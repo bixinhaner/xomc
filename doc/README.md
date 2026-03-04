@@ -2,15 +2,44 @@
 
 本目录包含基于规范目录（`规范/`）梳理的系统功能文档。
 
-## 文档清单
+功能分析基于 `规范/` 目录下三大运营商（中国移动、中国电信、中国联通）的 55 份技术规范文档（移动 19 份、电信 21 份、联通 15 份），涵盖 LTE 和 5G NR 两种制式。
+
+## 文档导航
+
+### 核心索引
 
 | 文件 | 说明 |
 |------|------|
-| [功能索引.md](功能索引.md) | 系统功能分类总览、详细功能列表、运营商交叉引用矩阵、规范文档目录及映射索引 |
+| [功能索引.md](功能索引.md) | 功能分类总览、详细功能列表、运营商交叉引用矩阵、文档映射索引 |
 
-## 数据来源
+### 系统架构
 
-功能分析基于 `规范/` 目录下三大运营商（中国移动、中国电信、中国联通）的 55 份技术规范文档（移动 19 份、电信 21 份、联通 15 份），涵盖 LTE 和 5G NR 两种制式。
+| 文件 | 说明 |
+|------|------|
+| [system-overview.md](architecture/system-overview.md) | OMC 系统定位、设备类型、制式支持、运营商差异概述 |
+| [interface-topology.md](architecture/interface-topology.md) | 南向/北向/直连接口拓扑关系、协议栈、数据流向 |
+
+### 规范清单
+
+| 文件 | 说明 |
+|------|------|
+| [document-catalog.md](specs-inventory/document-catalog.md) | 55 份规范文档完整目录，含文件路径，按运营商/类型/制式三维视图 |
+| [carrier-comparison.md](specs-inventory/carrier-comparison.md) | 三大运营商规范覆盖对比、功能差异分析、版本演进 |
+
+### 功能域详细文档
+
+| 文件 | 功能域 | 子功能数 |
+|------|--------|---------|
+| [01-southbound-interface.md](features/01-southbound-interface.md) | F01 南向接口管理（TR069） | 6 |
+| [02-data-model.md](features/02-data-model.md) | F02 数据模型与配置管理 | 7 |
+| [03-performance-management.md](features/03-performance-management.md) | F03 性能管理（PM/KPI） | 5 |
+| [04-alarm-management.md](features/04-alarm-management.md) | F04 告警管理 | 3 |
+| [05-measurement-reports.md](features/05-measurement-reports.md) | F05 测量报告（MR） | 4 |
+| [06-omc-core-functions.md](features/06-omc-core-functions.md) | F06 OMC-R 核心功能 | 5 |
+| [07-ne-direct-connection.md](features/07-ne-direct-connection.md) | F07 网元直连接口 | 3 |
+| [08-northbound-oss.md](features/08-northbound-oss.md) | F08 北向/OSS 接口 | 4 |
+| [09-auto-provisioning.md](features/09-auto-provisioning.md) | F09 自动开站/自动开通 | 3 |
+| [10-interop-testing.md](features/10-interop-testing.md) | F10 互操作测试 | 3 |
 
 ## 功能域速查
 
