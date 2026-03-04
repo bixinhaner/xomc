@@ -99,7 +99,10 @@
 
 | 子模块 | 职责 |
 |--------|------|
-| `config/datamodel` | TR069 数据模型注册表（按运营商/制式/版本加载参数树） |
+| `config/datamodel` | TR069 数据模型注册表（按运营商/制式/OUI/产品型号，三级回退解析） |
+| `config/datamodel/repository` | 数据模型 DB 持久层（PostgreSQL CRUD） |
+| `config/datamodel/import` | 数据模型导入（JSON 解析、校验、激活） |
+| `config/datamodel/cache` | 数据模型缓存层（内存 L1 + Redis L2） |
 | `config/template` | 配置模板管理 |
 | `config/audit` | 配置审计（实际值 vs 期望值对比） |
 | `config/backup` | 配置备份与恢复 |
@@ -389,6 +392,10 @@ CREATE TABLE devices_cucc PARTITION OF devices FOR VALUES IN ('cucc');
 CREATE INDEX idx_devices_status ON devices (carrier, technology, status);
 CREATE INDEX idx_devices_last_inform ON devices (last_inform_at);
 
+-- 设备关联的数据模型（解析后缓存）
+ALTER TABLE devices ADD COLUMN data_model_id UUID REFERENCES data_model_definitions(id);
+CREATE INDEX idx_devices_data_model ON devices (data_model_id) WHERE data_model_id IS NOT NULL;
+
 -- 设备参数表
 CREATE TABLE device_parameters (
     device_id        UUID NOT NULL REFERENCES devices(id),
@@ -414,15 +421,94 @@ CREATE TABLE config_templates (
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 数据模型定义表
+-- 数据模型定义表（支持多厂商 OUI + 多产品 ProductClass）
 CREATE TABLE data_model_definitions (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    carrier        VARCHAR(4) NOT NULL,
-    technology     VARCHAR(3) NOT NULL,
-    version        VARCHAR(16) NOT NULL,
-    parameter_tree JSONB NOT NULL,
-    UNIQUE (carrier, technology, version)
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- 分类
+    carrier          VARCHAR(4) NOT NULL,        -- cmcc, ctcc, cucc
+    technology       VARCHAR(3) NOT NULL,        -- lte, nr
+    version          VARCHAR(16) NOT NULL,       -- "V1.9.4"
+
+    -- 厂商/产品标识
+    oui              VARCHAR(6),                 -- 厂商 OUI，carrier_default 级为 NULL
+    product_class    VARCHAR(64),                -- 产品型号，oui/carrier_default 级为 NULL
+
+    -- 范围与状态
+    scope            VARCHAR(16) NOT NULL        -- 'product', 'oui', 'carrier_default'
+                     CHECK (scope IN ('product', 'oui', 'carrier_default')),
+    status           VARCHAR(12) NOT NULL DEFAULT 'draft'
+                     CHECK (status IN ('draft', 'active', 'deprecated')),
+    is_active        BOOLEAN NOT NULL DEFAULT false,
+
+    -- 模型内容
+    root_object      VARCHAR(64) NOT NULL DEFAULT 'Device.',
+    parameter_tree   JSONB NOT NULL,
+
+    -- 导入元数据
+    source           VARCHAR(32),                -- 'spec_import', 'api_import', 'auto_discovered'
+    imported_by      VARCHAR(128),
+    spec_document_ref VARCHAR(256),
+    description      TEXT,
+
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- scope 字段一致性约束
+    CONSTRAINT chk_scope_fields CHECK (
+        (scope = 'carrier_default' AND oui IS NULL AND product_class IS NULL) OR
+        (scope = 'oui' AND oui IS NOT NULL AND product_class IS NULL) OR
+        (scope = 'product' AND oui IS NOT NULL AND product_class IS NOT NULL)
+    )
 );
+
+-- 每分类仅一个活跃模型（partial unique index）
+CREATE UNIQUE INDEX idx_dm_active_product
+    ON data_model_definitions (carrier, technology, oui, product_class)
+    WHERE is_active = true AND scope = 'product';
+
+CREATE UNIQUE INDEX idx_dm_active_oui
+    ON data_model_definitions (carrier, technology, oui)
+    WHERE is_active = true AND scope = 'oui' AND product_class IS NULL;
+
+CREATE UNIQUE INDEX idx_dm_active_carrier_default
+    ON data_model_definitions (carrier, technology)
+    WHERE is_active = true AND scope = 'carrier_default' AND oui IS NULL;
+
+-- 查询索引
+CREATE INDEX idx_dm_carrier_tech ON data_model_definitions (carrier, technology);
+CREATE INDEX idx_dm_oui ON data_model_definitions (oui) WHERE oui IS NOT NULL;
+CREATE INDEX idx_dm_active_lookup
+    ON data_model_definitions (carrier, technology, oui, product_class, scope)
+    WHERE is_active = true;
+
+-- OUI 厂商注册表
+CREATE TABLE oui_registry (
+    oui              VARCHAR(6) PRIMARY KEY,
+    manufacturer     VARCHAR(128) NOT NULL,      -- "Huawei Technologies Co., Ltd."
+    short_name       VARCHAR(32) NOT NULL,        -- "Huawei"
+    country          VARCHAR(64),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO oui_registry (oui, manufacturer, short_name) VALUES
+    ('00E0FC', 'Huawei Technologies Co., Ltd.', 'Huawei'),
+    ('001E7E', 'ZTE Corporation', 'ZTE'),
+    ('000DB9', 'Ericsson AB', 'Ericsson'),
+    ('0004F2', 'Nokia Corporation', 'Nokia'),
+    ('58FB96', 'Comba Telecom Systems', 'Comba');
+
+-- 数据模型导入审计日志
+CREATE TABLE data_model_import_log (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    data_model_id    UUID NOT NULL REFERENCES data_model_definitions(id),
+    action           VARCHAR(16) NOT NULL,       -- 'created', 'updated', 'activated', 'deprecated'
+    performed_by     VARCHAR(128) NOT NULL,
+    changes_summary  JSONB,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_dm_import_log_model ON data_model_import_log (data_model_id, created_at DESC);
 
 -- 开站任务表
 CREATE TABLE provisioning_tasks (
@@ -515,9 +601,19 @@ acs:cmdq:{device_serial}        → Sorted Set (score=优先级, member=命令JS
 acs:heartbeat:{device_serial}   → String (最后 Inform 时间戳)
 TTL: 2 × inform_interval（用于离线检测）
 
-# 数据模型缓存
-datamodel:{carrier}:{tech}:{version} → String (压缩JSON)
+# 数据模型缓存（三级，匹配 Resolve 回退逻辑）
+datamodel:product:{carrier}:{tech}:{oui}:{product_class} → String (压缩JSON)
+datamodel:oui:{carrier}:{tech}:{oui}                     → String (压缩JSON)
+datamodel:default:{carrier}:{tech}                        → String (压缩JSON)
 TTL: 24 小时
+
+# 数据模型解析结果缓存（设备维度 → 模型 ID）
+datamodel:resolve:{carrier}:{tech}:{oui}:{product_class} → UUID (模型 ID)
+TTL: 1 小时
+
+# 缓存版本号（跨 ACS 实例协调失效）
+datamodel:cache_version → Counter（模型变更时自增）
+无 TTL
 
 # 活跃告警表
 alarm:active:{device_serial}    → Hash {alarm_code → 告警JSON}
@@ -827,7 +923,10 @@ omcgo/
 │   │
 │   ├── config/                     # F02: 数据模型与配置管理
 │   │   ├── datamodel/
-│   │   │   ├── registry.go         # 模型加载与缓存
+│   │   │   ├── registry.go         # 三级回退解析引擎（内存→Redis→DB）
+│   │   │   ├── repository.go       # PostgreSQL 数据模型 CRUD
+│   │   │   ├── import.go           # 数据模型导入（JSON 解析、校验、激活）
+│   │   │   ├── cache.go            # Redis 缓存层
 │   │   │   ├── parameter.go        # 参数树类型
 │   │   │   └── validator.go
 │   │   ├── template/
@@ -902,19 +1001,17 @@ omcgo/
 │   │   └── validator/
 │   │
 │   ├── carrier/                    # 运营商抽象层
-│   │   ├── carrier.go              # Carrier 接口
+│   │   ├── carrier.go              # Carrier 接口（含 DefaultDataModel 方法）
 │   │   ├── registry.go             # CarrierRegistry
 │   │   ├── cmcc/                   # 中国移动
 │   │   │   ├── adapter.go
-│   │   │   ├── datamodel_lte.go
-│   │   │   └── datamodel_nr.go
+│   │   │   └── defaults.go         # 运营商默认模型种子数据
 │   │   ├── ctcc/                   # 中国电信
 │   │   │   ├── adapter.go
-│   │   │   ├── datamodel_4g.go
-│   │   │   └── datamodel_5g.go
+│   │   │   └── defaults.go
 │   │   └── cucc/                   # 中国联通
 │   │       ├── adapter.go
-│   │       └── datamodel_nr.go
+│   │       └── defaults.go
 │   │
 │   ├── common/                     # 公共类型与工具
 │   │   ├── model/                  # 领域模型
@@ -983,14 +1080,27 @@ omcgo/
 │       └── infra/
 │
 ├── datamodels/                     # TR069 数据模型定义文件
-│   ├── cmcc/
-│   │   ├── lte_v2.3.json
-│   │   └── nr_v1.9.4.json
-│   ├── ctcc/
-│   │   ├── 4g_v1.1.json
-│   │   └── 5g_v2.1.7.json
-│   └── cucc/
-│       └── nr_v1.1.json
+│   ├── seed/                       # 初次部署种子数据
+│   │   ├── carrier_defaults/       # 运营商默认模型（scope=carrier_default）
+│   │   │   ├── cmcc/
+│   │   │   │   ├── lte_v2.3.json
+│   │   │   │   └── nr_v1.9.4.json
+│   │   │   ├── ctcc/
+│   │   │   │   ├── lte_v1.1.json
+│   │   │   │   └── nr_v2.1.7.json
+│   │   │   └── cucc/
+│   │   │       └── nr_v1.1.json
+│   │   ├── product_models/         # 厂商产品级模型（scope=product）
+│   │   │   ├── huawei/             # OUI: 00E0FC
+│   │   │   │   └── cmcc_nr_hw-5g-pico-a.json
+│   │   │   ├── zte/                # OUI: 001E7E
+│   │   │   │   └── cmcc_nr_zte-nr-micro-b.json
+│   │   │   └── comba/              # OUI: 58FB96
+│   │   │       └── cmcc_nr_comba-pico-1.json
+│   │   └── oui_registry.json       # OUI 厂商映射种子数据
+│   └── templates/                  # 导入用 JSON Schema 模板
+│       ├── model_schema.json
+│       └── example_model.json
 │
 ├── doc/                            # 文档（已有）
 ├── scripts/                        # 构建/部署/测试脚本
@@ -1059,6 +1169,28 @@ Base URL: /api/v1
   GET    /topology/tree                    设备层级树
   GET    /topology/groups                  设备分组
 
+数据模型管理:
+  GET    /datamodels                                列表（按carrier/tech/oui/product_class/scope/status过滤）
+  GET    /datamodels/{id}                           详情（含完整参数树）
+  POST   /datamodels                                创建数据模型定义
+  PUT    /datamodels/{id}                           更新数据模型定义
+  DELETE /datamodels/{id}                           删除（仅 draft 状态可删）
+  POST   /datamodels/{id}/activate                  激活（自动停用同分类旧版本）
+  POST   /datamodels/{id}/deprecate                 废弃
+  POST   /datamodels/import                         批量导入（上传 JSON 文件）
+  POST   /datamodels/import/validate                导入校验（dry-run）
+  GET    /datamodels/{id}/export                    导出为 JSON
+  GET    /datamodels/resolve                        解析测试（?carrier=&tech=&oui=&product_class=）
+  GET    /datamodels/{id}/diff/{other_id}           两个模型参数差异对比
+  GET    /datamodels/statistics                     统计（按 carrier/tech/scope 分组）
+  POST   /datamodels/cache/refresh                  强制刷新缓存
+  POST   /datamodels/{id}/cache/invalidate          使指定模型缓存失效
+
+OUI 厂商管理:
+  GET    /oui                                       OUI 注册表列表
+  POST   /oui                                       注册新 OUI
+  GET    /oui/{oui}/products                        列出该 OUI 下所有已知产品类型
+
 系统:
   GET    /system/health                    健康检查
   GET    /system/metrics                   系统指标汇总
@@ -1100,10 +1232,15 @@ type Carrier interface {
     Code() CarrierCode    // "cmcc", "ctcc", "cucc"
     Name() string         // "中国移动", "中国电信", "中国联通"
 
-    // 数据模型
+    // 制式支持
     SupportedTechnologies() []Technology
-    DataModelVersions(tech Technology) []string
-    LoadDataModel(tech Technology, version string) (*DataModel, error)
+
+    // 数据模型（仅提供运营商默认模型，实际解析由 DataModelRegistry 负责）
+    DefaultDataModelVersions(tech Technology) []string
+    LoadDefaultDataModel(tech Technology, version string) (*DataModel, error)
+
+    // 已知厂商/产品组合（用于管理界面建议和校验）
+    KnownOUIProductClasses(tech Technology) []OUIProductClassInfo
 
     // 参数映射（运营商路径 ↔ 统一内部名称）
     MapParameterToUnified(carrierPath string) string
@@ -1123,6 +1260,15 @@ type Carrier interface {
 
     // 参数校验
     ValidateParameter(path string, value string) error
+}
+
+// OUIProductClassInfo 描述某运营商的已知厂商/产品组合
+type OUIProductClassInfo struct {
+    OUI              string
+    ProductClass     string
+    ManufacturerName string
+    Description      string
+    HasCustomModel   bool // 是否已有产品级自定义模型
 }
 
 type CarrierCode string
@@ -1209,17 +1355,17 @@ func (c *CMCCCarrier) SupportsDirectConnection() bool { return true }
 
 ### 13.1 统一参数模型
 
-核心挑战：各运营商对等价概念定义了不同参数路径。解决方案：**双层模型**。
+核心挑战：各运营商对等价概念定义了不同参数路径，且同一运营商下不同厂商（OUI）和产品型号（ProductClass）的参数树也存在差异。解决方案：**三层模型**（协议层 → 数据模型层 → 统一抽象层）。
 
 ```go
-// pkg/tr069/types.go — 协议层类型
+// pkg/tr069/types.go — 协议层类型（与 SOAP 报文直接映射）
 type ParameterValueStruct struct {
     Name  string `xml:"Name"`
     Value string `xml:"Value"`
     Type  string `xml:"type,attr"` // xsd: string, int, unsignedInt, boolean, dateTime
 }
 
-// internal/config/datamodel/parameter.go — 内部模型
+// internal/config/datamodel/parameter.go — 数据模型层
 type Parameter struct {
     Path        string         // TR069 路径: "Device.DeviceInfo.Manufacturer"
     UnifiedName string         // 内部名称: "device.manufacturer"
@@ -1230,22 +1376,22 @@ type Parameter struct {
     Category    string         // radio, network, security, management
 }
 
+type ParameterType string
+
+const (
+    ParamString   ParameterType = "string"
+    ParamInt      ParameterType = "int"
+    ParamUint     ParameterType = "unsignedInt"
+    ParamBool     ParameterType = "boolean"
+    ParamDateTime ParameterType = "dateTime"
+)
+
 type Constraints struct {
     MinValue   *int64
     MaxValue   *int64
     EnumValues []string
     Pattern    string // regex
     MaxLength  int
-}
-
-// DataModel — 完整数据模型（运营商/制式/版本）
-type DataModel struct {
-    Carrier    CarrierCode
-    Technology Technology
-    Version    string
-    RootObject string                  // "Device." 或 "InternetGatewayDevice."
-    Parameters map[string]*Parameter   // key: TR069 路径
-    Objects    map[string]*Object      // key: TR069 对象路径
 }
 
 type Object struct {
@@ -1257,7 +1403,62 @@ type Object struct {
 }
 ```
 
-### 13.2 统一设备视图
+### 13.2 DataModel 结构体（支持多厂商/多产品）
+
+```go
+// internal/config/datamodel/registry.go
+
+// DataModelScope 数据模型作用范围
+type DataModelScope string
+
+const (
+    ScopeProduct        DataModelScope = "product"         // OUI + ProductClass 级（最精确）
+    ScopeOUI            DataModelScope = "oui"             // OUI 厂商级
+    ScopeCarrierDefault DataModelScope = "carrier_default" // 运营商默认级（最宽泛）
+)
+
+// DataModelStatus 数据模型生命周期状态
+type DataModelStatus string
+
+const (
+    StatusDraft      DataModelStatus = "draft"      // 草稿（导入后默认）
+    StatusActive     DataModelStatus = "active"     // 活跃（生产使用）
+    StatusDeprecated DataModelStatus = "deprecated" // 已废弃
+)
+
+// DataModel — 完整数据模型定义
+type DataModel struct {
+    ID           uuid.UUID
+    Carrier      CarrierCode
+    Technology   Technology
+    Version      string              // "V1.9.4"
+
+    // 厂商/产品标识（决定 Scope）
+    OUI          string              // 厂商 OUI，carrier_default 级为空
+    ProductClass string              // 产品型号，oui/carrier_default 级为空
+
+    // 范围与状态
+    Scope        DataModelScope      // product, oui, carrier_default
+    Status       DataModelStatus     // draft, active, deprecated
+    IsActive     bool                // 同分类中唯一活跃
+
+    // 模型内容
+    RootObject   string              // "Device." 或 "InternetGatewayDevice."
+    Parameters   map[string]*Parameter // key: TR069 路径
+    Objects      map[string]*Object    // key: TR069 对象路径
+
+    // 导入元数据
+    Source          string           // "spec_import", "api_import", "auto_discovered"
+    ImportedBy      string           // 操作人
+    SpecDocumentRef string           // 关联规范文档
+    Description     string
+
+    CreatedAt    time.Time
+    UpdatedAt    time.Time
+}
+```
+
+### 13.3 统一设备视图
 
 ```go
 // internal/common/model/device.go
@@ -1265,15 +1466,17 @@ type Object struct {
 type Device struct {
     ID                   uuid.UUID
     SerialNumber         string
-    OUI                  string
-    ProductClass         string
+    OUI                  string        // 厂商标识（Inform 中获取）
+    ProductClass         string        // 产品型号（Inform 中获取）
     Manufacturer         string
     ModelName            string
 
     // 分类
     Carrier              CarrierCode
     Technology           Technology
-    DataModelVersion     string
+
+    // 数据模型关联（由 DataModelRegistry.Resolve 确定）
+    DataModelID          *uuid.UUID    // 关联的数据模型定义 ID（可空，待首次解析后填充）
 
     // 状态
     Status               DeviceStatus
@@ -1312,33 +1515,197 @@ const (
 )
 ```
 
-### 13.3 数据模型加载策略
+### 13.4 DataModelRegistry — 三级回退解析引擎
 
-数据模型定义以 JSON 文件存储在 `datamodels/` 目录（源自运营商规范 Excel/Word 文档解析），启动时加载到内存，并缓存至 Redis。
+数据模型通过 PostgreSQL 持久化存储，结合内存 L1 + Redis L2 两级缓存。解析时按**三级回退**查找匹配的数据模型。
 
 ```go
+// internal/config/datamodel/registry.go
+
 type DataModelRegistry struct {
-    models   map[string]*DataModel // key: "cmcc:nr:V1.9.4"
-    cache    cache.Cache           // Redis
-    basePath string                // datamodels/ 目录路径
+    repo         DataModelRepository    // PostgreSQL 持久层
+    cache        *DataModelCache        // Redis L2 缓存
+    localCache   sync.Map               // 内存 L1 缓存（进程内）
+    cacheVersion int64                  // 本地缓存版本号
 }
 
-func (r *DataModelRegistry) Get(carrier CarrierCode, tech Technology, version string) (*DataModel, error) {
-    key := fmt.Sprintf("%s:%s:%s", carrier, tech, version)
+// Resolve — 三级回退查找设备对应的数据模型
+//
+// 查找优先级：
+//   1. product 级：carrier + tech + oui + product_class（最精确）
+//   2. oui 级：carrier + tech + oui（厂商默认模型）
+//   3. carrier_default 级：carrier + tech（运营商默认模型）
+//
+// 每级仅匹配 is_active = true 的模型
+func (r *DataModelRegistry) Resolve(ctx context.Context, carrier CarrierCode, tech Technology, oui, productClass string) (*DataModel, error) {
+    // 1. 查内存 L1 缓存
+    cacheKey := fmt.Sprintf("%s:%s:%s:%s", carrier, tech, oui, productClass)
+    if cached, ok := r.localCache.Load(cacheKey); ok {
+        return cached.(*DataModel), nil
+    }
 
-    // 优先查内存
-    if m, ok := r.models[key]; ok {
+    // 2. 查 Redis L2 缓存（resolve 结果缓存）
+    if modelID, err := r.cache.GetResolveResult(ctx, carrier, tech, oui, productClass); err == nil {
+        if model, err := r.getByID(ctx, modelID); err == nil {
+            r.localCache.Store(cacheKey, model)
+            return model, nil
+        }
+    }
+
+    // 3. 三级回退查询 DB
+    model, err := r.resolveFromDB(ctx, carrier, tech, oui, productClass)
+    if err != nil {
+        return nil, err
+    }
+
+    // 4. 回写缓存
+    r.cache.SetResolveResult(ctx, carrier, tech, oui, productClass, model.ID)
+    r.cacheModelContent(ctx, model)
+    r.localCache.Store(cacheKey, model)
+
+    return model, nil
+}
+
+func (r *DataModelRegistry) resolveFromDB(ctx context.Context, carrier CarrierCode, tech Technology, oui, productClass string) (*DataModel, error) {
+    // Level 1: product 级（最精确）
+    if oui != "" && productClass != "" {
+        if m, err := r.repo.FindActive(ctx, carrier, tech, oui, productClass, ScopeProduct); err == nil {
+            return m, nil
+        }
+    }
+
+    // Level 2: oui 级（厂商默认）
+    if oui != "" {
+        if m, err := r.repo.FindActive(ctx, carrier, tech, oui, "", ScopeOUI); err == nil {
+            return m, nil
+        }
+    }
+
+    // Level 3: carrier_default 级（运营商默认）
+    if m, err := r.repo.FindActive(ctx, carrier, tech, "", "", ScopeCarrierDefault); err == nil {
         return m, nil
     }
-    // 查 Redis 缓存
-    // 从 JSON 文件加载
-    // 缓存后返回
+
+    return nil, fmt.Errorf("no active data model found for %s/%s/%s/%s", carrier, tech, oui, productClass)
 }
 
-// GetForDevice — 根据设备的运营商/制式/版本获取对应数据模型
-func (r *DataModelRegistry) GetForDevice(device *Device) (*DataModel, error) {
-    return r.Get(device.Carrier, device.Technology, device.DataModelVersion)
+// ResolveForDevice — 根据设备信息解析数据模型并关联
+func (r *DataModelRegistry) ResolveForDevice(ctx context.Context, device *Device) (*DataModel, error) {
+    model, err := r.Resolve(ctx, device.Carrier, device.Technology, device.OUI, device.ProductClass)
+    if err != nil {
+        return nil, err
+    }
+    // 更新设备的数据模型关联
+    device.DataModelID = &model.ID
+    return model, nil
 }
+
+// InvalidateCache — 数据模型变更时清除相关缓存
+func (r *DataModelRegistry) InvalidateCache(ctx context.Context, model *DataModel) error {
+    // 自增全局缓存版本号（通知其他 ACS 实例）
+    r.cache.IncrCacheVersion(ctx)
+    // 清除该模型相关的所有缓存键
+    r.cache.InvalidateModel(ctx, model)
+    // 清除本地缓存
+    r.localCache = sync.Map{}
+    return nil
+}
+```
+
+### 13.5 DataModelRepository — DB 持久层接口
+
+```go
+// internal/config/datamodel/repository.go
+
+type DataModelRepository interface {
+    // CRUD
+    Create(ctx context.Context, model *DataModel) error
+    GetByID(ctx context.Context, id uuid.UUID) (*DataModel, error)
+    Update(ctx context.Context, model *DataModel) error
+    Delete(ctx context.Context, id uuid.UUID) error  // 仅 draft 可删
+
+    // 查询
+    List(ctx context.Context, filter DataModelFilter) ([]*DataModel, error)
+    FindActive(ctx context.Context, carrier CarrierCode, tech Technology, oui, productClass string, scope DataModelScope) (*DataModel, error)
+
+    // 生命周期
+    Activate(ctx context.Context, id uuid.UUID) error    // 激活（自动停用同分类旧版本）
+    Deprecate(ctx context.Context, id uuid.UUID) error   // 废弃
+
+    // 统计
+    Statistics(ctx context.Context) (*DataModelStats, error)
+}
+
+type DataModelFilter struct {
+    Carrier      *CarrierCode
+    Technology   *Technology
+    OUI          *string
+    ProductClass *string
+    Scope        *DataModelScope
+    Status       *DataModelStatus
+    Offset       int
+    Limit        int
+}
+
+type DataModelStats struct {
+    TotalCount     int
+    ByCarrier      map[CarrierCode]int
+    ByTechnology   map[Technology]int
+    ByScope        map[DataModelScope]int
+    ByStatus       map[DataModelStatus]int
+}
+```
+
+### 13.6 数据模型导入工作流
+
+```
+数据模型导入流程:
+
+  1. 管理员上传 JSON 文件（POST /api/v1/datamodels/import）
+     ↓
+  2. 校验 JSON 格式与参数树完整性（可先 dry-run: POST /api/v1/datamodels/import/validate）
+     ↓
+  3. 确定 scope:
+     - 有 oui + product_class → scope = "product"
+     - 有 oui 无 product_class → scope = "oui"
+     - 两者均无 → scope = "carrier_default"
+     ↓
+  4. 写入 data_model_definitions 表（status = "draft"）
+     ↓
+  5. 记录导入日志（data_model_import_log）
+     ↓
+  6. 管理员审核后激活（POST /api/v1/datamodels/{id}/activate）
+     ↓
+  7. 激活操作：
+     - 将同分类（carrier + tech + oui + product_class + scope）的旧活跃模型设为 deprecated
+     - 将新模型设为 is_active = true, status = "active"
+     - 清除相关 Redis 缓存
+     - 自增 datamodel:cache_version 通知所有 ACS 实例
+```
+
+### 13.7 ACS 会话中的数据模型查找流程
+
+```
+ACS 收到 CPE Inform 时的数据模型解析:
+
+  1. 从 Inform 中提取 DeviceId（OUI + ProductClass + SerialNumber）
+     ↓
+  2. 根据 SerialNumber 查设备表确定 carrier 和 technology
+     （新设备由 IP 段/认证信息/手动配置确定 carrier）
+     ↓
+  3. 调用 DataModelRegistry.Resolve(carrier, tech, oui, productClass)
+     ↓
+  4. 三级回退查找（内存→Redis→DB）:
+     ├─ 命中 product 级模型 → 最精确匹配
+     ├─ 命中 oui 级模型 → 厂商默认参数树
+     └─ 命中 carrier_default 级模型 → 运营商默认参数树
+     ↓
+  5. 使用匹配的数据模型处理后续 RPC:
+     - SetParameterValues: 校验参数路径和值约束
+     - GetParameterValues: 确定可查询的参数列表
+     - 开站模板匹配: 根据模型确定需要下发的参数集
+     ↓
+  6. 更新设备记录的 data_model_id（首次解析后关联）
 ```
 
 ---
@@ -1354,7 +1721,8 @@ func (r *DataModelRegistry) GetForDevice(device *Device) (*DataModel, error) {
 | 对象存储 | MinIO | S3 兼容、自托管、PM/MR 文件高效存取 |
 | XML 处理 | stdlib + 预编译模板 | 避免重框架；发送用模板、接收用流式解析 |
 | 运营商抽象 | 接口 + 适配器 | 清晰分离，便于新增运营商 |
-| 数据模型存储 | JSON 文件 + Redis 缓存 | 数据模型低频变更，无需入库 |
+| 数据模型存储 | PostgreSQL + Redis L2 + 内存 L1 三级缓存 | 支持多厂商/多产品动态导入管理，三级回退解析 |
+| 数据模型索引键 | carrier:tech:oui:product_class + 三级回退 | product → oui → carrier_default 逐级降精度 |
 | 外部 API | REST (北向) + gRPC (内部) | REST 兼容 OSS 生态，gRPC 保障内部性能 |
 | 容器编排 | Kubernetes | HPA 弹性伸缩，StatefulSet 管理有状态组件 |
 | 分片键 | 设备序列号 | 天然均匀分布，保证数据局部性 |
