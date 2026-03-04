@@ -37,7 +37,7 @@
 
 ### 核心选型：模块化单体 + 独立 ACS 引擎
 
-**不使用微服务��架，不使用 go-zero。**
+**不使用微服务架构，不使用 go-zero。**
 
 | 决策 | 理由 |
 |------|------|
@@ -75,7 +75,7 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 | XML 动态遍历 | `github.com/beevik/etree` | 参数树动态处理 |
 | 配置管理 | `github.com/spf13/viper` | YAML + 环境变量 + 热重载 |
 | CLI | `github.com/spf13/cobra` | omcctl 命令行管理工具 |
-| 日志 | `go.uber.org/zap` | ���构化高性能日志 |
+| 日志 | `go.uber.org/zap` | 结构化高性能日志 |
 | 指标 | `github.com/prometheus/client_golang` | Prometheus 指标暴露 |
 | 链路追踪 | `go.opentelemetry.io/otel` | 分布式链路追踪 |
 | DB 驱动 | `github.com/jackc/pgx/v5` | PostgreSQL 高性能驱动 |
@@ -89,7 +89,7 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 | UUID | `github.com/google/uuid` | UUID 生成 |
 | 定时任务 | `github.com/robfig/cron/v3` | PM 采集、聚合等周期任务 |
 | 限流 | `golang.org/x/time/rate` | 设备级/全局限流 |
-| 测试 | `github.com/stretchr/testify` | 断言�� Mock |
+| 测试 | `github.com/stretchr/testify` | 断言与 Mock |
 | API 文档 | `github.com/swaggo/swag` | Swagger 自动生成 |
 
 ### 数据存储
@@ -171,7 +171,7 @@ omcgo/
 │
 ├── pkg/                            # 可复用公共库
 │   ├── tr069/                      #   TR069 类型、事件码、CWMP 错误码
-│   ├── soap/                       #   通�� SOAP 工具
+│   ├── soap/                       #   通用 SOAP 工具
 │   └── xmlutil/                    #   XML 辅助工具
 │
 ├── api/                            # API 定义
@@ -221,7 +221,7 @@ CarrierCUCC CarrierCode = "cucc"  // 中国联通
 TechLTE Technology = "lte"
 TechNR  Technology = "nr"
 
-// 数据模型 Scope（解析优先级从高到低��
+// 数据模型 Scope（解析优先级从高到低）
 ScopeProduct        = "product"         // OUI + ProductClass 级
 ScopeOUI            = "oui"             // 厂商级
 ScopeCarrierDefault = "carrier_default" // 运营商默认级
@@ -383,7 +383,7 @@ chore(deploy): 添加 ACS 引擎的 Dockerfile 和 K8s deployment
 
 ### 版本号
 
-遵��� [SemVer](https://semver.org/)：`MAJOR.MINOR.PATCH`
+遵循 [SemVer](https://semver.org/)：`MAJOR.MINOR.PATCH`
 
 ---
 
@@ -393,7 +393,7 @@ chore(deploy): 添加 ACS 引擎的 Dockerfile 和 K8s deployment
 |------|------|------|
 | 系统总览 | `doc/architecture/system-overview.md` | 系统定位、设备类型、运营商差异 |
 | 后端架构设计 | `doc/architecture/backend-design.md` | 完整技术方案：技术栈、目录结构、数据库 Schema、API 设计、部署拓扑 |
-| 框架选型分析 | `doc/architecture/framework-comparison.md` | 当前方案 vs go-zero 的深度对比（**���论：不用 go-zero**） |
+| 框架选型分析 | `doc/architecture/framework-comparison.md` | 当前方案 vs go-zero 的深度对比（**结论：不用 go-zero**） |
 | 接口拓扑 | `doc/architecture/interface-topology.md` | 南向/北向/直连接口协议栈 |
 | 功能索引 | `doc/功能索引.md` | 10 域 43 项子功能完整列表 + 运营商交叉矩阵 |
 | 功能域详情 | `doc/features/01~10-*.md` | 每个功能域的子功能说明 |
