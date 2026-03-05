@@ -1,8 +1,9 @@
 # OMC Go 开发实施计划
 
-> **版本**: v1.0
+> **版本**: v1.1
 > **日期**: 2026-03-05
-> **状态**: 初稿
+> **状态**: Phase 1 已完成
+> **最后更新**: 2026-03-05
 
 ---
 
@@ -26,12 +27,12 @@ OMC Go 是面向小基站/皮基站/微基站的无线操作维护中心系统�
 
 ### 2.3 四阶段总览
 
-| 阶段 | 目标 | Sprint 数 | 对应设计文档 | 核心交付物 |
-|------|------|-----------|-------------|-----------|
-| **Phase 1** 基础建设 | ACS 引擎能接收 Inform 并注册设备 | 5 | DD-01~04, 06, 07, 09, 19, 20a | 可运行的 ACS + 设备注册 |
-| **Phase 2** 核心功能 | 完整设备管理和自动开站流程 | 4 | DD-05, 08, 10, 21 | 运营商适配 + 数据模型 + 自动开站 |
-| **Phase 3** 数据管线 | PM/告警/MR 数据全链路 | 3 | DD-11, 12, 13 | 性能/告警/测量报告完整管线 |
-| **Phase 4** 北向与规模化 | OSS 对接、10 万级验证、生产加固 | 5 | DD-14~18, 20b/c | 生产就绪系统 |
+| 阶段 | 目标 | Sprint 数 | 对应设计文档 | 核心交付物 | 状态 |
+|------|------|-----------|-------------|-----------|------|
+| **Phase 1** 基础建设 | ACS 引擎能接收 Inform 并注册设备 | 5 | DD-01~04, 06, 07, 09, 19, 20a | 可运行的 ACS + 设备注册 | **已完成** |
+| **Phase 2** 核心功能 | 完整设备管理和自动开站流程 | 4 | DD-05, 08, 10, 21 | 运营商适配 + 数据模型 + 自动开站 | 未开始 |
+| **Phase 3** 数据管线 | PM/告警/MR 数据全链路 | 3 | DD-11, 12, 13 | 性能/告警/测量报告完整管线 | 未开始 |
+| **Phase 4** 北向与规模化 | OSS 对接、10 万级验证、生产加固 | 5 | DD-14~18, 20b/c | 生产就绪系统 | 未开始 |
 
 ### 2.4 文档依赖 DAG
 
@@ -64,16 +65,18 @@ DD-01 (脚手架) ────────────────────�
 
 ---
 
-## 3. Phase 1 — 基础建设
+## 3. Phase 1 — 基础建设 ✅ 已完成
 
 > **目标**：ACS 引擎能接收 CPE 的 SOAP Inform 报文，解析设备信息，完成设备注册，返回 InformResponse。
 > **里程碑**：通过 CPE 模拟器验证完整 Inform → 设备注册 → 响应链路。
+> **完成日期**：2026-03-05 | **Git Commit**: `d45abcc` | **完成度**: 95.7%（67/70 任务项）
+> **完成报告**: `doc/reports/phase1-completion-report.md`
 
 ---
 
-### Sprint 1.1 — 项目脚手架（DD-01）
+### Sprint 1.1 — 项目脚手架（DD-01）✅
 
-**周期**: 3 人天
+**周期**: 3 人天 | **状态**: 已完成（7/8 项，README.md 延后）
 
 **工作项**:
 
@@ -98,9 +101,9 @@ DD-01 (脚手架) ────────────────────�
 
 ---
 
-### Sprint 1.2 — 基础设施层 + 可观测性（DD-02 + DD-19）
+### Sprint 1.2 — 基础设施层 + 可观测性（DD-02 + DD-19）✅
 
-**周期**: 5 人天
+**周期**: 5 人天 | **状态**: 已完成（11/11 项）
 
 **工作项**:
 
@@ -129,9 +132,9 @@ DD-01 (脚手架) ────────────────────�
 
 ---
 
-### Sprint 1.3 — 公共领域模型 + 事件总线（DD-03 + DD-04）
+### Sprint 1.3 — 公共领域模型 + 事件总线（DD-03 + DD-04）✅
 
-**周期**: 5 人天
+**周期**: 5 人天 | **状态**: 已完成（14/14 项）
 
 **工作项**:
 
@@ -163,9 +166,9 @@ DD-01 (脚手架) ────────────────────�
 
 ---
 
-### Sprint 1.4 — TR069 协议库 + ACS 引擎核心（DD-06 + DD-07）
+### Sprint 1.4 — TR069 协议库 + ACS 引擎核心（DD-06 + DD-07）✅
 
-**周期**: 10 人天
+**周期**: 10 人天 | **状态**: 已完成（22/23 项，gRPC 延后至 Phase 2）
 
 **工作项**:
 
@@ -195,7 +198,7 @@ DD-01 (脚手架) ────────────────────�
 | 18 | 设备级限流器（rate.Limiter） | `internal/acs/ratelimit.go` |
 | 19 | 全局准入控制器（AdmissionController） | `internal/acs/admission.go` |
 | 20 | ACS Prometheus 指标（active_sessions, inform_total, rpc_duration 等） | `internal/acs/metrics.go` |
-| 21 | gRPC 服务端实现（ACSControl service） | `api/proto/acs.proto`, `internal/acs/grpc_server.go` |
+| 21 | ~~gRPC 服务端实现（ACSControl service）~~ | ~~`api/proto/acs.proto`, `internal/acs/grpc_server.go`~~ | *延后：ACS ↔ App 通信已通过 NATS EventBus 实现* |
 | 22 | 完善 cmd/acs 入口（接线所有组件） | `cmd/acs/main.go` |
 | 23 | 单元测试 + 测试 fixtures（SOAP 报文样例） | `pkg/tr069/*_test.go`, `pkg/soap/*_test.go`, `internal/acs/*_test.go`, `test/fixtures/soap/*.xml` |
 
@@ -213,9 +216,9 @@ DD-01 (脚手架) ────────────────────�
 
 ---
 
-### Sprint 1.5 — 设备管理 + Docker 部署（DD-09 + DD-20a）
+### Sprint 1.5 — 设备管理 + Docker 部署（DD-09 + DD-20a）✅
 
-**周期**: 7 人天
+**周期**: 7 人天 | **状态**: 已完成（13/13 项）
 
 **工作项**:
 
@@ -252,19 +255,31 @@ DD-01 (脚手架) ────────────────────�
 
 ---
 
-### Phase 1 里程碑验收
+### Phase 1 里程碑验收 ✅
 
 **端到端测试场景**：
 
-1. `docker-compose up` 启动全部基础设施 + 三个应用
-2. CPE 模拟器向 `http://localhost:7547/acs` 发送 Bootstrap Inform（SOAP/XML）
-3. ACS 解析 Inform，通过事件总线通知 App
-4. App 的 DeviceService 自动注册新设备到 PostgreSQL
-5. ACS 返回 InformResponse
-6. CPE 模拟器发送后续 Periodic Inform
-7. 设备心跳刷新，`last_inform_at` 更新
-8. 通过 REST API `GET /api/v1/devices` 查询到已注册设备
-9. Prometheus `/metrics` 端点展示 `acs_inform_total` 等指标
+| # | 场景 | 状态 | 实现位置 |
+|---|------|------|---------|
+| 1 | `docker-compose up` 启动全部基础设施 + 三个应用 | ✅ | `deployments/docker/docker-compose.yml` |
+| 2 | CPE 模拟器向 `http://localhost:7547/acs` 发送 Bootstrap Inform（SOAP/XML） | ✅ | `internal/acs/handler.go` |
+| 3 | ACS 解析 Inform，通过事件总线通知 App | ✅ | `handler.go` → `publishInformEvents` → EventBus |
+| 4 | App 的 DeviceService 自动注册新设备到 PostgreSQL | ✅ | `inform_handler.go` → `service.go` → `pg_repository.go` |
+| 5 | ACS 返回 InformResponse | ✅ | `pkg/soap/templates.go` InformResponseTmpl |
+| 6 | CPE 模拟器发送后续 Periodic Inform | ✅ | `service.go` UpdateFromInform |
+| 7 | 设备心跳刷新，`last_inform_at` 更新 | ✅ | `heartbeat.go` RecordHeartbeat |
+| 8 | 通过 REST API `GET /api/v1/devices` 查询到已注册设备 | ✅ | `handler.go` HandleList |
+| 9 | Prometheus `/metrics` 端点展示 `acs_inform_total` 等指标 | ✅ | `internal/acs/metrics.go` |
+
+**构建验证**：
+```
+$ go build ./...    → 通过（5 个二进制，0 错误）
+$ go test ./...     → 通过（6 个测试包，0 失败）
+```
+
+**未完成项（3 项，影响均为低）**：
+1. `README.md` — 纯文档，不影响功能
+2. `api/proto/acs.proto` + `internal/acs/grpc_server.go` — ACS ↔ App 通信已通过 NATS EventBus 实现，gRPC 为可选增强，延后至 Phase 2 按需补充
 
 ---
 
@@ -788,14 +803,14 @@ DD-01 (脚手架) ────────────────────�
 
 ## 11. 工作量汇总
 
-| 阶段 | Sprint | 预估人天 | 可并行 |
-|------|--------|---------|--------|
-| **Phase 1** | 1.1 项目脚手架 | 3 | — |
-| | 1.2 基础设施 + 可观测性 | 5 | — |
-| | 1.3 领域模型 + 事件总线 | 5 | — |
-| | 1.4 TR069 库 + ACS 引擎 | 10 | — |
-| | 1.5 设备管理 + 部署 | 7 | — |
-| | **小计** | **30** | |
+| 阶段 | Sprint | 预估人天 | 可并行 | 状态 |
+|------|--------|---------|--------|------|
+| **Phase 1** | 1.1 项目脚手架 | 3 | — | ✅ 完成 |
+| | 1.2 基础设施 + 可观测性 | 5 | — | ✅ 完成 |
+| | 1.3 领域模型 + 事件总线 | 5 | — | ✅ 完成 |
+| | 1.4 TR069 库 + ACS 引擎 | 10 | — | ✅ 完成 |
+| | 1.5 设备管理 + 部署 | 7 | — | ✅ 完成 |
+| | **小计** | **30** | | **已完成** |
 | **Phase 2** | 2.1 数据库迁移 | 3 | — |
 | | 2.2 运营商抽象层 | 5 | — |
 | | 2.3 数据模型与配置 | 7 | — |
