@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">100002</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>TestVendor</Manufacturer>
+        <OUI>001122</OUI>
+        <ProductClass>SmallCell-LTE</ProductClass>
+        <SerialNumber>TEST-SN-001</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode>2 PERIODIC</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-03-05T10:05:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[3]">
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value xsi:type="xsd:string">FW-2.1.0</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.ConnectionRequestURL</Name>
+          <Value xsi:type="xsd:string">http://192.168.1.100:7547/connreq</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.PeriodicInformInterval</Name>
+          <Value xsi:type="xsd:unsignedInt">300</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>

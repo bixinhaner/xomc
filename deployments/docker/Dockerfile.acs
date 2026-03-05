@@ -1,0 +1,26 @@
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-acs ./cmd/acs
+
+# ---
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /build/bin/omcgo-acs /usr/local/bin/omcgo-acs
+COPY --from=builder /build/configs/acs.yaml /etc/omcgo/acs.yaml
+
+EXPOSE 7547 7548 9090
+
+ENTRYPOINT ["omcgo-acs"]
+CMD ["--config", "/etc/omcgo/acs.yaml"]
