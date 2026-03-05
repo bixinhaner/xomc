@@ -39,6 +39,21 @@ const (
 	SubjectAlarmAcknowledged = "alarm.acknowledged"
 )
 
+// Provisioning events
+const (
+	SubjectProvisionStarted   = "provision.started"
+	SubjectProvisionCompleted = "provision.completed"
+	SubjectProvisionFailed    = "provision.failed"
+	SubjectProvisionStepDone  = "provision.step.done"
+)
+
+// Command response events
+const (
+	SubjectCommandGetParamsResponse  = "command.get_parameters.response"
+	SubjectCommandSetParamsResponse  = "command.set_parameters.response"
+	SubjectCommandDownloadResponse   = "command.download.response"
+)
+
 // Northbound/OSS events
 const (
 	SubjectOSSAlarmForward   = "oss.alarm.forward"

@@ -10,15 +10,24 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/carrier"
+	"github.com/omcgo/omcgo/internal/carrier/cmcc"
+	"github.com/omcgo/omcgo/internal/carrier/ctcc"
+	"github.com/omcgo/omcgo/internal/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/common/event"
 	"github.com/omcgo/omcgo/internal/common/middleware"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"github.com/omcgo/omcgo/internal/config"
+	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/infra"
 	"github.com/omcgo/omcgo/internal/infra/cache"
 	"github.com/omcgo/omcgo/internal/infra/db"
 	"github.com/omcgo/omcgo/internal/infra/mq"
 	"github.com/omcgo/omcgo/internal/omcr/device"
+	"github.com/omcgo/omcgo/internal/omcr/topology"
+	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -100,16 +109,55 @@ func runApp(cmd *cobra.Command, args []string) error {
 	heartbeatMonitor.Start()
 	gs.Register("heartbeat", 1, func(ctx context.Context) error { heartbeatMonitor.Stop(); return nil })
 
-	// 10. Create services
+	// 10. Create carrier registry
+	carrierRegistry := carrier.NewRegistry()
+	carrierRegistry.Register(cmcc.New())
+	carrierRegistry.Register(ctcc.New())
+	carrierRegistry.Register(cucc.New())
+	logger.Info("carrier registry initialized", zap.Int("carriers", len(carrierRegistry.All())))
+
+	// 11. Create device services
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, logger)
 
-	// 11. Subscribe InformHandler to events
-	informHandler := device.NewInformHandler(deviceService, model.CarrierCMCC, logger)
+	// 12. Subscribe InformHandler to events
+	informHandler := device.NewInformHandler(deviceService, carrierRegistry, model.CarrierCMCC, logger)
 	if err := informHandler.Subscribe(eventBus); err != nil {
 		logger.Warn("subscribe inform handler", zap.Error(err))
 	}
 
-	// 12. Setup Gin router
+	// 13. Create DataModel module (repository + cache + registry + importer)
+	dmRepo := datamodel.NewPgDataModelRepository(pgPool)
+	importLogRepo := datamodel.NewPgImportLogRepository(pgPool)
+	ouiRepo := datamodel.NewPgOUIRepository(pgPool)
+	dmCache := datamodel.NewDataModelCache(redisClient)
+	dmRegistry := datamodel.NewDataModelRegistry(dmRepo, dmCache, logger)
+	dmRegistry.Start()
+	gs.Register("datamodel-registry", 1, func(ctx context.Context) error { dmRegistry.Stop(); return nil })
+	dmImporter := datamodel.NewDataModelImporter(dmRepo, importLogRepo)
+	logger.Info("datamodel registry started")
+
+	// 14. Create ConfigTemplate module
+	templateRepo := template.NewPgConfigTemplateRepository(pgPool)
+	templateService := template.NewConfigTemplateService(templateRepo, logger)
+
+	// 15. Create command queue (shared with ACS)
+	cmdQueue := cmdqueue.NewRedisCommandQueue(redisClient)
+
+	// 16. Create Provisioning module
+	provisionRepo := provision.NewPgProvisioningTaskRepository(pgPool)
+	provisionEngine := provision.NewProvisioningEngine(
+		provisionRepo, deviceService, dmRegistry, templateService,
+		carrierRegistry, cmdQueue, eventBus, logger,
+	)
+	if err := provisionEngine.Subscribe(eventBus); err != nil {
+		logger.Warn("subscribe provisioning engine", zap.Error(err))
+	}
+
+	// 17. Create Topology module
+	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)
+	groupService := topology.NewDeviceGroupService(groupRepo, logger)
+
+	// 18. Setup Gin router
 	if cfg.Log.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -128,8 +176,26 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
+
+	// Device routes
 	deviceHandler := device.NewHandler(deviceService)
 	deviceHandler.RegisterRoutes(v1)
+
+	// DataModel routes
+	dmHandler := datamodel.NewHandler(dmRepo, ouiRepo, dmRegistry, dmImporter)
+	dmHandler.RegisterRoutes(v1)
+
+	// ConfigTemplate routes
+	templateHandler := template.NewHandler(templateRepo)
+	templateHandler.RegisterRoutes(v1)
+
+	// Provisioning routes
+	provisionHandler := provision.NewHandler(provisionRepo, provisionEngine)
+	provisionHandler.RegisterRoutes(v1)
+
+	// Topology routes
+	topologyHandler := topology.NewHandler(groupRepo, groupService)
+	topologyHandler.RegisterRoutes(v1)
 
 	// 13. Prometheus metrics server
 	metricsMux := http.NewServeMux()

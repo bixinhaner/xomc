@@ -1,0 +1,259 @@
+{
+  "carrier": "cmcc",
+  "technology": "nr",
+  "version": "V1.9.4",
+  "scope": "carrier_default",
+  "root_object": "Device.",
+  "source": "seed",
+  "description": "中国移动 5G NR 小基站默认数据模型 (基于移动 5G 小基站管理规范 V1.9.4)",
+  "parameter_tree": {
+    "Device.": {
+      "type": "object",
+      "writable": false,
+      "parameters": {
+        "Device.DeviceInfo.": {
+          "type": "object",
+          "writable": false,
+          "parameters": {
+            "Device.DeviceInfo.Manufacturer": {
+              "type": "string",
+              "writable": false,
+              "description": "设备制造商名称"
+            },
+            "Device.DeviceInfo.ManufacturerOUI": {
+              "type": "string",
+              "writable": false,
+              "description": "制造商 OUI"
+            },
+            "Device.DeviceInfo.ModelName": {
+              "type": "string",
+              "writable": false,
+              "description": "设备型号"
+            },
+            "Device.DeviceInfo.SerialNumber": {
+              "type": "string",
+              "writable": false,
+              "description": "设备序列号"
+            },
+            "Device.DeviceInfo.HardwareVersion": {
+              "type": "string",
+              "writable": false,
+              "description": "硬件版本号"
+            },
+            "Device.DeviceInfo.SoftwareVersion": {
+              "type": "string",
+              "writable": false,
+              "description": "软件版本号"
+            },
+            "Device.DeviceInfo.UpTime": {
+              "type": "unsignedInt",
+              "writable": false,
+              "description": "设备运行时长（秒）"
+            }
+          }
+        },
+        "Device.ManagementServer.": {
+          "type": "object",
+          "writable": false,
+          "parameters": {
+            "Device.ManagementServer.URL": {
+              "type": "string",
+              "writable": true,
+              "description": "ACS 服务器 URL"
+            },
+            "Device.ManagementServer.Username": {
+              "type": "string",
+              "writable": true,
+              "description": "CPE 用户名"
+            },
+            "Device.ManagementServer.Password": {
+              "type": "string",
+              "writable": true,
+              "description": "CPE 密码"
+            },
+            "Device.ManagementServer.PeriodicInformEnable": {
+              "type": "boolean",
+              "writable": true,
+              "description": "周期性 Inform 开关"
+            },
+            "Device.ManagementServer.PeriodicInformInterval": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "Inform 间隔（秒）"
+            },
+            "Device.ManagementServer.ConnectionRequestURL": {
+              "type": "string",
+              "writable": false,
+              "description": "Connection Request URL"
+            }
+          }
+        },
+        "Device.Services.FAPService.1.": {
+          "type": "object",
+          "writable": false,
+          "multi_instance": true,
+          "parameters": {
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.Common.gNBId": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "gNodeB 标识"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.Common.gNBIdLength": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "gNB ID 位长度",
+              "constraints": {
+                "min_value": 22,
+                "max_value": 32
+              }
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "小区本地标识",
+              "constraints": {
+                "min_value": 0,
+                "max_value": 16383
+              }
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "NR 绝对射频频道号 (NR-ARFCN)"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "NR 物理小区标识 (PCI)",
+              "constraints": {
+                "min_value": 0,
+                "max_value": 1007
+              }
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.RF.SSBFrequency": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "SSB 频率 (NR-ARFCN)"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.RF.SubcarrierSpacing": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "子载波间隔 (kHz)",
+              "constraints": {
+                "enum_values": ["15", "30", "60", "120"]
+              }
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "信道带宽 (MHz)",
+              "constraints": {
+                "enum_values": ["5", "10", "15", "20", "25", "30", "40", "50", "60", "80", "100"]
+              }
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.RAN.RF.SSBPeriod": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "SSB 周期 (ms)",
+              "constraints": {
+                "enum_values": ["5", "10", "20", "40", "80", "160"]
+              }
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.Core.TAC": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "跟踪区编码 (TAC)"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID": {
+              "type": "string",
+              "writable": true,
+              "description": "PLMN 标识"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.Enable": {
+              "type": "boolean",
+              "writable": true,
+              "description": "PLMN 启用"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.Core.SNSSAI.1.SST": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "网络切片 SST"
+            },
+            "Device.Services.FAPService.1.CellConfig.NR.Core.SNSSAI.1.SD": {
+              "type": "string",
+              "writable": true,
+              "description": "网络切片 SD"
+            },
+            "Device.Services.FAPService.1.FAPControl.NR.AdminState": {
+              "type": "boolean",
+              "writable": true,
+              "description": "管理状态"
+            },
+            "Device.Services.FAPService.1.FAPControl.NR.RFTxStatus": {
+              "type": "boolean",
+              "writable": false,
+              "description": "射频状态"
+            },
+            "Device.Services.FAPService.1.FAPControl.NR.OpState": {
+              "type": "boolean",
+              "writable": false,
+              "description": "运行状态"
+            },
+            "Device.Services.FAPService.1.FAPControl.NR.Gateway.SecGWServer1": {
+              "type": "string",
+              "writable": true,
+              "description": "安全网关 1"
+            },
+            "Device.Services.FAPService.1.FAPControl.NR.Gateway.SecGWServer2": {
+              "type": "string",
+              "writable": true,
+              "description": "安全网关 2"
+            }
+          }
+        },
+        "Device.X_CMCC.": {
+          "type": "object",
+          "writable": false,
+          "description": "中国移动 5G 扩展参数",
+          "parameters": {
+            "Device.X_CMCC.gNBName": {
+              "type": "string",
+              "writable": true,
+              "description": "gNodeB 名称"
+            },
+            "Device.X_CMCC.SiteName": {
+              "type": "string",
+              "writable": true,
+              "description": "站点名称"
+            },
+            "Device.X_CMCC.SiteId": {
+              "type": "string",
+              "writable": true,
+              "description": "站点编号"
+            },
+            "Device.X_CMCC.Region": {
+              "type": "string",
+              "writable": true,
+              "description": "所属区域"
+            },
+            "Device.X_CMCC.PMEnable": {
+              "type": "boolean",
+              "writable": true,
+              "description": "性能统计开关"
+            },
+            "Device.X_CMCC.PMInterval": {
+              "type": "unsignedInt",
+              "writable": true,
+              "description": "性能统计周期（分钟）"
+            },
+            "Device.X_CMCC.OMCDirectEnable": {
+              "type": "boolean",
+              "writable": true,
+              "description": "OMC 直连开关"
+            }
+          }
+        }
+      }
+    }
+  }
+}

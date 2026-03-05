@@ -104,6 +104,152 @@ func DecodeTransferComplete(r io.Reader) (*tr069.TransferComplete, string, error
 	return nil, "", fmt.Errorf("no TransferComplete element found in SOAP body")
 }
 
+// DecodeGetParameterValuesResponse stream-parses a SOAP GetParameterValuesResponse.
+func DecodeGetParameterValuesResponse(r io.Reader) ([]tr069.ParameterValueStruct, string, error) {
+	decoder := xml.NewDecoder(r)
+
+	var cwmpID string
+	var resp tr069.GetParameterValuesResponse
+	var inBody bool
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, "", fmt.Errorf("decode SOAP: %w", err)
+		}
+
+		se, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		if se.Name.Local == "ID" {
+			var id string
+			if err := decoder.DecodeElement(&id, &se); err == nil {
+				cwmpID = id
+			}
+			continue
+		}
+
+		if se.Name.Local == "Body" {
+			inBody = true
+			continue
+		}
+
+		if inBody && se.Name.Local == "GetParameterValuesResponse" {
+			if err := decoder.DecodeElement(&resp, &se); err != nil {
+				return nil, "", fmt.Errorf("decode GetParameterValuesResponse: %w", err)
+			}
+			return resp.ParameterList, cwmpID, nil
+		}
+	}
+
+	return nil, "", fmt.Errorf("no GetParameterValuesResponse element found in SOAP body")
+}
+
+// DecodeSetParameterValuesResponse stream-parses a SOAP SetParameterValuesResponse.
+// Returns the status code (0=applied immediately, 1=requires reboot).
+func DecodeSetParameterValuesResponse(r io.Reader) (int, string, error) {
+	decoder := xml.NewDecoder(r)
+
+	var cwmpID string
+	var resp tr069.SetParameterValuesResponse
+	var inBody bool
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return -1, "", fmt.Errorf("decode SOAP: %w", err)
+		}
+
+		se, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		if se.Name.Local == "ID" {
+			var id string
+			if err := decoder.DecodeElement(&id, &se); err == nil {
+				cwmpID = id
+			}
+			continue
+		}
+
+		if se.Name.Local == "Body" {
+			inBody = true
+			continue
+		}
+
+		if inBody && se.Name.Local == "SetParameterValuesResponse" {
+			if err := decoder.DecodeElement(&resp, &se); err != nil {
+				return -1, "", fmt.Errorf("decode SetParameterValuesResponse: %w", err)
+			}
+			return resp.Status, cwmpID, nil
+		}
+	}
+
+	return -1, "", fmt.Errorf("no SetParameterValuesResponse element found in SOAP body")
+}
+
+// DecodeDownloadResponse stream-parses a SOAP DownloadResponse.
+// Returns status (0=complete, 1=in progress) and any fault string.
+func DecodeDownloadResponse(r io.Reader) (int, string, string, error) {
+	decoder := xml.NewDecoder(r)
+
+	var cwmpID string
+	var inBody bool
+
+	type downloadResponse struct {
+		Status       int    `xml:"Status"`
+		StartTime    string `xml:"StartTime"`
+		CompleteTime string `xml:"CompleteTime"`
+	}
+	var resp downloadResponse
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return -1, "", "", fmt.Errorf("decode SOAP: %w", err)
+		}
+
+		se, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		if se.Name.Local == "ID" {
+			var id string
+			if err := decoder.DecodeElement(&id, &se); err == nil {
+				cwmpID = id
+			}
+			continue
+		}
+
+		if se.Name.Local == "Body" {
+			inBody = true
+			continue
+		}
+
+		if inBody && se.Name.Local == "DownloadResponse" {
+			if err := decoder.DecodeElement(&resp, &se); err != nil {
+				return -1, "", "", fmt.Errorf("decode DownloadResponse: %w", err)
+			}
+			return resp.Status, resp.CompleteTime, cwmpID, nil
+		}
+	}
+
+	return -1, "", "", fmt.Errorf("no DownloadResponse element found in SOAP body")
+}
+
 // DetectMethod reads just enough of the SOAP body to determine the RPC method name.
 func DetectMethod(r io.Reader) (RPCMethod, string, []byte, error) {
 	data, err := io.ReadAll(r)

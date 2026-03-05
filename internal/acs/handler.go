@@ -168,12 +168,55 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 }
 
 func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body []byte, method soap.RPCMethod) {
-	// For now, just check for next command in queue
-	// Extract device SN from session (would need to track per connection)
-	// Simplified: send empty response to complete session
-	h.logger.Info("RPC response received", zap.String("method", string(method)))
+	// Extract CWMP ID from the SOAP response.
+	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
 
-	// Send empty response or next command
+	h.logger.Info("RPC response received",
+		zap.String("method", string(method)),
+		zap.String("cwmp_id", cwmpID),
+	)
+
+	// Find the device SN from the connection context.
+	// In TR069, the session persists over the same HTTP connection from Inform.
+	deviceSN := r.Header.Get("X-Device-SN")
+
+	if deviceSN != "" {
+		session, _ := h.sessionStore.Get(r.Context(), deviceSN)
+		if session != nil {
+			session.State = StateRPCResponse
+			session.UpdatedAt = time.Now()
+			h.sessionStore.Update(r.Context(), deviceSN, session)
+
+			// Publish RPC response event for provisioning engine.
+			h.publishRPCResponseEvent(r.Context(), deviceSN, method)
+
+			// Check if there are more commands in the queue (multi-step RPC).
+			cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+			if err != nil {
+				h.logger.Error("pop command queue", zap.Error(err))
+			}
+
+			if cmd != nil {
+				session.State = StateRPCPending
+				session.LastRPC = cmd.Method
+				h.sessionStore.Update(r.Context(), deviceSN, session)
+
+				respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
+				if err != nil {
+					h.logger.Error("build next RPC request", zap.Error(err))
+				} else {
+					h.sendSOAPResponse(w, respData)
+					return
+				}
+			}
+
+			// No more commands — complete the session.
+			session.State = StateComplete
+			h.sessionStore.Update(r.Context(), deviceSN, session)
+		}
+	}
+
+	// Send empty response to signal end of session.
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
@@ -246,6 +289,34 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
 		h.logger.Error("publish event", zap.Error(err), zap.String("subject", subject))
+	}
+}
+
+func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod) {
+	var subject string
+	switch method {
+	case soap.MethodGetParameterValuesResp:
+		subject = event.SubjectCommandGetParamsResponse
+	case soap.MethodSetParameterValuesResp:
+		subject = event.SubjectCommandSetParamsResponse
+	case soap.MethodDownloadResp:
+		subject = event.SubjectCommandDownloadResponse
+	default:
+		return
+	}
+
+	payload := map[string]interface{}{
+		"device_sn": deviceSN,
+		"method":    string(method),
+	}
+
+	evt, err := event.NewEvent(subject, payload)
+	if err != nil {
+		h.logger.Error("create RPC response event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
+		h.logger.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
 	}
 }
 

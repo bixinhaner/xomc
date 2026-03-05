@@ -161,6 +161,11 @@ func (s *DeviceService) GetDevice(ctx context.Context, id uuid.UUID) (*model.Dev
 	return s.deviceRepo.GetByID(ctx, id)
 }
 
+// GetBySerialNumber retrieves a device by its serial number.
+func (s *DeviceService) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
+	return s.deviceRepo.GetBySerialNumber(ctx, sn)
+}
+
 // ListDevices returns a paginated list of devices.
 func (s *DeviceService) ListDevices(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
 	return s.deviceRepo.List(ctx, filter)

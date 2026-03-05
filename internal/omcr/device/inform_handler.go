@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/omcgo/omcgo/internal/carrier"
 	"github.com/omcgo/omcgo/internal/common/event"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -21,17 +22,24 @@ type InformEventPayload struct {
 
 // InformHandler subscribes to device Inform events and routes them to DeviceService.
 type InformHandler struct {
-	service        *DeviceService
-	defaultCarrier model.CarrierCode
-	logger         *zap.Logger
+	service         *DeviceService
+	carrierRegistry *carrier.CarrierRegistry
+	defaultCarrier  model.CarrierCode
+	logger          *zap.Logger
 }
 
 // NewInformHandler creates a new InformHandler.
-func NewInformHandler(service *DeviceService, defaultCarrier model.CarrierCode, logger *zap.Logger) *InformHandler {
+func NewInformHandler(
+	service *DeviceService,
+	carrierRegistry *carrier.CarrierRegistry,
+	defaultCarrier model.CarrierCode,
+	logger *zap.Logger,
+) *InformHandler {
 	return &InformHandler{
-		service:        service,
-		defaultCarrier: defaultCarrier,
-		logger:         logger,
+		service:         service,
+		carrierRegistry: carrierRegistry,
+		defaultCarrier:  defaultCarrier,
+		logger:          logger,
 	}
 }
 
@@ -58,10 +66,10 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 
 	inform := payloadToInform(payload)
 
-	// Determine carrier from OUI or use default
-	carrier := h.resolveCarrier(payload.DeviceId.OUI)
+	// Determine carrier from OUI via registry, falling back to default
+	carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
 
-	device, err := h.service.RegisterFromInform(ctx, inform, carrier)
+	device, err := h.service.RegisterFromInform(ctx, inform, carrierCode)
 	if err != nil {
 		h.logger.Error("register device from bootstrap",
 			zap.Error(err),
@@ -73,6 +81,7 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 	h.logger.Info("device registered from bootstrap event",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber),
+		zap.String("carrier", string(carrierCode)),
 	)
 	return nil
 }
@@ -101,9 +110,14 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	return nil
 }
 
+// resolveCarrier resolves the carrier code by looking up the OUI in the
+// carrier registry's known OUI-ProductClass mappings. Falls back to defaultCarrier.
 func (h *InformHandler) resolveCarrier(oui string) model.CarrierCode {
-	// In a full implementation, this would look up OUI → carrier mapping.
-	// For now, use the configured default carrier.
+	if h.carrierRegistry != nil {
+		if code := h.carrierRegistry.ResolveByOUI(oui); code != "" {
+			return code
+		}
+	}
 	return h.defaultCarrier
 }
 
