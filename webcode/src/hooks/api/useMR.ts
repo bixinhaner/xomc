@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MRDeviceMapping } from '@/mock/data/mr';
 import type { PageRequest } from '@/types/pagination';
 import { mrService } from '@/mock/services/mrService';
+import { mrApi } from '@/services/api/mrApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useMRIndicators(params: PageRequest) {
   return useQuery({
@@ -55,7 +57,24 @@ export function useMRRecords(
 ) {
   return useQuery({
     queryKey: ['mr', 'records', params],
-    queryFn: () => mrService.getRecords(params),
+    queryFn: () =>
+      useMock ? mrService.getRecords(params) : mrApi.getRecords(params),
+  });
+}
+
+export function useMRFiles(
+  params: { deviceSn?: string; mrType?: string; timeRange?: [string, string] } & PageRequest
+) {
+  return useQuery({
+    queryKey: ['mr', 'files', params],
+    queryFn: () => mrApi.getFiles(params),
+    enabled: !useMock,
+  });
+}
+
+export function useDownloadMRFile() {
+  return useMutation({
+    mutationFn: (fileId: string) => mrApi.downloadFile(fileId),
   });
 }
 

@@ -3,6 +3,8 @@ import type { OperationType, OperationResult } from '@/types/system';
 import type { PageRequest } from '@/types/pagination';
 import type { SystemLog } from '@/mock/data/logs';
 import { logService } from '@/mock/services/logService';
+import { adminApi } from '@/services/api/adminApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useOperationLogs(
   params: {
@@ -16,7 +18,10 @@ export function useOperationLogs(
 ) {
   return useQuery({
     queryKey: ['logs', 'operation', params],
-    queryFn: () => logService.getOperationLogs(params),
+    queryFn: () =>
+      useMock
+        ? logService.getOperationLogs(params)
+        : adminApi.getOperationLogs(params),
   });
 }
 

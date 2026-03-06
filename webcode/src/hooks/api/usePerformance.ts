@@ -2,11 +2,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { PerformanceThreshold } from '@/types/performance';
 import type { PageRequest } from '@/types/pagination';
 import { performanceService } from '@/mock/services/performanceService';
+import { pmApi } from '@/services/api/pmApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useKPIList(params: { keyword?: string } & PageRequest) {
   return useQuery({
     queryKey: ['performance', 'kpis', params],
-    queryFn: () => performanceService.getKPIs(params),
+    queryFn: () =>
+      useMock ? performanceService.getKPIs(params) : pmApi.getKPIs(params),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -14,7 +17,8 @@ export function useKPIList(params: { keyword?: string } & PageRequest) {
 export function useAllKPIs() {
   return useQuery({
     queryKey: ['performance', 'kpis', 'all'],
-    queryFn: () => performanceService.getAllKPIs(),
+    queryFn: () =>
+      useMock ? performanceService.getAllKPIs() : pmApi.getAllKPIs(),
     staleTime: 10 * 60 * 1000,
   });
 }
@@ -32,14 +36,20 @@ export function useMeasurements(
 ) {
   return useQuery({
     queryKey: ['performance', 'measurements', params],
-    queryFn: () => performanceService.getMeasurements(params),
+    queryFn: () =>
+      useMock
+        ? performanceService.getMeasurements(params)
+        : pmApi.getMeasurements(params),
   });
 }
 
 export function useKPISeries(kpiCode: string, deviceSn?: string, days = 7) {
   return useQuery({
     queryKey: ['performance', 'series', kpiCode, deviceSn, days],
-    queryFn: () => performanceService.getKPISeries(kpiCode, deviceSn, days),
+    queryFn: () =>
+      useMock
+        ? performanceService.getKPISeries(kpiCode, deviceSn, days)
+        : pmApi.getKPISeries(kpiCode, deviceSn, days),
     enabled: Boolean(kpiCode),
   });
 }
@@ -47,7 +57,10 @@ export function useKPISeries(kpiCode: string, deviceSn?: string, days = 7) {
 export function useMultipleKPISeries(kpiCodes: string[], deviceSn?: string) {
   return useQuery({
     queryKey: ['performance', 'multi-series', kpiCodes, deviceSn],
-    queryFn: () => performanceService.getMultipleKPISeries(kpiCodes, deviceSn),
+    queryFn: () =>
+      useMock
+        ? performanceService.getMultipleKPISeries(kpiCodes, deviceSn)
+        : pmApi.getMultipleKPISeries(kpiCodes, deviceSn),
     enabled: kpiCodes.length > 0,
   });
 }

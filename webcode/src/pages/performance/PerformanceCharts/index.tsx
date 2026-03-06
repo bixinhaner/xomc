@@ -6,7 +6,18 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import LineChart from '@/components/Charts/LineChart';
 import { useMultipleKPISeries } from '@/hooks/api/usePerformance';
+import { useMock } from '@/services/apiSwitch';
 import { useT } from '@/hooks/useT';
+
+function formatTimestamp(ts: string): string {
+  if (!ts.includes('T')) return ts;
+  try {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  } catch {
+    return ts;
+  }
+}
 
 const KPI_OPTIONS = [
   { label: 'RRC建立成功率', value: 'RRC_SR' },
@@ -87,15 +98,19 @@ export default function PerformanceCharts() {
   // Use either API data or mock data
   const chartSeriesMap: Record<string, { name: string; unit: string; data: number[]; xData: string[] }> = {};
   for (const kpi of activeKPIs) {
-    const apiSeries = seriesData?.find((s) => s.kpiName === (KPI_OPTIONS.find((k) => k.value === kpi)?.label));
-    if (apiSeries) {
+    // Match by kpiName (mock returns label) or by kpiCode (real API returns code)
+    const kpiLabel = KPI_OPTIONS.find((k) => k.value === kpi)?.label;
+    const apiSeries = seriesData?.find(
+      (s) => s.kpiName === kpiLabel || s.kpiName === kpi
+    );
+    if (apiSeries && apiSeries.data.length > 0) {
       chartSeriesMap[kpi] = {
-        name: apiSeries.kpiName,
+        name: kpiLabel || apiSeries.kpiName,
         unit: apiSeries.unit,
         data: apiSeries.data.map((d) => d.value),
-        xData: apiSeries.data.map((d) => d.timestamp),
+        xData: apiSeries.data.map((d) => formatTimestamp(d.timestamp)),
       };
-    } else {
+    } else if (useMock) {
       const mock = generateMockTimeSeries(kpi);
       chartSeriesMap[kpi] = {
         name: mock.kpiName,

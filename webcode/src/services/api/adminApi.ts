@@ -243,6 +243,10 @@ export const adminApi = {
     };
     if (params.module) query.resource = params.module;
     if (params.operationType) query.action = params.operationType;
+    if (params.timeRange) {
+      query.start_time = params.timeRange[0];
+      query.end_time = params.timeRange[1];
+    }
 
     const { data } = await http.get<BackendListResponse<BackendAuditLog>>(
       '/admin/audit-logs',
