@@ -150,6 +150,10 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		builder = builder.Where(sq.Eq{"oui": *filter.OUI})
 		countBuilder = countBuilder.Where(sq.Eq{"oui": *filter.OUI})
 	}
+	if filter.SN != nil && *filter.SN != "" {
+		builder = builder.Where(sq.Eq{"serial_number": *filter.SN})
+		countBuilder = countBuilder.Where(sq.Eq{"serial_number": *filter.SN})
+	}
 	if filter.Search != nil && *filter.Search != "" {
 		like := "%" + *filter.Search + "%"
 		cond := sq.Or{sq.ILike{"serial_number": like}, sq.ILike{"site_name": like}}

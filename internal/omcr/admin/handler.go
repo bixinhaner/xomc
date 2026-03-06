@@ -231,6 +231,30 @@ func (h *Handler) ListRoles(c *gin.Context) {
 	c.JSON(http.StatusOK, roles)
 }
 
+// Me handles GET /api/v1/auth/me — returns current authenticated user info.
+func (h *Handler) Me(c *gin.Context) {
+	userIDVal, exists := c.Get(CtxKeyUserID)
+	if !exists {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+
+	userID, ok := userIDVal.(uuid.UUID)
+	if !ok {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	user, err := h.service.GetUser(c.Request.Context(), userID)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
 func (h *Handler) ListAuditLogs(c *gin.Context) {
 	var filter AuditLogFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {

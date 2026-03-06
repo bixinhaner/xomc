@@ -14,6 +14,7 @@ type DeviceFilter struct {
 	Technology *model.Technology
 	Status     *model.DeviceStatus
 	OUI        *string
+	SN         *string // exact match on serial_number
 	Search     *string // fuzzy search on serial_number/site_name
 	model.ListRequest
 }

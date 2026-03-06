@@ -57,6 +57,9 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if oui := c.Query("oui"); oui != "" {
 		filter.OUI = &oui
 	}
+	if sn := c.Query("sn"); sn != "" {
+		filter.SN = &sn
+	}
 	if search := c.Query("search"); search != "" {
 		filter.Search = &search
 	}

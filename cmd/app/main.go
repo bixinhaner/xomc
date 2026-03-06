@@ -251,6 +251,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 	v1.Use(admin.RequireCarrier())
 	v1.Use(admin.AuditLogger(auditRepo))
 
+	// Protected auth routes (authentication required)
+	v1.GET("/auth/me", adminHandler.Me)
+
 	// Device routes
 	deviceHandler := device.NewHandler(deviceService)
 	deviceHandler.RegisterRoutes(v1)
