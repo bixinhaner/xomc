@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/carrier"
 	"github.com/omcgo/omcgo/internal/carrier/cmcc"
 	"github.com/omcgo/omcgo/internal/carrier/ctcc"
@@ -25,8 +26,13 @@ import (
 	"github.com/omcgo/omcgo/internal/infra/cache"
 	"github.com/omcgo/omcgo/internal/infra/db"
 	"github.com/omcgo/omcgo/internal/infra/mq"
+	"github.com/omcgo/omcgo/internal/infra/storage"
+	"github.com/omcgo/omcgo/internal/mr"
 	"github.com/omcgo/omcgo/internal/omcr/device"
 	"github.com/omcgo/omcgo/internal/omcr/topology"
+	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -84,6 +90,19 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("connect to Redis: %w", err)
 	}
 	gs.Register("redis", 3, func(ctx context.Context) error { return redisClient.Close() })
+
+	// 5b. Connect to TimescaleDB
+	tsPool, err := db.NewTimescalePool(ctx, cfg.TSDB)
+	if err != nil {
+		return fmt.Errorf("connect to TimescaleDB: %w", err)
+	}
+	gs.Register("timescale", 4, func(ctx context.Context) error { tsPool.Close(); return nil })
+
+	// 5c. Connect to MinIO
+	minioClient, err := storage.NewMinIOClient(cfg.MinIO)
+	if err != nil {
+		return fmt.Errorf("connect to MinIO: %w", err)
+	}
 
 	// 6. Connect to NATS
 	natsClient, err := mq.NewNATSClient(cfg.NATS, logger)
@@ -196,6 +215,25 @@ func runApp(cmd *cobra.Command, args []string) error {
 	// Topology routes
 	topologyHandler := topology.NewHandler(groupRepo, groupService)
 	topologyHandler.RegisterRoutes(v1)
+
+	// PM routes
+	pmCounterRepo := counter.NewPgCounterRepository(tsPool)
+	pmKPIRepo := kpi.NewPgKPIRepository(tsPool)
+	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, carrierRegistry, logger)
+	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, logger)
+	pmHandler.RegisterRoutes(v1)
+
+	// Alarm routes
+	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
+	alarmPgStore := alarm.NewPgAlarmStore(pgPool, tsPool)
+	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, carrierRegistry, eventBus, logger)
+	alarmHandler := alarm.NewHandler(alarmEngine, alarmPgStore, logger)
+	alarmHandler.RegisterRoutes(v1)
+
+	// MR routes
+	mrStore := mr.NewPgMRStore(pgPool, tsPool)
+	mrHandler := mr.NewHandler(mrStore, minioClient, cfg.MinIO.Buckets.MRFiles, logger)
+	mrHandler.RegisterRoutes(v1)
 
 	// 13. Prometheus metrics server
 	metricsMux := http.NewServeMux()

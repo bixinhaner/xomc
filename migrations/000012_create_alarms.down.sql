@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS alarms_history CASCADE;
+DROP TABLE IF EXISTS alarms_active CASCADE;
