@@ -27,6 +27,10 @@ var (
 //   4000-4999: Performance Management
 //   5000-5999: Alarm Management
 //   6000-6999: Auto Provisioning
+//   7000-7999: Admin / Auth / RBAC
+//   8000-8999: Software / Firmware
+//   9000-9999: Northbound / OSS
+//   10000-10999: Interop Testing
 
 // BusinessError represents a domain-specific error with a numeric code.
 type BusinessError struct {

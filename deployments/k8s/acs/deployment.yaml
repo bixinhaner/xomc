@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omcgo-acs
+  namespace: omcgo
+  labels:
+    app: omcgo-acs
+    component: acs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: omcgo-acs
+  template:
+    metadata:
+      labels:
+        app: omcgo-acs
+        component: acs
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: acs
+          image: omcgo/acs:latest
+          args: ["--config", "/etc/omcgo/acs.yaml"]
+          ports:
+            - name: http
+              containerPort: 7547
+              protocol: TCP
+            - name: https
+              containerPort: 7548
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 7547
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 7547
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          env:
+            - name: DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: omcgo-secrets
+                  key: DB_DSN
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: omcgo-secrets
+                  key: REDIS_PASSWORD
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: omcgo-secrets
+                  key: NATS_URL
+          volumeMounts:
+            - name: config
+              mountPath: /etc/omcgo
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: omcgo-config
+            items:
+              - key: acs.yaml
+                path: acs.yaml

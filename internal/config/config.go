@@ -24,15 +24,50 @@ type ACSConfig struct {
 
 // AppConfig is the configuration for the main application.
 type AppConfig struct {
-	Server  AppServerConfig `mapstructure:"server"`
-	DB      PostgresConfig  `mapstructure:"db"`
-	TSDB    PostgresConfig  `mapstructure:"tsdb"`
-	Redis   RedisConfig     `mapstructure:"redis"`
-	NATS    NATSConfig      `mapstructure:"nats"`
-	MinIO   MinIOConfig     `mapstructure:"minio"`
-	Metrics MetricsConfig   `mapstructure:"metrics"`
-	Tracer  TracerConfig    `mapstructure:"tracer"`
-	Log     LogConfig       `mapstructure:"log"`
+	Server     AppServerConfig  `mapstructure:"server"`
+	DB         PostgresConfig   `mapstructure:"db"`
+	TSDB       PostgresConfig   `mapstructure:"tsdb"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+	NATS       NATSConfig       `mapstructure:"nats"`
+	MinIO      MinIOConfig      `mapstructure:"minio"`
+	JWT        JWTConfig        `mapstructure:"jwt"`
+	Northbound NorthboundConfig `mapstructure:"northbound"`
+	NEDirect   NEDirectConfig   `mapstructure:"ne_direct"`
+	Metrics    MetricsConfig    `mapstructure:"metrics"`
+	Tracer     TracerConfig     `mapstructure:"tracer"`
+	Log        LogConfig        `mapstructure:"log"`
+}
+
+// JWTConfig holds JWT authentication settings.
+type JWTConfig struct {
+	Secret          string        `mapstructure:"secret"`
+	AccessTokenTTL  time.Duration `mapstructure:"access_token_ttl"`
+	RefreshTokenTTL time.Duration `mapstructure:"refresh_token_ttl"`
+}
+
+// NorthboundConfig holds northbound/OSS interface settings.
+type NorthboundConfig struct {
+	PushTargets []PushTargetConfig `mapstructure:"push_targets"`
+}
+
+// PushTargetConfig defines a single northbound push target.
+type PushTargetConfig struct {
+	ID         string   `mapstructure:"id"`
+	URL        string   `mapstructure:"url"`
+	AuthType   string   `mapstructure:"auth_type"`
+	AuthToken  string   `mapstructure:"auth_token"`
+	DataTypes  []string `mapstructure:"data_types"`
+	Format     string   `mapstructure:"format"`
+	BatchSize  int      `mapstructure:"batch_size"`
+	RetryCount int      `mapstructure:"retry_count"`
+	Enabled    bool     `mapstructure:"enabled"`
+}
+
+// NEDirectConfig holds NE Direct connection settings (CMCC only).
+type NEDirectConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
 }
 
 // WorkerConfig is the configuration for the background worker process.

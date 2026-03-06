@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/carrier"
 	"github.com/omcgo/omcgo/internal/carrier/cmcc"
@@ -28,7 +29,15 @@ import (
 	"github.com/omcgo/omcgo/internal/infra/mq"
 	"github.com/omcgo/omcgo/internal/infra/storage"
 	"github.com/omcgo/omcgo/internal/mr"
+	"github.com/omcgo/omcgo/internal/nedirect"
+	"github.com/omcgo/omcgo/internal/northbound"
+	"github.com/omcgo/omcgo/internal/northbound/push"
+	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
+	"github.com/omcgo/omcgo/internal/interop"
+	"github.com/omcgo/omcgo/internal/interop/cases"
+	"github.com/omcgo/omcgo/internal/omcr/admin"
 	"github.com/omcgo/omcgo/internal/omcr/device"
+	"github.com/omcgo/omcgo/internal/omcr/software"
 	"github.com/omcgo/omcgo/internal/omcr/topology"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
@@ -176,7 +185,43 @@ func runApp(cmd *cobra.Command, args []string) error {
 	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)
 	groupService := topology.NewDeviceGroupService(groupRepo, logger)
 
-	// 18. Setup Gin router
+	// 18. Create Admin/RBAC module
+	userRepo := admin.NewPgUserRepository(pgPool)
+	roleRepo := admin.NewPgRoleRepository(pgPool)
+	auditRepo := admin.NewPgAuditRepository(pgPool)
+	jwtService := admin.NewJWTServiceWithTTL(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
+	adminService := admin.NewAdminService(userRepo, roleRepo, auditRepo, jwtService, logger)
+	adminHandler := admin.NewHandler(adminService, logger)
+	logger.Info("admin/RBAC module initialized")
+
+	// 19. Create Software Management module
+	firmwareRepo := software.NewPgFirmwareRepository(pgPool)
+	upgradeRepo := software.NewPgUpgradeTaskRepository(pgPool)
+	connReqClient := connreq.NewClient(redisClient, logger)
+	softwareService := software.NewSoftwareService(
+		firmwareRepo, upgradeRepo, deviceRepo, cmdQueue, connReqClient,
+		minioClient, cfg.MinIO.Buckets.Firmware, eventBus, logger,
+	)
+	if err := softwareService.Subscribe(eventBus); err != nil {
+		logger.Warn("subscribe software service", zap.Error(err))
+	}
+	softwareHandler := software.NewHandler(softwareService, firmwareRepo, upgradeRepo, logger)
+	logger.Info("software management module initialized")
+
+	// 20. PM module components (created early for use in routes)
+	pmCounterRepo := counter.NewPgCounterRepository(tsPool)
+	pmKPIRepo := kpi.NewPgKPIRepository(tsPool)
+	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, carrierRegistry, logger)
+
+	// 20. Alarm module components
+	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
+	alarmPgStore := alarm.NewPgAlarmStore(pgPool, tsPool)
+	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, carrierRegistry, eventBus, logger)
+
+	// 21. MR module components
+	mrStore := mr.NewPgMRStore(pgPool, tsPool)
+
+	// 22. Setup Gin router
 	if cfg.Log.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -188,13 +233,20 @@ func runApp(cmd *cobra.Command, args []string) error {
 	metricsReg := prometheus.NewRegistry()
 	router.Use(middleware.PrometheusMetrics(metricsReg))
 
-	// Health check
+	// Health check (public, no auth)
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// API v1 routes
+	// Public auth routes (no authentication required)
+	publicV1 := router.Group("/api/v1")
+	adminHandler.RegisterAuthRoutes(publicV1)
+
+	// Protected API v1 routes (JWT authentication required)
 	v1 := router.Group("/api/v1")
+	v1.Use(admin.RequireAuth(jwtService))
+	v1.Use(admin.RequireCarrier())
+	v1.Use(admin.AuditLogger(auditRepo))
 
 	// Device routes
 	deviceHandler := device.NewHandler(deviceService)
@@ -217,25 +269,64 @@ func runApp(cmd *cobra.Command, args []string) error {
 	topologyHandler.RegisterRoutes(v1)
 
 	// PM routes
-	pmCounterRepo := counter.NewPgCounterRepository(tsPool)
-	pmKPIRepo := kpi.NewPgKPIRepository(tsPool)
-	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, carrierRegistry, logger)
 	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, logger)
 	pmHandler.RegisterRoutes(v1)
 
 	// Alarm routes
-	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
-	alarmPgStore := alarm.NewPgAlarmStore(pgPool, tsPool)
-	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, carrierRegistry, eventBus, logger)
 	alarmHandler := alarm.NewHandler(alarmEngine, alarmPgStore, logger)
 	alarmHandler.RegisterRoutes(v1)
 
 	// MR routes
-	mrStore := mr.NewPgMRStore(pgPool, tsPool)
 	mrHandler := mr.NewHandler(mrStore, minioClient, cfg.MinIO.Buckets.MRFiles, logger)
 	mrHandler.RegisterRoutes(v1)
 
-	// 13. Prometheus metrics server
+	// Software routes
+	softwareHandler.RegisterRoutes(v1)
+
+	// Interop Testing module (F10)
+	testRunner := interop.NewConformanceTestRunner(deviceRepo, paramRepo, dmRegistry, cmdQueue, logger)
+	testRunner.RegisterCases(cases.ProtocolCases())
+	testRunner.RegisterCases(cases.DataModelCases())
+	testRunner.RegisterCases(cases.RPCCases())
+	dmValidator := interop.NewDataModelValidator(dmRegistry, paramRepo, deviceRepo, logger)
+	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
+	interopHandler.RegisterRoutes(v1)
+	logger.Info("interop testing module initialized")
+
+	// Northbound/OSS module
+	nbPMHandler := northbound.NewPMHandler(pmCounterRepo, pmKPIRepo, logger)
+	nbAlarmHandler := northbound.NewAlarmHandler(alarmPgStore, logger)
+	nbConfigHandler := northbound.NewConfigHandler(paramRepo, logger)
+	pushEngine := push.NewEngine(cfg.Northbound.PushTargets, logger)
+	if err := pushEngine.Subscribe(eventBus); err != nil {
+		logger.Warn("subscribe push engine", zap.Error(err))
+	}
+	gs.Register("push-engine", 1, func(ctx context.Context) error { return pushEngine.Close() })
+	syncService := nbsync.NewService(deviceRepo, alarmPgStore, pmCounterRepo, pmKPIRepo, paramRepo, logger)
+	nbRouter := northbound.NewRouter(nbPMHandler, nbAlarmHandler, nbConfigHandler, pushEngine, syncService)
+	nbRouter.RegisterRoutes(v1)
+	logger.Info("northbound/OSS module initialized")
+
+	// NE Direct module (CMCC only)
+	if cfg.NEDirect.Enabled {
+		neHandler := nedirect.NewHandler(deviceService, alarmEngine, eventBus, logger)
+		neServer := nedirect.NewServer(cfg.NEDirect, neHandler, logger)
+		if err := neServer.Start(); err != nil {
+			logger.Error("ne-direct server start failed", zap.Error(err))
+		} else {
+			gs.Register("ne-direct", 1, func(ctx context.Context) error { return neServer.Shutdown(ctx) })
+			logger.Info("ne-direct server started",
+				zap.String("host", cfg.NEDirect.Host),
+				zap.Int("port", cfg.NEDirect.Port))
+		}
+	}
+
+	// Admin management routes (require admin permission)
+	adminGroup := v1.Group("/admin")
+	adminGroup.Use(admin.RequirePermission(roleRepo, "users", "admin"))
+	adminHandler.RegisterAdminRoutes(adminGroup)
+
+	// 23. Prometheus metrics server
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(metricsReg, promhttp.HandlerOpts{}))
 	metricsServer := &http.Server{
@@ -251,7 +342,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// 14. Start HTTP server
+	// 24. Start HTTP server
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 		Handler:      router,
@@ -269,7 +360,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// 15. Wait for signal
+	// 25. Wait for signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -282,7 +373,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 16. Graceful shutdown
+	// 26. Graceful shutdown
 	if err := gs.Shutdown(context.Background()); err != nil {
 		logger.Error("shutdown error", zap.Error(err))
 	}

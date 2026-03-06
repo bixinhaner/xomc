@@ -62,30 +62,32 @@ func (r *DataModelRegistry) Resolve(ctx context.Context, carrier model.CarrierCo
 		return val.(*DataModel), nil
 	}
 
-	// Step 2: Check L2 Redis resolve result cache.
-	modelID, err := r.cache.GetResolveResult(ctx, string(carrier), string(tech), oui, productClass)
-	if err != nil {
-		r.logger.Warn("failed to get resolve result from L2 cache",
-			zap.String("key", key),
-			zap.Error(err),
-		)
-		// Fall through to DB lookup; treat cache errors as misses.
-	} else if modelID != uuid.Nil {
-		// Resolve result found in L2; fetch the full model.
-		dm, fetchErr := r.fetchModel(ctx, modelID)
-		if fetchErr != nil {
-			return nil, fmt.Errorf("fetch model after L2 resolve hit: %w", fetchErr)
-		}
-		if dm != nil {
-			r.localCache.Store(key, dm)
-			r.logger.Debug("data model resolved from L2 cache",
+	// Step 2: Check L2 Redis resolve result cache (skip if cache is nil).
+	if r.cache != nil {
+		modelID, err := r.cache.GetResolveResult(ctx, string(carrier), string(tech), oui, productClass)
+		if err != nil {
+			r.logger.Warn("failed to get resolve result from L2 cache",
 				zap.String("key", key),
-				zap.String("model_id", modelID.String()),
+				zap.Error(err),
 			)
-			return dm, nil
+			// Fall through to DB lookup; treat cache errors as misses.
+		} else if modelID != uuid.Nil {
+			// Resolve result found in L2; fetch the full model.
+			dm, fetchErr := r.fetchModel(ctx, modelID)
+			if fetchErr != nil {
+				return nil, fmt.Errorf("fetch model after L2 resolve hit: %w", fetchErr)
+			}
+			if dm != nil {
+				r.localCache.Store(key, dm)
+				r.logger.Debug("data model resolved from L2 cache",
+					zap.String("key", key),
+					zap.String("model_id", modelID.String()),
+				)
+				return dm, nil
+			}
+			// Model was deleted or deactivated since resolve result was cached.
+			// Fall through to DB lookup.
 		}
-		// Model was deleted or deactivated since resolve result was cached.
-		// Fall through to DB lookup.
 	}
 
 	// Step 3: DB three-level fallback.
@@ -101,19 +103,21 @@ func (r *DataModelRegistry) Resolve(ctx context.Context, carrier model.CarrierCo
 	// Step 4: Write back to L1 + L2 caches.
 	r.localCache.Store(key, dm)
 
-	if cacheErr := r.cache.SetResolveResult(ctx, string(carrier), string(tech), oui, productClass, dm.ID); cacheErr != nil {
-		r.logger.Warn("failed to write resolve result to L2 cache",
-			zap.String("key", key),
-			zap.Error(cacheErr),
-		)
-	}
+	if r.cache != nil {
+		if cacheErr := r.cache.SetResolveResult(ctx, string(carrier), string(tech), oui, productClass, dm.ID); cacheErr != nil {
+			r.logger.Warn("failed to write resolve result to L2 cache",
+				zap.String("key", key),
+				zap.Error(cacheErr),
+			)
+		}
 
-	modelKey := ModelKey(string(dm.Scope), string(carrier), string(tech), oui, productClass)
-	if cacheErr := r.cache.SetModel(ctx, modelKey, dm); cacheErr != nil {
-		r.logger.Warn("failed to write model to L2 cache",
-			zap.String("key", modelKey),
-			zap.Error(cacheErr),
-		)
+		modelKey := ModelKey(string(dm.Scope), string(carrier), string(tech), oui, productClass)
+		if cacheErr := r.cache.SetModel(ctx, modelKey, dm); cacheErr != nil {
+			r.logger.Warn("failed to write model to L2 cache",
+				zap.String("key", modelKey),
+				zap.Error(cacheErr),
+			)
+		}
 	}
 
 	r.logger.Info("data model resolved from database",
@@ -190,13 +194,15 @@ func (r *DataModelRegistry) InvalidateCache(ctx context.Context, dm *DataModel) 
 	r.localCache.Delete(key)
 
 	// Invalidate L2: remove model content and resolve results from Redis.
-	if err := r.cache.InvalidateModel(ctx, dm); err != nil {
-		return fmt.Errorf("invalidate L2 cache for model %s: %w", dm.ID, err)
-	}
+	if r.cache != nil {
+		if err := r.cache.InvalidateModel(ctx, dm); err != nil {
+			return fmt.Errorf("invalidate L2 cache for model %s: %w", dm.ID, err)
+		}
 
-	// Increment cache version to notify other ACS instances.
-	if _, err := r.cache.IncrCacheVersion(ctx); err != nil {
-		return fmt.Errorf("increment cache version: %w", err)
+		// Increment cache version to notify other ACS instances.
+		if _, err := r.cache.IncrCacheVersion(ctx); err != nil {
+			return fmt.Errorf("increment cache version: %w", err)
+		}
 	}
 
 	r.logger.Info("cache invalidated for data model",
@@ -218,15 +224,16 @@ func (r *DataModelRegistry) InvalidateAll(ctx context.Context) error {
 	})
 
 	// Increment cache version to notify all ACS instances.
-	newVersion, err := r.cache.IncrCacheVersion(ctx)
-	if err != nil {
-		return fmt.Errorf("invalidate all: increment cache version: %w", err)
+	if r.cache != nil {
+		newVersion, err := r.cache.IncrCacheVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("invalidate all: increment cache version: %w", err)
+		}
+		r.cacheVersion = newVersion
 	}
 
-	r.cacheVersion = newVersion
-
 	r.logger.Info("all data model caches invalidated",
-		zap.Int64("new_cache_version", newVersion),
+		zap.Int64("new_cache_version", r.cacheVersion),
 	)
 
 	return nil
@@ -235,6 +242,9 @@ func (r *DataModelRegistry) InvalidateAll(ctx context.Context) error {
 // refreshLocalCache checks the cache version in Redis and clears L1 if it has changed.
 // This is called periodically by the background cache watcher.
 func (r *DataModelRegistry) refreshLocalCache(ctx context.Context) {
+	if r.cache == nil {
+		return
+	}
 	version, err := r.cache.GetCacheVersion(ctx)
 	if err != nil {
 		r.logger.Warn("failed to get cache version from Redis",

@@ -54,9 +54,23 @@ const (
 	SubjectCommandDownloadResponse   = "command.download.response"
 )
 
+// Software/Firmware events
+const (
+	SubjectFirmwareUploaded = "firmware.uploaded"
+	SubjectUpgradeStarted   = "upgrade.started"
+	SubjectUpgradeCompleted = "upgrade.completed"
+	SubjectUpgradeFailed    = "upgrade.failed"
+)
+
 // Northbound/OSS events
 const (
 	SubjectOSSAlarmForward   = "oss.alarm.forward"
 	SubjectOSSPMExport       = "oss.pm.export"
 	SubjectOSSConfigSnapshot = "oss.config.snapshot"
+)
+
+// NE Direct events
+const (
+	SubjectNEDirectRegister = "nedirect.register"
+	SubjectNEDirectFault    = "nedirect.fault"
 )

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: omcgo-app
+  namespace: omcgo
+  labels:
+    app: omcgo-app
+spec:
+  type: ClusterIP
+  selector:
+    app: omcgo-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

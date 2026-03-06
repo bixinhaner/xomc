@@ -48,6 +48,19 @@ minio:
     config_backup: "config-backup"
     logs: "logs"
 
+jwt:
+  secret: "change-me-in-production-minimum-32-characters!!"
+  access_token_ttl: 30m
+  refresh_token_ttl: 168h
+
+northbound:
+  push_targets: []
+
+ne_direct:
+  enabled: false
+  host: "0.0.0.0"
+  port: 7549
+
 metrics:
   port: 9091
 
