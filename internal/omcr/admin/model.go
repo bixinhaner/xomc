@@ -89,9 +89,11 @@ type UserFilter struct {
 
 // AuditLogFilter provides filtering options for listing audit logs.
 type AuditLogFilter struct {
-	UserID   *uuid.UUID `form:"user_id"`
-	Action   *string    `form:"action"`
-	Resource *string    `form:"resource"`
+	UserID    *uuid.UUID `form:"user_id"`
+	Action    *string    `form:"action"`
+	Resource  *string    `form:"resource"`
+	StartTime *string    `form:"start_time"`
+	EndTime   *string    `form:"end_time"`
 	model.ListRequest
 }
 

@@ -62,5 +62,6 @@ type MRStore interface {
 	UpdateFileParsed(ctx context.Context, fileID uuid.UUID, recordCount int) error
 	BatchInsertRecords(ctx context.Context, fileID, deviceID uuid.UUID, mrType string, records []parser.MRRecord) error
 	ListFiles(ctx context.Context, filter MRFileFilter) (*model.ListResponse[MRFileInfo], error)
+	GetFileByID(ctx context.Context, fileID uuid.UUID) (*MRFileInfo, error)
 	QueryRecords(ctx context.Context, filter MRRecordFilter) (*model.ListResponse[MRRecordEntry], error)
 }

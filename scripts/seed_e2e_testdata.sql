@@ -1,4 +1,4 @@
--- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2)
+-- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2 + Sprint 3)
 -- 使用固定 UUID，方便验证脚本引用
 -- 运行前需已执行全部 migrations (make migrate-up)
 -- 使用方法: psql "$DSN" -f scripts/seed_e2e_testdata.sql
@@ -8,6 +8,14 @@ BEGIN;
 -- ============================================================
 -- 0. 清理旧的 E2E 测试数据 (幂等，按 FK 依赖逆序)
 -- ============================================================
+
+-- Sprint 3 data
+DELETE FROM mr_records WHERE device_id::text LIKE 'e2e00001%';
+DELETE FROM mr_files WHERE id::text LIKE 'e2e00008%';
+DELETE FROM kpi_values WHERE device_id::text LIKE 'e2e00001%';
+DELETE FROM kpi_definitions WHERE name LIKE 'E2E_%';
+DELETE FROM pm_counters WHERE device_id::text LIKE 'e2e00001%';
+DELETE FROM audit_logs WHERE id::text LIKE 'e2e00009%';
 
 -- Sprint 2 data
 DELETE FROM device_group_members WHERE group_id::text LIKE 'e2e00007%';
@@ -299,6 +307,82 @@ INSERT INTO device_group_members (group_id, device_id, added_at) VALUES
 ('e2e00007-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000002', NOW() - INTERVAL '30 days'),
 ('e2e00007-0000-0000-0000-000000000003', 'e2e00001-0000-0000-0000-000000000003', NOW() - INTERVAL '25 days');
 
+-- ============================================================
+-- 7. PM 性能计数器 (Sprint 3 — 8 条，覆盖 2 台设备 + 2 个计数组 + 2 个时间窗口)
+-- ============================================================
+
+INSERT INTO pm_counters (time, device_id, cell_id, counter_group, counter_name, counter_value, granularity) VALUES
+-- Device 1, RRC counters, 2 hours ago
+(NOW() - INTERVAL '2 hours', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'RRC', 'RRC_CONN_ATTEMPT', 1500, 15),
+(NOW() - INTERVAL '2 hours', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'RRC', 'RRC_CONN_SUCCESS', 1485, 15),
+-- Device 1, RRC counters, 1 hour ago
+(NOW() - INTERVAL '1 hour', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'RRC', 'RRC_CONN_ATTEMPT', 1600, 15),
+(NOW() - INTERVAL '1 hour', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'RRC', 'RRC_CONN_SUCCESS', 1592, 15),
+-- Device 1, ERAB counters
+(NOW() - INTERVAL '2 hours', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'ERAB', 'ERAB_SETUP_ATTEMPT', 1200, 15),
+(NOW() - INTERVAL '2 hours', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'ERAB', 'ERAB_SETUP_SUCCESS', 1188, 15),
+-- Device 2, RRC counters
+(NOW() - INTERVAL '1 hour', 'e2e00001-0000-0000-0000-000000000002', 'CELL-002-1', 'RRC', 'RRC_CONN_ATTEMPT', 800, 15),
+(NOW() - INTERVAL '1 hour', 'e2e00001-0000-0000-0000-000000000002', 'CELL-002-1', 'RRC', 'RRC_CONN_SUCCESS', 796, 15);
+
+-- ============================================================
+-- 8. KPI 定义 (Sprint 3 — 2 条)
+-- ============================================================
+
+INSERT INTO kpi_definitions (name, display_name, formula, unit, category, carrier, technology, counters) VALUES
+('E2E_RRC_SR', 'RRC Setup Success Rate', 'RRC_CONN_SUCCESS / RRC_CONN_ATTEMPT * 100', '%', 'accessibility', 'cmcc', 'lte',
+ '["RRC_CONN_ATTEMPT","RRC_CONN_SUCCESS"]'::jsonb),
+('E2E_ERAB_SR', 'E-RAB Setup Success Rate', 'ERAB_SETUP_SUCCESS / ERAB_SETUP_ATTEMPT * 100', '%', 'accessibility', 'cmcc', 'lte',
+ '["ERAB_SETUP_ATTEMPT","ERAB_SETUP_SUCCESS"]'::jsonb);
+
+-- ============================================================
+-- 9. KPI 计算值 (Sprint 3 — 4 条)
+-- ============================================================
+
+INSERT INTO kpi_values (time, device_id, cell_id, kpi_name, kpi_value, carrier, technology) VALUES
+(NOW() - INTERVAL '2 hours', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'E2E_RRC_SR', 99.0, 'cmcc', 'lte'),
+(NOW() - INTERVAL '1 hour',  'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'E2E_RRC_SR', 99.5, 'cmcc', 'lte'),
+(NOW() - INTERVAL '2 hours', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'E2E_ERAB_SR', 99.0, 'cmcc', 'lte'),
+(NOW() - INTERVAL '1 hour',  'e2e00001-0000-0000-0000-000000000002', 'CELL-002-1', 'E2E_RRC_SR', 99.5, 'cmcc', 'nr');
+
+-- ============================================================
+-- 10. MR 文件元数据 (Sprint 3 — 2 条)
+-- ============================================================
+
+INSERT INTO mr_files (id, device_id, device_sn, carrier, mr_type, file_name, file_size, collect_time, minio_path, parsed, record_count, created_at) VALUES
+('e2e00008-0000-0000-0000-000000000001', 'e2e00001-0000-0000-0000-000000000001', 'TEST-SN-001', 'cmcc', 'MRO',
+ 'MRO_TEST-SN-001_20260307.xml', 102400, NOW() - INTERVAL '1 hour',
+ 'mr/cmcc/TEST-SN-001/MRO_20260307.xml', true, 50, NOW() - INTERVAL '1 hour'),
+('e2e00008-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000002', 'TEST-SN-002', 'cmcc', 'MRS',
+ 'MRS_TEST-SN-002_20260307.xml', 51200, NOW() - INTERVAL '2 hours',
+ 'mr/cmcc/TEST-SN-002/MRS_20260307.xml', true, 30, NOW() - INTERVAL '2 hours');
+
+-- ============================================================
+-- 11. MR 解析记录 (Sprint 3 — 4 条)
+-- ============================================================
+
+INSERT INTO mr_records (time, file_id, device_id, cell_id, mr_type, measurement_data) VALUES
+(NOW() - INTERVAL '1 hour', 'e2e00008-0000-0000-0000-000000000001', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-1', 'MRO',
+ '{"RSRP": -85.5, "RSRQ": -9.2, "SINR": 12.3}'::jsonb),
+(NOW() - INTERVAL '1 hour', 'e2e00008-0000-0000-0000-000000000001', 'e2e00001-0000-0000-0000-000000000001', 'CELL-001-2', 'MRO',
+ '{"RSRP": -92.1, "RSRQ": -11.5, "SINR": 8.7}'::jsonb),
+(NOW() - INTERVAL '2 hours', 'e2e00008-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000002', 'CELL-002-1', 'MRS',
+ '{"RSRP": -78.3, "RSRQ": -7.8, "SINR": 15.6}'::jsonb),
+(NOW() - INTERVAL '2 hours', 'e2e00008-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000002', 'CELL-002-2', 'MRS',
+ '{"RSRP": -88.9, "RSRQ": -10.1, "SINR": 10.2}'::jsonb);
+
+-- ============================================================
+-- 12. 审计日志 (Sprint 3 — 3 条，不同时间戳便于时间范围过滤测试)
+-- ============================================================
+
+INSERT INTO audit_logs (id, user_id, username, action, resource, resource_id, details, ip_address, created_at) VALUES
+('e2e00009-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 'admin', 'login', 'auth', '',
+ '{}'::jsonb, '10.0.0.1'::inet, NOW() - INTERVAL '3 hours'),
+('e2e00009-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000001', 'admin', 'create', 'users', 'new-user-001',
+ '{"username":"testuser"}'::jsonb, '10.0.0.1'::inet, NOW() - INTERVAL '2 hours'),
+('e2e00009-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000001', 'admin', 'update', 'devices', 'e2e00001-0000-0000-0000-000000000001',
+ '{"field":"firmware"}'::jsonb, '10.0.0.1'::inet, NOW() - INTERVAL '1 hour');
+
 COMMIT;
 
 -- Verify counts
@@ -312,4 +396,16 @@ SELECT 'firmware_versions', COUNT(*) FROM firmware_versions WHERE id::text LIKE 
 UNION ALL
 SELECT 'upgrade_tasks', COUNT(*) FROM upgrade_tasks WHERE id::text LIKE 'e2e00005%'
 UNION ALL
-SELECT 'device_groups', COUNT(*) FROM device_groups WHERE id::text LIKE 'e2e00007%';
+SELECT 'device_groups', COUNT(*) FROM device_groups WHERE id::text LIKE 'e2e00007%'
+UNION ALL
+SELECT 'pm_counters', COUNT(*) FROM pm_counters WHERE device_id::text LIKE 'e2e00001%'
+UNION ALL
+SELECT 'kpi_definitions', COUNT(*) FROM kpi_definitions WHERE name LIKE 'E2E_%'
+UNION ALL
+SELECT 'kpi_values', COUNT(*) FROM kpi_values WHERE device_id::text LIKE 'e2e00001%'
+UNION ALL
+SELECT 'mr_files', COUNT(*) FROM mr_files WHERE id::text LIKE 'e2e00008%'
+UNION ALL
+SELECT 'mr_records', COUNT(*) FROM mr_records WHERE device_id::text LIKE 'e2e00001%'
+UNION ALL
+SELECT 'audit_logs', COUNT(*) FROM audit_logs WHERE id::text LIKE 'e2e00009%';

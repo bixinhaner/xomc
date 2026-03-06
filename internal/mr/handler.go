@@ -88,22 +88,11 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	// Look up file to get minio path
-	filter := MRFileFilter{ListRequest: model.ListRequest{Page: 1, PageSize: 1}}
-	filter.DeviceID = nil // We need to find by ID, so query all and filter
-	result, err := h.store.ListFiles(c.Request.Context(), filter)
-	if err != nil || len(result.Items) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+	// Look up file by ID directly
+	fileInfo, err := h.store.GetFileByID(c.Request.Context(), fileID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
 		return
-	}
-
-	// Find the specific file
-	var fileInfo *MRFileInfo
-	for _, f := range result.Items {
-		if f.ID == fileID {
-			fileInfo = &f
-			break
-		}
 	}
 	if fileInfo == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})

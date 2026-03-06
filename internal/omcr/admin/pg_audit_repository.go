@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -64,6 +65,18 @@ func (r *PgAuditRepository) List(ctx context.Context, filter AuditLogFilter) (*m
 	if filter.Resource != nil && *filter.Resource != "" {
 		base = base.Where(sq.Eq{"resource": *filter.Resource})
 		countBase = countBase.Where(sq.Eq{"resource": *filter.Resource})
+	}
+	if filter.StartTime != nil && *filter.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, *filter.StartTime); err == nil {
+			base = base.Where(sq.GtOrEq{"created_at": t})
+			countBase = countBase.Where(sq.GtOrEq{"created_at": t})
+		}
+	}
+	if filter.EndTime != nil && *filter.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, *filter.EndTime); err == nil {
+			base = base.Where(sq.LtOrEq{"created_at": t})
+			countBase = countBase.Where(sq.LtOrEq{"created_at": t})
+		}
 	}
 
 	// Count

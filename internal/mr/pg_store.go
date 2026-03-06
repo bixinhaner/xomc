@@ -77,6 +77,24 @@ func (s *PgMRStore) BatchInsertRecords(ctx context.Context, fileID, deviceID uui
 	return nil
 }
 
+func (s *PgMRStore) GetFileByID(ctx context.Context, fileID uuid.UUID) (*MRFileInfo, error) {
+	var f MRFileInfo
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, device_id, device_sn, carrier, mr_type, file_name, file_size,
+		        collect_time, minio_path, parsed, parsed_at, record_count, created_at
+		 FROM mr_files WHERE id = $1`, fileID,
+	).Scan(&f.ID, &f.DeviceID, &f.DeviceSN, &f.Carrier, &f.MRType,
+		&f.FileName, &f.FileSize, &f.CollectTime, &f.MinioPath,
+		&f.Parsed, &f.ParsedAt, &f.RecordCount, &f.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get mr_file by id: %w", err)
+	}
+	return &f, nil
+}
+
 func (s *PgMRStore) ListFiles(ctx context.Context, filter MRFileFilter) (*model.ListResponse[MRFileInfo], error) {
 	qb := psql.Select("id", "device_id", "device_sn", "carrier", "mr_type", "file_name",
 		"file_size", "collect_time", "minio_path", "parsed", "parsed_at", "record_count", "created_at").
