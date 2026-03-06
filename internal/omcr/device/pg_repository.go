@@ -36,6 +36,12 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 	extData, _ := json.Marshal(device.ExtensionData)
 	eventsData, _ := json.Marshal(device.LastInformEvents)
 
+	// INET column requires nil for empty values, not empty string
+	var ipAddr interface{}
+	if device.IPAddress != "" {
+		ipAddr = device.IPAddress
+	}
+
 	query, args, err := psql.Insert("devices").
 		Columns("id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
 			"carrier", "technology", "status", "firmware_version", "ip_address",
@@ -44,7 +50,7 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 			"extension_data", "created_at", "updated_at").
 		Values(device.ID, device.SerialNumber, device.OUI, device.ProductClass,
 			device.Manufacturer, device.ModelName, device.Carrier, device.Technology,
-			device.Status, device.FirmwareVersion, device.IPAddress,
+			device.Status, device.FirmwareVersion, ipAddr,
 			device.ConnectionRequestURL, device.LastInformAt, eventsData,
 			device.InformInterval, device.SiteName, device.SiteID,
 			device.Latitude, device.Longitude, extData, device.CreatedAt, device.UpdatedAt).
@@ -86,6 +92,12 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 	extData, _ := json.Marshal(device.ExtensionData)
 	eventsData, _ := json.Marshal(device.LastInformEvents)
 
+	// INET column requires nil for empty values, not empty string
+	var ipAddr interface{}
+	if device.IPAddress != "" {
+		ipAddr = device.IPAddress
+	}
+
 	query, args, err := psql.Update("devices").
 		Set("oui", device.OUI).
 		Set("product_class", device.ProductClass).
@@ -93,7 +105,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("model_name", device.ModelName).
 		Set("status", device.Status).
 		Set("firmware_version", device.FirmwareVersion).
-		Set("ip_address", device.IPAddress).
+		Set("ip_address", ipAddr).
 		Set("connection_request_url", device.ConnectionRequestURL).
 		Set("last_inform_at", device.LastInformAt).
 		Set("last_inform_events", eventsData).

@@ -9,7 +9,7 @@ server:
     key_file: ""
 
 db:
-  dsn: "postgres://omcgo:password@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
   max_conns: 50
   min_conns: 10
   max_conn_lifetime: 30m
@@ -17,7 +17,7 @@ db:
   health_check_interval: 30s
 
 tsdb:
-  dsn: "postgres://omcgo:password@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m

@@ -3,7 +3,7 @@
 
 CREATE TABLE device_group_members (
     group_id   UUID NOT NULL REFERENCES device_groups(id) ON DELETE CASCADE,
-    device_id  UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    device_id  UUID NOT NULL,
     added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (group_id, device_id)
 );

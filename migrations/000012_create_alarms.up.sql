@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_alarms_active_device_sn_code ON alarms_active (de
 CREATE INDEX IF NOT EXISTS idx_alarms_active_severity ON alarms_active (severity);
 CREATE INDEX IF NOT EXISTS idx_alarms_active_status ON alarms_active (status);
 
--- Historical alarms hypertable (TimescaleDB)
+-- Historical alarms table
 CREATE TABLE IF NOT EXISTS alarms_history (
     time            TIMESTAMPTZ NOT NULL,
     alarm_id        UUID NOT NULL,
@@ -39,8 +39,14 @@ CREATE TABLE IF NOT EXISTS alarms_history (
     cleared_at      TIMESTAMPTZ
 );
 
-SELECT create_hypertable('alarms_history', 'time', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
+-- TimescaleDB hypertable (skip if extension not available)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('alarms_history', 'time', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('alarms_history', INTERVAL '365 days', if_not_exists => TRUE);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_alarms_history_device ON alarms_history (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_alarms_history_alarm ON alarms_history (alarm_id, time DESC);
-
-SELECT add_retention_policy('alarms_history', INTERVAL '365 days', if_not_exists => TRUE);

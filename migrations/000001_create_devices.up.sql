@@ -1,6 +1,6 @@
 -- Devices table: partitioned by carrier for data isolation and query performance.
 CREATE TABLE devices (
-    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                     UUID NOT NULL DEFAULT gen_random_uuid(),
     serial_number          VARCHAR(64) NOT NULL,
     oui                    VARCHAR(6) NOT NULL,
     product_class          VARCHAR(64),
@@ -22,7 +22,8 @@ CREATE TABLE devices (
     longitude              DOUBLE PRECISION,
     extension_data         JSONB,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, carrier)
 ) PARTITION BY LIST (carrier);
 
 -- Carrier partitions
@@ -31,7 +32,7 @@ CREATE TABLE devices_ctcc PARTITION OF devices FOR VALUES IN ('ctcc');
 CREATE TABLE devices_cucc PARTITION OF devices FOR VALUES IN ('cucc');
 
 -- Indexes
-CREATE UNIQUE INDEX idx_devices_serial_number ON devices (serial_number);
+CREATE UNIQUE INDEX idx_devices_serial_number ON devices (serial_number, carrier);
 CREATE INDEX idx_devices_carrier_status ON devices (carrier, status);
 CREATE INDEX idx_devices_oui ON devices (oui);
 CREATE INDEX idx_devices_carrier_tech ON devices (carrier, technology);

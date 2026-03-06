@@ -3,7 +3,7 @@
 
 CREATE TABLE provisioning_tasks (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_id      UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    device_id      UUID NOT NULL,
     template_id    UUID REFERENCES config_templates(id),
     status         VARCHAR(20) NOT NULL DEFAULT 'discovered'
                    CHECK (status IN ('discovered', 'identifying', 'matching', 'configuring', 'verifying', 'completed', 'failed')),

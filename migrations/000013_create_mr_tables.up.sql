@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS idx_mr_files_device ON mr_files (device_id, collect_t
 CREATE INDEX IF NOT EXISTS idx_mr_files_type ON mr_files (mr_type);
 CREATE INDEX IF NOT EXISTS idx_mr_files_carrier ON mr_files (carrier);
 
--- MR parsed records hypertable (TimescaleDB)
+-- MR parsed records table
 CREATE TABLE IF NOT EXISTS mr_records (
     time             TIMESTAMPTZ NOT NULL,
     file_id          UUID NOT NULL,
@@ -29,12 +29,16 @@ CREATE TABLE IF NOT EXISTS mr_records (
     measurement_data JSONB NOT NULL DEFAULT '{}'
 );
 
-SELECT create_hypertable('mr_records', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
+-- TimescaleDB hypertable (skip if extension not available)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('mr_records', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
+        PERFORM add_compression_policy('mr_records', INTERVAL '7 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('mr_records', INTERVAL '90 days', if_not_exists => TRUE);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_mr_records_device ON mr_records (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_mr_records_file ON mr_records (file_id);
 CREATE INDEX IF NOT EXISTS idx_mr_records_type ON mr_records (mr_type, time DESC);
-
--- Compression and retention
-SELECT add_compression_policy('mr_records', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('mr_records', INTERVAL '90 days', if_not_exists => TRUE);
