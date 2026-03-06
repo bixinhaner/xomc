@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Alarm, AlarmRule, AlarmFilter, AlarmCount } from '@/types/alarm';
+import type { Alarm, AlarmFilter, AlarmCount } from '@/types/alarm';
 import type { AlarmSeverity } from '@/types/common';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { alarmService } from '@/mock/services/alarmService';

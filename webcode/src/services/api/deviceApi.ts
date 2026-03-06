@@ -36,13 +36,18 @@ interface BackendListResponse<T> {
 }
 
 // Map backend device status to frontend connStatus
+// Backend statuses: discovered, registered, provisioning, active, maintenance, offline, decommissioned
 function mapStatus(status: string): Device['connStatus'] {
   switch (status) {
     case 'online':
+    case 'active':
       return 'online';
     case 'offline':
     case 'registered':
-    case 'unregistered':
+    case 'discovered':
+    case 'provisioning':
+    case 'maintenance':
+    case 'decommissioned':
     default:
       return 'offline';
   }
@@ -123,18 +128,15 @@ export const deviceApi = {
     return result.items.length > 0 ? result.items[0] : null;
   },
 
-  async create(data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {
-    // Sprint 4 — device CRUD; placeholder for now
+  async create(_data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {
     throw new Error('Device create not yet implemented (Sprint 4)');
   },
 
-  async update(id: string, data: Partial<Device>): Promise<Device> {
-    // Sprint 4 — device CRUD; placeholder for now
+  async update(_id: string, _data: Partial<Device>): Promise<Device> {
     throw new Error('Device update not yet implemented (Sprint 4)');
   },
 
-  async delete(ids: string[]): Promise<void> {
-    // Sprint 4 — device CRUD; placeholder for now
+  async delete(_ids: string[]): Promise<void> {
     throw new Error('Device delete not yet implemented (Sprint 4)');
   },
 
