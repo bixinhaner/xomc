@@ -50,7 +50,7 @@ func (r *PgAuditRepository) Create(ctx context.Context, log *AuditLog) error {
 }
 
 func (r *PgAuditRepository) List(ctx context.Context, filter AuditLogFilter) (*model.ListResponse[AuditLog], error) {
-	base := psql.Select("id", "user_id", "username", "action", "resource", "resource_id", "details", "ip_address", "user_agent", "created_at").
+	base := psql.Select("id", "user_id", "username", "action", "resource", "resource_id", "details", "ip_address::text", "user_agent", "created_at").
 		From("audit_logs")
 	countBase := psql.Select("COUNT(*)").From("audit_logs")
 

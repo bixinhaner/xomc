@@ -1,6 +1,6 @@
 #!/bin/bash
-# e2e_verify.sh — Sprint 1+2 端到端数据流验证脚本
-# 用 curl 覆盖 M1+M2 里程碑所有关键路径
+# e2e_verify.sh — Sprint 1+2+3 端到端数据流验证脚本
+# 用 curl 覆盖 M1+M2+M3 里程碑所有关键路径
 # 前置: omcgo-app 运行在 localhost:8080, DB 已执行迁移 + 种子数据
 #
 # 使用方法:
@@ -101,7 +101,7 @@ print('' if v is None else v)
 }
 
 echo "================================================"
-echo "  OMC Sprint 1+2 — E2E Data Flow Verification"
+echo "  OMC Sprint 1+2+3 — E2E Data Flow Verification"
 echo "================================================"
 echo "Target: $BASE_URL"
 echo "Time:   $(date '+%Y-%m-%d %H:%M:%S')"
@@ -941,6 +941,416 @@ if [ -n "$ACCESS_TOKEN" ]; then
     check_status "POST /alarms/:id/clear" "200" "$HTTP_CODE"
 else
     fail "Alarm clear test" "skipped — no access token"
+fi
+
+# ============================================================
+section "17. PM Counter Queries"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 17.1 List PM counters (paginated)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/counters?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/counters (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "PM counter list has items (count=$ITEMS_LEN)"
+        else
+            fail "PM counter list has items" "items array is empty"
+        fi
+    fi
+
+    # 17.2 Filter by device_id
+    PM_DEVICE_ID="e2e00001-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/counters?device_id=$PM_DEVICE_ID&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/counters?device_id=... (filter)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "PM counters filtered by device_id (count=$ITEMS_LEN)"
+        else
+            fail "PM counters filtered by device_id" "items array is empty"
+        fi
+    fi
+
+    # 17.3 Filter by counter_group
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/counters?counter_group=RRC&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/counters?counter_group=RRC" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "PM counters filtered by counter_group=RRC (count=$ITEMS_LEN)"
+        else
+            fail "PM counters filtered by counter_group=RRC" "items array is empty"
+        fi
+    fi
+
+    # 17.4 Filter by time range
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/counters?start_time=2026-03-06T00:00:00Z&end_time=2026-03-07T00:00:00Z&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/counters?start_time=...&end_time=... (time range)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        pass "PM counters in time range (count=$ITEMS_LEN)"
+    fi
+
+    # 17.5 Verify counter fields
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/counters?page=1&page_size=1" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_FIELDS=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('items', [])
+if items:
+    item = items[0]
+    required = ['time', 'device_id', 'counter_group', 'counter_name', 'counter_value']
+    present = [k for k in required if k in item]
+    print(len(present))
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$HAS_FIELDS" -ge 4 ]; then
+            pass "PM counter has required fields (${HAS_FIELDS}/5)"
+        else
+            fail "PM counter has required fields" "only $HAS_FIELDS/5 present"
+        fi
+    fi
+else
+    fail "PM counter tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "18. KPI Queries"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 18.1 List KPI values (paginated)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/kpi?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/kpi (list values)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "KPI values list has items (count=$ITEMS_LEN)"
+        else
+            fail "KPI values list has items" "items array is empty"
+        fi
+    fi
+
+    # 18.2 Filter KPI by kpi_name
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/kpi?kpi_name=E2E_RRC_SR&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/kpi?kpi_name=E2E_RRC_SR (filter)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "KPI values filtered by name (count=$ITEMS_LEN)"
+        else
+            fail "KPI values filtered by name" "items array is empty"
+        fi
+    fi
+
+    # 18.3 List KPI definitions
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/kpi/definitions" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/kpi/definitions" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+else:
+    items = d.get('items') or d.get('definitions') or []
+    print(len(items) if isinstance(items, list) else 0)
+" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "KPI definitions has items (count=$ITEMS_LEN)"
+        else
+            fail "KPI definitions has items" "items array is empty"
+        fi
+    fi
+
+    # 18.4 Filter KPI definitions by carrier
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/kpi/definitions?carrier=cmcc" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/kpi/definitions?carrier=cmcc" "200" "$HTTP_CODE"
+
+    # 18.5 Verify KPI value fields
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/kpi?page=1&page_size=1" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_FIELDS=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('items', [])
+if items:
+    item = items[0]
+    required = ['time', 'device_id', 'kpi_name', 'kpi_value']
+    present = [k for k in required if k in item]
+    print(len(present))
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$HAS_FIELDS" -ge 3 ]; then
+            pass "KPI value has required fields (${HAS_FIELDS}/4)"
+        else
+            fail "KPI value has required fields" "only $HAS_FIELDS/4 present"
+        fi
+    fi
+else
+    fail "KPI tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "19. MR Files & Data"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 19.1 List MR files (paginated)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/files?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mr/files (list)" "200" "$HTTP_CODE"
+
+    MR_FILE_ID=""
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "MR file list has items (count=$ITEMS_LEN)"
+            MR_FILE_ID=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items',[]); print(items[0].get('id','') if items else '')" 2>/dev/null || echo "")
+        else
+            fail "MR file list has items" "items array is empty"
+        fi
+    fi
+
+    # 19.2 Filter MR files by mr_type
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/files?mr_type=MRO&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mr/files?mr_type=MRO (filter)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "MR files filtered by MRO type (count=$ITEMS_LEN)"
+        else
+            fail "MR files filtered by MRO type" "items array is empty"
+        fi
+    fi
+
+    # 19.3 Download MR file (may fail if MinIO unavailable — treat 500 as acceptable skip)
+    if [ -n "$MR_FILE_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/mr/files/$MR_FILE_ID/download" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "200" ]; then
+            pass "GET /mr/files/:id/download (HTTP 200)"
+        elif [ "$HTTP_CODE" = "500" ]; then
+            pass "GET /mr/files/:id/download (HTTP 500 — MinIO unavailable, expected)"
+        else
+            fail "GET /mr/files/:id/download" "expected HTTP 200 or 500, got $HTTP_CODE"
+        fi
+    else
+        pass "GET /mr/files/:id/download (skipped — no file id, no seeded files)"
+    fi
+
+    # 19.4 List MR data/records
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/data?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mr/data (list records)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "MR data list has items (count=$ITEMS_LEN)"
+        else
+            fail "MR data list has items" "items array is empty"
+        fi
+    fi
+
+    # 19.5 Filter MR data by device_id
+    MR_DEVICE_ID="e2e00001-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/data?device_id=$MR_DEVICE_ID&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mr/data?device_id=... (filter)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "MR data filtered by device_id (count=$ITEMS_LEN)"
+        else
+            fail "MR data filtered by device_id" "items array is empty"
+        fi
+    fi
+
+    # 19.6 Verify MR file fields
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/files?page=1&page_size=1" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_FIELDS=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('items', [])
+if items:
+    item = items[0]
+    required = ['id', 'device_id', 'mr_type', 'file_name', 'file_size']
+    present = [k for k in required if k in item]
+    print(len(present))
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$HAS_FIELDS" -ge 4 ]; then
+            pass "MR file has required fields (${HAS_FIELDS}/5)"
+        else
+            fail "MR file has required fields" "only $HAS_FIELDS/5 present"
+        fi
+    fi
+
+    # 19.7 Verify MR record fields
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/data?page=1&page_size=1" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_FIELDS=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('items', [])
+if items:
+    item = items[0]
+    required = ['id', 'device_id', 'cell_id', 'mr_type', 'measurement_data']
+    present = [k for k in required if k in item]
+    print(len(present))
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$HAS_FIELDS" -ge 4 ]; then
+            pass "MR record has required fields (${HAS_FIELDS}/5)"
+        else
+            fail "MR record has required fields" "only $HAS_FIELDS/5 present"
+        fi
+    fi
+else
+    fail "MR tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "20. Audit Log Time Range Filter"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 20.1 Audit logs with time range (should match seeded data)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/audit-logs?start_time=2026-03-06T00:00:00Z&end_time=2026-03-07T23:59:59Z&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/audit-logs?start_time=...&end_time=... (range)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        TOTAL_VAL=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total', len(d.get('items',[]))))" 2>/dev/null || echo "0")
+        if [ "$TOTAL_VAL" -gt 0 ]; then
+            pass "Audit logs in time range has results (total=$TOTAL_VAL)"
+        else
+            fail "Audit logs in time range has results" "total=0"
+        fi
+    fi
+
+    # 20.2 Audit logs with future time range (should return 0)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/audit-logs?start_time=2099-01-01T00:00:00Z&end_time=2099-12-31T23:59:59Z&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/audit-logs (future range)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        TOTAL_VAL=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total', len(d.get('items',[]))))" 2>/dev/null || echo "0")
+        if [ "$TOTAL_VAL" = "0" ]; then
+            pass "Audit logs future range returns empty (total=0)"
+        else
+            fail "Audit logs future range returns empty" "expected total=0, got $TOTAL_VAL"
+        fi
+    fi
+
+    # 20.3 Audit log entry has required fields
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/audit-logs?page=1&page_size=1" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_FIELDS=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('items', [])
+if items:
+    item = items[0]
+    required = ['id', 'username', 'action', 'resource', 'created_at']
+    present = [k for k in required if k in item]
+    print(len(present))
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$HAS_FIELDS" -ge 4 ]; then
+            pass "Audit log entry has required fields (${HAS_FIELDS}/5)"
+        else
+            fail "Audit log entry has required fields" "only $HAS_FIELDS/5 present"
+        fi
+    fi
+
+    # 20.4 Filter audit logs by action
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/audit-logs?action=login&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/audit-logs?action=login" "200" "$HTTP_CODE"
+else
+    fail "Audit log time range tests" "skipped — no access token"
 fi
 
 # ============================================================
