@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -92,15 +93,16 @@ func main() {
 	duration := flag.Duration("duration", 2*time.Minute, "Test duration")
 	concurrency := flag.Int("concurrency", 100, "Max concurrent requests")
 	interval := flag.Duration("interval", 1*time.Second, "Inform interval per device")
+	jsonOutput := flag.Bool("json", false, "Output results as JSON")
 	flag.Parse()
 
-	fmt.Printf("Load Test Configuration:\n")
-	fmt.Printf("  URL:         %s\n", *url)
-	fmt.Printf("  Devices:     %d\n", *devices)
-	fmt.Printf("  Duration:    %s\n", *duration)
-	fmt.Printf("  Concurrency: %d\n", *concurrency)
-	fmt.Printf("  Interval:    %s\n", *interval)
-	fmt.Println()
+	fmt.Fprintf(os.Stderr, "Load Test Configuration:\n")
+	fmt.Fprintf(os.Stderr, "  URL:         %s\n", *url)
+	fmt.Fprintf(os.Stderr, "  Devices:     %d\n", *devices)
+	fmt.Fprintf(os.Stderr, "  Duration:    %s\n", *duration)
+	fmt.Fprintf(os.Stderr, "  Concurrency: %d\n", *concurrency)
+	fmt.Fprintf(os.Stderr, "  Interval:    %s\n", *interval)
+	fmt.Fprintln(os.Stderr)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -116,7 +118,7 @@ func main() {
 	done := make(chan struct{})
 	deadline := time.After(*duration)
 
-	fmt.Printf("Starting load test at %s...\n\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(os.Stderr, "Starting load test at %s...\n\n", time.Now().Format(time.RFC3339))
 	startTime := time.Now()
 
 	go func() {
@@ -154,11 +156,15 @@ func main() {
 	}
 
 finish:
-	fmt.Println("Waiting for in-flight requests to complete...")
+	fmt.Fprintln(os.Stderr, "Waiting for in-flight requests to complete...")
 	wg.Wait()
 
 	totalDuration := time.Since(startTime)
-	printReport(s, totalDuration)
+	if *jsonOutput {
+		printJSONReport(s, totalDuration, *concurrency, *devices)
+	} else {
+		printReport(s, totalDuration)
+	}
 }
 
 func generateDeviceSNs(count int) []string {
@@ -265,4 +271,57 @@ func percentileIdx(sorted []time.Duration, p int) int {
 		idx = len(sorted) - 1
 	}
 	return idx
+}
+
+type jsonReport struct {
+	Concurrency int     `json:"concurrency"`
+	Devices     int     `json:"devices"`
+	DurationMs  int64   `json:"duration_ms"`
+	Total       int64   `json:"total"`
+	Success     int64   `json:"success"`
+	Failed      int64   `json:"failed"`
+	Errors      int64   `json:"errors"`
+	SuccessRate float64 `json:"success_rate"`
+	Throughput  float64 `json:"throughput"`
+	P50Ms       float64 `json:"p50_ms"`
+	P90Ms       float64 `json:"p90_ms"`
+	P95Ms       float64 `json:"p95_ms"`
+	P99Ms       float64 `json:"p99_ms"`
+	MaxMs       float64 `json:"max_ms"`
+}
+
+func printJSONReport(s *stats, totalDuration time.Duration, concurrency, devices int) {
+	success := s.successCount.Load()
+	fail := s.failCount.Load()
+	errors := s.errorCount.Load()
+	total := success + fail + errors
+
+	r := jsonReport{
+		Concurrency: concurrency,
+		Devices:     devices,
+		DurationMs:  totalDuration.Milliseconds(),
+		Total:       total,
+		Success:     success,
+		Failed:      fail,
+		Errors:      errors,
+		SuccessRate: pct(success, total),
+		Throughput:  float64(total) / totalDuration.Seconds(),
+	}
+
+	s.mu.Lock()
+	latencies := make([]time.Duration, len(s.latencies))
+	copy(latencies, s.latencies)
+	s.mu.Unlock()
+
+	if len(latencies) > 0 {
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		r.P50Ms = float64(latencies[percentileIdx(latencies, 50)].Microseconds()) / 1000.0
+		r.P90Ms = float64(latencies[percentileIdx(latencies, 90)].Microseconds()) / 1000.0
+		r.P95Ms = float64(latencies[percentileIdx(latencies, 95)].Microseconds()) / 1000.0
+		r.P99Ms = float64(latencies[percentileIdx(latencies, 99)].Microseconds()) / 1000.0
+		r.MaxMs = float64(latencies[len(latencies)-1].Microseconds()) / 1000.0
+	}
+
+	data, _ := json.Marshal(r)
+	fmt.Println(string(data))
 }
