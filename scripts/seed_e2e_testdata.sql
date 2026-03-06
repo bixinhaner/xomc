@@ -1,4 +1,4 @@
--- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2 + Sprint 3)
+-- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2 + Sprint 3 + Sprint 4)
 -- 使用固定 UUID，方便验证脚本引用
 -- 运行前需已执行全部 migrations (make migrate-up)
 -- 使用方法: psql "$DSN" -f scripts/seed_e2e_testdata.sql
@@ -8,6 +8,12 @@ BEGIN;
 -- ============================================================
 -- 0. 清理旧的 E2E 测试数据 (幂等，按 FK 依赖逆序)
 -- ============================================================
+
+-- Sprint 4 data
+DELETE FROM ne_message_logs WHERE device_id::text LIKE 'd0000000%' OR device_sn LIKE 'CMCC-ENB-%';
+DELETE FROM system_logs WHERE source IN ('alarm-engine', 'pm-collector', 'config-sync');
+DELETE FROM kpi_thresholds WHERE id::text LIKE 'b0000000%';
+DELETE FROM alarm_rules WHERE id::text LIKE 'a0000000%';
 
 -- Sprint 3 data
 DELETE FROM mr_records WHERE device_id::text LIKE 'e2e00001%';
@@ -383,6 +389,50 @@ INSERT INTO audit_logs (id, user_id, username, action, resource, resource_id, de
 ('e2e00009-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000001', 'admin', 'update', 'devices', 'e2e00001-0000-0000-0000-000000000001',
  '{"field":"firmware"}'::jsonb, '10.0.0.1'::inet, NOW() - INTERVAL '1 hour');
 
+-- ============================================================
+-- 13. Alarm Rules (Sprint 4 — 3 条)
+-- ============================================================
+
+-- Sprint 4: Alarm Rules
+INSERT INTO alarm_rules (id, name, description, alarm_code, severity, condition_type, condition_config, action_type, action_config, carrier, technology, enabled, created_at, updated_at)
+VALUES
+  ('a0000000-0000-0000-0000-000000000001', 'High CPU Alert', 'CPU usage exceeds threshold', 'CPU_HIGH', 1, 'threshold', '{"metric":"cpu_usage","operator":"gt","value":90}', 'notification', '{"channel":"email","recipients":["admin@omc.com"]}', 'cmcc', 'LTE', true, NOW(), NOW()),
+  ('a0000000-0000-0000-0000-000000000002', 'Link Down Alert', 'Network link goes down', 'LINK_DOWN', 2, 'event', '{"event_type":"link_status","value":"down"}', 'notification', '{"channel":"sms","recipients":["+8613800138000"]}', 'cmcc', 'NR', true, NOW(), NOW()),
+  ('a0000000-0000-0000-0000-000000000003', 'Low Signal Quality', 'Signal quality below minimum', 'SIGNAL_LOW', 3, 'threshold', '{"metric":"sinr","operator":"lt","value":-5}', 'auto_heal', '{"action":"reboot"}', 'ctcc', 'LTE', false, NOW(), NOW());
+
+-- ============================================================
+-- 14. KPI Thresholds (Sprint 4 — 3 条)
+-- ============================================================
+
+-- Sprint 4: KPI Thresholds
+INSERT INTO kpi_thresholds (id, kpi_name, carrier, technology, warning_threshold, minor_threshold, major_threshold, critical_threshold, comparison, enabled, description, created_at, updated_at)
+VALUES
+  ('b0000000-0000-0000-0000-000000000001', 'rrc_succ_rate', 'cmcc', 'LTE', 95.0, 90.0, 85.0, 80.0, 'lt', true, 'RRC success rate thresholds', NOW(), NOW()),
+  ('b0000000-0000-0000-0000-000000000002', 'erab_succ_rate', 'cmcc', 'LTE', 98.0, 95.0, 90.0, 85.0, 'lt', true, 'E-RAB success rate thresholds', NOW(), NOW()),
+  ('b0000000-0000-0000-0000-000000000003', 'handover_succ_rate', 'ctcc', 'NR', 97.0, 94.0, 90.0, 85.0, 'lt', false, 'Handover success rate thresholds', NOW(), NOW());
+
+-- ============================================================
+-- 15. System Logs (Sprint 4 — 3 条)
+-- ============================================================
+
+-- Sprint 4: System Logs
+INSERT INTO system_logs (id, level, source, message, details, created_at)
+VALUES
+  (gen_random_uuid(), 'ERROR', 'alarm-engine', 'Failed to process alarm batch', '{"batch_size":50,"error":"timeout"}', NOW() - INTERVAL '2 hours'),
+  (gen_random_uuid(), 'WARN', 'pm-collector', 'Counter collection delayed', '{"device_count":10,"delay_ms":5000}', NOW() - INTERVAL '1 hour'),
+  (gen_random_uuid(), 'INFO', 'config-sync', 'Configuration push completed', '{"device_id":"d0000000-0000-0000-0000-000000000001","params":5}', NOW() - INTERVAL '30 minutes');
+
+-- ============================================================
+-- 16. NE Message Logs (Sprint 4 — 3 条)
+-- ============================================================
+
+-- Sprint 4: NE Message Logs
+INSERT INTO ne_message_logs (id, device_id, device_sn, device_name, message_type, direction, content, created_at)
+VALUES
+  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'eNB-BJ-001', 'Inform', 'inbound', '{"event":"2 PERIODIC"}', NOW() - INTERVAL '1 hour'),
+  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'eNB-BJ-001', 'GetParameterValuesResponse', 'inbound', '{"params":["Device.DeviceInfo.SoftwareVersion"]}', NOW() - INTERVAL '45 minutes'),
+  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000002', 'CMCC-ENB-002', 'eNB-SH-001', 'SetParameterValues', 'outbound', '{"params":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300"}]}', NOW() - INTERVAL '30 minutes');
+
 COMMIT;
 
 -- Verify counts
@@ -408,4 +458,12 @@ SELECT 'mr_files', COUNT(*) FROM mr_files WHERE id::text LIKE 'e2e00008%'
 UNION ALL
 SELECT 'mr_records', COUNT(*) FROM mr_records WHERE device_id::text LIKE 'e2e00001%'
 UNION ALL
-SELECT 'audit_logs', COUNT(*) FROM audit_logs WHERE id::text LIKE 'e2e00009%';
+SELECT 'audit_logs', COUNT(*) FROM audit_logs WHERE id::text LIKE 'e2e00009%'
+UNION ALL
+SELECT 'alarm_rules', COUNT(*) FROM alarm_rules WHERE id::text LIKE 'a0000000%'
+UNION ALL
+SELECT 'kpi_thresholds', COUNT(*) FROM kpi_thresholds WHERE id::text LIKE 'b0000000%'
+UNION ALL
+SELECT 'system_logs', COUNT(*) FROM system_logs WHERE source IN ('alarm-engine', 'pm-collector', 'config-sync')
+UNION ALL
+SELECT 'ne_message_logs', COUNT(*) FROM ne_message_logs WHERE device_sn LIKE 'CMCC-ENB-%';

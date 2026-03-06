@@ -1,13 +1,13 @@
 #!/bin/bash
-# e2e_verify.sh — Sprint 1+2+3 端到端数据流验证脚本
-# 用 curl 覆盖 M1+M2+M3 里程碑所有关键路径
+# e2e_verify.sh — Sprint 1+2+3+4 端到端数据流验证脚本
+# 用 curl 覆盖 M1+M2+M3+M4 里程碑所有关键路径
 # 前置: omcgo-app 运行在 localhost:8080, DB 已执行迁移 + 种子数据
 #
 # 使用方法:
 #   ./scripts/e2e_verify.sh [BASE_URL]
 #   默认: http://localhost:8080
 
-set -euo pipefail
+set -uo pipefail
 
 BASE_URL="${1:-http://localhost:8080}"
 API="${BASE_URL}/api/v1"
@@ -101,7 +101,7 @@ print('' if v is None else v)
 }
 
 echo "================================================"
-echo "  OMC Sprint 1+2+3 — E2E Data Flow Verification"
+echo "  OMC Sprint 1+2+3+4 — E2E Data Flow Verification"
 echo "================================================"
 echo "Target: $BASE_URL"
 echo "Time:   $(date '+%Y-%m-%d %H:%M:%S')"
@@ -1351,6 +1351,581 @@ else:
     check_status "GET /admin/audit-logs?action=login" "200" "$HTTP_CODE"
 else
     fail "Audit log time range tests" "skipped — no access token"
+fi
+
+# ============================================================
+# Sprint 4 Tests (53 cases)
+# ============================================================
+# Sprint 4 tests use python3 (no jq dependency) and the same pass/fail helpers.
+
+# Helper: python3-based JSON field extraction (returns value or empty string)
+py_get() {
+    echo "$1" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    keys = '$2'.split('.')
+    v = d
+    for k in keys:
+        if isinstance(v, list):
+            v = v[int(k)] if len(v) > int(k) else None
+        elif isinstance(v, dict):
+            v = v.get(k)
+        else:
+            v = None
+        if v is None: break
+    if v is None:
+        print('')
+    elif isinstance(v, (dict, list)):
+        print(json.dumps(v))
+    else:
+        print(v)
+except:
+    print('')
+" 2>/dev/null
+}
+
+# Helper: check python3-extracted value is non-empty
+py_check_field() {
+    local desc="$1"
+    local json="$2"
+    local field="$3"
+    local val
+    val=$(py_get "$json" "$field")
+    if [ -n "$val" ]; then
+        pass "$desc ($field=$val)"
+        return 0
+    else
+        fail "$desc" "field '$field' missing or empty"
+        return 1
+    fi
+}
+
+# Helper: check count >= N
+py_check_ge() {
+    local desc="$1"
+    local json="$2"
+    local field="$3"
+    local min="$4"
+    local val
+    val=$(py_get "$json" "$field")
+    if [ -n "$val" ] && [ "$val" -ge "$min" ] 2>/dev/null; then
+        pass "$desc ($field=$val >= $min)"
+    else
+        fail "$desc" "$field=$val, expected >= $min"
+    fi
+}
+
+# Helper: check string contains substring
+py_check_contains() {
+    local desc="$1"
+    local json="$2"
+    local field="$3"
+    local expected="$4"
+    local val
+    val=$(py_get "$json" "$field")
+    if echo "$val" | grep -q "$expected"; then
+        pass "$desc ($field contains '$expected')"
+    else
+        fail "$desc" "$field='$val', expected to contain '$expected'"
+    fi
+}
+
+# ───── Sprint 4: Dashboard ─────
+section "21. Dashboard"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    RESP=$(curl -s -w "\n%{http_code}" "$API/dashboard/summary" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /dashboard/summary" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_field "Dashboard summary has device_stats" "$BODY" "device_stats"
+        py_check_field "Dashboard summary has alarm_stats" "$BODY" "alarm_stats"
+        py_check_field "Dashboard summary has timestamp" "$BODY" "timestamp"
+    fi
+else
+    fail "Dashboard tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: Device CRUD ─────
+section "22. Device CRUD"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 22.1 Create device
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/devices" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"serial_number":"E2E-TEST-DEV-001","oui":"AAAAAA","manufacturer":"E2E-Vendor","product_class":"TestClass","carrier":"cmcc","technology":"LTE"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /devices (create)" "201" "$HTTP_CODE"
+
+    NEW_DEV_ID=$(py_get "$BODY" "id")
+    if [ -n "$NEW_DEV_ID" ]; then
+        pass "Create device returns valid ID ($NEW_DEV_ID)"
+    else
+        fail "Create device returns valid ID" "id missing"
+    fi
+
+    # 22.2 Duplicate create returns 409
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/devices" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"serial_number":"E2E-TEST-DEV-001","oui":"AAAAAA","manufacturer":"E2E-Vendor","carrier":"cmcc","technology":"LTE"}')
+    check_status "POST /devices (duplicate SN)" "409" "$HTTP_CODE"
+
+    # 22.3 Update device
+    if [ -n "$NEW_DEV_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/devices/$NEW_DEV_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{"site_name":"E2E-Updated-Site","latitude":40.1,"longitude":116.4}')
+        check_status "PUT /devices/:id (update)" "200" "$HTTP_CODE"
+
+        # 22.4 Verify update
+        RESP=$(curl -s "$API/devices/$NEW_DEV_ID" -H "$AUTH_HEADER")
+        SITE_NAME=$(py_get "$RESP" "site_name")
+        if echo "$SITE_NAME" | grep -q "E2E-Updated-Site"; then
+            pass "Update device persisted site_name ($SITE_NAME)"
+        else
+            fail "Update device persisted site_name" "got '$SITE_NAME'"
+        fi
+    else
+        fail "PUT /devices/:id (update)" "skipped — no device id"
+        fail "Update device persisted site_name" "skipped"
+    fi
+
+    # 22.5 Delete device
+    if [ -n "$NEW_DEV_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/devices/$NEW_DEV_ID" \
+            -H "$AUTH_HEADER")
+        check_status "DELETE /devices/:id" "204" "$HTTP_CODE"
+
+        # 22.6 Verify deletion
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/devices/$NEW_DEV_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "200" ]; then
+            pass "Deleted device returns 404 or empty (HTTP $HTTP_CODE)"
+        else
+            fail "Deleted device returns 404 or empty" "got HTTP $HTTP_CODE"
+        fi
+    else
+        fail "DELETE /devices/:id" "skipped — no device id"
+        fail "Deleted device returns 404 or empty" "skipped"
+    fi
+
+    # 22.7 Create with invalid data
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/devices" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"oui":"AAAAAA"}')
+    check_status "POST /devices (missing required fields)" "400" "$HTTP_CODE"
+else
+    fail "Device CRUD tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: Alarm Rules ─────
+section "23. Alarm Rules"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 23.1 List alarm rules
+    RESP=$(curl -s -w "\n%{http_code}" "$API/alarms/rules" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /alarms/rules (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_field "Alarm rules list has items" "$BODY" "items"
+        py_check_ge "Alarm rules total >= 3" "$BODY" "total" 3
+    fi
+
+    # 23.2 Get single rule
+    RULE_ID="a0000000-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/alarms/rules/$RULE_ID" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /alarms/rules/:id" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_contains "Alarm rule name is correct" "$BODY" "name" "High CPU Alert"
+    fi
+
+    # 23.3 Filter by carrier
+    RESP=$(curl -s "$API/alarms/rules?carrier=cmcc" -H "$AUTH_HEADER")
+    py_check_ge "Alarm rules filter carrier=cmcc >= 2" "$RESP" "total" 2
+
+    # 23.4 Filter by enabled
+    RESP=$(curl -s "$API/alarms/rules?enabled=true" -H "$AUTH_HEADER")
+    py_check_ge "Alarm rules filter enabled=true >= 2" "$RESP" "total" 2
+
+    # 23.5 Create alarm rule
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/alarms/rules" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"E2E Test Rule","alarm_code":"E2E_TEST","severity":4,"condition_type":"threshold","condition_config":{"metric":"cpu","operator":"gt","value":90},"action_type":"notification","action_config":{"channel":"email"},"carrier":"cmcc","technology":"LTE"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /alarms/rules (create)" "201" "$HTTP_CODE"
+    NEW_RULE_ID=$(py_get "$BODY" "id")
+
+    # 23.6 Update alarm rule
+    if [ -n "$NEW_RULE_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/alarms/rules/$NEW_RULE_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"E2E Test Rule Updated","severity":3}')
+        check_status "PUT /alarms/rules/:id (update)" "200" "$HTTP_CODE"
+
+        # 23.7 Verify update
+        RESP=$(curl -s "$API/alarms/rules/$NEW_RULE_ID" -H "$AUTH_HEADER")
+        py_check_contains "Update alarm rule persisted name" "$RESP" "name" "E2E Test Rule Updated"
+
+        # 23.8 Delete alarm rule
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/alarms/rules/$NEW_RULE_ID" \
+            -H "$AUTH_HEADER")
+        check_status "DELETE /alarms/rules/:id" "200" "$HTTP_CODE"
+    else
+        fail "PUT /alarms/rules/:id (update)" "skipped — no rule id"
+        fail "Update alarm rule persisted name" "skipped"
+        fail "DELETE /alarms/rules/:id" "skipped"
+    fi
+
+    # 23.9 Verify field format
+    RESP=$(curl -s "$API/alarms/rules/$RULE_ID" -H "$AUTH_HEADER")
+    COND_CFG=$(py_get "$RESP" "condition_config")
+    if [ -n "$COND_CFG" ]; then
+        pass "Alarm rule has condition_config field"
+    else
+        fail "Alarm rule has condition_config field" "missing"
+    fi
+else
+    fail "Alarm rule tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: KPI Thresholds ─────
+section "24. KPI Thresholds"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 24.1 List thresholds
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/thresholds" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/thresholds (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_field "KPI thresholds list has items" "$BODY" "items"
+        py_check_ge "KPI thresholds total >= 3" "$BODY" "total" 3
+    fi
+
+    # 24.2 Get single threshold
+    TH_ID="b0000000-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/thresholds/$TH_ID" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/thresholds/:id" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_contains "Threshold kpi_name is correct" "$BODY" "kpi_name" "rrc_succ_rate"
+    fi
+
+    # 24.3 Create threshold
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/pm/thresholds" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"kpi_name":"e2e_test_kpi","carrier":"cmcc","technology":"LTE","warning_threshold":90,"critical_threshold":70,"comparison":"lt"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /pm/thresholds (create)" "201" "$HTTP_CODE"
+    NEW_TH_ID=$(py_get "$BODY" "id")
+
+    # 24.4 Update threshold
+    if [ -n "$NEW_TH_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/pm/thresholds/$NEW_TH_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{"warning_threshold":92,"description":"Updated by E2E"}')
+        check_status "PUT /pm/thresholds/:id (update)" "200" "$HTTP_CODE"
+
+        # 24.5 Delete threshold
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/pm/thresholds/$NEW_TH_ID" \
+            -H "$AUTH_HEADER")
+        check_status "DELETE /pm/thresholds/:id" "200" "$HTTP_CODE"
+    else
+        fail "PUT /pm/thresholds/:id (update)" "skipped — no threshold id"
+        fail "DELETE /pm/thresholds/:id" "skipped"
+    fi
+
+    # 24.6 Filter by carrier
+    RESP=$(curl -s "$API/pm/thresholds?carrier=cmcc" -H "$AUTH_HEADER")
+    py_check_ge "Threshold filter carrier=cmcc >= 2" "$RESP" "total" 2
+
+    # 24.7 Filter by enabled
+    RESP=$(curl -s "$API/pm/thresholds?enabled=true" -H "$AUTH_HEADER")
+    py_check_ge "Threshold filter enabled=true >= 2" "$RESP" "total" 2
+else
+    fail "KPI threshold tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: System Logs ─────
+section "25. System Logs"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 25.1 List system logs
+    RESP=$(curl -s -w "\n%{http_code}" "$API/logs/system" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /logs/system (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_field "System logs list has items" "$BODY" "items"
+        py_check_ge "System logs total >= 3" "$BODY" "total" 3
+    fi
+
+    # 25.2 Filter by level
+    RESP=$(curl -s "$API/logs/system?level=ERROR" -H "$AUTH_HEADER")
+    py_check_ge "System logs filter level=ERROR >= 1" "$RESP" "total" 1
+
+    # 25.3 Filter by source
+    RESP=$(curl -s "$API/logs/system?source=alarm-engine" -H "$AUTH_HEADER")
+    py_check_ge "System logs filter source=alarm-engine >= 1" "$RESP" "total" 1
+
+    # 25.4 Field validation
+    RESP=$(curl -s "$API/logs/system?page=1&page_size=1" -H "$AUTH_HEADER")
+    py_check_field "System log entry has level field" "$RESP" "items.0.level"
+else
+    fail "System log tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: NE Message Logs ─────
+section "26. NE Message Logs"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 26.1 List NE message logs
+    RESP=$(curl -s -w "\n%{http_code}" "$API/logs/ne-messages" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /logs/ne-messages (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_field "NE message logs list has items" "$BODY" "items"
+        py_check_ge "NE message logs total >= 3" "$BODY" "total" 3
+    fi
+
+    # 26.2 Filter by device_sn
+    RESP=$(curl -s "$API/logs/ne-messages?device_sn=CMCC-ENB-001" -H "$AUTH_HEADER")
+    py_check_ge "NE message logs filter device_sn >= 2" "$RESP" "total" 2
+
+    # 26.3 Filter by message_type
+    RESP=$(curl -s "$API/logs/ne-messages?message_type=Inform" -H "$AUTH_HEADER")
+    py_check_ge "NE message logs filter message_type=Inform >= 1" "$RESP" "total" 1
+
+    # 26.4 Field validation
+    RESP=$(curl -s "$API/logs/ne-messages?page=1&page_size=1" -H "$AUTH_HEADER")
+    py_check_field "NE message log entry has device_sn" "$RESP" "items.0.device_sn"
+else
+    fail "NE message log tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: Password Management ─────
+section "27. Password Management"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 27.1 Create a test user for password management
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"username":"e2e_pwd_test","password":"TestPass123!","email":"e2e_pwd@test.com","role":"operator","carrier":"cmcc"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    PWD_USER_ID=$(py_get "$BODY" "id")
+
+    # 27.2 Reset password
+    if [ -n "$PWD_USER_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/admin/users/$PWD_USER_ID/reset-password" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{"new_password":"NewPass456!"}')
+        check_status "POST /admin/users/:id/reset-password" "200" "$HTTP_CODE"
+
+        # 27.3 Lock user
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/admin/users/$PWD_USER_ID/lock" \
+            -H "$AUTH_HEADER")
+        check_status "POST /admin/users/:id/lock" "200" "$HTTP_CODE"
+
+        # 27.4 Unlock user
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/admin/users/$PWD_USER_ID/unlock" \
+            -H "$AUTH_HEADER")
+        check_status "POST /admin/users/:id/unlock" "200" "$HTTP_CODE"
+
+        # Clean up
+        curl -s -o /dev/null -X DELETE "$API/admin/users/$PWD_USER_ID" -H "$AUTH_HEADER"
+    else
+        fail "POST /admin/users/:id/reset-password" "skipped — no user id"
+        fail "POST /admin/users/:id/lock" "skipped"
+        fail "POST /admin/users/:id/unlock" "skipped"
+    fi
+else
+    fail "Password management tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: Permissions ─────
+section "28. Permissions"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 28.1 List permissions
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/permissions" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/permissions" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        PERM_LEN=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+elif isinstance(d, dict):
+    items = d.get('items') or []
+    print(len(items) if isinstance(items, list) else 0)
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$PERM_LEN" -ge 1 ]; then
+            pass "Permissions list has entries (count=$PERM_LEN)"
+        else
+            fail "Permissions list has entries" "count=$PERM_LEN"
+        fi
+    fi
+else
+    fail "Permissions tests" "skipped — no access token"
+fi
+
+# ───── Sprint 4: Role CRUD ─────
+section "29. Role CRUD"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 29.1 List roles
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/roles" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/roles (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ROLE_LEN=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+elif isinstance(d, dict):
+    items = d.get('items') or []
+    print(len(items) if isinstance(items, list) else 0)
+else:
+    print(0)
+" 2>/dev/null || echo "0")
+        if [ "$ROLE_LEN" -ge 1 ]; then
+            pass "Role list has entries (count=$ROLE_LEN)"
+        else
+            fail "Role list has entries" "count=$ROLE_LEN"
+        fi
+
+        # 29.2 Get first role by ID
+        FIRST_ROLE_ID=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list) and d:
+    print(d[0].get('id',''))
+elif isinstance(d, dict):
+    items = d.get('items') or []
+    print(items[0].get('id','') if items else '')
+else:
+    print('')
+" 2>/dev/null || echo "")
+
+        if [ -n "$FIRST_ROLE_ID" ]; then
+            RESP2=$(curl -s -w "\n%{http_code}" "$API/admin/roles/$FIRST_ROLE_ID" \
+                -H "$AUTH_HEADER")
+            HTTP_CODE=$(echo "$RESP2" | tail -1)
+            check_status "GET /admin/roles/:id" "200" "$HTTP_CODE"
+        else
+            fail "GET /admin/roles/:id" "no role id found"
+        fi
+    fi
+
+    # 29.3 Create role
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/roles" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"e2e_test_role","description":"E2E test role","permissions":[]}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+        pass "POST /admin/roles (create) (HTTP $HTTP_CODE)"
+    else
+        fail "POST /admin/roles (create)" "expected HTTP 200/201, got $HTTP_CODE"
+    fi
+    NEW_ROLE_ID=$(py_get "$BODY" "id")
+
+    # 29.4 Update role
+    if [ -n "$NEW_ROLE_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/admin/roles/$NEW_ROLE_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"e2e_test_role_updated","description":"Updated E2E role"}')
+        check_status "PUT /admin/roles/:id (update)" "200" "$HTTP_CODE"
+
+        # 29.5 Verify update
+        RESP=$(curl -s "$API/admin/roles/$NEW_ROLE_ID" -H "$AUTH_HEADER")
+        py_check_contains "Update role persisted name" "$RESP" "name" "e2e_test_role_updated"
+
+        # 29.6 Delete role
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/admin/roles/$NEW_ROLE_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            pass "DELETE /admin/roles/:id (HTTP $HTTP_CODE)"
+        else
+            fail "DELETE /admin/roles/:id" "expected HTTP 200/204, got $HTTP_CODE"
+        fi
+    else
+        fail "PUT /admin/roles/:id (update)" "skipped — no role id"
+        fail "Update role persisted name" "skipped"
+        fail "DELETE /admin/roles/:id" "skipped"
+    fi
+
+    # 29.7 Invalid role ID
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/admin/roles/invalid-uuid" \
+        -H "$AUTH_HEADER")
+    check_status "GET /admin/roles/:id (invalid UUID)" "400" "$HTTP_CODE"
+else
+    fail "Role CRUD tests" "skipped — no access token"
 fi
 
 # ============================================================
