@@ -1,10 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { dashboardService } from '@/mock/services/dashboardService';
+import { dashboardApi } from '@/services/api/dashboardApi';
+import { useMock } from '@/services/apiSwitch';
+
+const api = useMock ? dashboardService : dashboardApi;
 
 export function useDashboardData() {
   return useQuery({
     queryKey: ['dashboard', 'all'],
-    queryFn: () => dashboardService.getDashboardData(),
+    queryFn: () => api.getDashboardData(),
     refetchInterval: 30000,
   });
 }
@@ -12,7 +16,7 @@ export function useDashboardData() {
 export function useDashboardSummary() {
   return useQuery({
     queryKey: ['dashboard', 'summary'],
-    queryFn: () => dashboardService.getSummary(),
+    queryFn: () => api.getSummary(),
     refetchInterval: 30000,
   });
 }
@@ -20,7 +24,7 @@ export function useDashboardSummary() {
 export function useDashboardChartData() {
   return useQuery({
     queryKey: ['dashboard', 'charts'],
-    queryFn: () => dashboardService.getChartData(),
+    queryFn: () => api.getChartData(),
     refetchInterval: 60000,
   });
 }
@@ -28,7 +32,7 @@ export function useDashboardChartData() {
 export function useAlarmTrend(days = 7) {
   return useQuery({
     queryKey: ['dashboard', 'alarm-trend', days],
-    queryFn: () => dashboardService.getAlarmTrend(days),
+    queryFn: () => api.getAlarmTrend(days),
     refetchInterval: 60000,
   });
 }
@@ -36,7 +40,7 @@ export function useAlarmTrend(days = 7) {
 export function useDeviceStatusPie() {
   return useQuery({
     queryKey: ['dashboard', 'device-status'],
-    queryFn: () => dashboardService.getDeviceStatusPie(),
+    queryFn: () => api.getDeviceStatusPie(),
     refetchInterval: 30000,
   });
 }
@@ -44,7 +48,7 @@ export function useDeviceStatusPie() {
 export function useTopAlarmDevices() {
   return useQuery({
     queryKey: ['dashboard', 'top-alarm-devices'],
-    queryFn: () => dashboardService.getTopAlarmDevices(),
+    queryFn: () => api.getTopAlarmDevices(),
     refetchInterval: 60000,
   });
 }
@@ -52,7 +56,7 @@ export function useTopAlarmDevices() {
 export function useKPITrend(kpiCode: string) {
   return useQuery({
     queryKey: ['dashboard', 'kpi-trend', kpiCode],
-    queryFn: () => dashboardService.getKPITrend(kpiCode),
+    queryFn: () => api.getKPITrend(kpiCode),
     enabled: Boolean(kpiCode),
     refetchInterval: 60000,
   });
@@ -61,7 +65,7 @@ export function useKPITrend(kpiCode: string) {
 export function useRegionStats() {
   return useQuery({
     queryKey: ['dashboard', 'region-stats'],
-    queryFn: () => dashboardService.getRegionStats(),
+    queryFn: () => api.getRegionStats(),
     refetchInterval: 60000,
   });
 }

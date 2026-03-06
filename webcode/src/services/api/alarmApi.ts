@@ -1,8 +1,7 @@
 import http from '../http';
-import type { Alarm, AlarmFilter, AlarmCount } from '@/types/alarm';
+import type { Alarm, AlarmRule, AlarmRuleCondition, AlarmRuleAction, AlarmFilter, AlarmCount } from '@/types/alarm';
 import type { AlarmSeverity } from '@/types/common';
 import type { PageRequest, PageResponse } from '@/types/pagination';
-import { alarmService } from '@/mock/services/alarmService';
 
 // Backend alarm model
 interface BackendAlarm {
@@ -86,6 +85,51 @@ function mapListResponse(resp: BackendListResponse<BackendAlarm>): PageResponse<
     total: resp.total,
     page: resp.page,
     pageSize: resp.page_size,
+  };
+}
+
+// Backend alarm rule model
+interface BackendAlarmRule {
+  id: string;
+  rule_name: string;
+  rule_type: string;
+  severity: number; // 1=Critical, 2=Major, 3=Minor, 4=Warning
+  enabled: boolean;
+  conditions: Array<{
+    field: string;
+    operator: string;
+    value: string | number | boolean;
+  }>;
+  actions: Array<{
+    type: string;
+    target?: string;
+    template?: string;
+    params?: Record<string, string>;
+  }>;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapBackendAlarmRule(br: BackendAlarmRule): AlarmRule {
+  return {
+    id: br.id,
+    ruleName: br.rule_name,
+    ruleType: br.rule_type,
+    severity: severityNumToStr[br.severity] || 'warning',
+    enabled: br.enabled,
+    conditions: (br.conditions || []).map((c) => ({
+      field: c.field,
+      operator: c.operator as AlarmRuleCondition['operator'],
+      value: c.value,
+    })),
+    actions: (br.actions || []).map((a) => ({
+      type: a.type as AlarmRuleAction['type'],
+      target: a.target,
+      template: a.template,
+      params: a.params,
+    })),
+    createTime: br.created_at,
+    updateTime: br.updated_at,
   };
 }
 
@@ -180,9 +224,92 @@ export const alarmApi = {
     };
   },
 
-  // Alarm rules — not yet implemented in backend (Sprint 4), delegate to mock
-  getRules: alarmService.getRules.bind(alarmService),
-  createRule: alarmService.createRule.bind(alarmService),
-  updateRule: alarmService.updateRule.bind(alarmService),
-  deleteRules: alarmService.deleteRules.bind(alarmService),
+  // Alarm rules CRUD
+  async getRules(params: PageRequest): Promise<PageResponse<AlarmRule>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+    const { data } = await http.get<BackendListResponse<BackendAlarmRule>>(
+      '/alarms/rules',
+      { params: query }
+    );
+    return {
+      items: (data.items || []).map(mapBackendAlarmRule),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async createRule(
+    data: Omit<AlarmRule, 'id' | 'createTime' | 'updateTime'>
+  ): Promise<AlarmRule> {
+    const payload = {
+      rule_name: data.ruleName,
+      rule_type: data.ruleType,
+      severity: Number(
+        Object.entries(severityNumToStr).find(
+          ([, v]) => v === data.severity
+        )?.[0] ?? 4
+      ),
+      enabled: data.enabled,
+      conditions: data.conditions.map((c) => ({
+        field: c.field,
+        operator: c.operator,
+        value: c.value,
+      })),
+      actions: data.actions.map((a) => ({
+        type: a.type,
+        target: a.target,
+        template: a.template,
+        params: a.params,
+      })),
+    };
+    const { data: created } = await http.post<BackendAlarmRule>(
+      '/alarms/rules',
+      payload
+    );
+    return mapBackendAlarmRule(created);
+  },
+
+  async updateRule(id: string, data: Partial<AlarmRule>): Promise<AlarmRule> {
+    const payload: Record<string, unknown> = {};
+    if (data.ruleName !== undefined) payload.rule_name = data.ruleName;
+    if (data.ruleType !== undefined) payload.rule_type = data.ruleType;
+    if (data.severity !== undefined) {
+      payload.severity = Number(
+        Object.entries(severityNumToStr).find(
+          ([, v]) => v === data.severity
+        )?.[0] ?? 4
+      );
+    }
+    if (data.enabled !== undefined) payload.enabled = data.enabled;
+    if (data.conditions !== undefined) {
+      payload.conditions = data.conditions.map((c) => ({
+        field: c.field,
+        operator: c.operator,
+        value: c.value,
+      }));
+    }
+    if (data.actions !== undefined) {
+      payload.actions = data.actions.map((a) => ({
+        type: a.type,
+        target: a.target,
+        template: a.template,
+        params: a.params,
+      }));
+    }
+    const { data: updated } = await http.put<BackendAlarmRule>(
+      `/alarms/rules/${id}`,
+      payload
+    );
+    return mapBackendAlarmRule(updated);
+  },
+
+  async deleteRules(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/alarms/rules/${id}`);
+    }
+  },
 };

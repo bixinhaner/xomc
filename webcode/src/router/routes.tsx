@@ -46,6 +46,10 @@ const CellManagement     = React.lazy(() => import('@/pages/config/CellManagemen
 const BaselineMgmt       = React.lazy(() => import('@/pages/config/BaselineManagement'));
 const CommonConfig       = React.lazy(() => import('@/pages/config/CommonConfig'));
 const NeighborParams     = React.lazy(() => import('@/pages/config/NeighborParams'));
+const DataModelMgmt      = React.lazy(() => import('@/pages/config/DataModelManagement'));
+const NorthboundMgmt     = React.lazy(() => import('@/pages/config/NorthboundManagement'));
+const AutoProvisioning   = React.lazy(() => import('@/pages/config/AutoProvisioning'));
+const InteropTesting     = React.lazy(() => import('@/pages/config/InteropTesting'));
 
 // Performance Management
 const KPIStandard        = React.lazy(() => import('@/pages/performance/KPIStandardReport'));
@@ -204,6 +208,10 @@ export const routes: RouteObject[] = [
       { path: 'config/baseline',         element: withSuspense(BaselineMgmt) },
       { path: 'config/common',           element: withSuspense(CommonConfig) },
       { path: 'config/neighbor',         element: withSuspense(NeighborParams) },
+      { path: 'config/data-model',       element: withSuspense(DataModelMgmt) },
+      { path: 'config/northbound',       element: withSuspense(NorthboundMgmt) },
+      { path: 'config/auto-provision',   element: withSuspense(AutoProvisioning) },
+      { path: 'config/interop-test',     element: withSuspense(InteropTesting) },
 
       // Performance Management
       { path: 'performance/kpi-standard',  element: withSuspense(KPIStandard) },

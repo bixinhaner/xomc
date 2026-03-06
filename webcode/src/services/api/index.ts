@@ -7,7 +7,7 @@
  * Sprint 1: authApi, deviceApi, alarmApi ✅
  * Sprint 2: templateApi, softwareApi, adminApi, topologyApi ✅
  * Sprint 3: pmApi, mrApi ✅
- * Sprint 4: dashboardApi, datamodelApi, northboundApi, provisionApi, interopApi
+ * Sprint 4: dashboardApi, logApi, datamodelApi, northboundApi, provisionApi, interopApi ✅
  */
 
 export { http } from '../http';
@@ -20,3 +20,9 @@ export { adminApi } from './adminApi';
 export { topologyApi } from './topologyApi';
 export { pmApi } from './pmApi';
 export { mrApi } from './mrApi';
+export { dashboardApi } from './dashboardApi';
+export { logApi } from './logApi';
+export { datamodelApi } from './datamodelApi';
+export { northboundApi } from './northboundApi';
+export { provisionApi } from './provisionApi';
+export { interopApi } from './interopApi';

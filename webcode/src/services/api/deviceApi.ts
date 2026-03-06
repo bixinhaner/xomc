@@ -128,16 +128,50 @@ export const deviceApi = {
     return result.items.length > 0 ? result.items[0] : null;
   },
 
-  async create(_data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {
-    throw new Error('Device create not yet implemented (Sprint 4)');
+  async create(data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {
+    const payload: Record<string, unknown> = {
+      serial_number: data.sn,
+      oui: '',
+      product_class: data.productType,
+      manufacturer: data.vendor,
+      model_name: data.deviceModel,
+      carrier: '',
+      technology: data.networkType,
+      status: data.connStatus === 'online' ? 'active' : 'offline',
+      firmware_version: data.softwareVersion,
+      ip_address: data.ipAddress,
+      site_name: data.site || data.name,
+      site_id: data.stationId,
+      latitude: data.latitude,
+      longitude: data.longitude,
+    };
+    const { data: created } = await http.post<BackendDevice>('/devices', payload);
+    return mapBackendDevice(created);
   },
 
-  async update(_id: string, _data: Partial<Device>): Promise<Device> {
-    throw new Error('Device update not yet implemented (Sprint 4)');
+  async update(id: string, data: Partial<Device>): Promise<Device> {
+    const payload: Record<string, unknown> = {};
+    if (data.sn !== undefined) payload.serial_number = data.sn;
+    if (data.vendor !== undefined) payload.manufacturer = data.vendor;
+    if (data.productType !== undefined) payload.product_class = data.productType;
+    if (data.networkType !== undefined) payload.technology = data.networkType;
+    if (data.deviceModel !== undefined) payload.model_name = data.deviceModel;
+    if (data.connStatus !== undefined) payload.status = data.connStatus === 'online' ? 'active' : 'offline';
+    if (data.softwareVersion !== undefined) payload.firmware_version = data.softwareVersion;
+    if (data.ipAddress !== undefined) payload.ip_address = data.ipAddress;
+    if (data.site !== undefined) payload.site_name = data.site;
+    if (data.name !== undefined) payload.site_name = data.name;
+    if (data.stationId !== undefined) payload.site_id = data.stationId;
+    if (data.latitude !== undefined) payload.latitude = data.latitude;
+    if (data.longitude !== undefined) payload.longitude = data.longitude;
+    const { data: updated } = await http.put<BackendDevice>(`/devices/${id}`, payload);
+    return mapBackendDevice(updated);
   },
 
-  async delete(_ids: string[]): Promise<void> {
-    throw new Error('Device delete not yet implemented (Sprint 4)');
+  async delete(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/devices/${id}`);
+    }
   },
 
   async getGroups(): Promise<DeviceGroup[]> {

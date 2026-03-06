@@ -4,6 +4,7 @@ import type { PageRequest } from '@/types/pagination';
 import type { SystemLog } from '@/mock/data/logs';
 import { logService } from '@/mock/services/logService';
 import { adminApi } from '@/services/api/adminApi';
+import { logApi } from '@/services/api/logApi';
 import { useMock } from '@/services/apiSwitch';
 
 export function useOperationLogs(
@@ -30,7 +31,10 @@ export function useSystemLogs(
 ) {
   return useQuery({
     queryKey: ['logs', 'system', params],
-    queryFn: () => logService.getSystemLogs(params),
+    queryFn: () =>
+      useMock
+        ? logService.getSystemLogs(params)
+        : logApi.getSystemLogs(params),
     refetchInterval: 30000,
   });
 }
@@ -40,7 +44,10 @@ export function useNEMessageLogs(
 ) {
   return useQuery({
     queryKey: ['logs', 'ne-messages', params],
-    queryFn: () => logService.getNEMessageLogs(params),
+    queryFn: () =>
+      useMock
+        ? logService.getNEMessageLogs(params)
+        : logApi.getNEMessageLogs(params),
     refetchInterval: 10000,
   });
 }
