@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ConfigTemplate, BaselineConfig, ConfigTask, ConfigParam, NeighborParam } from '@/types/config';
 import type { PageRequest } from '@/types/pagination';
 import { configService } from '@/mock/services/configService';
+import { templateApi } from '@/services/api/templateApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useConfigParams(
   params: { deviceSn?: string; category?: string; keyword?: string } & PageRequest
@@ -26,14 +28,16 @@ export function useUpdateConfigParam() {
 export function useConfigTemplates(params: PageRequest) {
   return useQuery({
     queryKey: ['config', 'templates', params],
-    queryFn: () => configService.getTemplates(params),
+    queryFn: () =>
+      useMock ? configService.getTemplates(params) : templateApi.getTemplates(params),
   });
 }
 
 export function useConfigTemplateById(id: string) {
   return useQuery({
     queryKey: ['config', 'templates', 'detail', id],
-    queryFn: () => configService.getTemplateById(id),
+    queryFn: () =>
+      useMock ? configService.getTemplateById(id) : templateApi.getTemplateById(id),
     enabled: Boolean(id),
   });
 }
@@ -42,7 +46,7 @@ export function useCreateConfigTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<ConfigTemplate, 'id' | 'createTime'>) =>
-      configService.createTemplate(data),
+      useMock ? configService.createTemplate(data) : templateApi.createTemplate(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'templates'] });
     },
@@ -53,7 +57,7 @@ export function useUpdateConfigTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<ConfigTemplate> }) =>
-      configService.updateTemplate(id, data),
+      useMock ? configService.updateTemplate(id, data) : templateApi.updateTemplate(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'templates'] });
     },
@@ -63,7 +67,8 @@ export function useUpdateConfigTemplate() {
 export function useDeleteConfigTemplates() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => configService.deleteTemplates(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? configService.deleteTemplates(ids) : templateApi.deleteTemplates(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'templates'] });
     },

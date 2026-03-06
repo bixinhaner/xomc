@@ -1,10 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { topologyService } from '@/mock/services/topologyService';
+import { topologyApi } from '@/services/api/topologyApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useDomains() {
   return useQuery({
     queryKey: ['topology', 'domains'],
-    queryFn: () => topologyService.getDomains(),
+    queryFn: () =>
+      useMock ? topologyService.getDomains() : topologyApi.getDomains(),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -12,7 +15,8 @@ export function useDomains() {
 export function useDomainTree() {
   return useQuery({
     queryKey: ['topology', 'domain-tree'],
-    queryFn: () => topologyService.getDomainTree(),
+    queryFn: () =>
+      useMock ? topologyService.getDomainTree() : topologyApi.getDomainTree(),
     staleTime: 5 * 60 * 1000,
   });
 }

@@ -2,20 +2,24 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { User, Role, UserRole, UserStatus } from '@/types/system';
 import type { PageRequest } from '@/types/pagination';
 import { systemService } from '@/mock/services/systemService';
+import { adminApi } from '@/services/api/adminApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useUsers(
   params: { role?: UserRole; status?: UserStatus; keyword?: string } & PageRequest
 ) {
   return useQuery({
     queryKey: ['system', 'users', params],
-    queryFn: () => systemService.getUsers(params),
+    queryFn: () =>
+      useMock ? systemService.getUsers(params) : adminApi.getUsers(params),
   });
 }
 
 export function useUserById(id: string) {
   return useQuery({
     queryKey: ['system', 'users', 'detail', id],
-    queryFn: () => systemService.getUserById(id),
+    queryFn: () =>
+      useMock ? systemService.getUserById(id) : adminApi.getUserById(id),
     enabled: Boolean(id),
   });
 }
@@ -24,7 +28,7 @@ export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'>) =>
-      systemService.createUser(data),
+      useMock ? systemService.createUser(data) : adminApi.createUser(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
     },
@@ -35,7 +39,7 @@ export function useUpdateUser() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<User> }) =>
-      systemService.updateUser(id, data),
+      useMock ? systemService.updateUser(id, data) : adminApi.updateUser(id, data),
     onSuccess: (_result, { id }) => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users', 'detail', id] });
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
@@ -46,7 +50,8 @@ export function useUpdateUser() {
 export function useDeleteUsers() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => systemService.deleteUsers(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? systemService.deleteUsers(ids) : adminApi.deleteUsers(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
     },
@@ -83,7 +88,8 @@ export function useUnlockUser() {
 export function useRoles(params: PageRequest) {
   return useQuery({
     queryKey: ['system', 'roles', params],
-    queryFn: () => systemService.getRoles(params),
+    queryFn: () =>
+      useMock ? systemService.getRoles(params) : adminApi.getRoles(params),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -91,7 +97,8 @@ export function useRoles(params: PageRequest) {
 export function useAllRoles() {
   return useQuery({
     queryKey: ['system', 'roles', 'all'],
-    queryFn: () => systemService.getAllRoles(),
+    queryFn: () =>
+      useMock ? systemService.getAllRoles() : adminApi.getAllRoles(),
     staleTime: 5 * 60 * 1000,
   });
 }
