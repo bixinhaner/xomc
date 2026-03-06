@@ -130,3 +130,28 @@ type RefreshRequest struct {
 type AssignRoleRequest struct {
 	RoleID uuid.UUID `json:"role_id" binding:"required"`
 }
+
+// ResetPasswordRequest is the input for resetting a user's password.
+type ResetPasswordRequest struct {
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+// CreateRoleRequest is the input for creating a new role.
+type CreateRoleRequest struct {
+	Name        string            `json:"name" binding:"required"`
+	Description string            `json:"description"`
+	Permissions []PermissionInput `json:"permissions"`
+}
+
+// PermissionInput represents a resource-action pair for role permission assignment.
+type PermissionInput struct {
+	Resource string `json:"resource" binding:"required"`
+	Action   string `json:"action" binding:"required"`
+}
+
+// UpdateRoleRequest is the input for updating an existing role.
+type UpdateRoleRequest struct {
+	Name        *string           `json:"name"`
+	Description *string           `json:"description"`
+	Permissions []PermissionInput `json:"permissions"`
+}

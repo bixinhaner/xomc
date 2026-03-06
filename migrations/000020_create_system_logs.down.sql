@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS ne_message_logs CASCADE;
+DROP TABLE IF EXISTS system_logs CASCADE;

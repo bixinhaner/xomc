@@ -32,6 +32,9 @@ type RoleRepository interface {
 	GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error)
 	GetPermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	CheckPermission(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error)
+	ListAllPermissions(ctx context.Context) ([]Permission, error)
+	AddPermissions(ctx context.Context, roleID uuid.UUID, perms []Permission) error
+	RemoveAllPermissions(ctx context.Context, roleID uuid.UUID) error
 }
 
 // AuditRepository defines the persistence interface for audit logs.

@@ -266,6 +266,75 @@ func (r *PgRoleRepository) GetPermissions(ctx context.Context, roleID uuid.UUID)
 	return perms, nil
 }
 
+func (r *PgRoleRepository) ListAllPermissions(ctx context.Context) ([]Permission, error) {
+	query, args, err := psql.Select("id", "role_id", "resource", "action").
+		From("permissions").
+		OrderBy("resource ASC", "action ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list all permissions SQL: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list all permissions: %w", err)
+	}
+	defer rows.Close()
+
+	var perms []Permission
+	for rows.Next() {
+		var p Permission
+		if err := rows.Scan(&p.ID, &p.RoleID, &p.Resource, &p.Action); err != nil {
+			return nil, fmt.Errorf("scan permission: %w", err)
+		}
+		perms = append(perms, p)
+	}
+	return perms, nil
+}
+
+func (r *PgRoleRepository) AddPermissions(ctx context.Context, roleID uuid.UUID, perms []Permission) error {
+	if len(perms) == 0 {
+		return nil
+	}
+
+	builder := psql.Insert("permissions").
+		Columns("id", "role_id", "resource", "action")
+
+	for _, p := range perms {
+		id := p.ID
+		if id == uuid.Nil {
+			id = uuid.New()
+		}
+		builder = builder.Values(id, roleID, p.Resource, p.Action)
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build add permissions SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("add permissions: %w", err)
+	}
+	return nil
+}
+
+func (r *PgRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid.UUID) error {
+	query, args, err := psql.Delete("permissions").
+		Where(sq.Eq{"role_id": roleID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build remove all permissions SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("remove all permissions: %w", err)
+	}
+	return nil
+}
+
 func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error) {
 	query, args, err := psql.Select("COUNT(*)").
 		From("permissions p").

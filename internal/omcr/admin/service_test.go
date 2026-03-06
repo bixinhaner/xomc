@@ -85,17 +85,20 @@ func (m *mockUserRepo) UpdateLastLogin(ctx context.Context, id uuid.UUID) error 
 }
 
 type mockRoleRepo struct {
-	createFn          func(ctx context.Context, role *Role) error
-	getByIDFn         func(ctx context.Context, id uuid.UUID) (*Role, error)
-	getByNameFn       func(ctx context.Context, name string) (*Role, error)
-	updateFn          func(ctx context.Context, role *Role) error
-	deleteFn          func(ctx context.Context, id uuid.UUID) error
-	listFn            func(ctx context.Context) ([]Role, error)
-	assignRoleFn      func(ctx context.Context, userID, roleID uuid.UUID) error
-	removeRoleFn      func(ctx context.Context, userID, roleID uuid.UUID) error
-	getUserRolesFn    func(ctx context.Context, userID uuid.UUID) ([]Role, error)
-	getPermissionsFn  func(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
-	checkPermissionFn func(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error)
+	createFn               func(ctx context.Context, role *Role) error
+	getByIDFn              func(ctx context.Context, id uuid.UUID) (*Role, error)
+	getByNameFn            func(ctx context.Context, name string) (*Role, error)
+	updateFn               func(ctx context.Context, role *Role) error
+	deleteFn               func(ctx context.Context, id uuid.UUID) error
+	listFn                 func(ctx context.Context) ([]Role, error)
+	assignRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
+	removeRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
+	getUserRolesFn         func(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	getPermissionsFn       func(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
+	checkPermissionFn      func(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error)
+	listAllPermissionsFn   func(ctx context.Context) ([]Permission, error)
+	addPermissionsFn       func(ctx context.Context, roleID uuid.UUID, perms []Permission) error
+	removeAllPermissionsFn func(ctx context.Context, roleID uuid.UUID) error
 }
 
 func (m *mockRoleRepo) Create(ctx context.Context, role *Role) error {
@@ -173,6 +176,27 @@ func (m *mockRoleRepo) CheckPermission(ctx context.Context, userID uuid.UUID, re
 		return m.checkPermissionFn(ctx, userID, resource, action)
 	}
 	return false, nil
+}
+
+func (m *mockRoleRepo) ListAllPermissions(ctx context.Context) ([]Permission, error) {
+	if m.listAllPermissionsFn != nil {
+		return m.listAllPermissionsFn(ctx)
+	}
+	return []Permission{}, nil
+}
+
+func (m *mockRoleRepo) AddPermissions(ctx context.Context, roleID uuid.UUID, perms []Permission) error {
+	if m.addPermissionsFn != nil {
+		return m.addPermissionsFn(ctx, roleID, perms)
+	}
+	return nil
+}
+
+func (m *mockRoleRepo) RemoveAllPermissions(ctx context.Context, roleID uuid.UUID) error {
+	if m.removeAllPermissionsFn != nil {
+		return m.removeAllPermissionsFn(ctx, roleID)
+	}
+	return nil
 }
 
 type mockAuditRepo struct {

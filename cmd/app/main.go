@@ -36,8 +36,10 @@ import (
 	"github.com/omcgo/omcgo/internal/interop"
 	"github.com/omcgo/omcgo/internal/interop/cases"
 	"github.com/omcgo/omcgo/internal/omcr/admin"
+	"github.com/omcgo/omcgo/internal/omcr/dashboard"
 	"github.com/omcgo/omcgo/internal/omcr/device"
 	"github.com/omcgo/omcgo/internal/omcr/software"
+	"github.com/omcgo/omcgo/internal/omcr/syslog"
 	"github.com/omcgo/omcgo/internal/omcr/topology"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
@@ -281,6 +283,32 @@ func runApp(cmd *cobra.Command, args []string) error {
 	// Alarm routes
 	alarmHandler := alarm.NewHandler(alarmEngine, alarmPgStore, logger)
 	alarmHandler.RegisterRoutes(v1)
+
+	// Alarm rule routes (Sprint 4)
+	alarmRuleRepo := alarm.NewPgAlarmRuleRepository(pgPool)
+	alarmRuleHandler := alarm.NewRuleHandler(alarmRuleRepo, logger)
+	alarmsGroup := v1.Group("/alarms")
+	alarmRuleHandler.RegisterRoutes(alarmsGroup)
+
+	// KPI threshold routes (Sprint 4)
+	thresholdRepo := pm.NewPgThresholdRepository(pgPool)
+	thresholdHandler := pm.NewThresholdHandler(thresholdRepo, logger)
+	pmGroup := v1.Group("/pm")
+	thresholdHandler.RegisterRoutes(pmGroup)
+
+	// Dashboard routes (Sprint 4)
+	dashboardService := dashboard.NewService(deviceService, alarmPgStore, pmKPIRepo, logger)
+	dashboardHandler := dashboard.NewHandler(dashboardService)
+	dashboardHandler.RegisterRoutes(v1)
+
+	// Syslog routes (Sprint 4)
+	syslogRepo := syslog.NewPgSyslogRepository(pgPool)
+	syslogHandler := syslog.NewHandler(syslogRepo, logger)
+	syslogHandler.RegisterRoutes(v1)
+
+	// Config sync routes (Sprint 4)
+	syncHandler := config.NewSyncHandler(cmdQueue, logger)
+	syncHandler.RegisterRoutes(v1)
 
 	// MR routes
 	mrHandler := mr.NewHandler(mrStore, minioClient, cfg.MinIO.Buckets.MRFiles, logger)

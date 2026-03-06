@@ -229,3 +229,124 @@ func (s *AdminService) CheckPermission(ctx context.Context, userID uuid.UUID, re
 func (s *AdminService) ListRoles(ctx context.Context) ([]Role, error) {
 	return s.roleRepo.List(ctx)
 }
+
+// ResetPassword resets a user's password to the provided new password.
+func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	return s.userRepo.UpdatePassword(ctx, id, string(hash))
+}
+
+// LockUser disables a user account by setting its status to disabled.
+func (s *AdminService) LockUser(ctx context.Context, id uuid.UUID) error {
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	user.Status = UserStatusDisabled
+	return s.userRepo.Update(ctx, user)
+}
+
+// UnlockUser re-enables a user account by setting its status to active.
+func (s *AdminService) UnlockUser(ctx context.Context, id uuid.UUID) error {
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	user.Status = UserStatusActive
+	return s.userRepo.Update(ctx, user)
+}
+
+// GetRole returns a role by ID with permissions loaded.
+func (s *AdminService) GetRole(ctx context.Context, id uuid.UUID) (*Role, error) {
+	role, err := s.roleRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	perms, err := s.roleRepo.GetPermissions(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get role permissions: %w", err)
+	}
+	role.Permissions = perms
+	return role, nil
+}
+
+// CreateRole creates a new role with optional permissions.
+func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error) {
+	role := &Role{
+		Name:        req.Name,
+		Description: req.Description,
+	}
+
+	if err := s.roleRepo.Create(ctx, role); err != nil {
+		return nil, fmt.Errorf("create role: %w", err)
+	}
+
+	if len(req.Permissions) > 0 {
+		perms := make([]Permission, len(req.Permissions))
+		for i, p := range req.Permissions {
+			perms[i] = Permission{
+				RoleID:   role.ID,
+				Resource: p.Resource,
+				Action:   p.Action,
+			}
+		}
+		if err := s.roleRepo.AddPermissions(ctx, role.ID, perms); err != nil {
+			return nil, fmt.Errorf("add permissions: %w", err)
+		}
+	}
+
+	return s.GetRole(ctx, role.ID)
+}
+
+// UpdateRole updates an existing role's fields and replaces its permissions.
+func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateRoleRequest) (*Role, error) {
+	role, err := s.roleRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Name != nil {
+		role.Name = *req.Name
+	}
+	if req.Description != nil {
+		role.Description = *req.Description
+	}
+
+	if err := s.roleRepo.Update(ctx, role); err != nil {
+		return nil, fmt.Errorf("update role: %w", err)
+	}
+
+	if req.Permissions != nil {
+		if err := s.roleRepo.RemoveAllPermissions(ctx, id); err != nil {
+			return nil, fmt.Errorf("remove old permissions: %w", err)
+		}
+		if len(req.Permissions) > 0 {
+			perms := make([]Permission, len(req.Permissions))
+			for i, p := range req.Permissions {
+				perms[i] = Permission{
+					RoleID:   id,
+					Resource: p.Resource,
+					Action:   p.Action,
+				}
+			}
+			if err := s.roleRepo.AddPermissions(ctx, id, perms); err != nil {
+				return nil, fmt.Errorf("add new permissions: %w", err)
+			}
+		}
+	}
+
+	return s.GetRole(ctx, id)
+}
+
+// DeleteRole deletes a role by ID.
+func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
+	return s.roleRepo.Delete(ctx, id)
+}
+
+// ListAllPermissions returns all permissions across all roles.
+func (s *AdminService) ListAllPermissions(ctx context.Context) ([]Permission, error) {
+	return s.roleRepo.ListAllPermissions(ctx)
+}

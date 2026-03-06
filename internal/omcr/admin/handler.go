@@ -44,13 +44,21 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		users.DELETE("/:id", h.DeleteUser)
 		users.POST("/:id/roles", h.AssignRole)
 		users.DELETE("/:id/roles/:roleId", h.RemoveRole)
+		users.POST("/:id/reset-password", h.ResetPassword)
+		users.POST("/:id/lock", h.LockUser)
+		users.POST("/:id/unlock", h.UnlockUser)
 	}
 
 	roles := rg.Group("/roles")
 	{
 		roles.GET("", h.ListRoles)
+		roles.GET("/:id", h.GetRole)
+		roles.POST("", h.CreateRole)
+		roles.PUT("/:id", h.UpdateRole)
+		roles.DELETE("/:id", h.DeleteRole)
 	}
 
+	rg.GET("/permissions", h.ListPermissions)
 	rg.GET("/audit-logs", h.ListAuditLogs)
 }
 
@@ -253,6 +261,143 @@ func (h *Handler) Me(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) ResetPassword(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.ResetPassword(c.Request.Context(), id, req.NewPassword); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "password reset"})
+}
+
+func (h *Handler) LockUser(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.service.LockUser(c.Request.Context(), id); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user locked"})
+}
+
+func (h *Handler) UnlockUser(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.service.UnlockUser(c.Request.Context(), id); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user unlocked"})
+}
+
+func (h *Handler) GetRole(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	role, err := h.service.GetRole(c.Request.Context(), id)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, role)
+}
+
+func (h *Handler) CreateRole(c *gin.Context) {
+	var req CreateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	role, err := h.service.CreateRole(c.Request.Context(), req)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, role)
+}
+
+func (h *Handler) UpdateRole(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req UpdateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	role, err := h.service.UpdateRole(c.Request.Context(), id, req)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, role)
+}
+
+func (h *Handler) DeleteRole(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.service.DeleteRole(c.Request.Context(), id); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *Handler) ListPermissions(c *gin.Context) {
+	perms, err := h.service.ListAllPermissions(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, perms)
 }
 
 func (h *Handler) ListAuditLogs(c *gin.Context) {

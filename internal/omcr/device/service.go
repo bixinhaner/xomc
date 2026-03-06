@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
@@ -239,4 +240,84 @@ func findParamValue(params []tr069.ParameterValueStruct, name string) string {
 		}
 	}
 	return ""
+}
+
+// CreateDevice creates a new device from an API request.
+func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceRequest) (*model.Device, error) {
+	existing, err := s.deviceRepo.GetBySerialNumber(ctx, req.SerialNumber)
+	if err != nil {
+		return nil, fmt.Errorf("check existing device: %w", err)
+	}
+	if existing != nil {
+		return nil, commonerrors.ErrAlreadyExists
+	}
+
+	now := time.Now()
+	device := &model.Device{
+		ID:           uuid.New(),
+		SerialNumber: req.SerialNumber,
+		OUI:          req.OUI,
+		ProductClass: req.ProductClass,
+		Manufacturer: req.Manufacturer,
+		ModelName:    req.ModelName,
+		Carrier:      req.Carrier,
+		Technology:   req.Technology,
+		Status:       model.DeviceRegistered,
+		SiteName:     req.SiteName,
+		SiteID:       req.SiteID,
+		Latitude:     req.Latitude,
+		Longitude:    req.Longitude,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := s.deviceRepo.Create(ctx, device); err != nil {
+		return nil, fmt.Errorf("create device: %w", err)
+	}
+
+	s.logger.Info("device created via API",
+		zap.String("serial_number", device.SerialNumber),
+		zap.String("carrier", string(device.Carrier)),
+	)
+	return device, nil
+}
+
+// UpdateDevice updates an existing device from an API request.
+func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req UpdateDeviceRequest) (*model.Device, error) {
+	device, err := s.deviceRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	if device == nil {
+		return nil, nil
+	}
+
+	if req.SiteName != nil {
+		device.SiteName = *req.SiteName
+	}
+	if req.SiteID != nil {
+		device.SiteID = *req.SiteID
+	}
+	if req.ModelName != nil {
+		device.ModelName = *req.ModelName
+	}
+	if req.Latitude != nil {
+		device.Latitude = *req.Latitude
+	}
+	if req.Longitude != nil {
+		device.Longitude = *req.Longitude
+	}
+	if req.Status != nil {
+		device.Status = *req.Status
+	}
+
+	if err := s.deviceRepo.Update(ctx, device); err != nil {
+		return nil, fmt.Errorf("update device: %w", err)
+	}
+	return device, nil
+}
+
+// DeleteDevice deletes a device by ID.
+func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
+	return s.deviceRepo.Delete(ctx, id)
 }
