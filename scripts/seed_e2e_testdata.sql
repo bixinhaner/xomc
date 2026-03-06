@@ -1,4 +1,4 @@
--- seed_e2e_testdata.sql — E2E 联调测试数据
+-- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2)
 -- 使用固定 UUID，方便验证脚本引用
 -- 运行前需已执行全部 migrations (make migrate-up)
 -- 使用方法: psql "$DSN" -f scripts/seed_e2e_testdata.sql
@@ -6,9 +6,20 @@
 BEGIN;
 
 -- ============================================================
--- 0. 清理旧的 E2E 测试数据 (幂等)
+-- 0. 清理旧的 E2E 测试数据 (幂等，按 FK 依赖逆序)
 -- ============================================================
 
+-- Sprint 2 data
+DELETE FROM device_group_members WHERE group_id::text LIKE 'e2e00007%';
+DELETE FROM device_groups WHERE id::text LIKE 'e2e00007%';
+DELETE FROM upgrade_tasks WHERE id::text LIKE 'e2e00005%';
+DELETE FROM upgrade_tasks WHERE firmware_id::text LIKE 'e2e00004%';
+DELETE FROM firmware_versions WHERE id::text LIKE 'e2e00004%';
+DELETE FROM config_templates WHERE id::text LIKE 'e2e00003%';
+DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'e2e-%');
+DELETE FROM users WHERE username LIKE 'e2e-%';
+
+-- Sprint 1 data
 DELETE FROM alarms_active WHERE id::text LIKE 'e2e00002%';
 DELETE FROM devices WHERE serial_number IN ('TEST-SN-001','TEST-SN-002','TEST-SN-003','TEST-SN-004','TEST-SN-005');
 
@@ -153,9 +164,152 @@ INSERT INTO alarms_active (
     NOW() - INTERVAL '15 minutes', NOW() - INTERVAL '15 minutes'
 );
 
+-- ============================================================
+-- 3. 配置模板 (3 条，覆盖不同模板类型)
+-- ============================================================
+
+INSERT INTO config_templates (
+    id, name, carrier, technology, product_class, template_type,
+    parameters, priority, version, active, description,
+    created_at, updated_at
+) VALUES
+-- Template 1: LTE batch config, active
+(
+    'e2e00003-0000-0000-0000-000000000001',
+    'LTE Basic Config', 'cmcc', 'lte', 'FAP-LTE-100', 'batch_config',
+    '{"params": [{"name": "AdminState", "value": "1"}, {"name": "MaxTxPower", "value": "30"}]}'::jsonb,
+    1, 1, true, 'Basic LTE small cell configuration template',
+    NOW() - INTERVAL '20 days', NOW() - INTERVAL '1 day'
+),
+-- Template 2: NR provisioning, active
+(
+    'e2e00003-0000-0000-0000-000000000002',
+    'NR Provisioning', 'cmcc', 'nr', 'gNB-100', 'provisioning',
+    '{"params": [{"name": "NRPCI", "value": "100"}, {"name": "DLBandwidth", "value": "100MHz"}]}'::jsonb,
+    2, 1, true, 'NR gNB provisioning template',
+    NOW() - INTERVAL '15 days', NOW() - INTERVAL '2 days'
+),
+-- Template 3: LTE firmware upgrade, inactive
+(
+    'e2e00003-0000-0000-0000-000000000003',
+    'Firmware Upgrade LTE', 'ctcc', 'lte', 'FAP-LTE-200', 'firmware_upgrade',
+    '{"params": [{"name": "DownloadTimeout", "value": "3600"}, {"name": "RebootDelay", "value": "60"}]}'::jsonb,
+    0, 1, false, 'LTE firmware upgrade template (inactive)',
+    NOW() - INTERVAL '30 days', NOW() - INTERVAL '10 days'
+);
+
+-- ============================================================
+-- 4. 固件版本 (2 条)
+-- ============================================================
+
+INSERT INTO firmware_versions (
+    id, carrier, product_class, version, file_name, file_size,
+    minio_path, compatible_oui, release_notes, status,
+    created_at, updated_at
+) VALUES
+-- Firmware 1: LTE firmware
+(
+    'e2e00004-0000-0000-0000-000000000001',
+    'cmcc', 'FAP-LTE-100', 'V200R003C11',
+    'eLTE-230_V200R003C11.bin', 52428800,
+    'firmware/cmcc/FAP-LTE-100/V200R003C11.bin',
+    '["00A0C6"]'::jsonb, 'Bug fixes and stability improvements',
+    'active', NOW() - INTERVAL '10 days', NOW() - INTERVAL '10 days'
+),
+-- Firmware 2: NR firmware (has upgrade tasks referencing it)
+(
+    'e2e00004-0000-0000-0000-000000000002',
+    'cmcc', 'gNB-100', 'V100R019C10',
+    'AAU5613_V100R019C10.bin', 104857600,
+    'firmware/cmcc/gNB-100/V100R019C10.bin',
+    '["00A0C6"]'::jsonb, 'New 5G NR features and performance enhancements',
+    'active', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days'
+),
+-- Firmware 3: standalone (no upgrade tasks, safe to delete)
+(
+    'e2e00004-0000-0000-0000-000000000003',
+    'ctcc', 'FAP-LTE-200', 'V4.16.31P1',
+    'ZXSDR-B8200_V4.16.31P1.bin', 31457280,
+    'firmware/ctcc/FAP-LTE-200/V4.16.31P1.bin',
+    '["001E4F"]'::jsonb, 'Minor patch release',
+    'active', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days'
+);
+
+-- ============================================================
+-- 5. 升级任务 (2 条，关联固件和设备)
+-- ============================================================
+
+INSERT INTO upgrade_tasks (
+    id, device_id, firmware_id, batch_id, status,
+    error_message, retry_count, max_retries,
+    started_at, completed_at, created_at, updated_at
+) VALUES
+-- Task 1: completed
+(
+    'e2e00005-0000-0000-0000-000000000001',
+    'e2e00001-0000-0000-0000-000000000001',
+    'e2e00004-0000-0000-0000-000000000001',
+    'e2e00005-ba00-0000-0000-000000000001',
+    'completed', NULL, 0, 3,
+    NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days' + INTERVAL '15 minutes',
+    NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days' + INTERVAL '15 minutes'
+),
+-- Task 2: pending
+(
+    'e2e00005-0000-0000-0000-000000000002',
+    'e2e00001-0000-0000-0000-000000000002',
+    'e2e00004-0000-0000-0000-000000000002',
+    'e2e00005-ba00-0000-0000-000000000001',
+    'pending', NULL, 0, 3,
+    NULL, NULL,
+    NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day'
+);
+
+-- ============================================================
+-- 6. 设备分组 (3 条，含层级关系 + 设备绑定)
+-- ============================================================
+
+INSERT INTO device_groups (
+    id, name, parent_id, carrier, description, sort_order,
+    created_at, updated_at
+) VALUES
+-- Group 1: Beijing Region (root)
+(
+    'e2e00007-0000-0000-0000-000000000001',
+    'Beijing Region', NULL, 'cmcc', 'Beijing metropolitan area device group',
+    1, NOW() - INTERVAL '60 days', NOW() - INTERVAL '1 day'
+),
+-- Group 2: Beijing-Haidian (child of Beijing)
+(
+    'e2e00007-0000-0000-0000-000000000002',
+    'Beijing-Haidian', 'e2e00007-0000-0000-0000-000000000001', 'cmcc',
+    'Haidian district sub-group', 1,
+    NOW() - INTERVAL '55 days', NOW() - INTERVAL '1 day'
+),
+-- Group 3: Shanghai Region (root)
+(
+    'e2e00007-0000-0000-0000-000000000003',
+    'Shanghai Region', NULL, 'ctcc', 'Shanghai metropolitan area device group',
+    2, NOW() - INTERVAL '50 days', NOW() - INTERVAL '2 days'
+);
+
+-- Link devices to groups
+INSERT INTO device_group_members (group_id, device_id, added_at) VALUES
+('e2e00007-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000001', NOW() - INTERVAL '30 days'),
+('e2e00007-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000002', NOW() - INTERVAL '30 days'),
+('e2e00007-0000-0000-0000-000000000003', 'e2e00001-0000-0000-0000-000000000003', NOW() - INTERVAL '25 days');
+
 COMMIT;
 
 -- Verify counts
 SELECT 'devices' AS entity, COUNT(*) AS count FROM devices WHERE id::text LIKE 'e2e00001%'
 UNION ALL
-SELECT 'alarms_active', COUNT(*) FROM alarms_active WHERE id::text LIKE 'e2e00002%';
+SELECT 'alarms_active', COUNT(*) FROM alarms_active WHERE id::text LIKE 'e2e00002%'
+UNION ALL
+SELECT 'config_templates', COUNT(*) FROM config_templates WHERE id::text LIKE 'e2e00003%'
+UNION ALL
+SELECT 'firmware_versions', COUNT(*) FROM firmware_versions WHERE id::text LIKE 'e2e00004%'
+UNION ALL
+SELECT 'upgrade_tasks', COUNT(*) FROM upgrade_tasks WHERE id::text LIKE 'e2e00005%'
+UNION ALL
+SELECT 'device_groups', COUNT(*) FROM device_groups WHERE id::text LIKE 'e2e00007%';

@@ -1,6 +1,6 @@
 #!/bin/bash
-# e2e_verify.sh — Sprint 1 端到端数据流验证脚本
-# 用 curl 覆盖 M1 里程碑所有关键路径
+# e2e_verify.sh — Sprint 1+2 端到端数据流验证脚本
+# 用 curl 覆盖 M1+M2 里程碑所有关键路径
 # 前置: omcgo-app 运行在 localhost:8080, DB 已执行迁移 + 种子数据
 #
 # 使用方法:
@@ -100,9 +100,9 @@ print('' if v is None else v)
     fi
 }
 
-echo "============================================"
-echo "  OMC Sprint 1 — E2E Data Flow Verification"
-echo "============================================"
+echo "================================================"
+echo "  OMC Sprint 1+2 — E2E Data Flow Verification"
+echo "================================================"
 echo "Target: $BASE_URL"
 echo "Time:   $(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -448,6 +448,499 @@ if [ -n "$ACCESS_TOKEN" ]; then
         "$API/devices/not-a-uuid" \
         -H "Authorization: Bearer $ACCESS_TOKEN")
     check_status "GET /devices/:id (invalid UUID)" "400" "$HTTP_CODE"
+fi
+
+# ============================================================
+section "9. Config Template CRUD"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 9.1 List templates (seeded data)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/templates?limit=10&offset=0" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /templates (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or d.get('data') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "Template list has items (count=$ITEMS_LEN)"
+        else
+            fail "Template list has items" "items array is empty"
+        fi
+    fi
+
+    # 9.2 Get template by ID (seeded)
+    TMPL_ID="e2e00003-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/templates/$TMPL_ID" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /templates/:id" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        check_json_field "Template has name" "$BODY" "name"
+        check_json_field "Template has carrier" "$BODY" "carrier"
+        check_json_field "Template has template_type" "$BODY" "template_type"
+    fi
+
+    # 9.3 Create template
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/templates" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "name": "E2E Test Template",
+            "carrier": "cmcc",
+            "technology": "lte",
+            "product_class": "FAP-LTE-100",
+            "template_type": "batch_config",
+            "parameters": {"test_param": "test_value"},
+            "active": true,
+            "description": "Created by E2E test"
+        }')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    NEW_TMPL_ID=""
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        pass "POST /templates (create) (HTTP $HTTP_CODE)"
+        NEW_TMPL_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+        if [ -n "$NEW_TMPL_ID" ]; then
+            pass "Created template has id ($NEW_TMPL_ID)"
+        else
+            fail "Created template has id" "id missing"
+        fi
+    else
+        fail "POST /templates (create)" "expected HTTP 200/201, got $HTTP_CODE"
+    fi
+
+    # 9.4 Update template
+    if [ -n "$NEW_TMPL_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" -X PUT "$API/templates/$NEW_TMPL_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{
+                "name": "E2E Test Template Updated",
+                "carrier": "cmcc",
+                "technology": "lte",
+                "product_class": "FAP-LTE-100",
+                "template_type": "batch_config",
+                "parameters": {"test_param": "updated_value"},
+                "active": true,
+                "description": "Updated by E2E test"
+            }')
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "PUT /templates/:id (update)" "200" "$HTTP_CODE"
+    else
+        fail "PUT /templates/:id (update)" "skipped — no template id"
+    fi
+
+    # 9.5 Delete template
+    if [ -n "$NEW_TMPL_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/templates/$NEW_TMPL_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            pass "DELETE /templates/:id (HTTP $HTTP_CODE)"
+        else
+            fail "DELETE /templates/:id" "expected HTTP 200/204, got $HTTP_CODE"
+        fi
+    else
+        fail "DELETE /templates/:id" "skipped — no template id"
+    fi
+else
+    fail "Template tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "10. Firmware Management"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 10.1 List firmware versions
+    RESP=$(curl -s -w "\n%{http_code}" "$API/firmware?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /firmware (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or d.get('data') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "Firmware list has items (count=$ITEMS_LEN)"
+        else
+            fail "Firmware list has items" "items array is empty"
+        fi
+    fi
+
+    # 10.2 Get firmware by ID
+    FW_ID="e2e00004-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/firmware/$FW_ID" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /firmware/:id" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        check_json_field "Firmware has version" "$BODY" "version"
+        check_json_field "Firmware has carrier" "$BODY" "carrier"
+        check_json_field "Firmware has status" "$BODY" "status"
+    fi
+
+    # 10.3 Delete firmware (use third seeded record — no FK references)
+    FW_DEL_ID="e2e00004-0000-0000-0000-000000000003"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/firmware/$FW_DEL_ID" \
+        -H "$AUTH_HEADER")
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+        pass "DELETE /firmware/:id (HTTP $HTTP_CODE)"
+    else
+        fail "DELETE /firmware/:id" "expected HTTP 200/204, got $HTTP_CODE"
+    fi
+else
+    fail "Firmware tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "11. Upgrade Tasks"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 11.1 List upgrade tasks
+    RESP=$(curl -s -w "\n%{http_code}" "$API/upgrade-tasks?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /upgrade-tasks (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or d.get('data') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "Upgrade task list has items (count=$ITEMS_LEN)"
+        else
+            fail "Upgrade task list has items" "items array is empty"
+        fi
+    fi
+
+    # 11.2 Get upgrade task by ID
+    TASK_ID="e2e00005-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/upgrade-tasks/$TASK_ID" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /upgrade-tasks/:id" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        check_json_field "Upgrade task has status" "$BODY" "status"
+    fi
+else
+    fail "Upgrade task tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "12. User Management (Admin)"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 12.1 List users
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/users?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/users (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items') or d.get('data') or []; print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "User list has items (count=$ITEMS_LEN)"
+        else
+            fail "User list has items" "items array is empty"
+        fi
+    fi
+
+    # 12.2 Create user
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "username": "e2e-testuser",
+            "password": "Test@12345",
+            "display_name": "E2E Test User",
+            "email": "e2e@test.com",
+            "status": "active"
+        }')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    NEW_USER_ID=""
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        pass "POST /admin/users (create) (HTTP $HTTP_CODE)"
+        NEW_USER_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+        if [ -n "$NEW_USER_ID" ]; then
+            pass "Created user has id ($NEW_USER_ID)"
+        else
+            fail "Created user has id" "id missing"
+        fi
+    else
+        fail "POST /admin/users (create)" "expected HTTP 200/201, got $HTTP_CODE"
+    fi
+
+    # 12.3 Get user by ID
+    if [ -n "$NEW_USER_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/admin/users/$NEW_USER_ID" \
+            -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "GET /admin/users/:id" "200" "$HTTP_CODE"
+
+        if [ "$HTTP_CODE" = "200" ]; then
+            check_json_field "User has username" "$BODY" "username"
+            check_json_field "User has display_name" "$BODY" "display_name"
+        fi
+    else
+        fail "GET /admin/users/:id" "skipped — no user id"
+    fi
+
+    # 12.4 Update user
+    if [ -n "$NEW_USER_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" -X PUT "$API/admin/users/$NEW_USER_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{
+                "display_name": "E2E Updated User",
+                "email": "e2e-updated@test.com"
+            }')
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "PUT /admin/users/:id (update)" "200" "$HTTP_CODE"
+    else
+        fail "PUT /admin/users/:id (update)" "skipped — no user id"
+    fi
+
+    # 12.5 Delete user
+    if [ -n "$NEW_USER_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/admin/users/$NEW_USER_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            pass "DELETE /admin/users/:id (HTTP $HTTP_CODE)"
+        else
+            fail "DELETE /admin/users/:id" "expected HTTP 200/204, got $HTTP_CODE"
+        fi
+    else
+        fail "DELETE /admin/users/:id" "skipped — no user id"
+    fi
+else
+    fail "User management tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "13. Role Management (Admin)"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 13.1 List roles
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/roles" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/roles (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        # Response might be an array or paginated object
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+else:
+    items = d.get('items') or d.get('data') or []
+    print(len(items) if isinstance(items, list) else 0)
+" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "Role list has items (count=$ITEMS_LEN)"
+        else
+            fail "Role list has items" "items array is empty"
+        fi
+    fi
+else
+    fail "Role tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "14. Audit Logs (Admin)"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 14.1 List audit logs
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/audit-logs?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /admin/audit-logs (list)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        # Audit logs may or may not have entries depending on prior activity
+        TOTAL_VAL=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+else:
+    print(d.get('total', len(d.get('items', d.get('data', [])))))
+" 2>/dev/null || echo "0")
+        pass "Audit logs accessible (total=$TOTAL_VAL)"
+    fi
+else
+    fail "Audit log tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "15. Device Group Management"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 15.1 List groups (tree)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/groups" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /groups (list/tree)" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ITEMS_LEN=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+else:
+    items = d.get('items') or d.get('data') or d.get('children') or []
+    print(len(items) if isinstance(items, list) else 0)
+" 2>/dev/null || echo "0")
+        if [ "$ITEMS_LEN" -gt 0 ]; then
+            pass "Group list has items (count=$ITEMS_LEN)"
+        else
+            fail "Group list has items" "items array is empty"
+        fi
+    fi
+
+    # 15.2 Get group by ID (seeded)
+    GROUP_ID="e2e00007-0000-0000-0000-000000000001"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/groups/$GROUP_ID" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /groups/:id" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        check_json_field "Group has name" "$BODY" "name"
+    fi
+
+    # 15.3 Create group
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/groups" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "name": "E2E Test Group",
+            "carrier": "cmcc",
+            "description": "Created by E2E test"
+        }')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    NEW_GROUP_ID=""
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        pass "POST /groups (create) (HTTP $HTTP_CODE)"
+        NEW_GROUP_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+        if [ -n "$NEW_GROUP_ID" ]; then
+            pass "Created group has id ($NEW_GROUP_ID)"
+        else
+            fail "Created group has id" "id missing"
+        fi
+    else
+        fail "POST /groups (create)" "expected HTTP 200/201, got $HTTP_CODE"
+    fi
+
+    # 15.4 Update group
+    if [ -n "$NEW_GROUP_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" -X PUT "$API/groups/$NEW_GROUP_ID" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{
+                "name": "E2E Test Group Updated",
+                "description": "Updated by E2E test"
+            }')
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "PUT /groups/:id (update)" "200" "$HTTP_CODE"
+    else
+        fail "PUT /groups/:id (update)" "skipped — no group id"
+    fi
+
+    # 15.5 List devices in group (seeded group with 2 devices)
+    RESP=$(curl -s -w "\n%{http_code}" "$API/groups/e2e00007-0000-0000-0000-000000000002/devices" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /groups/:id/devices" "200" "$HTTP_CODE"
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        DEV_LEN=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, list):
+    print(len(d))
+else:
+    ids = d.get('device_ids') or d.get('items') or d.get('data') or d.get('devices') or []
+    print(len(ids) if isinstance(ids, list) else 0)
+" 2>/dev/null || echo "0")
+        if [ "$DEV_LEN" -gt 0 ]; then
+            pass "Group has devices (count=$DEV_LEN)"
+        else
+            fail "Group has devices" "no devices in group"
+        fi
+    fi
+
+    # 15.6 Delete group (cleanup)
+    if [ -n "$NEW_GROUP_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/groups/$NEW_GROUP_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            pass "DELETE /groups/:id (HTTP $HTTP_CODE)"
+        else
+            fail "DELETE /groups/:id" "expected HTTP 200/204, got $HTTP_CODE"
+        fi
+    else
+        fail "DELETE /groups/:id" "skipped — no group id"
+    fi
+else
+    fail "Device group tests" "skipped — no access token"
+fi
+
+# ============================================================
+section "16. Alarm Clear"
+# ============================================================
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 16.1 Clear alarm (use a different alarm than the one acknowledged in section 6)
+    CLEAR_ALARM_ID="e2e00002-0000-0000-0000-000000000004"
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/alarms/$CLEAR_ALARM_ID/clear" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"cleared_by":"e2e-test"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "POST /alarms/:id/clear" "200" "$HTTP_CODE"
+else
+    fail "Alarm clear test" "skipped — no access token"
 fi
 
 # ============================================================
