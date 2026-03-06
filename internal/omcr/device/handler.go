@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
 	"github.com/omcgo/omcgo/internal/common/model"
 )
 
@@ -37,7 +38,7 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -62,7 +63,7 @@ func (h *Handler) ListDevices(c *gin.Context) {
 
 	result, err := h.service.ListDevices(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -73,17 +74,17 @@ func (h *Handler) ListDevices(c *gin.Context) {
 func (h *Handler) GetDevice(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device ID"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 
 	device, err := h.service.GetDevice(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if device == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
 
@@ -94,13 +95,13 @@ func (h *Handler) GetDevice(c *gin.Context) {
 func (h *Handler) GetDeviceParameters(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device ID"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 
 	params, err := h.service.GetDeviceParameters(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -117,7 +118,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 	counts, err := h.service.CountByStatus(c.Request.Context(), carrier)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -128,7 +129,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 func (h *Handler) RebootDevice(c *gin.Context) {
 	_, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device ID"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 

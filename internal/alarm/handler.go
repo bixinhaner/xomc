@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"go.uber.org/zap"
 )
@@ -50,14 +51,14 @@ func (h *Handler) ListActive(c *gin.Context) {
 	var q alarmQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	filter := AlarmFilter{ListRequest: q.ListRequest}
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 			return
 		}
 		filter.DeviceID = &id
@@ -82,7 +83,7 @@ func (h *Handler) ListActive(c *gin.Context) {
 
 	result, err := h.store.ListActive(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -92,7 +93,7 @@ func (h *Handler) ListHistory(c *gin.Context) {
 	var q alarmQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	filter := AlarmFilter{ListRequest: q.ListRequest}
@@ -119,7 +120,7 @@ func (h *Handler) ListHistory(c *gin.Context) {
 
 	result, err := h.store.ListHistory(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -128,12 +129,12 @@ func (h *Handler) ListHistory(c *gin.Context) {
 func (h *Handler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid alarm id"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 	alarm, err := h.store.GetActiveByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "alarm not found"})
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
 	c.JSON(http.StatusOK, alarm)
@@ -146,16 +147,16 @@ type acknowledgeRequest struct {
 func (h *Handler) Acknowledge(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid alarm id"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 	var req acknowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	if err := h.engine.Acknowledge(c.Request.Context(), id, req.AcknowledgedBy); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "alarm acknowledged"})
@@ -164,11 +165,11 @@ func (h *Handler) Acknowledge(c *gin.Context) {
 func (h *Handler) ClearAlarm(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid alarm id"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 	if err := h.engine.Clear(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "alarm cleared"})
@@ -182,7 +183,7 @@ func (h *Handler) Statistics(c *gin.Context) {
 	}
 	stats, err := h.store.Statistics(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, stats)
