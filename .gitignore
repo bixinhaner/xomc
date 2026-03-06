@@ -6,5 +6,6 @@ Thumbs.db
 omcgo/
 omcmb/
 
-# Claude
-.claude/
+# Claude (keep commands/ tracked for team sharing)
+.claude/*
+!.claude/commands/
