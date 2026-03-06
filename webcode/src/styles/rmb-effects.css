@@ -1,0 +1,439 @@
+/* RMB theme special effects — 人民币/国潮风格特效 */
+
+/* ==================== 祥云纹理背景 ==================== */
+
+[data-theme="rmb"] body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M50 25c-8.284 0-15 6.716-15 15 0 4.418 1.909 8.388 4.948 11.134C34.396 53.008 30 58.484 30 65c0 8.284 6.716 15 15 15 3.138 0 6.047-.963 8.452-2.607C55.43 80.588 59.469 82 63.75 82 73.277 82 81 74.277 81 64.75c0-6.33-3.263-11.882-8.178-15.052C74.214 47.63 75 45.16 75 42.5c0-8.284-6.716-15-15-15-3.797 0-7.266 1.41-9.903 3.733C48.155 28.544 46.126 27 43.75 27c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.435 0 2.76-.465 3.837-1.252-.058.414-.087.835-.087 1.262 0 5.247 4.253 9.5 9.5 9.5s9.5-4.253 9.5-9.5c0-.427-.029-.848-.087-1.262C68.24 38.535 69.565 39 71 39c3.59 0 6.5-2.91 6.5-6.5S74.59 26 71 26c-2.376 0-4.405 1.544-5.097 3.733C63.266 27.41 59.797 26 56 26c-2.105 0-4.102.436-5.903 1.22C51.64 25.82 53.73 25 56 25' fill='%23D4AF37' fill-opacity='0.02' fill-rule='evenodd'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.6;
+}
+
+/* ==================== 浮雕边框卡片 ==================== */
+
+[data-theme="rmb"] .ant-card {
+  background: #FFFFFF;
+  border: 1px solid #E8DCD0;
+  border-radius: 6px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.05) inset,
+    0 2px 8px rgba(139, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+[data-theme="rmb"] .ant-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #E60012, #D4AF37, #E60012);
+  border-radius: 6px 6px 0 0;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+[data-theme="rmb"] .ant-card:hover {
+  border-color: #D4AF37;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.05) inset,
+    0 4px 16px rgba(139, 0, 0, 0.08);
+}
+
+[data-theme="rmb"] .ant-card:hover::before {
+  opacity: 1;
+}
+
+/* ==================== 金属光泽按钮 ==================== */
+
+[data-theme="rmb"] .ant-btn {
+  border-radius: 4px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  transition: all 0.3s ease;
+}
+
+[data-theme="rmb"] .ant-btn-primary {
+  background: linear-gradient(135deg, #E60012 0%, #B8000F 100%);
+  border: none;
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(230, 0, 18, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme="rmb"] .ant-btn-primary::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    45deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%) rotate(45deg);
+  transition: transform 0.5s ease;
+}
+
+[data-theme="rmb"] .ant-btn-primary:hover::before {
+  transform: translateX(100%) rotate(45deg);
+}
+
+[data-theme="rmb"] .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #B8000F 0%, #8B0000 100%);
+  box-shadow: 0 4px 12px rgba(230, 0, 18, 0.35);
+}
+
+/* 金边次要按钮 */
+[data-theme="rmb"] .ant-btn-default {
+  border: 1px solid #D4AF37;
+  background: #FFFFFF;
+  color: #8B0000;
+}
+
+[data-theme="rmb"] .ant-btn-default:hover {
+  border-color: #FFD700;
+  color: #E60012;
+  background: rgba(212, 175, 55, 0.05);
+}
+
+/* ==================== 输入框 ==================== */
+
+[data-theme="rmb"] .ant-input,
+[data-theme="rmb"] .ant-input-affix-wrapper,
+[data-theme="rmb"] .ant-select-selector {
+  border-radius: 4px;
+  border: 1px solid #E8DCD0;
+  background: #FFFEF8;
+  transition: all 0.3s ease;
+}
+
+[data-theme="rmb"] .ant-input:focus,
+[data-theme="rmb"] .ant-input-focused,
+[data-theme="rmb"] .ant-input-affix-wrapper-focused,
+[data-theme="rmb"] .ant-select-focused .ant-select-selector {
+  border-color: #E60012;
+  box-shadow: 0 0 0 2px rgba(230, 0, 18, 0.08);
+  background: #FFFFFF;
+}
+
+/* ==================== 表格效果 ==================== */
+
+[data-theme="rmb"] .ant-table {
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #E8DCD0;
+}
+
+[data-theme="rmb"] .ant-table-thead > tr > th {
+  background: linear-gradient(180deg, #FFF8F0 0%, #FFF5EB 100%);
+  font-family: var(--font-family-heading);
+  font-weight: 600;
+  color: #8B0000;
+  border-bottom: 1px solid #E8DCD0;
+}
+
+[data-theme="rmb"] .ant-table-tbody > tr {
+  transition: background-color 0.2s ease;
+}
+
+[data-theme="rmb"] .ant-table-tbody > tr:hover > td {
+  background: rgba(230, 0, 18, 0.03);
+}
+
+[data-theme="rmb"] .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
+/* ==================== 模态框效果 ==================== */
+
+[data-theme="rmb"] .ant-modal-content {
+  border-radius: 6px;
+  border: 1px solid #E8DCD0;
+  box-shadow: 0 8px 40px rgba(139, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+[data-theme="rmb"] .ant-modal-header {
+  background: linear-gradient(180deg, #FFF8F0 0%, #FFFFFF 100%);
+  border-bottom: 1px solid #E8DCD0;
+  padding: 20px 24px;
+}
+
+[data-theme="rmb"] .ant-modal-title {
+  font-family: var(--font-family-heading);
+  font-size: 18px;
+  font-weight: 600;
+  color: #8B0000;
+}
+
+[data-theme="rmb"] .ant-modal-body {
+  padding: 24px;
+}
+
+[data-theme="rmb"] .ant-modal-footer {
+  border-top: 1px solid #E8DCD0;
+  padding: 16px 24px;
+}
+
+/* ==================== 标签效果 ==================== */
+
+[data-theme="rmb"] .ant-tag {
+  border-radius: 4px;
+  border: 1px solid;
+  font-family: var(--font-family);
+  font-weight: 500;
+}
+
+[data-theme="rmb"] .ant-tag-red,
+[data-theme="rmb"] .ant-tag-error {
+  background: rgba(230, 0, 18, 0.08);
+  border-color: rgba(230, 0, 18, 0.3);
+  color: #B8000F;
+}
+
+[data-theme="rmb"] .ant-tag-gold,
+[data-theme="rmb"] .ant-tag-warning {
+  background: rgba(212, 175, 55, 0.1);
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #8B6914;
+}
+
+[data-theme="rmb"] .ant-tag-green,
+[data-theme="rmb"] .ant-tag-success {
+  background: rgba(139, 0, 0, 0.05);
+  border-color: rgba(139, 0, 0, 0.2);
+  color: #5C0000;
+}
+
+/* ==================== 菜单效果 ==================== */
+
+[data-theme="rmb"] .ant-menu-item,
+[data-theme="rmb"] .ant-menu-submenu-title {
+  margin: 4px 12px;
+  border-radius: 4px;
+  font-family: var(--font-family);
+  letter-spacing: 0.3px;
+}
+
+[data-theme="rmb"] .ant-menu-item-selected {
+  background: rgba(255, 215, 0, 0.15) !important;
+  font-weight: 600;
+  border-left: 3px solid #FFD700;
+}
+
+[data-theme="rmb"] .ant-menu-item::after {
+  display: none;
+}
+
+/* ==================== 滚动条 ==================== */
+
+[data-theme="rmb"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-theme="rmb"] ::-webkit-scrollbar-track {
+  background: #FFF8F0;
+}
+
+[data-theme="rmb"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #E60012, #D4AF37);
+  border-radius: 4px;
+  border: 2px solid #FFF8F0;
+}
+
+[data-theme="rmb"] ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #B8000F, #B8860B);
+}
+
+/* ==================== 分页器 ==================== */
+
+[data-theme="rmb"] .ant-pagination-item {
+  border-radius: 4px;
+  border: 1px solid #E8DCD0;
+  font-family: var(--font-family);
+}
+
+[data-theme="rmb"] .ant-pagination-item-active {
+  border-color: #E60012;
+  background: rgba(230, 0, 18, 0.05);
+}
+
+[data-theme="rmb"] .ant-pagination-item-active a {
+  color: #B8000F;
+}
+
+/* ==================== 标题字体 ==================== */
+
+[data-theme="rmb"] h1,
+[data-theme="rmb"] h2,
+[data-theme="rmb"] h3 {
+  font-family: var(--font-family-heading);
+  font-weight: 600;
+  color: #2C2C2C;
+}
+
+[data-theme="rmb"] h1 {
+  font-size: 28px;
+  background: linear-gradient(135deg, #E60012 0%, #8B0000 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ==================== 分割线 ==================== */
+
+[data-theme="rmb"] .ant-divider-horizontal.ant-divider-with-text {
+  font-family: var(--font-family-heading);
+  color: #6B5D50;
+}
+
+[data-theme="rmb"] .ant-divider::before,
+[data-theme="rmb"] .ant-divider::after {
+  border-top-color: #E8DCD0;
+}
+
+/* ==================== 进度条 ==================== */
+
+[data-theme="rmb"] .ant-progress-bg {
+  background: linear-gradient(90deg, #E60012, #D4AF37);
+}
+
+/* ==================== 开关 ==================== */
+
+[data-theme="rmb"] .ant-switch-checked {
+  background: linear-gradient(135deg, #E60012, #B8000F);
+}
+
+/* ==================== 复选框/单选框 ==================== */
+
+[data-theme="rmb"] .ant-checkbox-checked .ant-checkbox-inner,
+[data-theme="rmb"] .ant-radio-checked .ant-radio-inner {
+  background: linear-gradient(135deg, #E60012, #B8000F);
+  border-color: #E60012;
+}
+
+[data-theme="rmb"] .ant-checkbox-wrapper:hover .ant-checkbox-inner,
+[data-theme="rmb"] .ant-radio-wrapper:hover .ant-radio-inner {
+  border-color: #E60012;
+}
+
+/* ==================== 通知提示 ==================== */
+
+[data-theme="rmb"] .ant-message-notice-content {
+  border-radius: 4px;
+  background: #FFFFFF;
+  box-shadow: 0 4px 16px rgba(139, 0, 0, 0.08);
+  border: 1px solid #E8DCD0;
+}
+
+[data-theme="rmb"] .ant-notification-notice {
+  border-radius: 6px;
+  background: #FFFFFF;
+  border: 1px solid #E8DCD0;
+  box-shadow: 0 8px 32px rgba(139, 0, 0, 0.08);
+}
+
+/* ==================== 徽章 ==================== */
+
+[data-theme="rmb"] .ant-badge-count {
+  background: linear-gradient(135deg, #E60012 0%, #D4AF37 100%);
+  box-shadow: 0 2px 6px rgba(230, 0, 18, 0.3);
+}
+
+/* ==================== RMB 3D EFFECTS ==================== */
+
+/* Metallic embossed depth on cards */
+[data-theme="rmb"] .ant-card {
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme="rmb"] .ant-card:hover {
+  box-shadow:
+    0 8px 24px rgba(212, 175, 55, 0.12),
+    0 2px 8px rgba(230, 0, 18, 0.06),
+    inset 0 1px 0 rgba(255, 215, 0, 0.15),
+    inset 0 -1px 0 rgba(139, 69, 19, 0.08) !important;
+}
+
+/* Dragon scale shimmer overlay */
+@keyframes rmbDragonShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+[data-theme="rmb"] .ant-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    transparent 30%,
+    rgba(212, 175, 55, 0.06) 38%,
+    rgba(255, 215, 0, 0.1) 42%,
+    rgba(212, 175, 55, 0.06) 46%,
+    transparent 54%
+  );
+  background-size: 200% 100%;
+  animation: rmbDragonShimmer 4s ease-in-out infinite;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 1;
+}
+
+[data-theme="rmb"] .ant-card:hover::after {
+  opacity: 1;
+}
+
+/* Stamp-like seal rotation on hover for icons */
+[data-theme="rmb"] .ant-card:hover .anticon {
+  transform: rotate(8deg) scale(1.1);
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  color: #E60012 !important;
+}
+
+/* Gold leaf menu selection */
+[data-theme="rmb"] .ant-menu-item-selected {
+  background: linear-gradient(90deg, rgba(212, 175, 55, 0.12), rgba(212, 175, 55, 0.04)) !important;
+  border-left: 3px solid #D4AF37 !important;
+}
+
+[data-theme="rmb"] .ant-menu-item:hover {
+  transform: translateX(3px);
+  transition: transform 0.2s ease !important;
+}
+
+/* Button metallic sheen */
+[data-theme="rmb"] .ant-btn-primary:hover {
+  box-shadow:
+    0 4px 16px rgba(230, 0, 18, 0.2),
+    0 0 0 1px rgba(212, 175, 55, 0.15),
+    inset 0 1px 0 rgba(255, 215, 0, 0.3) !important;
+  transform: translateY(-1px);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="rmb"] *,
+  [data-theme="rmb"] *::before,
+  [data-theme="rmb"] *::after {
+    animation-duration: 0.01ms !important;
+  }
+}

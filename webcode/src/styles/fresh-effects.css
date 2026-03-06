@@ -1,0 +1,119 @@
+/* Fresh theme special effects — 简约清新风格特效 */
+
+/* Larger border-radius on cards */
+[data-theme="fresh"] .ant-card {
+  border-radius: 12px;
+}
+
+/* Softer shadows on cards */
+[data-theme="fresh"] .ant-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  border: 1px solid #E7E5E4;
+}
+
+[data-theme="fresh"] .ant-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* Rounded buttons and inputs */
+[data-theme="fresh"] .ant-btn {
+  border-radius: 8px;
+}
+
+[data-theme="fresh"] .ant-input,
+[data-theme="fresh"] .ant-select-selector {
+  border-radius: 8px !important;
+}
+
+/* Larger modal border-radius */
+[data-theme="fresh"] .ant-modal-content {
+  border-radius: 16px;
+}
+
+/* Subtle indigo focus ring */
+[data-theme="fresh"] .ant-input:focus,
+[data-theme="fresh"] .ant-input-focused,
+[data-theme="fresh"] .ant-select-focused .ant-select-selector {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12) !important;
+}
+
+/* Pill-shaped tags */
+[data-theme="fresh"] .ant-tag {
+  border-radius: 9999px;
+  padding: 0 10px;
+}
+
+/* Table header softened */
+[data-theme="fresh"] .ant-table-thead > tr > th {
+  background: #FAFAF9 !important;
+  font-weight: 500;
+}
+
+/* Sidebar border instead of no border */
+[data-theme="fresh"] .ant-menu-light {
+  border-inline-end: 1px solid #E7E5E4 !important;
+}
+
+/* ==================== FRESH 3D EFFECTS ==================== */
+
+/* Aurora gradient wave background on cards */
+@keyframes freshAurora {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+[data-theme="fresh"] .ant-card {
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme="fresh"] .ant-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366F1, #22C55E, #F59E0B, #EF4444, #8B5CF6, #6366F1);
+  background-size: 300% 100%;
+  animation: freshAurora 6s ease-in-out infinite;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 1;
+}
+
+[data-theme="fresh"] .ant-card:hover::before {
+  opacity: 1;
+}
+
+/* Prism refraction on card hover */
+[data-theme="fresh"] .ant-card:hover {
+  box-shadow:
+    0 8px 32px rgba(99, 102, 241, 0.08),
+    0 2px 8px rgba(34, 197, 94, 0.06),
+    0 0 0 1px rgba(99, 102, 241, 0.06) !important;
+}
+
+/* Soft 3D float on buttons */
+[data-theme="fresh"] .ant-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 6px 20px rgba(99, 102, 241, 0.25),
+    0 2px 6px rgba(99, 102, 241, 0.15) !important;
+}
+
+[data-theme="fresh"] .ant-btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Menu item smooth depth */
+[data-theme="fresh"] .ant-menu-item:hover {
+  transform: translateX(4px);
+  transition: transform 0.2s ease, background 0.2s ease !important;
+}
+
+[data-theme="fresh"] .ant-menu-item-selected {
+  transform: translateX(4px);
+  border-radius: 8px;
+}

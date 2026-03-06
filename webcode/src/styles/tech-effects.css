@@ -1,0 +1,117 @@
+/* Tech theme special effects — 科技未来风格特效 */
+
+/* Glassmorphism backdrop for header */
+[data-theme="tech"] .ant-layout-header,
+[data-theme="tech"] header {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Glassmorphism backdrop for sidebar */
+[data-theme="tech"] .ant-layout-sider,
+[data-theme="tech"] aside {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Subtle glow border on cards */
+[data-theme="tech"] .ant-card {
+  border: 1px solid rgba(0, 212, 255, 0.08);
+  transition: border-color 250ms ease, box-shadow 250ms ease;
+}
+
+[data-theme="tech"] .ant-card:hover {
+  border-color: rgba(0, 212, 255, 0.15);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.06);
+}
+
+/* Neon focus ring on inputs */
+[data-theme="tech"] .ant-input:focus,
+[data-theme="tech"] .ant-input-focused,
+[data-theme="tech"] .ant-select-focused .ant-select-selector {
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15) !important;
+}
+
+/* Neon accent for active table rows */
+[data-theme="tech"] .ant-table-tbody > tr.ant-table-row-selected > td {
+  background-color: rgba(0, 212, 255, 0.06) !important;
+}
+
+/* Primary button neon glow */
+[data-theme="tech"] .ant-btn-primary {
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+}
+
+[data-theme="tech"] .ant-btn-primary:hover {
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.3);
+}
+
+/* Modal glassmorphism */
+[data-theme="tech"] .ant-modal-content {
+  background: rgba(22, 27, 34, 0.95) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 212, 255, 0.08);
+}
+
+/* Scrollbar neon tint */
+[data-theme="tech"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.2);
+}
+
+[data-theme="tech"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.35);
+}
+
+/* ==================== TECH 3D EFFECTS ==================== */
+
+/* Glassmorphism refraction caustic overlay */
+[data-theme="tech"] .ant-card {
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme="tech"] .ant-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 120px 80px at 20% 30%, rgba(0, 212, 255, 0.04), transparent),
+    radial-gradient(ellipse 100px 60px at 70% 60%, rgba(0, 255, 136, 0.03), transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 0;
+}
+
+[data-theme="tech"] .ant-card:hover::before {
+  opacity: 1;
+}
+
+/* Glowing bottom border accent */
+[data-theme="tech"] .ant-card:hover {
+  border-color: rgba(0, 212, 255, 0.15) !important;
+  box-shadow:
+    0 4px 16px rgba(0, 212, 255, 0.08),
+    0 0 0 1px rgba(0, 212, 255, 0.06),
+    inset 0 -2px 0 rgba(0, 212, 255, 0.1) !important;
+}
+
+/* Hexagon float decoration on sidebar */
+@keyframes techHexFloat {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-6px) rotate(3deg); }
+}
+
+/* Table row hover glow line */
+[data-theme="tech"] .ant-table-tbody > tr:hover > td:first-child {
+  box-shadow: inset 3px 0 0 #00D4FF;
+}
+
+/* Input focus neon ring enhanced */
+[data-theme="tech"] .ant-input:focus,
+[data-theme="tech"] .ant-input-focused {
+  box-shadow:
+    0 0 0 2px rgba(0, 212, 255, 0.15),
+    0 0 12px rgba(0, 212, 255, 0.08) !important;
+}

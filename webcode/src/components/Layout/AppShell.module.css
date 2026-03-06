@@ -1,0 +1,205 @@
+/* AppShell CSS Grid Layout — area-based for flexible positioning */
+
+.shell {
+  display: grid;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--color-neutral-100);
+  /* Default: sidebar-left + tabbar-top */
+  grid-template-rows: 48px 36px 1fr auto;
+  grid-template-columns: var(--current-sidebar-width, 240px) 1fr;
+  grid-template-areas:
+    "header    header"
+    "sidebar   tabbar"
+    "sidebar   content"
+    "sidebar   taskpanel";
+}
+
+/* Sidebar-right + TabBar-top */
+.shell[data-sidebar="right"][data-tabbar="top"] {
+  grid-template-columns: 1fr var(--current-sidebar-width, 240px);
+  grid-template-areas:
+    "header    header"
+    "tabbar    sidebar"
+    "content   sidebar"
+    "taskpanel sidebar";
+}
+
+/* Sidebar-left + TabBar-bottom */
+.shell[data-sidebar="left"][data-tabbar="bottom"] {
+  grid-template-rows: 48px 1fr 36px auto;
+  grid-template-areas:
+    "header    header"
+    "sidebar   content"
+    "sidebar   tabbar"
+    "sidebar   taskpanel";
+}
+
+/* Sidebar-right + TabBar-bottom */
+.shell[data-sidebar="right"][data-tabbar="bottom"] {
+  grid-template-rows: 48px 1fr 36px auto;
+  grid-template-columns: 1fr var(--current-sidebar-width, 240px);
+  grid-template-areas:
+    "header    header"
+    "content   sidebar"
+    "tabbar    sidebar"
+    "taskpanel sidebar";
+}
+
+/* Sidebar-top + TabBar-top */
+.shell[data-sidebar="top"][data-tabbar="top"] {
+  grid-template-rows: 48px auto 36px 1fr auto;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "sidebar"
+    "tabbar"
+    "content"
+    "taskpanel";
+}
+
+/* Sidebar-top + TabBar-bottom */
+.shell[data-sidebar="top"][data-tabbar="bottom"] {
+  grid-template-rows: 48px auto 1fr 36px auto;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "sidebar"
+    "content"
+    "tabbar"
+    "taskpanel";
+}
+
+/* Sidebar-left + TabBar-left */
+.shell[data-sidebar="left"][data-tabbar="left"] {
+  grid-template-rows: 48px 1fr auto;
+  grid-template-columns: var(--current-sidebar-width, 240px) 120px 1fr;
+  grid-template-areas:
+    "header  header  header"
+    "sidebar tabbar  content"
+    "sidebar tabbar  taskpanel";
+}
+
+/* Sidebar-right + TabBar-left */
+.shell[data-sidebar="right"][data-tabbar="left"] {
+  grid-template-rows: 48px 1fr auto;
+  grid-template-columns: 120px 1fr var(--current-sidebar-width, 240px);
+  grid-template-areas:
+    "header  header  header"
+    "tabbar  content sidebar"
+    "tabbar  taskpanel sidebar";
+}
+
+/* Sidebar-top + TabBar-left */
+.shell[data-sidebar="top"][data-tabbar="left"] {
+  grid-template-rows: 48px auto 1fr auto;
+  grid-template-columns: 120px 1fr;
+  grid-template-areas:
+    "header  header"
+    "sidebar sidebar"
+    "tabbar  content"
+    "tabbar  taskpanel";
+}
+
+/* Area assignments — grid-template-areas controls positioning */
+.header {
+  grid-area: header;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  overflow: hidden;
+  transition: width 300ms ease-in-out;
+  position: relative;
+  z-index: 100;
+}
+
+.tabBar {
+  grid-area: tabbar;
+  overflow: hidden;
+}
+
+.content {
+  grid-area: content;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 24px;
+  background-color: var(--color-neutral-100);
+  min-height: 0;
+}
+
+.taskPanel {
+  grid-area: taskpanel;
+}
+
+/* ============ Mobile Sidebar Overlay ============ */
+.mobileOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  animation: omc-fade-in 200ms ease;
+}
+
+.mobileDrawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  z-index: 1001;
+  background-color: var(--color-sidebar-bg, #001529);
+  box-shadow: 6px 0 16px -8px rgba(0, 0, 0, 0.08), 9px 0 28px 0 rgba(0, 0, 0, 0.05), 12px 0 48px 16px rgba(0, 0, 0, 0.03);
+  animation: omc-slide-right 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes omc-slide-right {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes omc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ============ MOBILE (<768px) ============ */
+@media (max-width: 767px) {
+  /* All sidebar/tabbar variants collapse to single-column on mobile */
+  .shell,
+  .shell[data-sidebar="right"][data-tabbar="top"],
+  .shell[data-sidebar="left"][data-tabbar="bottom"],
+  .shell[data-sidebar="right"][data-tabbar="bottom"],
+  .shell[data-sidebar="top"][data-tabbar="top"],
+  .shell[data-sidebar="top"][data-tabbar="bottom"],
+  .shell[data-sidebar="left"][data-tabbar="left"],
+  .shell[data-sidebar="right"][data-tabbar="left"],
+  .shell[data-sidebar="top"][data-tabbar="left"] {
+    grid-template-rows: 48px 36px 1fr auto;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "tabbar"
+      "content"
+      "taskpanel";
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .content {
+    padding: var(--content-padding-v, 8px) var(--content-padding-h, 12px);
+  }
+
+  .shell {
+    height: 100dvh;
+  }
+}
+
+/* ============ TABLET (768–991px) ============ */
+@media (min-width: 768px) and (max-width: 991px) {
+  .content {
+    padding: 12px 16px;
+  }
+}

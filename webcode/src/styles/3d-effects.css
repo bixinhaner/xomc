@@ -1,0 +1,110 @@
+/* ===== 3D Effects Infrastructure ===== */
+
+/* Float animation for FloatingElement component */
+@keyframes omc-float {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(calc(var(--float-amplitude, 6px) * -0.7)) rotate(0.5deg);
+  }
+  50% {
+    transform: translateY(calc(var(--float-amplitude, 6px) * -1)) rotate(0deg);
+  }
+  75% {
+    transform: translateY(calc(var(--float-amplitude, 6px) * -0.7)) rotate(-0.5deg);
+  }
+}
+
+/* Glow pulse for accented elements */
+@keyframes omc-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px var(--effect-glow-color, rgba(22, 119, 255, 0.2));
+  }
+  50% {
+    box-shadow: 0 0 20px var(--effect-glow-color, rgba(22, 119, 255, 0.4)),
+                0 0 40px var(--effect-glow-color, rgba(22, 119, 255, 0.15));
+  }
+}
+
+/* Scroll-driven entrance from 3D depth */
+@keyframes omc-depth-enter {
+  from {
+    opacity: 0;
+    transform: perspective(1000px) rotateX(-8deg) translateY(30px) translateZ(-60px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1000px) rotateX(0deg) translateY(0) translateZ(0);
+  }
+}
+
+.omc-scroll-reveal {
+  opacity: 0;
+  transform: perspective(1000px) rotateX(-8deg) translateY(30px) translateZ(-60px);
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.omc-scroll-reveal.omc-visible {
+  opacity: 1;
+  transform: perspective(1000px) rotateX(0deg) translateY(0) translateZ(0);
+}
+
+/* Stagger delays for sequential card entry */
+.omc-scroll-reveal[data-delay="1"] { transition-delay: 0.05s; }
+.omc-scroll-reveal[data-delay="2"] { transition-delay: 0.10s; }
+.omc-scroll-reveal[data-delay="3"] { transition-delay: 0.15s; }
+.omc-scroll-reveal[data-delay="4"] { transition-delay: 0.20s; }
+
+/* Glare overlay — activated by TiltCard via CSS custom properties */
+.tilt-glare {
+  opacity: 0 !important;
+  transition: opacity 0.3s ease !important;
+}
+*:hover > .tilt-glare {
+  opacity: 1 !important;
+}
+
+/* Light sweep animation for cards */
+@keyframes omc-light-sweep {
+  0% {
+    transform: translateX(-100%) rotate(25deg);
+  }
+  100% {
+    transform: translateX(200%) rotate(25deg);
+  }
+}
+
+/* ===== Sidebar 3D depth for menu items ===== */
+[data-theme="cyberpunk"] .ant-menu-item,
+[data-theme="tech"] .ant-menu-item {
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease !important;
+}
+
+[data-theme="cyberpunk"] .ant-menu-item:hover,
+[data-theme="tech"] .ant-menu-item:hover {
+  transform: perspective(600px) translateZ(6px) !important;
+}
+
+[data-theme="cyberpunk"] .ant-menu-item-selected,
+[data-theme="tech"] .ant-menu-item-selected {
+  transform: perspective(600px) translateZ(10px) !important;
+}
+
+/* ===== Header Logo 3D spin ===== */
+
+/* ===== Reduced motion: disable everything ===== */
+@media (prefers-reduced-motion: reduce) {
+  .omc-scroll-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .tilt-glare {
+    display: none !important;
+  }
+  [class*="omc-float"] {
+    animation: none !important;
+  }
+}
