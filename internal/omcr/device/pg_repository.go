@@ -265,7 +265,7 @@ func deviceColumns() []string {
 	return []string{
 		"id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
 		"carrier", "technology", "data_model_id", "status", "firmware_version",
-		"ip_address", "connection_request_url", "last_inform_at", "last_inform_events",
+		"host(ip_address) as ip_address", "connection_request_url", "last_inform_at", "last_inform_events",
 		"inform_interval", "site_name", "site_id", "latitude", "longitude",
 		"extension_data", "created_at", "updated_at",
 	}

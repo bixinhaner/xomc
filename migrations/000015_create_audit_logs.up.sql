@@ -42,10 +42,10 @@ SELECT '10000000-0000-0000-0000-000000000003', r, 'read'
 FROM unnest(ARRAY['devices','alarms','pm','config','datamodels','firmware','northbound']) AS r;
 
 -- Seed: Default admin user (password: admin123)
--- bcrypt hash of 'admin123' with cost 10
+-- bcrypt hash of 'admin123' with cost 10, generated via: bcrypt.GenerateFromPassword([]byte("admin123"), 10)
 INSERT INTO users (id, username, password_hash, display_name, status) VALUES
     ('20000000-0000-0000-0000-000000000001', 'admin',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$5feKmwxvoxEyqIo5DaYQNuNcPFWZnRdNytomGLrXDnv0e5MgnEJT6',
      'System Admin', 'active');
 
 INSERT INTO user_roles (user_id, role_id) VALUES

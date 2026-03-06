@@ -101,6 +101,9 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 		}
 		items = append(items, *a)
 	}
+	if items == nil {
+		items = []model.Alarm{}
+	}
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
 
@@ -164,6 +167,9 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 			return nil, fmt.Errorf("scan alarms_history: %w", err)
 		}
 		items = append(items, a)
+	}
+	if items == nil {
+		items = []model.Alarm{}
 	}
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
