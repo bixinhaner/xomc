@@ -1,0 +1,54 @@
+/* ============ Responsive CSS — Mobile & Tablet Support ============ */
+
+/* Dynamic viewport height fix for mobile Safari address bar */
+html, body, #root {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* ===== Mobile (<768px) ===== */
+@media (max-width: 767px) {
+  :root {
+    --content-padding-h: 12px;
+    --content-padding-v: 8px;
+  }
+
+  /* Disable hover 3D transforms on mobile */
+  [data-theme] .logo-mark:hover {
+    transform: none !important;
+  }
+
+  /* Ensure minimum touch target size (44x44 per Apple HIG) */
+  button, [role="button"], .ant-btn {
+    min-height: 44px;
+  }
+}
+
+/* ===== Tablet (768–991px) ===== */
+@media (min-width: 768px) and (max-width: 991px) {
+  :root {
+    --content-padding-h: 16px;
+    --content-padding-v: 12px;
+  }
+}
+
+/* ===== Touch device — disable hover-dependent transforms ===== */
+@media (pointer: coarse) {
+  .tilt-card:hover {
+    transform: none !important;
+  }
+}
+
+/* ===== Utility classes ===== */
+.omc-hide-mobile { }
+.omc-show-mobile { display: none !important; }
+.omc-show-tablet { display: none !important; }
+
+@media (max-width: 767px) {
+  .omc-hide-mobile { display: none !important; }
+  .omc-show-mobile { display: block !important; }
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+  .omc-show-tablet { display: block !important; }
+}

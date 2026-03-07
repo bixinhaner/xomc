@@ -1,0 +1,949 @@
+const messages: Record<string, string> = {
+  // -------------------------------------------------------------------------
+  // Common actions
+  // -------------------------------------------------------------------------
+  'common.search':         '搜索',
+  'common.reset':          '重置',
+  'common.add':            '新增',
+  'common.edit':           '编辑',
+  'common.delete':         '删除',
+  'common.export':         '导出',
+  'common.import':         '导入',
+  'common.confirm':        '确认',
+  'common.cancel':         '取消',
+  'common.save':           '保存',
+  'common.submit':         '提交',
+  'common.refresh':        '刷新',
+  'common.close':          '关闭',
+  'common.back':           '返回',
+  'common.next':           '下一步',
+  'common.prev':           '上一步',
+  'common.finish':         '完成',
+  'common.view':           '查看',
+  'common.detail':         '详情',
+  'common.copy':           '复制',
+  'common.download':       '下载',
+  'common.upload':         '上传',
+  'common.execute':        '执行',
+  'common.deploy':         '下发',
+  'common.approve':        '审批',
+  'common.reject':         '拒绝',
+  'common.enable':         '启用',
+  'common.disable':        '禁用',
+  'common.batchDelete':    '批量删除',
+  'common.batchExport':    '批量导出',
+  'common.more':           '更多',
+  'common.loading':        '加载中...',
+  'common.noData':         '暂无数据',
+  'common.placeholder':    '请输入',
+  'common.pleaseSelect':   '请选择',
+  'common.all':            '全部',
+  'common.yes':            '是',
+  'common.no':             '否',
+  'common.unknown':        '未知',
+
+  // -------------------------------------------------------------------------
+  // Table headers
+  // -------------------------------------------------------------------------
+  'table.sn':              '序列号',
+  'table.name':            '名称',
+  'table.status':          '状态',
+  'table.createTime':      '创建时间',
+  'table.updateTime':      '更新时间',
+  'table.operation':       '操作',
+  'table.index':           '序号',
+  'table.description':     '描述',
+  'table.vendor':          '厂商',
+  'table.type':            '类型',
+  'table.region':          '区域',
+  'table.site':            '站点',
+  'table.ip':              'IP地址',
+  'table.version':         '版本',
+  'table.operator':        '操作人',
+  'table.result':          '结果',
+  'table.time':            '时间',
+  'table.total':           '合计',
+  'table.success':         '成功',
+  'table.failed':          '失败',
+  'table.pending':         '待处理',
+
+  // -------------------------------------------------------------------------
+  // Status labels
+  // -------------------------------------------------------------------------
+  'status.online':         '在线',
+  'status.offline':        '离线',
+  'status.active':         '激活',
+  'status.inactive':       '未激活',
+  'status.locked':         '锁定',
+  'status.enabled':        '已启用',
+  'status.disabled':       '已禁用',
+  'status.managed':        '已管理',
+  'status.unmanaged':      '未管理',
+  'status.preManaged':     '预管理',
+  'status.commissioned':   '已开通',
+  'status.uncommissioned': '未开通',
+  'status.decommissioned': '已停用',
+  'status.pending':        '待执行',
+  'status.running':        '执行中',
+  'status.success':        '成功',
+  'status.failed':         '失败',
+  'status.cancelled':      '已取消',
+
+  // -------------------------------------------------------------------------
+  // Alarm severity
+  // -------------------------------------------------------------------------
+  'alarm.severity.critical': '紧急',
+  'alarm.severity.major':    '重要',
+  'alarm.severity.minor':    '次要',
+  'alarm.severity.warning':  '警告',
+  'alarm.ackStatus.acknowledged':   '已确认',
+  'alarm.ackStatus.unacknowledged': '未确认',
+
+  // -------------------------------------------------------------------------
+  // Navigation — module names
+  // -------------------------------------------------------------------------
+  'nav.dashboard':     '仪表板',
+  'nav.device':        '设备管理',
+  'nav.alarm':         '告警管理',
+  'nav.config':        '配置管理',
+  'nav.performance':   '性能管理',
+  'nav.mml':           'MML管理',
+  'nav.topology':      '拓扑管理',
+  'nav.backup':        '备份恢复',
+  'nav.software':      '软件管理',
+  'nav.file':          '文件管理',
+  'nav.log':           '日志管理',
+  'nav.system':        '系统管理',
+  'nav.report':        '报表管理',
+  'nav.mr':            'MR管理',
+  'nav.license':       '许可证管理',
+  'nav.ops':           '运维管理',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Device
+  // -------------------------------------------------------------------------
+  'nav.device.list':       '设备列表',
+  'nav.device.register':   '设备注册',
+  'nav.device.group':      '设备分组',
+  'nav.device.detail':     '设备详情',
+  'nav.device.ne':         '网元管理',
+  'nav.device.monitor':    '在线监控',
+  'nav.device.commission': '开通管理',
+  'nav.device.handover':   '交接管理',
+  'nav.device.stats':      '资源统计',
+  'nav.device.import':     '导入导出',
+  'nav.device.rules':      '设备规则',
+  'nav.device.recycle':    '回收站',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Alarm
+  // -------------------------------------------------------------------------
+  'nav.alarm.current':    '当前告警',
+  'nav.alarm.history':    '历史告警',
+  'nav.alarm.statistics': '告警统计',
+  'nav.alarm.rules':      '告警规则',
+  'nav.alarm.library':    '告警库',
+  'nav.alarm.sync':       '告警同步',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Config
+  // -------------------------------------------------------------------------
+  'nav.config.paramSync':       '参数同步',
+  'nav.config.liveParam':       '实时参数配置',
+  'nav.config.batchClass':      '批量参数分类',
+  'nav.config.batchTemplate':   '批量参数模板',
+  'nav.config.paramList':       '参数列表',
+  'nav.config.commandMode':     '命令模式',
+  'nav.config.cell':            '小区管理',
+  'nav.config.baseline':        '基线管理',
+  'nav.config.common':          '公共配置',
+  'nav.config.neighbor':        '邻区参数',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Performance
+  // -------------------------------------------------------------------------
+  'nav.performance.kpiStandard':  'KPI标准报表',
+  'nav.performance.kpiStation':   'KPI站点报表',
+  'nav.performance.extraction':   '数据提取',
+  'nav.performance.charts':       '性能图表',
+  'nav.performance.threshold':    '门限配置',
+  'nav.performance.files':        '性能文件',
+  'nav.performance.taskConfig':   '任务配置',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: MML
+  // -------------------------------------------------------------------------
+  'nav.mml.console':   'MML控制台',
+  'nav.mml.script':    '脚本任务',
+  'nav.mml.commands':  '命令树',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Topology
+  // -------------------------------------------------------------------------
+  'nav.topology.gisMap':   'GIS地图',
+  'nav.topology.canvas':   '拓扑图',
+  'nav.topology.domain':   '域管理',
+  'nav.topology.site':     '站点管理',
+  'nav.topology.settings': '拓扑设置',
+  'nav.topology.legend':   '图例管理',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Backup
+  // -------------------------------------------------------------------------
+  'nav.backup.tasks':    '备份任务',
+  'nav.backup.schedule': '备份计划',
+  'nav.backup.ftp':      'FTP配置',
+  'nav.backup.restore':  '数据恢复',
+  'nav.backup.policy':   '备份策略',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Software
+  // -------------------------------------------------------------------------
+  'nav.software.version':      '版本查询',
+  'nav.software.upgradePlan':  '升级计划',
+  'nav.software.activation':   '激活计划',
+  'nav.software.firmware':     '固件上传',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: File
+  // -------------------------------------------------------------------------
+  'nav.file.configRetrieval':    '配置文件采集',
+  'nav.file.configDistribution': '配置文件下发',
+  'nav.file.logRetrieval':       '日志采集',
+  'nav.file.perfRetrieval':      '性能文件采集',
+  'nav.file.mrRetrieval':        'MR文件采集',
+  'nav.file.userFiles':          '用户文件',
+  'nav.file.deviceFiles':        '设备文件',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Log
+  // -------------------------------------------------------------------------
+  'nav.log.neMessage':  '网元消息日志',
+  'nav.log.heartbeat':  '心跳日志',
+  'nav.log.alarm':      '告警日志',
+  'nav.log.operation':  '操作日志',
+  'nav.log.system':     '系统日志',
+  'nav.log.config':     '日志配置',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: System
+  // -------------------------------------------------------------------------
+  'nav.system.deviceClass':   '设备分类',
+  'nav.system.users':         '用户管理',
+  'nav.system.roles':         '角色权限',
+  'nav.system.operationLog':  '操作日志',
+  'nav.system.config':        '系统配置',
+  'nav.system.dataDict':      '数据字典',
+  'nav.system.notifications': '通知设置',
+  'nav.system.dashboard':     '系统仪表板',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Report
+  // -------------------------------------------------------------------------
+  'nav.report.lteStandard':   'LTE标准报表',
+  'nav.report.station':       '站点报表',
+  'nav.report.historicalKpi': '历史KPI',
+  'nav.report.pollStats':     '轮询统计',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: MR
+  // -------------------------------------------------------------------------
+  'nav.mr.indicators':    'MR指标',
+  'nav.mr.deviceMapping': '设备映射',
+  'nav.mr.variables':     '变量管理',
+  'nav.mr.reports':       'MR报表',
+  'nav.mr.tasks':         'MR任务',
+  'nav.mr.files':         'MR文件',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: License
+  // -------------------------------------------------------------------------
+  'nav.license.list':       '许可证列表',
+  'nav.license.operations': '许可证操作',
+  'nav.license.logs':       '许可证日志',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Ops
+  // -------------------------------------------------------------------------
+  'nav.ops.templates':         '运维模板',
+  'nav.ops.commands':          '运维命令',
+  'nav.ops.tasks':             '运维任务',
+  'nav.ops.networkDiagnosis':  '网络诊断',
+  'nav.ops.downloads':         '运维下载',
+
+  // -------------------------------------------------------------------------
+  // Device labels
+  // -------------------------------------------------------------------------
+  'device.type.eNB':        'eNB基站',
+  'device.type.gNB':        'gNB基站',
+  'device.type.CPE':        'CPE终端',
+  'device.type.eGW':        '企业网关',
+  'device.type.all':        '全部',
+  'device.connStatus':      '连接状态',
+  'device.engStatus':       '工程状态',
+  'device.mgmtStatus':      '管理状态',
+  'device.vendor':          '厂商',
+  'device.productType':     '产品类型',
+  'device.networkType':     '网络类型',
+  'device.model':           '设备型号',
+  'device.softwareVersion': '软件版本',
+  'device.ipAddress':       'IP地址',
+  'device.subnet':          '子网',
+  'device.lastOnlineTime':  '最后在线时间',
+  'device.longitude':       '经度',
+  'device.latitude':        '纬度',
+
+  // -------------------------------------------------------------------------
+  // Alarm page labels
+  // -------------------------------------------------------------------------
+  'alarm.id':           '告警ID',
+  'alarm.code':         '告警码',
+  'alarm.name':         '告警名称',
+  'alarm.severity':     '告警级别',
+  'alarm.deviceSn':     '设备序列号',
+  'alarm.deviceName':   '设备名称',
+  'alarm.neType':       '网元类型',
+  'alarm.content':      '告警内容',
+  'alarm.time':         '告警时间',
+  'alarm.clearTime':    '清除时间',
+  'alarm.duration':     '持续时长',
+  'alarm.ackStatus':    '确认状态',
+  'alarm.ackUser':      '确认人',
+  'alarm.ackTime':      '确认时间',
+  'alarm.ackNote':      '确认备注',
+  'alarm.source':       '告警来源',
+  'alarm.location':     '告警位置',
+  'alarm.type':         '告警类型',
+  'alarm.acknowledge':  '确认告警',
+  'alarm.clear':        '清除告警',
+  'alarm.filter':       '告警过滤',
+  'alarm.total':        '告警总数',
+  'alarm.active':       '活跃告警',
+
+  // -------------------------------------------------------------------------
+  // User / System labels
+  // -------------------------------------------------------------------------
+  'user.username':      '用户名',
+  'user.displayName':   '显示名',
+  'user.email':         '邮箱',
+  'user.phone':         '电话',
+  'user.role':          '角色',
+  'user.status':        '状态',
+  'user.lastLogin':     '最后登录',
+  'user.createTime':    '创建时间',
+  'user.password':      '密码',
+  'user.newPassword':   '新密码',
+  'user.confirmPwd':    '确认密码',
+  'user.role.admin':    '管理员',
+  'user.role.operator': '操作员',
+  'user.role.viewer':   '查看者',
+  'user.role.auditor':  '审计员',
+
+  // -------------------------------------------------------------------------
+  // Login page
+  // -------------------------------------------------------------------------
+  'login.title':         'OMC网管系统',
+  'login.username':      '用户名',
+  'login.password':      '密码',
+  'login.submit':        '登录',
+  'login.rememberMe':    '记住我',
+  'login.forgotPwd':     '忘记密码',
+  'login.usernameTip':   '请输入用户名',
+  'login.passwordTip':   '请输入密码',
+  'login.success':       '登录成功',
+  'login.failed':        '用户名或密码错误',
+
+  // -------------------------------------------------------------------------
+  // Task panel
+  // -------------------------------------------------------------------------
+  'task.panel.title':     '任务面板',
+  'task.single':          '单任务',
+  'task.batch':           '批任务',
+  'task.export':          '导出任务',
+  'task.progress':        '进度',
+  'task.status':          '状态',
+  'task.startTime':       '开始时间',
+  'task.endTime':         '结束时间',
+  'task.message':         '消息',
+  'task.clear':           '清空',
+  'task.clearCompleted':  '清除已完成',
+
+  // -------------------------------------------------------------------------
+  // Theme / locale / timezone
+  // -------------------------------------------------------------------------
+  'settings.theme.light':   '浅色主题',
+  'settings.theme.dark':    '深色主题',
+  'settings.locale.zhCN':   '中文',
+  'settings.locale.enUS':   'English',
+  'settings.timezone.utc':  'UTC时间',
+  'settings.timezone.local':'本地时间',
+
+  // -------------------------------------------------------------------------
+  // Error pages
+  // -------------------------------------------------------------------------
+  'error.404.title':   '页面不存在',
+  'error.404.message': '抱歉，您访问的页面不存在。',
+  'error.403.title':   '无访问权限',
+  'error.403.message': '抱歉，您没有权限访问此页面。',
+  'error.500.title':   '服务器错误',
+  'error.500.message': '服务器发生错误，请稍后重试。',
+  'error.backHome':    '返回首页',
+
+  // -------------------------------------------------------------------------
+  // KPI / Performance labels
+  // -------------------------------------------------------------------------
+  'perf.kpiName':     'KPI名称',
+  'perf.kpiCode':     'KPI编码',
+  'perf.unit':        '单位',
+  'perf.category':    '分类',
+  'perf.threshold':   '门限',
+  'perf.granularity': '粒度',
+  'perf.timeRange':   '时间范围',
+  'perf.value':       '值',
+  'perf.timestamp':   '时间戳',
+
+  // -------------------------------------------------------------------------
+  // Config labels
+  // -------------------------------------------------------------------------
+  'config.paramName':   '参数名称',
+  'config.paramCode':   '参数编码',
+  'config.paramValue':  '参数值',
+  'config.defaultValue':'默认值',
+  'config.paramType':   '参数类型',
+  'config.readonly':    '只读',
+  'config.template':    '模板',
+  'config.baseline':    '基线',
+  'config.apply':       '下发',
+  'config.sync':        '同步',
+  'config.compare':     '比较',
+
+  // -------------------------------------------------------------------------
+  // Tab context menu
+  // -------------------------------------------------------------------------
+  'tab.closeOthers': '关闭其他',
+  'tab.closeAll':    '关闭全部',
+  'tab.closeRight':  '关闭右侧',
+
+  // -------------------------------------------------------------------------
+  // App / Header
+  // -------------------------------------------------------------------------
+  'app.title':            'OMC 统一网管系统',
+  'header.currentView':   '当前视图:',
+  'header.notification':  '通知',
+  'header.switchToDark':  '切换到深色主题',
+  'header.switchToDim':   '切换到柔和暗色',
+  'header.switchToLight': '切换到浅色主题',
+  'header.timezone':      '时区:',
+  'header.localTimezone': '本地时区',
+  'header.timezoneTitle': '当前时区: {tz}，点击切换',
+  'header.alarmTitle':    '{label}告警: {count}',
+
+  // -------------------------------------------------------------------------
+  // User dropdown
+  // -------------------------------------------------------------------------
+  'user.changePassword':  '修改密码',
+  'user.logout':          '退出登录',
+  'user.notLoggedIn':     '未登录',
+  'user.switchToEn':      '切换到 English',
+  'user.switchToZh':      '切换到中文',
+
+  // -------------------------------------------------------------------------
+  // Dashboard
+  // -------------------------------------------------------------------------
+  'dashboard.totalDevices':      '总设备数',
+  'dashboard.onlineDevices':     '在线设备',
+  'dashboard.activeAlarms':      '活跃告警',
+  'dashboard.runningTasks':      '任务执行中',
+  'dashboard.vsLastWeek':        '较上周',
+  'dashboard.onlineRate':        '在线率',
+  'dashboard.vsYesterday':       '较昨日',
+  'dashboard.alarmSummary':      '告警汇总',
+  'dashboard.viewAll':           '查看全部',
+  'dashboard.alarmDistribution': '告警级别分布',
+  'dashboard.deviceStatusByType':'设备状态分布（按类型）',
+  'dashboard.alarmTrend7d':      '近7天告警趋势',
+  'dashboard.top10AlarmDevices': 'TOP10告警设备',
+  'dashboard.deviceMap':         '设备地图',
+  'dashboard.quickAccess':       '快速入口',
+  'dashboard.sysAdmin':          '系统管理员',
+  'dashboard.todayOps':          '今日操作',
+  'dashboard.processedAlarms':   '处理告警',
+  'dashboard.lastLogin':         '上次登录:',
+  'dashboard.alarmCount':        '告警次数',
+
+  // Dashboard chart labels
+  'dashboard.chart.online':  '在线',
+  'dashboard.chart.offline': '离线',
+  'dashboard.chart.alarm':   '告警',
+
+  // -------------------------------------------------------------------------
+  // Common page labels
+  // -------------------------------------------------------------------------
+  'common.batchConfig':     '批量配置',
+  'common.batchAck':        '批量确认',
+  'common.batchClear':      '批量清除',
+  'common.addDevice':       '添加设备',
+  'common.confirmDelete':   '确认删除',
+  'common.deleteConfirmMsg':'确定要删除选中的 {count} 条记录吗？此操作不可恢复。',
+  'common.deleteSuccess':   '删除成功',
+  'common.exportInProgress':'正在导出...',
+  'common.featureInDev':    '功能开发中',
+  'common.realTimeConn':    '实时连接',
+  'common.unacked':         '{count} 条未确认',
+  'common.ackConfirmMsg':   '确定要确认选中的 {count} 条告警吗？',
+  'common.ackSuccess':      '已确认 {count} 条告警',
+  'common.clearConfirmMsg': '确定要清除选中的 {count} 条告警吗？',
+  'common.clearSuccess':    '已清除 {count} 条告警',
+  'common.hasAlarm':        '有告警',
+  'common.noAlarm':         '无告警',
+
+  // -------------------------------------------------------------------------
+  // FilterBar
+  // -------------------------------------------------------------------------
+  'filter.expand':      '展开',
+  'filter.collapse':    '收起',
+  'filter.query':       '查询',
+  'filter.enterField':  '请输入{label}',
+  'filter.selectField': '请选择{label}',
+  'dateRange.start':    '开始时间',
+  'dateRange.end':      '结束时间',
+
+  // -------------------------------------------------------------------------
+  // DataTable extras
+  // -------------------------------------------------------------------------
+  'table.density':           '密度',
+  'table.density.compact':   '紧凑',
+  'table.density.default':   '默认',
+  'table.density.comfortable':'宽松',
+  'table.columnSettings':    '列设置',
+  'table.columnDisplay':     '列显示',
+  'table.showAll':           '全部显示',
+  'table.selected':          '已选 {count} 项',
+  'table.totalItems':        '共 {total} 条',
+  'table.copied':            '已复制',
+  'table.searchPlaceholder': '搜索...',
+
+  // -------------------------------------------------------------------------
+  // EmptyState
+  // -------------------------------------------------------------------------
+  'empty.noData':          '暂无数据',
+  'empty.noDataDesc':      '当前列表为空，请稍后再试',
+  'empty.noResult':        '未找到相关结果',
+  'empty.noResultDesc':    '请尝试调整搜索条件后重新查询',
+  'empty.loadFailed':      '加载失败',
+  'empty.loadFailedDesc':  '数据加载时发生错误，请重试',
+  'empty.noPermission':    '暂无权限',
+  'empty.noPermissionDesc':'您没有访问此内容的权限，请联系管理员',
+
+  // -------------------------------------------------------------------------
+  // ErrorBoundary
+  // -------------------------------------------------------------------------
+  'error.pageError':        '页面发生错误',
+  'error.tryRefresh':       '请尝试刷新页面或联系系统管理员',
+  'error.retry':            '重试',
+  'error.networkError':     '网络错误',
+  'error.networkErrorDesc': '无法连接到服务器，请检查网络连接后重试。',
+
+  // -------------------------------------------------------------------------
+  // Sidebar
+  // -------------------------------------------------------------------------
+  'sidebar.expand':    '展开侧边栏',
+  'sidebar.collapse':  '收起侧边栏',
+
+  // -------------------------------------------------------------------------
+  // Layout customization
+  // -------------------------------------------------------------------------
+  'layout.title':             '布局设置',
+  'layout.subtitle':          '自定义侧边栏和标签栏位置',
+  'layout.sidebarPosition':   '侧边栏位置',
+  'layout.sidebarLeft':       '左侧',
+  'layout.sidebarRight':      '右侧',
+  'layout.sidebarTop':        '顶部',
+  'layout.tabBarPosition':    '标签栏位置',
+  'layout.tabBarTop':         '顶部',
+  'layout.tabBarBottom':      '底部',
+  'layout.tabBarLeft':        '左侧',
+  'layout.preview':           '布局预览',
+  'layout.resetDefault':      '恢复默认',
+
+  // -------------------------------------------------------------------------
+  // Visual styles
+  // -------------------------------------------------------------------------
+  'style.title':              '视觉风格',
+  'style.subtitle':           '选择一套完整的视觉风格方案',
+  'style.classic':            '经典商务',
+  'style.classicDesc':        '深色海军蓝导航，专业稳重',
+  'style.tech':               '科技未来',
+  'style.techDesc':           '全暗色赛博风格，霓虹青色主色',
+  'style.fresh':              '简约清新',
+  'style.freshDesc':          '全白色导航，靛蓝主色，现代SaaS风',
+  'style.cyberpunk':          '赛博朋克',
+  'style.cyberpunkDesc':      '极致炫酷的赛博朋克/黑客帝国风格',
+  'style.minions':            '萌宠版',
+  'style.minionsDesc':        '可爱活泼的小黄人主题',
+  'style.tiffany':            '纯美',
+  'style.tiffanyDesc':        '优雅奢华的蒂芙尼风格',
+  'style.rmb':                '人民币',
+  'style.rmbDesc':            '庄重大气的中国红金配色，国潮风格',
+  'effects3d.toggle':         '3D特效',
+  'effects3d.description':    '开启卡片倾斜、粒子背景、浮动动画等3D视觉效果',
+  'header.switchToTech':      '切换到科技未来风格',
+  'header.switchToFresh':     '切换到简约清新风格',
+  'header.switchToCyberpunk': '切换到赛博朋克风格',
+  'header.switchToMinions':   '切换到萌宠版风格',
+  'header.switchToTiffany':   '切换到纯美风格',
+  'header.switchToRmb':       '切换到人民币风格',
+  'header.switchToClassic':   '切换到经典商务风格',
+
+  // -------------------------------------------------------------------------
+  // SplitPanel
+  // -------------------------------------------------------------------------
+  'panel.expandTop':    '展开上方面板',
+  'panel.collapseTop':  '收起上方面板',
+  'panel.expandBottom': '展开下方面板',
+  'panel.collapseBottom':'收起下方面板',
+
+  // -------------------------------------------------------------------------
+  // Topology
+  // -------------------------------------------------------------------------
+  'topology.zoomIn':    '放大',
+  'topology.zoomOut':   '缩小',
+  'topology.resetView': '重置视图',
+  'topology.noData':    '暂无拓扑数据',
+  'topology.status.online':  '���线',
+  'topology.status.offline': '离线',
+  'topology.status.alarm':   '告警',
+  'topology.status.maintenance': '维护',
+
+  // -------------------------------------------------------------------------
+  // AlarmFilter
+  // -------------------------------------------------------------------------
+  'alarm.filter.title':    '告警筛选',
+  'alarm.filter.apply':    '应用筛选',
+  'alarm.filter.resetAll': '重置条件',
+  'alarm.filter.basic':    '基本条件',
+  'alarm.filter.device':   '设备条件',
+  'alarm.filter.advanced': '高级条件',
+  'alarm.filter.alarmType':'告警类型',
+  'alarm.filter.alarmNameCode': '告警名称/编码/内容',
+  'alarm.filter.deviceSn': '输入或粘贴设备SN，按Enter确认',
+  'alarm.filter.deviceModel': '请输入设备型号',
+  'alarm.filter.severity':     '告警级别',
+  'alarm.filter.keyword':      '告警关键字',
+  'alarm.filter.deviceSnPlaceholder': '输入或粘贴设备SN，按Enter确认',
+  'alarm.filter.location':     '位置条件',
+  'alarm.filter.locationId':   '告警位置',
+  'alarm.filter.locationDetail':'位置详情',
+  'alarm.filter.region':       '区域',
+  'alarm.filter.timeRange':    '时间条件',
+  'alarm.filter.alarmTime':    '告警时间',
+  'alarm.filter.clearTime':    '清除时间',
+  'alarm.filter.sortBy':       '排序方式',
+  'alarm.filter.maxCount':     '最大数量',
+  'alarm.filter.includeCleared':      '包含已清除',
+  'alarm.filter.includeAcknowledged': '包含已确认',
+  'alarm.filter.allTypes':     '全部类型',
+  'alarm.filter.type.device':  '设备告警',
+  'alarm.filter.type.link':    '链路告警',
+  'alarm.filter.type.performance': '性能告警',
+  'alarm.filter.type.security':'安全告警',
+  'alarm.filter.type.environment': '环境告警',
+  'alarm.filter.alarmCode':    '告警码',
+  'alarm.filter.countItems':   '{count} 条',
+  'alarm.filter.noLimit':      '不限',
+
+  // Topology node types
+  'topology.nodeType.eNB':    '基站',
+  'topology.nodeType.domain': '域',
+  'topology.nodeType.site':   '站',
+
+  // -------------------------------------------------------------------------
+  // Device specific
+  // -------------------------------------------------------------------------
+  'device.name':             '设备名称',
+  'device.sn':               '设备SN',
+  'device.region':           '区域',
+  'device.alarmLevel':       '告警级别',
+  'device.lastOnline':       '最后在线',
+  'device.engStatus.commissioned':   '已开通',
+  'device.engStatus.uncommissioned': '未开通',
+  'device.engStatus.decommissioned': '已退网',
+  'device.networkMode':      '网络制式',
+  'device.count.total':      '总数',
+
+  // -------------------------------------------------------------------------
+  // Alarm specific
+  // -------------------------------------------------------------------------
+  'alarm.occurTime':    '发生时间',
+  'alarm.severity.none':'无',
+
+  // -------------------------------------------------------------------------
+  // Time duration
+  // -------------------------------------------------------------------------
+  'time.seconds': '{n}秒',
+  'time.minutes': '{n}分钟',
+  'time.hours':   '{n}小时',
+  'time.days':    '{n}天',
+
+  // -------------------------------------------------------------------------
+  // License module
+  // -------------------------------------------------------------------------
+  'license.idOrName':               '许可证ID/名称',
+  'license.idOrNamePlaceholder':    '请输入许可证ID或名称',
+  'license.perpetual':              '永久许可',
+  'license.subscription':           '订阅授权',
+  'license.trialType':              '试用版',
+  'license.evaluation':             '评估版',
+  'license.expired':                '已过期',
+  'license.trial':                  '试用中',
+  'license.revoked':                '已撤销',
+  'license.capacityUsage':          '容量使用',
+  'license.validity':               '有效期',
+  'license.permanent':              '永久',
+  'license.permanentValid':         '永久有效',
+  'license.detail':                 'License详情',
+  'license.licenseName':            '许可证名称',
+  'license.productName':            '产品名称',
+  'license.licenseType':            '许可类型',
+  'license.capacity':               '授权容量',
+  'license.used':                   '已使用',
+  'license.licensor':               '发行方',
+  'license.issueDate':              '发行日期',
+  'license.expiryDate':             '到期日期',
+  'license.features':               '包含功能',
+  'license.notes':                  '备注',
+  'license.selectToViewDetail':     '请点击上方表格中的"详情"按钮查看 License 详细信息',
+  'license.revoke':                 '撤销',
+  'license.revokeSuccess':          'License已撤销',
+  'license.activate':               '激活',
+  'license.query':                  '查询',
+  'license.renew':                  '续期',
+  'license.operationType':          '操作类型',
+  'license.remark':                 '备注',
+  'license.operationsSubtitle':     '导入、激活和撤销License',
+  'license.importLicense':          '导入License',
+  'license.activateLicense':        '激活License',
+  'license.revokeLicense':          '撤销License',
+  'license.operationHistory':       '操作历史',
+  'license.selectFileFirst':        '请先��择License文件',
+  'license.importFile':             '导入文件',
+  'license.importSuccess':          'License文件导入成功',
+  'license.enterActivationCode':    '请输入License激活码',
+  'license.activateSuccess':        'License激活成功',
+  'license.enterRevokeId':          '请输入要撤销的License ID',
+  'license.confirmRevoke':          '确认撤销',
+  'license.confirmRevokeMsg':       '确认撤销 License "{id}"？撤销后该许可证将立即失效。',
+  'license.dragFileHere':           '点击或拖拽License文件到此区域',
+  'license.supportedFormats':       '支持格式：.lic / .dat / .xml / .key',
+  'license.activateDescription':    '输入License激活码进行激活。激活码通常由供应商提供，格式为 OMC-XXXX-XXXX-XXXX。',
+  'license.pasteActivationCode':    '请粘贴完整的License激活码',
+  'license.revokeWarning':          '警告：撤销操作不可恢复！撤销后 License 将立即失效，受该 License 保护的功能将无法使用。',
+  'license.enterRevokeIdPlaceholder': '请输入要撤销的 License ID（如: OMC-BASIC-HB-2024-001）',
+  'license.keyword':                '关键词',
+  'license.keywordPlaceholder':     '请输入License ID/操作者',
+  'license.timeRange':              '时间范围',
+  'license.logsSubtitle':           '查看许可证操作历史记录',
+  'license.clientIp':               '客户端IP',
+
+  // -------------------------------------------------------------------------
+  // MR module
+  // -------------------------------------------------------------------------
+  'mr.indicatorNameCode':           '指标名称/编码',
+  'mr.indicatorNameCodePlaceholder': '请输入指标名称或编码',
+  'mr.category':                    '分类',
+  'mr.categoryPlaceholder':         '请输入分类',
+  'mr.categoryExample':             '如: 采集配置、过滤配置',
+  'mr.radioAccess':                 '无线接入',
+  'mr.mobility':                    '移动性',
+  'mr.coverageQuality':             '覆盖质量',
+  'mr.systemLoad':                  '系统负荷',
+  'mr.interference':                '干扰',
+  'mr.indicatorName':               '指标名称',
+  'mr.indicatorCode':               '指标编码',
+  'mr.unit':                        '单位',
+  'mr.unitPlaceholder':             '如: 秒、dBm（选填）',
+  'mr.valueRange':                  '取值范围',
+  'mr.valueRangePlaceholder':       '如: 1-1000 或 A/B/C',
+  'mr.mrType':                      'MR类型',
+  'mr.indicatorsSubtitle':          '查看和管理MR测量指标定义',
+  'mr.reportName':                  '报表名称',
+  'mr.reportNamePlaceholder':       '请输入报表名称',
+  'mr.analysisType':                '分析类型',
+  'mr.coverageAnalysis':            '覆盖分析',
+  'mr.interferenceAnalysis':        '干扰分析',
+  'mr.mobilityAnalysis':            '移动性分析',
+  'mr.loadAnalysis':                '负载分析',
+  'mr.qualityAnalysis':             '质量分析',
+  'mr.generated':                   '已生成',
+  'mr.generating':                  '生成中',
+  'mr.generateFailed':              '生成失败',
+  'mr.generateTime':                '生成时间',
+  'mr.timeRange':                   '时间范围',
+  'mr.deviceScope':                 '设备范围',
+  'mr.fileSize':                    '文件大小',
+  'mr.downloadTaskCreated':         '下载任务已创建',
+  'mr.newReport':                   '新建报表',
+  'mr.newReportFeature':            '新建报表功能',
+  'mr.reportsSubtitle':             '查看MR数据分析报告',
+  'mr.taskName':                    '任务名称',
+  'mr.taskNamePlaceholder':         '请输入任务名称',
+  'mr.collectType':                 '采集类型',
+  'mr.paused':                      '已暂停',
+  'mr.completed':                   '已完成',
+  'mr.schedule':                    '调度',
+  'mr.progress':                    '进度',
+  'mr.lastRun':                     '最后执行',
+  'mr.creator':                     '创建者',
+  'mr.pause':                       '暂停',
+  'mr.taskCreateSuccess':           'MR采集任务创建成功',
+  'mr.newTask':                     '新建任务',
+  'mr.tasksSubtitle':               '管理MR数据采集任务',
+  'mr.newCollectTask':              '新建MR采集任务',
+  'mr.deviceCount':                 '设备数量',
+  'mr.deviceCountPlaceholder':      '预计设备数量',
+  'mr.collectSchedule':             '采集调度',
+  'mr.every15min':                  '每15分钟',
+  'mr.everyHour':                   '每小时',
+  'mr.dailyAt01':                   '每天01:00',
+  'mr.oneTime':                     '一次性立即执行',
+  'mr.varName':                     '变量名',
+  'mr.varNamePlaceholder':          '请输入变量名或描述',
+  'mr.varNameRequired':             '请输入变量名',
+  'mr.varNamePattern':              '变量名只能包含大写字母、数字和下划线，以字母或下划线开头',
+  'mr.varNameExample':              '如: MR_PERIOD',
+  'mr.varType':                     '变量类型',
+  'mr.varTypeInteger':              '整数',
+  'mr.varTypeFloat':                '浮点数',
+  'mr.varTypeEnum':                 '枚举',
+  'mr.varTypeBoolean':              '布尔',
+  'mr.varTypeString':               '字符串',
+  'mr.defaultValue':                '默认值',
+  'mr.defaultValuePlaceholder':     '请输入默认值',
+  'mr.descriptionPlaceholder':      '请输入变量说明',
+  'mr.varUpdateSuccess':            '变量配置已更新',
+  'mr.varCreateSuccess':            '变量已创建',
+  'mr.addVariable':                 '新增变量',
+  'mr.editVariable':                '编辑变量',
+  'mr.variablesSubtitle':           '管理MR测量报告采集变量参数',
+  'mr.fileName':                    '文件名',
+  'mr.fileNamePlaceholder':         '请输入文件名',
+  'mr.deviceSnPlaceholder':         '请输入设备SN',
+  'mr.collectTime':                 '采集时间',
+  'mr.uploadTime':                  '上传时间',
+  'mr.recordCount':                 '记录数',
+  'mr.filesSubtitle':               '查看设备上报的MR数据文件',
+  'mr.batchDownload':               '批量下载 {count} 个文件',
+
+  // -------------------------------------------------------------------------
+  // Ops module
+  // -------------------------------------------------------------------------
+  'ops.templateName':               '模板名称',
+  'ops.templateNamePlaceholder':    '请输入模板名称',
+  'ops.targetDevice':               '目标设备',
+  'ops.applicableDevices':          '适用设备',
+  'ops.applicableDeviceTypes':      '适用设备类型',
+  'ops.stepCount':                  '步骤数',
+  'ops.estimatedDuration':          '预计时长',
+  'ops.estimatedDurationSeconds':   '预计时长（秒）',
+  'ops.durationExample':            '如: 300',
+  'ops.useCount':                   '使用次数',
+  'ops.downloadCount':              '下载次数',
+  'ops.templateCreateSuccess':      '模板创建成功',
+  'ops.deleteConfirmContent':       '删除后不可恢复，是否确认？',
+  'ops.newTemplate':                '新建模板',
+  'ops.newOpsTemplate':             '新建运维模板',
+  'ops.templatesSubtitle':          '管理开站运维流程模板和通用操作模板',
+  'ops.commissionTemplates':        '开站运维模板',
+  'ops.genericTemplates':           '通用模板',
+  'ops.templateDetail':             '模板详情',
+  'ops.tags':                       '标签',
+  'ops.executionSteps':             '执行步骤（共 {count} 步）',
+  'ops.stepTypeMml':                'MML命令',
+  'ops.stepTypeCheck':              '条件检查',
+  'ops.stepTypeWait':               '等待',
+  'ops.stepTypeNotify':             '通知',
+  'ops.stepTypeScript':             '脚本',
+  'ops.condition':                  '条件',
+  'ops.waitSeconds':                '等待 {seconds} 秒',
+  'ops.rollback':                   '回滚',
+  'ops.minutes':                    '分钟',
+  'ops.seconds':                    '秒',
+  'ops.catInspection':              '巡检运维',
+  'ops.catFault':                   '故障处置',
+  'ops.catPerformance':             '性能优化',
+  'ops.catSoftware':                '软件管理',
+  'ops.catNetwork':                 '网络配置',
+  'ops.catMaintenance':             '维护操作',
+  'ops.descriptionPlaceholder':     '请输入模板描述',
+  'ops.commandOrDevice':            '命令/设备',
+  'ops.commandOrDevicePlaceholder': '请输入命令文本或设备SN',
+  'ops.deviceSnPlaceholder':        '请输入设备SN',
+  'ops.operatorPlaceholder':        '请输入操作者',
+  'ops.executeResult':              '执行结果',
+  'ops.executeTime':                '执行时间',
+  'ops.command':                    '命令',
+  'ops.duration':                   '耗时',
+  'ops.outputSummary':              '输出摘要',
+  'ops.commandDetail':              '命令执行详情',
+  'ops.executeSuccess':             '执行成功',
+  'ops.executeFailed':              '执行失败',
+  'ops.executeInfo':                '执行信息',
+  'ops.outputResult':               '输出结果',
+  'ops.noOutput':                   '（无输出）',
+  'ops.executeFailedNoOutput':      '命令执行失败，无有效输出。',
+  'ops.commandsSubtitle':           '查看MML命令执行记录',
+  'ops.downloadReady':              '可下载',
+  'ops.downloadExpired':            '已过期',
+  'ops.fileType':                   '文件类型',
+  'ops.fileTypeConfig':             '配置文件',
+  'ops.fileTypeLog':                '日志文件',
+  'ops.fileTypeFirmware':           '固件包',
+  'ops.fileTypeMR':                 'MR数据',
+  'ops.fileTypePerf':               '性能数据',
+  'ops.reportType':                 '报告类型',
+  'ops.reportTypeLTE':              'LTE标准报告',
+  'ops.reportTypeStation':          '站点报告',
+  'ops.reportTypeKPI':              'KPI历史',
+  'ops.reportTypeMR':               'MR分析报告',
+  'ops.reportTypePoll':             '轮询统计',
+  'ops.fileNameOrSn':               '文件名/设备SN',
+  'ops.fileNameOrSnPlaceholder':    '请输入文件名或设备SN',
+  'ops.reportName':                 '报告名称',
+  'ops.reportNamePlaceholder':      '请输入报告名称',
+  'ops.sourceDevice':               '来源设备',
+  'ops.expireTime':                 '过期时间',
+  'ops.generateTime':               '生成时间',
+  'ops.statsPeriod':                '统计周期',
+  'ops.startDownload':              '开始下载',
+  'ops.retry':                      '重试',
+  'ops.fileRegenerated':            '文件已重新生成',
+  'ops.reportRegenerated':          '报告已重新生成',
+  'ops.resourceFileDownload':       '资源文件下载',
+  'ops.reportDownload':             '报告下载',
+  'ops.downloadsSubtitle':          '资源文件和报告下载管理',
+  'ops.networkDiagnosisSubtitle':   'Ping / Traceroute 网络连通性诊断工具',
+  'ops.pingParams':                 'Ping 参数',
+  'ops.tracerouteParams':           'Traceroute 参数',
+  'ops.selectSourceDevice':         '请选择源设备（默认OMC）',
+  'ops.targetAddress':              '目标地址',
+  'ops.enterTargetAddress':         '请输入目标IP或域名',
+  'ops.ipOrDomain':                 'IP地址或域名',
+  'ops.count':                      '次数',
+  'ops.intervalSeconds':            '间隔(s)',
+  'ops.timeoutSeconds':             '超时(s)',
+  'ops.maxHops':                    '最大跳数',
+  'ops.startPing':                  '开始 Ping',
+  'ops.startTraceroute':            '开始 Traceroute',
+  'ops.stop':                       '停止',
+  'ops.pingStats':                  'Ping 统计',
+  'ops.transmitted':                '已发送',
+  'ops.received':                   '已接收',
+  'ops.packetLoss':                 '丢包率',
+  'ops.minRtt':                     '最小RTT',
+  'ops.avgRtt':                     '平均RTT',
+  'ops.maxRtt':                     '最大RTT',
+  'ops.tracerouteComplete':         'Traceroute 完成。路由追踪结果已显示在上方终端中。',
+  'ops.allOmcServer':               '全部 (OMC Server)',
+};
+
+export default messages;

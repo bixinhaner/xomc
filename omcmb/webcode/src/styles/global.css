@@ -1,0 +1,896 @@
+:root {
+  /* =========================================================================
+     CLASSIC theme (default) — 经典商务
+     ========================================================================= */
+
+  /* Primary */
+  --color-primary-50: #EBF5FF;
+  --color-primary-100: #D6EBFF;
+  --color-primary-200: #ADD6FF;
+  --color-primary-300: #85C1FF;
+  --color-primary-400: #5CACFF;
+  --color-primary-500: #3396FF;
+  --color-primary-600: #1677FF;
+  --color-primary-700: #0958D9;
+  --color-primary-800: #003EB3;
+  --color-primary-900: #002C8C;
+
+  /* Neutral */
+  --color-neutral-50: #FAFAFA;
+  --color-neutral-100: #F5F5F5;
+  --color-neutral-200: #F0F0F0;
+  --color-neutral-300: #D9D9D9;
+  --color-neutral-400: #BFBFBF;
+  --color-neutral-500: #8C8C8C;
+  --color-neutral-600: #595959;
+  --color-neutral-700: #434343;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #1F1F1F;
+  --color-neutral-950: #141414;
+
+  /* Severity */
+  --color-severity-critical: #F5222D;
+  --color-severity-critical-bg: #FFF1F0;
+  --color-severity-major: #FA8C16;
+  --color-severity-major-bg: #FFF7E6;
+  --color-severity-minor: #FAAD14;
+  --color-severity-minor-bg: #FFFBE6;
+  --color-severity-warning: #1890FF;
+  --color-severity-warning-bg: #E6F7FF;
+
+  /* Status */
+  --color-status-success: #52C41A;
+  --color-status-error: #F5222D;
+  --color-status-processing: #1677FF;
+  --color-status-warning: #FA8C16;
+  --color-status-inactive: #8C8C8C;
+
+  /* Semantic tokens */
+  --color-bg-container: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-border: #F0F0F0;
+  --color-border-secondary: #D9D9D9;
+
+  /* Hover / Selection */
+  --color-row-hover: #e6f7ff;
+  --color-selection-bg: #e6f7ff;
+  --color-severity-critical-hover: #ffccc7;
+  --color-severity-major-hover: #ffe7ba;
+  --color-severity-minor-hover: #fff1b8;
+  --color-severity-warning-hover: #bae7ff;
+
+  /* ----- Header chrome ----- */
+  --color-header-bg: #001529;
+  --color-header-shadow: 0 1px 4px rgba(0, 21, 41, 0.35);
+  --color-header-text: #FFFFFF;
+  --color-header-text-secondary: rgba(255, 255, 255, 0.65);
+  --color-header-text-muted: rgba(255, 255, 255, 0.45);
+  --color-header-text-dim: rgba(255, 255, 255, 0.55);
+  --color-header-text-bright: rgba(255, 255, 255, 0.9);
+  --color-header-action-hover: rgba(255, 255, 255, 0.08);
+  --color-header-divider: rgba(255, 255, 255, 0.15);
+  --color-header-border: rgba(255, 255, 255, 0.12);
+  --color-header-border-hover: rgba(255, 255, 255, 0.35);
+  --color-header-input-bg: rgba(255, 255, 255, 0.06);
+  --color-header-input-text: rgba(255, 255, 255, 0.75);
+  --color-header-logo-gradient: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+
+  /* ----- Sidebar chrome ----- */
+  --color-sidebar-bg: #001529;
+  --color-sidebar-bg-deep: #000C17;
+  --color-sidebar-text: rgba(255, 255, 255, 0.65);
+  --color-sidebar-text-active: #FFFFFF;
+  --color-sidebar-text-hover: rgba(255, 255, 255, 0.85);
+  --color-sidebar-text-muted: rgba(255, 255, 255, 0.35);
+  --color-sidebar-text-dim: rgba(255, 255, 255, 0.25);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.08);
+  --color-sidebar-divider: rgba(255, 255, 255, 0.06);
+  --color-sidebar-scrollbar: rgba(255, 255, 255, 0.15);
+  --color-sidebar-btn-border: rgba(255, 255, 255, 0.15);
+  --color-sidebar-btn-border-hover: rgba(255, 255, 255, 0.3);
+  --color-sidebar-btn-bg: rgba(255, 255, 255, 0.05);
+  --color-sidebar-btn-bg-hover: rgba(255, 255, 255, 0.12);
+  --color-sidebar-btn-text: rgba(255, 255, 255, 0.55);
+  --color-sidebar-btn-text-hover: rgba(255, 255, 255, 0.9);
+
+  /* ----- Login page ----- */
+  --login-bg-gradient: linear-gradient(135deg, #001529 0%, #002d62 50%, #0958D9 100%);
+  --login-bg-radial: radial-gradient(ellipse at center, rgba(9, 88, 217, 0.15) 0%, transparent 60%);
+  --login-bg-accent: radial-gradient(ellipse at center, rgba(0, 21, 41, 0.4) 0%, transparent 70%);
+  --login-card-bg: rgba(255, 255, 255, 0.98);
+  --login-card-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --login-logo-area-bg: linear-gradient(180deg, #001529 0%, #003a75 100%);
+  --login-logo-gradient: linear-gradient(135deg, #1677ff 0%, #0958D9 100%);
+  --login-logo-shadow: 0 8px 24px rgba(22, 119, 255, 0.4);
+  --login-logo-shadow-pulse: 0 8px 32px rgba(22, 119, 255, 0.7);
+  --login-btn-gradient: linear-gradient(135deg, #1677ff 0%, #0958D9 100%);
+  --login-btn-shadow: 0 4px 16px rgba(22, 119, 255, 0.35);
+  --login-btn-shadow-hover: 0 6px 20px rgba(22, 119, 255, 0.5);
+  --login-footer-border: rgba(0, 0, 0, 0.06);
+  --login-footer-text: rgba(0, 0, 0, 0.35);
+  --login-input-icon: rgba(0, 0, 0, 0.25);
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Layout */
+  --header-height: 48px;
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 48px;
+  --tab-bar-height: 36px;
+  --task-panel-height: 40px;
+  --content-padding-h: 24px;
+  --content-padding-v: 16px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.03), 0 1px 6px -1px rgba(0,0,0,0.02), 0 2px 4px 0 rgba(0,0,0,0.02);
+  --shadow-md: 0 3px 6px -4px rgba(0,0,0,0.12), 0 6px 16px 0 rgba(0,0,0,0.08), 0 9px 28px 8px rgba(0,0,0,0.05);
+  --shadow-lg: 0 6px 16px -8px rgba(0,0,0,0.08), 0 9px 28px 0 rgba(0,0,0,0.05), 0 12px 48px 16px rgba(0,0,0,0.03);
+
+  /* Font */
+  --font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+
+  /* 3D Effect tokens (classic defaults) */
+  --effect-perspective: 1200px;
+  --effect-tilt-max: 5deg;
+  --effect-glow-color: rgba(22, 119, 255, 0.2);
+  --effect-glow-intensity: 0.1;
+  --effect-float-amplitude: 3px;
+}
+
+/* ===========================================================================
+   TECH theme — 科技未来 (Cyberpunk / Dark)
+   =========================================================================== */
+[data-theme="tech"] {
+  /* 3D Effect tokens */
+  --effect-perspective: 1000px;
+  --effect-tilt-max: 10deg;
+  --effect-glow-color: rgba(0, 212, 255, 0.3);
+  --effect-glow-intensity: 0.3;
+  --effect-float-amplitude: 5px;
+
+  --color-primary-50: #0A2A3A;
+  --color-primary-100: #0D3A4F;
+  --color-primary-200: #125570;
+  --color-primary-300: #1A7A9C;
+  --color-primary-400: #26A5CC;
+  --color-primary-500: #00C4EE;
+  --color-primary-600: #00D4FF;
+  --color-primary-700: #33DDFF;
+  --color-primary-800: #66E5FF;
+  --color-primary-900: #99EEFF;
+
+  --color-neutral-50: #0D1117;
+  --color-neutral-100: #161B22;
+  --color-neutral-200: #1C2128;
+  --color-neutral-300: #21262D;
+  --color-neutral-400: #30363D;
+  --color-neutral-500: #484F58;
+  --color-neutral-600: #8B949E;
+  --color-neutral-700: #C9D1D9;
+  --color-neutral-800: #E6EDF3;
+  --color-neutral-900: #F0F6FC;
+  --color-neutral-950: #FFFFFF;
+
+  --color-bg-container: #161B22;
+  --color-bg-elevated: #1C2128;
+  --color-border: #21262D;
+  --color-border-secondary: #30363D;
+
+  --color-severity-critical-bg: #3A1215;
+  --color-severity-major-bg: #3B2D11;
+  --color-severity-minor-bg: #3B3611;
+  --color-severity-warning-bg: #112D3C;
+  --color-row-hover: #1C2530;
+  --color-selection-bg: #0D2A3A;
+  --color-severity-critical-hover: #4A1A1D;
+  --color-severity-major-hover: #4B3D18;
+  --color-severity-minor-hover: #4B4618;
+  --color-severity-warning-hover: #183D4C;
+
+  --color-status-processing: #00D4FF;
+
+  /* Header chrome — dark glassy */
+  --color-header-bg: rgba(13, 17, 23, 0.92);
+  --color-header-shadow: 0 1px 8px rgba(0, 0, 0, 0.5), 0 0 1px rgba(0, 212, 255, 0.1);
+  --color-header-text: #E6EDF3;
+  --color-header-text-secondary: rgba(201, 209, 217, 0.75);
+  --color-header-text-muted: rgba(139, 148, 158, 0.65);
+  --color-header-text-dim: rgba(139, 148, 158, 0.5);
+  --color-header-text-bright: #E6EDF3;
+  --color-header-action-hover: rgba(0, 212, 255, 0.1);
+  --color-header-divider: rgba(0, 212, 255, 0.12);
+  --color-header-border: rgba(0, 212, 255, 0.15);
+  --color-header-border-hover: rgba(0, 212, 255, 0.3);
+  --color-header-input-bg: rgba(0, 212, 255, 0.06);
+  --color-header-input-text: rgba(201, 209, 217, 0.8);
+  --color-header-logo-gradient: linear-gradient(135deg, #00D4FF 0%, #0090B0 100%);
+
+  /* Sidebar chrome — dark glassy */
+  --color-sidebar-bg: rgba(13, 17, 23, 0.95);
+  --color-sidebar-bg-deep: #0A0E14;
+  --color-sidebar-text: rgba(201, 209, 217, 0.7);
+  --color-sidebar-text-active: #00D4FF;
+  --color-sidebar-text-hover: #E6EDF3;
+  --color-sidebar-text-muted: rgba(139, 148, 158, 0.5);
+  --color-sidebar-text-dim: rgba(139, 148, 158, 0.35);
+  --color-sidebar-hover: rgba(0, 212, 255, 0.08);
+  --color-sidebar-divider: rgba(0, 212, 255, 0.06);
+  --color-sidebar-scrollbar: rgba(0, 212, 255, 0.12);
+  --color-sidebar-btn-border: rgba(0, 212, 255, 0.2);
+  --color-sidebar-btn-border-hover: rgba(0, 212, 255, 0.4);
+  --color-sidebar-btn-bg: rgba(0, 212, 255, 0.05);
+  --color-sidebar-btn-bg-hover: rgba(0, 212, 255, 0.12);
+  --color-sidebar-btn-text: rgba(201, 209, 217, 0.6);
+  --color-sidebar-btn-text-hover: #00D4FF;
+
+  /* Login page — dark neon */
+  --login-bg-gradient: linear-gradient(135deg, #0A0E14 0%, #0D1117 50%, #111D2C 100%);
+  --login-bg-radial: radial-gradient(ellipse at center, rgba(0, 212, 255, 0.08) 0%, transparent 60%);
+  --login-bg-accent: radial-gradient(ellipse at center, rgba(0, 255, 136, 0.04) 0%, transparent 70%);
+  --login-card-bg: rgba(22, 27, 34, 0.92);
+  --login-card-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 212, 255, 0.08);
+  --login-logo-area-bg: linear-gradient(180deg, rgba(13, 17, 23, 0.98) 0%, rgba(22, 27, 34, 0.95) 100%);
+  --login-logo-gradient: linear-gradient(135deg, #00D4FF 0%, #0090B0 100%);
+  --login-logo-shadow: 0 8px 24px rgba(0, 212, 255, 0.3);
+  --login-logo-shadow-pulse: 0 8px 32px rgba(0, 212, 255, 0.6);
+  --login-btn-gradient: linear-gradient(135deg, #00D4FF 0%, #0090B0 100%);
+  --login-btn-shadow: 0 4px 16px rgba(0, 212, 255, 0.3);
+  --login-btn-shadow-hover: 0 6px 20px rgba(0, 212, 255, 0.5);
+  --login-footer-border: rgba(0, 212, 255, 0.06);
+  --login-footer-text: rgba(139, 148, 158, 0.5);
+  --login-input-icon: rgba(139, 148, 158, 0.5);
+
+  --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.4), 0 1px 6px -1px rgba(0,0,0,0.3), 0 2px 4px 0 rgba(0,0,0,0.3);
+  --shadow-md: 0 3px 6px -4px rgba(0,0,0,0.5), 0 6px 16px 0 rgba(0,0,0,0.35), 0 9px 28px 8px rgba(0,0,0,0.25);
+  --shadow-lg: 0 6px 16px -8px rgba(0,0,0,0.5), 0 9px 28px 0 rgba(0,0,0,0.35), 0 12px 48px 16px rgba(0,0,0,0.25);
+}
+
+/* ===========================================================================
+   FRESH theme — 简约清新 (Modern SaaS / Notion-like)
+   =========================================================================== */
+[data-theme="fresh"] {
+  /* 3D Effect tokens */
+  --effect-perspective: 1100px;
+  --effect-tilt-max: 8deg;
+  --effect-glow-color: rgba(99, 102, 241, 0.2);
+  --effect-glow-intensity: 0.15;
+  --effect-float-amplitude: 4px;
+
+  --color-primary-50: #EEF2FF;
+  --color-primary-100: #E0E7FF;
+  --color-primary-200: #C7D2FE;
+  --color-primary-300: #A5B4FC;
+  --color-primary-400: #818CF8;
+  --color-primary-500: #6366F1;
+  --color-primary-600: #6366F1;
+  --color-primary-700: #4F46E5;
+  --color-primary-800: #4338CA;
+  --color-primary-900: #3730A3;
+
+  --color-neutral-50: #FAFAF9;
+  --color-neutral-100: #F5F5F4;
+  --color-neutral-200: #E7E5E4;
+  --color-neutral-300: #D6D3D1;
+  --color-neutral-400: #A8A29E;
+  --color-neutral-500: #78716C;
+  --color-neutral-600: #57534E;
+  --color-neutral-700: #44403C;
+  --color-neutral-800: #292524;
+  --color-neutral-900: #1C1917;
+  --color-neutral-950: #0C0A09;
+
+  --color-bg-container: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-border: #E7E5E4;
+  --color-border-secondary: #D6D3D1;
+
+  --color-row-hover: rgba(99, 102, 241, 0.04);
+  --color-selection-bg: rgba(99, 102, 241, 0.06);
+  --color-status-processing: #6366F1;
+
+  /* Header chrome — white/light */
+  --color-header-bg: #FFFFFF;
+  --color-header-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --color-header-text: #292524;
+  --color-header-text-secondary: #57534E;
+  --color-header-text-muted: #78716C;
+  --color-header-text-dim: #A8A29E;
+  --color-header-text-bright: #292524;
+  --color-header-action-hover: rgba(99, 102, 241, 0.06);
+  --color-header-divider: #E7E5E4;
+  --color-header-border: #D6D3D1;
+  --color-header-border-hover: #A8A29E;
+  --color-header-input-bg: #F5F5F4;
+  --color-header-input-text: #57534E;
+  --color-header-logo-gradient: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+
+  /* Sidebar chrome — white/light */
+  --color-sidebar-bg: #FFFFFF;
+  --color-sidebar-bg-deep: #FAFAF9;
+  --color-sidebar-text: #57534E;
+  --color-sidebar-text-active: #6366F1;
+  --color-sidebar-text-hover: #292524;
+  --color-sidebar-text-muted: #A8A29E;
+  --color-sidebar-text-dim: #D6D3D1;
+  --color-sidebar-hover: rgba(99, 102, 241, 0.04);
+  --color-sidebar-divider: #E7E5E4;
+  --color-sidebar-scrollbar: #D6D3D1;
+  --color-sidebar-btn-border: #D6D3D1;
+  --color-sidebar-btn-border-hover: #A8A29E;
+  --color-sidebar-btn-bg: #F5F5F4;
+  --color-sidebar-btn-bg-hover: #E7E5E4;
+  --color-sidebar-btn-text: #78716C;
+  --color-sidebar-btn-text-hover: #292524;
+
+  /* Login page — light purple gradient */
+  --login-bg-gradient: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 50%, #C7D2FE 100%);
+  --login-bg-radial: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.08) 0%, transparent 60%);
+  --login-bg-accent: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.06) 0%, transparent 70%);
+  --login-card-bg: #FFFFFF;
+  --login-card-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --login-logo-area-bg: linear-gradient(180deg, #6366F1 0%, #4F46E5 100%);
+  --login-logo-gradient: linear-gradient(135deg, #818CF8 0%, #6366F1 100%);
+  --login-logo-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+  --login-logo-shadow-pulse: 0 8px 32px rgba(99, 102, 241, 0.5);
+  --login-btn-gradient: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+  --login-btn-shadow: 0 4px 16px rgba(99, 102, 241, 0.25);
+  --login-btn-shadow-hover: 0 6px 20px rgba(99, 102, 241, 0.4);
+  --login-footer-border: #E7E5E4;
+  --login-footer-text: #A8A29E;
+  --login-input-icon: #A8A29E;
+}
+
+/* ===========================================================================
+   CYBERPUNK theme — 赛博朋克/黑客帝国 (极致炫酷)
+   =========================================================================== */
+[data-theme="cyberpunk"] {
+  /* 3D Effect tokens */
+  --effect-perspective: 800px;
+  --effect-tilt-max: 15deg;
+  --effect-glow-color: rgba(0, 245, 255, 0.4);
+  --effect-glow-intensity: 0.5;
+  --effect-float-amplitude: 8px;
+
+  /* Primary - 多色渐变体系 */
+  --color-primary-50: #0A1A2A;
+  --color-primary-100: #0F2040;
+  --color-primary-200: #1A3070;
+  --color-primary-300: #2540A0;
+  --color-primary-400: #4080CC;
+  --color-primary-500: #00D4FF;
+  --color-primary-600: #00F5FF;
+  --color-primary-700: #33F7FF;
+  --color-primary-800: #66F9FF;
+  --color-primary-900: #99FBFF;
+
+  /* Secondary - 霓虹紫 */
+  --color-secondary-500: #9900CC;
+  --color-secondary-600: #BF00FF;
+  --color-secondary-700: #D433FF;
+
+  /* Accent - 荧光绿 */
+  --color-accent-500: #00DD77;
+  --color-accent-600: #00FF88;
+  --color-accent-700: #33FFAA;
+
+  /* Neutral - 深紫黑系 */
+  --color-neutral-50: #0A0A1A;
+  --color-neutral-100: #12122A;
+  --color-neutral-200: #1A1A3A;
+  --color-neutral-300: #252550;
+  --color-neutral-400: #3A3A6A;
+  --color-neutral-500: #5A5A8A;
+  --color-neutral-600: #8A8AAA;
+  --color-neutral-700: #B0B0CC;
+  --color-neutral-800: #D0D0E0;
+  --color-neutral-900: #E8E8F0;
+  --color-neutral-950: #FFFFFF;
+
+  /* 告警色保持可读性 */
+  --color-severity-critical: #FF3366;
+  --color-severity-critical-bg: rgba(255, 51, 102, 0.15);
+  --color-severity-major: #FF9933;
+  --color-severity-major-bg: rgba(255, 153, 51, 0.15);
+  --color-severity-minor: #FFDD00;
+  --color-severity-minor-bg: rgba(255, 221, 0, 0.15);
+  --color-severity-warning: #00F5FF;
+  --color-severity-warning-bg: rgba(0, 245, 255, 0.15);
+
+  --color-bg-container: #12122A;
+  --color-bg-elevated: #1A1A3A;
+  --color-border: rgba(0, 245, 255, 0.2);
+  --color-border-secondary: rgba(191, 0, 255, 0.15);
+
+  --color-row-hover: rgba(0, 245, 255, 0.05);
+  --color-selection-bg: rgba(0, 245, 255, 0.1);
+  --color-status-processing: #00F5FF;
+
+  /* Header - 全息玻璃效果 */
+  --color-header-bg: rgba(10, 10, 26, 0.92);
+  --color-header-shadow: 0 2px 20px rgba(0, 245, 255, 0.1), 0 0 1px rgba(0, 245, 255, 0.3);
+  --color-header-text: #E0E0FF;
+  --color-header-text-secondary: rgba(224, 224, 255, 0.7);
+  --color-header-text-muted: rgba(160, 160, 204, 0.6);
+  --color-header-text-dim: rgba(128, 128, 170, 0.5);
+  --color-header-text-bright: #FFFFFF;
+  --color-header-action-hover: rgba(0, 245, 255, 0.1);
+  --color-header-divider: rgba(0, 245, 255, 0.15);
+  --color-header-border: rgba(0, 245, 255, 0.2);
+  --color-header-border-hover: rgba(0, 245, 255, 0.5);
+  --color-header-input-bg: rgba(0, 245, 255, 0.05);
+  --color-header-input-text: rgba(224, 224, 255, 0.85);
+  --color-header-logo-gradient: linear-gradient(135deg, #00F5FF 0%, #BF00FF 50%, #00FF88 100%);
+
+  /* Sidebar - 全息玻璃效果 */
+  --color-sidebar-bg: rgba(10, 10, 26, 0.95);
+  --color-sidebar-bg-deep: #050510;
+  --color-sidebar-text: rgba(224, 224, 255, 0.7);
+  --color-sidebar-text-active: #00F5FF;
+  --color-sidebar-text-hover: #FFFFFF;
+  --color-sidebar-text-muted: rgba(160, 160, 204, 0.5);
+  --color-sidebar-text-dim: rgba(128, 128, 170, 0.35);
+  --color-sidebar-hover: rgba(0, 245, 255, 0.08);
+  --color-sidebar-divider: rgba(0, 245, 255, 0.1);
+  --color-sidebar-scrollbar: rgba(0, 245, 255, 0.2);
+  --color-sidebar-btn-border: rgba(0, 245, 255, 0.3);
+  --color-sidebar-btn-border-hover: rgba(0, 245, 255, 0.6);
+  --color-sidebar-btn-bg: rgba(0, 245, 255, 0.05);
+  --color-sidebar-btn-bg-hover: rgba(0, 245, 255, 0.15);
+  --color-sidebar-btn-text: rgba(224, 224, 255, 0.6);
+  --color-sidebar-btn-text-hover: #00F5FF;
+
+  /* Login page - 矩阵雨效果 */
+  --login-bg-gradient: linear-gradient(180deg, #0A0A1A 0%, #0F0F2A 50%, #0A0A1A 100%);
+  --login-bg-radial: radial-gradient(ellipse at 30% 20%, rgba(0, 245, 255, 0.08) 0%, transparent 50%), radial-gradient(ellipse at 70% 80%, rgba(191, 0, 255, 0.06) 0%, transparent 50%);
+  --login-bg-accent: radial-gradient(ellipse at 50% 50%, rgba(0, 255, 136, 0.04) 0%, transparent 40%);
+  --login-card-bg: rgba(18, 18, 42, 0.95);
+  --login-card-shadow: 0 0 40px rgba(0, 245, 255, 0.15), 0 0 80px rgba(191, 0, 255, 0.1), 0 20px 60px rgba(0, 0, 0, 0.5);
+  --login-logo-area-bg: linear-gradient(135deg, rgba(0, 245, 255, 0.1) 0%, rgba(191, 0, 255, 0.1) 100%);
+  --login-logo-gradient: linear-gradient(135deg, #00F5FF 0%, #BF00FF 50%, #00FF88 100%);
+  --login-logo-shadow: 0 0 30px rgba(0, 245, 255, 0.5);
+  --login-logo-shadow-pulse: 0 0 50px rgba(0, 245, 255, 0.8), 0 0 80px rgba(191, 0, 255, 0.5);
+  --login-btn-gradient: linear-gradient(135deg, #00F5FF 0%, #BF00FF 100%);
+  --login-btn-shadow: 0 0 20px rgba(0, 245, 255, 0.4);
+  --login-btn-shadow-hover: 0 0 30px rgba(0, 245, 255, 0.6), 0 0 50px rgba(191, 0, 255, 0.4);
+  --login-footer-border: rgba(0, 245, 255, 0.1);
+  --login-footer-text: rgba(160, 160, 204, 0.5);
+  --login-input-icon: rgba(0, 245, 255, 0.5);
+
+  /* 阴影 */
+  --shadow-sm: 0 0 10px rgba(0, 245, 255, 0.1);
+  --shadow-md: 0 0 20px rgba(0, 245, 255, 0.15), 0 10px 40px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 0 40px rgba(0, 245, 255, 0.2), 0 20px 60px rgba(0, 0, 0, 0.4);
+
+  /* 字体 - 科技感 */
+  --font-family: "'Rajdhani', -apple-system, 'Segoe UI', sans-serif";
+  --font-family-heading: "'Orbitron', 'Rajdhani', sans-serif";
+}
+
+/* ===========================================================================
+   MINIONS theme — 萌宠版/小黄人风格 (可爱活泼)
+   =========================================================================== */
+[data-theme="minions"] {
+  /* 3D Effect tokens */
+  --effect-perspective: 900px;
+  --effect-tilt-max: 12deg;
+  --effect-glow-color: rgba(255, 217, 61, 0.3);
+  --effect-glow-intensity: 0.3;
+  --effect-float-amplitude: 7px;
+
+  /* Primary - 小黄人黄色系 */
+  --color-primary-50: #FFFEF5;
+  --color-primary-100: #FFFCE8;
+  --color-primary-200: #FFF5C2;
+  --color-primary-300: #FFED99;
+  --color-primary-400: #FFE570;
+  --color-primary-500: #FFDD47;
+  --color-primary-600: #FFD93D;
+  --color-primary-700: #F5C800;
+  --color-primary-800: #CCAA00;
+  --color-primary-900: #997D00;
+
+  /* Secondary - 工装蓝 */
+  --color-secondary-500: #5A7FE8;
+  --color-secondary-600: #4169E1;
+  --color-secondary-700: #3055C8;
+
+  /* Accent - 活力橙 */
+  --color-accent-500: #FF8555;
+  --color-accent-600: #FF6B35;
+  --color-accent-700: #E55A25;
+
+  /* Neutral - 温暖灰 */
+  --color-neutral-50: #FFFEF5;
+  --color-neutral-100: #FFFDF0;
+  --color-neutral-200: #FFF8DC;
+  --color-neutral-300: #FFEFD5;
+  --color-neutral-400: #DEDEDE;
+  --color-neutral-500: #A0A0A0;
+  --color-neutral-600: #666666;
+  --color-neutral-700: #444444;
+  --color-neutral-800: #2D2D2D;
+  --color-neutral-900: #1A1A1A;
+  --color-neutral-950: #0D0D0D;
+
+  /* 告警色 - 保持可读但更活泼 */
+  --color-severity-critical: #FF4757;
+  --color-severity-critical-bg: #FFF0F1;
+  --color-severity-major: #FF9F43;
+  --color-severity-major-bg: #FFF8E8;
+  --color-severity-minor: #FECA57;
+  --color-severity-minor-bg: #FFFBD8;
+  --color-severity-warning: #54A0FF;
+  --color-severity-warning-bg: #EEF6FF;
+
+  --color-bg-container: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-border: #FFE066;
+  --color-border-secondary: #FFF3B8;
+
+  --color-row-hover: rgba(255, 217, 61, 0.08);
+  --color-selection-bg: rgba(255, 217, 61, 0.15);
+  --color-status-processing: #FFD93D;
+
+  /* Header - 小黄人黄 */
+  --color-header-bg: #FFD93D;
+  --color-header-shadow: 0 4px 16px rgba(255, 217, 61, 0.3);
+  --color-header-text: #2D2D2D;
+  --color-header-text-secondary: #4A4A4A;
+  --color-header-text-muted: #6A6A6A;
+  --color-header-text-dim: #8A8A8A;
+  --color-header-text-bright: #1A1A1A;
+  --color-header-action-hover: rgba(65, 105, 225, 0.1);
+  --color-header-divider: rgba(65, 105, 225, 0.15);
+  --color-header-border: #FFE570;
+  --color-header-border-hover: #4169E1;
+  --color-header-input-bg: #FFFFFF;
+  --color-header-input-text: #2D2D2D;
+  --color-header-logo-gradient: linear-gradient(135deg, #FFD93D 0%, #FF6B35 100%);
+
+  /* Sidebar - 工装蓝 */
+  --color-sidebar-bg: #4169E1;
+  --color-sidebar-bg-deep: #3055C8;
+  --color-sidebar-text: rgba(255, 255, 255, 0.85);
+  --color-sidebar-text-active: #FFD93D;
+  --color-sidebar-text-hover: #FFFFFF;
+  --color-sidebar-text-muted: rgba(255, 255, 255, 0.6);
+  --color-sidebar-text-dim: rgba(255, 255, 255, 0.4);
+  --color-sidebar-hover: rgba(255, 217, 61, 0.15);
+  --color-sidebar-divider: rgba(255, 255, 255, 0.1);
+  --color-sidebar-scrollbar: rgba(255, 217, 61, 0.3);
+  --color-sidebar-btn-border: rgba(255, 255, 255, 0.3);
+  --color-sidebar-btn-border-hover: #FFD93D;
+  --color-sidebar-btn-bg: rgba(255, 255, 255, 0.1);
+  --color-sidebar-btn-bg-hover: rgba(255, 217, 61, 0.2);
+  --color-sidebar-btn-text: rgba(255, 255, 255, 0.8);
+  --color-sidebar-btn-text-hover: #FFD93D;
+
+  /* Login page - 欢快明亮 */
+  --login-bg-gradient: linear-gradient(135deg, #FFFEF5 0%, #FFF8DC 50%, #FFEFD5 100%);
+  --login-bg-radial: radial-gradient(ellipse at 30% 30%, rgba(255, 217, 61, 0.2) 0%, transparent 50%), radial-gradient(ellipse at 70% 70%, rgba(65, 105, 225, 0.1) 0%, transparent 50%);
+  --login-bg-accent: radial-gradient(ellipse at 50% 50%, rgba(255, 107, 53, 0.08) 0%, transparent 40%);
+  --login-card-bg: #FFFFFF;
+  --login-card-shadow: 0 8px 32px rgba(255, 217, 61, 0.3), 0 4px 16px rgba(65, 105, 225, 0.15);
+  --login-logo-area-bg: linear-gradient(135deg, #FFD93D 0%, #4169E1 100%);
+  --login-logo-gradient: linear-gradient(135deg, #FFD93D 0%, #FF6B35 100%);
+  --login-logo-shadow: 0 6px 20px rgba(255, 217, 61, 0.5);
+  --login-logo-shadow-pulse: 0 8px 30px rgba(255, 217, 61, 0.7), 0 4px 15px rgba(65, 105, 225, 0.4);
+  --login-btn-gradient: linear-gradient(135deg, #FFD93D 0%, #FF6B35 100%);
+  --login-btn-shadow: 0 4px 16px rgba(255, 217, 61, 0.5);
+  --login-btn-shadow-hover: 0 6px 24px rgba(255, 217, 61, 0.6), 0 4px 12px rgba(255, 107, 53, 0.3);
+  --login-footer-border: #FFE066;
+  --login-footer-text: #A0A0A0;
+  --login-input-icon: #DEDEDE;
+
+  /* 阴影 - 软糯投影 */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.04);
+
+  /* 字体 - 圆润可爱 */
+  --font-family: "'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  --font-family-heading: "'Baloo 2', 'Nunito', sans-serif";
+
+  /* 布局调整 */
+  --header-height: 56px;
+  --sidebar-width: 260px;
+}
+
+/* ===========================================================================
+   TIFFANY theme — 纯美/蒂芙尼风格 (优雅奢华)
+   =========================================================================== */
+[data-theme="tiffany"] {
+  /* 3D Effect tokens */
+  --effect-perspective: 1100px;
+  --effect-tilt-max: 6deg;
+  --effect-glow-color: rgba(129, 216, 208, 0.2);
+  --effect-glow-intensity: 0.12;
+  --effect-float-amplitude: 3px;
+
+  /* Primary - 蒂芙尼蓝色系 */
+  --color-primary-50: #F0FAF9;
+  --color-primary-100: #E0F5F3;
+  --color-primary-200: #C1EBE7;
+  --color-primary-300: #A2E1DB;
+  --color-primary-400: #83D7CF;
+  --color-primary-500: #81D8D0;
+  --color-primary-600: #5DCDC3;
+  --color-primary-700: #0ABAB5;
+  --color-primary-800: #089A96;
+  --color-primary-900: #067A77;
+
+  /* Accent - 玫瑰金 */
+  --color-accent-400: #D4919A;
+  --color-accent-500: #B76E79;
+  --color-accent-600: #A35D67;
+
+  /* Silver - 银色点缀 */
+  --color-silver-300: #E8E8E8;
+  --color-silver-400: #D0D0D0;
+  --color-silver-500: #B0B0B0;
+
+  /* Neutral - 纯净灰 */
+  --color-neutral-50: #FEFEFE;
+  --color-neutral-100: #FAFAFA;
+  --color-neutral-200: #F5F5F5;
+  --color-neutral-300: #EBEBEB;
+  --color-neutral-400: #D0D0D0;
+  --color-neutral-500: #8A8A8A;
+  --color-neutral-600: #5A5A5A;
+  --color-neutral-700: #3A3A3A;
+  --color-neutral-800: #2C2C2C;
+  --color-neutral-900: #1A1A1A;
+  --color-neutral-950: #0D0D0D;
+
+  /* 告警色 - 保持可读，柔和处理 */
+  --color-severity-critical: #D4615D;
+  --color-severity-critical-bg: #FDF2F1;
+  --color-severity-major: #D4915D;
+  --color-severity-major-bg: #FDF8F1;
+  --color-severity-minor: #D4C35D;
+  --color-severity-minor-bg: #FDFBF1;
+  --color-severity-warning: #5DA8D4;
+  --color-severity-warning-bg: #F1F7FD;
+
+  --color-bg-container: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-border: #E8E8E8;
+  --color-border-secondary: #F0F0F0;
+
+  --color-row-hover: rgba(129, 216, 208, 0.05);
+  --color-selection-bg: rgba(129, 216, 208, 0.1);
+  --color-status-processing: #81D8D0;
+
+  /* Header - 纯净白 */
+  --color-header-bg: #FFFFFF;
+  --color-header-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --color-header-text: #1A1A1A;
+  --color-header-text-secondary: #3A3A3A;
+  --color-header-text-muted: #6A6A6A;
+  --color-header-text-dim: #8A8A8A;
+  --color-header-text-bright: #1A1A1A;
+  --color-header-action-hover: rgba(129, 216, 208, 0.08);
+  --color-header-divider: #E8E8E8;
+  --color-header-border: #D0D0D0;
+  --color-header-border-hover: #81D8D0;
+  --color-header-input-bg: #FAFAFA;
+  --color-header-input-text: #2C2C2C;
+  --color-header-logo-gradient: linear-gradient(135deg, #81D8D0 0%, #0ABAB5 100%);
+
+  /* Sidebar - 蒂芙尼蓝 */
+  --color-sidebar-bg: #81D8D0;
+  --color-sidebar-bg-deep: #5DCDC3;
+  --color-sidebar-text: rgba(255, 255, 255, 0.9);
+  --color-sidebar-text-active: #FFFFFF;
+  --color-sidebar-text-hover: #FFFFFF;
+  --color-sidebar-text-muted: rgba(255, 255, 255, 0.7);
+  --color-sidebar-text-dim: rgba(255, 255, 255, 0.5);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.2);
+  --color-sidebar-divider: rgba(255, 255, 255, 0.15);
+  --color-sidebar-scrollbar: rgba(255, 255, 255, 0.3);
+  --color-sidebar-btn-border: rgba(255, 255, 255, 0.4);
+  --color-sidebar-btn-border-hover: #FFFFFF;
+  --color-sidebar-btn-bg: rgba(255, 255, 255, 0.15);
+  --color-sidebar-btn-bg-hover: rgba(255, 255, 255, 0.3);
+  --color-sidebar-btn-text: rgba(255, 255, 255, 0.85);
+  --color-sidebar-btn-text-hover: #FFFFFF;
+
+  /* Login page - 优雅珠宝感 */
+  --login-bg-gradient: linear-gradient(180deg, #FEFEFE 0%, #F0FAF9 50%, #E0F5F3 100%);
+  --login-bg-radial: radial-gradient(ellipse at 20% 20%, rgba(129, 216, 208, 0.1) 0%, transparent 50%), radial-gradient(ellipse at 80% 80%, rgba(183, 110, 121, 0.05) 0%, transparent 50%);
+  --login-bg-accent: radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.8) 0%, transparent 60%);
+  --login-card-bg: #FFFFFF;
+  --login-card-shadow: 0 8px 40px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.03);
+  --login-logo-area-bg: linear-gradient(135deg, #81D8D0 0%, #0ABAB5 100%);
+  --login-logo-gradient: linear-gradient(135deg, #FFFFFF 0%, rgba(255, 255, 255, 0.9) 100%);
+  --login-logo-shadow: 0 4px 16px rgba(129, 216, 208, 0.3);
+  --login-logo-shadow-pulse: 0 6px 24px rgba(129, 216, 208, 0.4), 0 2px 8px rgba(183, 110, 121, 0.2);
+  --login-btn-gradient: linear-gradient(135deg, #81D8D0 0%, #0ABAB5 100%);
+  --login-btn-shadow: 0 2px 8px rgba(129, 216, 208, 0.3);
+  --login-btn-shadow-hover: 0 4px 16px rgba(129, 216, 208, 0.4);
+  --login-footer-border: #E8E8E8;
+  --login-footer-text: #8A8A8A;
+  --login-input-icon: #B0B0B0;
+
+  /* 阴影 - 精致细腻 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.02), 0 1px 3px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.02);
+
+  /* 字体 - 衬线优雅 */
+  --font-family: "'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  --font-family-heading: "'Playfair Display', 'Cormorant Garamond', serif";
+
+  /* 布局调整 */
+  --content-padding-h: 32px;
+  --content-padding-v: 24px;
+}
+
+/* ===========================================================================
+   RMB theme — 人民币/国潮风格 (庄重大气)
+   =========================================================================== */
+[data-theme="rmb"] {
+  /* 3D Effect tokens */
+  --effect-perspective: 1100px;
+  --effect-tilt-max: 7deg;
+  --effect-glow-color: rgba(212, 175, 55, 0.2);
+  --effect-glow-intensity: 0.15;
+  --effect-float-amplitude: 3px;
+
+  /* Primary - 中国红色系 */
+  --color-primary-50: #FFF0F0;
+  --color-primary-100: #FFE0E0;
+  --color-primary-200: #FFC2C2;
+  --color-primary-300: #FFA3A3;
+  --color-primary-400: #FF8585;
+  --color-primary-500: #E60012;
+  --color-primary-600: #E60012;
+  --color-primary-700: #B8000F;
+  --color-primary-800: #8B0000;
+  --color-primary-900: #5C0000;
+
+  /* Accent - 金色 */
+  --color-accent-400: #FFD700;
+  --color-accent-500: #D4AF37;
+  --color-accent-600: #B8860B;
+
+  /* Neutral - 米白/象牙 */
+  --color-neutral-50: #FFFEF5;
+  --color-neutral-100: #FFF8F0;
+  --color-neutral-200: #F5EDE0;
+  --color-neutral-300: #E8DCD0;
+  --color-neutral-400: #D4C4B0;
+  --color-neutral-500: #A09080;
+  --color-neutral-600: #6B5D50;
+  --color-neutral-700: #4A3F35;
+  --color-neutral-800: #2C2420;
+  --color-neutral-900: #1A1512;
+  --color-neutral-950: #0D0A08;
+
+  /* 告警色 - 保持可读 */
+  --color-severity-critical: #DC143C;
+  --color-severity-critical-bg: #FFF0F3;
+  --color-severity-major: #D4AF37;
+  --color-severity-major-bg: #FFFDF0;
+  --color-severity-minor: #E60012;
+  --color-severity-minor-bg: #FFF5F5;
+  --color-severity-warning: #B8860B;
+  --color-severity-warning-bg: #FFFBF0;
+
+  --color-bg-container: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-border: #E8DCD0;
+  --color-border-secondary: #F0E8DC;
+
+  --color-row-hover: rgba(230, 0, 18, 0.04);
+  --color-selection-bg: rgba(230, 0, 18, 0.08);
+  --color-status-processing: #E60012;
+
+  /* Header - 中国红 */
+  --color-header-bg: #E60012;
+  --color-header-shadow: 0 2px 12px rgba(139, 0, 0, 0.2);
+  --color-header-text: #FFFFFF;
+  --color-header-text-secondary: rgba(255, 255, 255, 0.85);
+  --color-header-text-muted: rgba(255, 255, 255, 0.7);
+  --color-header-text-dim: rgba(255, 255, 255, 0.55);
+  --color-header-text-bright: #FFFFFF;
+  --color-header-action-hover: rgba(255, 255, 255, 0.15);
+  --color-header-divider: rgba(255, 215, 0, 0.3);
+  --color-header-border: rgba(255, 215, 0, 0.4);
+  --color-header-border-hover: #FFD700;
+  --color-header-input-bg: rgba(255, 255, 255, 0.15);
+  --color-header-input-text: #FFFFFF;
+  --color-header-logo-gradient: linear-gradient(135deg, #FFD700 0%, #D4AF37 100%);
+
+  /* Sidebar - 深红 */
+  --color-sidebar-bg: #8B0000;
+  --color-sidebar-bg-deep: #5C0000;
+  --color-sidebar-text: rgba(255, 255, 255, 0.85);
+  --color-sidebar-text-active: #FFD700;
+  --color-sidebar-text-hover: #FFFFFF;
+  --color-sidebar-text-muted: rgba(255, 255, 255, 0.6);
+  --color-sidebar-text-dim: rgba(255, 255, 255, 0.4);
+  --color-sidebar-hover: rgba(212, 175, 55, 0.15);
+  --color-sidebar-divider: rgba(255, 215, 0, 0.15);
+  --color-sidebar-scrollbar: rgba(255, 215, 0, 0.25);
+  --color-sidebar-btn-border: rgba(255, 215, 0, 0.35);
+  --color-sidebar-btn-border-hover: #FFD700;
+  --color-sidebar-btn-bg: rgba(255, 215, 0, 0.1);
+  --color-sidebar-btn-bg-hover: rgba(255, 215, 0, 0.2);
+  --color-sidebar-btn-text: rgba(255, 255, 255, 0.8);
+  --color-sidebar-btn-text-hover: #FFD700;
+
+  /* Login page - 庄重红金 */
+  --login-bg-gradient: linear-gradient(180deg, #FFFEF5 0%, #FFF8F0 50%, #F5EDE0 100%);
+  --login-bg-radial: radial-gradient(ellipse at 20% 20%, rgba(230, 0, 18, 0.05) 0%, transparent 50%), radial-gradient(ellipse at 80% 80%, rgba(212, 175, 55, 0.05) 0%, transparent 50%);
+  --login-bg-accent: radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.9) 0%, transparent 60%);
+  --login-card-bg: #FFFFFF;
+  --login-card-shadow: 0 8px 40px rgba(139, 0, 0, 0.08), 0 2px 8px rgba(139, 0, 0, 0.04);
+  --login-logo-area-bg: linear-gradient(135deg, #E60012 0%, #8B0000 100%);
+  --login-logo-gradient: linear-gradient(135deg, #FFD700 0%, #D4AF37 100%);
+  --login-logo-shadow: 0 4px 16px rgba(230, 0, 18, 0.3);
+  --login-logo-shadow-pulse: 0 6px 24px rgba(230, 0, 18, 0.4), 0 2px 8px rgba(212, 175, 55, 0.3);
+  --login-btn-gradient: linear-gradient(135deg, #E60012 0%, #B8000F 100%);
+  --login-btn-shadow: 0 2px 8px rgba(230, 0, 18, 0.3);
+  --login-btn-shadow-hover: 0 4px 16px rgba(230, 0, 18, 0.4);
+  --login-footer-border: #E8DCD0;
+  --login-footer-text: #6B5D50;
+  --login-input-icon: #A09080;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(139, 0, 0, 0.03), 0 1px 3px rgba(139, 0, 0, 0.02);
+  --shadow-md: 0 2px 8px rgba(139, 0, 0, 0.05), 0 1px 3px rgba(139, 0, 0, 0.03);
+  --shadow-lg: 0 4px 16px rgba(139, 0, 0, 0.08), 0 2px 4px rgba(139, 0, 0, 0.04);
+
+  /* 字体 - 宋体 */
+  --font-family: "'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif";
+  --font-family-heading: "'Noto Serif SC', 'Source Han Serif SC', serif";
+}
+
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-family);
+  font-size: 14px;
+  color: var(--color-neutral-600);
+  background-color: var(--color-neutral-50);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-300);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-neutral-400);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Monospace text */
+.mono {
+  font-family: var(--font-family-mono);
+}
