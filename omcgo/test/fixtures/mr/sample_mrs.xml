@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bulkPmMrDataFile>
+  <fileHeader startTime="2024-01-15T10:00:00Z" reportingPeriod="PT900S"/>
+  <eNB id="ENB001">
+    <measurement mrType="MRS">
+      <smr>MR.RSRP.00 MR.RSRP.01 MR.RSRP.02 MR.RSRP.03 MR.RSRP.04 MR.RSRP.05</smr>
+      <object id="Cell-1">
+        <v>10 25 45 80 120 50</v>
+      </object>
+      <object id="Cell-2">
+        <v>5 20 55 90 100 40</v>
+      </object>
+    </measurement>
+  </eNB>
+</bulkPmMrDataFile>

@@ -1,0 +1,38 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - misspell
+    - gofmt
+    - goimports
+    - gocritic
+
+linters-settings:
+  govet:
+    check-shadowing: true
+  errcheck:
+    check-type-assertions: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: cmd/
+      linters:
+        - errcheck
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+run:
+  timeout: 5m
+  tests: true

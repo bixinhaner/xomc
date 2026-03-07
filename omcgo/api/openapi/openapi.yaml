@@ -1,0 +1,4078 @@
+openapi: 3.0.3
+info:
+  title: OMC API
+  description: Operations Management and Control for Base Stations
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Auth
+    description: Authentication and authorization
+  - name: Devices
+    description: Device management
+  - name: DataModels
+    description: TR-069 data model management
+  - name: OUI
+    description: OUI (Organizationally Unique Identifier) management
+  - name: Templates
+    description: Configuration template management
+  - name: ConfigSync
+    description: Device configuration synchronization
+  - name: Provisioning
+    description: Device provisioning task management
+  - name: Groups
+    description: Device group management
+  - name: PMCounters
+    description: Performance management counters
+  - name: KPI
+    description: Key Performance Indicators
+  - name: KPIThresholds
+    description: KPI threshold management
+  - name: Alarms
+    description: Alarm management
+  - name: AlarmRules
+    description: Alarm rule configuration
+  - name: Dashboard
+    description: Dashboard and overview
+  - name: SystemLogs
+    description: System and NE message logs
+  - name: MR
+    description: Measurement Report management
+  - name: Software
+    description: Firmware and software management
+  - name: Upgrades
+    description: Device upgrade management
+  - name: Interop
+    description: Interoperability testing
+  - name: Northbound
+    description: Northbound interface and data export
+  - name: Admin
+    description: Administration (users, roles, permissions, audit)
+
+paths:
+  # ===========================================================================
+  # Health
+  # ===========================================================================
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ===========================================================================
+  # Auth
+  # ===========================================================================
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: User login
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "401":
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user info
+      operationId: getCurrentUser
+      responses:
+        "200":
+          description: Current user information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Devices
+  # ===========================================================================
+  /api/v1/devices:
+    get:
+      tags: [Devices]
+      summary: List devices
+      operationId: listDevices
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - $ref: "#/components/parameters/CarrierParam"
+        - $ref: "#/components/parameters/TechnologyParam"
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: oui
+          in: query
+          schema:
+            type: string
+        - name: sn
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated device list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Device"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Devices]
+      summary: Create a device
+      operationId: createDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeviceRequest"
+      responses:
+        "201":
+          description: Device created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/devices/stats:
+    get:
+      tags: [Devices]
+      summary: Get device statistics
+      operationId: getDeviceStats
+      responses:
+        "200":
+          description: Device statistics by carrier
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/devices/{id}:
+    get:
+      tags: [Devices]
+      summary: Get device by ID
+      operationId: getDevice
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Device details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Devices]
+      summary: Update a device
+      operationId: updateDevice
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDeviceRequest"
+      responses:
+        "200":
+          description: Device updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Devices]
+      summary: Delete a device
+      operationId: deleteDevice
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Device deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/devices/{id}/parameters:
+    get:
+      tags: [Devices]
+      summary: Get device parameters
+      operationId: getDeviceParameters
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Device parameter list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/devices/{id}/reboot:
+    post:
+      tags: [Devices]
+      summary: Reboot a device
+      operationId: rebootDevice
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "202":
+          description: Reboot command accepted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # DataModels
+  # ===========================================================================
+  /api/v1/datamodels:
+    get:
+      tags: [DataModels]
+      summary: List data models
+      operationId: listDataModels
+      parameters:
+        - $ref: "#/components/parameters/CarrierParam"
+        - $ref: "#/components/parameters/TechnologyParam"
+        - name: oui
+          in: query
+          schema:
+            type: string
+        - name: product_class
+          in: query
+          schema:
+            type: string
+        - name: scope
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated data model list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/DataModel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [DataModels]
+      summary: Create a data model
+      operationId: createDataModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDataModelRequest"
+      responses:
+        "201":
+          description: Data model created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataModel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/datamodels/resolve:
+    get:
+      tags: [DataModels]
+      summary: Resolve data model by OUI, product class, and carrier
+      operationId: resolveDataModel
+      parameters:
+        - name: oui
+          in: query
+          schema:
+            type: string
+        - name: product_class
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CarrierParam"
+      responses:
+        "200":
+          description: Resolved data model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataModel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/datamodels/statistics:
+    get:
+      tags: [DataModels]
+      summary: Get data model statistics
+      operationId: getDataModelStatistics
+      responses:
+        "200":
+          description: Data model statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/datamodels/import:
+    post:
+      tags: [DataModels]
+      summary: Bulk import data models
+      operationId: importDataModels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Import completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/datamodels/cache/refresh:
+    post:
+      tags: [DataModels]
+      summary: Refresh data model cache
+      operationId: refreshDataModelCache
+      responses:
+        "200":
+          description: Cache refreshed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/datamodels/{id}:
+    get:
+      tags: [DataModels]
+      summary: Get data model by ID
+      operationId: getDataModel
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Data model details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataModel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [DataModels]
+      summary: Update a data model
+      operationId: updateDataModel
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDataModelRequest"
+      responses:
+        "200":
+          description: Data model updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataModel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [DataModels]
+      summary: Delete a data model
+      operationId: deleteDataModel
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Data model deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/datamodels/{id}/export:
+    get:
+      tags: [DataModels]
+      summary: Export a data model
+      operationId: exportDataModel
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Data model export
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/datamodels/{id}/activate:
+    post:
+      tags: [DataModels]
+      summary: Activate a data model
+      operationId: activateDataModel
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Data model activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataModel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/datamodels/{id}/deprecate:
+    post:
+      tags: [DataModels]
+      summary: Deprecate a data model
+      operationId: deprecateDataModel
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Data model deprecated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataModel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # OUI
+  # ===========================================================================
+  /api/v1/oui:
+    get:
+      tags: [OUI]
+      summary: List OUIs
+      operationId: listOUIs
+      responses:
+        "200":
+          description: OUI list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OUI"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [OUI]
+      summary: Create an OUI
+      operationId: createOUI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOUIRequest"
+      responses:
+        "201":
+          description: OUI created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OUI"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Templates
+  # ===========================================================================
+  /api/v1/config/templates:
+    get:
+      tags: [Templates]
+      summary: List configuration templates
+      operationId: listConfigTemplates
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated template list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ConfigTemplate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Templates]
+      summary: Create a configuration template
+      operationId: createConfigTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConfigTemplateRequest"
+      responses:
+        "201":
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigTemplate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/config/templates/{id}:
+    get:
+      tags: [Templates]
+      summary: Get configuration template by ID
+      operationId: getConfigTemplate
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Template details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigTemplate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Templates]
+      summary: Update a configuration template
+      operationId: updateConfigTemplate
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateConfigTemplateRequest"
+      responses:
+        "200":
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigTemplate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Templates]
+      summary: Delete a configuration template
+      operationId: deleteConfigTemplate
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Template deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # ConfigSync
+  # ===========================================================================
+  /api/v1/config/sync/push/{deviceId}:
+    post:
+      tags: [ConfigSync]
+      summary: Push configuration to a device
+      operationId: pushConfig
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Configuration pushed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/config/sync/pull/{deviceId}:
+    post:
+      tags: [ConfigSync]
+      summary: Pull configuration from a device
+      operationId: pullConfig
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Configuration pulled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/config/sync/status/{deviceId}:
+    get:
+      tags: [ConfigSync]
+      summary: Get configuration sync status for a device
+      operationId: getConfigSyncStatus
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [synced, pending, out_of_sync, error]
+                  last_sync_at:
+                    type: string
+                    format: date-time
+                  error_message:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Provisioning
+  # ===========================================================================
+  /api/v1/provisioning/tasks:
+    get:
+      tags: [Provisioning]
+      summary: List provisioning tasks
+      operationId: listProvisioningTasks
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated provisioning task list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProvisioningTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Provisioning]
+      summary: Create a provisioning task
+      operationId: createProvisioningTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProvisioningTaskRequest"
+      responses:
+        "201":
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/provisioning/tasks/{id}:
+    get:
+      tags: [Provisioning]
+      summary: Get provisioning task by ID
+      operationId: getProvisioningTask
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/provisioning/tasks/{id}/retry:
+    post:
+      tags: [Provisioning]
+      summary: Retry a provisioning task
+      operationId: retryProvisioningTask
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Task retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Groups
+  # ===========================================================================
+  /api/v1/groups:
+    get:
+      tags: [Groups]
+      summary: Get device group tree
+      operationId: getGroupTree
+      responses:
+        "200":
+          description: Group tree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceGroup"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Groups]
+      summary: Create a device group
+      operationId: createGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGroupRequest"
+      responses:
+        "201":
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/groups/{id}:
+    get:
+      tags: [Groups]
+      summary: Get group by ID
+      operationId: getGroup
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Group details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceGroup"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Groups]
+      summary: Update a group
+      operationId: updateGroup
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateGroupRequest"
+      responses:
+        "200":
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Groups]
+      summary: Delete a group
+      operationId: deleteGroup
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Group deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/groups/{id}/members:
+    post:
+      tags: [Groups]
+      summary: Add members to a group
+      operationId: addGroupMembers
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_ids]
+              properties:
+                device_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Members added
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/groups/{id}/members/{deviceId}:
+    delete:
+      tags: [Groups]
+      summary: Remove a member from a group
+      operationId: removeGroupMember
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Member removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # PM Counters
+  # ===========================================================================
+  /api/v1/pm/counters:
+    get:
+      tags: [PMCounters]
+      summary: List PM counters
+      operationId: listPMCounters
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: cell_id
+          in: query
+          schema:
+            type: string
+        - name: counter_group
+          in: query
+          schema:
+            type: string
+        - name: counter_name
+          in: query
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated PM counter list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PMCounter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/pm/counters/aggregated:
+    get:
+      tags: [PMCounters]
+      summary: Get aggregated PM counters
+      operationId: getAggregatedPMCounters
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: aggregation
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [hourly, daily, weekly]
+      responses:
+        "200":
+          description: Aggregated PM counters
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # KPI
+  # ===========================================================================
+  /api/v1/pm/kpi:
+    get:
+      tags: [KPI]
+      summary: List KPI values
+      operationId: listKPIValues
+      parameters:
+        - name: kpi_name
+          in: query
+          schema:
+            type: string
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CarrierParam"
+        - $ref: "#/components/parameters/TechnologyParam"
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated KPI value list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/KPIValue"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/pm/kpi/definitions:
+    get:
+      tags: [KPI]
+      summary: List KPI definitions
+      operationId: listKPIDefinitions
+      parameters:
+        - $ref: "#/components/parameters/CarrierParam"
+        - $ref: "#/components/parameters/TechnologyParam"
+      responses:
+        "200":
+          description: KPI definition list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KPIDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/pm/kpi/calculate:
+    post:
+      tags: [KPI]
+      summary: Trigger KPI calculation
+      operationId: calculateKPI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_id:
+                  type: string
+                  format: uuid
+                kpi_names:
+                  type: array
+                  items:
+                    type: string
+                start_time:
+                  type: string
+                  format: date-time
+                end_time:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: KPI calculation triggered
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # KPI Thresholds
+  # ===========================================================================
+  /api/v1/pm/thresholds:
+    get:
+      tags: [KPIThresholds]
+      summary: List KPI thresholds
+      operationId: listKPIThresholds
+      parameters:
+        - name: kpi_name
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CarrierParam"
+        - $ref: "#/components/parameters/TechnologyParam"
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated KPI threshold list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/KPIThreshold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [KPIThresholds]
+      summary: Create a KPI threshold
+      operationId: createKPIThreshold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKPIThresholdRequest"
+      responses:
+        "201":
+          description: KPI threshold created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KPIThreshold"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/pm/thresholds/{id}:
+    get:
+      tags: [KPIThresholds]
+      summary: Get KPI threshold by ID
+      operationId: getKPIThreshold
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: KPI threshold details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KPIThreshold"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [KPIThresholds]
+      summary: Update a KPI threshold
+      operationId: updateKPIThreshold
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKPIThresholdRequest"
+      responses:
+        "200":
+          description: KPI threshold updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KPIThreshold"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [KPIThresholds]
+      summary: Delete a KPI threshold
+      operationId: deleteKPIThreshold
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: KPI threshold deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Alarms
+  # ===========================================================================
+  /api/v1/alarms/active:
+    get:
+      tags: [Alarms]
+      summary: List active alarms
+      operationId: listActiveAlarms
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: device_sn
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CarrierParam"
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [critical, major, minor, warning]
+        - name: status
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated active alarm list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Alarm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/alarms/history:
+    get:
+      tags: [Alarms]
+      summary: List alarm history
+      operationId: listAlarmHistory
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: device_sn
+          in: query
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated alarm history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Alarm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/alarms/statistics:
+    get:
+      tags: [Alarms]
+      summary: Get alarm statistics
+      operationId: getAlarmStatistics
+      responses:
+        "200":
+          description: Alarm statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmStatistics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/alarms/{id}:
+    get:
+      tags: [Alarms]
+      summary: Get alarm by ID
+      operationId: getAlarm
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Alarm details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/alarms/{id}/acknowledge:
+    post:
+      tags: [Alarms]
+      summary: Acknowledge an alarm
+      operationId: acknowledgeAlarm
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+      responses:
+        "200":
+          description: Alarm acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/alarms/{id}/clear:
+    post:
+      tags: [Alarms]
+      summary: Clear an alarm
+      operationId: clearAlarm
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+      responses:
+        "200":
+          description: Alarm cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Alarm Rules
+  # ===========================================================================
+  /api/v1/alarms/rules:
+    get:
+      tags: [AlarmRules]
+      summary: List alarm rules
+      operationId: listAlarmRules
+      parameters:
+        - $ref: "#/components/parameters/CarrierParam"
+        - $ref: "#/components/parameters/TechnologyParam"
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: alarm_code
+          in: query
+          schema:
+            type: string
+        - name: condition_type
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated alarm rule list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AlarmRule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [AlarmRules]
+      summary: Create an alarm rule
+      operationId: createAlarmRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAlarmRuleRequest"
+      responses:
+        "201":
+          description: Alarm rule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/alarms/rules/{id}:
+    get:
+      tags: [AlarmRules]
+      summary: Get alarm rule by ID
+      operationId: getAlarmRule
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Alarm rule details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmRule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [AlarmRules]
+      summary: Update an alarm rule
+      operationId: updateAlarmRule
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAlarmRuleRequest"
+      responses:
+        "200":
+          description: Alarm rule updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [AlarmRules]
+      summary: Delete an alarm rule
+      operationId: deleteAlarmRule
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Alarm rule deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Dashboard
+  # ===========================================================================
+  /api/v1/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard summary
+      operationId: getDashboardSummary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # System Logs
+  # ===========================================================================
+  /api/v1/logs/system:
+    get:
+      tags: [SystemLogs]
+      summary: List system logs
+      operationId: listSystemLogs
+      parameters:
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [debug, info, warn, error, fatal]
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated system log list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/SystemLog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/logs/ne-messages:
+    get:
+      tags: [SystemLogs]
+      summary: List NE (Network Element) messages
+      operationId: listNEMessages
+      parameters:
+        - name: device_sn
+          in: query
+          schema:
+            type: string
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: message_type
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [inbound, outbound]
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated NE message list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NEMessageLog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # MR (Measurement Reports)
+  # ===========================================================================
+  /api/v1/mr/files:
+    get:
+      tags: [MR]
+      summary: List MR files
+      operationId: listMRFiles
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: device_sn
+          in: query
+          schema:
+            type: string
+        - name: file_type
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated MR file list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MRFile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/mr/files/{id}:
+    get:
+      tags: [MR]
+      summary: Download MR file
+      operationId: downloadMRFile
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: MR file binary content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/mr/files/{id}/parse:
+    post:
+      tags: [MR]
+      summary: Parse an MR file
+      operationId: parseMRFile
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: MR file parsed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  records_parsed:
+                    type: integer
+                  status:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/mr/results:
+    get:
+      tags: [MR]
+      summary: List MR results
+      operationId: listMRResults
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: cell_id
+          in: query
+          schema:
+            type: string
+        - name: period
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated MR result list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MRRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Software (Firmware)
+  # ===========================================================================
+  /api/v1/firmware:
+    get:
+      tags: [Software]
+      summary: List firmware versions
+      operationId: listFirmware
+      parameters:
+        - $ref: "#/components/parameters/CarrierParam"
+        - name: product_class
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated firmware list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/FirmwareVersion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Software]
+      summary: Upload firmware
+      operationId: uploadFirmware
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, version, carrier, product_class]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                version:
+                  type: string
+                carrier:
+                  type: string
+                product_class:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "201":
+          description: Firmware uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FirmwareVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/firmware/{id}:
+    get:
+      tags: [Software]
+      summary: Get firmware by ID
+      operationId: getFirmware
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Firmware details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FirmwareVersion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Software]
+      summary: Delete firmware
+      operationId: deleteFirmware
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Firmware deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Upgrades
+  # ===========================================================================
+  /api/v1/upgrades:
+    get:
+      tags: [Upgrades]
+      summary: List upgrade tasks
+      operationId: listUpgrades
+      parameters:
+        - name: batch_id
+          in: query
+          schema:
+            type: string
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated upgrade task list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/UpgradeTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Upgrades]
+      summary: Create an upgrade task
+      operationId: createUpgrade
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUpgradeRequest"
+      responses:
+        "201":
+          description: Upgrade task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpgradeTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/upgrades/{id}:
+    get:
+      tags: [Upgrades]
+      summary: Get upgrade task by ID
+      operationId: getUpgrade
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Upgrade task details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpgradeTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/upgrades/{id}/cancel:
+    post:
+      tags: [Upgrades]
+      summary: Cancel an upgrade task
+      operationId: cancelUpgrade
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Upgrade task cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpgradeTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Interop
+  # ===========================================================================
+  /api/v1/interop/tests/cases:
+    get:
+      tags: [Interop]
+      summary: List interop test cases
+      operationId: listInteropTestCases
+      responses:
+        "200":
+          description: Interop test case list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    category:
+                      type: string
+                    parameters:
+                      type: object
+                      additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/interop/tests/run:
+    post:
+      tags: [Interop]
+      summary: Run interop tests
+      operationId: runInteropTests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                test_case_ids:
+                  type: array
+                  items:
+                    type: string
+                device_id:
+                  type: string
+                  format: uuid
+                parameters:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Tests started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/interop/tests/results:
+    get:
+      tags: [Interop]
+      summary: Get interop test results
+      operationId: getInteropTestResults
+      responses:
+        "200":
+          description: Interop test results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    run_id:
+                      type: string
+                    test_case_id:
+                      type: string
+                    status:
+                      type: string
+                      enum: [passed, failed, skipped, error]
+                    started_at:
+                      type: string
+                      format: date-time
+                    completed_at:
+                      type: string
+                      format: date-time
+                    details:
+                      type: object
+                      additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/interop/tests/validate-datamodel:
+    post:
+      tags: [Interop]
+      summary: Validate a data model via interop testing
+      operationId: validateDataModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                datamodel_id:
+                  type: string
+                  format: uuid
+                device_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  errors:
+                    type: array
+                    items:
+                      type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Northbound
+  # ===========================================================================
+  /api/v1/northbound/push/targets:
+    get:
+      tags: [Northbound]
+      summary: List push targets
+      operationId: listPushTargets
+      responses:
+        "200":
+          description: Push target list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PushTarget"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Northbound]
+      summary: Create a push target
+      operationId: createPushTarget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePushTargetRequest"
+      responses:
+        "201":
+          description: Push target created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/northbound/push/targets/{id}:
+    delete:
+      tags: [Northbound]
+      summary: Delete a push target
+      operationId: deletePushTarget
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Push target deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/northbound/sync/full:
+    get:
+      tags: [Northbound]
+      summary: Get full northbound sync data
+      operationId: getFullSync
+      responses:
+        "200":
+          description: Full sync data
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/northbound/sync/incremental:
+    get:
+      tags: [Northbound]
+      summary: Get incremental northbound sync data
+      operationId: getIncrementalSync
+      responses:
+        "200":
+          description: Incremental sync data
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/northbound/export/pm:
+    post:
+      tags: [Northbound]
+      summary: Export PM data
+      operationId: exportPMData
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                start_time:
+                  type: string
+                  format: date-time
+                end_time:
+                  type: string
+                  format: date-time
+                format:
+                  type: string
+                  enum: [json, csv, xml]
+      responses:
+        "200":
+          description: PM data exported
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/northbound/export/alarms:
+    post:
+      tags: [Northbound]
+      summary: Export alarm data
+      operationId: exportAlarmData
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                start_time:
+                  type: string
+                  format: date-time
+                end_time:
+                  type: string
+                  format: date-time
+                format:
+                  type: string
+                  enum: [json, csv, xml]
+      responses:
+        "200":
+          description: Alarm data exported
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/northbound/export/config/{deviceId}:
+    get:
+      tags: [Northbound]
+      summary: Export device configuration
+      operationId: exportDeviceConfig
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Device configuration export
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Admin - Users
+  # ===========================================================================
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: List users
+      operationId: listUsers
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Admin]
+      summary: Create a user
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/users/{id}:
+    get:
+      tags: [Admin]
+      summary: Get user by ID
+      operationId: getUser
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Admin]
+      summary: Update a user
+      operationId: updateUser
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Admin]
+      summary: Delete a user
+      operationId: deleteUser
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: User deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/users/{id}/roles:
+    post:
+      tags: [Admin]
+      summary: Assign roles to a user
+      operationId: assignUserRoles
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_ids]
+              properties:
+                role_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Roles assigned
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/users/{id}/roles/{roleId}:
+    delete:
+      tags: [Admin]
+      summary: Remove a role from a user
+      operationId: removeUserRole
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Role removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/users/{id}/reset-password:
+    post:
+      tags: [Admin]
+      summary: Reset a user's password
+      operationId: resetUserPassword
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Password reset
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/users/{id}/lock:
+    post:
+      tags: [Admin]
+      summary: Lock a user account
+      operationId: lockUser
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: User locked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/users/{id}/unlock:
+    post:
+      tags: [Admin]
+      summary: Unlock a user account
+      operationId: unlockUser
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: User unlocked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Admin - Roles
+  # ===========================================================================
+  /api/v1/admin/roles:
+    get:
+      tags: [Admin]
+      summary: List roles
+      operationId: listRoles
+      responses:
+        "200":
+          description: Role list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Role"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Admin]
+      summary: Create a role
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleRequest"
+      responses:
+        "201":
+          description: Role created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/roles/{id}:
+    get:
+      tags: [Admin]
+      summary: Get role by ID
+      operationId: getRole
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "200":
+          description: Role details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Admin]
+      summary: Update a role
+      operationId: updateRole
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoleRequest"
+      responses:
+        "200":
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Admin]
+      summary: Delete a role
+      operationId: deleteRole
+      parameters:
+        - $ref: "#/components/parameters/UUIDPathParam"
+      responses:
+        "204":
+          description: Role deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Admin - Permissions & Audit
+  # ===========================================================================
+  /api/v1/admin/permissions:
+    get:
+      tags: [Admin]
+      summary: List all permissions
+      operationId: listPermissions
+      responses:
+        "200":
+          description: Permission list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Permission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: List audit logs
+      operationId: listAuditLogs
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: resource
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated audit log list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            user_id:
+                              type: string
+                              format: uuid
+                            username:
+                              type: string
+                            action:
+                              type: string
+                            resource:
+                              type: string
+                            resource_id:
+                              type: string
+                            details:
+                              type: object
+                              additionalProperties: true
+                            ip_address:
+                              type: string
+                            created_at:
+                              type: string
+                              format: date-time
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  # ---------------------------------------------------------------------------
+  # Security Schemes
+  # ---------------------------------------------------------------------------
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ---------------------------------------------------------------------------
+  # Reusable Parameters
+  # ---------------------------------------------------------------------------
+  parameters:
+    UUIDPathParam:
+      name: id
+      in: path
+      required: true
+      description: Resource UUID
+      schema:
+        type: string
+        format: uuid
+
+    PageParam:
+      name: page
+      in: query
+      description: Page number (1-indexed)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    PageSizeParam:
+      name: page_size
+      in: query
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    CarrierParam:
+      name: carrier
+      in: query
+      description: Carrier / operator name
+      schema:
+        type: string
+
+    TechnologyParam:
+      name: technology
+      in: query
+      description: Radio access technology (e.g. 4G, 5G)
+      schema:
+        type: string
+
+  # ---------------------------------------------------------------------------
+  # Reusable Responses
+  # ---------------------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Unauthorized - missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: Forbidden - insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Schemas
+  # ---------------------------------------------------------------------------
+  schemas:
+    # ---- Generic ----
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          description: HTTP status code
+          example: 400
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Invalid request parameters"
+        details:
+          type: string
+          description: Additional error details
+        request_id:
+          type: string
+          description: Request tracking ID
+
+    PaginatedResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {}
+        total:
+          type: integer
+          description: Total number of records
+          example: 150
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        page_size:
+          type: integer
+          description: Number of items per page
+          example: 20
+
+    # ---- Auth ----
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: admin
+        password:
+          type: string
+          format: password
+          example: secret123
+
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        token_type:
+          type: string
+          example: Bearer
+
+    # ---- Device ----
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        serial_number:
+          type: string
+        oui:
+          type: string
+        product_class:
+          type: string
+        manufacturer:
+          type: string
+        model:
+          type: string
+        hardware_version:
+          type: string
+        software_version:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        status:
+          type: string
+          enum: [online, offline, provisioning, error]
+        ip_address:
+          type: string
+        last_contact:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DeviceParameter:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Device.DeviceInfo.SerialNumber"
+        value:
+          type: string
+        type:
+          type: string
+          enum: [string, int, unsignedInt, boolean, dateTime, base64]
+        writable:
+          type: boolean
+
+    CreateDeviceRequest:
+      type: object
+      required: [serial_number, oui]
+      properties:
+        serial_number:
+          type: string
+        oui:
+          type: string
+        product_class:
+          type: string
+        manufacturer:
+          type: string
+        model:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        carrier:
+          type: string
+        technology:
+          type: string
+        status:
+          type: string
+        model:
+          type: string
+
+    # ---- DataModel ----
+    DataModel:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        oui:
+          type: string
+        product_class:
+          type: string
+        scope:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, deprecated]
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              writable:
+                type: boolean
+              description:
+                type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateDataModelRequest:
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        oui:
+          type: string
+        product_class:
+          type: string
+        scope:
+          type: string
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              writable:
+                type: boolean
+              description:
+                type: string
+
+    UpdateDataModelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        scope:
+          type: string
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              writable:
+                type: boolean
+              description:
+                type: string
+
+    # ---- OUI ----
+    OUI:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        oui:
+          type: string
+          example: "00259E"
+        manufacturer:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateOUIRequest:
+      type: object
+      required: [oui, manufacturer]
+      properties:
+        oui:
+          type: string
+        manufacturer:
+          type: string
+        description:
+          type: string
+
+    # ---- ConfigTemplate ----
+    ConfigTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        content:
+          type: object
+          description: Template parameter tree
+          additionalProperties: true
+        version:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateConfigTemplateRequest:
+      type: object
+      required: [name, content]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        content:
+          type: object
+          additionalProperties: true
+        version:
+          type: string
+
+    UpdateConfigTemplateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        content:
+          type: object
+          additionalProperties: true
+        version:
+          type: string
+
+    # ---- Provisioning ----
+    ProvisioningTask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        task_type:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed]
+        parameters:
+          type: object
+          additionalProperties: true
+        result:
+          type: object
+          additionalProperties: true
+        error_message:
+          type: string
+        retry_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    CreateProvisioningTaskRequest:
+      type: object
+      required: [device_id, task_type]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        task_type:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+
+    # ---- Groups ----
+    DeviceGroup:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        member_count:
+          type: integer
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceGroup"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+
+    UpdateGroupRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+
+    # ---- PM Counter ----
+    PMCounter:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        cell_id:
+          type: string
+        counter_group:
+          type: string
+        counter_name:
+          type: string
+        value:
+          type: number
+          format: double
+        timestamp:
+          type: string
+          format: date-time
+        granularity:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ---- KPI ----
+    KPIDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        formula:
+          type: string
+        unit:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        counter_names:
+          type: array
+          items:
+            type: string
+
+    KPIValue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kpi_name:
+          type: string
+        device_id:
+          type: string
+          format: uuid
+        cell_id:
+          type: string
+        value:
+          type: number
+          format: double
+        unit:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- KPI Threshold ----
+    KPIThreshold:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kpi_name:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        warning_threshold:
+          type: number
+          format: double
+        critical_threshold:
+          type: number
+          format: double
+        comparison:
+          type: string
+          enum: [gt, gte, lt, lte, eq]
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateKPIThresholdRequest:
+      type: object
+      required: [kpi_name, warning_threshold, critical_threshold, comparison]
+      properties:
+        kpi_name:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        warning_threshold:
+          type: number
+          format: double
+        critical_threshold:
+          type: number
+          format: double
+        comparison:
+          type: string
+          enum: [gt, gte, lt, lte, eq]
+        enabled:
+          type: boolean
+          default: true
+
+    UpdateKPIThresholdRequest:
+      type: object
+      properties:
+        warning_threshold:
+          type: number
+          format: double
+        critical_threshold:
+          type: number
+          format: double
+        comparison:
+          type: string
+          enum: [gt, gte, lt, lte, eq]
+        enabled:
+          type: boolean
+
+    # ---- Alarm ----
+    Alarm:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        alarm_code:
+          type: string
+        alarm_name:
+          type: string
+        device_id:
+          type: string
+          format: uuid
+        device_sn:
+          type: string
+        carrier:
+          type: string
+        severity:
+          type: string
+          enum: [critical, major, minor, warning]
+        status:
+          type: string
+          enum: [active, acknowledged, cleared]
+        description:
+          type: string
+        source:
+          type: string
+        raised_at:
+          type: string
+          format: date-time
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        acknowledged_by:
+          type: string
+          nullable: true
+        cleared_at:
+          type: string
+          format: date-time
+          nullable: true
+        cleared_by:
+          type: string
+          nullable: true
+
+    AlarmStatistics:
+      type: object
+      properties:
+        total_active:
+          type: integer
+        by_severity:
+          type: object
+          properties:
+            critical:
+              type: integer
+            major:
+              type: integer
+            minor:
+              type: integer
+            warning:
+              type: integer
+        by_carrier:
+          type: object
+          additionalProperties:
+            type: integer
+        trend:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              count:
+                type: integer
+
+    # ---- Alarm Rule ----
+    AlarmRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        alarm_code:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        severity:
+          type: string
+          enum: [critical, major, minor, warning]
+        condition_type:
+          type: string
+        condition:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateAlarmRuleRequest:
+      type: object
+      required: [name, alarm_code, severity, condition_type, condition]
+      properties:
+        name:
+          type: string
+        alarm_code:
+          type: string
+        carrier:
+          type: string
+        technology:
+          type: string
+        severity:
+          type: string
+          enum: [critical, major, minor, warning]
+        condition_type:
+          type: string
+        condition:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+          default: true
+        description:
+          type: string
+
+    UpdateAlarmRuleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        severity:
+          type: string
+          enum: [critical, major, minor, warning]
+        condition_type:
+          type: string
+        condition:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+        description:
+          type: string
+
+    # ---- Dashboard ----
+    DashboardSummary:
+      type: object
+      properties:
+        device_stats:
+          type: object
+          properties:
+            total:
+              type: integer
+            online:
+              type: integer
+            offline:
+              type: integer
+            error:
+              type: integer
+        alarm_stats:
+          $ref: "#/components/schemas/AlarmStatistics"
+        kpi_overview:
+          type: object
+          additionalProperties: true
+        recent_alarms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alarm"
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- System Log ----
+    SystemLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        level:
+          type: string
+          enum: [debug, info, warn, error, fatal]
+        source:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- NE Message Log ----
+    NEMessageLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        device_sn:
+          type: string
+        message_type:
+          type: string
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        content:
+          type: string
+        size_bytes:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- MR ----
+    MRFile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        device_sn:
+          type: string
+        file_name:
+          type: string
+        file_type:
+          type: string
+        file_size:
+          type: integer
+        parsed:
+          type: boolean
+        record_count:
+          type: integer
+        uploaded_at:
+          type: string
+          format: date-time
+
+    MRRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        cell_id:
+          type: string
+        period:
+          type: string
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- Software / Firmware ----
+    FirmwareVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: string
+        carrier:
+          type: string
+        product_class:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        checksum:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ---- Upgrade ----
+    UpgradeTask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+        device_id:
+          type: string
+          format: uuid
+        firmware_id:
+          type: string
+          format: uuid
+        from_version:
+          type: string
+        to_version:
+          type: string
+        status:
+          type: string
+          enum: [pending, downloading, installing, rebooting, completed, failed, cancelled]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateUpgradeRequest:
+      type: object
+      required: [device_ids, firmware_id]
+      properties:
+        device_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        firmware_id:
+          type: string
+          format: uuid
+        schedule_at:
+          type: string
+          format: date-time
+
+    # ---- Northbound ----
+    PushTarget:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [http, kafka, mqtt]
+        url:
+          type: string
+        auth_type:
+          type: string
+          enum: [none, basic, bearer, api_key]
+        enabled:
+          type: boolean
+        data_types:
+          type: array
+          items:
+            type: string
+            enum: [alarm, pm, config, event]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreatePushTargetRequest:
+      type: object
+      required: [name, type, url]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [http, kafka, mqtt]
+        url:
+          type: string
+        auth_type:
+          type: string
+          enum: [none, basic, bearer, api_key]
+        auth_config:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+          default: true
+        data_types:
+          type: array
+          items:
+            type: string
+            enum: [alarm, pm, config, event]
+
+    # ---- User / Role / Permission ----
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        status:
+          type: string
+          enum: [active, locked, disabled]
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/Role"
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required: [username, password, email]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        role_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        status:
+          type: string
+          enum: [active, locked, disabled]
+
+    Role:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Permission"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRoleRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permission_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    UpdateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permission_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    Permission:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        resource:
+          type: string
+        action:
+          type: string
+          enum: [read, write, delete, admin]
+        description:
+          type: string

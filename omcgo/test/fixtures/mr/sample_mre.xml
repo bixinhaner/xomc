@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bulkPmMrDataFile>
+  <fileHeader startTime="2024-01-15T10:00:00Z" reportingPeriod="PT900S"/>
+  <eNB id="ENB001">
+    <measurement mrType="MRE">
+      <smr>MR.UeCategory MR.AccessStratumRelease MR.UeBand1 MR.UeBand3 MR.UeBand41</smr>
+      <object id="Cell-1">
+        <v>4 10 1 1 0</v>
+        <v>6 11 1 1 1</v>
+      </object>
+    </measurement>
+  </eNB>
+</bulkPmMrDataFile>

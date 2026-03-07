@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">
+  <fileHeader dnPrefix="DC=cmcc" vendorName="TestVendor" fileFormatVersion="32.435 V10.0"/>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001" swVersion="V2.1"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-03-06T15:00:00+08:00"/>
+      <measType p="1">rrc_conn_setup_att</measType>
+      <measType p="2">rrc_conn_setup_succ</measType>
+      <measType p="3">erab_setup_att</measType>
+      <measType p="4">erab_setup_succ</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">1000</r>
+        <r p="2">950</r>
+        <r p="3">800</r>
+        <r p="4">780</r>
+      </measValue>
+      <measValue measObjLdn="CellId=Cell2">
+        <r p="1">500</r>
+        <r p="2">490</r>
+        <r p="3">400</r>
+        <r p="4">395</r>
+      </measValue>
+    </measInfo>
+    <measInfo measInfoId="Throughput_Counters">
+      <granPeriod duration="PT900S" endTime="2026-03-06T15:00:00+08:00"/>
+      <measType p="1">pdcp_sdu_dl_volume</measType>
+      <measType p="2">pdcp_sdu_ul_volume</measType>
+      <measType p="3">dl_prb_used_avg</measType>
+      <measType p="4">dl_prb_total</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">125000000</r>
+        <r p="2">25000000</r>
+        <r p="3">75</r>
+        <r p="4">100</r>
+      </measValue>
+      <measValue measObjLdn="CellId=Cell2">
+        <r p="1">80000000</r>
+        <r p="2">15000000</r>
+        <r p="3">40</r>
+        <r p="4">100</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>

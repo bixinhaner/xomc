@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bulkPmMrDataFile>
+  <fileHeader startTime="2024-01-15T10:00:00Z" reportingPeriod="PT900S"/>
+  <eNB id="ENB001">
+    <measurement mrType="MRO">
+      <smr>MR.LteScRSRP MR.LteScRSRQ MR.LteScSinrUL MR.LteNcRSRP MR.LteNcRSRQ MR.LteNcEarfcn MR.LteNcPci</smr>
+      <object id="Cell-1">
+        <v>-85.5 -10.2 15.3 -92.0 -12.5 100 201</v>
+        <v>-78.0 -8.5 20.1 -88.0 -11.0 100 202</v>
+        <v>-95.0 -15.0 5.8 -98.0 -16.0 200 301</v>
+      </object>
+      <object id="Cell-2">
+        <v>-82.0 -9.5 18.0 -90.0 -13.0 100 203</v>
+        <v>-88.0 -11.5 12.5 -95.0 -14.5 200 302</v>
+      </object>
+    </measurement>
+  </eNB>
+</bulkPmMrDataFile>

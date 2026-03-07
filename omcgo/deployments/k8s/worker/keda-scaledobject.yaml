@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: omcgo-worker
+  namespace: omcgo
+spec:
+  scaleTargetRef:
+    name: omcgo-worker
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats.omcgo.svc.cluster.local:8222"
+        account: "$G"
+        stream: "omcgo"
+        consumer: "worker"
+        lagThreshold: "1000"
+        activationLagThreshold: "100"
