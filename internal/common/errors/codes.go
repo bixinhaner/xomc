@@ -89,3 +89,48 @@ const (
 	ErrCodeInteropValidateFailed = 10002
 	ErrCodeInteropCaseNotFound   = 10003
 )
+
+// Config Baseline/Task/Neighbor (11000-11999)
+const (
+	ErrCodeBaselineNotFound   = 11001
+	ErrCodeBaselineDuplicate  = 11002
+	ErrCodeConfigTaskNotFound = 11003
+	ErrCodeNeighborNotFound   = 11004
+)
+
+// License (12000-12999)
+const (
+	ErrCodeLicenseNotFound       = 12001
+	ErrCodeLicenseDuplicate      = 12002
+	ErrCodeLicenseExpired        = 12003
+	ErrCodeLicenseAlreadyActive  = 12004
+	ErrCodeLicenseAlreadyRevoked = 12005
+)
+
+// Reports (13000-13999)
+const (
+	ErrCodeReportDefNotFound = 13001
+	ErrCodeReportRecNotFound = 13002
+	ErrCodeReportGenFailed   = 13003
+)
+
+// OpsTools (14000-14999)
+const (
+	ErrCodeOpsTemplateNotFound = 14001
+	ErrCodeOpsTaskNotFound     = 14002
+	ErrCodeOpsTaskInvalidState = 14003
+	ErrCodeOpsCommandFailed    = 14004
+)
+
+// Backup FTP (15000-15999)
+const (
+	ErrCodeFTPConfigNotFound   = 15001
+	ErrCodeFTPConnectionFailed = 15002
+)
+
+// MR Indicators (16000-16999)
+const (
+	ErrCodeMRIndicatorNotFound = 16001
+	ErrCodeMRMappingNotFound   = 16002
+	ErrCodeMRExportFailed      = 16003
+)
