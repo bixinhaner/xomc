@@ -22,6 +22,11 @@ type ACSConfig struct {
 	Log       LogConfig          `mapstructure:"log"`
 }
 
+// CORSConfig holds CORS middleware settings.
+type CORSConfig struct {
+	AllowOrigins []string `mapstructure:"allow_origins"`
+}
+
 // AppConfig is the configuration for the main application.
 type AppConfig struct {
 	Server     AppServerConfig  `mapstructure:"server"`
@@ -31,6 +36,7 @@ type AppConfig struct {
 	NATS       NATSConfig       `mapstructure:"nats"`
 	MinIO      MinIOConfig      `mapstructure:"minio"`
 	JWT        JWTConfig        `mapstructure:"jwt"`
+	CORS       CORSConfig       `mapstructure:"cors"`
 	Northbound NorthboundConfig `mapstructure:"northbound"`
 	NEDirect   NEDirectConfig   `mapstructure:"ne_direct"`
 	Metrics    MetricsConfig    `mapstructure:"metrics"`

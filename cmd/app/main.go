@@ -230,8 +230,12 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	router := gin.New()
 	router.Use(gin.Recovery())
+	corsOrigins := cfg.CORS.AllowOrigins
+	if len(corsOrigins) == 0 {
+		corsOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+	}
 	router.Use(middleware.CORS(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowOrigins: corsOrigins,
 	}))
 	router.Use(middleware.RequestLogger(logger))
 

@@ -57,16 +57,23 @@ func NewBusinessError(code int, message string, err error) *BusinessError {
 
 // ErrorResponse is the JSON structure returned to API clients on error.
 type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Details string `json:"details,omitempty"`
+	Code      int    `json:"code"`
+	Message   string `json:"message"`
+	Details   string `json:"details,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // AbortWithError writes a JSON error response and aborts the Gin handler chain.
 func AbortWithError(c *gin.Context, statusCode int, err error) {
+	var reqIDStr string
+	if rid, exists := c.Get("request_id"); exists {
+		reqIDStr, _ = rid.(string)
+	}
+
 	resp := ErrorResponse{
-		Code:    statusCode,
-		Message: http.StatusText(statusCode),
+		Code:      statusCode,
+		Message:   http.StatusText(statusCode),
+		RequestID: reqIDStr,
 	}
 
 	var bErr *BusinessError
