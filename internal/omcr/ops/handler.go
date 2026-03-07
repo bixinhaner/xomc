@@ -101,7 +101,7 @@ type CreateCommandRecordRequest struct {
 	Duration     int    `json:"duration"`
 	Success      bool   `json:"success"`
 	Output       string `json:"output"`
-	ErrorMessage string `json:"error_message"`
+	ErrorMessage *string `json:"error_message"`
 }
 
 // ---- Template handlers ----

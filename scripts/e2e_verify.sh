@@ -101,7 +101,7 @@ print('' if v is None else v)
 }
 
 echo "================================================"
-echo "  OMC Sprint 0+1+2+3+4+5+6 — E2E Data Flow Verification"
+echo "  OMC Sprint 0+1+2+3+4+5+6+10 — E2E Data Flow Verification"
 echo "================================================"
 echo "Target: $BASE_URL"
 echo "Time:   $(date '+%Y-%m-%d %H:%M:%S')"
@@ -3506,6 +3506,696 @@ if [ -n "$ACCESS_TOKEN" ]; then
     fi
 else
     fail "S56 Full Regression" "skipped — no access token (tests 56.2-56.6)"
+fi
+
+# ============================================================
+# Sprint 10 — Phase A-D Module Alignment E2E Tests (S57-S74)
+# ============================================================
+
+# ============================================================
+# S57: System Info (Phase A)
+# ============================================================
+
+section "57. System Info"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 57.1 GET /system/info → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/system/info" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /system/info" "200" "$HTTP_CODE"
+
+    # 57.2 System info has version field
+    check_json_field "System info has version" "$BODY" "version"
+else
+    fail "S57 System Info" "skipped — no access token"
+fi
+
+# ============================================================
+# S58: Dashboard Widgets + KPI Time Series + Alarm Type Pie (Phase A)
+# ============================================================
+
+section "58. Dashboard Widgets & KPI & Alarm Pie"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 58.1 GET /dashboard/widgets → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/dashboard/widgets" -H "$AUTH_HEADER")
+    check_status "GET /dashboard/widgets" "200" "$HTTP_CODE"
+
+    # 58.2 PUT /dashboard/widgets → 200
+    RESP=$(curl -s -w "\n%{http_code}" -X PUT "$API/dashboard/widgets" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"layout":[{"id":"w1","type":"chart","title":"Test"}]}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "PUT /dashboard/widgets" "200" "$HTTP_CODE"
+
+    # 58.3 GET /dashboard/alarm-type-pie → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/dashboard/alarm-type-pie" -H "$AUTH_HEADER")
+    check_status "GET /dashboard/alarm-type-pie" "200" "$HTTP_CODE"
+
+    # 58.4 GET /dashboard/kpi-time-series → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/dashboard/kpi-time-series?kpi_names=E2E_RRC_SR&start_time=2026-01-01T00:00:00Z&end_time=2026-12-31T23:59:59Z" \
+        -H "$AUTH_HEADER")
+    check_status "GET /dashboard/kpi-time-series" "200" "$HTTP_CODE"
+else
+    fail "S58 Dashboard Widgets" "skipped — no access token"
+fi
+
+# ============================================================
+# S59: PM Tasks (Phase A)
+# ============================================================
+
+section "59. PM Tasks"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 59.1 GET /pm/tasks → 200, items
+    RESP=$(curl -s -w "\n%{http_code}" "$API/pm/tasks" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /pm/tasks" "200" "$HTTP_CODE"
+
+    # 59.2 PM tasks has items
+    check_json_field "PM tasks has items" "$BODY" "items"
+
+    # 59.3 POST /pm/tasks → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/pm/tasks" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"task_name":"E2E New PM Task","task_type":"extraction","device_sns":["TEST-SN-001"],"kpi_codes":["E2E_RRC_SR"],"granularity":"15min"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /pm/tasks (create)" "201" "$HTTP_CODE"
+
+    # 59.4 Created PM task has id
+    check_json_field "PM task has id" "$BODY" "id"
+else
+    fail "S59 PM Tasks" "skipped — no access token"
+fi
+
+# ============================================================
+# S60: Phase A Regression
+# ============================================================
+
+section "60. Phase A Regression"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/system/info" -H "$AUTH_HEADER")
+    check_status "GET /system/info (Phase A regression)" "200" "$HTTP_CODE"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/dashboard/widgets" -H "$AUTH_HEADER")
+    check_status "GET /dashboard/widgets (Phase A regression)" "200" "$HTTP_CODE"
+else
+    fail "S60 Phase A Regression" "skipped — no access token"
+fi
+
+# ============================================================
+# S61: Config Baselines CRUD (Phase B)
+# ============================================================
+
+section "61. Config Baselines CRUD"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 61.1 GET /config/baselines → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/config/baselines" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /config/baselines (list)" "200" "$HTTP_CODE"
+
+    # 61.2 Baselines has items
+    check_json_field "Config baselines has items" "$BODY" "items"
+
+    # 61.3 POST /config/baselines → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/config/baselines" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"baseline_name":"E2E Test Baseline","description":"Created by E2E test","device_type":"FAP-LTE-100","version":"v2.0","params":[{"name":"TestParam","value":"1"}],"creator":"admin"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /config/baselines (create)" "201" "$HTTP_CODE"
+
+    BASELINE_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    # 61.4 GET /config/baselines/:id → 200
+    if [ -n "$BASELINE_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/config/baselines/$BASELINE_ID" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "GET /config/baselines/:id" "200" "$HTTP_CODE"
+        check_json_field "Baseline has baseline_name" "$BODY" "baseline_name"
+
+        # 61.5 PUT /config/baselines/:id → 200
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/config/baselines/$BASELINE_ID" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d '{"baseline_name":"E2E Updated Baseline","description":"Updated by E2E","device_type":"FAP-LTE-100","version":"v2.1","params":[{"name":"TestParam","value":"2"}],"status":"active"}')
+        check_status "PUT /config/baselines/:id (update)" "200" "$HTTP_CODE"
+
+        # 61.6 DELETE /config/baselines/:id → 204
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/config/baselines/$BASELINE_ID" -H "$AUTH_HEADER")
+        check_status "DELETE /config/baselines/:id" "204" "$HTTP_CODE"
+    else
+        fail "Config baseline CRUD" "no id returned from create"
+    fi
+else
+    fail "S61 Config Baselines CRUD" "skipped — no access token"
+fi
+
+# ============================================================
+# S62: Config Tasks + Neighbors (Phase B)
+# ============================================================
+
+section "62. Config Tasks & Neighbors"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 62.1 GET /config/tasks → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/config/tasks" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /config/tasks (list)" "200" "$HTTP_CODE"
+    check_json_field "Config tasks has items" "$BODY" "items"
+
+    # 62.2 POST /config/tasks → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/config/tasks" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"task_name":"E2E Config Push","task_type":"apply","device_sns":["TEST-SN-001"],"baseline_id":"e2e00015-0000-0000-0000-000000000001","creator":"admin"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "POST /config/tasks (create)" "201" "$HTTP_CODE"
+
+    # 62.3 GET /config/neighbors → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/config/neighbors" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /config/neighbors (list)" "200" "$HTTP_CODE"
+    check_json_field "Config neighbors has items" "$BODY" "items"
+else
+    fail "S62 Config Tasks & Neighbors" "skipped — no access token"
+fi
+
+# ============================================================
+# S63: FTP Config CRUD (Phase B)
+# ============================================================
+
+section "63. FTP Config CRUD"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 63.1 GET /backup/ftp-configs → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/backup/ftp-configs" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /backup/ftp-configs (list)" "200" "$HTTP_CODE"
+    check_json_field "FTP configs has items" "$BODY" "items"
+
+    # 63.2 POST /backup/ftp-configs → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/backup/ftp-configs" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"config_name":"E2E Test FTP","host":"10.0.0.1","port":21,"username":"testuser","protocol":"FTP","remote_path":"/test","passive":true,"enabled":true}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /backup/ftp-configs (create)" "201" "$HTTP_CODE"
+
+    FTP_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    if [ -n "$FTP_ID" ]; then
+        # 63.3 PUT /backup/ftp-configs/:id → 200
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/backup/ftp-configs/$FTP_ID" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d '{"config_name":"E2E Updated FTP","host":"10.0.0.2","port":22,"username":"testuser2","protocol":"SFTP","remote_path":"/updated","passive":false,"enabled":true}')
+        check_status "PUT /backup/ftp-configs/:id (update)" "200" "$HTTP_CODE"
+
+        # 63.4 POST /backup/ftp-configs/:id/test → 200
+        RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/backup/ftp-configs/$FTP_ID/test" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "POST /backup/ftp-configs/:id/test" "200" "$HTTP_CODE"
+
+        # 63.5 DELETE /backup/ftp-configs/:id → 204
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/backup/ftp-configs/$FTP_ID" -H "$AUTH_HEADER")
+        check_status "DELETE /backup/ftp-configs/:id" "204" "$HTTP_CODE"
+    else
+        fail "FTP config CRUD" "no id returned from create"
+    fi
+else
+    fail "S63 FTP Config CRUD" "skipped — no access token"
+fi
+
+# ============================================================
+# S64: MR Indicators + Mappings (Phase B)
+# ============================================================
+
+section "64. MR Indicators & Mappings"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 64.1 GET /mr/indicators → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/indicators?page=1&page_size=10" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mr/indicators (paginated)" "200" "$HTTP_CODE"
+    check_json_field "MR indicators has items" "$BODY" "items"
+
+    # 64.2 GET /mr/indicators/all → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/indicators/all" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "GET /mr/indicators/all" "200" "$HTTP_CODE"
+
+    # 64.3 GET /mr/mappings → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/mappings" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mr/mappings (list)" "200" "$HTTP_CODE"
+    check_json_field "MR mappings has items" "$BODY" "items"
+
+    # 64.4 PUT /mr/mappings/:id → 200
+    MAPPING_ID="e2e00019-0000-0000-0000-000000000001"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/mr/mappings/$MAPPING_ID" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"sampling_interval":30}')
+    check_status "PUT /mr/mappings/:id (update)" "200" "$HTTP_CODE"
+
+    # 64.5 PUT /mr/mappings/:id/toggle → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/mr/mappings/$MAPPING_ID/toggle" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"enabled":false}')
+    check_status "PUT /mr/mappings/:id/toggle" "200" "$HTTP_CODE"
+else
+    fail "S64 MR Indicators & Mappings" "skipped — no access token"
+fi
+
+# ============================================================
+# S65: License CRUD (Phase C)
+# ============================================================
+
+section "65. License CRUD"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 65.1 GET /licenses → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/licenses" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /licenses (list)" "200" "$HTTP_CODE"
+    check_json_field "Licenses has items" "$BODY" "items"
+
+    # 65.2 GET /licenses/:id → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/licenses/e2e00020-0000-0000-0000-000000000001" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /licenses/:id" "200" "$HTTP_CODE"
+    check_json_field "License has license_name" "$BODY" "license_name"
+
+    # 65.3 GET /licenses/summary → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/licenses/summary" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /licenses/summary" "200" "$HTTP_CODE"
+    check_json_field "License summary has total" "$BODY" "total"
+
+    # 65.4 POST /licenses/activate → 200
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/licenses/activate" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"license_code":"E2E-LIC-002"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "POST /licenses/activate" "200" "$HTTP_CODE"
+
+    # 65.5 POST /licenses/:id/revoke → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+        "$API/licenses/e2e00020-0000-0000-0000-000000000002/revoke" -H "$AUTH_HEADER")
+    check_status "POST /licenses/:id/revoke" "200" "$HTTP_CODE"
+
+    # 65.6 POST /licenses/import → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/licenses/import" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"license_name":"E2E Imported License","license_code":"E2E-LIC-IMPORT","product_name":"OMC Import Test","license_type":"trial","max_devices":10,"features":["test"],"issue_date":"2026-01-01T00:00:00Z"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /licenses/import" "201" "$HTTP_CODE"
+
+    NEW_LIC_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    # 65.7 GET new license → 200
+    if [ -n "$NEW_LIC_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/licenses/$NEW_LIC_ID" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "GET /licenses/:id (imported)" "200" "$HTTP_CODE"
+    else
+        fail "GET imported license" "no id returned from import"
+    fi
+
+    # 65.8 GET /licenses?status=active → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/licenses?status=active" -H "$AUTH_HEADER")
+    check_status "GET /licenses?status=active (filter)" "200" "$HTTP_CODE"
+else
+    fail "S65 License CRUD" "skipped �� no access token"
+fi
+
+# ============================================================
+# S66: Topology Sites (Phase C)
+# ============================================================
+
+section "66. Topology Sites"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 66.1 GET /sites → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/sites" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /sites (list)" "200" "$HTTP_CODE"
+    check_json_field "Sites has items" "$BODY" "items"
+
+    # 66.2 POST /sites → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/sites" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"name":"E2E Test Site","domain_id":"e2e00007-0000-0000-0000-000000000001","address":"Test Address","longitude":116.5,"latitude":40.0,"status":"active"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /sites (create)" "201" "$HTTP_CODE"
+
+    SITE_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    # 66.3 GET /sites/:id → 200
+    if [ -n "$SITE_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/sites/$SITE_ID" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "GET /sites/:id" "200" "$HTTP_CODE"
+        check_json_field "Site has name" "$BODY" "name"
+    else
+        fail "GET site by id" "no id returned from create"
+    fi
+else
+    fail "S66 Topology Sites" "skipped — no access token"
+fi
+
+# ============================================================
+# S67: Topology Graph (Phase C)
+# ============================================================
+
+section "67. Topology Graph"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 67.1 GET /topology/nodes → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/topology/nodes" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /topology/nodes" "200" "$HTTP_CODE"
+    check_json_field "Topology nodes has items" "$BODY" "items"
+
+    # 67.2 GET /topology/edges → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/topology/edges" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /topology/edges" "200" "$HTTP_CODE"
+    check_json_field "Topology edges has items" "$BODY" "items"
+
+    # 67.3 GET /topology/graph → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/topology/graph" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /topology/graph" "200" "$HTTP_CODE"
+    check_json_field "Topology graph has nodes" "$BODY" "nodes"
+
+    # 67.4 GET /topology/geo → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/topology/geo" -H "$AUTH_HEADER")
+    check_status "GET /topology/geo" "200" "$HTTP_CODE"
+else
+    fail "S67 Topology Graph" "skipped — no access token"
+fi
+
+# ============================================================
+# S68: Reports CRUD (Phase C)
+# ============================================================
+
+section "68. Reports CRUD"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 68.1 GET /reports/definitions → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/reports/definitions" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /reports/definitions (list)" "200" "$HTTP_CODE"
+    check_json_field "Report definitions has items" "$BODY" "items"
+
+    # 68.2 POST /reports/definitions → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/reports/definitions" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"report_name":"E2E Test Report","report_type":"kpi","description":"E2E report","format":["pdf"],"period":"daily","kpi_codes":["E2E_RRC_SR"],"creator":"admin"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /reports/definitions (create)" "201" "$HTTP_CODE"
+
+    REPORT_DEF_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    if [ -n "$REPORT_DEF_ID" ]; then
+        # 68.3 GET /reports/definitions/:id → 200
+        RESP=$(curl -s -w "\n%{http_code}" "$API/reports/definitions/$REPORT_DEF_ID" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "GET /reports/definitions/:id" "200" "$HTTP_CODE"
+        check_json_field "Report definition has report_name" "$BODY" "report_name"
+
+        # 68.4 PUT /reports/definitions/:id → 200
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/reports/definitions/$REPORT_DEF_ID" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d '{"report_name":"E2E Updated Report","report_type":"kpi","description":"Updated","format":["pdf","xlsx"],"period":"weekly"}')
+        check_status "PUT /reports/definitions/:id (update)" "200" "$HTTP_CODE"
+
+        # 68.5 POST /reports/generate → 200/201
+        RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/reports/generate" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d "{\"definition_id\":\"$REPORT_DEF_ID\",\"format\":\"pdf\"}")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        # Accept both 200 and 201
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+            pass "POST /reports/generate (HTTP $HTTP_CODE)"
+        else
+            fail "POST /reports/generate" "expected HTTP 200 or 201, got $HTTP_CODE"
+        fi
+
+        # 68.6 DELETE /reports/definitions/:id → 204
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/reports/definitions/$REPORT_DEF_ID" -H "$AUTH_HEADER")
+        check_status "DELETE /reports/definitions/:id" "204" "$HTTP_CODE"
+    else
+        fail "Reports CRUD" "no id returned from create"
+    fi
+
+    # 68.7 GET /reports/records → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/reports/records" -H "$AUTH_HEADER")
+    check_status "GET /reports/records (list)" "200" "$HTTP_CODE"
+
+    # 68.8 GET /reports/sample-data → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/reports/sample-data" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "GET /reports/sample-data" "200" "$HTTP_CODE"
+else
+    fail "S68 Reports CRUD" "skipped — no access token"
+fi
+
+# ============================================================
+# S69: OpsTools Templates CRUD (Phase C)
+# ============================================================
+
+section "69. OpsTools Templates CRUD"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 69.1 GET /ops/templates → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/ops/templates" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /ops/templates (list)" "200" "$HTTP_CODE"
+    check_json_field "Ops templates has items" "$BODY" "items"
+
+    # 69.2 POST /ops/templates → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/ops/templates" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"template_name":"E2E Test Template","description":"E2E ops template","category":"diagnostic","target_device_types":["FAP-LTE-100"],"steps":[{"step_no":1,"step_name":"Ping","step_type":"check","command":"ping"}],"estimated_duration":60,"creator":"admin","tags":["e2e"]}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /ops/templates (create)" "201" "$HTTP_CODE"
+
+    OPS_TPL_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    if [ -n "$OPS_TPL_ID" ]; then
+        # 69.3 GET /ops/templates/:id → 200
+        RESP=$(curl -s -w "\n%{http_code}" "$API/ops/templates/$OPS_TPL_ID" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "GET /ops/templates/:id" "200" "$HTTP_CODE"
+        check_json_field "Ops template has template_name" "$BODY" "template_name"
+
+        # 69.4 PUT /ops/templates/:id → 200
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/ops/templates/$OPS_TPL_ID" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d '{"template_name":"E2E Updated Template","description":"Updated","category":"diagnostic","target_device_types":["FAP-LTE-100"],"steps":[{"step_no":1,"step_name":"Ping","step_type":"check","command":"ping"}],"estimated_duration":120,"tags":["e2e","updated"]}')
+        check_status "PUT /ops/templates/:id (update)" "200" "$HTTP_CODE"
+
+        # 69.5 DELETE /ops/templates/:id → 204
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/ops/templates/$OPS_TPL_ID" -H "$AUTH_HEADER")
+        check_status "DELETE /ops/templates/:id" "204" "$HTTP_CODE"
+    else
+        fail "Ops templates CRUD" "no id returned from create"
+    fi
+else
+    fail "S69 OpsTools Templates CRUD" "skipped — no access token"
+fi
+
+# ============================================================
+# S70: OpsTools Command Records (Phase C)
+# ============================================================
+
+section "70. OpsTools Command Records"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 70.1 GET /ops/command-records → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/ops/command-records" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /ops/command-records (list)" "200" "$HTTP_CODE"
+    check_json_field "Command records has items" "$BODY" "items"
+
+    # 70.2 POST /ops/command-records → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/ops/command-records" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"command_text":"LST DEVSTATUS","device_sn":"TEST-SN-001","device_name":"eNB-BJ-001","operator":"admin","duration":200,"success":true,"output":"Status: Online"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /ops/command-records (create)" "201" "$HTTP_CODE"
+
+    # 70.3 Check command_text field
+    check_json_field "Command record has command_text" "$BODY" "command_text"
+else
+    fail "S70 OpsTools Command Records" "skipped — no access token"
+fi
+
+# ============================================================
+# S71: OpsTools Tasks Lifecycle (Phase C)
+# ============================================================
+
+section "71. OpsTools Tasks Lifecycle"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 71.1 POST /ops/tasks → 201
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/ops/tasks" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"task_name":"E2E Ops Task","template_id":"e2e00024-0000-0000-0000-000000000001","device_sns":["TEST-SN-001"],"total_steps":1,"total_count":1,"creator":"admin"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /ops/tasks (create)" "201" "$HTTP_CODE"
+
+    OPS_TASK_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    # 71.2 GET /ops/tasks → 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/ops/tasks" -H "$AUTH_HEADER")
+    check_status "GET /ops/tasks (list)" "200" "$HTTP_CODE"
+
+    if [ -n "$OPS_TASK_ID" ]; then
+        # 71.3 GET /ops/tasks/:id → 200
+        RESP=$(curl -s -w "\n%{http_code}" "$API/ops/tasks/$OPS_TASK_ID" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "GET /ops/tasks/:id" "200" "$HTTP_CODE"
+        check_json_field "Ops task has status" "$BODY" "status"
+
+        # 71.4 POST /ops/tasks/:id/cancel → 200
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/ops/tasks/$OPS_TASK_ID/cancel" -H "$AUTH_HEADER")
+        check_status "POST /ops/tasks/:id/cancel" "200" "$HTTP_CODE"
+    else
+        fail "Ops task lifecycle" "no id returned from create"
+    fi
+
+    # 71.5 POST another task for pause test
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/ops/tasks" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"task_name":"E2E Ops Task 2","template_id":"e2e00024-0000-0000-0000-000000000001","device_sns":["TEST-SN-002"],"total_steps":1,"total_count":1,"creator":"admin"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /ops/tasks (create for pause)" "201" "$HTTP_CODE"
+
+    OPS_TASK_ID2=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+    # 71.6 POST /ops/tasks/:id/pause → 400 (pending task cannot be paused, only running)
+    if [ -n "$OPS_TASK_ID2" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/ops/tasks/$OPS_TASK_ID2/pause" -H "$AUTH_HEADER")
+        check_status "POST /ops/tasks/:id/pause (pending → 400)" "400" "$HTTP_CODE"
+    else
+        fail "Ops task pause" "no id returned from create"
+    fi
+else
+    fail "S71 OpsTools Tasks Lifecycle" "skipped — no access token"
+fi
+
+# ============================================================
+# S72: MR Export (Phase D)
+# ============================================================
+
+section "72. MR Export"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/mr/export" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"indicator_codes":["RSRP"],"device_sns":["TEST-SN-001"]}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /mr/export" "200" "$HTTP_CODE"
+else
+    fail "S72 MR Export" "skipped — no access token"
+fi
+
+# ============================================================
+# S73: Error Code Spot Check (Phase D)
+# ============================================================
+
+section "73. Error Code Spot Check"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 73.1 GET /config/baselines/{zero-uuid} → 404
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/config/baselines/00000000-0000-0000-0000-000000000000" -H "$AUTH_HEADER")
+    check_status "GET /config/baselines/{zero-uuid} → 404" "404" "$HTTP_CODE"
+
+    # 73.2 GET /licenses/{zero-uuid} → 404
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/licenses/00000000-0000-0000-0000-000000000000" -H "$AUTH_HEADER")
+    check_status "GET /licenses/{zero-uuid} → 404" "404" "$HTTP_CODE"
+else
+    fail "S73 Error Code Spot Check" "skipped — no access token"
+fi
+
+# ============================================================
+# S74: Phase A-D Full Regression
+# ============================================================
+
+section "74. Phase A-D Full Regression"
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/system/info" -H "$AUTH_HEADER")
+    check_status "GET /system/info (full regression)" "200" "$HTTP_CODE"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/dashboard/widgets" -H "$AUTH_HEADER")
+    check_status "GET /dashboard/widgets (full regression)" "200" "$HTTP_CODE"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/licenses/summary" -H "$AUTH_HEADER")
+    check_status "GET /licenses/summary (full regression)" "200" "$HTTP_CODE"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/reports/sample-data" -H "$AUTH_HEADER")
+    check_status "GET /reports/sample-data (full regression)" "200" "$HTTP_CODE"
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/ops/templates" -H "$AUTH_HEADER")
+    check_status "GET /ops/templates (full regression)" "200" "$HTTP_CODE"
+else
+    fail "S74 Phase A-D Full Regression" "skipped — no access token"
 fi
 
 # ============================================================

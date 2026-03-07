@@ -9,6 +9,23 @@ BEGIN;
 -- 0. 清理旧的 E2E 测试数据 (幂等，按 FK 依赖逆序)
 -- ============================================================
 
+-- Phase A-D data (Sprint 10)
+DELETE FROM ops_tasks WHERE template_id::text LIKE 'e2e00024%';
+DELETE FROM ops_command_records WHERE id::text LIKE 'e2e00025%';
+DELETE FROM ops_templates WHERE id::text LIKE 'e2e00024%';
+DELETE FROM report_records WHERE report_definition_id::text LIKE 'e2e00023%';
+DELETE FROM report_definitions WHERE id::text LIKE 'e2e00023%';
+DELETE FROM topo_edges WHERE source_id::text LIKE 'e2e00022%' OR target_id::text LIKE 'e2e00022%';
+DELETE FROM topo_nodes WHERE id::text LIKE 'e2e00022%';
+DELETE FROM sites WHERE id::text LIKE 'e2e00021%';
+DELETE FROM licenses WHERE id::text LIKE 'e2e00020%' OR license_code LIKE 'E2E-%';
+DELETE FROM mr_device_mappings WHERE id::text LIKE 'e2e00019%';
+DELETE FROM ftp_configs WHERE id::text LIKE 'e2e00018%';
+DELETE FROM config_tasks WHERE id::text LIKE 'e2e00016%';
+DELETE FROM config_neighbors WHERE id::text LIKE 'e2e00017%';
+DELETE FROM config_baselines WHERE id::text LIKE 'e2e00015%';
+DELETE FROM pm_tasks WHERE id::text LIKE 'e2e00014%';
+
 -- Sprint 8 data
 DELETE FROM mml_tasks WHERE creator = 'admin' AND task_name LIKE 'E2E%';
 DELETE FROM mml_scripts WHERE id::text LIKE 'e2e00013%';
@@ -515,6 +532,107 @@ INSERT INTO managed_files (id, file_name, file_type, file_size, minio_path, stat
 INSERT INTO mml_scripts (id, script_name, description, content, device_type, creator, created_at, updated_at) VALUES
 ('e2e00013-0000-0000-0000-000000000001', 'Device Health Check', 'Check device status', 'LST DEVPARAM;RST_DEV', 'router', 'admin', NOW(), NOW());
 
+-- ============================================================
+-- 22. PM Tasks (Phase A)
+-- ============================================================
+
+INSERT INTO pm_tasks (id, task_name, task_type, device_sns, kpi_codes, granularity, status, progress, creator, created_at, updated_at) VALUES
+('e2e00014-0000-0000-0000-000000000001', 'E2E PM Extraction Task', 'extraction', '["TEST-SN-001","TEST-SN-002"]', '["E2E_RRC_SR"]', '15min', 'completed', 100, 'admin', NOW() - INTERVAL '1 day', NOW()),
+('e2e00014-0000-0000-0000-000000000002', 'E2E PM Analysis Task', 'report', '["TEST-SN-001"]', '["E2E_RRC_SR","E2E_ERAB_SR"]', '1hour', 'pending', 0, 'admin', NOW(), NOW());
+
+-- ============================================================
+-- 23. Config Baselines (Phase B)
+-- ============================================================
+
+INSERT INTO config_baselines (id, baseline_name, description, device_type, version, params, creator, status, created_at, updated_at) VALUES
+('e2e00015-0000-0000-0000-000000000001', 'E2E LTE Baseline', 'LTE basic parameters', 'FAP-LTE-100', 'v1.0', '[{"name":"MaxTxPower","value":"30"}]', 'admin', 'active', NOW() - INTERVAL '5 days', NOW()),
+('e2e00015-0000-0000-0000-000000000002', 'E2E NR Baseline', 'NR basic parameters', 'gNB-100', 'v1.0', '[{"name":"NRPCI","value":"100"}]', 'admin', 'draft', NOW(), NOW());
+
+-- ============================================================
+-- 24. Config Tasks (Phase B)
+-- ============================================================
+
+INSERT INTO config_tasks (id, task_name, task_type, device_sns, baseline_id, status, progress, success_count, fail_count, total_count, creator, created_at, updated_at) VALUES
+('e2e00016-0000-0000-0000-000000000001', 'E2E Config Apply Task', 'apply', '["TEST-SN-001"]', 'e2e00015-0000-0000-0000-000000000001', 'pending', 0, 0, 0, 1, 'admin', NOW(), NOW());
+
+-- ============================================================
+-- 25. Config Neighbors (Phase B)
+-- ============================================================
+
+INSERT INTO config_neighbors (id, source_cell_id, source_cell_name, target_cell_id, target_cell_name, neighbor_type, params, created_at, updated_at) VALUES
+('e2e00017-0000-0000-0000-000000000001', 'CELL-001-1', 'Cell-BJ-01-1', 'CELL-002-1', 'Cell-BJ-02-1', 'intra-freq', '{"offset":0}', NOW(), NOW()),
+('e2e00017-0000-0000-0000-000000000002', 'CELL-001-1', 'Cell-BJ-01-1', 'CELL-003-1', 'Cell-SH-01-1', 'inter-freq', '{"offset":3}', NOW(), NOW());
+
+-- ============================================================
+-- 26. FTP Configs (Phase B)
+-- ============================================================
+
+INSERT INTO ftp_configs (id, config_name, host, port, username, protocol, remote_path, passive, enabled, created_at, updated_at) VALUES
+('e2e00018-0000-0000-0000-000000000001', 'E2E Primary FTP', '192.168.1.100', 21, 'ftpuser', 'FTP', '/backup', true, true, NOW(), NOW()),
+('e2e00018-0000-0000-0000-000000000002', 'E2E Secondary SFTP', '192.168.1.101', 22, 'sftpuser', 'SFTP', '/archive', false, false, NOW(), NOW());
+
+-- ============================================================
+-- 27. MR Device Mappings (Phase B)
+-- ============================================================
+
+INSERT INTO mr_device_mappings (id, device_sn, device_name, cell_id, cell_name, enabled, sampling_interval, total_records, created_at, updated_at) VALUES
+('e2e00019-0000-0000-0000-000000000001', 'TEST-SN-001', 'eNB-BJ-001', 'CELL-001-1', 'Cell-BJ-01-1', true, 15, 500, NOW(), NOW()),
+('e2e00019-0000-0000-0000-000000000002', 'TEST-SN-002', 'gNB-BJ-002', 'CELL-002-1', 'Cell-BJ-02-1', false, 30, 200, NOW(), NOW());
+
+-- ============================================================
+-- 28. Licenses (Phase C)
+-- ============================================================
+
+INSERT INTO licenses (id, license_name, license_code, product_name, license_type, status, max_devices, used_devices, features, issue_date, expiry_date, licensor, device_type, region, created_at, updated_at) VALUES
+('e2e00020-0000-0000-0000-000000000001', 'E2E OMC Base License', 'E2E-LIC-001', 'OMC Platform', 'subscription', 'active', 1000, 200, '["device_management","alarm_management"]', NOW() - INTERVAL '365 days', NOW() + INTERVAL '365 days', 'Vendor A', 'FAP-LTE-100', 'North', NOW(), NOW()),
+('e2e00020-0000-0000-0000-000000000002', 'E2E NR Feature License', 'E2E-LIC-002', 'NR Feature Pack', 'perpetual', 'pending', 500, 0, '["nr_support"]', NOW() - INTERVAL '30 days', NULL, 'Vendor B', 'gNB-100', 'East', NOW(), NOW()),
+('e2e00020-0000-0000-0000-000000000003', 'E2E Expired License', 'E2E-LIC-003', 'OMC Advanced', 'subscription', 'expired', 100, 100, '[]', NOW() - INTERVAL '730 days', NOW() - INTERVAL '365 days', 'Vendor C', 'FAP-LTE-200', 'South', NOW(), NOW());
+
+-- ============================================================
+-- 29. Sites (Phase C) — FK → device_groups
+-- ============================================================
+
+INSERT INTO sites (id, name, domain_id, address, longitude, latitude, device_count, status, created_at, updated_at) VALUES
+('e2e00021-0000-0000-0000-000000000001', 'E2E Beijing Main Site', 'e2e00007-0000-0000-0000-000000000001', 'Haidian District, Beijing', 116.4074, 39.9042, 10, 'active', NOW(), NOW()),
+('e2e00021-0000-0000-0000-000000000002', 'E2E Shanghai Branch Site', 'e2e00007-0000-0000-0000-000000000003', 'Pudong District, Shanghai', 121.4737, 31.2304, 5, 'active', NOW(), NOW());
+
+-- ============================================================
+-- 30. Topo Nodes (Phase C) — FK → sites
+-- ============================================================
+
+INSERT INTO topo_nodes (id, label, node_type, x, y, status, device_sn, site_id, domain_id, created_at, updated_at) VALUES
+('e2e00022-0000-0000-0000-000000000001', 'eNB-BJ-01', 'eNB', 100, 200, 'online', 'TEST-SN-001', 'e2e00021-0000-0000-0000-000000000001', 'e2e00007-0000-0000-0000-000000000001', NOW(), NOW()),
+('e2e00022-0000-0000-0000-000000000002', 'gNB-BJ-02', 'gNB', 300, 200, 'online', 'TEST-SN-002', 'e2e00021-0000-0000-0000-000000000001', 'e2e00007-0000-0000-0000-000000000001', NOW(), NOW()),
+('e2e00022-0000-0000-0000-000000000003', 'eGW-BJ', 'eGW', 200, 100, 'online', NULL, 'e2e00021-0000-0000-0000-000000000001', 'e2e00007-0000-0000-0000-000000000001', NOW(), NOW());
+
+-- ============================================================
+-- 31. Topo Edges (Phase C) — FK → topo_nodes
+-- ============================================================
+
+INSERT INTO topo_edges (id, source_id, target_id, label, status) VALUES
+('e2e00022-e000-0000-0000-000000000001', 'e2e00022-0000-0000-0000-000000000001', 'e2e00022-0000-0000-0000-000000000003', 'S1', 'active'),
+('e2e00022-e000-0000-0000-000000000002', 'e2e00022-0000-0000-0000-000000000002', 'e2e00022-0000-0000-0000-000000000003', 'NG', 'active');
+
+-- ============================================================
+-- 32. Report Definitions + Records (Phase C)
+-- ============================================================
+
+INSERT INTO report_definitions (id, report_name, report_type, description, format, period, kpi_codes, device_groups, auto_generate, status, creator, created_at, updated_at) VALUES
+('e2e00023-0000-0000-0000-000000000001', 'E2E Daily KPI Report', 'kpi', 'E2E test report definition', '["pdf","xlsx"]', 'daily', '["E2E_RRC_SR"]', '["e2e00007-0000-0000-0000-000000000001"]', false, 'active', 'admin', NOW(), NOW());
+
+INSERT INTO report_records (id, report_definition_id, report_name, period, format, status, file_size, created_at) VALUES
+('e2e00023-a000-0000-0000-000000000001', 'e2e00023-0000-0000-0000-000000000001', 'E2E Daily KPI Report', '2026-03-07', 'pdf', 'ready', 10240, NOW());
+
+-- ============================================================
+-- 33. Ops Templates + Command Records (Phase C)
+-- ============================================================
+
+INSERT INTO ops_templates (id, template_name, description, category, target_device_types, steps, estimated_duration, creator, use_count, tags, created_at, updated_at) VALUES
+('e2e00024-0000-0000-0000-000000000001', 'E2E Health Check Template', 'Device health check workflow', 'maintenance', '["FAP-LTE-100","gNB-100"]', '[{"step_no":1,"step_name":"Check Status","step_type":"mml","command":"LST DEVPARAM"}]', 300, 'admin', 5, '["health","check"]', NOW(), NOW());
+
+INSERT INTO ops_command_records (id, command_text, device_sn, device_name, operator, execute_time, duration, success, output, created_at) VALUES
+('e2e00025-0000-0000-0000-000000000001', 'LST DEVPARAM', 'TEST-SN-001', 'eNB-BJ-001', 'admin', NOW() - INTERVAL '1 hour', 150, true, 'Device parameters listed successfully', NOW());
+
 COMMIT;
 
 -- Verify counts
@@ -558,4 +676,32 @@ SELECT 'backup_schedules', COUNT(*) FROM backup_schedules WHERE id::text LIKE 'e
 UNION ALL
 SELECT 'managed_files', COUNT(*) FROM managed_files WHERE id::text LIKE 'e2e00012%'
 UNION ALL
-SELECT 'mml_scripts', COUNT(*) FROM mml_scripts WHERE id::text LIKE 'e2e00013%';
+SELECT 'mml_scripts', COUNT(*) FROM mml_scripts WHERE id::text LIKE 'e2e00013%'
+UNION ALL
+SELECT 'pm_tasks', COUNT(*) FROM pm_tasks WHERE id::text LIKE 'e2e00014%'
+UNION ALL
+SELECT 'config_baselines', COUNT(*) FROM config_baselines WHERE id::text LIKE 'e2e00015%'
+UNION ALL
+SELECT 'config_tasks', COUNT(*) FROM config_tasks WHERE id::text LIKE 'e2e00016%'
+UNION ALL
+SELECT 'config_neighbors', COUNT(*) FROM config_neighbors WHERE id::text LIKE 'e2e00017%'
+UNION ALL
+SELECT 'ftp_configs', COUNT(*) FROM ftp_configs WHERE id::text LIKE 'e2e00018%'
+UNION ALL
+SELECT 'mr_device_mappings', COUNT(*) FROM mr_device_mappings WHERE id::text LIKE 'e2e00019%'
+UNION ALL
+SELECT 'licenses', COUNT(*) FROM licenses WHERE id::text LIKE 'e2e00020%'
+UNION ALL
+SELECT 'sites', COUNT(*) FROM sites WHERE id::text LIKE 'e2e00021%'
+UNION ALL
+SELECT 'topo_nodes', COUNT(*) FROM topo_nodes WHERE id::text LIKE 'e2e00022%'
+UNION ALL
+SELECT 'topo_edges', COUNT(*) FROM topo_edges WHERE id::text LIKE 'e2e00022-e%'
+UNION ALL
+SELECT 'report_definitions', COUNT(*) FROM report_definitions WHERE id::text LIKE 'e2e00023%'
+UNION ALL
+SELECT 'report_records', COUNT(*) FROM report_records WHERE id::text LIKE 'e2e00023-a%'
+UNION ALL
+SELECT 'ops_templates', COUNT(*) FROM ops_templates WHERE id::text LIKE 'e2e00024%'
+UNION ALL
+SELECT 'ops_command_records', COUNT(*) FROM ops_command_records WHERE id::text LIKE 'e2e00025%';
