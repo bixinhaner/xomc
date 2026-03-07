@@ -1,5 +1,5 @@
 import http from '../http';
-import type { BackupTask, BackupSchedule } from '@/mock/data/backup';
+import type { BackupTask, BackupSchedule, FTPConfig } from '@/mock/data/backup';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,20 @@ interface BackendBackupSchedule {
   task_type: string;      // full, incremental, config_only
   target_type: string;    // device, group
   target_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendFTPConfig {
+  id: string;
+  config_name: string;
+  host: string;
+  port: number;
+  username: string;
+  protocol: string;
+  remote_path: string;
+  passive: boolean;
+  enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -120,6 +134,34 @@ function mapBackendSchedule(bs: BackendBackupSchedule): BackupSchedule {
     createTime: bs.created_at,
     creator: '',                                           // backend has no creator
   };
+}
+
+function mapBackendFTPConfig(bf: BackendFTPConfig): FTPConfig {
+  return {
+    id: bf.id,
+    configName: bf.config_name,
+    host: bf.host,
+    port: bf.port,
+    username: bf.username,
+    protocol: bf.protocol as FTPConfig['protocol'],
+    remotePath: bf.remote_path,
+    passive: bf.passive,
+    enabled: bf.enabled,
+    createTime: bf.created_at,
+  };
+}
+
+function mapToBackendFTPConfig(f: Partial<FTPConfig>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (f.configName !== undefined) payload.config_name = f.configName;
+  if (f.host !== undefined) payload.host = f.host;
+  if (f.port !== undefined) payload.port = f.port;
+  if (f.username !== undefined) payload.username = f.username;
+  if (f.protocol !== undefined) payload.protocol = f.protocol;
+  if (f.remotePath !== undefined) payload.remote_path = f.remotePath;
+  if (f.passive !== undefined) payload.passive = f.passive;
+  if (f.enabled !== undefined) payload.enabled = f.enabled;
+  return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,5 +301,66 @@ export const backupApi = {
     for (const id of ids) {
       await http.delete(`/backup/schedules/${id}`);
     }
+  },
+
+  // --- FTP Configs ---
+
+  async getFTPConfigs(
+    params: PageRequest
+  ): Promise<PageResponse<FTPConfig>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+
+    const { data } = await http.get<BackendListResponse<BackendFTPConfig>>(
+      '/backup/ftp-configs',
+      { params: query }
+    );
+
+    return {
+      items: (data.items || []).map(mapBackendFTPConfig),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async createFTPConfig(
+    data: Omit<FTPConfig, 'id' | 'createTime'>
+  ): Promise<FTPConfig> {
+    const payload = mapToBackendFTPConfig(data);
+    const { data: bf } = await http.post<BackendFTPConfig>(
+      '/backup/ftp-configs',
+      payload
+    );
+    return mapBackendFTPConfig(bf);
+  },
+
+  async updateFTPConfig(
+    id: string,
+    data: Partial<FTPConfig>
+  ): Promise<FTPConfig> {
+    const payload = mapToBackendFTPConfig(data);
+    const { data: bf } = await http.put<BackendFTPConfig>(
+      `/backup/ftp-configs/${id}`,
+      payload
+    );
+    return mapBackendFTPConfig(bf);
+  },
+
+  async deleteFTPConfigs(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/backup/ftp-configs/${id}`);
+    }
+  },
+
+  async testFTPConnection(
+    id: string
+  ): Promise<{ success: boolean; message: string }> {
+    const { data } = await http.post<{ success: boolean; message: string }>(
+      `/backup/ftp-configs/${id}/test`
+    );
+    return data;
   },
 };

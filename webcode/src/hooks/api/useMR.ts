@@ -8,7 +8,8 @@ import { useMock } from '@/services/apiSwitch';
 export function useMRIndicators(params: PageRequest) {
   return useQuery({
     queryKey: ['mr', 'indicators', params],
-    queryFn: () => mrService.getIndicators(params),
+    queryFn: () =>
+      useMock ? mrService.getIndicators(params) : mrApi.getIndicators(params),
     staleTime: 10 * 60 * 1000,
   });
 }
@@ -16,7 +17,8 @@ export function useMRIndicators(params: PageRequest) {
 export function useAllMRIndicators() {
   return useQuery({
     queryKey: ['mr', 'indicators', 'all'],
-    queryFn: () => mrService.getAllIndicators(),
+    queryFn: () =>
+      useMock ? mrService.getAllIndicators() : mrApi.getAllIndicators(),
     staleTime: 10 * 60 * 1000,
   });
 }
@@ -26,7 +28,8 @@ export function useMRMappings(
 ) {
   return useQuery({
     queryKey: ['mr', 'mappings', params],
-    queryFn: () => mrService.getMappings(params),
+    queryFn: () =>
+      useMock ? mrService.getMappings(params) : mrApi.getMappings(params),
   });
 }
 
@@ -34,7 +37,7 @@ export function useUpdateMRMapping() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<MRDeviceMapping> }) =>
-      mrService.updateMapping(id, data),
+      useMock ? mrService.updateMapping(id, data) : mrApi.updateMapping(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mr', 'mappings'] });
     },
@@ -45,7 +48,7 @@ export function useToggleMRMapping() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      mrService.toggleMapping(id, enabled),
+      useMock ? mrService.toggleMapping(id, enabled) : mrApi.toggleMapping(id, enabled),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mr', 'mappings'] });
     },
@@ -81,14 +84,15 @@ export function useDownloadMRFile() {
 export function useExportMRData() {
   return useMutation({
     mutationFn: (params: { deviceSns: string[]; timeRange: [string, string] }) =>
-      mrService.exportMRData(params),
+      useMock ? mrService.exportMRData(params) : mrApi.exportMRData(params),
   });
 }
 
 export function useMRIndicatorStats(indicatorCode: string, deviceSn?: string) {
   return useQuery({
     queryKey: ['mr', 'stats', indicatorCode, deviceSn],
-    queryFn: () => mrService.getIndicatorStats(indicatorCode, deviceSn),
+    queryFn: () =>
+      useMock ? mrService.getIndicatorStats(indicatorCode, deviceSn) : mrApi.getIndicatorStats(indicatorCode, deviceSn),
     enabled: Boolean(indicatorCode),
   });
 }

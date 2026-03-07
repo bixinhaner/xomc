@@ -97,14 +97,14 @@ export function useDeleteBackupSchedules() {
 }
 
 // ---------------------------------------------------------------------------
-// FTP Config hooks — backend does not support FTP config endpoints,
-// so these remain mock-only.
+// FTP Config hooks — with useMock switch for backend/mock toggle.
 // ---------------------------------------------------------------------------
 
 export function useFTPConfigs(params: PageRequest) {
   return useQuery({
     queryKey: ['backup', 'ftp', params],
-    queryFn: () => backupService.getFTPConfigs(params),
+    queryFn: () =>
+      useMock ? backupService.getFTPConfigs(params) : backupApi.getFTPConfigs(params),
   });
 }
 
@@ -112,7 +112,7 @@ export function useCreateFTPConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<FTPConfig, 'id' | 'createTime'>) =>
-      backupService.createFTPConfig(data),
+      useMock ? backupService.createFTPConfig(data) : backupApi.createFTPConfig(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'ftp'] });
     },
@@ -123,7 +123,7 @@ export function useUpdateFTPConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<FTPConfig> }) =>
-      backupService.updateFTPConfig(id, data),
+      useMock ? backupService.updateFTPConfig(id, data) : backupApi.updateFTPConfig(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'ftp'] });
     },
@@ -133,7 +133,8 @@ export function useUpdateFTPConfig() {
 export function useDeleteFTPConfigs() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => backupService.deleteFTPConfigs(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? backupService.deleteFTPConfigs(ids) : backupApi.deleteFTPConfigs(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'ftp'] });
     },
@@ -142,6 +143,7 @@ export function useDeleteFTPConfigs() {
 
 export function useTestFTPConnection() {
   return useMutation({
-    mutationFn: (id: string) => backupService.testFTPConnection(id),
+    mutationFn: (id: string) =>
+      useMock ? backupService.testFTPConnection(id) : backupApi.testFTPConnection(id),
   });
 }

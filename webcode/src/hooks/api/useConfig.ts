@@ -5,6 +5,7 @@ import { configService } from '@/mock/services/configService';
 import { templateApi } from '@/services/api/templateApi';
 import { deviceApi } from '@/services/api/deviceApi';
 import { configSyncApi } from '@/services/api/configSyncApi';
+import { configBaselineApi } from '@/services/api/configBaselineApi';
 import { useMock } from '@/services/apiSwitch';
 
 export function useConfigParams(
@@ -97,14 +98,16 @@ export function useBaselineConfigs(
 ) {
   return useQuery({
     queryKey: ['config', 'baselines', params],
-    queryFn: () => configService.getBaselines(params),
+    queryFn: () =>
+      useMock ? configService.getBaselines(params) : configBaselineApi.getBaselines(params),
   });
 }
 
 export function useBaselineConfigById(id: string) {
   return useQuery({
     queryKey: ['config', 'baselines', 'detail', id],
-    queryFn: () => configService.getBaselineById(id),
+    queryFn: () =>
+      useMock ? configService.getBaselineById(id) : configBaselineApi.getBaselineById(id),
     enabled: Boolean(id),
   });
 }
@@ -113,7 +116,7 @@ export function useCreateBaselineConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<BaselineConfig, 'id' | 'createTime' | 'updateTime'>) =>
-      configService.createBaseline(data),
+      useMock ? configService.createBaseline(data) : configBaselineApi.createBaseline(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'baselines'] });
     },
@@ -124,7 +127,7 @@ export function useUpdateBaselineConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<BaselineConfig> }) =>
-      configService.updateBaseline(id, data),
+      useMock ? configService.updateBaseline(id, data) : configBaselineApi.updateBaseline(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'baselines'] });
     },
@@ -134,7 +137,8 @@ export function useUpdateBaselineConfig() {
 export function useDeleteBaselineConfigs() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => configService.deleteBaselines(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? configService.deleteBaselines(ids) : configBaselineApi.deleteBaselines(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'baselines'] });
     },
@@ -144,7 +148,8 @@ export function useDeleteBaselineConfigs() {
 export function useConfigTasks(params: PageRequest) {
   return useQuery({
     queryKey: ['config', 'tasks', params],
-    queryFn: () => configService.getTasks(params),
+    queryFn: () =>
+      useMock ? configService.getTasks(params) : configBaselineApi.getTasks(params),
   });
 }
 
@@ -152,7 +157,7 @@ export function useCreateConfigTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<ConfigTask, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'progress' | 'successCount' | 'failCount'>) =>
-      configService.createTask(data),
+      useMock ? configService.createTask(data) : configBaselineApi.createTask(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'tasks'] });
     },
@@ -162,7 +167,8 @@ export function useCreateConfigTask() {
 export function useNeighborParams(params: { sourceCellId?: string } & PageRequest) {
   return useQuery({
     queryKey: ['config', 'neighbors', params],
-    queryFn: () => configService.getNeighbors(params),
+    queryFn: () =>
+      useMock ? configService.getNeighbors(params) : configBaselineApi.getNeighbors(params),
   });
 }
 
