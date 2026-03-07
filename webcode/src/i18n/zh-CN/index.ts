@@ -538,9 +538,11 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // ErrorBoundary
   // -------------------------------------------------------------------------
-  'error.pageError':   '页面发生错误',
-  'error.tryRefresh':  '请尝试刷新页面或联系系统管理员',
-  'error.retry':       '重试',
+  'error.pageError':        '页面发生错误',
+  'error.tryRefresh':       '请尝试刷新页面或联系系统管理员',
+  'error.retry':            '重试',
+  'error.networkError':     '网络错误',
+  'error.networkErrorDesc': '无法连接到服务器，请检查网络连接后重试。',
 
   // -------------------------------------------------------------------------
   // Sidebar

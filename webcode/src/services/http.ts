@@ -91,6 +91,12 @@ http.interceptors.response.use(
     const originalRequest = error.config;
     if (!originalRequest) return Promise.reject(error);
 
+    // Network error (no response received — server unreachable)
+    if (!error.response) {
+      console.error('[HTTP] Network error:', error.message);
+      return Promise.reject(error);
+    }
+
     // Handle 401 — attempt token refresh
     if (error.response?.status === 401) {
       const { refreshToken, clearAuth } = useUserStore.getState();

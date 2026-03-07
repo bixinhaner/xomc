@@ -3,6 +3,7 @@ import { Navigate, type RouteObject } from 'react-router-dom';
 import { Spin } from 'antd';
 import AppShell from '@/components/Layout';
 import PrivateRoute from './PrivateRoute';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import LoginPage from '@/pages/login';
 import NotFound from '@/pages/error/NotFound';
 
@@ -150,9 +151,11 @@ const PageLoader = () => (
 
 function withSuspense(Component: React.ComponentType) {
   return (
-    <Suspense fallback={<PageLoader />}>
-      <Component />
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        <Component />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 

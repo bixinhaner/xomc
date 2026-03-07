@@ -538,9 +538,11 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // ErrorBoundary
   // -------------------------------------------------------------------------
-  'error.pageError':   'Page Error',
-  'error.tryRefresh':  'Try refreshing the page or contact system admin',
-  'error.retry':       'Retry',
+  'error.pageError':        'Page Error',
+  'error.tryRefresh':       'Try refreshing the page or contact system admin',
+  'error.retry':            'Retry',
+  'error.networkError':     'Network Error',
+  'error.networkErrorDesc': 'Unable to connect to the server. Please check your network and try again.',
 
   // -------------------------------------------------------------------------
   // Sidebar
