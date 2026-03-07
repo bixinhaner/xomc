@@ -18,13 +18,37 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// FrontendDeviceStats matches the frontend's expected device_stats format.
+type FrontendDeviceStats struct {
+	Total   int64 `json:"total"`
+	Online  int64 `json:"online"`
+	Offline int64 `json:"offline"`
+	Alarm   int64 `json:"alarm"`
+}
+
+// FrontendAlarmStats matches the frontend's expected alarm_stats format.
+type FrontendAlarmStats struct {
+	Critical int64 `json:"critical"`
+	Major    int64 `json:"major"`
+	Minor    int64 `json:"minor"`
+	Warning  int64 `json:"warning"`
+	Total    int64 `json:"total"`
+}
+
+// FrontendRecentAlarm matches the frontend's expected recent_alarms format.
+type FrontendRecentAlarm struct {
+	DeviceName string `json:"device_name"`
+	AlarmCount int64  `json:"alarm_count"`
+	Severity   string `json:"severity"`
+}
+
 // DashboardSummary is the aggregated dashboard response.
 type DashboardSummary struct {
-	DeviceStats  map[model.DeviceStatus]int64 `json:"device_stats"`
-	AlarmStats   *alarm.AlarmStatistics       `json:"alarm_stats"`
-	KPIOverview  []model.KPIValue             `json:"kpi_overview"`
-	RecentAlarms []model.Alarm                `json:"recent_alarms"`
-	Timestamp    time.Time                    `json:"timestamp"`
+	DeviceStats  FrontendDeviceStats   `json:"device_stats"`
+	AlarmStats   FrontendAlarmStats    `json:"alarm_stats"`
+	KPIOverview  map[string]float64    `json:"kpi_overview"`
+	RecentAlarms []FrontendRecentAlarm `json:"recent_alarms"`
+	Timestamp    time.Time             `json:"timestamp"`
 }
 
 // AlarmTrendEntry represents alarm counts for a single day, broken down by severity.
@@ -106,8 +130,17 @@ func NewService(
 // GetSummary aggregates dashboard data from multiple sources in parallel.
 func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	summary := &DashboardSummary{
-		Timestamp: time.Now(),
+		Timestamp:   time.Now(),
+		KPIOverview: make(map[string]float64),
 	}
+
+	var (
+		rawDeviceCounts map[model.DeviceStatus]int64
+		rawAlarmStats   *alarm.AlarmStatistics
+		rawKPIValues    []model.KPIValue
+		rawAlarms       []model.Alarm
+		alarmDeviceCount int64
+	)
 
 	g, ctx := errgroup.WithContext(ctx)
 
@@ -116,10 +149,10 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		counts, err := s.deviceService.CountByStatus(ctx, nil)
 		if err != nil {
 			s.logger.Warn("dashboard: device count failed", zap.Error(err))
-			summary.DeviceStats = make(map[model.DeviceStatus]int64)
+			rawDeviceCounts = make(map[model.DeviceStatus]int64)
 			return nil
 		}
-		summary.DeviceStats = counts
+		rawDeviceCounts = counts
 		return nil
 	})
 
@@ -128,13 +161,13 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		stats, err := s.alarmStore.Statistics(ctx, alarm.AlarmFilter{})
 		if err != nil {
 			s.logger.Warn("dashboard: alarm stats failed", zap.Error(err))
-			summary.AlarmStats = &alarm.AlarmStatistics{
+			rawAlarmStats = &alarm.AlarmStatistics{
 				BySeverity: make(map[model.AlarmSeverity]int64),
 				ByType:     make(map[string]int64),
 			}
 			return nil
 		}
-		summary.AlarmStats = stats
+		rawAlarmStats = stats
 		return nil
 	})
 
@@ -152,10 +185,10 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		result, err := s.kpiRepo.Query(ctx, filter)
 		if err != nil {
 			s.logger.Warn("dashboard: kpi query failed", zap.Error(err))
-			summary.KPIOverview = []model.KPIValue{}
+			rawKPIValues = []model.KPIValue{}
 			return nil
 		}
-		summary.KPIOverview = result.Items
+		rawKPIValues = result.Items
 		return nil
 	})
 
@@ -169,10 +202,19 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		result, err := s.alarmStore.ListActive(ctx, filter)
 		if err != nil {
 			s.logger.Warn("dashboard: recent alarms failed", zap.Error(err))
-			summary.RecentAlarms = []model.Alarm{}
+			rawAlarms = []model.Alarm{}
 			return nil
 		}
-		summary.RecentAlarms = result.Items
+		rawAlarms = result.Items
+		return nil
+	})
+
+	// 5. Count devices with active alarms
+	g.Go(func() error {
+		query := `SELECT COUNT(DISTINCT device_id) FROM alarms_active WHERE status = 'active'`
+		if err := s.pgPool.QueryRow(ctx, query).Scan(&alarmDeviceCount); err != nil {
+			s.logger.Warn("dashboard: alarm device count failed", zap.Error(err))
+		}
 		return nil
 	})
 
@@ -180,7 +222,97 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		return nil, err
 	}
 
+	// Map device counts to frontend format
+	var total int64
+	for _, cnt := range rawDeviceCounts {
+		total += cnt
+	}
+	online := rawDeviceCounts[model.DeviceActive]
+	offline := total - online
+	summary.DeviceStats = FrontendDeviceStats{
+		Total:   total,
+		Online:  online,
+		Offline: offline,
+		Alarm:   alarmDeviceCount,
+	}
+
+	// Map alarm stats to frontend format
+	if rawAlarmStats != nil {
+		summary.AlarmStats = FrontendAlarmStats{
+			Critical: rawAlarmStats.BySeverity[model.AlarmCritical],
+			Major:    rawAlarmStats.BySeverity[model.AlarmMajor],
+			Minor:    rawAlarmStats.BySeverity[model.AlarmMinor],
+			Warning:  rawAlarmStats.BySeverity[model.AlarmWarning],
+			Total:    rawAlarmStats.TotalActive,
+		}
+	}
+
+	// Map KPI values to named fields (use latest value per KPI name)
+	for _, v := range rawKPIValues {
+		key := v.KPIName
+		if _, exists := summary.KPIOverview[key]; !exists {
+			summary.KPIOverview[key] = v.KPIValue
+		}
+	}
+
+	// Map recent alarms to frontend format (aggregate by device)
+	deviceAlarms := make(map[string]*FrontendRecentAlarm)
+	for _, a := range rawAlarms {
+		key := a.DeviceSN
+		if entry, exists := deviceAlarms[key]; exists {
+			entry.AlarmCount++
+			// Keep highest severity
+			if severityLabel(a.Severity) < severityLabel(model.AlarmSeverity(severityFromLabel(entry.Severity))) {
+				entry.Severity = severityToLabel(a.Severity)
+			}
+		} else {
+			deviceAlarms[key] = &FrontendRecentAlarm{
+				DeviceName: a.DeviceSN,
+				AlarmCount: 1,
+				Severity:   severityToLabel(a.Severity),
+			}
+		}
+	}
+	summary.RecentAlarms = make([]FrontendRecentAlarm, 0, len(deviceAlarms))
+	for _, entry := range deviceAlarms {
+		summary.RecentAlarms = append(summary.RecentAlarms, *entry)
+	}
+
 	return summary, nil
+}
+
+func severityToLabel(s model.AlarmSeverity) string {
+	switch s {
+	case model.AlarmCritical:
+		return "critical"
+	case model.AlarmMajor:
+		return "major"
+	case model.AlarmMinor:
+		return "minor"
+	case model.AlarmWarning:
+		return "warning"
+	default:
+		return "unknown"
+	}
+}
+
+func severityLabel(s model.AlarmSeverity) int {
+	return int(s)
+}
+
+func severityFromLabel(label string) int {
+	switch label {
+	case "critical":
+		return 1
+	case "major":
+		return 2
+	case "minor":
+		return 3
+	case "warning":
+		return 4
+	default:
+		return 5
+	}
 }
 
 // GetAlarmTrend returns alarm counts grouped by date and severity for the last N days.

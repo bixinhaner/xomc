@@ -59,7 +59,7 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		Manufacturer:         inform.DeviceId.Manufacturer,
 		Carrier:              carrier,
 		Technology:           tech,
-		Status:               model.DeviceDiscovered,
+		Status:               model.DeviceActive,
 		FirmwareVersion:      findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
 		ConnectionRequestURL: findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
 		LastInformAt:         &now,
@@ -113,6 +113,15 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	ipAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
 	if ipAddr != "" {
 		device.IPAddress = ipAddr
+	}
+
+	// Auto-transition to active when device informs (it's communicating, so it's online)
+	if device.Status == model.DeviceDiscovered || device.Status == model.DeviceOffline || device.Status == model.DeviceRegistered {
+		device.Status = model.DeviceActive
+		s.logger.Info("device auto-transitioned to active on inform",
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("previous_status", string(device.Status)),
+		)
 	}
 
 	if err := s.deviceRepo.Update(ctx, device); err != nil {

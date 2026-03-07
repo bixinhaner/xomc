@@ -8,8 +8,8 @@ import (
 
 // validTransitions defines the allowed state transitions for a device.
 var validTransitions = map[model.DeviceStatus][]model.DeviceStatus{
-	model.DeviceDiscovered:   {model.DeviceRegistered},
-	model.DeviceRegistered:   {model.DeviceProvisioning},
+	model.DeviceDiscovered:   {model.DeviceRegistered, model.DeviceActive},
+	model.DeviceRegistered:   {model.DeviceProvisioning, model.DeviceActive},
 	model.DeviceProvisioning: {model.DeviceActive, model.DeviceRegistered},
 	model.DeviceActive:       {model.DeviceMaintenance, model.DeviceOffline, model.DeviceDecommissioned},
 	model.DeviceMaintenance:  {model.DeviceActive, model.DeviceDecommissioned},
