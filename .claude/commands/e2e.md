@@ -1,6 +1,6 @@
 # OMC E2E 端到端验证
 
-执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档全链路 (210 个测试用例)。
+执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档、Dashboard 趋势/状态/区域统计、Config Sync (push/pull/status)、备份恢复 (任务/计划 CRUD)、文件管理 (上传/下载/过滤)、MML 控制台 (命令/脚本/任务)、前端集成验证、全量回归全链路 (~301 个测试用例, Sprint 0-9, S1-S56)。
 
 ## 环境信息
 
@@ -45,7 +45,7 @@ print('Seed data applied successfully')
 
 如果 psycopg2 不可用，先安装: `pip3 install --user --break-system-packages psycopg2-binary`
 
-确认输出包含正确的数据: 设备(5)、告警(8)、配置模板(3)、固件版本(3)、升级任务(2)、设备分组(3)、PM计数器(8)、KPI定义(2)、KPI值(4)、MR文件(2)、MR记录(4)、审计日志(3)、告警规则(3)、KPI阈值(3)、系统日志(3)、NE消息日志(3)。
+确认输出包含正确的数据: 设备(5)、告警(8+3 trend)、配置模板(3)、固件版本(3)、升级任务(2)、设备分组(3)、PM计数器(8)、KPI定义(2)、KPI值(4)、MR文件(2)、MR记录(4)、审计日志(3)、告警规则(3)、KPI阈值(3)、系统日志(3)、NE消息日志(3)、备份任务(2)、备份计划(2)、管理文件(3)、MML脚本(1)。
 
 ### Step 3: 重建后端
 
@@ -80,12 +80,12 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz
 cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 ```
 
-脚本包含 210 个测试用例，覆盖：
+脚本包含 ~301 个测试用例 (Sprint 0-9, S1-S56)，覆盖：
 
-**Sprint 0 (12 cases):**
+**Sprint 0 (12 cases, S1-S4):**
 - 基础通信层: 健康检查 (1), CORS preflight 204 (1), CORS 5 项头部验证 (5), 统一错误格式 (2), 前端静态检查 (3)
 
-**Sprint 1 (43 cases):**
+**Sprint 1 (43 cases, S5-S8):**
 - 健康检查 (1)
 - 认证/登录/Token刷新 (9)
 - 获取当前用户 (5)
@@ -94,7 +94,7 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - CORS 预检 (2)
 - 错误处理 (3)
 
-**Sprint 2 (45 cases):**
+**Sprint 2 (45 cases, S9-S14):**
 - 配置模板 CRUD: 列表/详情/创建/更新/删除 (10)
 - 固件管理: 列表/详情/删除 (7)
 - 升级任务: 列表/详情 (4)
@@ -104,13 +104,13 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - 设备分组: 列表/详情/创建/更新/设备列表/删除 (10)
 - 告警清除 (1)
 
-**Sprint 3 (44 cases):**
+**Sprint 3 (44 cases, S15-S18):**
 - PM 计数器: 列表/设备过滤/组过滤/时间过滤/字段验证 (9)
 - KPI 查询: 值列表/名称过滤/定义列表/运营商过滤/字段验证 (8)
 - MR 文件与数据: 文件列表/类型过滤/下载/数据列表/设备过滤/文件字段/记录字段 (11)
 - 审计日志时间过滤: 范围查询/空范围/字段验证/操作过滤 (6)
 
-**Sprint 4 (59 cases):**
+**Sprint 4 (59 cases, S19-S24):**
 - Dashboard 聚合: summary/device_stats/alarm_stats/timestamp (4)
 - 设备 CRUD: create/duplicate-409/update/verify/delete/verify-404/invalid-400 (8)
 - 告警规则 CRUD: list/count/get/filter-carrier/filter-enabled/create/update/verify/delete/condition_config (9)
@@ -121,12 +121,46 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - 权限列表: list/count (2)
 - 角色 CRUD: list/count/get/create/update/verify/delete/invalid-uuid (8)
 
-**Sprint 5 (7 cases):**
+**Sprint 5 (7 cases, S25-S30):**
 - 错误响应 request_id: 404 响应含 request_id / 400 响应含 request_id (2)
 - CORS 配置化: 允许已配置 origin / 拒绝未配置 origin (2)
 - 回归: 健康检查 (1)
 - 错误码域范围: Go 集成测试验证 35/35 (1)
 - OpenAPI 文档: 文件存在且 >3000 行 (1)
+
+**Sprint 6 (~30 cases, S31-S38):**
+- S31: Admin 角色 CRUD 扩展 (5) — createRole → getRoleById → updateRole → deleteRole → getPermissions
+- S32: Admin 用户操作扩展 (3) — resetPassword → lockUser → unlockUser
+- S33: Admin 角色分配 (3) — assignRole → verify → removeRole
+- S34: PM 阈值 CRUD 扩展 (5) — listThresholds → createThreshold → updateThreshold → verify → deleteThreshold
+- S35: DataModel 扩展操作 (3) — getAggregatedCounters → calculateKPI → verify
+- S36: Group CRUD 扩展 (5) — createGroup → addDevice → listDevices → removeDevice → deleteGroup
+- S37: Device 扩展操作 (3) — getStats → getParameters → reboot
+- S38: Config Sync (3) — pushConfig → pullConfig → getSyncStatus
+
+**Sprint 7 (~20 cases, S39-S46):**
+- S39: Dashboard 告警趋势 (3) — alarm-trend endpoint with day range, date field validation
+- S40: Dashboard 设备状态 (2) — device-status endpoint with status counts
+- S41: Dashboard KPI 趋势 (3) — kpi-trend endpoint with time/value fields, required param validation
+- S42: Dashboard 区域统计 (2) — region-stats endpoint with array response
+- S43: Config Sync 集成 (3) — push/pull/status with Sprint 7 specific payloads
+- S44: Device 参数查询 (2) — device parameter retrieval and items validation
+- S45: DataModel resolve (2) — datamodel list with items check
+- S46: Sprint 7 回归 (3) — dashboard/summary, healthz, CORS headers
+
+**Sprint 8 (~25 cases, S47-S52):**
+- S47: Backup 任务 CRUD (6) — list → create → get → cancel → verify cancelled → delete
+- S48: Backup 计划 CRUD (4) — list → create → update → delete
+- S49: 文件管理 (6) — list → multipart upload → get detail → download with Content-Disposition → type filter → delete
+- S50: MML 命令 (4) — list commands (3 seed) → get command detail → execute command → get task status
+- S51: MML 脚本 (3) — create script → list scripts → delete script
+- S52: MML 任务历史 (2) — list tasks → verify task from S50 in list
+
+**Sprint 9 (~15 cases, S53-S56):**
+- S53: Backup 前端集成 (3) — paginated task list with total, create+delete cleanup, paginated schedule list
+- S54: 文件管理前端集成 (3) — paginated file list with total, file_type filter, file detail by id
+- S55: MML 前端集成 (3) — paginated command list, execute command with task_id, task detail with status
+- S56: 全量回归 (6) — healthz, dashboard summary, devices list, alarms list, alarm-trend, CORS headers
 
 ### Step 6: 结果汇总
 
@@ -144,4 +178,5 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - E2E 脚本会修改数据状态（如确认告警、创建/删除资源），重复运行前需重新执行 Step 2 刷新数据
 - 后端依赖 PostgreSQL + TimescaleDB + Redis + NATS + MinIO，确保基础设施正在运行
 - 脚本依赖 `python3` (JSON 解析) 和 `curl`，不依赖 `jq`
-- Sprint 4 测试包含 CRUD 操作（创建→更新→删除），确保 seed 数据不影响后续测试
+- Sprint 4/6/8/9 测试包含 CRUD 操作（创建→更新→删除），确保 seed 数据不影响后续测试
+- Sprint 8 测试依赖 backup/filemanager/mml 三个新模块的 migration（000022-000024）
