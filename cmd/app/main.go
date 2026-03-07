@@ -18,6 +18,7 @@ import (
 	"github.com/omcgo/omcgo/internal/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/common/event"
+	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
 	"github.com/omcgo/omcgo/internal/common/middleware"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"github.com/omcgo/omcgo/internal/config"
@@ -241,6 +242,11 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	metricsReg := prometheus.NewRegistry()
 	router.Use(middleware.PrometheusMetrics(metricsReg))
+
+	// Unified JSON 404 for unmatched routes
+	router.NoRoute(func(c *gin.Context) {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+	})
 
 	// Health check (public, no auth)
 	router.GET("/healthz", func(c *gin.Context) {

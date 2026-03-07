@@ -1,6 +1,6 @@
 #!/bin/bash
-# e2e_verify.sh — Sprint 1+2+3+4+5 端到端数据流验证脚本
-# 用 curl 覆盖 M1+M2+M3+M4+M5 里程碑所有关键路径
+# e2e_verify.sh — Sprint 0+1+2+3+4+5 端到端数据流验证脚本
+# 用 curl 覆盖 M0+M1+M2+M3+M4+M5 里程碑所有关键路径
 # 前置: omcgo-app 运行在 localhost:8080, DB 已执行迁移 + 种子数据
 #
 # 使用方法:
@@ -101,10 +101,146 @@ print('' if v is None else v)
 }
 
 echo "================================================"
-echo "  OMC Sprint 1+2+3+4+5 — E2E Data Flow Verification"
+echo "  OMC Sprint 0+1+2+3+4+5 — E2E Data Flow Verification"
 echo "================================================"
 echo "Target: $BASE_URL"
 echo "Time:   $(date '+%Y-%m-%d %H:%M:%S')"
+
+# ============================================================
+# Sprint 0 — Basic Communication Layer Verification (M0)
+# ============================================================
+
+section "0. Sprint 0 — Basic Communication Layer"
+
+# 0.1 Health Check reachable (Sprint 0 deliverable: /healthz under CORS)
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/healthz" 2>/dev/null || echo "000")
+check_status "GET /healthz reachable (Sprint 0 M0)" "200" "$HTTP_CODE"
+
+# 0.2 OPTIONS preflight on /healthz returns 204
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$BASE_URL/healthz" \
+    -H "Origin: http://localhost:3000" \
+    -H "Access-Control-Request-Method: GET" 2>/dev/null || echo "000")
+check_status "OPTIONS /healthz preflight returns 204" "204" "$HTTP_CODE"
+
+# 0.3-0.7 Verify all CORS response headers on /healthz preflight
+CORS_HEADERS=$(curl -s -D - -o /dev/null -X OPTIONS "$BASE_URL/healthz" \
+    -H "Origin: http://localhost:3000" \
+    -H "Access-Control-Request-Method: GET" 2>/dev/null)
+
+# 0.3 Access-Control-Allow-Origin
+if echo "$CORS_HEADERS" | grep -qi "Access-Control-Allow-Origin.*localhost:3000"; then
+    pass "CORS Allow-Origin includes localhost:3000"
+else
+    fail "CORS Allow-Origin includes localhost:3000" "header not found or wrong value"
+fi
+
+# 0.4 Access-Control-Allow-Methods
+if echo "$CORS_HEADERS" | grep -qi "Access-Control-Allow-Methods"; then
+    METHODS=$(echo "$CORS_HEADERS" | grep -i "Access-Control-Allow-Methods" | tr -d '\r')
+    ALL_FOUND=true
+    for M in GET POST PUT PATCH DELETE OPTIONS; do
+        if ! echo "$METHODS" | grep -q "$M"; then
+            ALL_FOUND=false
+            break
+        fi
+    done
+    if [ "$ALL_FOUND" = "true" ]; then
+        pass "CORS Allow-Methods includes all required methods"
+    else
+        fail "CORS Allow-Methods includes all required methods" "header: $METHODS"
+    fi
+else
+    fail "CORS Allow-Methods header present" "header not found"
+fi
+
+# 0.5 Access-Control-Allow-Headers
+if echo "$CORS_HEADERS" | grep -qi "Access-Control-Allow-Headers"; then
+    HDRS=$(echo "$CORS_HEADERS" | grep -i "Access-Control-Allow-Headers" | tr -d '\r')
+    HDRS_OK=true
+    for H in Content-Type Authorization X-Request-ID; do
+        if ! echo "$HDRS" | grep -qi "$H"; then
+            HDRS_OK=false
+            break
+        fi
+    done
+    if [ "$HDRS_OK" = "true" ]; then
+        pass "CORS Allow-Headers includes Content-Type, Authorization, X-Request-ID"
+    else
+        fail "CORS Allow-Headers includes required headers" "header: $HDRS"
+    fi
+else
+    fail "CORS Allow-Headers header present" "header not found"
+fi
+
+# 0.6 Access-Control-Allow-Credentials: true
+if echo "$CORS_HEADERS" | grep -qi "Access-Control-Allow-Credentials.*true"; then
+    pass "CORS Allow-Credentials is true"
+else
+    fail "CORS Allow-Credentials is true" "header not found or not true"
+fi
+
+# 0.7 Access-Control-Max-Age: 86400
+if echo "$CORS_HEADERS" | grep -qi "Access-Control-Max-Age.*86400"; then
+    pass "CORS Max-Age is 86400"
+else
+    fail "CORS Max-Age is 86400" "header not found or wrong value"
+fi
+
+# 0.8 Unified error response format: 404 returns JSON with code and message
+RESP=$(curl -s -w "\n%{http_code}" "$API/nonexistent-endpoint-for-sprint0-test" 2>/dev/null)
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+if [ "$HTTP_CODE" = "404" ]; then
+    pass "GET /api/v1/nonexistent returns 404"
+    HAS_CODE=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if 'code' in d else 'no')" 2>/dev/null || echo "no")
+    HAS_MSG=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if 'message' in d else 'no')" 2>/dev/null || echo "no")
+    if [ "$HAS_CODE" = "yes" ] && [ "$HAS_MSG" = "yes" ]; then
+        pass "404 error response has unified format (code + message)"
+    else
+        fail "404 error response has unified format" "missing code or message in: $BODY"
+    fi
+else
+    fail "GET /api/v1/nonexistent returns 404" "got HTTP $HTTP_CODE"
+    fail "404 error response has unified format" "skipped due to wrong status code"
+fi
+
+# 0.9 Frontend static checks: verify key Sprint 0 deliverable files exist
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+FE_DIR="$PROJECT_ROOT/omcmb/webcode"
+
+if [ -f "$FE_DIR/package.json" ]; then
+    if grep -q '"axios"' "$FE_DIR/package.json"; then
+        pass "Frontend: axios in package.json dependencies"
+    else
+        fail "Frontend: axios in package.json dependencies" "axios not found"
+    fi
+else
+    fail "Frontend: axios in package.json dependencies" "package.json not found"
+fi
+
+# 0.10 Frontend .env files exist
+ENV_OK=true
+for ENV_FILE in .env.development .env.production .env.mock; do
+    if [ ! -f "$FE_DIR/$ENV_FILE" ]; then
+        ENV_OK=false
+        fail "Frontend: $ENV_FILE exists" "file not found"
+    fi
+done
+if [ "$ENV_OK" = "true" ]; then
+    pass "Frontend: all .env files exist (.development, .production, .mock)"
+fi
+
+# 0.11 Frontend: Vite proxy configured
+if [ -f "$FE_DIR/vite.config.ts" ]; then
+    if grep -q "proxy" "$FE_DIR/vite.config.ts" && grep -q "localhost:8080" "$FE_DIR/vite.config.ts"; then
+        pass "Frontend: Vite dev proxy configured (localhost:8080)"
+    else
+        fail "Frontend: Vite dev proxy configured" "proxy or target not found in vite.config.ts"
+    fi
+else
+    fail "Frontend: Vite dev proxy configured" "vite.config.ts not found"
+fi
 
 # ============================================================
 section "1. Health Check"
