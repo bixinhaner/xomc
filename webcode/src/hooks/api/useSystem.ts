@@ -3,6 +3,7 @@ import type { User, Role, UserRole, UserStatus } from '@/types/system';
 import type { PageRequest } from '@/types/pagination';
 import { systemService } from '@/mock/services/systemService';
 import { adminApi } from '@/services/api/adminApi';
+import { systemApi } from '@/services/api/systemApi';
 import { useMock } from '@/services/apiSwitch';
 
 export function useUsers(
@@ -179,7 +180,7 @@ export function useAllPermissions() {
 export function useSystemInfo() {
   return useQuery({
     queryKey: ['system', 'info'],
-    queryFn: () => systemService.getSystemInfo(),
+    queryFn: () => useMock ? systemService.getSystemInfo() : systemApi.getSystemInfo(),
     refetchInterval: 60000,
   });
 }

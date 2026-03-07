@@ -50,4 +50,36 @@ export const dashboardService = {
     await delay(80, 150);
     return mockDashboardChartData.deviceByRegion;
   },
+
+  async getWidgets(): Promise<{ id: string; user_id: string; layout: unknown; created_at: string; updated_at: string }> {
+    await delay(80, 150);
+    return {
+      id: '',
+      user_id: '',
+      layout: mockDashboardWidgets,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  },
+
+  async saveWidgets(layout: unknown): Promise<{ id: string; user_id: string; layout: unknown; created_at: string; updated_at: string }> {
+    await delay(100, 200);
+    return {
+      id: '',
+      user_id: '',
+      layout,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  },
+
+  async getAlarmTypePie(): Promise<DashboardChartData['alarmTypePie']> {
+    await delay(80, 150);
+    return mockDashboardChartData.alarmTypePie;
+  },
+
+  async getKPITimeSeries(): Promise<DashboardChartData['kpiTimeSeries']> {
+    await delay(100, 200);
+    return mockDashboardChartData.kpiTimeSeries;
+  },
 };

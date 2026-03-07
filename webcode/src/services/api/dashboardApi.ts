@@ -1,6 +1,5 @@
 import http from '../http';
 import type { DashboardSummary, DashboardChartData } from '@/mock/data/dashboard';
-import { dashboardService } from '@/mock/services/dashboardService';
 
 // --- Backend response types ---
 
@@ -68,6 +67,29 @@ interface BackendRegionStatsItem {
   online_count: number;
   alarm_count: number;
 }
+
+// Backend response types for Phase A2 endpoints
+
+interface BackendWidgetLayout {
+  id: string;
+  user_id: string;
+  layout: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendAlarmTypePieItem {
+  name: string;
+  value: number;
+}
+
+interface BackendKPITimeSeriesEntry {
+  time: string;
+  value: number;
+}
+
+/** GET /dashboard/kpi-time-series returns { kpiName: [{ time, value }, ...], ... } */
+type BackendKPITimeSeriesResponse = Record<string, BackendKPITimeSeriesEntry[]>;
 
 // --- Mapping functions ---
 
@@ -138,6 +160,22 @@ function mapRegionStats(
   }));
 }
 
+function mapKPITimeSeries(
+  data: BackendKPITimeSeriesResponse
+): DashboardChartData['kpiTimeSeries'] {
+  const result: Record<string, Array<[string, number]>> = {};
+  for (const [kpiName, entries] of Object.entries(data)) {
+    result[kpiName] = entries.map((e) => [e.time, e.value]);
+  }
+  return result;
+}
+
+function mapAlarmTypePie(
+  items: BackendAlarmTypePieItem[]
+): DashboardChartData['alarmTypePie'] {
+  return items.map((item) => ({ name: item.name, value: item.value }));
+}
+
 // --- Exported service ---
 
 export const dashboardApi = {
@@ -149,50 +187,53 @@ export const dashboardApi = {
     return mapBackendSummary(data);
   },
 
-  /** Fetch full dashboard data — summary + charts from backend, widgets from mock */
+  /** Fetch full dashboard data — summary + charts + widgets all from backend */
   async getDashboardData(): Promise<{
     summary: DashboardSummary;
     chartData: DashboardChartData;
-    widgets: Awaited<ReturnType<typeof dashboardService.getDashboardData>>['widgets'];
+    widgets: BackendWidgetLayout;
   }> {
-    const [summary, alarmTrend, deviceStatusPie, topAlarmDevices, deviceByRegion, mockData] =
+    const [summary, alarmTrend, deviceStatusPie, topAlarmDevices, deviceByRegion, alarmTypePie, kpiTimeSeries, widgets] =
       await Promise.all([
         dashboardApi.getSummary(),
         dashboardApi.getAlarmTrend(),
         dashboardApi.getDeviceStatusPie(),
         dashboardApi.getTopAlarmDevices(),
         dashboardApi.getRegionStats(),
-        dashboardService.getDashboardData(), // widgets + alarmTypePie + kpiTimeSeries still from mock
+        dashboardApi.getAlarmTypePie(),
+        dashboardApi.getKPITimeSeries(),
+        dashboardApi.getWidgets(),
       ]);
     return {
       summary,
       chartData: {
         alarmTrend,
         deviceStatusPie,
-        kpiTimeSeries: mockData.chartData.kpiTimeSeries,
-        alarmTypePie: mockData.chartData.alarmTypePie,
+        kpiTimeSeries,
+        alarmTypePie,
         deviceByRegion,
         topAlarmDevices,
       },
-      widgets: mockData.widgets,
+      widgets,
     };
   },
 
-  /** Chart data — compose from real endpoints where available */
+  /** Chart data — all from real backend endpoints */
   async getChartData(): Promise<DashboardChartData> {
-    const [alarmTrend, deviceStatusPie, topAlarmDevices, deviceByRegion, mockData] =
+    const [alarmTrend, deviceStatusPie, topAlarmDevices, deviceByRegion, alarmTypePie, kpiTimeSeries] =
       await Promise.all([
         dashboardApi.getAlarmTrend(),
         dashboardApi.getDeviceStatusPie(),
         dashboardApi.getTopAlarmDevices(),
         dashboardApi.getRegionStats(),
-        dashboardService.getChartData(), // alarmTypePie + kpiTimeSeries still from mock
+        dashboardApi.getAlarmTypePie(),
+        dashboardApi.getKPITimeSeries(),
       ]);
     return {
       alarmTrend,
       deviceStatusPie,
-      kpiTimeSeries: mockData.kpiTimeSeries,
-      alarmTypePie: mockData.alarmTypePie,
+      kpiTimeSeries,
+      alarmTypePie,
       deviceByRegion,
       topAlarmDevices,
     };
@@ -238,5 +279,55 @@ export const dashboardApi = {
       '/dashboard/region-stats'
     );
     return mapRegionStats(data);
+  },
+
+  /** Widget layout from GET /dashboard/widgets */
+  async getWidgets(): Promise<BackendWidgetLayout> {
+    const { data } = await http.get<BackendWidgetLayout>('/dashboard/widgets');
+    return data;
+  },
+
+  /** Save widget layout via PUT /dashboard/widgets */
+  async saveWidgets(layout: unknown): Promise<BackendWidgetLayout> {
+    const { data } = await http.put<BackendWidgetLayout>('/dashboard/widgets', {
+      layout,
+    });
+    return data;
+  },
+
+  /** Alarm type pie from GET /dashboard/alarm-type-pie */
+  async getAlarmTypePie(): Promise<DashboardChartData['alarmTypePie']> {
+    const { data } = await http.get<BackendAlarmTypePieItem[]>(
+      '/dashboard/alarm-type-pie'
+    );
+    return mapAlarmTypePie(data);
+  },
+
+  /** KPI time series from GET /dashboard/kpi-time-series */
+  async getKPITimeSeries(
+    kpiNames?: string[],
+    startTime?: string,
+    endTime?: string
+  ): Promise<DashboardChartData['kpiTimeSeries']> {
+    const defaultNames = [
+      'rrcSuccRate',
+      'erabSuccRate',
+      'hoSuccRate',
+      'dlThroughput',
+      'ulThroughput',
+      'prbUtil',
+    ];
+    const names = kpiNames ?? defaultNames;
+    const { data } = await http.get<BackendKPITimeSeriesResponse>(
+      '/dashboard/kpi-time-series',
+      {
+        params: {
+          kpi_names: names.join(','),
+          ...(startTime ? { start_time: startTime } : {}),
+          ...(endTime ? { end_time: endTime } : {}),
+        },
+      }
+    );
+    return mapKPITimeSeries(data);
   },
 };

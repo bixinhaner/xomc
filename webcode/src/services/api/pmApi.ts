@@ -1,7 +1,6 @@
 import http from '../http';
 import type { KPI, Measurement, KPISeries, PerformanceThreshold } from '@/types/performance';
 import type { PageRequest, PageResponse } from '@/types/pagination';
-import { performanceService } from '@/mock/services/performanceService';
 
 // --- Backend response types ---
 
@@ -145,6 +144,51 @@ function mapBackendThreshold(t: BackendKPIThreshold): PerformanceThreshold {
     deviceGroups: [],
     createTime: t.created_at || '',
     updateTime: t.updated_at || '',
+  };
+}
+
+// --- Backend PM Task types & mapping ---
+
+interface BackendPMTask {
+  id: string;
+  task_name: string;
+  task_type: string;
+  device_sns: string[];
+  kpi_codes: string[];
+  granularity: string;
+  time_range: [string, string] | null;
+  status: string;
+  progress: number;
+  creator: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapBackendPMTask(b: BackendPMTask) {
+  return {
+    id: b.id,
+    taskName: b.task_name,
+    taskType: b.task_type,
+    deviceSns: b.device_sns || [],
+    kpiCodes: b.kpi_codes || [],
+    granularity: b.granularity,
+    timeRange: b.time_range,
+    status: b.status,
+    progress: b.progress,
+    creator: b.creator,
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+
+function mapToBackendPMTask(t: any) {
+  return {
+    task_name: t.taskName,
+    task_type: t.taskType,
+    device_sns: t.deviceSns,
+    kpi_codes: t.kpiCodes,
+    granularity: t.granularity,
+    time_range: t.timeRange,
   };
 }
 
@@ -336,7 +380,13 @@ export const pmApi = {
     return data;
   },
 
-  // --- Delegated to mock (no backend endpoint) ---
-  getTasks: performanceService.getTasks.bind(performanceService),
-  createTask: performanceService.createTask.bind(performanceService),
+  // PM Tasks
+  async getTasks(params: any) {
+    const { data } = await http.get<any>('/pm/tasks', { params });
+    return { items: (data.items || []).map(mapBackendPMTask), total: data.total, page: data.page, pageSize: data.page_size };
+  },
+  async createTask(taskData: any) {
+    const { data } = await http.post<any>('/pm/tasks', mapToBackendPMTask(taskData));
+    return mapBackendPMTask(data);
+  },
 };
