@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -17,12 +18,13 @@ type Handler struct {
 	counterRepo counter.CounterRepository
 	kpiRepo     kpi.KPIRepository
 	kpiEngine   *kpi.KPIEngine
+	taskRepo    TaskRepository
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new PM handler.
-func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, logger *zap.Logger) *Handler {
-	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, logger: logger}
+func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, logger *zap.Logger) *Handler {
+	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, logger: logger}
 }
 
 // RegisterRoutes registers PM API routes.
@@ -34,6 +36,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		pm.GET("/kpi", h.ListKPIValues)
 		pm.GET("/kpi/definitions", h.ListKPIDefinitions)
 		pm.POST("/kpi/calculate", h.CalculateKPI)
+		pm.GET("/tasks", h.ListTasks)
+		pm.POST("/tasks", h.CreateTask)
 	}
 }
 
@@ -247,4 +251,64 @@ func (h *Handler) CalculateKPI(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": results, "total": len(results)})
+}
+
+// ---- PM Task handlers ----
+
+type taskQuery struct {
+	Status   string `form:"status"`
+	TaskType string `form:"task_type"`
+	model.ListRequest
+}
+
+// ListTasks handles GET /pm/tasks.
+func (h *Handler) ListTasks(c *gin.Context) {
+	var q taskQuery
+	q.ListRequest = model.DefaultListRequest()
+	if err := c.ShouldBindQuery(&q); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	filter := TaskFilter{ListRequest: q.ListRequest}
+	if q.Status != "" {
+		s := TaskStatus(q.Status)
+		filter.Status = &s
+	}
+	if q.TaskType != "" {
+		t := PMTaskType(q.TaskType)
+		filter.TaskType = &t
+	}
+
+	result, err := h.taskRepo.List(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// CreateTask handles POST /pm/tasks.
+func (h *Handler) CreateTask(c *gin.Context) {
+	var req CreatePerformanceTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	task := &PerformanceTask{
+		TaskName:    req.TaskName,
+		TaskType:    req.TaskType,
+		DeviceSNs:   req.DeviceSNs,
+		KPICodes:    req.KPICodes,
+		Granularity: req.Granularity,
+		TimeRange:   req.TimeRange,
+		Creator:     req.Creator,
+	}
+
+	if err := h.taskRepo.Create(c.Request.Context(), task); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusCreated, task)
 }

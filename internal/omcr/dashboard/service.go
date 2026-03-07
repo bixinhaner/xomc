@@ -2,9 +2,12 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/common/model"
@@ -46,6 +49,30 @@ type RegionStatEntry struct {
 	OnlineCount int64  `json:"online_count"`
 	AlarmCount  int64  `json:"alarm_count"`
 }
+
+// WidgetLayout represents a user's dashboard widget layout stored as JSONB.
+type WidgetLayout struct {
+	ID        uuid.UUID       `json:"id"`
+	UserID    uuid.UUID       `json:"user_id"`
+	Layout    json.RawMessage `json:"layout"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// AlarmTypePieEntry represents alarm counts for a single alarm type.
+type AlarmTypePieEntry struct {
+	Name  string `json:"name"`
+	Value int64  `json:"value"`
+}
+
+// KPITimeSeriesEntry represents a single data point within a named KPI series.
+type KPITimeSeriesEntry struct {
+	Time  string  `json:"time"`
+	Value float64 `json:"value"`
+}
+
+// KPITimeSeriesResponse maps KPI names to their time-series data.
+type KPITimeSeriesResponse map[string][]KPITimeSeriesEntry
 
 // Service aggregates data from multiple modules for the dashboard.
 type Service struct {
@@ -302,4 +329,128 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 	}
 
 	return entries, nil
+}
+
+// GetWidgetLayout retrieves the widget layout for a specific user.
+func (s *Service) GetWidgetLayout(ctx context.Context, userID uuid.UUID) (*WidgetLayout, error) {
+	query := `SELECT id, user_id, layout, created_at, updated_at
+		FROM dashboard_widgets WHERE user_id = $1`
+
+	var w WidgetLayout
+	err := s.pgPool.QueryRow(ctx, query, userID).Scan(
+		&w.ID, &w.UserID, &w.Layout, &w.CreatedAt, &w.UpdatedAt,
+	)
+	if err != nil {
+		// Return empty layout if none found (pgx returns error for no rows)
+		if err.Error() == "no rows in result set" {
+			return &WidgetLayout{
+				UserID: userID,
+				Layout: json.RawMessage("[]"),
+			}, nil
+		}
+		return nil, fmt.Errorf("query widget layout: %w", err)
+	}
+	return &w, nil
+}
+
+// SaveWidgetLayout upserts the widget layout for a specific user.
+func (s *Service) SaveWidgetLayout(ctx context.Context, userID uuid.UUID, layout json.RawMessage) (*WidgetLayout, error) {
+	query := `INSERT INTO dashboard_widgets (user_id, layout)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET layout = EXCLUDED.layout, updated_at = NOW()
+		RETURNING id, user_id, layout, created_at, updated_at`
+
+	var w WidgetLayout
+	err := s.pgPool.QueryRow(ctx, query, userID, layout).Scan(
+		&w.ID, &w.UserID, &w.Layout, &w.CreatedAt, &w.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upsert widget layout: %w", err)
+	}
+	return &w, nil
+}
+
+// GetAlarmTypePie returns alarm counts grouped by alarm_type.
+func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, error) {
+	query := `SELECT
+			COALESCE(NULLIF(alarm_type, ''), '其他告警') AS atype,
+			COUNT(*) AS cnt
+		FROM alarms_active
+		GROUP BY atype
+		ORDER BY cnt DESC`
+
+	rows, err := s.pgPool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query alarm type pie: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []AlarmTypePieEntry
+	for rows.Next() {
+		var e AlarmTypePieEntry
+		if err := rows.Scan(&e.Name, &e.Value); err != nil {
+			return nil, fmt.Errorf("scan alarm type pie row: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if entries == nil {
+		entries = []AlarmTypePieEntry{}
+	}
+	return entries, nil
+}
+
+// GetKPITimeSeries returns time-series data for multiple KPI names within a time range.
+func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
+	result := make(KPITimeSeriesResponse, len(kpiNames))
+
+	if len(kpiNames) == 0 {
+		return result, nil
+	}
+
+	// Initialize empty slices for all requested names
+	for _, name := range kpiNames {
+		result[name] = []KPITimeSeriesEntry{}
+	}
+
+	query := `SELECT kpi_name, time, kpi_value
+		FROM kpi_values
+		WHERE kpi_name = ANY($1) AND time >= $2 AND time <= $3
+		ORDER BY kpi_name, time ASC`
+
+	rows, err := s.pgPool.Query(ctx, query, kpiNames, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query kpi time series: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var kpiName string
+		var t time.Time
+		var value float64
+		if err := rows.Scan(&kpiName, &t, &value); err != nil {
+			return nil, fmt.Errorf("scan kpi time series row: %w", err)
+		}
+		result[kpiName] = append(result[kpiName], KPITimeSeriesEntry{
+			Time:  t.Format(time.RFC3339),
+			Value: value,
+		})
+	}
+
+	return result, nil
+}
+
+// parseKPINames splits a comma-separated string of KPI names into a slice.
+func parseKPINames(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	names := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			names = append(names, trimmed)
+		}
+	}
+	return names
 }

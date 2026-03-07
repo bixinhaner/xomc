@@ -218,6 +218,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	pmCounterRepo := counter.NewPgCounterRepository(tsPool)
 	pmKPIRepo := kpi.NewPgKPIRepository(tsPool)
 	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, carrierRegistry, logger)
+	pmTaskRepo := pm.NewPgTaskRepository(pgPool)
 
 	// 20. Alarm module components
 	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
@@ -290,7 +291,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	topologyHandler.RegisterRoutes(v1)
 
 	// PM routes
-	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, logger)
+	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, pmTaskRepo, logger)
 	pmHandler.RegisterRoutes(v1)
 
 	// Alarm routes
@@ -362,6 +363,11 @@ func runApp(cmd *cobra.Command, args []string) error {
 	mmlHandler := mml.NewHandler(mmlService, logger)
 	mmlHandler.RegisterRoutes(v1)
 	logger.Info("MML console module initialized")
+
+	// System Info endpoint
+	sysInfoHandler := infra.NewSystemInfoHandler(pgPool, redisClient, logger)
+	v1.GET("/system/info", sysInfoHandler.GetSystemInfo)
+	logger.Info("system info endpoint initialized")
 
 	// Northbound/OSS module
 	nbPMHandler := northbound.NewPMHandler(pmCounterRepo, pmKPIRepo, logger)
