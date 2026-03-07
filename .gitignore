@@ -2,9 +2,11 @@
 .DS_Store
 Thumbs.db
 
-# Sub-repositories (managed independently)
-omcgo/
-omcmb/
+# Build artifacts
+omcgo/bin/
+omcgo/app
+omcmb/webcode/dist/
+omcmb/webcode/node_modules/
 
 # Claude (keep commands/ tracked for team sharing)
 .claude/*
