@@ -1,4 +1,4 @@
--- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2 + Sprint 3 + Sprint 4)
+-- seed_e2e_testdata.sql — E2E 联调测试数据 (Sprint 1 + Sprint 2 + Sprint 3 + Sprint 4 + Sprint 7 + Sprint 8)
 -- 使用固定 UUID，方便验证脚本引用
 -- 运行前需已执行全部 migrations (make migrate-up)
 -- 使用方法: psql "$DSN" -f scripts/seed_e2e_testdata.sql
@@ -8,6 +8,16 @@ BEGIN;
 -- ============================================================
 -- 0. 清理旧的 E2E 测试数据 (幂等，按 FK 依赖逆序)
 -- ============================================================
+
+-- Sprint 8 data
+DELETE FROM mml_tasks WHERE creator = 'admin' AND task_name LIKE 'E2E%';
+DELETE FROM mml_scripts WHERE id::text LIKE 'e2e00013%';
+DELETE FROM managed_files WHERE id::text LIKE 'e2e00012%';
+DELETE FROM backup_schedules WHERE id::text LIKE 'e2e00011%';
+DELETE FROM backup_tasks WHERE id::text LIKE 'e2e00010%';
+
+-- Sprint 7 data
+DELETE FROM alarms_active WHERE id::text LIKE 'e2e00099%';
 
 -- Sprint 4 data
 DELETE FROM ne_message_logs WHERE device_id::text LIKE 'd0000000%' OR device_sn LIKE 'CMCC-ENB-%';
@@ -433,6 +443,78 @@ VALUES
   (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'eNB-BJ-001', 'GetParameterValuesResponse', 'inbound', '{"params":["Device.DeviceInfo.SoftwareVersion"]}', NOW() - INTERVAL '45 minutes'),
   (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000002', 'CMCC-ENB-002', 'eNB-SH-001', 'SetParameterValues', 'outbound', '{"params":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300"}]}', NOW() - INTERVAL '30 minutes');
 
+-- ============================================================
+-- 17. Alarm Trend Test Data (Sprint 7 — 3 条，不同日期用于告警趋势聚合验证)
+-- ============================================================
+
+INSERT INTO alarms_active (
+    id, device_id, device_sn, carrier, severity, alarm_type, alarm_code,
+    description, status, raised_at, acknowledged_at, acknowledged_by,
+    additional_info, created_at, updated_at
+) VALUES
+-- Sprint 7 Alarm 1: today (Critical)
+(
+    'e2e00099-0000-0000-0000-000000000001',
+    'e2e00001-0000-0000-0000-000000000001', 'TEST-SN-001', 'cmcc',
+    1, 'CommunicationFailure', 'ALM-S7-001',
+    'E2E Sprint 7 alarm trend test 1 — today', 'active',
+    NOW(), NULL, '',
+    '{"test": "sprint7-trend"}'::jsonb,
+    NOW(), NOW()
+),
+-- Sprint 7 Alarm 2: yesterday (Minor)
+(
+    'e2e00099-0000-0000-0000-000000000002',
+    'e2e00001-0000-0000-0000-000000000001', 'TEST-SN-001', 'cmcc',
+    3, 'HighTemperature', 'ALM-S7-002',
+    'E2E Sprint 7 alarm trend test 2 — yesterday', 'active',
+    NOW() - INTERVAL '1 day', NULL, '',
+    '{"test": "sprint7-trend"}'::jsonb,
+    NOW(), NOW()
+),
+-- Sprint 7 Alarm 3: 2 days ago (Major)
+(
+    'e2e00099-0000-0000-0000-000000000003',
+    'e2e00001-0000-0000-0000-000000000002', 'TEST-SN-002', 'cmcc',
+    2, 'HighCPUUtilization', 'ALM-S7-003',
+    'E2E Sprint 7 alarm trend test 3 — 2 days ago', 'active',
+    NOW() - INTERVAL '2 days', NULL, '',
+    '{"test": "sprint7-trend"}'::jsonb,
+    NOW(), NOW()
+);
+
+-- ============================================================
+-- 18. Backup Tasks (Sprint 8)
+-- ============================================================
+
+INSERT INTO backup_tasks (id, task_type, target_type, target_ids, status, progress, created_at, updated_at) VALUES
+('e2e00010-0000-0000-0000-000000000001', 'full', 'device', '["TEST00001"]', 'completed', 100, NOW() - INTERVAL '1 day', NOW()),
+('e2e00010-0000-0000-0000-000000000002', 'config_only', 'device', '["TEST00001"]', 'pending', 0, NOW(), NOW());
+
+-- ============================================================
+-- 19. Backup Schedules (Sprint 8)
+-- ============================================================
+
+INSERT INTO backup_schedules (id, name, cron_expr, enabled, task_type, created_at, updated_at) VALUES
+('e2e00011-0000-0000-0000-000000000001', 'Daily Full Backup', '0 2 * * *', true, 'full', NOW(), NOW()),
+('e2e00011-0000-0000-0000-000000000002', 'Weekly Config Backup', '0 3 * * 0', false, 'config_only', NOW(), NOW());
+
+-- ============================================================
+-- 20. Managed Files (Sprint 8)
+-- ============================================================
+
+INSERT INTO managed_files (id, file_name, file_type, file_size, minio_path, status, description, created_at, updated_at) VALUES
+('e2e00012-0000-0000-0000-000000000001', 'router-config.xml', 'config', 1024, 'managed-files/config/test.xml', 'ready', 'E2E config file', NOW(), NOW()),
+('e2e00012-0000-0000-0000-000000000002', 'device.log', 'log', 2048, 'managed-files/log/device.log', 'ready', 'E2E log file', NOW(), NOW()),
+('e2e00012-0000-0000-0000-000000000003', 'firmware-v2.bin', 'firmware', 10240, 'managed-files/firmware/fw.bin', 'ready', 'E2E firmware', NOW(), NOW());
+
+-- ============================================================
+-- 21. MML Scripts (Sprint 8)
+-- ============================================================
+
+INSERT INTO mml_scripts (id, script_name, description, content, device_type, creator, created_at, updated_at) VALUES
+('e2e00013-0000-0000-0000-000000000001', 'Device Health Check', 'Check device status', 'LST DEVPARAM;RST_DEV', 'router', 'admin', NOW(), NOW());
+
 COMMIT;
 
 -- Verify counts
@@ -466,4 +548,14 @@ SELECT 'kpi_thresholds', COUNT(*) FROM kpi_thresholds WHERE id::text LIKE 'b0000
 UNION ALL
 SELECT 'system_logs', COUNT(*) FROM system_logs WHERE source IN ('alarm-engine', 'pm-collector', 'config-sync')
 UNION ALL
-SELECT 'ne_message_logs', COUNT(*) FROM ne_message_logs WHERE device_sn LIKE 'CMCC-ENB-%';
+SELECT 'ne_message_logs', COUNT(*) FROM ne_message_logs WHERE device_sn LIKE 'CMCC-ENB-%'
+UNION ALL
+SELECT 'alarms_sprint7', COUNT(*) FROM alarms_active WHERE id::text LIKE 'e2e00099%'
+UNION ALL
+SELECT 'backup_tasks', COUNT(*) FROM backup_tasks WHERE id::text LIKE 'e2e00010%'
+UNION ALL
+SELECT 'backup_schedules', COUNT(*) FROM backup_schedules WHERE id::text LIKE 'e2e00011%'
+UNION ALL
+SELECT 'managed_files', COUNT(*) FROM managed_files WHERE id::text LIKE 'e2e00012%'
+UNION ALL
+SELECT 'mml_scripts', COUNT(*) FROM mml_scripts WHERE id::text LIKE 'e2e00013%';

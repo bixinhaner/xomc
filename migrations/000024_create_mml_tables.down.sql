@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS mml_tasks;
+DROP TABLE IF EXISTS mml_scripts;
+DROP TABLE IF EXISTS mml_commands;

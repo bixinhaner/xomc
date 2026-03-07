@@ -37,8 +37,11 @@ import (
 	"github.com/omcgo/omcgo/internal/interop"
 	"github.com/omcgo/omcgo/internal/interop/cases"
 	"github.com/omcgo/omcgo/internal/omcr/admin"
+	"github.com/omcgo/omcgo/internal/omcr/backup"
 	"github.com/omcgo/omcgo/internal/omcr/dashboard"
 	"github.com/omcgo/omcgo/internal/omcr/device"
+	"github.com/omcgo/omcgo/internal/omcr/filemanager"
+	"github.com/omcgo/omcgo/internal/omcr/mml"
 	"github.com/omcgo/omcgo/internal/omcr/software"
 	"github.com/omcgo/omcgo/internal/omcr/syslog"
 	"github.com/omcgo/omcgo/internal/omcr/topology"
@@ -306,8 +309,8 @@ func runApp(cmd *cobra.Command, args []string) error {
 	pmGroup := v1.Group("/pm")
 	thresholdHandler.RegisterRoutes(pmGroup)
 
-	// Dashboard routes (Sprint 4)
-	dashboardService := dashboard.NewService(deviceService, alarmPgStore, pmKPIRepo, logger)
+	// Dashboard routes (Sprint 4+7)
+	dashboardService := dashboard.NewService(deviceService, alarmPgStore, pmKPIRepo, pgPool, groupRepo, logger)
 	dashboardHandler := dashboard.NewHandler(dashboardService)
 	dashboardHandler.RegisterRoutes(v1)
 
@@ -336,6 +339,29 @@ func runApp(cmd *cobra.Command, args []string) error {
 	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
 	interopHandler.RegisterRoutes(v1)
 	logger.Info("interop testing module initialized")
+
+	// Backup module (Sprint 8)
+	backupTaskRepo := backup.NewPgTaskRepository(pgPool)
+	backupScheduleRepo := backup.NewPgScheduleRepository(pgPool)
+	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, logger)
+	backupHandler := backup.NewHandler(backupService, logger)
+	backupHandler.RegisterRoutes(v1)
+	logger.Info("backup module initialized")
+
+	// File Manager module (Sprint 8)
+	fileRepo := filemanager.NewPgFileRepository(pgPool)
+	fileHandler := filemanager.NewHandler(fileRepo, minioClient, cfg.MinIO.Buckets.ConfigBackup, logger)
+	fileHandler.RegisterRoutes(v1)
+	logger.Info("file manager module initialized")
+
+	// MML Console module (Sprint 8)
+	mmlCmdRepo := mml.NewPgCommandRepository(pgPool)
+	mmlScriptRepo := mml.NewPgScriptRepository(pgPool)
+	mmlTaskRepo := mml.NewPgTaskRepository(pgPool)
+	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, logger)
+	mmlHandler := mml.NewHandler(mmlService, logger)
+	mmlHandler.RegisterRoutes(v1)
+	logger.Info("MML console module initialized")
 
 	// Northbound/OSS module
 	nbPMHandler := northbound.NewPMHandler(pmCounterRepo, pmKPIRepo, logger)
