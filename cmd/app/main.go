@@ -42,7 +42,10 @@ import (
 	"github.com/omcgo/omcgo/internal/omcr/dashboard"
 	"github.com/omcgo/omcgo/internal/omcr/device"
 	"github.com/omcgo/omcgo/internal/omcr/filemanager"
+	"github.com/omcgo/omcgo/internal/omcr/license"
 	"github.com/omcgo/omcgo/internal/omcr/mml"
+	"github.com/omcgo/omcgo/internal/omcr/ops"
+	"github.com/omcgo/omcgo/internal/omcr/report"
 	"github.com/omcgo/omcgo/internal/omcr/software"
 	"github.com/omcgo/omcgo/internal/omcr/syslog"
 	"github.com/omcgo/omcgo/internal/omcr/topology"
@@ -191,6 +194,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 	// 17. Create Topology module
 	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)
 	groupService := topology.NewDeviceGroupService(groupRepo, logger)
+	siteRepo := topology.NewPgSiteRepository(pgPool)
+	topoNodeRepo := topology.NewPgTopoNodeRepository(pgPool)
+	topoEdgeRepo := topology.NewPgTopoEdgeRepository(pgPool)
 
 	// 18. Create Admin/RBAC module
 	userRepo := admin.NewPgUserRepository(pgPool)
@@ -290,7 +296,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	provisionHandler.RegisterRoutes(v1)
 
 	// Topology routes
-	topologyHandler := topology.NewHandler(groupRepo, groupService)
+	topologyHandler := topology.NewHandler(groupRepo, groupService, siteRepo, topoNodeRepo, topoEdgeRepo)
 	topologyHandler.RegisterRoutes(v1)
 
 	// PM routes
@@ -376,6 +382,30 @@ func runApp(cmd *cobra.Command, args []string) error {
 	baselineHandler := baseline.NewHandler(baselineSvc, logger)
 	baselineHandler.RegisterRoutes(v1)
 	logger.Info("config baseline module initialized")
+
+	// License module
+	licenseRepo := license.NewPgLicenseRepository(pgPool)
+	licenseSvc := license.NewService(licenseRepo, logger)
+	licenseHandler := license.NewHandler(licenseSvc, logger)
+	licenseHandler.RegisterRoutes(v1)
+	logger.Info("license module initialized")
+
+	// OpsTools module
+	opsTemplateRepo := ops.NewPgTemplateRepository(pgPool)
+	opsTaskRepo := ops.NewPgTaskRepository(pgPool)
+	opsCmdRepo := ops.NewPgCommandRecordRepository(pgPool)
+	opsSvc := ops.NewService(opsTemplateRepo, opsTaskRepo, opsCmdRepo, logger)
+	opsHandler := ops.NewHandler(opsSvc, logger)
+	opsHandler.RegisterRoutes(v1)
+	logger.Info("ops tools module initialized")
+
+	// Report module
+	reportDefRepo := report.NewPgDefinitionRepository(pgPool)
+	reportRecordRepo := report.NewPgRecordRepository(pgPool)
+	reportService := report.NewService(reportDefRepo, reportRecordRepo, logger)
+	reportHandler := report.NewHandler(reportService, logger)
+	reportHandler.RegisterRoutes(v1)
+	logger.Info("report module initialized")
 
 	// System Info endpoint
 	sysInfoHandler := infra.NewSystemInfoHandler(pgPool, redisClient, logger)
