@@ -3,22 +3,39 @@ import type { ConfigTemplate, BaselineConfig, ConfigTask, ConfigParam, NeighborP
 import type { PageRequest } from '@/types/pagination';
 import { configService } from '@/mock/services/configService';
 import { templateApi } from '@/services/api/templateApi';
+import { deviceApi } from '@/services/api/deviceApi';
+import { configSyncApi } from '@/services/api/configSyncApi';
 import { useMock } from '@/services/apiSwitch';
 
 export function useConfigParams(
-  params: { deviceSn?: string; category?: string; keyword?: string } & PageRequest
+  params: { deviceSn?: string; deviceId?: string; category?: string; keyword?: string } & PageRequest
 ) {
   return useQuery({
     queryKey: ['config', 'params', params],
-    queryFn: () => configService.getParams(params),
+    queryFn: () =>
+      useMock
+        ? configService.getParams(params)
+        : deviceApi.getParameters(params.deviceId ?? ''),
   });
 }
 
 export function useUpdateConfigParam() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, value }: { id: string; value: string | number | boolean }) =>
-      configService.updateParam(id, value),
+    mutationFn: ({
+      id,
+      value,
+      deviceId,
+    }: {
+      id: string;
+      value: string | number | boolean;
+      deviceId?: string;
+    }) =>
+      useMock
+        ? configService.updateParam(id, value)
+        : configSyncApi.pushConfig(deviceId ?? '', [
+            { name: id, value: String(value) },
+          ]),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'params'] });
     },

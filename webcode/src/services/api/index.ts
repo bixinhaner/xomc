@@ -8,6 +8,7 @@
  * Sprint 2: templateApi, softwareApi, adminApi, topologyApi ✅
  * Sprint 3: pmApi, mrApi ✅
  * Sprint 4: dashboardApi, logApi, datamodelApi, northboundApi, provisionApi, interopApi ✅
+ * Sprint 9: backupApi, fileApi, mmlApi ✅
  */
 
 export { http } from '../http';
@@ -26,3 +27,7 @@ export { datamodelApi } from './datamodelApi';
 export { northboundApi } from './northboundApi';
 export { provisionApi } from './provisionApi';
 export { interopApi } from './interopApi';
+export { configSyncApi } from './configSyncApi';
+export { backupApi } from './backupApi';
+export { fileApi } from './fileApi';
+export { mmlApi } from './mmlApi';

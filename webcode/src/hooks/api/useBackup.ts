@@ -2,18 +2,22 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BackupTask, BackupSchedule, FTPConfig } from '@/mock/data/backup';
 import type { PageRequest } from '@/types/pagination';
 import { backupService } from '@/mock/services/backupService';
+import { backupApi } from '@/services/api/backupApi';
+import { useMock } from '@/services/apiSwitch';
 
 export function useBackupTasks(params: { status?: string; taskType?: string } & PageRequest) {
   return useQuery({
     queryKey: ['backup', 'tasks', params],
-    queryFn: () => backupService.getTasks(params),
+    queryFn: () =>
+      useMock ? backupService.getTasks(params) : backupApi.getTasks(params),
   });
 }
 
 export function useBackupTaskById(id: string) {
   return useQuery({
     queryKey: ['backup', 'tasks', 'detail', id],
-    queryFn: () => backupService.getTaskById(id),
+    queryFn: () =>
+      useMock ? backupService.getTaskById(id) : backupApi.getTaskById(id),
     enabled: Boolean(id),
   });
 }
@@ -22,7 +26,7 @@ export function useCreateBackupTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<BackupTask, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'progress' | 'successCount' | 'failCount'>) =>
-      backupService.createTask(data),
+      useMock ? backupService.createTask(data) : backupApi.createTask(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'tasks'] });
     },
@@ -32,7 +36,8 @@ export function useCreateBackupTask() {
 export function useCancelBackupTask() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => backupService.cancelTask(id),
+    mutationFn: (id: string) =>
+      useMock ? backupService.cancelTask(id) : backupApi.cancelTask(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'tasks'] });
     },
@@ -42,7 +47,8 @@ export function useCancelBackupTask() {
 export function useDeleteBackupTasks() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => backupService.deleteTasks(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? backupService.deleteTasks(ids) : backupApi.deleteTasks(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'tasks'] });
     },
@@ -52,7 +58,8 @@ export function useDeleteBackupTasks() {
 export function useBackupSchedules(params: PageRequest) {
   return useQuery({
     queryKey: ['backup', 'schedules', params],
-    queryFn: () => backupService.getSchedules(params),
+    queryFn: () =>
+      useMock ? backupService.getSchedules(params) : backupApi.getSchedules(params),
   });
 }
 
@@ -60,7 +67,7 @@ export function useCreateBackupSchedule() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<BackupSchedule, 'id' | 'createTime'>) =>
-      backupService.createSchedule(data),
+      useMock ? backupService.createSchedule(data) : backupApi.createSchedule(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'schedules'] });
     },
@@ -71,7 +78,7 @@ export function useUpdateBackupSchedule() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<BackupSchedule> }) =>
-      backupService.updateSchedule(id, data),
+      useMock ? backupService.updateSchedule(id, data) : backupApi.updateSchedule(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'schedules'] });
     },
@@ -81,12 +88,18 @@ export function useUpdateBackupSchedule() {
 export function useDeleteBackupSchedules() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => backupService.deleteSchedules(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? backupService.deleteSchedules(ids) : backupApi.deleteSchedules(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backup', 'schedules'] });
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// FTP Config hooks — backend does not support FTP config endpoints,
+// so these remain mock-only.
+// ---------------------------------------------------------------------------
 
 export function useFTPConfigs(params: PageRequest) {
   return useQuery({

@@ -61,14 +61,15 @@ export function useDeleteUsers() {
 export function useResetPassword() {
   return useMutation({
     mutationFn: ({ id, newPassword }: { id: string; newPassword: string }) =>
-      systemService.resetPassword(id, newPassword),
+      useMock ? systemService.resetPassword(id, newPassword) : adminApi.resetPassword(id, newPassword),
   });
 }
 
 export function useLockUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => systemService.lockUser(id),
+    mutationFn: (id: string) =>
+      useMock ? systemService.lockUser(id) : adminApi.lockUser(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
     },
@@ -78,7 +79,8 @@ export function useLockUser() {
 export function useUnlockUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => systemService.unlockUser(id),
+    mutationFn: (id: string) =>
+      useMock ? systemService.unlockUser(id) : adminApi.unlockUser(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
     },
@@ -106,7 +108,8 @@ export function useAllRoles() {
 export function useRoleById(id: string) {
   return useQuery({
     queryKey: ['system', 'roles', 'detail', id],
-    queryFn: () => systemService.getRoleById(id),
+    queryFn: () =>
+      useMock ? systemService.getRoleById(id) : adminApi.getRoleById(id),
     enabled: Boolean(id),
   });
 }
@@ -115,7 +118,7 @@ export function useCreateRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<Role, 'id' | 'userCount'>) =>
-      systemService.createRole(data),
+      useMock ? systemService.createRole(data) : adminApi.createRole(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'roles'] });
     },
@@ -126,7 +129,7 @@ export function useUpdateRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Role> }) =>
-      systemService.updateRole(id, data),
+      useMock ? systemService.updateRole(id, data) : adminApi.updateRole(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'roles'] });
     },
@@ -136,7 +139,14 @@ export function useUpdateRole() {
 export function useDeleteRoles() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => systemService.deleteRoles(ids),
+    mutationFn: async (ids: string[]) => {
+      if (useMock) {
+        return systemService.deleteRoles(ids);
+      }
+      for (const id of ids) {
+        await adminApi.deleteRole(id);
+      }
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'roles'] });
     },
@@ -146,7 +156,13 @@ export function useDeleteRoles() {
 export function usePermissions(params: PageRequest) {
   return useQuery({
     queryKey: ['system', 'permissions', params],
-    queryFn: () => systemService.getPermissions(params),
+    queryFn: async () => {
+      if (useMock) return systemService.getPermissions(params);
+      const all = await adminApi.getPermissions();
+      const start = (params.page - 1) * params.pageSize;
+      const paged = all.slice(start, start + params.pageSize);
+      return { items: paged, total: all.length, page: params.page, pageSize: params.pageSize };
+    },
     staleTime: 10 * 60 * 1000,
   });
 }
@@ -154,7 +170,8 @@ export function usePermissions(params: PageRequest) {
 export function useAllPermissions() {
   return useQuery({
     queryKey: ['system', 'permissions', 'all'],
-    queryFn: () => systemService.getAllPermissions(),
+    queryFn: () =>
+      useMock ? systemService.getAllPermissions() : adminApi.getPermissions(),
     staleTime: 10 * 60 * 1000,
   });
 }

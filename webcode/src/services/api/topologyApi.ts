@@ -61,6 +61,33 @@ export const topologyApi = {
     return (data.items || []).map((g) => mapGroupToDomain(g));
   },
 
+  async createGroup(data: { name: string; parent_id?: string; description?: string }): Promise<any> {
+    const { data: result } = await http.post('/groups', data);
+    return result;
+  },
+
+  async updateGroup(id: string, data: { name?: string; description?: string }): Promise<any> {
+    const { data: result } = await http.put(`/groups/${id}`, data);
+    return result;
+  },
+
+  async deleteGroup(id: string): Promise<void> {
+    await http.delete(`/groups/${id}`);
+  },
+
+  async addDeviceToGroup(groupId: string, deviceId: string): Promise<void> {
+    await http.post(`/groups/${groupId}/devices`, { device_id: deviceId });
+  },
+
+  async removeDeviceFromGroup(groupId: string, deviceId: string): Promise<void> {
+    await http.delete(`/groups/${groupId}/devices/${deviceId}`);
+  },
+
+  async getGroupDevices(groupId: string, params?: any): Promise<any> {
+    const { data } = await http.get(`/groups/${groupId}/devices`, { params });
+    return data;
+  },
+
   // No backend equivalents — delegate to mock
   getSites: topologyService.getSites.bind(topologyService),
   getSiteById: topologyService.getSiteById.bind(topologyService),

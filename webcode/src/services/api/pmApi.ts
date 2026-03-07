@@ -1,5 +1,5 @@
 import http from '../http';
-import type { KPI, Measurement, KPISeries } from '@/types/performance';
+import type { KPI, Measurement, KPISeries, PerformanceThreshold } from '@/types/performance';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { performanceService } from '@/mock/services/performanceService';
 
@@ -95,6 +95,56 @@ function mapBackendKPIValue(v: BackendKPIValue): Measurement {
     unit: '',
     timestamp: v.time,
     granularity: '15min',
+  };
+}
+
+// --- Backend threshold types & mapping ---
+
+interface BackendKPIThreshold {
+  id: string;
+  kpi_name: string;
+  carrier: string;
+  technology: string;
+  warning_threshold: number | null;
+  minor_threshold: number | null;
+  major_threshold: number | null;
+  critical_threshold: number | null;
+  comparison: string;
+  enabled: boolean;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapComparisonToOperator(comp: string): PerformanceThreshold['operator'] {
+  const map: Record<string, PerformanceThreshold['operator']> = {
+    '>': 'gt', '<': 'lt', '>=': 'gte', '<=': 'lte', '=': 'eq', '!=': 'ne',
+    'gt': 'gt', 'lt': 'lt', 'gte': 'gte', 'lte': 'lte', 'eq': 'eq', 'ne': 'ne',
+  };
+  return map[comp] || 'gt';
+}
+
+function mapOperatorToComparison(op: string): string {
+  const map: Record<string, string> = {
+    'gt': '>', 'lt': '<', 'gte': '>=', 'lte': '<=', 'eq': '=', 'ne': '!=',
+  };
+  return map[op] || '>';
+}
+
+function mapBackendThreshold(t: BackendKPIThreshold): PerformanceThreshold {
+  return {
+    id: t.id,
+    thresholdName: t.description || t.kpi_name,
+    kpiCode: t.kpi_name,
+    kpiName: t.kpi_name,
+    operator: mapComparisonToOperator(t.comparison),
+    warningValue: t.warning_threshold ?? 0,
+    criticalValue: t.critical_threshold ?? 0,
+    unit: '',
+    enabled: t.enabled,
+    deviceGroups: [],
+    createTime: t.created_at || '',
+    updateTime: t.updated_at || '',
   };
 }
 
@@ -218,13 +268,75 @@ export const pmApi = {
     return results;
   },
 
-  // --- Delegated to mock (no backend endpoint) ---
+  // PM counters
+  async getCounters(params: PageRequest): Promise<PageResponse<Measurement>> {
+    const { data } = await http.get<BackendListResponse<BackendPMCounter>>(
+      '/pm/counters',
+      { params }
+    );
+    return {
+      items: (data.items || []).map(mapBackendCounter),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
 
-  getCounters: performanceService.getCounters.bind(performanceService),
-  getThresholds: performanceService.getThresholds.bind(performanceService),
-  createThreshold: performanceService.createThreshold.bind(performanceService),
-  updateThreshold: performanceService.updateThreshold.bind(performanceService),
-  deleteThresholds: performanceService.deleteThresholds.bind(performanceService),
+  // Threshold CRUD
+  async getThresholds(params?: any): Promise<PageResponse<PerformanceThreshold>> {
+    const { data } = await http.get('/pm/thresholds', { params });
+    const items = (data.items || []).map((t: BackendKPIThreshold) => mapBackendThreshold(t));
+    return {
+      items,
+      total: data.total || items.length,
+      page: data.page || 1,
+      pageSize: data.page_size || 20,
+    };
+  },
+
+  async createThreshold(data: Partial<PerformanceThreshold>): Promise<PerformanceThreshold> {
+    const payload = {
+      kpi_name: data.kpiCode || data.kpiName,
+      warning_threshold: data.warningValue,
+      critical_threshold: data.criticalValue,
+      comparison: mapOperatorToComparison(data.operator || 'gt'),
+      enabled: data.enabled ?? true,
+      description: data.thresholdName || '',
+    };
+    const { data: result } = await http.post('/pm/thresholds', payload);
+    return mapBackendThreshold(result);
+  },
+
+  async updateThreshold(id: string, data: Partial<PerformanceThreshold>): Promise<PerformanceThreshold> {
+    const payload: Record<string, unknown> = {};
+    if (data.kpiCode !== undefined || data.kpiName !== undefined) payload.kpi_name = data.kpiCode || data.kpiName;
+    if (data.warningValue !== undefined) payload.warning_threshold = data.warningValue;
+    if (data.criticalValue !== undefined) payload.critical_threshold = data.criticalValue;
+    if (data.operator !== undefined) payload.comparison = mapOperatorToComparison(data.operator);
+    if (data.enabled !== undefined) payload.enabled = data.enabled;
+    if (data.thresholdName !== undefined) payload.description = data.thresholdName;
+    const { data: result } = await http.put(`/pm/thresholds/${id}`, payload);
+    return mapBackendThreshold(result);
+  },
+
+  async deleteThresholds(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/pm/thresholds/${id}`);
+    }
+  },
+
+  // Aggregated counters & KPI calculation
+  async getAggregatedCounters(params?: any): Promise<any> {
+    const { data } = await http.get('/pm/counters/aggregated', { params });
+    return data;
+  },
+
+  async calculateKPI(params: { kpi_name: string; device_ids?: string[]; start_time?: string; end_time?: string }): Promise<any> {
+    const { data } = await http.post('/pm/kpi/calculate', params);
+    return data;
+  },
+
+  // --- Delegated to mock (no backend endpoint) ---
   getTasks: performanceService.getTasks.bind(performanceService),
   createTask: performanceService.createTask.bind(performanceService),
 };

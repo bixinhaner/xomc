@@ -1,7 +1,6 @@
 import http from '../http';
-import type { User, Role, UserRole, UserStatus, OperationLog, OperationType } from '@/types/system';
+import type { User, Role, Permission, UserRole, UserStatus, OperationLog, OperationType } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
-import { systemService } from '@/mock/services/systemService';
 
 // Backend user model
 interface BackendUser {
@@ -261,8 +260,74 @@ export const adminApi = {
     };
   },
 
-  // Operations not in backend — delegate to mock
-  resetPassword: systemService.resetPassword.bind(systemService),
-  lockUser: systemService.lockUser.bind(systemService),
-  unlockUser: systemService.unlockUser.bind(systemService),
+  async resetPassword(id: string, newPassword: string): Promise<void> {
+    await http.post(`/admin/users/${id}/reset-password`, { new_password: newPassword });
+  },
+
+  async lockUser(id: string): Promise<void> {
+    await http.post(`/admin/users/${id}/lock`);
+  },
+
+  async unlockUser(id: string): Promise<void> {
+    await http.post(`/admin/users/${id}/unlock`);
+  },
+
+  async getRoleById(id: string): Promise<Role> {
+    try {
+      const { data } = await http.get<BackendRole>(`/admin/roles/${id}`);
+      return mapBackendRole(data);
+    } catch {
+      throw new Error(`Role ${id} not found`);
+    }
+  },
+
+  async createRole(data: Omit<Role, 'id' | 'userCount'>): Promise<Role> {
+    const { data: result } = await http.post<BackendRole>('/admin/roles', {
+      name: data.roleName,
+      description: data.description,
+      permissions: (data.permissions || []).map((p) => {
+        const parts = p.split(':');
+        return { resource: parts[0], action: parts[1] || 'read' };
+      }),
+    });
+    return mapBackendRole(result);
+  },
+
+  async updateRole(id: string, data: Partial<Role>): Promise<Role> {
+    const payload: Record<string, unknown> = {};
+    if (data.roleName !== undefined) payload.name = data.roleName;
+    if (data.description !== undefined) payload.description = data.description;
+    if (data.permissions !== undefined) {
+      payload.permissions = data.permissions.map((p) => {
+        const parts = p.split(':');
+        return { resource: parts[0], action: parts[1] || 'read' };
+      });
+    }
+    const { data: result } = await http.put<BackendRole>(`/admin/roles/${id}`, payload);
+    return mapBackendRole(result);
+  },
+
+  async deleteRole(id: string): Promise<void> {
+    await http.delete(`/admin/roles/${id}`);
+  },
+
+  async getPermissions(): Promise<Permission[]> {
+    const { data } = await http.get('/admin/permissions');
+    const items = Array.isArray(data) ? data : (data.items || []);
+    return items.map((p: { id: string; resource: string; action: string; description?: string }) => ({
+      id: p.id,
+      permCode: p.resource + ':' + p.action,
+      permName: p.resource + ':' + p.action,
+      module: p.resource,
+      description: p.description || '',
+    }));
+  },
+
+  async assignRole(userId: string, roleId: string): Promise<void> {
+    await http.post(`/admin/users/${userId}/roles`, { role_id: roleId });
+  },
+
+  async removeRole(userId: string, roleId: string): Promise<void> {
+    await http.delete(`/admin/users/${userId}/roles/${roleId}`);
+  },
 };

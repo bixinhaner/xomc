@@ -26,7 +26,8 @@ export function useAllKPIs() {
 export function useCounters(params: PageRequest) {
   return useQuery({
     queryKey: ['performance', 'counters', params],
-    queryFn: () => performanceService.getCounters(params),
+    queryFn: () =>
+      useMock ? performanceService.getCounters(params) : pmApi.getCounters(params),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -68,7 +69,8 @@ export function useMultipleKPISeries(kpiCodes: string[], deviceSn?: string) {
 export function useThresholds(params: PageRequest) {
   return useQuery({
     queryKey: ['performance', 'thresholds', params],
-    queryFn: () => performanceService.getThresholds(params),
+    queryFn: () =>
+      useMock ? performanceService.getThresholds(params) : pmApi.getThresholds(params),
   });
 }
 
@@ -76,7 +78,7 @@ export function useCreateThreshold() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<PerformanceThreshold, 'id' | 'createTime' | 'updateTime'>) =>
-      performanceService.createThreshold(data),
+      useMock ? performanceService.createThreshold(data) : pmApi.createThreshold(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['performance', 'thresholds'] });
     },
@@ -87,7 +89,7 @@ export function useUpdateThreshold() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<PerformanceThreshold> }) =>
-      performanceService.updateThreshold(id, data),
+      useMock ? performanceService.updateThreshold(id, data) : pmApi.updateThreshold(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['performance', 'thresholds'] });
     },
@@ -97,7 +99,8 @@ export function useUpdateThreshold() {
 export function useDeleteThresholds() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => performanceService.deleteThresholds(ids),
+    mutationFn: (ids: string[]) =>
+      useMock ? performanceService.deleteThresholds(ids) : pmApi.deleteThresholds(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['performance', 'thresholds'] });
     },
@@ -107,7 +110,8 @@ export function useDeleteThresholds() {
 export function usePerformanceTasks(params: PageRequest) {
   return useQuery({
     queryKey: ['performance', 'tasks', params],
-    queryFn: () => performanceService.getTasks(params),
+    queryFn: () =>
+      useMock ? performanceService.getTasks(params) : pmApi.getTasks(params),
   });
 }
 
@@ -115,9 +119,24 @@ export function useCreatePerformanceTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Parameters<typeof performanceService.createTask>[0]) =>
-      performanceService.createTask(data),
+      useMock ? performanceService.createTask(data) : pmApi.createTask(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['performance', 'tasks'] });
     },
+  });
+}
+
+export function useAggregatedCounters(params?: any) {
+  return useQuery({
+    queryKey: ['performance', 'counters', 'aggregated', params],
+    queryFn: () => pmApi.getAggregatedCounters(params),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCalculateKPI() {
+  return useMutation({
+    mutationFn: (params: { kpi_name: string; device_ids?: string[]; start_time?: string; end_time?: string }) =>
+      pmApi.calculateKPI(params),
   });
 }

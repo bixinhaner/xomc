@@ -44,6 +44,31 @@ interface BackendDashboardSummary {
   timestamp: string;
 }
 
+// Backend response types for Sprint 7 chart endpoints
+
+interface BackendAlarmTrendItem {
+  date: string;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
+}
+
+/** GET /dashboard/device-status returns a map of status label → count */
+type BackendDeviceStatusMap = Record<string, number>;
+
+interface BackendKPITrendItem {
+  time: string;
+  value: number;
+}
+
+interface BackendRegionStatsItem {
+  region: string;
+  device_count: number;
+  online_count: number;
+  alarm_count: number;
+}
+
 // --- Mapping functions ---
 
 function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
@@ -90,6 +115,29 @@ function mapRecentAlarmsToTopDevices(
   }));
 }
 
+function mapDeviceStatusMap(
+  statusMap: BackendDeviceStatusMap
+): DashboardChartData['deviceStatusPie'] {
+  return Object.entries(statusMap).map(([name, value]) => ({ name, value }));
+}
+
+function mapKPITrend(
+  items: BackendKPITrendItem[]
+): Array<[string, number]> {
+  return items.map((item) => [item.time, item.value]);
+}
+
+function mapRegionStats(
+  items: BackendRegionStatsItem[]
+): DashboardChartData['deviceByRegion'] {
+  return items.map((item) => ({
+    region: item.region,
+    total: item.device_count,
+    online: item.online_count,
+    offline: item.device_count - item.online_count,
+  }));
+}
+
 // --- Exported service ---
 
 export const dashboardApi = {
@@ -101,31 +149,71 @@ export const dashboardApi = {
     return mapBackendSummary(data);
   },
 
-  /** Fetch full dashboard data — summary comes from backend, charts delegate to mock */
+  /** Fetch full dashboard data — summary + charts from backend, widgets from mock */
   async getDashboardData(): Promise<{
     summary: DashboardSummary;
     chartData: DashboardChartData;
     widgets: Awaited<ReturnType<typeof dashboardService.getDashboardData>>['widgets'];
   }> {
-    const [summary, mockData] = await Promise.all([
-      dashboardApi.getSummary(),
-      dashboardService.getDashboardData(),
-    ]);
+    const [summary, alarmTrend, deviceStatusPie, topAlarmDevices, deviceByRegion, mockData] =
+      await Promise.all([
+        dashboardApi.getSummary(),
+        dashboardApi.getAlarmTrend(),
+        dashboardApi.getDeviceStatusPie(),
+        dashboardApi.getTopAlarmDevices(),
+        dashboardApi.getRegionStats(),
+        dashboardService.getDashboardData(), // widgets + alarmTypePie + kpiTimeSeries still from mock
+      ]);
     return {
       summary,
-      chartData: mockData.chartData,
+      chartData: {
+        alarmTrend,
+        deviceStatusPie,
+        kpiTimeSeries: mockData.chartData.kpiTimeSeries,
+        alarmTypePie: mockData.chartData.alarmTypePie,
+        deviceByRegion,
+        topAlarmDevices,
+      },
       widgets: mockData.widgets,
     };
   },
 
-  /** Chart data — no dedicated backend endpoint, delegate to mock */
-  getChartData: dashboardService.getChartData.bind(dashboardService),
+  /** Chart data — compose from real endpoints where available */
+  async getChartData(): Promise<DashboardChartData> {
+    const [alarmTrend, deviceStatusPie, topAlarmDevices, deviceByRegion, mockData] =
+      await Promise.all([
+        dashboardApi.getAlarmTrend(),
+        dashboardApi.getDeviceStatusPie(),
+        dashboardApi.getTopAlarmDevices(),
+        dashboardApi.getRegionStats(),
+        dashboardService.getChartData(), // alarmTypePie + kpiTimeSeries still from mock
+      ]);
+    return {
+      alarmTrend,
+      deviceStatusPie,
+      kpiTimeSeries: mockData.kpiTimeSeries,
+      alarmTypePie: mockData.alarmTypePie,
+      deviceByRegion,
+      topAlarmDevices,
+    };
+  },
 
-  /** Alarm trend — no dedicated backend endpoint, delegate to mock */
-  getAlarmTrend: dashboardService.getAlarmTrend.bind(dashboardService),
+  /** Alarm trend from GET /dashboard/alarm-trend */
+  async getAlarmTrend(days: number = 7): Promise<DashboardChartData['alarmTrend']> {
+    const { data } = await http.get<BackendAlarmTrendItem[]>(
+      '/dashboard/alarm-trend',
+      { params: { days } }
+    );
+    return data;
+  },
 
-  /** Device status pie — no dedicated backend endpoint, delegate to mock */
-  getDeviceStatusPie: dashboardService.getDeviceStatusPie.bind(dashboardService),
+  /** Device status pie from GET /dashboard/device-status */
+  async getDeviceStatusPie(): Promise<DashboardChartData['deviceStatusPie']> {
+    const { data } = await http.get<BackendDeviceStatusMap>(
+      '/dashboard/device-status'
+    );
+    return mapDeviceStatusMap(data);
+  },
 
   /** Top alarm devices — extracted from /dashboard/summary recent_alarms */
   async getTopAlarmDevices(): Promise<DashboardChartData['topAlarmDevices']> {
@@ -135,9 +223,20 @@ export const dashboardApi = {
     return mapRecentAlarmsToTopDevices(data.recent_alarms || []);
   },
 
-  /** KPI trend — no dedicated backend endpoint, delegate to mock */
-  getKPITrend: dashboardService.getKPITrend.bind(dashboardService),
+  /** KPI trend from GET /dashboard/kpi-trend */
+  async getKPITrend(kpiCode: string, days: number = 7): Promise<Array<[string, number]>> {
+    const { data } = await http.get<BackendKPITrendItem[]>(
+      '/dashboard/kpi-trend',
+      { params: { kpi_name: kpiCode, days } }
+    );
+    return mapKPITrend(data);
+  },
 
-  /** Region stats — no dedicated backend endpoint, delegate to mock */
-  getRegionStats: dashboardService.getRegionStats.bind(dashboardService),
+  /** Region stats from GET /dashboard/region-stats */
+  async getRegionStats(): Promise<DashboardChartData['deviceByRegion']> {
+    const { data } = await http.get<BackendRegionStatsItem[]>(
+      '/dashboard/region-stats'
+    );
+    return mapRegionStats(data);
+  },
 };

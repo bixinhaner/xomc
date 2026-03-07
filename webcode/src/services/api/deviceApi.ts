@@ -191,6 +191,20 @@ export const deviceApi = {
     }));
   },
 
+  async getStats(): Promise<any> {
+    const { data } = await http.get('/devices/stats');
+    return data;
+  },
+
+  async getParameters(id: string): Promise<any> {
+    const { data } = await http.get(`/devices/${id}/parameters`);
+    return data;
+  },
+
+  async reboot(id: string): Promise<void> {
+    await http.post(`/devices/${id}/reboot`);
+  },
+
   async getNEList(params: { keyword?: string } & PageRequest): Promise<PageResponse<NE>> {
     const query: Record<string, unknown> = {
       page: params.page,
