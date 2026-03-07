@@ -1,6 +1,6 @@
 import http from '../http';
-import type { Domain, DomainLevel, Site, TopoNode, TopoEdge } from '@/types/topology';
-import { topologyService } from '@/mock/services/topologyService';
+import type { Domain, DomainLevel, Site, TopoNode, TopoEdge, NodeType, NodeStatus, SiteStatus, EdgeStatus } from '@/types/topology';
+import type { PageResponse } from '@/types/pagination';
 
 // Backend device group model
 interface BackendDeviceGroup {
@@ -13,6 +13,80 @@ interface BackendDeviceGroup {
   children?: BackendDeviceGroup[];
   created_at: string;
   updated_at: string;
+}
+
+// Backend site model (snake_case from Go)
+interface BackendSite {
+  id: string;
+  name: string;
+  domain_id: string | null;
+  address: string;
+  longitude: number | null;
+  latitude: number | null;
+  device_count: number;
+  status: SiteStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+// Backend topo node model (snake_case from Go)
+interface BackendTopoNode {
+  id: string;
+  label: string;
+  node_type: string;
+  x: number;
+  y: number;
+  status: NodeStatus;
+  device_sn: string;
+  site_id: string | null;
+  domain_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Backend topo edge model (snake_case from Go)
+interface BackendTopoEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  label: string;
+  status: EdgeStatus;
+  created_at: string;
+}
+
+function mapBackendSite(bs: BackendSite): Site {
+  return {
+    id: bs.id,
+    name: bs.name,
+    domainId: bs.domain_id ?? '',
+    address: bs.address ?? '',
+    longitude: bs.longitude ?? 0,
+    latitude: bs.latitude ?? 0,
+    deviceCount: bs.device_count,
+    status: bs.status,
+  };
+}
+
+function mapBackendTopoNode(bn: BackendTopoNode): TopoNode {
+  return {
+    id: bn.id,
+    label: bn.label,
+    type: bn.node_type as NodeType,
+    x: bn.x,
+    y: bn.y,
+    status: bn.status,
+    deviceSn: bn.device_sn || undefined,
+  };
+}
+
+function mapBackendTopoEdge(be: BackendTopoEdge): TopoEdge {
+  return {
+    id: be.id,
+    source: be.source_id,
+    target: be.target_id,
+    label: be.label || undefined,
+    status: be.status,
+  };
 }
 
 function mapGroupToDomain(
@@ -88,11 +162,64 @@ export const topologyApi = {
     return data;
   },
 
-  // No backend equivalents — delegate to mock
-  getSites: topologyService.getSites.bind(topologyService),
-  getSiteById: topologyService.getSiteById.bind(topologyService),
-  getTopoNodes: topologyService.getTopoNodes.bind(topologyService),
-  getTopoEdges: topologyService.getTopoEdges.bind(topologyService),
-  getTopoGraph: topologyService.getTopoGraph.bind(topologyService),
-  getGeoData: topologyService.getGeoData.bind(topologyService),
+  async getSites(params?: { domainId?: string }): Promise<PageResponse<Site>> {
+    const { data } = await http.get<{ items: BackendSite[]; total: number; page: number; page_size: number }>('/sites', {
+      params: { domain_id: params?.domainId },
+    });
+    return {
+      items: (data.items || []).map(mapBackendSite),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async getSiteById(id: string): Promise<Site | null> {
+    try {
+      const { data } = await http.get<BackendSite>(`/sites/${id}`);
+      return mapBackendSite(data);
+    } catch {
+      return null;
+    }
+  },
+
+  async getTopoNodes(params?: { domainId?: string }): Promise<PageResponse<TopoNode>> {
+    const { data } = await http.get<{ items: BackendTopoNode[]; total: number; page: number; page_size: number }>('/topology/nodes', {
+      params: { domain_id: params?.domainId },
+    });
+    return {
+      items: (data.items || []).map(mapBackendTopoNode),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async getTopoEdges(): Promise<PageResponse<TopoEdge>> {
+    const { data } = await http.get<{ items: BackendTopoEdge[]; total: number; page: number; page_size: number }>('/topology/edges');
+    return {
+      items: (data.items || []).map(mapBackendTopoEdge),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async getTopoGraph(params?: { domainId?: string }): Promise<{ nodes: TopoNode[]; edges: TopoEdge[] }> {
+    const { data } = await http.get<{ nodes: BackendTopoNode[]; edges: BackendTopoEdge[] }>('/topology/graph', {
+      params: { domain_id: params?.domainId },
+    });
+    return {
+      nodes: (data.nodes || []).map(mapBackendTopoNode),
+      edges: (data.edges || []).map(mapBackendTopoEdge),
+    };
+  },
+
+  async getGeoData(): Promise<{ sites: Site[]; nodes: TopoNode[] }> {
+    const { data } = await http.get<{ sites: BackendSite[]; nodes: BackendTopoNode[] }>('/topology/geo');
+    return {
+      sites: (data.sites || []).map(mapBackendSite),
+      nodes: (data.nodes || []).map(mapBackendTopoNode),
+    };
+  },
 };

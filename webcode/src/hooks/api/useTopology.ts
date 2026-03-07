@@ -24,7 +24,8 @@ export function useDomainTree() {
 export function useSites(params?: { domainId?: string }) {
   return useQuery({
     queryKey: ['topology', 'sites', params],
-    queryFn: () => topologyService.getSites(params),
+    queryFn: () =>
+      useMock ? topologyService.getSites(params) : topologyApi.getSites(params),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -32,7 +33,8 @@ export function useSites(params?: { domainId?: string }) {
 export function useSiteById(id: string) {
   return useQuery({
     queryKey: ['topology', 'sites', 'detail', id],
-    queryFn: () => topologyService.getSiteById(id),
+    queryFn: () =>
+      useMock ? topologyService.getSiteById(id) : topologyApi.getSiteById(id),
     enabled: Boolean(id),
   });
 }
@@ -40,7 +42,8 @@ export function useSiteById(id: string) {
 export function useTopoNodes(params?: { domainId?: string }) {
   return useQuery({
     queryKey: ['topology', 'nodes', params],
-    queryFn: () => topologyService.getTopoNodes(params),
+    queryFn: () =>
+      useMock ? topologyService.getTopoNodes(params) : topologyApi.getTopoNodes(params),
     refetchInterval: 30000,
   });
 }
@@ -48,7 +51,8 @@ export function useTopoNodes(params?: { domainId?: string }) {
 export function useTopoEdges() {
   return useQuery({
     queryKey: ['topology', 'edges'],
-    queryFn: () => topologyService.getTopoEdges(),
+    queryFn: () =>
+      useMock ? topologyService.getTopoEdges() : topologyApi.getTopoEdges(),
     refetchInterval: 30000,
   });
 }
@@ -56,7 +60,8 @@ export function useTopoEdges() {
 export function useTopoGraph(params?: { domainId?: string }) {
   return useQuery({
     queryKey: ['topology', 'graph', params],
-    queryFn: () => topologyService.getTopoGraph(),
+    queryFn: () =>
+      useMock ? topologyService.getTopoGraph() : topologyApi.getTopoGraph(params),
     refetchInterval: 30000,
   });
 }
@@ -64,7 +69,8 @@ export function useTopoGraph(params?: { domainId?: string }) {
 export function useGeoData() {
   return useQuery({
     queryKey: ['topology', 'geo'],
-    queryFn: () => topologyService.getGeoData(),
+    queryFn: () =>
+      useMock ? topologyService.getGeoData() : topologyApi.getGeoData(),
     staleTime: 60 * 1000,
   });
 }
