@@ -1,6 +1,6 @@
 # OMC E2E 端到端验证
 
-执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档、Dashboard 趋势/状态/区域统计、Config Sync (push/pull/status)、备份恢复 (任务/计划 CRUD)、文件管理 (上传/下载/过滤)、MML 控制台 (命令/脚本/任务)、前端集成验证、全量回归全链路 (~301 个测试用例, Sprint 0-9, S1-S56)。
+执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档、Dashboard 趋势/状态/区域统计、Config Sync (push/pull/status)、备份恢复 (任务/计划 CRUD)、文件管理 (上传/下载/过滤)、MML 控制台 (命令/脚本/任务)、前端集成验证、全量回归全链路，以及 Phase A-D 全模块对齐新端点 (System Info/Dashboard Widgets/PM Tasks/Config Baselines/FTP Configs/MR Indicators/License/Topology Sites/Reports/OpsTools) (~407 个测试用例, Sprint 0-10, S0-S74)。
 
 ## 环境信息
 
@@ -45,7 +45,7 @@ print('Seed data applied successfully')
 
 如果 psycopg2 不可用，先安装: `pip3 install --user --break-system-packages psycopg2-binary`
 
-确认输出包含正确的数据: 设备(5)、告警(8+3 trend)、配置模板(3)、固件版本(3)、升级任务(2)、设备分组(3)、PM计数器(8)、KPI定义(2)、KPI值(4)、MR文件(2)、MR记录(4)、审计日志(3)、告警规则(3)、KPI阈值(3)、系统日志(3)、NE消息日志(3)、备份任务(2)、备份计划(2)、管理文件(3)、MML脚本(1)。
+确认输出包含正确的数据: 设备(5)、告警(8+3 trend)、配置模板(3)、固件版本(3)、升级任务(2)、设备分组(3)、PM计数器(8)、KPI定义(2)、KPI值(4)、MR文件(2)、MR记录(4)、审计日志(3)、告警规则(3)、KPI阈值(3)、系统日志(3)、NE消息日志(3)、备份任务(2)、备份计划(2)、管理文件(3)、MML脚本(1)、PM任务(2)、配置基线(2)、配置任务(1)、邻区(2)、FTP配置(2)、MR映射(2)、License(3)、站点(2)、拓扑节点(3)、拓扑边(2)、报表定义(1)、报表记录(1)、运维模板(1)、命令记录(1)。
 
 ### Step 3: 重建后端
 
@@ -80,7 +80,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz
 cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 ```
 
-脚本包含 ~301 个测试用例 (Sprint 0-9, S1-S56)，覆盖：
+脚本包含 ~407 个测试用例 (Sprint 0-10, S0-S74)，覆盖：
 
 **Sprint 0 (12 cases, S1-S4):**
 - 基础通信层: 健康检查 (1), CORS preflight 204 (1), CORS 5 项头部验证 (5), 统一错误格式 (2), 前端静态检查 (3)
@@ -161,6 +161,26 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - S54: 文件管理前端集成 (3) — paginated file list with total, file_type filter, file detail by id
 - S55: MML 前端集成 (3) — paginated command list, execute command with task_id, task detail with status
 - S56: 全量回归 (6) — healthz, dashboard summary, devices list, alarms list, alarm-trend, CORS headers
+
+**Sprint 10 (~76 cases, S57-S74) — Phase A-D 全模块对齐:**
+- S57: System Info (2) — GET /system/info → version/db_status
+- S58: Dashboard Widgets + KPI + Alarm Pie (4) — GET/PUT widgets, alarm-type-pie, kpi-time-series
+- S59: PM Tasks (4) — GET list, POST create, status filter, field check
+- S60: Phase A Regression (2) — system/info + dashboard/widgets smoke
+- S61: Config Baselines CRUD (7) — list → create → get → update → verify → delete → 404
+- S62: Config Tasks & Neighbors (4) — tasks list/create, neighbors list/field check
+- S63: FTP Config CRUD (6) — list → create → update → test → delete → filter
+- S64: MR Indicators & Mappings (5) — indicators paginated/all, mappings list/update/toggle
+- S65: License CRUD (8) — list → get → summary → activate → revoke → import → get new → filter
+- S66: Topology Sites (3) — list → create → get
+- S67: Topology Graph (4) — nodes → edges → graph → geo
+- S68: Reports CRUD (8) — definitions list/create/get/update, generate, records, sample-data, delete
+- S69: OpsTools Templates CRUD (5) — list → create → get → update → delete
+- S70: OpsTools Command Records (3) — list → create → field check
+- S71: OpsTools Tasks Lifecycle (6) — create → list → get → cancel → create → pause
+- S72: MR Export (1) — POST export placeholder
+- S73: Error Code Spot Check (2) — baselines 404, licenses 404
+- S74: Phase A-D Full Regression (5) — 5 key endpoints smoke test
 
 ### Step 6: 结果汇总
 
