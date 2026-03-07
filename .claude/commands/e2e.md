@@ -1,6 +1,6 @@
 # OMC E2E 端到端验证
 
-执行 OMC 系统端到端数据流验证，覆盖认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档全链路 (198 个测试用例)。
+执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档全链路 (210 个测试用例)。
 
 ## 环境信息
 
@@ -80,7 +80,10 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz
 cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 ```
 
-脚本包含 198 个测试用例，覆盖：
+脚本包含 210 个测试用例，覆盖：
+
+**Sprint 0 (12 cases):**
+- 基础通信层: 健康检查 (1), CORS preflight 204 (1), CORS 5 项头部验证 (5), 统一错误格式 (2), 前端静态检查 (3)
 
 **Sprint 1 (43 cases):**
 - 健康检查 (1)
