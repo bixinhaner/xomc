@@ -22,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/common/middleware"
 	"github.com/omcgo/omcgo/internal/common/model"
 	"github.com/omcgo/omcgo/internal/config"
+	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/infra"
@@ -227,6 +228,8 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	// 21. MR module components
 	mrStore := mr.NewPgMRStore(pgPool, tsPool)
+	mrIndRepo := mr.NewPgIndicatorRepository(pgPool)
+	mrMapRepo := mr.NewPgMappingRepository(pgPool)
 
 	// 22. Setup Gin router
 	if cfg.Log.Level != "debug" {
@@ -325,7 +328,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	syncHandler.RegisterRoutes(v1)
 
 	// MR routes
-	mrHandler := mr.NewHandler(mrStore, minioClient, cfg.MinIO.Buckets.MRFiles, logger)
+	mrHandler := mr.NewHandler(mrStore, mrIndRepo, mrMapRepo, minioClient, cfg.MinIO.Buckets.MRFiles, logger)
 	mrHandler.RegisterRoutes(v1)
 
 	// Software routes
@@ -344,8 +347,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 	// Backup module (Sprint 8)
 	backupTaskRepo := backup.NewPgTaskRepository(pgPool)
 	backupScheduleRepo := backup.NewPgScheduleRepository(pgPool)
+	ftpRepo := backup.NewPgFTPConfigRepository(pgPool)
 	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, logger)
-	backupHandler := backup.NewHandler(backupService, logger)
+	backupHandler := backup.NewHandler(backupService, ftpRepo, logger)
 	backupHandler.RegisterRoutes(v1)
 	logger.Info("backup module initialized")
 
@@ -363,6 +367,15 @@ func runApp(cmd *cobra.Command, args []string) error {
 	mmlHandler := mml.NewHandler(mmlService, logger)
 	mmlHandler.RegisterRoutes(v1)
 	logger.Info("MML console module initialized")
+
+	// Config Baseline module
+	baselineRepo := baseline.NewPgBaselineRepository(pgPool)
+	configTaskRepo := baseline.NewPgConfigTaskRepository(pgPool)
+	neighborRepo := baseline.NewPgNeighborRepository(pgPool)
+	baselineSvc := baseline.NewService(baselineRepo, configTaskRepo, neighborRepo, logger)
+	baselineHandler := baseline.NewHandler(baselineSvc, logger)
+	baselineHandler.RegisterRoutes(v1)
+	logger.Info("config baseline module initialized")
 
 	// System Info endpoint
 	sysInfoHandler := infra.NewSystemInfoHandler(pgPool, redisClient, logger)

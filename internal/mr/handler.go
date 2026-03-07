@@ -14,14 +14,16 @@ import (
 // Handler provides REST API endpoints for MR data.
 type Handler struct {
 	store       MRStore
+	indRepo     IndicatorRepository
+	mapRepo     MappingRepository
 	minioClient *minio.Client
 	bucket      string
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new MR handler.
-func NewHandler(store MRStore, minioClient *minio.Client, bucket string, logger *zap.Logger) *Handler {
-	return &Handler{store: store, minioClient: minioClient, bucket: bucket, logger: logger}
+func NewHandler(store MRStore, indRepo IndicatorRepository, mapRepo MappingRepository, minioClient *minio.Client, bucket string, logger *zap.Logger) *Handler {
+	return &Handler{store: store, indRepo: indRepo, mapRepo: mapRepo, minioClient: minioClient, bucket: bucket, logger: logger}
 }
 
 // RegisterRoutes registers MR API routes.
@@ -31,6 +33,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		mrGroup.GET("/files", h.ListFiles)
 		mrGroup.GET("/files/:id/download", h.DownloadFile)
 		mrGroup.GET("/data", h.QueryData)
+
+		mrGroup.GET("/indicators", h.ListIndicators)
+		mrGroup.GET("/indicators/all", h.ListAllIndicators)
+		mrGroup.GET("/indicators/:code/stats", h.GetIndicatorStats)
+		mrGroup.GET("/mappings", h.ListMappings)
+		mrGroup.PUT("/mappings/:id", h.UpdateMapping)
+		mrGroup.PUT("/mappings/:id/toggle", h.ToggleMapping)
+		mrGroup.POST("/export", h.ExportMRData)
 	}
 }
 
@@ -175,4 +185,180 @@ func (h *Handler) QueryData(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// ---- Indicator handlers ----
+
+// ListIndicators handles GET /api/v1/mr/indicators.
+func (h *Handler) ListIndicators(c *gin.Context) {
+	filter := IndicatorFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if category := c.Query("category"); category != "" {
+		filter.Category = &category
+	}
+	if keyword := c.Query("keyword"); keyword != "" {
+		filter.Keyword = &keyword
+	}
+
+	result, err := h.indRepo.List(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// ListAllIndicators handles GET /api/v1/mr/indicators/all.
+func (h *Handler) ListAllIndicators(c *gin.Context) {
+	items, err := h.indRepo.ListAll(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, items)
+}
+
+// GetIndicatorStats handles GET /api/v1/mr/indicators/:code/stats.
+func (h *Handler) GetIndicatorStats(c *gin.Context) {
+	code := c.Param("code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "indicator code is required"})
+		return
+	}
+
+	// Verify indicator exists
+	indicator, err := h.indRepo.GetByCode(c.Request.Context(), code)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "indicator not found"})
+		return
+	}
+
+	// Return placeholder stats based on indicator's range
+	var minVal, maxVal float64
+	if indicator.ValueRangeMin != nil {
+		minVal = *indicator.ValueRangeMin
+	}
+	if indicator.ValueRangeMax != nil {
+		maxVal = *indicator.ValueRangeMax
+	}
+	avg := (minVal + maxVal) / 2
+
+	c.JSON(http.StatusOK, gin.H{
+		"indicator_code": code,
+		"avg":            avg,
+		"min":            minVal,
+		"max":            maxVal,
+		"p50":            avg,
+		"p95":            maxVal * 0.9,
+		"sample_count":   0,
+	})
+}
+
+// ---- Mapping handlers ----
+
+type updateMappingRequest struct {
+	DeviceSN         string  `json:"device_sn"`
+	DeviceName       *string `json:"device_name"`
+	CellID           string  `json:"cell_id"`
+	CellName         *string `json:"cell_name"`
+	Enabled          bool    `json:"enabled"`
+	SamplingInterval int     `json:"sampling_interval"`
+}
+
+type toggleMappingRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ListMappings handles GET /api/v1/mr/mappings.
+func (h *Handler) ListMappings(c *gin.Context) {
+	filter := MappingFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if deviceSN := c.Query("device_sn"); deviceSN != "" {
+		filter.DeviceSN = &deviceSN
+	}
+	if enabled := c.Query("enabled"); enabled != "" {
+		b := enabled == "true"
+		filter.Enabled = &b
+	}
+
+	result, err := h.mapRepo.List(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// UpdateMapping handles PUT /api/v1/mr/mappings/:id.
+func (h *Handler) UpdateMapping(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var req updateMappingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	mapping := &MRDeviceMapping{
+		ID:               id,
+		DeviceSN:         req.DeviceSN,
+		DeviceName:       req.DeviceName,
+		CellID:           req.CellID,
+		CellName:         req.CellName,
+		Enabled:          req.Enabled,
+		SamplingInterval: req.SamplingInterval,
+	}
+	if mapping.SamplingInterval == 0 {
+		mapping.SamplingInterval = 15
+	}
+
+	if err := h.mapRepo.Update(c.Request.Context(), mapping); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, mapping)
+}
+
+// ToggleMapping handles PUT /api/v1/mr/mappings/:id/toggle.
+func (h *Handler) ToggleMapping(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var req toggleMappingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.mapRepo.ToggleEnabled(c.Request.Context(), id, req.Enabled)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// ExportMRData handles POST /api/v1/mr/export.
+func (h *Handler) ExportMRData(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"task_id": "export-placeholder",
+		"status":  "pending",
+	})
 }

@@ -14,13 +14,15 @@ import (
 // Handler provides HTTP handlers for backup management REST API.
 type Handler struct {
 	service *Service
+	ftpRepo FTPConfigRepository
 	logger  *zap.Logger
 }
 
 // NewHandler creates a new backup Handler.
-func NewHandler(service *Service, logger *zap.Logger) *Handler {
+func NewHandler(service *Service, ftpRepo FTPConfigRepository, logger *zap.Logger) *Handler {
 	return &Handler{
 		service: service,
+		ftpRepo: ftpRepo,
 		logger:  logger.Named("backup-handler"),
 	}
 }
@@ -41,6 +43,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	schedules.POST("", h.CreateSchedule)
 	schedules.PUT("/:id", h.UpdateSchedule)
 	schedules.DELETE("/:id", h.DeleteSchedule)
+
+	ftp := rg.Group("/backup/ftp-configs")
+	ftp.GET("", h.ListFTPConfigs)
+	ftp.POST("", h.CreateFTPConfig)
+	ftp.PUT("/:id", h.UpdateFTPConfig)
+	ftp.DELETE("/:id", h.DeleteFTPConfig)
+	ftp.POST("/:id/test", h.TestFTPConnection)
 }
 
 // ---- Task request types ----
@@ -280,4 +289,180 @@ func (h *Handler) DeleteSchedule(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// ---- FTP Config request types ----
+
+// CreateFTPConfigRequest defines the request body for creating an FTP config.
+type CreateFTPConfigRequest struct {
+	ConfigName        string  `json:"config_name" binding:"required"`
+	Host              string  `json:"host" binding:"required"`
+	Port              int     `json:"port"`
+	Username          string  `json:"username" binding:"required"`
+	PasswordEncrypted *string `json:"password_encrypted"`
+	Protocol          string  `json:"protocol"`
+	RemotePath        string  `json:"remote_path"`
+	Passive           bool    `json:"passive"`
+	Enabled           bool    `json:"enabled"`
+}
+
+// UpdateFTPConfigRequest defines the request body for updating an FTP config.
+type UpdateFTPConfigRequest struct {
+	ConfigName        string  `json:"config_name" binding:"required"`
+	Host              string  `json:"host" binding:"required"`
+	Port              int     `json:"port"`
+	Username          string  `json:"username" binding:"required"`
+	PasswordEncrypted *string `json:"password_encrypted"`
+	Protocol          string  `json:"protocol"`
+	RemotePath        string  `json:"remote_path"`
+	Passive           bool    `json:"passive"`
+	Enabled           bool    `json:"enabled"`
+}
+
+// ---- FTP Config handlers ----
+
+// ListFTPConfigs handles GET /api/v1/backup/ftp-configs.
+func (h *Handler) ListFTPConfigs(c *gin.Context) {
+	filter := FTPConfigFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if enabled := c.Query("enabled"); enabled != "" {
+		b := enabled == "true"
+		filter.Enabled = &b
+	}
+
+	result, err := h.ftpRepo.List(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// CreateFTPConfig handles POST /api/v1/backup/ftp-configs.
+func (h *Handler) CreateFTPConfig(c *gin.Context) {
+	var req CreateFTPConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	config := &FTPConfig{
+		ConfigName:        req.ConfigName,
+		Host:              req.Host,
+		Port:              req.Port,
+		Username:          req.Username,
+		PasswordEncrypted: req.PasswordEncrypted,
+		Protocol:          req.Protocol,
+		RemotePath:        req.RemotePath,
+		Passive:           req.Passive,
+		Enabled:           req.Enabled,
+	}
+	if config.Port == 0 {
+		config.Port = 21
+	}
+	if config.Protocol == "" {
+		config.Protocol = "FTP"
+	}
+	if config.RemotePath == "" {
+		config.RemotePath = "/"
+	}
+
+	if err := h.ftpRepo.Create(c.Request.Context(), config); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, config)
+}
+
+// UpdateFTPConfig handles PUT /api/v1/backup/ftp-configs/:id.
+func (h *Handler) UpdateFTPConfig(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req UpdateFTPConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	existing, err := h.ftpRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	existing.ConfigName = req.ConfigName
+	existing.Host = req.Host
+	existing.Port = req.Port
+	existing.Username = req.Username
+	existing.PasswordEncrypted = req.PasswordEncrypted
+	existing.Protocol = req.Protocol
+	existing.RemotePath = req.RemotePath
+	existing.Passive = req.Passive
+	existing.Enabled = req.Enabled
+
+	if existing.Port == 0 {
+		existing.Port = 21
+	}
+	if existing.Protocol == "" {
+		existing.Protocol = "FTP"
+	}
+	if existing.RemotePath == "" {
+		existing.RemotePath = "/"
+	}
+
+	if err := h.ftpRepo.Update(c.Request.Context(), existing); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, existing)
+}
+
+// DeleteFTPConfig handles DELETE /api/v1/backup/ftp-configs/:id.
+func (h *Handler) DeleteFTPConfig(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.ftpRepo.Delete(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// TestFTPConnection handles POST /api/v1/backup/ftp-configs/:id/test.
+func (h *Handler) TestFTPConnection(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	// Verify config exists
+	if _, err := h.ftpRepo.GetByID(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Connection test not implemented",
+	})
 }
