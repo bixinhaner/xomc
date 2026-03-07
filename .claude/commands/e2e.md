@@ -1,6 +1,6 @@
 # OMC E2E 端到端验证
 
-执行 OMC 系统端到端数据流验证，覆盖认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD 全链路 (191 个测试用例)。
+执行 OMC 系统端到端数据流验证，覆盖认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档全链路 (198 个测试用例)。
 
 ## 环境信息
 
@@ -80,7 +80,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz
 cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 ```
 
-脚本包含 191 个测试用例，覆盖：
+脚本包含 198 个测试用例，覆盖：
 
 **Sprint 1 (43 cases):**
 - 健康检查 (1)
@@ -117,6 +117,13 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - 密码管理: reset-password/lock/unlock (3)
 - 权限列表: list/count (2)
 - 角色 CRUD: list/count/get/create/update/verify/delete/invalid-uuid (8)
+
+**Sprint 5 (7 cases):**
+- 错误响应 request_id: 404 响应含 request_id / 400 响应含 request_id (2)
+- CORS 配置化: 允许已配置 origin / 拒绝未配置 origin (2)
+- 回归: 健康检查 (1)
+- 错误码域范围: Go 集成测试验证 35/35 (1)
+- OpenAPI 文档: 文件存在且 >3000 行 (1)
 
 ### Step 6: 结果汇总
 
