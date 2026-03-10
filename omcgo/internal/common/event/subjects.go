@@ -2,12 +2,15 @@ package event
 
 // Device events
 const (
-	SubjectDeviceBootstrap        = "device.inform.bootstrap"
-	SubjectDevicePeriodic         = "device.inform.periodic"
-	SubjectDeviceValueChange      = "device.inform.value_change"
-	SubjectDeviceAlarm            = "device.inform.alarm"
-	SubjectDeviceTransferComplete = "device.inform.transfer_complete"
-	SubjectDeviceConnectionLost   = "device.connection.lost"
+	SubjectDeviceBootstrap                  = "device.inform.bootstrap"
+	SubjectDevicePeriodic                   = "device.inform.periodic"
+	SubjectDeviceValueChange                = "device.inform.value_change"
+	SubjectDeviceAlarm                      = "device.inform.alarm"
+	SubjectDeviceTransferComplete           = "device.inform.transfer_complete"
+	SubjectDeviceAutonomousTransferComplete = "device.inform.autonomous_transfer_complete"
+	SubjectDeviceRebootComplete             = "device.inform.reboot_complete"
+	SubjectDeviceConnectionRequest          = "device.inform.connection_request"
+	SubjectDeviceConnectionLost             = "device.connection.lost"
 )
 
 // Command events
@@ -49,9 +52,17 @@ const (
 
 // Command response events
 const (
-	SubjectCommandGetParamsResponse  = "command.get_parameters.response"
-	SubjectCommandSetParamsResponse  = "command.set_parameters.response"
-	SubjectCommandDownloadResponse   = "command.download.response"
+	SubjectCommandGetParamsResponse      = "command.get_parameters.response"
+	SubjectCommandSetParamsResponse      = "command.set_parameters.response"
+	SubjectCommandDownloadResponse       = "command.download.response"
+	SubjectCommandUploadResponse         = "command.upload.response"
+	SubjectCommandGetNamesResponse       = "command.get_names.response"
+	SubjectCommandAddObjectResponse      = "command.add_object.response"
+	SubjectCommandDeleteObjectResponse   = "command.delete_object.response"
+	SubjectCommandRebootResponse         = "command.reboot.response"
+	SubjectCommandFactoryResetResponse   = "command.factory_reset.response"
+	SubjectCommandGetAttrsResponse       = "command.get_attrs.response"
+	SubjectCommandSetAttrsResponse       = "command.set_attrs.response"
 )
 
 // Software/Firmware events

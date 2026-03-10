@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
@@ -28,6 +29,9 @@ type Handler struct {
 	admission     *AdmissionController
 	metrics       *ACSMetrics
 	logger        *zap.Logger
+	// connSessions maps HTTP RemoteAddr → deviceSN for connection-level session tracking.
+	// This replaces the non-standard X-Device-SN header approach.
+	connSessions sync.Map
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,9 +63,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleInform(w, r, body)
 	case soap.MethodTransferComplete:
 		h.handleTransferComplete(w, r, body)
+	case soap.MethodAutonomousTransferComplete:
+		h.handleAutonomousTransferComplete(w, r, body)
 	case soap.MethodGetParameterValuesResp,
 		soap.MethodSetParameterValuesResp,
 		soap.MethodGetParameterNamesResp,
+		soap.MethodGetParameterAttributesResp,
+		soap.MethodSetParameterAttributesResp,
 		soap.MethodAddObjectResp,
 		soap.MethodDeleteObjectResp,
 		soap.MethodDownloadResp,
@@ -75,6 +83,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleInform processes an Inform message from a CPE device.
+// Per TR069 spec: Inform → InformResponse (always). RPC dispatch happens on the
+// subsequent Empty POST via handleEmpty().
 func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []byte) {
 	// Parse Inform
 	inform, cwmpID, err := soap.DecodeInform(bytes.NewReader(body))
@@ -133,38 +144,81 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		h.logger.Error("create session", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
 
+	// Bind connection (RemoteAddr) → deviceSN for session tracking.
+	h.connSessions.Store(r.RemoteAddr, deviceSN)
+
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes)
 
+	// Per TR069 spec: Always send InformResponse first.
+	// Command queue will be checked on the subsequent Empty POST.
+	h.sendInformResponse(w, cwmpID)
+}
+
+// handleEmpty processes an empty POST from the CPE.
+// Per TR069 spec, after InformResponse the CPE sends an empty POST.
+// The ACS should then either send an RPC request or an empty response to close the session.
+func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
+	// Look up the device SN from the connection binding.
+	val, ok := h.connSessions.Load(r.RemoteAddr)
+	if !ok {
+		// No session bound to this connection — just close.
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	deviceSN := val.(string)
+
+	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
+	if session == nil {
+		h.connSessions.Delete(r.RemoteAddr)
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Transition from InformReceived → Processing
+	if session.State == StateInformReceived {
+		session.State = StateProcessing
+		session.UpdatedAt = time.Now()
+		h.sessionStore.Update(r.Context(), deviceSN, session)
+	}
+
 	// Check command queue for pending commands
-	cmd, err := h.commandQueue.Peek(r.Context(), deviceSN)
+	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 	if err != nil {
-		h.logger.Error("peek command queue", zap.Error(err))
+		h.logger.Error("pop command queue", zap.Error(err))
 	}
 
 	if cmd != nil {
-		// Pop and send the command after InformResponse
-		cmd, _ = h.commandQueue.Pop(r.Context(), deviceSN)
-		if cmd != nil {
-			session.State = StateRPCPending
-			session.LastRPC = cmd.Method
-			h.sessionStore.Update(r.Context(), deviceSN, session)
+		session.State = StateRPCPending
+		session.LastRPC = cmd.Method
+		session.UpdatedAt = time.Now()
+		h.sessionStore.Update(r.Context(), deviceSN, session)
 
-			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
-			if err != nil {
-				h.logger.Error("build RPC request", zap.Error(err))
-				h.sendInformResponse(w, cwmpID)
-				return
-			}
+		respData, err := h.rpcDispatcher.BuildRequest(cmd, session.CWMPId)
+		if err != nil {
+			h.logger.Error("build RPC request", zap.Error(err))
+		} else {
 			h.sendSOAPResponse(w, respData)
 			return
 		}
 	}
 
-	// No pending commands, send InformResponse and close session
-	h.sendInformResponse(w, cwmpID)
+	// No more commands — complete the session.
 	session.State = StateComplete
+	session.UpdatedAt = time.Now()
 	h.sessionStore.Update(r.Context(), deviceSN, session)
+	h.connSessions.Delete(r.RemoteAddr)
+
+	// Send empty SOAP response to signal end of session.
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
+	w.Write(resp)
 }
 
 func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body []byte, method soap.RPCMethod) {
@@ -177,43 +231,54 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	)
 
 	// Find the device SN from the connection context.
-	// In TR069, the session persists over the same HTTP connection from Inform.
-	deviceSN := r.Header.Get("X-Device-SN")
+	val, ok := h.connSessions.Load(r.RemoteAddr)
+	if !ok {
+		// Fallback: no connection binding found.
+		h.logger.Warn("no connection binding for RPC response", zap.String("remote_addr", r.RemoteAddr))
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
+		w.Write(resp)
+		return
+	}
 
-	if deviceSN != "" {
-		session, _ := h.sessionStore.Get(r.Context(), deviceSN)
-		if session != nil {
-			session.State = StateRPCResponse
+	deviceSN := val.(string)
+
+	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
+	if session != nil {
+		session.State = StateRPCResponse
+		session.UpdatedAt = time.Now()
+		h.sessionStore.Update(r.Context(), deviceSN, session)
+
+		// Publish RPC response event for provisioning engine.
+		h.publishRPCResponseEvent(r.Context(), deviceSN, method)
+
+		// Check if there are more commands in the queue (multi-step RPC).
+		cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+		if err != nil {
+			h.logger.Error("pop command queue", zap.Error(err))
+		}
+
+		if cmd != nil {
+			session.State = StateRPCPending
+			session.LastRPC = cmd.Method
 			session.UpdatedAt = time.Now()
 			h.sessionStore.Update(r.Context(), deviceSN, session)
 
-			// Publish RPC response event for provisioning engine.
-			h.publishRPCResponseEvent(r.Context(), deviceSN, method)
-
-			// Check if there are more commands in the queue (multi-step RPC).
-			cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
 			if err != nil {
-				h.logger.Error("pop command queue", zap.Error(err))
+				h.logger.Error("build next RPC request", zap.Error(err))
+			} else {
+				h.sendSOAPResponse(w, respData)
+				return
 			}
-
-			if cmd != nil {
-				session.State = StateRPCPending
-				session.LastRPC = cmd.Method
-				h.sessionStore.Update(r.Context(), deviceSN, session)
-
-				respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
-				if err != nil {
-					h.logger.Error("build next RPC request", zap.Error(err))
-				} else {
-					h.sendSOAPResponse(w, respData)
-					return
-				}
-			}
-
-			// No more commands — complete the session.
-			session.State = StateComplete
-			h.sessionStore.Update(r.Context(), deviceSN, session)
 		}
+
+		// No more commands — complete the session.
+		session.State = StateComplete
+		session.UpdatedAt = time.Now()
+		h.sessionStore.Update(r.Context(), deviceSN, session)
+		h.connSessions.Delete(r.RemoteAddr)
 	}
 
 	// Send empty response to signal end of session.
@@ -231,7 +296,14 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Get deviceSN from connection binding for logging/events.
+	deviceSN := ""
+	if val, ok := h.connSessions.Load(r.RemoteAddr); ok {
+		deviceSN = val.(string)
+	}
+
 	h.logger.Info("TransferComplete received",
+		zap.String("device_sn", deviceSN),
 		zap.String("command_key", tc.CommandKey))
 
 	// Publish event
@@ -248,12 +320,55 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 	h.sendSOAPResponse(w, resp)
 }
 
-func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
-	// Empty POST indicates the CPE has no more data to send.
-	// This is the session completion signal.
-	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	w.Header().Set("Connection", "close")
-	w.WriteHeader(http.StatusNoContent)
+// handleAutonomousTransferComplete processes an AutonomousTransferComplete message
+// from a CPE device (e.g., PM/MR file upload completion).
+func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *http.Request, body []byte) {
+	atc, cwmpID, err := soap.DecodeAutonomousTransferComplete(bytes.NewReader(body))
+	if err != nil {
+		h.logger.Error("decode AutonomousTransferComplete", zap.Error(err))
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	// Get deviceSN from connection binding.
+	deviceSN := ""
+	if val, ok := h.connSessions.Load(r.RemoteAddr); ok {
+		deviceSN = val.(string)
+	}
+
+	h.logger.Info("AutonomousTransferComplete received",
+		zap.String("device_sn", deviceSN),
+		zap.String("file_type", atc.FileType),
+		zap.String("transfer_url", atc.TransferURL),
+		zap.Bool("is_download", atc.IsDownload),
+	)
+
+	// Publish event
+	payload := map[string]interface{}{
+		"device_sn":       deviceSN,
+		"announce_url":    atc.AnnounceURL,
+		"transfer_url":    atc.TransferURL,
+		"is_download":     atc.IsDownload,
+		"file_type":       atc.FileType,
+		"file_size":       atc.FileSize,
+		"target_filename": atc.TargetFileName,
+		"start_time":      atc.StartTime,
+		"complete_time":   atc.CompleteTime,
+	}
+	if atc.FaultStruct != nil {
+		payload["fault"] = atc.FaultStruct
+	}
+	evt, _ := event.NewEvent(event.SubjectDeviceAutonomousTransferComplete, payload)
+	h.eventBus.Publish(r.Context(), event.SubjectDeviceAutonomousTransferComplete, evt)
+
+	// Send AutonomousTransferCompleteResponse
+	resp, err := soap.RenderResponse(soap.AutonomousTransferCompleteRespTmpl, soap.InformResponseData{ID: cwmpID})
+	if err != nil {
+		h.logger.Error("render AutonomousTransferCompleteResponse", zap.Error(err))
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	h.sendSOAPResponse(w, resp)
 }
 
 func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformMessage, eventCodes []string) {
@@ -266,17 +381,23 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		"retry_count":    inform.RetryCount,
 	}
 
-	// Determine primary subject based on event codes
+	// Determine primary subject based on event codes (priority order).
 	var subject string
 	switch {
 	case tr069.IsBootstrap(inform.Event):
 		subject = event.SubjectDeviceBootstrap
-	case tr069.IsPeriodic(inform.Event):
-		subject = event.SubjectDevicePeriodic
-	case tr069.IsValueChange(inform.Event):
-		subject = event.SubjectDeviceValueChange
+	case tr069.IsAlarm(inform.Event):
+		subject = event.SubjectDeviceAlarm
+	case tr069.IsRebootComplete(inform.Event):
+		subject = event.SubjectDeviceRebootComplete
+	case tr069.IsConnectionRequest(inform.Event):
+		subject = event.SubjectDeviceConnectionRequest
 	case tr069.HasEvent(inform.Event, tr069.EventTransferComplete):
 		subject = event.SubjectDeviceTransferComplete
+	case tr069.IsValueChange(inform.Event):
+		subject = event.SubjectDeviceValueChange
+	case tr069.IsPeriodic(inform.Event):
+		subject = event.SubjectDevicePeriodic
 	default:
 		subject = event.SubjectDevicePeriodic
 	}
@@ -301,6 +422,22 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 		subject = event.SubjectCommandSetParamsResponse
 	case soap.MethodDownloadResp:
 		subject = event.SubjectCommandDownloadResponse
+	case soap.MethodUploadResp:
+		subject = event.SubjectCommandUploadResponse
+	case soap.MethodGetParameterNamesResp:
+		subject = event.SubjectCommandGetNamesResponse
+	case soap.MethodAddObjectResp:
+		subject = event.SubjectCommandAddObjectResponse
+	case soap.MethodDeleteObjectResp:
+		subject = event.SubjectCommandDeleteObjectResponse
+	case soap.MethodRebootResp:
+		subject = event.SubjectCommandRebootResponse
+	case soap.MethodFactoryResetResp:
+		subject = event.SubjectCommandFactoryResetResponse
+	case soap.MethodGetParameterAttributesResp:
+		subject = event.SubjectCommandGetAttrsResponse
+	case soap.MethodSetParameterAttributesResp:
+		subject = event.SubjectCommandSetAttrsResponse
 	default:
 		return
 	}

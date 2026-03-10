@@ -20,8 +20,11 @@ var (
 	FactoryResetTmpl           *template.Template
 	ScheduleInformTmpl         *template.Template
 	FaultResponseTmpl          *template.Template
-	TransferCompleteRespTmpl   *template.Template
-	EmptyResponseTmpl          *template.Template
+	TransferCompleteRespTmpl              *template.Template
+	AutonomousTransferCompleteRespTmpl    *template.Template
+	GetParameterAttributesTmpl            *template.Template
+	SetParameterAttributesTmpl            *template.Template
+	EmptyResponseTmpl                     *template.Template
 )
 
 func init() {
@@ -38,6 +41,9 @@ func init() {
 	ScheduleInformTmpl = template.Must(template.New("ScheduleInform").Parse(scheduleInformXML))
 	FaultResponseTmpl = template.Must(template.New("Fault").Parse(faultResponseXML))
 	TransferCompleteRespTmpl = template.Must(template.New("TransferCompleteResponse").Parse(transferCompleteResponseXML))
+	AutonomousTransferCompleteRespTmpl = template.Must(template.New("AutonomousTransferCompleteResponse").Parse(autonomousTransferCompleteResponseXML))
+	GetParameterAttributesTmpl = template.Must(template.New("GetParameterAttributes").Parse(getParameterAttributesXML))
+	SetParameterAttributesTmpl = template.Must(template.New("SetParameterAttributes").Parse(setParameterAttributesXML))
 	EmptyResponseTmpl = template.Must(template.New("Empty").Parse(emptyResponseXML))
 }
 
@@ -131,6 +137,24 @@ type FaultData struct {
 	ID          string
 	FaultCode   int
 	FaultString string
+}
+
+type GetParameterAttributesData struct {
+	ID     string
+	Params []ParameterNameData
+}
+
+type SetParameterAttributesData struct {
+	ID     string
+	Params []SetParameterAttributeData
+}
+
+type SetParameterAttributeData struct {
+	Name               string
+	NotificationChange bool
+	Notification       int
+	AccessListChange   bool
+	AccessList         []string
 }
 
 // XML Templates
@@ -246,6 +270,37 @@ const faultResponseXML = soapEnvelopeOpen + `
 
 const transferCompleteResponseXML = soapEnvelopeOpen + `
     <cwmp:TransferCompleteResponse/>` + soapEnvelopeClose
+
+const autonomousTransferCompleteResponseXML = soapEnvelopeOpen + `
+    <cwmp:AutonomousTransferCompleteResponse/>` + soapEnvelopeClose
+
+const getParameterAttributesXML = soapEnvelopeOpen + `
+    <cwmp:GetParameterAttributes>
+      <ParameterNames soap:arrayType="xsd:string[{{len .Params}}]">
+        {{- range .Params}}
+        <string>{{.Name}}</string>
+        {{- end}}
+      </ParameterNames>
+    </cwmp:GetParameterAttributes>` + soapEnvelopeClose
+
+const setParameterAttributesXML = soapEnvelopeOpen + `
+    <cwmp:SetParameterAttributes>
+      <ParameterList soap:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">
+        {{- range .Params}}
+        <SetParameterAttributesStruct>
+          <Name>{{.Name}}</Name>
+          <NotificationChange>{{if .NotificationChange}}true{{else}}false{{end}}</NotificationChange>
+          <Notification>{{.Notification}}</Notification>
+          <AccessListChange>{{if .AccessListChange}}true{{else}}false{{end}}</AccessListChange>
+          <AccessList>
+            {{- range .AccessList}}
+            <string>{{.}}</string>
+            {{- end}}
+          </AccessList>
+        </SetParameterAttributesStruct>
+        {{- end}}
+      </ParameterList>
+    </cwmp:SetParameterAttributes>` + soapEnvelopeClose
 
 const emptyResponseXML = `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">

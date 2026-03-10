@@ -166,3 +166,45 @@ type TransferComplete struct {
 	StartTime    time.Time `xml:"StartTime" json:"start_time"`
 	CompleteTime time.Time `xml:"CompleteTime" json:"complete_time"`
 }
+
+// AutonomousTransferComplete is sent by the CPE after an autonomous
+// (CPE-initiated) file transfer completes (e.g., PM/MR file upload).
+type AutonomousTransferComplete struct {
+	AnnounceURL    string    `xml:"AnnounceURL" json:"announce_url"`
+	TransferURL    string    `xml:"TransferURL" json:"transfer_url"`
+	IsDownload     bool      `xml:"IsDownload" json:"is_download"`
+	FileType       string    `xml:"FileType" json:"file_type"`
+	FileSize       int64     `xml:"FileSize" json:"file_size"`
+	TargetFileName string    `xml:"TargetFileName" json:"target_file_name"`
+	FaultStruct    *Fault    `xml:"FaultStruct" json:"fault_struct,omitempty"`
+	StartTime      time.Time `xml:"StartTime" json:"start_time"`
+	CompleteTime   time.Time `xml:"CompleteTime" json:"complete_time"`
+}
+
+// --- Parameter Attributes Types ---
+
+// SetParameterAttributeStruct defines notification and access control
+// settings for a single parameter (used in SetParameterAttributes request).
+type SetParameterAttributeStruct struct {
+	Name               string   `xml:"Name" json:"name"`
+	NotificationChange bool     `xml:"NotificationChange" json:"notification_change"`
+	Notification       int      `xml:"Notification" json:"notification"` // 0=off, 1=passive, 2=active
+	AccessListChange   bool     `xml:"AccessListChange" json:"access_list_change"`
+	AccessList         []string `xml:"AccessList>string" json:"access_list"`
+}
+
+// ParameterAttributeStruct describes the notification and access settings
+// of a parameter (returned by GetParameterAttributes response).
+type ParameterAttributeStruct struct {
+	Name         string   `xml:"Name" json:"name"`
+	Notification int      `xml:"Notification" json:"notification"`
+	AccessList   []string `xml:"AccessList>string" json:"access_list"`
+}
+
+// GetParameterAttributesResponse is the CPE's response to GetParameterAttributes.
+type GetParameterAttributesResponse struct {
+	ParameterList []ParameterAttributeStruct `xml:"ParameterList>ParameterAttributeStruct" json:"parameter_list"`
+}
+
+// SetParameterAttributesResponse is the CPE's response to SetParameterAttributes.
+type SetParameterAttributesResponse struct{}

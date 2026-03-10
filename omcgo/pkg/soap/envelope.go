@@ -57,6 +57,12 @@ const (
 	MethodFactoryResetResp        RPCMethod = "FactoryResetResponse"
 	MethodScheduleInform          RPCMethod = "ScheduleInform"
 	MethodScheduleInformResp      RPCMethod = "ScheduleInformResponse"
+	MethodGetParameterAttributes      RPCMethod = "GetParameterAttributes"
+	MethodGetParameterAttributesResp  RPCMethod = "GetParameterAttributesResponse"
+	MethodSetParameterAttributes      RPCMethod = "SetParameterAttributes"
+	MethodSetParameterAttributesResp  RPCMethod = "SetParameterAttributesResponse"
+	MethodAutonomousTransferComplete     RPCMethod = "AutonomousTransferComplete"
+	MethodAutonomousTransferCompleteResp RPCMethod = "AutonomousTransferCompleteResponse"
 	MethodTransferComplete        RPCMethod = "TransferComplete"
 	MethodTransferCompleteResp    RPCMethod = "TransferCompleteResponse"
 	MethodFault                   RPCMethod = "Fault"
@@ -104,12 +110,17 @@ func ParseEnvelope(r io.Reader) (*Envelope, error) {
 func DetectRPCMethod(bodyContent []byte) RPCMethod {
 	s := string(bodyContent)
 
-	// Check for known method names in the body XML
+	// Check for known method names in the body XML.
+	// Order matters: longer/more-specific names must come before shorter substrings
+	// (e.g., AutonomousTransferComplete before TransferComplete).
 	methods := []RPCMethod{
 		MethodInform,
+		MethodAutonomousTransferComplete,
 		MethodTransferComplete,
 		MethodGetParameterValuesResp,
 		MethodSetParameterValuesResp,
+		MethodGetParameterAttributesResp,
+		MethodSetParameterAttributesResp,
 		MethodGetParameterNamesResp,
 		MethodAddObjectResp,
 		MethodDeleteObjectResp,

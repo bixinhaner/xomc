@@ -33,6 +33,8 @@ func NewDispatcher() *Dispatcher {
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
 	d.Register("FactoryReset", &FactoryResetHandler{})
+	d.Register("GetParameterAttributes", &GetParameterAttributesHandler{})
+	d.Register("SetParameterAttributes", &SetParameterAttributesHandler{})
 
 	return d
 }
@@ -178,4 +180,50 @@ type FactoryResetHandler struct{}
 
 func (h *FactoryResetHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 	return soap.RenderResponse(soap.FactoryResetTmpl, struct{ ID string }{ID: cmd.CommandKey})
+}
+
+type GetParameterAttributesHandler struct{}
+
+func (h *GetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+	var params struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(cmd.Params, &params); err != nil {
+		return nil, fmt.Errorf("parse GetParameterAttributes params: %w", err)
+	}
+
+	data := soap.GetParameterAttributesData{ID: cmd.CommandKey}
+	for _, name := range params.Names {
+		data.Params = append(data.Params, soap.ParameterNameData{Name: name})
+	}
+	return soap.RenderResponse(soap.GetParameterAttributesTmpl, data)
+}
+
+type SetParameterAttributesHandler struct{}
+
+func (h *SetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+	var params struct {
+		Attributes []struct {
+			Name               string   `json:"name"`
+			NotificationChange bool     `json:"notification_change"`
+			Notification       int      `json:"notification"`
+			AccessListChange   bool     `json:"access_list_change"`
+			AccessList         []string `json:"access_list"`
+		} `json:"attributes"`
+	}
+	if err := json.Unmarshal(cmd.Params, &params); err != nil {
+		return nil, fmt.Errorf("parse SetParameterAttributes params: %w", err)
+	}
+
+	data := soap.SetParameterAttributesData{ID: cmd.CommandKey}
+	for _, a := range params.Attributes {
+		data.Params = append(data.Params, soap.SetParameterAttributeData{
+			Name:               a.Name,
+			NotificationChange: a.NotificationChange,
+			Notification:       a.Notification,
+			AccessListChange:   a.AccessListChange,
+			AccessList:         a.AccessList,
+		})
+	}
+	return soap.RenderResponse(soap.SetParameterAttributesTmpl, data)
 }

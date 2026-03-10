@@ -1,5 +1,7 @@
 package tr069
 
+import "strings"
+
 // TR069 Inform event codes per CWMP specification.
 const (
 	EventBootstrap           = "0 BOOTSTRAP"
@@ -11,6 +13,19 @@ const (
 	EventConnectionRequest   = "6 CONNECTION REQUEST"
 	EventTransferComplete    = "7 TRANSFER COMPLETE"
 	EventDiagnosticsComplete = "8 DIAGNOSTICS COMPLETE"
+)
+
+// Vendor-specific event codes (M = Manufacturer).
+const (
+	EventMReboot   = "M Reboot"
+	EventMDownload = "M Download"
+	EventMUpload   = "M Upload"
+)
+
+// CMCC extended event codes.
+const (
+	EventAddObject    = "103 ADD OBJECT"
+	EventDeleteObject = "104 DELETE OBJECT"
 )
 
 // IsBootstrap returns true if the event list contains a BOOTSTRAP event.
@@ -41,6 +56,32 @@ func HasEvent(events []EventStruct, code string) bool {
 		}
 	}
 	return false
+}
+
+// IsAlarm returns true if the event list contains a CMCC alarm event.
+func IsAlarm(events []EventStruct) bool {
+	for _, e := range events {
+		if strings.Contains(e.EventCode, "ALARM") {
+			return true
+		}
+	}
+	return false
+}
+
+// IsConnectionRequest returns true if the event list contains a CONNECTION REQUEST event.
+func IsConnectionRequest(events []EventStruct) bool {
+	return HasEvent(events, EventConnectionRequest)
+}
+
+// IsRebootComplete returns true if the event list contains an M Reboot event,
+// indicating the device has rebooted in response to a Reboot RPC.
+func IsRebootComplete(events []EventStruct) bool {
+	return HasEvent(events, EventMReboot)
+}
+
+// IsDownloadComplete returns true if the event list contains an M Download event.
+func IsDownloadComplete(events []EventStruct) bool {
+	return HasEvent(events, EventMDownload)
 }
 
 // EventCodes extracts just the event codes from an event list.
