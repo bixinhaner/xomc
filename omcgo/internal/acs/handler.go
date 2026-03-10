@@ -18,6 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// connSessionEntry tracks a connection-level session binding with creation time for TTL cleanup.
+type connSessionEntry struct {
+	DeviceSN  string
+	CreatedAt time.Time
+}
+
 // Handler processes TR069/CWMP HTTP requests.
 type Handler struct {
 	sessionStore  SessionStore
@@ -29,9 +35,36 @@ type Handler struct {
 	admission     *AdmissionController
 	metrics       *ACSMetrics
 	logger        *zap.Logger
-	// connSessions maps HTTP RemoteAddr → deviceSN for connection-level session tracking.
-	// This replaces the non-standard X-Device-SN header approach.
+	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
+	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
+}
+
+// startSessionReaper launches a background goroutine that periodically cleans up
+// stale connSessions entries (e.g., from dropped TCP connections).
+// It releases admission slots and decrements metrics for reaped sessions.
+func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			h.connSessions.Range(func(key, value interface{}) bool {
+				entry := value.(connSessionEntry)
+				if now.Sub(entry.CreatedAt) > maxAge {
+					h.connSessions.Delete(key)
+					h.admission.Release()
+					h.metrics.ActiveSessions.Dec()
+					h.metrics.SessionDuration.Observe(now.Sub(entry.CreatedAt).Seconds())
+					h.logger.Warn("reaped stale session",
+						zap.String("device_sn", entry.DeviceSN),
+						zap.String("remote_addr", key.(string)),
+						zap.Duration("age", now.Sub(entry.CreatedAt)))
+				}
+				return true
+			})
+		}
+	}()
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -104,16 +137,16 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		return
 	}
 
-	// Admission control
+	// Admission control — slot is held until session completes (via completeSession)
+	// or the background reaper cleans it up.
 	if !h.admission.Acquire() {
 		h.logger.Warn("admission denied", zap.String("device_sn", deviceSN))
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	defer h.admission.Release()
 
+	// Track active session — will be decremented by completeSession() or reaper.
 	h.metrics.ActiveSessions.Inc()
-	defer h.metrics.ActiveSessions.Dec()
 
 	// Record metrics
 	eventCodes := tr069.EventCodes(inform.Event)
@@ -145,7 +178,10 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	}
 
 	// Bind connection (RemoteAddr) → deviceSN for session tracking.
-	h.connSessions.Store(r.RemoteAddr, deviceSN)
+	h.connSessions.Store(r.RemoteAddr, connSessionEntry{
+		DeviceSN:  deviceSN,
+		CreatedAt: time.Now(),
+	})
 
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes)
@@ -169,11 +205,12 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deviceSN := val.(string)
+	entry := val.(connSessionEntry)
+	deviceSN := entry.DeviceSN
 
 	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
 	if session == nil {
-		h.connSessions.Delete(r.RemoteAddr)
+		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, nil)
 		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusNoContent)
@@ -202,6 +239,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 		respData, err := h.rpcDispatcher.BuildRequest(cmd, session.CWMPId)
 		if err != nil {
 			h.logger.Error("build RPC request", zap.Error(err))
+			h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
 		} else {
 			h.sendSOAPResponse(w, respData)
 			return
@@ -209,10 +247,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// No more commands — complete the session.
-	session.State = StateComplete
-	session.UpdatedAt = time.Now()
-	h.sessionStore.Update(r.Context(), deviceSN, session)
-	h.connSessions.Delete(r.RemoteAddr)
+	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
 
 	// Send empty SOAP response to signal end of session.
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
@@ -242,10 +277,15 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		return
 	}
 
-	deviceSN := val.(string)
+	entry := val.(connSessionEntry)
+	deviceSN := entry.DeviceSN
 
 	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
 	if session != nil {
+		// Record RPC duration (approximate: time since last state update).
+		rpcDuration := time.Since(session.UpdatedAt).Seconds()
+		h.metrics.RPCDuration.WithLabelValues(string(method)).Observe(rpcDuration)
+
 		session.State = StateRPCResponse
 		session.UpdatedAt = time.Now()
 		h.sessionStore.Update(r.Context(), deviceSN, session)
@@ -268,6 +308,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
 			if err != nil {
 				h.logger.Error("build next RPC request", zap.Error(err))
+				h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
 			} else {
 				h.sendSOAPResponse(w, respData)
 				return
@@ -275,10 +316,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		}
 
 		// No more commands — complete the session.
-		session.State = StateComplete
-		session.UpdatedAt = time.Now()
-		h.sessionStore.Update(r.Context(), deviceSN, session)
-		h.connSessions.Delete(r.RemoteAddr)
+		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
 	}
 
 	// Send empty response to signal end of session.
@@ -286,6 +324,23 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	w.WriteHeader(http.StatusOK)
 	resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
 	w.Write(resp)
+}
+
+// completeSession releases admission, decrements metrics, records session duration,
+// cleans up connSessions, and marks the session as complete in the store.
+func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr string, session *Session) {
+	h.connSessions.Delete(remoteAddr)
+	h.admission.Release()
+	h.metrics.ActiveSessions.Dec()
+
+	if session != nil {
+		duration := time.Since(session.StartedAt).Seconds()
+		h.metrics.SessionDuration.Observe(duration)
+
+		session.State = StateComplete
+		session.UpdatedAt = time.Now()
+		h.sessionStore.Update(ctx, deviceSN, session)
+	}
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte) {
@@ -299,7 +354,7 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 	// Get deviceSN from connection binding for logging/events.
 	deviceSN := ""
 	if val, ok := h.connSessions.Load(r.RemoteAddr); ok {
-		deviceSN = val.(string)
+		deviceSN = val.(connSessionEntry).DeviceSN
 	}
 
 	h.logger.Info("TransferComplete received",
@@ -333,7 +388,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 	// Get deviceSN from connection binding.
 	deviceSN := ""
 	if val, ok := h.connSessions.Load(r.RemoteAddr); ok {
-		deviceSN = val.(string)
+		deviceSN = val.(connSessionEntry).DeviceSN
 	}
 
 	h.logger.Info("AutonomousTransferComplete received",

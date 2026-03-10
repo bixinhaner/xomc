@@ -1,9 +1,15 @@
 // Package main provides a load testing tool that simulates large-scale device
-// Inform sessions against the ACS engine.
+// TR069 sessions against the ACS engine.
+//
+// Supports two modes:
+//   - Inform-only mode: sends Inform messages (legacy, for Inform throughput measurement)
+//   - Full-session mode (default): simulates complete TR069 session lifecycle:
+//     Inform → InformResponse → Empty POST → RPC/Empty → loop until session ends
 //
 // Usage:
 //
 //	go run scripts/loadtest/main.go -url http://localhost:7547/acs -devices 10000 -duration 5m
+//	go run scripts/loadtest/main.go -url http://localhost:7547/acs -devices 1000 -full-session=false
 package main
 
 import (
@@ -11,10 +17,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"text/template"
@@ -64,6 +72,51 @@ var informTemplate = template.Must(template.New("inform").Parse(`<?xml version="
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>`))
 
+const gpvResponseXML = `<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope
+  xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">%s</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value>v1.0.0-loadtest</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>`
+
+const spvResponseXML = `<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope
+  xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">%s</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>`
+
+const genericResponseXML = `<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope
+  xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">%s</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:%sResponse/>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>`
+
 type informData struct {
 	ID           string
 	OUI          string
@@ -74,11 +127,14 @@ type informData struct {
 }
 
 type stats struct {
-	successCount atomic.Int64
-	failCount    atomic.Int64
-	errorCount   atomic.Int64
-	latencies    []time.Duration
-	mu           sync.Mutex
+	successCount   atomic.Int64
+	failCount      atomic.Int64
+	errorCount     atomic.Int64
+	sessionCount   atomic.Int64  // complete sessions (Inform + Empty + optional RPC rounds)
+	rpcRoundCount  atomic.Int64  // total RPC round-trips across all sessions
+	latencies      []time.Duration
+	sessionTimes   []time.Duration // end-to-end session durations
+	mu             sync.Mutex
 }
 
 func (s *stats) recordLatency(d time.Duration) {
@@ -87,36 +143,55 @@ func (s *stats) recordLatency(d time.Duration) {
 	s.mu.Unlock()
 }
 
+func (s *stats) recordSessionTime(d time.Duration) {
+	s.mu.Lock()
+	s.sessionTimes = append(s.sessionTimes, d)
+	s.mu.Unlock()
+}
+
 func main() {
 	url := flag.String("url", "http://localhost:7547/acs", "ACS endpoint URL")
 	devices := flag.Int("devices", 1000, "Number of simulated devices")
 	duration := flag.Duration("duration", 2*time.Minute, "Test duration")
-	concurrency := flag.Int("concurrency", 100, "Max concurrent requests")
+	concurrency := flag.Int("concurrency", 100, "Max concurrent sessions")
 	interval := flag.Duration("interval", 1*time.Second, "Inform interval per device")
+	fullSession := flag.Bool("full-session", true, "Simulate full TR069 session (Inform+Empty+RPC)")
 	jsonOutput := flag.Bool("json", false, "Output results as JSON")
 	flag.Parse()
 
 	fmt.Fprintf(os.Stderr, "Load Test Configuration:\n")
-	fmt.Fprintf(os.Stderr, "  URL:         %s\n", *url)
-	fmt.Fprintf(os.Stderr, "  Devices:     %d\n", *devices)
-	fmt.Fprintf(os.Stderr, "  Duration:    %s\n", *duration)
-	fmt.Fprintf(os.Stderr, "  Concurrency: %d\n", *concurrency)
-	fmt.Fprintf(os.Stderr, "  Interval:    %s\n", *interval)
+	fmt.Fprintf(os.Stderr, "  URL:          %s\n", *url)
+	fmt.Fprintf(os.Stderr, "  Devices:      %d\n", *devices)
+	fmt.Fprintf(os.Stderr, "  Duration:     %s\n", *duration)
+	fmt.Fprintf(os.Stderr, "  Concurrency:  %d\n", *concurrency)
+	fmt.Fprintf(os.Stderr, "  Interval:     %s\n", *interval)
+	fmt.Fprintf(os.Stderr, "  Full Session: %v\n", *fullSession)
 	fmt.Fprintln(os.Stderr)
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        *concurrency * 2,
-			MaxIdleConnsPerHost: *concurrency * 2,
-			IdleConnTimeout:     90 * time.Second,
-		},
+	// Shared transport for inform-only mode (no session continuity needed).
+	sharedTransport := &http.Transport{
+		MaxIdleConns:        *concurrency * 2,
+		MaxIdleConnsPerHost: *concurrency * 2,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
 	}
 
 	s := &stats{}
 	sem := make(chan struct{}, *concurrency)
 	done := make(chan struct{})
 	deadline := time.After(*duration)
+
+	// Rate limiter warning: estimate requests per device per minute
+	if *fullSession {
+		estReqPerSec := float64(*concurrency) * 2.0 // ~2 requests per session
+		estReqPerDevPerMin := estReqPerSec / float64(*devices) * 60.0
+		if estReqPerDevPerMin > 10 {
+			fmt.Fprintf(os.Stderr, "WARNING: Estimated %.1f req/device/min exceeds ACS rate limit (10/min).\n", estReqPerDevPerMin)
+			fmt.Fprintf(os.Stderr, "  Consider increasing -devices or reducing -concurrency.\n")
+			fmt.Fprintf(os.Stderr, "  Minimum devices for %d concurrency: %d\n\n",
+				*concurrency, int(float64(*concurrency)*2.0/10.0*60.0)+1)
+		}
+	}
 
 	fmt.Fprintf(os.Stderr, "Starting load test at %s...\n\n", time.Now().Format(time.RFC3339))
 	startTime := time.Now()
@@ -148,7 +223,15 @@ func main() {
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				sendInform(client, *url, serialNumber, s)
+				if *fullSession {
+					runFullSession(*url, serialNumber, s)
+				} else {
+					client := &http.Client{
+						Timeout:   30 * time.Second,
+						Transport: sharedTransport,
+					}
+					sendInform(client, *url, serialNumber, s)
+				}
 			}(sn)
 		}
 
@@ -161,9 +244,9 @@ finish:
 
 	totalDuration := time.Since(startTime)
 	if *jsonOutput {
-		printJSONReport(s, totalDuration, *concurrency, *devices)
+		printJSONReport(s, totalDuration, *concurrency, *devices, *fullSession)
 	} else {
-		printReport(s, totalDuration)
+		printReport(s, totalDuration, *fullSession)
 	}
 }
 
@@ -173,6 +256,219 @@ func generateDeviceSNs(count int) []string {
 		sns[i] = fmt.Sprintf("LT-%06d", i)
 	}
 	return sns
+}
+
+// runFullSession simulates a complete TR069 session:
+// Step 1: Inform → InformResponse
+// Step 2: Empty POST → RPC Request or Empty Response
+// Step 3: If RPC Request → send RPC Response, goto Step 2
+// Step 4: If Empty Response → session complete
+//
+// Each session creates a dedicated HTTP transport with MaxConnsPerHost=1
+// to ensure all requests within the session use the same TCP connection.
+// This is critical because the ACS binds sessions to RemoteAddr (IP:Port).
+func runFullSession(url, sn string, s *stats) {
+	sessionStart := time.Now()
+	rpcRounds := 0
+
+	// Per-session transport: forces all requests through the same TCP connection,
+	// preserving RemoteAddr consistency across the entire TR069 session.
+	transport := &http.Transport{
+		MaxConnsPerHost:   1,
+		IdleConnTimeout:   30 * time.Second,
+		DisableKeepAlives: false,
+	}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+	}
+
+	// Step 1: Send Inform
+	data := informData{
+		ID:           fmt.Sprintf("lt-%d", rand.Int63()),
+		OUI:          "AABBCC",
+		ProductClass: "SmallCell",
+		SerialNumber: sn,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		IP:           fmt.Sprintf("10.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(255)),
+	}
+
+	var buf bytes.Buffer
+	if err := informTemplate.Execute(&buf, data); err != nil {
+		s.errorCount.Add(1)
+		return
+	}
+
+	start := time.Now()
+	respBody, statusCode, err := doPost(client, url, buf.Bytes())
+	latency := time.Since(start)
+
+	if err != nil {
+		s.errorCount.Add(1)
+		return
+	}
+	s.recordLatency(latency)
+
+	if statusCode < 200 || statusCode >= 300 {
+		s.failCount.Add(1)
+		return
+	}
+	s.successCount.Add(1)
+
+	// Verify we got InformResponse
+	if !strings.Contains(string(respBody), "InformResponse") {
+		s.failCount.Add(1)
+		return
+	}
+
+	// Step 2-4: Loop — send Empty POST, handle RPC requests
+	for i := 0; i < 20; i++ { // max 20 RPC rounds to prevent infinite loops
+		start = time.Now()
+		respBody, statusCode, err = doPost(client, url, nil) // empty POST
+		latency = time.Since(start)
+
+		if err != nil {
+			s.errorCount.Add(1)
+			return
+		}
+		s.recordLatency(latency)
+
+		if statusCode == http.StatusNoContent || len(strings.TrimSpace(string(respBody))) == 0 {
+			// Session complete — ACS sent empty response
+			break
+		}
+
+		if statusCode < 200 || statusCode >= 300 {
+			s.failCount.Add(1)
+			return
+		}
+		s.successCount.Add(1)
+
+		// Check if ACS sent an RPC request
+		bodyStr := string(respBody)
+		rpcMethod := detectRPCMethod(bodyStr)
+		if rpcMethod == "" {
+			// Empty or unrecognized body — session complete
+			break
+		}
+
+		rpcRounds++
+
+		// Build an appropriate RPC response
+		cwmpID := extractCWMPID(bodyStr)
+		rpcResp := buildRPCResponse(rpcMethod, cwmpID)
+
+		start = time.Now()
+		respBody, statusCode, err = doPost(client, url, []byte(rpcResp))
+		latency = time.Since(start)
+
+		if err != nil {
+			s.errorCount.Add(1)
+			return
+		}
+		s.recordLatency(latency)
+
+		if statusCode >= 200 && statusCode < 300 {
+			s.successCount.Add(1)
+		} else {
+			s.failCount.Add(1)
+			return
+		}
+
+		// If response is empty or is another RPC, continue the loop
+		// The next iteration will send an empty POST
+	}
+
+	// Session completed successfully
+	s.sessionCount.Add(1)
+	s.rpcRoundCount.Add(int64(rpcRounds))
+	s.recordSessionTime(time.Since(sessionStart))
+}
+
+// doPost sends a POST request. If body is nil, sends an empty body.
+func doPost(client *http.Client, url string, body []byte) ([]byte, int, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	} else {
+		bodyReader = bytes.NewReader(nil)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bodyReader)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+
+	return respBody, resp.StatusCode, nil
+}
+
+// detectRPCMethod detects which RPC method the ACS is requesting from the CPE.
+func detectRPCMethod(body string) string {
+	methods := []string{
+		"GetParameterValues",
+		"SetParameterValues",
+		"GetParameterNames",
+		"GetParameterAttributes",
+		"SetParameterAttributes",
+		"AddObject",
+		"DeleteObject",
+		"Download",
+		"Upload",
+		"Reboot",
+		"FactoryReset",
+	}
+	for _, m := range methods {
+		// Look for <cwmp:Method> but not <cwmp:MethodResponse>
+		if strings.Contains(body, "cwmp:"+m) && !strings.Contains(body, m+"Response") {
+			return m
+		}
+	}
+	return ""
+}
+
+// extractCWMPID extracts the CWMP ID from a SOAP message.
+func extractCWMPID(body string) string {
+	// Simple extraction: find content between <cwmp:ID ...> and </cwmp:ID>
+	idx := strings.Index(body, "<cwmp:ID")
+	if idx < 0 {
+		return "loadtest-1"
+	}
+	start := strings.Index(body[idx:], ">")
+	if start < 0 {
+		return "loadtest-1"
+	}
+	start += idx + 1
+	end := strings.Index(body[start:], "</cwmp:ID>")
+	if end < 0 {
+		return "loadtest-1"
+	}
+	return body[start : start+end]
+}
+
+// buildRPCResponse builds a CPE RPC response for the given method.
+func buildRPCResponse(method, cwmpID string) string {
+	switch method {
+	case "GetParameterValues":
+		return fmt.Sprintf(gpvResponseXML, cwmpID)
+	case "SetParameterValues":
+		return fmt.Sprintf(spvResponseXML, cwmpID)
+	default:
+		return fmt.Sprintf(genericResponseXML, cwmpID, method)
+	}
 }
 
 func sendInform(client *http.Client, url, sn string, s *stats) {
@@ -218,21 +514,53 @@ func sendInform(client *http.Client, url, sn string, s *stats) {
 	}
 }
 
-func printReport(s *stats, totalDuration time.Duration) {
+func printReport(s *stats, totalDuration time.Duration, fullSession bool) {
 	success := s.successCount.Load()
 	fail := s.failCount.Load()
 	errors := s.errorCount.Load()
 	total := success + fail + errors
 
 	fmt.Println("\n========================================")
-	fmt.Println("           LOAD TEST REPORT")
+	if fullSession {
+		fmt.Println("    FULL SESSION LOAD TEST REPORT")
+	} else {
+		fmt.Println("     INFORM-ONLY LOAD TEST REPORT")
+	}
 	fmt.Println("========================================")
 	fmt.Printf("Duration:     %s\n", totalDuration.Round(time.Millisecond))
-	fmt.Printf("Total:        %d\n", total)
+	fmt.Printf("Total Reqs:   %d\n", total)
 	fmt.Printf("Success:      %d (%.1f%%)\n", success, pct(success, total))
 	fmt.Printf("Failed:       %d (%.1f%%)\n", fail, pct(fail, total))
 	fmt.Printf("Errors:       %d (%.1f%%)\n", errors, pct(errors, total))
 	fmt.Printf("Throughput:   %.1f req/s\n", float64(total)/totalDuration.Seconds())
+
+	if fullSession {
+		sessions := s.sessionCount.Load()
+		rpcRounds := s.rpcRoundCount.Load()
+		fmt.Println()
+		fmt.Printf("Sessions:     %d completed\n", sessions)
+		fmt.Printf("Session Rate: %.1f sessions/s\n", float64(sessions)/totalDuration.Seconds())
+		if sessions > 0 {
+			fmt.Printf("Avg RPC/Sess: %.1f rounds\n", float64(rpcRounds)/float64(sessions))
+		}
+
+		s.mu.Lock()
+		sessionTimes := make([]time.Duration, len(s.sessionTimes))
+		copy(sessionTimes, s.sessionTimes)
+		s.mu.Unlock()
+
+		if len(sessionTimes) > 0 {
+			sort.Slice(sessionTimes, func(i, j int) bool { return sessionTimes[i] < sessionTimes[j] })
+			fmt.Println()
+			fmt.Println("Session Duration Percentiles:")
+			fmt.Printf("  p50:  %s\n", sessionTimes[percentileIdx(sessionTimes, 50)])
+			fmt.Printf("  p90:  %s\n", sessionTimes[percentileIdx(sessionTimes, 90)])
+			fmt.Printf("  p95:  %s\n", sessionTimes[percentileIdx(sessionTimes, 95)])
+			fmt.Printf("  p99:  %s\n", sessionTimes[percentileIdx(sessionTimes, 99)])
+			fmt.Printf("  max:  %s\n", sessionTimes[len(sessionTimes)-1])
+		}
+	}
+
 	fmt.Println()
 
 	s.mu.Lock()
@@ -242,7 +570,7 @@ func printReport(s *stats, totalDuration time.Duration) {
 
 	if len(latencies) > 0 {
 		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-		fmt.Println("Latency Percentiles:")
+		fmt.Println("Request Latency Percentiles:")
 		fmt.Printf("  p50:  %s\n", latencies[percentileIdx(latencies, 50)])
 		fmt.Printf("  p90:  %s\n", latencies[percentileIdx(latencies, 90)])
 		fmt.Printf("  p95:  %s\n", latencies[percentileIdx(latencies, 95)])
@@ -254,6 +582,11 @@ func printReport(s *stats, totalDuration time.Duration) {
 
 	if pct(success, total) < 99.0 {
 		fmt.Println("\nWARNING: Success rate below 99%!")
+		if fail > 0 && pct(fail, total) > 10.0 {
+			fmt.Println("HINT: High failure rate may indicate ACS rate limiter (10/min/device).")
+			fmt.Println("      Increase -devices to spread load across more devices,")
+			fmt.Println("      or increase server rate_limit.per_device in acs.yaml.")
+		}
 		os.Exit(1)
 	}
 }
@@ -274,29 +607,41 @@ func percentileIdx(sorted []time.Duration, p int) int {
 }
 
 type jsonReport struct {
-	Concurrency int     `json:"concurrency"`
-	Devices     int     `json:"devices"`
-	DurationMs  int64   `json:"duration_ms"`
-	Total       int64   `json:"total"`
-	Success     int64   `json:"success"`
-	Failed      int64   `json:"failed"`
-	Errors      int64   `json:"errors"`
-	SuccessRate float64 `json:"success_rate"`
-	Throughput  float64 `json:"throughput"`
-	P50Ms       float64 `json:"p50_ms"`
-	P90Ms       float64 `json:"p90_ms"`
-	P95Ms       float64 `json:"p95_ms"`
-	P99Ms       float64 `json:"p99_ms"`
-	MaxMs       float64 `json:"max_ms"`
+	Mode             string  `json:"mode"`
+	Concurrency      int     `json:"concurrency"`
+	Devices          int     `json:"devices"`
+	DurationMs       int64   `json:"duration_ms"`
+	Total            int64   `json:"total"`
+	Success          int64   `json:"success"`
+	Failed           int64   `json:"failed"`
+	Errors           int64   `json:"errors"`
+	SuccessRate      float64 `json:"success_rate"`
+	Throughput       float64 `json:"throughput"`
+	Sessions         int64   `json:"sessions,omitempty"`
+	SessionRate      float64 `json:"session_rate,omitempty"`
+	AvgRPCPerSession float64 `json:"avg_rpc_per_session,omitempty"`
+	P50Ms            float64 `json:"p50_ms"`
+	P90Ms            float64 `json:"p90_ms"`
+	P95Ms            float64 `json:"p95_ms"`
+	P99Ms            float64 `json:"p99_ms"`
+	MaxMs            float64 `json:"max_ms"`
+	SessionP50Ms     float64 `json:"session_p50_ms,omitempty"`
+	SessionP99Ms     float64 `json:"session_p99_ms,omitempty"`
 }
 
-func printJSONReport(s *stats, totalDuration time.Duration, concurrency, devices int) {
+func printJSONReport(s *stats, totalDuration time.Duration, concurrency, devices int, fullSession bool) {
 	success := s.successCount.Load()
 	fail := s.failCount.Load()
 	errors := s.errorCount.Load()
 	total := success + fail + errors
 
+	mode := "inform-only"
+	if fullSession {
+		mode = "full-session"
+	}
+
 	r := jsonReport{
+		Mode:        mode,
 		Concurrency: concurrency,
 		Devices:     devices,
 		DurationMs:  totalDuration.Milliseconds(),
@@ -306,6 +651,27 @@ func printJSONReport(s *stats, totalDuration time.Duration, concurrency, devices
 		Errors:      errors,
 		SuccessRate: pct(success, total),
 		Throughput:  float64(total) / totalDuration.Seconds(),
+	}
+
+	if fullSession {
+		sessions := s.sessionCount.Load()
+		rpcRounds := s.rpcRoundCount.Load()
+		r.Sessions = sessions
+		r.SessionRate = float64(sessions) / totalDuration.Seconds()
+		if sessions > 0 {
+			r.AvgRPCPerSession = float64(rpcRounds) / float64(sessions)
+		}
+
+		s.mu.Lock()
+		sessionTimes := make([]time.Duration, len(s.sessionTimes))
+		copy(sessionTimes, s.sessionTimes)
+		s.mu.Unlock()
+
+		if len(sessionTimes) > 0 {
+			sort.Slice(sessionTimes, func(i, j int) bool { return sessionTimes[i] < sessionTimes[j] })
+			r.SessionP50Ms = float64(sessionTimes[percentileIdx(sessionTimes, 50)].Microseconds()) / 1000.0
+			r.SessionP99Ms = float64(sessionTimes[percentileIdx(sessionTimes, 99)].Microseconds()) / 1000.0
+		}
 	}
 
 	s.mu.Lock()

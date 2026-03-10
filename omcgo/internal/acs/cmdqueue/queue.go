@@ -74,34 +74,39 @@ func (q *RedisCommandQueue) Push(ctx context.Context, deviceSN string, cmd *Comm
 func (q *RedisCommandQueue) Pop(ctx context.Context, deviceSN string) (*Command, error) {
 	key := queueKey(deviceSN)
 
-	results, err := q.client.ZRangeWithScores(ctx, key, 0, 0).Result()
-	if err != nil {
-		return nil, fmt.Errorf("peek command queue: %w", err)
-	}
-	if len(results) == 0 {
-		return nil, nil
+	// Iterative loop to skip expired commands (max 100 to prevent infinite loops).
+	for i := 0; i < 100; i++ {
+		results, err := q.client.ZRangeWithScores(ctx, key, 0, 0).Result()
+		if err != nil {
+			return nil, fmt.Errorf("peek command queue: %w", err)
+		}
+		if len(results) == 0 {
+			return nil, nil
+		}
+
+		member := results[0].Member.(string)
+		removed, err := q.client.ZRem(ctx, key, member).Result()
+		if err != nil {
+			return nil, fmt.Errorf("remove from command queue: %w", err)
+		}
+		if removed == 0 {
+			continue // someone else popped it, try next
+		}
+
+		var cmd Command
+		if err := json.Unmarshal([]byte(member), &cmd); err != nil {
+			return nil, fmt.Errorf("unmarshal command: %w", err)
+		}
+
+		// Check expiration — skip expired commands, try next
+		if cmd.ExpiresAt != nil && time.Now().After(*cmd.ExpiresAt) {
+			continue
+		}
+
+		return &cmd, nil
 	}
 
-	member := results[0].Member.(string)
-	removed, err := q.client.ZRem(ctx, key, member).Result()
-	if err != nil {
-		return nil, fmt.Errorf("remove from command queue: %w", err)
-	}
-	if removed == 0 {
-		return nil, nil // someone else popped it
-	}
-
-	var cmd Command
-	if err := json.Unmarshal([]byte(member), &cmd); err != nil {
-		return nil, fmt.Errorf("unmarshal command: %w", err)
-	}
-
-	// Check expiration
-	if cmd.ExpiresAt != nil && time.Now().After(*cmd.ExpiresAt) {
-		return q.Pop(ctx, deviceSN) // skip expired, try next
-	}
-
-	return &cmd, nil
+	return nil, nil // exhausted or all expired
 }
 
 func (q *RedisCommandQueue) Peek(ctx context.Context, deviceSN string) (*Command, error) {

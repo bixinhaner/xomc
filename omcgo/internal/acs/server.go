@@ -57,6 +57,10 @@ func NewACSServer(cfg config.ACSConfig, deps ServerDeps) *ACSServer {
 		w.Write([]byte("ok"))
 	})
 
+	// Start background session reaper to clean up stale connSessions entries
+	// from dropped TCP connections. Scans every 30s, cleans entries older than 5min.
+	h.startSessionReaper(30*time.Second, 5*time.Minute)
+
 	return &ACSServer{
 		httpServer: &http.Server{
 			Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
