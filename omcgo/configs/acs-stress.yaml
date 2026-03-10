@@ -1,0 +1,66 @@
+# ACS Stress Testing Configuration
+# Use this config for load testing: ./bin/omcgo-acs --config configs/acs-stress.yaml
+#
+# Key differences from production (acs.yaml):
+# - rate_limit.per_device: 60000 (effectively disabled)
+# - rate_limit.global_burst: 100000
+# - session.max_concurrent: 50000
+# - redis.pool_size: 200
+# - log.level: warn (reduce logging overhead)
+
+server:
+  host: "0.0.0.0"
+  port: 7547
+  tls_port: 7548
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+
+session:
+  timeout: 5m
+  max_concurrent: 50000
+
+rate_limit:
+  per_device: 60000
+  global_burst: 100000
+
+auth:
+  mode: "none"
+  username: ""
+  password: ""
+
+redis:
+  addrs:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 200
+
+nats:
+  url: "nats://localhost:4222"
+  max_reconnect: -1
+  reconnect_wait: 2s
+
+db:
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  max_conns: 20
+  min_conns: 5
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
+metrics:
+  port: 9090
+
+tracer:
+  enabled: false
+  endpoint: "localhost:4317"
+  sample_rate: 1.0
+
+log:
+  level: "warn"
+  format: "json"

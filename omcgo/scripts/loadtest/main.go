@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -127,14 +128,15 @@ type informData struct {
 }
 
 type stats struct {
-	successCount   atomic.Int64
-	failCount      atomic.Int64
-	errorCount     atomic.Int64
-	sessionCount   atomic.Int64  // complete sessions (Inform + Empty + optional RPC rounds)
-	rpcRoundCount  atomic.Int64  // total RPC round-trips across all sessions
-	latencies      []time.Duration
-	sessionTimes   []time.Duration // end-to-end session durations
-	mu             sync.Mutex
+	successCount    atomic.Int64
+	failCount       atomic.Int64
+	errorCount      atomic.Int64
+	rateLimitCount  atomic.Int64 // 503/429 rate-limited responses (subset of failCount)
+	sessionCount    atomic.Int64 // complete sessions (Inform + Empty + optional RPC rounds)
+	rpcRoundCount   atomic.Int64 // total RPC round-trips across all sessions
+	latencies       []time.Duration
+	sessionTimes    []time.Duration // end-to-end session durations
+	mu              sync.Mutex
 }
 
 func (s *stats) recordLatency(d time.Duration) {
@@ -147,6 +149,44 @@ func (s *stats) recordSessionTime(d time.Duration) {
 	s.mu.Lock()
 	s.sessionTimes = append(s.sessionTimes, d)
 	s.mu.Unlock()
+}
+
+// deviceTransportPool manages per-device HTTP transports.
+// Each device gets a dedicated transport with MaxConnsPerHost=1,
+// ensuring all requests for the same device use the same TCP connection
+// (same RemoteAddr) while allowing TCP connection reuse across sessions.
+// This eliminates repeated TCP handshake overhead from per-session transport.
+type deviceTransportPool struct {
+	transports sync.Map
+}
+
+func newDeviceTransportPool() *deviceTransportPool {
+	return &deviceTransportPool{}
+}
+
+func (p *deviceTransportPool) Get(device string) *http.Transport {
+	if v, ok := p.transports.Load(device); ok {
+		return v.(*http.Transport)
+	}
+	t := &http.Transport{
+		MaxConnsPerHost:       1,
+		IdleConnTimeout:       90 * time.Second,
+		DisableKeepAlives:     false,
+		ResponseHeaderTimeout: 15 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+	actual, _ := p.transports.LoadOrStore(device, t)
+	return actual.(*http.Transport)
+}
+
+func (p *deviceTransportPool) CloseAll() {
+	p.transports.Range(func(key, value interface{}) bool {
+		value.(*http.Transport).CloseIdleConnections()
+		return true
+	})
 }
 
 func main() {
@@ -176,21 +216,31 @@ func main() {
 		DisableKeepAlives:   false,
 	}
 
+	// Per-device transport pool for full-session mode.
+	// Each device gets a dedicated transport ensuring RemoteAddr consistency
+	// while reusing TCP connections across sessions (no repeated TCP handshake).
+	pool := newDeviceTransportPool()
+	defer pool.CloseAll()
+
+	// Per-device in-flight guard: ensures at most one session per device at a time,
+	// preventing RemoteAddr collision and matching real CPE behavior.
+	var deviceInFlight sync.Map
+
 	s := &stats{}
 	sem := make(chan struct{}, *concurrency)
 	done := make(chan struct{})
 	deadline := time.After(*duration)
 
-	// Rate limiter warning: estimate requests per device per minute
+	// Rate limiter hint for full-session mode.
 	if *fullSession {
-		estReqPerSec := float64(*concurrency) * 2.0 // ~2 requests per session
-		estReqPerDevPerMin := estReqPerSec / float64(*devices) * 60.0
-		if estReqPerDevPerMin > 10 {
-			fmt.Fprintf(os.Stderr, "WARNING: Estimated %.1f req/device/min exceeds ACS rate limit (10/min).\n", estReqPerDevPerMin)
-			fmt.Fprintf(os.Stderr, "  Consider increasing -devices or reducing -concurrency.\n")
-			fmt.Fprintf(os.Stderr, "  Minimum devices for %d concurrency: %d\n\n",
-				*concurrency, int(float64(*concurrency)*2.0/10.0*60.0)+1)
-		}
+		fmt.Fprintf(os.Stderr, "NOTE: ACS default rate limit is 10/min/device. For maximum throughput,\n")
+		fmt.Fprintf(os.Stderr, "      use stress config: ./bin/omcgo-acs --config configs/acs-stress.yaml\n\n")
+	}
+
+	// Hint for high concurrency
+	if *concurrency >= 1000 {
+		fmt.Fprintf(os.Stderr, "HINT: High concurrency (%d). Ensure fd limit >= %d: ulimit -n %d\n\n",
+			*concurrency, *concurrency*3, *concurrency*3)
 	}
 
 	fmt.Fprintf(os.Stderr, "Starting load test at %s...\n\n", time.Now().Format(time.RFC3339))
@@ -224,7 +274,12 @@ func main() {
 				defer func() { <-sem }()
 
 				if *fullSession {
-					runFullSession(*url, serialNumber, s)
+					// Guard: at most one session per device at a time (matches real CPE behavior).
+					if _, loaded := deviceInFlight.LoadOrStore(serialNumber, true); loaded {
+						return
+					}
+					defer deviceInFlight.Delete(serialNumber)
+					runFullSession(*url, serialNumber, pool.Get(serialNumber), s)
 				} else {
 					client := &http.Client{
 						Timeout:   30 * time.Second,
@@ -264,21 +319,12 @@ func generateDeviceSNs(count int) []string {
 // Step 3: If RPC Request → send RPC Response, goto Step 2
 // Step 4: If Empty Response → session complete
 //
-// Each session creates a dedicated HTTP transport with MaxConnsPerHost=1
-// to ensure all requests within the session use the same TCP connection.
-// This is critical because the ACS binds sessions to RemoteAddr (IP:Port).
-func runFullSession(url, sn string, s *stats) {
+// The transport parameter is a per-device transport from deviceTransportPool.
+// MaxConnsPerHost=1 ensures all requests use the same TCP connection (same RemoteAddr).
+// TCP connections are reused across sessions for the same device, eliminating handshake overhead.
+func runFullSession(url, sn string, transport *http.Transport, s *stats) {
 	sessionStart := time.Now()
 	rpcRounds := 0
-
-	// Per-session transport: forces all requests through the same TCP connection,
-	// preserving RemoteAddr consistency across the entire TR069 session.
-	transport := &http.Transport{
-		MaxConnsPerHost:   1,
-		IdleConnTimeout:   30 * time.Second,
-		DisableKeepAlives: false,
-	}
-	defer transport.CloseIdleConnections()
 
 	client := &http.Client{
 		Timeout:   30 * time.Second,
@@ -312,6 +358,9 @@ func runFullSession(url, sn string, s *stats) {
 	s.recordLatency(latency)
 
 	if statusCode < 200 || statusCode >= 300 {
+		if statusCode == http.StatusServiceUnavailable || statusCode == http.StatusTooManyRequests {
+			s.rateLimitCount.Add(1)
+		}
 		s.failCount.Add(1)
 		return
 	}
@@ -341,6 +390,9 @@ func runFullSession(url, sn string, s *stats) {
 		}
 
 		if statusCode < 200 || statusCode >= 300 {
+			if statusCode == http.StatusServiceUnavailable || statusCode == http.StatusTooManyRequests {
+				s.rateLimitCount.Add(1)
+			}
 			s.failCount.Add(1)
 			return
 		}
@@ -510,6 +562,9 @@ func sendInform(client *http.Client, url, sn string, s *stats) {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		s.successCount.Add(1)
 	} else {
+		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusTooManyRequests {
+			s.rateLimitCount.Add(1)
+		}
 		s.failCount.Add(1)
 	}
 }
@@ -518,6 +573,7 @@ func printReport(s *stats, totalDuration time.Duration, fullSession bool) {
 	success := s.successCount.Load()
 	fail := s.failCount.Load()
 	errors := s.errorCount.Load()
+	rateLimited := s.rateLimitCount.Load()
 	total := success + fail + errors
 
 	fmt.Println("\n========================================")
@@ -531,6 +587,9 @@ func printReport(s *stats, totalDuration time.Duration, fullSession bool) {
 	fmt.Printf("Total Reqs:   %d\n", total)
 	fmt.Printf("Success:      %d (%.1f%%)\n", success, pct(success, total))
 	fmt.Printf("Failed:       %d (%.1f%%)\n", fail, pct(fail, total))
+	if rateLimited > 0 {
+		fmt.Printf("  Rate-Ltd:   %d (%.1f%% of total — ACS 503/429)\n", rateLimited, pct(rateLimited, total))
+	}
 	fmt.Printf("Errors:       %d (%.1f%%)\n", errors, pct(errors, total))
 	fmt.Printf("Throughput:   %.1f req/s\n", float64(total)/totalDuration.Seconds())
 
@@ -582,10 +641,13 @@ func printReport(s *stats, totalDuration time.Duration, fullSession bool) {
 
 	if pct(success, total) < 99.0 {
 		fmt.Println("\nWARNING: Success rate below 99%!")
-		if fail > 0 && pct(fail, total) > 10.0 {
-			fmt.Println("HINT: High failure rate may indicate ACS rate limiter (10/min/device).")
-			fmt.Println("      Increase -devices to spread load across more devices,")
-			fmt.Println("      or increase server rate_limit.per_device in acs.yaml.")
+		if rateLimited > 0 && pct(rateLimited, fail) > 50.0 {
+			fmt.Println("ROOT CAUSE: ACS rate limiter (10/min/device) rejected most failed requests.")
+			fmt.Println("FIX: Use stress config with relaxed rate limit:")
+			fmt.Println("     ./bin/omcgo-acs --config configs/acs-stress.yaml")
+		} else if errors > 0 && pct(errors, total) > 10.0 {
+			fmt.Println("ROOT CAUSE: TCP connection errors (timeout/refused).")
+			fmt.Println("FIX: Reduce -concurrency, or increase fd limit: ulimit -n 65535")
 		}
 		os.Exit(1)
 	}
@@ -614,6 +676,7 @@ type jsonReport struct {
 	Total            int64   `json:"total"`
 	Success          int64   `json:"success"`
 	Failed           int64   `json:"failed"`
+	RateLimited      int64   `json:"rate_limited"`
 	Errors           int64   `json:"errors"`
 	SuccessRate      float64 `json:"success_rate"`
 	Throughput       float64 `json:"throughput"`
@@ -640,6 +703,8 @@ func printJSONReport(s *stats, totalDuration time.Duration, concurrency, devices
 		mode = "full-session"
 	}
 
+	rateLimited := s.rateLimitCount.Load()
+
 	r := jsonReport{
 		Mode:        mode,
 		Concurrency: concurrency,
@@ -648,6 +713,7 @@ func printJSONReport(s *stats, totalDuration time.Duration, concurrency, devices
 		Total:       total,
 		Success:     success,
 		Failed:      fail,
+		RateLimited: rateLimited,
 		Errors:      errors,
 		SuccessRate: pct(success, total),
 		Throughput:  float64(total) / totalDuration.Seconds(),
