@@ -249,11 +249,8 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 	// No more commands — complete the session.
 	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
 
-	// Send empty SOAP response to signal end of session.
-	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
-	w.Write(resp)
+	// Send truly empty response to signal end of session (no body per TR069 spec).
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body []byte, method soap.RPCMethod) {
@@ -270,10 +267,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	if !ok {
 		// Fallback: no connection binding found.
 		h.logger.Warn("no connection binding for RPC response", zap.String("remote_addr", r.RemoteAddr))
-		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
-		w.Write(resp)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -319,11 +313,8 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
 	}
 
-	// Send empty response to signal end of session.
-	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	resp, _ := soap.RenderResponse(soap.EmptyResponseTmpl, nil)
-	w.Write(resp)
+	// Send truly empty response to signal end of session (no body per TR069 spec).
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // completeSession releases admission, decrements metrics, records session duration,

@@ -24,7 +24,6 @@ var (
 	AutonomousTransferCompleteRespTmpl    *template.Template
 	GetParameterAttributesTmpl            *template.Template
 	SetParameterAttributesTmpl            *template.Template
-	EmptyResponseTmpl                     *template.Template
 )
 
 func init() {
@@ -44,7 +43,6 @@ func init() {
 	AutonomousTransferCompleteRespTmpl = template.Must(template.New("AutonomousTransferCompleteResponse").Parse(autonomousTransferCompleteResponseXML))
 	GetParameterAttributesTmpl = template.Must(template.New("GetParameterAttributes").Parse(getParameterAttributesXML))
 	SetParameterAttributesTmpl = template.Must(template.New("SetParameterAttributes").Parse(setParameterAttributesXML))
-	EmptyResponseTmpl = template.Must(template.New("Empty").Parse(emptyResponseXML))
 }
 
 // RenderResponse executes a SOAP template with the given data and returns the XML bytes.
@@ -302,8 +300,3 @@ const setParameterAttributesXML = soapEnvelopeOpen + `
       </ParameterList>
     </cwmp:SetParameterAttributes>` + soapEnvelopeClose
 
-const emptyResponseXML = `<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Header/>
-  <soap:Body/>
-</soap:Envelope>`
