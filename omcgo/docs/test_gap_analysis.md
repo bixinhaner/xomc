@@ -246,3 +246,45 @@
 | 33 | `internal/config/baseline/handler_test.go` | 11 |
 | 34 | `internal/pm/threshold_handler_test.go` | 14 |
 | 35 | `internal/mr/handler_test.go` | 9 |
+
+---
+
+## 8. 第二轮补全结果（2026-03-10 实施完成）
+
+### 目标
+
+补全第一轮遗漏的 14 个源文件/模块的单元测试，实现全模块覆盖。
+
+### 实际交付
+
+| 指标 | 第一轮后 | 第二轮后 | 增幅 |
+|------|---------|---------|------|
+| internal/ 测试文件数 | 61 | 74 | +13 |
+| 总测试函数数 | 491 | 588 | +97（+20%）|
+| 全部 `go test ./...` | PASS | **PASS** | 0 failures |
+| `go vet ./...` | PASS | **PASS** | 0 warnings |
+
+### 新增测试文件清单（13 个）
+
+| # | 文件路径 | 测试数 | 测试目标 |
+|---|---------|--------|---------|
+| 1 | `internal/carrier/registry_test.go` | 8 | Registry CRUD、MustGet panic、ResolveByOUI、并发安全 |
+| 2 | `internal/acs/metrics_test.go` | 3 | Prometheus 指标注册验证 |
+| 3 | `internal/acs/handler_test.go` | 5 | TR069 HTTP handler: 405/204/400、completeSession、reaper |
+| 4 | `internal/alarm/receiver_test.go` | 5 | 告警事件接收/订阅/解码失败/引擎错误 |
+| 5 | `internal/omcr/device/inform_handler_test.go` | 7 | Bootstrap/Periodic/运营商解析/payload 转换 |
+| 6 | `internal/omcr/device/heartbeat_test.go` | 8 | Redis TTL 心跳刷新/过期检测/批量标离线(miniredis) |
+| 7 | `internal/pm/handler_test.go` | 10 | Counter/KPI/Task REST API 全端点 |
+| 8 | `internal/config/datamodel/handler_test.go` | 14 | DataModel CRUD/Activate/Deprecate/Statistics/Resolve/OUI |
+| 9 | `internal/omcr/admin/handler_test.go` | 9 | Login/ListUsers/CreateUser/GetUser/DeleteUser/ListRoles |
+| 10 | `internal/omcr/software/handler_test.go` | 7 | Firmware List/Get/Delete + UpgradeTask List/Get |
+| 11 | `internal/omcr/software/service_test.go` | 6 | StartUpgrade 全流程/设备不存在/重复升级/TransferComplete |
+| 12 | `internal/omcr/filemanager/handler_test.go` | 5 | File List/Get/Delete/InvalidUUID/NotFound |
+| 13 | `internal/omcr/dashboard/handler_test.go` | 10 | 参数校验(days/kpi_name/时间格式)/auth/getUserID/路由注册 |
+
+### 关键技术点
+
+- **miniredis**: heartbeat_test.go 使用 `alicebob/miniredis/v2` 实现无外部依赖的 Redis 测试
+- **Mock 命名**: 严格遵循前缀隔离（`dmH`/`swH`/`svcMock`/`pmH`/`hbMock`/`fmH`/`acsH`/`handlerMock`/`dashH`）避免同 package 冲突
+- **nil 依赖**: filemanager 和 software handler 传 nil MinIO/ConnReq client，仅测 repo 路径
+- **Dashboard**: Service 依赖 `*pgxpool.Pool` 等具体类型，仅测 handler 层参数校验
