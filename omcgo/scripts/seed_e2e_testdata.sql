@@ -26,6 +26,9 @@ DELETE FROM config_neighbors WHERE id::text LIKE 'e2e00017%';
 DELETE FROM config_baselines WHERE id::text LIKE 'e2e00015%';
 DELETE FROM pm_tasks WHERE id::text LIKE 'e2e00014%';
 
+-- File Transfer data
+DELETE FROM pm_files WHERE id::text LIKE 'e2e00026%';
+
 -- Sprint 8 data
 DELETE FROM mml_tasks WHERE creator = 'admin' AND task_name LIKE 'E2E%';
 DELETE FROM mml_scripts WHERE id::text LIKE 'e2e00013%';
@@ -624,6 +627,15 @@ INSERT INTO report_records (id, report_definition_id, report_name, period, forma
 ('e2e00023-a000-0000-0000-000000000001', 'e2e00023-0000-0000-0000-000000000001', 'E2E Daily KPI Report', '2026-03-07', 'pdf', 'ready', 10240, NOW());
 
 -- ============================================================
+-- 34. PM Files (File Transfer Feature)
+-- ============================================================
+
+INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size, collect_time, minio_path, parsed, counter_count, created_at) VALUES
+('e2e00026-0000-0000-0000-000000000001', 'e2e00001-0000-0000-0000-000000000001', 'TEST-SN-001', 'cmcc', 'lte', 'pm_20260311_0800_TEST-SN-001.xml', 4096, NOW() - INTERVAL '2 hours', 'pm-files/TEST-SN-001/pm_20260311_0800.xml', true, 15, NOW() - INTERVAL '2 hours'),
+('e2e00026-0000-0000-0000-000000000002', 'e2e00001-0000-0000-0000-000000000001', 'TEST-SN-001', 'cmcc', 'lte', 'pm_20260311_0900_TEST-SN-001.xml', 3200, NOW() - INTERVAL '1 hour', 'pm-files/TEST-SN-001/pm_20260311_0900.xml', false, 0, NOW() - INTERVAL '1 hour'),
+('e2e00026-0000-0000-0000-000000000003', 'e2e00001-0000-0000-0000-000000000002', 'TEST-SN-002', 'cmcc', 'nr', 'pm_20260311_0800_TEST-SN-002.xml', 5120, NOW() - INTERVAL '2 hours', 'pm-files/TEST-SN-002/pm_20260311_0800.xml', true, 20, NOW() - INTERVAL '2 hours');
+
+-- ============================================================
 -- 33. Ops Templates + Command Records (Phase C)
 -- ============================================================
 
@@ -704,4 +716,6 @@ SELECT 'report_records', COUNT(*) FROM report_records WHERE id::text LIKE 'e2e00
 UNION ALL
 SELECT 'ops_templates', COUNT(*) FROM ops_templates WHERE id::text LIKE 'e2e00024%'
 UNION ALL
-SELECT 'ops_command_records', COUNT(*) FROM ops_command_records WHERE id::text LIKE 'e2e00025%';
+SELECT 'ops_command_records', COUNT(*) FROM ops_command_records WHERE id::text LIKE 'e2e00025%'
+UNION ALL
+SELECT 'pm_files', COUNT(*) FROM pm_files WHERE id::text LIKE 'e2e00026%';

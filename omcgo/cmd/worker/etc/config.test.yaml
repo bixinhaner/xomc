@@ -37,6 +37,7 @@ minio:
     firmware: "firmware"
     config_backup: "config-backup"
     logs: "logs"
+    reports: "reports"
 
 metrics:
   port: 9092

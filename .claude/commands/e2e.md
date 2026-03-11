@@ -1,6 +1,6 @@
 # OMC E2E 端到端验证
 
-执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档、Dashboard 趋势/状态/区域统计、Config Sync (push/pull/status)、备份恢复 (任务/计划 CRUD)、文件管理 (上传/下载/过滤)、MML 控制台 (命令/脚本/任务)、前端集成验证、全量回归全链路，以及 Phase A-D 全模块对齐新端点 (System Info/Dashboard Widgets/PM Tasks/Config Baselines/FTP Configs/MR Indicators/License/Topology Sites/Reports/OpsTools) (~407 个测试用例, Sprint 0-10, S0-S74)。
+执行 OMC 系统端到端数据流验证，覆盖基础通信层 (CORS/healthz/统一错误格式/前端基础设施)、认证、设备管理、告警管理、配置模板、固件管理、用户管理、角色、审计日志、设备分组、PM 计数器、KPI 查询、MR 文件/数据、审计日志时间过滤、Dashboard 聚合、设备 CRUD、告警规则、KPI 阈值、系统日志、NE 消息日志、密码管理、权限管理、角色 CRUD、错误响应 request_id、CORS 配置化、OpenAPI 文档、Dashboard 趋势/状态/区域统计、Config Sync (push/pull/status)、备份恢复 (任务/计划 CRUD)、文件管理 (上传/下载/过滤/分发)、MML 控制台 (命令/脚本/任务)、前端集成验证、全量回归全链路、Phase A-D 全模块对齐新端点 (System Info/Dashboard Widgets/PM Tasks/Config Baselines/FTP Configs/MR Indicators/License/Topology Sites/Reports/OpsTools)，以及文件传输完整链路 (PM Files/File Distribution/Report Download/MR Export CSV) (~452 个测试用例, Sprint 0-10, S0-S78)。
 
 ## 环境信息
 
@@ -45,7 +45,7 @@ print('Seed data applied successfully')
 
 如果 psycopg2 不可用，先安装: `pip3 install --user --break-system-packages psycopg2-binary`
 
-确认输出包含正确的数据: 设备(5)、告警(8+3 trend)、配置模板(3)、固件版本(3)、升级任务(2)、设备分组(3)、PM计数器(8)、KPI定义(2)、KPI值(4)、MR文件(2)、MR记录(4)、审计日志(3)、告警规则(3)、KPI阈值(3)、系统日志(3)、NE消息日志(3)、备份任务(2)、备份计划(2)、管理文件(3)、MML脚本(1)、PM任务(2)、配置基线(2)、配置任务(1)、邻区(2)、FTP配置(2)、MR映射(2)、License(3)、站点(2)、拓扑节点(3)、拓扑边(2)、报表定义(1)、报表记录(1)、运维模板(1)、命令记录(1)。
+确认输出包含正确的数据: 设备(5)、告警(8+3 trend)、配置模板(3)、固件版本(3)、升级任务(2)、设备分组(3)、PM计数器(8)、KPI定义(2)、KPI值(4)、MR文件(2)、MR记录(4)、审计日志(3)、告警规则(3)、KPI阈值(3)、系统日志(3)、NE消息日志(3)、备份任务(2)、备份计划(2)、管理文件(3)、MML脚本(1)、PM任务(2)、配置基线(2)、配置任务(1)、邻区(2)、FTP配置(2)、MR映射(2)、License(3)、站点(2)、拓扑节点(3)、拓扑边(2)、报表定义(1)、报表记录(1)、运维模板(1)、命令记录(1)、PM文件(3)。
 
 ### Step 3: 重建后端
 
@@ -80,7 +80,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz
 cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 ```
 
-脚本包含 ~407 个测试用例 (Sprint 0-10, S0-S74)，覆盖：
+脚本包含 ~452 个测试用例 (Sprint 0-10, S0-S78)，覆盖：
 
 **Sprint 0 (12 cases, S1-S4):**
 - 基础通信层: 健康检查 (1), CORS preflight 204 (1), CORS 5 项头部验证 (5), 统一错误格式 (2), 前端静态检查 (3)
@@ -182,6 +182,12 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - S73: Error Code Spot Check (2) — baselines 404, licenses 404
 - S74: Phase A-D Full Regression (5) — 5 key endpoints smoke test
 
+**File Transfer (25 cases, S75-S78) — 文件传输完整链路:**
+- S75: PM Files 列表与下载 (7) — list → device_id filter → download → count check → invalid UUID 400 → zero UUID 404 → field validation
+- S76: File Distribution (6) — POST distribute with device_sns → task_id/device_count/status check → empty device_sns → zero UUID 404 → field validation
+- S77: Report Record Download (5) — records list → download by id → file_name check → invalid UUID 400 → zero UUID 404
+- S78: MR Export CSV/JSON (7) — CSV export with header validation → JSON export with total → mr_type filter → invalid device_id 400 → empty body → field validation
+
 ### Step 6: 结果汇总
 
 根据脚本输出汇总结果：
@@ -200,3 +206,4 @@ cd omcgo && bash ./scripts/e2e_verify.sh http://localhost:8080
 - 脚本依赖 `python3` (JSON 解析) 和 `curl`，不依赖 `jq`
 - Sprint 4/6/8/9 测试包含 CRUD 操作（创建→更新→删除），确保 seed 数据不影响后续测试
 - Sprint 8 测试依赖 backup/filemanager/mml 三个新模块的 migration（000022-000024）
+- File Transfer 测试 (S75-S78) 依赖 pm_files 表的 migration（000034）

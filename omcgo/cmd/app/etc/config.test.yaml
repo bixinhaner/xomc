@@ -47,6 +47,7 @@ minio:
     firmware: "firmware"
     config_backup: "config-backup"
     logs: "logs"
+    reports: "reports"
 
 jwt:
   secret: "change-me-in-production-minimum-32-characters!!"
