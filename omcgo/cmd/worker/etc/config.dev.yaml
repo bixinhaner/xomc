@@ -1,5 +1,5 @@
 db:
-  dsn: "postgres://omcgo:password@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -7,7 +7,7 @@ db:
   health_check_interval: 30s
 
 tsdb:
-  dsn: "postgres://omcgo:password@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -48,5 +48,5 @@ tracer:
   sample_rate: 1.0
 
 log:
-  level: "info"
+  level: "warn"
   format: "json"

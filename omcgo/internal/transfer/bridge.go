@@ -114,6 +114,11 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("get device by SN %s: %w", payload.DeviceSN, err)
 	}
+	if dev == nil {
+		b.logger.Warn("device not found in DB, skipping file processing",
+			zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
 
 	// Classify file type
 	fileCategory := classifyFileType(payload.FileType, payload.TargetFileName)

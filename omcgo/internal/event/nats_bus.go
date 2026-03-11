@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 )
+
+const maxDeliveries = 5
 
 // NATSEventBus implements EventBus using NATS JetStream.
 type NATSEventBus struct {
@@ -92,15 +95,30 @@ func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
 		var evt Event
 		if err := json.Unmarshal(msg.Data, &evt); err != nil {
 			b.logger.Error("unmarshal event", zap.Error(err))
-			msg.Nak()
+			// Permanent parse error — terminate to avoid infinite retry
+			msg.Term()
 			return
 		}
 
 		if err := handler(context.Background(), evt); err != nil {
+			meta, _ := msg.Metadata()
+			deliveries := uint64(1)
+			if meta != nil {
+				deliveries = meta.NumDelivered
+			}
 			b.logger.Error("handle event",
 				zap.String("subject", evt.Subject),
+				zap.Uint64("delivery", deliveries),
 				zap.Error(err))
-			msg.Nak()
+			if deliveries >= maxDeliveries {
+				b.logger.Warn("max deliveries reached, terminating message",
+					zap.String("subject", evt.Subject),
+					zap.Uint64("deliveries", deliveries))
+				msg.Term()
+			} else {
+				// Exponential backoff: 1s, 2s, 4s, 8s ...
+				msg.NakWithDelay(time.Duration(1<<(deliveries-1)) * time.Second)
+			}
 			return
 		}
 
