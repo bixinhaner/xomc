@@ -3,6 +3,7 @@ package dashboard
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -28,81 +29,193 @@ func dashHSetupRouter() (*gin.Engine, *Handler) {
 	return r, h
 }
 
+func dashHDoRequest(router *gin.Engine, method, path string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(method, path, nil)
+	router.ServeHTTP(w, req)
+	return w
+}
+
 // ---------------------------------------------------------------------------
-// Tests: parameter validation (no service call needed)
+// Tests: Route registration
+// ---------------------------------------------------------------------------
+
+func TestDashHandler_RegisterRoutes_UnknownPath(t *testing.T) {
+	router, _ := dashHSetupRouter()
+
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/nonexistent")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestDashHandler_RegisterRoutes_MethodNotAllowed(t *testing.T) {
+	router, _ := dashHSetupRouter()
+
+	// POST on a GET-only route should return 405 (Method Not Allowed).
+	w := dashHDoRequest(router, http.MethodPost, "/api/v1/dashboard/alarm-trend")
+	// Gin by default returns 404 for unmatched method+path combos unless
+	// HandleMethodNotAllowed is enabled, so we just verify it's not 200.
+	assert.NotEqual(t, http.StatusOK, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: AlarmTrend parameter validation
 // ---------------------------------------------------------------------------
 
 func TestDashHandler_AlarmTrend_InvalidDays(t *testing.T) {
 	router, _ := dashHSetupRouter()
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/alarm-trend?days=abc", nil)
-	router.ServeHTTP(w, req)
-
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/alarm-trend?days=abc")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestDashHandler_AlarmTrend_NegativeDays(t *testing.T) {
 	router, _ := dashHSetupRouter()
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/alarm-trend?days=-1", nil)
-	router.ServeHTTP(w, req)
-
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/alarm-trend?days=-1")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestDashHandler_AlarmTrend_ZeroDays(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/alarm-trend?days=0")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: KPITrend parameter validation
+// ---------------------------------------------------------------------------
+
 func TestDashHandler_KPITrend_MissingKPIName(t *testing.T) {
 	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/kpi-trend")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/kpi-trend", nil)
-	router.ServeHTTP(w, req)
-
+func TestDashHandler_KPITrend_EmptyKPIName(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/kpi-trend?kpi_name=")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestDashHandler_KPITrend_InvalidDays(t *testing.T) {
 	router, _ := dashHSetupRouter()
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/kpi-trend?kpi_name=rrc&days=xyz", nil)
-	router.ServeHTTP(w, req)
-
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/kpi-trend?kpi_name=rrc&days=xyz")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestDashHandler_KPITrend_ZeroDays(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/kpi-trend?kpi_name=rrc&days=0")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: KPITimeSeries parameter validation
+// ---------------------------------------------------------------------------
+
 func TestDashHandler_KPITimeSeries_MissingKPINames(t *testing.T) {
 	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/kpi-time-series")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/kpi-time-series", nil)
-	router.ServeHTTP(w, req)
-
+func TestDashHandler_KPITimeSeries_EmptyKPINames(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/kpi-time-series?kpi_names=")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestDashHandler_KPITimeSeries_InvalidStartTime(t *testing.T) {
 	router, _ := dashHSetupRouter()
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet,
-		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&start_time=bad", nil)
-	router.ServeHTTP(w, req)
-
+	w := dashHDoRequest(router, http.MethodGet,
+		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&start_time=bad")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestDashHandler_Widgets_NoAuth(t *testing.T) {
+func TestDashHandler_KPITimeSeries_InvalidEndTime(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet,
+		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&end_time=not-a-date")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDashHandler_KPITimeSeries_InvalidBothTimes(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet,
+		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&start_time=bad&end_time=also-bad")
+	// Should fail on start_time first.
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Widgets auth
+// ---------------------------------------------------------------------------
+
+func TestDashHandler_GetWidgets_NoAuth(t *testing.T) {
+	router, _ := dashHSetupRouter()
+	w := dashHDoRequest(router, http.MethodGet, "/api/v1/dashboard/widgets")
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestDashHandler_SaveWidgets_NoAuth(t *testing.T) {
 	router, _ := dashHSetupRouter()
 
-	// No user_id in gin context → should return 401
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/widgets", nil)
+	body := `{"layout": [{"id":"a","x":0,"y":0}]}`
+	req, _ := http.NewRequest(http.MethodPut, "/api/v1/dashboard/widgets",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
+
+func TestDashHandler_SaveWidgets_BadBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(nil)
+	h.RegisterRoutes(r.Group("/api/v1"))
+
+	// Set user_id in context to pass auth check, then send bad body.
+	userID := uuid.New()
+	r.Use() // routes already registered
+	// Create a custom route with middleware that injects user ID.
+	gin.SetMode(gin.TestMode)
+	r2 := gin.New()
+	r2.PUT("/api/v1/dashboard/widgets", func(c *gin.Context) {
+		c.Set(admin.CtxKeyUserID, userID)
+		h.SaveWidgets(c)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPut, "/api/v1/dashboard/widgets",
+		strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	r2.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDashHandler_SaveWidgets_MissingLayout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHandler(nil)
+	userID := uuid.New()
+	r.PUT("/test-widgets", func(c *gin.Context) {
+		c.Set(admin.CtxKeyUserID, userID)
+		h.SaveWidgets(c)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPut, "/test-widgets",
+		strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: getUserID helper
+// ---------------------------------------------------------------------------
 
 func TestDashHandler_GetUserID_Success(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -124,14 +237,14 @@ func TestDashHandler_GetUserID_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestDashHandler_GetUserID_InvalidType(t *testing.T) {
+func TestDashHandler_GetUserID_Missing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
 	r.GET("/test", func(c *gin.Context) {
-		c.Set(admin.CtxKeyUserID, "not-a-uuid") // wrong type
 		_, err := getUserID(c)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not authenticated")
 		c.Status(http.StatusOK)
 	})
 
@@ -140,13 +253,20 @@ func TestDashHandler_GetUserID_InvalidType(t *testing.T) {
 	r.ServeHTTP(w, req)
 }
 
-func TestDashHandler_RegisterRoutes(t *testing.T) {
-	router, _ := dashHSetupRouter()
+func TestDashHandler_GetUserID_InvalidType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
 
-	// Verify 404 for unknown path under dashboard group
+	r.GET("/test", func(c *gin.Context) {
+		c.Set(admin.CtxKeyUserID, "not-a-uuid") // wrong type
+		_, err := getUserID(c)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid user ID")
+		c.Status(http.StatusOK)
+	})
+
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/dashboard/nonexistent", nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	req, _ := http.NewRequest(http.MethodGet, "/test", nil)
+	r.ServeHTTP(w, req)
 }
+

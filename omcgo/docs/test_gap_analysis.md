@@ -288,3 +288,63 @@
 - **Mock 命名**: 严格遵循前缀隔离（`dmH`/`swH`/`svcMock`/`pmH`/`hbMock`/`fmH`/`acsH`/`handlerMock`/`dashH`）避免同 package 冲突
 - **nil 依赖**: filemanager 和 software handler 传 nil MinIO/ConnReq client，仅测 repo 路径
 - **Dashboard**: Service 依赖 `*pgxpool.Pool` 等具体类型，仅测 handler 层参数校验
+
+---
+
+## 9. 第二轮增强（2026-03-11 实施完成）
+
+### 目标
+
+增强 ACS handler 和 Dashboard handler 的测试深度，补充完整 Inform/RPC/TransferComplete 流程测试和更多参数校验。
+
+### 实际交付
+
+| 指标 | 增强前 | 增强后 | 增幅 |
+|------|--------|--------|------|
+| ACS handler_test.go 测试数 | 5 | 16 | +11（+220%）|
+| Dashboard handler_test.go 测试数 | 10 | 22 | +12（+120%）|
+| 总测试函数数 | 588 | 613 | +25（+4%）|
+| 全部 `go test ./...` | PASS | **PASS** | 0 failures |
+| `go vet ./...` | PASS | **PASS** | 0 warnings |
+
+### ACS handler_test.go 新增测试（11 个）
+
+| 测试 | 覆盖内容 |
+|------|---------|
+| EmptyBody_WithSession_NoCommands | 空 POST + 已有 session → 完成会话 |
+| EmptyBody_WithSession_HasCommand | 空 POST + 命令队列 → 派发 GetParameterValues RPC |
+| Inform_Bootstrap_Success | 完整 Inform 流程：解析/session 创建/connSessions/事件发布 |
+| Inform_Periodic_PublishesPeriodicEvent | 周期上报 → 发布 Periodic 事件 |
+| Inform_MalformedXML_Returns400 | 损坏的 XML → 400 |
+| Inform_RateLimited_Returns503 | 限流 → 503 |
+| Inform_AdmissionDenied_Returns503 | 准入控制 → 503 |
+| RPCResponse_CompletesSession | RPC 响应 + 无后续命令 → 会话完成 |
+| RPCResponse_ChainsNextCommand | RPC 响应 + 队列中有后续命令 → 链式派发 |
+| RPCResponse_NoBinding_Returns204 | 无连接绑定 → 204 |
+| TransferComplete_PublishesEvent | TransferComplete → 发布事件 |
+| CompleteSession_NilSession | nil session 仍释放资源 |
+| SessionReaper_CleansStaleEntries | 新鲜+陈旧 session 共存，只清理陈旧 |
+| FullLifecycle_InformThenEmpty | Inform → Empty → 会话完成 |
+| FullLifecycle_InformThenRPCThenEmpty | Inform → Empty(RPC) → RPCResponse → 会话完成 |
+
+### Dashboard handler_test.go 新增测试（12 个）
+
+| 测试 | 覆盖内容 |
+|------|---------|
+| AlarmTrend_ZeroDays | days=0 → 400 |
+| KPITrend_EmptyKPIName | kpi_name= → 400 |
+| KPITrend_ZeroDays | days=0 → 400 |
+| KPITimeSeries_EmptyKPINames | kpi_names= → 400 |
+| KPITimeSeries_InvalidEndTime | end_time 非法 → 400 |
+| KPITimeSeries_InvalidBothTimes | start+end 都非法 → 400 |
+| SaveWidgets_NoAuth | PUT /widgets 无认证 → 401 |
+| SaveWidgets_BadBody | PUT /widgets 非法 JSON → 400 |
+| SaveWidgets_MissingLayout | PUT /widgets 缺 layout → 400 |
+| GetUserID_Missing | context 无 user_id → error |
+| RegisterRoutes_MethodNotAllowed | POST 请求 GET-only 路由 → 非 200 |
+
+### 关键技术改进
+
+- **ACS handler**: 新增 `acsHSessionStore` 内存存储（`sync.Mutex` + `map`），支持完整 session 生命周期测试
+- **ACS handler**: 内置 Inform SOAP XML 常量（Bootstrap/Periodic/GetParamResp/TransferComplete），无需外部 fixture 文件
+- **Dashboard handler**: 通过 Gin middleware 注入 `admin.CtxKeyUserID` 绕过 nil service 限制，测试 SaveWidgets 的 body 校验

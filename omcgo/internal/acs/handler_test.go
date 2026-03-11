@@ -2,9 +2,11 @@ package acs
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,43 +16,61 @@ import (
 	"github.com/omcgo/omcgo/internal/common/event"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
 // ---------------------------------------------------------------------------
-// Mock types (acsH prefix to avoid conflicts with other _test.go files)
+// Mocks (acsH prefix to avoid conflicts with other _test.go files)
 // ---------------------------------------------------------------------------
 
 type acsHSessionStore struct {
-	createFn  func(ctx context.Context, deviceSN string, session *Session) error
-	getFn     func(ctx context.Context, deviceSN string) (*Session, error)
-	updateFn  func(ctx context.Context, deviceSN string, session *Session) error
-	deleteFn  func(ctx context.Context, deviceSN string) error
-	setTTLFn  func(ctx context.Context, deviceSN string, ttl time.Duration) error
+	mu       sync.Mutex
+	sessions map[string]*Session // in-memory store keyed by deviceSN
+	createFn func(ctx context.Context, deviceSN string, session *Session) error
+	getFn    func(ctx context.Context, deviceSN string) (*Session, error)
+	updateFn func(ctx context.Context, deviceSN string, session *Session) error
+	deleteFn func(ctx context.Context, deviceSN string) error
+	setTTLFn func(ctx context.Context, deviceSN string, ttl time.Duration) error
+}
+
+func newAcsHSessionStore() *acsHSessionStore {
+	return &acsHSessionStore{sessions: make(map[string]*Session)}
 }
 
 func (m *acsHSessionStore) Create(ctx context.Context, deviceSN string, session *Session) error {
 	if m.createFn != nil {
 		return m.createFn(ctx, deviceSN, session)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessions[deviceSN] = session
 	return nil
 }
 func (m *acsHSessionStore) Get(ctx context.Context, deviceSN string) (*Session, error) {
 	if m.getFn != nil {
 		return m.getFn(ctx, deviceSN)
 	}
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessions[deviceSN], nil
 }
 func (m *acsHSessionStore) Update(ctx context.Context, deviceSN string, session *Session) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, deviceSN, session)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessions[deviceSN] = session
 	return nil
 }
 func (m *acsHSessionStore) Delete(ctx context.Context, deviceSN string) error {
 	if m.deleteFn != nil {
 		return m.deleteFn(ctx, deviceSN)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, deviceSN)
 	return nil
 }
 func (m *acsHSessionStore) SetTTL(ctx context.Context, deviceSN string, ttl time.Duration) error {
@@ -61,28 +81,52 @@ func (m *acsHSessionStore) SetTTL(ctx context.Context, deviceSN string, ttl time
 }
 
 type acsHCmdQueue struct {
+	mu    sync.Mutex
+	queue []*cmdqueue.Command
 	popFn func(ctx context.Context, deviceSN string) (*cmdqueue.Command, error)
 }
 
-func (m *acsHCmdQueue) Push(_ context.Context, _ string, _ *cmdqueue.Command) error { return nil }
+func (m *acsHCmdQueue) Push(_ context.Context, _ string, cmd *cmdqueue.Command) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queue = append(m.queue, cmd)
+	return nil
+}
 func (m *acsHCmdQueue) Pop(ctx context.Context, deviceSN string) (*cmdqueue.Command, error) {
 	if m.popFn != nil {
 		return m.popFn(ctx, deviceSN)
 	}
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.queue) == 0 {
+		return nil, nil
+	}
+	cmd := m.queue[0]
+	m.queue = m.queue[1:]
+	return cmd, nil
 }
 func (m *acsHCmdQueue) Peek(_ context.Context, _ string) (*cmdqueue.Command, error) { return nil, nil }
 func (m *acsHCmdQueue) Len(_ context.Context, _ string) (int64, error)              { return 0, nil }
 func (m *acsHCmdQueue) Clear(_ context.Context, _ string) error                     { return nil }
 
 type acsHEventBus struct {
+	mu        sync.Mutex
+	published []acsHPublishedEvent
 	publishFn func(ctx context.Context, subject string, evt event.Event) error
+}
+
+type acsHPublishedEvent struct {
+	Subject string
+	Event   event.Event
 }
 
 func (m *acsHEventBus) Publish(ctx context.Context, subject string, evt event.Event) error {
 	if m.publishFn != nil {
 		return m.publishFn(ctx, subject, evt)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.published = append(m.published, acsHPublishedEvent{Subject: subject, Event: evt})
 	return nil
 }
 func (m *acsHEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subscription, error) {
@@ -102,12 +146,16 @@ func (s *acsHSubscription) Unsubscribe() error { return nil }
 // ---------------------------------------------------------------------------
 
 func newTestACSHandler() *Handler {
+	return newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHCmdQueue{}, &acsHEventBus{})
+}
+
+func newTestACSHandlerWithDeps(store SessionStore, cmdQ cmdqueue.CommandQueue, bus event.EventBus) *Handler {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
 	return &Handler{
-		sessionStore:  &acsHSessionStore{},
-		commandQueue:  &acsHCmdQueue{},
-		eventBus:      &acsHEventBus{},
+		sessionStore:  store,
+		commandQueue:  cmdQ,
+		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
 		rpcDispatcher: rpc.NewDispatcher(),
 		rateLimiter:   NewDeviceRateLimiter(100, 100),
@@ -117,8 +165,115 @@ func newTestACSHandler() *Handler {
 	}
 }
 
+// Minimal valid Inform SOAP body for TEST-SN-001 with bootstrap event.
+const acsHInformBootstrapXML = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">100001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>TestVendor</Manufacturer>
+        <OUI>001122</OUI>
+        <ProductClass>SmallCell-LTE</ProductClass>
+        <SerialNumber>TEST-SN-001</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode>0 BOOTSTRAP</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-03-05T10:00:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value xsi:type="xsd:string">FW-2.1.0</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>`
+
+// Minimal valid Inform SOAP body with periodic event.
+const acsHInformPeriodicXML = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">100002</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>TestVendor</Manufacturer>
+        <OUI>001122</OUI>
+        <ProductClass>SmallCell-LTE</ProductClass>
+        <SerialNumber>TEST-SN-002</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode>2 PERIODIC</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-03-05T10:00:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[0]">
+      </ParameterList>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>`
+
+// GetParameterValuesResponse SOAP body.
+const acsHGetParamRespXML = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">100001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value>FW-2.1.0</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soap:Body>
+</soap:Envelope>`
+
+// TransferComplete SOAP body.
+const acsHTransferCompleteXML = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">TC-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:TransferComplete>
+      <CommandKey>upgrade-001</CommandKey>
+      <FaultStruct>
+        <FaultCode>0</FaultCode>
+        <FaultString></FaultString>
+      </FaultStruct>
+      <StartTime>2026-03-05T10:00:00Z</StartTime>
+      <CompleteTime>2026-03-05T10:01:00Z</CompleteTime>
+    </cwmp:TransferComplete>
+  </soap:Body>
+</soap:Envelope>`
+
 // ---------------------------------------------------------------------------
-// Tests
+// Tests: HTTP method validation
 // ---------------------------------------------------------------------------
 
 func TestServeHTTP_NonPOST_Returns405(t *testing.T) {
@@ -133,16 +288,105 @@ func TestServeHTTP_NonPOST_Returns405(t *testing.T) {
 	}
 }
 
-func TestServeHTTP_EmptyBody_Returns204(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Tests: Empty body
+// ---------------------------------------------------------------------------
+
+func TestServeHTTP_EmptyBody_NoSession_Returns204(t *testing.T) {
 	h := newTestACSHandler()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
 	h.ServeHTTP(w, req)
 
-	// Empty body with no session binding → 204
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }
+
+func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+
+	// Simulate a prior Inform that created a session and connection binding.
+	deviceSN := "TEST-SN-EMPTY"
+	remoteAddr := "192.168.1.1:9999"
+	session := &Session{
+		DeviceSN:  deviceSN,
+		State:     StateInformReceived,
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		CWMPId:    "test-cwmp-id",
+	}
+	store.Create(context.Background(), deviceSN, session)
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
+	h.admission.Acquire()
+	h.metrics.ActiveSessions.Inc()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req.RemoteAddr = remoteAddr
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	// Session should be marked complete.
+	s, _ := store.Get(context.Background(), deviceSN)
+	require.NotNil(t, s)
+	assert.Equal(t, StateComplete, s.State)
+	// connSessions entry should be cleaned up.
+	_, loaded := h.connSessions.Load(remoteAddr)
+	assert.False(t, loaded, "connSessions entry should be cleaned up")
+}
+
+func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
+	store := newAcsHSessionStore()
+	cmdQ := &acsHCmdQueue{}
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
+
+	deviceSN := "TEST-SN-CMD"
+	remoteAddr := "192.168.1.1:8888"
+	session := &Session{
+		DeviceSN:  deviceSN,
+		State:     StateInformReceived,
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		CWMPId:    "cmd-cwmp-id",
+	}
+	store.Create(context.Background(), deviceSN, session)
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
+	h.admission.Acquire()
+	h.metrics.ActiveSessions.Inc()
+
+	// Queue a GetParameterValues command.
+	params, _ := json.Marshal(map[string]interface{}{
+		"names": []string{"Device.DeviceInfo.SoftwareVersion"},
+	})
+	cmdQ.Push(context.Background(), deviceSN, &cmdqueue.Command{
+		ID:         "cmd-1",
+		Method:     "GetParameterValues",
+		Params:     params,
+		CommandKey: "test-key",
+		CreatedAt:  time.Now(),
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req.RemoteAddr = remoteAddr
+	h.ServeHTTP(w, req)
+
+	// Should return 200 with SOAP XML (the RPC request).
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
+	assert.Contains(t, w.Body.String(), "GetParameterValues")
+	// Session should transition to RPC_PENDING.
+	s, _ := store.Get(context.Background(), deviceSN)
+	require.NotNil(t, s)
+	assert.Equal(t, StateRPCPending, s.State)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Unknown SOAP method
+// ---------------------------------------------------------------------------
 
 func TestServeHTTP_UnknownSOAP_Returns400(t *testing.T) {
 	h := newTestACSHandler()
@@ -155,15 +399,246 @@ func TestServeHTTP_UnknownSOAP_Returns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestCompleteSession(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Tests: Inform flow
+// ---------------------------------------------------------------------------
+
+func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	req.RemoteAddr = "192.168.1.1:5000"
+	h.ServeHTTP(w, req)
+
+	// Should return 200 with InformResponse.
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "InformResponse")
+	assert.Contains(t, w.Body.String(), "100001") // CWMP ID echoed back
+
+	// Session should be created with StateInformReceived.
+	s, _ := store.Get(context.Background(), "TEST-SN-001")
+	require.NotNil(t, s)
+	assert.Equal(t, StateInformReceived, s.State)
+	assert.Equal(t, "100001", s.CWMPId)
+
+	// connSessions should have the binding.
+	val, loaded := h.connSessions.Load("192.168.1.1:5000")
+	assert.True(t, loaded)
+	assert.Equal(t, "TEST-SN-001", val.(connSessionEntry).DeviceSN)
+
+	// Event should be published with bootstrap subject.
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	require.Len(t, bus.published, 1)
+	assert.Equal(t, event.SubjectDeviceBootstrap, bus.published[0].Subject)
+}
+
+func TestServeHTTP_Inform_Periodic_PublishesPeriodicEvent(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHCmdQueue{}, bus)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.RemoteAddr = "192.168.1.2:5000"
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	require.Len(t, bus.published, 1)
+	assert.Equal(t, event.SubjectDevicePeriodic, bus.published[0].Subject)
+}
+
+func TestServeHTTP_Inform_MalformedXML_Returns400(t *testing.T) {
+	h := newTestACSHandler()
+
+	w := httptest.NewRecorder()
+	body := `<?xml version="1.0"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+	<soap:Body><cwmp:Inform xmlns:cwmp="urn:dslforum-org:cwmp-1-0"><broken></cwmp:Inform></soap:Body></soap:Envelope>`
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(body))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Rate limiting
+// ---------------------------------------------------------------------------
+
+func TestServeHTTP_Inform_RateLimited_Returns503(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	// Set very low rate limit: 1 per minute, burst 1.
+	h.rateLimiter = NewDeviceRateLimiter(1, 1)
+
+	// First request should succeed.
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	req1.RemoteAddr = "10.0.0.1:1000"
+	h.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+
+	// Second request from same device should be rate limited.
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	req2.RemoteAddr = "10.0.0.1:1001"
+	h.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusServiceUnavailable, w2.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Admission control
+// ---------------------------------------------------------------------------
+
+func TestServeHTTP_Inform_AdmissionDenied_Returns503(t *testing.T) {
+	h := newTestACSHandler()
+	// Set max sessions to 1 and fill it.
+	h.admission = NewAdmissionController(1)
+	h.admission.Acquire()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.RemoteAddr = "10.0.0.2:2000"
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: RPC response handling
+// ---------------------------------------------------------------------------
+
+func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+
+	deviceSN := "TEST-SN-001"
+	remoteAddr := "192.168.1.1:7777"
+	session := &Session{
+		DeviceSN:  deviceSN,
+		State:     StateRPCPending,
+		LastRPC:   "GetParameterValues",
+		StartedAt: time.Now().Add(-2 * time.Second),
+		UpdatedAt: time.Now(),
+		CWMPId:    "100001",
+	}
+	store.Create(context.Background(), deviceSN, session)
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
+	h.admission.Acquire()
+	h.metrics.ActiveSessions.Inc()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
+	req.RemoteAddr = remoteAddr
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	// Session should be complete.
+	s, _ := store.Get(context.Background(), deviceSN)
+	require.NotNil(t, s)
+	assert.Equal(t, StateComplete, s.State)
+	// RPC response event should be published.
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	require.GreaterOrEqual(t, len(bus.published), 1)
+	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+}
+
+func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
+	store := newAcsHSessionStore()
+	cmdQ := &acsHCmdQueue{}
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
+
+	deviceSN := "TEST-SN-001"
+	remoteAddr := "192.168.1.1:6666"
+	session := &Session{
+		DeviceSN:  deviceSN,
+		State:     StateRPCPending,
+		LastRPC:   "GetParameterValues",
+		StartedAt: time.Now().Add(-2 * time.Second),
+		UpdatedAt: time.Now(),
+		CWMPId:    "100001",
+	}
+	store.Create(context.Background(), deviceSN, session)
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
+	h.admission.Acquire()
+	h.metrics.ActiveSessions.Inc()
+
+	// Queue another command to be dispatched after the RPC response.
+	rebootCmd := &cmdqueue.Command{
+		ID:         "cmd-reboot",
+		Method:     "Reboot",
+		Params:     json.RawMessage(`{}`),
+		CommandKey: "reboot-key",
+		CreatedAt:  time.Now(),
+	}
+	cmdQ.Push(context.Background(), deviceSN, rebootCmd)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
+	req.RemoteAddr = remoteAddr
+	h.ServeHTTP(w, req)
+
+	// Should return 200 with the next RPC request (Reboot).
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "Reboot")
+	// Session should be RPC_PENDING with LastRPC=Reboot.
+	s, _ := store.Get(context.Background(), deviceSN)
+	require.NotNil(t, s)
+	assert.Equal(t, StateRPCPending, s.State)
+	assert.Equal(t, "Reboot", s.LastRPC)
+}
+
+func TestServeHTTP_RPCResponse_NoBinding_Returns204(t *testing.T) {
+	h := newTestACSHandler()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
+	req.RemoteAddr = "10.0.0.99:1234"
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: TransferComplete
+// ---------------------------------------------------------------------------
+
+func TestServeHTTP_TransferComplete_PublishesEvent(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHCmdQueue{}, bus)
+
+	remoteAddr := "192.168.1.1:4444"
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: "TEST-SN-TC", CreatedAt: time.Now()})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHTransferCompleteXML))
+	req.RemoteAddr = remoteAddr
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "TransferCompleteResponse")
+
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	require.Len(t, bus.published, 1)
+	assert.Equal(t, event.SubjectDeviceTransferComplete, bus.published[0].Subject)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: completeSession
+// ---------------------------------------------------------------------------
+
+func TestCompleteSession_ReleasesResources(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
-	store := &acsHSessionStore{
-		updateFn: func(_ context.Context, _ string, s *Session) error {
-			assert.Equal(t, StateComplete, s.State)
-			return nil
-		},
-	}
+	store := newAcsHSessionStore()
 
 	h := &Handler{
 		sessionStore: store,
@@ -172,9 +647,10 @@ func TestCompleteSession(t *testing.T) {
 		logger:       zap.NewNop(),
 	}
 
-	// Pre-increment so completeSession can decrement
 	h.metrics.ActiveSessions.Inc()
 	h.admission.Acquire()
+	remoteAddr := "192.168.1.1:1234"
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: "SN-COMPLETE", CreatedAt: time.Now()})
 
 	session := &Session{
 		DeviceSN:  "SN-COMPLETE",
@@ -183,12 +659,41 @@ func TestCompleteSession(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 
-	h.completeSession(context.Background(), "SN-COMPLETE", "192.168.1.1:1234", session)
+	h.completeSession(context.Background(), "SN-COMPLETE", remoteAddr, session)
 
 	assert.Equal(t, StateComplete, session.State)
+	assert.Equal(t, int64(0), h.admission.Current())
+	_, loaded := h.connSessions.Load(remoteAddr)
+	assert.False(t, loaded, "connSessions entry should be removed")
 }
 
-func TestStartSessionReaper(t *testing.T) {
+func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewACSMetrics(reg)
+
+	h := &Handler{
+		sessionStore: newAcsHSessionStore(),
+		admission:    NewAdmissionController(100),
+		metrics:      metrics,
+		logger:       zap.NewNop(),
+	}
+
+	h.admission.Acquire()
+	remoteAddr := "192.168.1.1:5555"
+	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: "SN-NIL", CreatedAt: time.Now()})
+
+	h.completeSession(context.Background(), "SN-NIL", remoteAddr, nil)
+
+	assert.Equal(t, int64(0), h.admission.Current())
+	_, loaded := h.connSessions.Load(remoteAddr)
+	assert.False(t, loaded)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Session reaper
+// ---------------------------------------------------------------------------
+
+func TestStartSessionReaper_CleansStaleEntries(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
 	admission := NewAdmissionController(100)
@@ -199,22 +704,108 @@ func TestStartSessionReaper(t *testing.T) {
 		logger:    zap.NewNop(),
 	}
 
-	// Store a stale session
+	// Store a stale session (10 min old) and a fresh one.
 	h.connSessions.Store("192.168.1.1:9999", connSessionEntry{
 		DeviceSN:  "SN-STALE",
 		CreatedAt: time.Now().Add(-10 * time.Minute),
 	})
+	h.connSessions.Store("192.168.1.2:8888", connSessionEntry{
+		DeviceSN:  "SN-FRESH",
+		CreatedAt: time.Now(),
+	})
 
-	h.metrics.ActiveSessions.Inc()
+	h.metrics.ActiveSessions.Add(2)
+	h.admission.Acquire()
 	h.admission.Acquire()
 
-	// Start reaper with very short interval and low maxAge
 	h.startSessionReaper(50*time.Millisecond, 1*time.Second)
-
-	// Wait for reaper to run
 	time.Sleep(200 * time.Millisecond)
 
-	// Stale entry should be reaped
+	// Stale entry should be reaped.
 	_, loaded := h.connSessions.Load("192.168.1.1:9999")
 	assert.False(t, loaded, "stale session should be reaped")
+	// Fresh entry should still exist.
+	_, loaded = h.connSessions.Load("192.168.1.2:8888")
+	assert.True(t, loaded, "fresh session should not be reaped")
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Full Inform → Empty → Complete lifecycle
+// ---------------------------------------------------------------------------
+
+func TestFullSessionLifecycle_InformThenEmpty(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	remoteAddr := "192.168.1.100:3000"
+
+	// Step 1: Send Inform.
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	req1.RemoteAddr = remoteAddr
+	h.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+	assert.Contains(t, w1.Body.String(), "InformResponse")
+
+	// Step 2: Send empty POST (no commands queued).
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req2.RemoteAddr = remoteAddr
+	h.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusNoContent, w2.Code)
+
+	// Session should be complete.
+	s, _ := store.Get(context.Background(), "TEST-SN-001")
+	require.NotNil(t, s)
+	assert.Equal(t, StateComplete, s.State)
+	// Connection binding should be cleaned up.
+	_, loaded := h.connSessions.Load(remoteAddr)
+	assert.False(t, loaded)
+}
+
+func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
+	store := newAcsHSessionStore()
+	cmdQ := &acsHCmdQueue{}
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
+	remoteAddr := "192.168.1.100:4000"
+
+	// Queue a command before the Inform.
+	params, _ := json.Marshal(map[string]interface{}{
+		"names": []string{"Device.DeviceInfo.SoftwareVersion"},
+	})
+	cmdQ.Push(context.Background(), "TEST-SN-001", &cmdqueue.Command{
+		ID:         "cmd-gpv",
+		Method:     "GetParameterValues",
+		Params:     params,
+		CommandKey: "gpv-key",
+		CreatedAt:  time.Now(),
+	})
+
+	// Step 1: Inform.
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	req1.RemoteAddr = remoteAddr
+	h.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+
+	// Step 2: Empty POST → should dispatch the queued command.
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req2.RemoteAddr = remoteAddr
+	h.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Contains(t, w2.Body.String(), "GetParameterValues")
+
+	// Step 3: Device sends GetParameterValuesResponse.
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
+	req3.RemoteAddr = remoteAddr
+	h.ServeHTTP(w3, req3)
+	assert.Equal(t, http.StatusNoContent, w3.Code)
+
+	// Session complete.
+	s, _ := store.Get(context.Background(), "TEST-SN-001")
+	require.NotNil(t, s)
+	assert.Equal(t, StateComplete, s.State)
 }
