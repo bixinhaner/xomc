@@ -68,7 +68,7 @@ func fmHSetupRouter(repo FileRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// Pass nil for minioClient — only test endpoints that don't use MinIO
-	h := NewHandler(repo, nil, "test-bucket", zap.NewNop())
+	h := NewHandler(repo, nil, "test-bucket", nil, zap.NewNop())
 	h.RegisterRoutes(r.Group("/api/v1"))
 	return r
 }

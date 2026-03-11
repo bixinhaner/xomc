@@ -134,6 +134,7 @@ func Setup(r *gin.Engine, deps *Deps) {
 	pmKPIRepo := kpi.NewPgKPIRepository(tsPool)
 	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, carrierRegistry, logger)
 	pmTaskRepo := pm.NewPgTaskRepository(pgPool)
+	pmFileStore := pm.NewPgPMFileStore(pgPool)
 
 	// Alarm module components
 	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
@@ -200,7 +201,7 @@ func Setup(r *gin.Engine, deps *Deps) {
 	topologyHandler.RegisterRoutes(v1)
 
 	// PM routes
-	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, pmTaskRepo, logger)
+	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, pmTaskRepo, pmFileStore, minioClient, cfg.MinIO.Buckets.PMFiles, logger)
 	pmHandler.RegisterRoutes(v1)
 
 	// Alarm routes
@@ -254,14 +255,14 @@ func Setup(r *gin.Engine, deps *Deps) {
 	backupTaskRepo := backup.NewPgTaskRepository(pgPool)
 	backupScheduleRepo := backup.NewPgScheduleRepository(pgPool)
 	ftpRepo := backup.NewPgFTPConfigRepository(pgPool)
-	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, logger)
+	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, eventBus, logger)
 	backupHandler := backup.NewHandler(backupService, ftpRepo, logger)
 	backupHandler.RegisterRoutes(v1)
 	logger.Info("backup module initialized")
 
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(pgPool)
-	fileHandler := filemanager.NewHandler(fileRepo, minioClient, cfg.MinIO.Buckets.ConfigBackup, logger)
+	fileHandler := filemanager.NewHandler(fileRepo, minioClient, cfg.MinIO.Buckets.ConfigBackup, cmdQueue, logger)
 	fileHandler.RegisterRoutes(v1)
 	logger.Info("file manager module initialized")
 
@@ -302,8 +303,8 @@ func Setup(r *gin.Engine, deps *Deps) {
 	// Report module
 	reportDefRepo := report.NewPgDefinitionRepository(pgPool)
 	reportRecordRepo := report.NewPgRecordRepository(pgPool)
-	reportService := report.NewService(reportDefRepo, reportRecordRepo, logger)
-	reportHandler := report.NewHandler(reportService, logger)
+	reportService := report.NewService(reportDefRepo, reportRecordRepo, eventBus, logger)
+	reportHandler := report.NewHandler(reportService, minioClient, cfg.MinIO.Buckets.Reports, logger)
 	reportHandler.RegisterRoutes(v1)
 	logger.Info("report module initialized")
 

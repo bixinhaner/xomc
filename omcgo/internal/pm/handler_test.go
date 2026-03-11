@@ -91,7 +91,7 @@ func pmHNewEngine() *kpi.KPIEngine {
 func pmHSetupRouter(cr counter.CounterRepository, kr kpi.KPIRepository, engine *kpi.KPIEngine, tr TaskRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(cr, kr, engine, tr, zap.NewNop())
+	h := NewHandler(cr, kr, engine, tr, nil, nil, "pm-files", zap.NewNop())
 	h.RegisterRoutes(r.Group(""))
 	return r
 }

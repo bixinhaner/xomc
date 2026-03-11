@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/event"
 	"github.com/omcgo/omcgo/internal/model"
 )
 
@@ -15,14 +16,16 @@ import (
 type Service struct {
 	defRepo    DefinitionRepository
 	recordRepo RecordRepository
+	eventBus   event.EventBus
 	logger     *zap.Logger
 }
 
 // NewService creates a new report Service.
-func NewService(defRepo DefinitionRepository, recordRepo RecordRepository, logger *zap.Logger) *Service {
+func NewService(defRepo DefinitionRepository, recordRepo RecordRepository, eventBus event.EventBus, logger *zap.Logger) *Service {
 	return &Service{
 		defRepo:    defRepo,
 		recordRepo: recordRepo,
+		eventBus:   eventBus,
 		logger:     logger.Named("report"),
 	}
 }
@@ -148,6 +151,17 @@ func (s *Service) Generate(ctx context.Context, definitionID uuid.UUID, period s
 		zap.String("definition_id", definitionID.String()),
 		zap.String("period", period),
 	)
+
+	// Publish event to trigger async generator worker
+	if s.eventBus != nil {
+		genEvt, err := event.NewEvent(event.SubjectReportGenerateRequested, map[string]interface{}{
+			"record_id":     record.ID.String(),
+			"definition_id": definitionID.String(),
+		})
+		if err == nil {
+			_ = s.eventBus.Publish(ctx, event.SubjectReportGenerateRequested, genEvt)
+		}
+	}
 
 	return record, nil
 }

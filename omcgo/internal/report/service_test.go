@@ -62,6 +62,7 @@ func (m *mockDefRepo) List(ctx context.Context, filter DefinitionFilter) (*model
 type mockRecordRepo struct {
 	createFn  func(ctx context.Context, record *ReportRecord) error
 	getByIDFn func(ctx context.Context, id uuid.UUID) (*ReportRecord, error)
+	updateFn  func(ctx context.Context, record *ReportRecord) error
 	listFn    func(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error)
 }
 
@@ -79,6 +80,13 @@ func (m *mockRecordRepo) GetByID(ctx context.Context, id uuid.UUID) (*ReportReco
 	return nil, nil
 }
 
+func (m *mockRecordRepo) Update(ctx context.Context, record *ReportRecord) error {
+	if m.updateFn != nil {
+		return m.updateFn(ctx, record)
+	}
+	return nil
+}
+
 func (m *mockRecordRepo) List(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error) {
 	if m.listFn != nil {
 		return m.listFn(ctx, filter)
@@ -91,7 +99,7 @@ func (m *mockRecordRepo) List(ctx context.Context, filter RecordFilter) (*model.
 // ---------------------------------------------------------------------------
 
 func newTestService(defRepo *mockDefRepo, recordRepo *mockRecordRepo) *Service {
-	return NewService(defRepo, recordRepo, zap.NewNop())
+	return NewService(defRepo, recordRepo, nil, zap.NewNop())
 }
 
 // ---------------------------------------------------------------------------

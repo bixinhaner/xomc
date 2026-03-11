@@ -1,10 +1,12 @@
 package report
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/errors"
@@ -13,15 +15,19 @@ import (
 
 // Handler provides HTTP handlers for report management REST API.
 type Handler struct {
-	service *Service
-	logger  *zap.Logger
+	service     *Service
+	minioClient *minio.Client
+	reportBkt   string
+	logger      *zap.Logger
 }
 
 // NewHandler creates a new report Handler.
-func NewHandler(service *Service, logger *zap.Logger) *Handler {
+func NewHandler(service *Service, minioClient *minio.Client, reportBkt string, logger *zap.Logger) *Handler {
 	return &Handler{
-		service: service,
-		logger:  logger.Named("report-handler"),
+		service:     service,
+		minioClient: minioClient,
+		reportBkt:   reportBkt,
+		logger:      logger.Named("report-handler"),
 	}
 }
 
@@ -285,6 +291,38 @@ func (h *Handler) DownloadRecord(c *gin.Context) {
 		return
 	}
 
+	// Stream from MinIO if the file is stored there
+	if record.MinioPath != "" && h.minioClient != nil {
+		obj, err := h.minioClient.GetObject(c.Request.Context(), h.reportBkt, record.MinioPath, minio.GetObjectOptions{})
+		if err != nil {
+			h.logger.Error("minio get object failed", zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("download report file: %w", err))
+			return
+		}
+		defer obj.Close()
+
+		stat, err := obj.Stat()
+		if err != nil {
+			h.logger.Error("minio stat failed", zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("get report file info: %w", err))
+			return
+		}
+
+		fileName := record.ReportName + "." + record.Format
+		contentType := "application/json"
+		if record.Format == "pdf" {
+			contentType = "application/pdf"
+		} else if record.Format == "xlsx" {
+			contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+		} else if record.Format == "csv" {
+			contentType = "text/csv"
+		}
+
+		c.Header("Content-Disposition", "attachment; filename="+fileName)
+		c.DataFromReader(http.StatusOK, stat.Size, contentType, obj, nil)
+		return
+	}
+
 	if record.DownloadURL != "" {
 		c.JSON(http.StatusOK, gin.H{
 			"url":       record.DownloadURL,
@@ -293,7 +331,7 @@ func (h *Handler) DownloadRecord(c *gin.Context) {
 		return
 	}
 
-	// Placeholder if no download URL yet
+	// No file available yet
 	c.JSON(http.StatusOK, gin.H{
 		"url":       "",
 		"file_name": record.ReportName + "." + record.Format,

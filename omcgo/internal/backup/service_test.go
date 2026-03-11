@@ -105,7 +105,7 @@ func (m *mockScheduleRepo) List(ctx context.Context, filter ScheduleFilter) (*mo
 // --- Helper ---
 
 func newTestService(taskRepo *mockTaskRepo, scheduleRepo *mockScheduleRepo) *Service {
-	return NewService(taskRepo, scheduleRepo, zap.NewNop())
+	return NewService(taskRepo, scheduleRepo, nil, zap.NewNop())
 }
 
 // --- Tests: CreateTask ---

@@ -190,7 +190,7 @@ func newTestBackupHandler() (*Handler, *fakeTaskRepo, *fakeScheduleRepo, *fakeFT
 	scheduleRepo := newFakeScheduleRepo()
 	ftpRepo := newFakeFTPConfigRepo()
 	logger := zap.NewNop()
-	svc := NewService(taskRepo, scheduleRepo, logger)
+	svc := NewService(taskRepo, scheduleRepo, nil, logger)
 	h := NewHandler(svc, ftpRepo, logger)
 	return h, taskRepo, scheduleRepo, ftpRepo
 }

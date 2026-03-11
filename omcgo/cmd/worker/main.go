@@ -9,7 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/carrier"
 	"github.com/omcgo/omcgo/internal/carrier/cmcc"
 	"github.com/omcgo/omcgo/internal/carrier/ctcc"
@@ -22,11 +25,14 @@ import (
 	natscomp "github.com/omcgo/omcgo/internal/components/nats"
 	"github.com/omcgo/omcgo/internal/components/postgres"
 	rediscomp "github.com/omcgo/omcgo/internal/components/redis"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/report"
+	"github.com/omcgo/omcgo/internal/transfer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -151,7 +157,49 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	}
 	logger.Info("MR collector started")
 
-	// 14. Start Prometheus metrics server
+	// 14. Create Transfer Bridge + Subscribe
+	deviceRepo := device.NewPgDeviceRepository(pgPool)
+	transferBridge := transfer.NewTransferBridge(
+		deviceRepo, minioClient,
+		cfg.MinIO.Buckets.PMFiles, cfg.MinIO.Buckets.MRFiles, cfg.MinIO.Buckets.Logs,
+		eventBus, logger,
+	)
+	if err := transferBridge.Subscribe(eventBus); err != nil {
+		logger.Warn("subscribe transfer bridge", zap.Error(err))
+	}
+	logger.Info("transfer bridge started")
+
+	// 15. Create Backup Executor + Subscribe
+	backupTaskRepo := backup.NewPgTaskRepository(pgPool)
+	cmdQueue := cmdqueue.NewRedisCommandQueue(redisClient)
+	connReqClient := connreq.NewClient(redisClient, logger)
+	backupExecutor := backup.NewBackupExecutor(
+		backupTaskRepo, deviceRepo, cmdQueue, connReqClient,
+		eventBus, logger,
+	)
+	if err := backupExecutor.Subscribe(eventBus); err != nil {
+		logger.Warn("subscribe backup executor", zap.Error(err))
+	}
+	logger.Info("backup executor started")
+
+	// 16. Create Report Generator + Subscribe
+	reportDefRepo := report.NewPgDefinitionRepository(pgPool)
+	reportRecordRepo := report.NewPgRecordRepository(pgPool)
+	reportBucket := cfg.MinIO.Buckets.Reports
+	if reportBucket == "" {
+		reportBucket = "reports"
+	}
+	reportGenerator := report.NewReportGenerator(
+		reportRecordRepo, reportDefRepo, kpiRepo, alarmPgStore,
+		minioClient, reportBucket,
+		eventBus, logger,
+	)
+	if err := reportGenerator.Subscribe(eventBus); err != nil {
+		logger.Warn("subscribe report generator", zap.Error(err))
+	}
+	logger.Info("report generator started")
+
+	// 17. Start Prometheus metrics server
 	metricsReg := prometheus.NewRegistry()
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(metricsReg, promhttp.HandlerOpts{}))
@@ -170,13 +218,13 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 	logger.Info("omcgo-worker ready, waiting for events...")
 
-	// 15. Wait for signal
+	// 18. Wait for signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
 	logger.Info("received signal, shutting down", zap.String("signal", sig.String()))
 
-	// 16. Graceful shutdown
+	// 19. Graceful shutdown
 	if err := gs.Shutdown(context.Background()); err != nil {
 		logger.Error("shutdown error", zap.Error(err))
 	}

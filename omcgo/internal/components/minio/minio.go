@@ -30,6 +30,7 @@ func EnsureBuckets(ctx context.Context, client *minio.Client, cfg appconfig.Buck
 		cfg.Firmware,
 		cfg.ConfigBackup,
 		cfg.Logs,
+		cfg.Reports,
 	}
 
 	for _, bucket := range buckets {

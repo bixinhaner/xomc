@@ -1,6 +1,7 @@
 package filemanager
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	commonerrors "github.com/omcgo/omcgo/internal/errors"
 	"github.com/omcgo/omcgo/internal/model"
 )
@@ -20,15 +22,17 @@ type Handler struct {
 	repo        FileRepository
 	minioClient *minio.Client
 	bucket      string
+	cmdQueue    cmdqueue.CommandQueue
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new file manager Handler.
-func NewHandler(repo FileRepository, minioClient *minio.Client, bucket string, logger *zap.Logger) *Handler {
+func NewHandler(repo FileRepository, minioClient *minio.Client, bucket string, cmdQueue cmdqueue.CommandQueue, logger *zap.Logger) *Handler {
 	return &Handler{
 		repo:        repo,
 		minioClient: minioClient,
 		bucket:      bucket,
+		cmdQueue:    cmdQueue,
 		logger:      logger.Named("filemanager-handler"),
 	}
 }
@@ -247,19 +251,65 @@ func (h *Handler) Distribute(c *gin.Context) {
 		return
 	}
 
-	// Queue a distribution task (simplified — full implementation deferred to worker integration)
+	if h.cmdQueue == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
+		return
+	}
+
 	taskID := uuid.New().String()
+	downloadURL := fmt.Sprintf("minio://%s/%s", h.bucket, mf.MinIOPath)
+	tr069FileType := mapFileTypeToTR069(mf.FileType)
+
+	var succeeded, failed int
+	for _, deviceSN := range req.DeviceSNs {
+		params, _ := json.Marshal(map[string]string{
+			"CommandKey": taskID,
+			"FileType":   tr069FileType,
+			"URL":        downloadURL,
+			"TargetFileName": mf.FileName,
+		})
+		cmd := &cmdqueue.Command{
+			Method:     "Download",
+			Params:     params,
+			Priority:   5,
+			CommandKey: fmt.Sprintf("dist-%s-%s", taskID, deviceSN),
+		}
+		if err := h.cmdQueue.Push(c.Request.Context(), deviceSN, cmd); err != nil {
+			h.logger.Warn("push download command failed",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err),
+			)
+			failed++
+			continue
+		}
+		succeeded++
+	}
 
 	h.logger.Info("file distribution queued",
 		zap.String("task_id", taskID),
 		zap.String("file_id", mf.ID.String()),
-		zap.Int("device_count", len(req.DeviceSNs)),
+		zap.Int("succeeded", succeeded),
+		zap.Int("failed", failed),
 	)
 
 	c.JSON(http.StatusOK, gin.H{
 		"task_id":      taskID,
 		"file_id":      mf.ID.String(),
 		"device_count": len(req.DeviceSNs),
+		"succeeded":    succeeded,
+		"failed":       failed,
 		"status":       "queued",
 	})
+}
+
+// mapFileTypeToTR069 maps our FileType to TR-069 FileType codes.
+func mapFileTypeToTR069(ft FileType) string {
+	switch ft {
+	case FileFirmware:
+		return "1" // Firmware Upgrade Image
+	case FileConfig:
+		return "3" // Vendor Configuration File
+	default:
+		return "3" // Default to vendor config
+	}
 }

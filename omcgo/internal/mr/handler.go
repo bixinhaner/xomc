@@ -1,6 +1,9 @@
 package mr
 
 import (
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -355,10 +358,91 @@ func (h *Handler) ToggleMapping(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// exportRequest defines the request body for MR data export.
+type exportRequest struct {
+	DeviceID  string `json:"device_id"`
+	MRType    string `json:"mr_type"`
+	CellID    string `json:"cell_id"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	Format    string `json:"format"` // "json" or "csv", default "json"
+}
+
 // ExportMRData handles POST /api/v1/mr/export.
 func (h *Handler) ExportMRData(c *gin.Context) {
+	var req exportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	filter := MRRecordFilter{
+		ListRequest: model.ListRequest{Page: 1, PageSize: 10000},
+	}
+	if req.DeviceID != "" {
+		id, err := uuid.Parse(req.DeviceID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			return
+		}
+		filter.DeviceID = &id
+	}
+	if req.MRType != "" {
+		filter.MRType = &req.MRType
+	}
+	if req.CellID != "" {
+		filter.CellID = &req.CellID
+	}
+	if req.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.StartTime); err == nil {
+			filter.StartTime = &t
+		}
+	}
+	if req.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.EndTime); err == nil {
+			filter.EndTime = &t
+		}
+	}
+
+	result, err := h.store.QueryRecords(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("query MR records: %v", err)})
+		return
+	}
+
+	if req.Format == "csv" {
+		h.exportCSV(c, result.Items)
+		return
+	}
+
+	// Default: JSON export
+	c.Header("Content-Disposition", "attachment; filename=mr_export.json")
 	c.JSON(http.StatusOK, gin.H{
-		"task_id": "export-placeholder",
-		"status":  "pending",
+		"total":   result.Total,
+		"records": result.Items,
 	})
+}
+
+func (h *Handler) exportCSV(c *gin.Context, records []MRRecordEntry) {
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", "attachment; filename=mr_export.csv")
+	c.Status(http.StatusOK)
+
+	w := csv.NewWriter(c.Writer)
+	defer w.Flush()
+
+	// Write header
+	_ = w.Write([]string{"time", "file_id", "device_id", "cell_id", "mr_type", "measurement_data"})
+
+	for _, rec := range records {
+		dataJSON, _ := json.Marshal(rec.MeasurementData)
+		_ = w.Write([]string{
+			rec.Time.Format(time.RFC3339),
+			rec.FileID.String(),
+			rec.DeviceID.String(),
+			rec.CellID,
+			rec.MRType,
+			string(dataJSON),
+		})
+	}
 }

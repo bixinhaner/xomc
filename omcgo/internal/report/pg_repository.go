@@ -397,6 +397,28 @@ func (r *PgRecordRepository) GetByID(ctx context.Context, id uuid.UUID) (*Report
 	return record, nil
 }
 
+func (r *PgRecordRepository) Update(ctx context.Context, record *ReportRecord) error {
+	query, args, err := psql.Update("report_records").
+		Set("status", record.Status).
+		Set("file_size", record.FileSize).
+		Set("minio_path", nullableString(record.MinioPath)).
+		Set("download_url", nullableString(record.DownloadURL)).
+		Where(sq.Eq{"id": record.ID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update report_record SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update report_record: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgRecordRepository) List(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error) {
 	base := psql.Select(recordColumns...).From("report_records")
 	countBase := psql.Select("COUNT(*)").From("report_records")

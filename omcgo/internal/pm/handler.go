@@ -1,11 +1,13 @@
 package pm
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	commonerrors "github.com/omcgo/omcgo/internal/errors"
 	"github.com/omcgo/omcgo/internal/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
@@ -19,12 +21,15 @@ type Handler struct {
 	kpiRepo     kpi.KPIRepository
 	kpiEngine   *kpi.KPIEngine
 	taskRepo    TaskRepository
+	fileStore   PMFileStore
+	minioClient *minio.Client
+	pmBucket    string
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new PM handler.
-func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, logger *zap.Logger) *Handler {
-	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, logger: logger}
+func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, logger *zap.Logger) *Handler {
+	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, fileStore: fileStore, minioClient: minioClient, pmBucket: pmBucket, logger: logger}
 }
 
 // RegisterRoutes registers PM API routes.
@@ -38,6 +43,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		pm.POST("/kpi/calculate", h.CalculateKPI)
 		pm.GET("/tasks", h.ListTasks)
 		pm.POST("/tasks", h.CreateTask)
+		pm.GET("/files", h.ListPMFiles)
+		pm.GET("/files/:id/download", h.DownloadPMFile)
 	}
 }
 
@@ -311,4 +318,86 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, task)
+}
+
+// ---- PM File handlers ----
+
+type pmFileQuery struct {
+	DeviceID  string `form:"device_id"`
+	StartTime string `form:"start_time"`
+	EndTime   string `form:"end_time"`
+	model.ListRequest
+}
+
+// ListPMFiles handles GET /pm/files.
+func (h *Handler) ListPMFiles(c *gin.Context) {
+	var q pmFileQuery
+	q.ListRequest = model.DefaultListRequest()
+	if err := c.ShouldBindQuery(&q); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	filter := PMFileFilter{ListRequest: q.ListRequest}
+	if q.DeviceID != "" {
+		id, err := uuid.Parse(q.DeviceID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			return
+		}
+		filter.DeviceID = &id
+	}
+	if q.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, q.StartTime); err == nil {
+			filter.StartTime = &t
+		}
+	}
+	if q.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, q.EndTime); err == nil {
+			filter.EndTime = &t
+		}
+	}
+
+	result, err := h.fileStore.ListFiles(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// DownloadPMFile handles GET /pm/files/:id/download.
+func (h *Handler) DownloadPMFile(c *gin.Context) {
+	fileID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file id"})
+		return
+	}
+
+	fileInfo, err := h.fileStore.GetFileByID(c.Request.Context(), fileID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+	if fileInfo == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+
+	obj, err := h.minioClient.GetObject(c.Request.Context(), h.pmBucket, fileInfo.MinioPath, minio.GetObjectOptions{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "download failed"})
+		return
+	}
+	defer obj.Close()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "get file info failed"})
+		return
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileInfo.FileName))
+	c.Header("Content-Type", "application/xml")
+	c.DataFromReader(http.StatusOK, stat.Size, "application/xml", obj, nil)
 }

@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	"github.com/omcgo/omcgo/internal/event"
 	"github.com/omcgo/omcgo/internal/model"
 )
 
@@ -15,14 +16,16 @@ import (
 type Service struct {
 	taskRepo     TaskRepository
 	scheduleRepo ScheduleRepository
+	eventBus     event.EventBus
 	logger       *zap.Logger
 }
 
 // NewService creates a new backup Service.
-func NewService(taskRepo TaskRepository, scheduleRepo ScheduleRepository, logger *zap.Logger) *Service {
+func NewService(taskRepo TaskRepository, scheduleRepo ScheduleRepository, eventBus event.EventBus, logger *zap.Logger) *Service {
 	return &Service{
 		taskRepo:     taskRepo,
 		scheduleRepo: scheduleRepo,
+		eventBus:     eventBus,
 		logger:       logger.Named("backup"),
 	}
 }
@@ -45,6 +48,16 @@ func (s *Service) CreateTask(ctx context.Context, task *BackupTask) (*BackupTask
 		zap.String("task_type", string(task.TaskType)),
 		zap.String("target_type", task.TargetType),
 	)
+
+	// Publish event to trigger executor
+	if s.eventBus != nil {
+		evt, err := event.NewEvent(event.SubjectBackupTaskCreated, map[string]interface{}{
+			"task_id": task.ID.String(),
+		})
+		if err == nil {
+			_ = s.eventBus.Publish(ctx, event.SubjectBackupTaskCreated, evt)
+		}
+	}
 
 	return task, nil
 }

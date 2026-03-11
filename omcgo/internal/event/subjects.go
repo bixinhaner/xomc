@@ -73,6 +73,18 @@ const (
 	SubjectUpgradeFailed    = "upgrade.failed"
 )
 
+// Backup events
+const (
+	SubjectBackupTaskCreated = "backup.task.created"
+	SubjectBackupTaskDone    = "backup.task.done"
+)
+
+// Report events
+const (
+	SubjectReportGenerateRequested = "report.generate.requested"
+	SubjectReportGenerateDone      = "report.generate.done"
+)
+
 // Northbound/OSS events
 const (
 	SubjectOSSAlarmForward   = "oss.alarm.forward"

@@ -20,5 +20,6 @@ type DefinitionRepository interface {
 type RecordRepository interface {
 	Create(ctx context.Context, record *ReportRecord) error
 	GetByID(ctx context.Context, id uuid.UUID) (*ReportRecord, error)
+	Update(ctx context.Context, record *ReportRecord) error
 	List(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error)
 }

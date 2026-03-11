@@ -52,6 +52,7 @@ func (m *mockDefinitionRepo) List(ctx context.Context, filter DefinitionFilter) 
 type hRecordRepo struct {
 	CreateFn  func(ctx context.Context, record *ReportRecord) error
 	GetByIDFn func(ctx context.Context, id uuid.UUID) (*ReportRecord, error)
+	UpdateFn  func(ctx context.Context, record *ReportRecord) error
 	ListFn    func(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error)
 }
 
@@ -60,6 +61,12 @@ func (m *hRecordRepo) Create(ctx context.Context, record *ReportRecord) error {
 }
 func (m *hRecordRepo) GetByID(ctx context.Context, id uuid.UUID) (*ReportRecord, error) {
 	return m.GetByIDFn(ctx, id)
+}
+func (m *hRecordRepo) Update(ctx context.Context, record *ReportRecord) error {
+	if m.UpdateFn != nil {
+		return m.UpdateFn(ctx, record)
+	}
+	return nil
 }
 func (m *hRecordRepo) List(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error) {
 	return m.ListFn(ctx, filter)
@@ -88,8 +95,8 @@ func newReportTestHandler(
 	recordRepo *hRecordRepo,
 ) *Handler {
 	logger := zap.NewNop()
-	svc := NewService(defRepo, recordRepo, logger)
-	return NewHandler(svc, logger)
+	svc := NewService(defRepo, recordRepo, nil, logger)
+	return NewHandler(svc, nil, "reports", logger)
 }
 
 // ---------------------------------------------------------------------------
