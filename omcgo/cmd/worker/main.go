@@ -28,6 +28,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
+	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -133,7 +134,8 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	kpiRepo := kpi.NewPgKPIRepository(tsPool)
 	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, carrierRegistry, logger)
 	pmParser := collector.NewPMXMLParser()
-	pmCollector := collector.NewPMCollector(minioClient, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, eventBus, logger)
+	pmFileStore := pm.NewPgPMFileStore(pgPool)
+	pmCollector := collector.NewPMCollector(minioClient, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, eventBus, logger)
 	if err := pmCollector.Subscribe(eventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}

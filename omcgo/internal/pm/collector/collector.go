@@ -3,11 +3,14 @@ package collector
 import (
 	"context"
 	"fmt"
+	"path"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/event"
 	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"go.uber.org/zap"
@@ -29,6 +32,7 @@ type PMCollector struct {
 	parser      *PMXMLParser
 	counterRepo counter.CounterRepository
 	kpiEngine   *kpi.KPIEngine
+	fileStore   pm.PMFileStore
 	eventBus    event.EventBus
 	logger      *zap.Logger
 }
@@ -37,11 +41,13 @@ type PMCollector struct {
 func NewPMCollector(
 	minioClient *minio.Client, bucket string, parser *PMXMLParser,
 	counterRepo counter.CounterRepository, kpiEngine *kpi.KPIEngine,
+	fileStore pm.PMFileStore,
 	eventBus event.EventBus, logger *zap.Logger,
 ) *PMCollector {
 	return &PMCollector{
 		minioClient: minioClient, bucket: bucket, parser: parser,
 		counterRepo: counterRepo, kpiEngine: kpiEngine,
+		fileStore: fileStore,
 		eventBus: eventBus, logger: logger,
 	}
 }
@@ -77,6 +83,31 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	}
 	defer obj.Close()
 
+	// Save file metadata to pm_files table before parsing
+	var fileID uuid.UUID
+	if c.fileStore != nil {
+		var fileSize int64
+		if stat, statErr := obj.Stat(); statErr == nil {
+			fileSize = stat.Size
+		}
+		now := time.Now()
+		pmFile := &pm.PMFileInfo{
+			DeviceID:    deviceID,
+			DeviceSN:    payload.DeviceSN,
+			Carrier:     payload.Carrier,
+			Technology:  payload.Technology,
+			FileName:    path.Base(payload.MinIOPath),
+			FileSize:    fileSize,
+			CollectTime: now,
+			MinioPath:   payload.MinIOPath,
+		}
+		if err := c.fileStore.SaveFile(ctx, pmFile); err != nil {
+			c.logger.Warn("save PM file metadata", zap.Error(err))
+		} else {
+			fileID = pmFile.ID
+		}
+	}
+
 	content, err := c.parser.Parse(obj, deviceID)
 	if err != nil {
 		return fmt.Errorf("parse pm xml: %w", err)
@@ -86,6 +117,13 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
 		return fmt.Errorf("batch insert counters: %w", err)
+	}
+
+	// Update file parsed status
+	if c.fileStore != nil && fileID != uuid.Nil {
+		if err := c.fileStore.UpdateFileParsed(ctx, fileID, len(content.Counters)); err != nil {
+			c.logger.Warn("update PM file parsed status", zap.Error(err))
+		}
 	}
 
 	// Calculate KPIs
