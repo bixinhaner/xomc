@@ -1,6 +1,6 @@
 # ACS 压力测试
 
-对 ACS (TR069 Auto Configuration Server) 引擎进行全面的压力测试，验证完整 TR069 会话生命周期在高并发场景下的性能和稳定性。
+对 ACS (TR069 Auto Configuration Server) 引擎进行全面的压力测试。支持 4 种测试模式：ACS 会话吞吐 / KPI (PM) 文件上传 / MR 文件上传 / 混合模式，以及 5 轮递增压测 (-ramp)。验证完整 TR069 会话生命周期、AutonomousTransferComplete 文件上传管线在高并发场景下的性能和稳定性。
 
 ## 环境信息
 
@@ -94,6 +94,52 @@ go run scripts/loadtest/main.go \
 
 **每轮之间等待 5 秒**，让 ACS 的 admission slots 和 connSessions reaper 清理完毕。
 
+#### KPI/MR 文件上传压测
+
+```bash
+cd omcgo
+
+# 仅测 KPI (PM 文件上传): Inform → ATC(FileType=4) → session end
+go run scripts/loadtest/main.go \
+  -url http://localhost:7547/acs \
+  -mode kpi -devices 1000 -concurrency 100 -duration 60s -json
+
+# 仅测 MR (MR 文件上传): Inform → ATC(FileType=5) → session end
+go run scripts/loadtest/main.go \
+  -url http://localhost:7547/acs \
+  -mode mr -devices 1000 -concurrency 100 -duration 60s -json
+
+# 混合模式 (round-robin: acs/kpi/mr 按设备编号轮转)
+go run scripts/loadtest/main.go \
+  -url http://localhost:7547/acs \
+  -mode all -devices 3000 -concurrency 300 -duration 60s -json
+```
+
+#### 5 轮递增压测 (一键 15 分钟 ~5 万请求)
+
+```bash
+# KPI 模式 5 轮递增
+go run scripts/loadtest/main.go \
+  -url http://localhost:7547/acs \
+  -mode kpi -ramp -json
+
+# 混合模式 5 轮递增
+go run scripts/loadtest/main.go \
+  -url http://localhost:7547/acs \
+  -mode all -ramp -json
+```
+
+递增计划 (每轮 3 分钟):
+
+| 轮次 | 并发 | 设备数 | 预估请求 |
+|------|------|--------|---------|
+| R1 warmup | 20 | 200 | ~2,400 |
+| R2 light | 50 | 500 | ~6,000 |
+| R3 medium | 100 | 1,000 | ~12,000 |
+| R4 heavy | 200 | 2,000 | ~16,000 |
+| R5 stress | 500 | 5,000 | ~20,000 |
+| **合计** | - | - | **~56,000** |
+
 ### Step 5: 结果分析
 
 对比预测 vs 实际，保存分析报告到 `omcgo/doc/acs-benchmark-analysis.md`。
@@ -117,12 +163,16 @@ pkill -f omcgo-acs
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `-url` | `http://localhost:7547/acs` | ACS 端点 URL |
+| `-mode` | `acs` | 测试模式: `acs` / `kpi` / `mr` / `all` |
 | `-devices` | 1000 | 模拟设备数量 |
 | `-concurrency` | 100 | 最大并发会话数 |
 | `-duration` | 2m | 测试持续时间 |
 | `-interval` | 1s | 设备发送 Inform 的间隔 |
-| `-full-session` | true | 完整 TR069 会话模式 |
+| `-full-session` | true | 完整 TR069 会话模式 (kpi/mr/all 强制 true) |
 | `-json` | false | JSON 格式输出 |
+| `-ramp` | false | 5 轮递增压测 (覆盖 devices/concurrency/duration) |
+| `-file-port` | 9876 | 内置文件服务器端口 (kpi/mr/all 模式) |
+| `-file-host` | `localhost` | TransferURL 主机名 (需 TransferBridge 可达) |
 
 ## ACS 关键配置 (acs.yaml)
 
@@ -148,12 +198,41 @@ pkill -f omcgo-acs
 
 ## 性能基准 (4 核 / 同机部署)
 
-| 指标 | 基准值 | 说明 |
-|------|--------|------|
-| 会话速率 | >2000 sessions/s | R4 (1000 并发) |
-| 请求吞吐 | >5000 req/s | R4 |
-| p99 延迟 | <500ms | R4 (同机竞争) |
-| 成功率 | >70% | R4 (含 Rate Limiter 影响) |
+| 指标 | 基准值 | 模式 | 说明 |
+|------|--------|------|------|
+| 会话速率 | >2000 sessions/s | acs | R4 (1000 并发) |
+| 请求吞吐 | >5000 req/s | acs | R4 |
+| p99 延迟 | <500ms | acs | R4 (同机竞争) |
+| 成功率 | >70% | acs | R4 (含 Rate Limiter 影响) |
+| 文件上传速率 | >500 uploads/s | kpi/mr | R3 (100 并发) |
+| 混合吞吐 | >3000 req/s | all | R4 (acs+kpi+mr 混合) |
+
+## KPI/MR 模式说明
+
+### 会话流程
+
+```
+mode=acs:  Inform → InformResponse → Empty → RPC/Empty → session end
+mode=kpi:  Inform → InformResponse → ATC(FileType=4) → ATCResponse → Empty → session end
+mode=mr:   Inform → InformResponse → ATC(FileType=5) → ATCResponse → Empty → session end
+mode=all:  按设备编号 mod 3 轮转 (0=acs, 1=kpi, 2=mr)
+```
+
+### 内置文件服务器
+
+kpi/mr/all 模式下自动启动 HTTP 文件服务器 (默认端口 9876):
+- `GET /pm/{sn}.xml` → 3GPP 32.435 PM XML (4 counters × 2 cells)
+- `GET /mr/{sn}.xml` → MRO XML (RSRP/RSRQ/SINR × 2 cells)
+
+ATC 消息中的 TransferURL 指向此服务器。TransferBridge 从此 URL 下载文件 → MinIO → PM/MR Collector。
+
+### 数据管线 (需完整基础设施)
+
+若 NATS + MinIO + Collectors 运行中，KPI/MR 模式将触发完整数据管线:
+```
+Load Test → ACS (ATC) → NATS → TransferBridge → MinIO → PM/MR Collector → PostgreSQL
+```
+若只有 ACS 运行，仍可测试 ACS 的 ATC 处理吞吐量。
 
 ## 常见问题
 
