@@ -7,21 +7,21 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/config"
+	"github.com/omcgo/omcgo/internal/appconfig"
 	"go.uber.org/zap"
 )
 
 // Server is an independent HTTP server for NE Direct connections (CMCC only).
 // It uses net/http stdlib, not Gin, and only starts if enabled in config.
 type Server struct {
-	cfg        config.NEDirectConfig
+	cfg        appconfig.NEDirectConfig
 	httpServer *http.Server
 	handler    *Handler
 	logger     *zap.Logger
 }
 
 // NewServer creates a new NE Direct Server.
-func NewServer(cfg config.NEDirectConfig, handler *Handler, logger *zap.Logger) *Server {
+func NewServer(cfg appconfig.NEDirectConfig, handler *Handler, logger *zap.Logger) *Server {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 

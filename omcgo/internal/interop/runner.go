@@ -10,9 +10,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
-	"github.com/omcgo/omcgo/internal/omcr/device"
+	"github.com/omcgo/omcgo/internal/device"
 )
 
 // ConformanceTestRunner executes predefined interop conformance test cases

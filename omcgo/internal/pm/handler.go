@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
-	"github.com/omcgo/omcgo/internal/common/model"
+	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	"github.com/omcgo/omcgo/internal/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"go.uber.org/zap"

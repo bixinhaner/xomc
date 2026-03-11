@@ -1,6 +1,6 @@
 package carrier
 
-import "github.com/omcgo/omcgo/internal/common/model"
+import "github.com/omcgo/omcgo/internal/model"
 
 // OUIProductClassInfo describes a known vendor/product combination.
 type OUIProductClassInfo struct {

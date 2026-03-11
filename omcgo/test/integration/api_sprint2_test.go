@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/omcgo/omcgo/internal/omcr/admin"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

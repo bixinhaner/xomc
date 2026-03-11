@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // TemplateType represents the type of configuration template.

@@ -14,13 +14,14 @@ import (
 	"github.com/omcgo/omcgo/internal/carrier/cmcc"
 	"github.com/omcgo/omcgo/internal/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/carrier/cucc"
-	"github.com/omcgo/omcgo/internal/common/event"
-	"github.com/omcgo/omcgo/internal/config"
-	"github.com/omcgo/omcgo/internal/infra"
-	"github.com/omcgo/omcgo/internal/infra/cache"
-	"github.com/omcgo/omcgo/internal/infra/db"
-	"github.com/omcgo/omcgo/internal/infra/mq"
-	"github.com/omcgo/omcgo/internal/infra/storage"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/components"
+	logpkg "github.com/omcgo/omcgo/internal/components/logger"
+	miniocomp "github.com/omcgo/omcgo/internal/components/minio"
+	natscomp "github.com/omcgo/omcgo/internal/components/nats"
+	"github.com/omcgo/omcgo/internal/components/postgres"
+	rediscomp "github.com/omcgo/omcgo/internal/components/redis"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
 	"github.com/omcgo/omcgo/internal/pm/collector"
@@ -40,7 +41,7 @@ func main() {
 		RunE:  runWorker,
 	}
 
-	rootCmd.Flags().String("config", "configs/worker.yaml", "configuration file path")
+	rootCmd.Flags().String("config", "cmd/worker/etc/config.dev.yaml", "configuration file path")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -51,13 +52,13 @@ func main() {
 func runWorker(cmd *cobra.Command, args []string) error {
 	// 1. Load config
 	cfgPath, _ := cmd.Flags().GetString("config")
-	var cfg config.WorkerConfig
-	if err := config.Load(cfgPath, &cfg); err != nil {
+	var cfg appconfig.WorkerConfig
+	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
 	// 2. Initialize logger
-	logger, err := infra.NewLogger(cfg.Log)
+	logger, err := logpkg.NewLogger(cfg.Log)
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
@@ -66,32 +67,32 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
 	// 3. Graceful shutdown setup
-	gs := infra.NewGracefulShutdown(30*time.Second, logger)
+	gs := components.NewGracefulShutdown(30*time.Second, logger)
 	ctx := context.Background()
 
 	// 4. Connect to PostgreSQL
-	pgPool, err := db.NewPostgresPool(ctx, cfg.DB)
+	pgPool, err := postgres.NewPostgresPool(ctx, cfg.DB)
 	if err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	gs.Register("postgres", 4, func(ctx context.Context) error { pgPool.Close(); return nil })
 
 	// 5. Connect to TimescaleDB
-	tsPool, err := db.NewTimescalePool(ctx, cfg.TSDB)
+	tsPool, err := postgres.NewTimescalePool(ctx, cfg.TSDB)
 	if err != nil {
 		return fmt.Errorf("connect to TimescaleDB: %w", err)
 	}
 	gs.Register("timescale", 4, func(ctx context.Context) error { tsPool.Close(); return nil })
 
 	// 6. Connect to Redis
-	redisClient, err := cache.NewRedisClient(cfg.Redis)
+	redisClient, err := rediscomp.NewRedisClient(cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("connect to Redis: %w", err)
 	}
 	gs.Register("redis", 3, func(ctx context.Context) error { return redisClient.Close() })
 
 	// 7. Connect to NATS
-	natsClient, err := mq.NewNATSClient(cfg.NATS, logger)
+	natsClient, err := natscomp.NewNATSClient(cfg.NATS, logger)
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
 	}
@@ -102,11 +103,11 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	}
 
 	// 8. Connect to MinIO
-	minioClient, err := storage.NewMinIOClient(cfg.MinIO)
+	minioClient, err := miniocomp.NewMinIOClient(cfg.MinIO)
 	if err != nil {
 		return fmt.Errorf("connect to MinIO: %w", err)
 	}
-	if err := storage.EnsureBuckets(ctx, minioClient, cfg.MinIO.Buckets); err != nil {
+	if err := miniocomp.EnsureBuckets(ctx, minioClient, cfg.MinIO.Buckets); err != nil {
 		logger.Warn("ensure MinIO buckets", zap.Error(err))
 	}
 

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/omcgo/omcgo/internal/common/event"
-	"github.com/omcgo/omcgo/internal/common/model"
-	"github.com/omcgo/omcgo/internal/omcr/device"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"

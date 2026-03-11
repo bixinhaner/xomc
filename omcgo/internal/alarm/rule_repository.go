@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // AlarmRuleRepository defines the interface for alarm rule persistence.

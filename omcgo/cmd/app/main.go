@@ -10,49 +10,20 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/omcgo/omcgo/cmd/app/router"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/acs/connreq"
-	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/carrier"
 	"github.com/omcgo/omcgo/internal/carrier/cmcc"
 	"github.com/omcgo/omcgo/internal/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/carrier/cucc"
-	"github.com/omcgo/omcgo/internal/common/event"
-	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
-	"github.com/omcgo/omcgo/internal/common/middleware"
-	"github.com/omcgo/omcgo/internal/common/model"
-	"github.com/omcgo/omcgo/internal/config"
-	"github.com/omcgo/omcgo/internal/config/baseline"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
-	"github.com/omcgo/omcgo/internal/config/template"
-	"github.com/omcgo/omcgo/internal/infra"
-	"github.com/omcgo/omcgo/internal/infra/cache"
-	"github.com/omcgo/omcgo/internal/infra/db"
-	"github.com/omcgo/omcgo/internal/infra/mq"
-	"github.com/omcgo/omcgo/internal/infra/storage"
-	"github.com/omcgo/omcgo/internal/mr"
-	"github.com/omcgo/omcgo/internal/nedirect"
-	"github.com/omcgo/omcgo/internal/northbound"
-	"github.com/omcgo/omcgo/internal/northbound/push"
-	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
-	"github.com/omcgo/omcgo/internal/interop"
-	"github.com/omcgo/omcgo/internal/interop/cases"
-	"github.com/omcgo/omcgo/internal/omcr/admin"
-	"github.com/omcgo/omcgo/internal/omcr/backup"
-	"github.com/omcgo/omcgo/internal/omcr/dashboard"
-	"github.com/omcgo/omcgo/internal/omcr/device"
-	"github.com/omcgo/omcgo/internal/omcr/filemanager"
-	"github.com/omcgo/omcgo/internal/omcr/license"
-	"github.com/omcgo/omcgo/internal/omcr/mml"
-	"github.com/omcgo/omcgo/internal/omcr/ops"
-	"github.com/omcgo/omcgo/internal/omcr/report"
-	"github.com/omcgo/omcgo/internal/omcr/software"
-	"github.com/omcgo/omcgo/internal/omcr/syslog"
-	"github.com/omcgo/omcgo/internal/omcr/topology"
-	"github.com/omcgo/omcgo/internal/pm"
-	"github.com/omcgo/omcgo/internal/pm/counter"
-	"github.com/omcgo/omcgo/internal/pm/kpi"
-	"github.com/omcgo/omcgo/internal/provision"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/components"
+	logpkg "github.com/omcgo/omcgo/internal/components/logger"
+	miniocomp "github.com/omcgo/omcgo/internal/components/minio"
+	natscomp "github.com/omcgo/omcgo/internal/components/nats"
+	"github.com/omcgo/omcgo/internal/components/postgres"
+	rediscomp "github.com/omcgo/omcgo/internal/components/redis"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -67,7 +38,7 @@ func main() {
 		RunE:  runApp,
 	}
 
-	rootCmd.Flags().String("config", "configs/app.yaml", "configuration file path")
+	rootCmd.Flags().String("config", "cmd/app/etc/config.dev.yaml", "configuration file path")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -78,13 +49,13 @@ func main() {
 func runApp(cmd *cobra.Command, args []string) error {
 	// 1. Load config
 	cfgPath, _ := cmd.Flags().GetString("config")
-	var cfg config.AppConfig
-	if err := config.Load(cfgPath, &cfg); err != nil {
+	var cfg appconfig.AppConfig
+	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
 	// 2. Initialize logger
-	logger, err := infra.NewLogger(cfg.Log)
+	logger, err := logpkg.NewLogger(cfg.Log)
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
@@ -93,38 +64,38 @@ func runApp(cmd *cobra.Command, args []string) error {
 	logger.Info("omcgo-app starting", zap.String("config", cfgPath))
 
 	// 3. Graceful shutdown setup
-	gs := infra.NewGracefulShutdown(30*time.Second, logger)
+	gs := components.NewGracefulShutdown(30*time.Second, logger)
 	ctx := context.Background()
 
 	// 4. Connect to PostgreSQL
-	pgPool, err := db.NewPostgresPool(ctx, cfg.DB)
+	pgPool, err := postgres.NewPostgresPool(ctx, cfg.DB)
 	if err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	gs.Register("postgres", 4, func(ctx context.Context) error { pgPool.Close(); return nil })
 
 	// 5. Connect to Redis
-	redisClient, err := cache.NewRedisClient(cfg.Redis)
+	redisClient, err := rediscomp.NewRedisClient(cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("connect to Redis: %w", err)
 	}
 	gs.Register("redis", 3, func(ctx context.Context) error { return redisClient.Close() })
 
-	// 5b. Connect to TimescaleDB
-	tsPool, err := db.NewTimescalePool(ctx, cfg.TSDB)
+	// 6. Connect to TimescaleDB
+	tsPool, err := postgres.NewTimescalePool(ctx, cfg.TSDB)
 	if err != nil {
 		return fmt.Errorf("connect to TimescaleDB: %w", err)
 	}
 	gs.Register("timescale", 4, func(ctx context.Context) error { tsPool.Close(); return nil })
 
-	// 5c. Connect to MinIO
-	minioClient, err := storage.NewMinIOClient(cfg.MinIO)
+	// 7. Connect to MinIO
+	minioClient, err := miniocomp.NewMinIOClient(cfg.MinIO)
 	if err != nil {
 		return fmt.Errorf("connect to MinIO: %w", err)
 	}
 
-	// 6. Connect to NATS
-	natsClient, err := mq.NewNATSClient(cfg.NATS, logger)
+	// 8. Connect to NATS
+	natsClient, err := natscomp.NewNATSClient(cfg.NATS, logger)
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
 	}
@@ -134,18 +105,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 		logger.Warn("ensure NATS streams", zap.Error(err))
 	}
 
-	// 7. Create EventBus
+	// 9. Create EventBus
 	eventBus := event.NewNATSEventBus(natsClient.Conn, natsClient.JS, logger)
 	gs.Register("eventbus", 2, func(ctx context.Context) error { return eventBus.Close() })
-
-	// 8. Create repositories
-	deviceRepo := device.NewPgDeviceRepository(pgPool)
-	paramRepo := device.NewPgDeviceParameterRepository(pgPool)
-
-	// 9. Create HeartbeatMonitor
-	heartbeatMonitor := device.NewHeartbeatMonitor(redisClient, deviceRepo, logger)
-	heartbeatMonitor.Start()
-	gs.Register("heartbeat", 1, func(ctx context.Context) error { heartbeatMonitor.Stop(); return nil })
 
 	// 10. Create carrier registry
 	carrierRegistry := carrier.NewRegistry()
@@ -154,298 +116,34 @@ func runApp(cmd *cobra.Command, args []string) error {
 	carrierRegistry.Register(cucc.New())
 	logger.Info("carrier registry initialized", zap.Int("carriers", len(carrierRegistry.All())))
 
-	// 11. Create device services
-	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, logger)
-
-	// 12. Subscribe InformHandler to events
-	informHandler := device.NewInformHandler(deviceService, carrierRegistry, model.CarrierCMCC, logger)
-	if err := informHandler.Subscribe(eventBus); err != nil {
-		logger.Warn("subscribe inform handler", zap.Error(err))
-	}
-
-	// 13. Create DataModel module (repository + cache + registry + importer)
-	dmRepo := datamodel.NewPgDataModelRepository(pgPool)
-	importLogRepo := datamodel.NewPgImportLogRepository(pgPool)
-	ouiRepo := datamodel.NewPgOUIRepository(pgPool)
-	dmCache := datamodel.NewDataModelCache(redisClient)
-	dmRegistry := datamodel.NewDataModelRegistry(dmRepo, dmCache, logger)
-	dmRegistry.Start()
-	gs.Register("datamodel-registry", 1, func(ctx context.Context) error { dmRegistry.Stop(); return nil })
-	dmImporter := datamodel.NewDataModelImporter(dmRepo, importLogRepo)
-	logger.Info("datamodel registry started")
-
-	// 14. Create ConfigTemplate module
-	templateRepo := template.NewPgConfigTemplateRepository(pgPool)
-	templateService := template.NewConfigTemplateService(templateRepo, logger)
-
-	// 15. Create command queue (shared with ACS)
+	// 11. Create command queue (shared with ACS)
 	cmdQueue := cmdqueue.NewRedisCommandQueue(redisClient)
 
-	// 16. Create Provisioning module
-	provisionRepo := provision.NewPgProvisioningTaskRepository(pgPool)
-	provisionEngine := provision.NewProvisioningEngine(
-		provisionRepo, deviceService, dmRegistry, templateService,
-		carrierRegistry, cmdQueue, eventBus, logger,
-	)
-	if err := provisionEngine.Subscribe(eventBus); err != nil {
-		logger.Warn("subscribe provisioning engine", zap.Error(err))
-	}
-
-	// 17. Create Topology module
-	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)
-	groupService := topology.NewDeviceGroupService(groupRepo, logger)
-	siteRepo := topology.NewPgSiteRepository(pgPool)
-	topoNodeRepo := topology.NewPgTopoNodeRepository(pgPool)
-	topoEdgeRepo := topology.NewPgTopoEdgeRepository(pgPool)
-
-	// 18. Create Admin/RBAC module
-	userRepo := admin.NewPgUserRepository(pgPool)
-	roleRepo := admin.NewPgRoleRepository(pgPool)
-	auditRepo := admin.NewPgAuditRepository(pgPool)
-	jwtService := admin.NewJWTServiceWithTTL(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
-	adminService := admin.NewAdminService(userRepo, roleRepo, auditRepo, jwtService, logger)
-	adminHandler := admin.NewHandler(adminService, logger)
-	logger.Info("admin/RBAC module initialized")
-
-	// 19. Create Software Management module
-	firmwareRepo := software.NewPgFirmwareRepository(pgPool)
-	upgradeRepo := software.NewPgUpgradeTaskRepository(pgPool)
-	connReqClient := connreq.NewClient(redisClient, logger)
-	softwareService := software.NewSoftwareService(
-		firmwareRepo, upgradeRepo, deviceRepo, cmdQueue, connReqClient,
-		minioClient, cfg.MinIO.Buckets.Firmware, eventBus, logger,
-	)
-	if err := softwareService.Subscribe(eventBus); err != nil {
-		logger.Warn("subscribe software service", zap.Error(err))
-	}
-	softwareHandler := software.NewHandler(softwareService, firmwareRepo, upgradeRepo, logger)
-	logger.Info("software management module initialized")
-
-	// 20. PM module components (created early for use in routes)
-	pmCounterRepo := counter.NewPgCounterRepository(tsPool)
-	pmKPIRepo := kpi.NewPgKPIRepository(tsPool)
-	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, carrierRegistry, logger)
-	pmTaskRepo := pm.NewPgTaskRepository(pgPool)
-
-	// 20. Alarm module components
-	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
-	alarmPgStore := alarm.NewPgAlarmStore(pgPool, tsPool)
-	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, carrierRegistry, eventBus, logger)
-
-	// 21. MR module components
-	mrStore := mr.NewPgMRStore(pgPool, tsPool)
-	mrIndRepo := mr.NewPgIndicatorRepository(pgPool)
-	mrMapRepo := mr.NewPgMappingRepository(pgPool)
-
-	// 22. Setup Gin router
+	// 12. Setup Gin engine
 	if cfg.Log.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-
-	router := gin.New()
-	router.Use(gin.Recovery())
-	corsOrigins := cfg.CORS.AllowOrigins
-	if len(corsOrigins) == 0 {
-		corsOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
-	}
-	router.Use(middleware.CORS(middleware.CORSConfig{
-		AllowOrigins: corsOrigins,
-	}))
-	router.Use(middleware.RequestLogger(logger))
+	ginEngine := gin.New()
+	ginEngine.Use(gin.Recovery())
 
 	metricsReg := prometheus.NewRegistry()
-	router.Use(middleware.PrometheusMetrics(metricsReg))
 
-	// Unified JSON 404 for unmatched routes
-	router.NoRoute(func(c *gin.Context) {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+	// 13. Setup all modules and routes
+	router.Setup(ginEngine, &router.Deps{
+		PgPool:          pgPool,
+		TsPool:          tsPool,
+		Redis:           redisClient,
+		MinIO:           minioClient,
+		EventBus:        eventBus,
+		CmdQueue:        cmdQueue,
+		CarrierRegistry: carrierRegistry,
+		Cfg:             &cfg,
+		Logger:          logger,
+		GS:              gs,
+		MetricsReg:      metricsReg,
 	})
 
-	// Health check (public, no auth)
-	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	// Public auth routes (no authentication required)
-	publicV1 := router.Group("/api/v1")
-	adminHandler.RegisterAuthRoutes(publicV1)
-
-	// Protected API v1 routes (JWT authentication required)
-	v1 := router.Group("/api/v1")
-	v1.Use(admin.RequireAuth(jwtService))
-	v1.Use(admin.RequireCarrier())
-	v1.Use(admin.AuditLogger(auditRepo))
-
-	// Protected auth routes (authentication required)
-	v1.GET("/auth/me", adminHandler.Me)
-
-	// Device routes
-	deviceHandler := device.NewHandler(deviceService)
-	deviceHandler.RegisterRoutes(v1)
-
-	// DataModel routes
-	dmHandler := datamodel.NewHandler(dmRepo, ouiRepo, dmRegistry, dmImporter)
-	dmHandler.RegisterRoutes(v1)
-
-	// ConfigTemplate routes
-	templateHandler := template.NewHandler(templateRepo)
-	templateHandler.RegisterRoutes(v1)
-
-	// Provisioning routes
-	provisionHandler := provision.NewHandler(provisionRepo, provisionEngine)
-	provisionHandler.RegisterRoutes(v1)
-
-	// Topology routes
-	topologyHandler := topology.NewHandler(groupRepo, groupService, siteRepo, topoNodeRepo, topoEdgeRepo)
-	topologyHandler.RegisterRoutes(v1)
-
-	// PM routes
-	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, pmTaskRepo, logger)
-	pmHandler.RegisterRoutes(v1)
-
-	// Alarm routes
-	alarmHandler := alarm.NewHandler(alarmEngine, alarmPgStore, logger)
-	alarmHandler.RegisterRoutes(v1)
-
-	// Alarm rule routes (Sprint 4)
-	alarmRuleRepo := alarm.NewPgAlarmRuleRepository(pgPool)
-	alarmRuleHandler := alarm.NewRuleHandler(alarmRuleRepo, logger)
-	alarmsGroup := v1.Group("/alarms")
-	alarmRuleHandler.RegisterRoutes(alarmsGroup)
-
-	// KPI threshold routes (Sprint 4)
-	thresholdRepo := pm.NewPgThresholdRepository(pgPool)
-	thresholdHandler := pm.NewThresholdHandler(thresholdRepo, logger)
-	pmGroup := v1.Group("/pm")
-	thresholdHandler.RegisterRoutes(pmGroup)
-
-	// Dashboard routes (Sprint 4+7)
-	dashboardService := dashboard.NewService(deviceService, alarmPgStore, pmKPIRepo, pgPool, groupRepo, logger)
-	dashboardHandler := dashboard.NewHandler(dashboardService)
-	dashboardHandler.RegisterRoutes(v1)
-
-	// Syslog routes (Sprint 4)
-	syslogRepo := syslog.NewPgSyslogRepository(pgPool)
-	syslogHandler := syslog.NewHandler(syslogRepo, logger)
-	syslogHandler.RegisterRoutes(v1)
-
-	// Config sync routes (Sprint 4)
-	syncHandler := config.NewSyncHandler(cmdQueue, logger)
-	syncHandler.RegisterRoutes(v1)
-
-	// MR routes
-	mrHandler := mr.NewHandler(mrStore, mrIndRepo, mrMapRepo, minioClient, cfg.MinIO.Buckets.MRFiles, logger)
-	mrHandler.RegisterRoutes(v1)
-
-	// Software routes
-	softwareHandler.RegisterRoutes(v1)
-
-	// Interop Testing module (F10)
-	testRunner := interop.NewConformanceTestRunner(deviceRepo, paramRepo, dmRegistry, cmdQueue, logger)
-	testRunner.RegisterCases(cases.ProtocolCases())
-	testRunner.RegisterCases(cases.DataModelCases())
-	testRunner.RegisterCases(cases.RPCCases())
-	dmValidator := interop.NewDataModelValidator(dmRegistry, paramRepo, deviceRepo, logger)
-	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
-	interopHandler.RegisterRoutes(v1)
-	logger.Info("interop testing module initialized")
-
-	// Backup module (Sprint 8)
-	backupTaskRepo := backup.NewPgTaskRepository(pgPool)
-	backupScheduleRepo := backup.NewPgScheduleRepository(pgPool)
-	ftpRepo := backup.NewPgFTPConfigRepository(pgPool)
-	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, logger)
-	backupHandler := backup.NewHandler(backupService, ftpRepo, logger)
-	backupHandler.RegisterRoutes(v1)
-	logger.Info("backup module initialized")
-
-	// File Manager module (Sprint 8)
-	fileRepo := filemanager.NewPgFileRepository(pgPool)
-	fileHandler := filemanager.NewHandler(fileRepo, minioClient, cfg.MinIO.Buckets.ConfigBackup, logger)
-	fileHandler.RegisterRoutes(v1)
-	logger.Info("file manager module initialized")
-
-	// MML Console module (Sprint 8)
-	mmlCmdRepo := mml.NewPgCommandRepository(pgPool)
-	mmlScriptRepo := mml.NewPgScriptRepository(pgPool)
-	mmlTaskRepo := mml.NewPgTaskRepository(pgPool)
-	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, logger)
-	mmlHandler := mml.NewHandler(mmlService, logger)
-	mmlHandler.RegisterRoutes(v1)
-	logger.Info("MML console module initialized")
-
-	// Config Baseline module
-	baselineRepo := baseline.NewPgBaselineRepository(pgPool)
-	configTaskRepo := baseline.NewPgConfigTaskRepository(pgPool)
-	neighborRepo := baseline.NewPgNeighborRepository(pgPool)
-	baselineSvc := baseline.NewService(baselineRepo, configTaskRepo, neighborRepo, logger)
-	baselineHandler := baseline.NewHandler(baselineSvc, logger)
-	baselineHandler.RegisterRoutes(v1)
-	logger.Info("config baseline module initialized")
-
-	// License module
-	licenseRepo := license.NewPgLicenseRepository(pgPool)
-	licenseSvc := license.NewService(licenseRepo, logger)
-	licenseHandler := license.NewHandler(licenseSvc, logger)
-	licenseHandler.RegisterRoutes(v1)
-	logger.Info("license module initialized")
-
-	// OpsTools module
-	opsTemplateRepo := ops.NewPgTemplateRepository(pgPool)
-	opsTaskRepo := ops.NewPgTaskRepository(pgPool)
-	opsCmdRepo := ops.NewPgCommandRecordRepository(pgPool)
-	opsSvc := ops.NewService(opsTemplateRepo, opsTaskRepo, opsCmdRepo, logger)
-	opsHandler := ops.NewHandler(opsSvc, logger)
-	opsHandler.RegisterRoutes(v1)
-	logger.Info("ops tools module initialized")
-
-	// Report module
-	reportDefRepo := report.NewPgDefinitionRepository(pgPool)
-	reportRecordRepo := report.NewPgRecordRepository(pgPool)
-	reportService := report.NewService(reportDefRepo, reportRecordRepo, logger)
-	reportHandler := report.NewHandler(reportService, logger)
-	reportHandler.RegisterRoutes(v1)
-	logger.Info("report module initialized")
-
-	// System Info endpoint
-	sysInfoHandler := infra.NewSystemInfoHandler(pgPool, redisClient, logger)
-	v1.GET("/system/info", sysInfoHandler.GetSystemInfo)
-	logger.Info("system info endpoint initialized")
-
-	// Northbound/OSS module
-	nbPMHandler := northbound.NewPMHandler(pmCounterRepo, pmKPIRepo, logger)
-	nbAlarmHandler := northbound.NewAlarmHandler(alarmPgStore, logger)
-	nbConfigHandler := northbound.NewConfigHandler(paramRepo, logger)
-	pushEngine := push.NewEngine(cfg.Northbound.PushTargets, logger)
-	if err := pushEngine.Subscribe(eventBus); err != nil {
-		logger.Warn("subscribe push engine", zap.Error(err))
-	}
-	gs.Register("push-engine", 1, func(ctx context.Context) error { return pushEngine.Close() })
-	syncService := nbsync.NewService(deviceRepo, alarmPgStore, pmCounterRepo, pmKPIRepo, paramRepo, logger)
-	nbRouter := northbound.NewRouter(nbPMHandler, nbAlarmHandler, nbConfigHandler, pushEngine, syncService)
-	nbRouter.RegisterRoutes(v1)
-	logger.Info("northbound/OSS module initialized")
-
-	// NE Direct module (CMCC only)
-	if cfg.NEDirect.Enabled {
-		neHandler := nedirect.NewHandler(deviceService, alarmEngine, eventBus, logger)
-		neServer := nedirect.NewServer(cfg.NEDirect, neHandler, logger)
-		if err := neServer.Start(); err != nil {
-			logger.Error("ne-direct server start failed", zap.Error(err))
-		} else {
-			gs.Register("ne-direct", 1, func(ctx context.Context) error { return neServer.Shutdown(ctx) })
-			logger.Info("ne-direct server started",
-				zap.String("host", cfg.NEDirect.Host),
-				zap.Int("port", cfg.NEDirect.Port))
-		}
-	}
-
-	// Admin management routes (require admin permission)
-	adminGroup := v1.Group("/admin")
-	adminGroup.Use(admin.RequirePermission(roleRepo, "users", "admin"))
-	adminHandler.RegisterAdminRoutes(adminGroup)
-
-	// 23. Prometheus metrics server
+	// 14. Prometheus metrics server
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(metricsReg, promhttp.HandlerOpts{}))
 	metricsServer := &http.Server{
@@ -461,10 +159,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// 24. Start HTTP server
+	// 15. Start HTTP server
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      router,
+		Handler:      ginEngine,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -479,7 +177,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// 25. Wait for signal
+	// 16. Wait for signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -492,7 +190,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 26. Graceful shutdown
+	// 17. Graceful shutdown
 	if err := gs.Shutdown(context.Background()); err != nil {
 		logger.Error("shutdown error", zap.Error(err))
 	}

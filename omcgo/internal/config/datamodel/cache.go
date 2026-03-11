@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/common/event"
-	"github.com/omcgo/omcgo/internal/config"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/appconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -81,7 +81,7 @@ func TestEngine_GetTarget(t *testing.T) {
 }
 
 func TestEngine_FromConfig(t *testing.T) {
-	cfgTargets := []config.PushTargetConfig{
+	cfgTargets := []appconfig.PushTargetConfig{
 		{
 			ID:         "cfg1",
 			URL:        "http://oss1.example.com",

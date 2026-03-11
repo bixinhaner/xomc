@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
-	"github.com/omcgo/omcgo/internal/common/model"
+	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // Handler provides HTTP handlers for config baseline management REST API.

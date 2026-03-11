@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
-	"github.com/omcgo/omcgo/internal/common/middleware"
+	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	"github.com/omcgo/omcgo/internal/middleware"
 	"github.com/stretchr/testify/assert"
 )
 

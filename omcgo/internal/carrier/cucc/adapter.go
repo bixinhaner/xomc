@@ -2,7 +2,7 @@ package cucc
 
 import (
 	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // CUCCCarrier implements the Carrier interface for China Unicom (中国联通).

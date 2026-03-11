@@ -18,7 +18,7 @@ FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /build/bin/omcgo-app /usr/local/bin/omcgo-app
-COPY --from=builder /build/configs/app.yaml /etc/omcgo/app.yaml
+COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.yaml
 COPY --from=builder /build/migrations /etc/omcgo/migrations
 
 EXPOSE 8080 8443 9091 50051

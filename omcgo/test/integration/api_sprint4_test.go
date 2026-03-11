@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/internal/alarm"
-	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
-	"github.com/omcgo/omcgo/internal/omcr/syslog"
+	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

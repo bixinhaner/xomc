@@ -11,11 +11,12 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/common/event"
-	"github.com/omcgo/omcgo/internal/config"
-	"github.com/omcgo/omcgo/internal/infra"
-	"github.com/omcgo/omcgo/internal/infra/cache"
-	"github.com/omcgo/omcgo/internal/infra/mq"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/components"
+	logpkg "github.com/omcgo/omcgo/internal/components/logger"
+	natscomp "github.com/omcgo/omcgo/internal/components/nats"
+	rediscomp "github.com/omcgo/omcgo/internal/components/redis"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ func main() {
 		RunE:  runACS,
 	}
 
-	rootCmd.Flags().String("config", "configs/acs.yaml", "configuration file path")
+	rootCmd.Flags().String("config", "cmd/acs/etc/config.dev.yaml", "configuration file path")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -41,13 +42,13 @@ func main() {
 func runACS(cmd *cobra.Command, args []string) error {
 	// 1. Load config
 	cfgPath, _ := cmd.Flags().GetString("config")
-	var cfg config.ACSConfig
-	if err := config.Load(cfgPath, &cfg); err != nil {
+	var cfg appconfig.ACSConfig
+	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
 	// 2. Initialize logger
-	logger, err := infra.NewLogger(cfg.Log)
+	logger, err := logpkg.NewLogger(cfg.Log)
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
@@ -56,17 +57,17 @@ func runACS(cmd *cobra.Command, args []string) error {
 	logger.Info("omcgo-acs starting", zap.String("config", cfgPath))
 
 	// 3. Graceful shutdown setup
-	gs := infra.NewGracefulShutdown(30*time.Second, logger)
+	gs := components.NewGracefulShutdown(30*time.Second, logger)
 
 	// 4. Connect to Redis
-	redisClient, err := cache.NewRedisClient(cfg.Redis)
+	redisClient, err := rediscomp.NewRedisClient(cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("connect to Redis: %w", err)
 	}
 	gs.Register("redis", 3, func(ctx context.Context) error { return redisClient.Close() })
 
 	// 5. Connect to NATS
-	natsClient, err := mq.NewNATSClient(cfg.NATS, logger)
+	natsClient, err := natscomp.NewNATSClient(cfg.NATS, logger)
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
 	}

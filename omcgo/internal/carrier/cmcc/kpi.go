@@ -2,7 +2,7 @@ package cmcc
 
 import (
 	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 func kpiDefinitions(tech model.Technology) []*carrier.KPIDefinition {

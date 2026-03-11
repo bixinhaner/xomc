@@ -113,86 +113,106 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 ```
 omcgo/
 ├── cmd/                            # 入口
-│   ├── acs/main.go                 # TR069 ACS 引擎
-│   ├── app/main.go                 # 主应用（F02-F10）
-│   ├── worker/main.go              # 后台工作进程
+│   ├── app/
+│   │   ├── main.go                 # 主应用（~150 行，基础设施初始化 + 调用 router.Setup）
+│   │   ├── etc/                    # 配置文件（dev/test/prod）
+│   │   │   ├── config.dev.yaml
+│   │   │   ├── config.test.yaml
+│   │   │   └── config.prod.yaml
+│   │   └── router/                 # 路由注册 + DI 容器
+│   │       ├── deps.go
+│   │       └── router.go
+│   ├── acs/
+│   │   ├── main.go                 # TR069 ACS 引擎
+│   │   └── etc/                    # 配置文件（dev/test/prod）
+│   ├── worker/
+│   │   ├── main.go                 # 后台工作进程
+│   │   └── etc/                    # 配置文件（dev/test/prod）
 │   ├── migrate/main.go             # 数据库迁移
 │   └── omcctl/main.go              # CLI 管理工具
 │
-├── internal/                       # 私有代码（按功能域组织）
+├── global/                         # 全局常量与错误码（无框架依赖）
+│   ├── consts.go                   #   运营商/设备/告警等全局常量
+│   └── errors.go                   #   63 个错误码（纯数值常量）
+│
+├── internal/                       # 私有代码（按功能域组织，扁平化结构）
+│   ├── appconfig/                  # 配置结构体 + 加载逻辑
+│   │
 │   ├── acs/                        # F01: TR069 ACS 引擎
 │   │   ├── server.go               #   HTTP 服务器
 │   │   ├── handler.go              #   请求处理
 │   │   ├── session.go              #   会话状态机
 │   │   ├── soap/                   #   SOAP 编解码
-│   │   ├── rpc/                    #   RPC 方法（Get/Set/Download/Upload/Reboot...）
+│   │   ├── rpc/                    #   RPC 方法
 │   │   ├── connreq/                #   Connection Request
 │   │   ├── cmdqueue/               #   Redis 命令队列
-│   │   └── auth/                   #   CPE 认证（Digest/Basic）
+│   │   └── auth/                   #   CPE 认证
 │   │
-│   ├── config/                     # F02: 数据模型与配置管理
+│   ├── config/                     # F02: 数据模型与配置管理（业务域）
 │   │   ├── datamodel/              #   数据模型注册表、三级回退解析、缓存
 │   │   ├── template/               #   配置模板
-│   │   ├── audit/                  #   配置审计
-│   │   └── backup/                 #   配置备份
+│   │   ├── baseline/               #   配置基线
+│   │   └── sync_handler.go         #   配置同步
 │   │
 │   ├── pm/                         # F03: 性能管理
-│   │   ├── collector/              #   PM 文件采集与 XML 解析
-│   │   ├── counter/                #   计数器存储
-│   │   ├── kpi/                    #   KPI 计算引擎
-│   │   └── aggregation/            #   时间维度聚合
-│   │
 │   ├── alarm/                      # F04: 告警管理
 │   ├── mr/                         # F05: 测量报告
-│   ├── omcr/                       # F06: OMC-R 核心（拓扑/设备/固件/用户管理）
-│   ├── nedirect/                   # F07: 网元直连（移动专有）
+│   │
+│   ├── device/                     # F06: 设备管理与生命周期（← omcr/device）
+│   ├── admin/                      # F06: 用户管理与 RBAC（← omcr/admin）
+│   ├── topology/                   # F06: 设备拓扑与分组（← omcr/topology）
+│   ├── software/                   # F06: 固件管理（← omcr/software）
+│   ├── backup/                     # F06: 配置备份（← omcr/backup）
+│   ├── dashboard/                  # F06: 仪表盘（← omcr/dashboard）
+│   ├── ops/                        # F06: 运维工具（← omcr/ops）
+│   ├── report/                     # F06: 报表（← omcr/report）
+│   ├── mml/                        # F06: MML 控制台（← omcr/mml）
+│   ├── filemanager/                # F06: 文件管理（← omcr/filemanager）
+│   ├── syslog/                     # F06: 系统日志（← omcr/syslog）
+│   ├── license/                    # F06: 许可证（← omcr/license）
+│   │
+│   ├── nedirect/                   # F07: 网元直连
 │   ├── northbound/                 # F08: 北向/OSS 接口
 │   ├── provision/                  # F09: 自动开站
 │   ├── interop/                    # F10: 互操作测试
 │   │
 │   ├── carrier/                    # 运营商抽象层
-│   │   ├── carrier.go              #   Carrier 接口定义
-│   │   ├── registry.go             #   CarrierRegistry
-│   │   ├── cmcc/                   #   中国移动适配器
-│   │   ├── ctcc/                   #   中国电信适配器
-│   │   └── cucc/                   #   中国联通适配器
+│   │   ├── cmcc/                   #   中国移动
+│   │   ├── ctcc/                   #   中国电信
+│   │   └── cucc/                   #   中国联通
 │   │
-│   ├── common/                     # 公共类型
-│   │   ├── model/                  #   领域模型（Device, Alarm, Parameter, PMCounter, KPI）
-│   │   ├── event/                  #   EventBus（channel + NATS 双实现）
-│   │   ├── errors/                 #   错误类型
-│   │   └── middleware/             #   HTTP 中间件（认证/日志/指标/恢复）
+│   ├── model/                      # 共享领域类型（← common/model）
+│   ├── errors/                     # 业务错误 + gin 集成（← common/errors）
+│   ├── event/                      # EventBus 抽象（← common/event）
+│   ├── middleware/                  # HTTP 中间件（← common/middleware）
 │   │
-│   └── infra/                      # 基础设施适配器
-│       ├── db/                     #   PostgreSQL/TimescaleDB 连接
-│       ├── cache/                  #   Redis 连接
-│       ├── mq/                     #   NATS 连接
-│       └── storage/                #   MinIO 连接
+│   ├── components/                 # 基础设施适配器（← infra/）
+│   │   ├── postgres/               #   PostgreSQL/TimescaleDB（← infra/db）
+│   │   ├── redis/                  #   Redis（← infra/cache）
+│   │   ├── nats/                   #   NATS（← infra/mq）
+│   │   ├── minio/                  #   MinIO（← infra/storage）
+│   │   ├── logger/                 #   Zap 日志（← infra/logger.go）
+│   │   ├── monitor/                #   Prometheus 指标（← infra/metrics.go）
+│   │   ├── health.go               #   健康检查
+│   │   ├── sysinfo.go              #   系统���息
+│   │   ├── tracer.go               #   OpenTelemetry
+│   │   └── shutdown.go             #   优雅关机
+│   │
+│   └── utils/                      # 工具函数
 │
 ├── pkg/                            # 可复用公共库
-│   ├── tr069/                      #   TR069 类型、事件码、CWMP 错误码
+│   ├── tr069/                      #   TR069 类型、事件码
 │   ├── soap/                       #   通用 SOAP 工具
 │   └── xmlutil/                    #   XML 辅助工具
 │
 ├── api/                            # API 定义
-│   ├── openapi/                    #   OpenAPI/Swagger 定义
-│   └── proto/                      #   gRPC Proto 定义
-│
-├── migrations/                     # 数据库迁移文件（golang-migrate 格式）
-├── configs/                        # 配置文件模板（acs.yaml, app.yaml, worker.yaml）
+├── migrations/                     # 数据库迁移文件
+├── configs/                        # 压测专用配置（acs-stress.yaml）
 ├── datamodels/                     # TR069 数据模型种子数据
-│   ├── seed/                       #   初次部署种子（carrier_defaults/ + product_models/）
-│   └── templates/                  #   JSON Schema 模板
 ├── deployments/                    # 部署清单
-│   ├── docker/                     #   Dockerfile + docker-compose
-│   └── k8s/                        #   Kubernetes manifests
-├── doc/                            # 项目文档（已有）
-├── scripts/                        # 构建/部署/测试脚本
+├── doc/                            # 项目文档
+├── scripts/                        # 脚本
 ├── test/                           # 集成/E2E 测试
-│   ├── integration/
-│   ├── e2e/
-│   └── fixtures/                   #   测试数据（SOAP 报文、PM 文件示例）
-│
 ├── go.mod
 ├── go.sum
 ├── Makefile
@@ -362,7 +382,7 @@ oss.alarm.forward / oss.pm.export
 - `perf` — 性能优化
 
 **scope**（对应功能域或模块）：
-`acs`, `config`, `datamodel`, `pm`, `alarm`, `mr`, `omcr`, `nedirect`, `northbound`, `provision`, `interop`, `carrier`, `infra`, `api`, `deploy`
+`acs`, `config`, `datamodel`, `pm`, `alarm`, `mr`, `device`, `admin`, `topology`, `software`, `backup`, `dashboard`, `ops`, `report`, `mml`, `filemanager`, `syslog`, `license`, `nedirect`, `northbound`, `provision`, `interop`, `carrier`, `components`, `api`, `deploy`
 
 **示例**：
 ```
@@ -407,7 +427,7 @@ chore(deploy): 添加 ACS 引擎的 Dockerfile 和 K8s deployment
 
 | 阶段 | 目标 | 核心模块 |
 |------|------|---------|
-| **一：基础建设** | ACS 引擎能接收 Inform 并注册设备 | 项目脚手架, infra 层, pkg/tr069, acs 基础, device 注册 |
+| **一：基础建设** | ACS 引擎能接收 Inform 并注册设备 | 项目脚手架, components 层, pkg/tr069, acs 基础, device 注册 |
 | **二：核心功能** | 完整设备管理和自动开站流程 | acs/rpc 全量方法, cmdqueue, connreq, datamodel, carrier(cmcc), provision |
 | **三：数据管线** | PM/告警/MR 数据全链路 | pm, kpi, alarm, mr, carrier(ctcc/cucc) |
 | **四：北向与规模化** | OSS 对接、10 万级验证、生产加固 | northbound, omcr 完整功能, 负载测试, TLS/认证/监控 |

@@ -13,9 +13,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	commonerrors "github.com/omcgo/omcgo/internal/common/errors"
-	"github.com/omcgo/omcgo/internal/common/model"
-	"github.com/omcgo/omcgo/internal/omcr/device"
+	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/device"
 )
 
 // --- Mock DeviceRepository ---

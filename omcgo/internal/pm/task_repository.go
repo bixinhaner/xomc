@@ -3,7 +3,7 @@ package pm
 import (
 	"context"
 
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // TaskRepository defines the interface for PM task persistence.

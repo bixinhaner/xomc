@@ -18,7 +18,7 @@ FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /build/bin/omcgo-worker /usr/local/bin/omcgo-worker
-COPY --from=builder /build/configs/worker.yaml /etc/omcgo/worker.yaml
+COPY --from=builder /build/cmd/worker/etc/config.prod.yaml /etc/omcgo/worker.yaml
 
 EXPOSE 9092
 

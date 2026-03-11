@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/common/event"
-	"github.com/omcgo/omcgo/internal/config"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/appconfig"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +39,7 @@ type Engine struct {
 }
 
 // NewEngine creates a new push Engine with initial targets loaded from config.
-func NewEngine(cfgTargets []config.PushTargetConfig, logger *zap.Logger) *Engine {
+func NewEngine(cfgTargets []appconfig.PushTargetConfig, logger *zap.Logger) *Engine {
 	e := &Engine{
 		targets: make(map[string]*Target),
 		client: &http.Client{
@@ -246,7 +246,7 @@ func matchesDataType(types []string, dt string) bool {
 	return false
 }
 
-func targetFromConfig(ct config.PushTargetConfig) *Target {
+func targetFromConfig(ct appconfig.PushTargetConfig) *Target {
 	return &Target{
 		ID:         ct.ID,
 		URL:        ct.URL,

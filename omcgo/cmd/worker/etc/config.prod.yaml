@@ -1,0 +1,51 @@
+db:
+  dsn: "postgres://omcgo:password@localhost:5432/omcgo?sslmode=disable"
+  max_conns: 20
+  min_conns: 5
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
+tsdb:
+  dsn: "postgres://omcgo:password@localhost:5432/omcgo?sslmode=disable"
+  max_conns: 20
+  min_conns: 5
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
+redis:
+  addrs:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+
+nats:
+  url: "nats://localhost:4222"
+  max_reconnect: -1
+  reconnect_wait: 2s
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  buckets:
+    pm_files: "pm-files"
+    mr_files: "mr-files"
+    firmware: "firmware"
+    config_backup: "config-backup"
+    logs: "logs"
+
+metrics:
+  port: 9092
+
+tracer:
+  enabled: false
+  endpoint: "localhost:4317"
+  sample_rate: 1.0
+
+log:
+  level: "info"
+  format: "json"

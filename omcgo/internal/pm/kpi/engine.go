@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"go.uber.org/zap"
 )

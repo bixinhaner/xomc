@@ -9,8 +9,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
-	"github.com/omcgo/omcgo/internal/common/event"
-	"github.com/omcgo/omcgo/internal/config"
+	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/appconfig"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -19,7 +19,7 @@ import (
 type ACSServer struct {
 	httpServer    *http.Server
 	handler       *Handler
-	config        config.ACSServerConfig
+	config        appconfig.ACSServerConfig
 	logger        *zap.Logger
 }
 
@@ -37,7 +37,7 @@ type ServerDeps struct {
 }
 
 // NewACSServer creates a new ACS server with all dependencies wired.
-func NewACSServer(cfg config.ACSConfig, deps ServerDeps) *ACSServer {
+func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	h := &Handler{
 		sessionStore:  deps.SessionStore,
 		commandQueue:  deps.CommandQueue,

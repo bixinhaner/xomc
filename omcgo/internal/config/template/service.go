@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 	"go.uber.org/zap"
 )
 

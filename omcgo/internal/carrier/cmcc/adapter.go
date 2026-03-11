@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // CMCCCarrier implements the Carrier interface for China Mobile (中国移动).

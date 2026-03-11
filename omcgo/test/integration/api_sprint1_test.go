@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/omcgo/omcgo/internal/common/middleware"
-	"github.com/omcgo/omcgo/internal/omcr/admin"
+	"github.com/omcgo/omcgo/internal/middleware"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

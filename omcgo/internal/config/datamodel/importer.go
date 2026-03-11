@@ -7,7 +7,7 @@ import (
 	"io"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/common/model"
+	"github.com/omcgo/omcgo/internal/model"
 )
 
 // ImportValidationResult contains the result of a dry-run import validation.
