@@ -1,6 +1,7 @@
 # OS
 .DS_Store
 Thumbs.db
+.idea/
 
 # Build artifacts
 omcgo/bin/
@@ -11,3 +12,4 @@ omcmb/webcode/node_modules/
 # Claude (keep commands/ tracked for team sharing)
 .claude/*
 !.claude/commands/
+
