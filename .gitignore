@@ -6,7 +6,6 @@ Thumbs.db
 # Build artifacts
 omcgo/bin/
 omcgo/app
-omcmb/webcode/dist/
 omcmb/webcode/node_modules/
 
 # Claude (keep commands/ tracked for team sharing)
