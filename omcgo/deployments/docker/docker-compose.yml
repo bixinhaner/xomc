@@ -134,6 +134,15 @@ services:
       nats:
         condition: service_healthy
 
+  web:
+    build:
+      context: ../../..
+      dockerfile: omcgo/deployments/docker/Dockerfile.web
+    ports:
+      - "80:80"
+    depends_on:
+      - app
+
 volumes:
   pgdata:
   redisdata:
