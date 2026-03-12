@@ -18,6 +18,14 @@ import {
   RadarChartOutlined,
   SafetyOutlined,
   AppstoreOutlined,
+  GatewayOutlined,
+  DeploymentUnitOutlined,
+  WifiOutlined,
+  ThunderboltOutlined,
+  ApartmentOutlined,
+  CloudServerOutlined,
+  AimOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTabStore } from '@/store/tabStore';
@@ -44,8 +52,16 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   ToolOutlined:         <ToolOutlined />,
   BarChartOutlined:     <BarChartOutlined />,
   RadarChartOutlined:   <RadarChartOutlined />,
-  SafetyOutlined:       <SafetyOutlined />,
-  AppstoreOutlined:     <AppstoreOutlined />,
+  SafetyOutlined:         <SafetyOutlined />,
+  AppstoreOutlined:       <AppstoreOutlined />,
+  GatewayOutlined:        <GatewayOutlined />,
+  DeploymentUnitOutlined: <DeploymentUnitOutlined />,
+  WifiOutlined:           <WifiOutlined />,
+  ThunderboltOutlined:    <ThunderboltOutlined />,
+  ApartmentOutlined:      <ApartmentOutlined />,
+  CloudServerOutlined:    <CloudServerOutlined />,
+  AimOutlined:            <AimOutlined />,
+  ExperimentOutlined:     <ExperimentOutlined />,
 };
 
 function buildMenuItems(groups: NavGroup[], t: (id: string) => string): MenuItem[] {

@@ -46,6 +46,15 @@ export default function LoginPage() {
       createTime: '2024-01-01T00:00:00.000Z',
     };
 
+    const tokenPair = {
+      access_token: `mock-access-token-${values.username}-${Date.now()}`,
+      refresh_token: `mock-refresh-token-${values.username}-${Date.now()}`,
+      expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      token_type: 'Bearer',
+    };
+
+    setTokenPair(tokenPair);
+
     login(mockUser);
     message.success(t('login.success'));
     navigate(from, { replace: true });

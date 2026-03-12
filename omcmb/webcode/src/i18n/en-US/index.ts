@@ -272,6 +272,105 @@ const messages: Record<string, string> = {
   'nav.ops.downloads':         'Ops Downloads',
 
   // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Alarm (new)
+  // -------------------------------------------------------------------------
+  'nav.alarm.notification':   'Alarm Notification',
+  'nav.alarm.interfaceFault': 'Interface Fault',
+  'nav.alarm.customStats':    'Custom Statistics',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Config (new)
+  // -------------------------------------------------------------------------
+  'nav.config.son':            'SON Management',
+  'nav.config.epc':            'EPC Management',
+  'nav.config.reboot':         'Device Reboot',
+  'nav.config.factoryReset':   'Factory Reset',
+  'nav.config.selfStart':      'Self-Start Config',
+  'nav.config.cpeDiagnostics': 'CPE Diagnostics',
+  'nav.config.cpeFreqLock':    'CPE Freq Lock',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: Performance (new)
+  // -------------------------------------------------------------------------
+  'nav.performance.kpiMgmt':        'KPI Management',
+  'nav.performance.queryTemplates': 'Query Templates',
+  'nav.performance.busyHour':       'Busy Hour Stats',
+
+  // -------------------------------------------------------------------------
+  // Navigation — sub-pages: System (new)
+  // -------------------------------------------------------------------------
+  'nav.system.operators':     'Operator Management',
+  'nav.system.certificates':  'Certificate Management',
+  'nav.system.blacklist':     'Device Blacklist',
+  'nav.system.migration':     'Device Migration',
+  'nav.system.dbMonitor':     'DB Monitor',
+
+  // -------------------------------------------------------------------------
+  // Navigation — eGW
+  // -------------------------------------------------------------------------
+  'nav.egw':              'eGW Management',
+  'nav.egw.monitor':      'eGW Monitor',
+  'nav.egw.maintenance':  'eGW Maintenance',
+  'nav.egw.registration': 'eGW Registration',
+  'nav.egw.upgrade':      'eGW Upgrade',
+
+  // -------------------------------------------------------------------------
+  // Navigation — NewEGW
+  // -------------------------------------------------------------------------
+  'nav.newegw':               'NewEGW Management',
+  'nav.newegw.monitor':       'Device Monitor',
+  'nav.newegw.topology':      'Topology',
+  'nav.newegw.maintenance':   'Maintenance',
+  'nav.newegw.registration':  'Registration',
+  'nav.newegw.upgrade':       'Upgrade',
+  'nav.newegw.accessControl': 'Access Control',
+
+  // -------------------------------------------------------------------------
+  // Navigation — SAS
+  // -------------------------------------------------------------------------
+  'nav.sas':            'SAS Management',
+  'nav.sas.cpiConfig':  'CPI Config',
+  'nav.sas.properties': 'SAS Properties',
+  'nav.sas.monitoring': 'Spectrum Monitor',
+
+  // -------------------------------------------------------------------------
+  // Navigation — UPS
+  // -------------------------------------------------------------------------
+  'nav.ups':              'UPS Management',
+  'nav.ups.monitor':      'UPS Monitor',
+  'nav.ups.registration': 'UPS Registration',
+  'nav.ups.upgrade':      'UPS Upgrade',
+
+  // -------------------------------------------------------------------------
+  // Navigation — DHCP
+  // -------------------------------------------------------------------------
+  'nav.dhcp':              'DHCP Management',
+  'nav.dhcp.serverConfig': 'Server Config',
+  'nav.dhcp.clientList':   'Client List',
+  'nav.dhcp.service':      'Service Management',
+
+  // -------------------------------------------------------------------------
+  // Navigation — CAU
+  // -------------------------------------------------------------------------
+  'nav.cau':         'CAU Management',
+  'nav.cau.upgrade': 'CAU Upgrade',
+
+  // -------------------------------------------------------------------------
+  // Navigation — Strategy
+  // -------------------------------------------------------------------------
+  'nav.strategy':            'Strategy Management',
+  'nav.strategy.list':       'Strategy List',
+  'nav.strategy.execution':  'Strategy Execution',
+  'nav.strategy.import':     'Strategy Import',
+
+  // -------------------------------------------------------------------------
+  // Navigation — Advance
+  // -------------------------------------------------------------------------
+  'nav.advance':             'Advanced Features',
+  'nav.advance.anr':         'ANR Management',
+  'nav.advance.pciConflict': 'PCI Conflict Detection',
+
+  // -------------------------------------------------------------------------
   // Device labels
   // -------------------------------------------------------------------------
   'device.type.eNB':        'eNB Base Station',
