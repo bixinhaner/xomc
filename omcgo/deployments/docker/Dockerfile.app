@@ -9,7 +9,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app
+RUN CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app
 
 # ---
 
