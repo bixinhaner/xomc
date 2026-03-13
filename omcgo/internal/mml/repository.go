@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // CommandRepository provides read-only access to predefined MML commands.

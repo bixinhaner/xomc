@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/redis/go-redis/v9"
 )
 

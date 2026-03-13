@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"go.uber.org/zap"
 )

@@ -1,8 +1,8 @@
 package cmcc
 
 import (
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // knownOUIProducts returns known OUI-ProductClass combinations for CMCC.

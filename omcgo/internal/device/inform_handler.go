@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/event"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
 )

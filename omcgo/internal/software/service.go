@@ -12,8 +12,8 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/event"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 )
 

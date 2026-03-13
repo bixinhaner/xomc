@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // UpgradeState represents the current state of a firmware upgrade task.

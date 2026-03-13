@@ -1,8 +1,8 @@
 package ctcc
 
 import (
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // CTCCCarrier implements the Carrier interface for China Telecom (中国电信).

@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/model"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // Service provides business logic for ops tools management.

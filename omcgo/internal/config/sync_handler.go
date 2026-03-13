@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // SyncHandler provides HTTP endpoints for configuration parameter sync operations.

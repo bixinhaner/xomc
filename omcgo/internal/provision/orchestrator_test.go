@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

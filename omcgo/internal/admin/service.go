@@ -8,8 +8,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/model"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // AdminService provides user management, authentication, and RBAC functionality.

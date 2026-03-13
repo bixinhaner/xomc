@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/model"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // psql is the squirrel statement builder configured for PostgreSQL dollar placeholders.

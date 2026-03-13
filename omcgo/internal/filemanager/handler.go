@@ -13,8 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/model"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // Handler provides HTTP handlers for the file manager REST API.

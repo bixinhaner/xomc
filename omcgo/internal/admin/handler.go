@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // Handler provides HTTP endpoints for admin operations.

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 )
 
 // NewPostgresPool creates a new PostgreSQL connection pool.

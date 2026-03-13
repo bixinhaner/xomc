@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/device"
-	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/core/event"
 )
 
 // TransferBridge subscribes to AutonomousTransferComplete events from the ACS,

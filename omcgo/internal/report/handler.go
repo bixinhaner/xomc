@@ -9,8 +9,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/model"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // Handler provides HTTP handlers for report management REST API.

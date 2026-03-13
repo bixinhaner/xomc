@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // MRSParser parses MRS (Measurement Report - Statistics) XML files.

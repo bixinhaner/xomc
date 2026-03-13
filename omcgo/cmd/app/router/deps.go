@@ -8,10 +8,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/event"
-	"github.com/omcgo/omcgo/internal/appconfig"
-	"github.com/omcgo/omcgo/internal/components"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/components"
 )
 
 // Deps aggregates all infrastructure dependencies initialized by main.go.

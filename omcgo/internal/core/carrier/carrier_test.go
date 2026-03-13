@@ -3,11 +3,11 @@ package carrier_test
 import (
 	"testing"
 
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/carrier/cmcc"
-	"github.com/omcgo/omcgo/internal/carrier/ctcc"
-	"github.com/omcgo/omcgo/internal/carrier/cucc"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
+	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
+	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

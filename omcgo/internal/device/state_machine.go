@@ -3,7 +3,7 @@ package device
 import (
 	"fmt"
 
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // validTransitions defines the allowed state transitions for a device.

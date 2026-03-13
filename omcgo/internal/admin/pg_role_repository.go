@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // PgRoleRepository implements RoleRepository using PostgreSQL.

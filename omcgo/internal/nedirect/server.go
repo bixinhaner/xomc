@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.uber.org/zap"
 )
 

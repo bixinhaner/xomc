@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // CarrierRegistry manages carrier adapter registration and lookup.

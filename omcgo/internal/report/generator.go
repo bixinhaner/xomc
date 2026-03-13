@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/alarm"
-	"github.com/omcgo/omcgo/internal/event"
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 )
 

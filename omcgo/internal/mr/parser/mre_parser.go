@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // MREParser parses MRE (Measurement Report - Equipment/Terminal) XML files.

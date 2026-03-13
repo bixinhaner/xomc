@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	commonerrors "github.com/omcgo/omcgo/internal/errors"
-	"github.com/omcgo/omcgo/internal/model"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
 )

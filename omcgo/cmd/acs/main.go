@@ -7,8 +7,8 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/appconfig"
-	"github.com/omcgo/omcgo/internal/bootstrap"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/bootstrap"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )

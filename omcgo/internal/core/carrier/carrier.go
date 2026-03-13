@@ -1,6 +1,6 @@
 package carrier
 
-import "github.com/omcgo/omcgo/internal/model"
+import "github.com/omcgo/omcgo/internal/core/model"
 
 // Carrier defines the interface for carrier-specific behavior.
 // All carrier differences must be implemented through this interface.

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/event"
-	"github.com/omcgo/omcgo/internal/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.uber.org/zap"
 )
 

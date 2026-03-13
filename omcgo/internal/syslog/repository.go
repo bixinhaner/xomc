@@ -3,7 +3,7 @@ package syslog
 import (
 	"context"
 
-	"github.com/omcgo/omcgo/internal/model"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // SyslogRepository defines the interface for system log and NE message log persistence.

@@ -12,7 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/device"
-	"github.com/omcgo/omcgo/internal/event"
+	"github.com/omcgo/omcgo/internal/core/event"
 )
 
 // BackupExecutor subscribes to backup.task.created events and executes

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/omcgo/omcgo/internal/middleware"
+	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
