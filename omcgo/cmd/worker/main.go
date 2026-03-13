@@ -3,28 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
-	"github.com/omcgo/omcgo/internal/backup"
-	"github.com/omcgo/omcgo/internal/carrier"
-	"github.com/omcgo/omcgo/internal/carrier/cmcc"
-	"github.com/omcgo/omcgo/internal/carrier/ctcc"
-	"github.com/omcgo/omcgo/internal/carrier/cucc"
-	"github.com/omcgo/omcgo/internal/event"
 	"github.com/omcgo/omcgo/internal/appconfig"
-	"github.com/omcgo/omcgo/internal/components"
-	logpkg "github.com/omcgo/omcgo/internal/components/logger"
-	miniocomp "github.com/omcgo/omcgo/internal/components/minio"
-	natscomp "github.com/omcgo/omcgo/internal/components/nats"
-	"github.com/omcgo/omcgo/internal/components/postgres"
-	rediscomp "github.com/omcgo/omcgo/internal/components/redis"
+	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/bootstrap"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
@@ -34,8 +20,6 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/transfer"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -57,180 +41,98 @@ func main() {
 }
 
 func runWorker(cmd *cobra.Command, args []string) error {
-	// 1. Load config
 	cfgPath, _ := cmd.Flags().GetString("config")
 	var cfg appconfig.WorkerConfig
 	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// 2. Initialize logger
-	logger, err := logpkg.NewLogger(cfg.Log)
+	app, err := bootstrap.InitForWorker(context.Background(), &cfg)
 	if err != nil {
-		return fmt.Errorf("init logger: %w", err)
+		return err
 	}
-	defer logger.Sync()
+	defer app.Logger.Sync()
+	app.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
-	logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
+	// Register all event subscribers
+	registerSubscribers(app, &cfg)
 
-	// 3. Graceful shutdown setup
-	gs := components.NewGracefulShutdown(30*time.Second, logger)
-	ctx := context.Background()
+	app.Logger.Info("omcgo-worker ready, waiting for events...")
+	return app.WaitAndShutdown(nil)
+}
 
-	// 4. Connect to PostgreSQL
-	pgPool, err := postgres.NewPostgresPool(ctx, cfg.DB)
-	if err != nil {
-		return fmt.Errorf("connect to PostgreSQL: %w", err)
-	}
-	gs.Register("postgres", 4, func(ctx context.Context) error { pgPool.Close(); return nil })
+func registerSubscribers(app *bootstrap.App, cfg *appconfig.WorkerConfig) {
+	logger := app.Logger
 
-	// 5. Connect to TimescaleDB
-	tsPool, err := postgres.NewTimescalePool(ctx, cfg.TSDB)
-	if err != nil {
-		return fmt.Errorf("connect to TimescaleDB: %w", err)
-	}
-	gs.Register("timescale", 4, func(ctx context.Context) error { tsPool.Close(); return nil })
-
-	// 6. Connect to Redis
-	redisClient, err := rediscomp.NewRedisClient(cfg.Redis)
-	if err != nil {
-		return fmt.Errorf("connect to Redis: %w", err)
-	}
-	gs.Register("redis", 3, func(ctx context.Context) error { return redisClient.Close() })
-
-	// 7. Connect to NATS
-	natsClient, err := natscomp.NewNATSClient(cfg.NATS, logger)
-	if err != nil {
-		return fmt.Errorf("connect to NATS: %w", err)
-	}
-	gs.Register("nats", 2, func(ctx context.Context) error { natsClient.Close(); return nil })
-
-	if err := natsClient.EnsureStreams(ctx); err != nil {
-		logger.Warn("ensure NATS streams", zap.Error(err))
-	}
-
-	// 8. Connect to MinIO
-	minioClient, err := miniocomp.NewMinIOClient(cfg.MinIO)
-	if err != nil {
-		return fmt.Errorf("connect to MinIO: %w", err)
-	}
-	if err := miniocomp.EnsureBuckets(ctx, minioClient, cfg.MinIO.Buckets); err != nil {
-		logger.Warn("ensure MinIO buckets", zap.Error(err))
-	}
-
-	// 9. Create EventBus
-	eventBus := event.NewNATSEventBus(natsClient.Conn, natsClient.JS, logger)
-	gs.Register("eventbus", 2, func(ctx context.Context) error { return eventBus.Close() })
-
-	// 10. Create CarrierRegistry
-	carrierRegistry := carrier.NewRegistry()
-	carrierRegistry.Register(cmcc.New())
-	carrierRegistry.Register(ctcc.New())
-	carrierRegistry.Register(cucc.New())
-	logger.Info("carrier registry initialized", zap.Int("carriers", len(carrierRegistry.All())))
-
-	// 11. Create PM Collector + Subscribe
-	counterRepo := counter.NewPgCounterRepository(tsPool)
-	kpiRepo := kpi.NewPgKPIRepository(tsPool)
-	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, carrierRegistry, logger)
+	// PM Collector
+	counterRepo := counter.NewPgCounterRepository(app.TsPool)
+	kpiRepo := kpi.NewPgKPIRepository(app.TsPool)
+	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, app.Carriers, logger)
 	pmParser := collector.NewPMXMLParser()
-	pmFileStore := pm.NewPgPMFileStore(pgPool)
-	pmCollector := collector.NewPMCollector(minioClient, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, eventBus, logger)
-	if err := pmCollector.Subscribe(eventBus); err != nil {
+	pmFileStore := pm.NewPgPMFileStore(app.PgPool)
+	pmCollector := collector.NewPMCollector(app.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, app.EventBus, logger)
+	if err := pmCollector.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
 	logger.Info("PM collector started")
 
-	// 12. Create Alarm Receiver + Subscribe
-	alarmPgStore := alarm.NewPgAlarmStore(pgPool, tsPool)
-	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
-	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, carrierRegistry, eventBus, logger)
+	// Alarm Receiver
+	alarmPgStore := alarm.NewPgAlarmStore(app.PgPool, app.TsPool)
+	alarmRedisStore := alarm.NewRedisAlarmStore(app.Redis)
+	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, app.Carriers, app.EventBus, logger)
 	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, logger)
-	if err := alarmReceiver.Subscribe(eventBus); err != nil {
+	if err := alarmReceiver.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
 	}
 	logger.Info("alarm receiver started")
 
-	// 13. Create MR Collector + Subscribe
-	mrStore := mr.NewPgMRStore(pgPool, tsPool)
-	mrCollector := mrcollector.NewMRCollector(minioClient, cfg.MinIO.Buckets.MRFiles, mrStore, eventBus, logger)
-	if err := mrCollector.Subscribe(eventBus); err != nil {
+	// MR Collector
+	mrStore := mr.NewPgMRStore(app.PgPool, app.TsPool)
+	mrCollector := mrcollector.NewMRCollector(app.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, app.EventBus, logger)
+	if err := mrCollector.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}
 	logger.Info("MR collector started")
 
-	// 14. Create Transfer Bridge + Subscribe
-	deviceRepo := device.NewPgDeviceRepository(pgPool)
+	// Transfer Bridge
+	deviceRepo := device.NewPgDeviceRepository(app.PgPool)
 	transferBridge := transfer.NewTransferBridge(
-		deviceRepo, minioClient,
+		deviceRepo, app.MinIO,
 		cfg.MinIO.Buckets.PMFiles, cfg.MinIO.Buckets.MRFiles, cfg.MinIO.Buckets.Logs,
-		eventBus, logger,
+		app.EventBus, logger,
 	)
-	if err := transferBridge.Subscribe(eventBus); err != nil {
+	if err := transferBridge.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe transfer bridge", zap.Error(err))
 	}
 	logger.Info("transfer bridge started")
 
-	// 15. Create Backup Executor + Subscribe
-	backupTaskRepo := backup.NewPgTaskRepository(pgPool)
-	cmdQueue := cmdqueue.NewRedisCommandQueue(redisClient)
-	connReqClient := connreq.NewClient(redisClient, logger)
+	// Backup Executor
+	backupTaskRepo := backup.NewPgTaskRepository(app.PgPool)
+	cmdQueue := cmdqueue.NewRedisCommandQueue(app.Redis)
+	connReqClient := connreq.NewClient(app.Redis, logger)
 	backupExecutor := backup.NewBackupExecutor(
 		backupTaskRepo, deviceRepo, cmdQueue, connReqClient,
-		eventBus, logger,
+		app.EventBus, logger,
 	)
-	if err := backupExecutor.Subscribe(eventBus); err != nil {
+	if err := backupExecutor.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe backup executor", zap.Error(err))
 	}
 	logger.Info("backup executor started")
 
-	// 16. Create Report Generator + Subscribe
-	reportDefRepo := report.NewPgDefinitionRepository(pgPool)
-	reportRecordRepo := report.NewPgRecordRepository(pgPool)
+	// Report Generator
+	reportDefRepo := report.NewPgDefinitionRepository(app.PgPool)
+	reportRecordRepo := report.NewPgRecordRepository(app.PgPool)
 	reportBucket := cfg.MinIO.Buckets.Reports
 	if reportBucket == "" {
 		reportBucket = "reports"
 	}
 	reportGenerator := report.NewReportGenerator(
 		reportRecordRepo, reportDefRepo, kpiRepo, alarmPgStore,
-		minioClient, reportBucket,
-		eventBus, logger,
+		app.MinIO, reportBucket,
+		app.EventBus, logger,
 	)
-	if err := reportGenerator.Subscribe(eventBus); err != nil {
+	if err := reportGenerator.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe report generator", zap.Error(err))
 	}
 	logger.Info("report generator started")
-
-	// 17. Start Prometheus metrics server
-	metricsReg := prometheus.NewRegistry()
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.HandlerFor(metricsReg, promhttp.HandlerOpts{}))
-	metricsServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Metrics.Port),
-		Handler: metricsMux,
-	}
-	gs.Register("metrics-http", 1, func(ctx context.Context) error { return metricsServer.Shutdown(ctx) })
-
-	go func() {
-		logger.Info("metrics server starting", zap.Int("port", cfg.Metrics.Port))
-		if err := metricsServer.ListenAndServe(); err != http.ErrServerClosed {
-			logger.Error("metrics server error", zap.Error(err))
-		}
-	}()
-
-	logger.Info("omcgo-worker ready, waiting for events...")
-
-	// 18. Wait for signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
-	logger.Info("received signal, shutting down", zap.String("signal", sig.String()))
-
-	// 19. Graceful shutdown
-	if err := gs.Shutdown(context.Background()); err != nil {
-		logger.Error("shutdown error", zap.Error(err))
-	}
-
-	logger.Info("omcgo-worker stopped")
-	return nil
 }
