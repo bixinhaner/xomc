@@ -123,8 +123,11 @@ type SessionConfig struct {
 
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
-	PerDevice   int `mapstructure:"per_device"`
-	GlobalBurst int `mapstructure:"global_burst"`
+	PerDevice      int           `mapstructure:"per_device"`       // 每设备每分钟最大 Inform 数
+	Burst          int           `mapstructure:"burst"`            // token bucket 突发容量
+	MaxDevices     int           `mapstructure:"max_devices"`      // 限流器追踪的最大设备数
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"` // 清理扫描间隔
+	CleanupTimeout  time.Duration `mapstructure:"cleanup_timeout"`  // 设备不活跃淘汰超时
 }
 
 // AuthConfig holds CPE authentication settings.

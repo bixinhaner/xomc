@@ -15,8 +15,11 @@ session:
   max_concurrent: 10000
 
 rate_limit:
-  per_device: 10
-  global_burst: 5000
+  per_device: 10            # 每设备每分钟最大 Inform 数
+  burst: 5                  # token bucket 突发容量
+  max_devices: 100000       # 限流器追踪的最大设备数
+  cleanup_interval: 5m      # 不活跃设备清理扫描间隔
+  cleanup_timeout: 10m      # 设备不活跃淘汰超时
 
 auth:
   mode: "none"

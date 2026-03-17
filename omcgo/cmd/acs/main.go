@@ -52,7 +52,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		cmdQueue,
 		app.EventBus,
 		cfg.Auth.Mode, cfg.Auth.Username, cfg.Auth.Password,
-		cfg.RateLimit.PerDevice,
+		cfg.RateLimit,
 		cfg.Session.MaxConcurrent,
 		app.MetricsReg,
 		app.Logger,

@@ -16,7 +16,10 @@ session:
 
 rate_limit:
   per_device: 10
-  global_burst: 5000
+  burst: 5
+  max_devices: 200000
+  cleanup_interval: 5m
+  cleanup_timeout: 10m
 
 auth:
   mode: "none"

@@ -4,11 +4,13 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // ACSMetrics holds all Prometheus metrics for the ACS engine.
 type ACSMetrics struct {
-	ActiveSessions   prometheus.Gauge
-	InformTotal      *prometheus.CounterVec
-	RPCDuration      *prometheus.HistogramVec
-	RPCErrorsTotal   *prometheus.CounterVec
-	SessionDuration  prometheus.Histogram
+	ActiveSessions       prometheus.Gauge
+	InformTotal          *prometheus.CounterVec
+	RPCDuration          *prometheus.HistogramVec
+	RPCErrorsTotal       *prometheus.CounterVec
+	SessionDuration      prometheus.Histogram
+	RateLimitRejected    prometheus.Counter
+	RateLimitDeviceCount prometheus.Gauge
 }
 
 // NewACSMetrics creates and registers ACS metrics.
@@ -36,6 +38,14 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 			Help:    "Duration of complete TR069 sessions",
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
 		}),
+		RateLimitRejected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "acs_rate_limit_rejected_total",
+			Help: "Total number of requests rejected by per-device rate limiter",
+		}),
+		RateLimitDeviceCount: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_rate_limit_device_count",
+			Help: "Number of devices tracked by the rate limiter",
+		}),
 	}
 
 	reg.MustRegister(
@@ -44,6 +54,8 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 		m.RPCDuration,
 		m.RPCErrorsTotal,
 		m.SessionDuration,
+		m.RateLimitRejected,
+		m.RateLimitDeviceCount,
 	)
 
 	return m

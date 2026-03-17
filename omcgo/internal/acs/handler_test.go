@@ -158,7 +158,7 @@ func newTestACSHandlerWithDeps(store SessionStore, cmdQ cmdqueue.CommandQueue, b
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
 		rpcDispatcher: rpc.NewDispatcher(),
-		rateLimiter:   NewDeviceRateLimiter(100, 100),
+		rateLimiter:   NewDeviceRateLimiter(100, 100, 10000, zap.NewNop()),
 		admission:     NewAdmissionController(1000),
 		metrics:       metrics,
 		logger:        zap.NewNop(),
@@ -473,7 +473,7 @@ func TestServeHTTP_Inform_RateLimited_Returns503(t *testing.T) {
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
 	// Set very low rate limit: 1 per minute, burst 1.
-	h.rateLimiter = NewDeviceRateLimiter(1, 1)
+	h.rateLimiter = NewDeviceRateLimiter(1, 1, 10000, zap.NewNop())
 
 	// First request should succeed.
 	w1 := httptest.NewRecorder()

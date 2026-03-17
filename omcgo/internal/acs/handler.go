@@ -132,6 +132,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// Rate limiting
 	if !h.rateLimiter.Allow(deviceSN) {
+		h.metrics.RateLimitRejected.Inc()
 		h.logger.Warn("rate limited", zap.String("device_sn", deviceSN))
 		http.Error(w, "Too Many Requests", http.StatusServiceUnavailable)
 		return

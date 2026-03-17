@@ -61,6 +61,18 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	// from dropped TCP connections. Scans every 30s, cleans entries older than 5min.
 	h.startSessionReaper(30*time.Second, 5*time.Minute)
 
+	// Start rate limiter background cleanup based on config.
+	// Defaults: scan every 5 min, evict devices inactive for 10 min.
+	cleanupInterval := cfg.RateLimit.CleanupInterval
+	if cleanupInterval <= 0 {
+		cleanupInterval = 5 * time.Minute
+	}
+	cleanupTimeout := cfg.RateLimit.CleanupTimeout
+	if cleanupTimeout <= 0 {
+		cleanupTimeout = 10 * time.Minute
+	}
+	deps.RateLimiter.StartCleanup(cleanupInterval, cleanupTimeout)
+
 	return &ACSServer{
 		httpServer: &http.Server{
 			Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
@@ -85,9 +97,10 @@ func (s *ACSServer) Start() error {
 	return nil
 }
 
-// Shutdown gracefully stops the ACS server.
+// Shutdown gracefully stops the ACS server and its background goroutines.
 func (s *ACSServer) Shutdown(ctx context.Context) error {
 	s.logger.Info("ACS server shutting down")
+	s.handler.rateLimiter.Stop()
 	return s.httpServer.Shutdown(ctx)
 }
 
@@ -103,7 +116,7 @@ func NewDefaultDeps(
 	cmdQueue cmdqueue.CommandQueue,
 	eventBus event.EventBus,
 	authMode, authUser, authPass string,
-	rateLimitPerMin int,
+	rateCfg appconfig.RateLimitConfig,
 	maxSessions int64,
 	metricsReg prometheus.Registerer,
 	logger *zap.Logger,
@@ -114,14 +127,9 @@ func NewDefaultDeps(
 		EventBus:      eventBus,
 		Authenticator: auth.NewAuthenticator(authMode, authUser, authPass),
 		RPCDispatcher: rpc.NewDispatcher(),
-		RateLimiter:   NewDeviceRateLimiter(rateLimitPerMin, 5),
+		RateLimiter:   NewDeviceRateLimiter(rateCfg.PerDevice, rateCfg.Burst, rateCfg.MaxDevices, logger),
 		Admission:     NewAdmissionController(maxSessions),
 		Metrics:       NewACSMetrics(metricsReg),
 		Logger:        logger,
 	}
-}
-
-func init() {
-	// Ensure default values for durations
-	_ = time.Second
 }
