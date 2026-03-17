@@ -539,3 +539,160 @@ mac_address, group_name, cell_ip, op_state, ue_count
 | `components/DataTable/index.tsx` | ColumnGroup 类型、列排序支持 |
 | `components/DataTable/ColumnVisibility.tsx` | 折叠面板分组 + 搜索 + 拖拽排序 |
 | `components/DataTable/Toolbar.tsx` | 锁定刷新按钮 |
+
+---
+
+## 6. 各监控页面产品类型分析
+
+### 6.1 LTE eNodeB 监控页面
+
+LTE 页面使用两个字段标识产品：`product`（产品编号）和 `platformType`（平台类型）。
+
+#### product 取值
+
+| 产品编号 | 说明 | 特殊处理 |
+|---------|------|---------|
+| `PM-B4860` | NXP 芯片产品 | 独立的激活/取消激活逻辑、NXP 专用接口 |
+| `QAFA` | QA 系列 A 型 | MME 状态列表独立显示逻辑 |
+| `QATA` | QA 系列 T/A 型 | 同 QAFA |
+| `QAFB` | QA 系列 B 型 | 同 QAFA |
+| `RTD` | 辅站标识 | 双载波辅站不可选中 |
+| 其他 | 通用产品 | 标准显示逻辑 |
+
+#### platformType 取值
+
+| 平台类型 | 芯片平台 | 小区配置 | 说明 |
+|---------|---------|---------|------|
+| `Intel_CR` | Intel | 基础 | 英特尔 CR 基础版 |
+| `Intel_CR_CA` | Intel | 双小区(CA) | 支持载波聚合，多小区激活显示 |
+| `Intel_CR_TC` | Intel | 三小区(TC) | 三小区配置 |
+| `Intel_CR_SC` | Intel | 单小区(SC) | 单小区配置 |
+| `Intel_CR_DC` | Intel | 双载波(DC) | 双载波辅波特殊处理 |
+| `MLN` | MLN | 基础 | 美联平台基础版 |
+| `MLN_CA` | MLN | 双小区(CA) | 多小区激活显示 |
+| `MLN_SC` | MLN | 单小区(SC) | 单小区配置 |
+| `MLN_DC` | MLN | 双载波(DC) | 双载波辅波特殊处理 |
+| `BM` | BM | 多制式 | LTE+GSM 多制式，Cell ID/RF 状态/UE 数独立逻辑 |
+| `QA_436Q_CA` | QA 436Q | 双小区(CA) | 高通芯片，扫描功能 |
+| `QA_436Q_SC` | QA 436Q | 单小区(SC) | 高通芯片 |
+| `QA_436Q_DC` | QA 436Q | 双载波(DC) | 双载波辅波特殊处理 |
+| `NEU430_DC` | NEU 430 | 双载波(DC) | 扫描功能，双载波辅波处理 |
+| `BAIBLQ` | BAIBLQ | - | 扫描功能，设置面板跳转 |
+| `MLQ` | MLQ | - | 扫描功能，设置面板跳转 |
+
+#### 产品类型影响的功能差异
+
+| 功能 | 受影响的 platformType / product | 差异行为 |
+|------|-------------------------------|---------|
+| 激活状态显示 | Intel_CR_CA, Intel_CR_TC, MLN_CA, BM, PM-B4860 | 多小区分别显示激活状态 |
+| MME 状态列 | QAFA, QATA, QAFB | 独立的 MME 列表渲染 |
+| PLMN 显示 | Intel_CR 系列, MLN 系列, BM | 条件显示 PLMN 信息 |
+| UE 数显示 | BM | 独立的 UE 计数逻辑 |
+| Cell ID 显示 | BM | 多制式 Cell ID 显示 |
+| 扫描功能 | QA_436Q_CA/SC/DC, NEU430_DC, BAIBLQ, MLQ | 支持扫描操作 |
+| 双载波辅波 | Intel_CR_DC, MLN_DC, QA_436Q_DC, NEU430_DC | 辅波限制操作，仅射频可用 |
+| 设置面板 | 436Q, BAIBLQ, MLQ | 独立的设置面板跳转 |
+| 行选中限制 | RTD (辅站) | 双载波辅站不可选中 |
+
+---
+
+### 6.2 GSM 监控页面
+
+GSM 页面同时使用 `product` 和 `platformType`，但产品类型较少。
+
+#### product 取值
+
+| 产品编号 | 说明 | 特殊处理 |
+|---------|------|---------|
+| `BSC` | 基站控制器 | 状态列显示 `--`（不可操作） |
+| `BTS` | 基站收发台 | 标准 GSM 设备，完整状态显示 |
+| `PM-B4860` | NXP 芯片产品 | 独立激活逻辑，NXP 专用接口 |
+| `RTD` | 辅站标识 | 双载波辅站不可选中 |
+
+#### platformType 取值
+
+GSM 页面复用了 LTE 的 platformType 判断逻辑：
+
+| 平台类型 | 说明 |
+|---------|------|
+| `Intel_CR_CA` | 多小区激活状态显示 |
+| `Intel_CR_TC` | 多小区激活状态显示 |
+| `MLN_CA` | 多小区激活状态显示 |
+| `QA_436Q_CA` | 独立的多小区激活显示 |
+| `436Q` | 设置面板跳转条件 |
+| `BAIBLQ` | 设置面板跳转条件 |
+| `MLQ` | 设置面板跳转条件 |
+
+#### 筛选默认值
+
+- 默认筛选条件：`product_model = 'BSC,BTS'`（即默认查看 BSC 和 BTS 两种设备）
+
+---
+
+### 6.3 5G NR gNodeB 监控页面
+
+5G NR 页面产品类型最简单，仅两种产品。**不使用 platformType 字段**。
+
+#### product 取值
+
+| 产品编号 | 说明 | 特殊处理 |
+|---------|------|---------|
+| `BaiBNX` | 5G gNodeB X 型 | 标准 5G 设备 |
+| `BaiBNQ` | 5G gNodeB Q 型 | AMF 状态列独立显示逻辑 |
+
+#### 筛选下拉选项
+
+```
+全部 | BaiBNX | BaiBNQ
+```
+
+- 产品类型标识（`product`）和设备型号名（`module_type`）均为锁定字段（disabled: true）
+- `BaiBNQ` 特有 AMF Status 列的条件渲染
+
+---
+
+### 6.4 筛选下拉选项对比（前端 UI 层面）
+
+> 以下分析区分了**前端筛选下拉选项**（用户在 UI 中可选的值）和**代码条件渲染中引用的 product/platformType 值**（仅用于列渲染逻辑）。
+
+#### LTE eNodeB 筛选下拉
+
+- **产品类型标识 (`product_model`)**：JSP 中定义为 `product_model: []`（空数组），无硬编码选项
+- **加载方式**：JSP 中未找到调用 `getEnbMonitorProductList` 的 API 请求，下拉选项完全由后端动态填充
+- **结论**：LTE 页面的产品类型筛选选项由后端接口返回，前端不维护固定列表
+
+#### GSM 筛选下拉
+
+- **产品类型标识 (`product_model`)**：JSP 中硬编码为 `product_model: 'BSC,BTS'`（逗号分隔字符串）
+- **加载方式**：无动态 API 加载，固定值作为默认筛选条件
+- **结论**：GSM 页面默认筛选 BSC 和 BTS 两种产品类型，无动态扩展
+
+#### 5G NR gNodeB 筛选下拉
+
+- **硬编码选项**：`advancedQueryItemList` 中定义了 `BaiBNX` 和 `BaiBNQ` 两个选项
+- **动态加载**：页面初始化时调用 `getEnbMonitorProductList.action?isGnb=1` 接口，返回值**覆盖**硬编码选项
+- **结论**：5G NR 页面有初始硬编码值，但实际运行时以后端返回为准
+
+#### 下拉选项汇总
+
+| 页面 | 硬编码选项 | 动态加载 | 实际行为 |
+|------|-----------|:--------:|---------|
+| LTE eNodeB | 无（空数组） | 未明确调用 | 由后端完全控制 |
+| GSM | `BSC, BTS` | 无 | 固定两种产品 |
+| 5G NR gNodeB | `BaiBNX, BaiBNQ` | ✅ `getEnbMonitorProductList?isGnb=1` | 硬编码为初始值，后端可覆盖 |
+
+> **注意**：代码中通过 `product` 和 `platformType` 条件判断的产品类型（如 PM-B4860、QAFA、Intel_CR_CA 等）仅影响列渲染逻辑（激活状态显示、MME 列表、Cell ID 格式等），并不等同于用户可选的筛选下拉选项。这些值来自设备上报的数据，不需要在筛选下拉中逐一列举。
+
+---
+
+### 6.5 三页面产品类型汇总
+
+| 维度 | LTE eNodeB | GSM | 5G NR gNodeB |
+|------|:----------:|:---:|:------------:|
+| product 取值数 | 5+ (PM-B4860, QAFA, QATA, QAFB, RTD, 通用) | 4 (BSC, BTS, PM-B4860, RTD) | 2 (BaiBNX, BaiBNQ) |
+| platformType 取值数 | 16 | 7（复用 LTE 逻辑） | 不使用 |
+| 小区配置类型 | CA/TC/SC/DC/基础 | 复用 LTE | 无 |
+| 多制式支持 | BM (LTE+GSM) | - | - |
+| 双载波 | Intel_CR_DC, MLN_DC, QA_436Q_DC, NEU430_DC | 复用 LTE | - |
+| 筛选下拉选项 | 后端动态（空数组） | BSC, BTS（硬编码） | BaiBNX, BaiBNQ（硬编码+动态覆盖） |
+| 复杂度 | 高（16 种平台 × 5 种产品） | 中（复用 LTE 逻辑） | 低（仅 2 种产品） |
