@@ -1,0 +1,238 @@
+:root {
+	--main-bg:url(./images/login/login_bg.png);
+	--logo-big-white:url(./images/login/login_logo.png);
+	--logo-big:url(./images/login/nav_logo.png);
+	--logo-small:url(./images/login/nav_logo_collapse.png);
+}
+*{
+	margin:0;
+	padding:0;
+}
+
+input:-webkit-autofill{
+	-webkit-box-shadow:0 0 0px 1000px white inset;
+	border:1px solid #ccc !importnat;
+}
+.loginbody , .lockbody{
+	background-image:var(--main-bg);
+	background-size: cover;
+	background-position:center;
+	background-size: cover;
+	min-width:1024px;
+	overflow-x: auto;
+	overflow-y: hidden;
+	position:fixed;
+	top:0;
+	bottom:0;
+	right:0;
+	left:0;
+	z-index:99999;
+}
+.loginlogo , .locklogo{
+	line-height: 300px;
+	height: 324px;
+	display: inline-block;
+	margin-left: 15%;
+	font-size:90px;
+	color:#FFF;
+	background:none;
+}
+.loginformbox , .lockformbox{
+	width: 348px;
+	height: 450px;
+	display: inline-block;
+	float: right;
+	margin-right: 15%;
+	margin-top:-42px;
+	background-image: url(./images/login/loginbar_bg_login.png);
+	background-position: center center;
+	border-style: none;
+	position:relative;
+}
+.loginformbox .input_  , .lockformbox .input_{
+	width:221px;
+	height:30px;
+	border:none;
+}
+.login_user_div , .lock_user_div{
+	width: 267px;
+	height: 36px;
+	display: inline-block;
+	margin: 20px 30px 45px;
+	border-bottom:1px solid #d7dde8;
+}
+.login_pwd_div , .lock_pwd_div{
+	width: 267px;
+	height: 36px;
+	display: inline-block;
+	margin:5px 30px 45px;
+	border-bottom:1px solid #d7dde8;
+}
+.login_verifyCode_div {
+	width: 267px;
+	height: 36px;
+	display: inline-block;
+	margin:5px 30px;
+	border-bottom:1px solid #d7dde8;
+}
+.login_btn_div , .lock_btn_div{
+	width: 270px;
+	height: 38px;
+	margin-top: 10px;
+	background-image: url(./images/login/login_loginbar_btn_login_nor.png);
+	background-position: center center;
+	background-size: cover;
+	border-style: none;
+	display: inline-block;
+	cursor: pointer;
+}
+.login_btn_div:hover {
+	background-image: url(./images/login/login_loginbar_btn_login_hov.png);
+}
+
+.login_btn_div:active {
+	background-image: url(./images/login/login_loginbar_btn_login_click.png);
+}
+.input_ico_user_div , .input_ico_user_div_lock{
+	width: 16px;
+	height: 20px;
+	display: inline-block;
+	background-image: url(./images/login/login_loginbar_input_ico_user.png);
+	background-position: center center;
+	background-repeat: no-repeat;
+	border-style: none;
+	position: relative;
+	top: 5px;
+	margin:0 10px;
+}
+.input_ico_pwd_div , .input_ico_pwd_div_lock{
+	width: 16px;
+	height: 20px;
+	display: inline-block;
+	background-image: url(./images/login/login_loginbar_input_ico_password.png);
+	background-position: center center;
+	background-repeat: no-repeat;
+	border-style: none;
+	position: relative;
+	top: 5px;
+	margin:0 10px;
+}
+.input_ico_veriification_div {
+	width: 16px;
+	height: 20px;
+	display: inline-block;
+	background-image: url(./images/login/login_loginbar_input_ico_verificationCode.png);
+	background-position: center center;
+	background-repeat: no-repeat;
+	border-style: none;
+	position: relative;
+	top: 5px;
+	margin:0 10px;
+}
+.login_bar_logo_div ,.lock_bar_logo_div{
+	width: 190px;
+	height: 54px;
+	background-image: var(--logo-big-white) ;
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size: contain;
+	display: inline-block;
+	margin-top: 40px;
+	border-style: none;
+}
+/* GLOBALS */
+ *:after, *:before {
+	-webkit-box-sizing: border-box;
+	-moz-box-sizing: border-box;
+	-ms-box-sizing: border-box;
+	-o-box-sizing: border-box;
+	box-sizing: border-box;
+	padding: 0;
+	margin: 0;
+}
+
+.login-msg {
+	display: block;
+	width: 225px;
+	margin: 15px 0 0px 23px;
+	background-color: #4d4769;
+	padding: 5px 20px 5px 0px;
+	*width: 205px;
+	line-height: 18px;
+	clear: both;
+	text-align: right;
+	font-size: 12px;
+}
+
+.login-msg a {
+	color: #aaa;
+}
+
+.login-msg a:hover {
+	color: #fff;
+}
+
+.loginmain , .lockmain{
+	width: 100%;
+	min-width: 1024px;
+	height: 324px;
+	position: absolute;
+	top: 50%;
+	margin-top: -125px;
+}
+ .lockformbox {
+	width: 348px;
+	height: 394px;
+	display: inline-block;
+	float: right;
+	margin-right: 15%;
+	margin-top:-42px;
+	background-image: url('./images/login/loginbar_bg.png');
+	background-position: center center;
+	border-style: none;
+	position:relative;
+}
+.logoTitle .el-icon-logo-baiomc {
+	width:160px;
+	height: 50px; 
+	margin-top: 8px; 
+	background-image:var(--logo-big);
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+}
+
+
+.hidden {
+  	display:none !important;
+ }
+ .fenghuo_about{
+	background: url('./images/login/login_logo_FH.png') no-repeat center;
+	height:55px;
+}
+.browser_icon{
+ 	display:inline-block;
+ 	width:82px;
+ 	height:40px;
+ }
+ .google_icon{
+ 	background: url(./images/login/google.gif) center center no-repeat;
+ }
+ .firefox_icon{
+ 	background: url(./images/login/firefox.gif) center center no-repeat;
+ }
+ .edge_icon{
+ 	background: url(./images/login/edge.gif) center center no-repeat;
+ }
+ .safari_icon{
+ 	background: url(./images/login/safari.gif) center center no-repeat;
+ }
+.lockIconItem .el-icon-circle-warning:before{
+ 	color:#E68619;
+ }
+ .lockIconItem{
+ 	width:100%;
+ 	height:40px;
+ 	background:#fff;
+ 	display:flex;
+ }

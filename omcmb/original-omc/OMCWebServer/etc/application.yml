@@ -1,0 +1,27 @@
+spring:
+  profiles:
+    active: common,prod
+  application:
+    name: webServer
+  cloud:
+    bus:
+      trace:
+        enabled: true
+  config:
+    import: "configserver:http://system:systemSec1p2w3d@omclauncher:8888/"
+  pid:
+    file: /usr/local/tomcat_web/application.pid
+  mvc:
+    static-path-pattern: '/**'
+logging:
+  config: logback-spring.xml
+feign:
+  httpclient:
+    enabled: true
+http:
+  maxTotal: 100
+  defaultMaxPerRoute: 10
+  connectionTimeout: 2000
+  connectionRequestTimeout: 2000
+  socketTimeout: 5000
+  validateAfterInactivity: 5000

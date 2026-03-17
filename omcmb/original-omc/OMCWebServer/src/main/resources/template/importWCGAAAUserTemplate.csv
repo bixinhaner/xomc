@@ -1,0 +1,1 @@
+IMSI[String:15],KEY[String:32],OPC[String:32],SN[String:250],MAC[String:250],RCCONSTID[Int],VENDOR[String:64],"Filter Column(If the value of this column is 1, it means that the data in DEFG columns are invalid )"

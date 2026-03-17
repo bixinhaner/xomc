@@ -1,0 +1,441 @@
+.disabled.readonly {
+    position: relative;
+}
+.disabled.readonly::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+}
+.export1ConfigItem{
+    display: inline-block;
+    width: 150px; 
+    line-height: 30px; 		
+    vertical-align: middle; 
+}
+.mmeDetails , .syncNameInfo{
+    position:absolute;
+    background:white;
+    padding:10px 20px;
+    box-shadow:4px 4px 19px 0 rgba(0,0,0,0.15);
+    border:1px solid #d1ecf5;
+    display:none;
+    left:0;
+    z-index:99999;
+}
+.syncNameInfo div{
+    margin-right:20px;
+    line-height:30px;
+    
+}
+.enbPanleSouth{
+    height:30px;
+    position:absolute;
+    line-height:30px;
+    bottom:0;
+    right:0;
+    left:0;
+    background:#F4FAFD;
+}
+.enbPanleSouth > div{
+    float:right;
+    margin-right:20px;
+}
+#queryCollectPopdiv,#resetPassWord{
+    padding:5px 20px;  
+    border:1px solid #E4E4E4;
+    width:100%;
+    max-height:95px;
+    background:#FFF;
+    position:absolute;
+    bottom:-120px;
+    box-shadow:0 -8PX 15px rgba(0,0,0,0.15);
+}
+/*显示隐藏列*/
+.showHideItem{
+    position:absolute;
+    width:364px;
+    background:white;
+    z-index:888;
+    padding:0px 3px 0px;
+    top: 60px;
+    left: 0px;
+    display:none;
+    box-shadow:5px 10px 23px 0px rgba(0,0,0,0.15);
+}
+.showHideItem input{
+    margin-top:-2px;
+    margin-bottom:1px;
+    vertical-align:middle;
+    margin-right:20px;
+}
+.selectAll{
+    height:32px;
+    width:334px;
+    padding:28px 0px 0px 30px;
+}
+.sortul{
+    width:364px;
+    height:45vh; 
+    padding:0px 0px 0px 0px;
+    overflow:auto;
+    overflow-x:hidden;
+}
+.sortul .export1ConfigItem{
+    width:334px;
+    height:30px;
+    margin-top:2px;
+    padding-left:30px;
+    line-height:30px;
+}
+.sortul .export1ConfigItem span{
+    display:block;
+    width:20px;
+    height:20px;
+    float:right;
+    margin-right:20px;
+    margin-top:5px;
+}
+.sortul .export1ConfigItem span.movesTop:hover{
+    cursor:pointer;
+}
+.handleMouseDown{
+        box-shadow:2px 2px 0 0 #C6C6C6;
+}
+.formBtnContainer{
+    width:364px;
+    height:58px;
+    background:red;
+    padding-top:22px;
+}
+.buttonGroup{
+    width:178px;
+    height:22px;
+    margin: 0 auto;
+    background:#CBF3FB;
+    padding:7px 10px;
+}
+.buttonGroup div{
+    width:84px;
+    height:22px;
+    line-height:22px;
+    text-align:center;
+    float:left;
+}
+.enodeb_activeRatio,.enodeb_ueCounts{
+    width:925px;
+    position:absolute;
+    top:0px;
+    bottom:0px;
+    right:-1500px;
+    background:#fff;
+    z-index:100;
+    display:flex;
+    flex-direction:column;
+}
+.enodeb_state{
+    width:330px;
+    height:94%;
+    position:absolute;
+    top:20px;
+    right:-1000px;
+    background:#fff;
+    z-index:100;
+}
+.licenseInfo{
+    width:925px;
+    height:94%;
+    border:1px solid #4AB3FF;
+    position:absolute;
+    top:20px;
+    right:-1500px;
+    background:#fff;
+    z-index:100;
+    box-shadow:2px 3px 16px rgba(0,0,0,0.15);
+    overflow:auto;
+}
+.list_activeRatio{
+    height: 46%;
+    margin-top:20px;
+    padding-left:50px;
+}
+.list_state,.list_eNBueCounts{
+    height: 88%;
+    margin-top:10px;
+    padding-left:15px;
+}
+.echart_activeRatio{
+    width:88%;
+    height:37%;
+    border:1px solid #E9E9E9;
+    margin-left:47px;
+    margin-top:10px;
+    
+}
+/* 右侧隐藏设置 */
+.rightHideDiv{
+    position:absolute;
+    width:900px;
+    height:96%;
+    background:#FFFFFF;
+    right:-2000px;	
+    top:10px;
+    z-index:100;
+}
+.showeNBOp > div{
+    height:30px;
+    line-height:30px;
+    padding-left:56px;
+    display:block;
+    width:104px;
+    margin:0 !important;
+    border-bottom:1px solid #e5f0f6;
+    color:#000;
+    background-position-x:15px !important;
+}
+
+/* 列表告警显示样式 */
+.alarmListSty{
+    display:inline-block;
+    min-width:13px;
+    height:23px;
+    padding:0 5px;
+    line-height:24px;
+    border-radius:23px;
+    text-align:center;
+    color:#FFFFFF;
+    -webkit-transform:scale(0.8);
+    font-size:12px;
+    cursor:pointer;
+}
+.alarmCritical{
+    background:#E88282;
+}
+.alarmMajor{
+    background:#DCAA5E;
+}
+.alarmMinor{
+    background:#CCCC66;
+}
+.alarmWarning{
+    background:#9AF0FE;
+}
+#enbSetting_slide.loading::before,#enbSetting_slide_body.loading::before,#setting_form_cnt.loading::before{
+    background-color: #fff;
+}
+.optionItem{
+    font-size:14px;
+    color:#333;
+    margin-left:10px;
+}
+/* 分布式基站开始 */
+.batch_slidePanel{
+    width:100%;
+    height:70px;
+    background:#fff;
+    position:absolute;
+    bottom:0px;
+    display:none;
+    box-shadow:0 0 50px rgba(0,0,0,0.15);
+}
+.batch_p{
+    float:left;
+    height:70px;
+    line-height:70px;
+    font-size:14px;
+    color:#1E1E1E;
+    font-weight:400;
+    margin-left:15px;
+    cursor:pointer;
+}
+.device_slidePanel{
+    width:500px;
+    height:460px;
+    background:#fff;
+    position:absolute;
+    bottom:73px;
+    z-index:100;
+    display:none;
+    box-shadow:0 0 10px rgba(0,0,0,0.15);
+    border-radius:4px;
+    border:1px solid #E9E9E9;
+    padding:0 20px;
+}
+.upgrade_close{
+    margin-top:13px;
+    float:right;
+}
+#selectEnbDiv .datagrid-body .datagrid-cell{
+    position:relative;
+    cursor:pointer;
+}
+#selectEnbDiv .datagrid-view2 .datagrid-body td{
+    cursor:pointer;
+}
+.upgrade_clear{
+    font-size:16px;
+    margin-right:5px;
+    margin-top:10px;
+}
+.el-icon-operation-delete:before{
+    font-size:16px;
+}
+.device_slidePanel .el-icon-circle-close{
+    visibility:hidden;
+    transation: visibility 0.5s ease 0.2s;
+    cursor:pointer;
+    position:absolute;
+    top:0px;
+    width:20px;
+    height:20px;
+}
+.device_slidePanel .visible .el-icon-circle-close {
+    visibility:visible;
+}
+/* 分布式基站结束 */
+/* 批量同步和重启开始 */
+.reboot_info{
+        width:500px;
+        height:100px;
+        background:#e9ffef;
+        border-radius:5px;
+        border:2px solid #96eba2;
+        position:absolute;
+        z-index:100;
+        left:28%;
+        top:-140px;
+}
+.reboot_info b:nth-child(1){
+        position:absolute;
+        left:20px;
+        top:15px;
+}
+.reboot_info p:nth-child(2){
+        position:absolute;
+        left:60px;
+        top:17px;
+        font-size:14px;
+        color:#1ebc1e
+}
+.reboot_info span:nth-child(3){
+        position:absolute;
+        right:10px;
+        top:5px;
+        cursor:pointer;
+}
+.reboot_info p:nth-child(4){
+        position:absolute;
+        left:60px;
+        top:55px;
+        font-size:14px;
+        color:#676460
+}
+/* 批量同步和重启关闭 */
+.statusContent{
+    height:30px;
+    border:1px solid #E9E9E9;
+    border-radius:4px;
+    padding-top:2px;
+    display:inline-block;
+    position:relative;
+    float:left;
+}
+.statusContent .cmenu,.mmeContent .cmenu{
+    width:auto;
+}
+.statusContent .cmenu-item,.mmeContent .cmenu-item{
+    height:auto;
+    line-height:normal;
+}
+.statusContent .cmenu-item span,.mmeContent .cmenu-item span{
+    margin-left:0px;
+}
+.statusType{
+    padding:0 10px;
+    height:28px;
+    display:inline-block;
+    float:left;
+    margin-left:2px;
+    line-height:28px;
+}
+.statusType span{
+    font-size:12px;
+    font-weight:bold;
+}
+.statusNum{
+    height:28px;
+    line-height:28px;
+    display:inline-block;
+    font-size:14px;
+    color:#363B4E;
+    font-weight:bold;
+    float:right;
+    margin-right:10px;
+}
+.mmeItem{
+        float:left;
+        width:38px;
+        height:32px;
+        background:#E9E9E9;
+        border-radius:4px 0 0 4px;
+        border:1px solid #E9E9E9;
+        border-right:none;
+        font-size:12px;
+        color:#363B4E;
+        font-weight:bold;
+        line-height:32px;
+        text-align:center
+}
+.tabsTitle{
+    border:none;
+}
+.greenType{
+    background:#E9F8F1;
+}
+.greenType span{
+    color:#38C846;
+}
+.redType{
+    background:#FAEEEE;
+}
+.redType span{
+    color:#E88282;
+}
+.tabsTitle{
+    color:#333;
+}
+.el-icon-down:before{
+    color:#999;
+    cursor:pointer;
+}
+.el-card__body{
+    display:flex;
+    flex-direction:column;
+    flex:1 1 auto;
+    height:100%;
+    overflow:auto;
+    background:#FFF;
+}
+#enbSetting_slide .slidebarTitleContainer li.default{
+    height:40px;
+    line-height:40px;
+}
+.datagrid-body{
+    min-height:100px;
+}
+.limitation-form > div {
+    margin-bottom: 30px;
+}
+.limitation-title {
+    display: inline-block;
+    width: 95px;
+}
+.warning-color,.warning-color i::before {
+    color: #67C23A;
+}
+.error-color,.error-color i::before {
+    color: #F56C6C;
+}

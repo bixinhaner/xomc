@@ -1,0 +1,238 @@
+:root {
+	--main-bg:url(./images/login/login_bg.png);
+	--logo-big-white:url(./images/login/login_logo.png);
+	--logo-big:url(./images/login/nav_logo.png);
+	--logo-small:url(./images/login/nav_logo.png)
+}
+html * {/* ie */
+	scrollbar-arrow-color: rgba(204,229,235,0.1);
+	scrollbar-face-color: rgba(204,229,235,0.1);
+	scrollbar-shadow-color: rgba(204,229,235,0.1);
+	scrollbar-darkshadow-color: rgba(204,229,235,0.1);
+	scrollbar-3dlight-color: rgba(204,229,235,0.1);
+	scrollbar-track-color: rgba(255,255,255,0);
+}
+*{
+	margin:0;
+	padding:0;
+}
+.loginbody,.lockbody {
+	background-image:var(--main-bg);
+	-webkit-background-size: cover;
+	-moz-background-size: cover;
+	background-size: cover;
+	background-position:center;
+	overflow-x: auto;
+	overflow-y: hidden;
+	min-width:1024px;
+	height:100%;
+	top:0;
+	position:absolute;
+	width:100%;
+	height:100%;
+	display:block;
+	z-index:120000;
+}
+
+.loginlogo ,.locklogo{	
+	background: url(./images/login/loginLogo.png) no-repeat left center;
+	height: 324px;
+	display: inline-block;
+	margin-left: 16vw;
+	line-height:325px;
+	color:#FFFFFF;
+	font-size:30px;
+	padding-left:112px;
+	font-weight:900;
+	width:auto;
+}
+.loginformbox , .lockformbox{
+	width: 348px;
+	height: 400px;
+	display: inline-block;
+	float: right;
+	margin-right: 15%;
+	margin-top:-42px;
+	background-image: url(./images/login/login_loginbar_bg.png);
+	background-position: center center;
+	border-style: none;
+	position:relative;
+	background-size:contain;
+}
+.loginformbox .input_ , .lockformbox .input_{
+	width:221px;
+}
+.login_user_div , .lock_user_div{
+	width: 267px;
+	height: 36px;
+	display: inline-block;
+	margin: 20px 30px 45px;
+	border-bottom:1px solid #d7dde8;
+}
+.login_pwd_div , .lock_pwd_div{
+	width: 267px;
+	height: 36px;
+	display: inline-block;
+	margin:5px 30px 45px;
+	border-bottom:1px solid #d7dde8;
+}
+.login_verifyCode_div {
+	width: 267px;
+	height: 36px;
+	display: inline-block;
+	margin:5px 30px;
+	border-bottom:1px solid #d7dde8;
+}
+.login_btn_div , .lock_btn_div{
+	width: 270px;
+	height: 38px;
+	margin-top: 10px;
+	background-image: url(./images/login/login_loginbar_btn_login_nor.png);
+	background-position: center center;
+	background-size: cover;
+	border-style: none;
+	display: inline-block;
+	cursor: pointer;
+}
+.login_btn_div:hover {
+	background-image: url(./images/login/login_loginbar_btn_login_hov.png);
+}
+.login_btn_div:active {
+	background-image: url(./images/login/login_loginbar_btn_login_click.png);
+}
+.input_ico_user_div , .input_ico_user_div_lock{
+	width: 16px;
+	height: 20px;
+	display: inline-block;
+	background-image: url(./images/login/login_loginbar_input_ico_user.png);
+	background-position: center center;
+	background-repeat: no-repeat;
+	border-style: none;
+	position: relative;
+	top: 5px;
+	margin:0 10px;
+}
+.input_ico_pwd_div , .input_ico_pwd_div_lock{
+	width: 16px;
+	height: 20px;
+	display: inline-block;
+	background-image: url(./images/login/login_loginbar_input_ico_password.png);
+	background-position: center center;
+	background-repeat: no-repeat;
+	border-style: none;
+	position: relative;
+	top: 5px;
+	margin:0 10px;
+}
+.input_ico_veriification_div {
+	width: 16px;
+	height: 20px;
+	display: inline-block;
+	background-image: url(./images/login/login_loginbar_input_ico_verificationCode.png);
+	background-position: center center;
+	background-repeat: no-repeat;
+	border-style: none;
+	position: relative;
+	top: 5px;
+	margin:0 10px;
+}
+.login_bar_logo_div ,.lock_bar_logo_div {
+	width: 190px;
+	height: 44px;
+	background-image: var(--logo-big-white) ;
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+	display: inline-block;
+	margin-top: 40px;
+	border-style: none;
+}
+.loginmain , .lockmain{
+	width: 100%;
+	min-width: 1550px;
+	height: 324px;
+	position: absolute;
+	top: 50%;
+	margin-top: -125px;
+}
+#loginfrom .input_ ,#lockfrom .input_{
+	width:221px;
+}
+.input_ {
+	border-style: none;
+	height: 30px;
+	margin-top: 3px;
+	outline: none;
+}
+.code {
+	font-family: Arial;
+	font-style: italic;
+	font-weight: bold;
+	border: 0;
+	letter-spacing: 3px;
+	color: blue;
+}
+
+.logoTitle .el-icon-logo-baiomc {
+	width:140px;
+	height: 30px; 
+	margin-top: 20px; 
+	background-image:var(--logo-big);
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+}
+.logoTitle .el-icon-logo-baiomc:before{
+	content:'北京融昱';
+	font-size:20px;
+	margin-left:35px;
+	line-height:30px;
+	font-weight:bold;
+}
+.logoTitle .el-icon-logo-omc {
+	width:65px;
+	height: 30px; 
+	margin-top: 20px; 
+	background-image:var(--logo-small);
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+}
+.logoTitle .el-icon-logo-omc:before {
+	content:'';
+}
+.sysHeader #curr_operator_div {
+	border-color: #FFFFFF;
+}
+.hidden {
+  	display:none !important;
+ } 
+.rongyu_about{
+	background: url('./images/login/logoAbout.png') no-repeat center;
+}
+.browser_icon{
+ 	display:inline-block;
+ 	width:82px;
+ 	height:40px;
+ }
+ .google_icon{
+ 	background: url(./images/login/google.gif) center center no-repeat;
+ }
+ .firefox_icon{
+ 	background: url(./images/login/firefox.gif) center center no-repeat;
+ }
+ .edge_icon{
+ 	background: url(./images/login/edge.gif) center center no-repeat;
+ }
+ .safari_icon{
+ 	background: url(./images/login/safari.gif) center center no-repeat;
+ }
+.lockIconItem .el-icon-circle-warning:before{
+ 	color:#E68619;
+ }
+ .lockIconItem{
+ 	width:100%;
+ 	height:40px;
+ 	background:#fff;
+ 	display:flex;
+ }

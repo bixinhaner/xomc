@@ -1,0 +1,199 @@
+:root {
+	--main-color:#FFFFFF;
+	--main-bg:url();
+	--logo-big-white:url();
+	--logo-big:url();
+	--logo-small:url();
+	--main-color-rgba:255,70,20;
+}
+*{
+	margin:0;
+	padding:0;
+	font-family:Roboto;
+}
+@media only screen and (max-width: 1000px) {
+	.min-width-600 {
+		min-width: 600px !important;
+	}
+}
+
+input:-webkit-autofill{
+	-webkit-box-shadow:0 0 0px 1000px white inset;
+	border:1px solid #ccc !importnat;
+}
+.code {
+    font-style: italic;
+    font-weight: bold;
+    border: 0;
+    letter-spacing: 3px;
+    color: blue;
+}
+.lockPage {
+	background:#FFF;
+	/*min-width:1024px;*/
+	overflow-x: auto;
+	overflow-y: hidden;
+	position:fixed;
+	top:0;
+	bottom:0;
+	right:0;
+	left:0;
+	z-index:99999;
+}
+.loginbody , .lockbody{
+	display:flex;
+	flex-direction:column;
+	height:100%;
+}
+.login_header,.lock_header {
+	min-height:50px;
+	height:8vh;
+	background: url(./images/login/logo_slogan.png) no-repeat 20px;
+}
+.login_body , .lock_body{
+	flex:1 auto;
+	background-image:var(--main-bg);
+	background-size: cover;
+	background-position:center;
+	/*min-width:1024px;*/
+	overflow-x: auto;
+	overflow-y: hidden;
+	position:relative;
+}
+.login_footer , .lock_footer{
+	min-height:40px;
+	height:6vh;
+	line-height:6vh;
+	text-align:center;
+	font-size:12px;
+}
+.loginformbox , .lockformbox{
+	width: 25vw;
+	min-width:300px;
+	height: auto;
+	min-height: 300px;
+	border-radius:10px;
+	background:#FFF;
+	position:absolute;
+	right:10vw;
+	top:10vh;
+	padding:4vh 0;
+	text-align:center;
+}
+#loginfrom>div , #lockform>div {
+	width:80%;
+	margin:5vh auto;
+	min-height: 35px;
+}
+.loginformbox input, .lockformbox input{
+	height: 100% !important;
+	outline: none;
+	background:unset;
+	font-size:14px;
+	border:none;
+}
+.login_user_div , .lock_user_div , 
+.login_pwd_div , .lock_pwd_div , .login_verifyCode_div{
+	height: 5vh;
+	border:1px solid #dfe2ee;
+	border-radius:10px;
+}
+.lock_pwd_div .el-password .el-input__inner{
+	padding: 0px !important;
+	width: 100%;
+}
+.login_pwd_div .el-input__inner{
+	padding: 0px !important;
+}
+.login_pwd_div [class*=" el-icon-"] ,.login_user_div [class*=" el-icon-"] , .login_verifyCode_div [class*=" el-icon-"]{
+	font-family: "el-icon" !important;
+}
+.login_btn_div , .lock_btn_div{
+	cursor: pointer;
+	background:var(--main-color);
+	height:5vh;
+	line-height:5vh;
+	color:#fff;
+	margin-top:7vh !important;
+	font-size:20px;
+	border-radius:10px;
+}
+.login_btn_div:hover , .lock_btn_div:hover {
+	background: rgba(var(--main-color-rgba1),0.6);
+}
+
+.login_btn_div:active , .lock_btn_div:active{
+	background: rgba(var(--main-color-rgba1),0.8);
+}
+.input_ico_user_div , .input_ico_pwd_div ,
+.input_ico_user_div_lock , .input_ico_pwd_div_lock ,
+.input_ico_veriification_div{
+	display: inline-block;
+}
+.input_ico_user_div:before , .input_ico_pwd_div:before ,
+.input_ico_pwd_div_lock:before ,.input_ico_user_div_lock:before{
+	font-size:20px;
+	color:unset !important;
+}
+.input_ico_veriification_div {
+	background-image: url(./images/login/login_loginbar_input_ico_verificationCode.png);
+}
+.login_bar_logo_div ,.lock_bar_logo_div{
+	width: 50vw;
+	height: 6vh;
+	background-image: var(--logo-big-white) ;
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+}
+.el-icon-logo-omc {
+	width:54px;
+	height: 60px; 
+	margin-top: 0px; 
+	background-image:var(--logo-small);
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+}
+.el-icon-logo-baiomc {
+	width:100px;
+	height: 50px; 
+	margin-top: 0px;
+	background-image:var(--logo-big);
+	background-position: center center;
+	background-repeat: no-repeat;
+	background-size:contain;
+	margin-right:20px;
+	overflow:hidden;
+}
+.hidden {
+  	display:none !important;
+ }
+
+ 
+ .browser_icon{
+ 	display:inline-block;
+ 	width:82px;
+ 	height:40px;
+ }
+ .google_icon{
+ 	background: url(./images/login/google.gif) center center no-repeat;
+ }
+ .firefox_icon{
+ 	background: url(./images/login/firefox.gif) center center no-repeat;
+ }
+ .edge_icon{
+ 	background: url(./images/login/edge.gif) center center no-repeat;
+ }
+ .safari_icon{
+ 	background: url(./images/login/safari.gif) center center no-repeat;
+ }
+.lockIconItem .el-icon-circle-warning:before{
+ 	color:#E68619;
+ }
+ .lockIconItem{
+ 	width:100%;
+ 	height:40px;
+ 	background:#fff;
+ 	display:flex;
+ }

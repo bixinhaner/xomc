@@ -1,0 +1,386 @@
+:root {
+	--main-color :#FF4614;
+	--main-color-rgba1:255,70,20;
+}
+
+.mainCol {
+	color:var(--main-color);
+}
+
+.mainColBg {
+	background-color: var(--main-color);
+}
+
+.mainCloBgOpa1 {
+	 background-color: rgba(var(--main-color-rgba1),0.08);
+}
+.mainBorderCol {
+	border-color:var(--main-color);
+}
+
+.gray-font {
+	color:rgba(0,0,0,0.8);
+}
+.link-font {
+	color:#4D84FF;
+	cursor: pointer;
+}
+.link-font:hover {
+	text-decoration: underline;
+}
+
+
+/* .el-icon:before {
+	color:var(--main-color);
+} */
+
+.sysHeader {
+	background-color: #FFF;
+}
+.sysHeader .path ,.sysHeader .path .colorHighLight ,
+.sysHeader .el-icon-common-left:before , .sysHeader .el-icon-common-right:before {
+	color:#7a7992; 
+}
+
+.sysHeader .curr_operator_div {
+	border-color: #FFF;
+}
+
+.sysHeader.white .path , .sysHeader.white .path .colorHighLight ,
+.sysHeader.white .el-icon-common-left:before , .sysHeader.white .el-icon-common-right:before ,
+.sysHeader.white .curr_operator_div_white:hover [class*="el-icon-menu"]:before,
+.sysHeader.white .curr_operator_div_white:hover span{
+	color:var(--main-color);
+}
+
+.omcMenu {
+	background:#070b4b;
+}
+[class*="el-icon-menu"]:before, [class^=el-icon-menu]:before{
+   color:rgba(255,255,255,0.56);
+}
+ .menuPopoverClass {
+	border-color: var(--main-color);
+}
+.menuTitleOneMain , .menuTitleOneSelect .menuTitleOneMain , .collapseTitle{
+	border-color:#FFF;
+}
+.menuContent .menuTitleOne , .menuChildrenStyle , .collapseTitle ,
+.selectSty , .selectSty  .el-icon:before , .selectSty  .el-icon:before,.selectSty .el-submenu__title ,
+.popoverClick .el-submenu__title , .popoverClick .el-icon:before ,
+.el-submenu__title:hover , .el-submenu__title:focus ,
+.el-submenu__title:hover i, .el-submenu__title:focus i,
+.el-submenu__title:hover .el-icon:before , .el-submenu__title:focus .el-icon:before ,
+.el-submenu.is-opened > .el-submenu__title , .el-submenu.is-opened > .el-submenu__title .el-icon:before,
+.el-submenu.is-opened > .el-submenu__title i, 
+.el-menu-item:focus , .el-menu-item:hover , .menuContent .menuTitle ,
+.el-menu-item:focus .el-icon:before , .el-menu-item:hover .el-icon:before,
+.el-menu-item.is-active ,.el-menu-item.is-active .el-icon:before,
+.el-menu--collapse .el-submenu.is-active .el-submenu__title .el-icon:before ,
+.selectSty .el-icon-arrow-down{
+	color:#FFF;
+}
+
+.el-menu-item:focus {
+	background:rgba(255,255,255,0.2);
+}
+.omcMenu .el-menu-item:focus {
+	background:rgba(255,255,255,0);
+}
+.omcMenu .el-menu-item.is-active{
+	background:rgba(255,255,255,0.2);
+}
+
+.el-menu--collapse .el-menu-item:hover .el-tooltip ,
+.el-menu--collapse .el-menu-item.is-active .el-tooltip,
+.el-menu-item:hover , .el-menu-item.is-active{
+	background:rgba(255,255,255,0.2);
+}
+.menuPopoverClass , .selectSty , .el-menu--collapse .el-menu-item:hover , #menuAnimate .el-submenu__title:hover ,
+.popoverClick ,.el-menu--collapse .el-menu-item.is-active , .el-menu--collapse .el-submenu.is-active .el-submenu__title{
+	background-color: inherit;
+}
+
+.cmenu-item:not(.has-child):hover ,.el-tree--highlight-current .el-tree-node.is-current>.el-tree-node__content{
+	background-color: rgba(var(--main-color-rgba1),0.08);
+}
+
+
+/*   ------------------------------   Tabs    ---------------------------------------------*/
+.el-tabs__item.is-active , 
+.el-tabs__item:hover ,
+.tabsTitle > span.active ,.omcPageTitleContainer li.active,
+.el-tabs--card>.el-tabs__header .el-tabs__item.is-active,.singleTitle{
+	color : var(--main-color);
+}
+.el-tabs__active-bar {
+	background-color :var(--main-color);
+}
+.tabsTitle > span.active ,.omcPageTitleContainer li.active,
+.singleTitle > span {
+	border-color:var(--main-color);
+}
+.el-tabs--card>.el-tabs__header .el-tabs__item.is-active {
+	border-top-color:var(--main-color);
+}
+.titleLeftSelect ,.deviceStySelect ,.selectRegion_week p ,.deviceGroupStySelect ,.alarmIdStySelect{
+	border-color:var(--main-color) !important;
+	color:var(--main-color) !important;
+}
+.selectRegion_hour p {
+	background-color: rgba(var(--main-color-rgba1),0.1);
+	border:1px solid rgba(var(--main-color-rgba1),0.1);
+}
+.selectRegion_hour p.active ,.selectRegion_week p.active {
+	background-color :var(--main-color);
+}
+
+/*     -------------------------------- Button   ----------------------------------------------*/
+/*   默认按钮：background为白色，border和文字为灰色      */
+.el-button,.el-button:focus ,
+.warningConfirm .el-button.el-button--primary,
+.linkbutton.linkbutton_nowanna ,.seriousConfirm + div > a:first-of-type
+{
+	background:#FFF;
+	border-color:#DCDFE6;
+	color:#666;
+}
+/*   弱按钮hover样式：border和color为主色 */
+.el-button:hover , .linkbutton.linkbutton_nowanna:hover,
+.warningConfirm .el-button.el-button--primary:hover,
+.seriousConfirm + div > a:first-of-type:hover,
+.el-button.is-plain:focus , .el-button.is-plain:hover
+{
+	background:#FFF;
+	border-color:var(--main-color);	
+	color:var(--main-color);
+}
+/*   弱按钮active样式：border和color为主色，background在主色基础上透明0.08 */
+.el-button:active ,.linkbutton.linkbutton_nowanna:active,
+.seriousConfirm + div > a:first-of-type:active,
+.warningConfirm .el-button.el-button--primary:active{
+	background: rgba(var(--main-color-rgba1),0.08);
+}
+
+
+
+/*   倾向性按钮 ：background 、border为主色  color为白色         */
+.el-button--primary ,.el-button.el-button--primary:focus ,
+.warningConfirm .el-button,
+.linkbutton , .messager-button .l-btn , .dialog-button .l-btn ,
+.seriousConfirm + div > a:last-of-type {
+	background:var(--main-color);
+	border-color:var(--main-color);
+	color:#FFF;
+}
+
+/*   倾向性按钮hover ：background 、border在注册基础上透明度0.6  color为白色         */
+.el-button--primary:hover , .linkbutton:hover ,
+.warningConfirm .el-button:hover,.seriousConfirm + div > a:last-of-type:hover{
+	background-color:rgba(var(--main-color-rgba1),0.6);
+	border-color:rgba(var(--main-color-rgba1),0.6);
+	color:#FFF;
+}
+/*   倾向性按钮active ：background 、border在注册基础上透明度0.8  color为白色         */
+.el-button--primary:active , .linkbutton:active,
+.warningConfirm .el-button:active,.seriousConfirm + div > a:last-of-type:active{
+	background-color:rgba(var(--main-color-rgba1),0.8);
+	border-color:rgba(var(--main-color-rgba1),0.8);
+	color:#FFF;
+}
+
+.el-button--primary.is-disabled,.el-button--primary.is-disabled:active,
+.el-button--primary.is-disabled:focus,.el-button--primary.is-disabled:hover {
+	background-color:rgba(var(--main-color-rgba1),0.3);
+	border-color:rgba(var(--main-color-rgba1),0.3);
+	color:#FFF;
+}
+
+
+.mini-group > .el-button.active ,.warningConfirm .el-button--primary:hover,
+.kpiPeriod span.active {
+	border-color:var(--main-color) !important;	
+	color: var(--main-color) !important;
+}
+.clear-all {
+	background:var(--main-color);
+}
+.el-time-panel__btn.confirm {
+	color:var(--main-color);
+}
+
+
+
+
+
+
+
+
+
+
+
+/* --------------------------------------------    Icon   -------------------------------------------*/
+
+.el-icon-close,._icon_size.el-icon:before ,.titleButtonText ,.slide-arrow:hover::before,
+.circleButtonText,.circleIconText,.omcTitleButtonGroup .titleButtonText ,.omcTitleButton .titleButtonText ,
+.placeholder-bt[placeholder]:hover::after,.placeholder-bt[tip]:hover::after ,
+.el-message-box__headerbtn .el-message-box__close , .el-dialog__headerbtn .el-dialog__close,.panel-tool a ,
+.slide-arrow:hover::before ,.el-tabs__item.is-active .tabTitleIcon:before,.ulAfter li span,.el-dialog__headerbtn:hover .el-dialog__close{
+	color:var(--main-color);
+}
+.circleBg,.deviceType span ,.statisticsDiv > div:first-child {
+	background-color:var(--main-color);
+}
+.timeButtonLeft .el-button.is-circle,.timeButtonRight .el-button.is-circle {
+	background: rgba(var(--main-color-rgba1),0.08);
+	border: 1px solid var(--main-color);
+
+}
+
+.timeButtonRightBan .el-button.is-circle{
+	background: rgba(var(--main-color-rgba1),0.08);
+	border: 1px solid #DEDFE6;
+
+}
+
+.dayAndMonthSelect{
+	background: rgba(var(--main-color-rgba1),0.08) !important;
+	border: 1px solid var(--main-color) !important;
+	color: var(--main-color) !important;
+}
+
+
+
+/* ------------------------- Table ------------------------------------------------------------------ */
+.el-table__body tr.hover-row.el-table__row--striped>td, 
+.el-table__body tr.hover-row>td ,
+.el-table--striped .el-table__body tr.el-table__row--striped.current-row td, 
+.el-table__body tr.current-row>td,
+.el-table__body tr.hover-row.current-row>td, 
+.el-table__body tr.hover-row.el-table__row--striped.current-row>td ,
+.el-table--enable-row-hover .el-table__body tr:hover>td {
+    background-color: rgba(var(--main-color-rgba1),0.08);
+}
+
+.el-pager li.active {
+	color:var(--main-color);
+}
+
+
+.el-radio-button__orig-radio:checked+.el-radio-button__inner { 
+	border-color:var(--main-color) !important;
+	background-color: rgba(var(--main-color-rgba1),0.08) !important;
+	color:#666;
+	box-shadow:none !important;
+}
+.tabTaskSelectCls,.tabDeviceSelectCls{ 
+	background: var(--main-color) !important; 
+	border-color: var(--main-color) !important; 
+	box-shadow:none !important;
+	color:var(--main-color) !important;
+}
+
+.tabTaskSelectCls,.tabDeviceSelectCls{ 
+	background: var(--main-color) !important; 
+	border-color: var(--main-color) !important; 
+	box-shadow:none !important;
+	color:#FFF !important;
+}
+
+.editButton, .editButton.el-button--primary{
+	border-color:var(--main-color) !important;
+	background-color: rgba(var(--main-color-rgba1),0.08) !important;
+	color:#666;
+	font-size:12px;
+}
+.el-bulk .expand-arrow {
+	border-color: var(--main-color);
+}
+
+/* --------------------------------- form : select input check radio -----------------------------------------------------------*/
+input {
+	caret-color:var(--main-color);
+}
+.el-checkbox__input.is-checked+.el-checkbox__label, .el-checkbox {
+	color:#333;
+}
+.el-switch .el-switch__core
+{
+	background-color:#CFCFCF !important;
+	border-color:#CFCFCF !important;
+}
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-checkbox__input.is-indeterminate .el-checkbox__inner ,
+.el-radio__input.is-checked .el-radio__inner,
+.el-switch.is-checked .el-switch__core
+{
+	background-color:var(--main-color) !important;
+	border-color:var(--main-color) !important;
+}
+.el-radio__inner:hover ,
+.el-select .el-input.is-focus .el-input__inner ,
+.el-select .el-input__input:focus,
+.el-checkbox.is-bordered.is-checked,
+.el-input__inner:focus,.el-textarea__inner:focus,
+.el-range-editor.is-active,.el-range-editor.is-active:hover,
+.el-checkbox__inner:hover , .el-checkbox-button.is-checked:first-child .el-checkbox-button__inner,
+.queryGroup.focus,.el-radio.is-bordered.is-checked{
+	border-color:var(--main-color) !important;
+}
+.el-radio__input.is-checked+.el-radio__label ,
+.el-radio-button__inner:hover ,
+.el-select-dropdown.is-multiple .el-select-dropdown__item.selected,.el-select-dropdown__item.selected{
+	color:var(--main-color);
+}
+.el-select-dropdown__item.hover, .el-select-dropdown__item:hover , .radioBox ,
+.el-checkbox-button.is-checked .el-checkbox-button__inner,
+.combobox-item-hover,.combobox-item-selected ,.el-radio.is-bordered.is-checked{
+	background-color:rgba(var(--main-color-rgba1),0.08) !important;
+}
+
+
+
+/* ---------------------------------- Others --- Customer  -- Special---------------------------------------*/
+
+.redCol ,.redIcon:before ,.errorColor:before,.refusePic:before,
+.el-icon-status-conn-off:before ,.el-icon-status-kpi-failure:before,.el-icon-status-failed:before{
+  color:#E88282;
+}
+.el-icon-status-conn-on:before ,.el-icon-signal.signal-high:before {
+  color:#67D972;
+}
+.el-icon-status-kpi-off:before {
+  color:#CFCFCF;
+}
+.el-icon-status-kpi-normal:before {
+  color:#79DE83;
+}
+.el-icon-signal.signal-low:before {
+	color:#FF7B7B;
+}
+.el-icon-signal.signal-normal:before {
+	color:#FFBB00;
+}
+.el-icon-common-arrow-down:before,
+.el-icon-status-unlock:before ,
+.el-icon-status-yes:before,
+.el-icon-status-waiting1:before,
+.el-icon-status-inProgress:before,
+.el-icon-status-suspend:before,
+.el-icon-status-terminate:before,
+.el-icon-status-success:before{
+	color:#4D84FF;
+}
+.greenIcon:before {
+	color:#67D972;
+}
+.yellowIcon:before{
+	color:#F2B354;
+}
+.statisticsDiv > div:first-child , .dataStatistics .enableStatistics .enableBg,.result-info{
+	background: rgba(77,132,255,0.08);
+}
+
+.el-icon-circle-info:before {
+	color:#CFCFCF;
+}

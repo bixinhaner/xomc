@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2010-2011 The myBatis Team Licensed under the Apache License, 
+	Version 2.0 (the "License"); you may not use this file except in compliance 
+	with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 
+	Unless required by applicable law or agreed to in writing, software distributed 
+	under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES 
+	OR CONDITIONS OF ANY KIND, either express or implied. See the License for 
+	the specific language governing permissions and limitations under the License. -->
+<configuration debug="true" scan="true" scanPeriod="5 seconds">
+	<property name="LOG_HOME" value="/var/log/omc/tomcat_web/" />
+	<property name="LOG_NAME" value="web.log" />
+	<property name="LOG_LEVEL" value="info" />
+	<property name="LOG_PATTERN" value="%t %d{HHmmss.SSS} %logger{0}:%L %m%n"/>
+	<property name="LOG_CHARSET" value="UTF-8" />
+	<property name="RollingFileNamePattern" value="${LOG_HOME}/${LOG_NAME}.%d{yyyy-MM-dd}.gz" />
+	<property name="RollingMaxHistory" value="7" />
+
+	<appender name="RootConsoleAppender" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+			<pattern>${LOG_PATTERN}</pattern>
+			<charset>${LOG_CHARSET}</charset>
+		</encoder>
+	</appender>
+	<appender name="RootFileAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<append>true</append>
+		<file>${LOG_HOME}/${LOG_NAME}</file>
+<!-- 		<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+			<level>${LOG_LEVEL}</level>
+		</filter> -->
+		<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+			<FileNamePattern>${RollingFileNamePattern}</FileNamePattern>
+			<MaxHistory>${RollingMaxHistory}</MaxHistory>
+		</rollingPolicy>
+		<encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+			<pattern>${LOG_PATTERN}</pattern>
+			<charset>${LOG_CHARSET}</charset>
+		</encoder>
+		<filter class="com.baicells.omc.filter.SampleFilter"/>
+	</appender>
+	<root level="${LOG_LEVEL}">
+		<appender-ref ref="RootConsoleAppender" />
+		<appender-ref ref="RootFileAppender" />
+	</root>
+</configuration>

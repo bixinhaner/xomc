@@ -1,0 +1,46 @@
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="ID_b9d6fce5-8ca4-4f98-ab10-7d61130a2f97" entityID="http://localhost:8180/realms/myrealm">
+    <dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#">
+        <dsig:SignedInfo>
+            <dsig:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+            <dsig:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+            <dsig:Reference URI="#ID_b9d6fce5-8ca4-4f98-ab10-7d61130a2f97">
+                <dsig:Transforms>
+                    <dsig:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+                    <dsig:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+                </dsig:Transforms>
+                <dsig:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+                <dsig:DigestValue>tm0Gtrvfs8D2DWyyd4edlhELuTaeD2MHNku7LfwgklM=</dsig:DigestValue>
+            </dsig:Reference>
+        </dsig:SignedInfo>
+        <dsig:SignatureValue>G0cT3Esp1wtW0HpANl9JJxCUZewJsnyVLFnzCSC4XmGIAHUr6Nii9lPzYUurTH62GMqLh3n/+FaY6480BkpVOO/2RnO8+/e8RycGByXeZpVGWMEzLKZeCbLEa9TzbXwefckkx/N5axlWpF0iJwneOShO2R+3uKI7rQcgOfuQoUCU20ao3JuQZ7zzXgBqZNnL9N960lkULEpQ9nIRXcpskyJKjtJ9GAQ/8Rm3qT5oz6sIbeMDaI+sKl45jDnBwiLXsH2qQlVpn9i51mqg2hcPwt7ECBytvk4pQHcOvQV4aNExzWgFYdrox7tPRxqNve3XOI5iMj1QDRz9WwOgqSoyhQ==</dsig:SignatureValue>
+        <dsig:KeyInfo>
+            <dsig:KeyName>sNbr9oSQ5LMuKopX9Ak-IcpDUxT-Zfn-vEp3gg2u_xI</dsig:KeyName>
+            <dsig:X509Data>
+                <dsig:X509Certificate>MIICnTCCAYUCBgGYsXzs2DANBgkqhkiG9w0BAQsFADASMRAwDgYDVQQDDAdteXJlYWxtMB4XDTI1MDgxNjA2MDUxMVoXDTM1MDgxNjA2MDY1MVowEjEQMA4GA1UEAwwHbXlyZWFsbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALvaBMFAF/YYlitwBhLrOQoElwidn2kXglojwZWRTDzj6zjDgNp+I8GQTLN6AsQm1JOq8B+PqHk+wj4am6HhLVsCrrg4Asyc35JSORLSAB8bNdLBL5/JRYr3ToAnh6ymNmPI2a1ucp0uyhU4NHe0yz2qdUHzoPbmIaYjiddr6675+U7NnvnGKFzVZZlygnZrYoS96ujp6tj75BRXg0P9bTPC9J+yNwCIRqD7OubRzsuHZB1yskkec5Obhu5ZB406EgAVh1+cai+pjdXDJFHyT30o40dvgoFuHXOyt1d2ND0xdvTvPPXJhEMKpFEhoEe5nkdBx5GUBJQpTCAzMTdsZt8CAwEAATANBgkqhkiG9w0BAQsFAAOCAQEANHNYgWoTs3CXLsFCYtJ7C8D+DJDM4G6CmeKVuc1xhA3OVHNX96k+FAXWg5WZ+E4OGfPfoYnWIuWZUhunLRwxGJHmv9DdhDHQzp+Ci6ZKJhx6i/LGldy09pl9Jv8lnyo3c8LmjzocY/OI02alrsvCNaXmoUAX3K3W7gzGHy1gHj+Ezn/mojc1y5VtnXK5sAEczQ/uNO9lk5iWuR/FfPSxQLkWrCqdemMjIytjMrgjrjG36u3iheCK8G+2aN+KReed/80iivxt26euS5PxzslW2BU0W7PQObyv8OtVUZUBCSPkUFN4eiPKoxgsBQQiaRdcph/qs+ml2dHKHOGIKQjmJA==</dsig:X509Certificate>
+            </dsig:X509Data>
+        </dsig:KeyInfo>
+    </dsig:Signature>
+    <md:IDPSSODescriptor WantAuthnRequestsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+        <md:KeyDescriptor use="signing">
+            <ds:KeyInfo>
+                <ds:KeyName>sNbr9oSQ5LMuKopX9Ak-IcpDUxT-Zfn-vEp3gg2u_xI</ds:KeyName>
+                <ds:X509Data>
+                    <ds:X509Certificate>MIICnTCCAYUCBgGYsXzs2DANBgkqhkiG9w0BAQsFADASMRAwDgYDVQQDDAdteXJlYWxtMB4XDTI1MDgxNjA2MDUxMVoXDTM1MDgxNjA2MDY1MVowEjEQMA4GA1UEAwwHbXlyZWFsbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALvaBMFAF/YYlitwBhLrOQoElwidn2kXglojwZWRTDzj6zjDgNp+I8GQTLN6AsQm1JOq8B+PqHk+wj4am6HhLVsCrrg4Asyc35JSORLSAB8bNdLBL5/JRYr3ToAnh6ymNmPI2a1ucp0uyhU4NHe0yz2qdUHzoPbmIaYjiddr6675+U7NnvnGKFzVZZlygnZrYoS96ujp6tj75BRXg0P9bTPC9J+yNwCIRqD7OubRzsuHZB1yskkec5Obhu5ZB406EgAVh1+cai+pjdXDJFHyT30o40dvgoFuHXOyt1d2ND0xdvTvPPXJhEMKpFEhoEe5nkdBx5GUBJQpTCAzMTdsZt8CAwEAATANBgkqhkiG9w0BAQsFAAOCAQEANHNYgWoTs3CXLsFCYtJ7C8D+DJDM4G6CmeKVuc1xhA3OVHNX96k+FAXWg5WZ+E4OGfPfoYnWIuWZUhunLRwxGJHmv9DdhDHQzp+Ci6ZKJhx6i/LGldy09pl9Jv8lnyo3c8LmjzocY/OI02alrsvCNaXmoUAX3K3W7gzGHy1gHj+Ezn/mojc1y5VtnXK5sAEczQ/uNO9lk5iWuR/FfPSxQLkWrCqdemMjIytjMrgjrjG36u3iheCK8G+2aN+KReed/80iivxt26euS5PxzslW2BU0W7PQObyv8OtVUZUBCSPkUFN4eiPKoxgsBQQiaRdcph/qs+ml2dHKHOGIKQjmJA==</ds:X509Certificate>
+                </ds:X509Data>
+            </ds:KeyInfo>
+        </md:KeyDescriptor>
+        <md:ArtifactResolutionService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="http://localhost:8180/realms/myrealm/protocol/saml/resolve" index="0"/>
+        <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat>
+        <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</md:NameIDFormat>
+        <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat>
+        <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+        <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+        <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact" Location="http://localhost:8180/realms/myrealm/protocol/saml"/>
+    </md:IDPSSODescriptor>
+</md:EntityDescriptor>

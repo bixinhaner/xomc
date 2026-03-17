@@ -1,0 +1,292 @@
+@charset "utf-8";
+@import url('style.css');
+@charset "utf-8";
+/* CSS Document */
+
+* {
+	margin:0;
+	padding:0;
+}
+input:-webkit-autofill {
+	-webkit-box-shadow:0 0 0px 1000px white inset;
+	border:1px solid #ccc !importnat;
+}
+
+@media only screen and (max-width: 1550px) {
+	.mini-hidden {
+		display: none;
+	}
+}
+@media only screen and (max-width: 1000px) {
+	.sub-mini-hidden {
+		display: none !important;
+	}
+}
+
+/* scroll bar */
+::-webkit-scrollbar {
+	width: 9px;
+	height: 9px;
+}
+::-webkit-scrollbar-track {
+	background: rgba(255,255,255,0);
+}
+::-webkit-scrollbar-thumb {
+	background: #E1E1E1;
+	border-radius: 3px;
+	min-width: 80px;
+	min-height: 80px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: #949494;
+}
+html * {/* ie */
+	scrollbar-arrow-color: rgba(255,255,255,0);
+	scrollbar-face-color: rgba(255,255,255,0);
+	scrollbar-shadow-color: rgba(255,255,255,0);
+	scrollbar-darkshadow-color: rgba(255,255,255,0);
+	scrollbar-3dlight-color: rgba(255,255,255,0);
+	scrollbar-track-color: rgba(255,255,255,0);
+}
+html *:hover {
+	scrollbar-arrow-color: rgba(204,229,235,0.1);
+	scrollbar-face-color: rgba(204,229,235,0.1);
+	scrollbar-shadow-color: rgba(204,229,235,0.1);
+	scrollbar-darkshadow-color: rgba(204,229,235,0.1);
+	scrollbar-3dlight-color: rgba(204,229,235,0.1);
+}
+html , body {
+	font-family:Roboto !important;
+}
+:not(output):-moz-ui-invalid{
+	box-shadow:0 0 1.5px 1px transparent;
+}
+
+.calendar-saturday {
+    color: #009900;
+}
+
+#shortcut {
+    width: 100%;
+}
+
+/*parameter config operator version,create element automatically,the style of the new element*/
+.paramNodesUl {
+    list-style-type: none
+}
+
+.paramNodesUl > li {
+    width: 48.5%;
+    display: inline-block;
+    margin: 6px;
+    /*margin: 10px;*/
+    height: 55px;
+    border:1px;
+    vertical-align:top;
+    min-width:450px;
+}
+
+.paramNodesUl label {
+    min-width: 200px;
+    max-width: 200px;
+    float: left;
+}
+
+.paramNodesUl input, .paramNodesUl select, .paramNodesUl .datebox {
+    width: 200px;
+    border-style: solid;
+    border-width: 1px;
+    box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    -webkit-box-sizing: border-box;
+}
+
+.errSpan {
+    color: silver;
+}
+
+.redColor {
+	color: #FA5555;
+}
+
+.getSetParamValResult {
+    padding: 5px;
+    white-space: nowrap;
+}
+
+.getSetParamValResult span {
+    font-size: 14px;
+}
+
+.getSetParamValResult .resultTitle {
+    font-weight: bold;
+    font-size: 17px;
+}
+
+.getSetParamValResult hr {
+    height: 1px;
+    border: none;
+    border-top: 1px solid #bbbbbb;
+}
+
+.cell2{
+    border-style: solid;
+    border-color: #BBBBBB;
+    border-width: 1px 1px 1px 1px;
+    display: inline-block;
+    padding: 7px;
+    /*margin-top: 5px; */
+}
+.instanceNum {
+    background-color: #bbbbbb;
+}
+.lineDiv {
+    border-style: none;
+    white-space: nowrap;
+}
+.line-left {
+    border-style: solid;
+    border-color: #BBBBBB;
+    border-width: 1px;
+}
+
+
+body{
+	font-size:12px;
+	padding:0px;
+	margin:0px;
+}
+a{ 
+	text-decoration:none;
+}
+ul,ul li,li{
+	list-style-type:none;
+	padding:0px;
+	margin:0px;
+}
+.fl{
+float:left;
+}
+.fr{
+float:right;
+}
+.clear{
+	clear:both;
+}
+
+.admin_query_head .inputslist{
+	width:100%;
+	overflow:hidden;
+	margin-bottom:20px;
+	padding:0;
+}
+.admin_query_head .inputslist li{
+	float:left;
+	height:35px;
+	height:auto;
+}
+.admin_query_head .inputslist li label{
+	float:left;
+	line-height:26px;
+}
+.admin_query_head .inputslist li input{
+	height: 26px;
+}
+.admin_query_head .inputslist li.noborder input{
+	border:0;
+}
+.admin_query_head .inputslist li.btn{
+	float:right;
+	text-align:right;
+	padding-right:30px;
+}
+
+
+/*-------------------------*/
+.easyui-linkbutton{
+	height: 26px;
+	min-width: 72px;
+}
+.border{
+    border:solid 1px #DEDFE6;
+    padding-left:10px;
+}
+.border-box{
+	width: 150px;
+	height: 26px;
+	box-sizing: border-box;
+	-moz-box-sizing: border-box;
+	-webkit-box-sizing: border-box;
+	-ms-box-sizing: border-box;
+}
+
+.modal {
+    display: none;
+    top: 0;
+    left: 0;
+    padding:0;
+    z-index: 1001;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+}
+/*下拉列表的弹出框，距输入框有一像素的距离，免得线会重合*/
+.combo-panel.panel-body.panel-body-noheader{
+    margin-top: 1px;
+}
+.switch {
+	display: inline-block;
+	cursor: pointer;
+	text-align: center;
+	line-height: 26px;
+}
+
+.title {
+	display: block;
+	margin: 10px;
+}
+
+textarea, input {
+	font-size:12px;
+}
+.err_border {
+	border-color: #FA5555 !important;
+}
+.textbox.combo .textbox-text {
+	padding: 0 4px; 
+}	
+.itemDiv {
+	height: 36px;
+}
+.itemDiv > span:nth-child(1) {
+	display: inline-block;
+	width: 180px;
+	margin-bottom:8px;
+}
+.item {
+	width: 250px;
+	background-color: #ffffff;
+}
+
+.input_li.group_id,
+.input_li.software_version {
+	padding-left: 8px; 
+}
+.combobox-item{
+	font-size: 12px;
+	padding: 3px;
+	padding-right: 0px;
+	cursor: pointer;
+}
+.combobox-item-selected{
+	background:#CEC7C3;
+}
+
+::-webkit-input-placeholder{
+	color:#CCE1EF;
+	font-size:12px;
+}
+.searchResultImgChangeStyle{
+	cursor:pointer;
+}
