@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button, Space, Tooltip } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { LockOutlined, ReloadOutlined, UnlockOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 import styles from './DataTable.module.css';
 import ColumnVisibility from './ColumnVisibility';
@@ -21,6 +21,7 @@ interface ColumnDef {
   key: string;
   title: string;
   hidden?: boolean;
+  group?: string;
 }
 
 interface ToolbarProps {
@@ -31,6 +32,8 @@ interface ToolbarProps {
   onRefresh?: () => void;
   onExport?: (format: 'xlsx' | 'csv') => void;
   onColumnVisibilityChange: (hiddenKeys: string[]) => void;
+  onColumnOrderChange?: (orderedKeys: string[]) => void;
+  onRefreshLockChange?: (locked: boolean) => void;
   density: Density;
   onDensityChange: (d: Density) => void;
   extraLeft?: React.ReactNode;
@@ -45,6 +48,8 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onRefresh,
   onExport,
   onColumnVisibilityChange,
+  onColumnOrderChange,
+  onRefreshLockChange,
   density,
   onDensityChange,
   extraLeft,
@@ -52,6 +57,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const t = useT();
   const hasSelection = selectedRowKeys.length > 0;
+  const [refreshLocked, setRefreshLocked] = useState(false);
 
   return (
     <div className={styles.toolbar}>
@@ -81,10 +87,24 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Right side */}
       <Space size={4} className={styles.toolbarRight}>
         {extraRight}
+        <Tooltip title={refreshLocked ? t('table.unlockRefresh') : t('table.lockRefresh')}>
+          <Button
+            icon={refreshLocked ? <LockOutlined /> : <UnlockOutlined />}
+            size="small"
+            type={refreshLocked ? 'primary' : 'default'}
+            ghost={refreshLocked}
+            onClick={() => {
+              const next = !refreshLocked;
+              setRefreshLocked(next);
+              onRefreshLockChange?.(next);
+            }}
+          />
+        </Tooltip>
         <ColumnVisibility
           tableId={tableId}
           columns={columns}
           onChange={onColumnVisibilityChange}
+          onOrderChange={onColumnOrderChange}
         />
         <DensityToggle density={density} onChange={onDensityChange} />
         {onExport && <ExportButton onExport={onExport} />}
@@ -93,6 +113,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <Button
               icon={<ReloadOutlined />}
               size="small"
+              disabled={refreshLocked}
               onClick={onRefresh}
             />
           </Tooltip>

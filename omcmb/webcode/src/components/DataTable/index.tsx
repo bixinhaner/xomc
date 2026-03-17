@@ -9,6 +9,8 @@ import EmptyState from './EmptyState';
 import ColumnFilter from './ColumnFilter';
 import styles from './DataTable.module.css';
 
+export type ColumnGroup = 'common' | 'eNB' | 'gNB' | 'GSM';
+
 export interface DataTableColumn<T> {
   key: string;
   title: string;
@@ -24,6 +26,7 @@ export interface DataTableColumn<T> {
   hidden?: boolean;
   copyable?: boolean;
   mono?: boolean;
+  group?: ColumnGroup;
 }
 
 export interface BatchAction {
@@ -121,6 +124,24 @@ function DataTable<T extends Record<string, unknown>>(
     []
   );
 
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
+
+  const orderedColumns = useMemo(() => {
+    if (columnOrder.length === 0) return columns;
+    const colMap = new Map(columns.map((c) => [c.key, c]));
+    const ordered: DataTableColumn<T>[] = [];
+    for (const key of columnOrder) {
+      const col = colMap.get(key);
+      if (col) {
+        ordered.push(col);
+        colMap.delete(key);
+      }
+    }
+    // append any columns not in the order (e.g. newly added)
+    for (const col of colMap.values()) ordered.push(col);
+    return ordered;
+  }, [columns, columnOrder]);
+
   const filteredData = useMemo(() => {
     let data = dataSource;
     for (const [key, filterVal] of Object.entries(columnFilters)) {
@@ -135,7 +156,7 @@ function DataTable<T extends Record<string, unknown>>(
   }, [dataSource, columnFilters]);
 
   const buildColumns = useMemo((): TableProps<T>['columns'] => {
-    return columns
+    return orderedColumns
       .filter((col) => !hiddenKeys.includes(col.key))
       .map((col) => {
         const titleNode = (
@@ -206,7 +227,7 @@ function DataTable<T extends Record<string, unknown>>(
             : never,
         };
       });
-  }, [columns, hiddenKeys, columnFilters, handleColumnFilter]);
+  }, [orderedColumns, hiddenKeys, columnFilters, handleColumnFilter]);
 
   const rowSelection: TableProps<T>['rowSelection'] = selectable
     ? {
@@ -229,7 +250,7 @@ function DataTable<T extends Record<string, unknown>>(
 
   const tableSize = size ?? DENSITY_SIZE_MAP[density];
 
-  const columnDefs = columns.map((c) => ({ key: c.key, title: c.title, hidden: c.hidden }));
+  const columnDefs = orderedColumns.map((c) => ({ key: c.key, title: c.title, hidden: c.hidden, group: c.group }));
 
   return (
     <div className={styles.dataTableWrapper}>
@@ -241,6 +262,7 @@ function DataTable<T extends Record<string, unknown>>(
         onRefresh={onRefresh}
         onExport={onExport}
         onColumnVisibilityChange={setHiddenKeys}
+        onColumnOrderChange={setColumnOrder}
         density={density}
         onDensityChange={setDensity}
         extraLeft={extraToolbarLeft}

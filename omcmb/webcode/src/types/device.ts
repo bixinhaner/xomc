@@ -28,6 +28,97 @@ export interface Device {
   latitude: number;
   softwareVersion: string;
   createTime: string;
+
+  // --- 监控页面扩展字段 (来自 LTE/GSM/5G NR 三个监控页面合并) ---
+
+  // 设备信息组 (Device)
+  hostName: string;
+  productName: string;
+  firmwareVersion: string;
+  macAddress: string;
+  groupName: string;
+  onlineTime: string;
+  offlineTime: string;
+  onlineDuration: number;
+  upTime: string;
+  firstOnlineTime: string;
+  lastInformTime: string;
+  siteName: string;
+  gpsVersion: string;
+  rom: string;
+  remark: string;
+  gnbId: string;
+
+  // 小区信息组 (Cell)
+  enbId: string;
+  cellId: string;
+  eci: string;
+  nrCellId: string;
+  pci: string;
+  plmnId: string;
+  tac: string;
+  subframeAssignment: string;
+  specialSubframe: string;
+  rootIndex: string;
+  siteId: string;
+  bandwidth: string;
+  dlEarfcn: string;
+  ulEarfcn: string;
+  networkModel: string;
+  txPower: string;
+  band: string;
+  lac: string;
+  arfcn: string;
+  uplinkFrequency: string;
+  downlinkFrequency: string;
+
+  // 状态信息组 (Status)
+  opState: string;
+  mmeStatus: string;
+  amfStatus: string;
+  rfStatus: string;
+  pmReportStatus: string;
+  halobFlag: boolean;
+  syncStatus: string;
+  validity: string;
+  lockStatus: string;
+  ueCount: number;
+  euCount: string;
+  ruCount: string;
+  cpeCount: number;
+  wanSpeed: string;
+  serviceStatus: string;
+  adminState: string;
+  multiPlmnEnable: string;
+  bscLinkStatus: string;
+  bscSelect: string;
+  bscSerialNumber: string;
+  btsNum: number;
+
+  // 网络信息组 (Network)
+  ipsecAddr: string;
+  mmepoolIpsecAddr: string;
+  ipaUnitId: string;
+  omlRemoteIp: string;
+  omlRemoteIpBak: string;
+
+  // 位置信息组 (Location)
+  gpsHeight: number;
+  mechanicalDowntilt: string;
+  electronicDowntilt: string;
+  verticalBeamWidth: string;
+  horizontalAzimuth: string;
+  installAddress: string;
+  gpsSatelliteCount: number;
+
+  // 5G NR 扩展 (Others)
+  rollbackVersion: string;
+  sasParam: string;
+  euRu: string;
+  halobLicense: string;
+  energySaving: string;
+  gnbTopoCellmgr: string;
+  sslCertValidity: string;
 }
 
 export interface NE {

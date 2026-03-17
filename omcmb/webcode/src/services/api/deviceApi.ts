@@ -25,6 +25,91 @@ interface BackendDevice {
   longitude: number;
   created_at: string;
   updated_at: string;
+
+  // --- 监控扩展字段 ---
+  host_name?: string;
+  product_name?: string;
+  mac_address?: string;
+  group_name?: string;
+  online_at?: string;
+  offline_at?: string;
+  online_duration?: number;
+  up_time?: string;
+  first_online_at?: string;
+  gps_version?: string;
+  rom?: string;
+  remark?: string;
+  gnb_id?: string;
+
+  // Cell
+  enb_id?: string;
+  cell_id?: string;
+  eci?: string;
+  nr_cell_id?: string;
+  pci?: string;
+  plmn_id?: string;
+  tac?: string;
+  subframe_assignment?: string;
+  special_subframe?: string;
+  root_index?: string;
+  bandwidth?: string;
+  dl_earfcn?: string;
+  ul_earfcn?: string;
+  network_model?: string;
+  tx_power?: string;
+  band?: string;
+  lac?: string;
+  arfcn?: string;
+  uplink_frequency?: string;
+  downlink_frequency?: string;
+
+  // Status
+  op_state?: string;
+  mme_status?: string;
+  amf_status?: string;
+  rf_status?: string;
+  pm_report_status?: string;
+  halob_enabled?: boolean;
+  sync_status?: string;
+  validity?: string;
+  lock_status?: string;
+  ue_count?: number;
+  eu_count?: string;
+  ru_count?: string;
+  cpe_count?: number;
+  wan_speed?: string;
+  service_status?: string;
+  admin_state?: string;
+  multi_plmn_enable?: string;
+  bsc_link_status?: string;
+  bsc_select?: string;
+  bsc_serial_number?: string;
+  bts_num?: number;
+
+  // Network
+  ipsec_addr?: string;
+  mmepool_ipsec_addr?: string;
+  ipa_unit_id?: string;
+  oml_remote_ip?: string;
+  oml_remote_ip_bak?: string;
+
+  // Location
+  gps_height?: number;
+  mechanical_downtilt?: string;
+  electronic_downtilt?: string;
+  vertical_beam_width?: string;
+  horizontal_azimuth?: string;
+  install_address?: string;
+  gps_satellite_count?: number;
+
+  // 5G NR Others
+  rollback_version?: string;
+  sas_param?: string;
+  eu_ru?: string;
+  halob_license?: string;
+  energy_saving?: string;
+  gnb_topo_cellmgr?: string;
+  ssl_cert_validity?: string;
 }
 
 interface BackendListResponse<T> {
@@ -76,6 +161,90 @@ function mapBackendDevice(bd: BackendDevice): Device {
     latitude: bd.latitude,
     softwareVersion: bd.firmware_version,
     createTime: bd.created_at,
+
+    // 监控扩展字段
+    hostName: bd.host_name || '',
+    productName: bd.product_name || '',
+    firmwareVersion: bd.firmware_version || '',
+    macAddress: bd.mac_address || '',
+    groupName: bd.group_name || '',
+    onlineTime: bd.online_at || '',
+    offlineTime: bd.offline_at || '',
+    onlineDuration: bd.online_duration ?? 0,
+    upTime: bd.up_time || '',
+    firstOnlineTime: bd.first_online_at || '',
+    lastInformTime: bd.last_inform_at || '',
+    siteName: bd.site_name || '',
+    gpsVersion: bd.gps_version || '',
+    rom: bd.rom || '',
+    remark: bd.remark || '',
+    gnbId: bd.gnb_id || '',
+
+    enbId: bd.enb_id || '',
+    cellId: bd.cell_id || '',
+    eci: bd.eci || '',
+    nrCellId: bd.nr_cell_id || '',
+    pci: bd.pci || '',
+    plmnId: bd.plmn_id || '',
+    tac: bd.tac || '',
+    subframeAssignment: bd.subframe_assignment || '',
+    specialSubframe: bd.special_subframe || '',
+    rootIndex: bd.root_index || '',
+    siteId: bd.site_id || '',
+    bandwidth: bd.bandwidth || '',
+    dlEarfcn: bd.dl_earfcn || '',
+    ulEarfcn: bd.ul_earfcn || '',
+    networkModel: bd.network_model || '',
+    txPower: bd.tx_power || '',
+    band: bd.band || '',
+    lac: bd.lac || '',
+    arfcn: bd.arfcn || '',
+    uplinkFrequency: bd.uplink_frequency || '',
+    downlinkFrequency: bd.downlink_frequency || '',
+
+    opState: bd.op_state || 'unknown',
+    mmeStatus: bd.mme_status || '',
+    amfStatus: bd.amf_status || '',
+    rfStatus: bd.rf_status || '',
+    pmReportStatus: bd.pm_report_status || '',
+    halobFlag: bd.halob_enabled ?? false,
+    syncStatus: bd.sync_status || '',
+    validity: bd.validity || '',
+    lockStatus: bd.lock_status || '',
+    ueCount: bd.ue_count ?? 0,
+    euCount: bd.eu_count || '',
+    ruCount: bd.ru_count || '',
+    cpeCount: bd.cpe_count ?? 0,
+    wanSpeed: bd.wan_speed || '',
+    serviceStatus: bd.service_status || '',
+    adminState: bd.admin_state || '',
+    multiPlmnEnable: bd.multi_plmn_enable || '',
+    bscLinkStatus: bd.bsc_link_status || '',
+    bscSelect: bd.bsc_select || '',
+    bscSerialNumber: bd.bsc_serial_number || '',
+    btsNum: bd.bts_num ?? 0,
+
+    ipsecAddr: bd.ipsec_addr || '',
+    mmepoolIpsecAddr: bd.mmepool_ipsec_addr || '',
+    ipaUnitId: bd.ipa_unit_id || '',
+    omlRemoteIp: bd.oml_remote_ip || '',
+    omlRemoteIpBak: bd.oml_remote_ip_bak || '',
+
+    gpsHeight: bd.gps_height ?? 0,
+    mechanicalDowntilt: bd.mechanical_downtilt || '',
+    electronicDowntilt: bd.electronic_downtilt || '',
+    verticalBeamWidth: bd.vertical_beam_width || '',
+    horizontalAzimuth: bd.horizontal_azimuth || '',
+    installAddress: bd.install_address || '',
+    gpsSatelliteCount: bd.gps_satellite_count ?? 0,
+
+    rollbackVersion: bd.rollback_version || '',
+    sasParam: bd.sas_param || '',
+    euRu: bd.eu_ru || '',
+    halobLicense: bd.halob_license || '',
+    energySaving: bd.energy_saving || '',
+    gnbTopoCellmgr: bd.gnb_topo_cellmgr || '',
+    sslCertValidity: bd.ssl_cert_validity || '',
   };
 }
 

@@ -384,6 +384,7 @@ const messages: Record<string, string> = {
   'device.vendor':          '厂商',
   'device.productType':     '产品类型',
   'device.networkType':     '网络类型',
+  'device.radioMode':       '基站制式',
   'device.model':           '设备型号',
   'device.softwareVersion': '软件版本',
   'device.ipAddress':       'IP地址',
@@ -391,6 +392,76 @@ const messages: Record<string, string> = {
   'device.lastOnlineTime':  '最后在线时间',
   'device.longitude':       '经度',
   'device.latitude':        '纬度',
+
+  // 监控页面扩展字段 (Device)
+  'device.hostName':            '名称',
+  'device.productName':         '产品名称',
+  'device.firmwareVersion':     '固件版本',
+  'device.macAddress':          'MAC地址',
+  'device.groupName':           '设备组',
+  'device.onlineTime':          '接入时间',
+  'device.offlineTime':         '断开时间',
+  'device.onlineDuration':      '累计时长',
+  'device.upTime':              '运行时间',
+  'device.firstOnlineTime':     '首次连接时间',
+  'device.lastInformTime':      '上次连接时间',
+  'device.siteName':            '站址名称',
+  'device.gpsVersion':          'GPS版本',
+  'device.remark':              '备注',
+
+  // 监控页面扩展字段 (Cell)
+  'device.cellId':              '小区ID',
+  'device.subframeAssignment':  '子帧配比',
+  'device.specialSubframe':     '特殊子帧配比',
+  'device.rootIndex':           '根序列索引',
+  'device.bandwidth':           '带宽',
+  'device.dlEarfcn':            'DL EARFCN',
+  'device.ulEarfcn':            'UL EARFCN',
+  'device.networkModel':        '基站类型',
+  'device.arfcn':               '频点',
+  'device.uplinkFrequency':     '上行频率',
+  'device.downlinkFrequency':   '下行频率',
+
+  // 监控页面扩展字段 (Status)
+  'device.opState':             '激活状态',
+  'device.ueCount':             'UE数',
+  'device.mmeStatus':           'MME状态',
+  'device.amfStatus':           'AMF状态',
+  'device.rfStatus':            '射频状态',
+  'device.pmReportStatus':      'KPI上报状态',
+  'device.syncStatus':          '同步状态',
+  'device.validity':            '有效期',
+  'device.lockStatus':          '锁定状态',
+  'device.cpeCount':            'CPE连接数',
+  'device.euCount':             'EU数',
+  'device.ruCount':             'RU数',
+  'device.wanSpeed':            'WAN状态',
+  'device.serviceStatus':       '状态',
+  'device.bscLinkStatus':       'BSC连接状态',
+  'device.bscSerialNumber':     '所属BSC编码',
+  'device.btsNum':              'BTS数',
+
+  // 监控页面扩展字段 (Network)
+  'device.ipsecAddr':           'IPSec地址',
+  'device.mmepoolIpsecAddr':    'MME Pool IPSec地址',
+
+  // 监控页面扩展字段 (Location)
+  'device.gpsHeight':           'GPS高度',
+  'device.gpsSatelliteCount':   'GPS卫星数',
+  'device.mechanicalDowntilt':  '机械下倾角',
+  'device.electronicDowntilt':  '电子下倾角',
+  'device.verticalBeamWidth':   '垂直波束宽度',
+  'device.horizontalAzimuth':   '水平方位角',
+  'device.installAddress':      '安装详细地址',
+
+  // 监控页面扩展字段 (5G NR Others)
+  'device.rollbackVersion':     '回滚版本',
+  'device.sasParam':            'SAS参数',
+  'device.euRu':                'EU/RU数',
+  'device.halobLicense':        'HaloB License',
+  'device.energySaving':        '节能',
+  'device.gnbTopoCellmgr':      'gNB TOPO',
+  'device.sslCertValidity':     'SSL证书有效期',
 
   // -------------------------------------------------------------------------
   // Alarm page labels
@@ -621,6 +692,8 @@ const messages: Record<string, string> = {
   'table.totalItems':        '共 {total} 条',
   'table.copied':            '已复制',
   'table.searchPlaceholder': '搜索...',
+  'table.lockRefresh':       '锁定刷新',
+  'table.unlockRefresh':     '解锁刷新',
 
   // -------------------------------------------------------------------------
   // EmptyState

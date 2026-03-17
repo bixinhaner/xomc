@@ -384,6 +384,7 @@ const messages: Record<string, string> = {
   'device.vendor':          'Vendor',
   'device.productType':     'Product Type',
   'device.networkType':     'Network Type',
+  'device.radioMode':       'Radio Mode',
   'device.model':           'Device Model',
   'device.softwareVersion': 'Software Version',
   'device.ipAddress':       'IP Address',
@@ -391,6 +392,76 @@ const messages: Record<string, string> = {
   'device.lastOnlineTime':  'Last Online Time',
   'device.longitude':       'Longitude',
   'device.latitude':        'Latitude',
+
+  // Monitor page extended fields (Device)
+  'device.hostName':            'Name',
+  'device.productName':         'Product Name',
+  'device.firmwareVersion':     'Firmware Version',
+  'device.macAddress':          'MAC Address',
+  'device.groupName':           'Device Group',
+  'device.onlineTime':          'Online Time',
+  'device.offlineTime':         'Offline Time',
+  'device.onlineDuration':      'Online Duration',
+  'device.upTime':              'Up Time',
+  'device.firstOnlineTime':     'First Online Time',
+  'device.lastInformTime':      'Last Inform Time',
+  'device.siteName':            'Site Name',
+  'device.gpsVersion':          'GPS Version',
+  'device.remark':              'Remark',
+
+  // Monitor page extended fields (Cell)
+  'device.cellId':              'Cell ID',
+  'device.subframeAssignment':  'Subframe Assignment',
+  'device.specialSubframe':     'Special Subframe',
+  'device.rootIndex':           'Root Index',
+  'device.bandwidth':           'Bandwidth',
+  'device.dlEarfcn':            'DL EARFCN',
+  'device.ulEarfcn':            'UL EARFCN',
+  'device.networkModel':        'Network Model',
+  'device.arfcn':               'ARFCN',
+  'device.uplinkFrequency':     'Uplink Frequency',
+  'device.downlinkFrequency':   'Downlink Frequency',
+
+  // Monitor page extended fields (Status)
+  'device.opState':             'Activation Status',
+  'device.ueCount':             'UE Count',
+  'device.mmeStatus':           'MME Status',
+  'device.amfStatus':           'AMF Status',
+  'device.rfStatus':            'RF Status',
+  'device.pmReportStatus':      'PM Report Status',
+  'device.syncStatus':          'Sync Status',
+  'device.validity':            'Validity',
+  'device.lockStatus':          'Lock Status',
+  'device.cpeCount':            'CPE Connections',
+  'device.euCount':             'EU Count',
+  'device.ruCount':             'RU Count',
+  'device.wanSpeed':            'WAN Speed',
+  'device.serviceStatus':       'Service Status',
+  'device.bscLinkStatus':       'BSC Link Status',
+  'device.bscSerialNumber':     'BSC Serial Number',
+  'device.btsNum':              'BTS Count',
+
+  // Monitor page extended fields (Network)
+  'device.ipsecAddr':           'IPSec Address',
+  'device.mmepoolIpsecAddr':    'MME Pool IPSec Address',
+
+  // Monitor page extended fields (Location)
+  'device.gpsHeight':           'GPS Height',
+  'device.gpsSatelliteCount':   'GPS Satellite Count',
+  'device.mechanicalDowntilt':  'Mechanical Downtilt',
+  'device.electronicDowntilt':  'Electronic Downtilt',
+  'device.verticalBeamWidth':   'Vertical Beam Width',
+  'device.horizontalAzimuth':   'Horizontal Azimuth',
+  'device.installAddress':      'Install Address',
+
+  // Monitor page extended fields (5G NR Others)
+  'device.rollbackVersion':     'Rollback Version',
+  'device.sasParam':            'SAS Param',
+  'device.euRu':                'EU/RU Count',
+  'device.halobLicense':        'HaloB License',
+  'device.energySaving':        'Energy Saving',
+  'device.gnbTopoCellmgr':      'gNB TOPO',
+  'device.sslCertValidity':     'SSL Cert Validity',
 
   // -------------------------------------------------------------------------
   // Alarm page labels
@@ -621,6 +692,8 @@ const messages: Record<string, string> = {
   'table.totalItems':        '{total} total',
   'table.copied':            'Copied',
   'table.searchPlaceholder': 'Search...',
+  'table.lockRefresh':       'Lock Refresh',
+  'table.unlockRefresh':     'Unlock Refresh',
 
   // -------------------------------------------------------------------------
   // EmptyState
