@@ -32,6 +32,14 @@ const messages: Record<string, string> = {
   'common.disable':        'Disable',
   'common.batchDelete':    'Batch Delete',
   'common.batchExport':    'Batch Export',
+  'common.batchSync':      'Sync',
+  'common.batchReboot':    'Reboot',
+  'common.moveToGroup':    'Move to Group',
+  'common.recycleBin':     'Recycle Bin',
+  'common.recycleConfirmTitle': 'Move devices to recycle bin?',
+  'common.recycleConfirmDesc': 'Devices in recycle bin will not be monitored (monitoring data, config, alarms, KPI, etc.)',
+  'common.rebootConfirmMsg': 'Are you sure to reboot the device(s)?',
+  'common.commandSent':    'Command has been sent.',
   'common.more':           'More',
   'common.loading':        'Loading...',
   'common.noData':         'No Data',
@@ -463,6 +471,18 @@ const messages: Record<string, string> = {
   'device.gnbTopoCellmgr':      'gNB TOPO',
   'device.sslCertValidity':     'SSL Cert Validity',
 
+  // Device row-level actions
+  'device.action.sync':          'Sync',
+  'device.action.reboot':        'Reboot',
+  'device.action.activate':      'Activate',
+  'device.action.deactivate':    'Deactivate',
+  'device.action.rfOn':          'RF On',
+  'device.action.rfOff':         'RF Off',
+  'device.action.halobOn':       'HaloB On',
+  'device.action.halobOff':      'HaloB Off',
+  'device.action.logCollect':    'Log Collect',
+  'device.action.tr069Collect':  'Collect TR069 Msg',
+
   // -------------------------------------------------------------------------
   // Alarm page labels
   // -------------------------------------------------------------------------
@@ -656,6 +676,7 @@ const messages: Record<string, string> = {
   'common.confirmDelete':   'Confirm Delete',
   'common.deleteConfirmMsg':'Are you sure you want to delete the selected {count} records? This cannot be undone.',
   'common.deleteSuccess':   'Deleted successfully',
+  'common.operationSuccess':'Operation succeeded',
   'common.exportInProgress':'Exporting...',
   'common.featureInDev':    'Feature in development',
   'common.realTimeConn':    'Real-time Connected',
@@ -666,6 +687,26 @@ const messages: Record<string, string> = {
   'common.clearSuccess':    'Cleared {count} alarms',
   'common.hasAlarm':        'Has Alarm',
   'common.noAlarm':         'No Alarm',
+
+  // -------------------------------------------------------------------------
+  // Sync params modal
+  // -------------------------------------------------------------------------
+  'sync.title':             'Sync',
+  'sync.alarmManagement':   'Alarm Management',
+  'sync.activeAlarms':      'Active Alarms',
+  'sync.basicConfig':       'Basic Config',
+  'sync.advancedConfig':    'Advanced Config',
+  'sync.selectGroupTip':    'Please select a device group',
+
+  // -------------------------------------------------------------------------
+  // FilterBar — search & filter labels
+  // -------------------------------------------------------------------------
+  'filter.searchText':          'Search',
+  'filter.conn.normal':         'Connected',
+  'filter.conn.disconnected':   'Disconnected',
+  'filter.conn.syncing':        'Syncing',
+  'filter.conn.syncFailed':     'Sync Failed',
+  'filter.bscCode':             'BSC Serial Number',
 
   // -------------------------------------------------------------------------
   // FilterBar

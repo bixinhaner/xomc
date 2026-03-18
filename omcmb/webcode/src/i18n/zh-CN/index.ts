@@ -32,6 +32,14 @@ const messages: Record<string, string> = {
   'common.disable':        '禁用',
   'common.batchDelete':    '批量删除',
   'common.batchExport':    '批量导出',
+  'common.batchSync':      '同步',
+  'common.batchReboot':    '重启',
+  'common.moveToGroup':    '移动到设备组',
+  'common.recycleBin':     '回收站',
+  'common.recycleConfirmTitle': '确认将设备移入回收站？',
+  'common.recycleConfirmDesc': '回收站的设备，将不进行数据监控（监控数据、配置、警报、KPI等...）',
+  'common.rebootConfirmMsg': '确定重启设备？',
+  'common.commandSent':    '命令已经下发。',
   'common.more':           '更多',
   'common.loading':        '加载中...',
   'common.noData':         '暂无数据',
@@ -463,6 +471,18 @@ const messages: Record<string, string> = {
   'device.gnbTopoCellmgr':      'gNB TOPO',
   'device.sslCertValidity':     'SSL证书有效期',
 
+  // Device row-level actions (操作列 — 执行菜单)
+  'device.action.sync':          '同步',
+  'device.action.reboot':        '重启',
+  'device.action.activate':      '激活',
+  'device.action.deactivate':    '去激活',
+  'device.action.rfOn':          '射频开启',
+  'device.action.rfOff':         '射频关闭',
+  'device.action.halobOn':       'HaloB 开启',
+  'device.action.halobOff':      'HaloB 关闭',
+  'device.action.logCollect':    '日志收集',
+  'device.action.tr069Collect':  '收集报文',
+
   // -------------------------------------------------------------------------
   // Alarm page labels
   // -------------------------------------------------------------------------
@@ -656,6 +676,7 @@ const messages: Record<string, string> = {
   'common.confirmDelete':   '确认删除',
   'common.deleteConfirmMsg':'确定要删除选中的 {count} 条记录吗？此操作不可恢复。',
   'common.deleteSuccess':   '删除成功',
+  'common.operationSuccess':'操作成功',
   'common.exportInProgress':'正在导出...',
   'common.featureInDev':    '功能开发中',
   'common.realTimeConn':    '实时连接',
@@ -666,6 +687,26 @@ const messages: Record<string, string> = {
   'common.clearSuccess':    '已清除 {count} 条告警',
   'common.hasAlarm':        '有告警',
   'common.noAlarm':         '无告警',
+
+  // -------------------------------------------------------------------------
+  // Sync params modal
+  // -------------------------------------------------------------------------
+  'sync.title':             '同步',
+  'sync.alarmManagement':   '告警管理',
+  'sync.activeAlarms':      '活动告警',
+  'sync.basicConfig':       '基础配置',
+  'sync.advancedConfig':    '高级配置',
+  'sync.selectGroupTip':    '请选择设备组',
+
+  // -------------------------------------------------------------------------
+  // FilterBar — search & filter labels
+  // -------------------------------------------------------------------------
+  'filter.searchText':          '搜索',
+  'filter.conn.normal':         '连接正常',
+  'filter.conn.disconnected':   '连接断开',
+  'filter.conn.syncing':        '同步中',
+  'filter.conn.syncFailed':     '同步失败',
+  'filter.bscCode':             '所属BSC编码',
 
   // -------------------------------------------------------------------------
   // FilterBar

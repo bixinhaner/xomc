@@ -1,7 +1,16 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Modal, Space, Tag, Typography, message } from 'antd';
-import { DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { App, Button, Dropdown, Space, Tag, Typography } from 'antd';
+import type { MenuProps } from 'antd';
+import {
+  CaretRightOutlined,
+  EyeOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RestOutlined,
+  SwapOutlined,
+  SyncOutlined,
+} from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
@@ -12,6 +21,8 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useDeleteDevices } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
+import SyncParamsModal from './SyncParamsModal';
+import MoveToGroupModal from './MoveToGroupModal';
 
 const { Link } = Typography;
 
@@ -27,10 +38,13 @@ const SEVERITY_COLOR: Record<string, string> = {
 export default function DeviceList() {
   const t = useT();
   const navigate = useNavigate();
+  const { message, modal } = App.useApp();
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
 
   const queryParams = useMemo(
     () => ({ ...filterParams, page: currentPage, pageSize } as Parameters<typeof useDeviceList>[0]),
@@ -53,8 +67,35 @@ export default function DeviceList() {
 
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'sn', label: t('device.sn'), type: 'input' },
-    { name: 'hostName', label: t('device.hostName'), type: 'input' },
+    // --- 搜索项：文本搜索覆盖 SN/名称/IP/MAC/ECI/PCI ---
+    {
+      name: 'searchText',
+      label: t('filter.searchText'),
+      type: 'input',
+      placeholder: 'SN / ' + t('device.hostName') + ' / IP / MAC / ECI / PCI',
+    },
+
+    // --- 筛选项：三制式公共（默认显示） ---
+    {
+      name: 'connStatus',
+      label: t('device.connStatus'),
+      type: 'multi-select',
+      options: [
+        { label: t('filter.conn.normal'), value: '1' },
+        { label: t('filter.conn.disconnected'), value: '0' },
+        { label: t('filter.conn.syncing'), value: '3' },
+        { label: t('filter.conn.syncFailed'), value: '2' },
+      ],
+    },
+    {
+      name: 'opState',
+      label: t('device.opState'),
+      type: 'select',
+      options: [
+        { label: t('status.active'), value: '1' },
+        { label: t('status.inactive'), value: '0' },
+      ],
+    },
     {
       name: 'networkType',
       label: t('device.radioMode'),
@@ -66,37 +107,79 @@ export default function DeviceList() {
       ],
     },
     {
-      name: 'productType',
+      name: 'productModel',
       label: t('device.productType'),
-      type: 'select',
+      type: 'multi-select',
       options: [
-        { label: 'eNB', value: 'eNB' },
-        { label: 'gNB', value: 'gNB' },
-        { label: 'GSM', value: 'GSM' },
+        // eNB 产品类型（动态，后端返回）— 此处先列举已知选项
+        { label: 'PM-B4860', value: 'PM-B4860' },
+        { label: 'QAFA', value: 'QAFA' },
+        { label: 'QATA', value: 'QATA' },
+        { label: 'QAFB', value: 'QAFB' },
+        { label: 'RTD', value: 'RTD' },
+        // gNB 产品类型（硬编码）
+        { label: 'BaiBNX', value: 'BaiBNX' },
+        { label: 'BaiBNQ', value: 'BaiBNQ' },
+        // GSM 产品类型（硬编码）
+        { label: 'BSC', value: 'BSC' },
+        { label: 'BTS', value: 'BTS' },
       ],
     },
+
+    // --- 筛选项：三制式公共（默认折叠） ---
     {
-      name: 'connStatus',
-      label: t('device.connStatus'),
-      type: 'select',
-      options: [
-        { label: t('status.online'), value: 'online' },
-        { label: t('status.offline'), value: 'offline' },
-      ],
+      name: 'modelName',
+      label: t('device.model'),
+      type: 'multi-select',
+      options: [],  // TODO: 动态加载 /cell/cpeinfos/getModelNameList.action
     },
     {
-      name: 'opState',
-      label: t('device.opState'),
-      type: 'select',
-      options: [
-        { label: t('status.active'), value: 'active' },
-        { label: t('status.inactive'), value: 'inactive' },
-      ],
+      name: 'softwareVersion',
+      label: t('device.softwareVersion'),
+      type: 'multi-select',
+      options: [],  // TODO: 动态加载 /cell/cpeinfos/getCellVersionList.action
     },
     {
-      name: 'groupName',
+      name: 'firmwareVersion',
+      label: t('device.firmwareVersion'),
+      type: 'multi-select',
+      options: [],  // TODO: 动态加载 /cell/cpeinfos/getFirmwareVersionList.action
+    },
+    {
+      name: 'groupId',
       label: t('device.groupName'),
-      type: 'input',
+      type: 'multi-select',
+      options: [],  // TODO: 动态加载 /cell/cpeinfos/getDeviceGroupListByCell.action
+    },
+
+    // --- 筛选项：eNB + gNB ---
+    {
+      name: 'halobFlag',
+      label: 'HaloB',
+      type: 'select',
+      options: [
+        { label: t('common.yes'), value: '1' },
+        { label: t('common.no'), value: '0' },
+      ],
+    },
+
+    // --- 筛选项：仅 gNB ---
+    {
+      name: 'multiPlmnEnable',
+      label: 'MultiPLMN',
+      type: 'select',
+      options: [
+        { label: t('common.enable'), value: '1' },
+        { label: t('common.disable'), value: '0' },
+      ],
+    },
+
+    // --- 筛选项：仅 GSM ---
+    {
+      name: 'bscSerialnumber',
+      label: t('filter.bscCode'),
+      type: 'multi-select',
+      options: [],  // TODO: 动态加载 /cell/cpeinfos/getBSCSnForBTSList.action
     },
   ], [t]);
 
@@ -123,22 +206,157 @@ export default function DeviceList() {
     setCurrentPage(1);
   }, []);
 
-  const handleDelete = useCallback(
+  // 批量重启 — 确认对话框 → "命令已经下发。"
+  const handleBatchReboot = useCallback(
     (ids: string[]) => {
-      Modal.confirm({
-        title: t('common.confirmDelete'),
-        content: t('common.deleteConfirmMsg', { count: ids.length }),
-        okText: t('common.confirmDelete'),
+      modal.confirm({
+        title: t('common.confirm'),
+        content: t('common.rebootConfirmMsg'),
+        okText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+        onOk: async () => {
+          // TODO: 接入 POST /task/reboot/batchRebootCell.action，ids 传给后端
+          console.log('batch reboot ids:', ids);
+          void message.info(t('common.commandSent'));
+          setSelectedRowKeys([]);
+          void refetch();
+        },
+      });
+    },
+    [modal, message, t, refetch]
+  );
+
+  // 批量回收站 — 警告确认 + 说明文字
+  const handleRecycle = useCallback(
+    (ids: string[]) => {
+      modal.confirm({
+        title: t('common.recycleConfirmTitle'),
+        content: t('common.recycleConfirmDesc'),
+        okText: t('common.confirm'),
         okType: 'danger',
         cancelText: t('common.cancel'),
         onOk: async () => {
+          // TODO: 接入 POST /recycle/moveDeviceToRecycle.action
           await deleteDevices.mutateAsync(ids);
-          void message.success(t('common.deleteSuccess'));
+          void message.success(t('common.operationSuccess'));
           setSelectedRowKeys([]);
         },
       });
     },
-    [deleteDevices, t]
+    [modal, message, deleteDevices, t]
+  );
+
+  // 批量同步 — 打开参数选择对话框
+  const handleBatchSync = useCallback(() => {
+    setSyncModalOpen(true);
+  }, []);
+
+  // 批量同步确认回调
+  const handleSyncConfirm = useCallback(
+    (selectedParams: string[], alarmSync: boolean) => {
+      const params = alarmSync ? [...selectedParams, 'sync_alarm'] : selectedParams;
+      const cellCodes = selectedRowKeys.join(',');
+      // TODO: 接入 POST /cell/quicksettings/batchSyncCell.action
+      // params: { smallCellCode: cellCodes, selectedParams: params.join(',') }
+      console.log('batch sync:', { cellCodes, selectedParams: params.join(',') });
+      setSyncModalOpen(false);
+      setSelectedRowKeys([]);
+      void refetch();
+    },
+    [selectedRowKeys, refetch]
+  );
+
+  // 移动到设备组 — 打开设备组选择对话框
+  const handleMoveToGroup = useCallback(() => {
+    setMoveToGroupModalOpen(true);
+  }, []);
+
+  // 移动到设备组确认回调
+  const handleMoveToGroupConfirm = useCallback(
+    (groupId: string) => {
+      const cellCodes = selectedRowKeys.join(',');
+      // TODO: 接入 POST /system/deviceGroup/moveCellToGroup.action
+      // params: { toGroupId: groupId, ids: cellCodes }
+      console.log('move to group:', { groupId, cellCodes });
+      void message.success(t('common.operationSuccess'));
+      setMoveToGroupModalOpen(false);
+      setSelectedRowKeys([]);
+      void refetch();
+    },
+    [selectedRowKeys, message, t, refetch]
+  );
+
+  // 行级操作 — "执行"下拉菜单
+  const handleRowAction = useCallback(
+    (key: string, record: Device) => {
+      // 当前操作均为 placeholder，后续接入实际 API
+      void message.info(`${key}: ${record.sn} — ${t('common.featureInDev')}`);
+    },
+    [message, t]
+  );
+
+  const getActionMenuItems = useCallback(
+    (record: Device): MenuProps['items'] => {
+      const isOffline = record.connStatus !== 'online';
+      const isActive = record.opState === 'active';
+      const rfOn = record.rfStatus === 'on' || record.rfStatus === 'enabled';
+      const halobOn = record.halobFlag === true;
+      const isGSM = record.networkType === 'GSM';
+
+      const items: MenuProps['items'] = [
+        // Group 1: 同步 & 重启 — 三制式共有
+        {
+          key: 'sync',
+          label: t('device.action.sync'),
+          disabled: isOffline,
+        },
+        {
+          key: 'reboot',
+          label: t('device.action.reboot'),
+          disabled: isOffline,
+        },
+      ];
+
+      // Group 2: 激活/射频/HaloB — 仅 eNB 和 gNB（GSM 原始页面 group3 为空数组）
+      if (!isGSM) {
+        items.push(
+          { type: 'divider' },
+          {
+            key: 'activate',
+            label: isActive ? t('device.action.deactivate') : t('device.action.activate'),
+            disabled: isOffline,
+          },
+          {
+            key: 'rf',
+            label: rfOn ? t('device.action.rfOff') : t('device.action.rfOn'),
+            disabled: isOffline,
+          },
+          {
+            key: 'halob',
+            label: halobOn ? t('device.action.halobOff') : t('device.action.halobOn'),
+            disabled: isOffline,
+          },
+        );
+      }
+
+      // Group 3: 日志 & 报文 — 三制式共有
+      items.push(
+        { type: 'divider' },
+        {
+          key: 'logCollect',
+          label: t('device.action.logCollect'),
+          disabled: isOffline,
+        },
+        {
+          key: 'tr069Collect',
+          label: t('device.action.tr069Collect'),
+          disabled: isOffline,
+        },
+      );
+
+      return items;
+    },
+    [t]
   );
 
   // 格式化时间戳
@@ -379,7 +597,7 @@ export default function DeviceList() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 120,
+        width: 140,
         fixed: 'right',
         render: (_val, record) => (
           <Space size={4}>
@@ -391,53 +609,53 @@ export default function DeviceList() {
             >
               {t('common.detail')}
             </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => void navigate(`/device/edit/${record.id}`)}
+            <Dropdown
+              menu={{
+                items: getActionMenuItems(record),
+                onClick: ({ key }) => handleRowAction(key, record),
+              }}
+              trigger={['click']}
             >
-              {t('common.edit')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete([record.id])}
-            >
-              {t('common.delete')}
-            </Button>
+              <Button type="link" size="small" icon={<CaretRightOutlined />}>
+                {t('common.execute')}
+              </Button>
+            </Dropdown>
           </Space>
         ),
       },
     ],
-    [navigate, handleDelete, t, fmtTime, fmtDuration, SEVERITY_LABEL]
+    [navigate, t, fmtTime, fmtDuration, SEVERITY_LABEL, getActionMenuItems, handleRowAction]
   );
 
   const batchActions = useMemo(
     (): BatchAction[] => [
       {
-        key: 'batch-delete',
-        label: t('common.batchDelete'),
-        icon: <DeleteOutlined />,
+        key: 'move-to-group',
+        label: t('common.moveToGroup'),
+        icon: <SwapOutlined />,
+        onClick: () => handleMoveToGroup(),
+      },
+      {
+        key: 'batch-sync',
+        label: t('common.batchSync'),
+        icon: <SyncOutlined />,
+        onClick: () => handleBatchSync(),
+      },
+      {
+        key: 'batch-reboot',
+        label: t('common.batchReboot'),
+        icon: <ReloadOutlined />,
+        onClick: (keys) => handleBatchReboot(keys as string[]),
+      },
+      {
+        key: 'recycle',
+        label: t('common.recycleBin'),
+        icon: <RestOutlined />,
         danger: true,
-        onClick: (keys) => handleDelete(keys as string[]),
-      },
-      {
-        key: 'batch-config',
-        label: t('common.batchConfig'),
-        icon: <SettingOutlined />,
-        onClick: () => void message.info(t('common.featureInDev')),
-      },
-      {
-        key: 'export',
-        label: t('common.export'),
-        icon: <DownloadOutlined />,
-        onClick: () => void message.info(t('common.exportInProgress')),
+        onClick: (keys) => handleRecycle(keys as string[]),
       },
     ],
-    [handleDelete, t]
+    [handleMoveToGroup, handleBatchSync, handleBatchReboot, handleRecycle, t]
   );
 
   return (
@@ -482,6 +700,18 @@ export default function DeviceList() {
         batchActions={batchActions}
         onRefresh={() => void refetch()}
         defaultDensity="compact"
+      />
+
+      <SyncParamsModal
+        open={syncModalOpen}
+        onClose={() => setSyncModalOpen(false)}
+        onConfirm={handleSyncConfirm}
+      />
+
+      <MoveToGroupModal
+        open={moveToGroupModalOpen}
+        onClose={() => setMoveToGroupModalOpen(false)}
+        onConfirm={handleMoveToGroupConfirm}
       />
     </ListPageLayout>
   );

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, type ReactNode } from 'react';
 import type { ThemeConfig } from 'antd';
-import { ConfigProvider } from 'antd';
+import { App, ConfigProvider } from 'antd';
 import antdZhCN from 'antd/locale/zh_CN';
 import antdEnUS from 'antd/locale/en_US';
 import { useAppStore } from '@/store/appStore';
@@ -61,7 +61,7 @@ export default function ThemeProvider({ children }: ThemeProviderProps) {
 
   return (
     <ConfigProvider theme={themeConfig} locale={antdLocale}>
-      {children}
+      <App>{children}</App>
     </ConfigProvider>
   );
 }

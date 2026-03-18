@@ -514,17 +514,82 @@ mac_address, group_name, cell_ip, op_state, ue_count
 | 4 | 导出 | ⬇️ | Excel/CSV 导出 |
 | 5 | 刷新 | 🔄 | 手动刷新数据（锁定时禁用） |
 
-### 5.5 筛选条件
+### 5.5 搜索项与筛选项
 
-| # | 字段 | 类型 | 选项 |
-|---|------|------|------|
-| 1 | sn | 输入框 | - |
-| 2 | hostName（名称） | 输入框 | - |
-| 3 | networkType（基站制式） | 下拉 | eNB / gNB / GSM |
-| 4 | productType（产品类型） | 下拉 | eNB / gNB / GSM |
-| 5 | connStatus（连接状态） | 下拉 | 在线 / 离线 |
-| 6 | opState（操作状态） | 下拉 | 激活 / 未激活 |
-| 7 | groupName（设备组） | 输入框 | - |
+> 基于三制式 JSP 原始搜索/筛选功能逐项分析合并。
+
+#### 5.5.1 三制式搜索项对比
+
+| 维度 | eNB | gNB | GSM |
+|------|-----|-----|-----|
+| 搜索框 | ✅ 宽340px | ✅ 宽260px | ✅ 宽365px |
+| like_fields | serial_number, host_name, cell_ip, mac_address, cell_identity, phycellid [, sub_station_name] | serial_number, host_name, cell_ip | serial_number, host_name, cell_ip, mac_address, cell_identity, phycellid |
+| placeholder | SN / 主机名 / IP / MAC / ECI / PCI [/ 站址名称] | SN / 5G站点名 / IP | BSC编码 / BSC名称 / IP / MAC / 所属BSC编码 |
+| 搜索字段数 | 6~7 | 3 | 6 |
+
+#### 5.5.2 三制式筛选项对比
+
+| # | 筛选项 | 参数名 | 类型 | eNB | gNB | GSM | 默认显示 |
+|---|--------|--------|------|:---:|:---:|:---:|:--------:|
+| 1 | 连接状态 | connection_status | 多选 | ✅ 7选项 | ✅ 4选项 | ✅ 4选项 | ✅ |
+| 2 | 激活状态 | op_state | 单选 | ✅ | ✅ | ✅ | ✅ |
+| 3 | 产品类型 | product_model | 多选/单选 | ✅ 多选(动态) | ✅ 单选(BaiBNX/BaiBNQ) | ✅ 多选(BSC/BTS) | ✅ |
+| 4 | 设备型号名 | model_name | 多选 | ✅ (动态) | ✅ (动态) | ✅ (动态) | ❌ |
+| 5 | 软件版本 | software_version | 多选 | ✅ (动态) | ✅ (动态) | ✅ (动态) | ❌ |
+| 6 | 固件版本 | firmware_version | 多选 | ✅ (动态) | ✅ (动态) | ✅ (动态) | ❌ |
+| 7 | 设备组 | group_id | 多选 | ✅ (动态) | ✅ (动态) | ✅ (动态) | ❌ |
+| 8 | HaloB开关 | halob_flag | 单选 | ✅ | ✅ | ❌ | ❌ |
+| 9 | MultiPLMN | multiPlmnEnable | 单选 | ❌ | ✅ | ❌ | ❌ |
+| 10 | 所属BSC编码 | bscSerialnumber | 多选 | ❌ | ❌ | ✅ (动态) | ❌ |
+
+**连接状态选项差异**：
+
+| # | 选项 | 值 | eNB | gNB | GSM |
+|---|------|:--:|:---:|:---:|:---:|
+| 1 | 连接正常 | 1 | ✅ | ✅ | ✅ |
+| 2 | 连接断开 | 0 | ✅ | ✅ | ✅ |
+| 3 | 同步中 | 3 | ✅ | ✅ | ✅ |
+| 4 | 同步失败 | 2 | ✅ | ✅ | ✅ |
+| 5 | 初始化中 | 4 | ✅ | ❌ | ❌ |
+| 6 | 远同步中 | 5 | ✅ | ❌ | ❌ |
+| 7 | 远同步完成 | 6 | ✅ | ❌ | ❌ |
+
+**动态加载 API**：
+
+| 筛选项 | API | 参数差异 |
+|--------|-----|---------|
+| 产品类型 | `/cell/cpeinfos/getEnbMonitorProductList.action` | eNB 专用 |
+| 设备型号名 | `/cell/cpeinfos/getModelNameList.action` | gNB: `isGnb=1`, GSM: `isGnb=0&isGSM=1` |
+| 软件版本 | `/cell/cpeinfos/getCellVersionList.action` | GSM: `isGSM=1` |
+| 固件版本 | `/cell/cpeinfos/getFirmwareVersionList.action` | gNB: `isGnb=1`, GSM: `isGnb=0&isGSM=1` |
+| 设备组 | `/cell/cpeinfos/getDeviceGroupListByCell.action` | 三制式统一 |
+| 所属BSC编码 | `/cell/cpeinfos/getBSCSnForBTSList.action` | GSM: `isGSM=1` |
+
+#### 5.5.3 统一设备列表搜索与筛选实现
+
+##### 搜索项
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| searchText | 输入框 (span=2) | 模糊搜索，覆盖 SN / 名称 / IP / MAC / ECI / PCI |
+
+##### 筛选项
+
+| # | 字段名 | 标签 | 类型 | 选项来源 | 适用范围 | 默��显示 |
+|---|--------|------|------|---------|:--------:|:--------:|
+| 1 | connStatus | 连接状态 | 多选 | 连接正常/断开/同步中/同步失败 | 三制式公共 | ✅ 第1行 |
+| 2 | opState | 激活状态 | 单选 | 激活/未激活 | 三制式公共 | ✅ 第1行 |
+| 3 | networkType | 基站制式 | 单选 | eNB/gNB/GSM | 统一列表特有 | ✅ 第1行 |
+| 4 | productModel | 产品类型 | 多选 | eNB(动态)+gNB(BaiBNX/BaiBNQ)+GSM(BSC/BTS) | 三制式公共 | ✅ 第1行 |
+| 5 | modelName | 设备型号 | 多选 | 动态(API) | 三制式公共 | ❌ 第2行 |
+| 6 | softwareVersion | 软件版本 | 多选 | 动态(API) | 三制式公共 | ❌ 第2行 |
+| 7 | firmwareVersion | 固件版本 | 多选 | 动态(API) | 三制式公共 | ❌ 第2行 |
+| 8 | groupId | 设备组 | 多选 | 动态(API) | 三制式公共 | ❌ 第2行 |
+| 9 | halobFlag | HaloB | 单选 | 是/否 | eNB+gNB | ❌ 第2行 |
+| 10 | multiPlmnEnable | MultiPLMN | 单选 | 启用/禁用 | 仅gNB | ❌ 第2行 |
+| 11 | bscSerialnumber | 所属BSC编码 | 多选 | 动态(API) | 仅GSM | ❌ 第2行 |
+
+> FilterBar 配置 `collapsedRows={1}`，第1行显示搜索框+4个默认筛选项；展开后显示第2行的7个高级筛选项。
 
 ### 5.6 涉及的代码文件
 
@@ -685,7 +750,315 @@ GSM 页面复用了 LTE 的 platformType 判断逻辑：
 
 ---
 
-### 6.5 三页面产品类型汇总
+### 6.5 各制式行级操作（"执行"菜单）按产品类型对比
+
+> 基于三个 JSP 中 `optClick()` 函数逐条件分析，仅列出**当前菜单构建中实际生效**的操作项（不含残留 handler 代码）。
+> 排除"设置"操作。
+
+#### 6.5.1 eNB (LTE) 行级操作
+
+LTE 操作受 `product`、`platformType`、`dualCarrierType`、`have_connected` 多维度影响，是三制式中最复杂的。
+
+##### 通用操作（所有在线 eNB 设备的基线）
+
+| 操作组 | 操作项 | 权限码 | 离线禁用 |
+|--------|--------|--------|:--------:|
+| Group1 同步/报文 | 同步 | `CODE_ENB_SYNCHRONIZE` | ✅ |
+| | 收集报文 (TR069) | `CODE_ENB_TR069_MSG_EXCHANGE` | - |
+| Group2 重启 | 重启 | `CODE_ENB_REBOOT` | ✅ |
+| Group3 激活/射频/HaloB | 激活/去激活 | `CODE_ENB_ACTIVE` | ✅ |
+| | 射频 开/关 | `CODE_ENB_RF_ENABLE` | ✅ |
+| | HaloB 开/关 | `CODE_ENB_HALOB_ENABLE` | ✅ |
+| Group4 日志 | 日志收集 | `CODE_ENB_LOGS` | ✅ |
+
+##### 产品/平台类型差异
+
+| 产品/平台条件 | 操作差异 |
+|--------------|---------|
+| **PM-B4860** | 激活操作打开**板卡/槽位多 Cell 选择对话框**（非简单切换），其余不变 |
+| **Intel_CR_CA / Intel_CR_TC / MLN_CA** | 激活操作变为**子菜单**：`Cell1 激活/去激活`, `Cell2 激活/去激活`, ... |
+| **BM** (LTE+GSM 双模) | 激活子菜单包含 **LTE Cell + GSM Cell**：`LTE Cell1 激活`, `GSM Cell1 激活`, ... |
+| **Intel_CR_DC / MLN_DC + dualCarrier=2** (双载波子站) | Group3 缩减为仅 **激活**(id:411) + **射频**(单Cell)；**无 HaloB**；Group1 **无收集报文** |
+| **QA_436Q_CA/SC/DC / NEU430_DC + dualCarrier=2** (子设备) | Group1 **无收集报文**；其余保持基线 |
+| **QA_436Q_DC + SN 末尾 `-2`** | **激活操作隐藏** (`opStateShowFlag=false`) |
+| **have_connected=2** (从未连接) | **所有操作组清空**，全部禁用 |
+
+##### 附加操作（不在主菜单分组，由全局配置控制）
+
+| 操作 | 条件 |
+|------|------|
+| SAS 注册 | `sasSwitch == "1"` (全局开关) |
+| SAS 注销 | `sasSwitch == "1"` |
+| 强制关闭 RF / SAS 自动 RF | `CODE_ENB_SAS_RF_ENABLE` + `rfForceShowFlag` |
+| 配置恢复 | `CODE_ENB_RESET_CONFIG` (在 Maintenance 分类) |
+
+---
+
+#### 6.5.2 gNB (5G NR) 行级操作
+
+5G NR **不按产品类型区分操作**。BaiBNX 和 BaiBNQ 的操作菜单完全一致。
+
+| 操作组 | 操作项 | 权限码 | 离线禁用 |
+|--------|--------|--------|:--------:|
+| 同步/报文 | 同步 | `CODE_GNB_SYNCHRONIZE` | ✅ |
+| | 收集报文 | `CODE_GNB_TR069_MSG_EXCHANGE` | - |
+| 重启 | 重启 | `CODE_GNB_REBOOT` | ✅ |
+| 激活 | 激活/去激活 (按 Cell 子菜单) | `CODE_GNB_ACTIVE` | ✅ |
+| 射频 | 射频 开/关（单 Cell 或多 Cell 子菜单） | `CODE_GNB_RF_ENABLE` | ✅ |
+| HaloB | HaloB 开/关 | 由 License AJAX 检查控制 | ✅ |
+| 日志 | 日志收集 | `CODE_GNB_LOGS` | ✅ |
+
+| 条件 | 差异 |
+|------|------|
+| `dualCarrierType=2` | 收集报文隐藏 |
+| HaloB 集中管理模式 | HaloB 操作项隐藏 |
+| `DeviceLogView='0'` | 日志收集整体隐藏 |
+
+---
+
+#### 6.5.3 GSM 行级操作
+
+GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Group3 始终为空）。
+
+| 操作组 | 操作项 | 权限码 | 离线禁用 |
+|--------|--------|--------|:--------:|
+| Group1 同步/报文 | 同步 | `CODE_ENB_SYNCHRONIZE` | ✅ |
+| | 收集报文 | 仅超级用户 (`is_super_user`) | - |
+| Group2 重启 | 重启 | `CODE_ENB_REBOOT` | ✅ |
+| Group3 | **空**（无激活/射频/HaloB） | - | - |
+| Group4 日志 | 日志收集 | `CODE_ENB_LOGS` | ✅ |
+
+| 条件 | 差异 |
+|------|------|
+| `have_connected=2` | 所有操作组清空 |
+
+---
+
+#### 6.5.4 三制式行级操作汇总矩阵
+
+| 操作 | eNB 通用 | eNB DC子站 | eNB CA多载波 | eNB BM双模 | eNB PM-B4860 | gNB | GSM |
+|------|:--------:|:---------:|:-----------:|:---------:|:-----------:|:---:|:---:|
+| 同步 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 收集报文 | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅* |
+| 重启 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 激活/去激活 | ✅ 单项 | ✅ 单项 | ✅ 多Cell子菜单 | ✅ LTE+GSM子菜单 | ✅ 板卡对话框 | ✅ 多Cell子菜单 | ❌ |
+| 射频 开/关 | ✅ | ✅ 仅单Cell | ✅ | ✅ | ✅ | ✅ | ❌ |
+| HaloB 开/关 | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| 日志收集 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+> `✅*` GSM 的收集报文仅超级用户可见。
+> `eNB DC子站` 指 Intel_CR_DC / MLN_DC + dualCarrier=2。
+> `eNB CA多载波` 指 Intel_CR_CA / Intel_CR_TC / MLN_CA。
+
+---
+
+### 6.6 批量操作（工具栏）对比
+
+> 基于三个 JSP 工具栏区域逐按钮分析，列出需要选中行的批量操作和不需选中的全局操作。
+
+#### 6.6.1 三制式批量操作汇总
+
+| # | 操作 | eNB (LTE) | gNB (5G NR) | GSM | 需选中行 |
+|---|------|:---------:|:-----------:|:---:|:--------:|
+| 1 | **导出** | ✅ 全参数导出配置页 | ✅ CSV/XLSX + License 导出 | ✅ CSV/XLSX + License 导出 | ❌ |
+| 2 | **移动到设备组** | ✅ `CODE_ENB_MONITOR` | ❌ | ✅ | ✅ |
+| 3 | **同步** | ✅ `CODE_ENB_SYNCHRONIZE` | ✅ `CODE_GNB_SYNCHRONIZE` | ✅ `CODE_ENB_SYNCHRONIZE` | ✅ |
+| 4 | **重启** | ✅ `CODE_ENB_REBOOT` | ✅ `CODE_GNB_REBOOT` | ✅ `CODE_ENB_REBOOT` | ✅ |
+| 5 | **回收站** | ✅ `CODE_ENB_DEVICE_REGISTER` | ✅ `CODE_GNB_DEVICE_REGISTER` | ❌ | ✅ |
+| 6 | **添加基站** | ✅ `CODE_ENB_DEVICE_REGISTER` | ❌ | ❌ (已注释) | ❌ |
+
+#### 6.6.2 各操作交互流程对比
+
+##### 移动到设备组
+
+| 维度 | eNB | GSM | gNB |
+|------|-----|-----|-----|
+| 支持 | ✅ | ✅ | ❌ |
+| 弹窗类型 | Modal 对话框 (620px) | Modal 对话框 (620px) | - |
+| 交互流程 | 分页表格列出设备组 → 单选目标组 → 确定 | 同 eNB | - |
+| 验证 | 未选择时提示 "请选择设备组。" | 同 eNB | - |
+| API | `POST /system/deviceGroup/moveCellToGroup.action` | 同 eNB | - |
+| 参数 | `toGroupId` + `ids`(逗号分隔 small_cell_code) | 同 eNB | - |
+| 成功反馈 | "成功" toast | "成功" toast | - |
+| 失败反馈 | error toast 显示服务端消息 | 同 eNB | - |
+
+##### 同步
+
+| 维度 | eNB | gNB | GSM |
+|------|-----|-----|-----|
+| 弹窗类型 | Modal 对话框 | Modal 对话框 (660px) | Modal 对话框 |
+| 交互流程 | 复选框选择同步参数 → 确定 | 同 eNB | 同 eNB |
+| 参数分组 | 告警(活动告警) + 基础配置(~25项) + 高级配置(~20项) | 告警 + 基础配置(~17项) + 高级配置(~7项) | 告警 + 基础配置(~7项) + BSC(1项) + BTS(~15项) |
+| 默认选中 | 告警 ✅ + 部分基础配置 | 告警 ✅ + 部分基础配置 | 告警 ✅ |
+| 全选功能 | ✅ 分组全选 + 总全选 | ✅ 分组全选 + 总全选 | ✅ 分组全选 + 总全选 |
+| API | `POST /cell/quicksettings/batchSyncCell.action` | 同 eNB + `isGnb=1` | 同 eNB |
+| 参数 | `smallCellCode` + `selectedParams` | 同 eNB | 同 eNB |
+| 成功反馈 | 静默关闭对话框 | 静默关闭对话框 | 静默关闭对话框 |
+| 失败反馈 | 页面顶部红色滑动横幅(5秒) | 同 eNB | 同 eNB |
+
+##### 重启
+
+| 维度 | eNB | gNB | GSM |
+|------|-----|-----|-----|
+| 弹窗类型 | 确认对话框 (warning) | 确认对话框 (warning) | 确认对话框 (warning) |
+| 确认文案 | "确定重启设备？" | "确定重启设备？" | "确定重启设备？" |
+| API | `POST /task/reboot/batchRebootCell.action` | 同 eNB + `isGnb=1` | 同 eNB |
+| 参数 | `cellCodes`(逗号分隔) | `cellCodes` + `isGnb=1` | `cellCodes`(逗号分隔) |
+| 成功反馈 | "命令已经下发。" 提示(API调用前即显示) | "成功" toast | "命令已经下发。" 提示 |
+| 失败反馈 | 页面顶部红色滑动横幅 | error toast | 页面顶部红色滑动横幅 |
+
+##### 回收站
+
+| 维度 | eNB | gNB | GSM |
+|------|-----|-----|-----|
+| 支持 | ✅ | ✅ | ❌ |
+| 弹窗类型 | 警告确认对话框 (warning + HTML) | 同 eNB | - |
+| 确认文案(第一行) | "确认将设备移入回收站？" | 同 eNB | - |
+| 确认文案(第二行) | "回收站的设备，将不进行数据监控（监控数据、配置、警报、KPI等...）" | 同 eNB | - |
+| API | `POST /recycle/moveDeviceToRecycle.action` | 同 eNB + `?isGnb=1` | - |
+| 参数 | `smallCellCodeStr`(逗号分隔) | 同 eNB | - |
+| 成功反馈 | "成功" toast | "成功" toast | - |
+| 失败反馈 | error toast | error toast | - |
+
+##### 导出（独立工具栏按钮，不在批量操作中）
+
+| 维度 | eNB | gNB | GSM |
+|------|-----|-----|-----|
+| 交互方式 | 打开导出配置页面 | 下拉菜单 | 下拉菜单 |
+| 格式选项 | 参数列选择后导出 | CSV / XLSX | CSV / XLSX |
+| License 导出 | - | ✅ 可选 | ✅ 可选 |
+| 云管理员模式 | - | - | ✅ 运营商选择 + 格式选择 |
+| 需选中行 | ❌ (导出全量) | ❌ | ❌ |
+
+##### 添加基站（独立按钮，不在批量操作中）
+
+
+- 仅 eNB 页面有此按钮（gNB 无，GSM 已注释）
+- 在统一设备列表中已整合为页面顶部"新增"按钮
+
+#### 6.6.3 统一设备列表批量操作实现
+
+| # | 操作 | 图标 | 交互反馈 | 状态 |
+|---|------|------|---------|:----:|
+| 1 | 移动到设备组 | `SwapOutlined` | Modal 弹窗：设备组分页表格 + 单选 → "成功" toast | ✅ 已实现 |
+| 2 | 同步 | `SyncOutlined` | Modal 弹窗：告警/基础配置/高级配置/BSC/BTS 复选框 → 静默关闭 | ✅ 已实现 |
+| 3 | 重启 | `ReloadOutlined` | 确认对话框："确定重启设备？" → "命令已经下发。" 提示 | ✅ 已实现 |
+| 4 | 回收站 | `RestOutlined` (danger) | 警告确认：两行说明文字 → "成功" toast | ✅ 已实现 |
+
+> 页面顶部"新增"按钮已独立存在，不在批量操作栏中。
+> "导出"为独立工具栏功能，不需要选中行，后续作为独立按钮实现。
+
+#### 6.6.4 批量同步参数整合（三制式字段合并）
+
+> 源文件：`SyncParamsModal.tsx`
+
+将三制式的同步参数合并为统一列表，非公共字段通过 **scope 标签** 标识适用范围。
+
+##### 告警管理（独立复选框，默认勾选）
+
+所有制式均支持，勾选后额外传 `sync_alarm` 参数。
+
+##### 基础配置参数
+
+| # | code | 标签 | 适用范围 |
+|---|------|------|:--------:|
+| 1 | module_type | 设备型号名 | 三制式公共 |
+| 2 | software_version | 软件版本 | 三制式公共 |
+| 3 | firmware_version | 固件版本 | 三制式公共 |
+| 4 | MAC | MAC地址 | 三制式公共 |
+| 5 | IP | IP地址 | 三制式公共 |
+| 6 | ue_count | UE数 | 三制式公共 |
+| 7 | cell_name | 主机名/站点名 | eNB+gNB |
+| 8 | ECI | ECI | eNB+gNB |
+| 9 | halob_flag | HaloB开关 | eNB+gNB |
+| 10 | sync_status | 同步状态 | eNB+gNB |
+| 11 | mme_addr | IPSec地址 | eNB+gNB |
+| 12 | gps_position | GPS位置 | eNB+gNB |
+| 13 | PCI | PCI | 仅eNB |
+| 14 | plmn | PLMN | 仅eNB |
+| 15 | tac | TAC | 仅eNB |
+| 16 | bandwidth | 带宽 | 仅eNB |
+| 17 | earfcn | 频点 | 仅eNB |
+| 18 | duplex_mode | 双工模式 | 仅eNB |
+| 19 | tx_power | 发射功率 | 仅eNB |
+| 20 | cell_status | 激活状态 | 仅eNB |
+| 21 | mme_status | MME状态 | 仅eNB |
+| 22 | rf_status | 射频开关状态 | 仅eNB |
+| 23 | lease | 锁定状态 | 仅eNB |
+| 24 | root_sequence_index | 根序列索引 | 仅eNB |
+| 25 | gps_satellites | GPS卫星数 | 仅eNB |
+| 26 | sub_frame_assignment | 子帧配比 | 仅eNB |
+| 27 | wan_speed | WAN状态 | 仅eNB |
+| 28 | ipsec_addr | IPSec地址(eNB) | 仅eNB |
+| 29 | electronic_downtilt | 电子下倾角 | 仅eNB |
+| 30 | adminState | Admin State | 仅gNB |
+| 31 | amf_status | AMF Status | 仅gNB |
+| 32 | multiPlmnEnable | MultiPLMN状态 | 仅gNB |
+| 33 | cellConfig | 小区参数 | 仅gNB |
+| 34 | halob_license | License | 仅GSM |
+
+##### 高级配置参数
+
+| # | code | 标签 | 适用范围 |
+|---|------|------|:--------:|
+| 1 | rollback_version | 回退版本 | eNB+gNB |
+| 2 | sas_param | SAS参数 | eNB+gNB |
+| 3 | eu_ru | EU/RU数 | eNB+gNB |
+| 4 | halob_license | HaloB License | eNB+gNB |
+| 5 | band | 频段 | 仅eNB |
+| 6 | cell_neighbor | SAS邻区 | 仅eNB |
+| 7 | itfn_param | 背向接口 | 仅eNB |
+| 8 | son_pci | SON PCI | 仅eNB |
+| 9 | rollback_enable | 回退开关 | 仅eNB |
+| 10 | uboot_version | UBoot版本 | 仅eNB |
+| 11 | kernel_version | Kernel版本 | 仅eNB |
+| 12 | is_https | Https状态 | 仅eNB |
+| 13 | lan_enable | LAN状态 | 仅eNB |
+| 14 | wan_ip | WAN IP地址 | 仅eNB |
+| 15 | lte_turbo_enable | LTE Turbo | 仅eNB |
+| 16 | lock_mac_addr | 锁定MAC | 仅eNB |
+| 17 | lock_mac_status | 锁定MAC状态 | 仅eNB |
+| 18 | ipsec_bind_interface | IPSec Bind Interface | 仅eNB |
+| 19 | lgw_basic | WCG参数 | 仅eNB |
+| 20 | lgw_mode_ue_speed_statistics | UE Speed Statistics | 仅eNB |
+| 21 | ipsec_auto_enroll | IPSec Auto Enroll | 仅eNB |
+| 22 | slot | Slot | 仅eNB |
+| 23 | energy_saving | Energy Saving | 仅gNB |
+| 24 | gnb_topo_cellmgr | gNB TOPO | 仅gNB |
+| 25 | ssl_cert_validity | SSL Cert Validity | 仅gNB |
+
+##### BSC 参数（仅 GSM）
+
+| # | code | 标签 | 适用范围 |
+|---|------|------|:--------:|
+| 1 | BtsNum | BTS数 | 仅GSM |
+
+##### BTS 参数（仅 GSM）
+
+| # | code | 标签 | 适用范围 |
+|---|------|------|:--------:|
+| 1 | cell_status | 激活状态 | 仅GSM |
+| 2 | rf_status | 射频开关状态 | 仅GSM |
+| 3 | sync_status | 同步状态 | 仅GSM |
+| 4 | gps_satellites | GPS卫星数 | 仅GSM |
+| 5 | currentLac | LAC | 仅GSM |
+| 6 | currentArfcn | 频点+上行频率+下行频率 | 仅GSM |
+| 7 | gps_position | GPS经度+纬度+高度 | 仅GSM |
+| 8 | bts_bsc_relationship | IPA Unit ID + OML Remote IP + BSC关系 | 仅GSM |
+
+##### 参数统计
+
+| 分组 | 三制式公共 | eNB+gNB | 仅eNB | 仅gNB | 仅GSM | 总计 |
+|------|:---------:|:-------:|:-----:|:-----:|:-----:|:----:|
+| 基础配置 | 6 | 6 | 17 | 4 | 1 | **34** |
+| 高级配置 | 0 | 4 | 18 | 3 | 0 | **25** |
+| BSC | 0 | 0 | 0 | 0 | 1 | **1** |
+| BTS | 0 | 0 | 0 | 0 | 8 | **8** |
+| **合计** | **6** | **10** | **35** | **7** | **10** | **68** |
+
+---
+
+### 6.7 三页面产品类型汇总
 
 | 维度 | LTE eNodeB | GSM | 5G NR gNodeB |
 |------|:----------:|:---:|:------------:|
