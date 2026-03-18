@@ -51,17 +51,19 @@ func NewProvisioningEngine(
 	}
 }
 
-// bootstrapEvent represents the data published on device.inform.bootstrap.
+// bootstrapEvent represents the data published on device.registered.
 type bootstrapEvent struct {
 	DeviceID     uuid.UUID `json:"device_id"`
 	SerialNumber string    `json:"serial_number"`
 	OUI          string    `json:"oui"`
 	ProductClass string    `json:"product_class"`
+	Carrier      string    `json:"carrier"`
+	Technology   string    `json:"technology"`
 }
 
 // Subscribe registers the engine to listen for bootstrap events via queue group.
 func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
-	_, err := bus.QueueSubscribe(event.SubjectDeviceBootstrap, "provisioning", func(ctx context.Context, evt event.Event) error {
+	_, err := bus.QueueSubscribe(event.SubjectDeviceRegistered, "provisioning", func(ctx context.Context, evt event.Event) error {
 		var bsEvt bootstrapEvent
 		if err := evt.DecodePayload(&bsEvt); err != nil {
 			e.logger.Error("decode bootstrap event", zap.Error(err))

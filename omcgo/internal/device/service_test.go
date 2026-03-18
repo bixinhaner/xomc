@@ -138,7 +138,7 @@ func (m *mockParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) 
 // ---------------------------------------------------------------------------
 
 func newTestDeviceService(deviceRepo *mockDeviceRepo, paramRepo *mockParamRepo) *DeviceService {
-	return NewDeviceService(deviceRepo, paramRepo, nil, zap.NewNop())
+	return NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
 }
 
 // sampleInform returns a minimal InformMessage useful for most tests.

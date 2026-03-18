@@ -66,7 +66,7 @@ func Setup(r *gin.Engine, deps *Deps) {
 	gs.Register("heartbeat", 1, func(ctx context.Context) error { heartbeatMonitor.Stop(); return nil })
 
 	// Device services
-	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, logger)
+	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, eventBus, logger)
 
 	// Subscribe InformHandler to events
 	informHandler := device.NewInformHandler(deviceService, carrierRegistry, model.CarrierCMCC, logger)

@@ -147,7 +147,7 @@ func newTestHandler() (*Handler, *fakeDeviceRepo, *fakeParamRepo) {
 	deviceRepo := newFakeDeviceRepo()
 	paramRepo := newFakeParamRepo()
 	logger := zap.NewNop()
-	svc := NewDeviceService(deviceRepo, paramRepo, nil, logger)
+	svc := NewDeviceService(deviceRepo, paramRepo, nil, nil, logger)
 	h := NewHandler(svc)
 	return h, deviceRepo, paramRepo
 }

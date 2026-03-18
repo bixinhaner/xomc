@@ -201,7 +201,7 @@ func newEngineHarness(deviceRepo device.DeviceRepository) *engineHarness {
 	logger := zap.NewNop()
 
 	// Construct real (lightweight) collaborators that the engine expects.
-	devService := device.NewDeviceService(deviceRepo, nil, nil, logger)
+	devService := device.NewDeviceService(deviceRepo, nil, nil, nil, logger)
 	dmRegistry := datamodel.NewDataModelRegistry(nil, nil, logger)
 	tmplService := template.NewConfigTemplateService(nil, logger)
 	carrierReg := carrier.NewRegistry()
@@ -895,7 +895,7 @@ func newFullEngineHarness() *fullEngineHarness {
 	cmdQueue := &mockCommandQueue{}
 	evtBus := &mockEventBus{}
 
-	devService := device.NewDeviceService(devRepo, nil, nil, logger)
+	devService := device.NewDeviceService(devRepo, nil, nil, nil, logger)
 	dmRegistry := datamodel.NewDataModelRegistry(dmRepo, nil, logger)
 	tmplService := template.NewConfigTemplateService(tmplRepo, logger)
 	carrierReg := carrier.NewRegistry()

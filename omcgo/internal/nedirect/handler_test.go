@@ -152,7 +152,7 @@ func setupHandler(existingDevices map[string]*model.Device, params map[uuid.UUID
 	alarmEngine := alarm.NewAlarmEngine(alarmStore, nil, nil, nil, testLogger())
 	eventBus := &mockEventBus{}
 
-	deviceService := device.NewDeviceService(deviceRepo, paramRepo, nil, testLogger())
+	deviceService := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, testLogger())
 	handler := NewHandler(deviceService, alarmEngine, eventBus, testLogger())
 
 	return handler, eventBus

@@ -144,7 +144,7 @@ func (c *infMockCarrier) ValidateParameter(_ string, _ string) error            
 // ---------------------------------------------------------------------------
 
 func newInfTestDeviceService(deviceRepo *infMockDeviceRepo, paramRepo *infMockParamRepo) *DeviceService {
-	return NewDeviceService(deviceRepo, paramRepo, nil, zap.NewNop())
+	return NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
 }
 
 func sampleInformPayload(sn string) InformEventPayload {

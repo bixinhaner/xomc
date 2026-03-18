@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
@@ -17,6 +18,7 @@ type DeviceService struct {
 	deviceRepo DeviceRepository
 	paramRepo  DeviceParameterRepository
 	heartbeat  *HeartbeatMonitor
+	eventBus   event.EventBus
 	logger     *zap.Logger
 }
 
@@ -25,12 +27,14 @@ func NewDeviceService(
 	deviceRepo DeviceRepository,
 	paramRepo DeviceParameterRepository,
 	heartbeat *HeartbeatMonitor,
+	eventBus event.EventBus,
 	logger *zap.Logger,
 ) *DeviceService {
 	return &DeviceService{
 		deviceRepo: deviceRepo,
 		paramRepo:  paramRepo,
 		heartbeat:  heartbeat,
+		eventBus:   eventBus,
 		logger:     logger,
 	}
 }
@@ -86,6 +90,8 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("carrier", string(carrier)),
 		zap.String("oui", device.OUI),
 	)
+
+	s.publishDeviceRegistered(ctx, device)
 
 	return device, nil
 }
@@ -213,6 +219,28 @@ func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid
 			zap.Error(err),
 			zap.String("device_id", deviceID.String()),
 		)
+	}
+}
+
+func (s *DeviceService) publishDeviceRegistered(ctx context.Context, device *model.Device) {
+	if s.eventBus == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		"device_id":     device.ID,
+		"serial_number": device.SerialNumber,
+		"oui":           device.OUI,
+		"product_class": device.ProductClass,
+		"carrier":       string(device.Carrier),
+		"technology":    string(device.Technology),
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, payload)
+	if err != nil {
+		s.logger.Error("create device.registered event", zap.Error(err))
+		return
+	}
+	if err := s.eventBus.Publish(ctx, event.SubjectDeviceRegistered, evt); err != nil {
+		s.logger.Warn("publish device.registered event", zap.Error(err))
 	}
 }
 

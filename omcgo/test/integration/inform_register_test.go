@@ -57,7 +57,7 @@ func TestInformBootstrapRegister(t *testing.T) {
 	// 2. Register device via DeviceService
 	deviceRepo := device.NewPgDeviceRepository(pool)
 	paramRepo := device.NewPgDeviceParameterRepository(pool)
-	svc := device.NewDeviceService(deviceRepo, paramRepo, nil, logger)
+	svc := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, logger)
 
 	registered, err := svc.RegisterFromInform(ctx, inform, model.CarrierCMCC)
 	require.NoError(t, err)
