@@ -835,7 +835,7 @@ lac, arfcn, uplinkFrequency, downlinkFrequency, bscLinkStatus, bscSelect, bscSer
 | **激活状态** (op_state) | 多小区弹窗(激活/去激活列表)，License 过期⚠图标 | ✅ 多小区支持：汇总 Tag + [N/M] Popover 逐小区明细，兼容 "1,0,1" 和 "active,inactive" 格式 |
 | **射频状态** (rf_status) | 多小区弹窗(开/关列表) | ✅ 多小区支持：汇总 Tag + [N/M] Popover 逐小区明细，兼容 "on,off,on" 和 "1,0,1" 格式 |
 | **同步状态** (synStatus) | 多种同步状态文本，"未同步"红色 | ✅ 多状态 Tag，"未同步"加粗红色 |
-| **UE 数** (ue_count) | -1/null→"--", 0→"0", **>0 可点击查看 UE 详情** | ✅ 格式化 + 可点击链接跳转 `?tab=ue` |
+| **UE 数** (ue_count) | eNB: -1/null→"--", 0→"0", >0 且非 CA 站可点击 Slide 面板(18 字段); gNB/GSM: 不可点击纯文本 | ✅ eNB 非 CA 站 >0 → Link 打开右侧 Drawer(`UeDetailDrawer`)显示 UE 列表；gNB/GSM 及 CA 站纯文本；436Q 自动切换 P/S 双载波列 |
 | **KPI 上报** (pm_report_status) | off→关, normal→正常, broken→损坏(红色) | ✅ 彩色 Tag(关/正常/损坏) |
 | **CPE 连接数** (cpe_connect) | -1/null→"--", 0→"0", **>0 可点击查看 CPE 详情** | ✅ 格式化 + 可点击链接跳转 `?tab=cpe` |
 | **EU/RU 数** (euCount/ruCount) | "connected/total" 格式，**连接数<总数时红色** | ✅ 降级时红色文本 |
@@ -863,7 +863,7 @@ lac, arfcn, uplinkFrequency, downlinkFrequency, bscLinkStatus, bscSelect, bscSer
 | ~~**多小区射频状态**~~ | ~~同上，逐小区射频开/关弹窗~~ | ~~rfStatus~~ | ✅ 已实现 `renderMultiCellStatus` |
 | ~~**多 MME 详情**~~ | ~~多个 MME IP/连接状态/PLMN 列表弹窗~~ | ~~mmeStatus~~ | ✅ 已实现 `renderMultiConnStatus` |
 | ~~**多 AMF 详情**~~ | ~~多个 AMF IP/连接状态/PLMN 列表弹窗~~ | ~~amfStatus~~ | ✅ 已实现 `renderMultiConnStatus` |
-| **UE 详情面板** | 点击 UE 数打开滑出面板，显示 UE 列表(UEID/IMSI/速率等) | ueCount | `getueCountsData.action` |
+| ~~**UE 详情面板**~~ | ~~eNB: >0 且非 CA 站点击打开右侧 Slide 面板(18字段+436Q变体); gNB/GSM: 不可点击~~ | ~~ueCount~~ | ✅ 已实现 `UeDetailDrawer` 右侧 Drawer 面板，436Q 自动切换 P/S 双载波列 |
 | **CPE 详情面板** | 点击 CPE 数打开滑出面板 | cpeCount | `toUEDetailPage.action` |
 | **卫星详情面板** | 点击卫星数打开面板，显示卫星号+信号强度 | gpsSatelliteCount | `getSatellitesDataList.action` |
 | **锁定状态操作** | 点击切换锁定/解锁 + MAC 锁定对话框 | lockStatus | `cellModifyLockStatus.action` |
@@ -871,6 +871,35 @@ lac, arfcn, uplinkFrequency, downlinkFrequency, bscLinkStatus, bscSelect, bscSer
 | **连接状态增强** | 初始化/同步中/异常等多状态图标 + hover 同步时间 | connStatus | `lastsyntime` 字段 |
 | **HaloD 模式** | HaloD 关联设备弹窗（锁定/过滤/关联列表） | halobFlag | `queryHalodRelationInfo.action` |
 | **有效期警告** | License 过期时在 opState 列显示红色⚠图标 | validity + opState | `delay_avaliable` 字段 |
+
+#### 6.2.1 eNB UE 详情面板字段（仅 eNB 非 CA 站可触发）
+
+> 原始 API: `POST /system/device/enb/uedata/getENBUeStatisticsDataList.action`，参数 `{enb_code}`
+> 原始 JSP: 右侧 Slide 面板（ueslide）展示 UE 列表
+
+| # | 字段 | 属性名 | 宽度 | 说明 | 436Q 变体 |
+|---|------|--------|------|------|----------|
+| 1 | UEID | ue_id | 100 | 用户设备 ID | — |
+| 2 | IMSI | imsi | 150 | 国际移动订户身份码 | — |
+| 3 | VMAC | vmac | 130 | 虚拟 MAC 地址 | — |
+| 4 | CPE名称 | cpe_name | 150 | 客户端设备名称 | — |
+| 5 | 下行吞吐速率 | downlink_rate | 140 | Mbps | — |
+| 6 | 上行吞吐速率 | uplink_rate | 135 | Mbps | — |
+| 7 | IP地址 | ip | 140 | 用户 IP | — |
+| 8 | 端口 | port | 80 | 通信端口 | — |
+| 9 | 上行SINR | ulsinr | 100 | dB | — |
+| 10 | 下行CQI | dlcqi | 100 | 信道质量指示 | 436Q: P_Dlcqi (p_dlcqi) + S_Dlcqi (s_dlcqi) |
+| 11 | 上行MCS | ulmcs | 100 | ���制编码方案 | — |
+| 12 | 下行MCS | dlmcs | 100 | 调制编码方案 | 436Q: P_Dlmcs (p_dlmcs) + S_Dlmcs (s_dlmcs) |
+| 13 | 发送功率 | txpower | 100 | dBm | — |
+| 14 | 上行BLER | uplink_bler | 120 | 块错误率(%) | — |
+| 15 | 下行BLER | downlink_bler | 165 | 块错误率(%) | 436Q: P_TB1/P_TB2/S_TB1/S_TB2 四列 |
+| 16 | 路径损耗 | pathloss | 120 | dBm | — |
+| 17 | UE_S1AP_ID | ue_s1ap_id | 120 | S1-AP 标识（可选） | — |
+| 18 | MME_S1AP_ID | mme_s1ap_id | 120 | MME S1-AP 标识（可选） | — |
+
+> **注**: 436Q 平台（QA_436Q_*）使用 Primary/Secondary Carrier 双载波列替换单列 CQI/MCS/BLER。
+> gNB 和 GSM 的 UE 数不提供点击跳转，无详情面板。
 
 ### 6.3 操作列菜单对照
 

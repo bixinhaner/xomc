@@ -3,14 +3,26 @@ import type { AlarmSeverity } from '@/types/common';
 import { generateIP, generateSN } from '../utils';
 
 const vendors = ['华为', '中兴', '爱立信', '大唐', '京信'];
-const productTypes = ['eNB', 'gNB', 'GSM', 'CPE', 'eGW'];
-const networkTypes = ['eNB', 'gNB', 'GSM'];
+const networkTypes: Array<'eNB' | 'gNB' | 'GSM'> = ['eNB', 'gNB', 'GSM'];
+
+// 产品类型标识 — 与原始 JSP product 字段对应
+const productModels: Record<string, string[]> = {
+  eNB: ['PM-B4860', 'QAFA', 'QATA', 'QAFB'],
+  gNB: ['BaiBNX', 'BaiBNQ'],
+  GSM: ['BSC', 'BTS'],
+};
+
+// 平台类型 — 与原始 JSP platformType 字段对应（影响多小区/CA/DC 行为）
+const platformTypes: Record<string, string[]> = {
+  eNB: ['Intel_CR', 'Intel_CR_CA', 'Intel_CR_TC', 'Intel_CR_SC', 'Intel_CR_DC', 'MLN', 'MLN_CA', 'MLN_SC', 'MLN_DC', 'QA_436Q_CA', 'QA_436Q_SC'],
+  gNB: [''],
+  GSM: ['Intel_CR_CA', 'MLN_CA', 'QA_436Q_CA', ''],
+};
+
 const deviceModels: Record<string, string[]> = {
   eNB: ['BBU3910', 'DBS3900', 'BTS3900', 'eNodeB3900', 'ZXSDR B8200'],
   gNB: ['BBU5900', 'AAU5239', 'RRU5258', 'ZXRAN B8300', 'AIR6449'],
   GSM: ['BTS3012', 'RBS2206', 'ZXSDR BS8700', 'BTS3900G', 'Flexi BTS'],
-  CPE: ['CPE Pro 2', 'MC801A', 'H112-370', 'CPE B2351', 'FWA01'],
-  eGW: ['EGW200', 'EGW500', 'GW-B1000', 'eGW3000', 'vEPC-200'],
 };
 
 const cities = [
@@ -57,7 +69,7 @@ function generateMAC(): string {
 
 function generateDevice(index: number): Device {
   const city = cities[index % cities.length];
-  const type = productTypes[index % productTypes.length] as keyof typeof deviceModels;
+  const type = networkTypes[index % networkTypes.length];
   const vendor = vendors[index % vendors.length];
   const sn = generateSN(type) + String(index).padStart(3, '0');
   const isOnline = Math.random() < 0.85;
@@ -66,6 +78,8 @@ function generateDevice(index: number): Device {
   const model = models[Math.floor(Math.random() * models.length)];
   const isNR = type === 'gNB';
   const isLTE = type === 'eNB';
+  const productModel = pickRandom(productModels[type]);
+  const platformType = pickRandom(platformTypes[type]);
   const enbIdVal = isLTE ? String(10000 + index) : '';
   const gnbIdVal = isNR ? String(50000 + index) : '';
   const pciVal = String(Math.floor(Math.random() * 504));
@@ -76,8 +90,8 @@ function generateDevice(index: number): Device {
     sn,
     name: `${city.name}-${type}-${String(index + 1).padStart(4, '0')}`,
     vendor,
-    productType: type,
-    networkType: isNR ? 'gNB' : isLTE ? 'eNB' : type === 'GSM' ? 'GSM' : pickRandom(networkTypes),
+    productType: productModel,
+    networkType: type,
     deviceModel: model,
     region: city.region,
     stationId: `ST${String(index + 1).padStart(6, '0')}`,
@@ -95,6 +109,7 @@ function generateDevice(index: number): Device {
     createTime: randomDate(365),
 
     // 监控扩展字段
+    platformType: platformType,
     hostName: `${type}-${city.name}-${String(index + 1).padStart(3, '0')}`,
     productName: `${vendor} ${model}`,
     firmwareVersion: pickRandom(firmwareVersions),

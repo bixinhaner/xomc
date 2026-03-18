@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/hooks/useT';
 import {
   Button,
@@ -11,7 +11,12 @@ import {
   Select,
   TreeSelect,
 } from 'antd';
-import { DownOutlined, SearchOutlined, UpOutlined } from '@ant-design/icons';
+import {
+  DownOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  UpOutlined,
+} from '@ant-design/icons';
 import styles from './FilterBar.module.css';
 
 const { RangePicker } = DatePicker;
@@ -87,12 +92,14 @@ const FilterBar: React.FC<FilterBarProps> = ({
     onReset();
   }, [form, onReset, storageKey]);
 
-  // Calculate which fields to show based on collapsed state
-  const colsPerRow = COLS_PER_ROW;
-  const maxColsVisible = collapsedRows * colsPerRow;
-  // Reserve last slot in last row for action buttons
-  const fieldsToShow = expanded ? fields : fields.slice(0, maxColsVisible - 1);
-  const hasMore = fields.length > maxColsVisible - 1;
+  // Separate the first "input" field as the primary search field
+  const searchField = fields.find((f) => f.type === 'input');
+  const filterFields = fields.filter((f) => f !== searchField);
+
+  // Calculate visible filter fields based on collapsed state
+  const maxFiltersVisible = collapsedRows * COLS_PER_ROW - 1; // reserve 1 slot for actions
+  const filtersToShow = expanded ? filterFields : filterFields.slice(0, maxFiltersVisible);
+  const hasMore = filterFields.length > maxFiltersVisible;
 
   const renderField = (field: FilterField): React.ReactNode => {
     switch (field.type) {
@@ -158,55 +165,71 @@ const FilterBar: React.FC<FilterBarProps> = ({
     return fieldSpan * COL_SPAN;
   };
 
-  // Action buttons occupy one "cell"
-  const actionSpan = COL_SPAN;
-
   return (
     <div className={styles.filterBarWrapper}>
-      <Form form={form} layout="vertical" size="small">
-        <Row gutter={[12, 0]} align="bottom">
-          {fieldsToShow.map((field) => (
-            <Col key={field.name} span={getFieldSpan(field)}>
-              <Form.Item
-                name={field.name}
-                label={field.label}
-                initialValue={field.defaultValue}
-                className={styles.formItemWrapper}
-                style={{ marginBottom: 16 }}
-              >
-                {renderField(field)}
-              </Form.Item>
-            </Col>
-          ))}
+      <Form form={form} size="small" layout="vertical">
 
-          {/* Action column */}
-          <Col
-            span={actionSpan}
-            className={styles.actionCol}
-            style={{ marginBottom: 16 }}
-          >
-            {hasMore && (
-              <Button
-                type="link"
-                size="small"
-                className={styles.expandLink}
-                onClick={() => setExpanded(!expanded)}
-                icon={expanded ? <UpOutlined /> : <DownOutlined />}
-              >
-                {expanded ? t('filter.collapse') : t('filter.expand')}
-              </Button>
-            )}
-            {extra && <span className={styles.extraWrapper}>{extra}</span>}
-            <Button onClick={handleReset}>{t('common.reset')}</Button>
-            <Button
-              type="primary"
-              icon={<SearchOutlined />}
-              onClick={handleSearch}
+        {/* 主搜索行：搜索框 + 查询/重置按钮 */}
+        <div className={styles.searchRow}>
+          {searchField && (
+            <Form.Item
+              name={searchField.name}
+              initialValue={searchField.defaultValue}
+              noStyle
             >
-              {t('filter.query')}
-            </Button>
-          </Col>
-        </Row>
+              <Input
+                className={styles.searchInput}
+                placeholder={searchField.placeholder ?? t('common.placeholder')}
+                prefix={<SearchOutlined style={{ color: 'rgba(0,0,0,0.25)' }} />}
+                allowClear
+                onPressEnter={handleSearch}
+              />
+            </Form.Item>
+          )}
+          <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+            {t('filter.query')}
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>
+            {t('common.reset')}
+          </Button>
+          {extra && <span className={styles.extraWrapper}>{extra}</span>}
+        </div>
+
+        {/* 筛选条件区 */}
+        {filterFields.length > 0 && (
+          <div className={styles.filterSection}>
+            <Row gutter={[12, 0]} align="bottom">
+              {filtersToShow.map((field) => (
+                <Col key={field.name} span={getFieldSpan(field)}>
+                  <Form.Item
+                    name={field.name}
+                    label={field.label}
+                    initialValue={field.defaultValue}
+                    className={styles.compactFormItem}
+                    style={{ marginBottom: 12 }}
+                  >
+                    {renderField(field)}
+                  </Form.Item>
+                </Col>
+              ))}
+
+              {/* 展开/收起按钮 */}
+              {hasMore && (
+                <Col span={COL_SPAN} style={{ marginBottom: 12, display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
+                  <Button
+                    type="link"
+                    size="small"
+                    className={styles.expandBtn}
+                    onClick={() => setExpanded(!expanded)}
+                    icon={expanded ? <UpOutlined /> : <DownOutlined />}
+                  >
+                    {expanded ? t('filter.collapse') : t('filter.expand')}
+                  </Button>
+                </Col>
+              )}
+            </Row>
+          </div>
+        )}
       </Form>
     </div>
   );

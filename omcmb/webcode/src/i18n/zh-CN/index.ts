@@ -401,6 +401,7 @@ const messages: Record<string, string> = {
   'device.mgmtStatus':      '管理状态',
   'device.vendor':          '厂商',
   'device.productType':     '产品类型',
+  'device.platformType':    '平台类型',
   'device.networkType':     '网络类型',
   'device.radioMode':       '基站制式',
   'device.model':           '设备型号',
@@ -471,6 +472,8 @@ const messages: Record<string, string> = {
 
   // 监控页面扩展字段 (Location)
   'device.gpsHeight':           'GPS高度',
+  'device.gpsInconsistent':     '数据不一致，确认同步？',
+  'device.gpsSyncSuccess':      'GPS同步命令已下发',
   'device.gpsSatelliteCount':   'GPS卫星数',
   'device.mechanicalDowntilt':  '机械下倾角',
   'device.electronicDowntilt':  '电子下倾角',

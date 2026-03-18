@@ -401,6 +401,7 @@ const messages: Record<string, string> = {
   'device.mgmtStatus':      'Management Status',
   'device.vendor':          'Vendor',
   'device.productType':     'Product Type',
+  'device.platformType':    'Platform Type',
   'device.networkType':     'Network Type',
   'device.radioMode':       'Radio Mode',
   'device.model':           'Device Model',
@@ -471,6 +472,8 @@ const messages: Record<string, string> = {
 
   // Monitor page extended fields (Location)
   'device.gpsHeight':           'GPS Height',
+  'device.gpsInconsistent':     'Data inconsistent, Sure to synchronize?',
+  'device.gpsSyncSuccess':      'GPS sync command sent',
   'device.gpsSatelliteCount':   'GPS Satellite Count',
   'device.mechanicalDowntilt':  'Mechanical Downtilt',
   'device.electronicDowntilt':  'Electronic Downtilt',

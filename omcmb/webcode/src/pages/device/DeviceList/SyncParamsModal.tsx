@@ -42,16 +42,16 @@ const BASIC_PARAMS: SyncParam[] = [
   // --- 三制式公共 ---
   { code: 'module_type',       label: '设备型号名',          scope: 'common' },
   { code: 'software_version',  label: '软件版本',            scope: 'common' },
-  { code: 'firmware_version',  label: '固件版本',            scope: 'common' },
+  { code: 'firmware_version',  label: '固件版本',            scope: 'eNB+gNB' },
   { code: 'MAC',               label: 'MAC地址',             scope: 'common' },
   { code: 'IP',                label: 'IP地址',              scope: 'common' },
   { code: 'ue_count',          label: 'UE数',                scope: 'common' },
   // --- eNB + gNB 共有 ---
   { code: 'cell_name',         label: '主机名/站点名',       scope: 'eNB+gNB' },
   { code: 'ECI',               label: 'ECI',                 scope: 'eNB+gNB' },
-  { code: 'halob_flag',        label: 'HaloB开关',           scope: 'eNB+gNB' },
+  { code: 'halob_flag',        label: 'HaloX',               scope: 'eNB+gNB' },
   { code: 'sync_status',       label: '同步状态',            scope: 'eNB+gNB' },
-  { code: 'mme_addr',          label: 'IPSec地址',           scope: 'eNB+gNB' },
+  { code: 'mme_addr',          label: 'MME Pool IPSEC地址',   scope: 'eNB+gNB' },
   { code: 'gps_position',      label: 'GPS位置',             scope: 'eNB+gNB' },
   // --- eNB 独有 ---
   { code: 'PCI',               label: 'PCI',                 scope: 'eNB' },
@@ -69,13 +69,14 @@ const BASIC_PARAMS: SyncParam[] = [
   { code: 'gps_satellites',    label: 'GPS卫星数',           scope: 'eNB' },
   { code: 'sub_frame_assignment', label: '子帧配比',         scope: 'eNB' },
   { code: 'wan_speed',         label: 'WAN状态',             scope: 'eNB' },
-  { code: 'ipsec_addr',        label: 'IPSec地址(eNB)',      scope: 'eNB' },
+  { code: 'ipsec_addr',        label: 'IPSEC地址',           scope: 'eNB' },
   { code: 'electronic_downtilt', label: '电子下倾角',        scope: 'eNB' },
   // --- gNB 独有 ---
   { code: 'adminState',        label: 'Admin State',         scope: 'gNB' },
   { code: 'amf_status',        label: 'AMF Status',          scope: 'gNB' },
   { code: 'multiPlmnEnable',   label: 'MultiPLMN状态',       scope: 'gNB' },
   { code: 'cellConfig',        label: '小区参数',            scope: 'gNB' },
+  { code: 'sub_station_name', label: '站址名称',            scope: 'gNB' },
   // --- GSM 独有 ---
   { code: 'halob_license',     label: 'License',             scope: 'GSM' },
 ];
@@ -85,7 +86,7 @@ const ADVANCED_PARAMS: SyncParam[] = [
   { code: 'rollback_version',  label: '回退版本',            scope: 'eNB+gNB' },
   { code: 'sas_param',         label: 'SAS参数',             scope: 'eNB+gNB' },
   { code: 'eu_ru',             label: 'EU/RU数',             scope: 'eNB+gNB' },
-  { code: 'halob_license',     label: 'HaloB License',       scope: 'eNB+gNB' },
+  { code: 'halob_license',     label: 'HaloB License',       scope: 'gNB' },
   // --- eNB 独有 ---
   { code: 'band',              label: '频段',                scope: 'eNB' },
   { code: 'cell_neighbor',     label: 'SAS邻区',            scope: 'eNB' },

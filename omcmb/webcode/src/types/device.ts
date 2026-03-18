@@ -32,6 +32,7 @@ export interface Device {
   // --- 监控页面扩展字段 (来自 LTE/GSM/5G NR 三个监控页面合并) ---
 
   // 设备信息组 (Device)
+  platformType: string;  // 平台类型标识 (Intel_CR_CA, MLN_CA, BaiBNX 等)
   hostName: string;
   productName: string;
   firmwareVersion: string;

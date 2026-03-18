@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { App, Button, Dropdown, Input, Popover, Space, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Dropdown, Input, Popconfirm, Popover, Space, Tag, Tooltip, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CheckOutlined,
@@ -13,6 +13,7 @@ import {
   RestOutlined,
   SwapOutlined,
   SyncOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -26,6 +27,7 @@ import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
 import SyncParamsModal from './SyncParamsModal';
 import type { SyncNetworkType } from './SyncParamsModal';
+import UeDetailDrawer from './UeDetailDrawer';
 import MoveToGroupModal from './MoveToGroupModal';
 import ExportModal from './ExportModal';
 import type { ExportParams } from './ExportModal';
@@ -50,8 +52,12 @@ export default function DeviceList() {
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
+  // 同步目标：batch=批量(使用 selectedRowKeys)，single=单设备(指定 device)
+  const [syncTarget, setSyncTarget] = useState<{ mode: 'batch' } | { mode: 'single'; device: Device }>({ mode: 'batch' });
   const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  // UE 详情抽屉：仅 eNB 非 CA 站点击 UE 数时打开右侧 Slide 面板
+  const [ueDrawerDevice, setUeDrawerDevice] = useState<Device | null>(null);
 
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
@@ -327,22 +333,34 @@ export default function DeviceList() {
 
   // 批量同步 — 打开参数选择对话框
   const handleBatchSync = useCallback(() => {
+    setSyncTarget({ mode: 'batch' });
     setSyncModalOpen(true);
   }, []);
 
-  // 批量同步确认回调
+  // 同步确认回调 — 区分单设备和批量
   const handleSyncConfirm = useCallback(
     (selectedParams: string[], alarmSync: boolean) => {
       const params = alarmSync ? [...selectedParams, 'sync_alarm'] : selectedParams;
-      const cellCodes = selectedRowKeys.join(',');
-      // TODO: 接入 POST /cell/quicksettings/batchSyncCell.action
-      // params: { smallCellCode: cellCodes, selectedParams: params.join(',') }
-      console.log('batch sync:', { cellCodes, selectedParams: params.join(',') });
+
+      if (syncTarget.mode === 'single') {
+        // 单设备同步
+        // TODO: 接入 POST /cell/param/refreshCellInfo.action
+        // params: { smallCellCode: syncTarget.device.sn, selectedParams: params.join(','), isGnb: syncTarget.device.networkType === 'gNB' ? '1' : '0' }
+        console.log('single sync:', { sn: syncTarget.device.sn, networkType: syncTarget.device.networkType, selectedParams: params.join(',') });
+        void message.success(t('common.commandSent'));
+      } else {
+        // 批量同步
+        const cellCodes = selectedRowKeys.join(',');
+        // TODO: 接入 POST /cell/quicksettings/batchSyncCell.action
+        // params: { smallCellCode: cellCodes, selectedParams: params.join(',') }
+        console.log('batch sync:', { cellCodes, selectedParams: params.join(',') });
+        setSelectedRowKeys([]);
+      }
+
       setSyncModalOpen(false);
-      setSelectedRowKeys([]);
       void refetch();
     },
-    [selectedRowKeys, refetch]
+    [syncTarget, selectedRowKeys, refetch, message, t]
   );
 
   // 移动到设备组 — 打开设备组选择对话框
@@ -389,10 +407,10 @@ export default function DeviceList() {
       const sn = record.sn;
 
       switch (key) {
-        // ──── 同步：打开同步参数弹窗 ────
+        // ──── 同步：打开同步参数弹窗（按制式区分） ────
         case 'sync':
-          // TODO: 接入同步参数弹窗 (refreshCellInfo / batchSyncCell API)
-          void message.info(`${t('device.action.sync')}: ${sn} — ${t('common.featureInDev')}`);
+          setSyncTarget({ mode: 'single', device: record });
+          setSyncModalOpen(true);
           break;
 
         // ──── 重启：确认弹窗 → 下发 → "命令已下发" ────
@@ -845,7 +863,25 @@ export default function DeviceList() {
           return <Tag color={colorMap[record.networkType] ?? 'default'}>{record.networkType || '-'}</Tag>;
         },
       },
-      { key: 'productType', title: t('device.productType'), dataIndex: 'productType', width: 110, group: 'common' },
+      {
+        key: 'productType',
+        title: t('device.productType'),
+        dataIndex: 'productType',
+        width: 120,
+        group: 'common',
+        // 原始 JSP: product 字段 — PM-B4860/QAFA/BaiBNX/BSC/BTS 等
+        render: (_val, record) => record.productType || '-',
+      },
+      {
+        key: 'platformType',
+        title: t('device.platformType'),
+        dataIndex: 'platformType',
+        width: 140,
+        hidden: true,
+        group: 'common',
+        // 原始 JSP: platformType 字段 — 影响多小区/CA/DC 行为
+        render: (_val, record) => record.platformType || '-',
+      },
       { key: 'deviceModel', title: t('device.model'), dataIndex: 'deviceModel', width: 120, ellipsis: true, group: 'common' },
       { key: 'softwareVersion', title: t('device.softwareVersion'), dataIndex: 'softwareVersion', width: 140, ellipsis: true, group: 'common' },
       { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true, copyable: true, group: 'common' },
@@ -908,13 +944,18 @@ export default function DeviceList() {
         dataIndex: 'ueCount',
         width: 80,
         group: 'common',
-        // 原始 JSP: -1/null 显示 "--"，0 显示 "0"，>0 可点击查看 UE 详情
+        // JSP 行为: eNB >0 且非 CA 站可点击(Slide面板)；gNB/GSM 不可点击
         render: (_val, record) => {
           const v = record.ueCount;
           if (v === -1 || v === null || v === undefined) return '--';
           if (v === 0) return '0';
-          // TODO: 点击 >0 时打开 UE 详情面板 (getueCountsData)
-          return <Link onClick={() => void navigate(`/device/detail/${record.sn}?tab=ue`)}>{v}</Link>;
+          // 仅 eNB 且非 CA 站支持点击查看 UE 详情
+          const isEnb = record.networkType === 'eNB';
+          const isCaSite = record.platformType?.includes('_CA');
+          if (isEnb && !isCaSite) {
+            return <Link onClick={() => setUeDrawerDevice(record)}>{v}</Link>;
+          }
+          return String(v);
         },
       },
       {
@@ -993,9 +1034,87 @@ export default function DeviceList() {
       },
       { key: 'siteName', title: t('device.siteName'), dataIndex: 'siteName', width: 130, hidden: true, ellipsis: true, group: 'common' },
       { key: 'remark', title: t('device.remark'), dataIndex: 'remark', width: 185, hidden: true, ellipsis: true, group: 'common', headerRender: remarkHeaderRender },
-      { key: 'longitude', title: t('device.longitude'), dataIndex: 'longitude', width: 110, hidden: true, group: 'common' },
-      { key: 'latitude', title: t('device.latitude'), dataIndex: 'latitude', width: 110, hidden: true, group: 'common' },
-      { key: 'gpsHeight', title: t('device.gpsHeight'), dataIndex: 'gpsHeight', width: 100, hidden: true, group: 'common' },
+      {
+        key: 'longitude',
+        title: t('device.longitude'),
+        dataIndex: 'longitude',
+        width: 130,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => {
+          const v = record.longitude;
+          if (v === null || v === undefined) return '--';
+          if (record.networkType !== 'eNB') return v;
+          return (
+            <Space size={4}>
+              <Popconfirm
+                title={`${t('device.longitude')}: ${record.longitude}   ${t('device.latitude')}: ${record.latitude}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
+                description={t('device.gpsInconsistent')}
+                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
+                okText={t('common.confirm')}
+                cancelText={t('common.cancel')}
+              >
+                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
+              </Popconfirm>
+              {v}
+            </Space>
+          );
+        },
+      },
+      {
+        key: 'latitude',
+        title: t('device.latitude'),
+        dataIndex: 'latitude',
+        width: 130,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => {
+          const v = record.latitude;
+          if (v === null || v === undefined) return '--';
+          if (record.networkType !== 'eNB') return v;
+          return (
+            <Space size={4}>
+              <Popconfirm
+                title={`${t('device.longitude')}: ${record.longitude}   ${t('device.latitude')}: ${record.latitude}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
+                description={t('device.gpsInconsistent')}
+                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
+                okText={t('common.confirm')}
+                cancelText={t('common.cancel')}
+              >
+                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
+              </Popconfirm>
+              {v}
+            </Space>
+          );
+        },
+      },
+      {
+        key: 'gpsHeight',
+        title: t('device.gpsHeight'),
+        dataIndex: 'gpsHeight',
+        width: 120,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => {
+          const v = record.gpsHeight;
+          if (v === null || v === undefined) return '--';
+          if (record.networkType !== 'eNB') return v;
+          return (
+            <Space size={4}>
+              <Popconfirm
+                title={`${t('device.longitude')}: ${record.longitude}   ${t('device.latitude')}: ${record.latitude}   ${t('device.gpsHeight')}(m): ${record.gpsHeight ?? '--'}`}
+                description={t('device.gpsInconsistent')}
+                onConfirm={() => void message.success(t('device.gpsSyncSuccess'))}
+                okText={t('common.confirm')}
+                cancelText={t('common.cancel')}
+              >
+                <WarningOutlined style={{ color: '#faad14', cursor: 'pointer' }} />
+              </Popconfirm>
+              {v}
+            </Space>
+          );
+        },
+      },
       {
         key: 'gpsSatelliteCount',
         title: t('device.gpsSatelliteCount'),
@@ -1385,7 +1504,11 @@ export default function DeviceList() {
 
       <SyncParamsModal
         open={syncModalOpen}
-        networkType={selectedNetworkType ?? 'eNB'}
+        networkType={
+          syncTarget.mode === 'single'
+            ? (syncTarget.device.networkType as SyncNetworkType) ?? 'eNB'
+            : selectedNetworkType ?? 'eNB'
+        }
         onClose={() => setSyncModalOpen(false)}
         onConfirm={handleSyncConfirm}
       />
@@ -1401,6 +1524,12 @@ export default function DeviceList() {
         open={exportModalOpen}
         onClose={() => setExportModalOpen(false)}
         onConfirm={handleExportConfirm}
+      />
+
+      {/* UE 详情抽屉 — 仅 eNB 非 CA 站，右侧 Slide 面板 */}
+      <UeDetailDrawer
+        device={ueDrawerDevice}
+        onClose={() => setUeDrawerDevice(null)}
       />
     </ListPageLayout>
   );
