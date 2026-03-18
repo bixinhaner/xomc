@@ -28,8 +28,6 @@ import type { Device } from '@/types/device';
 import SyncParamsModal from './SyncParamsModal';
 import type { SyncNetworkType } from './SyncParamsModal';
 import MoveToGroupModal from './MoveToGroupModal';
-import ExportModal from './ExportModal';
-import type { ExportParams } from './ExportModal';
 
 const { Link } = Typography;
 
@@ -54,7 +52,6 @@ export default function DeviceList() {
   // 同步目标：batch=批量(使用 selectedRowKeys)，single=单设备(指定 device)
   const [syncTarget, setSyncTarget] = useState<{ mode: 'batch' } | { mode: 'single'; device: Device }>({ mode: 'batch' });
   const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
-  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
@@ -238,18 +235,6 @@ export default function DeviceList() {
       type: 'multi-select',
       options: [],  // TODO: 动态加载 /cell/cpeinfos/getDeviceGroupListByCell.action
     },
-
-    // --- 筛选项：eNB + gNB ---
-    {
-      name: 'halobFlag',
-      label: 'HaloB',
-      type: 'select',
-      options: [
-        { label: t('common.yes'), value: '1' },
-        { label: t('common.no'), value: '0' },
-      ],
-    },
-
   ], [t]);
 
   // 统计面板 — 基于筛选条件的全量统计（由后端/mock 返回，非当前页）
@@ -362,16 +347,14 @@ export default function DeviceList() {
     [selectedRowKeys, message, t, refetch]
   );
 
-  // 导出确认回调
-  const handleExportConfirm = useCallback(
-    (params: ExportParams) => {
-      // TODO: 根据 params.format 选择 API 端点
+  // 导出 — 直接选择格式后触发
+  const handleExport = useCallback(
+    (format: string) => {
+      // TODO: 根据 format 选择 API 端点
       // CSV: POST /cell/cpeinfos/exportCellsToCsv.action
       // XLSX: POST /cell/cpeinfos/exportCellsToExcel.action
-      // License: POST /cell/cpeinfos/exportEnodebLicenseInfos.action
-      console.log('export:', params);
+      console.log('export:', format);
       void message.info(t('common.exportInProgress'));
-      setExportModalOpen(false);
     },
     [message, t]
   );
@@ -1171,13 +1154,20 @@ export default function DeviceList() {
     <ListPageLayout
       title={t('nav.device.list')}
       extra={
-        <Button
-          type="primary"
-          icon={<ExportOutlined />}
-          onClick={() => setExportModalOpen(true)}
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'xlsx', label: 'XLSX' },
+              { key: 'csv', label: 'CSV' },
+            ],
+            onClick: ({ key }) => handleExport(key),
+          }}
+          trigger={['click']}
         >
-          {t('common.export')}
-        </Button>
+          <Button type="primary" icon={<ExportOutlined />}>
+            {t('common.export')}
+          </Button>
+        </Dropdown>
       }
     >
       <FilterBar
@@ -1227,12 +1217,6 @@ export default function DeviceList() {
         onClose={() => setMoveToGroupModalOpen(false)}
         onConfirm={handleMoveToGroupConfirm}
         selectedCount={selectedRowKeys.length}
-      />
-
-      <ExportModal
-        open={exportModalOpen}
-        onClose={() => setExportModalOpen(false)}
-        onConfirm={handleExportConfirm}
       />
 
     </ListPageLayout>
