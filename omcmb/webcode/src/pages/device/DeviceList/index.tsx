@@ -159,7 +159,7 @@ export default function DeviceList() {
       name: 'searchText',
       label: t('filter.searchText'),
       type: 'input',
-      placeholder: 'SN / ' + t('device.hostName') + ' / IP / MAC / ECI / PCI',
+      placeholder: 'SN / ' + t('device.hostName') + ' / IP / MAC / PCI',
     },
 
     // --- 筛选项：三制式公共（默认显示） ---
@@ -250,24 +250,6 @@ export default function DeviceList() {
       ],
     },
 
-    // --- 筛选项：仅 gNB ---
-    {
-      name: 'multiPlmnEnable',
-      label: 'MultiPLMN',
-      type: 'select',
-      options: [
-        { label: t('common.enable'), value: '1' },
-        { label: t('common.disable'), value: '0' },
-      ],
-    },
-
-    // --- 筛选项：仅 GSM ---
-    {
-      name: 'bscSerialnumber',
-      label: t('filter.bscCode'),
-      type: 'multi-select',
-      options: [],  // TODO: 动态加载 /cell/cpeinfos/getBSCSnForBTSList.action
-    },
   ], [t]);
 
   // 统计面板 — 基于筛选条件的全量统计（由后端/mock 返回，非当前页）
