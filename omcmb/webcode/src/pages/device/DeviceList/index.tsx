@@ -730,67 +730,6 @@ export default function DeviceList() {
     [parseCellValues, getCellSummary]
   );
 
-  /** 渲染多 MME/AMF 连接状态: 汇总 Tag + [N/M] Popover 含 IP/PLMN 明细 */
-  const renderMultiConnStatus = useCallback(
-    (
-      jsonStr: string | undefined | null,
-      config: { type: 'MME' | 'AMF'; ipKey: string; statusKey: string; plmnKey: string },
-    ) => {
-      if (!jsonStr || jsonStr === '--') return '-';
-
-      let items: Record<string, string>[];
-      try {
-        items = JSON.parse(jsonStr);
-      } catch {
-        // 兼容 eNB 旧格式 "1"/"0"/"mme1=1,mme2=0"
-        if (jsonStr === '1') return <Tag color="success">{config.type} {t('status.connected')}</Tag>;
-        if (jsonStr === '0') return <Tag color="error">{config.type} {t('status.disconnected')}</Tag>;
-        return String(jsonStr);
-      }
-      if (!Array.isArray(items) || items.length === 0) return '-';
-
-      const connCount = items.filter((it) => it[config.statusKey] === '1').length;
-      const total = items.length;
-      const allConn = connCount === total;
-      const noneConn = connCount === 0;
-      const summaryColor = allConn ? 'success' : noneConn ? 'error' : 'warning';
-      const summaryLabel = noneConn ? `${config.type} ${t('status.disconnected')}` : `${config.type} ${t('status.connected')}`;
-
-      const popoverContent = (
-        <div style={{ minWidth: 220 }}>
-          {items.map((item, idx) => {
-            const connected = item[config.statusKey] === '1';
-            return (
-              <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0', borderBottom: idx < total - 1 ? '1px solid #f0f0f0' : 'none' }}>
-                <Tag color={connected ? 'success' : 'error'} style={{ margin: 0, flexShrink: 0 }}>
-                  {connected ? t('status.connected') : t('status.disconnected')}
-                </Tag>
-                <div style={{ lineHeight: '20px' }}>
-                  <div>{config.type} IP: {item[config.ipKey] || '-'}</div>
-                  {item[config.plmnKey] && <div>PLMN: {item[config.plmnKey]}</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-
-      return (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <Tag color={summaryColor}>{summaryLabel}</Tag>
-          {total > 1 && (
-            <Popover title={`All ${config.type} Status`} content={popoverContent} trigger="click">
-              <span style={{ color: '#4d84ff', cursor: 'pointer' }}>
-                [{connCount}/{total}]
-              </span>
-            </Popover>
-          )}
-        </span>
-      );
-    },
-    [t]
-  );
-
   const columns = useMemo(
     (): DataTableColumn<Device>[] => [
       // =====================================================================
@@ -888,6 +827,7 @@ export default function DeviceList() {
         title: t('device.ipAddress'),
         dataIndex: 'ipAddress',
         width: 140,
+        hidden: true,
         mono: true,
         copyable: true,
         group: 'common',
@@ -909,6 +849,7 @@ export default function DeviceList() {
         title: t('device.onlineTime'),
         dataIndex: 'onlineTime',
         width: 165,
+        hidden: true,
         group: 'common',
         render: (_val, record) => fmtTime(record.onlineTime),
       },
@@ -917,6 +858,7 @@ export default function DeviceList() {
         title: t('device.offlineTime'),
         dataIndex: 'offlineTime',
         width: 165,
+        hidden: true,
         group: 'common',
         render: (_val, record) => fmtTime(record.offlineTime),
       },
@@ -925,6 +867,7 @@ export default function DeviceList() {
         title: t('device.opState'),
         dataIndex: 'opState',
         width: 140,
+        hidden: true,
         group: 'common',
         // 原始 JSP: 支持多小区 "1,0,1"，汇总 + [N/M] Popover
         // 兼容 active/inactive 文本值和 1/0 数值
@@ -964,6 +907,7 @@ export default function DeviceList() {
         title: t('device.rfStatus'),
         dataIndex: 'rfStatus',
         width: 150,
+        hidden: true,
         group: 'common',
         // 原始 JSP: 支持多小区 "on,off,on"，汇总 + [N/M] Popover
         render: (_val, record) => renderMultiCellStatus(
@@ -1168,224 +1112,6 @@ export default function DeviceList() {
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
 
       // =====================================================================
-      // eNB 字段 — LTE 独有
-      // =====================================================================
-      { key: 'enbId', title: 'eNodeB ID', dataIndex: 'enbId', width: 110, hidden: true, group: 'eNB' },
-      { key: 'cellId', title: t('device.cellId'), dataIndex: 'cellId', width: 80, hidden: true, group: 'eNB' },
-      { key: 'eci', title: 'ECI', dataIndex: 'eci', width: 120, hidden: true, group: 'eNB' },
-      { key: 'plmnId', title: 'PLMN', dataIndex: 'plmnId', width: 90, hidden: true, group: 'eNB' },
-      { key: 'subframeAssignment', title: t('device.subframeAssignment'), dataIndex: 'subframeAssignment', width: 100, hidden: true, group: 'eNB' },
-      { key: 'specialSubframe', title: t('device.specialSubframe'), dataIndex: 'specialSubframe', width: 120, hidden: true, group: 'eNB' },
-      { key: 'rootIndex', title: t('device.rootIndex'), dataIndex: 'rootIndex', width: 110, hidden: true, group: 'eNB' },
-      { key: 'siteId', title: 'Site ID', dataIndex: 'siteId', width: 130, hidden: true, group: 'eNB' },
-      { key: 'bandwidth', title: t('device.bandwidth'), dataIndex: 'bandwidth', width: 90, hidden: true, group: 'eNB' },
-      {
-        key: 'mmeStatus',
-        title: t('device.mmeStatus'),
-        dataIndex: 'mmeStatus',
-        width: 160,
-        hidden: true,
-        group: 'eNB',
-        // 原始 JSP: 支持多 MME，JSON 格式 [{mmeIp, status, plmnId}]
-        render: (_val, record) => renderMultiConnStatus(
-          record.mmeStatus,
-          { type: 'MME', ipKey: 'mmeIp', statusKey: 'status', plmnKey: 'plmnId' },
-        ),
-      },
-      {
-        key: 'pmReportStatus',
-        title: t('device.pmReportStatus'),
-        dataIndex: 'pmReportStatus',
-        width: 120,
-        hidden: true,
-        group: 'eNB',
-        // 原始 JSP: off→关, normal→正常, broken→损坏(红色)
-        render: (_val, record) => fmtStatus(record.pmReportStatus, {
-          off: { label: t('common.off'), color: 'default' },
-          normal: { label: t('common.normal'), color: 'success' },
-          broken: { label: t('common.broken'), color: 'error' },
-        }),
-      },
-      {
-        key: 'cpeCount',
-        title: t('device.cpeCount'),
-        dataIndex: 'cpeCount',
-        width: 100,
-        hidden: true,
-        group: 'eNB',
-        // 原始 JSP: -1/null→"--", 0→"0", >0 可点击查看 CPE 详情
-        render: (_val, record) => {
-          const v = record.cpeCount;
-          if (v === -1 || v === null || v === undefined) return '--';
-          if (v === 0) return '0';
-          // TODO: 点击 >0 时打开 CPE 详情面板 (getueCpeCountsData)
-          return <Link onClick={() => void navigate(`/device/detail/${record.sn}?tab=cpe`)}>{v}</Link>;
-        },
-      },
-      {
-        key: 'lockStatus',
-        title: t('device.lockStatus'),
-        dataIndex: 'lockStatus',
-        width: 100,
-        hidden: true,
-        group: 'eNB',
-        render: (_val, record) => fmtStatus(record.lockStatus, {
-          locked: { label: t('status.locked'), color: 'warning' },
-          unlocked: { label: t('status.unlocked'), color: 'success' },
-        }),
-      },
-      { key: 'wanSpeed', title: t('device.wanSpeed'), dataIndex: 'wanSpeed', width: 110, hidden: true, group: 'eNB' },
-      { key: 'serviceStatus', title: t('device.serviceStatus'), dataIndex: 'serviceStatus', width: 100, hidden: true, group: 'eNB' },
-      { key: 'validity', title: t('device.validity'), dataIndex: 'validity', width: 120, hidden: true, group: 'eNB' },
-      { key: 'gpsVersion', title: t('device.gpsVersion'), dataIndex: 'gpsVersion', width: 100, hidden: true, group: 'eNB' },
-      { key: 'rom', title: 'ROM', dataIndex: 'rom', width: 100, hidden: true, group: 'eNB' },
-      { key: 'mmepoolIpsecAddr', title: t('device.mmepoolIpsecAddr'), dataIndex: 'mmepoolIpsecAddr', width: 160, hidden: true, mono: true, group: 'eNB' },
-      { key: 'mechanicalDowntilt', title: t('device.mechanicalDowntilt'), dataIndex: 'mechanicalDowntilt', width: 110, hidden: true, group: 'eNB' },
-      { key: 'electronicDowntilt', title: t('device.electronicDowntilt'), dataIndex: 'electronicDowntilt', width: 110, hidden: true, group: 'eNB' },
-      { key: 'verticalBeamWidth', title: t('device.verticalBeamWidth'), dataIndex: 'verticalBeamWidth', width: 120, hidden: true, group: 'eNB' },
-      { key: 'horizontalAzimuth', title: t('device.horizontalAzimuth'), dataIndex: 'horizontalAzimuth', width: 120, hidden: true, group: 'eNB' },
-
-      // =====================================================================
-      // gNB 字段 — 5G NR 独有
-      // =====================================================================
-      { key: 'gnbId', title: 'gNB ID', dataIndex: 'gnbId', width: 110, hidden: true, group: 'gNB' },
-      { key: 'nrCellId', title: 'NR Cell ID', dataIndex: 'nrCellId', width: 120, hidden: true, group: 'gNB' },
-      {
-        key: 'amfStatus',
-        title: t('device.amfStatus'),
-        dataIndex: 'amfStatus',
-        width: 160,
-        hidden: true,
-        group: 'gNB',
-        // 原始 JSP: 支持多 AMF，JSON 格式 [{AmfIP1, Status, PLMNID}]
-        render: (_val, record) => renderMultiConnStatus(
-          record.amfStatus,
-          { type: 'AMF', ipKey: 'AmfIP1', statusKey: 'Status', plmnKey: 'PLMNID' },
-        ),
-      },
-      {
-        key: 'multiPlmnEnable',
-        title: 'Multi PLMN',
-        dataIndex: 'multiPlmnEnable',
-        width: 120,
-        hidden: true,
-        group: 'gNB',
-        render: (_val, record) => fmtStatus(record.multiPlmnEnable, {
-          enabled: { label: t('status.enabled'), color: 'success' },
-          disabled: { label: t('status.disabled'), color: 'default' },
-        }),
-      },
-      {
-        key: 'euCount',
-        title: t('device.euCount'),
-        dataIndex: 'euCount',
-        width: 80,
-        hidden: true,
-        group: 'gNB',
-        // 原始 JSP: "connected/total" 格式，连接数 < 总数时红色
-        render: (_val, record) => {
-          const v = record.euCount;
-          if (!v || v === '--') return '--';
-          if (typeof v === 'string' && v.includes('/')) {
-            const [conn, total] = v.split('/').map(Number);
-            const degraded = conn < total;
-            return <span style={degraded ? { color: '#E88282', fontWeight: 500 } : undefined}>{v}</span>;
-          }
-          return String(v);
-        },
-      },
-      {
-        key: 'ruCount',
-        title: t('device.ruCount'),
-        dataIndex: 'ruCount',
-        width: 80,
-        hidden: true,
-        group: 'gNB',
-        // 原始 JSP: "connected/total" 格式，连接数 < 总数时红色
-        render: (_val, record) => {
-          const v = record.ruCount;
-          if (!v || v === '--') return '--';
-          if (typeof v === 'string' && v.includes('/')) {
-            const [conn, total] = v.split('/').map(Number);
-            const degraded = conn < total;
-            return <span style={degraded ? { color: '#E88282', fontWeight: 500 } : undefined}>{v}</span>;
-          }
-          return String(v);
-        },
-      },
-      { key: 'rollbackVersion', title: t('device.rollbackVersion'), dataIndex: 'rollbackVersion', width: 140, hidden: true, group: 'gNB' },
-      { key: 'sasParam', title: t('device.sasParam'), dataIndex: 'sasParam', width: 120, hidden: true, group: 'gNB' },
-      { key: 'euRu', title: t('device.euRu'), dataIndex: 'euRu', width: 90, hidden: true, group: 'gNB' },
-      { key: 'halobLicense', title: t('device.halobLicense'), dataIndex: 'halobLicense', width: 120, hidden: true, group: 'gNB' },
-      { key: 'energySaving', title: t('device.energySaving'), dataIndex: 'energySaving', width: 100, hidden: true, group: 'gNB' },
-      { key: 'gnbTopoCellmgr', title: t('device.gnbTopoCellmgr'), dataIndex: 'gnbTopoCellmgr', width: 120, hidden: true, group: 'gNB' },
-      { key: 'sslCertValidity', title: t('device.sslCertValidity'), dataIndex: 'sslCertValidity', width: 140, hidden: true, group: 'gNB' },
-
-      // =====================================================================
-      // GSM 字段 — GSM 独有
-      // =====================================================================
-      { key: 'lac', title: 'LAC', dataIndex: 'lac', width: 80, hidden: true, group: 'GSM' },
-      { key: 'arfcn', title: t('device.arfcn'), dataIndex: 'arfcn', width: 90, hidden: true, group: 'GSM' },
-      {
-        key: 'uplinkFrequency',
-        title: t('device.uplinkFrequency'),
-        dataIndex: 'uplinkFrequency',
-        width: 120,
-        hidden: true,
-        group: 'GSM',
-        // 原始 JSP: 显示值 + "MHz" 后缀
-        render: (_val, record) => {
-          const v = record.uplinkFrequency;
-          return v ? `${v} MHz` : '-';
-        },
-      },
-      {
-        key: 'downlinkFrequency',
-        title: t('device.downlinkFrequency'),
-        dataIndex: 'downlinkFrequency',
-        width: 120,
-        hidden: true,
-        group: 'GSM',
-        // 原始 JSP: 显示值 + "MHz" 后缀
-        render: (_val, record) => {
-          const v = record.downlinkFrequency;
-          return v ? `${v} MHz` : '-';
-        },
-      },
-      {
-        key: 'bscLinkStatus',
-        title: t('device.bscLinkStatus'),
-        dataIndex: 'bscLinkStatus',
-        width: 120,
-        hidden: true,
-        group: 'GSM',
-        render: (_val, record) => fmtStatus(record.bscLinkStatus, {
-          connected: { label: t('status.connected'), color: 'success' },
-          disconnected: { label: t('status.disconnected'), color: 'error' },
-        }),
-      },
-      {
-        key: 'bscSelect',
-        title: 'BSC Select',
-        dataIndex: 'bscSelect',
-        width: 100,
-        hidden: true,
-        group: 'GSM',
-        // 原始 JSP: '0'→"主"(Primary), '1'→"备"(Backup)
-        render: (_val, record) => {
-          const v = record.bscSelect;
-          if (v === '0' || v === 0) return t('device.bscPrimary');
-          if (v === '1' || v === 1) return t('device.bscBackup');
-          return v ?? '-';
-        },
-      },
-      { key: 'bscSerialNumber', title: t('device.bscSerialNumber'), dataIndex: 'bscSerialNumber', width: 150, hidden: true, group: 'GSM' },
-      { key: 'btsNum', title: t('device.btsNum'), dataIndex: 'btsNum', width: 80, hidden: true, group: 'GSM' },
-      { key: 'ipaUnitId', title: 'IPA Unit ID', dataIndex: 'ipaUnitId', width: 120, hidden: true, group: 'GSM' },
-      { key: 'omlRemoteIp', title: 'OML Remote IP', dataIndex: 'omlRemoteIp', width: 140, hidden: true, mono: true, group: 'GSM' },
-      { key: 'omlRemoteIpBak', title: 'OML Remote IP Bak', dataIndex: 'omlRemoteIpBak', width: 160, hidden: true, mono: true, group: 'GSM' },
-
-      // =====================================================================
       // 操作列
       // =====================================================================
       {
@@ -1417,7 +1143,7 @@ export default function DeviceList() {
         ),
       },
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderMultiConnStatus, SEVERITY_LABEL, getActionMenuItems, handleRowAction, remarkHeaderRender]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, getActionMenuItems, handleRowAction, remarkHeaderRender]
   );
 
   const batchActions = useMemo((): BatchAction[] => {

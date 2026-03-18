@@ -89,61 +89,6 @@ const DEFAULT_LOCKED_CODES = new Set([
   'ue_count',           // UE数
 ]);
 
-const ENB_COLUMNS: ExportColumn[] = [
-  { code: 'CELL_IDENTITY', label: 'ECI' },
-  { code: 'PHYCELLID', label: 'PCI' },
-  { code: 'PLMNID', label: 'PLMN' },
-  { code: 'tac', label: 'TAC' },
-  { code: 'bandwidth', label: '带宽' },
-  { code: 'EARFCNDLINUSE', label: 'DL EARFCN' },
-  { code: 'EARFCNULINUSE', label: 'UL EARFCN' },
-  { code: 'tx_power', label: '发射功率' },
-  { code: 'network_model', label: '基站类型' },
-  { code: 'Band', label: 'Band' },
-  { code: 'mme_status', label: 'MME状态' },
-  { code: 'cpe_connect', label: 'CPE连接数' },
-  { code: 'IPSEC_ADDR', label: 'IPSec地址' },
-  { code: 'mmepool_ipsec_addr', label: 'MME Pool IPSec' },
-  { code: 'sub_frame_assignment', label: '子帧配比' },
-  { code: 'root_sequence_index', label: '根序列索引' },
-  { code: 'wan_speed', label: 'WAN状态' },
-  { code: 'mechanical_downtilt', label: '机械下倾角' },
-  { code: 'electronic_downtilt', label: '电子下倾角' },
-  { code: 'vertical_beam_width', label: '垂直波束宽度' },
-  { code: 'horizontal_azimuth', label: '水平方位角' },
-  { code: 'gps_satellites', label: 'GPS卫星数' },
-];
-
-const GNB_COLUMNS: ExportColumn[] = [
-  { code: 'nr_cell_id', label: 'NR Cell ID' },
-  { code: 'PHYCELLID', label: 'PCI' },
-  { code: 'tac', label: 'TAC' },
-  { code: 'Band', label: 'Band' },
-  { code: 'EARFCNULINUSE', label: 'UL ARFCN' },
-  { code: 'EARFCNDLINUSE', label: 'DL ARFCN' },
-  { code: 'tx_power', label: '发射功率' },
-  { code: 'network_model', label: '基站类型' },
-  { code: 'adminState', label: 'Admin State' },
-  { code: 'halob_flag', label: 'HaloB' },
-  { code: 'synStatus', label: '同步状态' },
-  { code: 'multiPlmnEnable', label: 'MultiPLMN' },
-  { code: 'amf_status', label: 'AMF状态' },
-  { code: 'IPSEC_ADDR', label: 'IPSec地址' },
-];
-
-const GSM_COLUMNS: ExportColumn[] = [
-  { code: 'bsc_serial_number', label: '所属BSC编码' },
-  { code: 'bts_num', label: 'BTS数' },
-  { code: 'lac', label: 'LAC' },
-  { code: 'arfcn', label: '频点' },
-  { code: 'uplink_frequency', label: '上行频率' },
-  { code: 'downlink_frequency', label: '下行频率' },
-  { code: 'bsc_link_status', label: 'BSC连接状态' },
-  { code: 'bsc_select', label: 'BSC Select' },
-  { code: 'ipa_unit_id', label: 'IPA Unit ID' },
-  { code: 'oml_remote_ip', label: 'OML Remote IP' },
-];
-
 export default function ExportModal({ open, onClose, onConfirm, confirmLoading }: ExportModalProps) {
   const t = useT();
   const [operatorCodes, setOperatorCodes] = useState<string[]>([]);
@@ -153,9 +98,6 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
 
   const groups: ExportColumnGroup[] = useMemo(() => [
     { key: 'common', label: t('export.commonFields'), columns: COMMON_COLUMNS },
-    { key: 'eNB',    label: t('export.enbFields'),    tag: 'eNB',  tagColor: 'blue',   columns: ENB_COLUMNS },
-    { key: 'gNB',    label: t('export.gnbFields'),    tag: 'gNB',  tagColor: 'green',  columns: GNB_COLUMNS },
-    { key: 'GSM',    label: t('export.gsmFields'),    tag: 'GSM',  tagColor: 'orange', columns: GSM_COLUMNS },
   ], [t]);
 
   const handleCheckAll = useCallback((columns: ExportColumn[], checked: boolean) => {
