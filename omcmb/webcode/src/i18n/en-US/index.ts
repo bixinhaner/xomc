@@ -49,6 +49,9 @@ const messages: Record<string, string> = {
   'common.yes':            'Yes',
   'common.no':             'No',
   'common.unknown':        'Unknown',
+  'common.off':            'Off',
+  'common.normal':         'Normal',
+  'common.broken':         'Broken',
 
   // -------------------------------------------------------------------------
   // Table headers
@@ -83,8 +86,15 @@ const messages: Record<string, string> = {
   'status.active':         'Active',
   'status.inactive':       'Inactive',
   'status.locked':         'Locked',
+  'status.unlocked':       'Unlocked',
   'status.enabled':        'Enabled',
   'status.disabled':       'Disabled',
+  'status.connected':      'Connected',
+  'status.disconnected':   'Disconnected',
+  'status.synchronized':   'Synchronized',
+  'status.notSynchronized': 'Not Synchronized',
+  'status.rfOn':           'RF On',
+  'status.rfOff':          'RF Off',
   'status.managed':        'Managed',
   'status.unmanaged':      'Unmanaged',
   'status.preManaged':     'Pre-managed',
@@ -407,6 +417,9 @@ const messages: Record<string, string> = {
   'device.firmwareVersion':     'Firmware Version',
   'device.macAddress':          'MAC Address',
   'device.groupName':           'Device Group',
+  'device.moveToGroupTip':      '{count} device(s) selected. Please choose a target group:',
+  'device.searchGroup':         'Search groups',
+  'device.selectedGroup':       'Target group',
   'device.onlineTime':          'Online Time',
   'device.offlineTime':         'Offline Time',
   'device.onlineDuration':      'Online Duration',
@@ -447,6 +460,9 @@ const messages: Record<string, string> = {
   'device.serviceStatus':       'Service Status',
   'device.bscLinkStatus':       'BSC Link Status',
   'device.bscSerialNumber':     'BSC Serial Number',
+  'device.bscPrimary':          'Primary',
+  'device.bscBackup':           'Backup',
+  'device.multiCellStatus':     'Multi-cell Status',
   'device.btsNum':              'BTS Count',
 
   // Monitor page extended fields (Network)
@@ -482,6 +498,23 @@ const messages: Record<string, string> = {
   'device.action.halobOff':      'HaloB Off',
   'device.action.logCollect':    'Log Collect',
   'device.action.tr069Collect':  'Collect TR069 Msg',
+
+  // Action confirm & feedback messages
+  'device.action.rebootConfirm':     'Are you sure to reboot this device?',
+  'device.action.activateConfirm':   'Are you sure to {action} this device?',
+  'device.action.rfConfirm':         'Are you sure to {action} the RF of this device?',
+  'device.action.halobConfirm':      'This change requires device restart. Are you sure?',
+  'device.action.logCollecting':     'Logs are being collected',
+  'device.action.tr069Collecting':   'Packets are being collected',
+  'device.action.tr069Interval':     'Collection duration',
+  'device.action.tr069Interval5':    '5 minutes',
+  'device.action.tr069Interval10':   '10 minutes',
+  'device.action.resetConfig':       'Reset to Default',
+  'device.action.resetConfigConfirm': 'Are you sure to reset to default configuration? This cannot be undone.',
+  'device.action.activateCell':      'Activate Cell {n}',
+  'device.action.deactivateCell':    'Deactivate Cell {n}',
+  'device.action.rfOnCell':          'RF{n} On',
+  'device.action.rfOffCell':         'RF{n} Off',
 
   // -------------------------------------------------------------------------
   // Alarm page labels
@@ -692,10 +725,11 @@ const messages: Record<string, string> = {
   // Sync params modal
   // -------------------------------------------------------------------------
   'sync.title':             'Sync',
-  'sync.alarmManagement':   'Alarm Management',
   'sync.activeAlarms':      'Active Alarms',
   'sync.basicConfig':       'Basic Config',
   'sync.advancedConfig':    'Advanced Config',
+  'sync.syncParamsLabel':   'Sync Parameters',
+  'sync.selectedCount':     '{count} item(s) selected',
   'sync.selectGroupTip':    'Please select a device group',
 
   // -------------------------------------------------------------------------

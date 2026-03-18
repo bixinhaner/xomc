@@ -49,6 +49,9 @@ const messages: Record<string, string> = {
   'common.yes':            '是',
   'common.no':             '否',
   'common.unknown':        '未知',
+  'common.off':            '关',
+  'common.normal':         '正常',
+  'common.broken':         '损坏',
 
   // -------------------------------------------------------------------------
   // Table headers
@@ -83,8 +86,15 @@ const messages: Record<string, string> = {
   'status.active':         '激活',
   'status.inactive':       '未激活',
   'status.locked':         '锁定',
+  'status.unlocked':       '未锁定',
   'status.enabled':        '已启用',
   'status.disabled':       '已禁用',
+  'status.connected':      '已连接',
+  'status.disconnected':   '未连接',
+  'status.synchronized':   '已同步',
+  'status.notSynchronized': '未同步',
+  'status.rfOn':           '射频开',
+  'status.rfOff':          '射频关',
   'status.managed':        '已管理',
   'status.unmanaged':      '未管理',
   'status.preManaged':     '预管理',
@@ -407,6 +417,9 @@ const messages: Record<string, string> = {
   'device.firmwareVersion':     '固件版本',
   'device.macAddress':          'MAC地址',
   'device.groupName':           '设备组',
+  'device.moveToGroupTip':      '已选择 {count} 台设备，请选择目标设备组：',
+  'device.searchGroup':         '搜索设备组',
+  'device.selectedGroup':       '目标设备组',
   'device.onlineTime':          '接入时间',
   'device.offlineTime':         '断开时间',
   'device.onlineDuration':      '累计时长',
@@ -447,6 +460,9 @@ const messages: Record<string, string> = {
   'device.serviceStatus':       '状态',
   'device.bscLinkStatus':       'BSC连接状态',
   'device.bscSerialNumber':     '所属BSC编码',
+  'device.bscPrimary':          '主',
+  'device.bscBackup':           '备',
+  'device.multiCellStatus':     '多小区状态',
   'device.btsNum':              'BTS数',
 
   // 监控页面扩展字段 (Network)
@@ -482,6 +498,23 @@ const messages: Record<string, string> = {
   'device.action.halobOff':      'HaloB 关闭',
   'device.action.logCollect':    '日志收集',
   'device.action.tr069Collect':  '收集报文',
+
+  // Action confirm & feedback messages (操作确认和反馈)
+  'device.action.rebootConfirm':     '确定重启设备吗？',
+  'device.action.activateConfirm':   '确定要{action}该设备吗？',
+  'device.action.rfConfirm':         '确定要{action}该设备射频吗？',
+  'device.action.halobConfirm':      '参数修改需要重启基站，确定修改吗？',
+  'device.action.logCollecting':     '日志正在收集',
+  'device.action.tr069Collecting':   '报文正在收集',
+  'device.action.tr069Interval':     '收集时长',
+  'device.action.tr069Interval5':    '5 分钟',
+  'device.action.tr069Interval10':   '10 分钟',
+  'device.action.resetConfig':       '恢复默认配置',
+  'device.action.resetConfigConfirm': '确定恢复默认配置吗？此操作不可撤销。',
+  'device.action.activateCell':      '激活 Cell {n}',
+  'device.action.deactivateCell':    '去激活 Cell {n}',
+  'device.action.rfOnCell':          'RF{n} 开启',
+  'device.action.rfOffCell':         'RF{n} 关闭',
 
   // -------------------------------------------------------------------------
   // Alarm page labels
@@ -692,10 +725,11 @@ const messages: Record<string, string> = {
   // Sync params modal
   // -------------------------------------------------------------------------
   'sync.title':             '同步',
-  'sync.alarmManagement':   '告警管理',
   'sync.activeAlarms':      '活动告警',
   'sync.basicConfig':       '基础配置',
   'sync.advancedConfig':    '高级配置',
+  'sync.syncParamsLabel':   '检测参数',
+  'sync.selectedCount':     '已选 {count} 项',
   'sync.selectGroupTip':    '请选择设备组',
 
   // -------------------------------------------------------------------------

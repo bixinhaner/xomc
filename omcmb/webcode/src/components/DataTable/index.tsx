@@ -27,6 +27,7 @@ export interface DataTableColumn<T> {
   copyable?: boolean;
   mono?: boolean;
   group?: ColumnGroup;
+  headerRender?: React.ReactNode;
 }
 
 export interface BatchAction {
@@ -159,9 +160,10 @@ function DataTable<T extends Record<string, unknown>>(
     return orderedColumns
       .filter((col) => !hiddenKeys.includes(col.key))
       .map((col) => {
+        const titleContent = col.headerRender ?? col.title;
         const titleNode = (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-            {col.title}
+            {titleContent}
             {col.filterable && (
               <ColumnFilter
                 columnKey={col.key}
@@ -191,7 +193,7 @@ function DataTable<T extends Record<string, unknown>>(
                       <Tooltip title={text}>
                         <Typography.Text
                           ellipsis
-                          style={col.mono ? { fontFamily: 'monospace', fontSize: 12 } : undefined}
+                          style={col.mono ? { fontFamily: 'monospace' } : undefined}
                         >
                           {text}
                         </Typography.Text>

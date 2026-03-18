@@ -424,6 +424,232 @@ mac_address, group_name, cell_ip, op_state, ue_count
 
 这 10 个字段在所有三个监控页面中都是**默认勾选**的，应作为统一设备列表的默认显示列。
 
+### 4.4 统一设备列表 — 三制式字段适用性对照表
+
+> 每个字段标注在哪些制式下有数据，不适用的制式显示为空（`-`）。
+
+#### 公共字段 (common)
+
+| key | 标题 | eNB | gNB | GSM | 默认显示 | 状态渲染 |
+|-----|------|:---:|:---:|:---:|:--------:|:--------:|
+| sn | SN | ✅ | ✅ | ✅ | ✅ | - |
+| connStatus | 连接状态 | ✅ | ✅ | ✅ | ✅ | StatusIndicator |
+| alarmLevel | 告警级别 | ✅ | ✅ | ✅ | ✅ | Tag(颜色) |
+| hostName | 名称 | ✅(主机名) | ✅(站点名) | ✅(BSC名) | ✅ | - |
+| networkType | 基站制式 | ✅ | ✅ | ✅ | ✅ | Tag(颜色) |
+| productType | 产品类型 | ✅ | ✅ | ✅ | ✅ | - |
+| deviceModel | 设备型号 | ✅ | ✅ | ✅ | ✅ | - |
+| softwareVersion | 软件版本 | ✅ | ✅ | ✅ | ✅ | - |
+| macAddress | MAC地址 | ✅ | ✅ | ✅ | ✅ | - |
+| groupName | 设备组 | ✅ | ✅ | ✅ | ✅ | - |
+| ipAddress | IP地址 | ✅ | ✅ | ✅ | ✅ | - |
+| onlineTime | 接入时间 | ✅ | ✅ | - | ✅ | - |
+| offlineTime | 断开时间 | ✅ | ✅ | - | ✅ | - |
+| opState | 激活状态 | ✅ | ✅ | ✅(仅BTS) | ✅ | Tag(active/inactive) |
+| ueCount | UE数 | ✅ | ✅ | ✅ | ✅ | - |
+| rfStatus | 射频状态 | ✅ | ✅ | ✅(仅BTS) | ✅ | Tag(on/off) |
+| syncStatus | 同步状态 | ✅ | ✅ | ✅(仅BTS) | ❌ | Tag(GPS同步/1588同步/未同步) |
+| productName | 产品名称 | ✅ | ✅ | ✅ | ❌ | - |
+| firmwareVersion | 固件版本 | ✅ | ✅(硬件版本) | ✅ | ❌ | - |
+| onlineDuration | 累计时长 | ✅ | - | ✅ | ❌ | - |
+| upTime | 运行时间 | ✅ | ✅ | ✅ | ❌ | - |
+| firstOnlineTime | 首次连接 | ✅ | ✅ | ✅ | ❌ | - |
+| lastInformTime | 上次连接 | ✅ | ✅ | ✅ | ❌ | - |
+| lastOnlineTime | 最后在线 | ✅ | ✅ | ✅ | ❌ | - |
+| siteName | 站址名称 | ✅ | ✅ | ✅ | ❌ | - |
+| remark | 备注 | ✅ | ✅ | ✅ | ❌ | - |
+| longitude | GPS经度 | ✅ | ✅ | ✅ | ❌ | - |
+| latitude | GPS纬度 | ✅ | ✅ | ✅ | ❌ | - |
+| gpsHeight | GPS高度 | ✅ | ✅ | ✅ | ❌ | - |
+| gpsSatelliteCount | GPS卫星数 | ✅ | - | ✅ | ❌ | - |
+| installAddress | 安装地址 | ✅ | - | - | ❌ | - |
+
+#### eNB+gNB 共享字段
+
+| key | 标题 | eNB | gNB | GSM | 状态渲染 |
+|-----|------|:---:|:---:|:---:|:--------:|
+| pci | PCI | ✅ | ✅ | - | - |
+| tac | TAC | ✅ | ✅ | - | - |
+| band | Band | ✅ | ✅ | - | - |
+| dlEarfcn | DL频点 | ✅(EARFCN) | ✅(NR ARFCN) | - | - |
+| ulEarfcn | UL频点 | ✅(EARFCN) | ✅(NR ARFCN) | - | - |
+| networkModel | 基站指示 | ✅ | ✅ | - | - |
+| txPower | Tx Power | ✅(CPE发射功率) | ✅ | - | - |
+| halobFlag | HaloB | ✅(HaloX) | ✅(HaloB) | - | Tag(启用/禁用) |
+| adminState | Admin State | ✅ | ✅ | - | Tag(激活/取消激活) |
+| ipsecAddr | IPSec地址 | ✅ | ✅ | - | - |
+
+#### eNB 独有字段
+
+| key | 标题 | 状态渲染 |
+|-----|------|:--------:|
+| enbId | eNodeB ID | - |
+| cellId | 小区ID | - |
+| eci | ECI | - |
+| plmnId | PLMN | - |
+| subframeAssignment | 子帧配比 | - |
+| specialSubframe | 特殊子帧配比 | - |
+| rootIndex | 根序列索引 | - |
+| siteId | Site ID | - |
+| bandwidth | 带宽 | - |
+| mmeStatus | MME状态 | Tag(已连接/未连接) |
+| pmReportStatus | KPI上报状态 | - |
+| cpeCount | CPE连接数 | - |
+| lockStatus | 锁定状态 | Tag(锁定/未锁定) |
+| wanSpeed | WAN状态 | - |
+| serviceStatus | 状态 | - |
+| validity | 有效期 | - |
+| gpsVersion | GPS版本 | - |
+| rom | ROM | - |
+| mmepoolIpsecAddr | MME Pool IPSec | - |
+| mechanicalDowntilt | 机械下倾角 | - |
+| electronicDowntilt | 电子下倾角 | - |
+| verticalBeamWidth | 垂直波束宽度 | - |
+| horizontalAzimuth | 水平方位角 | - |
+
+#### gNB 独有字段
+
+| key | 标题 | 状态渲染 |
+|-----|------|:--------:|
+| gnbId | gNB ID | - |
+| nrCellId | NR Cell ID | - |
+| amfStatus | AMF状态 | Tag(已连接/未连接) |
+| multiPlmnEnable | Multi PLMN | Tag(启用/禁用) |
+| euCount | EU数 | - |
+| ruCount | RU数 | - |
+| rollbackVersion | 回退版本 | - |
+| sasParam | SAS参数 | - |
+| euRu | EU/RU数 | - |
+| halobLicense | HaloB License | - |
+| energySaving | Energy Saving | - |
+| gnbTopoCellmgr | gNB TOPO | - |
+| sslCertValidity | SSL证书有效期 | - |
+
+#### GSM 独有字段
+
+| key | 标题 | 状态渲染 |
+|-----|------|:--------:|
+| lac | LAC | - |
+| arfcn | 频点 | - |
+| uplinkFrequency | 上行频率 | - |
+| downlinkFrequency | 下行频率 | - |
+| bscLinkStatus | BSC连接状态 | Tag(连接/断开) |
+| bscSelect | BSC Select | - |
+| bscSerialNumber | 所属BSC编码 | - |
+| btsNum | BTS数 | - |
+| ipaUnitId | IPA Unit ID | - |
+| omlRemoteIp | OML Remote IP | - |
+| omlRemoteIpBak | OML Remote IP Bak | - |
+
+### 4.5 状态字段枚举值参考
+
+> 基于原始 JSP 页面的格式化函数和条件渲染逻辑提取。
+
+#### connStatus — 连接状态
+
+| 前端值 | 后端值 | 中文 | 显示样式 | 适用制式 |
+|--------|:------:|------|---------|:--------:|
+| online | 1 | 在线 / 连接正常 | 绿色状态指示 | 全部 |
+| offline | 0 | 离线 / 连接断开 | 灰色状态指示 | 全部 |
+| - | 3 | 同步中 | - | 全部 |
+| - | 2 | 同步失败 | - | 全部 |
+| - | 4 | 初始化中 | - | 仅eNB |
+| - | 5 | 远同步中 | - | 仅eNB |
+| - | 6 | 远同步完成 | - | 仅eNB |
+
+#### opState — 激活状态
+
+| 前端值 | 后端值 | 中文 | Tag颜色 | 适用制式 |
+|--------|:------:|------|---------|:--------:|
+| active | 1 | 激活 | success(绿) | 全部 |
+| inactive | 0 | 未激活 / 取消激活 | error(红) | 全部 |
+
+> GSM 中 BSC 类型设备显示 `--`（不适用），仅 BTS 显示激活状态。
+> 多小区设备(Intel_CR_CA/TC, MLN_CA, BM, QA_436Q_CA)支持逗号分隔多值如 `"1,0,1"`。
+
+#### rfStatus — 射频开关状态
+
+| 前端值 | 后端值 | 中文 | Tag颜色 | 适用制式 |
+|--------|:------:|------|---------|:--------:|
+| on | on / 1 | 射频开 | success(绿) | 全部 |
+| off | off / 0 | 射频关 | error(红) | 全部 |
+| - | -- | 不支持 | - | GSM(BSC) |
+
+> 多小区设备支持逗号分隔如 `"on,off,on"`。
+
+#### mmeStatus — MME状态（仅eNB）
+
+| 前端值 | 后端值 | 中文 | Tag颜色 |
+|--------|:------:|------|---------|
+| connected | 1 / Connected | 已连接 | success(绿) |
+| disconnected | 0 / Disconnected | 未连接 | error(红) |
+
+#### amfStatus — AMF状态（仅gNB）
+
+| 前端值 | 后端值 | 中文 | Tag颜色 |
+|--------|:------:|------|---------|
+| connected | 1 | 已连接 | success(绿) |
+| disconnected | 0 | 未连接 | error(红) |
+
+> 后端返回 JSON 数组字符串，解析后判断全部连接/全部断开/部分连接。
+
+#### syncStatus — 同步状态
+
+| 前端值 | 后端值 | 中文 | Tag颜色 | 适用制式 |
+|--------|--------|------|---------|:--------:|
+| synchronized | 1 | 已同步 | success(绿) | eNB+gNB |
+| not synchronized | 0 | 未同步 | error(红) | eNB+gNB |
+| GPS synchronized | GPS synchronized | GPS同步 | success(绿) | GSM(BTS) |
+| 1588 synchronized | 1588 synchronized | 1588同步 | success(绿) | GSM(BTS) |
+| REM synchronized | REM synchronized | REM同步 | success(绿) | GSM(BTS) |
+
+#### halobFlag — HaloB/HaloX 开关
+
+| 前端值 | 后端值 | 中文 | Tag颜色 | 适用制式 |
+|--------|:------:|------|---------|:--------:|
+| true | 1 | 已启用 | success(绿) | eNB+gNB |
+| false | 0 | 已禁用 | default(灰) | eNB+gNB |
+
+#### adminState — Admin 状态
+
+| 前端值 | 后端值 | 中文 | Tag颜色 | 适用制式 |
+|--------|:------:|------|---------|:--------:|
+| active | 1 | 激活 | success(绿) | eNB+gNB |
+| inactive | 0 | 取消激活 | error(红) | eNB+gNB |
+
+#### multiPlmnEnable — Multi PLMN 状态（仅gNB）
+
+| 前端值 | 后端值 | 中文 | Tag颜色 |
+|--------|:------:|------|---------|
+| enabled | 1 | 已启用 | success(绿) |
+| disabled | 0 | 已禁用 | default(灰) |
+
+#### lockStatus — 锁定状态（仅eNB）
+
+| 前端值 | 后端值 | 中文 | Tag颜色 |
+|--------|:------:|------|---------|
+| locked | 1 | 锁定 | warning(橙) |
+| unlocked | 0 | 未锁定 | success(绿) |
+
+#### bscLinkStatus — BSC连接状态（仅GSM）
+
+| 前端值 | 后端值 | 中文 | Tag颜色 |
+|--------|:------:|------|---------|
+| connected | 0 | 连接 | success(绿) |
+| disconnected | 1 | 断开 | error(红) |
+
+> 注意：BSC连接状态的后端值与其他状态相反（0=连接，1=断开）。
+
+#### alarmLevel — 告警级别
+
+| 前端值 | 后端值 | 中文 | Tag颜色 | 说明 |
+|--------|:------:|------|---------|------|
+| critical | 31001 | 紧急 | red | 最高级 |
+| major | 31002 | 重要 | orange | |
+| minor | 31003 | 次要 | gold | |
+| warning | 31004 | 警告 | blue | |
+| none | - | 无告警 | default(灰) | |
+
 ---
 
 ## 5. 统一设备列表实现方案
@@ -432,7 +658,7 @@ mac_address, group_name, cell_ip, op_state, ue_count
 
 ### 5.1 设计思路
 
-将三个原始监控页面（LTE eNodeB、GSM、5G NR gNodeB）合并为一个统一的设备列表页面。通过 **基站制式（networkType）** 列区分 eNB / gNB / GSM，所有字段按归属制式分为四组。
+将三个原始监控页面（LTE eNodeB、GSM、5G NR gNodeB）合并为一个统一的设备列表页面。通过 **基站制式（networkType）** 列区分 eNB / gNB / GSM，所有字段按归属制式分为五组。某制式不支持的字段在该制式设备行中显示为空。
 
 ### 5.2 字段分组方案
 
@@ -440,53 +666,38 @@ mac_address, group_name, cell_ip, op_state, ue_count
 
 | 分组 | group 值 | 说明 | 列数 | 默认显示 |
 |------|----------|------|:----:|:--------:|
-| 公共字段 | `common` | 三制式共有的字段 | 27 | 15 |
-| eNB 字段 | `eNB` | LTE 独有 / LTE+GSM 共有 | 31 | 0 |
-| gNB 字段 | `gNB` | 5G NR 独有 + othersCol | 15 | 0 |
+| 公共字段 | `common` | 三制式共有 + 状态字段 | 31 | 16 |
+| eNB+gNB 共享 | `eNB+gNB` | LTE 和 5G NR 共有（GSM 显示空） | 10 | 0 |
+| eNB 字段 | `eNB` | LTE 独有 | 23 | 0 |
+| gNB 字段 | `gNB` | 5G NR 独有 | 13 | 0 |
 | GSM 字段 | `GSM` | GSM 独有 | 11 | 0 |
-| **合计** | | | **84** | **15** |
+| **合计** | | | **88** | **16** |
 
-#### 公共字段 (common) — 27 列
+#### 公共字段 (common) — 31 列
 
-默认显示（15列）：
+默认显示（16列）：sn, connStatus, alarmLevel, hostName, networkType, productType, deviceModel, softwareVersion, macAddress, groupName, ipAddress, onlineTime, offlineTime, opState, ueCount, rfStatus
 
-| # | key | 标题 | 说明 |
-|---|-----|------|------|
-| 1 | sn | SN | 设备序列号，可点击跳转详情 |
-| 2 | connStatus | 连接状态 | 在线/离线状态指示 |
-| 3 | alarmLevel | 告警级别 | 彩色 Tag 显示 |
-| 4 | hostName | 名称 | 原 host_name，LTE=主机名，GSM=BSC名称，5G=站点名称 |
-| 5 | networkType | 基站制式 | eNB(蓝)/gNB(绿)/GSM(橙) Tag |
-| 6 | productType | 产品类型 | eNB / gNB / GSM |
-| 7 | deviceModel | 设备型号 | BBU3910 等 |
-| 8 | softwareVersion | 软件版本 | |
-| 9 | macAddress | MAC地址 | 等宽字体，可复制 |
-| 10 | groupName | 设备组 | |
-| 11 | ipAddress | IP地址 | 等宽字体，可复制 |
-| 12 | onlineTime | 接入时间 | 格式化时间戳 |
-| 13 | offlineTime | 断开时间 | 格式化时间戳 |
-| 14 | opState | 操作状态 | active(绿)/inactive(红) Tag |
-| 15 | ueCount | UE数 | |
+默认隐藏（15列）：syncStatus, productName, firmwareVersion, onlineDuration, upTime, firstOnlineTime, lastInformTime, lastOnlineTime, siteName, remark, longitude, latitude, gpsHeight, gpsSatelliteCount, installAddress
 
-默认隐藏（12列）：productName, firmwareVersion, onlineDuration, upTime, firstOnlineTime, lastInformTime, lastOnlineTime, siteName, rfStatus, longitude, latitude, gpsHeight, gpsSatelliteCount, installAddress
+#### eNB+gNB 共享字段 — 10 列（全部默认隐藏）
 
-#### eNB 字段 — 31 列（全部默认隐藏）
+pci, tac, band, dlEarfcn, ulEarfcn, networkModel, txPower, halobFlag, adminState, ipsecAddr
 
-小区信息：enbId, cellId, eci, pci, plmnId, tac, subframeAssignment, specialSubframe, rootIndex, siteId, bandwidth, dlEarfcn, ulEarfcn, networkModel, txPower, band
-状态信息：mmeStatus, pmReportStatus, cpeCount, lockStatus, wanSpeed, serviceStatus, adminState, multiPlmnEnable
-设备信息：gpsVersion, rom, remark
-网络信息：ipsecAddr, mmepoolIpsecAddr
+#### eNB 字段 — 23 列（全部默认隐藏）
+
+小区信息：enbId, cellId, eci, plmnId, subframeAssignment, specialSubframe, rootIndex, siteId, bandwidth
+状态信息：mmeStatus, pmReportStatus, cpeCount, lockStatus, wanSpeed, serviceStatus, validity
+设备信息：gpsVersion, rom
+网络信息：mmepoolIpsecAddr
 位置信息：mechanicalDowntilt, electronicDowntilt, verticalBeamWidth, horizontalAzimuth
 
-#### gNB 字段 — 15 列（全部默认隐藏）
+#### gNB 字段 — 13 列（全部默认隐藏）
 
-小区/状态：gnbId, nrCellId, amfStatus, halobFlag, syncStatus, validity, euCount, ruCount
-5G NR 扩展（原 othersCol）：rollbackVersion, sasParam, euRu, halobLicense, energySaving, gnbTopoCellmgr, sslCertValidity
+gnbId, nrCellId, amfStatus, multiPlmnEnable, euCount, ruCount, rollbackVersion, sasParam, euRu, halobLicense, energySaving, gnbTopoCellmgr, sslCertValidity
 
 #### GSM 字段 — 11 列（全部默认隐藏）
 
-小区信息：lac, arfcn, uplinkFrequency, downlinkFrequency
-状态/网络：bscLinkStatus, bscSelect, bscSerialNumber, btsNum, ipaUnitId, omlRemoteIp, omlRemoteIpBak
+lac, arfcn, uplinkFrequency, downlinkFrequency, bscLinkStatus, bscSelect, bscSerialNumber, btsNum, ipaUnitId, omlRemoteIp, omlRemoteIpBak
 
 ### 5.3 列设置交互设计
 
@@ -607,7 +818,191 @@ mac_address, group_name, cell_ip, op_state, ue_count
 
 ---
 
-## 6. 各监控页面产品类型分析
+## 6. 单元格交互行为对照表
+
+> 对比三个原始 JSP 监控页面中每个字段的单元格交互行为（点击、弹窗、图标、格式化等），记录统一设备列表的实现状态。
+
+### 6.1 已实现的交互
+
+| 字段 | 原始行为 | 统一设备列表实现 |
+|------|---------|---------------|
+| **SN** (serial_number) | eNB/GSM: 纯文本; gNB: 纯文本 | ✅ 改进：可点击链接跳转设备详情页 |
+| **连接状态** (connection_status) | 多状态图标(在线/离线/初始化/同步中/异常)，hover 显示同步时间 | ✅ StatusIndicator 组件(在线/离线) |
+| **告警** (alarm) | 颜色圆形徽章(红/橙/黄/蓝)，**点击跳转告警 tab** | ✅ 彩色 Tag + 点击跳转 `?tab=alarm` |
+| **主机名** (host_name) | 名称不匹配时显示⚠图标+同步弹窗 | ⚠ 仅纯文本 (TODO: 名称不匹配警告) |
+| **制式** (networkType) | 原始无此列 | ✅ 新增列，彩色 Tag 区分三制式 |
+| **IP 地址** (cell_ip) | **可点击**：`https://{ip}` 新窗口打开设备 Web UI | ✅ 蓝色链接，点击新窗口打开 |
+| **激活状态** (op_state) | 多小区弹窗(激活/去激活列表)，License 过期⚠图标 | ✅ 多小区支持：汇总 Tag + [N/M] Popover 逐小区明细，兼容 "1,0,1" 和 "active,inactive" 格式 |
+| **射频状态** (rf_status) | 多小区弹窗(开/关列表) | ✅ 多小区支持：汇总 Tag + [N/M] Popover 逐小区明细，兼容 "on,off,on" 和 "1,0,1" 格式 |
+| **同步状态** (synStatus) | 多种同步状态文本，"未同步"红色 | ✅ 多状态 Tag，"未同步"加粗红色 |
+| **UE 数** (ue_count) | -1/null→"--", 0→"0", **>0 可点击查看 UE 详情** | ✅ 格式化 + 可点击链接跳转 `?tab=ue` |
+| **KPI 上报** (pm_report_status) | off→关, normal→正常, broken→损坏(红色) | ✅ 彩色 Tag(关/正常/损坏) |
+| **CPE 连接数** (cpe_connect) | -1/null→"--", 0→"0", **>0 可点击查看 CPE 详情** | ✅ 格式化 + 可点击链接跳转 `?tab=cpe` |
+| **EU/RU 数** (euCount/ruCount) | "connected/total" 格式，**连接数<总数时红色** | ✅ 降级时红色文本 |
+| **GPS 卫星数** (gps_satellite_count) | **有详情时可点击查看卫星信号表** | ✅ >0 时可点击链接跳转 `?tab=gps` |
+| **HaloB** (halob_flag) | 1→绿色启用图标, 0→红色禁用图标 | ✅ 彩色 Tag(启用/禁用) |
+| **Admin State** (adminState) | gNB: 1→Locked, 2→Unlocked, 3→ShuttingDown | ✅ Tag(Locked/Unlocked/ShuttingDown)，颜色 warning/success/error |
+| **Multi PLMN** (multiPlmnEnable) | 0→禁用, 1→启用 | ✅ 彩色 Tag(启用/禁用) |
+| **BSC 连接状态** (BscLinkStatus) | 0→未连接, 1→已连接 | ✅ 彩色 Tag(已连接/未连接) |
+| **BSC Select** (BscSelect) | 0→"主"(Primary), 1→"备"(Backup) | ✅ 值映射中文显示 |
+| **上行/下行频率** (uplink/downlinkFrequency) | 数值 + "MHz" 后缀 | ✅ 值 + MHz 后缀 |
+| **锁定状态** (lock_status) | 可点击切换锁定/解锁，锁定原因弹窗 | ⚠ 仅 Tag，TODO: 交互式锁定操作 |
+| **Remark 列头** | 可编辑列头名称，同步到所有页面 | ✅ 可编辑(EditOutlined + Input 确认/取消) |
+| **MME 状态** (mme_status) | 多 MME 弹窗(IP/状态/PLMN 列表) | ✅ 多 MME 支持：汇总 Tag + [N/M] Popover 含 IP/PLMN 明细，兼容 JSON 数组和旧格式 "1"/"0" |
+| **AMF 状态** (amf_status) | 多 AMF 弹窗(IP/状态/PLMN 列表) | ✅ 多 AMF 支持：汇总 Tag + [N/M] Popover 含 IP/PLMN 明细，兼容 JSON 数组和旧格式 |
+
+### 6.2 待实现的复杂交互 (TODO)
+
+以下交互需要后端 API 支持或复杂的前端组件，标记为后续迭代：
+
+| 交互类型 | 原始行为 | 涉及字段 | 原始 API |
+|---------|---------|---------|---------|
+| **主���名同步** | ���备上报名称 ≠ OMC 名称时显示⚠图标，点击弹窗提示同步 | hostName | `syncCellName.action` |
+| **GPS 坐标同步** | 设备上报 GPS ≠ OMC GPS 时显示⚠图标，点击弹窗提示同步 | longitude, latitude, gpsHeight | `syncGPSInfo.action` |
+| ~~**多小区激活状态**~~ | ~~多小区设备显示汇总 + 可点击 `[N/M]` 弹窗逐小区显示~~ | ~~opState~~ | ✅ 已实现 `renderMultiCellStatus` |
+| ~~**多小区射频状态**~~ | ~~同上，逐小区射频开/关弹窗~~ | ~~rfStatus~~ | ✅ 已实现 `renderMultiCellStatus` |
+| ~~**多 MME 详情**~~ | ~~多个 MME IP/连接状态/PLMN 列表弹窗~~ | ~~mmeStatus~~ | ✅ 已实现 `renderMultiConnStatus` |
+| ~~**多 AMF 详情**~~ | ~~多个 AMF IP/连接状态/PLMN 列表弹窗~~ | ~~amfStatus~~ | ✅ 已实现 `renderMultiConnStatus` |
+| **UE 详情面板** | 点击 UE 数打开滑出面板，显示 UE 列表(UEID/IMSI/速率等) | ueCount | `getueCountsData.action` |
+| **CPE 详情面板** | 点击 CPE 数打开滑出面板 | cpeCount | `toUEDetailPage.action` |
+| **卫星详情面板** | 点击卫星数打开面板，显示卫星号+信号强度 | gpsSatelliteCount | `getSatellitesDataList.action` |
+| **锁定状态操作** | 点击切换锁定/解锁 + MAC 锁定对话框 | lockStatus | `cellModifyLockStatus.action` |
+| **EARFCN→频率转换** | EARFCN 编号转为频率显示："38650(2300MHz)" | dlEarfcn | 前端查表转换 |
+| **连接状态增强** | 初始化/同步中/异常等多状态图标 + hover 同步时间 | connStatus | `lastsyntime` 字段 |
+| **HaloD 模式** | HaloD 关联设备弹窗（锁定/过滤/关联列表） | halobFlag | `queryHalodRelationInfo.action` |
+| **有效期警告** | License 过期时在 opState 列显示红色⚠图标 | validity + opState | `delay_avaliable` 字段 |
+
+### 6.3 操作列菜单对照
+
+三个页面的行级操作菜单项（原始通过右键上下文菜单实现，统一设备列表通过 `⋯` 下拉菜单实现）：
+
+| 操作 | eNB | gNB | GSM | 权限码 | 统一列表 |
+|------|:---:|:---:|:---:|-------|---------|
+| 同步 | ✅ | ✅ | ✅ | `CODE_ENB_SYNCHRONIZE` / `CODE_GNB_SYNCHRONIZE` | ✅ sync |
+| TR069 报文采集 | ✅ | ✅ | ✅ (超级用户) | `CODE_ENB_TR069_MSG_EXCHANGE` / `CODE_GNB_TR069_MSG_EXCHANGE` | ✅ tr069Collect |
+| 重启 | ✅ | ✅ | ✅ | `CODE_ENB_REBOOT` / `CODE_GNB_REBOOT` | ✅ reboot |
+| 恢复默认配置 | ✅ | — | ✅ | — | ✅ resetConfig |
+| 激活/去激活 | ✅ (多小区) | ✅ (逐小区) | ✅ (多小区 CA) | `CODE_ENB_ACTIVE` / `CODE_GNB_ACTIVE` | ✅ activate (多小区子菜单) |
+| 射频开/关 | ✅ (多小区) | ✅ (逐小区) | — | `CODE_ENB_RF_ENABLE` / `CODE_GNB_RF_ENABLE` | ✅ rf (多射频子菜单) |
+| HaloB 开/关 | ✅ | ✅ | — | 动态检测 | ✅ halob |
+| 日志采集 | ✅ | ✅ | ✅ | `CODE_ENB_LOGS` / `CODE_GNB_LOGS` | ✅ logCollect |
+
+### 6.4 行级操作点击反馈行为详细对照
+
+> 从三个原始 JSP 逐操作提取的点击后反馈动作（确认弹窗、API 调用、成功/失败通知、特殊逻辑），以及统一设备列表的实现状态。
+
+#### 6.4.1 同步 (sync)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `openSyncDialog()` | `openSyncDialog()` | `vm.openSyncDialog()` | `handleRowAction('sync')` |
+| **点击行为** | 弹出同步参数弹窗，加载 `toSyncParamsPage.action` | 弹出同步参数弹窗（基础+高级参数） | 弹出同步参数弹窗（含 GPS/1588/REM） | ⚠ TODO: 接入同步参数弹窗 |
+| **API** | `cell/param/refreshCellInfo.action` | `cell/param/refreshCellInfo.action` + `batchSyncCell.action` | 同 eNB | — |
+| **参数** | `smallCellCode`, `selectedParams` | `smallCellCode`, `selectedParams`, `isGnb=1` | `cell_code` | — |
+| **成功反馈** | 弹窗自动关闭 | 弹窗自动关闭 | 弹窗自动关闭 | — |
+| **前置条件** | 必须在线 | 必须在线 | 必须在线 | ✅ 离线禁用 |
+
+#### 6.4.2 报文采集 (tr069Collect)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `vm.showCollectMessage()` | `showCollectMessage()` | `vm.showCollectMessage()` | `handleRowAction('tr069Collect')` |
+| **点击行为** | ①检查是否有其他设备在采集 → ②弹出采集时长选择弹窗（5/10分钟） | 同 eNB | 同 eNB（需超级用户） | ⚠ TODO: 接入检查+时长弹窗 |
+| **检查 API** | `trace/isExistTracingDevice.action` | 同 eNB | 同 eNB | — |
+| **执行 API** | `trace/start.action` | 同 eNB | 同 eNB | — |
+| **参数** | `deviceCode`, `serialNumber`, `type='enb'`, `collectInterval` | `type='gnb'` 其余同 eNB | 同 eNB | — |
+| **成功反馈** | "成功"提示 + 计时器启动 | "成功"提示 + 计时器启动 | "成功"提示 | ✅ "报文正在收集" |
+| **失败反馈** | "SN=xxx正在收集" (已有采集) | 同 eNB | 同 eNB | — |
+| **前置条件** | 必须在线；非双载波 | 必须在线；非双载波 | 必须在线 + 超级用户 | ✅ 离线禁用 |
+
+#### 6.4.3 重启 (reboot)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `cellReboot()` | `goReboot()` | `cellReboot()` | `handleRowAction('reboot')` |
+| **点击行为** | 弹出**危险确认弹窗**（红色样式）"确定重启设备吗？" | 弹出确认弹窗 | 弹出确认弹窗 | ✅ `modal.confirm` 危险样式 |
+| **API** | `cell/cpeinfos/cellReboot.action` | 同 eNB + `isGnb=1` | 同 eNB | ⚠ TODO: 接入 API |
+| **参数** | `cell_code` | `cell_code`, `isGnb=1` | `cell_code` | — |
+| **成功反馈** | "命令已下发" 提示 | "命令已下发" 提示 | 提示通知 | ✅ "命令已下发" |
+| **失败反馈** | 服务端错误消息 | 服务端错误消息 | 服务端错误消息 | — |
+| **前置条件** | 必须在线 | 必须在线 | 必须在线 | ✅ 离线禁用 |
+
+#### 6.4.4 恢复默认配置 (resetConfig)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `configReset()` | — | `configReset()` | `handleRowAction('resetConfig')` |
+| **点击行为** | 弹出**危险确认弹窗**"确定恢复默认配置吗？" | 不支持 | 同 eNB | ✅ `modal.confirm` 危险样式 |
+| **API** | 未明确 (configReset action) | — | 同 eNB | ⚠ TODO: 接入 API |
+| **成功反馈** | 无明确成功提示 | — | 同 eNB | ✅ "命令已下发" |
+| **前置条件** | 必须在线 | — | 必须在线 | ✅ 离线禁用 |
+
+#### 6.4.5 激活/去激活 (activate)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `activeOpStatus()` | `goMultActive()` | `activeOpStatus()` | `handleRowAction('activate_N')` |
+| **点击行为** | **单小区**: 直接切换。**多小区(CA)**: 展开为 Cell1/Cell2/Cell3 子菜单，逐小区切换。**PM-B4860**: 先弹出 slot 选择弹窗 | 展开为 Cell1/Cell2/Cell3 子菜单 | 同 eNB (支持 CA 多小区) | ✅ 单小区→确认弹窗；多小区→子菜单逐 Cell |
+| **API** | `cell/cpeinfos/cellModifyActiveStatus.action` | 同 eNB | 同 eNB | ⚠ TODO: 接入 API |
+| **参数** | `op_state`(0/1), `small_cell_code`, `cellNumber` | 同 eNB | `+isGsm='1'` | — |
+| **成功反馈** | "下发成功" + 刷新列表 | "下发成功" + 刷新列表 | "成功" + 刷新列表 | ✅ "命令已下发" |
+| **失败反馈** | 服务端错误消息 | 服务端错误消息 | 服务端错误消息 | — |
+| **特殊逻辑** | 位置变更时(isSystemDeActivation)显示额外警告弹窗 | — | — | — |
+| **前置条件** | 必须在线 | 必须在线 | 必须在线 | ✅ 离线禁用 |
+
+#### 6.4.6 射频开/关 (rf)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `setRFStatus()` | `setRFStatus()` | — | `handleRowAction('rf_N')` |
+| **点击行为** | **单射频**: 直接切换 on↔off。**多射频**: 展开为 RF1/RF2/RF3 子菜单逐 RF 切换 | 同 eNB (逐小区 RF 控制) | 不支持 | ✅ 单射频→确认弹窗；多射频→子菜单逐 RF |
+| **API** | `cell/cpeinfos/cellModifyRadioStatus.action` | 同 eNB | — | ⚠ TODO: 接入 API |
+| **参数** | `smallCellCode`, `radioStatus`(on/off), `cellNumber` | 同 eNB | — | — |
+| **成功反馈** | "下发成功" + 刷新列表 | "下发成功" + 刷新列表 | — | ✅ "命令已下发" |
+| **失败反馈** | "设置失败" | 服务端错误消息 | — | — |
+| **前置条件** | 必须在线；RF 状态非空/非未知 | 必须在线；RF 状态有效 | — | ✅ 离线禁用 |
+
+#### 6.4.7 HaloB 开/关 (halob)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `openCloseHalob()` | `openCloseHalob()` | — | `handleRowAction('halob')` |
+| **点击行为** | 弹出**警告确认弹窗**"参数修改需要重启基站" | 同 eNB | 不支持 | ✅ `modal.confirm` 危险样式 + 重启警告 |
+| **API** | `cell/cpeinfos/setCellHalobSwitch.action` | 同 eNB | — | ⚠ TODO: 接入 API |
+| **参数** | `cell_code`, `halob_switch`(0=开,1=关) | 同 eNB | — | — |
+| **成功反馈** | 弹窗关闭（无明确成功提示） | 弹窗关闭 | — | ✅ "命令已下发" |
+| **特殊逻辑** | 集中化模式下不显示 | 同 eNB | — | — |
+| **前置条件** | 必须在线；需 HaloB License | 必须在线；需 HaloB License | — | ✅ 离线禁用 |
+
+#### 6.4.8 日志收集 (logCollect)
+
+| 维度 | eNB | gNB | GSM | 统一列表 |
+|------|-----|-----|-----|---------|
+| **触发函数** | `confirmImmediateCollectLogFile()` | `goLogs()` | `gsmConfirmImmediateCollectLogFile()` | `handleRowAction('logCollect')` |
+| **点击行为** | **直接下发**（无确认弹窗），立即发送采集请求 | **直接下发** | **直接下发** | ✅ 直接提示"日志正在收集" |
+| **API** | `cell/collect/goImmediateCollectLogFile.action` | 同 eNB + `isGnb=1` | 同 eNB | ⚠ TODO: 接入 API |
+| **参数** | `serial_number`, `device_code`, `device_type='eNB'`, `execute_type='Immediately'`, `timeZone` | `+isGnb=1` | 同 eNB | — |
+| **成功反馈** | "日志正在收集" | "gNB日志收集提示"(i18n) | "日志正在收集" toast | ✅ "日志正在收集" |
+| **失败反馈** | 服务端错误消息 toast | 服务端错误消息 | 服务端错误消息 toast | — |
+| **前置条件** | 必须在线；非双载波 | 必须在线 | 必须在线 | ✅ 离线禁用 |
+
+### 6.5 eNB 特有操作（统一列表暂不纳入）
+
+以下操作仅在 eNB 原始页面存在，暂未整合到统一列表：
+
+| 操作 | 触发函数 | 行为 | 前置条件 |
+|------|---------|------|---------|
+| SAS 注册 | `registerSas()` | 确认弹窗 → 发送注册请求 | SAS 开关启用 (sasSwitch=="1") |
+| SAS 取消注册 | `deregisterSAS()` | 确认弹窗 → 发送注销请求 | SAS 已注册 |
+| SAS 强制/自动 RF | `setForceRFStatus()` | 切换 SAS 自动控制 ↔ 强制关闭 RF | SAS 启用 (sasEnable=="on") |
+| STUN 重启 | `vm.restartEnb()` | 通过 STUN 通道发送重启 (stunReboot) | stun_reboot==1 + 超级用户 |
+| 有效期/流量限制 | `setEffectPeriod()` / `setLimitation()` | 打开配置滑出面板 | eNB 独有功能 |
+| 设备信息 | `goCellDetailParamInfoWin()` | 打开设备参数信息滑出面板 | 任何状态可用 |
+| 设备设置 | `jumpToSetting()` / `goSettingPanel()` | 打开设置表单（不同平台不同处理） | 任何状态可用 |
+
+---
+
+## 7. 各监控页面产品类型分析
 
 ### 6.1 LTE eNodeB 监控页面
 

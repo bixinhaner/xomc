@@ -1,7 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Checkbox, Collapse, Modal, Tag } from 'antd';
+import { Checkbox, Collapse, Divider, Modal, Tag, Typography } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import { useT } from '@/hooks/useT';
+
+const { Text } = Typography;
 
 /** 网络类型标识 */
 type NetworkScope = 'common' | 'eNB' | 'gNB' | 'GSM' | 'eNB+gNB';
@@ -33,7 +35,7 @@ interface SyncParamsModalProps {
 
 // ---------------------------------------------------------------------------
 // 同步参数定义 — 从三制式 JSP 源码逐字段提取并合并
-// scope: common = 三制式共有, eNB+gNB = LTE+5G共有, eNB/gNB/GSM = 仅该制式
+// scope: common = 三制式共��, eNB+gNB = LTE+5G共有, eNB/gNB/GSM = 仅该制式
 // ---------------------------------------------------------------------------
 
 const BASIC_PARAMS: SyncParam[] = [
@@ -161,10 +163,10 @@ const DEFAULT_CHECKED_CODES: Record<SyncNetworkType, string[]> = {
 };
 
 /** 制式标签配置 */
-const NETWORK_TYPE_TAG: Record<SyncNetworkType, { color: string }> = {
-  eNB: { color: 'blue' },
-  gNB: { color: 'green' },
-  GSM: { color: 'orange' },
+const NETWORK_TYPE_TAG: Record<SyncNetworkType, { color: string; label: string }> = {
+  eNB: { color: 'blue',   label: 'LTE eNodeB' },
+  gNB: { color: 'green',  label: '5G gNodeB' },
+  GSM: { color: 'orange', label: 'GSM' },
 };
 
 export default function SyncParamsModal({ open, networkType, onClose, onConfirm, confirmLoading }: SyncParamsModalProps) {
@@ -190,6 +192,8 @@ export default function SyncParamsModal({ open, networkType, onClose, onConfirm,
       }))
       .filter((g) => g.params.length > 0);
   }, [t, networkType]);
+
+  const totalSelected = selectedCodes.size + (alarmSync ? 1 : 0);
 
   const handleCheckAll = useCallback((params: SyncParam[], checked: boolean) => {
     setSelectedCodes((prev) => {
@@ -228,21 +232,23 @@ export default function SyncParamsModal({ open, networkType, onClose, onConfirm,
       return {
         key: group.key,
         label: (
-          <span onClick={(e) => e.stopPropagation()}>
+          <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center' }}>
             <Checkbox
               checked={allChecked}
               indeterminate={indeterminate}
               onChange={(e: CheckboxChangeEvent) => handleCheckAll(group.params, e.target.checked)}
               style={{ marginRight: 8 }}
             />
-            {group.label}
-            <Tag style={{ marginLeft: 8, fontSize: 11 }}>{checkedCount}/{group.params.length}</Tag>
+            <span style={{ fontWeight: 500 }}>{group.label}</span>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+              {checkedCount}/{group.params.length}
+            </Text>
           </span>
         ),
         children: (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 0', padding: '4px 0' }}>
             {group.params.map((p) => (
-              <div key={p.code} style={{ width: '50%', minWidth: 240 }}>
+              <div key={p.code} style={{ width: '50%', minWidth: 220 }}>
                 <Checkbox
                   checked={selectedCodes.has(p.code)}
                   onChange={(e: CheckboxChangeEvent) => handleToggle(p.code, e.target.checked)}
@@ -258,13 +264,15 @@ export default function SyncParamsModal({ open, networkType, onClose, onConfirm,
 
   const defaultActiveKeys = useMemo(() => groups.map((g) => g.key), [groups]);
 
+  const tagConfig = NETWORK_TYPE_TAG[networkType];
+
   return (
     <Modal
       title={
-        <span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {t('sync.title')}
-          <Tag color={NETWORK_TYPE_TAG[networkType].color} style={{ marginLeft: 8 }}>
-            {networkType}
+          <Tag color={tagConfig.color} style={{ marginLeft: 4, fontWeight: 400 }}>
+            {tagConfig.label}
           </Tag>
         </span>
       }
@@ -277,23 +285,44 @@ export default function SyncParamsModal({ open, networkType, onClose, onConfirm,
       width={680}
       destroyOnClose
     >
-      {/* 告警管理 */}
-      <div style={{ marginBottom: 12, paddingLeft: 4 }}>
+      {/* 活动告警 */}
+      <div
+        style={{
+          padding: '10px 12px',
+          background: '#fafafa',
+          borderRadius: 6,
+          border: '1px solid #f0f0f0',
+          marginBottom: 16,
+        }}
+      >
         <Checkbox
           checked={alarmSync}
           onChange={(e: CheckboxChangeEvent) => setAlarmSync(e.target.checked)}
         >
-          <strong>{t('sync.alarmManagement')}</strong>
-          <span style={{ color: '#999', fontSize: 12, marginLeft: 8 }}>({t('sync.activeAlarms')})</span>
+          <span style={{ fontWeight: 500 }}>{t('sync.activeAlarms')}</span>
         </Checkbox>
       </div>
 
       {/* 检测参数 */}
+      <div style={{ marginBottom: 8 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>{t('sync.syncParamsLabel')}</Text>
+      </div>
+
       <Collapse
         defaultActiveKey={defaultActiveKeys}
         items={collapseItems}
         size="small"
+        style={{ borderRadius: 6 }}
       />
+
+      <Divider style={{ margin: '12px 0 8px' }} />
+
+      {/* 已选统计 */}
+      <div style={{ textAlign: 'right' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t('sync.selectedCount', { count: totalSelected })}
+        </Text>
+      </div>
     </Modal>
   );
 }

@@ -50,6 +50,11 @@
   overflow: hidden;
 }
 
+/* Unified cell font size */
+:global(.omc-data-table) :global(.ant-table-tbody > tr > td) {
+  font-size: 13px;
+}
+
 /* Zebra striping */
 :global(.omc-data-table) :global(.ant-table-tbody > tr:nth-child(odd) > td) {
   background-color: var(--color-neutral-50);

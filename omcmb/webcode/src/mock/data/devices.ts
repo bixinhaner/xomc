@@ -32,9 +32,9 @@ const mgmtStatuses: Array<Device['mgmtStatus']> = ['managed', 'managed', 'manage
 const softwareVersions = ['V100R011C10SPC100', 'V100R011C10SPC200', 'V200R001C00SPC100', 'V200R001C10SPC100', 'V300R001C00'];
 const firmwareVersions = ['HW-V1.0.0', 'HW-V1.1.0', 'HW-V2.0.0', 'ZTE-V3.0.0', 'ER-V4.0.0'];
 const groupNames = ['华北大区', '华东大区', '华南大区', '西南大区', '西北大区', '东北大区', '5G gNB设备'];
-const opStates = ['active', 'inactive', 'unknown'];
+const opStates = ['active', 'inactive'];
 const rfStatuses = ['on', 'off', ''];
-const syncStatuses = ['synced', 'unsynced', ''];
+const syncStatuses = ['synchronized', 'not synchronized', ''];
 const bands = ['Band 1', 'Band 3', 'Band 5', 'Band 7', 'Band 38', 'Band 40', 'Band 41', 'n41', 'n78', 'n79'];
 
 function randomOffset(base: number, range: number): number {
@@ -134,22 +134,72 @@ function generateDevice(index: number): Device {
     uplinkFrequency: `${(1920 + Math.random() * 100).toFixed(1)}MHz`,
     downlinkFrequency: `${(2110 + Math.random() * 100).toFixed(1)}MHz`,
 
-    opState: pickRandom(opStates),
-    mmeStatus: isLTE ? pickRandom(['connected', 'disconnected', '']) : '',
-    amfStatus: isNR ? pickRandom(['connected', 'disconnected', '']) : '',
-    rfStatus: pickRandom(rfStatuses),
-    pmReportStatus: isLTE ? pickRandom(['reporting', 'stopped', '']) : '',
-    halobFlag: isNR ? Math.random() > 0.5 : false,
+    opState: (() => {
+      // 多小区场景: 70% 概率生成多小区值 "1,0,1" / "active,inactive"
+      if ((isLTE || isNR) && Math.random() < 0.7) {
+        const cellCount = Math.floor(Math.random() * 3) + 2; // 2-4 cells
+        return Array.from({ length: cellCount }, () => pickRandom(['1', '0'])).join(',');
+      }
+      return pickRandom(opStates);
+    })(),
+    mmeStatus: (() => {
+      if (!isLTE) return '';
+      // 多 MME 场景: 70% JSON 数组, 15% 旧格式 "1"/"0", 15% 空
+      const r = Math.random();
+      if (r < 0.7) {
+        const count = Math.floor(Math.random() * 3) + 2; // 2-4 MMEs
+        return JSON.stringify(Array.from({ length: count }, (_, i) => ({
+          mmeIp: `10.${20 + i}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
+          status: Math.random() > 0.3 ? '1' : '0',
+          plmnId: '46000',
+        })));
+      }
+      if (r < 0.85) return pickRandom(['1', '0']);
+      return '';
+    })(),
+    amfStatus: (() => {
+      if (!isNR) return '';
+      // 多 AMF 场景: 70% JSON 数组, 15% 旧格式, 15% 空
+      const r = Math.random();
+      if (r < 0.7) {
+        const count = Math.floor(Math.random() * 3) + 2; // 2-4 AMFs
+        return JSON.stringify(Array.from({ length: count }, (_, i) => ({
+          AmfIP1: `10.${30 + i}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
+          Status: Math.random() > 0.3 ? '1' : '0',
+          PLMNID: '46000',
+        })));
+      }
+      if (r < 0.85) return pickRandom(['1', '0']);
+      return '';
+    })(),
+    rfStatus: (() => {
+      // 多小区场景: 70% 概率生成多小区值 "on,off,on"
+      if ((isLTE || isNR) && Math.random() < 0.7) {
+        const cellCount = Math.floor(Math.random() * 3) + 2; // 2-4 cells
+        return Array.from({ length: cellCount }, () => pickRandom(['on', 'off'])).join(',');
+      }
+      return pickRandom(rfStatuses);
+    })(),
+    pmReportStatus: isLTE ? pickRandom(['off', 'normal', 'broken', '']) : '',
+    halobFlag: (isNR || isLTE) ? Math.random() > 0.5 : false,
     syncStatus: pickRandom(syncStatuses),
     validity: isLTE && Math.random() > 0.8 ? randomDate(-90) : '',
     lockStatus: Math.random() > 0.9 ? 'locked' : '',
     ueCount: isOnline ? Math.floor(Math.random() * 200) : 0,
-    euCount: isLTE ? String(Math.floor(Math.random() * 4)) : '',
-    ruCount: isLTE ? String(Math.floor(Math.random() * 8)) : '',
+    euCount: isNR ? (() => {
+      const total = Math.floor(Math.random() * 4) + 1;
+      const conn = Math.floor(Math.random() * (total + 1));
+      return `${conn}/${total}`;
+    })() : '',
+    ruCount: isNR ? (() => {
+      const total = Math.floor(Math.random() * 8) + 1;
+      const conn = Math.floor(Math.random() * (total + 1));
+      return `${conn}/${total}`;
+    })() : '',
     cpeCount: isLTE ? Math.floor(Math.random() * 32) : 0,
     wanSpeed: isLTE ? `${Math.floor(Math.random() * 1000)}Mbps` : '',
     serviceStatus: '',
-    adminState: isNR ? pickRandom(['unlocked', 'locked', '']) : '',
+    adminState: isNR ? pickRandom(['1', '2', '3', '2', '2']) : '',
     multiPlmnEnable: isNR ? pickRandom(['true', 'false', '']) : '',
     bscLinkStatus: '',
     bscSelect: '',
