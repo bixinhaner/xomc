@@ -463,21 +463,128 @@ type CommandQueue interface {
 | 文件分发 | `filemanager/handler.go` | REST API `POST /api/v1/files/:id/distribute` | Download |
 | 互操作测试 | `interop/runner.go` | 测试用例执行 | 各种 RPC |
 
-### 6.4 Connection Request 唤醒机制
+### 6.4 Connection Request 完整解析
 
-当设备不在线（无活跃会话）时，推送命令后需要主动唤醒设备：
+#### 6.4.1 为什么需要 Connection Request
+
+TR-069 协议中 **CPE 是 HTTP Client，ACS 是 HTTP Server**——只有 CPE 能主动发起连接。CPE 平时按自己的节奏（心跳、事件变化）连接 ACS。当 ACS 需要主动对设备执行操作（读参数、下发配置、固件升级）时，**唯一的办法**是通过 Connection Request 唤醒 CPE，让它发起一个新的 CWMP 会话。
+
+#### 6.4.2 机制本质：两步握手
+
+```
+步骤 1 (ACS → CPE): ACS 向 CPE 的 ConnectionRequestURL 发送 HTTP GET
+                     含义："我有事找你，请立即连接我"
+
+步骤 2 (CPE → ACS): CPE 向 ACS 发送 Inform（事件码 = 6 CONNECTION REQUEST）
+                     含义："好的，我来了，你说"
+```
+
+#### 6.4.3 步骤 1 实现：connreq.Client（ACS → CPE）
 
 ```go
 // internal/acs/connreq/client.go
-type ConnReqClient interface {
-    Send(ctx context.Context, deviceSN, url string) error
+type Client struct {
+    httpClient *http.Client          // 支持 TLS 1.2+
+    redis      redis.UniversalClient // 去重
+    logger     *zap.Logger
+    digest     *DigestCredentials    // 可选 Digest 认证
 }
+
+func (c *Client) Send(ctx context.Context, deviceSN, url string) error
 ```
 
-- 通过 HTTP GET 请求设备的 ConnectionRequestURL
-- **去重**：Redis Key `acs:connreq:pending:{device_serial}`，TTL 30 秒
-- 支持 Digest/Basic 认证
-- 设备收到 Connection Request 后主动发起新的 TR-069 会话
+**发送流程**：
+
+1. **Redis SetNX 去重** — `acs:connreq:pending:{deviceSN}`，TTL 30 秒，30 秒内不重复发送
+2. **HTTP GET** — 向 CPE 的 ConnectionRequestURL 发送请求
+3. **Digest 认证** — 如果 CPE 返回 401，解析 `WWW-Authenticate` 头，构造 Digest 响应重试
+4. **指数退避重试** — 失败后 1s → 2s → 4s，最多 3 次
+
+#### 6.4.4 触发 Connection Request 的业务场景
+
+项目中有两个模块直接调用 `connReq.Send()`：
+
+| 调用方 | 代码位置 | 业务场景 | 模式 |
+|--------|---------|---------|------|
+| `SoftwareService.StartUpgrade()` | `software/service.go:148` | 固件升级 — 推送 Download 命令后唤醒设备来取命令 | cmdQueue.Push → connReq.Send |
+| `SoftwareService.BatchUpgrade()` | `software/service.go:222` | 批量固件升级 — 对每台设备执行同样流程 | cmdQueue.Push → connReq.Send |
+| `BackupExecutor.handleTaskCreated()` | `backup/executor.go:132` | 配置备份 — 推送 Upload 命令后唤醒设备执行上传 | cmdQueue.Push → connReq.Send |
+
+统一模式：**先入队命令（Redis Sorted Set），再唤醒设备（HTTP GET）**。
+
+```go
+// 固件升级（software/service.go）
+s.cmdQueue.Push(ctx, dev.SerialNumber, cmd)                           // 1. 命令入队
+s.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL)       // 2. 唤醒
+
+// 配置备份（backup/executor.go）
+e.cmdQueue.Push(ctx, dev.SerialNumber, cmd)                           // 1. 命令入队
+e.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL)       // 2. 唤醒
+```
+
+#### 6.4.5 步骤 2 实现：CPE 响应（CPE → ACS）
+
+CPE 收到 HTTP GET 后，向 ACS 发起一个新的 Inform 请求，事件码携带 `6 CONNECTION REQUEST`：
+
+```go
+// handler.go — publishInformEvents()
+case tr069.IsConnectionRequest(inform.Event):
+    subject = event.SubjectDeviceConnectionRequest  // "device.inform.connection_request"
+```
+
+之后进入 ACS 的正常会话流程：handleInform → InformResponse → Empty POST → handleEmpty → cmdQueue.Pop → 下发 RPC。
+
+#### 6.4.6 端到端时序图（以固件升级为例）
+
+```
+运维人员              App                  Redis               ACS              CPE
+  │                   │                    │                   │                │
+  │ POST /upgrade     │                    │                   │                │
+  ├──────────────────→│                    │                   │                │
+  │                   │ Push(Download)     │                   │                │
+  │                   ├───────────────────→│ acs:cmdq:{sn}     │                │
+  │                   │                    │                   │                │
+  │                   │ connReq.Send()     │                   │                │
+  │                   ├───────────────────→│ SetNX 去重        │                │
+  │                   │                    │                   │                │
+  │                   │                    │               HTTP GET             │
+  │                   │                    │                   ├───────────────→│
+  │                   │                    │                   │    200 OK      │
+  │                   │                    │                   │←───────────────┤
+  │                   │                    │                   │                │
+  │                   │                    │                   │  Inform        │
+  │                   │                    │                   │  (6 CONN REQ)  │
+  │                   │                    │                   │←───────────────┤
+  │                   │                    │                   │ InformResponse │
+  │                   │                    │                   ├───────────────→│
+  │                   │                    │                   │                │
+  │                   │                    │                   │  Empty POST    │
+  │                   │                    │                   │←───────────────┤
+  │                   │                    │ Pop(Download)     │                │
+  │                   │                    │←──────────────────┤                │
+  │                   │                    │                   │  Download RPC  │
+  │                   │                    │                   ├───────────────→│
+  │                   │                    │                   │                │
+  │                   │                    │                   │ DownloadResp   │
+  │                   │                    │                   │←───────────────┤
+  │                   │                    │                   │  HTTP 204      │
+  │                   │                    │                   ├───────────────→│
+```
+
+#### 6.4.7 与其他 Inform 事件码的对比
+
+| 事件码 | 触发方 | 场景 |
+|--------|--------|------|
+| `0 BOOTSTRAP` | CPE 自发 | 首次上电或恢复出厂设置 |
+| `1 BOOT` | CPE 自发 | 设备重启完成 |
+| `2 PERIODIC` | CPE 自发 | 定时心跳（默认 300s-3600s 周期） |
+| `4 VALUE CHANGE` | CPE 自发 | 参数值被本地或远端修改 |
+| **`6 CONNECTION REQUEST`** | **ACS 触发，CPE 响应** | **ACS 发送 HTTP GET 唤醒后，CPE 回连** |
+| `7 TRANSFER COMPLETE` | CPE 自发 | 文件下载/上传完成 |
+| `8 DIAGNOSTICS COMPLETE` | CPE 自发 | 诊断任务完成 |
+| `10 AUTONOMOUS TRANSFER` | CPE 自发 | 设备主动上传文件（PM/MR） |
+
+**`6 CONNECTION REQUEST` 是 TR-069 协议中 ACS 反向控制 CPE 的唯一通道。**
 
 ### 6.5 完整下发流程示例
 
