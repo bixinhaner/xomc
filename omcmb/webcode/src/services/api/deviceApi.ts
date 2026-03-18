@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup } from '@/types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats } from '@/types/device';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // Backend device model from Go struct
@@ -118,6 +118,13 @@ interface BackendListResponse<T> {
   page: number;
   page_size: number;
   total_pages: number;
+  // 统计字段 — 后端返回筛选条件下的全量统计
+  stats?: {
+    total: number;
+    online: number;
+    offline: number;
+    alarmed: number;
+  };
 }
 
 // Map backend device status to frontend connStatus
@@ -248,17 +255,26 @@ function mapBackendDevice(bd: BackendDevice): Device {
   };
 }
 
-function mapListResponse(resp: BackendListResponse<BackendDevice>): PageResponse<Device> {
+function mapListResponse(resp: BackendListResponse<BackendDevice>): DeviceListResponse {
+  const items = (resp.items || []).map(mapBackendDevice);
+  // 优先使用后端返回的统计；如果后端未返回则从当前页数据估算
+  const stats: DeviceListStats = resp.stats ?? {
+    total: resp.total,
+    online: items.filter((d) => d.connStatus === 'online').length,
+    offline: items.filter((d) => d.connStatus === 'offline').length,
+    alarmed: items.filter((d) => d.alarmLevel !== 'none').length,
+  };
   return {
-    items: (resp.items || []).map(mapBackendDevice),
+    items,
     total: resp.total,
     page: resp.page,
     pageSize: resp.page_size,
+    stats,
   };
 }
 
 export const deviceApi = {
-  async getList(params: DeviceFilter & PageRequest): Promise<PageResponse<Device>> {
+  async getList(params: DeviceFilter & PageRequest): Promise<DeviceListResponse> {
     // Map frontend filter fields to backend query params
     const query: Record<string, unknown> = {
       page: params.page,

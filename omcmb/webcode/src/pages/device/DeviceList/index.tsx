@@ -22,6 +22,7 @@ import { useDeviceList, useDeleteDevices } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
 import SyncParamsModal from './SyncParamsModal';
+import type { SyncNetworkType } from './SyncParamsModal';
 import MoveToGroupModal from './MoveToGroupModal';
 import ExportModal from './ExportModal';
 import type { ExportParams } from './ExportModal';
@@ -59,6 +60,19 @@ export default function DeviceList() {
 
   const devices: Device[] = data?.items ?? [];
   const total = data?.total ?? 0;
+  const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
+
+  // 计算选中设备的统一制式 — 全部相同时返回该制式，否则 null
+  const selectedNetworkType: SyncNetworkType | null = useMemo(() => {
+    if (selectedRowKeys.length === 0) return null;
+    const selectedDevices = devices.filter((d) => selectedRowKeys.includes(d.id));
+    if (selectedDevices.length === 0) return null;
+    const firstType = selectedDevices[0].networkType;
+    const allSame = selectedDevices.every((d) => d.networkType === firstType);
+    if (!allSame) return null;
+    if (firstType === 'eNB' || firstType === 'gNB' || firstType === 'GSM') return firstType;
+    return null;
+  }, [selectedRowKeys, devices]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -186,18 +200,13 @@ export default function DeviceList() {
     },
   ], [t]);
 
-  // Statistics
-  const statsItems = useMemo(() => {
-    const online = devices.filter((d) => d.connStatus === 'online').length;
-    const offline = devices.filter((d) => d.connStatus === 'offline').length;
-    const alarmed = devices.filter((d) => d.alarmLevel !== 'none').length;
-    return [
-      { label: t('device.count.total'), value: total },
-      { label: t('status.online'), value: online, color: '#52C41A' },
-      { label: t('status.offline'), value: offline, color: '#8C8C8C' },
-      { label: t('common.hasAlarm'), value: alarmed, color: '#FA8C16' },
-    ];
-  }, [devices, total, t]);
+  // 统计面板 — 基于筛选条件的全量统计（由后端/mock 返回，非当前页）
+  const statsItems = useMemo(() => [
+    { label: t('device.count.total'), value: stats.total },
+    { label: t('status.online'), value: stats.online, color: '#52C41A' },
+    { label: t('status.offline'), value: stats.offline, color: '#8C8C8C' },
+    { label: t('common.hasAlarm'), value: stats.alarmed, color: '#FA8C16' },
+  ], [stats, t]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams(values);
@@ -644,20 +653,27 @@ export default function DeviceList() {
     [navigate, t, fmtTime, fmtDuration, SEVERITY_LABEL, getActionMenuItems, handleRowAction]
   );
 
-  const batchActions = useMemo(
-    (): BatchAction[] => [
+  const batchActions = useMemo((): BatchAction[] => {
+    const actions: BatchAction[] = [
       {
         key: 'move-to-group',
         label: t('common.moveToGroup'),
         icon: <SwapOutlined />,
         onClick: () => handleMoveToGroup(),
       },
-      {
+    ];
+
+    // 批量同步仅在所有选中设备为同一制式时显示
+    if (selectedNetworkType) {
+      actions.push({
         key: 'batch-sync',
-        label: t('common.batchSync'),
+        label: `${t('common.batchSync')} (${selectedNetworkType})`,
         icon: <SyncOutlined />,
         onClick: () => handleBatchSync(),
-      },
+      });
+    }
+
+    actions.push(
       {
         key: 'batch-reboot',
         label: t('common.batchReboot'),
@@ -671,9 +687,10 @@ export default function DeviceList() {
         danger: true,
         onClick: (keys) => handleRecycle(keys as string[]),
       },
-    ],
-    [handleMoveToGroup, handleBatchSync, handleBatchReboot, handleRecycle, t]
-  );
+    );
+
+    return actions;
+  }, [handleMoveToGroup, handleBatchSync, handleBatchReboot, handleRecycle, selectedNetworkType, t]);
 
   return (
     <ListPageLayout
@@ -721,6 +738,7 @@ export default function DeviceList() {
 
       <SyncParamsModal
         open={syncModalOpen}
+        networkType={selectedNetworkType ?? 'eNB'}
         onClose={() => setSyncModalOpen(false)}
         onConfirm={handleSyncConfirm}
       />

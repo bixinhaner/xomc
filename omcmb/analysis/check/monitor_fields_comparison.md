@@ -938,20 +938,235 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 #### 6.6.3 统一设备列表批量操作实现
 
-| # | 操作 | 图标 | 交互反馈 | 状态 |
-|---|------|------|---------|:----:|
-| 1 | 移动到设备组 | `SwapOutlined` | Modal 弹窗：设备组分页表格 + 单选 → "成功" toast | ✅ 已实现 |
-| 2 | 同步 | `SyncOutlined` | Modal 弹窗：告警/基础配置/高级配置/BSC/BTS 复选框 → 静默关闭 | ✅ 已实现 |
-| 3 | 重启 | `ReloadOutlined` | 确认对话框："确定重启设备？" → "命令已经下发。" 提示 | ✅ 已实现 |
-| 4 | 回收站 | `RestOutlined` (danger) | 警告确认：两行说明文字 → "成功" toast | ✅ 已实现 |
+| # | 操作 | 图标 | 交互反馈 | 显示条件 | 状态 |
+|---|------|------|---------|---------|:----:|
+| 1 | 移动到设备组 | `SwapOutlined` | Modal 弹窗：设备组分页表格 + 单选 → "成功" toast | 选中任意设备 | ✅ |
+| 2 | 同步 (制式) | `SyncOutlined` | Modal 弹窗：仅显示当前制式的同步字段（无 scope 标签） | **仅选中相同制式** | ✅ |
+| 3 | 重启 | `ReloadOutlined` | 确认对话框："确定重启设备？" → "命令已经下发。" 提示 | 选中任意设备 | ✅ |
+| 4 | 回收站 | `RestOutlined` (danger) | 警告确认：两行说明文字 → "成功" toast | 选中任意设备 | ✅ |
 
+> **批量同步制式限制**：只有当所有选中设备的 `networkType` 完全相同时（全 eNB / 全 gNB / 全 GSM），才在批量操作栏显示"同步"按钮。按钮文本显示当前制式，如"批量同步 (eNB)"。弹窗标题带制式 Tag，仅展示该制式的同步参数（参见 6.6.4.1 各制式字段表）。
+>
 > 页面顶部"导出"按钮为独立功能，不需要选中行，点击弹出导出配置弹窗。
 
 #### 6.6.4 批量同步参数整合（三制式字段合并）
 
 > 源文件：`SyncParamsModal.tsx`
+>
+> 原始 JSP 源码：
+> - eNB: `enodeb/monitor/sync_params.jsp`
+> - GSM: `enodeb/monitor/GSM/gsm_syncParams.jsp`
+> - gNB: `gnodeb/monitor/gnodeb_monitor.jsp`（内嵌同步弹窗）
 
-将三制式的同步参数合并为统一列表，非公共字段通过 **scope 标签** 标识适用范围。
+##### 6.6.4.1 三制式原始同步弹窗字段对比
+
+###### eNB 同步弹窗（sync_params.jsp）
+
+共 2 组 + 告警管理，基础配置 29 字段（3 个条件字段可能被过滤），高级配置 22 字段。
+
+**告警管理**：`alarmSync`（默认勾选） → 传 `sync_alarm`
+
+**基础配置 (basicCol) — 29 字段**：
+
+| # | code | 标签 | 条件 |
+|---|------|------|------|
+| 1 | module_type | 设备型号名 | |
+| 2 | software_version | 软件版本 | |
+| 3 | firmware_version | 固件版本 | |
+| 4 | MAC | 小站MAC | |
+| 5 | cell_name | 主机名 | |
+| 6 | ECI | ECI | |
+| 7 | PCI | PCI | |
+| 8 | plmn | PLMN | |
+| 9 | tac | TAC | |
+| 10 | bandwidth | 带宽 | |
+| 11 | earfcn | 频点 | |
+| 12 | duplex_mode | 基站指示（双工模式） | |
+| 13 | tx_power | CPE发射功率 | |
+| 14 | cell_status | 是否激活 | |
+| 15 | mme_status | MME状态 | |
+| 16 | rf_status | 射频开关状态 | |
+| 17 | halob_flag | HaloX | ⚠️ `isSupportHalob == 'true'` |
+| 18 | sync_status | 同步状态 | |
+| 19 | IP | IP地址 | |
+| 20 | mme_addr | MME Pool IPSEC地址 | ⚠️ `is_super_user == 'true'` |
+| 21 | lease | 锁定状态 | ⚠️ `writableMap["CODE_ENB_EXPIRY_DATE"]` 存在 |
+| 22 | ue_count | UE数 | |
+| 23 | root_sequence_index | 根序列索引 | |
+| 24 | gps_satellites | GPS卫星数 | |
+| 25 | sub_frame_assignment | 子帧配比 + 特殊子帧配比 | |
+| 26 | wan_speed | WAN状态 | |
+| 27 | ipsec_addr | IPSEC地址 | ⚠️ `is_super_user == 'true'` |
+| 28 | gps_position | GPS版本 + GPS经度 + GPS纬度 + GPS高度 | |
+| 29 | electronic_downtilt | 电子下倾角 | |
+
+**高级配置 (othersCol) — 22 字段**：
+
+| # | code | 标签 |
+|---|------|------|
+| 1 | band | 频段 |
+| 2 | sas_param | SAS 监测参数名 |
+| 3 | cell_neighbor | SAS 邻区 |
+| 4 | itfn_param | 背向接口 |
+| 5 | son_pci | SON PCI |
+| 6 | rollback_enable | 回退 设置开关 |
+| 7 | rollback_version | 回退版本 |
+| 8 | uboot_version | UBoot版本 |
+| 9 | kernel_version | Kernel版本 |
+| 10 | is_https | Https 状态 |
+| 11 | lan_enable | LAN状态 |
+| 12 | wan_ip | WAN IP地址 |
+| 13 | lte_turbo_enable | LTE Turbo |
+| 14 | eu_ru | EU/RU数 |
+| 15 | halob_license | HaloB License |
+| 16 | lock_mac_addr | 锁定Mac |
+| 17 | lock_mac_status | 锁定Mac 状态 |
+| 18 | ipsec_bind_interface | IPSec Bind Interface |
+| 19 | lgw_basic | WCG 监测参数名 |
+| 20 | lgw_mode_ue_speed_statistics | UE Speed Statistics |
+| 21 | ipsec_auto_enroll | IPSec Auto Enroll |
+| 22 | slot | Slot |
+
+> eNB 总计：29 + 22 = **51 字段**（+ 告警管理）
+> 提交 API：`POST /cell/quicksettings/batchSyncCell.action`（批量）/ `POST /cell/param/refreshCellInfo.action`（单个）
+> 参数：`smallCellCode=<sn逗号分隔>&selectedParams=<code逗号分隔>[,sync_alarm]`
+
+---
+
+###### gNB 同步弹窗（gnodeb_monitor.jsp 内嵌）
+
+共 2 组 + 告警管理，基础配置 16 字段（+ 1 条件字段），高级配置 7 字段。
+
+**告警管理**：`alarmSync`（默认勾选） → 传 `sync_alarm`
+
+**基础配置 (deviceCol, computed) — 16 字段 + 1 条件**：
+
+| # | code | 标签 | 条件 |
+|---|------|------|------|
+| 1 | cell_name | 5G站点名称 | |
+| 2 | IP | IP地址 | |
+| 3 | module_type | 设备型号名 | |
+| 4 | software_version | 软件版本 | |
+| 5 | firmware_version | 硬件版本 | |
+| 6 | halob_flag | HaloB开关 | |
+| 7 | ue_count | UE数 | |
+| 8 | sync_status | 同步状态 | |
+| 9 | adminState | Admin状态 | |
+| 10 | amf_status | AMF Status | |
+| 11 | multiPlmnEnable | MultiPLMN状态 | |
+| 12 | ECI | ECI (gNodeB ID + Cell Identity) | |
+| 13 | cellConfig | 小区参数 | |
+| 14 | MAC | MAC | |
+| 15 | mme_addr | IPSEC地址 | |
+| 16 | gps_position | GPS经度 + GPS纬度 | |
+| 17 | sub_station_name | 站址名称 | ⚠️ `supportTopoSite == true` |
+
+> 注意：gNB 的 `gps_position` 只含经度+纬度，不含高度（eNB 含高度），gNB 的 `firmware_version` 标签为"硬件版本"。
+
+**高级配置 (othersCol) — 7 字段**：
+
+| # | code | 标签 |
+|---|------|------|
+| 1 | rollback_version | 回退版本 |
+| 2 | sas_param | SAS 监测参数名 |
+| 3 | eu_ru | EU/RU数 |
+| 4 | halob_license | HaloB License |
+| 5 | energy_saving | Energy |
+| 6 | gnb_topo_cellmgr | gNB TOPO |
+| 7 | ssl_cert_validity | SSL Cert Validity |
+
+> gNB 总计：16 + 7 = **23 字段**（+ 1 条件字段 + 告警管理）
+> 提交 API：同 eNB `POST /cell/quicksettings/batchSyncCell.action`
+> 默认预选：`form.device: ['cell_name','IP','module_type','software_version','halob_flag','ue_count']`
+
+---
+
+###### GSM 同步弹窗（gsm_syncParams.jsp）
+
+共 3 组 + 告警管理，基础配置 7 字段，BSC 1 字段，BTS 8 字段。
+
+**告警管理**：`alarmSync`（默认勾选） → 传 `sync_alarm`
+
+**基础配置 (basicCol) — 7 字段**：
+
+| # | code | 标签 |
+|---|------|------|
+| 1 | module_type | 设备型号名 |
+| 2 | software_version | 软件版本 |
+| 3 | firmware_version | 固件版本 |
+| 4 | MAC | 小站MAC |
+| 5 | IP | IP地址 |
+| 6 | ue_count | UE数 |
+| 7 | halob_license | License |
+
+**BSC 参数 (bscCol) — 1 字段**：
+
+| # | code | 标签 |
+|---|------|------|
+| 1 | BtsNum | BTS数 |
+
+**BTS 参数 (btsCol) — 8 字段**：
+
+| # | code | 标签 |
+|---|------|------|
+| 1 | cell_status | 是否激活 |
+| 2 | rf_status | 射频开关状态 |
+| 3 | sync_status | 同步状态 |
+| 4 | gps_satellites | GPS卫星数 |
+| 5 | currentLac | LAC |
+| 6 | currentArfcn | 频点 + 上行频率 + 下行频率 |
+| 7 | gps_position | GPS经度 + GPS纬度 + GPS高度 |
+| 8 | bts_bsc_relationship | Ipa Unit Id + Oml Remote Ip + Oml Remote Ip Bak + BSC Select + BSC连接状态 + 所属BSC编码 |
+
+> GSM 总计：7 + 1 + 8 = **16 字段**（+ 告警管理）
+> 提交 API：同 eNB `POST /cell/quicksettings/batchSyncCell.action`（批量）/ `POST /cell/param/refreshCellInfo.action`（单个）
+> 无条件字段，无默认预选
+
+---
+
+###### 三制式同步弹窗结构对比
+
+| 维度 | eNB (LTE) | gNB (5G NR) | GSM |
+|------|:---------:|:-----------:|:---:|
+| 分组数 | 2（基础 + 高级） | 2（基础 + 高级） | 3（基础 + BSC + BTS） |
+| 基础字段数 | 29 | 16 (+1 条件) | 7 |
+| 高级/扩展字段数 | 22 | 7 | 9 (BSC:1 + BTS:8) |
+| **字段总数** | **51** | **23 (+1)** | **16** |
+| 条件字段 | 3 (halob_flag, ipsec_addr, mme_addr, lease) | 1 (sub_station_name) | 0 |
+| 默认预选 | 动态 (7 字段，见下) | 6 字段硬编码 | 无 |
+| 告警管理 | ✅ 默认勾选 | ✅ 默认勾选 | ✅ 默认勾选 |
+| 提交 API | batchSyncCell.action | batchSyncCell.action | batchSyncCell.action |
+
+###### 默认预选字段详情
+
+**eNB 默认预选**（原始 JSP 中通过 `init()` 从监控列表可见列 `enbvm.showProps` 动态映射，经 `monitorCols` 转换为同步参数 code；统一实现取设备列表默认可见列的静态等价集）：
+
+| # | code | 标签 | 映射来源 (monitorCols) |
+|---|------|------|----------------------|
+| 1 | module_type | 设备型号名 | deviceModel (直接匹配) |
+| 2 | software_version | 软件版本 | softwareVersion (直接匹配) |
+| 3 | MAC | MAC地址 | mac_address → MAC |
+| 4 | cell_name | 主机名 | host_name → cell_name |
+| 5 | IP | IP地址 | cell_ip → IP |
+| 6 | cell_status | 激活状态 | op_state → cell_status |
+| 7 | ue_count | UE数 | ueCount (直接匹配) |
+
+**gNB 默认预选**（`gnodeb_monitor.jsp` 中 `form.device` 硬编码初始值）：
+
+| # | code | 标签 |
+|---|------|------|
+| 1 | cell_name | 5G站点名称 |
+| 2 | IP | IP地址 |
+| 3 | module_type | 设备型号名 |
+| 4 | software_version | 软件版本 |
+| 5 | halob_flag | HaloB开关 |
+| 6 | ue_count | UE数 |
+
+**GSM 默认预选**：无（`gsm_syncParams.jsp` 中 `form.basic/bsc/bts` 均为空数组，`mounted()` 为空）
+
+##### 6.6.4.2 统一同步弹窗（按制式分类显示）
+
+批量同步仅在所有选中设备为**同一制式**时可用。弹窗根据制式过滤参数，只显示当前制式的同步字段。各制式的默认预选字段同上。
 
 ##### 告警管理（独立复选框，默认勾选）
 
@@ -959,91 +1174,91 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 ##### 基础配置参数
 
-| # | code | 标签 | 适用范围 |
-|---|------|------|:--------:|
-| 1 | module_type | 设备型号名 | 三制式公共 |
-| 2 | software_version | 软件版本 | 三制式公共 |
-| 3 | firmware_version | 固件版本 | 三制式公共 |
-| 4 | MAC | MAC地址 | 三制式公共 |
-| 5 | IP | IP地址 | 三制式公共 |
-| 6 | ue_count | UE数 | 三制式公共 |
-| 7 | cell_name | 主机名/站点名 | eNB+gNB |
-| 8 | ECI | ECI | eNB+gNB |
-| 9 | halob_flag | HaloB开关 | eNB+gNB |
-| 10 | sync_status | 同步状态 | eNB+gNB |
-| 11 | mme_addr | IPSec地址 | eNB+gNB |
-| 12 | gps_position | GPS位置 | eNB+gNB |
-| 13 | PCI | PCI | 仅eNB |
-| 14 | plmn | PLMN | 仅eNB |
-| 15 | tac | TAC | 仅eNB |
-| 16 | bandwidth | 带宽 | 仅eNB |
-| 17 | earfcn | 频点 | 仅eNB |
-| 18 | duplex_mode | 双工模式 | 仅eNB |
-| 19 | tx_power | 发射功率 | 仅eNB |
-| 20 | cell_status | 激活状态 | 仅eNB |
-| 21 | mme_status | MME状态 | 仅eNB |
-| 22 | rf_status | 射频开关状态 | 仅eNB |
-| 23 | lease | 锁定状态 | 仅eNB |
-| 24 | root_sequence_index | 根序列索引 | 仅eNB |
-| 25 | gps_satellites | GPS卫星数 | 仅eNB |
-| 26 | sub_frame_assignment | 子帧配比 | 仅eNB |
-| 27 | wan_speed | WAN状态 | 仅eNB |
-| 28 | ipsec_addr | IPSec地址(eNB) | 仅eNB |
-| 29 | electronic_downtilt | 电子下倾角 | 仅eNB |
-| 30 | adminState | Admin State | 仅gNB |
-| 31 | amf_status | AMF Status | 仅gNB |
-| 32 | multiPlmnEnable | MultiPLMN状态 | 仅gNB |
-| 33 | cellConfig | 小区参数 | 仅gNB |
-| 34 | halob_license | License | 仅GSM |
+| # | code | 标签 | 适用范围 | eNB | gNB | GSM |
+|---|------|------|:--------:|:---:|:---:|:---:|
+| 1 | module_type | 设备型号名 | 三制式公共 | ✅ | ✅ | ✅ |
+| 2 | software_version | 软件版本 | 三制式公共 | ✅ | ✅ | ✅ |
+| 3 | firmware_version | 固件版本 | 三制式公共 | ✅ | ✅ | ✅ |
+| 4 | MAC | MAC地址 | 三制式公共 | ✅ | ✅ | ✅ |
+| 5 | IP | IP地址 | 三制式公共 | ✅ | ✅ | ✅ |
+| 6 | ue_count | UE数 | 三制式公共 | ✅ | ✅ | ✅ |
+| 7 | cell_name | 主机名/站点名 | eNB+gNB | ✅ | ✅ | |
+| 8 | ECI | ECI | eNB+gNB | ✅ | ✅ | |
+| 9 | halob_flag | HaloB开关 | eNB+gNB | ✅⚠️ | ✅ | |
+| 10 | sync_status | 同步状态 | eNB+gNB | ✅ | ✅ | |
+| 11 | mme_addr | IPSec地址 | eNB+gNB | ✅⚠️ | ✅ | |
+| 12 | gps_position | GPS位置 | eNB+gNB | ✅(含高度) | ✅(经纬度) | |
+| 13 | PCI | PCI | 仅eNB | ✅ | | |
+| 14 | plmn | PLMN | 仅eNB | ✅ | | |
+| 15 | tac | TAC | 仅eNB | ✅ | | |
+| 16 | bandwidth | 带宽 | 仅eNB | ✅ | | |
+| 17 | earfcn | 频点 | 仅eNB | ✅ | | |
+| 18 | duplex_mode | 双工模式 | 仅eNB | ✅ | | |
+| 19 | tx_power | 发射功率 | 仅eNB | ✅ | | |
+| 20 | cell_status | 激活状态 | 仅eNB | ✅ | | |
+| 21 | mme_status | MME状态 | 仅eNB | ✅ | | |
+| 22 | rf_status | 射频开关状态 | 仅eNB | ✅ | | |
+| 23 | lease | 锁定状态 | 仅eNB | ✅⚠️ | | |
+| 24 | root_sequence_index | 根序列索引 | 仅eNB | ✅ | | |
+| 25 | gps_satellites | GPS卫星数 | 仅eNB | ✅ | | |
+| 26 | sub_frame_assignment | 子帧配比 | 仅eNB | ✅ | | |
+| 27 | wan_speed | WAN状态 | 仅eNB | ✅ | | |
+| 28 | ipsec_addr | IPSec地址(eNB) | 仅eNB | ✅⚠️ | | |
+| 29 | electronic_downtilt | 电子下倾角 | 仅eNB | ✅ | | |
+| 30 | adminState | Admin State | 仅gNB | | ✅ | |
+| 31 | amf_status | AMF Status | 仅gNB | | ✅ | |
+| 32 | multiPlmnEnable | MultiPLMN状态 | 仅gNB | | ✅ | |
+| 33 | cellConfig | 小区参数 | 仅gNB | | ✅ | |
+| 34 | halob_license | License | 仅GSM | | | ✅ |
 
 ##### 高级配置参数
 
-| # | code | 标签 | 适用范围 |
-|---|------|------|:--------:|
-| 1 | rollback_version | 回退版本 | eNB+gNB |
-| 2 | sas_param | SAS参数 | eNB+gNB |
-| 3 | eu_ru | EU/RU数 | eNB+gNB |
-| 4 | halob_license | HaloB License | eNB+gNB |
-| 5 | band | 频段 | 仅eNB |
-| 6 | cell_neighbor | SAS邻区 | 仅eNB |
-| 7 | itfn_param | 背向接口 | 仅eNB |
-| 8 | son_pci | SON PCI | 仅eNB |
-| 9 | rollback_enable | 回退开关 | 仅eNB |
-| 10 | uboot_version | UBoot版本 | 仅eNB |
-| 11 | kernel_version | Kernel版本 | 仅eNB |
-| 12 | is_https | Https状态 | 仅eNB |
-| 13 | lan_enable | LAN状态 | 仅eNB |
-| 14 | wan_ip | WAN IP地址 | 仅eNB |
-| 15 | lte_turbo_enable | LTE Turbo | 仅eNB |
-| 16 | lock_mac_addr | 锁定MAC | 仅eNB |
-| 17 | lock_mac_status | 锁定MAC状态 | 仅eNB |
-| 18 | ipsec_bind_interface | IPSec Bind Interface | 仅eNB |
-| 19 | lgw_basic | WCG参数 | 仅eNB |
-| 20 | lgw_mode_ue_speed_statistics | UE Speed Statistics | 仅eNB |
-| 21 | ipsec_auto_enroll | IPSec Auto Enroll | 仅eNB |
-| 22 | slot | Slot | 仅eNB |
-| 23 | energy_saving | Energy Saving | 仅gNB |
-| 24 | gnb_topo_cellmgr | gNB TOPO | 仅gNB |
-| 25 | ssl_cert_validity | SSL Cert Validity | 仅gNB |
+| # | code | 标签 | 适用范围 | eNB | gNB | GSM |
+|---|------|------|:--------:|:---:|:---:|:---:|
+| 1 | rollback_version | 回退版本 | eNB+gNB | ✅ | ✅ | |
+| 2 | sas_param | SAS参数 | eNB+gNB | ✅ | ✅ | |
+| 3 | eu_ru | EU/RU数 | eNB+gNB | ✅ | ✅ | |
+| 4 | halob_license | HaloB License | eNB+gNB | ✅ | ✅ | |
+| 5 | band | 频段 | 仅eNB | ✅ | | |
+| 6 | cell_neighbor | SAS邻区 | 仅eNB | ✅ | | |
+| 7 | itfn_param | 背向接口 | 仅eNB | ✅ | | |
+| 8 | son_pci | SON PCI | 仅eNB | ✅ | | |
+| 9 | rollback_enable | 回退开关 | 仅eNB | ✅ | | |
+| 10 | uboot_version | UBoot版本 | 仅eNB | ✅ | | |
+| 11 | kernel_version | Kernel版本 | 仅eNB | ✅ | | |
+| 12 | is_https | Https状态 | 仅eNB | ✅ | | |
+| 13 | lan_enable | LAN状态 | 仅eNB | ✅ | | |
+| 14 | wan_ip | WAN IP地址 | 仅eNB | ✅ | | |
+| 15 | lte_turbo_enable | LTE Turbo | 仅eNB | ✅ | | |
+| 16 | lock_mac_addr | 锁定MAC | 仅eNB | ✅ | | |
+| 17 | lock_mac_status | 锁定MAC状态 | 仅eNB | ✅ | | |
+| 18 | ipsec_bind_interface | IPSec Bind Interface | 仅eNB | ✅ | | |
+| 19 | lgw_basic | WCG参数 | 仅eNB | ✅ | | |
+| 20 | lgw_mode_ue_speed_statistics | UE Speed Statistics | 仅eNB | ✅ | | |
+| 21 | ipsec_auto_enroll | IPSec Auto Enroll | 仅eNB | ✅ | | |
+| 22 | slot | Slot | 仅eNB | ✅ | | |
+| 23 | energy_saving | Energy Saving | 仅gNB | | ✅ | |
+| 24 | gnb_topo_cellmgr | gNB TOPO | 仅gNB | | ✅ | |
+| 25 | ssl_cert_validity | SSL Cert Validity | 仅gNB | | ✅ | |
 
 ##### BSC 参数（仅 GSM）
 
-| # | code | 标签 | 适用范围 |
-|---|------|------|:--------:|
-| 1 | BtsNum | BTS数 | 仅GSM |
+| # | code | 标签 | 适用范围 | eNB | gNB | GSM |
+|---|------|------|:--------:|:---:|:---:|:---:|
+| 1 | BtsNum | BTS数 | 仅GSM | | | ✅ |
 
 ##### BTS 参数（仅 GSM）
 
-| # | code | 标签 | 适用范围 |
-|---|------|------|:--------:|
-| 1 | cell_status | 激活状态 | 仅GSM |
-| 2 | rf_status | 射频开关状态 | 仅GSM |
-| 3 | sync_status | 同步状态 | 仅GSM |
-| 4 | gps_satellites | GPS卫星数 | 仅GSM |
-| 5 | currentLac | LAC | 仅GSM |
-| 6 | currentArfcn | 频点+上行频率+下行频率 | 仅GSM |
-| 7 | gps_position | GPS经度+纬度+高度 | 仅GSM |
-| 8 | bts_bsc_relationship | IPA Unit ID + OML Remote IP + BSC关系 | 仅GSM |
+| # | code | 标签 | 适用范围 | eNB | gNB | GSM |
+|---|------|------|:--------:|:---:|:---:|:---:|
+| 1 | cell_status | 激活状态 | 仅GSM | | | ✅ |
+| 2 | rf_status | 射频开关状态 | 仅GSM | | | ✅ |
+| 3 | sync_status | 同步状态 | 仅GSM | | | ✅ |
+| 4 | gps_satellites | GPS卫星数 | 仅GSM | | | ✅ |
+| 5 | currentLac | LAC | 仅GSM | | | ✅ |
+| 6 | currentArfcn | 频点+上行频率+下行频率 | 仅GSM | | | ✅ |
+| 7 | gps_position | GPS经度+纬度+高度 | 仅GSM | | | ✅ |
+| 8 | bts_bsc_relationship | IPA Unit ID + OML Remote IP + BSC关系 | 仅GSM | | | ✅ |
 
 ##### 参数统计
 
@@ -1054,6 +1269,8 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | BSC | 0 | 0 | 0 | 0 | 1 | **1** |
 | BTS | 0 | 0 | 0 | 0 | 8 | **8** |
 | **合计** | **6** | **10** | **35** | **7** | **10** | **68** |
+
+> ⚠️ = 条件字段（受权限或功能开关控制，可能被过滤不显示）
 
 #### 6.6.5 导出功能（页面顶部按钮）
 

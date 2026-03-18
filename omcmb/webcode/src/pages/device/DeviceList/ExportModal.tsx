@@ -50,6 +50,7 @@ const COMMON_COLUMNS: ExportColumn[] = [
   { code: 'connection_status', label: '连接状态' },
   { code: 'alarm', label: '告警级别' },
   { code: 'host_name', label: '名称' },
+  { code: 'network_type', label: '基站制式' },
   { code: 'product', label: '产品类型' },
   { code: 'module_type', label: '设备型号' },
   { code: 'software_version', label: '软件版本' },
@@ -66,6 +67,27 @@ const COMMON_COLUMNS: ExportColumn[] = [
   { code: 'gps_latitude', label: 'GPS纬度' },
   { code: 'gps_height', label: 'GPS高度' },
 ];
+
+// ---------------------------------------------------------------------------
+// 默认必选字段 — 与设备列表默认显示列一致，导出时始终勾选且不可取消
+// ---------------------------------------------------------------------------
+const DEFAULT_LOCKED_CODES = new Set([
+  'serial_number',      // SN
+  'connection_status',  // 连接状态
+  'alarm',              // 告警级别
+  'host_name',          // 名称
+  'network_type',       // 基站制式
+  'product',            // 产品类型
+  'module_type',        // 设备型号
+  'software_version',   // 软件版本
+  'mac_address',        // MAC地址
+  'group_name',         // 设备组
+  'cell_ip',            // IP地址
+  'online_time',        // 接入时间
+  'offline_time',       // 断开时间
+  'op_state',           // 激活状态
+  'ue_count',           // UE数
+]);
 
 const ENB_COLUMNS: ExportColumn[] = [
   { code: 'CELL_IDENTITY', label: 'ECI' },
@@ -125,7 +147,7 @@ const GSM_COLUMNS: ExportColumn[] = [
 export default function ExportModal({ open, onClose, onConfirm, confirmLoading }: ExportModalProps) {
   const t = useT();
   const [operatorCodes, setOperatorCodes] = useState<string[]>([]);
-  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set(DEFAULT_LOCKED_CODES));
   const [exportLicense, setExportLicense] = useState(false);
   const [format, setFormat] = useState<'csv' | 'xlsx'>('xlsx');
 
@@ -140,6 +162,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
     setSelectedCodes((prev) => {
       const next = new Set(prev);
       for (const col of columns) {
+        if (DEFAULT_LOCKED_CODES.has(col.code)) continue;
         if (checked) next.add(col.code); else next.delete(col.code);
       }
       return next;
@@ -147,6 +170,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
   }, []);
 
   const handleToggle = useCallback((code: string, checked: boolean) => {
+    if (DEFAULT_LOCKED_CODES.has(code)) return;
     setSelectedCodes((prev) => {
       const next = new Set(prev);
       if (checked) next.add(code); else next.delete(code);
@@ -165,7 +189,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
 
   const handleCancel = useCallback(() => {
     setOperatorCodes([]);
-    setSelectedCodes(new Set());
+    setSelectedCodes(new Set(DEFAULT_LOCKED_CODES));
     setExportLicense(false);
     setFormat('xlsx');
     onClose();
@@ -198,6 +222,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
               <div key={col.code} style={{ width: '33.3%', minWidth: 180 }}>
                 <Checkbox
                   checked={selectedCodes.has(col.code)}
+                  disabled={DEFAULT_LOCKED_CODES.has(col.code)}
                   onChange={(e: CheckboxChangeEvent) => handleToggle(col.code, e.target.checked)}
                 >
                   {col.label}

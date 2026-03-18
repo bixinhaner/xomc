@@ -154,3 +154,20 @@ export interface DeviceFilter {
   subnet?: string;
   engStatus?: EngStatus;
 }
+
+/** 设备列表统计数据 — 基于筛选条件的全量统计（非当前页） */
+export interface DeviceListStats {
+  total: number;
+  online: number;
+  offline: number;
+  alarmed: number;
+}
+
+/** 设备列表响应 — 分页数据 + 筛选统计 */
+export interface DeviceListResponse {
+  items: Device[];
+  total: number;
+  page: number;
+  pageSize: number;
+  stats: DeviceListStats;
+}

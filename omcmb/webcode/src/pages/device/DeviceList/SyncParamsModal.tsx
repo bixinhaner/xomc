@@ -6,6 +6,9 @@ import { useT } from '@/hooks/useT';
 /** 网络类型标识 */
 type NetworkScope = 'common' | 'eNB' | 'gNB' | 'GSM' | 'eNB+gNB';
 
+/** 同步参数所属的网络制式 */
+export type SyncNetworkType = 'eNB' | 'gNB' | 'GSM';
+
 interface SyncParam {
   code: string;
   label: string;
@@ -21,6 +24,8 @@ interface SyncParamGroup {
 
 interface SyncParamsModalProps {
   open: boolean;
+  /** 当前选中设备的统一制式 */
+  networkType: SyncNetworkType;
   onClose: () => void;
   onConfirm: (selectedParams: string[], alarmSync: boolean) => void;
   confirmLoading?: boolean;
@@ -119,44 +124,72 @@ const BTS_PARAMS: SyncParam[] = [
   { code: 'bts_bsc_relationship', label: 'IPA Unit ID + OML Remote IP + BSC关系', scope: 'GSM' },
 ];
 
-/** scope → Tag 颜色 */
-const SCOPE_COLOR: Record<NetworkScope, string> = {
-  common: '',
-  'eNB+gNB': 'purple',
-  eNB: 'blue',
-  gNB: 'green',
-  GSM: 'orange',
-};
-
-/** scope → Tag 文本 */
-const SCOPE_TEXT: Record<NetworkScope, string> = {
-  common: '',
-  'eNB+gNB': 'LTE+5G',
-  eNB: 'eNB',
-  gNB: 'gNB',
-  GSM: 'GSM',
-};
-
-function ScopeTag({ scope }: { scope: NetworkScope }) {
-  if (scope === 'common') return null;
-  return (
-    <Tag color={SCOPE_COLOR[scope]} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginLeft: 4 }}>
-      {SCOPE_TEXT[scope]}
-    </Tag>
-  );
+/** 判断 scope 是否匹配指定的网络制式 */
+function matchesNetworkType(scope: NetworkScope, networkType: SyncNetworkType): boolean {
+  if (scope === 'common') return true;
+  if (scope === networkType) return true;
+  if (scope === 'eNB+gNB' && (networkType === 'eNB' || networkType === 'gNB')) return true;
+  return false;
 }
 
-export default function SyncParamsModal({ open, onClose, onConfirm, confirmLoading }: SyncParamsModalProps) {
+// ---------------------------------------------------------------------------
+// 各制式默认勾选字段 — 从原始 JSP 同步弹窗提取
+// eNB: 原始页面通过 init() 从监控列表可见列动态映射 (monitorCols)，
+//      此处取设备列表默认可见列经 monitorCols 映射后的静态等价集
+// gNB: gnodeb_monitor.jsp 中 form.device 硬编码初始值
+// GSM: gsm_syncParams.jsp 中 form.basic/bsc/bts 均为空数组
+// ---------------------------------------------------------------------------
+const DEFAULT_CHECKED_CODES: Record<SyncNetworkType, string[]> = {
+  eNB: [
+    'module_type',        // 设备型号名 ← deviceModel (default visible)
+    'software_version',   // 软件版本 ← softwareVersion (default visible)
+    'MAC',                // MAC地址 ← macAddress (default visible)
+    'cell_name',          // 主机名 ← hostName (default visible, via monitorCols)
+    'IP',                 // IP地址 ← ipAddress (default visible, via monitorCols)
+    'cell_status',        // 激活状态 ← opState (default visible, via monitorCols)
+    'ue_count',           // UE数 ← ueCount (default visible)
+  ],
+  gNB: [
+    'cell_name',          // 5G站点名称
+    'IP',                 // IP地址
+    'module_type',        // 设备型号名
+    'software_version',   // 软件版本
+    'halob_flag',         // HaloB开关
+    'ue_count',           // UE数
+  ],
+  GSM: [],
+};
+
+/** 制式标签配置 */
+const NETWORK_TYPE_TAG: Record<SyncNetworkType, { color: string }> = {
+  eNB: { color: 'blue' },
+  gNB: { color: 'green' },
+  GSM: { color: 'orange' },
+};
+
+export default function SyncParamsModal({ open, networkType, onClose, onConfirm, confirmLoading }: SyncParamsModalProps) {
   const t = useT();
   const [alarmSync, setAlarmSync] = useState(true);
-  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  // destroyOnClose 确保每次打开重新挂载，useState 初始值基于当前 networkType
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(
+    () => new Set(DEFAULT_CHECKED_CODES[networkType])
+  );
 
-  const groups: SyncParamGroup[] = useMemo(() => [
-    { key: 'basic',    label: t('sync.basicConfig'),    params: BASIC_PARAMS },
-    { key: 'advanced', label: t('sync.advancedConfig'),  params: ADVANCED_PARAMS },
-    { key: 'bsc',      label: 'BSC',                    params: BSC_PARAMS },
-    { key: 'bts',      label: 'BTS',                    params: BTS_PARAMS },
-  ], [t]);
+  // 根据 networkType 过滤各组参数，隐藏空组
+  const groups: SyncParamGroup[] = useMemo(() => {
+    const allGroups: SyncParamGroup[] = [
+      { key: 'basic',    label: t('sync.basicConfig'),    params: BASIC_PARAMS },
+      { key: 'advanced', label: t('sync.advancedConfig'),  params: ADVANCED_PARAMS },
+      { key: 'bsc',      label: 'BSC',                    params: BSC_PARAMS },
+      { key: 'bts',      label: 'BTS',                    params: BTS_PARAMS },
+    ];
+    return allGroups
+      .map((g) => ({
+        ...g,
+        params: g.params.filter((p) => matchesNetworkType(p.scope, networkType)),
+      }))
+      .filter((g) => g.params.length > 0);
+  }, [t, networkType]);
 
   const handleCheckAll = useCallback((params: SyncParam[], checked: boolean) => {
     setSelectedCodes((prev) => {
@@ -181,10 +214,10 @@ export default function SyncParamsModal({ open, onClose, onConfirm, confirmLoadi
   }, [onConfirm, selectedCodes, alarmSync]);
 
   const handleCancel = useCallback(() => {
-    setSelectedCodes(new Set());
+    setSelectedCodes(new Set(DEFAULT_CHECKED_CODES[networkType]));
     setAlarmSync(true);
     onClose();
-  }, [onClose]);
+  }, [onClose, networkType]);
 
   const collapseItems = useMemo(() =>
     groups.map((group) => {
@@ -216,7 +249,6 @@ export default function SyncParamsModal({ open, onClose, onConfirm, confirmLoadi
                 >
                   {p.label}
                 </Checkbox>
-                <ScopeTag scope={p.scope} />
               </div>
             ))}
           </div>
@@ -224,9 +256,18 @@ export default function SyncParamsModal({ open, onClose, onConfirm, confirmLoadi
       };
     }), [groups, selectedCodes, handleCheckAll, handleToggle]);
 
+  const defaultActiveKeys = useMemo(() => groups.map((g) => g.key), [groups]);
+
   return (
     <Modal
-      title={t('sync.title')}
+      title={
+        <span>
+          {t('sync.title')}
+          <Tag color={NETWORK_TYPE_TAG[networkType].color} style={{ marginLeft: 8 }}>
+            {networkType}
+          </Tag>
+        </span>
+      }
       open={open}
       onOk={handleOk}
       onCancel={handleCancel}
@@ -249,7 +290,7 @@ export default function SyncParamsModal({ open, onClose, onConfirm, confirmLoadi
 
       {/* 检测参数 */}
       <Collapse
-        defaultActiveKey={['basic', 'advanced', 'bsc', 'bts']}
+        defaultActiveKey={defaultActiveKeys}
         items={collapseItems}
         size="small"
       />

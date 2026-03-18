@@ -1,4 +1,4 @@
-import type { Device, NE, DeviceFilter } from '@/types/device';
+import type { Device, NE, DeviceFilter, DeviceListResponse } from '@/types/device';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { mockDevices } from '../data/devices';
 import { mockNEs } from '../data/nes';
@@ -6,10 +6,19 @@ import { delay, paginate, sortBy, filterByText, generateId } from '../utils';
 
 let devices = [...mockDevices];
 
+function computeStats(items: Device[]) {
+  return {
+    total: items.length,
+    online: items.filter((d) => d.connStatus === 'online').length,
+    offline: items.filter((d) => d.connStatus === 'offline').length,
+    alarmed: items.filter((d) => d.alarmLevel !== 'none').length,
+  };
+}
+
 export const deviceService = {
   async getList(
     params: DeviceFilter & PageRequest
-  ): Promise<PageResponse<Device>> {
+  ): Promise<DeviceListResponse> {
     await delay(100, 250);
     let filtered = [...devices];
 
@@ -28,7 +37,9 @@ export const deviceService = {
       filtered = sortBy(filtered, params.sortField as keyof Device, params.sortOrder ?? 'ascend');
     }
 
-    return paginate(filtered, params.page, params.pageSize);
+    const stats = computeStats(filtered);
+    const page = paginate(filtered, params.page, params.pageSize);
+    return { ...page, stats };
   },
 
   async getById(id: string): Promise<Device | null> {
