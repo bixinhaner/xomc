@@ -61,6 +61,18 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.app
+    entrypoint: ["omcgo-migrate"]
+    command: ["--dsn", "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable", "--path", "/etc/omcgo/migrations", "up"]
+    volumes:
+      - ../../migrations:/etc/omcgo/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   acs:
     build:
       context: ../..
@@ -78,6 +90,8 @@ services:
       OMCGO_LOG_LEVEL: "info"
       OMCGO_LOG_FORMAT: "json"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       nats:
@@ -104,8 +118,8 @@ services:
       OMCGO_LOG_LEVEL: "info"
       OMCGO_LOG_FORMAT: "json"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       nats:
@@ -129,8 +143,8 @@ services:
       OMCGO_LOG_LEVEL: "info"
       OMCGO_LOG_FORMAT: "json"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       nats:
