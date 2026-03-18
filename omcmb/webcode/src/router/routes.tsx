@@ -27,6 +27,7 @@ const ResourceStats      = React.lazy(() => import('@/pages/device/ResourceStati
 const ImportExport       = React.lazy(() => import('@/pages/device/ImportExport'));
 const DeviceRules        = React.lazy(() => import('@/pages/device/DeviceRules'));
 const RecycleBin         = React.lazy(() => import('@/pages/device/RecycleBin'));
+const UeDetail           = React.lazy(() => import('@/pages/device/UeDetail'));
 
 // Alarm Management
 const CurrentAlarms      = React.lazy(() => import('@/pages/alarm/CurrentAlarms'));
@@ -191,6 +192,7 @@ export const routes: RouteObject[] = [
       { path: 'device/import',     element: withSuspense(ImportExport) },
       { path: 'device/rules',      element: withSuspense(DeviceRules) },
       { path: 'device/recycle',    element: withSuspense(RecycleBin) },
+      { path: 'device/ue-detail/:sn', element: withSuspense(UeDetail) },
 
       // Alarm Management
       { path: 'alarm/current',    element: withSuspense(CurrentAlarms) },

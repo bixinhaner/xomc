@@ -247,184 +247,8 @@
 
 **5G NR 锁定字段 (12个)**：serial_number, product, module_type, host_name, software_version, group_name, mac_address, PHYCELLID, op_state, halob_flag, ue_count, cell_ip
 
----
 
-## 3. 公共字段 vs 独立字段
-
-### 3.1 三页面公共字段（三个页面都有）
-
-| # | field | LTE 标签 | GSM 标签 | 5G NR 标签 | LTE默认 | GSM默认 | 5G默认 |
-|---|-------|---------|---------|-----------|:-------:|:-------:|:------:|
-| 1 | serial_number | 小站编码 | BSC编码 | 小站编码 | ✅锁定 | ✅固定 | ✅锁定 |
-| 2 | host_name | 主机名 | BSC名称 | 5G站点名称 | ✅锁定 | ✅固定 | ✅锁定 |
-| 3 | product | 产品类型标识 | 产品类型标识 | 产品类型标识 | ✅锁定 | ✅ | ✅锁定 |
-| 4 | module_type | 设备型号名 | 设备型号名 | 设备型号名 | ✅锁定 | ✅ | ✅锁定 |
-| 5 | software_version | 软件版本 | 软件版本 | 软件版本 | ✅锁定 | ✅ | ✅锁定 |
-| 6 | firmware_version | 固件版本 | 固件版本 | 硬件版本 | - | ✅ | - |
-| 7 | mac_address | MAC地址 | MAC | MAC | ✅锁定 | ✅ | ✅锁定 |
-| 8 | group_name | 设备组 | 设备组 | 设备组 | ✅锁定 | ✅ | ✅锁定 |
-| 9 | product_name | 产品名称 | 产品名称 | 产品名称 | - | ✅ | - |
-| 10 | sub_station_name | 站点名称 | 站址名称 | 站址名称 | - | ✅条件 | -条件 |
-| 11 | remark | 备注 | 备注 | 备注 | - | ✅ | - |
-| 12 | up_time | 运行时间 | 运行时间 | 运行时间 | - | ✅ | - |
-| 13 | first_online_time | 第一次连接时间 | 第一次连接时间 | 第一次连接时间 | - | ✅ | - |
-| 14 | LASTINFORMTIME | 上次连接时间 | 上次连接时间 | 上次连接时间 | - | ✅ | - |
-| 15 | cell_ip | IP地址 | IP地址 | IP地址 | ✅锁定 | ✅ | ✅锁定 |
-| 16 | op_state | 是否激活 | 是否激活 | gNB状态 | ✅锁定 | ✅ | ✅锁定 |
-| 17 | rf_status | 射频开关状态 | 射频开关状态 | 射频开关状态 | ✅锁定 | ✅ | - |
-| 18 | ue_count | UE数 | UE数 | UE数 | ✅锁定 | ✅ | ✅锁定 |
-| 19 | synStatus | 同步状态 | 同步状态 | 同步状态 | - | ✅ | - |
-| 20 | gps_longitude | GPS经度 | GPS经度 | GPS经度 | - | ✅ | - |
-| 21 | gps_latitude | GPS纬度 | GPS纬度 | GPS纬度 | - | ✅ | - |
-| 22 | gps_height | GPS高度 | GPS高度 | GPS高度 | - | ✅ | - |
-
-### 3.2 LTE + 5G NR 共有（GSM 无）
-
-| # | field | LTE 标签 | 5G NR 标签 | LTE默认 | 5G默认 |
-|---|-------|---------|-----------|:-------:|:------:|
-| 1 | online_time | 接入时间 | 接入时间 | ✅ | ✅ |
-| 2 | offline_time | 断开时间 | 断开时间 | ✅ | ✅ |
-| 3 | PHYCELLID | PCI | PCI | ✅锁定 | ✅锁定 |
-| 4 | tac | TAC | TAC | - | - |
-| 5 | EARFCNDLINUSE | 频点 | NR频点下限 | - | - |
-| 6 | network_model | 基站指示 | 基站指示 | - | - |
-| 7 | tx_power | CPE发射功率 | Tx Power | - | - |
-| 8 | IPSEC_ADDR | IPSEC地址 | IPSEC地址 | - | - |
-| 9 | halob_flag | HaloX | HaloB开关 | - | ✅锁定 |
-
-### 3.3 LTE + GSM 共有（5G NR 无）
-
-| # | field | LTE 标签 | GSM 标签 | LTE默认 | GSM默认 |
-|---|-------|---------|---------|:-------:|:-------:|
-| 1 | online_duration | 累计时长 | 累计时长 | - | ✅ |
-| 2 | gps_satellite_count | GPS卫星数 | GPS卫星数 | - | ✅ |
-
-### 3.4 LTE 独有字段（仅 LTE 有）
-
-| # | field | 中文标签 | 默认 | 所属组 |
-|---|-------|---------|:----:|--------|
-| 1 | enbId | eNodeB ID | - | cell |
-| 2 | cellId | 小区ID | - | cell |
-| 3 | CELL_IDENTITY | ECI | ✅锁定 | cell |
-| 4 | plmnid | PLMN | - | cell |
-| 5 | signment | 子帧配比 | - | cell |
-| 6 | specialSubframe | 特殊子帧配比 | - | cell |
-| 7 | rootIndex | 根序列索引 | - | cell |
-| 8 | site_id | 站点ID | - | cell |
-| 9 | bandwidth | 带宽 | - | cell |
-| 10 | mme_status | MME状态 | ✅锁定 | status |
-| 11 | pm_report_status | KPI上报状态 | - | status |
-| 12 | validity | 有效期 | - | status |
-| 13 | lock_status | 锁定状态 | - | status |
-| 14 | euCountStr | EU数 | - | status |
-| 15 | ruCountStr | RU数 | - | status |
-| 16 | cpe_connect | CPE连接数 | ✅锁定 | status |
-| 17 | wanSpeed | WAN状态 | - | status |
-| 18 | service_status | 状态 | - | status |
-| 19 | mmepool_ipsec_addr | MME Pool IPSEC地址 | - | network |
-| 20 | gps_version | GPS版本 | - | device |
-| 21 | rom | Rom | - | device |
-| 22 | mechanical_downtilt | 机械下倾角 | - | location |
-| 23 | electronic_downtilt | 电子下倾角 | - | location |
-| 24 | vertical_3dB_beam_width | 垂直波束宽度 | - | location |
-| 25 | horizontal_azimuth | 水平方位角 | - | location |
-| 26 | install_address | 安装详细地址 | - | location |
-
-### 3.5 GSM 独有字段（仅 GSM 有）
-
-| # | field | 中文标签 | 所属 |
-|---|-------|---------|------|
-| 1 | IpaUnitId | Ipa Unit Id | 网络 |
-| 2 | OmlRemoteIp | Oml Remote Ip | 网络 |
-| 3 | OmlRemoteIpBak | Oml Remote Ip Bak | 网络 |
-| 4 | BscSelect | BSC Select | 状态 |
-| 5 | BscLinkStatus | BSC连接状态 | 状态 |
-| 6 | BSCSerialNumber | 所属BSC编码 | 状态 |
-| 7 | BtsNum | BTS数 | 状态 |
-| 8 | currentLac | LAC | 小区 |
-| 9 | currentArfcn | ��点 | 小区 |
-| 10 | uplinkFrequency | 上行频率 | 小区 |
-| 11 | downlinkFrequency | 下行频率 | 小区 |
-
-### 3.6 5G NR 独有字段（仅 5G NR 有）
-
-| # | field | 中文标签 | 默认 | 所属组 |
-|---|-------|---------|:----:|--------|
-| 1 | gNBId | gNodeB ID | - | device |
-| 2 | nr_cell_id | NR小区ID | - | cell |
-| 3 | Band | 频段 | - | cell |
-| 4 | EARFCNULINUSE | NR频点上限 | - | cell |
-| 5 | adminState | Admin状态 | - | status |
-| 6 | amf_status | AMF Status | - | status |
-| 7 | multiPlmnEnable | Multi PLMN状态 | - | status |
-
-#### 5G NR 同步对话框扩展（othersCol，不在主列表中）
-
-| # | field | 中文标签 |
-|---|-------|---------|
-| 1 | rollback_version | 回滚版本 |
-| 2 | sas_param | SAS参数 |
-| 3 | eu_ru | EU/RU数 |
-| 4 | halob_license | HaloB License |
-| 5 | energy_saving | 节能 |
-| 6 | gnb_topo_cellmgr | gNB TOPO |
-| 7 | ssl_cert_validity | SSL证书有效期 |
-
----
-
-## 4. 统计汇总
-
-### 4.1 字段数量
-
-| 维度 | LTE eNodeB | GSM | 5G NR gNodeB |
-|------|:----------:|:---:|:------------:|
-| 固定列 | 7 | 7 | 6 |
-| 可配置列 | 60 | 33 | 42 (+7 othersCol) |
-| 默认勾选数 | 17 | 33 (全部) | 14 |
-| 锁定字段数 | 15 | 0 | 12 |
-| 列分组数 | 6 | 1 (扁平) | 5 |
-
-### 4.2 默认勾选对比
-
-| field | LTE | GSM | 5G NR | 三页面共有默认 |
-|-------|:---:|:---:|:-----:|:-------------:|
-| serial_number | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| host_name | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| product | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| module_type | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| software_version | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| mac_address | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| group_name | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| cell_ip | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| op_state | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| ue_count | ✅锁定 | ✅ | ✅锁定 | ✅ |
-| rf_status | ✅锁定 | ✅ | - | LTE+GSM |
-| online_time | ✅ | - | ✅ | LTE+5G |
-| offline_time | ✅ | - | ✅ | LTE+5G |
-| CELL_IDENTITY | ✅锁定 | - | - | 仅LTE |
-| PHYCELLID | ✅锁定 | - | ✅锁定 | LTE+5G |
-| mme_status | ✅锁定 | - | - | 仅LTE |
-| cpe_connect | ✅锁定 | - | - | 仅LTE |
-| halob_flag | - | - | ✅锁定 | 仅5G |
-| firmware_version | - | ✅ | - | 仅GSM |
-| product_name | - | ✅ | - | 仅GSM |
-| sub_station_name | - | ✅ | - | 仅GSM |
-| up_time | - | ✅ | - | 仅GSM |
-| online_duration | - | ✅ | - | 仅GSM |
-| first_online_time | - | ✅ | - | 仅GSM |
-| LASTINFORMTIME | - | ✅ | - | 仅GSM |
-| remark | - | ✅ | - | 仅GSM |
-
-### 4.3 三页面共有且默认显示的 10 个核心字段
-
-```
-serial_number, host_name, product, module_type, software_version,
-mac_address, group_name, cell_ip, op_state, ue_count
-```
-
-这 10 个字段在所有三个监控页面中都是**默认勾选**的，应作为统一设备列表的默认显示列。
-
-### 4.4 统一设备列表 — 三制式字段适用性对照表
+## 3. 统一设备列表 — 三制式字段适用性对照表
 
 > 每个字段标注在哪些制式下有数据，不适用的制式显示为空（`-`）。
 
@@ -541,7 +365,7 @@ mac_address, group_name, cell_ip, op_state, ue_count
 | omlRemoteIp | OML Remote IP | - |
 | omlRemoteIpBak | OML Remote IP Bak | - |
 
-### 4.5 状态字段枚举值参考
+## 4. 状态字段枚举值参考
 
 > 基于原始 JSP 页面的格式化函数和条件渲染逻辑提取。
 
@@ -673,31 +497,7 @@ mac_address, group_name, cell_ip, op_state, ue_count
 | GSM 字段 | `GSM` | GSM 独有 | 11 | 0 |
 | **合计** | | | **88** | **16** |
 
-#### 公共字段 (common) — 31 列
-
-默认显示（16列）：sn, connStatus, alarmLevel, hostName, networkType, productType, deviceModel, softwareVersion, macAddress, groupName, ipAddress, onlineTime, offlineTime, opState, ueCount, rfStatus
-
-默认隐藏（15列）：syncStatus, productName, firmwareVersion, onlineDuration, upTime, firstOnlineTime, lastInformTime, lastOnlineTime, siteName, remark, longitude, latitude, gpsHeight, gpsSatelliteCount, installAddress
-
-#### eNB+gNB 共享字段 — 10 列（全部默认隐藏）
-
-pci, tac, band, dlEarfcn, ulEarfcn, networkModel, txPower, halobFlag, adminState, ipsecAddr
-
-#### eNB 字段 — 23 列（全部默认隐藏）
-
-小区信息：enbId, cellId, eci, plmnId, subframeAssignment, specialSubframe, rootIndex, siteId, bandwidth
-状态信息：mmeStatus, pmReportStatus, cpeCount, lockStatus, wanSpeed, serviceStatus, validity
-设备信息：gpsVersion, rom
-网络信息：mmepoolIpsecAddr
-位置信息：mechanicalDowntilt, electronicDowntilt, verticalBeamWidth, horizontalAzimuth
-
-#### gNB 字段 — 13 列（全部默认隐藏）
-
-gnbId, nrCellId, amfStatus, multiPlmnEnable, euCount, ruCount, rollbackVersion, sasParam, euRu, halobLicense, energySaving, gnbTopoCellmgr, sslCertValidity
-
-#### GSM 字段 — 11 列（全部默认隐藏）
-
-lac, arfcn, uplinkFrequency, downlinkFrequency, bscLinkStatus, bscSelect, bscSerialNumber, btsNum, ipaUnitId, omlRemoteIp, omlRemoteIpBak
+> 各分组的字段明细详见第 3 节「统一设备列表 — 三制式字段适用性对照表」。
 
 ### 5.3 列设置交互设计
 
@@ -1033,7 +833,7 @@ lac, arfcn, uplinkFrequency, downlinkFrequency, bscLinkStatus, bscSelect, bscSer
 
 ## 7. 各监控页面产品类型分析
 
-### 6.1 LTE eNodeB 监控页面
+### 7.1 LTE eNodeB 监控页面
 
 LTE 页面使用两个字段标识产品：`product`（产品编号）和 `platformType`（平台类型）。
 
@@ -1085,7 +885,7 @@ LTE 页面使用两个字段标识产品：`product`（产品编号）和 `platf
 
 ---
 
-### 6.2 GSM 监控页面
+### 7.2 GSM 监控页面
 
 GSM 页面同时使用 `product` 和 `platformType`，但产品类型较少。
 
@@ -1118,7 +918,7 @@ GSM 页面复用了 LTE 的 platformType 判断逻辑：
 
 ---
 
-### 6.3 5G NR gNodeB 监控页面
+### 7.3 5G NR gNodeB 监控页面
 
 5G NR 页面产品类型最简单，仅两种产品。**不使用 platformType 字段**。
 
@@ -1138,48 +938,13 @@ GSM 页面复用了 LTE 的 platformType 判断逻辑：
 - 产品类型标识（`product`）和设备型号名（`module_type`）均为锁定字段（disabled: true）
 - `BaiBNQ` 特有 AMF Status 列的条件渲染
 
----
 
-### 6.4 筛选下拉选项对比（前端 UI 层面）
-
-> 以下分析区分了**前端筛选下拉选项**（用户在 UI 中可选的值）和**代码条件渲染中引用的 product/platformType 值**（仅用于列渲染逻辑）。
-
-#### LTE eNodeB 筛选下拉
-
-- **产品类型标识 (`product_model`)**：JSP 中定义为 `product_model: []`（空数组），无硬编码选项
-- **加载方式**：JSP 中未找到调用 `getEnbMonitorProductList` 的 API 请求，下拉选项完全由后端动态填充
-- **结论**：LTE 页面的产品类型筛选选项由后端接口返回，前端不维护固定列表
-
-#### GSM 筛选下拉
-
-- **产品类型标识 (`product_model`)**：JSP 中硬编码为 `product_model: 'BSC,BTS'`（逗号分隔字符串）
-- **加载方式**：无动态 API 加载，固定值作为默认筛选条件
-- **结论**：GSM 页面默认筛选 BSC 和 BTS 两种产品类型，无动态扩展
-
-#### 5G NR gNodeB 筛选下拉
-
-- **硬编码选项**：`advancedQueryItemList` 中定义了 `BaiBNX` 和 `BaiBNQ` 两个选项
-- **动态加载**：页面初始化时调用 `getEnbMonitorProductList.action?isGnb=1` 接口，返回值**覆盖**硬编码选项
-- **结论**：5G NR 页面有初始硬编码值，但实际运行时以后端返回为准
-
-#### 下拉选项汇总
-
-| 页面 | 硬编码选项 | 动态加载 | 实际行为 |
-|------|-----------|:--------:|---------|
-| LTE eNodeB | 无（空数组） | 未明确调用 | 由后端完全控制 |
-| GSM | `BSC, BTS` | 无 | 固定两种产品 |
-| 5G NR gNodeB | `BaiBNX, BaiBNQ` | ✅ `getEnbMonitorProductList?isGnb=1` | 硬编码为初始值，后端可覆盖 |
-
-> **注意**：代码中通过 `product` 和 `platformType` 条件判断的产品类型（如 PM-B4860、QAFA、Intel_CR_CA 等）仅影响列渲染逻辑（激活状态显示、MME 列表、Cell ID 格式等），并不等同于用户可选的筛选下拉选项。这些值来自设备上报的数据，不需要在筛选下拉中逐一列举。
-
----
-
-### 6.5 各制式行级操作（"执行"菜单）按产品类型对比
+### 7.4 各制式行级操作（"执行"菜单）按产品类型对比
 
 > 基于三个 JSP 中 `optClick()` 函数逐条件分析，仅列出**当前菜单构建中实际生效**的操作项（不含残留 handler 代码）。
 > 排除"设置"操作。
 
-#### 6.5.1 eNB (LTE) 行级操作
+#### 7.4.1 eNB (LTE) 行级操作
 
 LTE 操作受 `product`、`platformType`、`dualCarrierType`、`have_connected` 多维度影响，是三制式中最复杂的。
 
@@ -1218,7 +983,7 @@ LTE 操作受 `product`、`platformType`、`dualCarrierType`、`have_connected` 
 
 ---
 
-#### 6.5.2 gNB (5G NR) 行级操作
+#### 7.4.2 gNB (5G NR) 行级操作
 
 5G NR **不按产品类型区分操作**。BaiBNX 和 BaiBNQ 的操作菜单完全一致。
 
@@ -1240,7 +1005,7 @@ LTE 操作受 `product`、`platformType`、`dualCarrierType`、`have_connected` 
 
 ---
 
-#### 6.5.3 GSM 行级操作
+#### 7.4.3 GSM 行级操作
 
 GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Group3 始终为空）。
 
@@ -1258,7 +1023,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 ---
 
-#### 6.5.4 三制式行级操作汇总矩阵
+#### 7.4.4 三制式行级操作汇总矩阵
 
 | 操作 | eNB 通用 | eNB DC子站 | eNB CA多载波 | eNB BM双模 | eNB PM-B4860 | gNB | GSM |
 |------|:--------:|:---------:|:-----------:|:---------:|:-----------:|:---:|:---:|
@@ -1276,11 +1041,11 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 ---
 
-### 6.6 批量操作（工具栏）对比
+### 7.5 批量操作（工具栏）对比
 
 > 基于三个 JSP 工具栏区域逐按钮分析，列出需要选中行的批量操作和不需选中的全局操作。
 
-#### 6.6.1 三制式批量操作汇总
+#### 7.5.1 三制式批量操作汇总
 
 | # | 操作 | eNB (LTE) | gNB (5G NR) | GSM | 需选中行 |
 |---|------|:---------:|:-----------:|:---:|:--------:|
@@ -1291,7 +1056,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | 5 | **回收站** | ✅ `CODE_ENB_DEVICE_REGISTER` | ✅ `CODE_GNB_DEVICE_REGISTER` | ❌ | ✅ |
 | 6 | **添加基站** | ✅ `CODE_ENB_DEVICE_REGISTER` | ❌ | ❌ (已注释) | ❌ |
 
-#### 6.6.2 各操作交互流程对比
+#### 7.5.2 各操作交互流程对比
 
 ##### 移动到设备组
 
@@ -1360,7 +1125,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 - 仅 eNB 页面有此按钮（gNB 无，GSM 已注释）
 - 统一设备列表中不再提供添加基站入口（改为导出按钮）
 
-#### 6.6.3 统一设备列表批量操作实现
+#### 7.5.3 统一设备列表批量操作实现
 
 | # | 操作 | 图标 | 交互反馈 | 显示条件 | 状态 |
 |---|------|------|---------|---------|:----:|
@@ -1369,11 +1134,11 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | 3 | 重启 | `ReloadOutlined` | 确认对话框："确定重启设备？" → "命令已经下发。" 提示 | 选中任意设备 | ✅ |
 | 4 | 回收站 | `RestOutlined` (danger) | 警告确认：两行说明文字 → "成功" toast | 选中任意设备 | ✅ |
 
-> **批量同步制式限制**：只有当所有选中设备的 `networkType` 完全相同时（全 eNB / 全 gNB / 全 GSM），才在批量操作栏显示"同步"按钮。按钮文本显示当前制式，如"批量同步 (eNB)"。弹窗标题带制式 Tag，仅展示该制式的同步参数（参见 6.6.4.1 各制式字段表）。
+> **批量同步制式限制**：只有当所有选中设备的 `networkType` 完全相同时（全 eNB / 全 gNB / 全 GSM），才在批量操作栏显示"同步"按钮。按钮文本显示当前制式，如"批量同步 (eNB)"。弹窗标题带制式 Tag，仅展示该制式的同步参数（参见 7.5.4.1 各制式字段表）。
 >
 > 页面顶部"导出"按钮为独立功能，不需要选中行，点击弹出导出配置弹窗。
 
-#### 6.6.4 批量同步参数整合（三制式字段合并）
+#### 7.5.4 批量同步参数整合（三制式字段合并）
 
 > 源文件：`SyncParamsModal.tsx`
 >
@@ -1382,7 +1147,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 > - GSM: `enodeb/monitor/GSM/gsm_syncParams.jsp`
 > - gNB: `gnodeb/monitor/gnodeb_monitor.jsp`（内嵌同步弹窗）
 
-##### 6.6.4.1 三制式原始同步弹窗字段对比
+##### 7.5.4.1 三制式原始同步弹窗字段对比
 
 ###### eNB 同步弹窗（sync_params.jsp）
 
@@ -1588,7 +1353,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 **GSM 默认预选**：无（`gsm_syncParams.jsp` 中 `form.basic/bsc/bts` 均为空数组，`mounted()` 为空）
 
-##### 6.6.4.2 统一同步弹窗（按制式分类显示）
+##### 7.5.4.2 统一同步弹窗（按制式分类显示）
 
 批量同步仅在所有选中设备为**同一制式**时可用。弹窗根据制式过滤参数，只显示当前制式的同步字段。各制式的默认预选字段同上。
 
@@ -1696,7 +1461,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 > ⚠️ = 条件字段（受权限或功能开关控制，可能被过滤不显示）
 
-#### 6.6.5 导出功能（页面顶部按钮）
+#### 7.5.5 导出功能（页面顶部按钮）
 
 > 源文件：`ExportModal.tsx`
 
@@ -1740,16 +1505,3 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | gNB | `/gnb/gnbMonitor/exportGnbInfoToCsv.action` | `/gnb/gnbMonitor/exportGnbInfoToExcel.action` | 同 eNB + `isGnb=1` |
 | GSM | - | `/cell/cpeinfos/exportGSMInfosToExcel.action` | 同 eNB + `isGSM=1` |
 
----
-
-### 6.7 三页面产品类型汇总
-
-| 维度 | LTE eNodeB | GSM | 5G NR gNodeB |
-|------|:----------:|:---:|:------------:|
-| product 取值数 | 5+ (PM-B4860, QAFA, QATA, QAFB, RTD, 通用) | 4 (BSC, BTS, PM-B4860, RTD) | 2 (BaiBNX, BaiBNQ) |
-| platformType 取值数 | 16 | 7（复用 LTE 逻辑） | 不使用 |
-| 小区配置类型 | CA/TC/SC/DC/基础 | 复用 LTE | 无 |
-| 多制式支持 | BM (LTE+GSM) | - | - |
-| 双载波 | Intel_CR_DC, MLN_DC, QA_436Q_DC, NEU430_DC | 复用 LTE | - |
-| 筛选下拉选项 | 后端动态（空数组） | BSC, BTS（硬编码） | BaiBNX, BaiBNQ（硬编码+动态覆盖） |
-| 复杂度 | 高（16 种平台 × 5 种产品） | 中（复用 LTE 逻辑） | 低（仅 2 种产品） |

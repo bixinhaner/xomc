@@ -27,7 +27,6 @@ import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
 import SyncParamsModal from './SyncParamsModal';
 import type { SyncNetworkType } from './SyncParamsModal';
-import UeDetailDrawer from './UeDetailDrawer';
 import MoveToGroupModal from './MoveToGroupModal';
 import ExportModal from './ExportModal';
 import type { ExportParams } from './ExportModal';
@@ -56,8 +55,6 @@ export default function DeviceList() {
   const [syncTarget, setSyncTarget] = useState<{ mode: 'batch' } | { mode: 'single'; device: Device }>({ mode: 'batch' });
   const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  // UE 详情抽屉：仅 eNB 非 CA 站点击 UE 数时打开右侧 Slide 面板
-  const [ueDrawerDevice, setUeDrawerDevice] = useState<Device | null>(null);
 
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
@@ -944,16 +941,20 @@ export default function DeviceList() {
         dataIndex: 'ueCount',
         width: 80,
         group: 'common',
-        // JSP 行为: eNB >0 且非 CA 站可点击(Slide面板)；gNB/GSM 不可点击
+        // JSP 行为: eNB >0 且非 CA 站可点击(跳转 UE 详情页)；gNB/GSM 不可点击
         render: (_val, record) => {
           const v = record.ueCount;
           if (v === -1 || v === null || v === undefined) return '--';
           if (v === 0) return '0';
-          // 仅 eNB 且非 CA 站支持点击查看 UE 详情
+          // 仅 eNB 且非 CA 站支持点击跳转 UE 详情页
           const isEnb = record.networkType === 'eNB';
           const isCaSite = record.platformType?.includes('_CA');
           if (isEnb && !isCaSite) {
-            return <Link onClick={() => setUeDrawerDevice(record)}>{v}</Link>;
+            return (
+              <Link onClick={() => navigate(`/device/ue-detail/${record.sn}?platformType=${encodeURIComponent(record.platformType ?? '')}&name=${encodeURIComponent(record.name || record.sn)}&ueCount=${record.ueCount}`)}>
+                {v}
+              </Link>
+            );
           }
           return String(v);
         },
@@ -1526,11 +1527,6 @@ export default function DeviceList() {
         onConfirm={handleExportConfirm}
       />
 
-      {/* UE 详情抽屉 — 仅 eNB 非 CA 站，右侧 Slide 面板 */}
-      <UeDetailDrawer
-        device={ueDrawerDevice}
-        onClose={() => setUeDrawerDevice(null)}
-      />
     </ListPageLayout>
   );
 }
