@@ -34,6 +34,10 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
         PERFORM create_hypertable('mr_records', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
+        ALTER TABLE mr_records SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'device_id, file_id, mr_type'
+        );
         PERFORM add_compression_policy('mr_records', INTERVAL '7 days', if_not_exists => TRUE);
         PERFORM add_retention_policy('mr_records', INTERVAL '90 days', if_not_exists => TRUE);
     END IF;
