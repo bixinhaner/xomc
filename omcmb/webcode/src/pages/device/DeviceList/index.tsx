@@ -20,8 +20,6 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
-import SyncParamsModal from './SyncParamsModal';
-import type { SyncNetworkType } from './SyncParamsModal';
 
 const { Link } = Typography;
 
@@ -42,8 +40,6 @@ export default function DeviceList() {
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [syncModalOpen, setSyncModalOpen] = useState(false);
-
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
     return localStorage.getItem('omc_remark_label') || 'Remark';
@@ -244,44 +240,22 @@ export default function DeviceList() {
     setCurrentPage(1);
   }, []);
 
-  // 批量重启 — 确认对话框 → "命令已经下发。"
-  const handleBatchReboot = useCallback(
-    (ids: string[]) => {
+  // 批量操作通用确认弹窗
+  const handleBatchAction = useCallback(
+    (actionLabel: string, ids: React.Key[]) => {
       modal.confirm({
         title: t('common.confirm'),
-        content: t('common.rebootConfirmMsg'),
+        content: `${actionLabel} ${ids.length} ${t('device.count.unit')}`,
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
-        onOk: async () => {
-          // TODO: 接入 POST /task/reboot/batchRebootCell.action，ids 传给后端
-          console.log('batch reboot ids:', ids);
-          void message.info(t('common.commandSent'));
+        onOk: () => {
+          // TODO: 接入对应批量操作 API
+          void message.success(t('common.commandSent'));
           setSelectedRowKeys([]);
-          void refetch();
         },
       });
     },
-    [modal, message, t, refetch]
-  );
-
-  // 批量同步 — 打开参数选择对话框
-  const handleBatchSync = useCallback(() => {
-    setSyncModalOpen(true);
-  }, []);
-
-  // 批量同步确认回调
-  const handleSyncConfirm = useCallback(
-    (selectedParams: string[], alarmSync: boolean) => {
-      const params = alarmSync ? [...selectedParams, 'sync_alarm'] : selectedParams;
-      const cellCodes = selectedRowKeys.join(',');
-      // TODO: 接入 POST /cell/quicksettings/batchSyncCell.action
-      // params: { smallCellCode: cellCodes, selectedParams: params.join(',') }
-      console.log('batch sync:', { cellCodes, selectedParams: params.join(',') });
-      setSelectedRowKeys([]);
-      setSyncModalOpen(false);
-      void refetch();
-    },
-    [selectedRowKeys, refetch]
+    [modal, message, t]
   );
 
   // 导出 — 直接选择格式后触发
@@ -777,47 +751,6 @@ export default function DeviceList() {
     [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender]
   );
 
-  // 批量收集报文
-  const handleBatchTr069Collect = useCallback(
-    (ids: string[]) => {
-      // TODO: 接入批量报文收集 API
-      console.log('batch tr069 collect ids:', ids);
-      void message.info(t('device.action.tr069Collecting'));
-      setSelectedRowKeys([]);
-    },
-    [message, t]
-  );
-
-  // 批量恢复默认配置
-  const handleBatchResetConfig = useCallback(
-    (ids: string[]) => {
-      modal.confirm({
-        title: t('device.action.resetConfig'),
-        content: t('device.action.resetConfigConfirm'),
-        okType: 'danger',
-        onOk: () => {
-          // TODO: 接入批量恢复默认配置 API
-          console.log('batch reset config ids:', ids);
-          void message.success(t('common.commandSent'));
-          setSelectedRowKeys([]);
-          void refetch();
-        },
-      });
-    },
-    [modal, message, t, refetch]
-  );
-
-  // 批量日志收集
-  const handleBatchLogCollect = useCallback(
-    (ids: string[]) => {
-      // TODO: 接入批量日志收集 API
-      console.log('batch log collect ids:', ids);
-      void message.info(t('device.action.logCollecting'));
-      setSelectedRowKeys([]);
-    },
-    [message, t]
-  );
-
   const batchActions = useMemo((): BatchAction[] => {
     const actions: BatchAction[] = [];
 
@@ -827,7 +760,7 @@ export default function DeviceList() {
         key: 'batch-sync',
         label: `${t('common.batchSync')} (${selectedNetworkType})`,
         icon: <SyncOutlined />,
-        onClick: () => handleBatchSync(),
+        onClick: (keys) => handleBatchAction(t('common.batchSync'), keys),
       });
     }
 
@@ -836,27 +769,27 @@ export default function DeviceList() {
         key: 'batch-reboot',
         label: t('common.batchReboot'),
         icon: <ReloadOutlined />,
-        onClick: (keys) => handleBatchReboot(keys as string[]),
+        onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys),
       },
       {
         key: 'batch-tr069-collect',
         label: t('device.action.tr069Collect'),
-        onClick: (keys) => handleBatchTr069Collect(keys as string[]),
+        onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys),
       },
       {
         key: 'batch-reset-config',
         label: t('device.action.resetConfig'),
-        onClick: (keys) => handleBatchResetConfig(keys as string[]),
+        onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys),
       },
       {
         key: 'batch-log-collect',
         label: t('device.action.logCollect'),
-        onClick: (keys) => handleBatchLogCollect(keys as string[]),
+        onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys),
       },
     );
 
     return actions;
-  }, [handleBatchSync, handleBatchReboot, handleBatchTr069Collect, handleBatchResetConfig, handleBatchLogCollect, selectedNetworkType, t]);
+  }, [handleBatchAction, selectedNetworkType, t]);
 
   return (
     <ListPageLayout
@@ -907,13 +840,6 @@ export default function DeviceList() {
         batchActions={batchActions}
         onRefresh={() => void refetch()}
         defaultDensity="compact"
-      />
-
-      <SyncParamsModal
-        open={syncModalOpen}
-        networkType={selectedNetworkType ?? 'eNB'}
-        onClose={() => setSyncModalOpen(false)}
-        onConfirm={handleSyncConfirm}
       />
 
     </ListPageLayout>
