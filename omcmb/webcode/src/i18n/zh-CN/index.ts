@@ -699,6 +699,22 @@ const messages: Record<string, string> = {
   'sync.selectGroupTip':    '请选择设备组',
 
   // -------------------------------------------------------------------------
+  // Export modal
+  // -------------------------------------------------------------------------
+  'export.title':               '导出',
+  'export.startExport':         '开始导出',
+  'export.selectOperator':      '选择运营商',
+  'export.operatorPlaceholder': '请选择运营商（支持多选）',
+  'export.selectFields':        '列表字段',
+  'export.commonFields':        '公共字段',
+  'export.enbFields':           'eNB 字段',
+  'export.gnbFields':           'gNB 字段',
+  'export.gsmFields':           'GSM 字段',
+  'export.licenseInfo':         '导出License信息',
+  'export.licenseDesc':         '同时导出设备License信息',
+  'export.format':              '导出格式',
+
+  // -------------------------------------------------------------------------
   // FilterBar — search & filter labels
   // -------------------------------------------------------------------------
   'filter.searchText':          '搜索',

@@ -4,8 +4,8 @@ import { App, Button, Dropdown, Space, Tag, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CaretRightOutlined,
+  ExportOutlined,
   EyeOutlined,
-  PlusOutlined,
   ReloadOutlined,
   RestOutlined,
   SwapOutlined,
@@ -23,6 +23,8 @@ import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
 import SyncParamsModal from './SyncParamsModal';
 import MoveToGroupModal from './MoveToGroupModal';
+import ExportModal from './ExportModal';
+import type { ExportParams } from './ExportModal';
 
 const { Link } = Typography;
 
@@ -45,6 +47,7 @@ export default function DeviceList() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
   const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const queryParams = useMemo(
     () => ({ ...filterParams, page: currentPage, pageSize } as Parameters<typeof useDeviceList>[0]),
@@ -284,6 +287,20 @@ export default function DeviceList() {
       void refetch();
     },
     [selectedRowKeys, message, t, refetch]
+  );
+
+  // 导出确认回调
+  const handleExportConfirm = useCallback(
+    (params: ExportParams) => {
+      // TODO: 根据 params.format 选择 API 端点
+      // CSV: POST /cell/cpeinfos/exportCellsToCsv.action
+      // XLSX: POST /cell/cpeinfos/exportCellsToExcel.action
+      // License: POST /cell/cpeinfos/exportEnodebLicenseInfos.action
+      console.log('export:', params);
+      void message.info(t('common.exportInProgress'));
+      setExportModalOpen(false);
+    },
+    [message, t]
   );
 
   // 行级操作 — "执行"下拉菜单
@@ -664,10 +681,10 @@ export default function DeviceList() {
       extra={
         <Button
           type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => void navigate('/device/registration')}
+          icon={<ExportOutlined />}
+          onClick={() => setExportModalOpen(true)}
         >
-          {t('common.addDevice')}
+          {t('common.export')}
         </Button>
       }
     >
@@ -712,6 +729,12 @@ export default function DeviceList() {
         open={moveToGroupModalOpen}
         onClose={() => setMoveToGroupModalOpen(false)}
         onConfirm={handleMoveToGroupConfirm}
+      />
+
+      <ExportModal
+        open={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        onConfirm={handleExportConfirm}
       />
     </ListPageLayout>
   );

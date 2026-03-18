@@ -934,7 +934,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 
 
 - 仅 eNB 页面有此按钮（gNB 无，GSM 已注释）
-- 在统一设备列表中已整合为页面顶部"新增"按钮
+- 统一设备列表中不再提供添加基站入口（改为导出按钮）
 
 #### 6.6.3 统一设备列表批量操作实现
 
@@ -945,8 +945,7 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | 3 | 重启 | `ReloadOutlined` | 确认对话框："确定重启设备？" → "命令已经下发。" 提示 | ✅ 已实现 |
 | 4 | 回收站 | `RestOutlined` (danger) | 警告确认：两行说明文字 → "成功" toast | ✅ 已实现 |
 
-> 页面顶部"新增"按钮已独立存在，不在批量操作栏中。
-> "导出"为独立工具栏功能，不需要选中行，后续作为独立按钮实现。
+> 页面顶部"导出"按钮为独立功能，不需要选中行，点击弹出导出配置弹窗。
 
 #### 6.6.4 批量同步参数整合（三制式字段合并）
 
@@ -1055,6 +1054,50 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | BSC | 0 | 0 | 0 | 0 | 1 | **1** |
 | BTS | 0 | 0 | 0 | 0 | 8 | **8** |
 | **合计** | **6** | **10** | **35** | **7** | **10** | **68** |
+
+#### 6.6.5 导出功能（页面顶部按钮）
+
+> 源文件：`ExportModal.tsx`
+
+原三制式各自有独立的导出入口（eNB: Popover 全参数配置页, gNB: Popover, GSM: Dropdown/Popover），统一为页面右上角"导出"按钮 → Modal 弹窗。
+
+##### 三制式导出功能对比
+
+| 维度 | eNB | gNB | GSM |
+|------|-----|-----|-----|
+| 入口 | Popover (920×500px) | Popover (700×400px) | Dropdown / Popover (云管理员) |
+| 格式 | CSV / XLSX | CSV / XLSX | XLSX (云管理员: XLSX) |
+| 字段选择 | ✅ 6组可折叠 | ✅ 5组可折叠 | ❌ 使用当前可见列 |
+| License 导出 | ✅ | ✅ | ✅ (仅云管理员) |
+| 运营商选择 | ✅ (仅云管理员) | ❌ | ✅ (仅云管理员) |
+| 需选中行 | ❌ | ❌ | ❌ |
+
+##### 统一导出弹窗配置
+
+| # | 配置项 | 类型 | 说明 |
+|---|--------|------|------|
+| 1 | 选择运营商 | 多选下拉 | 中国移动/中国电信/中国联通，支持多选 |
+| 2 | 列表字段 | 分组复选框 | 4 组折叠面板：公共字段(19) / eNB(22) / gNB(14) / GSM(10)，各组支持全选 |
+| 3 | 导出License | 复选框 | 同时导出设备License信��� |
+| 4 | 导出格式 | Radio | XLSX（默认）/ CSV |
+
+##### 导出列字段分组
+
+| 分组 | Tag 颜色 | 字段数 | 说明 |
+|------|:--------:|:------:|------|
+| 公共字段 | - | 19 | SN/连接状态/告警/名称/产品类型/型号/版本/MAC/设备组/IP/时间/状态/UE/���频/GPS |
+| eNB 字段 | 蓝色 | 22 | ECI/PCI/PLMN/TAC/带宽/频点/功率/MME/CPE/IPSec/子帧/WAN/倾角/方位角/卫星 |
+| gNB 字段 | 绿色 | 14 | NR Cell ID/PCI/TAC/Band/ARFCN/功率/AdminState/HaloB/同步/MultiPLMN/AMF/IPSec |
+| GSM 字段 | 橙色 | 10 | BSC编码/BTS数/LAC/频点/频率/BSC连接/BSC Select/IPA/OML |
+| **合计** | | **65** | |
+
+##### 导出 API 端点
+
+| 制式 | CSV | XLSX | License |
+|------|-----|------|---------|
+| eNB | `/cell/cpeinfos/exportCellsToCsv.action` | `/cell/cpeinfos/exportCellsToExcel.action` | `/cell/cpeinfos/exportEnodebLicenseInfos.action` |
+| gNB | `/gnb/gnbMonitor/exportGnbInfoToCsv.action` | `/gnb/gnbMonitor/exportGnbInfoToExcel.action` | 同 eNB + `isGnb=1` |
+| GSM | - | `/cell/cpeinfos/exportGSMInfosToExcel.action` | 同 eNB + `isGSM=1` |
 
 ---
 

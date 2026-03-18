@@ -699,6 +699,22 @@ const messages: Record<string, string> = {
   'sync.selectGroupTip':    'Please select a device group',
 
   // -------------------------------------------------------------------------
+  // Export modal
+  // -------------------------------------------------------------------------
+  'export.title':               'Export',
+  'export.startExport':         'Start Export',
+  'export.selectOperator':      'Select Operator',
+  'export.operatorPlaceholder': 'Select operators (multi-select)',
+  'export.selectFields':        'Fields',
+  'export.commonFields':        'Common Fields',
+  'export.enbFields':           'eNB Fields',
+  'export.gnbFields':           'gNB Fields',
+  'export.gsmFields':           'GSM Fields',
+  'export.licenseInfo':         'Export License Info',
+  'export.licenseDesc':         'Export device license info simultaneously',
+  'export.format':              'Format',
+
+  // -------------------------------------------------------------------------
   // FilterBar — search & filter labels
   // -------------------------------------------------------------------------
   'filter.searchText':          'Search',
