@@ -1,17 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { App, Button, Dropdown, Input, Popconfirm, Popover, Space, Tag, Tooltip, Typography } from 'antd';
-import type { MenuProps } from 'antd';
 import {
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
   ExportOutlined,
-  EyeOutlined,
-  MoreOutlined,
   ReloadOutlined,
-  RestOutlined,
-  SwapOutlined,
   SyncOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
@@ -22,12 +17,11 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useDeviceList, useDeleteDevices } from '@/hooks/api/useDevices';
+import { useDeviceList } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
 import SyncParamsModal from './SyncParamsModal';
 import type { SyncNetworkType } from './SyncParamsModal';
-import MoveToGroupModal from './MoveToGroupModal';
 
 const { Link } = Typography;
 
@@ -49,9 +43,6 @@ export default function DeviceList() {
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
-  // 同步目标：batch=批量(使用 selectedRowKeys)，single=单设备(指定 device)
-  const [syncTarget, setSyncTarget] = useState<{ mode: 'batch' } | { mode: 'single'; device: Device }>({ mode: 'batch' });
-  const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
 
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
@@ -123,8 +114,6 @@ export default function DeviceList() {
   );
 
   const { data, isLoading, refetch } = useDeviceList(queryParams);
-  const deleteDevices = useDeleteDevices();
-
   const devices: Device[] = data?.items ?? [];
   const total = data?.total ?? 0;
   const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
@@ -275,76 +264,24 @@ export default function DeviceList() {
     [modal, message, t, refetch]
   );
 
-  // 批量回收站 — 警告确认 + 说明文字
-  const handleRecycle = useCallback(
-    (ids: string[]) => {
-      modal.confirm({
-        title: t('common.recycleConfirmTitle'),
-        content: t('common.recycleConfirmDesc'),
-        okText: t('common.confirm'),
-        okType: 'danger',
-        cancelText: t('common.cancel'),
-        onOk: async () => {
-          // TODO: 接入 POST /recycle/moveDeviceToRecycle.action
-          await deleteDevices.mutateAsync(ids);
-          void message.success(t('common.operationSuccess'));
-          setSelectedRowKeys([]);
-        },
-      });
-    },
-    [modal, message, deleteDevices, t]
-  );
-
   // 批量同步 — 打开参数选择对话框
   const handleBatchSync = useCallback(() => {
-    setSyncTarget({ mode: 'batch' });
     setSyncModalOpen(true);
   }, []);
 
-  // 同步确认回调 — 区分单设备和批量
+  // 批量同步确认回调
   const handleSyncConfirm = useCallback(
     (selectedParams: string[], alarmSync: boolean) => {
       const params = alarmSync ? [...selectedParams, 'sync_alarm'] : selectedParams;
-
-      if (syncTarget.mode === 'single') {
-        // 单设备同步
-        // TODO: 接入 POST /cell/param/refreshCellInfo.action
-        // params: { smallCellCode: syncTarget.device.sn, selectedParams: params.join(','), isGnb: syncTarget.device.networkType === 'gNB' ? '1' : '0' }
-        console.log('single sync:', { sn: syncTarget.device.sn, networkType: syncTarget.device.networkType, selectedParams: params.join(',') });
-        void message.success(t('common.commandSent'));
-      } else {
-        // 批量同步
-        const cellCodes = selectedRowKeys.join(',');
-        // TODO: 接入 POST /cell/quicksettings/batchSyncCell.action
-        // params: { smallCellCode: cellCodes, selectedParams: params.join(',') }
-        console.log('batch sync:', { cellCodes, selectedParams: params.join(',') });
-        setSelectedRowKeys([]);
-      }
-
+      const cellCodes = selectedRowKeys.join(',');
+      // TODO: 接入 POST /cell/quicksettings/batchSyncCell.action
+      // params: { smallCellCode: cellCodes, selectedParams: params.join(',') }
+      console.log('batch sync:', { cellCodes, selectedParams: params.join(',') });
+      setSelectedRowKeys([]);
       setSyncModalOpen(false);
       void refetch();
     },
-    [syncTarget, selectedRowKeys, refetch, message, t]
-  );
-
-  // 移动到设备组 — 打开设备组选择对话框
-  const handleMoveToGroup = useCallback(() => {
-    setMoveToGroupModalOpen(true);
-  }, []);
-
-  // 移动到设备组确认回调
-  const handleMoveToGroupConfirm = useCallback(
-    (groupId: string) => {
-      const cellCodes = selectedRowKeys.join(',');
-      // TODO: 接入 POST /system/deviceGroup/moveCellToGroup.action
-      // params: { toGroupId: groupId, ids: cellCodes }
-      console.log('move to group:', { groupId, cellCodes });
-      void message.success(t('common.operationSuccess'));
-      setMoveToGroupModalOpen(false);
-      setSelectedRowKeys([]);
-      void refetch();
-    },
-    [selectedRowKeys, message, t, refetch]
+    [selectedRowKeys, refetch]
   );
 
   // 导出 — 直接选择格式后触发
@@ -359,251 +296,11 @@ export default function DeviceList() {
     [message, t]
   );
 
-  // 行级操作 — "执行"下拉菜单
-  // ── 行级操作处理 ──
-  // 原始 JSP 行为：同步→打开同步弹窗；重启→确认弹窗→下发命令→"命令已下发"；
-  // 激活/射频→切换状态→"下发成功"→刷新；HaloB→确认需重启→下发；
-  // 日志→直接下发→"日志正在收集"；报文→检查已有采集→打开时长弹窗→"报文正在收集"
-  const handleRowAction = useCallback(
-    (key: string, record: Device) => {
-      const sn = record.sn;
-
-      switch (key) {
-        // ──── 同步：打开同步参数弹窗（按制式区分） ────
-        case 'sync':
-          setSyncTarget({ mode: 'single', device: record });
-          setSyncModalOpen(true);
-          break;
-
-        // ──── 重启：确认弹窗 → 下发 → "命令已下发" ────
-        case 'reboot':
-          modal.confirm({
-            title: t('device.action.reboot'),
-            content: t('device.action.rebootConfirm'),
-            okType: 'danger',
-            onOk: () => {
-              // TODO: 接入 cellReboot API (cell_code, isGnb)
-              void message.success(t('common.commandSent'));
-            },
-          });
-          break;
-
-        // ──── 日志收集：直接下发 → "日志正在收集" ────
-        case 'logCollect':
-          // 原始 JSP: confirmImmediateCollectLogFile → POST goImmediateCollectLogFile.action
-          // TODO: 接入 logCollect API (serial_number, device_code, execute_type='Immediately')
-          void message.success(t('device.action.logCollecting'));
-          break;
-
-        // ──── 报文收集：打开收集时长弹窗 → "报文正在收集" ────
-        case 'tr069Collect':
-          // 原始 JSP: showCollectMessage → 检查是否已有采集 → 选择 5/10 分钟 → start trace
-          // TODO: 接入 isExistTracingDevice + trace/start API
-          void message.success(t('device.action.tr069Collecting'));
-          break;
-
-        // ──── HaloB 开/关：确认需重启 → 下发 ────
-        case 'halob':
-          modal.confirm({
-            title: record.halobFlag ? t('device.action.halobOff') : t('device.action.halobOn'),
-            content: t('device.action.halobConfirm'),
-            okType: 'danger',
-            onOk: () => {
-              // TODO: 接入 setCellHalobSwitch API (cell_code, halob_switch)
-              void message.success(t('common.commandSent'));
-            },
-          });
-          break;
-
-        // ──── 恢复默认配置：确认弹窗 → 下发 ────
-        case 'resetConfig':
-          modal.confirm({
-            title: t('device.action.resetConfig'),
-            content: t('device.action.resetConfigConfirm'),
-            okType: 'danger',
-            onOk: () => {
-              // TODO: 接入 configReset API (cellCode)
-              void message.success(t('common.commandSent'));
-            },
-          });
-          break;
-
-        default:
-          // 激活/射频 per-cell 操作: activate_0, activate_1, rf_0, rf_1, ...
-          if (key.startsWith('activate_') || key.startsWith('rf_')) {
-            const [action] = key.split('_');
-            const actionLabel = action === 'activate' ? t('device.action.activate') : t('device.action.rfOn');
-            modal.confirm({
-              title: actionLabel,
-              content: action === 'activate'
-                ? t('device.action.activateConfirm', { action: actionLabel })
-                : t('device.action.rfConfirm', { action: actionLabel }),
-              onOk: () => {
-                // TODO: 接入 cellModifyActiveStatus / cellModifyRadioStatus API
-                // params: { small_cell_code, op_state/radioStatus, cellNumber }
-                void message.success(t('common.commandSent'));
-              },
-            });
-          } else {
-            void message.info(`${key}: ${sn} — ${t('common.featureInDev')}`);
-          }
-          break;
-      }
-    },
-    [message, modal, t]
-  );
-
   /** 解析多小区逗号分隔值为 cell 数组 */
   const parseCellValues = useCallback((v: string | undefined | null): string[] => {
     if (!v || v === '--') return [];
     return String(v).split(',').map((s) => s.trim()).filter(Boolean);
   }, []);
-
-  const getActionMenuItems = useCallback(
-    (record: Device): MenuProps['items'] => {
-      const isOffline = record.connStatus !== 'online';
-      const isGSM = record.networkType === 'GSM';
-
-      // 解析多小区状态
-      const opCells = parseCellValues(record.opState);
-      const rfCells = parseCellValues(record.rfStatus);
-      const isMultiCellOp = opCells.length > 1;
-      const isMultiCellRf = rfCells.length > 1;
-
-      const items: MenuProps['items'] = [
-        // Group 1: 同步 & 报文收集 — 三制式共有
-        {
-          key: 'sync',
-          label: t('device.action.sync'),
-          disabled: isOffline,
-        },
-        {
-          key: 'tr069Collect',
-          label: t('device.action.tr069Collect'),
-          disabled: isOffline,
-        },
-      ];
-
-      // Group 2: 重启 & 恢复默认配置 — 三制式共有
-      items.push(
-        { type: 'divider' },
-        {
-          key: 'reboot',
-          label: t('device.action.reboot'),
-          disabled: isOffline,
-        },
-        {
-          key: 'resetConfig',
-          label: t('device.action.resetConfig'),
-          disabled: isOffline,
-        },
-      );
-
-      // Group 3: 激活/射频/HaloB — eNB 和 gNB
-      // GSM 原始页面也支持激活（带 CA 多小区），但不支持射频和 HaloB
-      if (!isGSM) {
-        items.push({ type: 'divider' });
-
-        // ── 激活/去激活 ──
-        if (isMultiCellOp) {
-          // 多小区: 展开为子菜单，逐 Cell 控制
-          items.push({
-            key: 'activate_sub',
-            label: t('device.action.activate'),
-            disabled: isOffline,
-            children: opCells.map((cellState, idx) => {
-              const isOn = ['1', 'active'].includes(cellState);
-              return {
-                key: `activate_${idx}`,
-                label: isOn
-                  ? t('device.action.deactivateCell', { n: idx + 1 })
-                  : t('device.action.activateCell', { n: idx + 1 }),
-              };
-            }),
-          });
-        } else {
-          const isActive = ['1', 'active'].includes(opCells[0] ?? '');
-          items.push({
-            key: 'activate_0',
-            label: isActive ? t('device.action.deactivate') : t('device.action.activate'),
-            disabled: isOffline,
-          });
-        }
-
-        // ── RF 开/关 ──
-        if (isMultiCellRf) {
-          // 多射频: 展开为子菜单，逐 RF 控制
-          items.push({
-            key: 'rf_sub',
-            label: t('device.action.rfOn'),
-            disabled: isOffline,
-            children: rfCells.map((rfState, idx) => {
-              const isOn = ['on', '1'].includes(rfState);
-              return {
-                key: `rf_${idx}`,
-                label: isOn
-                  ? t('device.action.rfOffCell', { n: idx + 1 })
-                  : t('device.action.rfOnCell', { n: idx + 1 }),
-              };
-            }),
-          });
-        } else {
-          const rfOn = ['on', '1'].includes(rfCells[0] ?? '');
-          items.push({
-            key: 'rf_0',
-            label: rfOn ? t('device.action.rfOff') : t('device.action.rfOn'),
-            disabled: isOffline,
-          });
-        }
-
-        // ── HaloB 开/关 ──
-        items.push({
-          key: 'halob',
-          label: record.halobFlag ? t('device.action.halobOff') : t('device.action.halobOn'),
-          disabled: isOffline,
-        });
-      } else {
-        // GSM: 只有激活（也支持多小区 CA）
-        items.push({ type: 'divider' });
-        if (isMultiCellOp) {
-          items.push({
-            key: 'activate_sub',
-            label: t('device.action.activate'),
-            disabled: isOffline,
-            children: opCells.map((cellState, idx) => {
-              const isOn = ['1', 'active'].includes(cellState);
-              return {
-                key: `activate_${idx}`,
-                label: isOn
-                  ? t('device.action.deactivateCell', { n: idx + 1 })
-                  : t('device.action.activateCell', { n: idx + 1 }),
-              };
-            }),
-          });
-        } else {
-          const isActive = ['1', 'active'].includes(opCells[0] ?? '');
-          items.push({
-            key: 'activate_0',
-            label: isActive ? t('device.action.deactivate') : t('device.action.activate'),
-            disabled: isOffline,
-          });
-        }
-      }
-
-      // Group 4: 日志 — 三制式共有
-      items.push(
-        { type: 'divider' },
-        {
-          key: 'logCollect',
-          label: t('device.action.logCollect'),
-          disabled: isOffline,
-        },
-      );
-
-      return items;
-    },
-    [t, parseCellValues]
-  );
 
   // 格式化时间戳
   const fmtTime = useCallback((v: string) => (v ? new Date(v).toLocaleString('zh-CN') : '-'), []);
@@ -1076,50 +773,53 @@ export default function DeviceList() {
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
 
-      // =====================================================================
-      // 操作列
-      // =====================================================================
-      {
-        key: 'actions',
-        title: t('table.operation'),
-        dataIndex: 'id',
-        width: 100,
-        fixed: 'right',
-        render: (_val, record) => (
-          <Space size={4}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => void navigate(`/device/detail/${record.sn}`)}
-            >
-              {t('common.detail')}
-            </Button>
-            <Dropdown
-              menu={{
-                items: getActionMenuItems(record),
-                onClick: ({ key }) => handleRowAction(key, record),
-              }}
-              trigger={['click']}
-            >
-              <Button type="text" size="small" icon={<MoreOutlined style={{ fontSize: 16 }} />} />
-            </Dropdown>
-          </Space>
-        ),
-      },
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, getActionMenuItems, handleRowAction, remarkHeaderRender]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender]
+  );
+
+  // 批量收集报文
+  const handleBatchTr069Collect = useCallback(
+    (ids: string[]) => {
+      // TODO: 接入批量报文收集 API
+      console.log('batch tr069 collect ids:', ids);
+      void message.info(t('device.action.tr069Collecting'));
+      setSelectedRowKeys([]);
+    },
+    [message, t]
+  );
+
+  // 批量恢复默认配置
+  const handleBatchResetConfig = useCallback(
+    (ids: string[]) => {
+      modal.confirm({
+        title: t('device.action.resetConfig'),
+        content: t('device.action.resetConfigConfirm'),
+        okType: 'danger',
+        onOk: () => {
+          // TODO: 接入批量恢复默认配置 API
+          console.log('batch reset config ids:', ids);
+          void message.success(t('common.commandSent'));
+          setSelectedRowKeys([]);
+          void refetch();
+        },
+      });
+    },
+    [modal, message, t, refetch]
+  );
+
+  // 批量日志收集
+  const handleBatchLogCollect = useCallback(
+    (ids: string[]) => {
+      // TODO: 接入批量日志收集 API
+      console.log('batch log collect ids:', ids);
+      void message.info(t('device.action.logCollecting'));
+      setSelectedRowKeys([]);
+    },
+    [message, t]
   );
 
   const batchActions = useMemo((): BatchAction[] => {
-    const actions: BatchAction[] = [
-      {
-        key: 'move-to-group',
-        label: t('common.moveToGroup'),
-        icon: <SwapOutlined />,
-        onClick: () => handleMoveToGroup(),
-      },
-    ];
+    const actions: BatchAction[] = [];
 
     // 批量同步仅在所有选中设备为同一制式时显示
     if (selectedNetworkType) {
@@ -1139,16 +839,24 @@ export default function DeviceList() {
         onClick: (keys) => handleBatchReboot(keys as string[]),
       },
       {
-        key: 'recycle',
-        label: t('common.recycleBin'),
-        icon: <RestOutlined />,
-        danger: true,
-        onClick: (keys) => handleRecycle(keys as string[]),
+        key: 'batch-tr069-collect',
+        label: t('device.action.tr069Collect'),
+        onClick: (keys) => handleBatchTr069Collect(keys as string[]),
+      },
+      {
+        key: 'batch-reset-config',
+        label: t('device.action.resetConfig'),
+        onClick: (keys) => handleBatchResetConfig(keys as string[]),
+      },
+      {
+        key: 'batch-log-collect',
+        label: t('device.action.logCollect'),
+        onClick: (keys) => handleBatchLogCollect(keys as string[]),
       },
     );
 
     return actions;
-  }, [handleMoveToGroup, handleBatchSync, handleBatchReboot, handleRecycle, selectedNetworkType, t]);
+  }, [handleBatchSync, handleBatchReboot, handleBatchTr069Collect, handleBatchResetConfig, handleBatchLogCollect, selectedNetworkType, t]);
 
   return (
     <ListPageLayout
@@ -1203,20 +911,9 @@ export default function DeviceList() {
 
       <SyncParamsModal
         open={syncModalOpen}
-        networkType={
-          syncTarget.mode === 'single'
-            ? (syncTarget.device.networkType as SyncNetworkType) ?? 'eNB'
-            : selectedNetworkType ?? 'eNB'
-        }
+        networkType={selectedNetworkType ?? 'eNB'}
         onClose={() => setSyncModalOpen(false)}
         onConfirm={handleSyncConfirm}
-      />
-
-      <MoveToGroupModal
-        open={moveToGroupModalOpen}
-        onClose={() => setMoveToGroupModalOpen(false)}
-        onConfirm={handleMoveToGroupConfirm}
-        selectedCount={selectedRowKeys.length}
       />
 
     </ListPageLayout>
