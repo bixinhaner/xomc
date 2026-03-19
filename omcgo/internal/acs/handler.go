@@ -120,15 +120,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Per TR069 spec: Inform → InformResponse (always). RPC dispatch happens on the
 // subsequent Empty POST via handleEmpty().
 func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []byte) {
+	// Log raw request body for debugging
+	h.logger.Debug("ACS received raw Inform body",
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.Int("body_len", len(body)),
+		zap.String("body_preview", truncateString(string(body), 500)),
+	)
+
 	// Parse Inform
 	inform, cwmpID, err := soap.DecodeInform(bytes.NewReader(body))
 	if err != nil {
-		h.logger.Error("decode Inform", zap.Error(err))
+		h.logger.Error("decode Inform", zap.Error(err),
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.String("body_preview", truncateString(string(body), 200)),
+		)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
 	deviceSN := inform.DeviceId.SerialNumber
+
+	// Log parsed Inform details
+	h.logger.Info("ACS parsed Inform",
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.String("device_sn", deviceSN),
+		zap.String("oui", inform.DeviceId.OUI),
+		zap.String("product_class", inform.DeviceId.ProductClass),
+		zap.String("manufacturer", inform.DeviceId.Manufacturer),
+		zap.String("cwmp_id", cwmpID),
+	)
 
 	// Rate limiting
 	if !h.rateLimiter.Allow(deviceSN) {
@@ -155,7 +175,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		h.metrics.InformTotal.WithLabelValues(code).Inc()
 	}
 
-	h.logger.Info("Inform received",
+	h.logger.Info("ACS Inform processing",
 		zap.String("device_sn", deviceSN),
 		zap.String("oui", inform.DeviceId.OUI),
 		zap.String("product_class", inform.DeviceId.ProductClass),
@@ -189,6 +209,9 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// Per TR069 spec: Always send InformResponse first.
 	// Command queue will be checked on the subsequent Empty POST.
+	h.logger.Info("ACS Inform done, sending InformResponse",
+		zap.String("device_sn", deviceSN),
+		zap.String("cwmp_id", cwmpID))
 	h.sendInformResponse(w, cwmpID)
 }
 
@@ -451,13 +474,27 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 
 	evt, err := event.NewEvent(subject, payload)
 	if err != nil {
-		h.logger.Error("create event", zap.Error(err))
+		h.logger.Error("create event failed",
+			zap.Error(err),
+			zap.String("device_sn", inform.DeviceId.SerialNumber),
+			zap.String("subject", subject))
 		return
 	}
 
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
-		h.logger.Error("publish event", zap.Error(err), zap.String("subject", subject))
+		h.logger.Error("publish event failed",
+			zap.Error(err),
+			zap.String("device_sn", inform.DeviceId.SerialNumber),
+			zap.String("subject", subject),
+			zap.String("event_id", evt.ID))
+		return
 	}
+
+	h.logger.Info("event published to bus",
+		zap.String("device_sn", inform.DeviceId.SerialNumber),
+		zap.String("subject", subject),
+		zap.String("event_id", evt.ID),
+		zap.Strings("event_codes", eventCodes))
 }
 
 func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod) {
@@ -518,4 +555,12 @@ func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
+}
+
+// truncateString truncates a string to maxLen characters for logging purposes.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

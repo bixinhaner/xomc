@@ -45,40 +45,67 @@ func NewInformHandler(
 
 // Subscribe registers event handlers on the event bus for device Inform events.
 func (h *InformHandler) Subscribe(bus event.EventBus) error {
+	h.logger.Info("subscribing to device inform events...")
+
 	if _, err := bus.QueueSubscribe(event.SubjectDeviceBootstrap, "device-manager", h.handleBootstrap); err != nil {
 		return fmt.Errorf("subscribe bootstrap: %w", err)
 	}
+	h.logger.Info("subscribed to bootstrap events", zap.String("subject", event.SubjectDeviceBootstrap))
+
 	if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-manager", h.handlePeriodic); err != nil {
 		return fmt.Errorf("subscribe periodic: %w", err)
 	}
+	h.logger.Info("subscribed to periodic events", zap.String("subject", event.SubjectDevicePeriodic))
+
 	if _, err := bus.QueueSubscribe(event.SubjectDeviceValueChange, "device-manager", h.handlePeriodic); err != nil {
 		return fmt.Errorf("subscribe value_change: %w", err)
 	}
-	h.logger.Info("inform handler subscribed to device events")
+	h.logger.Info("subscribed to value_change events", zap.String("subject", event.SubjectDeviceValueChange))
+
+	h.logger.Info("inform handler subscribed to device events successfully")
 	return nil
 }
 
 func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) error {
+	h.logger.Info("handleBootstrap: received bootstrap event",
+		zap.String("event_id", evt.ID),
+		zap.String("subject", evt.Subject),
+		zap.Time("timestamp", evt.Timestamp))
+
 	var payload InformEventPayload
 	if err := evt.DecodePayload(&payload); err != nil {
+		h.logger.Error("handleBootstrap: decode payload failed", zap.Error(err))
 		return fmt.Errorf("decode bootstrap payload: %w", err)
 	}
+
+	h.logger.Info("handleBootstrap: payload decoded",
+		zap.String("serial_number", payload.DeviceId.SerialNumber),
+		zap.String("oui", payload.DeviceId.OUI),
+		zap.String("product_class", payload.DeviceId.ProductClass),
+		zap.Strings("events", payload.Events),
+		zap.Int("param_count", len(payload.ParameterList)))
 
 	inform := payloadToInform(payload)
 
 	// Determine carrier from OUI via registry, falling back to default
 	carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
+	h.logger.Info("handleBootstrap: carrier resolved",
+		zap.String("carrier", string(carrierCode)),
+		zap.String("oui", payload.DeviceId.OUI))
+
+	h.logger.Info("handleBootstrap: calling DeviceService.RegisterFromInform",
+		zap.String("serial_number", payload.DeviceId.SerialNumber))
 
 	device, err := h.service.RegisterFromInform(ctx, inform, carrierCode)
 	if err != nil {
-		h.logger.Error("register device from bootstrap",
+		h.logger.Error("handleBootstrap: RegisterFromInform failed",
 			zap.Error(err),
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
 		)
 		return err
 	}
 
-	h.logger.Info("device registered from bootstrap event",
+	h.logger.Info("handleBootstrap: device registered successfully",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber),
 		zap.String("carrier", string(carrierCode)),
@@ -87,23 +114,35 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 }
 
 func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) error {
+	h.logger.Debug("handlePeriodic: received periodic event",
+		zap.String("event_id", evt.ID),
+		zap.String("subject", evt.Subject))
+
 	var payload InformEventPayload
 	if err := evt.DecodePayload(&payload); err != nil {
+		h.logger.Error("handlePeriodic: decode payload failed", zap.Error(err))
 		return fmt.Errorf("decode periodic payload: %w", err)
 	}
 
+	h.logger.Debug("handlePeriodic: payload decoded",
+		zap.String("serial_number", payload.DeviceId.SerialNumber),
+		zap.Strings("events", payload.Events))
+
 	inform := payloadToInform(payload)
+
+	h.logger.Debug("handlePeriodic: calling DeviceService.UpdateFromInform",
+		zap.String("serial_number", payload.DeviceId.SerialNumber))
 
 	device, err := h.service.UpdateFromInform(ctx, inform)
 	if err != nil {
-		h.logger.Error("update device from periodic inform",
+		h.logger.Error("handlePeriodic: UpdateFromInform failed",
 			zap.Error(err),
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
 		)
 		return err
 	}
 
-	h.logger.Debug("device updated from periodic event",
+	h.logger.Debug("handlePeriodic: device updated successfully",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber),
 	)

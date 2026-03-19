@@ -41,18 +41,35 @@ func NewDeviceService(
 
 // RegisterFromInform creates a new device from a bootstrap Inform message.
 func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.InformMessage, carrier model.CarrierCode) (*model.Device, error) {
+	s.logger.Info("RegisterFromInform: start",
+		zap.String("serial_number", inform.DeviceId.SerialNumber),
+		zap.String("oui", inform.DeviceId.OUI),
+		zap.String("product_class", inform.DeviceId.ProductClass),
+		zap.String("carrier", string(carrier)),
+		zap.Int("param_count", len(inform.ParameterList)))
+
 	// Check if device already exists
+	s.logger.Debug("RegisterFromInform: checking if device exists in DB",
+		zap.String("serial_number", inform.DeviceId.SerialNumber))
 	existing, err := s.deviceRepo.GetBySerialNumber(ctx, inform.DeviceId.SerialNumber)
 	if err != nil {
+		s.logger.Error("RegisterFromInform: GetBySerialNumber failed",
+			zap.Error(err),
+			zap.String("serial_number", inform.DeviceId.SerialNumber))
 		return nil, fmt.Errorf("lookup device: %w", err)
 	}
 	if existing != nil {
 		// Device already registered, just update it
+		s.logger.Info("RegisterFromInform: device already exists, updating instead",
+			zap.String("serial_number", inform.DeviceId.SerialNumber),
+			zap.String("existing_device_id", existing.ID.String()))
 		return s.UpdateFromInform(ctx, inform)
 	}
 
 	// Detect technology from parameters
 	tech := detectTechnology(inform.ParameterList)
+	s.logger.Debug("RegisterFromInform: technology detected",
+		zap.String("technology", string(tech)))
 
 	now := time.Now()
 	device := &model.Device{
@@ -73,11 +90,27 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		UpdatedAt:            now,
 	}
 
+	s.logger.Info("RegisterFromInform: creating device in DB",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber),
+		zap.String("carrier", string(carrier)),
+		zap.String("technology", string(tech)),
+		zap.String("firmware_version", device.FirmwareVersion))
+
 	if err := s.deviceRepo.Create(ctx, device); err != nil {
+		s.logger.Error("RegisterFromInform: deviceRepo.Create failed",
+			zap.Error(err),
+			zap.String("serial_number", device.SerialNumber))
 		return nil, fmt.Errorf("create device: %w", err)
 	}
 
+	s.logger.Info("RegisterFromInform: device created in DB successfully",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber))
+
 	// Store parameters
+	s.logger.Debug("RegisterFromInform: storing inform parameters",
+		zap.Int("param_count", len(inform.ParameterList)))
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
 
 	// Refresh heartbeat
@@ -98,13 +131,25 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 
 // UpdateFromInform updates an existing device from a periodic Inform message.
 func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.InformMessage) (*model.Device, error) {
+	s.logger.Debug("UpdateFromInform: looking up device",
+		zap.String("serial_number", inform.DeviceId.SerialNumber))
+
 	device, err := s.deviceRepo.GetBySerialNumber(ctx, inform.DeviceId.SerialNumber)
 	if err != nil {
+		s.logger.Error("UpdateFromInform: deviceRepo.GetBySerialNumber failed",
+			zap.Error(err),
+			zap.String("serial_number", inform.DeviceId.SerialNumber))
 		return nil, fmt.Errorf("lookup device: %w", err)
 	}
 	if device == nil {
+		s.logger.Warn("UpdateFromInform: device not found in DB",
+			zap.String("serial_number", inform.DeviceId.SerialNumber))
 		return nil, fmt.Errorf("device not found: %s", inform.DeviceId.SerialNumber)
 	}
+
+	s.logger.Debug("UpdateFromInform: device found, updating",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber))
 
 	// Update fields from Inform
 	now := time.Now()
@@ -123,16 +168,27 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 
 	// Auto-transition to active when device informs (it's communicating, so it's online)
 	if device.Status == model.DeviceDiscovered || device.Status == model.DeviceOffline || device.Status == model.DeviceRegistered {
+		oldStatus := device.Status
 		device.Status = model.DeviceActive
-		s.logger.Info("device auto-transitioned to active on inform",
+		s.logger.Info("UpdateFromInform: device auto-transitioned to active",
 			zap.String("serial_number", device.SerialNumber),
-			zap.String("previous_status", string(device.Status)),
+			zap.String("previous_status", string(oldStatus)),
 		)
 	}
 
+	s.logger.Debug("UpdateFromInform: calling deviceRepo.Update",
+		zap.String("device_id", device.ID.String()))
+
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
+		s.logger.Error("UpdateFromInform: deviceRepo.Update failed",
+			zap.Error(err),
+			zap.String("device_id", device.ID.String()))
 		return nil, fmt.Errorf("update device: %w", err)
 	}
+
+	s.logger.Info("UpdateFromInform: device updated in DB successfully",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber))
 
 	// Store parameters
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
