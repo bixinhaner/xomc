@@ -152,8 +152,8 @@ export default function DeviceGrouping() {
   }), [t]);
 
   const queryParams = useMemo(
-    () => ({ page: currentPage, pageSize } as Parameters<typeof useDeviceList>[0]),
-    [currentPage, pageSize]
+    () => ({ page: currentPage, pageSize, groupId: selectedGroupId ?? undefined } as Parameters<typeof useDeviceList>[0]),
+    [currentPage, pageSize, selectedGroupId]
   );
 
   const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);

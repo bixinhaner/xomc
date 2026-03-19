@@ -154,6 +154,7 @@ export interface DeviceFilter {
   region?: string;
   subnet?: string;
   engStatus?: EngStatus;
+  groupId?: string;
 }
 
 /** 设备列表统计数据 — 基于筛选条件的全量统计（非当前页） */

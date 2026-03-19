@@ -32,6 +32,22 @@ export const deviceService = {
     if (params.region) filtered = filtered.filter((d) => d.region === params.region);
     if (params.subnet) filtered = filtered.filter((d) => d.subnet === params.subnet);
     if (params.engStatus) filtered = filtered.filter((d) => d.engStatus === params.engStatus);
+    // 按 groupId 过滤（模拟：基于分组名称匹配城市）
+    if (params.groupId) {
+      const group = await this.getGroups().then((groups) => groups.find((g) => g.id === params.groupId));
+      if (group) {
+        // 根据分组名称过滤设备（模拟分组与设备的关联）
+        const groupCityMap: Record<string, string[]> = {
+          'grp-north': ['北京', '天津'],
+          'grp-sh': ['上海', '杭州', '南京'],
+          'grp-gz': ['广州', '深圳', '长沙'],
+        };
+        const cities = groupCityMap[params.groupId];
+        if (cities) {
+          filtered = filtered.filter((d) => cities.includes(d.region));
+        }
+      }
+    }
 
     if (params.sortField) {
       filtered = sortBy(filtered, params.sortField as keyof Device, params.sortOrder ?? 'ascend');
