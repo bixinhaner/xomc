@@ -421,6 +421,7 @@ const messages: Record<string, string> = {
   'device.productName':         '产品名称',
   'device.firmwareVersion':     '固件版本',
   'device.macAddress':          'MAC地址',
+  'device.serialNumber':         '小站编码',
   'device.groupName':           '设备组',
   'device.moveToGroupTip':      '已选择 {count} 台设备，请选择目标设备组：',
   'device.searchGroup':         '搜索设备组',
@@ -1220,7 +1221,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Device Rules (设备归属规则)
   // -------------------------------------------------------------------------
-  'device.rules.title':             '设备归属设备组规则',
+  'device.rules.title':             '设备规则',
   'device.rules.targetGroup':       '目标设备组',
   'device.rules.basicSettings':     '基本设置',
   'device.rules.matchingRule':      '匹配规则',

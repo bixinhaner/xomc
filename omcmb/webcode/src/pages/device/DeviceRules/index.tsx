@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
+  App,
   Button,
   Divider,
   Drawer,
@@ -12,7 +13,6 @@ import {
   Switch,
   Tree,
   Typography,
-  message,
   Radio,
 } from 'antd';
 import type { MenuProps } from 'antd';
@@ -212,6 +212,7 @@ const SUPPORT_GSM = true;
 
 export default function DeviceRules() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [rules, setRules] = useState<DeviceGroupRule[]>(MOCK_RULES);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -277,7 +278,7 @@ export default function DeviceRules() {
   // 删除规则
   const handleDelete = useCallback(
     (id: string) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('common.confirmDelete'),
         content: t('device.rules.deleteConfirm'),
         okText: t('common.confirm'),
@@ -285,11 +286,11 @@ export default function DeviceRules() {
         okType: 'danger',
         onOk: () => {
           setRules((prev) => prev.filter((r) => r.id !== id));
-          void message.success(t('common.deleteSuccess'));
+          message.success(t('common.deleteSuccess'));
         },
       });
     },
-    [t]
+    [t, modal, message]
   );
 
   // 打开编辑弹窗
@@ -360,7 +361,7 @@ export default function DeviceRules() {
         nameRuleList: values.matchingMode === 'deviceName' ? nameFilters : [],
         tacRag: values.matchingMode !== 'deviceName' ? values.tacRag : '',
       };
-      ruleData.operators = generateOperators(ruleData);
+      ruleData.operators = generateOperators(ruleData, t);
 
       if (editingRule) {
         setRules((prev) => prev.map((r) => (r.id === editingRule.id ? { ...r, ...ruleData } : r)));
@@ -574,15 +575,15 @@ export default function DeviceRules() {
   // 预览条件描述
   const previewText = useMemo(() => {
     if (matchingMode === 'deviceName') {
-      return generateOperators({ matchingMode: 'deviceName', nameRuleList: nameFilters });
+      return generateOperators({ matchingMode: 'deviceName', nameRuleList: nameFilters }, t);
     }
     return '';
-  }, [matchingMode, nameFilters]);
+  }, [matchingMode, nameFilters, t]);
 
   return (
     <>
       <ListPageLayout
-        title="设备归属设备组规则"
+        title={t('device.rules.title')}
         subtitle={`${t('table.total')} ${rules.length}`}
         extra={
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
@@ -671,7 +672,7 @@ export default function DeviceRules() {
                           <Select
                             value={filter.condition}
                             style={{ width: 120 }}
-                            options={FILTER_CONDITION_OPTIONS}
+                            options={getFilterConditionOptions(t)}
                             onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
                           />
                           <Input
@@ -687,13 +688,13 @@ export default function DeviceRules() {
                           <Select
                             value={filter.andOr || 'and'}
                             style={{ width: 70 }}
-                            options={AND_OR_OPTIONS}
+                            options={getAndOrOptions(t)}
                             onChange={(v) => handleUpdateFilter(filter.id, 'andOr', v)}
                           />
                           <Select
                             value={filter.condition}
                             style={{ width: 120 }}
-                            options={FILTER_CONDITION_OPTIONS}
+                            options={getFilterConditionOptions(t)}
                             onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
                           />
                           <Input
@@ -722,7 +723,7 @@ export default function DeviceRules() {
                     onClick={handleAddFilter}
                     style={{ marginTop: 8 }}
                   >
-                    添加条件
+                    {t('device.rules.addCondition')}
                   </Button>
                 )}
               </Form.Item>
@@ -751,10 +752,10 @@ export default function DeviceRules() {
             <Form.Item
               name="tacRag"
               label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
-              rules={[{ required: true, message: `请输入${matchingMode === 'tac' ? 'TAC' : 'LAC'}范围` }]}
+              rules={[{ required: true, message: t('device.rules.inputRange', { type: matchingMode === 'tac' ? 'TAC' : 'LAC' }) }]}
               extra={
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  格式: 1,2,3 或 1-10,20-30 (范围: {DEVICE_TYPE === 'ENB' ? '0-65535' : '0-16777215'})
+                  {t('device.rules.formatRange', { range: DEVICE_TYPE === 'ENB' ? '0-65535' : '0-16777215' })}
                 </Text>
               }
             >
@@ -766,7 +767,7 @@ export default function DeviceRules() {
 
       {/* 应用规则弹窗 */}
       <Modal
-        title="应用规则"
+        title={t('device.rules.applyRule')}
         open={activeModalOpen}
         onOk={handleExecute}
         onCancel={() => setActiveModalOpen(false)}
@@ -774,7 +775,7 @@ export default function DeviceRules() {
         cancelText={t('common.cancel')}
         width={480}
       >
-        <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>选择要应用规则的设备组</div>
+        <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>{t('device.rules.selectGroupToApply')}</div>
         <div
           style={{
             border: '1px solid var(--color-border)',

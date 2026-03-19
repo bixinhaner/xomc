@@ -421,6 +421,7 @@ const messages: Record<string, string> = {
   'device.productName':         'Product Name',
   'device.firmwareVersion':     'Firmware Version',
   'device.macAddress':          'MAC Address',
+  'device.serialNumber':         'Serial Number',
   'device.groupName':           'Device Group',
   'device.moveToGroupTip':      '{count} device(s) selected. Please choose a target group:',
   'device.searchGroup':         'Search groups',
@@ -1221,7 +1222,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Device Rules
   // -------------------------------------------------------------------------
-  'device.rules.title':             'Device Group Assignment Rules',
+  'device.rules.title':             'Device Rules',
   'device.rules.targetGroup':       'Target Device Group',
   'device.rules.basicSettings':     'Basic Settings',
   'device.rules.matchingRule':      'Matching Rule',

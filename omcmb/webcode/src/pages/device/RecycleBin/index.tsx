@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Modal, Tag, message } from 'antd';
+import { App, Modal, Tag } from 'antd';
 import {
   DeleteOutlined,
   ExportOutlined,
@@ -135,6 +135,7 @@ const getMoveTypeLabel = (t: (key: string) => string, value: string) => {
 
 export default function RecycleBin() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -164,37 +165,37 @@ export default function RecycleBin() {
   // 移出回收站（带确认）
   const handleRestore = useCallback(
     (ids: React.Key[]) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('common.confirm'),
         content: t('recycle.restoreConfirm', { count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         icon: <ExportOutlined style={{ color: '#52C41A' }} />,
         onOk: () => {
-          void message.success(t('status.success'));
+          message.success(t('status.success'));
           setSelectedRowKeys([]);
         },
       });
     },
-    [t]
+    [t, modal, message]
   );
 
   // 批量删除（带确认）
   const handlePermanentDelete = useCallback(
     (ids: React.Key[]) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('common.confirmDelete'),
         content: t('recycle.deleteConfirm', { count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         okType: 'danger',
         onOk: () => {
-          void message.success(t('common.deleteSuccess'));
+          message.success(t('common.deleteSuccess'));
           setSelectedRowKeys([]);
         },
       });
     },
-    [t]
+    [t, modal, message]
   );
 
   // 筛选字段配置
