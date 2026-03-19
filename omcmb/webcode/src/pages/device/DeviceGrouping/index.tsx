@@ -51,8 +51,11 @@ function buildTreeData(
 
   function buildNode(group: typeof groups[0]): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
+    // 二级节点（parentId === null）不可选择，三级节点可选择
+    const isLevel2 = group.parentId === null;
     return {
       key: group.id,
+      selectable: !isLevel2,
       title: (
         <div
           style={{
@@ -317,18 +320,20 @@ export default function DeviceGrouping() {
                 </span>
               ),
               children: treeData,
+              selectable: false,
             },
           ]}
           defaultExpandAll
-          selectedKeys={selectedGroupId ? [selectedGroupId] : ['__all__']}
+          selectedKeys={selectedGroupId ? [selectedGroupId] : []}
           onSelect={(keys) => {
             const key = keys[0] as string | undefined;
-            if (key === '__all__' || !key) {
-              setSelectedGroupId(null);
-            } else {
+            if (!key) return;
+            // 只有三级节点（有 parentId 的组）才能点击
+            const clickedGroup = groups.find((g) => g.id === key);
+            if (clickedGroup && clickedGroup.parentId !== null) {
               setSelectedGroupId(key);
+              setCurrentPage(1);
             }
-            setCurrentPage(1);
           }}
           blockNode
           style={{ fontSize: 13 }}
