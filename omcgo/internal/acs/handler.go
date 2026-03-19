@@ -14,11 +14,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
-<<<<<<< HEAD
 	"github.com/omcgo/omcgo/internal/acs/upload"
-=======
 	"github.com/omcgo/omcgo/internal/core/components/logger"
->>>>>>> c2a509c (feat(components): 实现 Request ID 中间件和 SQL 日志功能)
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"

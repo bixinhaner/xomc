@@ -26,18 +26,6 @@ type ACSServer struct {
 
 // ServerDeps holds the dependencies for the ACS server.
 type ServerDeps struct {
-<<<<<<< HEAD
-	SessionStore  SessionStore
-	CommandQueue  cmdqueue.CommandQueue
-	EventBus      event.EventBus
-	Authenticator auth.DeviceAuthenticator
-	RPCDispatcher *rpc.Dispatcher
-	RateLimiter   *DeviceRateLimiter
-	Admission     *AdmissionController
-	Metrics       *ACSMetrics
-	UploadHandler *upload.Handler // File upload handler
-	Logger        *zap.Logger
-=======
 	SessionStore    SessionStore
 	CommandQueue    cmdqueue.CommandQueue
 	EventBus        event.EventBus
@@ -46,9 +34,9 @@ type ServerDeps struct {
 	RateLimiter     *DeviceRateLimiter
 	Admission       *AdmissionController
 	Metrics         *ACSMetrics
+	UploadHandler   *upload.Handler // File upload handler
 	Logger          *zap.Logger
 	RequestIDPrefix string // prefix for request IDs, e.g., "acs"
->>>>>>> c2a509c (feat(components): 实现 Request ID 中间件和 SQL 日志功能)
 }
 
 // NewACSServer creates a new ACS server with all dependencies wired.

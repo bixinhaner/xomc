@@ -11,20 +11,6 @@ import (
 
 // ACSConfig is the configuration for the ACS engine.
 type ACSConfig struct {
-<<<<<<< HEAD
-	Server    ACSServerConfig    `mapstructure:"server"`
-	Session   SessionConfig      `mapstructure:"session"`
-	RateLimit RateLimitConfig    `mapstructure:"rate_limit"`
-	Auth      AuthConfig         `mapstructure:"auth"`
-	Redis     RedisConfig        `mapstructure:"redis"`
-	NATS      NATSConfig         `mapstructure:"nats"`
-	DB        PostgresConfig     `mapstructure:"db"`
-	MinIO     MinIOConfig        `mapstructure:"minio"`
-	Upload    UploadConfig       `mapstructure:"upload"`
-	Metrics   MetricsConfig      `mapstructure:"metrics"`
-	Tracer    TracerConfig       `mapstructure:"tracer"`
-	Log       LogConfig          `mapstructure:"log"`
-=======
 	Server          ACSServerConfig    `mapstructure:"server"`
 	Session         SessionConfig      `mapstructure:"session"`
 	RateLimit       RateLimitConfig    `mapstructure:"rate_limit"`
@@ -32,11 +18,12 @@ type ACSConfig struct {
 	Redis           RedisConfig        `mapstructure:"redis"`
 	NATS            NATSConfig         `mapstructure:"nats"`
 	DB              PostgresConfig     `mapstructure:"db"`
+	MinIO           MinIOConfig        `mapstructure:"minio"`
+	Upload          UploadConfig       `mapstructure:"upload"`
 	Metrics         MetricsConfig      `mapstructure:"metrics"`
 	Tracer          TracerConfig       `mapstructure:"tracer"`
 	Log             LogConfig          `mapstructure:"log"`
 	RequestIDPrefix string             `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "acs"
->>>>>>> c2a509c (feat(components): 实现 Request ID 中间件和 SQL 日志功能)
 }
 
 // UploadConfig holds file upload server settings.
@@ -151,9 +138,9 @@ type SessionConfig struct {
 
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
-	PerDevice      int           `mapstructure:"per_device"`       // 每设备每分钟最大 Inform 数
-	Burst          int           `mapstructure:"burst"`            // token bucket 突发容量
-	MaxDevices     int           `mapstructure:"max_devices"`      // 限流器追踪的最大设备数
+	PerDevice       int           `mapstructure:"per_device"`       // 每设备每分钟最大 Inform 数
+	Burst           int           `mapstructure:"burst"`            // token bucket 突发容量
+	MaxDevices      int           `mapstructure:"max_devices"`      // 限流器追踪的最大设备数
 	CleanupInterval time.Duration `mapstructure:"cleanup_interval"` // 清理扫描间隔
 	CleanupTimeout  time.Duration `mapstructure:"cleanup_timeout"`  // 设备不活跃淘汰超时
 }
