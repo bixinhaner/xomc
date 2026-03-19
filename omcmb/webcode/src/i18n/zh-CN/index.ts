@@ -401,6 +401,8 @@ const messages: Record<string, string> = {
   'device.type.eGW':        '企业网关',
   'device.type.all':        '全部',
   'device.connStatus':      '连接状态',
+  'device.online':          '在线',
+  'device.offline':         '离线',
   'device.installStatus':   '安装状态',
   'device.engStatus':       '工程状态',
   'device.mgmtStatus':      '管理状态',

@@ -401,6 +401,8 @@ const messages: Record<string, string> = {
   'device.type.eGW':        'Enterprise Gateway',
   'device.type.all':        'All Types',
   'device.connStatus':      'Connection Status',
+  'device.online':          'Online',
+  'device.offline':         'Offline',
   'device.installStatus':   'Install Status',
   'device.engStatus':       'Engineering Status',
   'device.mgmtStatus':      'Management Status',

@@ -34,6 +34,7 @@ import type { DataNode } from 'antd/es/tree';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
+import StatusIndicator from '@/components/StatusIndicator';
 import { useDeviceGroups, useDeviceList } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device, EngStatus } from '@/types/device';
@@ -611,6 +612,18 @@ export default function DeviceGrouping() {
           >
             {t('common.edit')}
           </Button>
+        ),
+      },
+      {
+        key: 'connStatus',
+        title: t('device.connStatus'),
+        dataIndex: 'connStatus',
+        width: 90,
+        render: (val: string) => (
+          <StatusIndicator
+            status={val === 'online' ? 'online' : 'offline'}
+            text={val === 'online' ? t('status.online') : t('status.offline')}
+          />
         ),
       },
       {
