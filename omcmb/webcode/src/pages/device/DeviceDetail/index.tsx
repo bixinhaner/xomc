@@ -7,6 +7,7 @@ import {
   Col,
   Descriptions,
   Divider,
+  Radio,
   Row,
   Skeleton,
   Space,
@@ -59,49 +60,37 @@ const KPI_CATEGORIES: Record<string, string> = {
   mobility: '移动性',
 };
 
-// eNB KPI 配置 (16 项)
+// eNB KPI 配置 (8 项)
 const ENB_KPI_CONFIG: KPIConfig[] = [
-  // 业务量 (4)
-  { key: 'enbTotalDataVolumeDL', label: '下行总数据量', unit: 'GB', category: 'traffic' },
-  { key: 'enbTotalDataVolumeUL', label: '上行总数据量', unit: 'GB', category: 'traffic' },
-  { key: 'enbThroughputDL', label: '下行吞吐率', unit: 'Mbps', category: 'traffic' },
-  { key: 'enbThroughputUL', label: '上行吞吐率', unit: 'Mbps', category: 'traffic' },
-  // 可用性 (1)
-  { key: 'enbCellAvailable', label: '小区可用率', unit: '%', category: 'availability' },
   // 使用率 (2)
-  { key: 'enbDownlinkPRBUtilizationRate', label: '下行 PRB 利用率', unit: '%', category: 'utilization' },
-  { key: 'enbUplinkPRBUtilizationRate', label: '上行 PRB 利用率', unit: '%', category: 'utilization' },
-  // 接入性 (4)
-  { key: 'enbWirelessSetupSuccessRate', label: '无线接通率', unit: '%', category: 'accessibility' },
-  { key: 'enbRrcSetupSuccessRate', label: 'RRC 建立成功率', unit: '%', category: 'accessibility' },
-  { key: 'enbERABSetupSuccessRate', label: 'ERAB 建立成功率', unit: '%', category: 'accessibility' },
-  { key: 'enbCsfbSuccessRate', label: 'CSFB 成功率', unit: '%', category: 'accessibility' },
-  // 保持性 (1)
-  { key: 'enbERABDropRate', label: 'ERAB 掉话率', unit: '%', category: 'retainability' },
-  // 移动性 (4)
-  { key: 'enbHoIntraEnbOutSuccRate', label: '站内切换出成功率', unit: '%', category: 'mobility' },
-  { key: 'enbHoIntraEnbInSuccRate', label: '站内切换入成功率', unit: '%', category: 'mobility' },
-  { key: 'enbHoInterEnbOutSuccRate', label: '站间切换出成功率', unit: '%', category: 'mobility' },
-  { key: 'enbHoInterEnbInSuccRate', label: '站间切换入成功率', unit: '%', category: 'mobility' },
+  { key: 'enbDownlinkPRBUtilizationRate', label: '下行PRB利用率', unit: '%', category: 'utilization' },
+  { key: 'enbUplinkPRBUtilizationRate', label: '上行PRB利用率', unit: '%', category: 'utilization' },
+  // 移动性 (3)
+  { key: 'enbHoS1SuccRate', label: 'eNB间S1切换成功率', unit: '%', category: 'mobility' },
+  { key: 'enbHoX2SuccRate', label: 'eNB间X2切换成功率', unit: '%', category: 'mobility' },
+  { key: 'enbHoInterEnbSuccRate', label: 'eNB间切换成功率', unit: '%', category: 'mobility' },
+  // 接入性 (1)
+  { key: 'enbRrcSetupSuccessRate', label: 'RRC连接建立成功率', unit: '%', category: 'accessibility' },
+  // 业务量 (2)
+  { key: 'enbAvgThroughputDL', label: '平均下行吞吐率', unit: 'Mbps', category: 'traffic' },
+  { key: 'enbAvgThroughputUL', label: '平均上行吞吐率', unit: 'Mbps', category: 'traffic' },
 ];
 
-// gNB KPI 配置 (6 项)
+// gNB KPI 配置 (4 项)
 const GNB_KPI_CONFIG: KPIConfig[] = [
-  // 业务量 (4)
-  { key: 'gnbPdcpUpOctDL', label: '下行 PDCP 数据量', unit: 'GB', category: 'traffic' },
-  { key: 'gnbPdcpUpOctUL', label: '上行 PDCP 数据量', unit: 'GB', category: 'traffic' },
-  { key: 'gnbThroughputDL', label: '下行吞吐率', unit: 'Mbps', category: 'traffic' },
-  { key: 'gnbThroughputUL', label: '上行吞吐率', unit: 'Mbps', category: 'traffic' },
+  // 业务量 (2)
+  { key: 'gnbThroughputDL', label: 'Throughput DL', unit: 'Mbps', category: 'traffic' },
+  { key: 'gnbThroughputUL', label: 'Throughput UL', unit: 'Mbps', category: 'traffic' },
   // 使用率 (2)
-  { key: 'gnbDownlinkPRBUtilizationRate', label: '下行 PRB 利用率', unit: '%', category: 'utilization' },
-  { key: 'gnbUplinkPRBUtilizationRate', label: '上行 PRB 利用率', unit: '%', category: 'utilization' },
+  { key: 'gnbDownlinkPRBUtilizationRate', label: 'Downlink PRB Utilization Rate', unit: '%', category: 'utilization' },
+  { key: 'gnbUplinkPRBUtilizationRate', label: 'Uplink PRB Utilization Rate', unit: '%', category: 'utilization' },
 ];
 
 // GSM KPI 配置 (3 项)
 const GSM_KPI_CONFIG: KPIConfig[] = [
-  { key: 'gsmCallSetupSuccRate', label: '呼叫建立成功率', unit: '%', category: 'accessibility' },
-  { key: 'gsmCallDropRate', label: '掉话率', unit: '%', category: 'retainability' },
-  { key: 'gsmHandoverSuccessRate', label: '切换成功率', unit: '%', category: 'mobility' },
+  { key: 'gsmCallSetupSuccRate', label: 'KPI.CallSetupSuccRate', unit: '%', category: 'accessibility' },
+  { key: 'gsmCallDropRate', label: 'KPI.CallDropRate', unit: '%', category: 'retainability' },
+  { key: 'gsmHandoverSuccessRate', label: 'KPI.HandoverSuccessRate', unit: '%', category: 'mobility' },
 ];
 
 // 根据 networkType 获取 KPI 配置
@@ -118,22 +107,27 @@ const getKPIConfig = (networkType: string): KPIConfig[] => {
   }
 };
 
-// 生成最近7天日期标签
-function generateTrendDays(): string[] {
-  const days: string[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    days.push(`${d.getMonth() + 1}/${d.getDate()}`);
+// 生成趋势日期标签（天/周）
+function generateTrendLabels(mode: 'day' | 'week'): string[] {
+  if (mode === 'day') {
+    // 按天：显示24小时整点
+    return Array.from({ length: 24 }, (_, i) => `${i}:00`);
+  } else {
+    // 按周：显示最近7天
+    const labels: string[] = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+    }
+    return labels;
   }
-  return days;
-}
-
-const TREND_XDATA = generateTrendDays();
+};
 
 // 预定义颜色数组
 const CHART_COLORS = [
-  'var(--color-primary-600)',
+  '#1677FF',
   '#52C41A',
   '#FA8C16',
   '#722ED1',
@@ -144,9 +138,10 @@ const CHART_COLORS = [
 ];
 
 // 根据KPI配置生成类别趋势数据
-const generateCategoryTrendSeries = (kpis: KPIConfig[]) => {
+const generateCategoryTrendSeries = (kpis: KPIConfig[], mode: 'day' | 'week') => {
+  const count = mode === 'day' ? 24 : 7; // 按天24个点，按周7个点
   const randomData = (base: number = 50, range: number = 40) =>
-    Array.from({ length: 7 }, () => Math.floor(Math.random() * range) + base);
+    Array.from({ length: count }, () => Math.floor(Math.random() * range) + base);
 
   return kpis.map((kpi, index) => ({
     name: kpi.label,
@@ -420,6 +415,86 @@ const renderFieldGroup = (group: FieldGroup, device: Device) => (
   </Descriptions>
 );
 
+// ─── KPI Tab 组件─────────────────────────────────────────────────────────
+
+interface KPITabContentProps {
+  device: Device;
+  t: ReturnType<typeof useT>;
+}
+
+function KPITabContent({ device, t }: KPITabContentProps) {
+  const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
+
+  const networkType = device.networkType ?? '';
+  const kpiConfig = getKPIConfig(networkType);
+
+  if (kpiConfig.length === 0) {
+    return (
+      <div style={{ padding: '0 0 16px' }}>
+        <Alert
+          type="info"
+          message={t('common.noData')}
+          description={`暂无 ${networkType || '未知制式'} 的 KPI 指标配置`}
+          showIcon
+        />
+      </div>
+    );
+  }
+
+  const trendLabels = generateTrendLabels(timeMode);
+
+  return (
+    <div style={{ padding: '0 0 16px' }}>
+      {/* 时间维度切换 */}
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+        <Radio.Group
+          value={timeMode}
+          onChange={(e) => setTimeMode(e.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+          size="small"
+        >
+          <Radio.Button value="day">按天</Radio.Button>
+          <Radio.Button value="week">按周</Radio.Button>
+        </Radio.Group>
+      </div>
+
+      {/* 每个 KPI 指标单独显示趋势图 */}
+      <Row gutter={[16, 16]}>
+        {kpiConfig.map((kpi) => {
+          const trendSeries = generateCategoryTrendSeries([kpi], timeMode);
+
+          return (
+            <Col key={kpi.key} xs={24} sm={12}>
+              <div style={{
+                borderRadius: 8,
+                padding: '12px 12px 8px',
+                border: '1px solid var(--color-gray-200, #f0f0f0)',
+              }}>
+                <div style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: 'var(--color-gray-700, #525252)',
+                  marginBottom: 8,
+                }}>
+                  {kpi.label}
+                </div>
+                <LineChart
+                  title=""
+                  xData={trendLabels}
+                  series={trendSeries}
+                  height={220}
+                  areaFill
+                />
+              </div>
+            </Col>
+          );
+        })}
+      </Row>
+    </div>
+  );
+}
+
 // ─── 主组件 ─────────────────────────────────────────────────────────────
 
 export default function DeviceDetail() {
@@ -617,97 +692,7 @@ export default function DeviceDetail() {
             {
               key: 'performance',
               label: 'KPI',
-              children: (
-                <div style={{ padding: '0 0 16px' }}>
-                  {(() => {
-                    const networkType = device.networkType ?? '';
-                    const kpiConfig = getKPIConfig(networkType);
-
-                    if (kpiConfig.length === 0) {
-                      return (
-                        <Alert
-                          type="info"
-                          message={t('common.noData')}
-                          description={`暂无 ${networkType || '未知制式'} 的 KPI 指标配置`}
-                          showIcon
-                        />
-                      );
-                    }
-
-                    // 按类别分组
-                    const groupedKPIs = kpiConfig.reduce((acc, kpi) => {
-                      const category = kpi.category;
-                      if (!acc[category]) {
-                        acc[category] = [];
-                      }
-                      acc[category].push(kpi);
-                      return acc;
-                    }, {} as Record<string, KPIConfig[]>);
-
-                    // 类别显示顺序
-                    const categoryOrder = ['traffic', 'availability', 'utilization', 'accessibility', 'retainability', 'mobility'];
-
-                    return categoryOrder
-                      .filter((cat) => groupedKPIs[cat])
-                      .map((category) => {
-                        const categoryKPIs = groupedKPIs[category];
-                        const trendSeries = generateCategoryTrendSeries(categoryKPIs);
-
-                        return (
-                          <div key={category} style={{ marginBottom: 24 }}>
-                            <Divider orientation="left" style={{ margin: '0 0 16px' }}>
-                              <Text strong style={{ fontSize: 14 }}>{KPI_CATEGORIES[category] || category}</Text>
-                            </Divider>
-
-                            {/* 类别趋势图 */}
-                            <Card size="small" style={{ marginBottom: 16 }}>
-                              <LineChart
-                                title=""
-                                xData={TREND_XDATA}
-                                series={trendSeries}
-                                height={220}
-                                areaFill
-                              />
-                            </Card>
-
-                            {/* KPI 卡片 */}
-                            <Row gutter={[16, 16]}>
-                              {categoryKPIs.map((kpi) => {
-                                // TODO: 从实际数据获取 KPI 值，目前显示占位
-                                const kpiValue = (device as Record<string, unknown>)[kpi.key];
-                                const displayValue = kpiValue !== undefined && kpiValue !== null
-                                  ? `${kpiValue}`
-                                  : '-';
-
-                                return (
-                                  <Col key={kpi.key} xs={12} sm={8} md={6} lg={4}>
-                                    <Card
-                                      size="small"
-                                      styles={{ body: { padding: '12px 16px' } }}
-                                      hoverable
-                                    >
-                                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                                        {kpi.label}
-                                      </Text>
-                                      <Text strong style={{ fontSize: 18 }}>
-                                        {displayValue}
-                                      </Text>
-                                      {displayValue !== '-' && (
-                                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                                          {kpi.unit}
-                                        </Text>
-                                      )}
-                                    </Card>
-                                  </Col>
-                                );
-                              })}
-                            </Row>
-                          </div>
-                        );
-                      });
-                  })()}
-                </div>
-              ),
+              children: <KPITabContent device={device} t={t} />,
             },
             {
               key: 'license',
