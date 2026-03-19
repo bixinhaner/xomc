@@ -374,7 +374,7 @@ export default function DeviceDetail() {
         ),
       },
       { key: 'alarmCode', title: t('alarm.code'), dataIndex: 'alarmCode', width: 100, mono: true },
-      { key: 'alarmName', title: t('alarm.name'), dataIndex: 'alarmName', width: 180, ellipsis: true },
+      { key: 'ackStatus', title: t('alarm.status'), dataIndex: 'ackStatus', width: 100,
       { key: 'alarmContent', title: t('alarm.content'), dataIndex: 'alarmContent', width: 220, ellipsis: true },
       {
         key: 'alarmTime',

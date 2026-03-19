@@ -528,7 +528,9 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'alarm.id':           '告警ID',
   'alarm.code':         '告警码',
-  'alarm.name':         '告警名称',
+  'alarm.name':         '告警标识',
+  'alarm.possibleCause': '可能原因',
+  'alarm.status':        '告警状态',
   'alarm.severity':     '告警级别',
   'alarm.deviceSn':     '设备序列号',
   'alarm.deviceName':   '设备名称',
