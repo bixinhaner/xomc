@@ -1,6 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Popover, Tooltip } from 'antd';
-import { SettingOutlined } from '@ant-design/icons';
+import { HolderOutlined, SettingOutlined } from '@ant-design/icons';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useT } from '@/hooks/useT';
 
 interface Column {
@@ -18,6 +33,47 @@ interface ColumnVisibilityProps {
 }
 
 const VIS_STORAGE_PREFIX = 'omc_col_vis_';
+const ORDER_STORAGE_PREFIX = 'omc_col_order_';
+
+// ─── Sortable row ───────────────────────────────────────────────────────────
+
+interface SortableItemProps {
+  id: string;
+  title: string;
+  checked: boolean;
+  onToggle: (key: string, checked: boolean) => void;
+}
+
+const SortableItem: React.FC<SortableItemProps> = ({ id, title, checked, onToggle }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '3px 0',
+    borderRadius: 4,
+    background: isDragging ? '#e6f4ff' : undefined,
+    cursor: 'default',
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <span {...listeners} style={{ cursor: 'grab', color: '#bfbfbf', display: 'flex', flexShrink: 0 }}>
+        <HolderOutlined />
+      </span>
+      <Checkbox
+        checked={checked}
+        onChange={(e) => onToggle(id, e.target.checked)}
+        style={{ width: '100%' }}
+      >
+        <span style={{ fontSize: 13 }}>{title}</span>
+      </Checkbox>
+    </div>
+  );
+};
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
@@ -29,6 +85,7 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
 }) => {
   const t = useT();
   const visKey = `${VIS_STORAGE_PREFIX}${tableId}`;
+  const orderKey = `${ORDER_STORAGE_PREFIX}${tableId}`;
   const isZh = t('common.yes') === '是';
 
   // ─── hidden keys ────────────────────────────────────────────────────────
@@ -42,15 +99,42 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
   };
 
   const [hiddenKeys, setHiddenKeys] = useState<string[]>(getInitialHidden);
-  const [open, setOpen] = useState(false);
+
+  // ─── column order ───────────────────────────────────────────────────────
+
+  const getInitialOrder = (): string[] => {
+    try {
+      const stored = localStorage.getItem(orderKey);
+      if (stored) {
+        const parsed = JSON.parse(stored) as string[];
+        if (parsed.length > 0) return parsed;
+      }
+    } catch { /* ignore */ }
+    return columns.map((c) => c.key);
+  };
+
+  const [orderedKeys, setOrderedKeys] = useState<string[]>(getInitialOrder);
+
+  const effectiveOrder = useMemo(() => {
+    const set = new Set(orderedKeys);
+    const extra = columns.filter((c) => !set.has(c.key)).map((c) => c.key);
+    return extra.length > 0 ? [...orderedKeys, ...extra] : orderedKeys;
+  }, [orderedKeys, columns]);
+
+  const orderedColumns = useMemo(() => {
+    const map = new Map(columns.map((c) => [c.key, c]));
+    return effectiveOrder.map((k) => map.get(k)).filter(Boolean) as Column[];
+  }, [columns, effectiveOrder]);
 
   // ─── init ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     onChange(hiddenKeys);
-    onOrderChange?.(columns.map((c) => c.key));
+    onOrderChange?.(effectiveOrder);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const [open, setOpen] = useState(false);
 
   // ─── handlers ──────────────────────────────────────────────────────────
 
@@ -74,13 +158,38 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
   const handleReset = useCallback(() => {
     const defaultHidden = columns.filter((c) => c.hidden).map((c) => c.key);
     persistHidden(defaultHidden);
-  }, [columns, persistHidden]);
+    const defaultOrder = columns.map((c) => c.key);
+    setOrderedKeys(defaultOrder);
+    onOrderChange?.(defaultOrder);
+    try { localStorage.removeItem(orderKey); } catch { /* ignore */ }
+  }, [columns, persistHidden, onOrderChange, orderKey]);
+
+  // ─── drag-and-drop ────────────────────────────────────────────────────
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = effectiveOrder.indexOf(active.id as string);
+      const newIndex = effectiveOrder.indexOf(over.id as string);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const newOrder = arrayMove(effectiveOrder, oldIndex, newIndex);
+      setOrderedKeys(newOrder);
+      onOrderChange?.(newOrder);
+      try { localStorage.setItem(orderKey, JSON.stringify(newOrder)); } catch { /* ignore */ }
+    },
+    [effectiveOrder, onOrderChange, orderKey]
+  );
 
   // ─── filterable columns (exclude fixed columns like actions) ───────────
 
   const settableColumns = useMemo(
-    () => columns.filter((c) => c.key !== 'actions'),
-    [columns]
+    () => orderedColumns.filter((c) => c.key !== 'actions'),
+    [orderedColumns]
   );
 
   const totalVisible = settableColumns.filter((c) => !hiddenKeys.includes(c.key)).length;
@@ -88,7 +197,7 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
   // ─── popover content ──────────────────────────────────────────────────
 
   const content = (
-    <div style={{ width: 200 }}>
+    <div style={{ width: 220 }}>
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f0f0f0',
@@ -100,18 +209,21 @@ const ColumnVisibility: React.FC<ColumnVisibilityProps> = ({
           {isZh ? '重置' : 'Reset'}
         </Button>
       </div>
-      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-        {settableColumns.map((col) => (
-          <div key={col.key} style={{ padding: '4px 0' }}>
-            <Checkbox
-              checked={!hiddenKeys.includes(col.key)}
-              onChange={(e) => handleToggle(col.key, e.target.checked)}
-            >
-              <span style={{ fontSize: 13 }}>{col.title}</span>
-            </Checkbox>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={settableColumns.map((c) => c.key)} strategy={verticalListSortingStrategy}>
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            {settableColumns.map((col) => (
+              <SortableItem
+                key={col.key}
+                id={col.key}
+                title={col.title}
+                checked={!hiddenKeys.includes(col.key)}
+                onToggle={handleToggle}
+              />
+            ))}
           </div>
-        ))}
-      </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 

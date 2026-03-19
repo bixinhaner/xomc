@@ -4,8 +4,11 @@ import { App, Button, Dropdown, Input, Popconfirm, Popover, Space, Tag, Tooltip,
 import {
   CheckOutlined,
   CloseOutlined,
+  CloudDownloadOutlined,
   EditOutlined,
+  ExclamationCircleOutlined,
   ExportOutlined,
+  FileTextOutlined,
   ReloadOutlined,
   SyncOutlined,
   WarningOutlined,
@@ -755,17 +758,21 @@ export default function DeviceList() {
     {
       key: 'batch-tr069-collect',
       label: t('device.action.tr069Collect'),
+      icon: <CloudDownloadOutlined />,
       onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys),
-    },
-    {
-      key: 'batch-reset-config',
-      label: t('device.action.resetConfig'),
-      onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys),
     },
     {
       key: 'batch-log-collect',
       label: t('device.action.logCollect'),
+      icon: <FileTextOutlined />,
       onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys),
+    },
+    {
+      key: 'batch-reset-config',
+      label: t('device.action.resetConfig'),
+      icon: <ExclamationCircleOutlined />,
+      danger: true,
+      onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys),
     },
   ], [handleBatchAction, t]);
 
