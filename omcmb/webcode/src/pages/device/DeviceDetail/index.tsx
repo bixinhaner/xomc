@@ -374,8 +374,8 @@ export default function DeviceDetail() {
         ),
       },
       { key: 'alarmCode', title: t('alarm.code'), dataIndex: 'alarmCode', width: 100, mono: true },
-      { key: 'ackStatus', title: t('alarm.status'), dataIndex: 'ackStatus', width: 100,
-      { key: 'alarmContent', title: t('alarm.content'), dataIndex: 'alarmContent', width: 220, ellipsis: true },
+      { key: 'alarmName', title: t('alarm.name'), dataIndex: 'alarmName', width: 180, ellipsis: true },
+      { key: 'alarmContent', title: t('alarm.possibleCause'), dataIndex: 'alarmContent', width: 220, ellipsis: true },
       {
         key: 'alarmTime',
         title: t('alarm.time'),
@@ -385,7 +385,7 @@ export default function DeviceDetail() {
       },
       {
         key: 'ackStatus',
-        title: t('alarm.ackStatus'),
+        title: t('alarm.status'),
         dataIndex: 'ackStatus',
         width: 100,
         render: (_val, record) => (
