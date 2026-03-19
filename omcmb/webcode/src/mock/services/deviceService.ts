@@ -79,7 +79,7 @@ export const deviceService = {
   async getGroups() {
     await delay(80, 150);
     return [
-      { id: 'grp-001', name: '华北大区', parentId: null, deviceCount: 45, description: '华北区所有设备' },
+      { id: 'grp-001', name: '默认设备组', parentId: null, deviceCount: 45, description: '默认设备组' },
       { id: 'grp-002', name: '华东大区', parentId: null, deviceCount: 60, description: '华东区所有设备' },
       { id: 'grp-003', name: '华南大区', parentId: null, deviceCount: 50, description: '华南区所有设备' },
       { id: 'grp-004', name: '西南大区', parentId: null, deviceCount: 25, description: '西南区所有设备' },
