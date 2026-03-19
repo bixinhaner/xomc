@@ -1,14 +1,14 @@
 # OMC Docker Compose Configuration
 #
-# Log files are mounted to /data/logs/omcgo on the host:
-#   /data/logs/omcgo/acs/acs.log     - ACS service logs
-#   /data/logs/omcgo/app/app.log     - App service logs
-#   /data/logs/omcgo/worker/worker.log - Worker service logs
+# Log files are mounted to ~/data/logs/omcgo on the host:
+#   ~/data/logs/omcgo/acs/acs.log     - ACS service logs
+#   ~/data/logs/omcgo/app/app.log     - App service logs
+#   ~/data/logs/omcgo/worker/worker.log - Worker service logs
 #
 # View logs:
-#   tail -f /data/logs/omcgo/acs/acs.log
-#   tail -f /data/logs/omcgo/app/app.log
-#   tail -f /data/logs/omcgo/worker/worker.log
+#   tail -f ~/data/logs/omcgo/acs/acs.log
+#   tail -f ~/data/logs/omcgo/app/app.log
+#   tail -f ~/data/logs/omcgo/worker/worker.log
 #
 # Log rotation is handled by lumberjack (configured in config.yaml):
 #   - Max file size: 20MB
@@ -106,7 +106,7 @@ services:
       OMCGO_LOG_FORMAT: "json"
       OMCGO_LOG_OUTPUT_PATHS: "stdout,/var/log/omcgo/acs.log"
     volumes:
-      - /data/logs/omcgo/acs:/var/log/omcgo
+      - ~/data/logs/omcgo/acs:/var/log/omcgo
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -137,7 +137,7 @@ services:
       OMCGO_LOG_FORMAT: "json"
       OMCGO_LOG_OUTPUT_PATHS: "stdout,/var/log/omcgo/app.log"
     volumes:
-      - /data/logs/omcgo/app:/var/log/omcgo
+      - ~/data/logs/omcgo/app:/var/log/omcgo
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -165,7 +165,7 @@ services:
       OMCGO_LOG_FORMAT: "json"
       OMCGO_LOG_OUTPUT_PATHS: "stdout,/var/log/omcgo/worker.log"
     volumes:
-      - /data/logs/omcgo/worker:/var/log/omcgo
+      - ~/data/logs/omcgo/worker:/var/log/omcgo
     depends_on:
       migrate:
         condition: service_completed_successfully
