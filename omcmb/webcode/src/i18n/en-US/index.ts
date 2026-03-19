@@ -391,6 +391,11 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Device labels
   // -------------------------------------------------------------------------
+  'device.group.basic':        'Basic Information',
+  'device.group.enbGnbShared': 'eNB/gNB Shared',
+  'device.group.enbOnly':      'eNB Only',
+  'device.group.gnbOnly':      'gNB Only',
+  'device.group.gsmOnly':      'GSM Only',
   'device.type.eNB':        'eNB Base Station',
   'device.type.gNB':        'gNB Base Station',
   'device.type.CPE':        'CPE Terminal',
