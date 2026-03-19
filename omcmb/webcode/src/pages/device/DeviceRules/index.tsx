@@ -94,25 +94,25 @@ const MOCK_GROUP_TREE: DeviceGroupTreeNode[] = [
   },
 ];
 
-// 过滤条件选项
-const FILTER_CONDITION_OPTIONS = [
-  { label: '包含', value: 'contain' },
-  { label: '不包含', value: 'notContain' },
-  { label: '以...开始', value: 'startWith' },
-  { label: '以...结束', value: 'endWith' },
+// 过滤条件选项 - 使用函数以便获取 t
+const getFilterConditionOptions = (t: (key: string) => string) => [
+  { label: t('filter.contain'), value: 'contain' },
+  { label: t('filter.notContain'), value: 'notContain' },
+  { label: t('filter.startWith'), value: 'startWith' },
+  { label: t('filter.endWith'), value: 'endWith' },
 ];
 
 // And/Or 选项
-const AND_OR_OPTIONS = [
-  { label: '与', value: 'and' },
-  { label: '或', value: 'or' },
+const getAndOrOptions = (t: (key: string) => string) => [
+  { label: t('filter.and'), value: 'and' },
+  { label: t('filter.or'), value: 'or' },
 ];
 
 // 生成唯一ID
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 // 生成操作描述
-function generateOperators(rule: Partial<DeviceGroupRule>): string {
+function generateOperators(rule: Partial<DeviceGroupRule>, t: (key: string) => string): string {
   if (rule.matchingMode === 'deviceName' && rule.nameRuleList?.length) {
     const orGroups: NameFilterItem[][] = [[]];
 
@@ -128,24 +128,20 @@ function generateOperators(rule: Partial<DeviceGroupRule>): string {
     const filteredGroups = orGroups.filter((g) => g.length > 0);
     if (filteredGroups.length === 0) return '';
 
+    const verbMap: Record<string, string> = {
+      contain: t('filter.contain'),
+      notContain: t('filter.notContain'),
+      startWith: t('filter.startWith'),
+      endWith: t('filter.endWith'),
+    };
+
     const groupParts = filteredGroups.map((group) => {
-      const conditionParts = group.map((item) => {
-        const verbMap: Record<string, string> = {
-          contain: '包含',
-          notContain: '不包含',
-          startWith: '以...开始',
-          endWith: '以...结束',
-        };
-        return `${verbMap[item.condition]} "${item.value}"`;
-      });
-      const groupText = conditionParts.join(' 且 ');
+      const conditionParts = group.map((item) => `${verbMap[item.condition]} "${item.value}"`);
+      const groupText = conditionParts.join(` ${t('filter.and')} `);
       return filteredGroups.length > 1 || group.length > 1 ? `(${groupText})` : groupText;
     });
 
-    let result = groupParts.join(' 或 ');
-    if (filteredGroups.length > 1 || filteredGroups[0].length > 1) {
-      result = `必须 ${result}`;
-    }
+    let result = groupParts.join(` ${t('filter.or')} `);
     return result;
   } else if (rule.matchingMode === 'tac') {
     return `TAC: ${rule.tacRag || ''}`;
@@ -233,19 +229,19 @@ export default function DeviceRules() {
   // 过滤字段配置
   const FILTER_FIELDS: FilterField[] = useMemo(
     () => [
-      { name: 'operators', label: '操作描述', type: 'input' },
+      { name: 'operators', label: t('device.rules.operators'), type: 'input' },
       {
         name: 'enable',
         label: t('table.status'),
         type: 'select',
         options: [
-          { label: '已启用', value: '1' },
-          { label: '已禁用', value: '0' },
+          { label: t('status.enabled'), value: '1' },
+          { label: t('status.disabled'), value: '0' },
         ],
       },
       {
         name: 'moveToGroupId',
-        label: '目标设备组',
+        label: t('device.rules.targetGroup'),
         type: 'select',
         options: MOCK_DEVICE_GROUPS.map((g) => ({ label: g.groupName, value: g.id })),
       },
@@ -273,9 +269,9 @@ export default function DeviceRules() {
   const handleToggle = useCallback(
     (id: string, checked: boolean) => {
       setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enable: checked ? '1' : '0' } : r)));
-      void message.success(checked ? '已启用' : '已禁用');
+      void message.success(checked ? t('status.enabled') : t('status.disabled'));
     },
-    []
+    [t]
   );
 
   // 删除规则
@@ -283,7 +279,7 @@ export default function DeviceRules() {
     (id: string) => {
       Modal.confirm({
         title: t('common.confirmDelete'),
-        content: '确定要删除这条规则吗？',
+        content: t('device.rules.deleteConfirm'),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         okType: 'danger',
@@ -344,14 +340,14 @@ export default function DeviceRules() {
       if (values.matchingMode === 'deviceName') {
         const validFilters = nameFilters.filter((f) => f.value?.trim());
         if (values.enable === '1' && validFilters.length === 0) {
-          void message.error('请至少输入一个过滤条件');
+          void message.error(t('device.rules.atLeastOneFilter'));
           return;
         }
       }
 
       // 验证 TAC/LAC
       if ((values.matchingMode === 'tac' || values.matchingMode === 'lac') && !values.tacRag?.trim()) {
-        void message.error(`请输入${values.matchingMode === 'tac' ? 'TAC' : 'LAC'}范围`);
+        void message.error(t('device.rules.inputRange', { type: values.matchingMode === 'tac' ? 'TAC' : 'LAC' }));
         return;
       }
 
@@ -393,17 +389,17 @@ export default function DeviceRules() {
   // 应用规则
   const handleExecute = useCallback(() => {
     if (selectedGroupIds.length === 0) {
-      void message.warning('请选择至少一个设备组');
+      void message.warning(t('device.rules.selectAtLeastOne'));
       return;
     }
-    void message.success(`已对 ${selectedGroupIds.length} 个设备组应用规则`);
+    void message.success(t('device.rules.appliedTo', { count: selectedGroupIds.length }));
     setActiveModalOpen(false);
-  }, [selectedGroupIds]);
+  }, [selectedGroupIds, t]);
 
   // 添加过滤条件
   const handleAddFilter = useCallback(() => {
     if (nameFilters.length >= 10) {
-      void message.warning('最多添加10个条件');
+      void message.warning(t('device.rules.maxConditions', { max: 10 }));
       return;
     }
     const hasOr = nameFilters.some((f, index) => index > 0 && f.andOr === 'or');
@@ -474,14 +470,14 @@ export default function DeviceRules() {
           const items: MenuProps['items'] = [
             {
               key: 'up',
-              label: '上移',
+              label: t('device.rules.moveUp'),
               icon: <ArrowUpOutlined />,
               disabled: index === 0,
               onClick: () => handleMoveUp(index),
             },
             {
               key: 'down',
-              label: '下移',
+              label: t('device.rules.moveDown'),
               icon: <ArrowDownOutlined />,
               disabled: index === filteredRules.length - 1,
               onClick: () => handleMoveDown(index),
@@ -514,7 +510,7 @@ export default function DeviceRules() {
                 icon={<SyncOutlined />}
                 onClick={() => handleActive(record)}
               >
-                应用
+                {t('device.rules.apply')}
               </Button>
             )}
             <Button
@@ -552,7 +548,7 @@ export default function DeviceRules() {
       },
       {
         key: 'operators',
-        title: '操作',
+        title: t('device.rules.operation'),
         dataIndex: 'operators',
         ellipsis: true,
         render: (val) => (
@@ -561,7 +557,7 @@ export default function DeviceRules() {
       },
       {
         key: 'moveToGroupName',
-        title: '目标设备组',
+        title: t('device.rules.targetGroup'),
         dataIndex: 'moveToGroupName',
         width: 150,
       },
@@ -633,8 +629,8 @@ export default function DeviceRules() {
       >
         <Form form={form} layout="vertical">
           {/* 基本设置 */}
-          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>基本设置</div>
-          <Form.Item name="moveToGroupId" label="目标设备组" rules={[{ required: true, message: '请选择目标设备组' }]}>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>{t('device.rules.basicSettings')}</div>
+          <Form.Item name="moveToGroupId" label={t('device.rules.targetGroup')} rules={[{ required: true, message: t('device.rules.selectTargetGroup') }]}>
             <Select
               placeholder={t('common.pleaseSelect')}
               options={MOCK_DEVICE_GROUPS.map((g) => ({ label: g.groupName, value: g.id }))}
@@ -643,21 +639,21 @@ export default function DeviceRules() {
 
           <Form.Item
             name="enable"
-            label="启用状态"
+            label={t('device.rules.enableStatus')}
             valuePropName="checked"
             getValueProps={(v) => ({ checked: v === '1' })}
             getValueFromEvent={(checked: boolean) => (checked ? '1' : '0')}
           >
-            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+            <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} />
           </Form.Item>
 
           <Divider style={{ margin: '16px 0' }} />
 
           {/* 匹配规则 */}
-          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>匹配规则</div>
-          <Form.Item name="matchingMode" label="匹配方式" rules={[{ required: true }]}>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>{t('device.rules.matchingRule')}</div>
+          <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} rules={[{ required: true }]}>
             <Radio.Group onChange={handleMatchingModeChange}>
-              <Radio value="deviceName">设备名称</Radio>
+              <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
               {SUPPORT_GSM && DEVICE_TYPE === 'ENB' && <Radio value="lac">LAC</Radio>}
               {DEVICE_TYPE !== 'CPE' && <Radio value="tac">TAC</Radio>}
             </Radio.Group>
@@ -666,7 +662,7 @@ export default function DeviceRules() {
           {/* 设备名称过滤条件 */}
           {matchingMode === 'deviceName' && (
             <>
-              <Form.Item label={<span>过滤条件 <Text type="secondary" style={{ fontSize: 12 }}>(不超过 10)</Text></span>}>
+              <Form.Item label={<span>{t('device.rules.filterCondition')} <Text type="secondary" style={{ fontSize: 12 }}>{t('device.rules.conditionLimit', { max: 10 })}</Text></span>}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {nameFilters.map((filter, index) => (
                     <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

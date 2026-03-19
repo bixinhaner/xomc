@@ -1217,6 +1217,77 @@ const messages: Record<string, string> = {
   'ops.maxRtt':                     'Max RTT',
   'ops.tracerouteComplete':         'Traceroute complete. Route trace results are displayed in the terminal above.',
   'ops.allOmcServer':               'All (OMC Server)',
+
+  // -------------------------------------------------------------------------
+  // Device Rules
+  // -------------------------------------------------------------------------
+  'device.rules.title':             'Device Group Assignment Rules',
+  'device.rules.targetGroup':       'Target Device Group',
+  'device.rules.basicSettings':     'Basic Settings',
+  'device.rules.matchingRule':      'Matching Rule',
+  'device.rules.matchingMode':      'Matching Mode',
+  'device.rules.deviceName':        'Device Name',
+  'device.rules.filterCondition':   'Filter Condition',
+  'device.rules.addCondition':      'Add Condition',
+  'device.rules.maxConditions':     'Max {max} conditions',
+  'device.rules.atLeastOneFilter':  'Please enter at least one filter condition',
+  'device.rules.selectTargetGroup': 'Please select target device group',
+  'device.rules.apply':             'Apply',
+  'device.rules.applyRule':         'Apply Rule',
+  'device.rules.selectGroupToApply':'Select device groups to apply the rule',
+  'device.rules.selectAtLeastOne':  'Please select at least one device group',
+  'device.rules.appliedTo':         'Rule applied to {count} device groups',
+  'device.rules.moveUp':            'Move Up',
+  'device.rules.moveDown':          'Move Down',
+  'device.rules.deleteConfirm':     'Are you sure you want to delete this rule?',
+  'device.rules.formatRange':       'Format: 1,2,3 or 1-10,20-30 (Range: {range})',
+  'device.rules.inputRange':        'Please enter {type} range',
+  'device.rules.operators':         'Operation Description',
+  'device.rules.operation':         'Operation',
+  'device.rules.conditionLimit':    '(Max {max})',
+
+  // Filter conditions
+  'filter.contain':                 'Contains',
+  'filter.notContain':              'Not Contains',
+  'filter.startWith':               'Starts With',
+  'filter.endWith':                 'Ends With',
+  'filter.and':                     'And',
+  'filter.or':                      'Or',
+  'filter.must':                    'Must',
+
+  // -------------------------------------------------------------------------
+  // Recycle Bin
+  // -------------------------------------------------------------------------
+  'recycle.title':                  'Recycle Bin',
+  'recycle.serialNumber':           'Serial Number',
+  'recycle.macAddress':             'MAC Address',
+  'recycle.hostName':               'HostName',
+  'recycle.longitude':              'Longitude',
+  'recycle.latitude':               'Latitude',
+  'recycle.height':                 'Height',
+  'recycle.offlineDays':            'Offline Days',
+  'recycle.groupName':              'Device Group Name',
+  'recycle.moveType':               'Move Type',
+  'recycle.moveTime':               'Move Time',
+  'recycle.account':                'Account',
+  'recycle.auto':                   'Auto',
+  'recycle.manual':                 'Manual',
+  'recycle.restore':                'Restore',
+  'recycle.restoreConfirm':         'Confirm to restore {count} selected device(s) from recycle bin?',
+  'recycle.deleteConfirm':          'Confirm to delete {count} selected device(s)? This action cannot be undone.',
+  'recycle.searchPlaceholder':      'Serial Number / MAC Address',
+
+  // Status
+  'status.enabled':                 'Enabled',
+  'status.disabled':                'Disabled',
+
+  // Filter
+  'filter.contain':                 'Contains',
+  'filter.notContain':              'Not Contains',
+  'filter.startWith':               'Starts With',
+  'filter.endWith':                 'Ends With',
+  'filter.and':                     'And',
+  'filter.or':                      'Or',
 };
 
 export default messages;

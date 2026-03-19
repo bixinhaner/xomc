@@ -1216,6 +1216,77 @@ const messages: Record<string, string> = {
   'ops.maxRtt':                     '最大RTT',
   'ops.tracerouteComplete':         'Traceroute 完成。路由追踪结果已显示在上方终端中。',
   'ops.allOmcServer':               '全部 (OMC Server)',
+
+  // -------------------------------------------------------------------------
+  // Device Rules (设备归属规则)
+  // -------------------------------------------------------------------------
+  'device.rules.title':             '设备归属设备组规则',
+  'device.rules.targetGroup':       '目标设备组',
+  'device.rules.basicSettings':     '基本设置',
+  'device.rules.matchingRule':      '匹配规则',
+  'device.rules.matchingMode':      '匹配方式',
+  'device.rules.deviceName':        '设备名称',
+  'device.rules.filterCondition':   '过滤条件',
+  'device.rules.addCondition':      '添加条件',
+  'device.rules.maxConditions':     '最多添加{max}个条件',
+  'device.rules.atLeastOneFilter':  '请至少输入一个过滤条件',
+  'device.rules.selectTargetGroup': '请选择目标设备组',
+  'device.rules.apply':             '应用',
+  'device.rules.applyRule':         '应用规则',
+  'device.rules.selectGroupToApply':'选择要应用规则的设备组',
+  'device.rules.selectAtLeastOne':  '请选择至少一个设备组',
+  'device.rules.appliedTo':         '已对 {count} 个设备组应用规则',
+  'device.rules.moveUp':            '上移',
+  'device.rules.moveDown':          '下移',
+  'device.rules.deleteConfirm':     '确定要删除这条规则吗？',
+  'device.rules.formatRange':       '格式: 1,2,3 或 1-10,20-30 (范围: {range})',
+  'device.rules.inputRange':        '请输入{type}范围',
+  'device.rules.operators':         '操作描述',
+  'device.rules.operation':         '操作',
+  'device.rules.conditionLimit':    '(不超过 {max})',
+
+  // Filter conditions
+  'filter.contain':                 '包含',
+  'filter.notContain':              '不包含',
+  'filter.startWith':               '以...开始',
+  'filter.endWith':                 '以...结束',
+  'filter.and':                     '与',
+  'filter.or':                      '或',
+  'filter.must':                    '必须',
+
+  // -------------------------------------------------------------------------
+  // Recycle Bin (回收站)
+  // -------------------------------------------------------------------------
+  'recycle.title':                  '回收站',
+  'recycle.serialNumber':           '小站编码',
+  'recycle.macAddress':             'MAC地址',
+  'recycle.hostName':               'HostName',
+  'recycle.longitude':              '经度',
+  'recycle.latitude':               '纬度',
+  'recycle.height':                 '高度',
+  'recycle.offlineDays':            '离线天数',
+  'recycle.groupName':              '设备组名称',
+  'recycle.moveType':               '回收方式',
+  'recycle.moveTime':               '回收时间',
+  'recycle.account':                '账户',
+  'recycle.auto':                   '自动',
+  'recycle.manual':                 '手动',
+  'recycle.restore':                '移出回收站',
+  'recycle.restoreConfirm':         '确认将选中的 {count} 个设备移出回收站？',
+  'recycle.deleteConfirm':          '确认删除选中的 {count} 个设备？此操作不可恢复。',
+  'recycle.searchPlaceholder':      '小站编码 / MAC地址',
+
+  // Status
+  'status.enabled':                 '已启用',
+  'status.disabled':                '已禁用',
+
+  // Filter
+  'filter.contain':                 '包含',
+  'filter.notContain':              '不包含',
+  'filter.startWith':               '以...开始',
+  'filter.endWith':                 '以...结束',
+  'filter.and':                     '与',
+  'filter.or':                      '或',
 };
 
 export default messages;

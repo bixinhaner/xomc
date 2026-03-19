@@ -125,9 +125,12 @@ const MOCK_ALL_DATA: RecycleDeviceItem[] = [
 ];
 
 // 回收方式映射
-const MOVE_TYPE_MAP: Record<string, string> = {
-  '0': '自动',
-  '1': '手动',
+const getMoveTypeLabel = (t: (key: string) => string, value: string) => {
+  const map: Record<string, string> = {
+    '0': t('recycle.auto'),
+    '1': t('recycle.manual'),
+  };
+  return map[value] || value;
 };
 
 export default function RecycleBin() {
@@ -162,8 +165,8 @@ export default function RecycleBin() {
   const handleRestore = useCallback(
     (ids: React.Key[]) => {
       Modal.confirm({
-        title: '确认',
-        content: `确认将选中的 ${ids.length} 个设备移出回收站？`,
+        title: t('common.confirm'),
+        content: t('recycle.restoreConfirm', { count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         icon: <ExportOutlined style={{ color: '#52C41A' }} />,
@@ -181,7 +184,7 @@ export default function RecycleBin() {
     (ids: React.Key[]) => {
       Modal.confirm({
         title: t('common.confirmDelete'),
-        content: `确认删除选中的 ${ids.length} 个设备？此操作不可恢复。`,
+        content: t('recycle.deleteConfirm', { count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         okType: 'danger',
@@ -199,13 +202,13 @@ export default function RecycleBin() {
     () => [
       {
         name: 'searchText',
-        label: '搜索',
+        label: t('common.search'),
         type: 'input',
-        placeholder: '小站编码 / MAC地址',
+        placeholder: t('recycle.searchPlaceholder'),
       },
       {
         name: 'deviceType',
-        label: '基站制式',
+        label: t('device.radioMode'),
         type: 'select',
         options: [
           { label: 'All', value: '' },
@@ -216,7 +219,7 @@ export default function RecycleBin() {
       },
       {
         name: 'group_id',
-        label: '设备组',
+        label: t('device.groupName'),
         type: 'select',
         options: [
           { label: 'All', value: '' },
@@ -225,16 +228,16 @@ export default function RecycleBin() {
       },
       {
         name: 'moveType',
-        label: '回收方式',
+        label: t('recycle.moveType'),
         type: 'select',
         options: [
           { label: 'All', value: '' },
-          { label: '自动', value: '0' },
-          { label: '手动', value: '1' },
+          { label: t('recycle.auto'), value: '0' },
+          { label: t('recycle.manual'), value: '1' },
         ],
       },
     ],
-    []
+    [t]
   );
 
   // 列定义
@@ -242,7 +245,7 @@ export default function RecycleBin() {
     () => [
       {
         key: 'serial_number',
-        title: '小站编码',
+        title: t('device.serialNumber'),
         dataIndex: 'serial_number',
         width: 140,
         mono: true,
@@ -250,7 +253,7 @@ export default function RecycleBin() {
       },
       {
         key: 'deviceType',
-        title: '基站制式',
+        title: t('device.radioMode'),
         dataIndex: 'deviceType',
         width: 100,
         render: (v) => (
@@ -260,27 +263,27 @@ export default function RecycleBin() {
       { key: 'host_name', title: 'HostName', dataIndex: 'host_name', width: 140, ellipsis: true },
       {
         key: 'mac',
-        title: 'MAC地址',
+        title: t('device.macAddress'),
         width: 130,
         mono: true,
         render: (_v, record) => record.mac_address || record.macaddress || '-',
       },
-      { key: 'longitude', title: '经度', dataIndex: 'longitude', width: 90 },
-      { key: 'latitude', title: '纬度', dataIndex: 'latitude', width: 90 },
-      { key: 'height', title: '高度', dataIndex: 'height', width: 70 },
-      { key: 'offlineDays', title: '离线天数', dataIndex: 'offlineDays', width: 90 },
-      { key: 'group_name', title: '设备组名称', dataIndex: 'group_name', width: 120 },
+      { key: 'longitude', title: t('device.longitude'), dataIndex: 'longitude', width: 90 },
+      { key: 'latitude', title: t('device.latitude'), dataIndex: 'latitude', width: 90 },
+      { key: 'height', title: t('recycle.height'), dataIndex: 'height', width: 70 },
+      { key: 'offlineDays', title: t('recycle.offlineDays'), dataIndex: 'offlineDays', width: 90 },
+      { key: 'group_name', title: t('recycle.groupName'), dataIndex: 'group_name', width: 120 },
       {
         key: 'moveType',
-        title: '回收方式',
+        title: t('recycle.moveType'),
         dataIndex: 'moveType',
         width: 90,
-        render: (v) => <Tag color={v === '1' ? 'blue' : 'green'}>{MOVE_TYPE_MAP[String(v)]}</Tag>,
+        render: (v) => <Tag color={v === '1' ? 'blue' : 'green'}>{getMoveTypeLabel(t, String(v))}</Tag>,
       },
-      { key: 'moveTime', title: '回收时间', dataIndex: 'moveTime', width: 160 },
-      { key: 'move_author', title: '账户', dataIndex: 'move_author', width: 90 },
+      { key: 'moveTime', title: t('recycle.moveTime'), dataIndex: 'moveTime', width: 160 },
+      { key: 'move_author', title: t('recycle.account'), dataIndex: 'move_author', width: 90 },
     ],
-    []
+    [t]
   );
 
   // 批量操作
@@ -288,7 +291,7 @@ export default function RecycleBin() {
     () => [
       {
         key: 'batch-restore',
-        label: '移出回收站',
+        label: t('recycle.restore'),
         icon: <ExportOutlined />,
         onClick: handleRestore,
       },
@@ -304,7 +307,7 @@ export default function RecycleBin() {
   );
 
   return (
-    <ListPageLayout title="回收站" subtitle={`${t('table.total')} ${filteredData.length}`}>
+    <ListPageLayout title={t('nav.device.recycle')} subtitle={`${t('table.total')} ${filteredData.length}`}>
       <FilterBar
         filterId="recycle-bin"
         fields={FILTER_FIELDS}
