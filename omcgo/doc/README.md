@@ -1,8 +1,62 @@
 # OMC 基站管理系统 - 文档目录
 
-本目录包含基于规范目录（`规范/`）梳理的系统功能文档。
+本目录是 OMC 项目的统一文档中心，包含所有技术设计、架构文档、功能规范和开发报告。
 
 功能分析基于 `规范/` 目录下三大运营商（中国移动、中国电信、中国联通）的 55 份技术规范文档（移动 19 份、电信 21 份、联通 15 份），涵盖 LTE 和 5G NR 两种制式。
+
+## 目录结构
+
+```
+omcgo/doc/
+├── README.md                    # 本文件 - 文档索引
+├── 功能索引.md                   # 功能分类总览、运营商交叉引用矩阵
+├── development-plan.md          # 开发计划
+├── phase4-analysis-report.md    # Phase 4 分析报告
+│
+├── architecture/                # 系统架构文档
+│   ├── system-overview.md       # OMC 系统定位、设备类型、运营商差异
+│   ├── backend-design.md        # Go 后端架构设计
+│   ├── interface-topology.md    # 南向/北向/直连接口拓扑
+│   └── framework-comparison.md  # 技术框架选型分析
+│
+├── design/                      # 技术设计文档
+│   ├── acs-service-flow.md      # ACS 服务流程设计
+│   ├── database-migration.md    # 数据库迁移方案
+│   ├── pm-kpi-flow.md           # PM/KPI 数据流设计
+│   ├── session-design.md        # 会话设计
+│   └── ...                      # 其他设计文档
+│
+├── detailed-design/             # 详细设计文档 (F01-F21)
+│   ├── 01-project-scaffolding.md
+│   ├── 07-acs-engine.md
+│   └── ...
+│
+├── features/                    # 功能域文档 (F01-F10)
+│   ├── 01-southbound-interface.md
+│   ├── 06-omc-core-functions.md
+│   └── ...
+│
+├── go-zero-design/              # Go-Zero 架构设计
+│   ├── 01-architecture-overview.md
+│   ├── 03-acs-engine.md
+│   └── ...
+│
+├── operations/                  # 运维文档
+│   └── deployment-guide.md      # 部署指南
+│
+├── reports/                     # 分析报告
+│   ├── phase1-completion-report.md
+│   ├── phase2-completion-report.md
+│   ├── phase3-completion-report.md
+│   ├── phase4-completion-report.md
+│   ├── review-report/           # 代码审查报告
+│   │   └── YYYYMMDD/
+│   └── ...
+│
+└── specs-inventory/             # 规范清单
+    ├── document-catalog.md      # 55 份规范文档完整目录
+    └── carrier-comparison.md    # 三大运营商规范覆盖对比
+```
 
 ## 文档导航
 
