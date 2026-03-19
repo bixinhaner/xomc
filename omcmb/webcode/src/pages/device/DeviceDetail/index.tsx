@@ -100,11 +100,11 @@ const renderStatusTag = (value: string | undefined, map: Record<string, { label:
   return <Tag color={entry.color}>{entry.label}</Tag>;
 };
 
-// ─── 公共字段组 ────────────────────────────────────────────────────────
+// ─── 基站信息组 ────────────────────────────────────────────────────────
 
-const getCommonFields = (t: ReturnType<typeof useT>): FieldGroup => ({
-  title: t('device.group.basic'),
-  fields: [
+const getStationFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+  const fields: FieldItem[] = [
+    // 公共字段
     { key: 'sn', label: t('device.sn'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.sn}</Text> },
     { key: 'name', label: t('device.hostName'), render: (d) => d.name || '-' },
     { key: 'networkType', label: t('device.radioMode'), render: (d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag> },
@@ -115,115 +115,194 @@ const getCommonFields = (t: ReturnType<typeof useT>): FieldGroup => ({
     { key: 'macAddress', label: t('device.macAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.macAddress || '-'}</Text> },
     { key: 'groupName', label: t('device.groupName'), render: (d) => d.groupName || '-' },
     { key: 'ipAddress', label: t('device.ipAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipAddress || '-'}</Text> },
+  ];
+
+  // eNB/gNB 共享字段
+  if (networkType === 'eNB' || networkType === 'gNB') {
+    fields.push(
+      { key: 'ipsecAddr', label: t('device.ipsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipsecAddr || '-'}</Text> },
+      { key: 'halobFlag', label: 'HaloB', render: (d) => <Tag color={d.halobFlag ? 'success' : 'default'}>{d.halobFlag ? t('status.enabled') : t('status.disabled')}</Tag> },
+      { key: 'adminState', label: 'Admin State', render: (d) => renderStatusTag(String(d.adminState), { '1': { label: 'Locked', color: 'warning' }, '2': { label: 'Unlocked', color: 'success' }, '3': { label: 'ShuttingDown', color: 'error' } }) },
+    );
+  }
+
+  // eNB 独有字段
+  if (networkType === 'eNB') {
+    fields.push(
+      { key: 'gpsVersion', label: t('device.gpsVersion'), render: (d) => d.gpsVersion ?? '-' },
+      { key: 'rom', label: 'ROM', render: (d) => d.rom ?? '-' },
+      { key: 'mmepoolIpsecAddr', label: t('device.mmepoolIpsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.mmepoolIpsecAddr || '-'}</Text> },
+    );
+  }
+
+  // gNB 独有字段
+  if (networkType === 'gNB') {
+    fields.push(
+      { key: 'rollbackVersion', label: t('device.rollbackVersion'), render: (d) => d.rollbackVersion ?? '-' },
+      { key: 'sasParam', label: t('device.sasParam'), render: (d) => d.sasParam ?? '-' },
+      { key: 'euRu', label: t('device.euRu'), render: (d) => d.euRu ?? '-' },
+      { key: 'halobLicense', label: t('device.halobLicense'), render: (d) => d.halobLicense ?? '-' },
+      { key: 'energySaving', label: t('device.energySaving'), render: (d) => d.energySaving ?? '-' },
+      { key: 'gnbTopoCellmgr', label: t('device.gnbTopoCellmgr'), render: (d) => d.gnbTopoCellmgr ?? '-' },
+      { key: 'sslCertValidity', label: t('device.sslCertValidity'), render: (d) => d.sslCertValidity ?? '-' },
+    );
+  }
+
+  // GSM 独有字段
+  if (networkType === 'GSM') {
+    fields.push(
+      { key: 'ipaUnitId', label: 'IPA Unit ID', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipaUnitId ?? '-'}</Text> },
+      { key: 'omlRemoteIp', label: 'OML Remote IP', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIp ?? '-'}</Text> },
+      { key: 'omlRemoteIpBak', label: 'OML Remote IP Bak', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIpBak ?? '-'}</Text> },
+      { key: 'bscSelect', label: 'BSC Select', render: (d) => d.bscSelect === '0' ? t('device.bscPrimary') : d.bscSelect === '1' ? t('device.bscBackup') : d.bscSelect ?? '-' },
+    );
+  }
+
+  return { title: t('device.group.station'), fields };
+};
+
+// ─── 小区信息组 ────────────────────────────────────────────────────────
+
+const getCellFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+  const fields: FieldItem[] = [];
+
+  // eNB/gNB 共享字段
+  if (networkType === 'eNB' || networkType === 'gNB') {
+    fields.push(
+      { key: 'pci', label: 'PCI', render: (d) => d.pci ?? '-' },
+      { key: 'tac', label: 'TAC', render: (d) => d.tac ?? '-' },
+      { key: 'band', label: 'Band', render: (d) => d.band ?? '-' },
+      { key: 'dlEarfcn', label: t('device.dlEarfcn'), render: (d) => d.dlEarfcn ?? '-' },
+      { key: 'ulEarfcn', label: t('device.ulEarfcn'), render: (d) => d.ulEarfcn ?? '-' },
+      { key: 'networkModel', label: t('device.networkModel'), render: (d) => d.networkModel ?? '-' },
+      { key: 'txPower', label: 'Tx Power', render: (d) => d.txPower ?? '-' },
+    );
+  }
+
+  // eNB 独有字段
+  if (networkType === 'eNB') {
+    fields.push(
+      { key: 'enbId', label: 'eNodeB ID', render: (d) => d.enbId ?? '-' },
+      { key: 'cellId', label: t('device.cellId'), render: (d) => d.cellId ?? '-' },
+      { key: 'eci', label: 'ECI', render: (d) => d.eci ?? '-' },
+      { key: 'plmnId', label: 'PLMN', render: (d) => d.plmnId ?? '-' },
+      { key: 'subframeAssignment', label: t('device.subframeAssignment'), render: (d) => d.subframeAssignment ?? '-' },
+      { key: 'specialSubframe', label: t('device.specialSubframe'), render: (d) => d.specialSubframe ?? '-' },
+      { key: 'rootIndex', label: t('device.rootIndex'), render: (d) => d.rootIndex ?? '-' },
+      { key: 'siteId', label: 'Site ID', render: (d) => d.siteId ?? '-' },
+      { key: 'bandwidth', label: t('device.bandwidth'), render: (d) => d.bandwidth ?? '-' },
+    );
+  }
+
+  // gNB 独有字段
+  if (networkType === 'gNB') {
+    fields.push(
+      { key: 'gnbId', label: 'gNB ID', render: (d) => d.gnbId ?? '-' },
+      { key: 'nrCellId', label: 'NR Cell ID', render: (d) => d.nrCellId ?? '-' },
+    );
+  }
+
+  // GSM 独有字段
+  if (networkType === 'GSM') {
+    fields.push(
+      { key: 'lac', label: 'LAC', render: (d) => d.lac ?? '-' },
+      { key: 'arfcn', label: t('device.arfcn'), render: (d) => d.arfcn ?? '-' },
+      { key: 'uplinkFrequency', label: t('device.uplinkFrequency'), render: (d) => d.uplinkFrequency ? `${d.uplinkFrequency} MHz` : '-' },
+      { key: 'downlinkFrequency', label: t('device.downlinkFrequency'), render: (d) => d.downlinkFrequency ? `${d.downlinkFrequency} MHz` : '-' },
+      { key: 'btsNum', label: t('device.btsNum'), render: (d) => d.btsNum ?? '-' },
+    );
+  }
+
+  return { title: t('device.group.cell'), fields };
+};
+
+// ─── 状态信息组 ────────────────────────────────────────────────────────
+
+const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+  const fields: FieldItem[] = [
+    // 公共字段
     { key: 'connStatus', label: t('device.connStatus'), render: (d) => <StatusIndicator status={d.connStatus === 'online' ? 'online' : 'offline'} /> },
     { key: 'opState', label: t('device.opState'), render: (d) => renderStatusTag(d.opState, { '1': { label: t('status.active'), color: 'success' }, '0': { label: t('status.inactive'), color: 'error' }, active: { label: t('status.active'), color: 'success' }, inactive: { label: t('status.inactive'), color: 'error' } }) },
     { key: 'rfStatus', label: t('device.rfStatus'), render: (d) => renderStatusTag(d.rfStatus, { on: { label: t('status.rfOn'), color: 'success' }, off: { label: t('status.rfOff'), color: 'error' }, '1': { label: t('status.rfOn'), color: 'success' }, '0': { label: t('status.rfOff'), color: 'error' } }) },
     { key: 'ueCount', label: t('device.ueCount'), render: (d) => d.ueCount ?? '-' },
     { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => d.syncStatus || '-' },
+  ];
+
+  // eNB 独有字段
+  if (networkType === 'eNB') {
+    fields.push(
+      { key: 'mmeStatus', label: t('device.mmeStatus'), render: (d) => d.mmeStatus ?? '-' },
+      { key: 'pmReportStatus', label: t('device.pmReportStatus'), render: (d) => d.pmReportStatus ?? '-' },
+      { key: 'cpeCount', label: t('device.cpeCount'), render: (d) => d.cpeCount ?? '-' },
+      { key: 'lockStatus', label: t('device.lockStatus'), render: (d) => renderStatusTag(d.lockStatus, { locked: { label: t('status.locked'), color: 'warning' }, unlocked: { label: t('status.unlocked'), color: 'success' } }) },
+      { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
+      { key: 'serviceStatus', label: t('device.serviceStatus'), render: (d) => d.serviceStatus ?? '-' },
+      { key: 'validity', label: t('device.validity'), render: (d) => d.validity ?? '-' },
+    );
+  }
+
+  // gNB 独有字段
+  if (networkType === 'gNB') {
+    fields.push(
+      { key: 'amfStatus', label: t('device.amfStatus'), render: (d) => d.amfStatus ?? '-' },
+      { key: 'multiPlmnEnable', label: 'Multi PLMN', render: (d) => renderStatusTag(d.multiPlmnEnable, { enabled: { label: t('status.enabled'), color: 'success' }, disabled: { label: t('status.disabled'), color: 'default' } }) },
+      { key: 'euCount', label: t('device.euCount'), render: (d) => d.euCount ?? '-' },
+      { key: 'ruCount', label: t('device.ruCount'), render: (d) => d.ruCount ?? '-' },
+    );
+  }
+
+  // GSM 独有字段
+  if (networkType === 'GSM') {
+    fields.push(
+      { key: 'bscLinkStatus', label: t('device.bscLinkStatus'), render: (d) => renderStatusTag(d.bscLinkStatus, { connected: { label: t('status.connected'), color: 'success' }, disconnected: { label: t('status.disconnected'), color: 'error' } }) },
+      { key: 'bscSerialNumber', label: t('device.bscSerialNumber'), render: (d) => d.bscSerialNumber ?? '-' },
+    );
+  }
+
+  return { title: t('device.group.status'), fields };
+};
+
+// ─── 其他信息组 ────────────────────────────────────────────────────────
+
+const getOtherFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+  const fields: FieldItem[] = [
+    // 时间信息
     { key: 'onlineTime', label: t('device.onlineTime'), render: (d) => fmtTime(d.onlineTime) },
     { key: 'offlineTime', label: t('device.offlineTime'), render: (d) => fmtTime(d.offlineTime) },
     { key: 'onlineDuration', label: t('device.onlineDuration'), render: (d) => fmtDuration(d.onlineDuration) },
     { key: 'upTime', label: t('device.upTime'), render: (d) => fmtDuration(d.upTime) },
     { key: 'firstOnlineTime', label: t('device.firstOnlineTime'), render: (d) => fmtTime(d.firstOnlineTime) },
     { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
+    // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.siteName || '-' },
-    { key: 'remark', label: t('device.remark'), render: (d) => d.remark || '-' },
+    // 位置信息
     { key: 'longitude', label: t('device.longitude'), render: (d) => d.longitude?.toFixed(4) || '-' },
     { key: 'latitude', label: t('device.latitude'), render: (d) => d.latitude?.toFixed(4) || '-' },
     { key: 'gpsHeight', label: t('device.gpsHeight'), render: (d) => d.gpsHeight ?? '-' },
-  ],
-});
+    // 备注
+    { key: 'remark', label: t('device.remark'), render: (d) => d.remark || '-' },
+  ];
 
-// ─── eNB+gNB 共享字段组 ────────────────────────────────────────────────
+  // eNB 独有字段
+  if (networkType === 'eNB') {
+    fields.push(
+      { key: 'mechanicalDowntilt', label: t('device.mechanicalDowntilt'), render: (d) => d.mechanicalDowntilt ?? '-' },
+      { key: 'electronicDowntilt', label: t('device.electronicDowntilt'), render: (d) => d.electronicDowntilt ?? '-' },
+      { key: 'verticalBeamWidth', label: t('device.verticalBeamWidth'), render: (d) => d.verticalBeamWidth ?? '-' },
+      { key: 'horizontalAzimuth', label: t('device.horizontalAzimuth'), render: (d) => d.horizontalAzimuth ?? '-' },
+      { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
+    );
+  }
 
-const getEnbGnbSharedFields = (t: ReturnType<typeof useT>): FieldGroup => ({
-  title: t('device.group.enbGnbShared'),
-  fields: [
-    { key: 'pci', label: 'PCI', render: (d) => d.pci ?? '-' },
-    { key: 'tac', label: 'TAC', render: (d) => d.tac ?? '-' },
-    { key: 'band', label: 'Band', render: (d) => d.band ?? '-' },
-    { key: 'dlEarfcn', label: t('device.dlEarfcn'), render: (d) => d.dlEarfcn ?? '-' },
-    { key: 'ulEarfcn', label: t('device.ulEarfcn'), render: (d) => d.ulEarfcn ?? '-' },
-    { key: 'networkModel', label: t('device.networkModel'), render: (d) => d.networkModel ?? '-' },
-    { key: 'txPower', label: 'Tx Power', render: (d) => d.txPower ?? '-' },
-    { key: 'halobFlag', label: 'HaloB', render: (d) => <Tag color={d.halobFlag ? 'success' : 'default'}>{d.halobFlag ? t('status.enabled') : t('status.disabled')}</Tag> },
-    { key: 'adminState', label: 'Admin State', render: (d) => renderStatusTag(String(d.adminState), { '1': { label: 'Locked', color: 'warning' }, '2': { label: 'Unlocked', color: 'success' }, '3': { label: 'ShuttingDown', color: 'error' } }) },
-    { key: 'ipsecAddr', label: t('device.ipsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipsecAddr || '-'}</Text> },
-  ],
-});
+  // GSM 独有字段
+  if (networkType === 'GSM') {
+    fields.push(
+      { key: 'gpsSatelliteCount', label: t('device.gpsSatelliteCount'), render: (d) => d.gpsSatelliteCount ?? '-' },
+    );
+  }
 
-// ─── eNB 独有字段组 ────────────────────────────────────────────────────────
-
-const getEnbOnlyFields = (t: ReturnType<typeof useT>): FieldGroup => ({
-  title: t('device.group.enbOnly'),
-  fields: [
-    { key: 'enbId', label: 'eNodeB ID', render: (d) => d.enbId ?? '-' },
-    { key: 'cellId', label: t('device.cellId'), render: (d) => d.cellId ?? '-' },
-    { key: 'eci', label: 'ECI', render: (d) => d.eci ?? '-' },
-    { key: 'plmnId', label: 'PLMN', render: (d) => d.plmnId ?? '-' },
-    { key: 'subframeAssignment', label: t('device.subframeAssignment'), render: (d) => d.subframeAssignment ?? '-' },
-    { key: 'specialSubframe', label: t('device.specialSubframe'), render: (d) => d.specialSubframe ?? '-' },
-    { key: 'rootIndex', label: t('device.rootIndex'), render: (d) => d.rootIndex ?? '-' },
-    { key: 'siteId', label: 'Site ID', render: (d) => d.siteId ?? '-' },
-    { key: 'bandwidth', label: t('device.bandwidth'), render: (d) => d.bandwidth ?? '-' },
-    { key: 'mmeStatus', label: t('device.mmeStatus'), render: (d) => d.mmeStatus ?? '-' },
-    { key: 'pmReportStatus', label: t('device.pmReportStatus'), render: (d) => d.pmReportStatus ?? '-' },
-    { key: 'cpeCount', label: t('device.cpeCount'), render: (d) => d.cpeCount ?? '-' },
-    { key: 'lockStatus', label: t('device.lockStatus'), render: (d) => renderStatusTag(d.lockStatus, { locked: { label: t('status.locked'), color: 'warning' }, unlocked: { label: t('status.unlocked'), color: 'success' } }) },
-    { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
-    { key: 'serviceStatus', label: t('device.serviceStatus'), render: (d) => d.serviceStatus ?? '-' },
-    { key: 'validity', label: t('device.validity'), render: (d) => d.validity ?? '-' },
-    { key: 'gpsVersion', label: t('device.gpsVersion'), render: (d) => d.gpsVersion ?? '-' },
-    { key: 'rom', label: 'ROM', render: (d) => d.rom ?? '-' },
-    { key: 'mmepoolIpsecAddr', label: t('device.mmepoolIpsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.mmepoolIpsecAddr || '-'}</Text> },
-    { key: 'mechanicalDowntilt', label: t('device.mechanicalDowntilt'), render: (d) => d.mechanicalDowntilt ?? '-' },
-    { key: 'electronicDowntilt', label: t('device.electronicDowntilt'), render: (d) => d.electronicDowntilt ?? '-' },
-    { key: 'verticalBeamWidth', label: t('device.verticalBeamWidth'), render: (d) => d.verticalBeamWidth ?? '-' },
-    { key: 'horizontalAzimuth', label: t('device.horizontalAzimuth'), render: (d) => d.horizontalAzimuth ?? '-' },
-    { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
-  ],
-});
-
-// ─── gNB 独有字段组 ────────────────────────────────────────────────────────
-
-const getGnbOnlyFields = (t: ReturnType<typeof useT>): FieldGroup => ({
-  title: t('device.group.gnbOnly'),
-  fields: [
-    { key: 'gnbId', label: 'gNB ID', render: (d) => d.gnbId ?? '-' },
-    { key: 'nrCellId', label: 'NR Cell ID', render: (d) => d.nrCellId ?? '-' },
-    { key: 'amfStatus', label: t('device.amfStatus'), render: (d) => d.amfStatus ?? '-' },
-    { key: 'multiPlmnEnable', label: 'Multi PLMN', render: (d) => renderStatusTag(d.multiPlmnEnable, { enabled: { label: t('status.enabled'), color: 'success' }, disabled: { label: t('status.disabled'), color: 'default' } }) },
-    { key: 'euCount', label: t('device.euCount'), render: (d) => d.euCount ?? '-' },
-    { key: 'ruCount', label: t('device.ruCount'), render: (d) => d.ruCount ?? '-' },
-    { key: 'rollbackVersion', label: t('device.rollbackVersion'), render: (d) => d.rollbackVersion ?? '-' },
-    { key: 'sasParam', label: t('device.sasParam'), render: (d) => d.sasParam ?? '-' },
-    { key: 'euRu', label: t('device.euRu'), render: (d) => d.euRu ?? '-' },
-    { key: 'halobLicense', label: t('device.halobLicense'), render: (d) => d.halobLicense ?? '-' },
-    { key: 'energySaving', label: t('device.energySaving'), render: (d) => d.energySaving ?? '-' },
-    { key: 'gnbTopoCellmgr', label: t('device.gnbTopoCellmgr'), render: (d) => d.gnbTopoCellmgr ?? '-' },
-    { key: 'sslCertValidity', label: t('device.sslCertValidity'), render: (d) => d.sslCertValidity ?? '-' },
-  ],
-});
-
-// ─── GSM 独有字段组 ────────────────────────────────────────────────────────
-
-const getGsmOnlyFields = (t: ReturnType<typeof useT>): FieldGroup => ({
-  title: t('device.group.gsmOnly'),
-  fields: [
-    { key: 'lac', label: 'LAC', render: (d) => d.lac ?? '-' },
-    { key: 'arfcn', label: t('device.arfcn'), render: (d) => d.arfcn ?? '-' },
-    { key: 'uplinkFrequency', label: t('device.uplinkFrequency'), render: (d) => d.uplinkFrequency ? `${d.uplinkFrequency} MHz` : '-' },
-    { key: 'downlinkFrequency', label: t('device.downlinkFrequency'), render: (d) => d.downlinkFrequency ? `${d.downlinkFrequency} MHz` : '-' },
-    { key: 'bscLinkStatus', label: t('device.bscLinkStatus'), render: (d) => renderStatusTag(d.bscLinkStatus, { connected: { label: t('status.connected'), color: 'success' }, disconnected: { label: t('status.disconnected'), color: 'error' } }) },
-    { key: 'bscSelect', label: 'BSC Select', render: (d) => d.bscSelect === '0' ? t('device.bscPrimary') : d.bscSelect === '1' ? t('device.bscBackup') : d.bscSelect ?? '-' },
-    { key: 'bscSerialNumber', label: t('device.bscSerialNumber'), render: (d) => d.bscSerialNumber ?? '-' },
-    { key: 'btsNum', label: t('device.btsNum'), render: (d) => d.btsNum ?? '-' },
-    { key: 'ipaUnitId', label: 'IPA Unit ID', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipaUnitId ?? '-'}</Text> },
-    { key: 'omlRemoteIp', label: 'OML Remote IP', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIp ?? '-'}</Text> },
-    { key: 'omlRemoteIpBak', label: 'OML Remote IP Bak', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIpBak ?? '-'}</Text> },
-    { key: 'gpsSatelliteCount', label: t('device.gpsSatelliteCount'), render: (d) => d.gpsSatelliteCount ?? '-' },
-  ],
-});
+  return { title: t('device.group.other'), fields };
+};
 
 // ─── 渲染字段组 ────────────────────────────────────────────────────────
 
@@ -322,20 +401,14 @@ export default function DeviceDetail() {
   // 根据设备制式获取字段组
   const detailGroups = useMemo((): FieldGroup[] => {
     if (!device) return [];
-    const networkType = device.networkType;
-    const groups: FieldGroup[] = [getCommonFields(t)];
+    const networkType = device.networkType ?? '';
 
-    if (networkType === 'eNB') {
-      groups.push(getEnbGnbSharedFields(t));
-      groups.push(getEnbOnlyFields(t));
-    } else if (networkType === 'gNB') {
-      groups.push(getEnbGnbSharedFields(t));
-      groups.push(getGnbOnlyFields(t));
-    } else if (networkType === 'GSM') {
-      groups.push(getGsmOnlyFields(t));
-    }
-
-    return groups;
+    return [
+      getStationFields(t, networkType),
+      getCellFields(t, networkType),
+      getStatusFields(t, networkType),
+      getOtherFields(t, networkType),
+    ];
   }, [device, t]);
 
   if (isLoading) {

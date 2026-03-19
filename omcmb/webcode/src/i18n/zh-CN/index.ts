@@ -391,11 +391,10 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Device labels
   // -------------------------------------------------------------------------
-  'device.group.basic':         '基本信息',
-  'device.group.enbGnbShared':  'eNB/gNB 共享信息',
-  'device.group.enbOnly':       'eNB 独有信息',
-  'device.group.gnbOnly':       'gNB 独有信息',
-  'device.group.gsmOnly':       'GSM 独有信息',
+  'device.group.station':       '基站信息',
+  'device.group.cell':          '小区信息',
+  'device.group.status':        '状态信息',
+  'device.group.other':         '其他信息',
   'device.type.eNB':        'eNB基站',
   'device.type.gNB':        'gNB基站',
   'device.type.CPE':        'CPE终端',
