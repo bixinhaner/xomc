@@ -76,7 +76,7 @@ services:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.acs
     ports:
-      - "7547:7547"
+      - "8080:8080"
       - "9090:9090"
     environment:
       OMCGO_SERVER_HOST: "0.0.0.0"
@@ -100,7 +100,7 @@ services:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.app
     ports:
-      - "8080:8080"
+      - "8081:8081"
       - "9091:9091"
     environment:
       OMCGO_SERVER_HOST: "0.0.0.0"
