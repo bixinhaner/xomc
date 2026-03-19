@@ -54,7 +54,7 @@ log:
     - "stdout"
     - "/var/log/omcgo/worker.log"
   rotation:
-    enabled: false
+    enabled: true
     max_size_mb: 20
     max_age_days: 7
     max_backups: 100
