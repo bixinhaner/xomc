@@ -64,17 +64,20 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Left side */}
       <div className={styles.toolbarLeft}>
         {extraLeft}
-        {hasSelection && (
+        {batchActions.length > 0 && (
           <>
-            <span className={styles.selectionBadge}>
-              {t('table.selected', { count: selectedRowKeys.length })}
-            </span>
+            {hasSelection && (
+              <span className={styles.selectionBadge}>
+                {t('table.selected', { count: selectedRowKeys.length })}
+              </span>
+            )}
             {batchActions.map((action) => (
               <Button
                 key={action.key}
                 size="small"
                 danger={action.danger}
                 icon={action.icon}
+                disabled={!hasSelection}
                 onClick={() => action.onClick(selectedRowKeys)}
               >
                 {action.label}
