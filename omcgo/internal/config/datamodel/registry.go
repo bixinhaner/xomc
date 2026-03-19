@@ -2,11 +2,13 @@ package datamodel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/errors/commonerrors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
@@ -130,6 +132,8 @@ func (r *DataModelRegistry) Resolve(ctx context.Context, carrier model.CarrierCo
 }
 
 // resolveFromDB performs the three-level fallback query against the database.
+// When a model is not found at a specific level, it continues to the next level.
+// Only system errors (not ErrNotFound) cause the resolution to fail.
 func (r *DataModelRegistry) resolveFromDB(ctx context.Context, carrier model.CarrierCode,
 	tech model.Technology, oui, productClass string) (*DataModel, error) {
 
@@ -137,9 +141,17 @@ func (r *DataModelRegistry) resolveFromDB(ctx context.Context, carrier model.Car
 	if oui != "" && productClass != "" {
 		dm, err := r.repo.FindActive(ctx, carrier, tech, oui, productClass, model.ScopeProduct)
 		if err != nil {
-			return nil, fmt.Errorf("find active product model: %w", err)
-		}
-		if dm != nil {
+			// ErrNotFound means no match at this level, continue to next level
+			if !errors.Is(err, commonerrors.ErrNotFound) {
+				return nil, fmt.Errorf("find active product model: %w", err)
+			}
+			r.logger.Debug("no product-level data model found, trying oui level",
+				zap.String("carrier", string(carrier)),
+				zap.String("tech", string(tech)),
+				zap.String("oui", oui),
+				zap.String("product_class", productClass),
+			)
+		} else if dm != nil {
 			return dm, nil
 		}
 	}
@@ -148,9 +160,16 @@ func (r *DataModelRegistry) resolveFromDB(ctx context.Context, carrier model.Car
 	if oui != "" {
 		dm, err := r.repo.FindActive(ctx, carrier, tech, oui, "", model.ScopeOUI)
 		if err != nil {
-			return nil, fmt.Errorf("find active oui model: %w", err)
-		}
-		if dm != nil {
+			// ErrNotFound means no match at this level, continue to next level
+			if !errors.Is(err, commonerrors.ErrNotFound) {
+				return nil, fmt.Errorf("find active oui model: %w", err)
+			}
+			r.logger.Debug("no oui-level data model found, trying carrier default",
+				zap.String("carrier", string(carrier)),
+				zap.String("tech", string(tech)),
+				zap.String("oui", oui),
+			)
+		} else if dm != nil {
 			return dm, nil
 		}
 	}
@@ -158,6 +177,14 @@ func (r *DataModelRegistry) resolveFromDB(ctx context.Context, carrier model.Car
 	// Level 3 (carrier_default): broadest fallback.
 	dm, err := r.repo.FindActive(ctx, carrier, tech, "", "", model.ScopeCarrierDefault)
 	if err != nil {
+		// ErrNotFound at this level means no data model configured at all
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			r.logger.Warn("no data model found for carrier/tech combination",
+				zap.String("carrier", string(carrier)),
+				zap.String("tech", string(tech)),
+			)
+			return nil, nil
+		}
 		return nil, fmt.Errorf("find active carrier default model: %w", err)
 	}
 	return dm, nil
