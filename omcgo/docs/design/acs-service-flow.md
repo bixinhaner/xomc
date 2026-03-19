@@ -1,6 +1,6 @@
 # ACS 服务完整实现流程分析
 
-> 本文档分析 ACS（TR-069 自动配置服务器）引擎的完整实现流程，包含请求处理、EventBus 发布/订阅、命令队列反向通道等核心链路。
+> 本文档分析 ACS（TR-069 自动配置服务器）引擎的完整实现流程，包含请求处理、EventBus 发布/订阅、命令队列反向通道等核心链路，以及每个交互流程的详细 SOAP/XML 报文示例。
 
 ---
 
@@ -774,3 +774,1226 @@ alarm:active:{device_serial}         — 活跃告警 Hash
 | **全局准入** | Atomic CAS | 无锁并发控制，保护 ACS 实例不过载 |
 | **事件级联** | 文件传输 → 下载 → 解析 → KPI/告警 | 异步管线，Worker 可独立扩缩容 |
 | **因果时序** | `device.registered` 事件保证注册先于开站 | 消除 InformHandler 与 ProvisioningEngine 的竞态条件 |
+
+---
+
+## 十二、SOAP/XML 报文示例详解
+
+本节给出每个 TR069 交互流程的完整 SOAP/XML 报文示例，包括 CPE 发送的请求和 ACS 返回的响应。
+
+### 12.1 SOAP Envelope 结构
+
+所有 TR069 报文都遵循 SOAP 1.1 规范，使用以下命名空间：
+
+```xml
+xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+```
+
+### 12.2 会话建立流程（Inform ↔ InformResponse）
+
+#### 12.2.1 CPE → ACS：Inform 请求
+
+**场景**：设备首次上电（BOOTSTRAP）或重启（BOOT）时发送 Inform 报文，携带设备标识、事件码和初始参数列表。
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+SOAPAction:
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">urn:uuid:550e8400-e29b-41d4-a716-446655440000</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>BaiCell</Manufacturer>
+        <OUI>00256D</OUI>
+        <ProductClass>pBS3202</ProductClass>
+        <SerialNumber>BC20240100001</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[2]">
+        <EventStruct>
+          <EventCode>0 BOOTSTRAP</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+        <EventStruct>
+          <EventCode>1 BOOT</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[8]">
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.HardwareVersion</Name>
+          <Value xsi:type="xsd:string">A01</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value xsi:type="xsd:string">BaiBLQ_5.1.10</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.ManagementServer.ConnectionRequestURL</Name>
+          <Value xsi:type="xsd:string">http://172.21.100.43:7547</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.Services.FAPService.1.FAPControl.LTE.OpState</Name>
+          <Value xsi:type="xsd:boolean">true</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus</Name>
+          <Value xsi:type="xsd:boolean">true</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.IP.Interface.1.IPv4Address.1.IPAddress</Name>
+          <Value xsi:type="xsd:string">172.21.100.43</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.FAP.GPS.LockedLatitude</Name>
+          <Value xsi:type="xsd:int">0</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.FAP.GPS.LockedLongitude</Name>
+          <Value xsi:type="xsd:int">0</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-03-19T10:30:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**关键字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| `DeviceId.Manufacturer` | 设备厂商名称 |
+| `DeviceId.OUI` | IEEE 分配的组织唯一标识符（前 3 字节 MAC） |
+| `DeviceId.ProductClass` | 产品型号 |
+| `DeviceId.SerialNumber` | 设备序列号（全局唯一） |
+| `Event.EventCode` | 事件码，常见值：`0 BOOTSTRAP`、`1 BOOT`、`2 PERIODIC`、`4 VALUE CHANGE`、`6 CONNECTION REQUEST`、`7 TRANSFER COMPLETE`、`10 AUTONOMOUS TRANSFER` |
+| `ParameterList` | 设备参数列表，包含名称、值和类型 |
+| `MaxEnvelopes` | CPE 在单个 TCP 连接中可接收的 SOAP Envelope 数量（通常为 1） |
+
+#### 12.2.2 ACS → CPE：InformResponse 响应
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">urn:uuid:550e8400-e29b-41d4-a716-446655440000</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:InformResponse>
+      <MaxEnvelopes>1</MaxEnvelopes>
+    </cwmp:InformResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**说明**：
+- `cwmp:ID` 必须与请求中的 ID 保持一致（请求-响应关联）
+- `MaxEnvelopes` 告知 CPE ACS 在单个响应中最多发送多少个 SOAP Envelope
+
+---
+
+### 12.3 Empty POST 处理流程
+
+#### 12.3.1 CPE → ACS：空 POST 请求
+
+**场景**：CPE 发送 InformResponse 后，立即发送一个空 POST，表示"我准备好接收指令了"。
+
+```http
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+Content-Length: 0
+
+（无请求体）
+```
+
+#### 12.3.2 ACS → CPE：有命令时返回 RPC 请求
+
+**场景**：如果 Redis 命令队列中有待执行命令，ACS 返回对应的 SOAP RPC 请求。
+
+（见 12.4 节各 RPC 方法示例）
+
+#### 12.3.3 ACS → CPE：无命令时返回 HTTP 204
+
+**场景**：如果命令队列为空，ACS 返回 HTTP 204 结束会话。
+
+```http
+HTTP/1.1 204 No Content
+```
+
+**说明**：CPE 收到 204 后，如果还有其他事件要上报（如周期性心跳），会发起新的 Inform 会话。
+
+---
+
+### 12.4 RPC 方法报文示例
+
+#### 12.4.1 GetParameterValues（获取参数值）
+
+**场景**：ACS 主动查询设备的参数值。
+
+**ACS → CPE：GetParameterValues 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-get-params-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soap:arrayType="xsd:string[3]">
+        <string>Device.DeviceInfo.SoftwareVersion</string>
+        <string>Device.Services.FAPService.1.FAPControl.LTE.OpState</string>
+        <string>Device.IP.Interface.1.IPv4Address.1.IPAddress</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：GetParameterValuesResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+SOAPAction:
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-get-params-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[3]">
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value xsi:type="xsd:string">BaiBLQ_5.1.10</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.Services.FAPService.1.FAPControl.LTE.OpState</Name>
+          <Value xsi:type="xsd:boolean">true</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.IP.Interface.1.IPv4Address.1.IPAddress</Name>
+          <Value xsi:type="xsd:string">172.21.100.43</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**常用参数类型**：
+
+| xsi:type | 说明 | 示例 |
+|----------|------|------|
+| `xsd:string` | 字符串 | `"BaiBLQ_5.1.10"` |
+| `xsd:int` | 32位整数 | `0`、`1`、`42` |
+| `xsd:boolean` | 布尔值 | `true`、`false` |
+| `xsd:dateTime` | 日期时间 | `2026-03-19T10:30:00Z` |
+| `xsd:unsignedInt` | 无符号整数 | `46000` |
+
+---
+
+#### 12.4.2 SetParameterValues（设置参数值）
+
+**场景**：ACS 向设备下发配置参数。
+
+**ACS → CPE：SetParameterValues 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-set-params-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[2]">
+        <ParameterValueStruct>
+          <Name>Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.TxPower</Name>
+          <Value xsi:type="xsd:int">20</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth</Name>
+          <Value xsi:type="xsd:string">20MHz</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey>provision-20260319-001</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**关键字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| `ParameterKey` | 配置事务标识符，CPE 会在后续 Inform 中回传此值，用于配置变更追踪 |
+
+**CPE → ACS：SetParameterValuesResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-set-params-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**Status 值说明**：
+
+| Status | 含义 |
+|--------|------|
+| `0` | 参数已立即生效 |
+| `1` | 参数已保存，需要重启后生效 |
+
+---
+
+#### 12.4.3 GetParameterNames（获取参数名称列表）
+
+**场景**：ACS 查询设备支持哪些参数路径，用于发现数据模型。
+
+**ACS → CPE：GetParameterNames 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-get-names-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>Device.Services.FAPService.1.</ParameterPath>
+      <NextLevel>true</NextLevel>
+    </cwmp:GetParameterNames>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**关键字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| `ParameterPath` | 查询的参数路径前缀，以 `.` 结尾表示对象路径 |
+| `NextLevel` | `true`=只返回下一级子节点；`false`=递归返回所有子节点 |
+
+**CPE → ACS：GetParameterNamesResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-get-names-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterNamesResponse>
+      <ParameterList soap:arrayType="cwmp:ParameterInfoStruct[4]">
+        <ParameterInfoStruct>
+          <Name>Device.Services.FAPService.1.CellConfig.</Name>
+          <Writable>false</Writable>
+        </ParameterInfoStruct>
+        <ParameterInfoStruct>
+          <Name>Device.Services.FAPService.1.FAPControl.</Name>
+          <Writable>false</Writable>
+        </ParameterInfoStruct>
+        <ParameterInfoStruct>
+          <Name>Device.Services.FAPService.1.Capabilities.</Name>
+          <Writable>false</Writable>
+        </ParameterInfoStruct>
+        <ParameterInfoStruct>
+          <Name>Device.Services.FAPService.1.X_COM.</Name>
+          <Writable>false</Writable>
+        </ParameterInfoStruct>
+      </ParameterList>
+    </cwmp:GetParameterNamesResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+---
+
+#### 12.4.4 AddObject（添加对象实例）
+
+**场景**：在多实例对象（如 VLAN、ACL）中添加新的实例。
+
+**ACS → CPE：AddObject 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-add-obj-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:AddObject>
+      <ObjectName>Device.Services.FAPService.1.CellConfig.LTE.NeighborList.</ObjectName>
+      <ParameterKey>add-neighbor-001</ParameterKey>
+    </cwmp:AddObject>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：AddObjectResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-add-obj-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:AddObjectResponse>
+      <InstanceNumber>3</InstanceNumber>
+      <Status>0</Status>
+    </cwmp:AddObjectResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**关键字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| `InstanceNumber` | 新创建实例的编号（CPE 自动分配） |
+| `Status` | `0`=立即生效，`1`=需要重启 |
+
+---
+
+#### 12.4.5 DeleteObject（删除对象实例）
+
+**场景**：从多实例对象中删除指定实例。
+
+**ACS → CPE：DeleteObject 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-del-obj-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:DeleteObject>
+      <ObjectName>Device.Services.FAPService.1.CellConfig.LTE.NeighborList.3.</ObjectName>
+      <ParameterKey>del-neighbor-001</ParameterKey>
+    </cwmp:DeleteObject>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：DeleteObjectResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-del-obj-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:DeleteObjectResponse>
+      <Status>0</Status>
+    </cwmp:DeleteObjectResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+---
+
+#### 12.4.6 Download（下载文件）
+
+**场景**：ACS 指示 CPE 从指定 URL 下载文件（固件、配置文件等）。
+
+**ACS → CPE：Download 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-download-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Download>
+      <CommandKey>firmware-upgrade-20260319-001</CommandKey>
+      <FileType>1 Firmware Upgrade Image</FileType>
+      <URL>http://minio.example.com:9000/firmware/BaiBLQ_5.2.0.bin</URL>
+      <Username>firmware-user</Username>
+      <Password>secret123</Password>
+      <FileSize>52428800</FileSize>
+      <TargetFileName></TargetFileName>
+      <DelaySeconds>0</DelaySeconds>
+      <SuccessURL></SuccessURL>
+      <FailureURL></FailureURL>
+    </cwmp:Download>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**FileType 常见值**：
+
+| 值 | 说明 |
+|----|------|
+| `1 Firmware Upgrade Image` | 固件升级包 |
+| `2 Web Content` | Web 内容文件 |
+| `3 Vendor Configuration File` | 厂商配置文件 |
+| `4 Tone File` | 音频文件 |
+| `5 Ringer File` | 铃声文件 |
+
+**CPE → ACS：DownloadResponse 响应（立即）**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-download-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:DownloadResponse>
+      <Status>1</Status>
+      <StartTime>2026-03-19T10:35:00Z</StartTime>
+      <CompleteTime>1970-01-01T00:00:00Z</CompleteTime>
+    </cwmp:DownloadResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**Status 值说明**：
+
+| Status | 含义 |
+|--------|------|
+| `0` | 下载已完成（同步下载） |
+| `1` | 下载正在进行（异步下载，CPE 会稍后发送 TransferComplete） |
+
+**CPE → ACS：TransferComplete（下载完成后上报）**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">tc-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:TransferComplete>
+      <CommandKey>firmware-upgrade-20260319-001</CommandKey>
+      <FaultStruct>
+        <FaultCode>0</FaultCode>
+        <FaultString></FaultString>
+      </FaultStruct>
+      <StartTime>2026-03-19T10:35:00Z</StartTime>
+      <CompleteTime>2026-03-19T10:37:30Z</CompleteTime>
+    </cwmp:TransferComplete>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**ACS → CPE：TransferCompleteResponse**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">tc-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:TransferCompleteResponse/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+---
+
+#### 12.4.7 Upload（上传文件）
+
+**场景**：ACS 指示 CPE 上传文件到指定 URL（配置备份、PM/MR 文件等）。
+
+**ACS → CPE：Upload 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-upload-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Upload>
+      <CommandKey>backup-20260319-001</CommandKey>
+      <FileType>1 Vendor Configuration File</FileType>
+      <URL>http://minio.example.com:9000/backup/BC20240100001-config.xml</URL>
+      <Username>backup-user</Username>
+      <Password>secret456</Password>
+      <DelaySeconds>0</DelaySeconds>
+    </cwmp:Upload>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：UploadResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-upload-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:UploadResponse>
+      <Status>0</Status>
+      <StartTime>2026-03-19T10:40:00Z</StartTime>
+      <CompleteTime>2026-03-19T10:40:05Z</CompleteTime>
+    </cwmp:UploadResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+---
+
+#### 12.4.8 Reboot（重启设备）
+
+**场景**：ACS 指示 CPE 重启。
+
+**ACS → CPE：Reboot 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-reboot-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Reboot>
+      <CommandKey>reboot-20260319-001</CommandKey>
+    </cwmp:Reboot>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：RebootResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-reboot-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:RebootResponse/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**说明**：CPE 收到 RebootResponse 后会执行重启。重启完成后会发送带 `1 BOOT` 事件码的 Inform。
+
+---
+
+#### 12.4.9 FactoryReset（恢复出厂设置）
+
+**场景**：ACS 指示 CPE 恢复出厂设置。
+
+**ACS → CPE：FactoryReset 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-factoryreset-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:FactoryReset/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：FactoryResetResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-factoryreset-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:FactoryResetResponse/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**说明**：CPE 恢复出厂后重启，会发送带 `0 BOOTSTRAP` 事件码的 Inform。
+
+---
+
+#### 12.4.10 GetParameterAttributes（获取参数属性）
+
+**场景**：查询参数的通知属性和访问控制列表。
+
+**ACS → CPE：GetParameterAttributes 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-get-attr-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterAttributes>
+      <ParameterNames soap:arrayType="xsd:string[2]">
+        <string>Device.DeviceInfo.SoftwareVersion</string>
+        <string>Device.Services.FAPService.1.FAPControl.LTE.OpState</string>
+      </ParameterNames>
+    </cwmp:GetParameterAttributes>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：GetParameterAttributesResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-get-attr-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterAttributesResponse>
+      <ParameterList soap:arrayType="cwmp:ParameterAttributeStruct[2]">
+        <ParameterAttributeStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Notification>0</Notification>
+          <AccessList soap:arrayType="xsd:string[1]">
+            <string>Subscriber</string>
+          </AccessList>
+        </ParameterAttributeStruct>
+        <ParameterAttributeStruct>
+          <Name>Device.Services.FAPService.1.FAPControl.LTE.OpState</Name>
+          <Notification>2</Notification>
+          <AccessList soap:arrayType="xsd:string[0]"/>
+        </ParameterAttributeStruct>
+      </ParameterList>
+    </cwmp:GetParameterAttributesResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**Notification 值说明**：
+
+| 值 | 说明 |
+|----|------|
+| `0` | Off — 参数变更不主动通知 |
+| `1` | Passive — 参数变更时在下次 Inform 中携带 VALUE CHANGE 事件 |
+| `2` | Active — 参数变更时立即发起 Inform（携带 VALUE CHANGE 事件） |
+
+---
+
+#### 12.4.11 SetParameterAttributes（设置参数属性）
+
+**场景**：配置参数的主动通知属性，用于实时监控关键参数变化。
+
+**ACS → CPE：SetParameterAttributes 请求**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-set-attr-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:SetParameterAttributes>
+      <ParameterList soap:arrayType="cwmp:SetParameterAttributesStruct[1]">
+        <SetParameterAttributesStruct>
+          <Name>Device.Services.FAPService.1.FAPControl.LTE.OpState</Name>
+          <NotificationChange>true</NotificationChange>
+          <Notification>2</Notification>
+          <AccessListChange>false</AccessListChange>
+          <AccessList/>
+        </SetParameterAttributesStruct>
+      </ParameterList>
+    </cwmp:SetParameterAttributes>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**CPE → ACS：SetParameterAttributesResponse 响应**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-set-attr-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:SetParameterAttributesResponse/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+---
+
+#### 12.4.12 AutonomousTransferComplete（设备主动上传完成通知）
+
+**场景**：CPE 主动上传 PM/MR 等文件后，通知 ACS 上传结果。
+
+**CPE → ACS：AutonomousTransferComplete 请求**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">atc-20260319-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:AutonomousTransferComplete>
+      <AnnounceURL>http://minio.example.com:9000/pm/</AnnounceURL>
+      <TransferURL>http://minio.example.com:9000/pm/BC20240100001-20260319-103000.xml</TransferURL>
+      <IsDownload>false</IsDownload>
+      <FileType>PM Measurement File</FileType>
+      <FileSize>102400</FileSize>
+      <TargetFileName>BC20240100001-20260319-103000.xml</TargetFileName>
+      <FaultStruct>
+        <FaultCode>0</FaultCode>
+        <FaultString></FaultString>
+      </FaultStruct>
+      <StartTime>2026-03-19T10:30:00Z</StartTime>
+      <CompleteTime>2026-03-19T10:30:05Z</CompleteTime>
+    </cwmp:AutonomousTransferComplete>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**ACS → CPE：AutonomousTransferCompleteResponse 响应**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">atc-20260319-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:AutonomousTransferCompleteResponse/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+---
+
+### 12.5 Fault 错误响应
+
+当 RPC 方法执行失败时，CPE 返回 SOAP Fault 响应：
+
+```xml
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">cmd-set-params-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>Client</faultcode>
+      <faultstring>CWMP fault</faultstring>
+      <detail>
+        <cwmp:Fault>
+          <FaultCode>9003</FaultCode>
+          <FaultString>Invalid arguments</FaultString>
+        </cwmp:Fault>
+      </detail>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**常用 FaultCode**：
+
+| FaultCode | 说明 |
+|-----------|------|
+| `9000` | Method not supported |
+| `9001` | Request denied |
+| `9002` | Internal error |
+| `9003` | Invalid arguments |
+| `9004` | Resources exceeded |
+| `9005` | Invalid parameter name |
+| `9006` | Invalid parameter type |
+| `9007` | Invalid parameter value |
+| `9008` | Attempt to set non-writable parameter |
+| `9009` | Notification request rejected |
+
+---
+
+### 12.6 Connection Request 流程
+
+#### 12.6.1 ACS → CPE：HTTP GET（唤醒请求）
+
+**场景**：ACS 主动唤醒设备以执行操作。
+
+```http
+GET / HTTP/1.1
+Host: 172.21.100.43:7547
+Connection: close
+```
+
+**CPE 响应**：
+
+```http
+HTTP/1.1 200 OK
+Content-Length: 0
+```
+
+#### 12.6.2 CPE → ACS：Inform（事件码 6 CONNECTION REQUEST）
+
+**场景**：CPE 被唤醒后，向 ACS 发起带 `6 CONNECTION REQUEST` 事件码的 Inform。
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">urn:uuid:550e8400-e29b-41d4-a716-446655440001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>BaiCell</Manufacturer>
+        <OUI>00256D</OUI>
+        <ProductClass>pBS3202</ProductClass>
+        <SerialNumber>BC20240100001</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode>6 CONNECTION REQUEST</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[0]"/>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-03-19T10:45:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>
+```
+
+之后进入正常的会话流程（InformResponse → Empty POST → RPC 下发）。
+
+---
+
+### 12.7 完整会话示例（配置下发）
+
+以下是一个完整的配置下发会话示例，展示从设备连接到配置生效的完整报文序列：
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. CPE → ACS: Inform (EventCode=6 CONNECTION REQUEST)                        │
+│    设备被 Connection Request 唤醒后发起                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. ACS → CPE: InformResponse                                                 │
+│    确认收到 Inform，告知 MaxEnvelopes=1                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. CPE → ACS: Empty POST                                                     │
+│    空请求体，表示准备接收指令                                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. ACS → CPE: SetParameterValues                                             │
+│    下发配置参数（TxPower=20, DLBandwidth=20MHz）                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. CPE → ACS: SetParameterValuesResponse (Status=0)                          │
+│    配置已立即生效                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. CPE → ACS: Empty POST                                                     │
+│    继续等待更多指令                                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. ACS → CPE: HTTP 204 No Content                                            │
+│    无更多命令，会话结束                                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 12.8 告警上报流程
+
+#### 12.8.1 CPE → ACS：Inform（携带告警参数）
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">inform-alarm-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>BaiCell</Manufacturer>
+        <OUI>00256D</OUI>
+        <ProductClass>pBS3202</ProductClass>
+        <SerialNumber>BC20240100001</SerialNumber>
+      </DeviceId>
+      <Event soap:arrayType="cwmp:EventStruct[1]">
+        <EventStruct>
+          <EventCode>4 VALUE CHANGE</EventCode>
+          <CommandKey></CommandKey>
+        </EventStruct>
+      </Event>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[2]">
+        <ParameterValueStruct>
+          <Name>Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity</Name>
+          <Value xsi:type="xsd:string">Critical</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>Device.FaultMgmt.CurrentAlarm.1.ProbableCause</Name>
+          <Value xsi:type="xsd:string">License has expired</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-03-19T10:50:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+    </cwmp:Inform>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**说明**：当设备启用 Active Notification（Notification=2）的参数发生变化时，设备会主动发送带 `4 VALUE CHANGE` 事件码的 Inform。

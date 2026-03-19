@@ -9,6 +9,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
+	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,6 +34,7 @@ type ServerDeps struct {
 	RateLimiter   *DeviceRateLimiter
 	Admission     *AdmissionController
 	Metrics       *ACSMetrics
+	UploadHandler *upload.Handler // File upload handler
 	Logger        *zap.Logger
 }
 
@@ -56,6 +58,11 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+
+	// File upload handler (CPE -> ACS -> MinIO proxy)
+	if deps.UploadHandler != nil {
+		mux.Handle("/upload/", deps.UploadHandler)
+	}
 
 	// Start background session reaper to clean up stale connSessions entries
 	// from dropped TCP connections. Scans every 30s, cleans entries older than 5min.

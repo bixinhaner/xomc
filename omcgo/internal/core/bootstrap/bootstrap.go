@@ -90,7 +90,7 @@ func InitForApp(ctx context.Context, cfg *appconfig.AppConfig) (*App, error) {
 	return app, nil
 }
 
-// InitForACS initializes infrastructure for the ACS engine (Redis + NATS only).
+// InitForACS initializes infrastructure for the ACS engine (Redis + NATS + MinIO).
 func InitForACS(ctx context.Context, cfg *appconfig.ACSConfig) (*App, error) {
 	app, err := newBase(cfg.Log, cfg.Metrics.Port)
 	if err != nil {
@@ -102,6 +102,12 @@ func InitForACS(ctx context.Context, cfg *appconfig.ACSConfig) (*App, error) {
 	}
 	if err := app.connectNATS(ctx, cfg.NATS); err != nil {
 		return nil, err
+	}
+	// MinIO connection for file upload proxy
+	if cfg.MinIO.Endpoint != "" {
+		if err := app.connectMinIO(ctx, cfg.MinIO); err != nil {
+			return nil, err
+		}
 	}
 	app.createEventBus()
 

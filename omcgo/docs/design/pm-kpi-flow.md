@@ -63,9 +63,229 @@ PMCollector.handleFileReceived()
 
 ## 三、阶段一：PM 文件采集触发
 
-### 3.1 Upload 命令下发
+### 3.0 文件传输模式概述
 
-管理面通过命令队列触发设备上传 PM 文件。Upload RPC 的 SOAP 模板：
+TR069 协议定义了两种文件传输模式，当前项目实现了其中一种。
+
+#### 3.0.1 模式一：TransferURL 模式（当前实现）
+
+**工作原理**：
+1. CPE 将文件保存在设备内置的 HTTP 服务器
+2. CPE 发送 `AutonomousTransferComplete`，携带 `TransferURL`（设备侧文件下载地址）
+3. ACS 的 TransferBridge 从 `TransferURL` **下载**文件到 MinIO
+
+```
+┌──────────┐                               ┌──────────┐
+│   CPE    │                               │   ACS    │
+│          │                               │          │
+│  生成文件 │                               │          │
+│  存入本地 │                               │          │
+│  HTTP服务 │                               │          │
+│          │  AutonomousTransferComplete   │          │
+│          │ ────────────────────────────→ │          │
+│          │  (携带 TransferURL)           │          │
+│          │                               │          │
+│          │     HTTP GET (TransferURL)    │          │
+│          │ ←──────────────────────────── │ Worker   │
+│          │     返回文件内容               │ (Bridge) │
+│          │                               │          │
+│          │                               │ 存入MinIO │
+└──────────┘                               └──────────┘
+```
+
+**优点**：
+- 不需要 ACS 部署独立的文件接收服务器
+- 适合设备有内置 HTTP 服务器的场景（如 BaiCell 设备）
+
+**缺点**：
+- ACS 需要能访问设备的 HTTP 端口（可能需要网络打通）
+- 设备需要实现 HTTP 服务器
+
+#### 3.0.2 模式二：ACS 文件服务器模式（未实现）
+
+**工作原理**：
+1. ACS 通过 `Upload` RPC 告知 CPE 上传目标 URL（ACS 文件服务器地址）
+2. CPE 通过 HTTP PUT/POST **主动上传**文件到 ACS 文件服务器
+3. CPE 发送 `TransferComplete` 通知 ACS
+
+```
+┌──────────┐                               ┌──────────┐
+│   CPE    │                               │   ACS    │
+│          │        Upload RPC             │          │
+│          │ ←───────────────────────────── │          │
+│          │  (携带 ACS 文件服务器 URL)      │          │
+│          │                               │          │
+│          │     HTTP PUT (文件内容)        │          │
+│          │ ────────────────────────────→ │ FileSrv  │
+│          │     HTTP 200 OK               │          │
+│          │                               │          │
+│          │     TransferComplete          │          │
+│          │ ────────────────────────────→ │          │
+└──────────┘                               └──────────┘
+```
+
+**优点**：
+- ACS 完全控制文件接收流程
+- 适合设备无法暴露 HTTP 端口的场景
+
+**缺点**：
+- 需要部署独立的文件接收服务器
+- 文件服务器需要支持 HTTP PUT/POST
+
+#### 3.0.3 当前项目实现状态
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| TransferURL 模式 | ✅ 已实现 | TransferBridge 从设备下载文件 |
+| ACS 文件服务器 | ❌ 未实现 | 无 HTTP PUT/POST 接收端点 |
+| Upload RPC 构建 | ✅ 已实现 | `internal/acs/rpc/dispatcher.go` |
+| Upload 完整流程 | ⚠️ 部分 | 缺少文件接收服务器和后续处理 |
+
+---
+
+### 3.1 设备自主上传（AutonomousTransferComplete）
+
+设备根据自身配置周期性生成 PM 文件，并通过 `AutonomousTransferComplete` 通知 ACS。
+
+#### 3.1.1 完整流程（TransferURL 模式）
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 1: CPE 采集数据并生成文件                                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • 设备每 15 分钟采集一次性能数据                                          │
+│ • 生成 3GPP 32.435 格式的 XML 文件                                        │
+│ • 文件保存在设备内置 HTTP 服务器（如 http://172.21.100.43:8080/pm/）      │
+│ • 文件命名规则：A00.4g{NN}.pm.xml（NN 为序号）                             │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 2: CPE 发送 AutonomousTransferComplete SOAP 消息                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • CPE 向 ACS 发起 TR069 会话                                             │
+│ • 发送 Inform（EventCode=10 AUTONOMOUS TRANSFER）                        │
+│ • ACS 返回 InformResponse                                                │
+│ • CPE 发送 AutonomousTransferComplete 消息                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 3: ACS 发布事件                                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • handler.handleAutonomousTransferComplete() 解析 SOAP                   │
+│ • 提取 TransferURL、FileType、FileSize 等信息                            │
+│ • 发布 device.inform.autonomous_transfer_complete 事件                   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 4: TransferBridge 下载文件                                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • 订阅 autonomous_transfer_complete 事件                                  │
+│ • HTTP GET TransferURL 下载文件内容                                       │
+│ • 流式写入 MinIO（不加载到内存）                                           │
+│ • 发布 pm.file.received / mr.file.received 事件                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.1.2 AutonomousTransferComplete SOAP 报文示例
+
+**CPE → ACS：AutonomousTransferComplete 请求**
+
+```xml
+POST / HTTP/1.1
+Host: acs.example.com:7547
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">urn:uuid:atc-pm-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:AutonomousTransferComplete>
+      <AnnounceURL>http://acs.example.com:7547/files</AnnounceURL>
+      <TransferURL>http://172.21.100.43:8080/pm/A00.4g01.pm.xml</TransferURL>
+      <IsDownload>false</IsDownload>
+      <FileType>4</FileType>
+      <FileSize>102400</FileSize>
+      <TargetFileName>A00.4g01.pm.xml</TargetFileName>
+      <FaultStruct>
+        <FaultCode>0</FaultCode>
+        <FaultString></FaultString>
+      </FaultStruct>
+      <StartTime>2026-03-19T10:00:00Z</StartTime>
+      <CompleteTime>2026-03-19T10:00:05Z</CompleteTime>
+    </cwmp:AutonomousTransferComplete>
+  </soap:Body>
+</soap:Envelope>
+```
+
+**关键字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| `AnnounceURL` | ACS 文件服务器地址（用于 ACS 主动上传模式，当前未使用） |
+| `TransferURL` | **设备侧文件下载地址**（TransferURL 模式的关键字段） |
+| `IsDownload` | `false`=上传，`true`=下载 |
+| `FileType` | `4`=PM 文件，`5`=MR 文件 |
+| `FileSize` | 文件大小（字节） |
+| `TargetFileName` | 文件名 |
+| `FaultStruct` | 错误信息，`FaultCode=0` 表示成功 |
+
+**ACS → CPE：AutonomousTransferCompleteResponse 响应**
+
+```xml
+HTTP/1.1 200 OK
+Content-Type: text/xml; charset=utf-8
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">urn:uuid:atc-pm-001</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:AutonomousTransferCompleteResponse/>
+  </soap:Body>
+</soap:Envelope>
+```
+
+#### 3.1.3 ACS 处理逻辑
+
+```go
+// internal/acs/handler.go — handleAutonomousTransferComplete()
+// 1. 解码 SOAP 报文
+atc, cwmpID, err := soap.DecodeAutonomousTransferComplete(reader)
+
+// 2. 构建事件负载
+payload := map[string]interface{}{
+    "device_sn":       deviceSN,
+    "announce_url":    atc.AnnounceURL,    // ACS 文件服务器地址（未使用）
+    "transfer_url":    atc.TransferURL,    // 设备侧文件下载地址 ← 关键字段
+    "is_download":     atc.IsDownload,     // false = 上传场景
+    "file_type":       atc.FileType,       // "4"=PM, "5"=MR
+    "file_size":       atc.FileSize,
+    "target_filename": atc.TargetFileName, // 如 "A00.4g01.pm.xml"
+    "start_time":      atc.StartTime,
+    "complete_time":   atc.CompleteTime,
+    "fault":           atc.FaultStruct,    // nil 表示成功
+}
+
+// 3. 发布事件
+h.eventBus.Publish(ctx, "device.inform.autonomous_transfer_complete", evt)
+
+// 4. 返回 AutonomousTransferCompleteResponse
+```
+
+---
+
+### 3.2 Upload RPC 主动触发（部分实现）
+
+管理面可以通过 Upload RPC 主动触发设备上传 PM 文件。
+
+#### 3.2.1 Upload RPC SOAP 模板
 
 ```xml
 <cwmp:Upload>
@@ -88,32 +308,51 @@ PMCollector.handleFileReceived()
 | `4` | **PM 文件** |
 | `5` | MR 文件 |
 
-### 3.2 设备自主上传（AutonomousTransferComplete）
+#### 3.2.2 Upload 完整流程（需要 ACS 文件服务器）
 
-设备也可根据自身配置周期性上传 PM 文件，无需 ACS 主动触发。上传完成后设备发送 `AutonomousTransferComplete` SOAP 消息：
-
-```go
-// internal/acs/handler.go — handleAutonomousTransferComplete()
-// 1. 解码 SOAP 报文
-atc, cwmpID, err := soap.DecodeAutonomousTransferComplete(reader)
-
-// 2. 构建事件负载
-payload := map[string]interface{}{
-    "device_sn":       deviceSN,
-    "transfer_url":    atc.TransferURL,      // 设备侧文件下载地址
-    "file_type":       atc.FileType,         // "4"=PM, "5"=MR
-    "file_size":       atc.FileSize,
-    "target_filename": atc.TargetFileName,   // 如 "A00.4g01.pm"
-    "start_time":      atc.StartTime,
-    "complete_time":   atc.CompleteTime,
-    "fault":           atc.FaultStruct,      // nil 表示成功
-}
-
-// 3. 发布事件
-h.eventBus.Publish(ctx, "device.inform.autonomous_transfer_complete", evt)
-
-// 4. 返回 AutonomousTransferCompleteResponse
 ```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 1: ACS 发送 Upload RPC                                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • URL 字段指向 ACS 文件服务器的上传端点                                    │
+│ • 例如: http://acs.example.com:8080/uploads/{device_sn}/                 │
+│ • 包含认证信息（Username/Password）                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 2: CPE 返回 UploadResponse                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • Status=0: 文件上传已完成（同步）                                        │
+│ • Status=1: 文件上传正在进行（异步，后续发送 TransferComplete）           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 3: CPE 上传文件到 ACS 文件服务器                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • CPE 通过 HTTP PUT/POST 将文件上传到指定的 URL                           │
+│ • ACS 文件服务器接收文件并存储                                            │
+│ • 返回 HTTP 200/201 确认                                                 │
+│                                                                          │
+│ ⚠️ 当前项目缺少此步骤：没有 HTTP PUT/POST 文件接收端点                    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 步骤 4: CPE 发送 TransferComplete                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│ • 通知 ACS 文件传输结果                                                   │
+│ • 包含 StartTime、CompleteTime、FaultStruct                              │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.2.3 当前项目 Upload 实现状态
+
+| 步骤 | 状态 | 说明 |
+|------|------|------|
+| Upload RPC 构建 | ✅ 已实现 | `internal/acs/rpc/dispatcher.go` |
+| UploadResponse 解析 | ✅ 已实现 | `pkg/soap/decoder.go` |
+| ACS 文件服务器 | ❌ 未实现 | 需要 HTTP PUT/POST 接收端点 |
+| TransferComplete 处理 | ✅ 已实现 | `internal/acs/handler.go` |
+| 文件存储到 MinIO | ❌ 未实现 | 需要文件服务器与 MinIO 集成 |
 
 ---
 
@@ -566,67 +805,168 @@ transferBridge.Subscribe(app.EventBus)  // → "device.inform.autonomous_transfe
 
 ## 十、端到端完整流程示例
 
-### 场景：CMCC LTE 基站定期上传 PM 文件
+### 场景：CMCC LTE 基站定期上传 PM 文件（TransferURL 模式）
 
 ```
 时间线：
 T+0s   设备采集 15 分钟性能数据，生成 PM XML 文件
-T+1s   设备主动上传文件到 ACS 文件服务器
-T+5s   设备发送 AutonomousTransferComplete SOAP 消息
+T+1s   设备将文件存入内置 HTTP 服务器（如 http://172.21.100.43:8080/pm/）
+T+5s   设备发送 AutonomousTransferComplete SOAP 消息（携带 TransferURL）
           ↓
 === ACS 引擎 (omcgo-acs) ===
 
 T+5s   handler.handleAutonomousTransferComplete()
-       ├─ 解码 SOAP: FileType="4", TransferURL="http://device:8080/pm/latest"
+       ├─ 解码 SOAP:
+       │   ├─ FileType="4" (PM 文件)
+       │   ├─ TransferURL="http://172.21.100.43:8080/pm/A00.4g01.pm.xml"
+       │   ├─ FileSize=102400
+       │   └─ TargetFileName="A00.4g01.pm.xml"
        ├─ 发布事件: "device.inform.autonomous_transfer_complete"
-       │   Payload: {device_sn:"BST001", file_type:"4", transfer_url:...}
+       │   Payload: {
+       │     device_sn: "BST001",
+       │     transfer_url: "http://172.21.100.43:8080/pm/A00.4g01.pm.xml",
+       │     file_type: "4",
+       │     ...
+       │   }
        └─ 返回 AutonomousTransferCompleteResponse
           ↓
 === Worker 进程 (omcgo-worker) ===
 
 T+6s   TransferBridge.handleAutonomousTransferComplete()
-       ├─ 查询设备: BST001 → {carrier:"cmcc", tech:"lte"}
-       ├─ 分类: FileType="4" → PM 文件
-       ├─ HTTP GET http://device:8080/pm/latest → 下载 XML
-       ├─ MinIO PUT: pm-files/2026/03/17/BST001/A00.pm.xml
-       └─ 发布事件: "pm.file.received"
-           Payload: {minio_path:"2026/03/17/BST001/A00.pm.xml",
-                     device_id:"uuid-001", carrier:"cmcc", technology:"lte"}
+       │
+       ├─ 1. 查询设备信息
+       │      deviceRepo.GetBySerialNumber("BST001")
+       │      → {carrier:"cmcc", tech:"lte", id:"uuid-001"}
+       │
+       ├─ 2. 文件分类
+       │      classifyFileType("4", "A00.4g01.pm.xml") → "pm"
+       │
+       ├─ 3. 下载文件（从设备 HTTP 服务器拉取）
+       │      HTTP GET http://172.21.100.43:8080/pm/A00.4g01.pm.xml
+       │      ↓ 30 秒超时
+       │      流式读取响应体
+       │
+       ├─ 4. 存入 MinIO
+       │      minioClient.PutObject(
+       │        bucket: "pm-files",
+       │        objectPath: "2026/03/17/BST001/A00.4g01.pm.xml",
+       │        reader: resp.Body,
+       │      )
+       │
+       └─ 5. 发布下游事件: "pm.file.received"
+              Payload: {
+                minio_path: "2026/03/17/BST001/A00.4g01.pm.xml",
+                device_id: "uuid-001",
+                device_sn: "BST001",
+                carrier: "cmcc",
+                technology: "lte"
+              }
           ↓
 T+7s   PMCollector.handleFileReceived()
-       ├─ MinIO GET: pm-files/2026/03/17/BST001/A00.pm.xml
-       ├─ 记录元数据: INSERT INTO pm_files (parsed=false)
-       ├─ XML 流式解析:
-       │   ├─ managedElement: deviceSN="BST001"
-       │   ├─ measInfo: counterGroup="LTE.CellMeasReport"
-       │   ├─ granPeriod: duration=PT900S(15min), endTime=2026-03-17T10:00:00Z
-       │   ├─ measType: p=1→"rrc_conn_setup_att", p=2→"rrc_conn_setup_succ", ...
-       │   └─ measValue: CellId=1234 → [1000, 950, ...], CellId=5678 → [800, 760, ...]
-       │   结果: 2 cells × 10 counters = 20 PMCounter 记录
        │
-       ├─ 批量写入: COPY TO pm_counters (20 rows)
-       ├─ 更新元数据: UPDATE pm_files SET parsed=true, counter_count=20
+       ├─ 1. 从 MinIO 下载文件
+       │      minioClient.GetObject("pm-files", "2026/03/17/BST001/A00.4g01.pm.xml")
        │
-       ├─ KPI 计算 (CellId=1234):
-       │   ├─ 时间窗口: [09:45:00, 10:00:00]
-       │   ├─ 查询计数器: SELECT counter_name, SUM(counter_value) ...
-       │   ├─ 注入 period_seconds=900
-       │   ├─ 计算 10 个 LTE KPI:
-       │   │   ├─ lte_rrc_setup_success_rate = 950/1000*100 = 95.0%
-       │   │   ├─ lte_dl_throughput = volume*8/900/1000000 = xx Mbps
-       │   │   └─ ... (8 more KPIs)
-       │   └─ COPY TO kpi_values (10 rows)
+       ├─ 2. 记录文件元数据
+       │      INSERT INTO pm_files (device_id, device_sn, carrier, technology,
+       │                           file_name, minio_path, parsed)
+       │      VALUES ('uuid-001', 'BST001', 'cmcc', 'lte',
+       │              'A00.4g01.pm.xml', '2026/03/17/BST001/A00.4g01.pm.xml', false)
        │
-       ├─ KPI 计算 (CellId=5678):
-       │   └─ 同上，另一个小区的 KPI
+       ├─ 3. XML 流式解析
+       │      ├─ managedElement.localDn → deviceSN="BST001"
+       │      ├─ measInfo.measInfoId → counterGroup="LTE.CellMeasReport"
+       │      ├─ granPeriod → duration=PT900S (15min), endTime=2026-03-17T10:00:00Z
+       │      ├─ measType[p] → 索引映射
+       │      │   p=1 → "rrc_conn_setup_att"
+       │      │   p=2 → "rrc_conn_setup_succ"
+       │      │   ...
+       │      └─ measValue → 解析每个小区的计数器值
+       │          CellId=1234 → [1000, 950, ...]
+       │          CellId=5678 → [800, 760, ...]
+       │      结果: 2 cells × 10 counters = 20 PMCounter 记录
        │
-       └─ 发布事件: "pm.file.parsed"
-           Payload: {minio_path:..., device_id:..., counter_count:20}
+       ├─ 4. 批量写入计数器
+       │      pgx.CopyFrom("pm_counters", []PMCounter{...})
+       │      → 20 rows inserted
+       │
+       ├─ 5. 更新文件元数据
+       │      UPDATE pm_files
+       │      SET parsed=true, counter_count=20, parsed_at=NOW()
+       │      WHERE id='...'
+       │
+       ├─ 6. KPI 计算 (CellId=1234)
+       │      ├─ 确定时间窗口: [09:45:00, 10:00:00]
+       │      ├─ 查询计数器:
+       │      │   SELECT counter_name, SUM(counter_value)
+       │      │   FROM pm_counters
+       │      │   WHERE device_id='uuid-001' AND cell_id='1234'
+       │      │     AND time BETWEEN '09:45:00' AND '10:00:00'
+       │      │   GROUP BY counter_name
+       │      ├─ 注入合成计数器: period_seconds=900
+       │      ├─ 计算 10 个 LTE KPI:
+       │      │   lte_rrc_setup_success_rate = 950/1000*100 = 95.0%
+       │      │   lte_dl_throughput = volume*8/900/1000000 = xx Mbps
+       │      │   ...
+       │      └─ COPY TO kpi_values (10 rows)
+       │
+       ├─ 7. KPI 计算 (CellId=5678)
+       │      └─ 同上，另一个小区的 10 个 KPI
+       │
+       └─ 8. 发布事件: "pm.file.parsed"
+              Payload: {
+                minio_path: "2026/03/17/BST001/A00.4g01.pm.xml",
+                device_id: "uuid-001",
+                counter_count: 20
+              }
           ↓
 T+8s   完成。数据可通过 REST API 查询:
        GET /pm/counters?device_id=uuid-001&start_time=...
        GET /pm/kpi?device_id=uuid-001&kpi_name=lte_rrc_setup_success_rate
 ```
+
+### 网络拓扑要求
+
+TransferURL 模式要求 **Worker 进程能够访问设备的 HTTP 端口**：
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        网络拓扑                                      │
+│                                                                     │
+│   ┌─────────────┐                                                   │
+│   │   CPE 设备   │  ← 172.21.100.43:8080 (PM 文件 HTTP 服务器)       │
+│   │  (BaiCell)  │                                                   │
+│   └──────┬──────┘                                                   │
+│          │                                                          │
+│          │ ① TR069 SOAP (Inform/ATC)                                │
+│          │                                                          │
+│          ▼                                                          │
+│   ┌─────────────┐                                                   │
+│   │  ACS 引擎   │  ← :7547 (公网可访问)                             │
+│   │ (omcgo-acs) │                                                   │
+│   └─────────────┘                                                   │
+│          │                                                          │
+│          │ ② EventBus (NATS JetStream)                              │
+│          │                                                          │
+│          ▼                                                          │
+│   ┌─────────────┐     ③ HTTP GET TransferURL                       │
+│   │   Worker    │ ─────────────────────────────────→ CPE :8080     │
+│   │ (omcgo-worker)│  ← 需要 Worker 能访问设备的 172.21.x.x 地址     │
+│   └──────┬──────┘                                                   │
+│          │                                                          │
+│          │ ④ MinIO PUT                                              │
+│          ▼                                                          │
+│   ┌─────────────┐                                                   │
+│   │   MinIO     │                                                   │
+│   │ (pm-files)  │                                                   │
+│   └─────────────┘                                                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**网络打通方案**：
+1. Worker 与 CPE 在同一内网
+2. 或通过 VPN/专线打通
+3. 或 CPE 使用公网 IP（不推荐，安全风险）
 
 ---
 
@@ -636,10 +976,14 @@ T+8s   完成。数据可通过 REST API 查询:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        CPE 设备 (基站)                              │
 │  ┌──────────┐     ┌──────────────┐     ┌──────────────────┐        │
-│  │ PM 采集  │ ──→ │ 生成 XML 文件 │ ──→ │ HTTP Upload 到 ACS│        │
+│  │ PM 采集  │ ──→ │ 生成 XML 文件 │ ──→ │ 存入设备内置      │        │
+│  │ (15min)  │     │ (3GPP 32.435)│     │ HTTP 服务器       │        │
 │  └──────────┘     └──────────────┘     └────────┬─────────┘        │
 │                                                  │                  │
-│  发送 AutonomousTransferComplete SOAP ←──────────┘                  │
+│  文件 URL: http://172.21.x.x:8080/pm/xxx.xml     │                  │
+│                                                  │                  │
+│  发送 AutonomousTransferComplete SOAP ───────────┘                  │
+│  (携带 TransferURL)                                                 │
 └──────────────────────────────────────┬──────────────────────────────┘
                                        │
               ┌────────────────────────▼────────────────────────┐
@@ -647,35 +991,36 @@ T+8s   完成。数据可通过 REST API 查询:
               │                                                  │
               │  handleAutonomousTransferComplete()              │
               │      ↓                                          │
+              │  提取 TransferURL: "http://172.21.x.x:8080/..."  │
+              │      ↓                                          │
               │  EventBus.Publish("device.inform.autonomous_    │
               │                    transfer_complete")           │
               └────────────────────────┬────────────────────────┘
                                        │ NATS JetStream
+                                       │ Payload: {transfer_url, file_type, ...}
               ┌────────────────────────▼────────────────────────┐
               │              Worker 进程                          │
               │                                                  │
               │  ┌─────────────────┐                             │
               │  │ TransferBridge  │ ← "device.inform.           │
               │  │                 │    autonomous_transfer_      │
-              │  │ HTTP 下载文件   │    complete"                  │
-              │  │ 分类 PM/MR/Log │                              │
-              │  │ 存入 MinIO     │                              │
+              │  │ ① HTTP GET      │    complete"                  │
+              │  │    TransferURL  │ ────────────────────────→  CPE │
+              │  │ ② 流式下载文件   │ ←─────────────────────────   │
+              │  │ ③ 分类 PM/MR/Log│                              │
+              │  │ ④ MinIO PUT     │ ──→ MinIO (pm-files bucket)  │
               │  └───────┬────────┘                              │
               │          │ "pm.file.received"                    │
+              │          │ Payload: {minio_path, device_id, ...} │
               │  ┌───────▼────────┐                              │
               │  │  PMCollector   │                              │
               │  │                │                              │
-              │  │ MinIO 下载     │                              │
-              │  │ XML 流式解析   │                              │
-              │  │ ↓              │                              │
-              │  │ pm_counters    │ ──→ TimescaleDB              │
-              │  │ ↓              │                              │
-              │  │ KPIEngine      │                              │
-              │  │ 公式计算       │                              │
-              │  │ ↓              │                              │
-              │  │ kpi_values     │ ──→ TimescaleDB              │
-              │  │ ↓              │                              │
-              │  │ pm_files 元数据│ ──→ PostgreSQL               │
+              │  │ ① MinIO GET    │ ←── MinIO                    │
+              │  │ ② XML 流式解析  │                              │
+              │  │ ③ 批量写入计数器│ ──→ TimescaleDB (pm_counters)│
+              │  │ ④ KPI 公式计算  │                              │
+              │  │ ⑤ 写入 KPI 结果 │ ──→ TimescaleDB (kpi_values) │
+              │  │ ⑥ 更新元数据    │ ──→ PostgreSQL (pm_files)    │
               │  └───────┬────────┘                              │
               │          │ "pm.file.parsed"                      │
               └──────────┼──────────────────────────────────────┘
@@ -693,6 +1038,16 @@ T+8s   完成。数据可通过 REST API 查询:
               │  GET /pm/files/:id/download ← MinIO              │
               └─────────────────────────────────────────────────┘
 ```
+
+### 关键数据流节点
+
+| 节点 | 数据来源 | 数据去向 | 协议/接口 |
+|------|---------|---------|----------|
+| CPE HTTP 服务器 | 设备本地生成 | TransferBridge HTTP GET | HTTP GET |
+| TransferBridge | CPE HTTP 服务器 | MinIO | HTTP GET → S3 PUT |
+| PMCollector | MinIO | TimescaleDB | S3 GET → pgx.CopyFrom |
+| KPIEngine | pm_counters | kpi_values | SQL → 公式计算 → pgx.CopyFrom |
+| App REST API | PostgreSQL/TimescaleDB/MinIO | 前端 | HTTP/JSON |
 
 ---
 
@@ -734,3 +1089,143 @@ T+8s   完成。数据可通过 REST API 查询:
 | `migrations/000010_create_pm_counters.up.sql` | pm_counters 超表 |
 | `migrations/000011_create_kpi_tables.up.sql` | kpi_definitions + kpi_values + 连续聚合 |
 | `migrations/000034_create_pm_files.up.sql` | pm_files 元数据表 |
+
+---
+
+## 十四、文件上传功能实现状态
+
+### 14.1 功能矩阵
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| **TransferURL 模式** | ✅ 已实现 | CPE 托管文件，ACS 主动拉取 |
+| AutonomousTransferComplete 接收 | ✅ 已实现 | `internal/acs/handler.go` |
+| TransferURL 解析 | ✅ 已实现 | 从 SOAP 提取 `TransferURL` 字段 |
+| 文件下载（从 CPE） | ✅ 已实现 | `internal/transfer/bridge.go` HTTP GET |
+| 文件分类（PM/MR/Log） | ✅ 已实现 | 根据 FileType 和文件名判断 |
+| MinIO 存储 | ✅ 已实现 | 按日期/设备路径存储 |
+| 事件发布 | ✅ 已实现 | `pm.file.received` / `mr.file.received` |
+| **ACS 文件服务器模式** | ❌ 未实现 | CPE 主动上传到 ACS |
+| HTTP PUT/POST 接收端点 | ❌ 未实现 | 需要独立的文件服务器 |
+| Upload RPC 完整流程 | ⚠️ 部分 | RPC 构建已实现，但无接收端点 |
+| TransferComplete（Upload 场景） | ✅ 已实现 | 通用处理逻辑 |
+
+### 14.2 当前实现的文件传输模式
+
+**TransferURL 模式（设备托管文件）**：
+
+```
+CPE 设备                                    ACS 系统
+┌──────────────────┐                    ┌──────────────────┐
+│ 1. 采集 PM 数据   │                    │                  │
+│ 2. 生成 XML 文件  │                    │                  │
+│ 3. 存入内置 HTTP  │                    │                  │
+│    服务器         │                    │                  │
+│                  │                    │                  │
+│ 文件 URL:        │                    │                  │
+│ http://172.21.x  │                    │                  │
+│ .x:8080/pm/xxx   │                    │                  │
+│                  │                    │                  │
+│ 4. 发送 ATC SOAP │ ─────────────────→ │ 5. 接收 ATC      │
+│    (携带 URL)    │                    │    提取 URL      │
+│                  │                    │                  │
+│                  │ ←───────────────── │ 6. HTTP GET 下载 │
+│ 7. 返回文件内容   │ ─────────────────→ │ 8. 存入 MinIO   │
+└──────────────────┘                    └──────────────────┘
+```
+
+**适用场景**：
+- 设备有内置 HTTP 服务器（如 BaiCell 设备）
+- Worker 进程能访问设备的 HTTP 端口（网络打通）
+- 设备内网地址可路由
+
+### 14.3 未实现的文件传输模式
+
+**ACS 文件服务器模式（设备主动上传）**：
+
+```
+CPE 设备                                    ACS 系统
+┌──────────────────┐                    ┌──────────────────┐
+│                  │                    │   File Server    │
+│                  │                    │   :8080/uploads  │
+│                  │                    │                  │
+│ 1. 收到 Upload   │ ←───────────────── │ 2. ACS 发送      │
+│    RPC (含 URL)  │                    │    Upload RPC    │
+│                  │                    │                  │
+│ 3. HTTP PUT 文件 │ ─────────────────→ │ 4. 接收文件      │
+│    到 ACS URL    │                    │    存入 MinIO    │
+│                  │                    │                  │
+│ 5. 发送 Transfer │ ─────────────────→ │ 6. 处理结果      │
+│    Complete      │                    │                  │
+└──────────────────┘                    └──────────────────┘
+
+⚠️ 当前缺少: HTTP PUT/POST 接收端点
+```
+
+**适用场景**：
+- 设备无法暴露 HTTP 端口
+- ACS 在公网，设备在内网
+- 需要完全由 ACS 控制文件接收
+
+### 14.4 待开发功能
+
+| 功能 | 优先级 | 说明 |
+|------|--------|------|
+| ACS 文件服务器 | P2 | 独立 HTTP 服务器，接收设备 PUT/POST 上传 |
+| Upload 完整流程 | P2 | 集成文件服务器与 TransferBridge |
+| 文件上传认证 | P2 | 验证 Upload RPC 中的 Username/Password |
+| 断点续传支持 | P3 | 大文件上传的断点续传 |
+| 上传进度跟踪 | P3 | 实时跟踪文件上传进度 |
+
+### 14.5 网络拓扑要求
+
+**当前模式（TransferURL）要求**：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  网络要求: Worker 进程必须能访问设备的 HTTP 端口                  │
+│                                                                 │
+│  ┌─────────┐         ┌─────────┐         ┌─────────┐           │
+│  │   CPE   │ :8080   │  Worker │         │  MinIO  │           │
+│  │  设备   │ ←───────│ 进程    │ ───────→│ 存储    │           │
+│  │172.21.x │  HTTP   │         │  S3 API │         │           │
+│  └─────────┘  GET    └─────────┘         └─────────┘           │
+│       ↑               ↑                                         │
+│       │               │                                         │
+│       └───────────────┘                                         │
+│         必须网络打通                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**如果网络不通，可选方案**：
+
+1. **部署 ACS 文件服务器模式**（推荐）
+   - Worker 部署独立文件服务器（:8080/uploads）
+   - 修改 Upload RPC 的 URL 指向文件服务器
+   - 设备主动上传到文件服务器
+
+2. **VPN/专线打通**
+   - Worker 与 CPE 在同一 VPN
+   - 或通过专线连接
+
+3. **代理/网关**
+   - 部署代理服务器转发请求
+   - 设备通过代理访问 Worker
+
+### 14.6 详细设计文档
+
+ACS 文件上传功能的详细设计文档请参阅：
+
+- **[acs-file-upload-design.md](./acs-file-upload-design.md)** — 包含完整的技术方案、实现计划、代码分析和待确认事项
+
+---
+
+## 十五、相关文档
+
+| 文档 | 路径 | 说明 |
+|------|------|------|
+| ACS 服务流程 | `docs/design/acs-service-flow.md` | TR069 SOAP/XML 交互流程详解 |
+| ACS 文件上传设计 | `docs/design/acs-file-upload-design.md` | 文件上传功能实现方案 |
+| TransferBridge 实现 | `internal/transfer/bridge.go` | 当前 TransferURL 模式实现 |
+| PM Collector | `internal/pm/collector/` | PM 文件解析与处理 |
+| KPI Engine | `internal/pm/kpi/` | KPI 公式计算引擎 |

@@ -18,9 +18,20 @@ type ACSConfig struct {
 	Redis     RedisConfig        `mapstructure:"redis"`
 	NATS      NATSConfig         `mapstructure:"nats"`
 	DB        PostgresConfig     `mapstructure:"db"`
+	MinIO     MinIOConfig        `mapstructure:"minio"`
+	Upload    UploadConfig       `mapstructure:"upload"`
 	Metrics   MetricsConfig      `mapstructure:"metrics"`
 	Tracer    TracerConfig       `mapstructure:"tracer"`
 	Log       LogConfig          `mapstructure:"log"`
+}
+
+// UploadConfig holds file upload server settings.
+type UploadConfig struct {
+	BaseURL     string        `mapstructure:"base_url"`      // Upload server base URL, e.g. http://acs:7547
+	Path        string        `mapstructure:"path"`          // Upload path prefix, default /upload
+	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret
+	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
+	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
 }
 
 // CORSConfig holds CORS middleware settings.
