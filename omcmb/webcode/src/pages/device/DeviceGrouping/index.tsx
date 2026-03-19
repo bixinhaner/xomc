@@ -11,10 +11,10 @@ import {
   Modal,
   Radio,
   Select,
-  Switch,
   Tag,
   Tree,
   Typography,
+  Upload,
 } from 'antd';
 import {
   CloseCircleOutlined,
@@ -27,6 +27,7 @@ import {
   PlusOutlined,
   RestOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
@@ -170,15 +171,15 @@ function buildTreeData(
         },
       ];
     } else {
-      // 二级节点：显示完整菜单
+      // 二级节点：点击添加直接打开抽屉
       menuItems = [
         {
-          key: 'add-child',
+          key: 'add-device',
           label: t('common.add'),
           icon: <FolderAddOutlined />,
           onClick: (info) => {
             info.domEvent.stopPropagation();
-            onContextMenu(`add-child:${group.id}`);
+            onContextMenu(`add-device:${group.id}`);
           },
         },
         {
@@ -277,13 +278,24 @@ export default function DeviceGrouping() {
   const [parentGroupId, setParentGroupId] = useState<string | null>(null);
   const [addChildForm] = Form.useForm<{
     name: string;
-    autoMatch: boolean;
     matchingMode: 'deviceName' | 'lac' | 'tac';
     tacRag: string;
   }>();
   const [nameFilters, setNameFilters] = useState<NameFilterItem[]>([
     { id: generateId(), condition: 'contain', value: '' },
   ]);
+
+  // 二级节点添加设备抽屉相关状态
+  const [addDeviceDrawerOpen, setAddDeviceDrawerOpen] = useState(false);
+  const [addDeviceGroupId, setAddDeviceGroupId] = useState<string | null>(null);
+  const [addDeviceForm] = Form.useForm<{
+    addMethod: 'manual' | 'import';
+    deviceSnList: string;
+  }>();
+  const [fileList, setFileList] = useState<any[]>([]);
+
+  // 监听添加方式变化
+  const addMethod = Form.useWatch('addMethod', addDeviceForm);
 
   // 监听匹配模式变化
   const matchingMode = Form.useWatch('matchingMode', addChildForm);
@@ -335,16 +347,22 @@ export default function DeviceGrouping() {
     (action: string) => {
       const [cmd, groupId] = action.split(':');
       if (cmd === 'add-child') {
-        // 打开新增子分组弹窗
+        // 一级节点：打开新增子分组弹窗
         setParentGroupId(groupId);
         addChildForm.resetFields();
         addChildForm.setFieldsValue({
-          autoMatch: false,
           matchingMode: 'deviceName',
           tacRag: '',
         });
         setNameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
         setAddChildDrawerOpen(true);
+      } else if (cmd === 'add-device') {
+        // 二级节点：添加设备到分组
+        setAddDeviceGroupId(groupId);
+        addDeviceForm.resetFields();
+        addDeviceForm.setFieldsValue({ addMethod: 'manual', deviceSnList: '' });
+        setFileList([]);
+        setAddDeviceDrawerOpen(true);
       } else if (cmd === 'edit') {
         const grp = groups.find((g) => g.id === groupId);
         if (grp) {
@@ -462,43 +480,40 @@ export default function DeviceGrouping() {
     try {
       const values = await addChildForm.validateFields();
 
-      // 如果开启了自动匹配且是设备名称模式，验证过滤条件
-      if (values.autoMatch && values.matchingMode === 'deviceName') {
-        const validFilters = nameFilters.filter((f) => f.value?.trim());
-        if (validFilters.length === 0) {
-          void message.error(t('device.rules.atLeastOneFilter'));
-          return;
-        }
-      }
+      // 匹配规则为可选项，只有填写了内容才进行验证
+      let operators = '';
+      let validNameFilters: NameFilterItem[] = [];
+      let validTacRag = '';
 
-      // 如果开启了自动匹配且是 TAC/LAC 模式，验证范围输入
-      if (values.autoMatch && (values.matchingMode === 'tac' || values.matchingMode === 'lac')) {
-        if (!values.tacRag?.trim()) {
-          void message.error(t('device.rules.inputRange', { type: values.matchingMode === 'tac' ? 'TAC' : 'LAC' }));
-          return;
+      if (values.matchingMode === 'deviceName') {
+        // 设备名称模式：检查是否有有效的过滤条件
+        validNameFilters = nameFilters.filter((f) => f.value?.trim());
+        if (validNameFilters.length > 0) {
+          operators = generateOperators(
+            { matchingMode: 'deviceName', nameRuleList: validNameFilters },
+            t
+          );
+        }
+      } else if (values.matchingMode === 'tac' || values.matchingMode === 'lac') {
+        // TAC/LAC 模式：检查是否填写了范围
+        if (values.tacRag?.trim()) {
+          validTacRag = values.tacRag.trim();
+          operators = generateOperators(
+            { matchingMode: values.matchingMode, tacRag: validTacRag },
+            t
+          );
         }
       }
 
       // TODO: 调用 API 创建子分组
-      const operators = values.autoMatch
-        ? generateOperators(
-            {
-              matchingMode: values.matchingMode,
-              nameRuleList: values.matchingMode === 'deviceName' ? nameFilters : undefined,
-              tacRag: values.matchingMode !== 'deviceName' ? values.tacRag : undefined,
-            },
-            t
-          )
-        : '';
-
       console.log('创建子分组:', {
         parentGroupId,
         name: values.name,
-        autoMatch: values.autoMatch,
         matchingMode: values.matchingMode,
-        nameFilters: values.autoMatch && values.matchingMode === 'deviceName' ? nameFilters : [],
-        tacRag: values.autoMatch && values.matchingMode !== 'deviceName' ? values.tacRag : '',
+        nameFilters: validNameFilters,
+        tacRag: validTacRag,
         operators,
+        hasRule: operators.length > 0,
       });
 
       void message.success(t('common.success'));
@@ -508,6 +523,59 @@ export default function DeviceGrouping() {
       // validation error
     }
   }, [addChildForm, nameFilters, parentGroupId, refetchGroups, message, t]);
+
+  // 二级节点添加设备处理函数
+  const handleSaveDevices = useCallback(async () => {
+    try {
+      const values = await addDeviceForm.validateFields();
+
+      if (values.addMethod === 'manual') {
+        // 手动添加：验证设备SN列表
+        const snList = values.deviceSnList?.trim();
+        if (!snList) {
+          void message.error(t('device.snListRequired'));
+          return;
+        }
+        // 解析SN列表（支持换行、逗号、分号分隔）
+        const snArray = snList
+          .split(/[\n,;]+/)
+          .map((sn) => sn.trim())
+          .filter((sn) => sn.length > 0);
+
+        if (snArray.length === 0) {
+          void message.error(t('device.snListRequired'));
+          return;
+        }
+
+        // TODO: 调用 API 添加设备到分组
+        console.log('手动添加设备到分组:', {
+          groupId: addDeviceGroupId,
+          snList: snArray,
+        });
+
+        void message.success(t('device.addDeviceSuccess', { count: snArray.length }));
+      } else {
+        // 批量导入：验证文件
+        if (fileList.length === 0) {
+          void message.error(t('device.fileRequired'));
+          return;
+        }
+
+        // TODO: 调用 API 批量导入设备
+        console.log('批量导入设备到分组:', {
+          groupId: addDeviceGroupId,
+          file: fileList[0],
+        });
+
+        void message.success(t('device.importSuccess'));
+      }
+
+      setAddDeviceDrawerOpen(false);
+      await refetch();
+    } catch {
+      // validation error
+    }
+  }, [addDeviceForm, addDeviceGroupId, fileList, refetch, message, t]);
 
   // 预览条件描述
   const previewText = useMemo(() => {
@@ -901,137 +969,195 @@ export default function DeviceGrouping() {
 
           <Divider style={{ margin: '16px 0' }} />
 
-          {/* 自动匹配到组开关 */}
-          <Form.Item
-            name="autoMatch"
-            label={t('device.autoMatch')}
-            valuePropName="checked"
-            extra={t('device.autoMatchDesc')}
-          >
-            <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} />
+          {/* 匹配规则（直接显示，不再需要开关） */}
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
+            {t('device.matchRule')}
+          </div>
+          <Form.Item name="matchingMode" label={t('device.rules.matchingMode')}>
+            <Radio.Group onChange={handleMatchingModeChange}>
+              <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
+              <Radio value="lac">LAC</Radio>
+              <Radio value="tac">TAC</Radio>
+            </Radio.Group>
           </Form.Item>
 
-          {/* 匹配规则（仅当开启自动匹配时显示） */}
-          {addChildForm.getFieldValue('autoMatch') && (
+          {/* 设备名称过滤条件 */}
+          {matchingMode === 'deviceName' && (
             <>
-              <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
-                {t('device.matchRule')}
-              </div>
-              <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} rules={[{ required: true }]}>
-                <Radio.Group onChange={handleMatchingModeChange}>
-                  <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
-                  <Radio value="lac">LAC</Radio>
-                  <Radio value="tac">TAC</Radio>
-                </Radio.Group>
+              <Form.Item
+                label={
+                  <span>
+                    {t('device.rules.filterCondition')}
+                    <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
+                      {t('device.rules.conditionLimit', { max: 10 })}
+                    </Text>
+                  </span>
+                }
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {nameFilters.map((filter, index) => (
+                    <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {index === 0 ? (
+                        <>
+                          <Select
+                            value={filter.condition}
+                            style={{ width: 120 }}
+                            options={getFilterConditionOptions(t)}
+                            onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
+                          />
+                          <Input
+                            value={filter.value}
+                            style={{ flex: 1 }}
+                            maxLength={64}
+                            placeholder={t('common.placeholder')}
+                            onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Select
+                            value={filter.andOr || 'and'}
+                            style={{ width: 70 }}
+                            options={getAndOrOptions(t)}
+                            onChange={(v) => handleUpdateFilter(filter.id, 'andOr', v)}
+                          />
+                          <Select
+                            value={filter.condition}
+                            style={{ width: 120 }}
+                            options={getFilterConditionOptions(t)}
+                            onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
+                          />
+                          <Input
+                            value={filter.value}
+                            style={{ flex: 1 }}
+                            maxLength={64}
+                            placeholder={t('common.placeholder')}
+                            onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
+                          />
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<CloseCircleOutlined />}
+                            onClick={() => handleRemoveFilter(filter.id)}
+                            style={{ color: 'var(--color-text-quaternary)' }}
+                          />
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {nameFilters.length < 10 && (
+                  <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddFilter} style={{ marginTop: 8 }}>
+                    {t('device.rules.addCondition')}
+                  </Button>
+                )}
               </Form.Item>
 
-              {/* 设备名称过滤条件 */}
-              {matchingMode === 'deviceName' && (
-                <>
-                  <Form.Item
-                    label={
-                      <span>
-                        {t('device.rules.filterCondition')}
-                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                          {t('device.rules.conditionLimit', { max: 10 })}
-                        </Text>
-                      </span>
-                    }
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {nameFilters.map((filter, index) => (
-                        <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          {index === 0 ? (
-                            <>
-                              <Select
-                                value={filter.condition}
-                                style={{ width: 120 }}
-                                options={getFilterConditionOptions(t)}
-                                onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
-                              />
-                              <Input
-                                value={filter.value}
-                                style={{ flex: 1 }}
-                                maxLength={64}
-                                placeholder={t('common.placeholder')}
-                                onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
-                              />
-                            </>
-                          ) : (
-                            <>
-                              <Select
-                                value={filter.andOr || 'and'}
-                                style={{ width: 70 }}
-                                options={getAndOrOptions(t)}
-                                onChange={(v) => handleUpdateFilter(filter.id, 'andOr', v)}
-                              />
-                              <Select
-                                value={filter.condition}
-                                style={{ width: 120 }}
-                                options={getFilterConditionOptions(t)}
-                                onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
-                              />
-                              <Input
-                                value={filter.value}
-                                style={{ flex: 1 }}
-                                maxLength={64}
-                                placeholder={t('common.placeholder')}
-                                onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
-                              />
-                              <Button
-                                type="text"
-                                size="small"
-                                icon={<CloseCircleOutlined />}
-                                onClick={() => handleRemoveFilter(filter.id)}
-                                style={{ color: 'var(--color-text-quaternary)' }}
-                              />
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    {nameFilters.length < 10 && (
-                      <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddFilter} style={{ marginTop: 8 }}>
-                        {t('device.rules.addCondition')}
-                      </Button>
-                    )}
-                  </Form.Item>
-
-                  {/* 预览条件描述 */}
-                  {previewText && (
-                    <div
-                      style={{
-                        color: 'var(--color-text-tertiary)',
-                        fontSize: 12,
-                        marginBottom: 16,
-                        padding: '8px 12px',
-                        background: 'var(--color-fill-quaternary)',
-                        borderRadius: 4,
-                        wordBreak: 'break-all',
-                      }}
-                    >
-                      {previewText}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* TAC/LAC 输入 */}
-              {(matchingMode === 'tac' || matchingMode === 'lac') && (
-                <Form.Item
-                  name="tacRag"
-                  label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
-                  rules={[{ required: true, message: t('device.rules.inputRange', { type: matchingMode === 'tac' ? 'TAC' : 'LAC' }) }]}
-                  extra={
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {t('device.rules.formatRange', { range: '0-65535' })}
-                    </Text>
-                  }
+              {/* 预览条件描述 */}
+              {previewText && (
+                <div
+                  style={{
+                    color: 'var(--color-text-tertiary)',
+                    fontSize: 12,
+                    marginBottom: 16,
+                    padding: '8px 12px',
+                    background: 'var(--color-fill-quaternary)',
+                    borderRadius: 4,
+                    wordBreak: 'break-all',
+                  }}
                 >
-                  <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
-                </Form.Item>
+                  {previewText}
+                </div>
               )}
             </>
+          )}
+
+          {/* TAC/LAC 输入 */}
+          {(matchingMode === 'tac' || matchingMode === 'lac') && (
+            <Form.Item
+              name="tacRag"
+              label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
+              extra={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('device.rules.formatRange', { range: '0-65535' })}
+                </Text>
+              }
+            >
+              <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
+            </Form.Item>
+          )}
+        </Form>
+      </Drawer>
+
+      {/* Add Device to Group Drawer (二级节点添加设备) */}
+      <Drawer
+        title={t('device.addDeviceToGroup')}
+        open={addDeviceDrawerOpen}
+        onClose={() => setAddDeviceDrawerOpen(false)}
+        width={520}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setAddDeviceDrawerOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={() => void handleSaveDevices()}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
+      >
+        <Form form={addDeviceForm} layout="vertical">
+          {/* 添加方式 */}
+          <Form.Item
+            name="addMethod"
+            label={t('device.addMethod')}
+            rules={[{ required: true }]}
+          >
+            <Radio.Group>
+              <Radio value="manual">{t('device.manualAdd')}</Radio>
+              <Radio value="import">{t('device.batchImport')}</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          {/* 手动添加：批量输入SN */}
+          {addMethod === 'manual' && (
+            <Form.Item
+              name="deviceSnList"
+              label={
+                <span>
+                  {t('device.deviceSnList')}
+                  <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
+                    {t('device.snListFormat')}
+                  </Text>
+                </span>
+              }
+              rules={[{ required: true, message: t('device.snListRequired') }]}
+            >
+              <Input.TextArea
+                rows={8}
+                placeholder={t('device.snListPlaceholder')}
+                maxLength={5000}
+              />
+            </Form.Item>
+          )}
+
+          {/* 批量导入：上传文件 */}
+          {addMethod === 'import' && (
+            <Form.Item
+              label={t('device.importFile')}
+              extra={t('device.importFileFormat')}
+            >
+              <Upload
+                accept=".txt,.csv"
+                maxCount={1}
+                fileList={fileList}
+                beforeUpload={() => false}
+                onChange={(info) => {
+                  setFileList(info.fileList.slice(-1));
+                }}
+              >
+                <Button icon={<UploadOutlined />}>{t('device.selectFile')}</Button>
+              </Upload>
+            </Form.Item>
           )}
         </Form>
       </Drawer>
