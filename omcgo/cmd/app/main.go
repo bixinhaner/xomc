@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/cmd/app/router"
@@ -36,6 +37,11 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Handle LOG_OUTPUT_PATHS environment variable (comma-separated)
+	if outputPaths := os.Getenv("OMCGO_LOG_OUTPUT_PATHS"); outputPaths != "" {
+		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
+	}
+
 	app, err := bootstrap.InitForApp(context.Background(), &cfg)
 	if err != nil {
 		return err
@@ -66,4 +72,20 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return app.ListenAndServe(engine, addr)
+}
+
+// parseStringSlice parses a comma-separated string into a slice.
+func parseStringSlice(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }

@@ -2,6 +2,7 @@ package appconfig
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -195,8 +196,20 @@ type TracerConfig struct {
 
 // LogConfig holds structured logging settings.
 type LogConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"` // json, console
+	Level       string         `mapstructure:"level"`
+	Format      string         `mapstructure:"format"`       // json, console
+	OutputPaths []string       `mapstructure:"output_paths"` // output destinations, e.g. ["stdout", "/var/log/omcgo/app.log"]
+	Rotation    RotationConfig `mapstructure:"rotation"`     // log rotation settings
+}
+
+// RotationConfig holds log rotation settings.
+type RotationConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`     // enable log rotation
+	MaxSizeMB  int    `mapstructure:"max_size_mb"` // max size in MB before rotation (default: 20)
+	MaxAgeDays int    `mapstructure:"max_age_days"` // max days to retain old log files (default: 7)
+	MaxBackups int    `mapstructure:"max_backups"`  // max number of old log files to retain (default: 100)
+	Compress   bool   `mapstructure:"compress"`     // compress rotated files
+	LocalTime  bool   `mapstructure:"local_time"`   // use local time for rotation
 }
 
 // Load reads a configuration file and unmarshals it into the target struct.
@@ -209,6 +222,33 @@ func Load(path string, target interface{}) error {
 
 	if err := v.ReadInConfig(); err != nil {
 		return fmt.Errorf("read config file %s: %w", path, err)
+	}
+
+	if err := v.Unmarshal(target); err != nil {
+		return fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	return nil
+}
+
+// LoadWithEnvOverride loads config from file and applies environment variable overrides.
+// This is useful for Docker deployments where config values need to be set via env vars.
+func LoadWithEnvOverride(path string, target interface{}, envOverrides map[string]string) error {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetEnvPrefix("OMCGO")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	if err := v.ReadInConfig(); err != nil {
+		return fmt.Errorf("read config file %s: %w", path, err)
+	}
+
+	// Apply environment variable overrides
+	for key, envVar := range envOverrides {
+		if val := os.Getenv(envVar); val != "" {
+			v.Set(key, val)
+		}
 	}
 
 	if err := v.Unmarshal(target); err != nil {

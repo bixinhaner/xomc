@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
@@ -34,6 +35,11 @@ func runACS(cmd *cobra.Command, args []string) error {
 	var cfg appconfig.ACSConfig
 	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Handle LOG_OUTPUT_PATHS environment variable (comma-separated)
+	if outputPaths := os.Getenv("OMCGO_LOG_OUTPUT_PATHS"); outputPaths != "" {
+		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
 	app, err := bootstrap.InitForACS(context.Background(), &cfg)
@@ -67,4 +73,20 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}()
 
 	return app.WaitAndShutdown(errCh)
+}
+
+// parseStringSlice parses a comma-separated string into a slice.
+func parseStringSlice(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }

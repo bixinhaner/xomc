@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
@@ -45,6 +46,11 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	var cfg appconfig.WorkerConfig
 	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Handle LOG_OUTPUT_PATHS environment variable (comma-separated)
+	if outputPaths := os.Getenv("OMCGO_LOG_OUTPUT_PATHS"); outputPaths != "" {
+		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
 	app, err := bootstrap.InitForWorker(context.Background(), &cfg)
@@ -135,4 +141,20 @@ func registerSubscribers(app *bootstrap.App, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe report generator", zap.Error(err))
 	}
 	logger.Info("report generator started")
+}
+
+// parseStringSlice parses a comma-separated string into a slice.
+func parseStringSlice(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
