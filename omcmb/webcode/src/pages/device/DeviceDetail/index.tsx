@@ -199,13 +199,6 @@ export default function DeviceDetail() {
             <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
               {t('common.refresh')}
             </Button>
-            <Button
-              type="primary"
-              icon={<EditOutlined />}
-              onClick={() => void navigate(`/device/edit/${device.id}`)}
-            >
-              {t('common.edit')}
-            </Button>
           </Space>
         </div>
       </Card>
