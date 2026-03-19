@@ -1505,3 +1505,121 @@ GSM **不按产品类型区分操作**。BSC 和 BTS 的操作菜单一致（Gro
 | gNB | `/gnb/gnbMonitor/exportGnbInfoToCsv.action` | `/gnb/gnbMonitor/exportGnbInfoToExcel.action` | 同 eNB + `isGnb=1` |
 | GSM | - | `/cell/cpeinfos/exportGSMInfosToExcel.action` | 同 eNB + `isGSM=1` |
 
+---
+
+## 8. Dashboard KPI 统计指标
+
+> 源文件：`home.jsp` (首页 Dashboard KPI 模块)
+>
+> 首页 Dashboard 的 KPI 统计模块按制式分为三个 Tab（eNB / gNB / GSM），每个制式展示不同类别的 KPI 指标趋势图。
+
+### 8.1 eNB KPI 指标 (16 个)
+
+eNB 制式的 KPI 分为 6 个类别：
+
+#### 8.1.1 业务量类 (Traffic) — 4 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | enbTotalDataVolumeDL | Total Data Volume DL | GB | `(C000060011+C000060022)/1000/1000` |
+| 2 | enbTotalDataVolumeUL | Total Data Volume UL | GB | `(C000060001+C000060021)/1000/1000` |
+| 3 | enbThroughputDL | Throughput DL | Mbps | `(C000060011+C000060022)*8/#period/1000` |
+| 4 | enbThroughputUL | Throughput UL | Mbps | `(C000060001+C000060021)*8/#period/1000` |
+
+#### 8.1.2 可用性类 (Availability) — 1 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | enbCellAvailable | Cell Available | % | `C000060216/#period*100` |
+
+#### 8.1.3 使用率类 (Utilization) — 2 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | enbDownlinkPRBUtilizationRate | Downlink PRB Utilization Rate | % | `K900010014` |
+| 2 | enbUplinkPRBUtilizationRate | Uplink PRB Utilization Rate | % | `K900010013` |
+
+#### 8.1.4 接入性类 (Accessibility) — 4 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | enbWirelessSetupSuccessRate | Wireless Setup Success Rate | % | `K900010006` |
+| 2 | enbRrcSetupSuccessRate | RRC Setup Success Rate | % | `K900010002` |
+| 3 | enbERABSetupSuccessRate | E-RAB Setup Success Rate | % | `K900010005` |
+| 4 | enbCsfbSuccessRate | CSFB Success Rate | % | `K900010029` |
+
+#### 8.1.5 保持性类 (Retainability) — 1 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | enbERABDropRate | E-RAB Drop Rate | % | `K900010027` |
+
+#### 8.1.6 移动性类 (Mobility) — 4 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | enbHoIntraEnbOutSuccRate | HO IntraEnbOutSucc Rate | % | `K900010017` |
+| 2 | enbHoIntraEnbInSuccRate | HO IntraEnbInSucc Rate | % | `K900010022` |
+| 3 | enbHoInterEnbOutSuccRate | HO InterEnbOutSucc Rate | % | `K900010021` |
+| 4 | enbHoInterEnbInSuccRate | HO InterEnbInSucc Rate | % | `K900010026` |
+
+---
+
+### 8.2 gNB KPI 指标 (6 个)
+
+gNB 制式的 KPI 分为 2 个类别：
+
+#### 8.2.1 业务量类 (Traffic) — 4 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | gnbPdcpUpOctDL | KPI.PdcpUpOctDL | GB | `C010030006/1000/1000` |
+| 2 | gnbPdcpUpOctUL | KPI.PdcpUpOctUL | GB | `C010030005/1000/1000` |
+| 3 | gnbThroughputDL | Throughput DL | Mbps | `C010030006*8/#period/1000` |
+| 4 | gnbThroughputUL | Throughput UL | Mbps | `C010030005*8/#period/1000` |
+
+#### 8.2.2 使用率类 (Utilization) — 2 个
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | gnbDownlinkPRBUtilizationRate | Downlink PRB Utilization Rate | % | `KGNB0506` |
+| 2 | gnbUplinkPRBUtilizationRate | Uplink PRB Utilization Rate | % | `KGNB0505` |
+
+---
+
+### 8.3 GSM KPI 指标 (3 个)
+
+GSM 制式的 KPI 分为 3 个类别（每类 1 个）：
+
+| # | 代码 | 标题 | 单位 | 计算公式 |
+|---|------|------|:----:|---------|
+| 1 | gsmCallSetupSuccRate | KPI.CallSetupSuccRate | % | `KGSM0102` |
+| 2 | gsmCallDropRate | KPI.CallDropRate | % | `KGSM0103` |
+| 3 | gsmHandoverSuccessRate | KPI.HandoverSuccessRate | % | `KGSM0101` |
+
+---
+
+### 8.4 KPI 指标汇总
+
+| 制式 | 业务量 | 可用性 | 使用率 | 接入性 | 保持性 | 移动性 | **总计** |
+|:----:|:------:|:------:|:------:|:------:|:------:|:------:|:--------:|
+| **eNB** | 4 | 1 | 2 | 4 | 1 | 4 | **16** |
+| **gNB** | 4 | - | 2 | - | - | - | **6** |
+| **GSM** | - | - | - | 1 | 1 | 1 | **3** |
+| **合计** | **8** | **1** | **4** | **5** | **2** | **5** | **25** |
+
+---
+
+### 8.5 KPI 数据 API
+
+| 制式 | API 端点 |
+|------|---------|
+| eNB | `POST /pm/template/queryStatisKPIChartData.action` |
+| gNB | `POST /gnb/pm/template/queryStatisKPIChartData.action` |
+| GSM | `POST /pm/template/queryGSMStatisKPIChartData.action` |
+
+**请求参数**：
+- `kpiIdList`: KPI 计算公式（如 `K900010006`）
+- `period`: 时间粒度（`min`/`hour`/`day`/`week`）
+- `startTime` / `endTime`: 时间范围
+
