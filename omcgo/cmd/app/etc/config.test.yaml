@@ -1,7 +1,7 @@
 server:
   host: "0.0.0.0"
-  port: 8080
-  tls_port: 8443
+  port: 8081
+  tls_port: 8444
   grpc_port: 50051
   tls:
     enabled: false
