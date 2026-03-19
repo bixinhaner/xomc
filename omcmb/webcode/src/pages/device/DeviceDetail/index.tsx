@@ -40,8 +40,86 @@ const SEVERITY_COLOR: Record<string, string> = {
   none: 'default',
 };
 
-// Mock KPI trend data (7 days)
-function generateTrendDays() {
+// ─── KPI 指标配置 ────────────────────────────────────────────────────────
+
+interface KPIConfig {
+  key: string;
+  label: string;
+  unit: string;
+  category: string;
+}
+
+// KPI 类别
+const KPI_CATEGORIES: Record<string, string> = {
+  traffic: '业务量',
+  availability: '可用性',
+  utilization: '使用率',
+  accessibility: '接入性',
+  retainability: '保持性',
+  mobility: '移动性',
+};
+
+// eNB KPI 配置 (16 项)
+const ENB_KPI_CONFIG: KPIConfig[] = [
+  // 业务量 (4)
+  { key: 'enbTotalDataVolumeDL', label: '下行总数据量', unit: 'GB', category: 'traffic' },
+  { key: 'enbTotalDataVolumeUL', label: '上行总数据量', unit: 'GB', category: 'traffic' },
+  { key: 'enbThroughputDL', label: '下行吞吐率', unit: 'Mbps', category: 'traffic' },
+  { key: 'enbThroughputUL', label: '上行吞吐率', unit: 'Mbps', category: 'traffic' },
+  // 可用性 (1)
+  { key: 'enbCellAvailable', label: '小区可用率', unit: '%', category: 'availability' },
+  // 使用率 (2)
+  { key: 'enbDownlinkPRBUtilizationRate', label: '下行 PRB 利用率', unit: '%', category: 'utilization' },
+  { key: 'enbUplinkPRBUtilizationRate', label: '上行 PRB 利用率', unit: '%', category: 'utilization' },
+  // 接入性 (4)
+  { key: 'enbWirelessSetupSuccessRate', label: '无线接通率', unit: '%', category: 'accessibility' },
+  { key: 'enbRrcSetupSuccessRate', label: 'RRC 建立成功率', unit: '%', category: 'accessibility' },
+  { key: 'enbERABSetupSuccessRate', label: 'ERAB 建立成功率', unit: '%', category: 'accessibility' },
+  { key: 'enbCsfbSuccessRate', label: 'CSFB 成功率', unit: '%', category: 'accessibility' },
+  // 保持性 (1)
+  { key: 'enbERABDropRate', label: 'ERAB 掉话率', unit: '%', category: 'retainability' },
+  // 移动性 (4)
+  { key: 'enbHoIntraEnbOutSuccRate', label: '站内切换出成功率', unit: '%', category: 'mobility' },
+  { key: 'enbHoIntraEnbInSuccRate', label: '站内切换入成功率', unit: '%', category: 'mobility' },
+  { key: 'enbHoInterEnbOutSuccRate', label: '站间切换出成功率', unit: '%', category: 'mobility' },
+  { key: 'enbHoInterEnbInSuccRate', label: '站间切换入成功率', unit: '%', category: 'mobility' },
+];
+
+// gNB KPI 配置 (6 项)
+const GNB_KPI_CONFIG: KPIConfig[] = [
+  // 业务量 (4)
+  { key: 'gnbPdcpUpOctDL', label: '下行 PDCP 数据量', unit: 'GB', category: 'traffic' },
+  { key: 'gnbPdcpUpOctUL', label: '上行 PDCP 数据量', unit: 'GB', category: 'traffic' },
+  { key: 'gnbThroughputDL', label: '下行吞吐率', unit: 'Mbps', category: 'traffic' },
+  { key: 'gnbThroughputUL', label: '上行吞吐率', unit: 'Mbps', category: 'traffic' },
+  // 使用率 (2)
+  { key: 'gnbDownlinkPRBUtilizationRate', label: '下行 PRB 利用率', unit: '%', category: 'utilization' },
+  { key: 'gnbUplinkPRBUtilizationRate', label: '上行 PRB 利用率', unit: '%', category: 'utilization' },
+];
+
+// GSM KPI 配置 (3 项)
+const GSM_KPI_CONFIG: KPIConfig[] = [
+  { key: 'gsmCallSetupSuccRate', label: '呼叫建立成功率', unit: '%', category: 'accessibility' },
+  { key: 'gsmCallDropRate', label: '掉话率', unit: '%', category: 'retainability' },
+  { key: 'gsmHandoverSuccessRate', label: '切换成功率', unit: '%', category: 'mobility' },
+];
+
+// 根据 networkType 获取 KPI 配置
+const getKPIConfig = (networkType: string): KPIConfig[] => {
+  switch (networkType) {
+    case 'eNB':
+      return ENB_KPI_CONFIG;
+    case 'gNB':
+      return GNB_KPI_CONFIG;
+    case 'GSM':
+      return GSM_KPI_CONFIG;
+    default:
+      return [];
+  }
+};
+
+// 生成最近7天日期标签
+function generateTrendDays(): string[] {
   const days: string[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
@@ -51,12 +129,31 @@ function generateTrendDays() {
   return days;
 }
 
-const MOCK_XDATA = generateTrendDays();
-const MOCK_KPI_SERIES = [
-  { name: 'CPU(%)', data: [45, 52, 48, 61, 55, 58, 53], color: 'var(--color-primary-600)' },
-  { name: 'Memory(%)', data: [62, 65, 60, 68, 63, 67, 64], color: '#52C41A' },
-  { name: 'Temp(C)', data: [38, 40, 37, 42, 39, 41, 40], color: '#FA8C16' },
+const TREND_XDATA = generateTrendDays();
+
+// 预定义颜色数组
+const CHART_COLORS = [
+  'var(--color-primary-600)',
+  '#52C41A',
+  '#FA8C16',
+  '#722ED1',
+  '#13C2C2',
+  '#EB2F96',
+  '#1890FF',
+  '#FAAD14',
 ];
+
+// 根据KPI配置生成类别趋势数据
+const generateCategoryTrendSeries = (kpis: KPIConfig[]) => {
+  const randomData = (base: number = 50, range: number = 40) =>
+    Array.from({ length: 7 }, () => Math.floor(Math.random() * range) + base);
+
+  return kpis.map((kpi, index) => ({
+    name: kpi.label,
+    data: randomData(),
+    color: CHART_COLORS[index % CHART_COLORS.length],
+  }));
+};
 
 const MOCK_CONFIG_PARAMS = [
   { key: 'heartbeatInterval', name: 'heartbeatInterval', value: '30', unit: 's', category: 'Connection' },
@@ -522,42 +619,182 @@ export default function DeviceDetail() {
               label: 'KPI',
               children: (
                 <div style={{ padding: '0 0 16px' }}>
-                  <Card size="small" title="KPI" style={{ marginBottom: 16 }}>
-                    <LineChart
-                      title=""
-                      xData={MOCK_XDATA}
-                      series={MOCK_KPI_SERIES}
-                      height={300}
-                      areaFill
-                    />
-                  </Card>
-                  <Row gutter={[16, 16]}>
-                    {[
-                      { label: 'CPU', value: '53%', color: 'var(--color-primary-600)' },
-                      { label: 'Memory', value: '64%', color: '#52C41A' },
-                      { label: 'Disk', value: '45%', color: '#722ED1' },
-                      { label: 'Temp', value: '40C', color: '#FA8C16' },
-                      { label: 'Uplink', value: '12.3 Mbps', color: '#13C2C2' },
-                      { label: 'Downlink', value: '45.6 Mbps', color: '#EB2F96' },
-                    ].map(({ label, value, color }) => (
-                      <Col key={label} xs={12} sm={8} md={6}>
-                        <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
-                          <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-                            {label}
-                          </Text>
-                          <Text strong style={{ fontSize: 20, color }}>
-                            {value}
-                          </Text>
-                        </Card>
-                      </Col>
-                    ))}
-                  </Row>
+                  {(() => {
+                    const networkType = device.networkType ?? '';
+                    const kpiConfig = getKPIConfig(networkType);
+
+                    if (kpiConfig.length === 0) {
+                      return (
+                        <Alert
+                          type="info"
+                          message={t('common.noData')}
+                          description={`暂无 ${networkType || '未知制式'} 的 KPI 指标配置`}
+                          showIcon
+                        />
+                      );
+                    }
+
+                    // 按类别分组
+                    const groupedKPIs = kpiConfig.reduce((acc, kpi) => {
+                      const category = kpi.category;
+                      if (!acc[category]) {
+                        acc[category] = [];
+                      }
+                      acc[category].push(kpi);
+                      return acc;
+                    }, {} as Record<string, KPIConfig[]>);
+
+                    // 类别显示顺序
+                    const categoryOrder = ['traffic', 'availability', 'utilization', 'accessibility', 'retainability', 'mobility'];
+
+                    return categoryOrder
+                      .filter((cat) => groupedKPIs[cat])
+                      .map((category) => {
+                        const categoryKPIs = groupedKPIs[category];
+                        const trendSeries = generateCategoryTrendSeries(categoryKPIs);
+
+                        return (
+                          <div key={category} style={{ marginBottom: 24 }}>
+                            <Divider orientation="left" style={{ margin: '0 0 16px' }}>
+                              <Text strong style={{ fontSize: 14 }}>{KPI_CATEGORIES[category] || category}</Text>
+                            </Divider>
+
+                            {/* 类别趋势图 */}
+                            <Card size="small" style={{ marginBottom: 16 }}>
+                              <LineChart
+                                title=""
+                                xData={TREND_XDATA}
+                                series={trendSeries}
+                                height={220}
+                                areaFill
+                              />
+                            </Card>
+
+                            {/* KPI 卡片 */}
+                            <Row gutter={[16, 16]}>
+                              {categoryKPIs.map((kpi) => {
+                                // TODO: 从实际数据获取 KPI 值，目前显示占位
+                                const kpiValue = (device as Record<string, unknown>)[kpi.key];
+                                const displayValue = kpiValue !== undefined && kpiValue !== null
+                                  ? `${kpiValue}`
+                                  : '-';
+
+                                return (
+                                  <Col key={kpi.key} xs={12} sm={8} md={6} lg={4}>
+                                    <Card
+                                      size="small"
+                                      styles={{ body: { padding: '12px 16px' } }}
+                                      hoverable
+                                    >
+                                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                                        {kpi.label}
+                                      </Text>
+                                      <Text strong style={{ fontSize: 18 }}>
+                                        {displayValue}
+                                      </Text>
+                                      {displayValue !== '-' && (
+                                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
+                                          {kpi.unit}
+                                        </Text>
+                                      )}
+                                    </Card>
+                                  </Col>
+                                );
+                              })}
+                            </Row>
+                          </div>
+                        );
+                      });
+                  })()}
+                </div>
+              ),
+            },
+            {
+              key: 'license',
+              label: t('nav.license.list').replace('管理', '').trim(),
+              children: (
+                <div style={{ padding: '0 0 16px' }}>
+                  <Table
+                    size="small"
+                    dataSource={[
+                      {
+                        key: '1',
+                        version: 'V2.1.0',
+                        generatedTime: '2025-01-15 10:30:00',
+                        mode: '永久',
+                        featureId: 'BASIC-001',
+                        description: '基础功能授权',
+                        capacity: '不限',
+                        expiryDate: '永久',
+                        remainingDays: '-',
+                      },
+                      {
+                        key: '2',
+                        version: 'V2.1.0',
+                        generatedTime: '2025-01-15 10:30:00',
+                        mode: '时间限制',
+                        featureId: 'HALOB-001',
+                        description: 'HaloB License',
+                        capacity: '100',
+                        expiryDate: '2027-12-31',
+                        remainingDays: 652,
+                      },
+                      {
+                        key: '3',
+                        version: 'V2.1.0',
+                        generatedTime: '2025-06-01 14:20:00',
+                        mode: '时间限制',
+                        featureId: '5GNR-001',
+                        description: '5G NR 授权',
+                        capacity: '50',
+                        expiryDate: '2027-06-30',
+                        remainingDays: 468,
+                      },
+                      {
+                        key: '4',
+                        version: 'V1.5.0',
+                        generatedTime: '2024-12-10 09:00:00',
+                        mode: '时间限制',
+                        featureId: 'LTE-ADV-001',
+                        description: 'LTE Advanced 功能',
+                        capacity: '200',
+                        expiryDate: '2026-06-30',
+                        remainingDays: 103,
+                      },
+                    ]}
+                    rowKey="key"
+                    pagination={false}
+                    scroll={{ x: 1100 }}
+                    columns={[
+                      { title: 'License版本', dataIndex: 'version', key: 'version', width: 100, fixed: 'left' },
+                      { title: '生成时间', dataIndex: 'generatedTime', key: 'generatedTime', width: 160 },
+                      { title: '模式', dataIndex: 'mode', key: 'mode', width: 100, render: (v: string) => <Tag color={v === '永久' ? 'success' : 'processing'}>{v}</Tag> },
+                      { title: '特性ID', dataIndex: 'featureId', key: 'featureId', width: 120, render: (v: string) => <Text style={{ fontFamily: 'monospace' }}>{v}</Text> },
+                      { title: '描述', dataIndex: 'description', key: 'description', width: 150 },
+                      { title: '数量', dataIndex: 'capacity', key: 'capacity', width: 80 },
+                      { title: '有效期', dataIndex: 'expiryDate', key: 'expiryDate', width: 120 },
+                      {
+                        title: '剩余天数',
+                        dataIndex: 'remainingDays',
+                        key: 'remainingDays',
+                        width: 100,
+                        render: (v: number | string) => {
+                          if (v === '-') return <Text type="secondary">-</Text>;
+                          const days = Number(v);
+                          let color = 'success';
+                          if (days <= 30) color = 'error';
+                          else if (days <= 90) color = 'warning';
+                          return <Tag color={color}>{days} 天</Tag>;
+                        },
+                      },
+                    ]}
+                  />
                 </div>
               ),
             },
             {
               key: 'config',
-              label: t('table.description'),
+              label: '简易开站',
               children: (
                 <div style={{ padding: '0 0 16px' }}>
                   <Table
@@ -571,43 +808,6 @@ export default function DeviceDetail() {
                       { title: t('table.result'), dataIndex: 'value', key: 'value', width: 150, render: (v: string) => <Text strong>{v}</Text> },
                       { title: t('table.type'), dataIndex: 'unit', key: 'unit', width: 80 },
                       { title: t('table.vendor'), dataIndex: 'category', key: 'category', width: 120, render: (v: string) => <Tag>{v}</Tag> },
-                    ]}
-                  />
-                </div>
-              ),
-            },
-            {
-              key: 'license',
-              label: t('nav.license.list').replace('管理', '').trim(),
-              children: (
-                <div style={{ padding: '0 0 16px' }}>
-                  <Table
-                    size="small"
-                    dataSource={[
-                      { key: 'basic', name: '基础功能授权', status: 'active', expiryDate: '永久', capacity: '不限', used: 128 },
-                      { key: 'halob', name: 'HaloB License', status: 'active', expiryDate: '2027-12-31', capacity: '100', used: 45 },
-                      { key: '5g', name: '5G NR 授权', status: 'active', expiryDate: '2027-06-30', capacity: '50', used: 12 },
-                    ]}
-                    rowKey="key"
-                    pagination={false}
-                    columns={[
-                      { title: t('license.licenseName'), dataIndex: 'name', key: 'name', width: 200 },
-                      {
-                        title: t('status.status'),
-                        dataIndex: 'status',
-                        key: 'status',
-                        width: 100,
-                        render: (v: string) => <Tag color={v === 'active' ? 'success' : 'warning'}>{v === 'active' ? t('status.active') : t('status.inactive')}</Tag>,
-                      },
-                      { title: t('license.expiryDate'), dataIndex: 'expiryDate', key: 'expiryDate', width: 120 },
-                      { title: t('license.capacity'), dataIndex: 'capacity', key: 'capacity', width: 100 },
-                      {
-                        title: t('license.used'),
-                        dataIndex: 'used',
-                        key: 'used',
-                        width: 100,
-                        render: (_v: number, record) => `${record.used} / ${record.capacity}`,
-                      },
                     ]}
                   />
                 </div>
