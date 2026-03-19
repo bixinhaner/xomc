@@ -6,6 +6,7 @@ import {
   Card,
   Col,
   Descriptions,
+  Divider,
   Row,
   Skeleton,
   Space,
@@ -17,9 +18,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined,
-  EditOutlined,
   ReloadOutlined,
-  WifiOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -29,6 +28,7 @@ import { useDeviceBySn } from '@/hooks/api/useDevices';
 import { useCurrentAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@/types/alarm';
+import type { Device } from '@/types/device';
 
 const { Title, Text } = Typography;
 
@@ -65,9 +65,186 @@ const MOCK_CONFIG_PARAMS = [
   { key: 'qosLevel', name: 'QoS', value: '3', unit: '-', category: 'Network' },
   { key: 'logLevel', name: 'logLevel', value: 'INFO', unit: '-', category: 'System' },
   { key: 'ntpServer', name: 'NTP Server', value: '10.0.0.1', unit: '-', category: 'System' },
-  { key: 'snmpCommunity', name: 'SNMP Community', value: 'public', unit: '-', category: 'Alarm' },
-  { key: 'alarmThreshold', name: 'alarmThreshold', value: '80', unit: '%', category: 'Alarm' },
 ];
+
+// ─── 字段定义组件 ────────────────────────────────────────────────────────
+
+interface FieldItem {
+  key: string;
+  label: string;
+  render: (device: Device) => React.ReactNode;
+}
+
+interface FieldGroup {
+  title: string;
+  fields: FieldItem[];
+}
+
+// 格式化时间
+const fmtTime = (v: string | undefined | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-');
+
+// 格式化时长(秒)
+const fmtDuration = (seconds: number | undefined | null) => {
+  if (!seconds) return '-';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+};
+
+// 状态渲染
+const renderStatusTag = (value: string | undefined, map: Record<string, { label: string; color: string }>) => {
+  if (!value) return '-';
+  const entry = map[value];
+  if (!entry) return value;
+  return <Tag color={entry.color}>{entry.label}</Tag>;
+};
+
+// ─── 公共字段组 ────────────────────────────────────────────────────────
+
+const getCommonFields = (t: ReturnType<typeof useT>): FieldGroup => ({
+  title: t('device.group.basic'),
+  fields: [
+    { key: 'sn', label: t('device.sn'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.sn}</Text> },
+    { key: 'name', label: t('device.hostName'), render: (d) => d.name || '-' },
+    { key: 'networkType', label: t('device.radioMode'), render: (d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag> },
+    { key: 'productType', label: t('device.productType'), render: (d) => d.productType || '-' },
+    { key: 'deviceModel', label: t('device.model'), render: (d) => d.deviceModel || '-' },
+    { key: 'softwareVersion', label: t('device.softwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.softwareVersion || '-'}</Text> },
+    { key: 'firmwareVersion', label: t('device.firmwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.firmwareVersion || '-'}</Text> },
+    { key: 'macAddress', label: t('device.macAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.macAddress || '-'}</Text> },
+    { key: 'groupName', label: t('device.groupName'), render: (d) => d.groupName || '-' },
+    { key: 'ipAddress', label: t('device.ipAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipAddress || '-'}</Text> },
+    { key: 'connStatus', label: t('device.connStatus'), render: (d) => <StatusIndicator status={d.connStatus === 'online' ? 'online' : 'offline'} /> },
+    { key: 'opState', label: t('device.opState'), render: (d) => renderStatusTag(d.opState, { '1': { label: t('status.active'), color: 'success' }, '0': { label: t('status.inactive'), color: 'error' }, active: { label: t('status.active'), color: 'success' }, inactive: { label: t('status.inactive'), color: 'error' } }) },
+    { key: 'rfStatus', label: t('device.rfStatus'), render: (d) => renderStatusTag(d.rfStatus, { on: { label: t('status.rfOn'), color: 'success' }, off: { label: t('status.rfOff'), color: 'error' }, '1': { label: t('status.rfOn'), color: 'success' }, '0': { label: t('status.rfOff'), color: 'error' } }) },
+    { key: 'ueCount', label: t('device.ueCount'), render: (d) => d.ueCount ?? '-' },
+    { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => d.syncStatus || '-' },
+    { key: 'onlineTime', label: t('device.onlineTime'), render: (d) => fmtTime(d.onlineTime) },
+    { key: 'offlineTime', label: t('device.offlineTime'), render: (d) => fmtTime(d.offlineTime) },
+    { key: 'onlineDuration', label: t('device.onlineDuration'), render: (d) => fmtDuration(d.onlineDuration) },
+    { key: 'upTime', label: t('device.upTime'), render: (d) => fmtDuration(d.upTime) },
+    { key: 'firstOnlineTime', label: t('device.firstOnlineTime'), render: (d) => fmtTime(d.firstOnlineTime) },
+    { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
+    { key: 'siteName', label: t('device.siteName'), render: (d) => d.siteName || '-' },
+    { key: 'remark', label: t('device.remark'), render: (d) => d.remark || '-' },
+    { key: 'longitude', label: t('device.longitude'), render: (d) => d.longitude?.toFixed(4) || '-' },
+    { key: 'latitude', label: t('device.latitude'), render: (d) => d.latitude?.toFixed(4) || '-' },
+    { key: 'gpsHeight', label: t('device.gpsHeight'), render: (d) => d.gpsHeight ?? '-' },
+  ],
+});
+
+// ─── eNB+gNB 共享字段组 ────────────────────────────────────────────────
+
+const getEnbGnbSharedFields = (t: ReturnType<typeof useT>): FieldGroup => ({
+  title: t('device.group.enbGnbShared'),
+  fields: [
+    { key: 'pci', label: 'PCI', render: (d) => d.pci ?? '-' },
+    { key: 'tac', label: 'TAC', render: (d) => d.tac ?? '-' },
+    { key: 'band', label: 'Band', render: (d) => d.band ?? '-' },
+    { key: 'dlEarfcn', label: t('device.dlEarfcn'), render: (d) => d.dlEarfcn ?? '-' },
+    { key: 'ulEarfcn', label: t('device.ulEarfcn'), render: (d) => d.ulEarfcn ?? '-' },
+    { key: 'networkModel', label: t('device.networkModel'), render: (d) => d.networkModel ?? '-' },
+    { key: 'txPower', label: 'Tx Power', render: (d) => d.txPower ?? '-' },
+    { key: 'halobFlag', label: 'HaloB', render: (d) => <Tag color={d.halobFlag ? 'success' : 'default'}>{d.halobFlag ? t('status.enabled') : t('status.disabled')}</Tag> },
+    { key: 'adminState', label: 'Admin State', render: (d) => renderStatusTag(String(d.adminState), { '1': { label: 'Locked', color: 'warning' }, '2': { label: 'Unlocked', color: 'success' }, '3': { label: 'ShuttingDown', color: 'error' } }) },
+    { key: 'ipsecAddr', label: t('device.ipsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipsecAddr || '-'}</Text> },
+  ],
+});
+
+// ─── eNB 独有字段组 ────────────────────────────────────────────────────────
+
+const getEnbOnlyFields = (t: ReturnType<typeof useT>): FieldGroup => ({
+  title: t('device.group.enbOnly'),
+  fields: [
+    { key: 'enbId', label: 'eNodeB ID', render: (d) => d.enbId ?? '-' },
+    { key: 'cellId', label: t('device.cellId'), render: (d) => d.cellId ?? '-' },
+    { key: 'eci', label: 'ECI', render: (d) => d.eci ?? '-' },
+    { key: 'plmnId', label: 'PLMN', render: (d) => d.plmnId ?? '-' },
+    { key: 'subframeAssignment', label: t('device.subframeAssignment'), render: (d) => d.subframeAssignment ?? '-' },
+    { key: 'specialSubframe', label: t('device.specialSubframe'), render: (d) => d.specialSubframe ?? '-' },
+    { key: 'rootIndex', label: t('device.rootIndex'), render: (d) => d.rootIndex ?? '-' },
+    { key: 'siteId', label: 'Site ID', render: (d) => d.siteId ?? '-' },
+    { key: 'bandwidth', label: t('device.bandwidth'), render: (d) => d.bandwidth ?? '-' },
+    { key: 'mmeStatus', label: t('device.mmeStatus'), render: (d) => d.mmeStatus ?? '-' },
+    { key: 'pmReportStatus', label: t('device.pmReportStatus'), render: (d) => d.pmReportStatus ?? '-' },
+    { key: 'cpeCount', label: t('device.cpeCount'), render: (d) => d.cpeCount ?? '-' },
+    { key: 'lockStatus', label: t('device.lockStatus'), render: (d) => renderStatusTag(d.lockStatus, { locked: { label: t('status.locked'), color: 'warning' }, unlocked: { label: t('status.unlocked'), color: 'success' } }) },
+    { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
+    { key: 'serviceStatus', label: t('device.serviceStatus'), render: (d) => d.serviceStatus ?? '-' },
+    { key: 'validity', label: t('device.validity'), render: (d) => d.validity ?? '-' },
+    { key: 'gpsVersion', label: t('device.gpsVersion'), render: (d) => d.gpsVersion ?? '-' },
+    { key: 'rom', label: 'ROM', render: (d) => d.rom ?? '-' },
+    { key: 'mmepoolIpsecAddr', label: t('device.mmepoolIpsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.mmepoolIpsecAddr || '-'}</Text> },
+    { key: 'mechanicalDowntilt', label: t('device.mechanicalDowntilt'), render: (d) => d.mechanicalDowntilt ?? '-' },
+    { key: 'electronicDowntilt', label: t('device.electronicDowntilt'), render: (d) => d.electronicDowntilt ?? '-' },
+    { key: 'verticalBeamWidth', label: t('device.verticalBeamWidth'), render: (d) => d.verticalBeamWidth ?? '-' },
+    { key: 'horizontalAzimuth', label: t('device.horizontalAzimuth'), render: (d) => d.horizontalAzimuth ?? '-' },
+    { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
+  ],
+});
+
+// ─── gNB 独有字段组 ────────────────────────────────────────────────────────
+
+const getGnbOnlyFields = (t: ReturnType<typeof useT>): FieldGroup => ({
+  title: t('device.group.gnbOnly'),
+  fields: [
+    { key: 'gnbId', label: 'gNB ID', render: (d) => d.gnbId ?? '-' },
+    { key: 'nrCellId', label: 'NR Cell ID', render: (d) => d.nrCellId ?? '-' },
+    { key: 'amfStatus', label: t('device.amfStatus'), render: (d) => d.amfStatus ?? '-' },
+    { key: 'multiPlmnEnable', label: 'Multi PLMN', render: (d) => renderStatusTag(d.multiPlmnEnable, { enabled: { label: t('status.enabled'), color: 'success' }, disabled: { label: t('status.disabled'), color: 'default' } }) },
+    { key: 'euCount', label: t('device.euCount'), render: (d) => d.euCount ?? '-' },
+    { key: 'ruCount', label: t('device.ruCount'), render: (d) => d.ruCount ?? '-' },
+    { key: 'rollbackVersion', label: t('device.rollbackVersion'), render: (d) => d.rollbackVersion ?? '-' },
+    { key: 'sasParam', label: t('device.sasParam'), render: (d) => d.sasParam ?? '-' },
+    { key: 'euRu', label: t('device.euRu'), render: (d) => d.euRu ?? '-' },
+    { key: 'halobLicense', label: t('device.halobLicense'), render: (d) => d.halobLicense ?? '-' },
+    { key: 'energySaving', label: t('device.energySaving'), render: (d) => d.energySaving ?? '-' },
+    { key: 'gnbTopoCellmgr', label: t('device.gnbTopoCellmgr'), render: (d) => d.gnbTopoCellmgr ?? '-' },
+    { key: 'sslCertValidity', label: t('device.sslCertValidity'), render: (d) => d.sslCertValidity ?? '-' },
+  ],
+});
+
+// ─── GSM 独有字段组 ────────────────────────────────────────────────────────
+
+const getGsmOnlyFields = (t: ReturnType<typeof useT>): FieldGroup => ({
+  title: t('device.group.gsmOnly'),
+  fields: [
+    { key: 'lac', label: 'LAC', render: (d) => d.lac ?? '-' },
+    { key: 'arfcn', label: t('device.arfcn'), render: (d) => d.arfcn ?? '-' },
+    { key: 'uplinkFrequency', label: t('device.uplinkFrequency'), render: (d) => d.uplinkFrequency ? `${d.uplinkFrequency} MHz` : '-' },
+    { key: 'downlinkFrequency', label: t('device.downlinkFrequency'), render: (d) => d.downlinkFrequency ? `${d.downlinkFrequency} MHz` : '-' },
+    { key: 'bscLinkStatus', label: t('device.bscLinkStatus'), render: (d) => renderStatusTag(d.bscLinkStatus, { connected: { label: t('status.connected'), color: 'success' }, disconnected: { label: t('status.disconnected'), color: 'error' } }) },
+    { key: 'bscSelect', label: 'BSC Select', render: (d) => d.bscSelect === '0' ? t('device.bscPrimary') : d.bscSelect === '1' ? t('device.bscBackup') : d.bscSelect ?? '-' },
+    { key: 'bscSerialNumber', label: t('device.bscSerialNumber'), render: (d) => d.bscSerialNumber ?? '-' },
+    { key: 'btsNum', label: t('device.btsNum'), render: (d) => d.btsNum ?? '-' },
+    { key: 'ipaUnitId', label: 'IPA Unit ID', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipaUnitId ?? '-'}</Text> },
+    { key: 'omlRemoteIp', label: 'OML Remote IP', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIp ?? '-'}</Text> },
+    { key: 'omlRemoteIpBak', label: 'OML Remote IP Bak', render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.omlRemoteIpBak ?? '-'}</Text> },
+    { key: 'gpsSatelliteCount', label: t('device.gpsSatelliteCount'), render: (d) => d.gpsSatelliteCount ?? '-' },
+  ],
+});
+
+// ─── 渲染字段组 ────────────────────────────────────────────────────────
+
+const renderFieldGroup = (group: FieldGroup, device: Device) => (
+  <Descriptions
+    key={group.title}
+    title={group.title}
+    bordered
+    column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
+    size="small"
+    style={{ marginBottom: 16 }}
+  >
+    {group.fields.map((field) => (
+      <Descriptions.Item key={field.key} label={field.label}>
+        {field.render(device)}
+      </Descriptions.Item>
+    ))}
+  </Descriptions>
+);
+
+// ─── 主组件 ─────────────────────────────────────────────────────────────
 
 export default function DeviceDetail() {
   const t = useT();
@@ -141,6 +318,25 @@ export default function DeviceDetail() {
     ],
     [t, SEVERITY_LABEL]
   );
+
+  // 根据设备制式获取字段组
+  const detailGroups = useMemo((): FieldGroup[] => {
+    if (!device) return [];
+    const networkType = device.networkType;
+    const groups: FieldGroup[] = [getCommonFields(t)];
+
+    if (networkType === 'eNB') {
+      groups.push(getEnbGnbSharedFields(t));
+      groups.push(getEnbOnlyFields(t));
+    } else if (networkType === 'gNB') {
+      groups.push(getEnbGnbSharedFields(t));
+      groups.push(getGnbOnlyFields(t));
+    } else if (networkType === 'GSM') {
+      groups.push(getGsmOnlyFields(t));
+    }
+
+    return groups;
+  }, [device, t]);
 
   if (isLoading) {
     return (
@@ -217,65 +413,8 @@ export default function DeviceDetail() {
               key: 'basic',
               label: t('common.detail'),
               children: (
-                <div style={{ padding: '0 0 16px' }}>
-                  <Row gutter={[16, 16]}>
-                    <Col span={24}>
-                      <Descriptions
-                        title={t('common.detail')}
-                        bordered
-                        column={{ xs: 1, sm: 2, md: 3 }}
-                        size="small"
-                      >
-                        <Descriptions.Item label={t('device.sn')}>
-                          <Text style={{ fontFamily: 'monospace' }}>{device.sn}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('device.name')}>{device.name}</Descriptions.Item>
-                        <Descriptions.Item label={t('device.vendor')}>{device.vendor}</Descriptions.Item>
-                        <Descriptions.Item label={t('device.productType')}>{device.productType}</Descriptions.Item>
-                        <Descriptions.Item label={t('device.networkType')}>{device.networkType}</Descriptions.Item>
-                        <Descriptions.Item label={t('device.model')}>{device.deviceModel}</Descriptions.Item>
-                        <Descriptions.Item label={t('device.connStatus')}>
-                          <StatusIndicator
-                            status={device.connStatus === 'online' ? 'online' : 'offline'}
-                          />
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('device.engStatus')}>
-                          <Tag color={device.engStatus === 'commissioned' ? 'success' : 'default'}>
-                            {ENG_STATUS_LABEL[device.engStatus] ?? device.engStatus}
-                          </Tag>
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('table.status')}>
-                          <Tag color={device.mgmtStatus === 'managed' ? 'processing' : 'default'}>
-                            {MGMT_STATUS_LABEL[device.mgmtStatus] ?? device.mgmtStatus}
-                          </Tag>
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('device.ipAddress')}>
-                          <Text style={{ fontFamily: 'monospace' }}>{device.ipAddress}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('table.description')}>
-                          <Text style={{ fontFamily: 'monospace' }}>{device.subnet}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('device.region')}>{device.region}</Descriptions.Item>
-                        <Descriptions.Item label={t('table.site')}>{device.site}</Descriptions.Item>
-                        <Descriptions.Item label={t('device.softwareVersion')}>
-                          <Text style={{ fontFamily: 'monospace' }}>{device.softwareVersion}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('device.lastOnline')}>
-                          {device.lastOnlineTime
-                            ? new Date(device.lastOnlineTime).toLocaleString('zh-CN')
-                            : '-'}
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('table.createTime')}>
-                          {device.createTime
-                            ? new Date(device.createTime).toLocaleString('zh-CN')
-                            : '-'}
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t('alarm.location')}>
-                          {device.longitude.toFixed(4)}, {device.latitude.toFixed(4)}
-                        </Descriptions.Item>
-                      </Descriptions>
-                    </Col>
-                  </Row>
+                <div style={{ padding: '16px 0' }}>
+                  {detailGroups.map((group) => renderFieldGroup(group, device))}
                 </div>
               ),
             },
@@ -359,16 +498,6 @@ export default function DeviceDetail() {
                       { title: t('table.result'), dataIndex: 'value', key: 'value', width: 150, render: (v: string) => <Text strong>{v}</Text> },
                       { title: t('table.type'), dataIndex: 'unit', key: 'unit', width: 80 },
                       { title: t('table.vendor'), dataIndex: 'category', key: 'category', width: 120, render: (v: string) => <Tag>{v}</Tag> },
-                      {
-                        title: t('table.operation'),
-                        key: 'actions',
-                        width: 80,
-                        render: () => (
-                          <Button type="link" size="small" icon={<EditOutlined />}>
-                            {t('common.edit')}
-                          </Button>
-                        ),
-                      },
                     ]}
                   />
                 </div>
