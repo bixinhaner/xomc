@@ -1,5 +1,5 @@
-import { useEffect, useCallback } from 'react';
-import { Outlet } from 'react-router-dom';
+import { useEffect, useCallback, useMemo } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import { useResponsive } from '@/hooks/useResponsive';
@@ -22,6 +22,12 @@ export default function AppShell() {
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
+  const location = useLocation();
+
+  // 判断是否隐藏任务面板（设备列表页面隐藏）
+  const hideTaskPanel = useMemo(() => {
+    return location.pathname === '/device/list' || location.pathname.startsWith('/device/list/');
+  }, [location.pathname]);
 
   // Auto-collapse sidebar on tablet
   useEffect(() => {
@@ -80,9 +86,11 @@ export default function AppShell() {
             <Outlet />
           </div>
         </main>
-        <div className={styles.taskPanel}>
-          <TaskPanel />
-        </div>
+        {!hideTaskPanel && (
+          <div className={styles.taskPanel}>
+            <TaskPanel />
+          </div>
+        )}
       </div>
 
       {/* Mobile sidebar drawer overlay */}
