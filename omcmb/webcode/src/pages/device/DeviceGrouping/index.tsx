@@ -1,45 +1,38 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
+  App,
   Button,
   Dropdown,
   Form,
   Input,
+  InputNumber,
   Modal,
-  Space,
+  Select,
   Tag,
   Tree,
   Typography,
-  message,
 } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
-  EyeOutlined,
   FolderAddOutlined,
   FolderOutlined,
+  FolderOutlined as MoveToGroupIcon,
   MoreOutlined,
   PlusOutlined,
+  RestOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
-import StatusIndicator from '@/components/StatusIndicator';
 import { useDeviceGroups, useDeviceList } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
-import type { Device } from '@/types/device';
+import type { Device, EngStatus } from '@/types/device';
 
 const { Title, Text } = Typography;
-
-const SEVERITY_COLOR: Record<string, string> = {
-  critical: 'red',
-  major: 'orange',
-  minor: 'gold',
-  warning: 'blue',
-  none: 'default',
-};
 
 function buildTreeData(
   groups: Array<{ id: string; name: string; parentId: string | null; deviceCount: number; description: string }>,
@@ -49,10 +42,56 @@ function buildTreeData(
 ): DataNode[] {
   const rootGroups = groups.filter((g) => g.parentId === null);
 
-  function buildNode(group: typeof groups[0]): DataNode {
+  function buildNode(group: typeof groups[0], isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
     // 二级节点（parentId === null）不可选择，三级节点可选择
     const isLevel2 = group.parentId === null;
+
+    // 一级节点只显示新增，其他节点显示完整菜单
+    const menuItems: MenuProps['items'] = isRootLevel
+      ? [
+          {
+            key: 'add-child',
+            label: t('common.add'),
+            icon: <FolderAddOutlined />,
+            onClick: (info) => {
+              info.domEvent.stopPropagation();
+              onContextMenu(`add-child:${group.id}`);
+            },
+          },
+        ]
+      : [
+          {
+            key: 'add-child',
+            label: t('common.add'),
+            icon: <FolderAddOutlined />,
+            onClick: (info) => {
+              info.domEvent.stopPropagation();
+              onContextMenu(`add-child:${group.id}`);
+            },
+          },
+          {
+            key: 'edit',
+            label: t('common.edit'),
+            icon: <EditOutlined />,
+            onClick: (info) => {
+              info.domEvent.stopPropagation();
+              onContextMenu(`edit:${group.id}`);
+            },
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            onClick: (info) => {
+              info.domEvent.stopPropagation();
+              onContextMenu(`delete:${group.id}`);
+            },
+          },
+        ];
+
     return {
       key: group.id,
       selectable: !isLevel2,
@@ -74,39 +113,7 @@ function buildTreeData(
             </Text>
           </span>
           <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'add-child',
-                  label: t('common.add'),
-                  icon: <FolderAddOutlined />,
-                  onClick: (info) => {
-                    info.domEvent.stopPropagation();
-                    onContextMenu(`add-child:${group.id}`);
-                  },
-                },
-                {
-                  key: 'edit',
-                  label: t('common.edit'),
-                  icon: <EditOutlined />,
-                  onClick: (info) => {
-                    info.domEvent.stopPropagation();
-                    onContextMenu(`edit:${group.id}`);
-                  },
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  label: t('common.delete'),
-                  icon: <DeleteOutlined />,
-                  danger: true,
-                  onClick: (info) => {
-                    info.domEvent.stopPropagation();
-                    onContextMenu(`delete:${group.id}`);
-                  },
-                },
-              ] as MenuProps['items'],
-            }}
+            menu={{ items: menuItems }}
             trigger={['click']}
           >
             <Button
@@ -120,37 +127,47 @@ function buildTreeData(
         </div>
       ),
       icon: null,
-      children: children.length > 0 ? children.map(buildNode) : undefined,
+      children: children.length > 0 ? children.map((child) => buildNode(child, false)) : undefined,
     };
   }
 
-  return rootGroups.map(buildNode);
+  return rootGroups.map((group) => buildNode(group, true));
 }
 
 export default function DeviceGrouping() {
   const t = useT();
-  const navigate = useNavigate();
+  const { modal, message } = App.useApp();
   const { data: groupsData, refetch: refetchGroups } = useDeviceGroups();
   const groups = groupsData ?? [];
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [groupSearchText, setGroupSearchText] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [parentIdForAdd, setParentIdForAdd] = useState<string | null>(null);
-  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  const [moveToGroupModalOpen, setMoveToGroupModalOpen] = useState(false);
+  const [editDeviceModalOpen, setEditDeviceModalOpen] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<Device | null>(null);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
+  const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
   const [addForm] = Form.useForm<{ name: string; description: string }>();
   const [editForm] = Form.useForm<{ name: string; description: string }>();
+  const [editDeviceForm] = Form.useForm<{
+    engStatus: EngStatus;
+    longitude: number;
+    latitude: number;
+    gpsHeight: number;
+  }>();
 
-  const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
-    critical: t('alarm.severity.critical'),
-    major: t('alarm.severity.major'),
-    minor: t('alarm.severity.minor'),
-    warning: t('alarm.severity.warning'),
-    none: t('alarm.severity.none'),
-  }), [t]);
+  // 设备安装状态选项
+  const ENG_STATUS_OPTIONS = useMemo(() => [
+    { label: t('device.engStatus.commissioned'), value: 'commissioned' },
+    { label: t('device.engStatus.uncommissioned'), value: 'uncommissioned' },
+    { label: t('device.engStatus.decommissioned'), value: 'decommissioned' },
+  ], [t]);
 
+  // 获取设备列表
   const queryParams = useMemo(
     () => ({ page: currentPage, pageSize, groupId: selectedGroupId ?? undefined } as Parameters<typeof useDeviceList>[0]),
     [currentPage, pageSize, selectedGroupId]
@@ -159,6 +176,27 @@ export default function DeviceGrouping() {
   const { data: deviceData, isLoading, refetch } = useDeviceList(queryParams);
   const devices: Device[] = deviceData?.items ?? [];
   const total = deviceData?.total ?? 0;
+
+  // 打开编辑设备弹窗
+  const handleEditDevice = useCallback((device: Device) => {
+    setEditingDevice(device);
+    editDeviceForm.setFieldsValue({
+      engStatus: device.engStatus,
+      longitude: device.longitude,
+      latitude: device.latitude,
+      gpsHeight: device.gpsHeight,
+    });
+    setEditDeviceModalOpen(true);
+  }, [editDeviceForm]);
+
+  // 保存设备修改
+  const handleSaveDevice = useCallback(async () => {
+    await editDeviceForm.validateFields();
+    // TODO: 调用 API 更新设备
+    message.success(t('common.operationSuccess'));
+    setEditDeviceModalOpen(false);
+    await refetch();
+  }, [editDeviceForm, message, t, refetch]);
 
   const selectedGroup = useMemo(
     () => groups.find((g) => g.id === selectedGroupId),
@@ -169,18 +207,16 @@ export default function DeviceGrouping() {
     (action: string) => {
       const [cmd, groupId] = action.split(':');
       if (cmd === 'add-child') {
-        setParentIdForAdd(groupId ?? null);
         addForm.resetFields();
         setAddModalOpen(true);
       } else if (cmd === 'edit') {
         const grp = groups.find((g) => g.id === groupId);
         if (grp) {
-          setEditGroupId(groupId ?? null);
           editForm.setFieldsValue({ name: grp.name, description: grp.description });
           setEditModalOpen(true);
         }
       } else if (cmd === 'delete') {
-        Modal.confirm({
+        modal.confirm({
           title: t('common.confirmDelete'),
           content: t('common.deleteConfirmMsg'),
           okText: t('common.confirmDelete'),
@@ -192,7 +228,7 @@ export default function DeviceGrouping() {
         });
       }
     },
-    [groups, addForm, editForm, refetchGroups, t]
+    [groups, addForm, editForm, refetchGroups, t, modal, message]
   );
 
   const treeData = useMemo(
@@ -200,83 +236,189 @@ export default function DeviceGrouping() {
     [groups, selectedGroupId, handleContextMenu, t]
   );
 
+  // 根据搜索文本过滤分组
+  const filteredGroups = useMemo(() => {
+    if (!groupSearchText.trim()) return groups;
+    const searchLower = groupSearchText.toLowerCase();
+    return groups.filter((g) => g.name.toLowerCase().includes(searchLower));
+  }, [groups, groupSearchText]);
+
+  const filteredTreeData = useMemo(
+    () => buildTreeData(filteredGroups, selectedGroupId, handleContextMenu, t),
+    [filteredGroups, selectedGroupId, handleContextMenu, t]
+  );
+
+  // 获取父级分组名称
+  const getParentName = useCallback((parentId: string | null): string => {
+    if (!parentId) return '';
+    const parent = groups.find((g) => g.id === parentId);
+    return parent?.name ?? '';
+  }, [groups]);
+
+  // 目标设备组选项（显示父级名称）
+  const targetGroupOptions = useMemo(() => {
+    return groups
+      .filter((g) => g.parentId !== null)
+      .map((g) => {
+        const parentName = getParentName(g.parentId);
+        return {
+          label: parentName ? `${parentName} / ${g.name}` : g.name,
+          value: g.id,
+        };
+      });
+  }, [groups, getParentName]);
+
   const handleAddGroup = useCallback(async () => {
     const values = await addForm.validateFields();
     // In a real app, call API to create group
-    void message.success(`${values.name}`);
+    message.success(`${values.name}`);
     setAddModalOpen(false);
     await refetchGroups();
-  }, [addForm, refetchGroups]);
+  }, [addForm, refetchGroups, message]);
 
   const handleEditGroup = useCallback(async () => {
     const values = await editForm.validateFields();
-    void message.success(`${values.name}`);
+    message.success(`${values.name}`);
     setEditModalOpen(false);
     await refetchGroups();
-  }, [editForm, refetchGroups]);
+  }, [editForm, refetchGroups, message]);
+
+  // 计算离线天数
+  const calculateOfflineDays = useCallback((lastOnlineTime: string): number => {
+    if (!lastOnlineTime) return 0;
+    const lastOnline = new Date(lastOnlineTime);
+    const now = new Date();
+    const diffMs = now.getTime() - lastOnline.getTime();
+    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+  }, []);
 
   const columns = useMemo(
     (): DataTableColumn<Device>[] => [
-      {
-        key: 'sn',
-        title: 'SN',
-        dataIndex: 'sn',
-        width: 150,
-        mono: true,
-        copyable: true,
-        render: (_val, record) => (
-          <Typography.Link
-            style={{ fontFamily: 'monospace', fontSize: 12 }}
-            onClick={() => void navigate(`/device/detail/${record.sn}`)}
-          >
-            {record.sn}
-          </Typography.Link>
-        ),
-      },
-      { key: 'name', title: t('device.name'), dataIndex: 'name', width: 160, ellipsis: true },
-      { key: 'vendor', title: t('device.vendor'), dataIndex: 'vendor', width: 90 },
-      { key: 'productType', title: t('device.productType'), dataIndex: 'productType', width: 90 },
-      {
-        key: 'connStatus',
-        title: t('device.connStatus'),
-        dataIndex: 'connStatus',
-        width: 100,
-        render: (_val, record) => (
-          <StatusIndicator status={record.connStatus === 'online' ? 'online' : 'offline'} />
-        ),
-      },
-      {
-        key: 'alarmLevel',
-        title: t('device.alarmLevel'),
-        dataIndex: 'alarmLevel',
-        width: 90,
-        render: (_val, record) => (
-          <Tag color={SEVERITY_COLOR[record.alarmLevel] ?? 'default'}>
-            {SEVERITY_LABEL[record.alarmLevel] ?? record.alarmLevel}
-          </Tag>
-        ),
-      },
-      { key: 'ipAddress', title: t('device.ipAddress'), dataIndex: 'ipAddress', width: 130, mono: true },
       {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
         width: 80,
-        fixed: 'right',
+        fixed: 'left',
         render: (_val, record) => (
           <Button
             type="link"
             size="small"
-            icon={<EyeOutlined />}
-            onClick={() => void navigate(`/device/detail/${record.sn}`)}
+            icon={<EditOutlined />}
+            onClick={() => handleEditDevice(record)}
           >
-            {t('common.detail')}
+            {t('common.edit')}
           </Button>
         ),
       },
+      {
+        key: 'engStatus',
+        title: t('device.installStatus'),
+        dataIndex: 'engStatus',
+        width: 100,
+        render: (val: EngStatus) => {
+          const statusMap: Record<EngStatus, { label: string; color: string }> = {
+            commissioned: { label: t('device.engStatus.commissioned'), color: 'green' },
+            uncommissioned: { label: t('device.engStatus.uncommissioned'), color: 'orange' },
+            decommissioned: { label: t('device.engStatus.decommissioned'), color: 'red' },
+          };
+          const { label, color } = statusMap[val] || { label: val, color: 'default' };
+          return <Tag color={color}>{label}</Tag>;
+        },
+      },
+      {
+        key: 'sn',
+        title: t('device.serialNumber'),
+        dataIndex: 'sn',
+        width: 150,
+        mono: true,
+        copyable: true,
+      },
+      { key: 'name', title: t('device.stationName'), dataIndex: 'name', width: 160, ellipsis: true },
+      { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true },
+      { key: 'groupName', title: t('device.groupName'), dataIndex: 'groupName', width: 140, ellipsis: true },
+      { key: 'longitude', title: t('device.longitude'), dataIndex: 'longitude', width: 100 },
+      { key: 'latitude', title: t('device.latitude'), dataIndex: 'latitude', width: 100 },
+      { key: 'gpsHeight', title: t('device.height'), dataIndex: 'gpsHeight', width: 80 },
+      {
+        key: 'offlineDays',
+        title: t('device.offlineDays'),
+        width: 100,
+        render: (_val, record) => {
+          if (record.connStatus === 'online') return '-';
+          return calculateOfflineDays(record.lastOnlineTime);
+        },
+      },
     ],
-    [navigate, t, SEVERITY_LABEL]
+    [t, calculateOfflineDays, handleEditDevice]
   );
+
+  // 批量操作
+  const batchActions = useMemo(() => [
+    {
+      key: 'moveToGroup',
+      label: t('device.batch.moveToGroup'),
+      icon: <MoveToGroupIcon />,
+      onClick: (selectedKeys: React.Key[]) => {
+        setSelectedDeviceIds(selectedKeys);
+        setTargetGroupId(null);
+        setMoveToGroupModalOpen(true);
+      },
+    },
+    {
+      key: 'recycle',
+      label: t('device.batch.recycle'),
+      icon: <RestOutlined />,
+      onClick: (selectedKeys: React.Key[]) => {
+        modal.confirm({
+          title: t('device.batch.recycleConfirm'),
+          content: t('device.batch.recycleMsg', { count: selectedKeys.length }),
+          okText: t('common.confirm'),
+          okType: 'danger',
+          onOk: async () => {
+            // TODO: 调用 API 批量回收
+            message.success(t('common.success'));
+            await refetch();
+          },
+        });
+      },
+    },
+    {
+      key: 'delete',
+      label: t('common.delete'),
+      icon: <DeleteOutlined />,
+      danger: true,
+      onClick: (selectedKeys: React.Key[]) => {
+        modal.confirm({
+          title: t('common.confirmDelete'),
+          content: t('common.deleteConfirmMsg', { count: selectedKeys.length }),
+          okText: t('common.confirmDelete'),
+          okType: 'danger',
+          onOk: async () => {
+            // TODO: 调用 API 批量删除
+            message.success(t('common.deleteSuccess'));
+            await refetch();
+          },
+        });
+      },
+    },
+  ], [t, modal, message, refetch]);
+
+  const handleExport = useCallback((format: 'xlsx' | 'csv') => {
+    // TODO: 实现导出功能
+    message.success(`Export as ${format.toUpperCase()}`);
+  }, [message]);
+
+  const handleMoveToGroup = useCallback(async () => {
+    if (!targetGroupId) {
+      message.warning(t('device.batch.selectGroup'));
+      return;
+    }
+    // TODO: 调用 API 移动设备到设备组
+    message.success(t('common.success'));
+    setMoveToGroupModalOpen(false);
+    await refetch();
+  }, [targetGroupId, message, t, refetch]);
 
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -305,6 +447,17 @@ export default function DeviceGrouping() {
           {t('common.add')}
         </Button>
       </div>
+      {/* 搜索框 */}
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+        <Input
+          placeholder={t('device.searchGroup')}
+          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+          value={groupSearchText}
+          onChange={(e) => setGroupSearchText(e.target.value)}
+          allowClear
+          size="small"
+        />
+      </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
         <Tree
           treeData={[
@@ -319,7 +472,7 @@ export default function DeviceGrouping() {
                   </Text>
                 </span>
               ),
-              children: treeData,
+              children: filteredTreeData,
               selectable: false,
             },
           ]}
@@ -328,7 +481,7 @@ export default function DeviceGrouping() {
           onSelect={(keys) => {
             const key = keys[0] as string | undefined;
             if (!key) return;
-            // 只有三级节点（有 parentId 的组）才能点击
+            // 只有二级节点（有 parentId 的组）才能点击
             const clickedGroup = groups.find((g) => g.id === key);
             if (clickedGroup && clickedGroup.parentId !== null) {
               setSelectedGroupId(key);
@@ -362,6 +515,8 @@ export default function DeviceGrouping() {
             loading={isLoading}
             rowKey="id"
             selectable
+            batchActions={batchActions}
+            onExport={handleExport}
             total={total}
             pageSize={pageSize}
             currentPage={currentPage}
@@ -415,6 +570,72 @@ export default function DeviceGrouping() {
           </Form.Item>
           <Form.Item name="description" label={t('table.description')}>
             <Input.TextArea rows={3} placeholder={t('common.placeholder')} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Move to Group Modal */}
+      <Modal
+        title={t('device.batch.moveToGroup')}
+        open={moveToGroupModalOpen}
+        onOk={() => void handleMoveToGroup()}
+        onCancel={() => setMoveToGroupModalOpen(false)}
+        okText={t('common.confirm')}
+      >
+        <div style={{ marginTop: 16 }}>
+          <Text type="secondary">
+            {t('device.batch.selectedDevices', { count: selectedDeviceIds.length })}
+          </Text>
+          <Form.Item label={t('device.batch.targetGroup')} style={{ marginTop: 16 }}>
+            <Select
+              style={{ width: '100%' }}
+              placeholder={t('device.batch.selectGroupPlaceholder')}
+              value={targetGroupId}
+              onChange={setTargetGroupId}
+              options={targetGroupOptions}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+        </div>
+      </Modal>
+
+      {/* Edit Device Modal */}
+      <Modal
+        title={`${t('common.edit')} - ${editingDevice?.name ?? ''}`}
+        open={editDeviceModalOpen}
+        onOk={() => void handleSaveDevice()}
+        onCancel={() => setEditDeviceModalOpen(false)}
+        okText={t('common.save')}
+      >
+        <Form form={editDeviceForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            name="engStatus"
+            label={t('device.installStatus')}
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          >
+            <Select options={ENG_STATUS_OPTIONS} />
+          </Form.Item>
+          <Form.Item
+            name="longitude"
+            label={t('device.longitude')}
+            rules={[{ required: true, message: t('common.placeholder') }]}
+          >
+            <InputNumber style={{ width: '100%' }} precision={6} />
+          </Form.Item>
+          <Form.Item
+            name="latitude"
+            label={t('device.latitude')}
+            rules={[{ required: true, message: t('common.placeholder') }]}
+          >
+            <InputNumber style={{ width: '100%' }} precision={6} />
+          </Form.Item>
+          <Form.Item
+            name="gpsHeight"
+            label={t('device.height')}
+            rules={[{ required: true, message: t('common.placeholder') }]}
+          >
+            <InputNumber style={{ width: '100%' }} precision={1} />
           </Form.Item>
         </Form>
       </Modal>

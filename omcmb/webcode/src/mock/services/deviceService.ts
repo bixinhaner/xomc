@@ -36,15 +36,15 @@ export const deviceService = {
     if (params.groupId) {
       const group = await this.getGroups().then((groups) => groups.find((g) => g.id === params.groupId));
       if (group) {
-        // 根据分组名称过滤设备（模拟分组与设备的关联）
-        const groupCityMap: Record<string, string[]> = {
-          'grp-north': ['北京', '天津'],
-          'grp-sh': ['上海', '杭州', '南京'],
-          'grp-gz': ['广州', '深圳', '长沙'],
+        // 根据分组名称过滤设备（通过设备名称包含城市名来判断）
+        const groupCityMap: Record<string, string> = {
+          'grp-bj': '北京',
+          'grp-sh': '上海',
+          'grp-gz': '广州',
         };
-        const cities = groupCityMap[params.groupId];
-        if (cities) {
-          filtered = filtered.filter((d) => cities.includes(d.region));
+        const cityName = groupCityMap[params.groupId];
+        if (cityName) {
+          filtered = filtered.filter((d) => d.name.includes(cityName));
         }
       }
     }
@@ -95,14 +95,14 @@ export const deviceService = {
   async getGroups() {
     await delay(80, 150);
     return [
-      { id: 'grp-001', name: '默认设备组', parentId: null, deviceCount: 45, description: '默认设备组' },
-      { id: 'grp-002', name: '华东大区', parentId: null, deviceCount: 60, description: '华东区所有设备' },
-      { id: 'grp-003', name: '华南大区', parentId: null, deviceCount: 50, description: '华南区所有设备' },
-      { id: 'grp-004', name: '西南大区', parentId: null, deviceCount: 25, description: '西南区所有设备' },
-      { id: 'grp-north', name: '北京', parentId: 'grp-001', deviceCount: 30, description: '北京市设备' },
-      { id: 'grp-sh', name: '上海', parentId: 'grp-002', deviceCount: 35, description: '上海市设备' },
-      { id: 'grp-gz', name: '广州', parentId: 'grp-003', deviceCount: 28, description: '广州市设备' },
-      { id: 'grp-5g', name: '5G gNB设备', parentId: null, deviceCount: 60, description: '全国所有5G基站' },
+      // 一级节点 (parentId: null) - 不可选择
+      { id: 'grp-default', name: '默认设备组', parentId: null, deviceCount: 0, description: '默认设备组' },
+      { id: 'grp-east', name: '华东大区', parentId: null, deviceCount: 0, description: '华东区所有设备' },
+      { id: 'grp-south', name: '华南大区', parentId: null, deviceCount: 0, description: '华南区所有设备' },
+      // 二级节点 (parentId 指向一级) - 可选择
+      { id: 'grp-bj', name: '北京', parentId: 'grp-default', deviceCount: 20, description: '北京市设备' },
+      { id: 'grp-sh', name: '上海', parentId: 'grp-east', deviceCount: 20, description: '上海市设备' },
+      { id: 'grp-gz', name: '广州', parentId: 'grp-south', deviceCount: 20, description: '广州市设备' },
     ];
   },
 

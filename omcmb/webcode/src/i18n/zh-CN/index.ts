@@ -401,6 +401,7 @@ const messages: Record<string, string> = {
   'device.type.eGW':        '企业网关',
   'device.type.all':        '全部',
   'device.connStatus':      '连接状态',
+  'device.installStatus':   '安装状态',
   'device.engStatus':       '工程状态',
   'device.mgmtStatus':      '管理状态',
   'device.vendor':          '厂商',
@@ -415,6 +416,9 @@ const messages: Record<string, string> = {
   'device.lastOnlineTime':  '最后在线时间',
   'device.longitude':       '经度',
   'device.latitude':        '纬度',
+  'device.height':          '高度',
+  'device.offlineDays':     '离线天数',
+  'device.stationName':     '基站名称',
 
   // 监控页面扩展字段 (Device)
   'device.hostName':            '名称',
@@ -523,6 +527,16 @@ const messages: Record<string, string> = {
   'device.action.deactivateCell':    '去激活 Cell {n}',
   'device.action.rfOnCell':          'RF{n} 开启',
   'device.action.rfOffCell':         'RF{n} 关闭',
+
+  // Device batch actions (批量操作)
+  'device.batch.moveToGroup':           '移动',
+  'device.batch.recycle':               '回收站',
+  'device.batch.recycleConfirm':        '确认批量回收',
+  'device.batch.recycleMsg':            '确定将 {count} 台设备移入回收站？移入回收站的设备将不再进行数据监控。',
+  'device.batch.selectGroup':           '请选择目标设备组',
+  'device.batch.selectGroupPlaceholder': '请选择设备组',
+  'device.batch.targetGroup':           '目标设备组',
+  'device.batch.selectedDevices':       '已选择 {count} 台设备',
 
   // -------------------------------------------------------------------------
   // Alarm page labels

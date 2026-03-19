@@ -401,6 +401,7 @@ const messages: Record<string, string> = {
   'device.type.eGW':        'Enterprise Gateway',
   'device.type.all':        'All Types',
   'device.connStatus':      'Connection Status',
+  'device.installStatus':   'Install Status',
   'device.engStatus':       'Engineering Status',
   'device.mgmtStatus':      'Management Status',
   'device.vendor':          'Vendor',
@@ -415,6 +416,9 @@ const messages: Record<string, string> = {
   'device.lastOnlineTime':  'Last Online Time',
   'device.longitude':       'Longitude',
   'device.latitude':        'Latitude',
+  'device.height':          'Height',
+  'device.offlineDays':     'Offline Days',
+  'device.stationName':     'Station Name',
 
   // Monitor page extended fields (Device)
   'device.hostName':            'Name',
@@ -523,6 +527,16 @@ const messages: Record<string, string> = {
   'device.action.deactivateCell':    'Deactivate Cell {n}',
   'device.action.rfOnCell':          'RF{n} On',
   'device.action.rfOffCell':         'RF{n} Off',
+
+  // Device batch actions
+  'device.batch.moveToGroup':           'Move',
+  'device.batch.recycle':              'Recycle Bin',
+  'device.batch.recycleConfirm':       'Confirm Recycle Devices',
+  'device.batch.recycleMsg':           '{count} device(s) will be moved to recycle bin. Devices in recycle bin will not be monitored. Continue?',
+  'device.batch.selectGroup':           'Please select a target group',
+  'device.batch.selectGroupPlaceholder': 'Select a device group',
+  'device.batch.targetGroup':           'Target Group',
+  'device.batch.selectedDevices':       '{count} device(s) selected',
 
   // -------------------------------------------------------------------------
   // Alarm page labels
