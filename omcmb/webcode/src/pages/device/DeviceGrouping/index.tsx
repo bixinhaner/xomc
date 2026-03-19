@@ -2,17 +2,22 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   App,
   Button,
+  Divider,
+  Drawer,
   Dropdown,
   Form,
   Input,
   InputNumber,
   Modal,
+  Radio,
   Select,
+  Switch,
   Tag,
   Tree,
   Typography,
 } from 'antd';
 import {
+  CloseCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderAddOutlined,
@@ -34,6 +39,73 @@ import type { Device, EngStatus } from '@/types/device';
 
 const { Title, Text } = Typography;
 
+// 名称过滤条件（复用设备规则的逻辑）
+interface NameFilterItem {
+  id: string;
+  condition: 'contain' | 'notContain' | 'startWith' | 'endWith';
+  value: string;
+  andOr?: 'and' | 'or';
+}
+
+// 过滤条件选项
+const getFilterConditionOptions = (t: (key: string) => string) => [
+  { label: t('filter.contain'), value: 'contain' },
+  { label: t('filter.notContain'), value: 'notContain' },
+  { label: t('filter.startWith'), value: 'startWith' },
+  { label: t('filter.endWith'), value: 'endWith' },
+];
+
+// And/Or 选项
+const getAndOrOptions = (t: (key: string) => string) => [
+  { label: t('filter.and'), value: 'and' },
+  { label: t('filter.or'), value: 'or' },
+];
+
+// 生成唯一ID
+const generateId = () => Math.random().toString(36).substring(2, 9);
+
+// 生成操作描述
+function generateOperators(
+  rule: { matchingMode?: string; nameRuleList?: NameFilterItem[]; tacRag?: string },
+  t: (key: string) => string
+): string {
+  if (rule.matchingMode === 'deviceName' && rule.nameRuleList?.length) {
+    const orGroups: NameFilterItem[][] = [[]];
+
+    rule.nameRuleList.forEach((filter, index) => {
+      if (filter.value && filter.value.trim() !== '') {
+        if (index > 0 && filter.andOr === 'or') {
+          orGroups.push([]);
+        }
+        orGroups[orGroups.length - 1].push(filter);
+      }
+    });
+
+    const filteredGroups = orGroups.filter((g) => g.length > 0);
+    if (filteredGroups.length === 0) return '';
+
+    const verbMap: Record<string, string> = {
+      contain: t('filter.contain'),
+      notContain: t('filter.notContain'),
+      startWith: t('filter.startWith'),
+      endWith: t('filter.endWith'),
+    };
+
+    const groupParts = filteredGroups.map((group) => {
+      const conditionParts = group.map((item) => `${verbMap[item.condition]} "${item.value}"`);
+      const groupText = conditionParts.join(` ${t('filter.and')} `);
+      return filteredGroups.length > 1 || group.length > 1 ? `(${groupText})` : groupText;
+    });
+
+    return groupParts.join(` ${t('filter.or')} `);
+  } else if (rule.matchingMode === 'tac') {
+    return `TAC: ${rule.tacRag || ''}`;
+  } else if (rule.matchingMode === 'lac') {
+    return `LAC: ${rule.tacRag || ''}`;
+  }
+  return '';
+}
+
 function buildTreeData(
   groups: Array<{ id: string; name: string; parentId: string | null; deviceCount: number; description: string }>,
   selectedId: string | null,
@@ -44,57 +116,97 @@ function buildTreeData(
 
   function buildNode(group: typeof groups[0], isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
-    // 二级节点（parentId === null）不可选择，三级节点可选择
-    const isLevel2 = group.parentId === null;
+    // 一级节点（parentId === null）不可选择，二级节点可选择
+    const isLevel1 = group.parentId === null;
 
-    // 一级节点只显示新增，其他节点显示完整菜单
-    const menuItems: MenuProps['items'] = isRootLevel
-      ? [
-          {
-            key: 'add-child',
-            label: t('common.add'),
-            icon: <FolderAddOutlined />,
-            onClick: (info) => {
-              info.domEvent.stopPropagation();
-              onContextMenu(`add-child:${group.id}`);
-            },
+    // 默认设备组只显示添加，其他一级节点显示完整菜单
+    const isDefaultGroup = group.id === 'grp-default';
+
+    let menuItems: MenuProps['items'];
+    if (isRootLevel && isDefaultGroup) {
+      // 默认设备组：只显示添加
+      menuItems = [
+        {
+          key: 'add-child',
+          label: t('common.add'),
+          icon: <FolderAddOutlined />,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`add-child:${group.id}`);
           },
-        ]
-      : [
-          {
-            key: 'add-child',
-            label: t('common.add'),
-            icon: <FolderAddOutlined />,
-            onClick: (info) => {
-              info.domEvent.stopPropagation();
-              onContextMenu(`add-child:${group.id}`);
-            },
+        },
+      ];
+    } else if (isRootLevel) {
+      // 其他一级节点：显示添加、编辑、删除
+      menuItems = [
+        {
+          key: 'add-child',
+          label: t('common.add'),
+          icon: <FolderAddOutlined />,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`add-child:${group.id}`);
           },
-          {
-            key: 'edit',
-            label: t('common.edit'),
-            icon: <EditOutlined />,
-            onClick: (info) => {
-              info.domEvent.stopPropagation();
-              onContextMenu(`edit:${group.id}`);
-            },
+        },
+        {
+          key: 'edit',
+          label: t('common.edit'),
+          icon: <EditOutlined />,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`edit:${group.id}`);
           },
-          { type: 'divider' },
-          {
-            key: 'delete',
-            label: t('common.delete'),
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: (info) => {
-              info.domEvent.stopPropagation();
-              onContextMenu(`delete:${group.id}`);
-            },
+        },
+        { type: 'divider' },
+        {
+          key: 'delete',
+          label: t('common.delete'),
+          icon: <DeleteOutlined />,
+          danger: true,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`delete:${group.id}`);
           },
-        ];
+        },
+      ];
+    } else {
+      // 二级节点：显示完整菜单
+      menuItems = [
+        {
+          key: 'add-child',
+          label: t('common.add'),
+          icon: <FolderAddOutlined />,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`add-child:${group.id}`);
+          },
+        },
+        {
+          key: 'edit',
+          label: t('common.edit'),
+          icon: <EditOutlined />,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`edit:${group.id}`);
+          },
+        },
+        { type: 'divider' },
+        {
+          key: 'delete',
+          label: t('common.delete'),
+          icon: <DeleteOutlined />,
+          danger: true,
+          onClick: (info) => {
+            info.domEvent.stopPropagation();
+            onContextMenu(`delete:${group.id}`);
+          },
+        },
+      ];
+    }
 
     return {
       key: group.id,
-      selectable: !isLevel2,
+      selectable: !isLevel1,
       title: (
         <div
           style={{
@@ -160,6 +272,22 @@ export default function DeviceGrouping() {
     gpsHeight: number;
   }>();
 
+  // 新增子分组弹窗相关状态
+  const [addChildDrawerOpen, setAddChildDrawerOpen] = useState(false);
+  const [parentGroupId, setParentGroupId] = useState<string | null>(null);
+  const [addChildForm] = Form.useForm<{
+    name: string;
+    autoMatch: boolean;
+    matchingMode: 'deviceName' | 'lac' | 'tac';
+    tacRag: string;
+  }>();
+  const [nameFilters, setNameFilters] = useState<NameFilterItem[]>([
+    { id: generateId(), condition: 'contain', value: '' },
+  ]);
+
+  // 监听匹配模式变化
+  const matchingMode = Form.useWatch('matchingMode', addChildForm);
+
   // 设备安装状态选项
   const ENG_STATUS_OPTIONS = useMemo(() => [
     { label: t('device.engStatus.commissioned'), value: 'commissioned' },
@@ -207,8 +335,16 @@ export default function DeviceGrouping() {
     (action: string) => {
       const [cmd, groupId] = action.split(':');
       if (cmd === 'add-child') {
-        addForm.resetFields();
-        setAddModalOpen(true);
+        // 打开新增子分组弹窗
+        setParentGroupId(groupId);
+        addChildForm.resetFields();
+        addChildForm.setFieldsValue({
+          autoMatch: false,
+          matchingMode: 'deviceName',
+          tacRag: '',
+        });
+        setNameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
+        setAddChildDrawerOpen(true);
       } else if (cmd === 'edit') {
         const grp = groups.find((g) => g.id === groupId);
         if (grp) {
@@ -228,7 +364,7 @@ export default function DeviceGrouping() {
         });
       }
     },
-    [groups, addForm, editForm, refetchGroups, t, modal, message]
+    [groups, addChildForm, editForm, refetchGroups, t, modal, message]
   );
 
   const treeData = useMemo(
@@ -282,6 +418,104 @@ export default function DeviceGrouping() {
     setEditModalOpen(false);
     await refetchGroups();
   }, [editForm, refetchGroups, message]);
+
+  // 新增子分组相关处理函数
+  const handleAddFilter = useCallback(() => {
+    if (nameFilters.length >= 10) {
+      void message.warning(t('device.rules.maxConditions', { max: 10 }));
+      return;
+    }
+    const hasOr = nameFilters.some((f, index) => index > 0 && f.andOr === 'or');
+    setNameFilters((prev) => [
+      ...prev,
+      {
+        id: generateId(),
+        condition: 'contain',
+        value: '',
+        andOr: hasOr ? 'or' : 'and',
+      },
+    ]);
+  }, [nameFilters, message, t]);
+
+  const handleRemoveFilter = useCallback((id: string) => {
+    setNameFilters((prev) => {
+      if (prev.length <= 1) return prev;
+      const newFilters = prev.filter((f) => f.id !== id);
+      if (newFilters.length > 0 && newFilters[0].andOr !== undefined) {
+        const { andOr: _, ...rest } = newFilters[0];
+        newFilters[0] = rest as NameFilterItem;
+      }
+      return newFilters;
+    });
+  }, []);
+
+  const handleUpdateFilter = useCallback((id: string, field: keyof NameFilterItem, value: string) => {
+    setNameFilters((prev) => prev.map((f) => (f.id === id ? { ...f, [field]: value } : f)));
+  }, []);
+
+  const handleMatchingModeChange = useCallback(() => {
+    setNameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
+    addChildForm.setFieldsValue({ tacRag: '' });
+  }, [addChildForm]);
+
+  const handleSaveChildGroup = useCallback(async () => {
+    try {
+      const values = await addChildForm.validateFields();
+
+      // 如果开启了自动匹配且是设备名称模式，验证过滤条件
+      if (values.autoMatch && values.matchingMode === 'deviceName') {
+        const validFilters = nameFilters.filter((f) => f.value?.trim());
+        if (validFilters.length === 0) {
+          void message.error(t('device.rules.atLeastOneFilter'));
+          return;
+        }
+      }
+
+      // 如果开启了自动匹配且是 TAC/LAC 模式，验证范围输入
+      if (values.autoMatch && (values.matchingMode === 'tac' || values.matchingMode === 'lac')) {
+        if (!values.tacRag?.trim()) {
+          void message.error(t('device.rules.inputRange', { type: values.matchingMode === 'tac' ? 'TAC' : 'LAC' }));
+          return;
+        }
+      }
+
+      // TODO: 调用 API 创建子分组
+      const operators = values.autoMatch
+        ? generateOperators(
+            {
+              matchingMode: values.matchingMode,
+              nameRuleList: values.matchingMode === 'deviceName' ? nameFilters : undefined,
+              tacRag: values.matchingMode !== 'deviceName' ? values.tacRag : undefined,
+            },
+            t
+          )
+        : '';
+
+      console.log('创建子分组:', {
+        parentGroupId,
+        name: values.name,
+        autoMatch: values.autoMatch,
+        matchingMode: values.matchingMode,
+        nameFilters: values.autoMatch && values.matchingMode === 'deviceName' ? nameFilters : [],
+        tacRag: values.autoMatch && values.matchingMode !== 'deviceName' ? values.tacRag : '',
+        operators,
+      });
+
+      void message.success(t('common.success'));
+      setAddChildDrawerOpen(false);
+      await refetchGroups();
+    } catch {
+      // validation error
+    }
+  }, [addChildForm, nameFilters, parentGroupId, refetchGroups, message, t]);
+
+  // 预览条件描述
+  const previewText = useMemo(() => {
+    if (matchingMode === 'deviceName') {
+      return generateOperators({ matchingMode: 'deviceName', nameRuleList: nameFilters }, t);
+    }
+    return '';
+  }, [matchingMode, nameFilters, t]);
 
   // 计算离线天数
   const calculateOfflineDays = useCallback((lastOnlineTime: string): number => {
@@ -439,7 +673,6 @@ export default function DeviceGrouping() {
           size="small"
           icon={<PlusOutlined />}
           onClick={() => {
-            setParentIdForAdd(null);
             addForm.resetFields();
             setAddModalOpen(true);
           }}
@@ -639,6 +872,169 @@ export default function DeviceGrouping() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Add Child Group Drawer */}
+      <Drawer
+        title={t('device.addChildGroup')}
+        open={addChildDrawerOpen}
+        onClose={() => setAddChildDrawerOpen(false)}
+        width={520}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setAddChildDrawerOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={() => void handleSaveChildGroup()}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
+      >
+        <Form form={addChildForm} layout="vertical">
+          {/* 子分组名称 */}
+          <Form.Item
+            name="name"
+            label={t('device.childGroupName')}
+            rules={[{ required: true, message: t('common.placeholder') }]}
+          >
+            <Input placeholder={t('common.placeholder')} maxLength={50} />
+          </Form.Item>
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          {/* 自动匹配到组开关 */}
+          <Form.Item
+            name="autoMatch"
+            label={t('device.autoMatch')}
+            valuePropName="checked"
+            extra={t('device.autoMatchDesc')}
+          >
+            <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} />
+          </Form.Item>
+
+          {/* 匹配规则（仅当开启自动匹配时显示） */}
+          {addChildForm.getFieldValue('autoMatch') && (
+            <>
+              <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
+                {t('device.matchRule')}
+              </div>
+              <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} rules={[{ required: true }]}>
+                <Radio.Group onChange={handleMatchingModeChange}>
+                  <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
+                  <Radio value="lac">LAC</Radio>
+                  <Radio value="tac">TAC</Radio>
+                </Radio.Group>
+              </Form.Item>
+
+              {/* 设备名称过滤条件 */}
+              {matchingMode === 'deviceName' && (
+                <>
+                  <Form.Item
+                    label={
+                      <span>
+                        {t('device.rules.filterCondition')}
+                        <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
+                          {t('device.rules.conditionLimit', { max: 10 })}
+                        </Text>
+                      </span>
+                    }
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {nameFilters.map((filter, index) => (
+                        <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          {index === 0 ? (
+                            <>
+                              <Select
+                                value={filter.condition}
+                                style={{ width: 120 }}
+                                options={getFilterConditionOptions(t)}
+                                onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
+                              />
+                              <Input
+                                value={filter.value}
+                                style={{ flex: 1 }}
+                                maxLength={64}
+                                placeholder={t('common.placeholder')}
+                                onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <Select
+                                value={filter.andOr || 'and'}
+                                style={{ width: 70 }}
+                                options={getAndOrOptions(t)}
+                                onChange={(v) => handleUpdateFilter(filter.id, 'andOr', v)}
+                              />
+                              <Select
+                                value={filter.condition}
+                                style={{ width: 120 }}
+                                options={getFilterConditionOptions(t)}
+                                onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
+                              />
+                              <Input
+                                value={filter.value}
+                                style={{ flex: 1 }}
+                                maxLength={64}
+                                placeholder={t('common.placeholder')}
+                                onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
+                              />
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<CloseCircleOutlined />}
+                                onClick={() => handleRemoveFilter(filter.id)}
+                                style={{ color: 'var(--color-text-quaternary)' }}
+                              />
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {nameFilters.length < 10 && (
+                      <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddFilter} style={{ marginTop: 8 }}>
+                        {t('device.rules.addCondition')}
+                      </Button>
+                    )}
+                  </Form.Item>
+
+                  {/* 预览条件描述 */}
+                  {previewText && (
+                    <div
+                      style={{
+                        color: 'var(--color-text-tertiary)',
+                        fontSize: 12,
+                        marginBottom: 16,
+                        padding: '8px 12px',
+                        background: 'var(--color-fill-quaternary)',
+                        borderRadius: 4,
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {previewText}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* TAC/LAC 输入 */}
+              {(matchingMode === 'tac' || matchingMode === 'lac') && (
+                <Form.Item
+                  name="tacRag"
+                  label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
+                  rules={[{ required: true, message: t('device.rules.inputRange', { type: matchingMode === 'tac' ? 'TAC' : 'LAC' }) }]}
+                  extra={
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('device.rules.formatRange', { range: '0-65535' })}
+                    </Text>
+                  }
+                >
+                  <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
+                </Form.Item>
+              )}
+            </>
+          )}
+        </Form>
+      </Drawer>
     </>
   );
 }
