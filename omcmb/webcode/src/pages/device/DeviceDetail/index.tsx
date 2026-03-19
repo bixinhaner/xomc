@@ -519,7 +519,7 @@ export default function DeviceDetail() {
             },
             {
               key: 'performance',
-              label: t('table.result'),
+              label: 'KPI',
               children: (
                 <div style={{ padding: '0 0 16px' }}>
                   <Card size="small" title="KPI" style={{ marginBottom: 16 }}>
@@ -571,6 +571,43 @@ export default function DeviceDetail() {
                       { title: t('table.result'), dataIndex: 'value', key: 'value', width: 150, render: (v: string) => <Text strong>{v}</Text> },
                       { title: t('table.type'), dataIndex: 'unit', key: 'unit', width: 80 },
                       { title: t('table.vendor'), dataIndex: 'category', key: 'category', width: 120, render: (v: string) => <Tag>{v}</Tag> },
+                    ]}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'license',
+              label: t('nav.license.list').replace('管理', '').trim(),
+              children: (
+                <div style={{ padding: '0 0 16px' }}>
+                  <Table
+                    size="small"
+                    dataSource={[
+                      { key: 'basic', name: '基础功能授权', status: 'active', expiryDate: '永久', capacity: '不限', used: 128 },
+                      { key: 'halob', name: 'HaloB License', status: 'active', expiryDate: '2027-12-31', capacity: '100', used: 45 },
+                      { key: '5g', name: '5G NR 授权', status: 'active', expiryDate: '2027-06-30', capacity: '50', used: 12 },
+                    ]}
+                    rowKey="key"
+                    pagination={false}
+                    columns={[
+                      { title: t('license.licenseName'), dataIndex: 'name', key: 'name', width: 200 },
+                      {
+                        title: t('status.status'),
+                        dataIndex: 'status',
+                        key: 'status',
+                        width: 100,
+                        render: (v: string) => <Tag color={v === 'active' ? 'success' : 'warning'}>{v === 'active' ? t('status.active') : t('status.inactive')}</Tag>,
+                      },
+                      { title: t('license.expiryDate'), dataIndex: 'expiryDate', key: 'expiryDate', width: 120 },
+                      { title: t('license.capacity'), dataIndex: 'capacity', key: 'capacity', width: 100 },
+                      {
+                        title: t('license.used'),
+                        dataIndex: 'used',
+                        key: 'used',
+                        width: 100,
+                        render: (_v: number, record) => `${record.used} / ${record.capacity}`,
+                      },
                     ]}
                   />
                 </div>
