@@ -59,7 +59,7 @@ log:
   format: "json"
   output_paths:
     - "stdout"
-    - "/var/log/omcgo/acs.log"
+    - "/var/log/omcgo/worker.log"
   rotation:
     enabled: true
     max_size_mb: 20
