@@ -51,7 +51,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("", h.ServeHTTP)
+	mux.HandleFunc("/acs", h.ServeHTTP)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))

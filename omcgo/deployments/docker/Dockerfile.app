@@ -27,7 +27,7 @@ COPY --from=builder /build/migrations /etc/omcgo/migrations
 COPY deployments/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8080 8443 9091 50051
+EXPOSE 8081 8444 9091 50051
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--config", "/etc/omcgo/app.yaml"]
