@@ -1,6 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Button,
+  Divider,
+  Drawer,
   Dropdown,
   Form,
   Input,
@@ -613,32 +615,47 @@ export default function DeviceRules() {
         />
       </ListPageLayout>
 
-      {/* 添加/编辑规则弹窗 */}
-      <Modal
+      {/* 添加/编辑规则抽屉 */}
+      <Drawer
         title={editingRule ? t('common.edit') : t('common.add')}
         open={editModalOpen}
-        onOk={() => void handleSave()}
-        onCancel={() => setEditModalOpen(false)}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
-        width={560}
+        onClose={() => setEditModalOpen(false)}
+        width={520}
         destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setEditModalOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={() => void handleSave()}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item name="moveToGroupId" label="目标设备组" rules={[{ required: true }]}>
+        <Form form={form} layout="vertical">
+          {/* 基本设置 */}
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>基本设置</div>
+          <Form.Item name="moveToGroupId" label="目标设备组" rules={[{ required: true, message: '请选择目标设备组' }]}>
             <Select
               placeholder={t('common.pleaseSelect')}
               options={MOCK_DEVICE_GROUPS.map((g) => ({ label: g.groupName, value: g.id }))}
             />
           </Form.Item>
 
-          <Form.Item label="Enable">
-            <Form.Item name="enable" noStyle valuePropName="checked" getValueProps={(v) => ({ checked: v === '1' })} setValueProps={(v) => ({ value: v ? '1' : '0' })}>
-              <Switch />
-            </Form.Item>
+          <Form.Item
+            name="enable"
+            label="启用状态"
+            valuePropName="checked"
+            getValueProps={(v) => ({ checked: v === '1' })}
+            getValueFromEvent={(checked: boolean) => (checked ? '1' : '0')}
+          >
+            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
           </Form.Item>
 
-          <Form.Item name="matchingMode" label="匹配规则" rules={[{ required: true }]}>
+          <Divider style={{ margin: '16px 0' }} />
+
+          {/* 匹配规则 */}
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>匹配规则</div>
+          <Form.Item name="matchingMode" label="匹配方式" rules={[{ required: true }]}>
             <Radio.Group onChange={handleMatchingModeChange}>
               <Radio value="deviceName">设备名称</Radio>
               {SUPPORT_GSM && DEVICE_TYPE === 'ENB' && <Radio value="lac">LAC</Radio>}
@@ -749,7 +766,7 @@ export default function DeviceRules() {
             </Form.Item>
           )}
         </Form>
-      </Modal>
+      </Drawer>
 
       {/* 应用规则弹窗 */}
       <Modal
