@@ -114,18 +114,6 @@ export default function DeviceList() {
   const total = data?.total ?? 0;
   const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
 
-  // 计算选中设备的统一制式 — 全部相同时返回该制式，否则 null
-  const selectedNetworkType: SyncNetworkType | null = useMemo(() => {
-    if (selectedRowKeys.length === 0) return null;
-    const selectedDevices = devices.filter((d) => selectedRowKeys.includes(d.id));
-    if (selectedDevices.length === 0) return null;
-    const firstType = selectedDevices[0].networkType;
-    const allSame = selectedDevices.every((d) => d.networkType === firstType);
-    if (!allSame) return null;
-    if (firstType === 'eNB' || firstType === 'gNB' || firstType === 'GSM') return firstType;
-    return null;
-  }, [selectedRowKeys, devices]);
-
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
     major: t('alarm.severity.major'),
@@ -751,45 +739,35 @@ export default function DeviceList() {
     [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender]
   );
 
-  const batchActions = useMemo((): BatchAction[] => {
-    const actions: BatchAction[] = [];
-
-    // 批量同步仅在所有选中设备为同一制式时显示
-    if (selectedNetworkType) {
-      actions.push({
-        key: 'batch-sync',
-        label: `${t('common.batchSync')} (${selectedNetworkType})`,
-        icon: <SyncOutlined />,
-        onClick: (keys) => handleBatchAction(t('common.batchSync'), keys),
-      });
-    }
-
-    actions.push(
-      {
-        key: 'batch-reboot',
-        label: t('common.batchReboot'),
-        icon: <ReloadOutlined />,
-        onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys),
-      },
-      {
-        key: 'batch-tr069-collect',
-        label: t('device.action.tr069Collect'),
-        onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys),
-      },
-      {
-        key: 'batch-reset-config',
-        label: t('device.action.resetConfig'),
-        onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys),
-      },
-      {
-        key: 'batch-log-collect',
-        label: t('device.action.logCollect'),
-        onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys),
-      },
-    );
-
-    return actions;
-  }, [handleBatchAction, selectedNetworkType, t]);
+  const batchActions = useMemo((): BatchAction[] => [
+    {
+      key: 'batch-sync',
+      label: t('common.batchSync'),
+      icon: <SyncOutlined />,
+      onClick: (keys) => handleBatchAction(t('common.batchSync'), keys),
+    },
+    {
+      key: 'batch-reboot',
+      label: t('common.batchReboot'),
+      icon: <ReloadOutlined />,
+      onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys),
+    },
+    {
+      key: 'batch-tr069-collect',
+      label: t('device.action.tr069Collect'),
+      onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys),
+    },
+    {
+      key: 'batch-reset-config',
+      label: t('device.action.resetConfig'),
+      onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys),
+    },
+    {
+      key: 'batch-log-collect',
+      label: t('device.action.logCollect'),
+      onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys),
+    },
+  ], [handleBatchAction, t]);
 
   return (
     <ListPageLayout
