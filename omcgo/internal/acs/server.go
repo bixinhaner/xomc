@@ -9,18 +9,18 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
-	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
 // ACSServer is the TR069 ACS HTTP server.
 type ACSServer struct {
-	httpServer    *http.Server
-	handler       *Handler
-	config        appconfig.ACSServerConfig
-	logger        *zap.Logger
+	httpServer *http.Server
+	handler    *Handler
+	config     appconfig.ACSServerConfig
+	logger     *zap.Logger
 }
 
 // ServerDeps holds the dependencies for the ACS server.
@@ -51,7 +51,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/acs", h.ServeHTTP)
+	mux.HandleFunc("", h.ServeHTTP)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
