@@ -173,9 +173,9 @@ export default function CurrentAlarms() {
             await acknowledgeAlarms.mutateAsync({ ids });
             setSelectedRowKeys([]);
             refetch();
-            message.success(t('common.ackSuccess'));
+            setTimeout(() => message.success(t('common.ackSuccess')), 100);
           } catch {
-            message.error(t('common.ackFailed'));
+            setTimeout(() => message.error(t('common.ackFailed')), 100);
           }
         },
       });
@@ -194,9 +194,9 @@ export default function CurrentAlarms() {
             // TODO: 调用反确认 API
             setSelectedRowKeys([]);
             refetch();
-            message.success(t('common.unackSuccess'));
+            setTimeout(() => message.success(t('common.unackSuccess')), 100);
           } catch {
-            message.error(t('common.unackFailed'));
+            setTimeout(() => message.error(t('common.unackFailed')), 100);
           }
         },
       });
@@ -217,9 +217,9 @@ export default function CurrentAlarms() {
             await clearAlarms.mutateAsync(ids);
             setSelectedRowKeys([]);
             refetch();
-            message.success(t('common.clearSuccess'));
+            setTimeout(() => message.success(t('common.clearSuccess')), 100);
           } catch {
-            message.error(t('common.clearFailed'));
+            setTimeout(() => message.error(t('common.clearFailed')), 100);
           }
         },
       });
@@ -238,7 +238,7 @@ export default function CurrentAlarms() {
           // TODO: 调用过滤告警 API
           setSelectedRowKeys([]);
           refetch();
-          message.success(t('common.success'));
+          setTimeout(() => message.success(t('common.success')), 100);
         },
       });
     },
