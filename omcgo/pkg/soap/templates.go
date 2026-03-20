@@ -56,7 +56,8 @@ func RenderResponse(tmpl *template.Template, data interface{}) ([]byte, error) {
 
 // Template data types
 type InformResponseData struct {
-	ID string
+	ID          string
+	CurrentTime string // ACS current time for CPE synchronization (optional per TR069 spec)
 }
 
 type GetParameterValuesData struct {
@@ -173,7 +174,8 @@ const soapEnvelopeClose = `
 
 const informResponseXML = soapEnvelopeOpen + `
     <cwmp:InformResponse>
-      <MaxEnvelopes>1</MaxEnvelopes>
+      <MaxEnvelopes>1</MaxEnvelopes>{{if .CurrentTime}}
+      <CurrentTime>{{.CurrentTime}}</CurrentTime>{{end}}
     </cwmp:InformResponse>` + soapEnvelopeClose
 
 const getParameterValuesXML = soapEnvelopeOpen + `

@@ -566,7 +566,13 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 }
 
 func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string) {
-	resp, err := soap.RenderResponse(soap.InformResponseTmpl, soap.InformResponseData{ID: cwmpID})
+	// CurrentTime is formatted as ISO 8601 dateTime per TR069 spec
+	// This helps CPE devices synchronize their clocks with the ACS
+	currentTime := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	resp, err := soap.RenderResponse(soap.InformResponseTmpl, soap.InformResponseData{
+		ID:          cwmpID,
+		CurrentTime: currentTime,
+	})
 	if err != nil {
 		h.logger.Error("render InformResponse", zap.Error(err))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

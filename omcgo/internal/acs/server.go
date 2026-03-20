@@ -34,7 +34,7 @@ type ServerDeps struct {
 	RateLimiter     *DeviceRateLimiter
 	Admission       *AdmissionController
 	Metrics         *ACSMetrics
-	UploadHandler   *upload.Handler // File upload handler
+	UploadHandler   *upload.Handler // CPE file upload handler (supports query params and path-based token)
 	Logger          *zap.Logger
 	RequestIDPrefix string // prefix for request IDs, e.g., "acs"
 }
@@ -62,9 +62,11 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		w.Write([]byte("ok"))
 	})
 
-	// File upload handler (CPE -> ACS -> MinIO proxy)
+	// CPE file upload handler (CPE -> ACS -> MinIO proxy)
+	// Endpoint: POST /smallcell/FileUploadService?fileType=PM&filename=xxx
+	// Auth: HTTP Basic Authentication with global credentials
 	if deps.UploadHandler != nil {
-		mux.Handle("/smallcell/upload/", deps.UploadHandler)
+		mux.Handle("/smallcell/FileUploadService", deps.UploadHandler)
 	}
 
 	// Start background session reaper to clean up stale connSessions entries
