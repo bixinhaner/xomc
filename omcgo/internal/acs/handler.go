@@ -14,7 +14,6 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
-	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/pkg/soap"
@@ -33,16 +32,16 @@ type connSessionEntry struct {
 
 // Handler processes TR069/CWMP HTTP requests.
 type Handler struct {
-	sessionStore     SessionStore
-	commandQueue     cmdqueue.CommandQueue
-	eventBus         event.EventBus
-	authenticator    auth.DeviceAuthenticator
-	rpcDispatcher    *rpc.Dispatcher
-	rateLimiter      *DeviceRateLimiter
-	admission        *AdmissionController
-	metrics          *ACSMetrics
-	logger           *zap.Logger
-	requestIDPrefix  string // prefix for request IDs, e.g., "acs"
+	sessionStore    SessionStore
+	commandQueue    cmdqueue.CommandQueue
+	eventBus        event.EventBus
+	authenticator   auth.DeviceAuthenticator
+	rpcDispatcher   *rpc.Dispatcher
+	rateLimiter     *DeviceRateLimiter
+	admission       *AdmissionController
+	metrics         *ACSMetrics
+	logger          *zap.Logger
+	requestIDPrefix string // prefix for request IDs, e.g., "acs"
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
