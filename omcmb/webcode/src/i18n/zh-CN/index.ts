@@ -650,6 +650,8 @@ const messages: Record<string, string> = {
   // 告警操作
   'alarm.filterAlarm':      '过滤告警',
   'alarm.filterAlarmConfirm': '确认过滤选中的告警？',
+  'alarm.deleteAlarm':      '删除告警',
+  'alarm.deleteConfirmMsg': '确定要删除选中的 {count} 条告警吗？此操作不可恢复。',
 
   // 告警详情页
   'alarm.basicInfo':        '基本信息',
@@ -662,6 +664,8 @@ const messages: Record<string, string> = {
   'alarm.dealUser':         '确认人',
   'alarm.dealTime':         '确认时间',
   'alarm.clearUser':        '清除人',
+  'alarm.noteLabel':        '处理描述（选填）',
+  'alarm.notePlaceholder':  '请输入处理描述或备注信息',
 
   // -------------------------------------------------------------------------
   // User / System labels

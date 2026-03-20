@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Badge, Button, Space, Tag, Typography, App } from 'antd';
 import {
   CheckOutlined,
-  ClearOutlined,
+  DeleteOutlined,
   ExportOutlined,
   EyeOutlined,
   FilterOutlined,
@@ -13,12 +13,13 @@ import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useHistoricalAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
+import { useHistoricalAlarms, useAcknowledgeAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal, { type ExportParams } from '../CurrentAlarms/ExportModal';
+import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 
 const { Text } = Typography;
 
@@ -66,6 +67,11 @@ export default function HistoricalAlarms() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+
+  // 确认告警弹窗状态
+  const [ackModalOpen, setAckModalOpen] = useState(false);
+  const [ackTargetIds, setAckTargetIds] = useState<string[]>([]);
+  const [ackLoading, setAckLoading] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -131,7 +137,6 @@ export default function HistoricalAlarms() {
 
   const { data, isLoading, refetch } = useHistoricalAlarms(queryParams);
   const acknowledgeAlarms = useAcknowledgeAlarms();
-  const clearAlarms = useClearAlarms();
 
   const rawAlarms: Alarm[] = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -164,24 +169,28 @@ export default function HistoricalAlarms() {
 
   const handleAcknowledge = useCallback(
     (ids: string[]) => {
-      modal.confirm({
-        title: t('alarm.acknowledge'),
-        content: t('common.ackConfirmMsg', { count: ids.length }),
-        okText: t('common.confirm'),
-        icon: <CheckOutlined style={{ color: 'var(--color-primary-600)' }} />,
-        onOk: async () => {
-          try {
-            await acknowledgeAlarms.mutateAsync({ ids });
-            setSelectedRowKeys([]);
-            refetch();
-            message.success(t('common.ackSuccess'));
-          } catch {
-            message.error(t('common.ackFailed'));
-          }
-        },
-      });
+      setAckTargetIds(ids);
+      setAckModalOpen(true);
     },
-    [acknowledgeAlarms, refetch, t]
+    []
+  );
+
+  const handleAcknowledgeConfirm = useCallback(
+    async (note: string) => {
+      setAckLoading(true);
+      try {
+        await acknowledgeAlarms.mutateAsync({ ids: ackTargetIds, note });
+        setSelectedRowKeys([]);
+        setAckModalOpen(false);
+        refetch();
+        message.success(t('common.ackSuccess'));
+      } catch {
+        message.error(t('common.ackFailed'));
+      } finally {
+        setAckLoading(false);
+      }
+    },
+    [acknowledgeAlarms, ackTargetIds, refetch, t, message]
   );
 
   const handleUnacknowledge = useCallback(
@@ -205,29 +214,6 @@ export default function HistoricalAlarms() {
     [refetch, t]
   );
 
-  const handleClear = useCallback(
-    (ids: string[]) => {
-      modal.confirm({
-        title: t('alarm.clear'),
-        content: t('common.clearConfirmMsg', { count: ids.length }),
-        okText: t('alarm.clear'),
-        okType: 'danger',
-        icon: <ClearOutlined />,
-        onOk: async () => {
-          try {
-            await clearAlarms.mutateAsync(ids);
-            setSelectedRowKeys([]);
-            refetch();
-            message.success(t('common.clearSuccess'));
-          } catch {
-            message.error(t('common.clearFailed'));
-          }
-        },
-      });
-    },
-    [clearAlarms, refetch, t]
-  );
-
   const handleFilter = useCallback(
     (ids: string[]) => {
       modal.confirm({
@@ -246,12 +232,26 @@ export default function HistoricalAlarms() {
     [refetch, t]
   );
 
-  const handleMarkRead = useCallback(
+  // 删除告警
+  const handleDelete = useCallback(
     (ids: string[]) => {
-      // TODO: 调用标记已读 API
-      setSelectedRowKeys([]);
-      refetch();
-      message.success(t('common.markReadSuccess'));
+      modal.confirm({
+        title: t('alarm.deleteAlarm'),
+        content: t('alarm.deleteConfirmMsg', { count: ids.length }),
+        okText: t('common.delete'),
+        okType: 'danger',
+        icon: <DeleteOutlined />,
+        onOk: async () => {
+          try {
+            // TODO: 调用删除告警 API
+            setSelectedRowKeys([]);
+            refetch();
+            message.success(t('common.deleteSuccess'));
+          } catch {
+            message.error(t('common.deleteFailed'));
+          }
+        },
+      });
     },
     [refetch, t]
   );
@@ -467,20 +467,14 @@ export default function HistoricalAlarms() {
         onClick: (keys) => handleUnacknowledge(keys as string[]),
       },
       {
-        key: 'batch-clear',
-        label: t('alarm.clear'),
-        icon: <ClearOutlined />,
+        key: 'batch-delete',
+        label: t('alarm.deleteAlarm'),
+        icon: <DeleteOutlined />,
         danger: true,
-        onClick: (keys) => handleClear(keys as string[]),
-      },
-      {
-        key: 'batch-read',
-        label: t('alarm.markRead'),
-        icon: <EyeOutlined />,
-        onClick: (keys) => handleMarkRead(keys as string[]),
+        onClick: (keys) => handleDelete(keys as string[]),
       },
     ],
-    [handleAcknowledge, handleUnacknowledge, handleClear, handleFilter, handleMarkRead]
+    [handleAcknowledge, handleUnacknowledge, handleFilter, handleDelete]
   );
 
   return (
@@ -533,6 +527,15 @@ export default function HistoricalAlarms() {
         onClose={() => setExportOpen(false)}
         onConfirm={handleExport}
         confirmLoading={exportLoading}
+      />
+
+      <ConfirmWithNoteModal
+        open={ackModalOpen}
+        title={t('alarm.acknowledge')}
+        message={t('common.ackConfirmMsg', { count: ackTargetIds.length })}
+        onConfirm={handleAcknowledgeConfirm}
+        onCancel={() => setAckModalOpen(false)}
+        loading={ackLoading}
       />
     </ListPageLayout>
   );

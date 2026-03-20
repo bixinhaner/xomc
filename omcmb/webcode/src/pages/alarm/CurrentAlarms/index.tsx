@@ -19,6 +19,7 @@ import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal, { type ExportParams } from './ExportModal';
+import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 
 const { Text } = Typography;
 
@@ -66,6 +67,16 @@ export default function CurrentAlarms() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+
+  // 确认告警弹窗状态
+  const [ackModalOpen, setAckModalOpen] = useState(false);
+  const [ackTargetIds, setAckTargetIds] = useState<string[]>([]);
+  const [ackLoading, setAckLoading] = useState(false);
+
+  // 清除告警弹窗状态
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [clearTargetIds, setClearTargetIds] = useState<string[]>([]);
+  const [clearLoading, setClearLoading] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -173,24 +184,28 @@ export default function CurrentAlarms() {
 
   const handleAcknowledge = useCallback(
     (ids: string[]) => {
-      modal.confirm({
-        title: t('alarm.acknowledge'),
-        content: t('common.ackConfirmMsg', { count: ids.length }),
-        okText: t('common.confirm'),
-        icon: <CheckOutlined style={{ color: 'var(--color-primary-600)' }} />,
-        onOk: async () => {
-          try {
-            await acknowledgeAlarms.mutateAsync({ ids });
-            setSelectedRowKeys([]);
-            refetch();
-            message.success(t('common.ackSuccess'));
-          } catch {
-            message.error(t('common.ackFailed'));
-          }
-        },
-      });
+      setAckTargetIds(ids);
+      setAckModalOpen(true);
     },
-    [acknowledgeAlarms, refetch, t]
+    []
+  );
+
+  const handleAcknowledgeConfirm = useCallback(
+    async (note: string) => {
+      setAckLoading(true);
+      try {
+        await acknowledgeAlarms.mutateAsync({ ids: ackTargetIds, note });
+        setSelectedRowKeys([]);
+        setAckModalOpen(false);
+        refetch();
+        message.success(t('common.ackSuccess'));
+      } catch {
+        message.error(t('common.ackFailed'));
+      } finally {
+        setAckLoading(false);
+      }
+    },
+    [acknowledgeAlarms, ackTargetIds, refetch, t, message]
   );
 
   const handleUnacknowledge = useCallback(
@@ -216,25 +231,28 @@ export default function CurrentAlarms() {
 
   const handleClear = useCallback(
     (ids: string[]) => {
-      modal.confirm({
-        title: t('alarm.clear'),
-        content: t('common.clearConfirmMsg', { count: ids.length }),
-        okText: t('alarm.clear'),
-        okType: 'danger',
-        icon: <ClearOutlined />,
-        onOk: async () => {
-          try {
-            await clearAlarms.mutateAsync(ids);
-            setSelectedRowKeys([]);
-            refetch();
-            message.success(t('common.clearSuccess'));
-          } catch {
-            message.error(t('common.clearFailed'));
-          }
-        },
-      });
+      setClearTargetIds(ids);
+      setClearModalOpen(true);
     },
-    [clearAlarms, refetch, t]
+    []
+  );
+
+  const handleClearConfirm = useCallback(
+    async (note: string) => {
+      setClearLoading(true);
+      try {
+        await clearAlarms.mutateAsync({ ids: clearTargetIds, note });
+        setSelectedRowKeys([]);
+        setClearModalOpen(false);
+        refetch();
+        message.success(t('common.clearSuccess'));
+      } catch {
+        message.error(t('common.clearFailed'));
+      } finally {
+        setClearLoading(false);
+      }
+    },
+    [clearAlarms, clearTargetIds, refetch, t, message]
   );
 
   const handleFilter = useCallback(
@@ -545,6 +563,26 @@ export default function CurrentAlarms() {
         onClose={() => setExportOpen(false)}
         onConfirm={handleExport}
         confirmLoading={exportLoading}
+      />
+
+      <ConfirmWithNoteModal
+        open={ackModalOpen}
+        title={t('alarm.acknowledge')}
+        message={t('common.ackConfirmMsg', { count: ackTargetIds.length })}
+        onConfirm={handleAcknowledgeConfirm}
+        onCancel={() => setAckModalOpen(false)}
+        loading={ackLoading}
+      />
+
+      <ConfirmWithNoteModal
+        open={clearModalOpen}
+        title={t('alarm.clear')}
+        message={t('common.clearConfirmMsg', { count: clearTargetIds.length })}
+        confirmText={t('alarm.clear')}
+        confirmType="danger"
+        onConfirm={handleClearConfirm}
+        onCancel={() => setClearModalOpen(false)}
+        loading={clearLoading}
       />
     </ListPageLayout>
   );
