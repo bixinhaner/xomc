@@ -870,6 +870,7 @@ const messages: Record<string, string> = {
   'common.failed':          '操作失败',
   'common.hasAlarm':        '有告警',
   'common.noAlarm':         '无告警',
+  'common.characters':      '个字符',
 
   // -------------------------------------------------------------------------
   // Sync params modal
@@ -1109,6 +1110,10 @@ const messages: Record<string, string> = {
   'alarm.ruleEnabled': '规则已启用',
   'alarm.ruleDisabled': '规则已禁用',
   'alarm.ruleToggleFailed': '切换规则状态失败',
+  'alarm.ruleNameMax100': '规则名称最多100个字符',
+  'alarm.ruleNameDuplicate': '规则名称已存在',
+  'alarm.selectAtLeastOne': '请至少选择一条告警',
+  'alarm.deviceSelection': '设备选择',
 
   // -------------------------------------------------------------------------
   // Time duration

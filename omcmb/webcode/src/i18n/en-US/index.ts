@@ -866,6 +866,7 @@ const messages: Record<string, string> = {
   'common.success':             'Success',
   'common.hasAlarm':        'Has Alarm',
   'common.noAlarm':         'No Alarm',
+  'common.characters':      'characters',
 
   // -------------------------------------------------------------------------
   // Sync params modal
@@ -1105,6 +1106,10 @@ const messages: Record<string, string> = {
   'alarm.ruleEnabled': 'Rule enabled',
   'alarm.ruleDisabled': 'Rule disabled',
   'alarm.ruleToggleFailed': 'Failed to toggle rule status',
+  'alarm.ruleNameMax100': 'Rule name must be at most 100 characters',
+  'alarm.ruleNameDuplicate': 'Rule name already exists',
+  'alarm.selectAtLeastOne': 'Please select at least one alarm',
+  'alarm.deviceSelection': 'Device Selection',
 
   // -------------------------------------------------------------------------
   // Time duration

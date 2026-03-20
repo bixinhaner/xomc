@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { App, Button, Space, Switch, Tag, Typography } from 'antd';
+import { App, Button, Space, Switch, Tag, Typography, message } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -10,9 +11,10 @@ import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useAlarmRules, useDeleteAlarmRules, useUpdateAlarmRule } from '@/hooks/api/useAlarms';
+import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { AlarmRule } from '@/types/alarm';
+import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
 
 const { Text } = Typography;
 
@@ -34,12 +36,20 @@ const DEVICE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
+type DrawerMode = 'add' | 'edit' | 'view';
+
 export default function AlarmRules() {
   const t = useT();
   const { modal } = App.useApp();
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // 抽屉状态
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerMode, setDrawerMode] = useState<DrawerMode>('add');
+  const [currentRule, setCurrentRule] = useState<AlarmRule | null>(null);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     {
@@ -55,6 +65,7 @@ export default function AlarmRules() {
   const { data, isLoading, refetch } = useAlarmRules(queryParams);
   const deleteRules = useDeleteAlarmRules();
   const updateRule = useUpdateAlarmRule();
+  const createRule = useCreateAlarmRule();
 
   const rules: AlarmRule[] = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -62,21 +73,77 @@ export default function AlarmRules() {
   // 启用/禁用规则
   const handleToggle = useCallback(
     async (rule: AlarmRule, checked: boolean) => {
+      setTogglingId(rule.id);
       try {
-        await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } as Partial<AlarmRule> });
+        await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } });
+        message.success(t(checked ? 'alarm.ruleEnabled' : 'alarm.ruleDisabled'));
         void refetch();
-      } catch {
-        // error handled by hook
+      } catch (error) {
+        message.error(t('alarm.ruleToggleFailed'));
+        console.error('Toggle rule failed:', error);
+      } finally {
+        setTogglingId(null);
       }
     },
-    [updateRule, refetch]
+    [updateRule, refetch, t]
   );
 
-  // 编辑规则
-  const handleEdit = useCallback((rule: AlarmRule) => {
-    // TODO: 打开编辑抽屉/页面
-    console.log('Edit rule:', rule);
+  // 打开添加抽屉
+  const handleAdd = useCallback(() => {
+    setCurrentRule(null);
+    setDrawerMode('add');
+    setDrawerOpen(true);
   }, []);
+
+  // 打开编辑抽屉
+  const handleEdit = useCallback((rule: AlarmRule) => {
+    if (rule.enabled) {
+      modal.warning({
+        title: t('common.warning'),
+        content: t('alarm.cannotEditEnabledRule'),
+      });
+      return;
+    }
+    setCurrentRule(rule);
+    setDrawerMode('edit');
+    setDrawerOpen(true);
+  }, [modal, t]);
+
+  // 打开查看抽屉
+  const handleView = useCallback((rule: AlarmRule) => {
+    setCurrentRule(rule);
+    setDrawerMode('view');
+    setDrawerOpen(true);
+  }, []);
+
+  // 关闭抽屉
+  const handleDrawerClose = useCallback(() => {
+    setDrawerOpen(false);
+    setCurrentRule(null);
+  }, []);
+
+  // 提交表单
+  const handleDrawerSubmit = useCallback(async (formData: AlarmRuleFormData) => {
+    const ruleData = {
+      ruleName: formData.ruleName,
+      enabled: formData.status,
+      ruleType: formData.ruleType,
+      deviceType: formData.deviceSelectionMode === 'devices'
+        ? formData.selectedDevices.join(',')
+        : formData.selectedGroups.join(','),
+      userCode: 'admin',
+      severity: 'warning' as const,
+      conditions: [],
+      actions: [],
+    };
+
+    if (drawerMode === 'add') {
+      await createRule.mutateAsync(ruleData);
+    } else if (drawerMode === 'edit' && currentRule) {
+      await updateRule.mutateAsync({ id: currentRule.id, data: ruleData });
+    }
+    void refetch();
+  }, [drawerMode, currentRule, createRule, updateRule, refetch]);
 
   // 删除规则
   const handleDelete = useCallback(
@@ -115,10 +182,18 @@ export default function AlarmRules() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 120,
+        width: 160,
         fixed: 'left',
         render: (_val, record) => (
           <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => handleView(record)}
+            >
+              {t('common.view')}
+            </Button>
             <Button
               type="link"
               size="small"
@@ -150,7 +225,7 @@ export default function AlarmRules() {
           <Switch
             checked={record.enabled}
             size="small"
-            loading={updateRule.isPending}
+            loading={togglingId === record.id}
             onChange={(checked) => void handleToggle(record, checked)}
           />
         ),
@@ -209,7 +284,7 @@ export default function AlarmRules() {
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
       },
     ],
-    [handleToggle, handleEdit, handleDelete, updateRule.isPending, t]
+    [handleToggle, handleEdit, handleView, handleDelete, togglingId, t]
   );
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
@@ -220,11 +295,6 @@ export default function AlarmRules() {
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
-  }, []);
-
-  const handleAdd = useCallback(() => {
-    // TODO: 打开添加抽屉/页面
-    console.log('Add new rule');
   }, []);
 
   return (
@@ -260,6 +330,15 @@ export default function AlarmRules() {
         }}
         onRefresh={() => void refetch()}
         defaultDensity="compact"
+      />
+
+      <AlarmRuleDrawer
+        open={drawerOpen}
+        mode={drawerMode}
+        rule={currentRule}
+        existingNames={rules.map(r => r.ruleName)}
+        onClose={handleDrawerClose}
+        onSubmit={handleDrawerSubmit}
       />
     </ListPageLayout>
   );
