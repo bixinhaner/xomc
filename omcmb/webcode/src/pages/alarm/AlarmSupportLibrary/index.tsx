@@ -1,342 +1,245 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Drawer, Space, Tag, Typography } from 'antd';
-import { EyeOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Input, Space, Tag } from 'antd';
+import { ExportOutlined, SearchOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import FilterBar from '@/components/FilterBar';
-import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
-const { Text, Paragraph, Title } = Typography;
-
-interface AlarmLibraryEntry {
-  id: string;
-  alarmCode: string;
-  alarmName: string;
-  severity: 'critical' | 'major' | 'minor' | 'warning';
-  possibleCauses: string;
-  handlingSuggestions: string;
-  updateTime: string;
-  neType: string;
-  vendor: string;
+// 告警库项类型定义
+interface AlarmLibrary {
+  deviceTypeName: string;    // 信告警源
+  alarmIdentifier: string;   // 告警唯一标识
+  alarmName: string;         // 可能原因
+  serverityType: 'Critical' | 'Major' | 'Minor' | 'Warning';  // 严重程度
+  eventType: EventType;      // 事件类型
+  explanation: string;       // 告警解释
 }
 
-const MOCK_LIBRARY: AlarmLibraryEntry[] = [
+// 事件类型
+type EventType = '30000' | '30001' | '30002' | '30003' | '30004' | '30006';
+
+// Mock 数据
+const MOCK_LIBRARY: AlarmLibrary[] = [
   {
-    id: '1', alarmCode: 'ALM-0001', alarmName: 'CPU占用率超阈值',
-    severity: 'major', neType: 'eNB', vendor: '华为',
-    possibleCauses: '1. 系统负载过高\n2. 进程异常死循环\n3. 内存泄漏导致CPU占用上升',
-    handlingSuggestions: '1. 检查系统进程，终止异常进程\n2. 重启相关服务\n3. 如持续发生，考虑升级硬件或优化配置',
-    updateTime: '2024-02-01',
+    deviceTypeName: 'eNB',
+    alarmIdentifier: 'ALM-0001',
+    alarmName: 'CPU占用率超阈值告警',
+    serverityType: 'Major',
+    eventType: '30003',
+    explanation: '当CPU占用率超过设定的阈值时产生此告警，可能导致系统性能下降。需要检查系统负载情况，必要时进行优化或扩容。',
   },
   {
-    id: '2', alarmCode: 'ALM-0002', alarmName: '设备断连告警',
-    severity: 'critical', neType: 'gNB', vendor: '华为',
-    possibleCauses: '1. 网络链路中断\n2. 设备断电\n3. 配置错误导致连接失败',
-    handlingSuggestions: '1. 检查网络连接和电源\n2. 检查防火墙规则\n3. 验证管理IP配置是否正确',
-    updateTime: '2024-02-05',
+    deviceTypeName: 'gNB',
+    alarmIdentifier: 'ALM-0002',
+    alarmName: '设备断连告警',
+    serverityType: 'Critical',
+    eventType: '30000',
+    explanation: '设备与网管系统失去连接，可能是由于网络故障、设备断电或配置错误导致。需要立即检查设备状态和网络连接。',
   },
   {
-    id: '3', alarmCode: 'ALM-0003', alarmName: '温度过高告警',
-    severity: 'major', neType: 'CPE', vendor: '中兴',
-    possibleCauses: '1. 环境温度过高\n2. 散热风扇故障\n3. 设备长期高负载运行',
-    handlingSuggestions: '1. 检查机房温度，开启空调降温\n2. 检查并更换散热风扇\n3. 降低设备工作负载',
-    updateTime: '2024-02-08',
+    deviceTypeName: 'CPE',
+    alarmIdentifier: 'ALM-0003',
+    alarmName: '温度过高告警',
+    serverityType: 'Major',
+    eventType: '30004',
+    explanation: '设备运行温度超过安全阈值，可能导致设备损坏或性能下降。需要检查机房散热条件和设备风扇状态。',
   },
   {
-    id: '4', alarmCode: 'ALM-0004', alarmName: '光模块接收功率低',
-    severity: 'minor', neType: 'eNB', vendor: '爱立信',
-    possibleCauses: '1. 光纤弯折损耗\n2. 光模块老化\n3. 光纤连接器污染',
-    handlingSuggestions: '1. 检查光纤路由，避免弯折\n2. 清洁光纤连接器\n3. 如光模块老化严重，及时更换',
-    updateTime: '2024-02-10',
+    deviceTypeName: 'eNB',
+    alarmIdentifier: 'ALM-0004',
+    alarmName: '光模块接收功率低',
+    serverityType: 'Minor',
+    eventType: '30000',
+    explanation: '光模块接收光功率低于正常工作范围，可能是光纤损耗过大或光模块老化导致。建议检查光纤连接和光模块状态。',
   },
   {
-    id: '5', alarmCode: 'ALM-0005', alarmName: '磁盘空间不足',
-    severity: 'warning', neType: 'eGW', vendor: '华为',
-    possibleCauses: '1. 日志文件未定期清理\n2. 核心转储文件积累\n3. 业务数据增长过快',
-    handlingSuggestions: '1. 定期清理日志文件\n2. 配置日志自动归档策略\n3. 扩容存储空间',
-    updateTime: '2024-02-12',
+    deviceTypeName: 'eGW',
+    alarmIdentifier: 'ALM-0005',
+    alarmName: '磁盘空间不足',
+    serverityType: 'Warning',
+    eventType: '30006',
+    explanation: '磁盘空间使用率超过阈值，可能影响系统正常运行。建议清理日志文件或扩展存储容量。',
   },
   {
-    id: '6', alarmCode: 'ALM-0006', alarmName: '链路丢包率异常',
-    severity: 'major', neType: 'gNB', vendor: '中兴',
-    possibleCauses: '1. 网络拥塞\n2. 物理链路质量差\n3. QoS配置不当',
-    handlingSuggestions: '1. 检查网络流量，优化路由\n2. 检查物理链路，替换损坏线缆\n3. 调整QoS配置',
-    updateTime: '2024-02-15',
+    deviceTypeName: 'gNB',
+    alarmIdentifier: 'ALM-0006',
+    alarmName: '链路丢包率异常',
+    serverityType: 'Major',
+    eventType: '30001',
+    explanation: '链路丢包率超过正常范围，可能影响业务质量。需要检查网络链路质量和QoS配置。',
   },
   {
-    id: '7', alarmCode: 'ALM-0007', alarmName: '软件版本不匹配',
-    severity: 'warning', neType: 'eNB', vendor: '大唐',
-    possibleCauses: '1. 软件升级后版本兼容性问题\n2. 配置文件版本不一致',
-    handlingSuggestions: '1. 检查软件版本兼容性列表\n2. 升级或回退至兼容版本\n3. 重新下发配置',
-    updateTime: '2024-02-18',
+    deviceTypeName: 'eNB',
+    alarmIdentifier: 'ALM-0007',
+    alarmName: '软件版本不匹配',
+    serverityType: 'Warning',
+    eventType: '30002',
+    explanation: '设备软件版本与预期版本不一致，可能导致功能异常。建议检查软件版本兼容性并进行升级或回退。',
   },
   {
-    id: '8', alarmCode: 'ALM-0008', alarmName: '内存使用率超阈值',
-    severity: 'major', neType: 'eGW', vendor: '京信',
-    possibleCauses: '1. 内存泄漏\n2. 业务并发量过大\n3. 缓存配置不合理',
-    handlingSuggestions: '1. 重启相关服务释放内存\n2. 检查内存泄漏点并修复\n3. 优化缓存配置',
-    updateTime: '2024-02-20',
+    deviceTypeName: 'eGW',
+    alarmIdentifier: 'ALM-0008',
+    alarmName: '内存使用率超阈值',
+    serverityType: 'Major',
+    eventType: '30006',
+    explanation: '内存使用率超过设定的阈值，可能导致系统性能下降或服务异常。需要检查内存占用情况并优化配置。',
+  },
+  {
+    deviceTypeName: 'RRU',
+    alarmIdentifier: 'ALM-0009',
+    alarmName: '射频单元发射功率异常',
+    serverityType: 'Critical',
+    eventType: '30003',
+    explanation: '射频单元发射功率超出正常范围，可能导致覆盖问题或干扰。需要立即检查射频单元状态和功率配置。',
+  },
+  {
+    deviceTypeName: 'BBU',
+    alarmIdentifier: 'ALM-0010',
+    alarmName: '时钟同步异常',
+    serverityType: 'Major',
+    eventType: '30000',
+    explanation: '基站时钟同步异常，可能影响切换性能和定位精度。需要检查时钟源配置和同步链路状态。',
   },
 ];
 
-const SEVERITY_TAG_COLOR: Record<string, string> = {
-  critical: 'red', major: 'orange', minor: 'gold', warning: 'blue',
+// 严重程度配置 - Material Design 颜色
+const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
+  Critical: { color: '#E53935', bgColor: '#FFEBEE' },
+  Major: { color: '#FB8C00', bgColor: '#FFF3E0' },
+  Minor: { color: '#FDD835', bgColor: '#FFFDE7' },
+  Warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
+};
+
+// 事件类型配置
+const EVENT_TYPE_CONFIG: Record<EventType, string> = {
+  '30000': '通信告警',
+  '30001': '服务质量告警',
+  '30002': '处理失败告警',
+  '30003': '设备告警',
+  '30004': '环境告警',
+  '30006': '性能溢出告警',
 };
 
 export default function AlarmSupportLibrary() {
   const t = useT();
-  const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
+  const [searchText, setSearchText] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [drawerEntry, setDrawerEntry] = useState<AlarmLibraryEntry | null>(null);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
-    critical: t('alarm.severity.critical'),
-    major: t('alarm.severity.major'),
-    minor: t('alarm.severity.minor'),
-    warning: t('alarm.severity.warning'),
+    Critical: t('alarm.severity.critical'),
+    Major: t('alarm.severity.major'),
+    Minor: t('alarm.severity.minor'),
+    Warning: t('alarm.severity.warning'),
   }), [t]);
 
-  const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'alarmCode', label: t('alarm.code'), type: 'input' },
-    { name: 'alarmName', label: t('alarm.name'), type: 'input' },
-    {
-      name: 'severity',
-      label: t('alarm.severity'),
-      type: 'select',
-      options: [
-        { label: t('alarm.severity.critical'), value: 'critical' },
-        { label: t('alarm.severity.major'), value: 'major' },
-        { label: t('alarm.severity.minor'), value: 'minor' },
-        { label: t('alarm.severity.warning'), value: 'warning' },
-      ],
-    },
-    {
-      name: 'neType',
-      label: t('alarm.neType'),
-      type: 'select',
-      options: [
-        { label: 'eNB', value: 'eNB' },
-        { label: 'gNB', value: 'gNB' },
-        { label: 'CPE', value: 'CPE' },
-        { label: 'eGW', value: 'eGW' },
-      ],
-    },
-    {
-      name: 'vendor',
-      label: t('device.vendor'),
-      type: 'select',
-      options: [
-        { label: '华为', value: '华为' },
-        { label: '中兴', value: '中兴' },
-        { label: '爱立信', value: '爱立信' },
-        { label: '大唐', value: '大唐' },
-        { label: '京信', value: '京信' },
-      ],
-    },
-  ], [t]);
-
+  // 过滤数据
   const filteredData = useMemo(() => {
-    return MOCK_LIBRARY.filter((entry) => {
-      if (filterParams.alarmCode && !entry.alarmCode.toLowerCase().includes(String(filterParams.alarmCode).toLowerCase())) return false;
-      if (filterParams.alarmName && !entry.alarmName.toLowerCase().includes(String(filterParams.alarmName).toLowerCase())) return false;
-      if (filterParams.severity && entry.severity !== filterParams.severity) return false;
-      if (filterParams.neType && entry.neType !== filterParams.neType) return false;
-      if (filterParams.vendor && entry.vendor !== filterParams.vendor) return false;
-      return true;
-    });
-  }, [filterParams]);
+    if (!searchText.trim()) return MOCK_LIBRARY;
+    const keyword = searchText.toLowerCase();
+    return MOCK_LIBRARY.filter((entry) =>
+      entry.alarmIdentifier.toLowerCase().includes(keyword) ||
+      entry.alarmName.toLowerCase().includes(keyword) ||
+      entry.deviceTypeName.toLowerCase().includes(keyword)
+    );
+  }, [searchText]);
 
-  const handleSearch = useCallback((values: Record<string, unknown>) => {
-    setFilterParams(values);
+  const handleSearch = useCallback(() => {
     setCurrentPage(1);
   }, []);
 
-  const handleReset = useCallback(() => {
-    setFilterParams({});
-    setCurrentPage(1);
+  const handleExport = useCallback(() => {
+    // TODO: 实现导出功能
+    console.log('Export alarm library');
   }, []);
 
   const columns = useMemo(
-    (): DataTableColumn<AlarmLibraryEntry>[] => [
+    (): DataTableColumn<AlarmLibrary>[] => [
       {
-        key: 'alarmCode',
-        title: t('alarm.code'),
-        dataIndex: 'alarmCode',
+        key: 'deviceTypeName',
+        title: t('alarm.deviceTypeName'),
+        dataIndex: 'deviceTypeName',
         width: 110,
+      },
+      {
+        key: 'alarmIdentifier',
+        title: t('alarm.alarmIdentifier'),
+        dataIndex: 'alarmIdentifier',
+        width: 150,
         mono: true,
-        render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{String(v)}</Text>,
       },
-      { key: 'alarmName', title: t('alarm.name'), dataIndex: 'alarmName', width: 180, ellipsis: true },
       {
-        key: 'severity',
+        key: 'alarmName',
+        title: t('alarm.possibleCause'),
+        dataIndex: 'alarmName',
+        width: 300,
+        ellipsis: true,
+      },
+      {
+        key: 'serverityType',
         title: t('alarm.severity'),
-        dataIndex: 'severity',
-        width: 80,
-        render: (_val, record) => (
-          <Tag color={SEVERITY_TAG_COLOR[record.severity]}>{SEVERITY_LABEL[record.severity]}</Tag>
-        ),
+        dataIndex: 'serverityType',
+        width: 140,
+        render: (value) => {
+          const config = SEVERITY_CONFIG[value as string];
+          return (
+            <Tag style={{ color: config?.color, backgroundColor: config?.bgColor, border: 'none' }}>
+              {SEVERITY_LABEL[value as string] || value}
+            </Tag>
+          );
+        },
       },
-      { key: 'neType', title: t('alarm.neType'), dataIndex: 'neType', width: 90 },
-      { key: 'vendor', title: t('device.vendor'), dataIndex: 'vendor', width: 90 },
       {
-        key: 'possibleCauses',
-        title: t('alarm.content'),
-        dataIndex: 'possibleCauses',
-        width: 240,
+        key: 'eventType',
+        title: t('alarm.eventType'),
+        dataIndex: 'eventType',
+        width: 160,
+        render: (value) => EVENT_TYPE_CONFIG[value as EventType] || value,
+      },
+      {
+        key: 'explanation',
+        title: t('alarm.explanation'),
+        dataIndex: 'explanation',
+        width: 700,
         ellipsis: true,
-        render: (v) => (
-          <Text type="secondary" title={String(v)} style={{ fontSize: 12 }}>
-            {String(v).split('\n')[0]}...
-          </Text>
-        ),
-      },
-      {
-        key: 'handlingSuggestions',
-        title: t('table.description'),
-        dataIndex: 'handlingSuggestions',
-        width: 240,
-        ellipsis: true,
-        render: (v) => (
-          <Text type="secondary" title={String(v)} style={{ fontSize: 12 }}>
-            {String(v).split('\n')[0]}...
-          </Text>
-        ),
-      },
-      { key: 'updateTime', title: t('table.updateTime'), dataIndex: 'updateTime', width: 120 },
-      {
-        key: 'actions',
-        title: t('table.operation'),
-        dataIndex: 'id',
-        width: 80,
-        fixed: 'right',
-        render: (_val, record) => (
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => setDrawerEntry(record)}
-          >
-            {t('common.detail')}
-          </Button>
-        ),
       },
     ],
     [t, SEVERITY_LABEL]
   );
 
+  // 工具栏
+  const toolbar = useMemo(() => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <Input.Search
+        placeholder={t('alarm.librarySearchPlaceholder')}
+        allowClear
+        style={{ width: 400 }}
+        value={searchText}
+        onChange={(e) => setSearchText(e.target.value)}
+        onSearch={handleSearch}
+        enterButton={<SearchOutlined />}
+      />
+      <Button icon={<ExportOutlined />} onClick={handleExport}>
+        {t('common.export')}
+      </Button>
+    </div>
+  ), [t, searchText, handleSearch, handleExport]);
+
   return (
-    <>
-      <ListPageLayout
-        title={t('nav.alarm.library')}
-      >
-        <FilterBar
-          filterId="alarm-support-library"
-          fields={FILTER_FIELDS}
-          onSearch={handleSearch}
-          onReset={handleReset}
-          collapsedRows={1}
-        />
-
-        <DataTable<AlarmLibraryEntry>
-          tableId="alarm-support-library-table"
-          columns={columns}
-          dataSource={filteredData}
-          loading={false}
-          rowKey="id"
-          total={filteredData.length}
-          pageSize={20}
-          currentPage={currentPage}
-          onPageChange={(p) => setCurrentPage(p)}
-          defaultDensity="compact"
-        />
-      </ListPageLayout>
-
-      {/* Detail Drawer */}
-      <Drawer
-        title={
-          <Space>
-            <Text style={{ fontFamily: 'monospace' }}>{drawerEntry?.alarmCode}</Text>
-            <span>{drawerEntry?.alarmName}</span>
-            {drawerEntry && (
-              <Tag color={SEVERITY_TAG_COLOR[drawerEntry.severity]}>
-                {SEVERITY_LABEL[drawerEntry.severity]}
-              </Tag>
-            )}
-          </Space>
-        }
-        open={Boolean(drawerEntry)}
-        onClose={() => setDrawerEntry(null)}
-        width={520}
-      >
-        {drawerEntry && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                {t('common.detail')}
-              </Text>
-              <table style={{ width: '100%', fontSize: 14 }}>
-                <tbody>
-                  {[
-                    { label: t('alarm.code'), value: drawerEntry.alarmCode },
-                    { label: t('alarm.name'), value: drawerEntry.alarmName },
-                    { label: t('alarm.severity'), value: SEVERITY_LABEL[drawerEntry.severity] },
-                    { label: t('alarm.neType'), value: drawerEntry.neType },
-                    { label: t('device.vendor'), value: drawerEntry.vendor },
-                    { label: t('table.updateTime'), value: drawerEntry.updateTime },
-                  ].map(({ label, value }) => (
-                    <tr key={label} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                      <td style={{ padding: '8px 0', color: '#8c8c8c', width: 100 }}>{label}</td>
-                      <td style={{ padding: '8px 0', fontWeight: 500 }}>{value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div>
-              <Title level={5} style={{ fontSize: 14, marginBottom: 8, color: '#FA8C16' }}>
-                {t('alarm.content')}
-              </Title>
-              <div
-                style={{
-                  background: '#fff7e6',
-                  border: '1px solid #ffd591',
-                  borderRadius: 6,
-                  padding: '12px 16px',
-                }}
-              >
-                {drawerEntry.possibleCauses.split('\n').map((line, idx) => (
-                  <Paragraph key={idx} style={{ margin: '2px 0', fontSize: 13 }}>
-                    {line}
-                  </Paragraph>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Title level={5} style={{ fontSize: 14, marginBottom: 8, color: '#52C41A' }}>
-                {t('table.description')}
-              </Title>
-              <div
-                style={{
-                  background: '#f6ffed',
-                  border: '1px solid #b7eb8f',
-                  borderRadius: 6,
-                  padding: '12px 16px',
-                }}
-              >
-                {drawerEntry.handlingSuggestions.split('\n').map((line, idx) => (
-                  <Paragraph key={idx} style={{ margin: '2px 0', fontSize: 13 }}>
-                    {line}
-                  </Paragraph>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </Drawer>
-    </>
+    <ListPageLayout title={t('nav.alarm.library')}>
+      {toolbar}
+      <DataTable<AlarmLibrary>
+        tableId="alarm-support-library-table"
+        columns={columns}
+        dataSource={filteredData}
+        loading={false}
+        rowKey="alarmIdentifier"
+        total={filteredData.length}
+        pageSize={20}
+        currentPage={currentPage}
+        onPageChange={(p) => setCurrentPage(p)}
+        defaultDensity="compact"
+      />
+    </ListPageLayout>
   );
 }

@@ -639,6 +639,11 @@ const messages: Record<string, string> = {
   'alarm.keyword':           '关键字',
   'alarm.search':             '搜索',
   'alarm.searchPlaceholder':   '告警码 / 可能原因 / 网元定位',
+
+  // 告警库字段
+  'alarm.deviceTypeName':        '信告警源',
+  'alarm.explanation':           '告警解释',
+  'alarm.librarySearchPlaceholder': '告警唯一标识 / 可能原因 / 信告警源',
   'alarm.eventTime':         '告警时间',
   'alarm.neType':            '基站制式',
   'alarm.detail':            '详细',

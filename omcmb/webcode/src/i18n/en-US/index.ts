@@ -645,6 +645,11 @@ const messages: Record<string, string> = {
   'alarm.detail':            'Detail',
   'alarm.markRead':          'Mark as Read',
 
+  // Alarm library fields
+  'alarm.deviceTypeName':        'Alarm Source',
+  'alarm.explanation':           'Explanation',
+  'alarm.librarySearchPlaceholder': 'Alarm Identifier / Possible Cause / Alarm Source',
+
   // Deal states
   'alarm.dealState.unconfirmedUncleared': 'Unconfirmed & Active',
   'alarm.dealState.confirmedUncleared':   'Confirmed & Active',
