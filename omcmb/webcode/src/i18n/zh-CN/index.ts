@@ -1106,6 +1106,9 @@ const messages: Record<string, string> = {
   'alarm.rulesDesc': '配置告警过滤规则，支持按设备类型、告警级别等条件进行过滤',
   'alarm.defaultRule': '默认',
   'alarm.searchPlaceholder': '请输入规则名称',
+  'alarm.ruleEnabled': '规则已启用',
+  'alarm.ruleDisabled': '规则已禁用',
+  'alarm.ruleToggleFailed': '切换规则状态失败',
 
   // -------------------------------------------------------------------------
   // Time duration

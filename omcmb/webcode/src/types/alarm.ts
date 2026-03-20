@@ -56,9 +56,12 @@ export interface Alarm {
 export interface AlarmRule {
   id: string;
   ruleName: string;
-  ruleType: string;
+  ruleType: string;           // 执行动作: 0-禁止上报, 1-不入库不显示, 2-入库不显示, 3-自动确认
+  deviceType?: string;         // 告警源: ENB/UPS/CPE/GNB/WCG/GSM
   severity: AlarmSeverity;
   enabled: boolean;
+  isDefault?: boolean;         // 是否默认规则
+  userCode?: string;           // 操作人
   conditions: AlarmRuleCondition[];
   actions: AlarmRuleAction[];
   createTime: string;

@@ -7,6 +7,52 @@ import { delay, paginate, sortBy, generateId } from '../utils';
 let activeAlarms = [...mockActiveAlarms];
 let historicalAlarms = [...mockHistoricalAlarms];
 
+// 持久化的告警规则数据
+let alarmRules: import('@/types/alarm').AlarmRule[] = [
+  {
+    id: 'rule-001',
+    ruleName: '默认告警过滤规则',
+    ruleType: '1',
+    deviceType: '',
+    severity: 'warning',
+    enabled: true,
+    isDefault: true,
+    userCode: 'system',
+    conditions: [],
+    actions: [],
+    createTime: '2024-01-01T00:00:00.000Z',
+    updateTime: '2024-06-01T00:00:00.000Z',
+  },
+  {
+    id: 'rule-002',
+    ruleName: 'S1链路中断告警过滤',
+    ruleType: '3',
+    deviceType: 'ENB',
+    severity: 'major',
+    enabled: true,
+    isDefault: false,
+    userCode: 'admin',
+    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0002' }],
+    actions: [{ type: 'notify', target: '传输组' }],
+    createTime: '2024-01-01T00:00:00.000Z',
+    updateTime: '2024-04-01T00:00:00.000Z',
+  },
+  {
+    id: 'rule-003',
+    ruleName: '温度过高抑制规则',
+    ruleType: '0',
+    deviceType: 'ENB',
+    severity: 'warning',
+    enabled: false,
+    isDefault: false,
+    userCode: 'admin',
+    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0004' }, { field: 'alarmContent', operator: 'contains', value: '温度' }],
+    actions: [{ type: 'suppress' }],
+    createTime: '2024-03-01T00:00:00.000Z',
+    updateTime: '2024-03-01T00:00:00.000Z',
+  },
+];
+
 function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
   let result = [...items];
   if (filter.severity) result = result.filter((a) => a.severity === filter.severity);
@@ -124,71 +170,41 @@ export const alarmService = {
   // Alarm rules
   async getRules(params: PageRequest): Promise<PageResponse<AlarmRule>> {
     await delay(100, 200);
-    const rules: AlarmRule[] = [
-      {
-        id: 'rule-001',
-        ruleName: '小区不可用紧急通知',
-        ruleType: '无线告警',
-        severity: 'critical',
-        enabled: true,
-        conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0001' }],
-        actions: [{ type: 'notify', target: '运维值班群' }, { type: 'email', target: 'oncall@telecom.com' }],
-        createTime: '2024-01-01T00:00:00.000Z',
-        updateTime: '2024-06-01T00:00:00.000Z',
-      },
-      {
-        id: 'rule-002',
-        ruleName: 'S1链路中断告警',
-        ruleType: '传输告警',
-        severity: 'major',
-        enabled: true,
-        conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0002' }],
-        actions: [{ type: 'notify', target: '传输组' }],
-        createTime: '2024-01-01T00:00:00.000Z',
-        updateTime: '2024-04-01T00:00:00.000Z',
-      },
-      {
-        id: 'rule-003',
-        ruleName: '温度过高抑制规则',
-        ruleType: '环境告警',
-        severity: 'warning',
-        enabled: false,
-        conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0004' }, { field: 'alarmContent', operator: 'contains', value: '温度' }],
-        actions: [{ type: 'suppress' }],
-        createTime: '2024-03-01T00:00:00.000Z',
-        updateTime: '2024-03-01T00:00:00.000Z',
-      },
-    ];
-    return paginate(rules, params.page, params.pageSize);
+    return paginate(alarmRules, params.page, params.pageSize);
   },
 
   async createRule(data: Omit<AlarmRule, 'id' | 'createTime' | 'updateTime'>): Promise<AlarmRule> {
     await delay(200, 400);
-    return {
+    const newRule: AlarmRule = {
       ...data,
       id: generateId('rule'),
+      isDefault: false,
       createTime: new Date().toISOString(),
       updateTime: new Date().toISOString(),
     };
+    alarmRules.push(newRule);
+    return newRule;
   },
 
   async updateRule(id: string, data: Partial<AlarmRule>): Promise<AlarmRule> {
     await delay(150, 300);
-    return {
+    const index = alarmRules.findIndex((r) => r.id === id);
+    if (index === -1) {
+      throw new Error('Rule not found');
+    }
+    const existing = alarmRules[index];
+    const updated: AlarmRule = {
+      ...existing,
+      ...data,
       id,
-      ruleName: data.ruleName ?? '规则',
-      ruleType: data.ruleType ?? '无线告警',
-      severity: data.severity ?? 'warning',
-      enabled: data.enabled ?? true,
-      conditions: data.conditions ?? [],
-      actions: data.actions ?? [],
-      createTime: '2024-01-01T00:00:00.000Z',
       updateTime: new Date().toISOString(),
     };
+    alarmRules[index] = updated;
+    return updated;
   },
 
   async deleteRules(ids: string[]): Promise<void> {
     await delay(150, 300);
-    void ids;
+    alarmRules = alarmRules.filter((r) => !ids.includes(r.id));
   },
 };

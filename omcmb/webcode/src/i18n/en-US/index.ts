@@ -1102,6 +1102,9 @@ const messages: Record<string, string> = {
   'alarm.rulesDesc': 'Configure alarm filtering rules, support filtering by device type, alarm level, etc.',
   'alarm.defaultRule': 'Default',
   'alarm.searchPlaceholder': 'Enter rule name',
+  'alarm.ruleEnabled': 'Rule enabled',
+  'alarm.ruleDisabled': 'Rule disabled',
+  'alarm.ruleToggleFailed': 'Failed to toggle rule status',
 
   // -------------------------------------------------------------------------
   // Time duration
