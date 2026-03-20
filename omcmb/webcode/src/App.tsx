@@ -1,4 +1,5 @@
 import { RouterProvider } from 'react-router-dom';
+import { App as AntApp } from 'antd';
 import QueryProvider from './providers/QueryProvider';
 import ThemeProvider from './providers/ThemeProvider';
 import LocaleProvider from './providers/LocaleProvider';
@@ -11,6 +12,7 @@ import router from './router';
  *   QueryProvider       — React Query cache and client
  *   ThemeProvider       — Ant Design theme + data-theme attribute on <html>
  *   LocaleProvider      — react-intl + Ant Design locale
+ *   AntApp              — Ant Design App component for message/modal/notification support
  *   RouterProvider      — React Router v6 with all routes
  */
 export default function App() {
@@ -18,7 +20,9 @@ export default function App() {
     <QueryProvider>
       <ThemeProvider>
         <LocaleProvider>
-          <RouterProvider router={router} />
+          <AntApp>
+            <RouterProvider router={router} />
+          </AntApp>
         </LocaleProvider>
       </ThemeProvider>
     </QueryProvider>

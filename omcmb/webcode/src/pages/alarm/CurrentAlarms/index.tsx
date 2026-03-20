@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Modal, Space, Tag, Typography, message } from 'antd';
+import { Badge, Button, Modal, Space, Tag, Typography, App } from 'antd';
 import {
   BellOutlined,
   CheckOutlined,
@@ -49,6 +49,7 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
 
 export default function CurrentAlarms() {
   const t = useT();
+  const { message } = App.useApp();
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<AlarmFilter>({});
