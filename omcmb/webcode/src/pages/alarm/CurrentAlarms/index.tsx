@@ -408,19 +408,23 @@ export default function CurrentAlarms() {
         ellipsis: true,
         render: (val: DealState) => {
           const config = DEAL_STATE_CONFIG[val];
+          // 根据状态添加图标区分：已确认用✓，已清除用✕
+          const isConfirmed = val === '1' || val === '3';
+          const isCleared = val === '2' || val === '3';
           return (
-            <span style={{ color: config?.color || '#666' }}>
-              {t(config?.label || 'common.unknown')}
-            </span>
+            <Space size={4}>
+              {isCleared ? (
+                <span style={{ color: '#52c41a' }}>✕</span>
+              ) : (
+                <span style={{ color: config?.color || '#666' }}>○</span>
+              )}
+              {isConfirmed && <span style={{ color: '#1890ff' }}>✓</span>}
+              <span style={{ color: config?.color || '#666' }}>
+                {t(config?.label || 'common.unknown')}
+              </span>
+            </Space>
           );
         },
-      },
-      {
-        key: 'alarmType',
-        title: t('alarm.alarmType'),
-        dataIndex: 'alarmType',
-        width: 100,
-        render: () => t('alarm.alarmType.active'),
       },
       {
         key: 'eventTime',
