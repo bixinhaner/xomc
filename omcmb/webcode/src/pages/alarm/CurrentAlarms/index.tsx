@@ -127,8 +127,18 @@ export default function CurrentAlarms() {
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
 
-  const alarms: Alarm[] = data?.items ?? [];
+  const rawAlarms: Alarm[] = data?.items ?? [];
   const total = data?.total ?? 0;
+
+  // 未读告警排在最前面
+  const alarms = useMemo(
+    () => [...rawAlarms].sort((a, b) => {
+      if (a.unread === '1' && b.unread !== '1') return -1;
+      if (a.unread !== '1' && b.unread === '1') return 1;
+      return 0;
+    }),
+    [rawAlarms]
+  );
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams({
@@ -225,8 +235,9 @@ export default function CurrentAlarms() {
   );
 
   const alarmRowStyle = useCallback(
-    (record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
-      return record.severity as 'critical' | 'major' | 'minor' | 'warning';
+    // 去掉紧急告警的红色背景色，不再根据告警级别设置行样式
+    (_record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
+      return null;
     },
     []
   );
