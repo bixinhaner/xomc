@@ -330,7 +330,6 @@ export default function CurrentAlarms() {
         title: t('alarm.alarmId'),
         dataIndex: 'alarmId',
         width: 100,
-        sorter: true,
         render: (val, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
@@ -350,7 +349,6 @@ export default function CurrentAlarms() {
         title: t('alarm.severity'),
         dataIndex: 'severity',
         width: 100,
-        sorter: true,
         render: (_val, record) => {
           const config = SEVERITY_CONFIG[record.severity] || SEVERITY_CONFIG.warning;
           return (
@@ -407,7 +405,6 @@ export default function CurrentAlarms() {
         title: t('alarm.dealState'),
         dataIndex: 'dealState',
         width: 190,
-        sorter: true,
         ellipsis: true,
         render: (val: DealState) => {
           const config = DEAL_STATE_CONFIG[val];
@@ -430,7 +427,6 @@ export default function CurrentAlarms() {
         title: t('alarm.eventTime'),
         dataIndex: 'eventTime',
         width: 150,
-        sorter: true,
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
       },
       {
@@ -438,7 +434,6 @@ export default function CurrentAlarms() {
         title: t('alarm.updTime'),
         dataIndex: 'updTime',
         width: 150,
-        sorter: true,
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
       },
       {
@@ -453,7 +448,6 @@ export default function CurrentAlarms() {
         title: t('alarm.alarmCount'),
         dataIndex: 'alarmCount',
         width: 100,
-        sorter: true,
       },
       {
         key: 'dealMemo',
