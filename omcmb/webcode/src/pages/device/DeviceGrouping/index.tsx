@@ -951,6 +951,13 @@ export default function DeviceGrouping() {
                 {t('table.total')} {total}
               </Text>
             </Title>
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => handleExport('xlsx')}
+            >
+              {t('common.export')}
+            </Button>
           </div>
 
           <DataTable<Device>
@@ -963,7 +970,6 @@ export default function DeviceGrouping() {
             selectedRowKeys={selectedDeviceIds}
             onSelectionChange={(keys) => setSelectedDeviceIds(keys)}
             batchActions={batchActions}
-            onExport={handleExport}
             total={total}
             pageSize={pageSize}
             currentPage={currentPage}
