@@ -12,3 +12,6 @@ omcmb/webcode/node_modules/
 .claude/*
 !.claude/commands/
 
+# Qoder (AI tool generated files)
+.qoder/
+
