@@ -146,7 +146,7 @@ func InitForWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*App, erro
 // --- infrastructure connect methods ---
 
 func (a *App) connectPostgres(ctx context.Context, cfg appconfig.PostgresConfig) error {
-	pool, err := postgres.NewPostgresPool(ctx, cfg)
+	pool, err := postgres.NewPostgresPool(ctx, cfg, a.Logger)
 	if err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
@@ -156,7 +156,7 @@ func (a *App) connectPostgres(ctx context.Context, cfg appconfig.PostgresConfig)
 }
 
 func (a *App) connectTimescale(ctx context.Context, cfg appconfig.PostgresConfig) error {
-	pool, err := postgres.NewTimescalePool(ctx, cfg)
+	pool, err := postgres.NewTimescalePool(ctx, cfg, a.Logger)
 	if err != nil {
 		return fmt.Errorf("connect to TimescaleDB: %w", err)
 	}

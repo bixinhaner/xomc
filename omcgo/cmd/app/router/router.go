@@ -151,6 +151,14 @@ func Setup(r *gin.Engine, deps *Deps) {
 	if len(corsOrigins) == 0 {
 		corsOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
 	}
+
+	// Setup Request ID middleware with configurable prefix
+	requestIDPrefix := cfg.RequestIDPrefix
+	if requestIDPrefix == "" {
+		requestIDPrefix = "app" // default prefix for app service
+	}
+	r.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{Prefix: requestIDPrefix}))
+
 	r.Use(middleware.CORS(middleware.CORSConfig{
 		AllowOrigins: corsOrigins,
 	}))

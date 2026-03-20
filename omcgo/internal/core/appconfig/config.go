@@ -11,6 +11,7 @@ import (
 
 // ACSConfig is the configuration for the ACS engine.
 type ACSConfig struct {
+<<<<<<< HEAD
 	Server    ACSServerConfig    `mapstructure:"server"`
 	Session   SessionConfig      `mapstructure:"session"`
 	RateLimit RateLimitConfig    `mapstructure:"rate_limit"`
@@ -23,6 +24,19 @@ type ACSConfig struct {
 	Metrics   MetricsConfig      `mapstructure:"metrics"`
 	Tracer    TracerConfig       `mapstructure:"tracer"`
 	Log       LogConfig          `mapstructure:"log"`
+=======
+	Server          ACSServerConfig    `mapstructure:"server"`
+	Session         SessionConfig      `mapstructure:"session"`
+	RateLimit       RateLimitConfig    `mapstructure:"rate_limit"`
+	Auth            AuthConfig         `mapstructure:"auth"`
+	Redis           RedisConfig        `mapstructure:"redis"`
+	NATS            NATSConfig         `mapstructure:"nats"`
+	DB              PostgresConfig     `mapstructure:"db"`
+	Metrics         MetricsConfig      `mapstructure:"metrics"`
+	Tracer          TracerConfig       `mapstructure:"tracer"`
+	Log             LogConfig          `mapstructure:"log"`
+	RequestIDPrefix string             `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "acs"
+>>>>>>> c2a509c (feat(components): 实现 Request ID 中间件和 SQL 日志功能)
 }
 
 // UploadConfig holds file upload server settings.
@@ -41,19 +55,20 @@ type CORSConfig struct {
 
 // AppConfig is the configuration for the main application.
 type AppConfig struct {
-	Server     AppServerConfig  `mapstructure:"server"`
-	DB         PostgresConfig   `mapstructure:"db"`
-	TSDB       PostgresConfig   `mapstructure:"tsdb"`
-	Redis      RedisConfig      `mapstructure:"redis"`
-	NATS       NATSConfig       `mapstructure:"nats"`
-	MinIO      MinIOConfig      `mapstructure:"minio"`
-	JWT        JWTConfig        `mapstructure:"jwt"`
-	CORS       CORSConfig       `mapstructure:"cors"`
-	Northbound NorthboundConfig `mapstructure:"northbound"`
-	NEDirect   NEDirectConfig   `mapstructure:"ne_direct"`
-	Metrics    MetricsConfig    `mapstructure:"metrics"`
-	Tracer     TracerConfig     `mapstructure:"tracer"`
-	Log        LogConfig        `mapstructure:"log"`
+	Server          AppServerConfig  `mapstructure:"server"`
+	DB              PostgresConfig   `mapstructure:"db"`
+	TSDB            PostgresConfig   `mapstructure:"tsdb"`
+	Redis           RedisConfig      `mapstructure:"redis"`
+	NATS            NATSConfig       `mapstructure:"nats"`
+	MinIO           MinIOConfig      `mapstructure:"minio"`
+	JWT             JWTConfig        `mapstructure:"jwt"`
+	CORS            CORSConfig       `mapstructure:"cors"`
+	Northbound      NorthboundConfig `mapstructure:"northbound"`
+	NEDirect        NEDirectConfig   `mapstructure:"ne_direct"`
+	Metrics         MetricsConfig    `mapstructure:"metrics"`
+	Tracer          TracerConfig     `mapstructure:"tracer"`
+	Log             LogConfig        `mapstructure:"log"`
+	RequestIDPrefix string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
 }
 
 // JWTConfig holds JWT authentication settings.
@@ -90,14 +105,15 @@ type NEDirectConfig struct {
 
 // WorkerConfig is the configuration for the background worker process.
 type WorkerConfig struct {
-	DB      PostgresConfig `mapstructure:"db"`
-	TSDB    PostgresConfig `mapstructure:"tsdb"`
-	Redis   RedisConfig    `mapstructure:"redis"`
-	NATS    NATSConfig     `mapstructure:"nats"`
-	MinIO   MinIOConfig    `mapstructure:"minio"`
-	Metrics MetricsConfig  `mapstructure:"metrics"`
-	Tracer  TracerConfig   `mapstructure:"tracer"`
-	Log     LogConfig      `mapstructure:"log"`
+	DB              PostgresConfig `mapstructure:"db"`
+	TSDB            PostgresConfig `mapstructure:"tsdb"`
+	Redis           RedisConfig    `mapstructure:"redis"`
+	NATS            NATSConfig     `mapstructure:"nats"`
+	MinIO           MinIOConfig    `mapstructure:"minio"`
+	Metrics         MetricsConfig  `mapstructure:"metrics"`
+	Tracer          TracerConfig   `mapstructure:"tracer"`
+	Log             LogConfig      `mapstructure:"log"`
+	RequestIDPrefix string         `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
 }
 
 // ACSServerConfig holds the ACS HTTP server settings.
@@ -157,6 +173,10 @@ type PostgresConfig struct {
 	MaxConnLifetime     time.Duration `mapstructure:"max_conn_lifetime"`
 	MaxConnIdleTime     time.Duration `mapstructure:"max_conn_idle_time"`
 	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
+	// SQL 日志配置
+	LogSQL              bool `mapstructure:"log_sql"`               // 是否记录 SQL
+	LogSQLParams        bool `mapstructure:"log_sql_params"`         // 是否记录参数
+	LogSQLSlowThreshold int  `mapstructure:"log_sql_slow_threshold"` // 慢查询阈值(ms)
 }
 
 // RedisConfig holds Redis connection settings.

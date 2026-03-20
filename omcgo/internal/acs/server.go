@@ -26,6 +26,7 @@ type ACSServer struct {
 
 // ServerDeps holds the dependencies for the ACS server.
 type ServerDeps struct {
+<<<<<<< HEAD
 	SessionStore  SessionStore
 	CommandQueue  cmdqueue.CommandQueue
 	EventBus      event.EventBus
@@ -36,20 +37,33 @@ type ServerDeps struct {
 	Metrics       *ACSMetrics
 	UploadHandler *upload.Handler // File upload handler
 	Logger        *zap.Logger
+=======
+	SessionStore    SessionStore
+	CommandQueue    cmdqueue.CommandQueue
+	EventBus        event.EventBus
+	Authenticator   auth.DeviceAuthenticator
+	RPCDispatcher   *rpc.Dispatcher
+	RateLimiter     *DeviceRateLimiter
+	Admission       *AdmissionController
+	Metrics         *ACSMetrics
+	Logger          *zap.Logger
+	RequestIDPrefix string // prefix for request IDs, e.g., "acs"
+>>>>>>> c2a509c (feat(components): 实现 Request ID 中间件和 SQL 日志功能)
 }
 
 // NewACSServer creates a new ACS server with all dependencies wired.
 func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	h := &Handler{
-		sessionStore:  deps.SessionStore,
-		commandQueue:  deps.CommandQueue,
-		eventBus:      deps.EventBus,
-		authenticator: deps.Authenticator,
-		rpcDispatcher: deps.RPCDispatcher,
-		rateLimiter:   deps.RateLimiter,
-		admission:     deps.Admission,
-		metrics:       deps.Metrics,
-		logger:        deps.Logger,
+		sessionStore:    deps.SessionStore,
+		commandQueue:    deps.CommandQueue,
+		eventBus:        deps.EventBus,
+		authenticator:   deps.Authenticator,
+		rpcDispatcher:   deps.RPCDispatcher,
+		rateLimiter:     deps.RateLimiter,
+		admission:       deps.Admission,
+		metrics:         deps.Metrics,
+		logger:          deps.Logger,
+		requestIDPrefix: deps.RequestIDPrefix,
 	}
 
 	mux := http.NewServeMux()
@@ -127,16 +141,18 @@ func NewDefaultDeps(
 	maxSessions int64,
 	metricsReg prometheus.Registerer,
 	logger *zap.Logger,
+	requestIDPrefix string,
 ) ServerDeps {
 	return ServerDeps{
-		SessionStore:  sessionStore,
-		CommandQueue:  cmdQueue,
-		EventBus:      eventBus,
-		Authenticator: auth.NewAuthenticator(authMode, authUser, authPass),
-		RPCDispatcher: rpc.NewDispatcher(),
-		RateLimiter:   NewDeviceRateLimiter(rateCfg.PerDevice, rateCfg.Burst, rateCfg.MaxDevices, logger),
-		Admission:     NewAdmissionController(maxSessions),
-		Metrics:       NewACSMetrics(metricsReg),
-		Logger:        logger,
+		SessionStore:    sessionStore,
+		CommandQueue:    cmdQueue,
+		EventBus:        eventBus,
+		Authenticator:   auth.NewAuthenticator(authMode, authUser, authPass),
+		RPCDispatcher:   rpc.NewDispatcher(),
+		RateLimiter:     NewDeviceRateLimiter(rateCfg.PerDevice, rateCfg.Burst, rateCfg.MaxDevices, logger),
+		Admission:       NewAdmissionController(maxSessions),
+		Metrics:         NewACSMetrics(metricsReg),
+		Logger:          logger,
+		RequestIDPrefix: requestIDPrefix,
 	}
 }

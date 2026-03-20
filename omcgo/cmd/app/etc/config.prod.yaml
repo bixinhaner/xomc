@@ -15,6 +15,9 @@ db:
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
   health_check_interval: 30s
+  log_sql: true
+  log_sql_params: false
+  log_sql_slow_threshold: 1000
 
 tsdb:
   dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
@@ -23,6 +26,9 @@ tsdb:
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
   health_check_interval: 30s
+  log_sql: true
+  log_sql_params: false
+  log_sql_slow_threshold: 2000
 
 redis:
   addrs:
@@ -88,3 +94,5 @@ log:
     max_backups: 100
     compress: true
     local_time: true
+
+request_id_prefix: "app"

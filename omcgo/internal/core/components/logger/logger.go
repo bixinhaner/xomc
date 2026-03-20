@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,27 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// contextKey for request_id storage in context
+type contextKey int
+
+const (
+	requestIDKey contextKey = iota
+)
+
+// WithRequestID stores the request ID in the context.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey, requestID)
+}
+
+// GetRequestID retrieves the request ID from the context.
+// Returns an empty string if not found.
+func GetRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
 
 // NewLogger creates a new zap logger from configuration.
 // Supports both console output and file output with rotation via lumberjack.
@@ -138,4 +160,40 @@ func ParseStringSlice(s string) []string {
 		}
 	}
 	return result
+}
+
+// L returns a logger with request_id field if present in context.
+// This enables automatic request tracing across all log entries.
+func L(ctx context.Context) *zap.Logger {
+	// Get the global logger or fallback to nop logger
+	logger := zap.L()
+	if logger == nil {
+		return zap.NewNop()
+	}
+
+	// Add request_id if present
+	if requestID := GetRequestID(ctx); requestID != "" {
+		return logger.With(zap.String("request_id", requestID))
+	}
+	return logger
+}
+
+// Info logs at INFO level with context-aware request_id.
+func Info(ctx context.Context, msg string, fields ...zap.Field) {
+	L(ctx).Info(msg, fields...)
+}
+
+// Error logs at ERROR level with context-aware request_id.
+func Error(ctx context.Context, msg string, fields ...zap.Field) {
+	L(ctx).Error(msg, fields...)
+}
+
+// Debug logs at DEBUG level with context-aware request_id.
+func Debug(ctx context.Context, msg string, fields ...zap.Field) {
+	L(ctx).Debug(msg, fields...)
+}
+
+// Warn logs at WARN level with context-aware request_id.
+func Warn(ctx context.Context, msg string, fields ...zap.Field) {
+	L(ctx).Warn(msg, fields...)
 }

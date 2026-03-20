@@ -3,6 +3,8 @@ package acs
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"strings"
@@ -12,12 +14,19 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
+<<<<<<< HEAD
 	"github.com/omcgo/omcgo/internal/acs/upload"
+=======
+	"github.com/omcgo/omcgo/internal/core/components/logger"
+>>>>>>> c2a509c (feat(components): 实现 Request ID 中间件和 SQL 日志功能)
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
 )
+
+// RequestIDHeader is the header key for request ID
+const RequestIDHeader = "X-Request-ID"
 
 // connSessionEntry tracks a connection-level session binding with creation time for TTL cleanup.
 type connSessionEntry struct {
@@ -27,15 +36,16 @@ type connSessionEntry struct {
 
 // Handler processes TR069/CWMP HTTP requests.
 type Handler struct {
-	sessionStore  SessionStore
-	commandQueue  cmdqueue.CommandQueue
-	eventBus      event.EventBus
-	authenticator auth.DeviceAuthenticator
-	rpcDispatcher *rpc.Dispatcher
-	rateLimiter   *DeviceRateLimiter
-	admission     *AdmissionController
-	metrics       *ACSMetrics
-	logger        *zap.Logger
+	sessionStore     SessionStore
+	commandQueue     cmdqueue.CommandQueue
+	eventBus         event.EventBus
+	authenticator    auth.DeviceAuthenticator
+	rpcDispatcher    *rpc.Dispatcher
+	rateLimiter      *DeviceRateLimiter
+	admission        *AdmissionController
+	metrics          *ACSMetrics
+	logger           *zap.Logger
+	requestIDPrefix  string // prefix for request IDs, e.g., "acs"
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
@@ -69,6 +79,23 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Generate or propagate Request ID
+	requestID := r.Header.Get(RequestIDHeader)
+	if requestID == "" {
+		prefix := h.requestIDPrefix
+		if prefix == "" {
+			prefix = "acs" // default prefix
+		}
+		requestID = generateRequestIDWithPrefix(prefix)
+	}
+
+	// Store Request ID in context for logger and downstream services
+	ctx := logger.WithRequestID(r.Context(), requestID)
+	r = r.WithContext(ctx)
+
+	// Set Request ID in response header for client correlation
+	w.Header().Set(RequestIDHeader, requestID)
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -564,4 +591,14 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// generateRequestIDWithPrefix generates a unique request ID with a custom prefix.
+// Format: {prefix}-{timestamp}-{random}
+// Example: acs-20260319150430-a1b2c3d4
+func generateRequestIDWithPrefix(prefix string) string {
+	timestamp := time.Now().Format("20060102150405")
+	random := make([]byte, 4)
+	rand.Read(random)
+	return prefix + "-" + timestamp + "-" + hex.EncodeToString(random)
 }

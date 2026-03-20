@@ -7,10 +7,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"go.uber.org/zap"
 )
 
 // NewPostgresPool creates a new PostgreSQL connection pool.
-func NewPostgresPool(ctx context.Context, cfg appconfig.PostgresConfig) (*pgxpool.Pool, error) {
+// If logger is provided and LogSQL is enabled, SQL queries will be logged.
+func NewPostgresPool(ctx context.Context, cfg appconfig.PostgresConfig, log *zap.Logger) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres DSN: %w", err)
@@ -30,6 +32,11 @@ func NewPostgresPool(ctx context.Context, cfg appconfig.PostgresConfig) (*pgxpoo
 	}
 	if cfg.HealthCheckInterval > 0 {
 		poolCfg.HealthCheckPeriod = cfg.HealthCheckInterval
+	}
+
+	// Attach SQL tracer if logging is enabled
+	if cfg.LogSQL && log != nil {
+		poolCfg.ConnConfig.Tracer = NewSQLTracer(log, cfg.LogSQLParams, cfg.LogSQLSlowThreshold)
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)

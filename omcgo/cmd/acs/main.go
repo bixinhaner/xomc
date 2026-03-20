@@ -53,6 +53,12 @@ func runACS(cmd *cobra.Command, args []string) error {
 	sessionStore := acs.NewRedisSessionStore(app.Redis, cfg.Session.Timeout)
 	cmdQueue := cmdqueue.NewRedisCommandQueue(app.Redis)
 
+	// Get request ID prefix from config, default to "acs"
+	requestIDPrefix := cfg.RequestIDPrefix
+	if requestIDPrefix == "" {
+		requestIDPrefix = "acs"
+	}
+
 	deps := acs.NewDefaultDeps(
 		sessionStore,
 		cmdQueue,
@@ -62,6 +68,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		cfg.Session.MaxConcurrent,
 		app.MetricsReg,
 		app.Logger,
+		requestIDPrefix,
 	)
 
 	acsServer := acs.NewACSServer(cfg, deps)
