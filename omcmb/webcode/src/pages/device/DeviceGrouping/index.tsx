@@ -693,6 +693,7 @@ export default function DeviceGrouping() {
           onOk: async () => {
             // TODO: 调用 API 批量回收
             message.success(t('common.success'));
+            setSelectedDeviceIds([]);
             await refetch();
           },
         });
@@ -712,6 +713,7 @@ export default function DeviceGrouping() {
           onOk: async () => {
             // TODO: 调用 API 批量删除
             message.success(t('common.deleteSuccess'));
+            setSelectedDeviceIds([]);
             await refetch();
           },
         });
@@ -732,6 +734,7 @@ export default function DeviceGrouping() {
     // TODO: 调用 API 移动设备到设备组
     message.success(t('common.success'));
     setMoveToGroupModalOpen(false);
+    setSelectedDeviceIds([]);
     await refetch();
   }, [targetGroupId, message, t, refetch]);
 
