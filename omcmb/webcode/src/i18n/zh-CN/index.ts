@@ -1089,6 +1089,20 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'alarm.occurTime':    '发生时间',
   'alarm.severity.none':'无',
+  'alarm.ruleName':     '规则名称',
+  'alarm.deviceType':   '告警源',
+  'alarm.ruleType':     '执行动作',
+  'alarm.operator':     '操作人',
+  'alarm.updateTime':   '更新时间',
+  'alarm.searchPlaceholder': '请输入规则名称',
+  'alarm.ruleType.forbidReport': '禁止上报',
+  'alarm.ruleType.noStoreNoShow': '不入库不显示',
+  'alarm.ruleType.storeNoShow': '入库不显示',
+  'alarm.ruleType.autoConfirm': '自动确认',
+  'alarm.cannotDeleteDefaultRule': '默认规则不可删除',
+  'alarm.cannotDeleteEnabledRule': '启用状态的规则不可删除，请先禁用',
+  'alarm.cannotEditEnabledRule': '启用状态的规则不可编辑，请先禁用',
+  'alarm.deleteRuleConfirm': '确定删除规则"{name}"吗？',
 
   // -------------------------------------------------------------------------
   // Time duration

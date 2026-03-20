@@ -1085,6 +1085,20 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'alarm.occurTime':    'Occur Time',
   'alarm.severity.none':'None',
+  'alarm.ruleName':     'Rule Name',
+  'alarm.deviceType':   'Alarm Source',
+  'alarm.ruleType':     'Action Type',
+  'alarm.operator':     'Operator',
+  'alarm.updateTime':   'Update Time',
+  'alarm.searchPlaceholder': 'Enter rule name',
+  'alarm.ruleType.forbidReport': 'Forbid Report',
+  'alarm.ruleType.noStoreNoShow': 'No Store No Show',
+  'alarm.ruleType.storeNoShow': 'Store No Show',
+  'alarm.ruleType.autoConfirm': 'Auto Confirm',
+  'alarm.cannotDeleteDefaultRule': 'Default rule cannot be deleted',
+  'alarm.cannotDeleteEnabledRule': 'Enabled rule cannot be deleted, please disable it first',
+  'alarm.cannotEditEnabledRule': 'Enabled rule cannot be edited, please disable it first',
+  'alarm.deleteRuleConfirm': 'Are you sure to delete rule "{name}"?',
 
   // -------------------------------------------------------------------------
   // Time duration

@@ -1,183 +1,171 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Space, Switch, Tag, message } from 'antd';
+import { App, Button, Space, Switch, Tag, Typography } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useAlarmRules, useDeleteAlarmRules, useUpdateAlarmRule, useCreateAlarmRule } from '@/hooks/api/useAlarms';
+import { useAlarmRules, useDeleteAlarmRules, useUpdateAlarmRule } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { AlarmRule } from '@/types/alarm';
 
-const SEVERITY_TAG_COLOR: Record<string, string> = {
-  critical: 'red', major: 'orange', minor: 'gold', warning: 'blue',
+const { Text } = Typography;
+
+// 执行动作配置
+const RULE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
+  '0': { label: 'alarm.ruleType.forbidReport', color: 'red' },
+  '1': { label: 'alarm.ruleType.noStoreNoShow', color: 'orange' },
+  '2': { label: 'alarm.ruleType.storeNoShow', color: 'gold' },
+  '3': { label: 'alarm.ruleType.autoConfirm', color: 'green' },
 };
 
-const RULE_TYPE_LABEL: Record<string, string> = {
-  threshold: 'threshold',
-  correlation: 'correlation',
-  suppression: 'suppression',
-  escalation: 'escalation',
+// 告警源配置
+const DEVICE_TYPE_CONFIG: Record<string, string> = {
+  'ENB': 'ENB',
+  'UPS': 'UPS',
+  'CPE': 'CPE',
+  'GNB': 'GNB',
+  'WCG': 'WCG',
+  'GSM': 'GSM',
 };
 
 export default function AlarmRules() {
   const t = useT();
+  const { modal } = App.useApp();
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<AlarmRule | null>(null);
-  const [form] = Form.useForm();
 
-  const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
-    critical: t('alarm.severity.critical'),
-    major: t('alarm.severity.major'),
-    minor: t('alarm.severity.minor'),
-    warning: t('alarm.severity.warning'),
+  const RULE_TYPE_LABEL: Record<string, string> = useMemo(() => ({
+    '0': t('alarm.ruleType.forbidReport'),
+    '1': t('alarm.ruleType.noStoreNoShow'),
+    '2': t('alarm.ruleType.storeNoShow'),
+    '3': t('alarm.ruleType.autoConfirm'),
   }), [t]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'ruleName', label: t('table.name'), type: 'input' },
     {
-      name: 'ruleType',
-      label: t('table.type'),
-      type: 'select',
-      options: [
-        { label: 'threshold', value: 'threshold' },
-        { label: 'correlation', value: 'correlation' },
-        { label: 'suppression', value: 'suppression' },
-        { label: 'escalation', value: 'escalation' },
-      ],
-    },
-    {
-      name: 'severity',
-      label: t('alarm.severity'),
-      type: 'select',
-      options: [
-        { label: t('alarm.severity.critical'), value: 'critical' },
-        { label: t('alarm.severity.major'), value: 'major' },
-        { label: t('alarm.severity.minor'), value: 'minor' },
-        { label: t('alarm.severity.warning'), value: 'warning' },
-      ],
+      name: 'searchText',
+      label: t('alarm.ruleName'),
+      type: 'input',
+      placeholder: t('alarm.searchPlaceholder'),
     },
   ], [t]);
 
-  const queryParams = useMemo(() => ({ page: currentPage, pageSize }), [currentPage, pageSize]);
+  const queryParams = useMemo(() => ({ ...filterParams, page: currentPage, pageSize }), [filterParams, currentPage, pageSize]);
 
   const { data, isLoading, refetch } = useAlarmRules(queryParams);
   const deleteRules = useDeleteAlarmRules();
   const updateRule = useUpdateAlarmRule();
-  const createRule = useCreateAlarmRule();
 
   const rules: AlarmRule[] = data?.items ?? [];
   const total = data?.total ?? 0;
 
-  // Client-side filter
-  const filteredRules = useMemo(() => {
-    return rules.filter((r) => {
-      if (filterParams.ruleName && !r.ruleName.toLowerCase().includes(String(filterParams.ruleName).toLowerCase())) return false;
-      if (filterParams.ruleType && r.ruleType !== filterParams.ruleType) return false;
-      if (filterParams.severity && r.severity !== filterParams.severity) return false;
-      return true;
-    });
-  }, [rules, filterParams]);
-
+  // 启用/禁用规则
   const handleToggle = useCallback(
     async (rule: AlarmRule, checked: boolean) => {
-      await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } as Partial<AlarmRule> });
-      void message.success(checked ? t('common.enable') : t('common.disable'));
+      try {
+        await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } as Partial<AlarmRule> });
+        void refetch();
+      } catch {
+        // error handled by hook
+      }
     },
-    [updateRule, t]
+    [updateRule, refetch]
   );
 
+  // 查看规则详情
+  const handleView = useCallback((rule: AlarmRule) => {
+    modal.info({
+      title: t('common.info'),
+      width: 600,
+      content: (
+        <div style={{ marginTop: 16 }}>
+          <p><strong>{t('alarm.ruleName')}:</strong> {rule.ruleName}</p>
+          <p><strong>{t('alarm.status')}:</strong> {rule.enabled ? t('common.enable') : t('common.disable')}</p>
+          <p><strong>{t('alarm.deviceType')}:</strong> {rule.deviceType || 'ALL'}</p>
+          <p><strong>{t('alarm.ruleType')}:</strong> {RULE_TYPE_LABEL[rule.ruleType as string] || rule.ruleType}</p>
+          <p><strong>{t('alarm.operator')}:</strong> {rule.userCode || '-'}</p>
+          <p><strong>{t('alarm.updateTime')}:</strong> {rule.updateTime ? new Date(String(rule.updateTime)).toLocaleString('zh-CN') : '-'}</p>
+        </div>
+      ),
+    });
+  }, [modal, t, RULE_TYPE_LABEL]);
+
+  // 编辑规则
+  const handleEdit = useCallback((rule: AlarmRule) => {
+    // TODO: 打开编辑抽屉/页面
+    console.log('Edit rule:', rule);
+  }, []);
+
+  // 删除规则
   const handleDelete = useCallback(
-    (ids: string[]) => {
-      Modal.confirm({
+    (rule: AlarmRule) => {
+      if (rule.isDefault) {
+        modal.warning({
+          title: t('common.warning'),
+          content: t('alarm.cannotDeleteDefaultRule'),
+        });
+        return;
+      }
+      if (rule.enabled) {
+        modal.warning({
+          title: t('common.warning'),
+          content: t('alarm.cannotDeleteEnabledRule'),
+        });
+        return;
+      }
+      modal.confirm({
         title: t('common.confirmDelete'),
-        content: t('common.deleteConfirmMsg', { count: ids.length }),
-        okText: t('common.confirmDelete'),
+        content: t('alarm.deleteRuleConfirm', { name: rule.ruleName }),
+        okText: t('common.delete'),
         okType: 'danger',
         onOk: async () => {
-          await deleteRules.mutateAsync(ids);
+          await deleteRules.mutateAsync([rule.id]);
           setSelectedRowKeys([]);
-          void message.success(t('common.deleteSuccess'));
+          void refetch();
         },
       });
     },
-    [deleteRules, t]
+    [deleteRules, modal, t, refetch]
   );
 
-  const handleEdit = useCallback((rule: AlarmRule) => {
-    setEditingRule(rule);
-    form.setFieldsValue({
-      ruleName: rule.ruleName,
-      ruleType: rule.ruleType,
-      severity: rule.severity,
-    });
-    setEditModalOpen(true);
-  }, [form]);
-
-  const handleCreate = useCallback(() => {
-    setEditingRule(null);
-    form.resetFields();
-    setEditModalOpen(true);
-  }, [form]);
-
-  const handleSave = useCallback(async () => {
-    try {
-      const values = await form.validateFields() as Partial<AlarmRule>;
-      if (editingRule) {
-        await updateRule.mutateAsync({ id: editingRule.id, data: values });
-        void message.success(t('status.success'));
-      } else {
-        await createRule.mutateAsync({
-          ruleName: (values as { ruleName: string }).ruleName,
-          ruleType: (values as { ruleType: string }).ruleType,
-          severity: (values as { severity: AlarmRule['severity'] }).severity,
-          enabled: true,
-          conditions: [],
-          actions: [],
-        } as Parameters<typeof createRule.mutateAsync>[0]);
-        void message.success(t('status.success'));
-      }
-      setEditModalOpen(false);
-    } catch {
-      // validation error
+  // 操作菜单点击
+  const handleActionClick = useCallback((action: string, rule: AlarmRule) => {
+    switch (action) {
+      case 'view':
+        handleView(rule);
+        break;
+      case 'edit':
+        if (rule.enabled) {
+          modal.warning({
+            title: t('common.warning'),
+            content: t('alarm.cannotEditEnabledRule'),
+          });
+          return;
+        }
+        handleEdit(rule);
+        break;
+      case 'delete':
+        handleDelete(rule);
+        break;
     }
-  }, [editingRule, form, updateRule, createRule, t]);
+  }, [handleView, handleEdit, handleDelete, modal, t]);
 
   const columns = useMemo(
     (): DataTableColumn<AlarmRule>[] => [
-      { key: 'ruleName', title: t('table.name'), dataIndex: 'ruleName', width: 200, ellipsis: true },
       {
-        key: 'ruleType',
-        title: t('table.type'),
-        dataIndex: 'ruleType',
-        width: 120,
-        render: (v) => <Tag>{RULE_TYPE_LABEL[String(v)] ?? String(v)}</Tag>,
-      },
-      {
-        key: 'severity',
-        title: t('alarm.severity'),
-        dataIndex: 'severity',
-        width: 100,
-        render: (_val, record) => (
-          <Tag color={SEVERITY_TAG_COLOR[record.severity] ?? 'default'}>
-            {SEVERITY_LABEL[record.severity] ?? record.severity}
-          </Tag>
-        ),
-      },
-      {
-        key: 'enabled',
-        title: t('table.status'),
+        key: 'status',
+        title: t('alarm.status'),
         dataIndex: 'enabled',
-        width: 90,
+        width: 100,
         render: (_val, record) => (
           <Switch
             checked={record.enabled}
@@ -188,15 +176,48 @@ export default function AlarmRules() {
         ),
       },
       {
-        key: 'createTime',
-        title: t('table.createTime'),
-        dataIndex: 'createTime',
-        width: 160,
-        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+        key: 'ruleName',
+        title: t('alarm.ruleName'),
+        dataIndex: 'ruleName',
+        width: 200,
+        ellipsis: true,
+      },
+      {
+        key: 'deviceType',
+        title: t('alarm.deviceType'),
+        dataIndex: 'deviceType',
+        width: 120,
+        render: (val: string, record) => {
+          if (record.isDefault) {
+            return <Text type="secondary">ALL</Text>;
+          }
+          return DEVICE_TYPE_CONFIG[val] || val || '-';
+        },
+      },
+      {
+        key: 'ruleType',
+        title: t('alarm.ruleType'),
+        dataIndex: 'ruleType',
+        width: 140,
+        render: (val: string) => {
+          const config = RULE_TYPE_CONFIG[val];
+          return (
+            <Tag color={config?.color || 'default'}>
+              {config ? t(config.label) : val}
+            </Tag>
+          );
+        },
+      },
+      {
+        key: 'userCode',
+        title: t('alarm.operator'),
+        dataIndex: 'userCode',
+        width: 120,
+        render: (val: string) => val || '-',
       },
       {
         key: 'updateTime',
-        title: t('table.updateTime'),
+        title: t('alarm.updateTime'),
         dataIndex: 'updateTime',
         width: 160,
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
@@ -205,15 +226,24 @@ export default function AlarmRules() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 120,
+        width: 140,
         fixed: 'right',
         render: (_val, record) => (
           <Space size={4}>
             <Button
               type="link"
               size="small"
+              icon={<EyeOutlined />}
+              onClick={() => handleActionClick('view', record)}
+            >
+              {t('common.info')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
               icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
+              disabled={record.enabled}
+              onClick={() => handleActionClick('edit', record)}
             >
               {t('common.edit')}
             </Button>
@@ -222,7 +252,8 @@ export default function AlarmRules() {
               size="small"
               danger
               icon={<DeleteOutlined />}
-              onClick={() => handleDelete([record.id])}
+              disabled={record.enabled || record.isDefault}
+              onClick={() => handleActionClick('delete', record)}
             >
               {t('common.delete')}
             </Button>
@@ -230,99 +261,60 @@ export default function AlarmRules() {
         ),
       },
     ],
-    [handleToggle, handleEdit, handleDelete, updateRule.isPending, t, SEVERITY_LABEL]
+    [handleToggle, handleActionClick, updateRule.isPending, t]
   );
 
-  const batchActions = useMemo(
-    (): BatchAction[] => [
-      {
-        key: 'batch-delete',
-        label: t('common.batchDelete'),
-        icon: <DeleteOutlined />,
-        danger: true,
-        onClick: (keys) => handleDelete(keys as string[]),
-      },
-    ],
-    [handleDelete, t]
-  );
+  const handleSearch = useCallback((values: Record<string, unknown>) => {
+    setFilterParams(values);
+    setCurrentPage(1);
+  }, []);
+
+  const handleReset = useCallback(() => {
+    setFilterParams({});
+    setCurrentPage(1);
+  }, []);
+
+  const handleAdd = useCallback(() => {
+    // TODO: 打开添加抽屉/页面
+    console.log('Add new rule');
+  }, []);
 
   return (
-    <>
-      <ListPageLayout
-        title={t('nav.alarm.rules')}
-        extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            {t('common.add')}
-          </Button>
-        }
-      >
-        <FilterBar
-          filterId="alarm-rules"
-          fields={FILTER_FIELDS}
-          onSearch={(v) => { setFilterParams(v); setCurrentPage(1); }}
-          onReset={() => { setFilterParams({}); setCurrentPage(1); }}
-          collapsedRows={1}
-        />
+    <ListPageLayout
+      title={t('nav.alarm.rules')}
+      extra={
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+          {t('common.add')}
+        </Button>
+      }
+    >
+      <FilterBar
+        filterId="alarm-rules"
+        fields={FILTER_FIELDS}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+      />
 
-        <DataTable<AlarmRule>
-          tableId="alarm-rules-table"
-          columns={columns}
-          dataSource={filteredRules}
-          loading={isLoading}
-          rowKey="id"
-          selectable
-          selectedRowKeys={selectedRowKeys}
-          onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-          total={total}
-          pageSize={pageSize}
-          currentPage={currentPage}
-          onPageChange={(p) => setCurrentPage(p)}
-          batchActions={batchActions}
-          onRefresh={() => void refetch()}
-          defaultDensity="compact"
-        />
-      </ListPageLayout>
-
-      <Modal
-        title={editingRule ? t('common.edit') : t('common.add')}
-        open={editModalOpen}
-        onOk={() => void handleSave()}
-        onCancel={() => setEditModalOpen(false)}
-        okText={t('common.save')}
-        confirmLoading={updateRule.isPending || createRule.isPending}
-        width={520}
-      >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item name="ruleName" label={t('table.name')} rules={[{ required: true, message: t('common.placeholder') }]}>
-            <Input placeholder={t('common.placeholder')} />
-          </Form.Item>
-          <Form.Item name="ruleType" label={t('table.type')} rules={[{ required: true, message: t('common.pleaseSelect') }]}>
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: 'threshold', value: 'threshold' },
-                { label: 'correlation', value: 'correlation' },
-                { label: 'suppression', value: 'suppression' },
-                { label: 'escalation', value: 'escalation' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="severity" label={t('alarm.severity')} rules={[{ required: true, message: t('common.pleaseSelect') }]}>
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: t('alarm.severity.critical'), value: 'critical' },
-                { label: t('alarm.severity.major'), value: 'major' },
-                { label: t('alarm.severity.minor'), value: 'minor' },
-                { label: t('alarm.severity.warning'), value: 'warning' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="description" label={t('table.description')}>
-            <Input.TextArea rows={3} placeholder={t('common.placeholder')} />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </>
+      <DataTable<AlarmRule>
+        tableId="alarm-rules-table"
+        columns={columns}
+        dataSource={rules}
+        loading={isLoading}
+        rowKey="id"
+        selectable
+        selectedRowKeys={selectedRowKeys}
+        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+        total={total}
+        pageSize={pageSize}
+        currentPage={currentPage}
+        onPageChange={(page, size) => {
+          setCurrentPage(page);
+          setPageSize(size);
+        }}
+        onRefresh={() => void refetch()}
+        defaultDensity="compact"
+      />
+    </ListPageLayout>
   );
 }
