@@ -31,12 +31,12 @@ const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
 };
 
-// 告警状态配置
+// 告警状态配置 - 四种状态使用不同颜色区分
 const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string; icon: string }> = {
-  '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E88282', icon: 'unconfirmInactive' },
-  '1': { label: 'alarm.dealState.confirmedUncleared', color: '#E88282', icon: 'confirmInactive' },
-  '2': { label: 'alarm.dealState.unconfirmedCleared', color: '#67D972', icon: 'unconfirmActive' },
-  '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972', icon: 'confirmActive' },
+  '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E53935', icon: 'unconfirmInactive' },  // 红色 - 未确认未清除
+  '1': { label: 'alarm.dealState.confirmedUncleared', color: '#FB8C00', icon: 'confirmInactive' },      // 橙色 - 已确认未清除
+  '2': { label: 'alarm.dealState.unconfirmedCleared', color: '#42A5F5', icon: 'unconfirmActive' },       // 蓝色 - 未确认已清除
+  '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972', icon: 'confirmActive' },           // 绿色 - 已确认已清除
 };
 
 // 事件类型配置
