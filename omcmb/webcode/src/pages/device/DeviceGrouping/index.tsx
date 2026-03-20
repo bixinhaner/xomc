@@ -19,6 +19,7 @@ import {
 import {
   CloseCircleOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   FolderAddOutlined,
   FolderOutlined,
@@ -404,10 +405,11 @@ export default function DeviceGrouping() {
         // 一级节点删除
         modal.confirm({
           title: t('common.confirmDelete'),
+          width: 480,
           content: (
             <div>
               <div>{t('common.deleteConfirmMsg')}</div>
-              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13 }}>
+              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
                 {t('device.deleteLevel1Desc')}
               </div>
             </div>
@@ -423,10 +425,11 @@ export default function DeviceGrouping() {
         // 二级节点删除
         modal.confirm({
           title: t('common.confirmDelete'),
+          width: 480,
           content: (
             <div>
               <div>{t('common.deleteConfirmMsg')}</div>
-              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13 }}>
+              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
                 {t('device.deleteLevel2Desc')}
               </div>
             </div>
@@ -649,6 +652,22 @@ export default function DeviceGrouping() {
     }
   }, [addDeviceForm, addDeviceGroupId, fileList, refetch, message, t]);
 
+  // 下载模板
+  const handleDownloadTemplate = useCallback(() => {
+    // 创建模板内容
+    const csvContent = 'SN\n';
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'device_import_template.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    void message.success(t('common.download'));
+  }, [message, t]);
+
   // 二级节点编辑处理函数
   const handleSaveEditLevel2 = useCallback(async () => {
     try {
@@ -780,7 +799,15 @@ export default function DeviceGrouping() {
       onClick: (selectedKeys: React.Key[]) => {
         modal.confirm({
           title: t('device.batch.recycleConfirm'),
-          content: t('device.batch.recycleMsg', { count: selectedKeys.length }),
+          width: 480,
+          content: (
+            <div>
+              <div>{t('device.batch.recycleMsg', { count: selectedKeys.length })}</div>
+              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
+                {t('device.batch.deleteWarning')}
+              </div>
+            </div>
+          ),
           okText: t('common.confirm'),
           okType: 'danger',
           onOk: async () => {
@@ -800,7 +827,15 @@ export default function DeviceGrouping() {
       onClick: (selectedKeys: React.Key[]) => {
         modal.confirm({
           title: t('common.confirmDelete'),
-          content: t('common.deleteConfirmMsg', { count: selectedKeys.length }),
+          width: 480,
+          content: (
+            <div>
+              <div>{t('common.deleteConfirmMsg', { count: selectedKeys.length })}</div>
+              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
+                {t('device.batch.deleteWarning')}
+              </div>
+            </div>
+          ),
           okText: t('common.confirmDelete'),
           okType: 'danger',
           onOk: async () => {
@@ -1014,7 +1049,7 @@ export default function DeviceGrouping() {
 
       {/* Edit Device Modal */}
       <Modal
-        title={`${t('common.edit')} - ${editingDevice?.name ?? ''}`}
+        title={`${t('common.edit')} - ${editingDevice?.sn ?? ''}`}
         open={editDeviceModalOpen}
         onOk={() => void handleSaveDevice()}
         onCancel={() => setEditDeviceModalOpen(false)}
@@ -1304,9 +1339,18 @@ export default function DeviceGrouping() {
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
                 {t('device.importFileFormat')}
               </Text>
+              <div style={{ marginBottom: 12 }}>
+                <Button
+                  icon={<DownloadOutlined />}
+                  size="small"
+                  onClick={handleDownloadTemplate}
+                >
+                  {t('device.downloadTemplate')}
+                </Button>
+              </div>
               <Form.Item style={{ marginBottom: 0 }}>
                 <Upload
-                  accept=".txt,.csv"
+                  accept=".csv,.xlsx,.xls"
                   maxCount={1}
                   fileList={fileList}
                   beforeUpload={() => false}
