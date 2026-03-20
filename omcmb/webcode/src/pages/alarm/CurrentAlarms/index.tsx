@@ -326,32 +326,22 @@ export default function CurrentAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
-        key: 'actions',
-        title: t('table.operation'),
-        dataIndex: 'id',
-        width: 80,
-        fixed: 'left',
-        render: (_, record) => (
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleShowDetail(record)}
-          >
-            {t('alarm.detail')}
-          </Button>
-        ),
-      },
-      {
         key: 'alarmId',
         title: t('alarm.alarmId'),
         dataIndex: 'alarmId',
-        width: 80,
+        width: 100,
         sorter: true,
         render: (val, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
-            <span>{val}</span>
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => handleShowDetail(record)}
+            >
+              {val}
+            </Button>
           </Space>
         ),
       },
