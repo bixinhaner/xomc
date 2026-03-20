@@ -6,18 +6,16 @@
 
 -- ============================================================================
 -- 1. CMCC 运营商默认数据模型 (carrier_default scope)
---    最宽泛的默认配置，-- ============================================================================
+--    最宽泛的默认配置
+-- ============================================================================
 
 INSERT INTO data_model_definitions (
-    id, name, description, carrier, technology, oui, product_class, scope, status, parameter_tree
+    id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description
 ) VALUES (
     '30000000-0001-4000-8000-000000000001',
-    'CMCC LTE 默认模型',
-    '中国移动 LTE 网络默认数据模型配置',
-    'cmcc', 'lte', '', '', 'carrier_default', 'active',
-    '{
-        "version": "1.0",
-    }'::jsonb
+    'cmcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true,
+    '{}'::jsonb,
+    '中国移动 LTE 网络默认数据模型配置'
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -26,15 +24,12 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO data_model_definitions (
-    id, name, description, carrier, technology, oui, product_class, scope, status, parameter_tree
+    id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description
 ) VALUES (
     '30000000-0001-4000-8000-000000000002',
-    'CMCC NR 默认模型',
-    '中国移动 5G NR 网络默认数据模型配置',
-    'cmcc', 'nr', '', '', 'carrier_default', 'active',
-    '{
-        "version": "1.0"
-    }'::jsonb
+    'cmcc', 'nr', '1.0', NULL, NULL, 'carrier_default', 'active', true,
+    '{}'::jsonb,
+    '中国移动 5G NR 网络默认数据模型配置'
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -43,15 +38,12 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO data_model_definitions (
-    id, name, description, carrier, technology, oui, product_class, scope, status, parameter_tree
+    id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description
 ) VALUES (
     '30000000-0001-4000-8000-000000000003',
-    'CTCC LTE 默认模型',
-    '中国电信 LTE 网络默认数据模型配置',
-    'ctcc', 'lte', '', '', 'carrier_default', 'active',
-    '{
-        "version": "1.0"
-    }'::jsonb
+    'ctcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true,
+    '{}'::jsonb,
+    '中国电信 LTE 网络默认数据模型配置'
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -60,15 +52,12 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO data_model_definitions (
-    id, name, description, carrier, technology, oui, product_class, scope, status, parameter_tree
+    id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description
 ) VALUES (
     '30000000-0001-4000-8000-000000000004',
-    'CUCC LTE 默认模型',
-    '中国联通 LTE 网络默认数据模型配置',
-    'cucc', 'lte', '', '', 'carrier_default', 'active',
-    '{
-        "version": "1.0"
-    }'::jsonb
+    'cucc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true,
+    '{}'::jsonb,
+    '中国联通 LTE 网络默认数据模型配置'
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -78,15 +67,12 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO data_model_definitions (
-    id, name, description, carrier, technology, oui, product_class, scope, status, parameter_tree
+    id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description
 ) VALUES (
     '30000000-0001-4000-8000-000000000010',
-    'BaiCell LTE 默认模型',
-    'BaiCell 厂商 LTE 设备默认配置',
-    'cmcc', 'lte', '001A2B', '', 'oui', 'active',
-    '{
-        "version": "1.0"
-    }'::jsonb
+    'cmcc', 'lte', '1.0', '001A2B', NULL, 'oui', 'active', true,
+    '{}'::jsonb,
+    'BaiCell 厂商 LTE 设备默认配置'
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -96,14 +82,11 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO data_model_definitions (
-    id, name, description, carrier, technology, oui, product_class, scope, status, parameter_tree
+    id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description
 ) VALUES (
     '30000000-0001-4000-8000-000000000020',
-    'BaiCell SmallCell-LTE 产品模型',
-    'BaiCell SmallCell-LTE 产品特定配置',
-    'cmcc', 'lte', '001A2B', 'SmallCell-LTE', 'product', 'active',
-    '{
-        "version": "1.0"
-    }'::jsonb
+    'cmcc', 'lte', '1.0', '001A2B', 'SmallCell-LTE', 'product', 'active', true,
+    '{}'::jsonb,
+    'BaiCell SmallCell-LTE 产品特定配置'
 )
 ON CONFLICT (id) DO NOTHING;
