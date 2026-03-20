@@ -391,11 +391,25 @@ export default function DeviceGrouping() {
     [groups, selectedGroupId, handleContextMenu, t]
   );
 
-  // 根据搜索文本过滤分组
+  // 根据搜索文本过滤分组（支持搜索二级节点，同时保留父节点）
   const filteredGroups = useMemo(() => {
     if (!groupSearchText.trim()) return groups;
     const searchLower = groupSearchText.toLowerCase();
-    return groups.filter((g) => g.name.toLowerCase().includes(searchLower));
+
+    // 找出匹配的分组ID
+    const matchedIds = new Set<string>();
+
+    groups.forEach((g) => {
+      if (g.name.toLowerCase().includes(searchLower)) {
+        matchedIds.add(g.id);
+        // 如果是二级节点，也要包含其父节点
+        if (g.parentId) {
+          matchedIds.add(g.parentId);
+        }
+      }
+    });
+
+    return groups.filter((g) => matchedIds.has(g.id));
   }, [groups, groupSearchText]);
 
   const filteredTreeData = useMemo(
