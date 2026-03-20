@@ -114,8 +114,15 @@ export default function AlarmStatistics() {
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* 顶部标题栏 */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '0 0 16px 0',
+        flexShrink: 0,
+      }}>
         <Title level={4} style={{ margin: 0 }}>
           {t('nav.alarm.statistics')}
         </Title>
@@ -140,27 +147,34 @@ export default function AlarmStatistics() {
         </Space>
       </div>
 
-      {/* 四个图表卡片 */}
-      <Row gutter={[16, 16]}>
-        {chartCards.map(({ key, title, series }) => (
-          <Col key={key} xs={24} sm={12}>
-            <Card
-              title={title}
-              size="small"
-              styles={{ body: { padding: '12px' } }}
-            >
-              <BarChart
-                title=""
-                xData={xData}
-                series={series}
-                height={260}
-                stacked
-                borderRadius={0}
-              />
-            </Card>
-          </Col>
-        ))}
-      </Row>
+      {/* 四个图表卡片 - 填满剩余空间 */}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Row gutter={[16, 16]} style={{ height: '100%' }}>
+          {chartCards.map(({ key, title, series }) => (
+            <Col key={key} xs={24} sm={12} style={{ height: '100%', display: 'flex' }}>
+              <Card
+                title={title}
+                size="small"
+                styles={{
+                  body: { padding: '12px', flex: 1, display: 'flex', flexDirection: 'column' },
+                }}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+              >
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  <BarChart
+                    title=""
+                    xData={xData}
+                    series={series}
+                    height="100%"
+                    stacked
+                    borderRadius={0}
+                  />
+                </div>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      </div>
     </div>
   );
 }

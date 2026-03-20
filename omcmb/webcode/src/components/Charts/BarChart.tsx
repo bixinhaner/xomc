@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useLayoutEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { getBaseOption, getChartPalette } from './chartTheme';
@@ -39,6 +39,34 @@ const BarChart: React.FC<BarChartProps> = ({
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
   const palette = getChartPalette(appTheme);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [computedHeight, setComputedHeight] = useState<number>(280);
+
+  // 当 height 为 "100%" 时，计算实际像素高度
+  useLayoutEffect(() => {
+    if (height !== '100%' || !containerRef.current) {
+      setComputedHeight(typeof height === 'number' ? height : 280);
+      return;
+    }
+
+    const updateHeight = () => {
+      if (containerRef.current) {
+        const h = containerRef.current.clientHeight;
+        if (h > 0) {
+          setComputedHeight(h);
+        }
+      }
+    };
+
+    updateHeight();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateHeight();
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, [height]);
 
   const option = useMemo((): EChartsOption => {
     const base = getBaseOption(isDark, appTheme);
@@ -115,11 +143,13 @@ const BarChart: React.FC<BarChartProps> = ({
   }, [title, xData, series, horizontal, yAxisName, barWidth, borderRadius, isDark, appTheme, palette]);
 
   return (
-    <ReactECharts
-      option={option}
-      style={{ height, width: '100%' }}
-      opts={{ renderer: 'canvas' }}
-    />
+    <div ref={containerRef} style={{ height: typeof height === 'string' ? height : undefined, width: '100%', minHeight: 0 }}>
+      <ReactECharts
+        option={option}
+        style={{ height: computedHeight, width: '100%' }}
+        opts={{ renderer: 'canvas' }}
+      />
+    </div>
   );
 };
 
