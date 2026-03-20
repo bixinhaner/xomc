@@ -151,23 +151,23 @@ function buildTreeData(
           },
         },
         {
-          key: 'edit',
+          key: 'edit-level1',
           label: t('common.edit'),
           icon: <EditOutlined />,
           onClick: (info) => {
             info.domEvent.stopPropagation();
-            onContextMenu(`edit:${group.id}`);
+            onContextMenu(`edit-level1:${group.id}`);
           },
         },
         { type: 'divider' },
         {
-          key: 'delete',
+          key: 'delete-level1',
           label: t('common.delete'),
           icon: <DeleteOutlined />,
           danger: true,
           onClick: (info) => {
             info.domEvent.stopPropagation();
-            onContextMenu(`delete:${group.id}`);
+            onContextMenu(`delete-level1:${group.id}`);
           },
         },
       ];
@@ -184,23 +184,23 @@ function buildTreeData(
           },
         },
         {
-          key: 'edit',
+          key: 'edit-level2',
           label: t('common.edit'),
           icon: <EditOutlined />,
           onClick: (info) => {
             info.domEvent.stopPropagation();
-            onContextMenu(`edit:${group.id}`);
+            onContextMenu(`edit-level2:${group.id}`);
           },
         },
         { type: 'divider' },
         {
-          key: 'delete',
+          key: 'delete-level2',
           label: t('common.delete'),
           icon: <DeleteOutlined />,
           danger: true,
           onClick: (info) => {
             info.domEvent.stopPropagation();
-            onContextMenu(`delete:${group.id}`);
+            onContextMenu(`delete-level2:${group.id}`);
           },
         },
       ];
@@ -295,6 +295,21 @@ export default function DeviceGrouping() {
   }>();
   const [fileList, setFileList] = useState<any[]>([]);
 
+  // 二级节点编辑抽屉相关状态
+  const [editLevel2DrawerOpen, setEditLevel2DrawerOpen] = useState(false);
+  const [editLevel2GroupId, setEditLevel2GroupId] = useState<string | null>(null);
+  const [editLevel2Form] = Form.useForm<{
+    name: string;
+    matchingMode: 'deviceName' | 'lac' | 'tac';
+    tacRag: string;
+  }>();
+  const [editLevel2NameFilters, setEditLevel2NameFilters] = useState<NameFilterItem[]>([
+    { id: generateId(), condition: 'contain', value: '' },
+  ]);
+
+  // 监听二级节点编辑匹配模式变化
+  const editLevel2MatchingMode = Form.useWatch('matchingMode', editLevel2Form);
+
   // 监听添加方式变化
   const addMethod = Form.useWatch('addMethod', addDeviceForm);
 
@@ -364,16 +379,58 @@ export default function DeviceGrouping() {
         addDeviceForm.setFieldsValue({ addMethod: 'manual', deviceSnList: '' });
         setFileList([]);
         setAddDeviceDrawerOpen(true);
-      } else if (cmd === 'edit') {
+      } else if (cmd === 'edit-level1') {
+        // 一级节点编辑：只能修改名称
         const grp = groups.find((g) => g.id === groupId);
         if (grp) {
           editForm.setFieldsValue({ name: grp.name, description: grp.description });
           setEditModalOpen(true);
         }
-      } else if (cmd === 'delete') {
+      } else if (cmd === 'edit-level2') {
+        // 二级节点编辑：可以修改名称和匹配规则
+        const grp = groups.find((g) => g.id === groupId);
+        if (grp) {
+          setEditLevel2GroupId(groupId);
+          editLevel2Form.resetFields();
+          editLevel2Form.setFieldsValue({
+            name: grp.name,
+            matchingMode: 'deviceName',
+            tacRag: '',
+          });
+          setEditLevel2NameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
+          setEditLevel2DrawerOpen(true);
+        }
+      } else if (cmd === 'delete-level1') {
+        // 一级节点删除
         modal.confirm({
           title: t('common.confirmDelete'),
-          content: t('common.deleteConfirmMsg'),
+          content: (
+            <div>
+              <div>{t('common.deleteConfirmMsg')}</div>
+              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13 }}>
+                {t('device.deleteLevel1Desc')}
+              </div>
+            </div>
+          ),
+          okText: t('common.confirmDelete'),
+          okType: 'danger',
+          onOk: async () => {
+            await refetchGroups();
+            void message.success(t('common.deleteSuccess'));
+          },
+        });
+      } else if (cmd === 'delete-level2') {
+        // 二级节点删除
+        modal.confirm({
+          title: t('common.confirmDelete'),
+          content: (
+            <div>
+              <div>{t('common.deleteConfirmMsg')}</div>
+              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13 }}>
+                {t('device.deleteLevel2Desc')}
+              </div>
+            </div>
+          ),
           okText: t('common.confirmDelete'),
           okType: 'danger',
           onOk: async () => {
@@ -591,6 +648,28 @@ export default function DeviceGrouping() {
       // validation error
     }
   }, [addDeviceForm, addDeviceGroupId, fileList, refetch, message, t]);
+
+  // 二级节点编辑处理函数
+  const handleSaveEditLevel2 = useCallback(async () => {
+    try {
+      const values = await editLevel2Form.validateFields();
+
+      // TODO: 调用 API 更新二级分组
+      console.log('更新二级分组:', {
+        groupId: editLevel2GroupId,
+        name: values.name,
+        matchingMode: values.matchingMode,
+        tacRag: values.tacRag,
+        nameFilters: editLevel2NameFilters,
+      });
+
+      void message.success(t('common.success'));
+      setEditLevel2DrawerOpen(false);
+      await refetchGroups();
+    } catch {
+      // validation error
+    }
+  }, [editLevel2Form, editLevel2GroupId, editLevel2NameFilters, refetchGroups, message, t]);
 
   // 预览条件描述
   const previewText = useMemo(() => {
@@ -1240,6 +1319,192 @@ export default function DeviceGrouping() {
               </Form.Item>
             </div>
           )}
+        </Form>
+      </Drawer>
+
+      {/* Edit Level 2 Group Drawer (二级节点编辑) */}
+      <Drawer
+        title={t('device.editGroup')}
+        open={editLevel2DrawerOpen}
+        onClose={() => setEditLevel2DrawerOpen(false)}
+        width={520}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setEditLevel2DrawerOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={() => void handleSaveEditLevel2()}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
+      >
+        <Form form={editLevel2Form} layout="vertical">
+          {/* 基本信息 */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8,
+            marginBottom: 16
+          }}>
+            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('device.basicInfo')}
+            </div>
+            <Form.Item
+              name="name"
+              label={t('device.groupName')}
+              rules={[{ required: true, message: t('common.placeholder') }]}
+              style={{ marginBottom: 0 }}
+            >
+              <Input placeholder={t('common.placeholder')} maxLength={50} />
+            </Form.Item>
+          </div>
+
+          {/* 匹配规则 */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8
+          }}>
+            <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('device.matchRule')}
+            </div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              {t('device.matchRuleDesc')}
+            </Text>
+            <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
+              <Radio.Group onChange={() => {
+                setEditLevel2NameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
+                editLevel2Form.setFieldsValue({ tacRag: '' });
+              }}>
+                <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
+                <Radio value="lac">LAC</Radio>
+                <Radio value="tac">TAC</Radio>
+              </Radio.Group>
+            </Form.Item>
+
+            {/* 设备名称过滤条件 */}
+            {editLevel2MatchingMode === 'deviceName' && (
+              <>
+                <Form.Item
+                  label={
+                    <span>
+                      {t('device.rules.filterCondition')}
+                      <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
+                        {t('device.rules.conditionLimit', { max: 10 })}
+                      </Text>
+                    </span>
+                  }
+                  style={{ marginBottom: 0 }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {editLevel2NameFilters.map((filter, index) => (
+                      <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {index === 0 ? (
+                          <>
+                            <Select
+                              value={filter.condition}
+                              style={{ width: 120 }}
+                              options={getFilterConditionOptions(t)}
+                              onChange={(v) => {
+                                setEditLevel2NameFilters(prev => prev.map(f => f.id === filter.id ? { ...f, condition: v } : f));
+                              }}
+                            />
+                            <Input
+                              value={filter.value}
+                              style={{ flex: 1 }}
+                              maxLength={64}
+                              placeholder={t('common.placeholder')}
+                              onChange={(e) => {
+                                setEditLevel2NameFilters(prev => prev.map(f => f.id === filter.id ? { ...f, value: e.target.value } : f));
+                              }}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <Select
+                              value={filter.andOr || 'and'}
+                              style={{ width: 70 }}
+                              options={getAndOrOptions(t)}
+                              onChange={(v) => {
+                                setEditLevel2NameFilters(prev => prev.map(f => f.id === filter.id ? { ...f, andOr: v } : f));
+                              }}
+                            />
+                            <Select
+                              value={filter.condition}
+                              style={{ width: 120 }}
+                              options={getFilterConditionOptions(t)}
+                              onChange={(v) => {
+                                setEditLevel2NameFilters(prev => prev.map(f => f.id === filter.id ? { ...f, condition: v } : f));
+                              }}
+                            />
+                            <Input
+                              value={filter.value}
+                              style={{ flex: 1 }}
+                              maxLength={64}
+                              placeholder={t('common.placeholder')}
+                              onChange={(e) => {
+                                setEditLevel2NameFilters(prev => prev.map(f => f.id === filter.id ? { ...f, value: e.target.value } : f));
+                              }}
+                            />
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<CloseCircleOutlined />}
+                              onClick={() => {
+                                setEditLevel2NameFilters(prev => {
+                                  if (prev.length <= 1) return prev;
+                                  const newFilters = prev.filter(f => f.id !== filter.id);
+                                  if (newFilters.length > 0 && newFilters[0].andOr !== undefined) {
+                                    const { andOr: _, ...rest } = newFilters[0];
+                                    newFilters[0] = rest as NameFilterItem;
+                                  }
+                                  return newFilters;
+                                });
+                              }}
+                              style={{ color: 'var(--color-text-quaternary)' }}
+                            />
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {editLevel2NameFilters.length < 10 && (
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={() => {
+                        if (editLevel2NameFilters.length >= 10) return;
+                        const hasOr = editLevel2NameFilters.some((f, index) => index > 0 && f.andOr === 'or');
+                        setEditLevel2NameFilters(prev => [
+                          ...prev,
+                          { id: generateId(), condition: 'contain', value: '', andOr: hasOr ? 'or' : 'and' },
+                        ]);
+                      }}
+                      style={{ marginTop: 8 }}
+                    >
+                      {t('device.rules.addCondition')}
+                    </Button>
+                  )}
+                </Form.Item>
+              </>
+            )}
+
+            {/* TAC/LAC 输入 */}
+            {(editLevel2MatchingMode === 'tac' || editLevel2MatchingMode === 'lac') && (
+              <Form.Item
+                name="tacRag"
+                label={editLevel2MatchingMode === 'tac' ? 'TAC' : 'LAC'}
+                style={{ marginBottom: 0 }}
+                extra={
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('device.rules.formatRange', { range: '0-65535' })}
+                  </Text>
+                }
+              >
+                <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
+              </Form.Item>
+            )}
+          </div>
         </Form>
       </Drawer>
     </>
