@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   App,
   Button,
@@ -359,6 +359,17 @@ export default function DeviceGrouping() {
     () => groups.find((g) => g.id === selectedGroupId),
     [groups, selectedGroupId]
   );
+
+  // 页面加载时默认选中"默认设备组"下的第一个二级节点
+  useEffect(() => {
+    if (groups.length > 0 && !selectedGroupId) {
+      // 找到默认设备组下的第一个二级节点
+      const firstLevel2Node = groups.find((g) => g.parentId === 'grp-default');
+      if (firstLevel2Node) {
+        setSelectedGroupId(firstLevel2Node.id);
+      }
+    }
+  }, [groups, selectedGroupId]);
 
   const handleContextMenu = useCallback(
     (action: string) => {
