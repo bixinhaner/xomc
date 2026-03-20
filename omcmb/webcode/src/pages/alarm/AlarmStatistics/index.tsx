@@ -1,24 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { Card, Col, Row, Statistic, Typography, DatePicker, Radio, Space } from 'antd';
-import {
-  AlertOutlined,
-  ExclamationCircleOutlined,
-  InfoCircleOutlined,
-  WarningOutlined,
-} from '@ant-design/icons';
+import { Card, Col, Row, Typography, DatePicker, Radio, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import BarChart from '@/components/Charts/BarChart';
-import { useAlarmCount } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 
 const { Title, Text } = Typography;
 
-const SEVERITY_COLORS = {
-  critical: '#FC5959',
-  major: '#FF973E',
-  minor: '#FFDA41',
-  warning: '#67DFF8',
+// 告警级别颜色 - 专业配色方案
+export const SEVERITY_COLORS = {
+  critical: '#E53935', // 紧急 - 深红色
+  major: '#FB8C00',    // 重要 - 明亮橙色
+  minor: '#FDD835',    // 次要 - 金黄色
+  warning: '#42A5F5',  // 警告 - 亮蓝色
 };
 
 function generateHourLabels(): string[] {
@@ -46,15 +40,8 @@ function generateMockStackedData(baseMultiplier: number = 1) {
 
 export default function AlarmStatistics() {
   const t = useT();
-  const { data: alarmCount } = useAlarmCount();
   const [dateType, setDateType] = useState<'day' | 'month'>('day');
   const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
-
-  const critical = alarmCount?.critical ?? 8;
-  const major = alarmCount?.major ?? 15;
-  const minor = alarmCount?.minor ?? 12;
-  const warning = alarmCount?.warning ?? 8;
-  const totalActive = critical + major + minor + warning;
 
   // X-axis labels based on date type
   const xData = useMemo(() => {
@@ -68,10 +55,10 @@ export default function AlarmStatistics() {
   const newAlarmSeries = useMemo(() => {
     const data = generateMockStackedData(1.2);
     return [
-      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
-      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
-      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
-      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity', borderRadius: 4 },
     ];
   }, [t, selectedDate, dateType]);
 
@@ -79,10 +66,10 @@ export default function AlarmStatistics() {
   const clearedAlarmSeries = useMemo(() => {
     const data = generateMockStackedData(0.8);
     return [
-      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
-      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
-      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
-      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity', borderRadius: 4 },
     ];
   }, [t, selectedDate, dateType]);
 
@@ -90,10 +77,10 @@ export default function AlarmStatistics() {
   const activeAlarmSeries = useMemo(() => {
     const data = generateMockStackedData(1.5);
     return [
-      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
-      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
-      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
-      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity', borderRadius: 4 },
     ];
   }, [t, selectedDate, dateType]);
 
@@ -101,44 +88,12 @@ export default function AlarmStatistics() {
   const allAlarmSeries = useMemo(() => {
     const data = generateMockStackedData(2);
     return [
-      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
-      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
-      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
-      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity', borderRadius: 0 },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity', borderRadius: 4 },
     ];
   }, [t, selectedDate, dateType]);
-
-  // Summary cards
-  const summaryCards = [
-    {
-      title: t('alarm.severity.critical'),
-      value: critical,
-      color: SEVERITY_COLORS.critical,
-      bg: '#fff2f0',
-      icon: <AlertOutlined />,
-    },
-    {
-      title: t('alarm.severity.major'),
-      value: major,
-      color: SEVERITY_COLORS.major,
-      bg: '#fff7e6',
-      icon: <ExclamationCircleOutlined />,
-    },
-    {
-      title: t('alarm.severity.minor'),
-      value: minor,
-      color: '#D4B106',
-      bg: '#feffe6',
-      icon: <WarningOutlined />,
-    },
-    {
-      title: t('alarm.severity.warning'),
-      value: warning,
-      color: '#1677FF',
-      bg: '#e6f4ff',
-      icon: <InfoCircleOutlined />,
-    },
-  ];
 
   const handleDateChange = (date: Dayjs | null) => {
     if (date) {
@@ -149,6 +104,14 @@ export default function AlarmStatistics() {
   const handleDateTypeChange = (value: 'day' | 'month') => {
     setDateType(value);
   };
+
+  // 图表卡片配置
+  const chartCards = [
+    { key: 'new', title: t('alarm.stats.new'), series: newAlarmSeries },
+    { key: 'cleared', title: t('alarm.stats.cleared'), series: clearedAlarmSeries },
+    { key: 'active', title: t('alarm.stats.active'), series: activeAlarmSeries },
+    { key: 'all', title: t('alarm.stats.all'), series: allAlarmSeries },
+  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -177,110 +140,27 @@ export default function AlarmStatistics() {
         </Space>
       </div>
 
-      {/* Summary Row */}
+      {/* 四个图表卡片 */}
       <Row gutter={[16, 16]}>
-        {summaryCards.map(({ title, value, color, bg, icon }) => (
-          <Col key={title} xs={12} sm={6}>
-            <Card styles={{ body: { padding: '16px 20px' } }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 8,
-                    background: bg,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 18,
-                    color,
-                    flexShrink: 0,
-                  }}
-                >
-                  {icon}
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 13, display: 'block' }}>
-                    {title}
-                  </Text>
-                  <Statistic
-                    value={value}
-                    valueStyle={{ color, fontSize: 22, fontWeight: 700 }}
-                  />
-                </div>
-              </div>
+        {chartCards.map(({ key, title, series }) => (
+          <Col key={key} xs={24} sm={12}>
+            <Card
+              title={title}
+              size="small"
+              styles={{ body: { padding: '12px' } }}
+            >
+              <BarChart
+                title=""
+                xData={xData}
+                series={series}
+                height={260}
+                stacked
+                borderRadius={0}
+              />
             </Card>
           </Col>
         ))}
       </Row>
-
-      {/* 告警变化趋势 - 新增告警 & 清除告警 */}
-      <Card
-        title={t('alarm.stats.trend')}
-        size="small"
-        styles={{ body: { padding: '12px' } }}
-      >
-        <Row gutter={16}>
-          <Col span={12}>
-            <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <Text strong>{t('alarm.stats.new')}</Text>
-            </div>
-            <BarChart
-              title=""
-              xData={xData}
-              series={newAlarmSeries}
-              height={280}
-              stacked
-            />
-          </Col>
-          <Col span={12}>
-            <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <Text strong>{t('alarm.stats.cleared')}</Text>
-            </div>
-            <BarChart
-              title=""
-              xData={xData}
-              series={clearedAlarmSeries}
-              height={280}
-              stacked
-            />
-          </Col>
-        </Row>
-      </Card>
-
-      {/* 告警存量分布 - 活动告警 & 所有告警 */}
-      <Card
-        title={t('alarm.stats.distribution')}
-        size="small"
-        styles={{ body: { padding: '12px' } }}
-      >
-        <Row gutter={16}>
-          <Col span={12}>
-            <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <Text strong>{t('alarm.stats.active')}</Text>
-            </div>
-            <BarChart
-              title=""
-              xData={xData}
-              series={activeAlarmSeries}
-              height={280}
-              stacked
-            />
-          </Col>
-          <Col span={12}>
-            <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <Text strong>{t('alarm.stats.all')}</Text>
-            </div>
-            <BarChart
-              title=""
-              xData={xData}
-              series={allAlarmSeries}
-              height={280}
-              stacked
-            />
-          </Col>
-        </Row>
-      </Card>
     </div>
   );
 }

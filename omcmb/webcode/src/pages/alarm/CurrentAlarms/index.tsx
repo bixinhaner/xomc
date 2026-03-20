@@ -23,12 +23,12 @@ import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 
 const { Text } = Typography;
 
-// 告警级别颜色
+// 告警级别颜色 - 专业配色方案
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
-  critical: { color: '#FC5959', bgColor: '#FFF1F0' },
-  major: { color: '#FF973E', bgColor: '#FFF7E6' },
-  minor: { color: '#FFDA41', bgColor: '#FFFBE6' },
-  warning: { color: '#60BEFC', bgColor: '#E6F7FF' },
+  critical: { color: '#E53935', bgColor: '#FFEBEE' },
+  major: { color: '#FB8C00', bgColor: '#FFF3E0' },
+  minor: { color: '#FDD835', bgColor: '#FFFDE7' },
+  warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
 };
 
 // 告警状态配置

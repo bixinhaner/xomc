@@ -10,6 +10,8 @@ export interface BarSeries {
   data: (number | null)[];
   color?: string;
   stack?: string;
+  /** 单独设置该系列的圆角，覆盖全局 borderRadius */
+  borderRadius?: number | [number, number, number, number];
 }
 
 export interface BarChartProps {
@@ -20,6 +22,8 @@ export interface BarChartProps {
   horizontal?: boolean;
   yAxisName?: string;
   barWidth?: number | string;
+  /** 圆角大小，默认 6，设为 0 则无圆角 */
+  borderRadius?: number;
 }
 
 const BarChart: React.FC<BarChartProps> = ({
@@ -30,6 +34,7 @@ const BarChart: React.FC<BarChartProps> = ({
   horizontal = false,
   yAxisName,
   barWidth,
+  borderRadius = 6,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -73,29 +78,41 @@ const BarChart: React.FC<BarChartProps> = ({
       },
       xAxis: horizontal ? valueAxis : categoryAxis,
       yAxis: horizontal ? categoryAxis : valueAxis,
-      series: series.map((s, i) => ({
-        name: s.name,
-        type: 'bar',
-        data: s.data,
-        stack: s.stack,
-        barWidth: barWidth ?? 'auto',
-        itemStyle: {
-          color: s.color ?? palette[i % palette.length],
-          borderRadius: horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0],
-          shadowBlur: isDark ? 10 : 6,
-          shadowOffsetY: isDark ? 4 : 2,
-          shadowColor: isDark ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.08)',
-        },
-        emphasis: {
+      series: series.map((s, i) => {
+        // 计算该系列的圆角：优先使用系列自身的 borderRadius，否则使用全局 borderRadius
+        let seriesBorderRadius: number | [number, number, number, number];
+        if (s.borderRadius !== undefined) {
+          seriesBorderRadius = typeof s.borderRadius === 'number'
+            ? (horizontal ? [0, s.borderRadius, s.borderRadius, 0] : [s.borderRadius, s.borderRadius, 0, 0])
+            : s.borderRadius;
+        } else {
+          seriesBorderRadius = horizontal ? [0, borderRadius, borderRadius, 0] : [borderRadius, borderRadius, 0, 0];
+        }
+
+        return {
+          name: s.name,
+          type: 'bar',
+          data: s.data,
+          stack: s.stack,
+          barWidth: barWidth ?? 'auto',
           itemStyle: {
-            shadowBlur: 18,
-            shadowOffsetY: 8,
-            shadowColor: isDark ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.15)',
+            color: s.color ?? palette[i % palette.length],
+            borderRadius: seriesBorderRadius,
+            shadowBlur: isDark ? 10 : 6,
+            shadowOffsetY: isDark ? 4 : 2,
+            shadowColor: isDark ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.08)',
           },
-        },
-      })),
+          emphasis: {
+            itemStyle: {
+              shadowBlur: 18,
+              shadowOffsetY: 8,
+              shadowColor: isDark ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.15)',
+            },
+          },
+        };
+      }),
     };
-  }, [title, xData, series, horizontal, yAxisName, barWidth, isDark, appTheme, palette]);
+  }, [title, xData, series, horizontal, yAxisName, barWidth, borderRadius, isDark, appTheme, palette]);
 
   return (
     <ReactECharts
