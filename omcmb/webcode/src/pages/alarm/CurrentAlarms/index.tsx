@@ -4,7 +4,9 @@ import {
   BellOutlined,
   CheckOutlined,
   ClearOutlined,
-  SoundOutlined,
+  EyeOutlined,
+  FilterOutlined,
+  MinusCircleOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -13,32 +15,36 @@ import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
-import type { Alarm } from '@/types/alarm';
+import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
 
 const { Text } = Typography;
 
-const SEVERITY_TAG_COLOR: Record<string, string> = {
-  critical: 'red',
-  major: 'orange',
-  minor: 'gold',
-  warning: 'blue',
+// 告警级别颜色
+const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
+  critical: { color: '#FC5959', bgColor: '#FFF1F0' },
+  major: { color: '#FF973E', bgColor: '#FFF7E6' },
+  minor: { color: '#FFDA41', bgColor: '#FFFBE6' },
+  warning: { color: '#60BEFC', bgColor: '#E6F7FF' },
 };
 
-function formatDuration(ms: number): string {
-  if (ms < 60000) return `${Math.floor(ms / 1000)}s`;
-  if (ms < 3600000) return `${Math.floor(ms / 60000)}m`;
-  if (ms < 86400000) return `${Math.floor(ms / 3600000)}h`;
-  return `${Math.floor(ms / 86400000)}d`;
-}
+// 告警状态配置
+const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string; icon: string }> = {
+  '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E88282', icon: 'unconfirmInactive' },
+  '1': { label: 'alarm.dealState.confirmedUncleared', color: '#E88282', icon: 'confirmInactive' },
+  '2': { label: 'alarm.dealState.unconfirmedCleared', color: '#67D972', icon: 'unconfirmActive' },
+  '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972', icon: 'confirmActive' },
+};
 
-function computeDuration(alarmTime: string): string {
-  const now = Date.now();
-  const then = new Date(alarmTime).getTime();
-  const diff = now - then;
-  if (diff < 0) return '-';
-  return formatDuration(diff);
-}
+// 事件类型配置
+const EVENT_TYPE_CONFIG: Record<EventType, string> = {
+  '30000': 'alarm.eventType.communication',
+  '30001': 'alarm.eventType.qualityOfService',
+  '30002': 'alarm.eventType.processingError',
+  '30003': 'alarm.eventType.device',
+  '30004': 'alarm.eventType.environment',
+  '30006': 'alarm.eventType.performance',
+};
 
 export default function CurrentAlarms() {
   const t = useT();
@@ -55,6 +61,8 @@ export default function CurrentAlarms() {
   }), [t]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
+    { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholder') },
+    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
     {
       name: 'severity',
       label: t('alarm.severity'),
@@ -67,18 +75,47 @@ export default function CurrentAlarms() {
       ],
     },
     {
-      name: 'ackStatus',
-      label: t('alarm.ackStatus'),
+      name: 'eventType',
+      label: t('alarm.eventType'),
       type: 'select',
       options: [
-        { label: t('alarm.ackStatus.unacknowledged'), value: 'unacknowledged' },
-        { label: t('alarm.ackStatus.acknowledged'), value: 'acknowledged' },
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.eventType.communication'), value: '30000' },
+        { label: t('alarm.eventType.qualityOfService'), value: '30001' },
+        { label: t('alarm.eventType.processingError'), value: '30002' },
+        { label: t('alarm.eventType.device'), value: '30003' },
+        { label: t('alarm.eventType.environment'), value: '30004' },
       ],
     },
-    { name: 'deviceSn', label: t('alarm.deviceSn'), type: 'input' },
-    { name: 'alarmCode', label: t('alarm.code'), type: 'input' },
-    { name: 'alarmName', label: t('alarm.name'), type: 'input' },
-    { name: 'timeRange', label: t('table.time'), type: 'date-range' },
+    {
+      name: 'neType',
+      label: t('alarm.neType'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        // TODO: 从 API 动态加载网元类型
+      ],
+    },
+    {
+      name: 'unread',
+      label: t('alarm.readStatus'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.readStatus.read'), value: '0' },
+        { label: t('alarm.readStatus.unread'), value: '1' },
+      ],
+    },
+    {
+      name: 'dealState',
+      label: t('alarm.dealState'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.dealState.unconfirmedUncleared'), value: '0' },
+        { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
+      ],
+    },
   ], [t]);
 
   const queryParams = useMemo(
@@ -96,10 +133,11 @@ export default function CurrentAlarms() {
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams({
       severity: values.severity as AlarmFilter['severity'],
-      ackStatus: values.ackStatus as AlarmFilter['ackStatus'],
-      deviceSn: values.deviceSn as string | undefined,
-      alarmCode: values.alarmCode as string | undefined,
-      alarmName: values.alarmName as string | undefined,
+      eventType: values.eventType as AlarmFilter['eventType'],
+      neType: values.neType as string,
+      unread: values.unread as '0' | '1',
+      dealState: values.dealState as AlarmFilter['dealState'],
+      keyword: values.keyword as string,
     });
     setCurrentPage(1);
   }, []);
@@ -126,6 +164,22 @@ export default function CurrentAlarms() {
     [acknowledgeAlarms, t]
   );
 
+  const handleUnacknowledge = useCallback(
+    (ids: string[]) => {
+      Modal.confirm({
+        title: t('alarm.unacknowledge'),
+        content: t('common.unackConfirmMsg', { count: ids.length }),
+        okText: t('common.confirm'),
+        onOk: async () => {
+          // TODO: 调用反确认 API
+          setSelectedRowKeys([]);
+          void message.success(t('common.unackSuccess'));
+        },
+      });
+    },
+    [t]
+  );
+
   const handleClear = useCallback(
     (ids: string[]) => {
       Modal.confirm({
@@ -144,6 +198,32 @@ export default function CurrentAlarms() {
     [clearAlarms, t]
   );
 
+  const handleFilter = useCallback(
+    (ids: string[]) => {
+      Modal.confirm({
+        title: t('alarm.filterAlarm'),
+        content: t('alarm.filterAlarmConfirm'),
+        okText: t('common.confirm'),
+        icon: <FilterOutlined />,
+        onOk: async () => {
+          // TODO: 调用过滤告警 API
+          setSelectedRowKeys([]);
+          void message.success(t('common.success'));
+        },
+      });
+    },
+    [t]
+  );
+
+  const handleMarkRead = useCallback(
+    (ids: string[]) => {
+      // TODO: 调用标记已读 API
+      setSelectedRowKeys([]);
+      void message.success(t('common.markReadSuccess'));
+    },
+    [t]
+  );
+
   const alarmRowStyle = useCallback(
     (record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
       return record.severity as 'critical' | 'major' | 'minor' | 'warning';
@@ -154,140 +234,195 @@ export default function CurrentAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
-        key: 'severity',
-        title: t('alarm.severity'),
-        dataIndex: 'severity',
-        width: 80,
-        render: (_val, record) => (
-          <Tag color={SEVERITY_TAG_COLOR[record.severity] ?? 'default'}>
-            {SEVERITY_LABEL[record.severity] ?? record.severity}
-          </Tag>
-        ),
-      },
-      {
-        key: 'alarmCode',
-        title: t('alarm.code'),
-        dataIndex: 'alarmCode',
-        width: 100,
-        mono: true,
-        render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(v)}</Text>,
-      },
-      {
-        key: 'alarmName',
-        title: t('alarm.name'),
-        dataIndex: 'alarmName',
-        width: 160,
-        ellipsis: true,
-      },
-      {
-        key: 'deviceSn',
-        title: t('alarm.deviceSn'),
-        dataIndex: 'deviceSn',
-        width: 160,
-        mono: true,
-        copyable: true,
-        render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(v)}</Text>,
-      },
-      { key: 'deviceName', title: t('alarm.deviceName'), dataIndex: 'deviceName', width: 140, ellipsis: true },
-      {
-        key: 'alarmContent',
-        title: t('alarm.content'),
-        dataIndex: 'alarmContent',
-        width: 200,
-        ellipsis: true,
-        render: (v) => (
-          <Text type="secondary" ellipsis title={String(v)}>
-            {String(v)}
-          </Text>
-        ),
-      },
-      {
-        key: 'alarmTime',
-        title: t('alarm.occurTime'),
-        dataIndex: 'alarmTime',
-        width: 160,
-        render: (v) => new Date(String(v)).toLocaleString('zh-CN'),
-      },
-      {
-        key: 'duration',
-        title: t('alarm.duration'),
-        dataIndex: 'alarmTime',
-        width: 100,
-        render: (v) => computeDuration(String(v)),
-      },
-      {
-        key: 'ackStatus',
-        title: t('alarm.ackStatus'),
-        dataIndex: 'ackStatus',
-        width: 100,
-        render: (_val, record) => (
-          <Tag color={record.ackStatus === 'acknowledged' ? 'success' : 'warning'}>
-            {record.ackStatus === 'acknowledged' ? t('alarm.ackStatus.acknowledged') : t('alarm.ackStatus.unacknowledged')}
-          </Tag>
-        ),
-      },
-      {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 120,
-        fixed: 'right',
-        render: (_val, record) => (
+        width: 80,
+        fixed: 'left',
+        render: () => (
+          <Button type="link" size="small" icon={<EyeOutlined />}>
+            {t('alarm.detail')}
+          </Button>
+        ),
+      },
+      {
+        key: 'alarmId',
+        title: t('alarm.alarmId'),
+        dataIndex: 'alarmId',
+        width: 80,
+        sorter: true,
+        render: (val, record) => (
           <Space size={4}>
-            {record.ackStatus === 'unacknowledged' && (
-              <Button
-                type="link"
-                size="small"
-                icon={<CheckOutlined />}
-                onClick={() => handleAcknowledge([record.id])}
-              >
-                {t('alarm.acknowledge')}
-              </Button>
-            )}
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<ClearOutlined />}
-              onClick={() => handleClear([record.id])}
-            >
-              {t('alarm.clear')}
-            </Button>
+            {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
+            <span>{val}</span>
           </Space>
         ),
       },
+      {
+        key: 'severity',
+        title: t('alarm.severity'),
+        dataIndex: 'severity',
+        width: 100,
+        sorter: true,
+        render: (_val, record) => {
+          const config = SEVERITY_CONFIG[record.severity] || SEVERITY_CONFIG.warning;
+          return (
+            <Tag
+              style={{
+                color: config.color,
+                backgroundColor: config.bgColor,
+                border: 'none',
+              }}
+            >
+              {SEVERITY_LABEL[record.severity] ?? record.severity}
+            </Tag>
+          );
+        },
+      },
+      {
+        key: 'alarmIdentifier',
+        title: t('alarm.alarmIdentifier'),
+        dataIndex: 'alarmIdentifier',
+        width: 130,
+        mono: true,
+      },
+      {
+        key: 'alarmName',
+        title: t('alarm.possibleCause'),
+        dataIndex: 'alarmName',
+        width: 180,
+        ellipsis: true,
+      },
+      {
+        key: 'neType',
+        title: t('alarm.neType'),
+        dataIndex: 'neType',
+        width: 120,
+      },
+      {
+        key: 'equipInfo',
+        title: t('alarm.equipInfo'),
+        dataIndex: 'equipInfo',
+        width: 250,
+        ellipsis: true,
+      },
+      {
+        key: 'eventType',
+        title: t('alarm.eventType'),
+        dataIndex: 'eventType',
+        width: 160,
+        ellipsis: true,
+        render: (val: EventType) => t(EVENT_TYPE_CONFIG[val] || 'common.unknown'),
+      },
+      {
+        key: 'dealState',
+        title: t('alarm.dealState'),
+        dataIndex: 'dealState',
+        width: 190,
+        sorter: true,
+        ellipsis: true,
+        render: (val: DealState) => {
+          const config = DEAL_STATE_CONFIG[val];
+          return (
+            <span style={{ color: config?.color || '#666' }}>
+              {t(config?.label || 'common.unknown')}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'alarmType',
+        title: t('alarm.alarmType'),
+        dataIndex: 'alarmType',
+        width: 100,
+        render: () => t('alarm.alarmType.active'),
+      },
+      {
+        key: 'eventTime',
+        title: t('alarm.eventTime'),
+        dataIndex: 'eventTime',
+        width: 150,
+        sorter: true,
+        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+      },
+      {
+        key: 'updTime',
+        title: t('alarm.updTime'),
+        dataIndex: 'updTime',
+        width: 150,
+        sorter: true,
+        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+      },
+      {
+        key: 'specificProblem',
+        title: t('alarm.specificProblem'),
+        dataIndex: 'specificProblem',
+        width: 150,
+        ellipsis: true,
+      },
+      {
+        key: 'alarmCount',
+        title: t('alarm.alarmCount'),
+        dataIndex: 'alarmCount',
+        width: 100,
+        sorter: true,
+      },
+      {
+        key: 'dealMemo',
+        title: t('alarm.dealMemo'),
+        dataIndex: 'dealMemo',
+        width: 100,
+        ellipsis: true,
+      },
     ],
-    [handleAcknowledge, handleClear, t, SEVERITY_LABEL]
+    [t, SEVERITY_LABEL]
   );
 
   const batchActions = useMemo(
     (): BatchAction[] => [
       {
+        key: 'batch-filter',
+        label: t('alarm.filterAlarm'),
+        icon: <FilterOutlined />,
+        onClick: (keys) => handleFilter(keys as string[]),
+      },
+      {
         key: 'batch-ack',
-        label: t('common.batchAck'),
+        label: t('alarm.acknowledge'),
         icon: <CheckOutlined />,
         onClick: (keys) => handleAcknowledge(keys as string[]),
       },
       {
+        key: 'batch-unack',
+        label: t('alarm.unacknowledge'),
+        icon: <MinusCircleOutlined />,
+        onClick: (keys) => handleUnacknowledge(keys as string[]),
+      },
+      {
         key: 'batch-clear',
-        label: t('common.batchClear'),
+        label: t('alarm.clear'),
         icon: <ClearOutlined />,
         danger: true,
         onClick: (keys) => handleClear(keys as string[]),
       },
+      {
+        key: 'batch-read',
+        label: t('alarm.markRead'),
+        icon: <EyeOutlined />,
+        onClick: (keys) => handleMarkRead(keys as string[]),
+      },
     ],
-    [handleAcknowledge, handleClear, t]
+    [handleAcknowledge, handleUnacknowledge, handleClear, handleFilter, handleMarkRead, t]
   );
 
-  // Count unacknowledged
-  const unackCount = alarms.filter((a) => a.ackStatus === 'unacknowledged').length;
+  // 统计未确认未清除告警
+  const unackCount = alarms.filter((a) => a.dealState === '0' || a.dealState === '1').length;
 
   return (
     <ListPageLayout
       title={t('nav.alarm.current')}
       extra={
         <Space>
-          {/* Real-time connection indicator */}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
             <Badge status="success" />
             <span style={{ color: '#52C41A' }}>{t('common.realTimeConn')}</span>

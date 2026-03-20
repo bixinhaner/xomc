@@ -600,10 +600,57 @@ const messages: Record<string, string> = {
   'alarm.location':     'Alarm Location',
   'alarm.type':         'Alarm Type',
   'alarm.acknowledge':  'Acknowledge',
+  'alarm.unacknowledge': 'Unacknowledge',
   'alarm.clear':        'Clear Alarm',
   'alarm.filter':       'Alarm Filter',
   'alarm.total':        'Total Alarms',
   'alarm.active':       'Active Alarms',
+
+  // Active alarm fields
+  'alarm.alarmId':           'ID',
+  'alarm.alarmIdentifier':   'Alarm Identifier',
+  'alarm.equipInfo':         'Equipment Info',
+  'alarm.eventType':         'Event Type',
+  'alarm.dealState':         'Alarm State',
+  'alarm.alarmType':         'Alarm Type',
+  'alarm.alarmType.active':  'Active',
+  'alarm.alarmType.history': 'History',
+  'alarm.eventTime':         'Event Time',
+  'alarm.updTime':           'Update Time',
+  'alarm.specificProblem':   'Specific Problem',
+  'alarm.alarmCount':        'Count',
+  'alarm.dealMemo':          'Description',
+  'alarm.readStatus':        'Read Status',
+  'alarm.readStatus.read':   'Read',
+  'alarm.readStatus.unread': 'Unread',
+  'alarm.searchType':        'Search Type',
+  'alarm.searchType.fuzzy':  'Fuzzy',
+  'alarm.searchType.precise': 'Precise',
+  'alarm.keyword':           'Keyword',
+  'alarm.search':             'Search',
+  'alarm.searchPlaceholder':  'ID / Possible Cause / Equipment Info',
+  'alarm.eventTime':         'Event Time',
+  'alarm.neType':            'Alarm Source',
+  'alarm.detail':            'Detail',
+  'alarm.markRead':          'Mark as Read',
+
+  // Deal states
+  'alarm.dealState.unconfirmedUncleared': 'Unconfirmed & Active',
+  'alarm.dealState.confirmedUncleared':   'Confirmed & Active',
+  'alarm.dealState.unconfirmedCleared':   'Unconfirmed & Cleared',
+  'alarm.dealState.confirmedCleared':     'Confirmed & Cleared',
+
+  // Event types
+  'alarm.eventType.communication':        'Communication Alarm',
+  'alarm.eventType.qualityOfService':     'Quality of Service Alarm',
+  'alarm.eventType.processingError':      'Processing Error Alarm',
+  'alarm.eventType.device':               'Equipment Alarm',
+  'alarm.eventType.environment':          'Environmental Alarm',
+  'alarm.eventType.performance':          'Performance Overflow Alarm',
+
+  // Alarm actions
+  'alarm.filterAlarm':      'Filter Alarm',
+  'alarm.filterAlarmConfirm': 'Confirm to filter selected alarms?',
 
   // -------------------------------------------------------------------------
   // User / System labels

@@ -599,10 +599,57 @@ const messages: Record<string, string> = {
   'alarm.location':     '告警位置',
   'alarm.type':         '告警类型',
   'alarm.acknowledge':  '确认告警',
+  'alarm.unacknowledge': '反确认告警',
   'alarm.clear':        '清除告警',
   'alarm.filter':       '告警过滤',
   'alarm.total':        '告警总数',
   'alarm.active':       '活跃告警',
+
+  // 活动告警字段
+  'alarm.alarmId':           '序号',
+  'alarm.alarmIdentifier':   '告警唯一标识',
+  'alarm.equipInfo':         '网元定位',
+  'alarm.eventType':         '事件类型',
+  'alarm.dealState':         '告警状态',
+  'alarm.alarmType':         '告警类型',
+  'alarm.alarmType.active':  '活动告警',
+  'alarm.alarmType.history': '历史告警',
+  'alarm.eventTime':         '故障时间',
+  'alarm.updTime':           '更新时间',
+  'alarm.specificProblem':   '具体故障',
+  'alarm.alarmCount':        '告警次数',
+  'alarm.dealMemo':          '描述',
+  'alarm.readStatus':        '阅读状态',
+  'alarm.readStatus.read':   '已读',
+  'alarm.readStatus.unread': '未读',
+  'alarm.searchType':        '搜索方式',
+  'alarm.searchType.fuzzy':  '模糊查询',
+  'alarm.searchType.precise': '精确查询',
+  'alarm.keyword':           '关键字',
+  'alarm.search':             '搜索',
+  'alarm.searchPlaceholder':   '序号 / 可能原因 / 网元定位',
+  'alarm.eventTime':         '故障时间',
+  'alarm.neType':            '告警源',
+  'alarm.detail':            '详细',
+  'alarm.markRead':          '标记为已读',
+
+  // 告警状态
+  'alarm.dealState.unconfirmedUncleared': '未确认未清除',
+  'alarm.dealState.confirmedUncleared':   '已确认未清除',
+  'alarm.dealState.unconfirmedCleared':   '未确认已清除',
+  'alarm.dealState.confirmedCleared':     '已确认已清除',
+
+  // 事件类型
+  'alarm.eventType.communication':        '通信告警',
+  'alarm.eventType.qualityOfService':     '服务质量告警',
+  'alarm.eventType.processingError':      '处理失败告警',
+  'alarm.eventType.device':               '设备告警',
+  'alarm.eventType.environment':          '环境告警',
+  'alarm.eventType.performance':          '性能溢出告警',
+
+  // 告警操作
+  'alarm.filterAlarm':      '过滤告警',
+  'alarm.filterAlarmConfirm': '确认过滤选中的告警？',
 
   // -------------------------------------------------------------------------
   // User / System labels

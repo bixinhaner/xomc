@@ -74,7 +74,7 @@ function generateAlarmContent(def: { name: string; type: string }, deviceName: s
 
 let alarmCounter = 1;
 
-function generateAlarm(isActive: boolean, index: number): Alarm {
+function generateAlarm(isActive: boolean, index: number, unread: '0' | '1' = '0'): Alarm {
   const def = alarmDefinitions[index % alarmDefinitions.length];
   const device = deviceSnList[index % deviceSnList.length];
   const severity: AlarmSeverity = pickRandom(severityDistribution);
@@ -84,17 +84,34 @@ function generateAlarm(isActive: boolean, index: number): Alarm {
 
   const id = `ALM${String(alarmCounter++).padStart(6, '0')}`;
 
+  // 生成告警状态：活动告警为0或1，历史告警为2或3
+  const dealState = isActive
+    ? (isAcknowledged ? '1' : '0')
+    : (isAcknowledged ? '3' : '2');
+
   return {
     id,
+    alarmId: id,
+    alarmIdentifier: def.code,
     alarmCode: def.code,
     alarmName: def.name,
     severity,
     deviceSn: device.sn,
     deviceName: device.name,
     neType: device.type,
+    equipInfo: `SN=${device.sn};Name=${device.name}`,
+    eventType: '30003', // 设备告警
+    dealState: dealState as '0' | '1' | '2' | '3',
+    alarmType: isActive ? 'active' : 'history',
+    eventTime: alarmTime,
+    updTime: alarmTime,
     alarmContent: generateAlarmContent(def, device.name),
     alarmTime,
     clearTime,
+    specificProblem: def.name,
+    alarmCount: Math.floor(Math.random() * 10) + 1,
+    dealMemo: '',
+    unread,
     duration: clearTime
       ? Math.floor((new Date(clearTime).getTime() - new Date(alarmTime).getTime()) / 60000)
       : Math.floor((Date.now() - new Date(alarmTime).getTime()) / 60000),
@@ -104,10 +121,14 @@ function generateAlarm(isActive: boolean, index: number): Alarm {
     ackNote: isAcknowledged ? '已确认，正在处理' : undefined,
     alarmSource: device.sn,
     alarmLocation: `${device.name}-${def.type}`,
-    alarmType: def.type,
     isActive,
   };
 }
 
-export const mockActiveAlarms: Alarm[] = Array.from({ length: 150 }, (_, i) => generateAlarm(true, i));
-export const mockHistoricalAlarms: Alarm[] = Array.from({ length: 500 }, (_, i) => generateAlarm(false, i + 150));
+// 前20个告警设置为未读
+export const mockActiveAlarms: Alarm[] = Array.from({ length: 150 }, (_, i) =>
+  generateAlarm(true, i, i < 20 ? '1' : '0')
+);
+export const mockHistoricalAlarms: Alarm[] = Array.from({ length: 500 }, (_, i) =>
+  generateAlarm(false, i + 150, '0')
+);
