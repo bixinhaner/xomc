@@ -4,15 +4,17 @@ import "strings"
 
 // TR069 Inform event codes per CWMP specification.
 const (
-	EventBootstrap           = "0 BOOTSTRAP"
-	EventBoot                = "1 BOOT"
-	EventPeriodic            = "2 PERIODIC"
-	EventScheduled           = "3 SCHEDULED"
-	EventValueChange         = "4 VALUE CHANGE"
-	EventKicked              = "5 KICKED"
-	EventConnectionRequest   = "6 CONNECTION REQUEST"
-	EventTransferComplete    = "7 TRANSFER COMPLETE"
-	EventDiagnosticsComplete = "8 DIAGNOSTICS COMPLETE"
+	EventBootstrap                 = "0 BOOTSTRAP"
+	EventBoot                      = "1 BOOT"
+	EventPeriodic                  = "2 PERIODIC"
+	EventScheduled                 = "3 SCHEDULED"
+	EventValueChange               = "4 VALUE CHANGE"
+	EventKicked                    = "5 KICKED"
+	EventConnectionRequest         = "6 CONNECTION REQUEST"
+	EventTransferComplete          = "7 TRANSFER COMPLETE"
+	EventDiagnosticsComplete       = "8 DIAGNOSTICS COMPLETE"
+	EventRequestDownload           = "9 REQUEST DOWNLOAD"
+	EventAutonomousTransferComplete = "10 AUTONOMOUS TRANSFER COMPLETE"
 )
 
 // Vendor-specific event codes (M = Manufacturer).
@@ -82,6 +84,16 @@ func IsRebootComplete(events []EventStruct) bool {
 // IsDownloadComplete returns true if the event list contains an M Download event.
 func IsDownloadComplete(events []EventStruct) bool {
 	return HasEvent(events, EventMDownload)
+}
+
+// IsRequestDownload returns true if the event list contains a REQUEST DOWNLOAD event.
+func IsRequestDownload(events []EventStruct) bool {
+	return HasEvent(events, EventRequestDownload)
+}
+
+// IsAutonomousTransferComplete returns true if the event list contains an AUTONOMOUS TRANSFER COMPLETE event.
+func IsAutonomousTransferComplete(events []EventStruct) bool {
+	return HasEvent(events, EventAutonomousTransferComplete)
 }
 
 // EventCodes extracts just the event codes from an event list.

@@ -20,14 +20,15 @@ const (
 
 // Session represents an active TR069/CWMP session with a CPE device.
 type Session struct {
-	DeviceSN     string       `json:"device_sn"`
-	State        SessionState `json:"state"`
-	LastRPC      string       `json:"last_rpc"`
-	InstanceID   string       `json:"instance_id"`
-	StartedAt    time.Time    `json:"started_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	InformEvents []string     `json:"inform_events"`
-	CWMPId       string       `json:"cwmp_id"`
+	DeviceSN       string       `json:"device_sn"`
+	State          SessionState `json:"state"`
+	LastRPC        string       `json:"last_rpc"`
+	InstanceID     string       `json:"instance_id"`
+	StartedAt      time.Time    `json:"started_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	InformEvents   []string     `json:"inform_events"`
+	CWMPId         string       `json:"cwmp_id"`
+	SessionTimeout int          `json:"session_timeout"` // CPE suggested session timeout in seconds
 }
 
 // validTransitions defines the allowed state transitions.

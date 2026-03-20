@@ -24,6 +24,7 @@ type Envelope struct {
 type Header struct {
 	ID             string `xml:"ID"`
 	NoMoreRequests string `xml:"NoMoreRequests,omitempty"`
+	SessionTimeout int    `xml:"SessionTimeout,omitempty"`
 }
 
 // Body represents a SOAP body containing raw XML for the RPC payload.

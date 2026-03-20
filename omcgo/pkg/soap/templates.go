@@ -54,15 +54,24 @@ func RenderResponse(tmpl *template.Template, data interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Template data types
+// HeaderData contains common SOAP header fields used by all templates.
+// NoMoreRequests: 0 = ACS will send more requests, 1 = this is the last request.
+type HeaderData struct {
+	ID             string
+	NoMoreRequests int // 0=more requests coming, 1=last request (omit for default 0)
+}
+
+// InformResponseData contains data for InformResponse template.
 type InformResponseData struct {
-	ID          string
-	CurrentTime string // ACS current time for CPE synchronization (optional per TR069 spec)
+	ID             string
+	CurrentTime    string // ACS current time for CPE synchronization (optional per TR069 spec)
+	NoMoreRequests int    // 0=more requests coming, 1=last request
 }
 
 type GetParameterValuesData struct {
-	ID     string
-	Params []ParameterNameData
+	ID             string
+	Params         []ParameterNameData
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type ParameterNameData struct {
@@ -70,9 +79,10 @@ type ParameterNameData struct {
 }
 
 type SetParameterValuesData struct {
-	ID     string
-	Key    string
-	Params []ParameterSetData
+	ID             string
+	Key            string
+	Params         []ParameterSetData
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type ParameterSetData struct {
@@ -82,21 +92,24 @@ type ParameterSetData struct {
 }
 
 type GetParameterNamesData struct {
-	ID        string
-	Path      string
-	NextLevel bool
+	ID             string
+	Path           string
+	NextLevel      bool
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type AddObjectData struct {
-	ID         string
-	ObjectName string
-	Key        string
+	ID             string
+	ObjectName     string
+	Key            string
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type DeleteObjectData struct {
-	ID         string
-	ObjectName string
-	Key        string
+	ID             string
+	ObjectName     string
+	Key            string
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type DownloadData struct {
@@ -109,43 +122,50 @@ type DownloadData struct {
 	FileSize       int64
 	TargetFileName string
 	DelaySeconds   int
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type UploadData struct {
-	ID           string
-	CommandKey   string
-	FileType     string
-	URL          string
-	Username     string
-	Password     string
-	DelaySeconds int
+	ID             string
+	CommandKey     string
+	FileType       string
+	URL            string
+	Username       string
+	Password       string
+	DelaySeconds   int
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type RebootData struct {
-	ID         string
-	CommandKey string
+	ID             string
+	CommandKey     string
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type ScheduleInformData struct {
-	ID           string
-	DelaySeconds int
-	CommandKey   string
+	ID             string
+	DelaySeconds   int
+	CommandKey     string
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type FaultData struct {
-	ID          string
-	FaultCode   int
-	FaultString string
+	ID             string
+	FaultCode      int
+	FaultString    string
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type GetParameterAttributesData struct {
-	ID     string
-	Params []ParameterNameData
+	ID             string
+	Params         []ParameterNameData
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type SetParameterAttributesData struct {
-	ID     string
-	Params []SetParameterAttributeData
+	ID             string
+	Params         []SetParameterAttributeData
+	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
 type SetParameterAttributeData struct {
@@ -160,11 +180,13 @@ type SetParameterAttributeData struct {
 
 const soapEnvelopeOpen = `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
                xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <soap:Header>
-    <cwmp:ID soap:mustUnderstand="1">{{.ID}}</cwmp:ID>
+    <cwmp:ID soap:mustUnderstand="1">{{.ID}}</cwmp:ID>{{if .NoMoreRequests}}
+    <cwmp:NoMoreRequests>{{.NoMoreRequests}}</cwmp:NoMoreRequests>{{end}}
   </soap:Header>
   <soap:Body>`
 

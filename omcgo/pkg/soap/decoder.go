@@ -702,3 +702,55 @@ func DetectMethod(r io.Reader) (RPCMethod, string, []byte, error) {
 
 	return method, cwmpID, data, nil
 }
+
+// HeaderInfo contains extracted SOAP header information.
+type HeaderInfo struct {
+	ID             string
+	SessionTimeout int
+	NoMoreRequests string
+}
+
+// ParseHeader extracts header information from a SOAP message.
+// Returns HeaderInfo with ID, SessionTimeout, and NoMoreRequests if present.
+func ParseHeader(r io.Reader) (HeaderInfo, error) {
+	decoder := xml.NewDecoder(r)
+	var info HeaderInfo
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return info, fmt.Errorf("parse SOAP header: %w", err)
+		}
+
+		se, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		switch se.Name.Local {
+		case "ID":
+			var id string
+			if err := decoder.DecodeElement(&id, &se); err == nil {
+				info.ID = id
+			}
+		case "SessionTimeout":
+			var timeout int
+			if err := decoder.DecodeElement(&timeout, &se); err == nil {
+				info.SessionTimeout = timeout
+			}
+		case "NoMoreRequests":
+			var nmr string
+			if err := decoder.DecodeElement(&nmr, &se); err == nil {
+				info.NoMoreRequests = nmr
+			}
+		case "Body":
+			// Stop parsing once we reach the body
+			return info, nil
+		}
+	}
+
+	return info, nil
+}
