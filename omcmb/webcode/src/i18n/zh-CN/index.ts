@@ -605,6 +605,17 @@ const messages: Record<string, string> = {
   'alarm.total':        '告警总数',
   'alarm.active':       '活跃告警',
 
+  // 告警统计
+  'alarm.stats.new':         '新增告警',
+  'alarm.stats.cleared':     '清除告警',
+  'alarm.stats.active':      '活动告警',
+  'alarm.stats.all':         '所有告警',
+  'alarm.stats.trend':       '告警变化趋势',
+  'alarm.stats.distribution': '告警存量分布',
+  'alarm.stats.hour':        '小时',
+  'alarm.stats.day':         '天',
+  'alarm.stats.alarmCount':  '告警数量',
+
   // 活动告警字段
   'alarm.alarmId':           '告警码',
   'alarm.alarmIdentifier':   '告警标识',

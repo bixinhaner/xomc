@@ -606,6 +606,17 @@ const messages: Record<string, string> = {
   'alarm.total':        'Total Alarms',
   'alarm.active':       'Active Alarms',
 
+  // Alarm Statistics
+  'alarm.stats.new':         'New Alarms',
+  'alarm.stats.cleared':     'Cleared Alarms',
+  'alarm.stats.active':      'Active',
+  'alarm.stats.all':         'All Alarms',
+  'alarm.stats.trend':       'Alarm Change Trend',
+  'alarm.stats.distribution': 'Alarm Distribution',
+  'alarm.stats.hour':        'Hour',
+  'alarm.stats.day':         'Day',
+  'alarm.stats.alarmCount':  'Alarm Count',
+
   // Active alarm fields
   'alarm.alarmId':           'ID',
   'alarm.alarmIdentifier':   'Alarm Identifier',

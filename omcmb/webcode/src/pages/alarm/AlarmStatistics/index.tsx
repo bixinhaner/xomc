@@ -1,32 +1,54 @@
-import React, { useMemo } from 'react';
-import { Card, Col, Row, Statistic, Typography } from 'antd';
+import React, { useMemo, useState } from 'react';
+import { Card, Col, Row, Statistic, Typography, DatePicker, Radio, Space } from 'antd';
 import {
   AlertOutlined,
   ExclamationCircleOutlined,
   InfoCircleOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import PieChart from '@/components/Charts/PieChart';
+import type { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import BarChart from '@/components/Charts/BarChart';
-import LineChart from '@/components/Charts/LineChart';
 import { useAlarmCount } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 
 const { Title, Text } = Typography;
 
-function generateTrendDays(count: number): string[] {
+const SEVERITY_COLORS = {
+  critical: '#FC5959',
+  major: '#FF973E',
+  minor: '#FFDA41',
+  warning: '#67DFF8',
+};
+
+function generateHourLabels(): string[] {
+  return Array.from({ length: 24 }, (_, i) => `${i}:00`);
+}
+
+function generateDayLabels(count: number): string[] {
   const days: string[] = [];
   for (let i = count - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    days.push(`${d.getMonth() + 1}/${d.getDate()}`);
+    const d = dayjs().subtract(i, 'day');
+    days.push(d.format('MM/DD'));
   }
   return days;
+}
+
+// Mock data generator for stacked bar chart
+function generateMockStackedData(baseMultiplier: number = 1) {
+  return {
+    critical: Array.from({ length: 24 }, () => Math.floor(Math.random() * 5 * baseMultiplier)),
+    major: Array.from({ length: 24 }, () => Math.floor(Math.random() * 10 * baseMultiplier)),
+    minor: Array.from({ length: 24 }, () => Math.floor(Math.random() * 8 * baseMultiplier)),
+    warning: Array.from({ length: 24 }, () => Math.floor(Math.random() * 6 * baseMultiplier)),
+  };
 }
 
 export default function AlarmStatistics() {
   const t = useT();
   const { data: alarmCount } = useAlarmCount();
+  const [dateType, setDateType] = useState<'day' | 'month'>('day');
+  const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
 
   const critical = alarmCount?.critical ?? 8;
   const major = alarmCount?.major ?? 15;
@@ -34,72 +56,71 @@ export default function AlarmStatistics() {
   const warning = alarmCount?.warning ?? 8;
   const totalActive = critical + major + minor + warning;
 
-  // Severity distribution donut
-  const severityData = useMemo(
-    () => [
-      { name: t('alarm.severity.critical'), value: critical },
-      { name: t('alarm.severity.major'), value: major },
-      { name: t('alarm.severity.minor'), value: minor },
-      { name: t('alarm.severity.warning'), value: warning },
-    ],
-    [critical, major, minor, warning, t]
-  );
+  // X-axis labels based on date type
+  const xData = useMemo(() => {
+    if (dateType === 'day') {
+      return generateHourLabels();
+    }
+    return generateDayLabels(30);
+  }, [dateType]);
 
-  // 7-day trend (4 series)
-  const trendXData = useMemo(() => generateTrendDays(7), []);
-  const trendSeries = useMemo(() => [
-    { name: t('alarm.severity.critical'), data: [5, 8, 6, 9, 7, 10, 8], color: '#F5222D' },
-    { name: t('alarm.severity.major'), data: [12, 15, 11, 18, 14, 17, 15], color: '#FA8C16' },
-    { name: t('alarm.severity.minor'), data: [8, 10, 9, 12, 11, 13, 12], color: '#FADB14' },
-    { name: t('alarm.severity.warning'), data: [6, 7, 5, 8, 6, 9, 8], color: '#1677FF' },
-  ], [t]);
+  // Series for new alarms (新增告警)
+  const newAlarmSeries = useMemo(() => {
+    const data = generateMockStackedData(1.2);
+    return [
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+    ];
+  }, [t, selectedDate, dateType]);
 
-  // TOP10 devices (horizontal bar)
-  const top10Devices = [
-    '成都基站-005', '广州基站-003', '昆明基站-010', '哈尔滨-009',
-    '北京基站-001', '上海基站-002', '西安基站-007', '南京基站-008',
-    '深圳基站-004', '兰州基站-006',
-  ];
-  const top10Series = [
-    {
-      name: t('alarm.total'),
-      data: [24, 21, 18, 16, 14, 12, 10, 8, 6, 4],
-      color: '#FA8C16',
-    },
-  ];
+  // Series for cleared alarms (清除告警)
+  const clearedAlarmSeries = useMemo(() => {
+    const data = generateMockStackedData(0.8);
+    return [
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+    ];
+  }, [t, selectedDate, dateType]);
 
-  // Alarm type distribution
-  const alarmTypeXData = useMemo(() => ['Link Down', 'Link Fault', 'Threshold', 'Config', 'Software', 'Hardware'], []);
-  const alarmTypeSeries = [
-    {
-      name: t('alarm.total'),
-      data: [23, 18, 34, 12, 9, 7],
-      color: 'var(--color-primary-600)',
-    },
-  ];
+  // Series for active alarms (活动告警)
+  const activeAlarmSeries = useMemo(() => {
+    const data = generateMockStackedData(1.5);
+    return [
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+    ];
+  }, [t, selectedDate, dateType]);
 
-  // Alarm by hour heatmap-style bar
-  const hourXData = Array.from({ length: 24 }, (_, i) => `${i}:00`);
-  const hourSeries = [
-    {
-      name: t('alarm.total'),
-      data: [3, 2, 1, 1, 2, 4, 6, 8, 10, 9, 8, 7, 6, 5, 7, 9, 10, 12, 11, 8, 7, 5, 4, 3],
-    },
-  ];
+  // Series for all alarms (所有告警)
+  const allAlarmSeries = useMemo(() => {
+    const data = generateMockStackedData(2);
+    return [
+      { name: t('alarm.severity.critical'), data: data.critical, color: SEVERITY_COLORS.critical, stack: 'severity' },
+      { name: t('alarm.severity.major'), data: data.major, color: SEVERITY_COLORS.major, stack: 'severity' },
+      { name: t('alarm.severity.minor'), data: data.minor, color: SEVERITY_COLORS.minor, stack: 'severity' },
+      { name: t('alarm.severity.warning'), data: data.warning, color: SEVERITY_COLORS.warning, stack: 'severity' },
+    ];
+  }, [t, selectedDate, dateType]);
 
   // Summary cards
   const summaryCards = [
     {
       title: t('alarm.severity.critical'),
       value: critical,
-      color: '#F5222D',
+      color: SEVERITY_COLORS.critical,
       bg: '#fff2f0',
       icon: <AlertOutlined />,
     },
     {
       title: t('alarm.severity.major'),
       value: major,
-      color: '#FA8C16',
+      color: SEVERITY_COLORS.major,
       bg: '#fff7e6',
       icon: <ExclamationCircleOutlined />,
     },
@@ -119,11 +140,42 @@ export default function AlarmStatistics() {
     },
   ];
 
+  const handleDateChange = (date: Dayjs | null) => {
+    if (date) {
+      setSelectedDate(date);
+    }
+  };
+
+  const handleDateTypeChange = (value: 'day' | 'month') => {
+    setDateType(value);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Title level={4} style={{ margin: 0 }}>
-        {t('nav.alarm.statistics')}
-      </Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={4} style={{ margin: 0 }}>
+          {t('nav.alarm.statistics')}
+        </Title>
+        <Space>
+          <DatePicker
+            value={selectedDate}
+            onChange={handleDateChange}
+            picker={dateType === 'day' ? 'date' : 'month'}
+            allowClear={false}
+            disabledDate={(current) => current && current > dayjs().endOf('day')}
+          />
+          <Radio.Group
+            value={dateType}
+            onChange={(e) => handleDateTypeChange(e.target.value)}
+            optionType="button"
+            buttonStyle="solid"
+            size="small"
+          >
+            <Radio.Button value="day">{t('alarm.stats.hour')}</Radio.Button>
+            <Radio.Button value="month">{t('alarm.stats.day')}</Radio.Button>
+          </Radio.Group>
+        </Space>
+      </div>
 
       {/* Summary Row */}
       <Row gutter={[16, 16]}>
@@ -162,69 +214,73 @@ export default function AlarmStatistics() {
         ))}
       </Row>
 
-      {/* Charts Row 1 */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={10}>
-          <Card title={t('alarm.severity')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
-            <PieChart
-              title=""
-              data={severityData}
-              height={300}
-              donut
-            />
-            <div style={{ textAlign: 'center', paddingBottom: 12 }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                {t('alarm.active')} <Text strong style={{ color: '#F5222D' }}>{totalActive}</Text>
-              </Text>
+      {/* 告警变化趋势 - 新增告警 & 清除告警 */}
+      <Card
+        title={t('alarm.stats.trend')}
+        size="small"
+        styles={{ body: { padding: '12px' } }}
+      >
+        <Row gutter={16}>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <Text strong>{t('alarm.stats.new')}</Text>
             </div>
-          </Card>
-        </Col>
-        <Col xs={24} lg={14}>
-          <Card title={t('alarm.severity')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
-            <LineChart
-              title=""
-              xData={trendXData}
-              series={trendSeries}
-              height={320}
-              areaFill
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Charts Row 2 */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <Card title="TOP10" size="small" styles={{ body: { padding: '8px 0 0' } }}>
             <BarChart
               title=""
-              xData={top10Devices}
-              series={top10Series}
-              height={300}
-              horizontal
+              xData={xData}
+              series={newAlarmSeries}
+              height={280}
+              stacked
             />
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card title={t('alarm.type')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <Text strong>{t('alarm.stats.cleared')}</Text>
+            </div>
             <BarChart
               title=""
-              xData={alarmTypeXData}
-              series={alarmTypeSeries}
-              height={300}
+              xData={xData}
+              series={clearedAlarmSeries}
+              height={280}
+              stacked
             />
-          </Card>
-        </Col>
-      </Row>
+          </Col>
+        </Row>
+      </Card>
 
-      {/* Charts Row 3 -- Hourly distribution */}
-      <Row gutter={[16, 16]}>
-        <Col span={24}>
-          <Card title={t('alarm.time')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
-            <BarChart title="" xData={hourXData} series={hourSeries} height={220} />
-          </Card>
-        </Col>
-      </Row>
+      {/* 告警存量分布 - 活动告警 & 所有告警 */}
+      <Card
+        title={t('alarm.stats.distribution')}
+        size="small"
+        styles={{ body: { padding: '12px' } }}
+      >
+        <Row gutter={16}>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <Text strong>{t('alarm.stats.active')}</Text>
+            </div>
+            <BarChart
+              title=""
+              xData={xData}
+              series={activeAlarmSeries}
+              height={280}
+              stacked
+            />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <Text strong>{t('alarm.stats.all')}</Text>
+            </div>
+            <BarChart
+              title=""
+              xData={xData}
+              series={allAlarmSeries}
+              height={280}
+              stacked
+            />
+          </Col>
+        </Row>
+      </Card>
     </div>
   );
 }
