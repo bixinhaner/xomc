@@ -171,10 +171,10 @@ export default function CurrentAlarms() {
           try {
             await acknowledgeAlarms.mutateAsync({ ids });
             setSelectedRowKeys([]);
-            void refetch();
-            void message.success(t('common.ackSuccess'));
+            refetch();
+            message.success(t('common.ackSuccess'));
           } catch {
-            void message.error(t('common.ackFailed'));
+            message.error(t('common.ackFailed'));
           }
         },
       });
@@ -192,10 +192,10 @@ export default function CurrentAlarms() {
           try {
             // TODO: 调用反确认 API
             setSelectedRowKeys([]);
-            void refetch();
-            void message.success(t('common.unackSuccess'));
+            refetch();
+            message.success(t('common.unackSuccess'));
           } catch {
-            void message.error(t('common.unackFailed'));
+            message.error(t('common.unackFailed'));
           }
         },
       });
@@ -215,10 +215,10 @@ export default function CurrentAlarms() {
           try {
             await clearAlarms.mutateAsync(ids);
             setSelectedRowKeys([]);
-            void refetch();
-            void message.success(t('common.clearSuccess'));
+            refetch();
+            message.success(t('common.clearSuccess'));
           } catch {
-            void message.error(t('common.clearFailed'));
+            message.error(t('common.clearFailed'));
           }
         },
       });
@@ -234,14 +234,10 @@ export default function CurrentAlarms() {
         okText: t('common.confirm'),
         icon: <FilterOutlined />,
         onOk: async () => {
-          try {
-            // TODO: 调用过滤告警 API
-            setSelectedRowKeys([]);
-            void refetch();
-            void message.success(t('common.success'));
-          } catch {
-            void message.error(t('common.failed'));
-          }
+          // TODO: 调用过滤告警 API
+          setSelectedRowKeys([]);
+          refetch();
+          message.success(t('common.success'));
         },
       });
     },
@@ -250,14 +246,10 @@ export default function CurrentAlarms() {
 
   const handleMarkRead = useCallback(
     (ids: string[]) => {
-      try {
-        // TODO: 调用标记已读 API
-        setSelectedRowKeys([]);
-        void refetch();
-        void message.success(t('common.markReadSuccess'));
-      } catch {
-        void message.error(t('common.markReadFailed'));
-      }
+      // TODO: 调用标记已读 API
+      setSelectedRowKeys([]);
+      refetch();
+      message.success(t('common.markReadSuccess'));
     },
     [refetch, t]
   );
