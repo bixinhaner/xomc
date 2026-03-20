@@ -46,6 +46,26 @@ db:
   max_conn_idle_time: 5m
   health_check_interval: 30s
 
+minio:
+  endpoint: "minio:9000"
+  access_key: "${MINIO_ACCESS_KEY}"
+  secret_key: "${MINIO_SECRET_KEY}"
+  use_ssl: true
+  buckets:
+    pm_files: "pm-files"
+    mr_files: "mr-files"
+    firmware: "firmware"
+    config_backup: "config-backup"
+    logs: "logs"
+    reports: "reports"
+
+upload:
+  base_url: "${ACS_BASE_URL}"  # e.g. https://acs.example.com
+  path: "/smallcell/FileUploadService"
+  username: "${UPLOAD_USERNAME}"
+  password: "${UPLOAD_PASSWORD}"
+  max_file_size: 104857600  # 100MB
+
 metrics:
   port: 9090
 

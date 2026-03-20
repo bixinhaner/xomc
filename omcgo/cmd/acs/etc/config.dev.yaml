@@ -46,6 +46,26 @@ db:
   max_conn_idle_time: 5m
   health_check_interval: 30s
 
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  buckets:
+    pm_files: "pm-files"
+    mr_files: "mr-files"
+    firmware: "firmware"
+    config_backup: "config-backup"
+    logs: "logs"
+    reports: "reports"
+
+upload:
+  base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址
+  path: "/smallcell/FileUploadService"
+  username: "upload_user"             # HTTP Basic Auth 用户名
+  password: "secure_upload_password_123"  # HTTP Basic Auth 密码
+  max_file_size: 104857600            # 100MB
+
 metrics:
   port: 9090
 

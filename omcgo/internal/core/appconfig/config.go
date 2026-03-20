@@ -30,7 +30,9 @@ type ACSConfig struct {
 type UploadConfig struct {
 	BaseURL     string        `mapstructure:"base_url"`      // Upload server base URL, e.g. http://acs:7547
 	Path        string        `mapstructure:"path"`          // Upload path prefix, default /upload
-	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret
+	Username    string        `mapstructure:"username"`      // HTTP Basic Auth username for CPE upload
+	Password    string        `mapstructure:"password"`      // HTTP Basic Auth password for CPE upload
+	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
 }
