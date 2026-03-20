@@ -92,7 +92,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           >
             {SEVERITY_LABEL[alarm.severity] ?? alarm.severity}
           </Tag>
-          <span>{alarm.alarmName || t('alarm.detail')}</span>
+          <span>{alarm.alarmIdentifier || t('alarm.detail')}</span>
         </Space>
       }
       open={open}

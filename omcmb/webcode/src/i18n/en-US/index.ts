@@ -847,6 +847,7 @@ const messages: Record<string, string> = {
   'common.markReadSuccess': 'Marked as read successfully',
   'common.markReadFailed':  'Mark as read failed',
   'common.failed':          'Operation failed',
+  'common.success':             'Success',
   'common.hasAlarm':        'Has Alarm',
   'common.noAlarm':         'No Alarm',
 

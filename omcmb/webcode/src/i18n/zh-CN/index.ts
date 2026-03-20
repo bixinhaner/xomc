@@ -845,6 +845,7 @@ const messages: Record<string, string> = {
   'common.clearFailed':     '清除失败',
   'common.markReadSuccess': '标记已读成功',
   'common.markReadFailed':  '标记已读失败',
+  'common.success': '操作成功',
   'common.failed':          '操作失败',
   'common.hasAlarm':        '有告警',
   'common.noAlarm':         '无告警',
