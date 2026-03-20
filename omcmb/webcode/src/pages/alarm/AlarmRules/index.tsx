@@ -3,7 +3,6 @@ import { App, Button, Space, Switch, Tag, Typography } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
-  EyeOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -41,7 +40,6 @@ export default function AlarmRules() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   const RULE_TYPE_LABEL: Record<string, string> = useMemo(() => ({
     '0': t('alarm.ruleType.forbidReport'),
@@ -129,7 +127,6 @@ export default function AlarmRules() {
         okType: 'danger',
         onOk: async () => {
           await deleteRules.mutateAsync([rule.id]);
-          setSelectedRowKeys([]);
           void refetch();
         },
       });
@@ -161,6 +158,36 @@ export default function AlarmRules() {
 
   const columns = useMemo(
     (): DataTableColumn<AlarmRule>[] => [
+      {
+        key: 'actions',
+        title: t('table.operation'),
+        dataIndex: 'id',
+        width: 120,
+        fixed: 'left',
+        render: (_val, record) => (
+          <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              disabled={record.enabled}
+              onClick={() => handleActionClick('edit', record)}
+            >
+              {t('common.edit')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              disabled={record.enabled || record.isDefault}
+              onClick={() => handleActionClick('delete', record)}
+            >
+              {t('common.delete')}
+            </Button>
+          </Space>
+        ),
+      },
       {
         key: 'status',
         title: t('alarm.status'),
@@ -222,44 +249,6 @@ export default function AlarmRules() {
         width: 160,
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
       },
-      {
-        key: 'actions',
-        title: t('table.operation'),
-        dataIndex: 'id',
-        width: 140,
-        fixed: 'right',
-        render: (_val, record) => (
-          <Space size={4}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => handleActionClick('view', record)}
-            >
-              {t('common.info')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              disabled={record.enabled}
-              onClick={() => handleActionClick('edit', record)}
-            >
-              {t('common.edit')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              disabled={record.enabled || record.isDefault}
-              onClick={() => handleActionClick('delete', record)}
-            >
-              {t('common.delete')}
-            </Button>
-          </Space>
-        ),
-      },
     ],
     [handleToggle, handleActionClick, updateRule.isPending, t]
   );
@@ -302,9 +291,6 @@ export default function AlarmRules() {
         dataSource={rules}
         loading={isLoading}
         rowKey="id"
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
         total={total}
         pageSize={pageSize}
         currentPage={currentPage}
