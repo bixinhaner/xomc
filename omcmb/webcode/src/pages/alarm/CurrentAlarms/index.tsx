@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Modal, Space, Tag, Typography, App } from 'antd';
+import { Badge, Button, Space, Tag, Typography, App } from 'antd';
 import {
   BellOutlined,
   CheckOutlined,
@@ -49,7 +49,7 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
 
 export default function CurrentAlarms() {
   const t = useT();
-  const { message } = App.useApp();
+  const { modal, message } = App.useApp();
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<AlarmFilter>({});
@@ -163,7 +163,7 @@ export default function CurrentAlarms() {
 
   const handleAcknowledge = useCallback(
     (ids: string[]) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('alarm.acknowledge'),
         content: t('common.ackConfirmMsg', { count: ids.length }),
         okText: t('common.confirm'),
@@ -173,9 +173,9 @@ export default function CurrentAlarms() {
             await acknowledgeAlarms.mutateAsync({ ids });
             setSelectedRowKeys([]);
             refetch();
-            setTimeout(() => message.success(t('common.ackSuccess')), 300);
+            message.success(t('common.ackSuccess'));
           } catch {
-            setTimeout(() => message.error(t('common.ackFailed')), 300);
+            message.error(t('common.ackFailed'));
           }
         },
       });
@@ -185,7 +185,7 @@ export default function CurrentAlarms() {
 
   const handleUnacknowledge = useCallback(
     (ids: string[]) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('alarm.unacknowledge'),
         content: t('common.unackConfirmMsg', { count: ids.length }),
         okText: t('common.confirm'),
@@ -194,9 +194,9 @@ export default function CurrentAlarms() {
             // TODO: 调用反确认 API
             setSelectedRowKeys([]);
             refetch();
-            setTimeout(() => message.success(t('common.unackSuccess')), 300);
+            message.success(t('common.unackSuccess'));
           } catch {
-            setTimeout(() => message.error(t('common.unackFailed')), 300);
+            message.error(t('common.unackFailed'));
           }
         },
       });
@@ -206,7 +206,7 @@ export default function CurrentAlarms() {
 
   const handleClear = useCallback(
     (ids: string[]) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('alarm.clear'),
         content: t('common.clearConfirmMsg', { count: ids.length }),
         okText: t('alarm.clear'),
@@ -217,9 +217,9 @@ export default function CurrentAlarms() {
             await clearAlarms.mutateAsync(ids);
             setSelectedRowKeys([]);
             refetch();
-            setTimeout(() => message.success(t('common.clearSuccess')), 300);
+            message.success(t('common.clearSuccess'));
           } catch {
-            setTimeout(() => message.error(t('common.clearFailed')), 300);
+            message.error(t('common.clearFailed'));
           }
         },
       });
@@ -229,7 +229,7 @@ export default function CurrentAlarms() {
 
   const handleFilter = useCallback(
     (ids: string[]) => {
-      Modal.confirm({
+      modal.confirm({
         title: t('alarm.filterAlarm'),
         content: t('alarm.filterAlarmConfirm'),
         okText: t('common.confirm'),
@@ -238,7 +238,7 @@ export default function CurrentAlarms() {
           // TODO: 调用过滤告警 API
           setSelectedRowKeys([]);
           refetch();
-          setTimeout(() => message.success(t('common.success')), 300);
+          message.success(t('common.success'));
         },
       });
     },
