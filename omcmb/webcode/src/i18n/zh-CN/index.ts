@@ -651,6 +651,18 @@ const messages: Record<string, string> = {
   'alarm.filterAlarm':      '过滤告警',
   'alarm.filterAlarmConfirm': '确认过滤选中的告警？',
 
+  // 告警详情页
+  'alarm.basicInfo':        '基本信息',
+  'alarm.deviceInfo':       '设备信息',
+  'alarm.statusAndTime':    '状态与时间',
+  'alarm.handleInfo':       '处理信息',
+  'alarm.additionalInfo':   '附件信息',
+  'alarm.additionalText':   '附件文本',
+  'alarm.suggestion':       '处理建议',
+  'alarm.dealUser':         '确认人',
+  'alarm.dealTime':         '确认时间',
+  'alarm.clearUser':        '清除人',
+
   // -------------------------------------------------------------------------
   // User / System labels
   // -------------------------------------------------------------------------
@@ -823,9 +835,17 @@ const messages: Record<string, string> = {
   'common.realTimeConn':    '实时连接',
   'common.unacked':         '{count} 条未确认',
   'common.ackConfirmMsg':   '确定要确认选中的 {count} 条告警吗？',
-  'common.ackSuccess':      '已确认 {count} 条告警',
+  'common.ackSuccess':      '确认成功',
+  'common.ackFailed':       '确认失败',
+  'common.unackConfirmMsg': '确定要取消选中的 {count} 条告警确认吗？',
+  'common.unackSuccess':    '取消确认成功',
+  'common.unackFailed':     '取消确认失败',
   'common.clearConfirmMsg': '确定要清除选中的 {count} 条告警吗？',
-  'common.clearSuccess':    '已清除 {count} 条告警',
+  'common.clearSuccess':    '清除成功',
+  'common.clearFailed':     '清除失败',
+  'common.markReadSuccess': '标记已读成功',
+  'common.markReadFailed':  '标记已读失败',
+  'common.failed':          '操作失败',
   'common.hasAlarm':        '有告警',
   'common.noAlarm':         '无告警',
 

@@ -1,20 +1,15 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import {
-  Button,
   Descriptions,
   Drawer,
   Space,
   Tag,
-  Timeline,
   Typography,
 } from 'antd';
 import {
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  InfoCircleOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import type { Alarm } from '@/types/alarm';
+import type { Alarm, DealState, EventType } from '@/types/alarm';
 import { useT } from '@/hooks/useT';
 
 const { Text, Paragraph } = Typography;
@@ -25,11 +20,30 @@ export interface AlarmDetailProps {
   onClose: () => void;
 }
 
-const SEVERITY_TAG_COLOR: Record<string, string> = {
-  critical: 'red',
-  major: 'orange',
-  minor: 'gold',
-  warning: 'blue',
+// 告警级别颜色
+const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
+  critical: { color: '#FC5959', bgColor: '#FFF1F0' },
+  major: { color: '#FF973E', bgColor: '#FFF7E6' },
+  minor: { color: '#FFDA41', bgColor: '#FFFBE6' },
+  warning: { color: '#60BEFC', bgColor: '#E6F7FF' },
+};
+
+// 告警状态配置
+const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string }> = {
+  '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E88282' },
+  '1': { label: 'alarm.dealState.confirmedUncleared', color: '#E88282' },
+  '2': { label: 'alarm.dealState.unconfirmedCleared', color: '#67D972' },
+  '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972' },
+};
+
+// 事件类型配置
+const EVENT_TYPE_CONFIG: Record<EventType, string> = {
+  '30000': 'alarm.eventType.communication',
+  '30001': 'alarm.eventType.qualityOfService',
+  '30002': 'alarm.eventType.processingError',
+  '30003': 'alarm.eventType.device',
+  '30004': 'alarm.eventType.environment',
+  '30006': 'alarm.eventType.performance',
 };
 
 const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
@@ -42,65 +56,20 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
     warning: t('alarm.severity.warning'),
   }), [t]);
 
-  const handleAcknowledge = useCallback(() => {
-    // In a real app, call acknowledge API
-    onClose();
-  }, [onClose]);
+  // 判断是否已确认 (dealState 为 1 或 3)
+  const isConfirmed = alarm?.dealState === '1' || alarm?.dealState === '3';
+  // 判断是否已清除 (dealState 为 2 或 3)
+  const isCleared = alarm?.dealState === '2' || alarm?.dealState === '3';
 
-  const handleClear = useCallback(() => {
-    // In a real app, call clear API
-    onClose();
-  }, [onClose]);
-
-  // Mock operation history for the alarm
-  const operationHistory = useMemo(() => {
-    if (!alarm) return [];
-    const history: Array<{
-      time: string;
-      action: string;
-      operator: string;
-      note?: string;
-      color: string;
-      icon: React.ReactNode;
-    }> = [
-      {
-        time: alarm.alarmTime,
-        action: t('alarm.time'),
-        operator: 'System',
-        note: alarm.alarmContent,
-        color: alarm.severity === 'critical' ? 'red' : alarm.severity === 'major' ? 'orange' : 'blue',
-        icon: <InfoCircleOutlined />,
-      },
-    ];
-
-    if (alarm.ackStatus === 'acknowledged' && alarm.ackTime) {
-      history.push({
-        time: alarm.ackTime,
-        action: t('alarm.acknowledge'),
-        operator: alarm.ackUser ?? 'Admin',
-        note: alarm.ackNote ?? t('alarm.ackStatus.acknowledged'),
-        color: 'blue',
-        icon: <CheckCircleOutlined style={{ color: 'var(--color-primary-600)' }} />,
-      });
-    }
-
-    if (alarm.clearTime) {
-      history.push({
-        time: alarm.clearTime,
-        action: t('alarm.clear'),
-        operator: alarm.ackUser ?? 'System',
-        note: t('alarm.clear'),
-        color: 'green',
-        icon: <CloseCircleOutlined style={{ color: '#52C41A' }} />,
-      });
-    }
-
-    return history.reverse(); // Most recent first
-  }, [alarm, t]);
+  // 格式化时间
+  const formatTime = (time?: string) => {
+    if (!time) return '-';
+    return new Date(String(time)).toLocaleString('zh-CN');
+  };
 
   if (!alarm) {
     return (
-      <Drawer title={t('common.detail')} open={open} onClose={onClose} width={560}>
+      <Drawer title={t('alarm.detail')} open={open} onClose={onClose} width={600}>
         <div style={{ padding: '40px 0', textAlign: 'center', color: '#8c8c8c' }}>
           {t('common.noData')}
         </div>
@@ -108,182 +77,179 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
     );
   }
 
+  const severityConfig = SEVERITY_CONFIG[alarm.severity] || SEVERITY_CONFIG.warning;
+
   return (
     <Drawer
       title={
         <Space>
-          <Tag color={SEVERITY_TAG_COLOR[alarm.severity] ?? 'default'}>
+          <Tag
+            style={{
+              color: severityConfig.color,
+              backgroundColor: severityConfig.bgColor,
+              border: 'none',
+            }}
+          >
             {SEVERITY_LABEL[alarm.severity] ?? alarm.severity}
           </Tag>
-          <span>{alarm.alarmName}</span>
+          <span>{alarm.alarmName || t('alarm.detail')}</span>
         </Space>
       }
       open={open}
       onClose={onClose}
-      width={560}
-      extra={
-        <Space>
-          {alarm.ackStatus === 'unacknowledged' && (
-            <Button size="small" type="primary" ghost onClick={handleAcknowledge}>
-              {t('alarm.acknowledge')}
-            </Button>
-          )}
-          {alarm.isActive && (
-            <Button size="small" danger ghost onClick={handleClear}>
-              {t('alarm.clear')}
-            </Button>
-          )}
-        </Space>
-      }
+      width={600}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        {/* Basic Info */}
+        {/* 基本信息 */}
         <section>
           <Text
             type="secondary"
             strong
             style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
           >
-            {t('common.detail')}
+            {t('alarm.basicInfo')}
           </Text>
           <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label={t('alarm.code')}>
-              <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{alarm.alarmCode}</Text>
+            {/* 1. 序号 */}
+            <Descriptions.Item label={t('alarm.alarmId')}>
+              <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{alarm.alarmId}</Text>
             </Descriptions.Item>
-            <Descriptions.Item label={t('alarm.name')}>{alarm.alarmName}</Descriptions.Item>
+            {/* 2. 告警唯一标识 */}
+            <Descriptions.Item label={t('alarm.alarmIdentifier')}>
+              <Text style={{ fontFamily: 'monospace' }}>{alarm.alarmIdentifier}</Text>
+            </Descriptions.Item>
+            {/* 3. 可能原因 */}
+            <Descriptions.Item label={t('alarm.possibleCause')}>
+              {alarm.alarmName}
+            </Descriptions.Item>
+            {/* 4. 具体故障 */}
+            <Descriptions.Item label={t('alarm.specificProblem')}>
+              {alarm.specificProblem || '-'}
+            </Descriptions.Item>
+            {/* 5. 附件信息 */}
+            <Descriptions.Item label={t('alarm.additionalInfo')}>
+              <Paragraph style={{ margin: 0 }}>{alarm.additionalInformation || '-'}</Paragraph>
+            </Descriptions.Item>
+            {/* 6. 附件文本 */}
+            <Descriptions.Item label={t('alarm.additionalText')}>
+              <Paragraph style={{ margin: 0 }}>{alarm.additionalText || '-'}</Paragraph>
+            </Descriptions.Item>
+            {/* 7. 严重程度 */}
             <Descriptions.Item label={t('alarm.severity')}>
-              <Tag color={SEVERITY_TAG_COLOR[alarm.severity] ?? 'default'}>
+              <Tag
+                style={{
+                  color: severityConfig.color,
+                  backgroundColor: severityConfig.bgColor,
+                  border: 'none',
+                }}
+              >
                 {SEVERITY_LABEL[alarm.severity] ?? alarm.severity}
               </Tag>
             </Descriptions.Item>
-            <Descriptions.Item label={t('alarm.type')}>{alarm.alarmType ?? '-'}</Descriptions.Item>
-            <Descriptions.Item label={t('alarm.occurTime')}>
-              {new Date(alarm.alarmTime).toLocaleString('zh-CN')}
+            {/* 8. 事件类型 */}
+            <Descriptions.Item label={t('alarm.eventType')}>
+              {t(EVENT_TYPE_CONFIG[alarm.eventType] || 'common.unknown')}
             </Descriptions.Item>
-            {alarm.clearTime && (
-              <Descriptions.Item label={t('alarm.clearTime')}>
-                {new Date(alarm.clearTime).toLocaleString('zh-CN')}
-              </Descriptions.Item>
-            )}
-            <Descriptions.Item label={t('alarm.ackStatus')}>
-              <Tag color={alarm.ackStatus === 'acknowledged' ? 'success' : 'warning'}>
-                {alarm.ackStatus === 'acknowledged' ? t('alarm.ackStatus.acknowledged') : t('alarm.ackStatus.unacknowledged')}
-              </Tag>
+          </Descriptions>
+        </section>
+
+        {/* 设备信息 */}
+        <section>
+          <Text
+            type="secondary"
+            strong
+            style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
+          >
+            {t('alarm.deviceInfo')}
+          </Text>
+          <Descriptions column={1} size="small" bordered>
+            {/* 9. 告警源 */}
+            <Descriptions.Item label={t('alarm.neType')}>
+              {alarm.neType}
             </Descriptions.Item>
-            {alarm.ackUser && (
-              <Descriptions.Item label={t('alarm.ackUser')}>
+            {/* 10. 网元定位 */}
+            <Descriptions.Item label={t('alarm.equipInfo')}>
+              {alarm.equipInfo}
+            </Descriptions.Item>
+          </Descriptions>
+        </section>
+
+        {/* 状态与时间 */}
+        <section>
+          <Text
+            type="secondary"
+            strong
+            style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
+          >
+            {t('alarm.statusAndTime')}
+          </Text>
+          <Descriptions column={1} size="small" bordered>
+            {/* 11. 告警状态 */}
+            <Descriptions.Item label={t('alarm.dealState')}>
+              <span style={{ color: DEAL_STATE_CONFIG[alarm.dealState]?.color || '#666' }}>
+                {t(DEAL_STATE_CONFIG[alarm.dealState]?.label || 'common.unknown')}
+              </span>
+            </Descriptions.Item>
+            {/* 12. 故障时间 */}
+            <Descriptions.Item label={t('alarm.eventTime')}>
+              {formatTime(alarm.eventTime)}
+            </Descriptions.Item>
+            {/* 13. 更新时间 */}
+            <Descriptions.Item label={t('alarm.updTime')}>
+              {formatTime(alarm.updTime)}
+            </Descriptions.Item>
+            {/* 14. 确认人 - 已确认时显示 */}
+            {isConfirmed && (
+              <Descriptions.Item label={t('alarm.dealUser')}>
                 <Space>
                   <UserOutlined />
-                  {alarm.ackUser}
+                  {alarm.dealUser || '-'}
                 </Space>
               </Descriptions.Item>
             )}
-            <Descriptions.Item label={t('table.status')}>
-              <Tag color={alarm.isActive ? 'error' : 'default'}>
-                {alarm.isActive ? t('alarm.active') : t('alarm.clear')}
-              </Tag>
-            </Descriptions.Item>
-          </Descriptions>
-        </section>
-
-        {/* Device Info */}
-        <section>
-          <Text
-            type="secondary"
-            strong
-            style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
-          >
-            {t('alarm.deviceName')}
-          </Text>
-          <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label={t('alarm.deviceSn')}>
-              <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{alarm.deviceSn}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('alarm.deviceName')}>{alarm.deviceName}</Descriptions.Item>
-            <Descriptions.Item label={t('alarm.neType')}>{alarm.neType}</Descriptions.Item>
-            <Descriptions.Item label={t('alarm.source')}>{alarm.alarmSource}</Descriptions.Item>
-            {alarm.alarmLocation && (
-              <Descriptions.Item label={t('alarm.location')}>{alarm.alarmLocation}</Descriptions.Item>
+            {/* 15. 确认时间 - 已确认时显示 */}
+            {isConfirmed && (
+              <Descriptions.Item label={t('alarm.dealTime')}>
+                {formatTime(alarm.dealTime)}
+              </Descriptions.Item>
+            )}
+            {/* 16. 告警清除人 - 已清除时显示 */}
+            {isCleared && (
+              <Descriptions.Item label={t('alarm.clearUser')}>
+                <Space>
+                  <UserOutlined />
+                  {alarm.clearUser || '-'}
+                </Space>
+              </Descriptions.Item>
+            )}
+            {/* 17. 告警清除时间 - 已清除时显示 */}
+            {isCleared && (
+              <Descriptions.Item label={t('alarm.clearTime')}>
+                {formatTime(alarm.clearTime)}
+              </Descriptions.Item>
             )}
           </Descriptions>
         </section>
 
-        {/* Alarm Content */}
+        {/* 处理信息 */}
         <section>
           <Text
             type="secondary"
             strong
             style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
           >
-            {t('alarm.content')}
+            {t('alarm.handleInfo')}
           </Text>
-          <div
-            style={{
-              background: '#fafafa',
-              border: '1px solid #f0f0f0',
-              borderRadius: 6,
-              padding: '12px 16px',
-            }}
-          >
-            <Paragraph style={{ margin: 0, fontSize: 13, lineHeight: 1.8 }}>
-              {alarm.alarmContent}
-            </Paragraph>
-          </div>
-          {alarm.ackNote && (
-            <div
-              style={{
-                marginTop: 8,
-                background: '#e6f4ff',
-                border: '1px solid #91caff',
-                borderRadius: 6,
-                padding: '10px 14px',
-              }}
-            >
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                {t('alarm.ackNote')}
-              </Text>
-              <Paragraph style={{ margin: 0, fontSize: 13 }}>{alarm.ackNote}</Paragraph>
-            </div>
-          )}
-        </section>
-
-        {/* Operation History */}
-        <section>
-          <Text
-            type="secondary"
-            strong
-            style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 14 }}
-          >
-            {t('table.time')}
-          </Text>
-          <Timeline
-            items={operationHistory.map((h) => ({
-              color: h.color,
-              dot: h.icon,
-              children: (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text strong style={{ fontSize: 13 }}>
-                      {h.action}
-                    </Text>
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      {new Date(h.time).toLocaleString('zh-CN')}
-                    </Text>
-                  </div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t('table.operator')}: {h.operator}
-                  </Text>
-                  {h.note && (
-                    <Paragraph
-                      style={{ margin: '4px 0 0', fontSize: 12, color: '#595959' }}
-                    >
-                      {h.note}
-                    </Paragraph>
-                  )}
-                </div>
-              ),
-            }))}
-          />
+          <Descriptions column={1} size="small" bordered>
+            {/* 18. 处理建议 */}
+            <Descriptions.Item label={t('alarm.suggestion')}>
+              <Paragraph style={{ margin: 0 }}>{alarm.suggestion || '-'}</Paragraph>
+            </Descriptions.Item>
+            {/* 19. 描述 */}
+            <Descriptions.Item label={t('alarm.dealMemo')}>
+              <Paragraph style={{ margin: 0 }}>{alarm.dealMemo || '-'}</Paragraph>
+            </Descriptions.Item>
+          </Descriptions>
         </section>
       </div>
     </Drawer>

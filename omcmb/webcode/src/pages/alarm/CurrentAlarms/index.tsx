@@ -17,6 +17,7 @@ import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
+import AlarmDetail from '../AlarmDetail';
 
 const { Text } = Typography;
 
@@ -52,6 +53,8 @@ export default function CurrentAlarms() {
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<AlarmFilter>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -165,13 +168,18 @@ export default function CurrentAlarms() {
         okText: t('common.confirm'),
         icon: <CheckOutlined style={{ color: 'var(--color-primary-600)' }} />,
         onOk: async () => {
-          await acknowledgeAlarms.mutateAsync({ ids });
-          setSelectedRowKeys([]);
-          void message.success(t('common.ackSuccess'));
+          try {
+            await acknowledgeAlarms.mutateAsync({ ids });
+            setSelectedRowKeys([]);
+            void refetch();
+            void message.success(t('common.ackSuccess'));
+          } catch {
+            void message.error(t('common.ackFailed'));
+          }
         },
       });
     },
-    [acknowledgeAlarms, t]
+    [acknowledgeAlarms, refetch, t]
   );
 
   const handleUnacknowledge = useCallback(
@@ -181,13 +189,18 @@ export default function CurrentAlarms() {
         content: t('common.unackConfirmMsg', { count: ids.length }),
         okText: t('common.confirm'),
         onOk: async () => {
-          // TODO: 调用反确认 API
-          setSelectedRowKeys([]);
-          void message.success(t('common.unackSuccess'));
+          try {
+            // TODO: 调用反确认 API
+            setSelectedRowKeys([]);
+            void refetch();
+            void message.success(t('common.unackSuccess'));
+          } catch {
+            void message.error(t('common.unackFailed'));
+          }
         },
       });
     },
-    [t]
+    [refetch, t]
   );
 
   const handleClear = useCallback(
@@ -199,13 +212,18 @@ export default function CurrentAlarms() {
         okType: 'danger',
         icon: <ClearOutlined />,
         onOk: async () => {
-          await clearAlarms.mutateAsync(ids);
-          setSelectedRowKeys([]);
-          void message.success(t('common.clearSuccess'));
+          try {
+            await clearAlarms.mutateAsync(ids);
+            setSelectedRowKeys([]);
+            void refetch();
+            void message.success(t('common.clearSuccess'));
+          } catch {
+            void message.error(t('common.clearFailed'));
+          }
         },
       });
     },
-    [clearAlarms, t]
+    [clearAlarms, refetch, t]
   );
 
   const handleFilter = useCallback(
@@ -216,23 +234,45 @@ export default function CurrentAlarms() {
         okText: t('common.confirm'),
         icon: <FilterOutlined />,
         onOk: async () => {
-          // TODO: 调用过滤告警 API
-          setSelectedRowKeys([]);
-          void message.success(t('common.success'));
+          try {
+            // TODO: 调用过滤告警 API
+            setSelectedRowKeys([]);
+            void refetch();
+            void message.success(t('common.success'));
+          } catch {
+            void message.error(t('common.failed'));
+          }
         },
       });
     },
-    [t]
+    [refetch, t]
   );
 
   const handleMarkRead = useCallback(
     (ids: string[]) => {
-      // TODO: 调用标记已读 API
-      setSelectedRowKeys([]);
-      void message.success(t('common.markReadSuccess'));
+      try {
+        // TODO: 调用标记已读 API
+        setSelectedRowKeys([]);
+        void refetch();
+        void message.success(t('common.markReadSuccess'));
+      } catch {
+        void message.error(t('common.markReadFailed'));
+      }
     },
-    [t]
+    [refetch, t]
   );
+
+  // 打开告警详情
+  const handleShowDetail = useCallback((alarm: Alarm) => {
+    setDetailAlarm(alarm);
+    setDetailOpen(true);
+  }, []);
+
+  // 关闭告警详情
+  const handleCloseDetail = useCallback(() => {
+    setDetailOpen(false);
+    setDetailAlarm(null);
+  }, []);
 
   const alarmRowStyle = useCallback(
     // 去掉紧急告警的红色背景色，不再根据告警级别设置行样式
@@ -250,8 +290,13 @@ export default function CurrentAlarms() {
         dataIndex: 'id',
         width: 80,
         fixed: 'left',
-        render: () => (
-          <Button type="link" size="small" icon={<EyeOutlined />}>
+        render: (_, record) => (
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleShowDetail(record)}
+          >
             {t('alarm.detail')}
           </Button>
         ),
@@ -386,7 +431,7 @@ export default function CurrentAlarms() {
         ellipsis: true,
       },
     ],
-    [t, SEVERITY_LABEL]
+    [t, SEVERITY_LABEL, handleShowDetail]
   );
 
   const batchActions = useMemo(
@@ -423,7 +468,7 @@ export default function CurrentAlarms() {
         onClick: (keys) => handleMarkRead(keys as string[]),
       },
     ],
-    [handleAcknowledge, handleUnacknowledge, handleClear, handleFilter, handleMarkRead, t]
+    [handleAcknowledge, handleUnacknowledge, handleClear, handleFilter, handleMarkRead]
   );
 
   // 统计未确认未清除告警
@@ -474,6 +519,12 @@ export default function CurrentAlarms() {
         onRefresh={() => void refetch()}
         alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
         defaultDensity="compact"
+      />
+
+      <AlarmDetail
+        alarm={detailAlarm}
+        open={detailOpen}
+        onClose={handleCloseDetail}
       />
     </ListPageLayout>
   );

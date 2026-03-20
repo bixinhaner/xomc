@@ -652,6 +652,18 @@ const messages: Record<string, string> = {
   'alarm.filterAlarm':      'Filter Alarm',
   'alarm.filterAlarmConfirm': 'Confirm to filter selected alarms?',
 
+  // Alarm detail
+  'alarm.basicInfo':        'Basic Info',
+  'alarm.deviceInfo':       'Device Info',
+  'alarm.statusAndTime':    'Status & Time',
+  'alarm.handleInfo':       'Handle Info',
+  'alarm.additionalInfo':   'Additional Info',
+  'alarm.additionalText':   'Additional Text',
+  'alarm.suggestion':       'Suggestion',
+  'alarm.dealUser':         'Confirmed By',
+  'alarm.dealTime':         'Confirmed At',
+  'alarm.clearUser':        'Cleared By',
+
   // -------------------------------------------------------------------------
   // User / System labels
   // -------------------------------------------------------------------------
@@ -824,9 +836,17 @@ const messages: Record<string, string> = {
   'common.realTimeConn':    'Real-time Connected',
   'common.unacked':         '{count} unacknowledged',
   'common.ackConfirmMsg':   'Are you sure you want to acknowledge the selected {count} alarms?',
-  'common.ackSuccess':      'Acknowledged {count} alarms',
+  'common.ackSuccess':      'Acknowledged successfully',
+  'common.ackFailed':       'Acknowledgement failed',
+  'common.unackConfirmMsg': 'Are you sure you want to unacknowledge the selected {count} alarms?',
+  'common.unackSuccess':    'Unacknowledged successfully',
+  'common.unackFailed':     'Unacknowledgement failed',
   'common.clearConfirmMsg': 'Are you sure you want to clear the selected {count} alarms?',
-  'common.clearSuccess':    'Cleared {count} alarms',
+  'common.clearSuccess':    'Cleared successfully',
+  'common.clearFailed':     'Clear failed',
+  'common.markReadSuccess': 'Marked as read successfully',
+  'common.markReadFailed':  'Mark as read failed',
+  'common.failed':          'Operation failed',
   'common.hasAlarm':        'Has Alarm',
   'common.noAlarm':         'No Alarm',
 

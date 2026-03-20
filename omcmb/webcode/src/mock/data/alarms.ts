@@ -89,6 +89,10 @@ function generateAlarm(isActive: boolean, index: number, unread: '0' | '1' = '0'
     ? (isAcknowledged ? '1' : '0')
     : (isAcknowledged ? '3' : '2');
 
+  const dealUser = isAcknowledged ? pickRandom(['admin', 'operator01', 'operator02', 'operator03']) : undefined;
+  const dealTime = isAcknowledged ? new Date(new Date(alarmTime).getTime() + Math.random() * 3600000).toISOString() : undefined;
+  const clearUser = clearTime ? pickRandom(['admin', 'system']) : undefined;
+
   return {
     id,
     alarmId: id,
@@ -110,14 +114,22 @@ function generateAlarm(isActive: boolean, index: number, unread: '0' | '1' = '0'
     clearTime,
     specificProblem: def.name,
     alarmCount: Math.floor(Math.random() * 10) + 1,
-    dealMemo: '',
+    dealMemo: isAcknowledged ? '已确认，正在处理' : '',
     unread,
+    // 详情页新增字段
+    additionalInformation: `设备${device.type}，序列号${device.sn}`,
+    additionalText: `告警类型：${def.type}`,
+    dealUser,
+    dealTime,
+    clearUser,
+    suggestion: `建议检查${def.name}相关配置和硬件状态`,
+    // 兼容旧字段
     duration: clearTime
       ? Math.floor((new Date(clearTime).getTime() - new Date(alarmTime).getTime()) / 60000)
       : Math.floor((Date.now() - new Date(alarmTime).getTime()) / 60000),
     ackStatus: isAcknowledged ? 'acknowledged' : 'unacknowledged',
-    ackUser: isAcknowledged ? pickRandom(['admin', 'operator01', 'operator02', 'operator03']) : undefined,
-    ackTime: isAcknowledged ? new Date(new Date(alarmTime).getTime() + Math.random() * 3600000).toISOString() : undefined,
+    ackUser: dealUser,
+    ackTime: dealTime,
     ackNote: isAcknowledged ? '已确认，正在处理' : undefined,
     alarmSource: device.sn,
     alarmLocation: `${device.name}-${def.type}`,
