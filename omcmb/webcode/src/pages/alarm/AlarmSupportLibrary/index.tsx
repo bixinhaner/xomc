@@ -1,8 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Input, Space, Tag } from 'antd';
-import { ExportOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Space, Tag, App } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import FilterBar from '@/components/FilterBar';
+import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
@@ -123,8 +125,11 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
 
 export default function AlarmSupportLibrary() {
   const t = useT();
-  const [searchText, setSearchText] = useState('');
+  const { message } = App.useApp();
+  const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     Critical: t('alarm.severity.critical'),
@@ -133,25 +138,86 @@ export default function AlarmSupportLibrary() {
     Warning: t('alarm.severity.warning'),
   }), [t]);
 
+  const FILTER_FIELDS: FilterField[] = useMemo(() => [
+    {
+      name: 'keyword',
+      label: t('alarm.search'),
+      type: 'input',
+      placeholder: t('alarm.librarySearchPlaceholder'),
+    },
+    {
+      name: 'severity',
+      label: t('alarm.severity'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.severity.critical'), value: 'Critical' },
+        { label: t('alarm.severity.major'), value: 'Major' },
+        { label: t('alarm.severity.minor'), value: 'Minor' },
+        { label: t('alarm.severity.warning'), value: 'Warning' },
+      ],
+    },
+    {
+      name: 'eventType',
+      label: t('alarm.eventType'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.eventType.communication'), value: '30000' },
+        { label: t('alarm.eventType.qualityOfService'), value: '30001' },
+        { label: t('alarm.eventType.processingError'), value: '30002' },
+        { label: t('alarm.eventType.device'), value: '30003' },
+        { label: t('alarm.eventType.environment'), value: '30004' },
+        { label: t('alarm.eventType.performance'), value: '30006' },
+      ],
+    },
+  ], [t]);
+
   // 过滤数据
   const filteredData = useMemo(() => {
-    if (!searchText.trim()) return MOCK_LIBRARY;
-    const keyword = searchText.toLowerCase();
-    return MOCK_LIBRARY.filter((entry) =>
-      entry.alarmIdentifier.toLowerCase().includes(keyword) ||
-      entry.alarmName.toLowerCase().includes(keyword) ||
-      entry.deviceTypeName.toLowerCase().includes(keyword)
-    );
-  }, [searchText]);
+    return MOCK_LIBRARY.filter((entry) => {
+      if (filterParams.keyword) {
+        const keyword = String(filterParams.keyword).toLowerCase();
+        if (
+          !entry.alarmIdentifier.toLowerCase().includes(keyword) &&
+          !entry.alarmName.toLowerCase().includes(keyword) &&
+          !entry.deviceTypeName.toLowerCase().includes(keyword)
+        ) {
+          return false;
+        }
+      }
+      if (filterParams.severity && entry.serverityType !== filterParams.severity) {
+        return false;
+      }
+      if (filterParams.eventType && entry.eventType !== filterParams.eventType) {
+        return false;
+      }
+      return true;
+    });
+  }, [filterParams]);
 
-  const handleSearch = useCallback(() => {
+  const handleSearch = useCallback((values: Record<string, unknown>) => {
+    setFilterParams(values);
     setCurrentPage(1);
   }, []);
 
-  const handleExport = useCallback(() => {
-    // TODO: 实现导出功能
-    console.log('Export alarm library');
+  const handleReset = useCallback(() => {
+    setFilterParams({});
+    setCurrentPage(1);
   }, []);
+
+  const handleExport = useCallback(async () => {
+    setExportLoading(true);
+    try {
+      // TODO: 实现导出功能
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      message.success(t('common.exportSuccess'));
+    } catch {
+      message.error(t('common.exportFailed'));
+    } finally {
+      setExportLoading(false);
+    }
+  }, [t, message]);
 
   const columns = useMemo(
     (): DataTableColumn<AlarmLibrary>[] => [
@@ -194,7 +260,7 @@ export default function AlarmSupportLibrary() {
         title: t('alarm.eventType'),
         dataIndex: 'eventType',
         width: 160,
-        render: (value) => EVENT_TYPE_CONFIG[value as EventType] || value,
+        render: (value) => t(`alarm.eventType.${EVENT_TYPE_TYPE_MAP[value as EventType]}`),
       },
       {
         key: 'explanation',
@@ -207,39 +273,53 @@ export default function AlarmSupportLibrary() {
     [t, SEVERITY_LABEL]
   );
 
-  // 工具栏
-  const toolbar = useMemo(() => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-      <Input.Search
-        placeholder={t('alarm.librarySearchPlaceholder')}
-        allowClear
-        style={{ width: 400 }}
-        value={searchText}
-        onChange={(e) => setSearchText(e.target.value)}
-        onSearch={handleSearch}
-        enterButton={<SearchOutlined />}
-      />
-      <Button icon={<ExportOutlined />} onClick={handleExport}>
-        {t('common.export')}
-      </Button>
-    </div>
-  ), [t, searchText, handleSearch, handleExport]);
-
   return (
-    <ListPageLayout title={t('nav.alarm.library')}>
-      {toolbar}
+    <ListPageLayout
+      title={t('nav.alarm.library')}
+      extra={
+        <Button
+          type="primary"
+          icon={<ExportOutlined />}
+          onClick={handleExport}
+          loading={exportLoading}
+        >
+          {t('common.export')}
+        </Button>
+      }
+    >
+      <FilterBar
+        filterId="alarm-library"
+        fields={FILTER_FIELDS}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+      />
+
       <DataTable<AlarmLibrary>
-        tableId="alarm-support-library-table"
+        tableId="alarm-library-table"
         columns={columns}
         dataSource={filteredData}
         loading={false}
         rowKey="alarmIdentifier"
         total={filteredData.length}
-        pageSize={20}
+        pageSize={pageSize}
         currentPage={currentPage}
-        onPageChange={(p) => setCurrentPage(p)}
+        onPageChange={(page, size) => {
+          setCurrentPage(page);
+          setPageSize(size);
+        }}
         defaultDensity="compact"
       />
     </ListPageLayout>
   );
 }
+
+// 事件类型映射到 i18n key
+const EVENT_TYPE_TYPE_MAP: Record<EventType, string> = {
+  '30000': 'communication',
+  '30001': 'qualityOfService',
+  '30002': 'processingError',
+  '30003': 'device',
+  '30004': 'environment',
+  '30006': 'performance',
+};
