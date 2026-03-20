@@ -1099,6 +1099,9 @@ const messages: Record<string, string> = {
   'alarm.cannotDeleteEnabledRule': 'Enabled rule cannot be deleted, please disable it first',
   'alarm.cannotEditEnabledRule': 'Enabled rule cannot be edited, please disable it first',
   'alarm.deleteRuleConfirm': 'Are you sure to delete rule "{name}"?',
+  'alarm.rulesDesc': 'Configure alarm filtering rules, support filtering by device type, alarm level, etc.',
+  'alarm.defaultRule': 'Default',
+  'alarm.searchPlaceholder': 'Enter rule name',
 
   // -------------------------------------------------------------------------
   // Time duration

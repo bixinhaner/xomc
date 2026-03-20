@@ -41,13 +41,6 @@ export default function AlarmRules() {
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
 
-  const RULE_TYPE_LABEL: Record<string, string> = useMemo(() => ({
-    '0': t('alarm.ruleType.forbidReport'),
-    '1': t('alarm.ruleType.noStoreNoShow'),
-    '2': t('alarm.ruleType.storeNoShow'),
-    '3': t('alarm.ruleType.autoConfirm'),
-  }), [t]);
-
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     {
       name: 'searchText',
@@ -78,24 +71,6 @@ export default function AlarmRules() {
     },
     [updateRule, refetch]
   );
-
-  // 查看规则详情
-  const handleView = useCallback((rule: AlarmRule) => {
-    modal.info({
-      title: t('common.info'),
-      width: 600,
-      content: (
-        <div style={{ marginTop: 16 }}>
-          <p><strong>{t('alarm.ruleName')}:</strong> {rule.ruleName}</p>
-          <p><strong>{t('alarm.status')}:</strong> {rule.enabled ? t('common.enable') : t('common.disable')}</p>
-          <p><strong>{t('alarm.deviceType')}:</strong> {rule.deviceType || 'ALL'}</p>
-          <p><strong>{t('alarm.ruleType')}:</strong> {RULE_TYPE_LABEL[rule.ruleType as string] || rule.ruleType}</p>
-          <p><strong>{t('alarm.operator')}:</strong> {rule.userCode || '-'}</p>
-          <p><strong>{t('alarm.updateTime')}:</strong> {rule.updateTime ? new Date(String(rule.updateTime)).toLocaleString('zh-CN') : '-'}</p>
-        </div>
-      ),
-    });
-  }, [modal, t, RULE_TYPE_LABEL]);
 
   // 编辑规则
   const handleEdit = useCallback((rule: AlarmRule) => {
@@ -134,28 +109,6 @@ export default function AlarmRules() {
     [deleteRules, modal, t, refetch]
   );
 
-  // 操作菜单点击
-  const handleActionClick = useCallback((action: string, rule: AlarmRule) => {
-    switch (action) {
-      case 'view':
-        handleView(rule);
-        break;
-      case 'edit':
-        if (rule.enabled) {
-          modal.warning({
-            title: t('common.warning'),
-            content: t('alarm.cannotEditEnabledRule'),
-          });
-          return;
-        }
-        handleEdit(rule);
-        break;
-      case 'delete':
-        handleDelete(rule);
-        break;
-    }
-  }, [handleView, handleEdit, handleDelete, modal, t]);
-
   const columns = useMemo(
     (): DataTableColumn<AlarmRule>[] => [
       {
@@ -171,7 +124,7 @@ export default function AlarmRules() {
               size="small"
               icon={<EditOutlined />}
               disabled={record.enabled}
-              onClick={() => handleActionClick('edit', record)}
+              onClick={() => handleEdit(record)}
             >
               {t('common.edit')}
             </Button>
@@ -181,7 +134,7 @@ export default function AlarmRules() {
               danger
               icon={<DeleteOutlined />}
               disabled={record.enabled || record.isDefault}
-              onClick={() => handleActionClick('delete', record)}
+              onClick={() => handleDelete(record)}
             >
               {t('common.delete')}
             </Button>
@@ -208,6 +161,12 @@ export default function AlarmRules() {
         dataIndex: 'ruleName',
         width: 200,
         ellipsis: true,
+        render: (val: string, record) => (
+          <Space size={4}>
+            {record.isDefault && <Tag color="blue">{t('alarm.defaultRule')}</Tag>}
+            <span>{val}</span>
+          </Space>
+        ),
       },
       {
         key: 'deviceType',
@@ -250,7 +209,7 @@ export default function AlarmRules() {
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
       },
     ],
-    [handleToggle, handleActionClick, updateRule.isPending, t]
+    [handleToggle, handleEdit, handleDelete, updateRule.isPending, t]
   );
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
@@ -271,6 +230,7 @@ export default function AlarmRules() {
   return (
     <ListPageLayout
       title={t('nav.alarm.rules')}
+      subTitle={t('alarm.rulesDesc')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
           {t('common.add')}

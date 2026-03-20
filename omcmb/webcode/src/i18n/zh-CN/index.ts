@@ -1103,6 +1103,9 @@ const messages: Record<string, string> = {
   'alarm.cannotDeleteEnabledRule': '启用状态的规则不可删除，请先禁用',
   'alarm.cannotEditEnabledRule': '启用状态的规则不可编辑，请先禁用',
   'alarm.deleteRuleConfirm': '确定删除规则"{name}"吗？',
+  'alarm.rulesDesc': '配置告警过滤规则，支持按设备类型、告警级别等条件进行过滤',
+  'alarm.defaultRule': '默认',
+  'alarm.searchPlaceholder': '请输入规则名称',
 
   // -------------------------------------------------------------------------
   // Time duration
