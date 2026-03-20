@@ -832,6 +832,8 @@ export default function DeviceGrouping() {
             loading={isLoading}
             rowKey="id"
             selectable
+            selectedRowKeys={selectedDeviceIds}
+            onSelectionChange={(keys) => setSelectedDeviceIds(keys)}
             batchActions={batchActions}
             onExport={handleExport}
             total={total}
