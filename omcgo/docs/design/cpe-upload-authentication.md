@@ -97,7 +97,7 @@ ACS 发送给 CPE 的 Upload RPC：
 |------|------|
 | `CommandKey` | 唯一命令标识，用于 TransferComplete 关联 |
 | `FileType` | TR069 文件类型：4=PM, 5=MR, 6=Log |
-| `URL` | 上传目标 URL（含 fileType 和 filename 参数） |
+| `URL` | 上传目标 URL（含 fileType、filename 参数） |
 | `Username` | 全局上传用户名（配置文件定义） |
 | `Password` | 全局上传密码（配置文件定义） |
 | `DelaySeconds` | 延迟执行秒数（通常为 0） |
@@ -165,17 +165,17 @@ func (s *ACSService) BuildUploadParams(device *Device, fileType, filename string
 
 ```
 {bucket}/
-├── pm/{YYYY}/{MM}/{DD}/{deviceSN}/{filename}
-├── mr/{YYYY}/{MM}/{DD}/{deviceSN}/{filename}
-└── logs/{YYYY}/{MM}/{DD}/{deviceSN}/{filename}
+├── pm/{YYYY}/{MM}/{DD}/{filename}
+├── mr/{YYYY}/{MM}/{DD}/{filename}
+└── logs/{YYYY}/{MM}/{DD}/{filename}
 ```
 
 ### 5.2 示例
 
 ```
-pm-files/pm/2026/03/20/ABC123456/pm_20260320_100000.xml
-mr-files/mr/2026/03/20/ABC123456/mro_20260320_100000.xml
-logs-files/logs/2026/03/20/ABC123456/device_log_20260320.txt
+pm-files/pm/2026/03/20/pm_20260320_100000.xml
+mr-files/mr/2026/03/20/mro_20260320_100000.xml
+logs-files/logs/2026/03/20/device_log_20260320.txt
 ```
 
 ---

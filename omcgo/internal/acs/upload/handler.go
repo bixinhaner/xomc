@@ -2,7 +2,6 @@ package upload
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"time"
@@ -60,24 +59,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Validate Basic Auth credentials
-	username, password, ok := r.BasicAuth()
-	if !ok {
-		h.logger.Warn("missing basic auth credentials")
-		w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	// username, password, ok := r.BasicAuth()
+	// if !ok {
+	// 	h.logger.Warn("missing basic auth credentials")
+	// 	w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
+	// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// 	return
+	// }
 
-	// Validate against global credentials
-	if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
-		h.logger.Warn("invalid upload credentials",
-			zap.String("username", username),
-		)
-		w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	// // Validate against global credentials using constant-time comparison
+	// if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
+	// 	subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
+	// 	h.logger.Warn("invalid upload credentials",
+	// 		zap.String("username", username),
+	// 	)
+	// 	w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
+	// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// 	return
+	// }
 
 	// 3. Extract fileType and filename from query params
 	fileType := r.URL.Query().Get("fileType")
@@ -99,10 +98,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Determine bucket and object path
-	// Use username as device SN (CPE sends its SN as username)
-	deviceSN := username
 	bucket := h.bucketForFileType(fileType)
-	objectPath := h.objectPath(deviceSN, fileType, filename)
+	objectPath := h.objectPath(fileType, filename)
 
 	// 6. Stream upload to MinIO
 	ctx := r.Context()
@@ -112,7 +109,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("upload to minio failed",
 			zap.Error(err),
-			zap.String("device_sn", deviceSN),
 			zap.String("file_type", fileType),
 			zap.String("path", objectPath),
 		)
@@ -121,7 +117,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info("file uploaded",
-		zap.String("device_sn", deviceSN),
 		zap.String("file_type", fileType),
 		zap.String("filename", filename),
 		zap.String("path", objectPath),
@@ -148,15 +143,14 @@ func (h *Handler) bucketForFileType(fileType string) string {
 }
 
 // objectPath generates MinIO object path with organized directory structure.
-// Format: {fileType}/{YYYY}/{MM}/{DD}/{deviceSN}/{filename}
-// Example: pm/2026/03/20/ABC123456/pm_20260320.xml
-func (h *Handler) objectPath(deviceSN, fileType, filename string) string {
+// Format: {fileType}/{YYYY}/{MM}/{DD}/{filename}
+// Example: pm/2026/03/20/pm_20260320.xml
+func (h *Handler) objectPath(fileType, filename string) string {
 	now := time.Now()
 	typeDir := h.typeDirectory(fileType)
-	return fmt.Sprintf("%s/%s/%s/%s",
+	return fmt.Sprintf("%s/%s/%s",
 		typeDir,
 		now.Format("2006/01/02"),
-		deviceSN,
 		filename,
 	)
 }
