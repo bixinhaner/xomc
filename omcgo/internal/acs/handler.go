@@ -92,7 +92,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set Request ID in response header for client correlation
 	w.Header().Set(RequestIDHeader, requestID)
 
+	// Create context-aware logger with request_id
+	log := logger.L(ctx)
+
 	if r.Method != http.MethodPost {
+		log.Warn("method not allowed", zap.String("method", r.Method))
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -100,28 +104,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Read body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.logger.Error("read request body", zap.Error(err))
+		log.Error("read request body", zap.Error(err))
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
+	// Log complete request XML
+	log.Debug("ACS received request",
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.Int("body_len", len(body)),
+		zap.String("xml", string(body)),
+	)
+
 	// Detect method from body
 	trimmed := strings.TrimSpace(string(body))
 	if len(trimmed) == 0 {
-		h.handleEmpty(w, r)
+		h.handleEmpty(w, r, log)
 		return
 	}
 
 	method := soap.DetectRPCMethod(body)
+	log.Info("ACS detected RPC method", zap.String("method", string(method)))
 
 	switch method {
 	case soap.MethodInform:
-		h.handleInform(w, r, body)
+		h.handleInform(w, r, body, log)
 	case soap.MethodTransferComplete:
-		h.handleTransferComplete(w, r, body)
+		h.handleTransferComplete(w, r, body, log)
 	case soap.MethodAutonomousTransferComplete:
-		h.handleAutonomousTransferComplete(w, r, body)
+		h.handleAutonomousTransferComplete(w, r, body, log)
 	case soap.MethodGetParameterValuesResp,
 		soap.MethodSetParameterValuesResp,
 		soap.MethodGetParameterNamesResp,
@@ -133,9 +145,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		soap.MethodUploadResp,
 		soap.MethodRebootResp,
 		soap.MethodFactoryResetResp:
-		h.handleRPCResponse(w, r, body, method)
+		h.handleRPCResponse(w, r, body, method, log)
 	default:
-		h.logger.Warn("unknown SOAP method", zap.String("method", string(method)))
+		log.Warn("unknown SOAP method", zap.String("method", string(method)))
 		http.Error(w, "Unknown method", http.StatusBadRequest)
 	}
 }
@@ -143,20 +155,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // handleInform processes an Inform message from a CPE device.
 // Per TR069 spec: Inform → InformResponse (always). RPC dispatch happens on the
 // subsequent Empty POST via handleEmpty().
-func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []byte) {
-	// Log raw request body for debugging
-	h.logger.Debug("ACS received raw Inform body",
+func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
+	// Log complete request XML
+	log.Debug("ACS received Inform request",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.Int("body_len", len(body)),
-		zap.String("body_preview", truncateString(string(body), 500)),
+		zap.String("xml", string(body)),
 	)
 
 	// Parse Inform
 	inform, cwmpID, err := soap.DecodeInform(bytes.NewReader(body))
 	if err != nil {
-		h.logger.Error("decode Inform", zap.Error(err),
+		log.Error("decode Inform", zap.Error(err),
 			zap.String("remote_addr", r.RemoteAddr),
-			zap.String("body_preview", truncateString(string(body), 200)),
+			zap.String("xml", string(body)),
 		)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -165,7 +177,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	deviceSN := inform.DeviceId.SerialNumber
 
 	// Log parsed Inform details
-	h.logger.Info("ACS parsed Inform",
+	log.Info("ACS parsed Inform",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("device_sn", deviceSN),
 		zap.String("oui", inform.DeviceId.OUI),
@@ -177,7 +189,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// Rate limiting
 	if !h.rateLimiter.Allow(deviceSN) {
 		h.metrics.RateLimitRejected.Inc()
-		h.logger.Warn("rate limited", zap.String("device_sn", deviceSN))
+		log.Warn("rate limited", zap.String("device_sn", deviceSN))
 		http.Error(w, "Too Many Requests", http.StatusServiceUnavailable)
 		return
 	}
@@ -185,7 +197,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// Admission control — slot is held until session completes (via completeSession)
 	// or the background reaper cleans it up.
 	if !h.admission.Acquire() {
-		h.logger.Warn("admission denied", zap.String("device_sn", deviceSN))
+		log.Warn("admission denied", zap.String("device_sn", deviceSN))
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -199,7 +211,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		h.metrics.InformTotal.WithLabelValues(code).Inc()
 	}
 
-	h.logger.Info("ACS Inform processing",
+	log.Info("ACS Inform processing",
 		zap.String("device_sn", deviceSN),
 		zap.String("oui", inform.DeviceId.OUI),
 		zap.String("product_class", inform.DeviceId.ProductClass),
@@ -219,7 +231,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	}
 
 	if err := h.sessionStore.Create(r.Context(), deviceSN, session); err != nil {
-		h.logger.Error("create session", zap.Error(err), zap.String("device_sn", deviceSN))
+		log.Error("create session", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
 
 	// Bind connection (RemoteAddr) → deviceSN for session tracking.
@@ -229,20 +241,22 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	})
 
 	// Publish events
-	h.publishInformEvents(r.Context(), inform, eventCodes)
+	h.publishInformEvents(r.Context(), inform, eventCodes, log)
 
 	// Per TR069 spec: Always send InformResponse first.
 	// Command queue will be checked on the subsequent Empty POST.
-	h.logger.Info("ACS Inform done, sending InformResponse",
+	log.Info("ACS Inform done, sending InformResponse",
 		zap.String("device_sn", deviceSN),
 		zap.String("cwmp_id", cwmpID))
-	h.sendInformResponse(w, cwmpID)
+	h.sendInformResponse(w, cwmpID, log)
 }
 
 // handleEmpty processes an empty POST from the CPE.
 // Per TR069 spec, after InformResponse the CPE sends an empty POST.
 // The ACS should then either send an RPC request or an empty response to close the session.
-func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.Logger) {
+	log.Debug("ACS received empty POST", zap.String("remote_addr", r.RemoteAddr))
+
 	// Look up the device SN from the connection binding.
 	val, ok := h.connSessions.Load(r.RemoteAddr)
 	if !ok {
@@ -258,7 +272,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 
 	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
 	if session == nil {
-		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, nil)
+		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, nil, log)
 		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusNoContent)
@@ -275,7 +289,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 	// Check command queue for pending commands
 	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 	if err != nil {
-		h.logger.Error("pop command queue", zap.Error(err))
+		log.Error("pop command queue", zap.Error(err))
 	}
 
 	if cmd != nil {
@@ -286,26 +300,38 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request) {
 
 		respData, err := h.rpcDispatcher.BuildRequest(cmd, session.CWMPId)
 		if err != nil {
-			h.logger.Error("build RPC request", zap.Error(err))
+			log.Error("build RPC request", zap.Error(err))
 			h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
 		} else {
-			h.sendSOAPResponse(w, respData)
+			log.Debug("ACS sending RPC request",
+				zap.String("device_sn", deviceSN),
+				zap.String("method", cmd.Method),
+				zap.String("xml", string(respData)),
+			)
+			h.sendSOAPResponse(w, respData, log)
 			return
 		}
 	}
 
 	// No more commands — complete the session.
-	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
+	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session, log)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body []byte, method soap.RPCMethod) {
+func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body []byte, method soap.RPCMethod, log *zap.Logger) {
 	// Extract CWMP ID from the SOAP response.
 	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
 
-	h.logger.Info("RPC response received",
+	// Log complete response XML
+	log.Debug("ACS received RPC response",
+		zap.String("method", string(method)),
+		zap.String("cwmp_id", cwmpID),
+		zap.String("xml", string(body)),
+	)
+
+	log.Info("RPC response received",
 		zap.String("method", string(method)),
 		zap.String("cwmp_id", cwmpID),
 	)
@@ -314,7 +340,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	val, ok := h.connSessions.Load(r.RemoteAddr)
 	if !ok {
 		// Fallback: no connection binding found.
-		h.logger.Warn("no connection binding for RPC response", zap.String("remote_addr", r.RemoteAddr))
+		log.Warn("no connection binding for RPC response", zap.String("remote_addr", r.RemoteAddr))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -333,12 +359,12 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		h.sessionStore.Update(r.Context(), deviceSN, session)
 
 		// Publish RPC response event for provisioning engine.
-		h.publishRPCResponseEvent(r.Context(), deviceSN, method)
+		h.publishRPCResponseEvent(r.Context(), deviceSN, method, log)
 
 		// Check if there are more commands in the queue (multi-step RPC).
 		cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 		if err != nil {
-			h.logger.Error("pop command queue", zap.Error(err))
+			log.Error("pop command queue", zap.Error(err))
 		}
 
 		if cmd != nil {
@@ -349,16 +375,21 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
 			if err != nil {
-				h.logger.Error("build next RPC request", zap.Error(err))
+				log.Error("build next RPC request", zap.Error(err))
 				h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
 			} else {
-				h.sendSOAPResponse(w, respData)
+				log.Debug("ACS sending next RPC request",
+					zap.String("device_sn", deviceSN),
+					zap.String("method", cmd.Method),
+					zap.String("xml", string(respData)),
+				)
+				h.sendSOAPResponse(w, respData, log)
 				return
 			}
 		}
 
 		// No more commands — complete the session.
-		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
+		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session, log)
 	}
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
@@ -367,7 +398,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 // completeSession releases admission, decrements metrics, records session duration,
 // cleans up connSessions, and marks the session as complete in the store.
-func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr string, session *Session) {
+func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr string, session *Session, log *zap.Logger) {
 	h.connSessions.Delete(remoteAddr)
 	h.admission.Release()
 	h.metrics.ActiveSessions.Dec()
@@ -379,13 +410,24 @@ func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr stri
 		session.State = StateComplete
 		session.UpdatedAt = time.Now()
 		h.sessionStore.Update(ctx, deviceSN, session)
+
+		log.Info("session completed",
+			zap.String("device_sn", deviceSN),
+			zap.Float64("duration_seconds", duration),
+		)
 	}
 }
 
-func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte) {
+func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
+	// Log complete request XML
+	log.Debug("ACS received TransferComplete request",
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.String("xml", string(body)),
+	)
+
 	tc, cwmpID, err := soap.DecodeTransferComplete(bytes.NewReader(body))
 	if err != nil {
-		h.logger.Error("decode TransferComplete", zap.Error(err))
+		log.Error("decode TransferComplete", zap.Error(err))
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -396,7 +438,7 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		deviceSN = val.(connSessionEntry).DeviceSN
 	}
 
-	h.logger.Info("TransferComplete received",
+	log.Info("TransferComplete received",
 		zap.String("device_sn", deviceSN),
 		zap.String("command_key", tc.CommandKey))
 
@@ -407,19 +449,30 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 	// Send TransferCompleteResponse
 	resp, err := soap.RenderResponse(soap.TransferCompleteRespTmpl, soap.InformResponseData{ID: cwmpID})
 	if err != nil {
-		h.logger.Error("render TransferCompleteResponse", zap.Error(err))
+		log.Error("render TransferCompleteResponse", zap.Error(err))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.sendSOAPResponse(w, resp)
+
+	log.Debug("ACS sending TransferCompleteResponse",
+		zap.String("device_sn", deviceSN),
+		zap.String("xml", string(resp)),
+	)
+	h.sendSOAPResponse(w, resp, log)
 }
 
 // handleAutonomousTransferComplete processes an AutonomousTransferComplete message
 // from a CPE device (e.g., PM/MR file upload completion).
-func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *http.Request, body []byte) {
+func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
+	// Log complete request XML
+	log.Debug("ACS received AutonomousTransferComplete request",
+		zap.String("remote_addr", r.RemoteAddr),
+		zap.String("xml", string(body)),
+	)
+
 	atc, cwmpID, err := soap.DecodeAutonomousTransferComplete(bytes.NewReader(body))
 	if err != nil {
-		h.logger.Error("decode AutonomousTransferComplete", zap.Error(err))
+		log.Error("decode AutonomousTransferComplete", zap.Error(err))
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -430,7 +483,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		deviceSN = val.(connSessionEntry).DeviceSN
 	}
 
-	h.logger.Info("AutonomousTransferComplete received",
+	log.Info("AutonomousTransferComplete received",
 		zap.String("device_sn", deviceSN),
 		zap.String("file_type", atc.FileType),
 		zap.String("transfer_url", atc.TransferURL),
@@ -458,14 +511,19 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 	// Send AutonomousTransferCompleteResponse
 	resp, err := soap.RenderResponse(soap.AutonomousTransferCompleteRespTmpl, soap.InformResponseData{ID: cwmpID})
 	if err != nil {
-		h.logger.Error("render AutonomousTransferCompleteResponse", zap.Error(err))
+		log.Error("render AutonomousTransferCompleteResponse", zap.Error(err))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.sendSOAPResponse(w, resp)
+
+	log.Debug("ACS sending AutonomousTransferCompleteResponse",
+		zap.String("device_sn", deviceSN),
+		zap.String("xml", string(resp)),
+	)
+	h.sendSOAPResponse(w, resp, log)
 }
 
-func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformMessage, eventCodes []string) {
+func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformMessage, eventCodes []string, log *zap.Logger) {
 	// Build event payload
 	payload := map[string]interface{}{
 		"device_id":      inform.DeviceId,
@@ -498,7 +556,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 
 	evt, err := event.NewEvent(subject, payload)
 	if err != nil {
-		h.logger.Error("create event failed",
+		log.Error("create event failed",
 			zap.Error(err),
 			zap.String("device_sn", inform.DeviceId.SerialNumber),
 			zap.String("subject", subject))
@@ -506,7 +564,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 	}
 
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
-		h.logger.Error("publish event failed",
+		log.Error("publish event failed",
 			zap.Error(err),
 			zap.String("device_sn", inform.DeviceId.SerialNumber),
 			zap.String("subject", subject),
@@ -514,14 +572,14 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		return
 	}
 
-	h.logger.Info("event published to bus",
+	log.Info("event published to bus",
 		zap.String("device_sn", inform.DeviceId.SerialNumber),
 		zap.String("subject", subject),
 		zap.String("event_id", evt.ID),
 		zap.Strings("event_codes", eventCodes))
 }
 
-func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod) {
+func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, log *zap.Logger) {
 	var subject string
 	switch method {
 	case soap.MethodGetParameterValuesResp:
@@ -557,15 +615,15 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 
 	evt, err := event.NewEvent(subject, payload)
 	if err != nil {
-		h.logger.Error("create RPC response event", zap.Error(err))
+		log.Error("create RPC response event", zap.Error(err))
 		return
 	}
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
-		h.logger.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
+		log.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
 	}
 }
 
-func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string) {
+func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *zap.Logger) {
 	// CurrentTime is formatted as ISO 8601 dateTime per TR069 spec
 	// This helps CPE devices synchronize their clocks with the ACS
 	currentTime := time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -574,25 +632,25 @@ func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string) {
 		CurrentTime: currentTime,
 	})
 	if err != nil {
-		h.logger.Error("render InformResponse", zap.Error(err))
+		log.Error("render InformResponse", zap.Error(err))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.sendSOAPResponse(w, resp)
+
+	log.Debug("ACS sending InformResponse",
+		zap.String("cwmp_id", cwmpID),
+		zap.String("xml", string(resp)),
+	)
+	h.sendSOAPResponse(w, resp, log)
 }
 
-func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte) {
+func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte, log *zap.Logger) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
-}
 
-// truncateString truncates a string to maxLen characters for logging purposes.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
+	// Log complete response XML
+	log.Debug("ACS sent response", zap.String("xml", string(data)))
 }
 
 // generateRequestIDWithPrefix generates a unique request ID with a custom prefix.
