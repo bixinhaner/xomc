@@ -11,17 +11,11 @@
 
 -- CMCC LTE 默认模型
 INSERT INTO data_model_definitions (
-    id, name, carrier, technology, oui, product_class, scope, status,
-    parameter_tree, rpc_methods, description
+    id, carrier, technology, version, oui, product_class, scope, status, is_active,
+    parameter_tree, description
 ) VALUES (
     '30000047-0001-4000-8000-000000000001',
-    'CMCC LTE Default',
-    'cmcc',
-    'lte',
-    NULL,
-    NULL,
-    'carrier_default',
-    'active',
+    'cmcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true,
     '{
         "Device.DeviceInfo": {"access": "r"},
         "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"},
@@ -31,76 +25,54 @@ INSERT INTO data_model_definitions (
         "Device.Services.FAPService.1": {"access": "rw"},
         "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}
     }'::jsonb,
-    '["GetParameterValues", "SetParameterValues", "GetParameterNames", "Reboot", "Download"]'::jsonb,
     '中国移动 LTE 默认数据模型，适用于所有未识别的 LTE 设备'
-) ON CONFLICT (carrier, technology, oui, product_class, scope) WHERE status = 'active' DO NOTHING;
+) ON CONFLICT (id) DO NOTHING;
 
 -- CMCC NR 默认模型
 INSERT INTO data_model_definitions (
-    id, name, carrier, technology, oui, product_class, scope, status,
-    parameter_tree, rpc_methods, description
+    id, carrier, technology, version, oui, product_class, scope, status, is_active,
+    parameter_tree, description
 ) VALUES (
     '30000047-0001-4000-8000-000000000002',
-    'CMCC NR Default',
-    'cmcc',
-    'nr',
-    NULL,
-    NULL,
-    'carrier_default',
-    'active',
+    'cmcc', 'nr', '1.0', NULL, NULL, 'carrier_default', 'active', true,
     '{
         "Device.DeviceInfo": {"access": "r"},
         "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"},
         "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"},
         "Device.ManagementServer": {"access": "rw"}
     }'::jsonb,
-    '["GetParameterValues", "SetParameterValues", "GetParameterNames", "Reboot", "Download"]'::jsonb,
     '中国移动 NR 默认数据模型'
-) ON CONFLICT (carrier, technology, oui, product_class, scope) WHERE status = 'active' DO NOTHING;
+) ON CONFLICT (id) DO NOTHING;
 
 -- CTCC LTE 默认模型
 INSERT INTO data_model_definitions (
-    id, name, carrier, technology, oui, product_class, scope, status,
-    parameter_tree, rpc_methods, description
+    id, carrier, technology, version, oui, product_class, scope, status, is_active,
+    parameter_tree, description
 ) VALUES (
     '30000047-0001-4000-8000-000000000003',
-    'CTCC LTE Default',
-    'ctcc',
-    'lte',
-    NULL,
-    NULL,
-    'carrier_default',
-    'active',
+    'ctcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true,
     '{
         "Device.DeviceInfo": {"access": "r"},
         "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"},
         "Device.ManagementServer": {"access": "rw"}
     }'::jsonb,
-    '["GetParameterValues", "SetParameterValues", "GetParameterNames", "Reboot"]'::jsonb,
     '中国电信 LTE 默认数据模型'
-) ON CONFLICT (carrier, technology, oui, product_class, scope) WHERE status = 'active' DO NOTHING;
+) ON CONFLICT (id) DO NOTHING;
 
 -- CUCC LTE 默认模型
 INSERT INTO data_model_definitions (
-    id, name, carrier, technology, oui, product_class, scope, status,
-    parameter_tree, rpc_methods, description
+    id, carrier, technology, version, oui, product_class, scope, status, is_active,
+    parameter_tree, description
 ) VALUES (
     '30000047-0001-4000-8000-000000000004',
-    'CUCC LTE Default',
-    'cucc',
-    'lte',
-    NULL,
-    NULL,
-    'carrier_default',
-    'active',
+    'cucc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true,
     '{
         "Device.DeviceInfo": {"access": "r"},
         "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"},
         "Device.ManagementServer": {"access": "rw"}
     }'::jsonb,
-    '["GetParameterValues", "SetParameterValues", "GetParameterNames", "Reboot"]'::jsonb,
     '中国联通 LTE 默认数据模型'
-) ON CONFLICT (carrier, technology, oui, product_class, scope) WHERE status = 'active' DO NOTHING;
+) ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
 -- 2. OUI 级数据模型 (oui scope)
@@ -109,17 +81,11 @@ INSERT INTO data_model_definitions (
 
 -- BaiCells (OUI: 001A2B) LTE 模型
 INSERT INTO data_model_definitions (
-    id, name, carrier, technology, oui, product_class, scope, status,
-    parameter_tree, rpc_methods, description
+    id, carrier, technology, version, oui, product_class, scope, status, is_active,
+    parameter_tree, description
 ) VALUES (
     '30000047-0002-4000-8000-000000000001',
-    'BaiCells LTE',
-    'cmcc',
-    'lte',
-    '001A2B',
-    NULL,
-    'oui',
-    'active',
+    'cmcc', 'lte', '1.0', '001A2B', NULL, 'oui', 'active', true,
     '{
         "Device.DeviceInfo": {"access": "r"},
         "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"},
@@ -139,28 +105,21 @@ INSERT INTO data_model_definitions (
         "Device.FAP.GPS.LockedLongitude": {"access": "r", "type": "string"},
         "Device.IP.Interface.1.IPv4Address.1.IPAddress": {"access": "r", "type": "string"}
     }'::jsonb,
-    '["GetParameterValues", "SetParameterValues", "GetParameterNames", "Reboot", "Download", "Upload"]'::jsonb,
-    'BaiCells 厂商 LTE 数据模型'
-) ON CONFLICT (carrier, technology, oui, product_class, scope) WHERE status = 'active' DO NOTHING;
+    'BaiCells 厂商 LTE 设备默认配置'
+) ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
--- 3. 产品级数据模型 (product scope)
---    最高优先级，适用于特定产品型号
+-- 3. Product 级数据模型 (product scope)
+--    最具体的配置，针对特定产品型号
 -- ============================================================================
 
 -- BaiCells SmallCell-LTE 产品模型
 INSERT INTO data_model_definitions (
-    id, name, carrier, technology, oui, product_class, scope, status,
-    parameter_tree, rpc_methods, description
+    id, carrier, technology, version, oui, product_class, scope, status, is_active,
+    parameter_tree, description
 ) VALUES (
     '30000047-0003-4000-8000-000000000001',
-    'BaiCells SmallCell-LTE',
-    'cmcc',
-    'lte',
-    '001A2B',
-    'SmallCell-LTE',
-    'product',
-    'active',
+    'cmcc', 'lte', '1.0', '001A2B', 'SmallCell-LTE', 'product', 'active', true,
     '{
         "Device.DeviceInfo": {"access": "r"},
         "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"},
@@ -180,6 +139,5 @@ INSERT INTO data_model_definitions (
         "Device.FAP.GPS.LockedLongitude": {"access": "r", "type": "string"},
         "Device.IP.Interface.1.IPv4Address.1.IPAddress": {"access": "r", "type": "string"}
     }'::jsonb,
-    '["GetParameterValues", "SetParameterValues", "GetParameterNames", "Reboot", "Download", "Upload"]'::jsonb,
     'BaiCells SmallCell-LTE 产品数据模型，用于自动开站'
-) ON CONFLICT (carrier, technology, oui, product_class, scope) WHERE status = 'active' DO NOTHING;
+) ON CONFLICT (id) DO NOTHING;
