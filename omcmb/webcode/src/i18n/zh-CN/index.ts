@@ -641,11 +641,11 @@ const messages: Record<string, string> = {
   'alarm.searchPlaceholder':   '告警码 / 可能原因 / 网元定位',
 
   // 告警库字段
-  'alarm.deviceTypeName':        '信告警源',
+  'alarm.deviceTypeName':        '告警源',
   'alarm.explanation':           '告警解释',
-  'alarm.librarySearchPlaceholder': '告警唯一标识 / 可能原因 / 信告警源',
+  'alarm.librarySearchPlaceholder': '告警唯一标识 / 可能原因 / 告警源',
   'alarm.eventTime':         '告警时间',
-  'alarm.neType':            '基站制式',
+  'alarm.neType':            '告警源',
   'alarm.detail':            '详细',
   'alarm.markRead':          '标记为已读',
 

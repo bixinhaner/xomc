@@ -585,7 +585,7 @@ const messages: Record<string, string> = {
   'alarm.severity':     'Severity',
   'alarm.deviceSn':     'Device SN',
   'alarm.deviceName':   'Device Name',
-  'alarm.neType':       'NE Type',
+  'alarm.neType':       'Alarm Source',
   'alarm.content':      'Alarm Content',
   'alarm.possibleCause': 'Possible Cause',
   'alarm.time':         'Alarm Time',
