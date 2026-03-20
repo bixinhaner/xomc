@@ -55,7 +55,8 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/acs", h.ServeHTTP)
+	// TR069 ACS endpoint - /smallcell/AcsService
+	mux.HandleFunc("/smallcell/AcsService", h.ServeHTTP)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -63,7 +64,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 
 	// File upload handler (CPE -> ACS -> MinIO proxy)
 	if deps.UploadHandler != nil {
-		mux.Handle("/upload/", deps.UploadHandler)
+		mux.Handle("/smallcell/upload/", deps.UploadHandler)
 	}
 
 	// Start background session reaper to clean up stale connSessions entries

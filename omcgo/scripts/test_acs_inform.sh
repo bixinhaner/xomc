@@ -1,10 +1,10 @@
 #!/bin/bash
 # ACS Inform 测试脚本
 # 使用方法: ./test_acs_inform.sh [ACS_URL]
-# 示例: ./test_acs_inform.sh http://localhost:8080/acs
-#       ./test_acs_inform.sh http://localhost:8080/acs bootstrap
+# 示例: ./test_acs_inform.sh http://localhost:8080/smallcell/AcsService
+#       ./test_acs_inform.sh http://localhost:8080/smallcell/AcsService bootstrap
 
-ACS_URL="${1:-http://localhost:8080/acs}"
+ACS_URL="${1:-http://localhost:8080/smallcell/AcsService}"
 EVENT_TYPE="${2:-periodic}"
 
 # 生成当前时间戳
