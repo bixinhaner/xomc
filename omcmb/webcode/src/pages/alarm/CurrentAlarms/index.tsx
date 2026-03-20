@@ -1,9 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Badge, Button, Space, Tag, Typography, App } from 'antd';
 import {
-  BellOutlined,
   CheckOutlined,
   ClearOutlined,
+  ExportOutlined,
   EyeOutlined,
   FilterOutlined,
   MinusCircleOutlined,
@@ -18,6 +18,7 @@ import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
 import AlarmDetail from '../AlarmDetail';
+import ExportModal, { type ExportParams } from './ExportModal';
 
 const { Text } = Typography;
 
@@ -47,6 +48,13 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
   '30006': 'alarm.eventType.performance',
 };
 
+// 基站制式配置
+const NE_TYPE_CONFIG: Record<string, string> = {
+  'eNB': 'eNB',
+  'gNB': 'gNB',
+  'GSM': 'GSM',
+};
+
 export default function CurrentAlarms() {
   const t = useT();
   const { modal, message } = App.useApp();
@@ -56,6 +64,8 @@ export default function CurrentAlarms() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -255,6 +265,26 @@ export default function CurrentAlarms() {
     [refetch, t]
   );
 
+  // 导出告警
+  const handleExport = useCallback(
+    async (params: ExportParams) => {
+      setExportLoading(true);
+      try {
+        // TODO: 调用导出 API
+        // const blob = await alarmApi.exportAlarms({ ...filterParams, ...params });
+        // 下载文件逻辑
+        console.log('Export params:', params);
+        void message.info(t('common.exportInProgress'));
+        setExportOpen(false);
+      } catch {
+        message.error(t('common.exportFailed'));
+      } finally {
+        setExportLoading(false);
+      }
+    },
+    [message, t]
+  );
+
   // 打开告警详情
   const handleShowDetail = useCallback((alarm: Alarm) => {
     setDetailAlarm(alarm);
@@ -347,6 +377,7 @@ export default function CurrentAlarms() {
         title: t('alarm.neType'),
         dataIndex: 'neType',
         width: 120,
+        render: (val: string) => NE_TYPE_CONFIG[val] || val || '-',
       },
       {
         key: 'equipInfo',
@@ -464,24 +495,13 @@ export default function CurrentAlarms() {
     [handleAcknowledge, handleUnacknowledge, handleClear, handleFilter, handleMarkRead]
   );
 
-  // 统计未确认未清除告警
-  const unackCount = alarms.filter((a) => a.dealState === '0' || a.dealState === '1').length;
-
   return (
     <ListPageLayout
       title={t('nav.alarm.current')}
       extra={
-        <Space>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <Badge status="success" />
-            <span style={{ color: '#52C41A' }}>{t('common.realTimeConn')}</span>
-          </span>
-          {unackCount > 0 && (
-            <Tag color="red" icon={<BellOutlined />}>
-              {unackCount} {t('common.unacked')}
-            </Tag>
-          )}
-        </Space>
+        <Button type="primary" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
+          {t('common.export')}
+        </Button>
       }
     >
       <FilterBar
@@ -518,6 +538,13 @@ export default function CurrentAlarms() {
         alarm={detailAlarm}
         open={detailOpen}
         onClose={handleCloseDetail}
+      />
+
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        onConfirm={handleExport}
+        confirmLoading={exportLoading}
       />
     </ListPageLayout>
   );
