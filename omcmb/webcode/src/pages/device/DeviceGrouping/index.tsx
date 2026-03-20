@@ -990,134 +990,155 @@ export default function DeviceGrouping() {
         }
       >
         <Form form={addChildForm} layout="vertical">
-          {/* 子分组名称 */}
-          <Form.Item
-            name="name"
-            label={t('device.childGroupName')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
-          >
-            <Input placeholder={t('common.placeholder')} maxLength={50} />
-          </Form.Item>
-
-          <Divider style={{ margin: '16px 0' }} />
-
-          {/* 匹配规则（直接显示，不再需要开关） */}
-          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
-            {t('device.matchRule')}
+          {/* 基本信息 */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8,
+            marginBottom: 16
+          }}>
+            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('device.basicInfo')}
+            </div>
+            <Form.Item
+              name="name"
+              label={t('device.childGroupName')}
+              rules={[{ required: true, message: t('common.placeholder') }]}
+              style={{ marginBottom: 0 }}
+            >
+              <Input placeholder={t('common.placeholder')} maxLength={50} />
+            </Form.Item>
           </div>
-          <Form.Item name="matchingMode" label={t('device.rules.matchingMode')}>
-            <Radio.Group onChange={handleMatchingModeChange}>
-              <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
-              <Radio value="lac">LAC</Radio>
-              <Radio value="tac">TAC</Radio>
-            </Radio.Group>
-          </Form.Item>
 
-          {/* 设备名称过滤条件 */}
-          {matchingMode === 'deviceName' && (
-            <>
+          {/* 匹配规则 */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8
+          }}>
+            <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('device.matchRule')}
+            </div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              {t('device.matchRuleDesc')}
+            </Text>
+            <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
+              <Radio.Group onChange={handleMatchingModeChange}>
+                <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
+                <Radio value="lac">LAC</Radio>
+                <Radio value="tac">TAC</Radio>
+              </Radio.Group>
+            </Form.Item>
+
+            {/* 设备名称过滤条件 */}
+            {matchingMode === 'deviceName' && (
+              <>
+                <Form.Item
+                  label={
+                    <span>
+                      {t('device.rules.filterCondition')}
+                      <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
+                        {t('device.rules.conditionLimit', { max: 10 })}
+                      </Text>
+                    </span>
+                  }
+                  style={{ marginBottom: 0 }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {nameFilters.map((filter, index) => (
+                      <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {index === 0 ? (
+                          <>
+                            <Select
+                              value={filter.condition}
+                              style={{ width: 120 }}
+                              options={getFilterConditionOptions(t)}
+                              onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
+                            />
+                            <Input
+                              value={filter.value}
+                              style={{ flex: 1 }}
+                              maxLength={64}
+                              placeholder={t('common.placeholder')}
+                              onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <Select
+                              value={filter.andOr || 'and'}
+                              style={{ width: 70 }}
+                              options={getAndOrOptions(t)}
+                              onChange={(v) => handleUpdateFilter(filter.id, 'andOr', v)}
+                            />
+                            <Select
+                              value={filter.condition}
+                              style={{ width: 120 }}
+                              options={getFilterConditionOptions(t)}
+                              onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
+                            />
+                            <Input
+                              value={filter.value}
+                              style={{ flex: 1 }}
+                              maxLength={64}
+                              placeholder={t('common.placeholder')}
+                              onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
+                            />
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<CloseCircleOutlined />}
+                              onClick={() => handleRemoveFilter(filter.id)}
+                              style={{ color: 'var(--color-text-quaternary)' }}
+                            />
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {nameFilters.length < 10 && (
+                    <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddFilter} style={{ marginTop: 8 }}>
+                      {t('device.rules.addCondition')}
+                    </Button>
+                  )}
+                </Form.Item>
+
+                {/* 预览条件描述 */}
+                {previewText && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      color: 'var(--color-text-tertiary)',
+                      fontSize: 12,
+                      padding: '8px 12px',
+                      background: 'var(--color-bg-container)',
+                      borderRadius: 4,
+                      wordBreak: 'break-all',
+                      border: '1px solid var(--color-border-secondary)',
+                    }}
+                  >
+                    {previewText}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* TAC/LAC 输入 */}
+            {(matchingMode === 'tac' || matchingMode === 'lac') && (
               <Form.Item
-                label={
-                  <span>
-                    {t('device.rules.filterCondition')}
-                    <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                      {t('device.rules.conditionLimit', { max: 10 })}
-                    </Text>
-                  </span>
+                name="tacRag"
+                label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
+                style={{ marginBottom: 0 }}
+                extra={
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('device.rules.formatRange', { range: '0-65535' })}
+                  </Text>
                 }
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {nameFilters.map((filter, index) => (
-                    <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      {index === 0 ? (
-                        <>
-                          <Select
-                            value={filter.condition}
-                            style={{ width: 120 }}
-                            options={getFilterConditionOptions(t)}
-                            onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
-                          />
-                          <Input
-                            value={filter.value}
-                            style={{ flex: 1 }}
-                            maxLength={64}
-                            placeholder={t('common.placeholder')}
-                            onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <Select
-                            value={filter.andOr || 'and'}
-                            style={{ width: 70 }}
-                            options={getAndOrOptions(t)}
-                            onChange={(v) => handleUpdateFilter(filter.id, 'andOr', v)}
-                          />
-                          <Select
-                            value={filter.condition}
-                            style={{ width: 120 }}
-                            options={getFilterConditionOptions(t)}
-                            onChange={(v) => handleUpdateFilter(filter.id, 'condition', v)}
-                          />
-                          <Input
-                            value={filter.value}
-                            style={{ flex: 1 }}
-                            maxLength={64}
-                            placeholder={t('common.placeholder')}
-                            onChange={(e) => handleUpdateFilter(filter.id, 'value', e.target.value)}
-                          />
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<CloseCircleOutlined />}
-                            onClick={() => handleRemoveFilter(filter.id)}
-                            style={{ color: 'var(--color-text-quaternary)' }}
-                          />
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {nameFilters.length < 10 && (
-                  <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddFilter} style={{ marginTop: 8 }}>
-                    {t('device.rules.addCondition')}
-                  </Button>
-                )}
+                <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
               </Form.Item>
-
-              {/* 预览条件描述 */}
-              {previewText && (
-                <div
-                  style={{
-                    color: 'var(--color-text-tertiary)',
-                    fontSize: 12,
-                    marginBottom: 16,
-                    padding: '8px 12px',
-                    background: 'var(--color-fill-quaternary)',
-                    borderRadius: 4,
-                    wordBreak: 'break-all',
-                  }}
-                >
-                  {previewText}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* TAC/LAC 输入 */}
-          {(matchingMode === 'tac' || matchingMode === 'lac') && (
-            <Form.Item
-              name="tacRag"
-              label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
-              extra={
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('device.rules.formatRange', { range: '0-65535' })}
-                </Text>
-              }
-            >
-              <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
-            </Form.Item>
-          )}
+            )}
+          </div>
         </Form>
       </Drawer>
 
@@ -1139,57 +1160,85 @@ export default function DeviceGrouping() {
       >
         <Form form={addDeviceForm} layout="vertical">
           {/* 添加方式 */}
-          <Form.Item
-            name="addMethod"
-            label={t('device.addMethod')}
-            rules={[{ required: true }]}
-          >
-            <Radio.Group>
-              <Radio value="manual">{t('device.manualAdd')}</Radio>
-              <Radio value="import">{t('device.batchImport')}</Radio>
-            </Radio.Group>
-          </Form.Item>
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8,
+            marginBottom: 16
+          }}>
+            <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('device.addMethod')}
+            </div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              {t('device.addMethodDesc')}
+            </Text>
+            <Form.Item
+              name="addMethod"
+              rules={[{ required: true }]}
+              style={{ marginBottom: 0 }}
+            >
+              <Radio.Group>
+                <Radio value="manual">{t('device.manualAdd')}</Radio>
+                <Radio value="import">{t('device.batchImport')}</Radio>
+              </Radio.Group>
+            </Form.Item>
+          </div>
 
           {/* 手动添加：批量输入SN */}
           {addMethod === 'manual' && (
-            <Form.Item
-              name="deviceSnList"
-              label={
-                <span>
-                  {t('device.deviceSnList')}
-                  <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                    {t('device.snListFormat')}
-                  </Text>
-                </span>
-              }
-              rules={[{ required: true, message: t('device.snListRequired') }]}
-            >
-              <Input.TextArea
-                rows={8}
-                placeholder={t('device.snListPlaceholder')}
-                maxLength={5000}
-              />
-            </Form.Item>
+            <div style={{
+              padding: '16px',
+              background: 'var(--color-fill-quaternary)',
+              borderRadius: 8
+            }}>
+              <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
+                {t('device.deviceSnList')}
+              </div>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                {t('device.snListFormat')}
+              </Text>
+              <Form.Item
+                name="deviceSnList"
+                rules={[{ required: true, message: t('device.snListRequired') }]}
+                style={{ marginBottom: 0 }}
+              >
+                <Input.TextArea
+                  rows={8}
+                  placeholder={t('device.snListPlaceholder')}
+                  maxLength={5000}
+                  showCount
+                />
+              </Form.Item>
+            </div>
           )}
 
           {/* 批量导入：上传文件 */}
           {addMethod === 'import' && (
-            <Form.Item
-              label={t('device.importFile')}
-              extra={t('device.importFileFormat')}
-            >
-              <Upload
-                accept=".txt,.csv"
-                maxCount={1}
-                fileList={fileList}
-                beforeUpload={() => false}
-                onChange={(info) => {
-                  setFileList(info.fileList.slice(-1));
-                }}
-              >
-                <Button icon={<UploadOutlined />}>{t('device.selectFile')}</Button>
-              </Upload>
-            </Form.Item>
+            <div style={{
+              padding: '16px',
+              background: 'var(--color-fill-quaternary)',
+              borderRadius: 8
+            }}>
+              <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
+                {t('device.importFile')}
+              </div>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                {t('device.importFileFormat')}
+              </Text>
+              <Form.Item style={{ marginBottom: 0 }}>
+                <Upload
+                  accept=".txt,.csv"
+                  maxCount={1}
+                  fileList={fileList}
+                  beforeUpload={() => false}
+                  onChange={(info) => {
+                    setFileList(info.fileList.slice(-1));
+                  }}
+                >
+                  <Button icon={<UploadOutlined />}>{t('device.selectFile')}</Button>
+                </Upload>
+              </Form.Item>
+            </div>
           )}
         </Form>
       </Drawer>
