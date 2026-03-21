@@ -25,17 +25,21 @@ import (
 // ---------------------------------------------------------------------------
 
 type acsHSessionStore struct {
-	mu       sync.Mutex
-	sessions map[string]*Session // in-memory store keyed by deviceSN
-	createFn func(ctx context.Context, deviceSN string, session *Session) error
-	getFn    func(ctx context.Context, deviceSN string) (*Session, error)
-	updateFn func(ctx context.Context, deviceSN string, session *Session) error
-	deleteFn func(ctx context.Context, deviceSN string) error
-	setTTLFn func(ctx context.Context, deviceSN string, ttl time.Duration) error
+	mu           sync.Mutex
+	sessions     map[string]*Session // in-memory store keyed by deviceSN
+	sessionsByID map[string]*Session // in-memory store keyed by sessionID
+	createFn     func(ctx context.Context, deviceSN string, session *Session) error
+	getFn        func(ctx context.Context, deviceSN string) (*Session, error)
+	updateFn     func(ctx context.Context, deviceSN string, session *Session) error
+	deleteFn     func(ctx context.Context, deviceSN string) error
+	setTTLFn     func(ctx context.Context, deviceSN string, ttl time.Duration) error
 }
 
 func newAcsHSessionStore() *acsHSessionStore {
-	return &acsHSessionStore{sessions: make(map[string]*Session)}
+	return &acsHSessionStore{
+		sessions:     make(map[string]*Session),
+		sessionsByID: make(map[string]*Session),
+	}
 }
 
 func (m *acsHSessionStore) Create(ctx context.Context, deviceSN string, session *Session) error {
@@ -77,6 +81,36 @@ func (m *acsHSessionStore) SetTTL(ctx context.Context, deviceSN string, ttl time
 	if m.setTTLFn != nil {
 		return m.setTTLFn(ctx, deviceSN, ttl)
 	}
+	return nil
+}
+
+// Cookie-based session methods
+func (m *acsHSessionStore) GetByID(ctx context.Context, sessionID string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessionsByID[sessionID], nil
+}
+
+func (m *acsHSessionStore) CreateWithID(ctx context.Context, sessionID string, session *Session) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session.ID = sessionID
+	m.sessionsByID[sessionID] = session
+	return nil
+}
+
+func (m *acsHSessionStore) UpdateByID(ctx context.Context, sessionID string, session *Session) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session.ID = sessionID
+	m.sessionsByID[sessionID] = session
+	return nil
+}
+
+func (m *acsHSessionStore) DeleteByID(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessionsByID, sessionID)
 	return nil
 }
 
@@ -307,24 +341,25 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
 
-	// Simulate a prior Inform that created a session and connection binding.
+	// Simulate a prior Inform that created a session with Cookie.
 	deviceSN := "TEST-SN-EMPTY"
-	remoteAddr := "192.168.1.1:9999"
+	sessionID := "test-session-id-001"
 	session := &Session{
+		ID:        sessionID,
 		DeviceSN:  deviceSN,
 		State:     StateInformReceived,
 		StartedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		CWMPId:    "test-cwmp-id",
 	}
+	store.CreateWithID(context.Background(), sessionID, session)
 	store.Create(context.Background(), deviceSN, session)
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
-	req.RemoteAddr = remoteAddr
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
@@ -332,9 +367,6 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 	s, _ := store.Get(context.Background(), deviceSN)
 	require.NotNil(t, s)
 	assert.Equal(t, StateComplete, s.State)
-	// connSessions entry should be cleaned up.
-	_, loaded := h.connSessions.Load(remoteAddr)
-	assert.False(t, loaded, "connSessions entry should be cleaned up")
 }
 
 func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
@@ -344,16 +376,17 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
 
 	deviceSN := "TEST-SN-CMD"
-	remoteAddr := "192.168.1.1:8888"
+	sessionID := "test-session-id-002"
 	session := &Session{
+		ID:        sessionID,
 		DeviceSN:  deviceSN,
 		State:     StateInformReceived,
 		StartedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		CWMPId:    "cmd-cwmp-id",
 	}
+	store.CreateWithID(context.Background(), sessionID, session)
 	store.Create(context.Background(), deviceSN, session)
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
@@ -371,7 +404,7 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
-	req.RemoteAddr = remoteAddr
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
 	h.ServeHTTP(w, req)
 
 	// Should return 200 with SOAP XML (the RPC request).
@@ -418,16 +451,29 @@ func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "InformResponse")
 	assert.Contains(t, w.Body.String(), "100001") // CWMP ID echoed back
 
+	// Should set SESSION cookie.
+	cookies := w.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie, "SESSION cookie should be set")
+	assert.NotEmpty(t, sessionCookie.Value)
+
 	// Session should be created with StateInformReceived.
 	s, _ := store.Get(context.Background(), "TEST-SN-001")
 	require.NotNil(t, s)
 	assert.Equal(t, StateInformReceived, s.State)
 	assert.Equal(t, "100001", s.CWMPId)
+	assert.Equal(t, sessionCookie.Value, s.ID)
 
-	// connSessions should have the binding.
-	val, loaded := h.connSessions.Load("192.168.1.1:5000")
-	assert.True(t, loaded)
-	assert.Equal(t, "TEST-SN-001", val.(connSessionEntry).DeviceSN)
+	// Session should also be stored by ID.
+	sByID, _ := store.GetByID(context.Background(), sessionCookie.Value)
+	require.NotNil(t, sByID)
+	assert.Equal(t, "TEST-SN-001", sByID.DeviceSN)
 
 	// Event should be published with bootstrap subject.
 	bus.mu.Lock()
@@ -518,8 +564,9 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
 
 	deviceSN := "TEST-SN-001"
-	remoteAddr := "192.168.1.1:7777"
+	sessionID := "test-session-id-003"
 	session := &Session{
+		ID:        sessionID,
 		DeviceSN:  deviceSN,
 		State:     StateRPCPending,
 		LastRPC:   "GetParameterValues",
@@ -527,14 +574,14 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 		UpdatedAt: time.Now(),
 		CWMPId:    "100001",
 	}
+	store.CreateWithID(context.Background(), sessionID, session)
 	store.Create(context.Background(), deviceSN, session)
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
-	req.RemoteAddr = remoteAddr
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
@@ -556,8 +603,9 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
 
 	deviceSN := "TEST-SN-001"
-	remoteAddr := "192.168.1.1:6666"
+	sessionID := "test-session-id-004"
 	session := &Session{
+		ID:        sessionID,
 		DeviceSN:  deviceSN,
 		State:     StateRPCPending,
 		LastRPC:   "GetParameterValues",
@@ -565,8 +613,8 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 		UpdatedAt: time.Now(),
 		CWMPId:    "100001",
 	}
+	store.CreateWithID(context.Background(), sessionID, session)
 	store.Create(context.Background(), deviceSN, session)
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: deviceSN, CreatedAt: time.Now()})
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
@@ -582,7 +630,7 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
-	req.RemoteAddr = remoteAddr
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
 	h.ServeHTTP(w, req)
 
 	// Should return 200 with the next RPC request (Reboot).
@@ -595,12 +643,11 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	assert.Equal(t, "Reboot", s.LastRPC)
 }
 
-func TestServeHTTP_RPCResponse_NoBinding_Returns204(t *testing.T) {
+func TestServeHTTP_RPCResponse_NoCookie_Returns204(t *testing.T) {
 	h := newTestACSHandler()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
-	req.RemoteAddr = "10.0.0.99:1234"
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
@@ -611,15 +658,23 @@ func TestServeHTTP_RPCResponse_NoBinding_Returns204(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestServeHTTP_TransferComplete_PublishesEvent(t *testing.T) {
+	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
 
-	remoteAddr := "192.168.1.1:4444"
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: "TEST-SN-TC", CreatedAt: time.Now()})
+	sessionID := "test-session-id-tc"
+	session := &Session{
+		ID:        sessionID,
+		DeviceSN:  "TEST-SN-TC",
+		State:     StateProcessing,
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	store.CreateWithID(context.Background(), sessionID, session)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHTransferCompleteXML))
-	req.RemoteAddr = remoteAddr
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -649,22 +704,20 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 
 	h.metrics.ActiveSessions.Inc()
 	h.admission.Acquire()
-	remoteAddr := "192.168.1.1:1234"
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: "SN-COMPLETE", CreatedAt: time.Now()})
 
 	session := &Session{
+		ID:        "session-complete",
 		DeviceSN:  "SN-COMPLETE",
 		State:     StateProcessing,
 		StartedAt: time.Now().Add(-5 * time.Second),
 		UpdatedAt: time.Now(),
 	}
+	store.CreateWithID(context.Background(), "session-complete", session)
 
-	h.completeSession(context.Background(), "SN-COMPLETE", remoteAddr, session)
+	h.completeSession(context.Background(), "SN-COMPLETE", "192.168.1.1:1234", session)
 
 	assert.Equal(t, StateComplete, session.State)
 	assert.Equal(t, int64(0), h.admission.Current())
-	_, loaded := h.connSessions.Load(remoteAddr)
-	assert.False(t, loaded, "connSessions entry should be removed")
 }
 
 func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
@@ -679,54 +732,46 @@ func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
 	}
 
 	h.admission.Acquire()
-	remoteAddr := "192.168.1.1:5555"
-	h.connSessions.Store(remoteAddr, connSessionEntry{DeviceSN: "SN-NIL", CreatedAt: time.Now()})
 
-	h.completeSession(context.Background(), "SN-NIL", remoteAddr, nil)
+	h.completeSession(context.Background(), "SN-NIL", "192.168.1.1:5555", nil)
 
 	assert.Equal(t, int64(0), h.admission.Current())
-	_, loaded := h.connSessions.Load(remoteAddr)
-	assert.False(t, loaded)
 }
 
 // ---------------------------------------------------------------------------
-// Tests: Session reaper
+// Tests: completeSessionByID
 // ---------------------------------------------------------------------------
 
-func TestStartSessionReaper_CleansStaleEntries(t *testing.T) {
+func TestCompleteSessionByID_ReleasesResources(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
-	admission := NewAdmissionController(100)
+	store := newAcsHSessionStore()
 
 	h := &Handler{
-		admission: admission,
-		metrics:   metrics,
-		logger:    zap.NewNop(),
+		sessionStore: store,
+		admission:    NewAdmissionController(100),
+		metrics:      metrics,
+		logger:       zap.NewNop(),
 	}
 
-	// Store a stale session (10 min old) and a fresh one.
-	h.connSessions.Store("192.168.1.1:9999", connSessionEntry{
-		DeviceSN:  "SN-STALE",
-		CreatedAt: time.Now().Add(-10 * time.Minute),
-	})
-	h.connSessions.Store("192.168.1.2:8888", connSessionEntry{
-		DeviceSN:  "SN-FRESH",
-		CreatedAt: time.Now(),
-	})
-
-	h.metrics.ActiveSessions.Add(2)
-	h.admission.Acquire()
+	h.metrics.ActiveSessions.Inc()
 	h.admission.Acquire()
 
-	h.startSessionReaper(50*time.Millisecond, 1*time.Second)
-	time.Sleep(200 * time.Millisecond)
+	sessionID := "session-by-id-001"
+	session := &Session{
+		ID:        sessionID,
+		DeviceSN:  "SN-BY-ID",
+		State:     StateProcessing,
+		StartedAt: time.Now().Add(-3 * time.Second),
+		UpdatedAt: time.Now(),
+	}
+	store.CreateWithID(context.Background(), sessionID, session)
+	store.Create(context.Background(), "SN-BY-ID", session)
 
-	// Stale entry should be reaped.
-	_, loaded := h.connSessions.Load("192.168.1.1:9999")
-	assert.False(t, loaded, "stale session should be reaped")
-	// Fresh entry should still exist.
-	_, loaded = h.connSessions.Load("192.168.1.2:8888")
-	assert.True(t, loaded, "fresh session should not be reaped")
+	h.completeSessionByID(context.Background(), sessionID, session)
+
+	assert.Equal(t, StateComplete, session.State)
+	assert.Equal(t, int64(0), h.admission.Current())
 }
 
 // ---------------------------------------------------------------------------
@@ -737,20 +782,29 @@ func TestFullSessionLifecycle_InformThenEmpty(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
-	remoteAddr := "192.168.1.100:3000"
 
 	// Step 1: Send Inform.
 	w1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
-	req1.RemoteAddr = remoteAddr
 	h.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusOK, w1.Code)
 	assert.Contains(t, w1.Body.String(), "InformResponse")
 
-	// Step 2: Send empty POST (no commands queued).
+	// Extract session cookie from response.
+	cookies := w1.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie, "SESSION cookie should be set")
+
+	// Step 2: Send empty POST (no commands queued) with session cookie.
 	w2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
-	req2.RemoteAddr = remoteAddr
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
 	h.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusNoContent, w2.Code)
 
@@ -758,9 +812,6 @@ func TestFullSessionLifecycle_InformThenEmpty(t *testing.T) {
 	s, _ := store.Get(context.Background(), "TEST-SN-001")
 	require.NotNil(t, s)
 	assert.Equal(t, StateComplete, s.State)
-	// Connection binding should be cleaned up.
-	_, loaded := h.connSessions.Load(remoteAddr)
-	assert.False(t, loaded)
 }
 
 func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
@@ -768,7 +819,6 @@ func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 	cmdQ := &acsHCmdQueue{}
 	bus := &acsHEventBus{}
 	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
-	remoteAddr := "192.168.1.100:4000"
 
 	// Queue a command before the Inform.
 	params, _ := json.Marshal(map[string]interface{}{
@@ -785,14 +835,24 @@ func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 	// Step 1: Inform.
 	w1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
-	req1.RemoteAddr = remoteAddr
 	h.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusOK, w1.Code)
+
+	// Extract session cookie from response.
+	cookies := w1.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie, "SESSION cookie should be set")
 
 	// Step 2: Empty POST → should dispatch the queued command.
 	w2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
-	req2.RemoteAddr = remoteAddr
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
 	h.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusOK, w2.Code)
 	assert.Contains(t, w2.Body.String(), "GetParameterValues")
@@ -800,7 +860,7 @@ func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 	// Step 3: Device sends GetParameterValuesResponse.
 	w3 := httptest.NewRecorder()
 	req3 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
-	req3.RemoteAddr = remoteAddr
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
 	h.ServeHTTP(w3, req3)
 	assert.Equal(t, http.StatusNoContent, w3.Code)
 

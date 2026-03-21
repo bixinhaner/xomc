@@ -24,6 +24,9 @@ import (
 // RequestIDHeader is the header key for request ID
 const RequestIDHeader = "X-Request-ID"
 
+// SessionCookieName is the cookie name for TR069 session ID
+const SessionCookieName = "SESSION"
+
 // connSessionEntry tracks a connection-level session binding with creation time for TTL cleanup.
 type connSessionEntry struct {
 	DeviceSN  string
@@ -219,8 +222,10 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		zap.Int("param_count", len(inform.ParameterList)),
 	)
 
-	// Create/update session
+	// Create/update session with new Session ID
+	sessionID := generateSessionID()
 	session := &Session{
+		ID:           sessionID,
 		DeviceSN:     deviceSN,
 		State:        StateInformReceived,
 		InstanceID:   r.RemoteAddr,
@@ -230,15 +235,15 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		CWMPId:       cwmpID,
 	}
 
+	// Store session by Session ID (Cookie-based lookup)
+	if err := h.sessionStore.CreateWithID(r.Context(), sessionID, session); err != nil {
+		log.Error("create session by id", zap.Error(err), zap.String("device_sn", deviceSN))
+	}
+
+	// Also store by device SN for backward compatibility
 	if err := h.sessionStore.Create(r.Context(), deviceSN, session); err != nil {
 		log.Error("create session", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
-
-	// Bind connection (RemoteAddr) → deviceSN for session tracking.
-	h.connSessions.Store(r.RemoteAddr, connSessionEntry{
-		DeviceSN:  deviceSN,
-		CreatedAt: time.Now(),
-	})
 
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
@@ -247,7 +252,12 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// Command queue will be checked on the subsequent Empty POST.
 	log.Info("ACS Inform done, sending InformResponse",
 		zap.String("device_sn", deviceSN),
-		zap.String("cwmp_id", cwmpID))
+		zap.String("cwmp_id", cwmpID),
+		zap.String("session_id", sessionID))
+
+	// Set Session Cookie in response header
+	h.setSessionCookie(w, sessionID)
+
 	h.sendInformResponse(w, cwmpID, log)
 }
 
@@ -255,35 +265,25 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 // Per TR069 spec, after InformResponse the CPE sends an empty POST.
 // The ACS should then either send an RPC request or an empty response to close the session.
 func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.Logger) {
-	log.Debug("ACS received empty POST", zap.String("remote_addr", r.RemoteAddr))
-
-	// Look up the device SN from the connection binding.
-	val, ok := h.connSessions.Load(r.RemoteAddr)
-	if !ok {
-		// No session bound to this connection — just close.
-		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-		w.Header().Set("Connection", "close")
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	entry := val.(connSessionEntry)
-	deviceSN := entry.DeviceSN
-
-	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
+	// Look up session from Cookie
+	session, sessionID := h.getSessionFromCookie(r)
 	if session == nil {
-		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, nil, log)
+		// No valid session — just close.
+		log.Warn("empty POST without valid session cookie", zap.String("remote_addr", r.RemoteAddr))
 		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+
+	deviceSN := session.DeviceSN
 
 	// Transition from InformReceived → Processing
 	if session.State == StateInformReceived {
 		session.State = StateProcessing
 		session.UpdatedAt = time.Now()
-		h.sessionStore.Update(r.Context(), deviceSN, session)
+		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
+		h.sessionStore.Update(r.Context(), deviceSN, session) // also update by device SN
 	}
 
 	// Check command queue for pending commands
@@ -296,6 +296,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		session.State = StateRPCPending
 		session.LastRPC = cmd.Method
 		session.UpdatedAt = time.Now()
+		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 		h.sessionStore.Update(r.Context(), deviceSN, session)
 
 		respData, err := h.rpcDispatcher.BuildRequest(cmd, session.CWMPId)
@@ -308,13 +309,15 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				zap.String("method", cmd.Method),
 				zap.String("xml", string(respData)),
 			)
+			// Set session cookie in response
+			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
 		}
 	}
 
 	// No more commands — complete the session.
-	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session, log)
+	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
 	w.WriteHeader(http.StatusNoContent)
@@ -336,61 +339,55 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		zap.String("cwmp_id", cwmpID),
 	)
 
-	// Find the device SN from the connection context.
-	val, ok := h.connSessions.Load(r.RemoteAddr)
-	if !ok {
-		// Fallback: no connection binding found.
-		log.Warn("no connection binding for RPC response", zap.String("remote_addr", r.RemoteAddr))
+	// Look up session from Cookie
+	session, sessionID := h.getSessionFromCookie(r)
+	if session == nil {
+		log.Warn("no valid session cookie for RPC response", zap.String("remote_addr", r.RemoteAddr))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	entry := val.(connSessionEntry)
-	deviceSN := entry.DeviceSN
+	deviceSN := session.DeviceSN
 
-	session, _ := h.sessionStore.Get(r.Context(), deviceSN)
-	if session != nil {
-		// Record RPC duration (approximate: time since last state update).
-		rpcDuration := time.Since(session.UpdatedAt).Seconds()
-		h.metrics.RPCDuration.WithLabelValues(string(method)).Observe(rpcDuration)
+	// Record RPC duration (approximate: time since last state update).
+	rpcDuration := time.Since(session.UpdatedAt).Seconds()
+	h.metrics.RPCDuration.WithLabelValues(string(method)).Observe(rpcDuration)
 
-		session.State = StateRPCResponse
+	session.State = StateRPCResponse
+	session.UpdatedAt = time.Now()
+	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
+	h.sessionStore.Update(r.Context(), deviceSN, session)
+
+	// Publish RPC response event for provisioning engine.
+	h.publishRPCResponseEvent(r.Context(), deviceSN, method, log)
+
+	// Check if there are more commands in the queue (multi-step RPC).
+	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+	if err != nil {
+		log.Error("pop command queue", zap.Error(err))
+	}
+
+	if cmd != nil {
+		session.State = StateRPCPending
+		session.LastRPC = cmd.Method
 		session.UpdatedAt = time.Now()
+		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 		h.sessionStore.Update(r.Context(), deviceSN, session)
 
-		// Publish RPC response event for provisioning engine.
-		h.publishRPCResponseEvent(r.Context(), deviceSN, method, log)
-
-		// Check if there are more commands in the queue (multi-step RPC).
-		cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+		respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
 		if err != nil {
-			log.Error("pop command queue", zap.Error(err))
+			log.Error("build next RPC request", zap.Error(err))
+			h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
+		} else {
+			// Set session cookie in response
+			h.setSessionCookie(w, sessionID)
+			h.sendSOAPResponse(w, respData, log)
+			return
 		}
-
-		if cmd != nil {
-			session.State = StateRPCPending
-			session.LastRPC = cmd.Method
-			session.UpdatedAt = time.Now()
-			h.sessionStore.Update(r.Context(), deviceSN, session)
-
-			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
-			if err != nil {
-				log.Error("build next RPC request", zap.Error(err))
-				h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
-			} else {
-				log.Debug("ACS sending next RPC request",
-					zap.String("device_sn", deviceSN),
-					zap.String("method", cmd.Method),
-					zap.String("xml", string(respData)),
-				)
-				h.sendSOAPResponse(w, respData, log)
-				return
-			}
-		}
-
-		// No more commands — complete the session.
-		h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session, log)
 	}
+
+	// No more commands — complete the session.
+	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
 	w.WriteHeader(http.StatusNoContent)
@@ -398,7 +395,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 // completeSession releases admission, decrements metrics, records session duration,
 // cleans up connSessions, and marks the session as complete in the store.
-func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr string, session *Session, log *zap.Logger) {
+func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr string, session *Session) {
 	h.connSessions.Delete(remoteAddr)
 	h.admission.Release()
 	h.metrics.ActiveSessions.Dec()
@@ -411,10 +408,31 @@ func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr stri
 		session.UpdatedAt = time.Now()
 		h.sessionStore.Update(ctx, deviceSN, session)
 
-		log.Info("session completed",
-			zap.String("device_sn", deviceSN),
-			zap.Float64("duration_seconds", duration),
-		)
+		// Also delete by session ID if available
+		if session.ID != "" {
+			h.sessionStore.DeleteByID(ctx, session.ID)
+		}
+	}
+}
+
+// completeSessionByID completes a session using its Session ID (Cookie-based).
+func (h *Handler) completeSessionByID(ctx context.Context, sessionID string, session *Session) {
+	h.admission.Release()
+	h.metrics.ActiveSessions.Dec()
+
+	if session != nil {
+		duration := time.Since(session.StartedAt).Seconds()
+		h.metrics.SessionDuration.Observe(duration)
+
+		session.State = StateComplete
+		session.UpdatedAt = time.Now()
+
+		// Update both stores
+		h.sessionStore.UpdateByID(ctx, sessionID, session)
+		h.sessionStore.Update(ctx, session.DeviceSN, session)
+
+		// Delete the session by ID (cleanup)
+		h.sessionStore.DeleteByID(ctx, sessionID)
 	}
 }
 
@@ -432,10 +450,12 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// Get deviceSN from connection binding for logging/events.
+	// Get deviceSN from Cookie session
 	deviceSN := ""
-	if val, ok := h.connSessions.Load(r.RemoteAddr); ok {
-		deviceSN = val.(connSessionEntry).DeviceSN
+	var sessionID string
+	if session, sid := h.getSessionFromCookie(r); session != nil {
+		deviceSN = session.DeviceSN
+		sessionID = sid
 	}
 
 	log.Info("TransferComplete received",
@@ -458,6 +478,10 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		zap.String("device_sn", deviceSN),
 		zap.String("xml", string(resp)),
 	)
+	// Set session cookie in response if available
+	if sessionID != "" {
+		h.setSessionCookie(w, sessionID)
+	}
 	h.sendSOAPResponse(w, resp, log)
 }
 
@@ -477,10 +501,12 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Get deviceSN from connection binding.
+	// Get deviceSN from Cookie session
 	deviceSN := ""
-	if val, ok := h.connSessions.Load(r.RemoteAddr); ok {
-		deviceSN = val.(connSessionEntry).DeviceSN
+	var sessionID string
+	if session, sid := h.getSessionFromCookie(r); session != nil {
+		deviceSN = session.DeviceSN
+		sessionID = sid
 	}
 
 	log.Info("AutonomousTransferComplete received",
@@ -520,6 +546,10 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		zap.String("device_sn", deviceSN),
 		zap.String("xml", string(resp)),
 	)
+	// Set session cookie in response if available
+	if sessionID != "" {
+		h.setSessionCookie(w, sessionID)
+	}
 	h.sendSOAPResponse(w, resp, log)
 }
 
@@ -648,9 +678,44 @@ func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte, log *zap.
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
+}
 
-	// Log complete response XML
-	log.Debug("ACS sent response", zap.String("xml", string(data)))
+// getSessionFromCookie retrieves the session from the Cookie header.
+// Returns nil if no valid session cookie found.
+func (h *Handler) getSessionFromCookie(r *http.Request) (*Session, string) {
+	cookie, err := r.Cookie(SessionCookieName)
+	if err != nil {
+		h.logger.Debug("no session cookie", zap.Error(err), zap.String("remote_addr", r.RemoteAddr))
+		return nil, ""
+	}
+
+	sessionID := cookie.Value
+	session, err := h.sessionStore.GetByID(r.Context(), sessionID)
+	if err != nil {
+		h.logger.Error("get session by cookie", zap.Error(err), zap.String("session_id", sessionID))
+		return nil, sessionID
+	}
+
+	return session, sessionID
+}
+
+// setSessionCookie sets the SESSION cookie in the response header.
+func (h *Handler) setSessionCookie(w http.ResponseWriter, sessionID string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// truncateString truncates a string to maxLen characters for logging purposes.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // generateRequestIDWithPrefix generates a unique request ID with a custom prefix.
@@ -661,4 +726,14 @@ func generateRequestIDWithPrefix(prefix string) string {
 	random := make([]byte, 4)
 	rand.Read(random)
 	return prefix + "-" + timestamp + "-" + hex.EncodeToString(random)
+}
+
+// generateSessionID generates a UUID-based session ID for Cookie.
+func generateSessionID() string {
+	uuidBytes := make([]byte, 16)
+	rand.Read(uuidBytes)
+	// Set version (4) and variant bits per RFC 4122
+	uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40
+	uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80
+	return hex.EncodeToString(uuidBytes)
 }

@@ -20,6 +20,7 @@ const (
 
 // Session represents an active TR069/CWMP session with a CPE device.
 type Session struct {
+	ID             string       `json:"id"`              // Session ID (UUID), used as Cookie value
 	DeviceSN       string       `json:"device_sn"`
 	State          SessionState `json:"state"`
 	LastRPC        string       `json:"last_rpc"`
