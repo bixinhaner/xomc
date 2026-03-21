@@ -713,11 +713,18 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 	store.CreateWithID(context.Background(), "session-complete", session)
+	store.Create(context.Background(), "SN-COMPLETE", session)
 
-	h.completeSession(context.Background(), "SN-COMPLETE", "192.168.1.1:1234", session)
+	h.completeSession(context.Background(), session)
 
 	assert.Equal(t, StateComplete, session.State)
 	assert.Equal(t, int64(0), h.admission.Current())
+
+	// 验证 Session 已从两个存储中删除
+	sByID, _ := store.GetByID(context.Background(), "session-complete")
+	assert.Nil(t, sByID)
+	sBySN, _ := store.Get(context.Background(), "SN-COMPLETE")
+	assert.Nil(t, sBySN)
 }
 
 func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
@@ -733,44 +740,8 @@ func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
 
 	h.admission.Acquire()
 
-	h.completeSession(context.Background(), "SN-NIL", "192.168.1.1:5555", nil)
+	h.completeSession(context.Background(), nil)
 
-	assert.Equal(t, int64(0), h.admission.Current())
-}
-
-// ---------------------------------------------------------------------------
-// Tests: completeSessionByID
-// ---------------------------------------------------------------------------
-
-func TestCompleteSessionByID_ReleasesResources(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	metrics := NewACSMetrics(reg)
-	store := newAcsHSessionStore()
-
-	h := &Handler{
-		sessionStore: store,
-		admission:    NewAdmissionController(100),
-		metrics:      metrics,
-		logger:       zap.NewNop(),
-	}
-
-	h.metrics.ActiveSessions.Inc()
-	h.admission.Acquire()
-
-	sessionID := "session-by-id-001"
-	session := &Session{
-		ID:        sessionID,
-		DeviceSN:  "SN-BY-ID",
-		State:     StateProcessing,
-		StartedAt: time.Now().Add(-3 * time.Second),
-		UpdatedAt: time.Now(),
-	}
-	store.CreateWithID(context.Background(), sessionID, session)
-	store.Create(context.Background(), "SN-BY-ID", session)
-
-	h.completeSessionByID(context.Background(), sessionID, session)
-
-	assert.Equal(t, StateComplete, session.State)
 	assert.Equal(t, int64(0), h.admission.Current())
 }
 

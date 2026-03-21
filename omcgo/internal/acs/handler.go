@@ -317,7 +317,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	}
 
 	// No more commands — complete the session.
-	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
+	h.completeSession(r.Context(), session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
 	w.WriteHeader(http.StatusNoContent)
@@ -387,53 +387,40 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// No more commands — complete the session.
-	h.completeSession(r.Context(), deviceSN, r.RemoteAddr, session)
+	h.completeSession(r.Context(), session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// completeSession releases admission, decrements metrics, records session duration,
-// cleans up connSessions, and marks the session as complete in the store.
-func (h *Handler) completeSession(ctx context.Context, deviceSN, remoteAddr string, session *Session) {
-	h.connSessions.Delete(remoteAddr)
+// completeSession 完成 TR069 会话，释放所有相关资源。
+// 根据 Session.ID 和 Session.DeviceSN 删除 Redis 中的会话数据。
+func (h *Handler) completeSession(ctx context.Context, session *Session) {
+	// 释放准入槽位
 	h.admission.Release()
+
+	// 递减活跃会话计数
 	h.metrics.ActiveSessions.Dec()
 
-	if session != nil {
-		duration := time.Since(session.StartedAt).Seconds()
-		h.metrics.SessionDuration.Observe(duration)
-
-		session.State = StateComplete
-		session.UpdatedAt = time.Now()
-		h.sessionStore.Update(ctx, deviceSN, session)
-
-		// Also delete by session ID if available
-		if session.ID != "" {
-			h.sessionStore.DeleteByID(ctx, session.ID)
-		}
+	if session == nil {
+		return
 	}
-}
 
-// completeSessionByID completes a session using its Session ID (Cookie-based).
-func (h *Handler) completeSessionByID(ctx context.Context, sessionID string, session *Session) {
-	h.admission.Release()
-	h.metrics.ActiveSessions.Dec()
+	// 记录会话时长指标
+	duration := time.Since(session.StartedAt).Seconds()
+	h.metrics.SessionDuration.Observe(duration)
 
-	if session != nil {
-		duration := time.Since(session.StartedAt).Seconds()
-		h.metrics.SessionDuration.Observe(duration)
+	// 更新会话状态为 COMPLETE
+	session.State = StateComplete
+	session.UpdatedAt = time.Now()
 
-		session.State = StateComplete
-		session.UpdatedAt = time.Now()
-
-		// Update both stores
-		h.sessionStore.UpdateByID(ctx, sessionID, session)
-		h.sessionStore.Update(ctx, session.DeviceSN, session)
-
-		// Delete the session by ID (cleanup)
-		h.sessionStore.DeleteByID(ctx, sessionID)
+	// 删除 Cookie-based Session（主存储）
+	if session.ID != "" {
+		h.sessionStore.DeleteByID(ctx, session.ID)
 	}
+
+	// 删除 DeviceSN-based Session（兼容存储）
+	h.sessionStore.Delete(ctx, session.DeviceSN)
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
