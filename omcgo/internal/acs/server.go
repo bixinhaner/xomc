@@ -36,7 +36,8 @@ type ServerDeps struct {
 	RateLimiter             *DeviceRateLimiter
 	Admission               *AdmissionController
 	Metrics                 *ACSMetrics
-	UploadHandler           *upload.Handler // CPE file upload handler (supports query params and path-based token)
+	UploadHandler           *upload.Handler        // CPE file upload handler (supports query params and path-based token)
+	UploadConfig            *appconfig.UploadConfig // upload server configuration for generating upload URLs
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -57,6 +58,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		logger:                  deps.Logger,
 		requestIDPrefix:         deps.RequestIDPrefix,
 		enableTestTaskInjection: deps.EnableTestTaskInjection,
+		uploadConfig:            deps.UploadConfig,
 	}
 
 	mux := http.NewServeMux()

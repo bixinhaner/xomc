@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
@@ -49,8 +50,9 @@ type Handler struct {
 	admission               *AdmissionController
 	metrics                 *ACSMetrics
 	logger                  *zap.Logger
-	requestIDPrefix         string // prefix for request IDs, e.g., "acs"
-	enableTestTaskInjection bool   // enable random test task injection (for testing only)
+	requestIDPrefix         string                  // prefix for request IDs, e.g., "acs"
+	enableTestTaskInjection bool                    // enable random test task injection (for testing only)
+	uploadConfig            *appconfig.UploadConfig // upload server configuration for generating upload URLs
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
@@ -253,7 +255,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// Inject random test tasks for this device (TEST FEATURE)
 	// This is for testing purposes only - can be disabled by commenting out this line
-	h.injectRandomTestTasks(r.Context(), deviceSN, log)
+	h.injectRandomTestTasks(r, deviceSN, log)
 
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
@@ -955,10 +957,10 @@ var testRPCTaskTemplates = []rpcTaskTemplate{
 }
 
 // injectRandomTestTasks injects random RPC tasks for testing purposes.
-// This method generates 3-10 random tasks for the device.
+// This method generates 3-10 random tasks for the device, plus a fixed PM upload task.
 // If Reboot task is generated, it will be moved to the end of the queue.
 // NOTE: This is a test feature - disable by setting enableTestTaskInjection to false.
-func (h *Handler) injectRandomTestTasks(ctx context.Context, deviceSN string, log *zap.Logger) {
+func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *zap.Logger) {
 	// Skip if test task injection is disabled
 	if !h.enableTestTaskInjection {
 		return
@@ -968,6 +970,8 @@ func (h *Handler) injectRandomTestTasks(ctx context.Context, deviceSN string, lo
 	if h.taskService == nil {
 		return
 	}
+
+	ctx := r.Context()
 
 	// Generate random number of tasks (3-10)
 	numTasks := 3 + rand.Intn(8) // 3 + 0-7 = 3-10
@@ -983,6 +987,12 @@ func (h *Handler) injectRandomTestTasks(ctx context.Context, deviceSN string, lo
 		}
 		selectedIndices[idx] = true
 		tasks = append(tasks, testRPCTaskTemplates[idx])
+	}
+
+	// Fixed: Always inject a PM upload task with real upload URL
+	pmUploadTask := h.createPMUploadTask(r, deviceSN)
+	if pmUploadTask != nil {
+		tasks = append(tasks, *pmUploadTask)
 	}
 
 	// Sort tasks: Reboot should be last
@@ -1030,7 +1040,65 @@ func (h *Handler) injectRandomTestTasks(ctx context.Context, deviceSN string, lo
 		zap.String("device_sn", deviceSN),
 		zap.Int("total_selected", len(tasks)),
 		zap.Int("created", createdCount),
-		zap.Bool("has_reboot", rebootTask != nil))
+		zap.Bool("has_reboot", rebootTask != nil),
+		zap.Bool("has_pm_upload", pmUploadTask != nil))
+}
+
+// createPMUploadTask creates a PM file upload task with a real upload URL from config.
+// If base_url is localhost, it will be replaced with the request's host.
+// Returns nil if upload config is not available.
+func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskTemplate {
+	if h.uploadConfig == nil || h.uploadConfig.BaseURL == "" {
+		return nil
+	}
+
+	// Generate upload URL: {BaseURL}{Path}?fileType=PM&filename={deviceSN}_{timestamp}.xml.gz
+	timestamp := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("%s_%s.xml.gz", deviceSN, timestamp)
+
+	// Get base URL, replace localhost with request host if needed
+	baseURL := h.uploadConfig.BaseURL
+	if isLocalhost(baseURL) {
+		// Use the request's host instead of localhost
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		baseURL = fmt.Sprintf("%s://%s", scheme, r.Host)
+	}
+
+	// Build upload URL
+	uploadURL := fmt.Sprintf("%s%s?fileType=PM&filename=%s",
+		baseURL,
+		h.uploadConfig.Path,
+		filename,
+	)
+
+	// Create Upload task params
+	// TR069 Upload RPC parameters:
+	// - FileType: "1 Vendor Configuration File" (1) or "2 Vendor Log File" (2) etc.
+	// - URL: The URL where the CPE should upload the file
+	// - Username/Password: HTTP Basic Auth credentials (optional)
+	params := map[string]interface{}{
+		"file_type":      "1 Vendor Configuration File", // PM data as vendor config
+		"url":            uploadURL,
+		"delay_seconds":  0,
+	}
+	if h.uploadConfig.Username != "" {
+		params["username"] = h.uploadConfig.Username
+		params["password"] = h.uploadConfig.Password
+	}
+
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil
+	}
+
+	return &rpcTaskTemplate{
+		method:   "Upload",
+		params:   json.RawMessage(paramsJSON),
+		priority: 10,
+	}
 }
 
 // ============================================================================
@@ -1066,4 +1134,12 @@ func detectSOAPFault(body []byte) (bool, int, string) {
 		return true, faultCode, faultString
 	}
 	return false, 0, ""
+}
+
+// isLocalhost checks if a URL contains localhost or 127.0.0.1
+func isLocalhost(url string) bool {
+	return strings.Contains(url, "localhost") ||
+		strings.Contains(url, "127.0.0.1") ||
+		strings.Contains(url, "[::1]") ||
+		strings.Contains(url, "::1")
 }
