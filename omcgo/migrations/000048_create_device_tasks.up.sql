@@ -1,5 +1,6 @@
 -- 设备任务表：用于管理 ACS 与 CPE 之间的 RPC 任务
 -- 支持任务状态跟踪、历史记录、重试机制
+-- 注意: device_sn 是逻辑引用，不使用外键约束（devices 表是分区表，主键为 (id, carrier)）
 
 CREATE TABLE device_tasks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -25,9 +26,7 @@ CREATE TABLE device_tasks (
 
     source          VARCHAR(32) DEFAULT 'api',
     creator_id      VARCHAR(64),
-    description     TEXT,
-
-    CONSTRAINT fk_device FOREIGN KEY (device_sn) REFERENCES devices(serial_number) ON DELETE CASCADE
+    description     TEXT
 );
 
 -- 索引
