@@ -11,19 +11,20 @@ import (
 
 // ACSConfig is the configuration for the ACS engine.
 type ACSConfig struct {
-	Server          ACSServerConfig    `mapstructure:"server"`
-	Session         SessionConfig      `mapstructure:"session"`
-	RateLimit       RateLimitConfig    `mapstructure:"rate_limit"`
-	Auth            AuthConfig         `mapstructure:"auth"`
-	Redis           RedisConfig        `mapstructure:"redis"`
-	NATS            NATSConfig         `mapstructure:"nats"`
-	DB              PostgresConfig     `mapstructure:"db"`
-	MinIO           MinIOConfig        `mapstructure:"minio"`
-	Upload          UploadConfig       `mapstructure:"upload"`
-	Metrics         MetricsConfig      `mapstructure:"metrics"`
-	Tracer          TracerConfig       `mapstructure:"tracer"`
-	Log             LogConfig          `mapstructure:"log"`
-	RequestIDPrefix string             `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "acs"
+	Server                  ACSServerConfig    `mapstructure:"server"`
+	Session                 SessionConfig      `mapstructure:"session"`
+	RateLimit               RateLimitConfig    `mapstructure:"rate_limit"`
+	Auth                    AuthConfig         `mapstructure:"auth"`
+	Redis                   RedisConfig        `mapstructure:"redis"`
+	NATS                    NATSConfig         `mapstructure:"nats"`
+	DB                      PostgresConfig     `mapstructure:"db"`
+	MinIO                   MinIOConfig        `mapstructure:"minio"`
+	Upload                  UploadConfig       `mapstructure:"upload"`
+	Metrics                 MetricsConfig      `mapstructure:"metrics"`
+	Tracer                  TracerConfig       `mapstructure:"tracer"`
+	Log                     LogConfig          `mapstructure:"log"`
+	RequestIDPrefix         string             `mapstructure:"request_id_prefix"`          // 请求 ID 前缀，如 "acs"
+	EnableTestTaskInjection bool               `mapstructure:"enable_test_task_injection"` // 启用随机测试任务注入（仅用于测试）
 }
 
 // UploadConfig holds file upload server settings.

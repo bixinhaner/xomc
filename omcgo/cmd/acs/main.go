@@ -80,6 +80,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		app.MetricsReg,
 		app.Logger,
 		requestIDPrefix,
+		cfg.EnableTestTaskInjection,
 	)
 
 	acsServer := acs.NewACSServer(cfg, deps)

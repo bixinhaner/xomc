@@ -3,10 +3,12 @@ package acs
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -37,17 +39,18 @@ type connSessionEntry struct {
 
 // Handler processes TR069/CWMP HTTP requests.
 type Handler struct {
-	sessionStore    SessionStore
-	commandQueue    cmdqueue.CommandQueue // deprecated: use taskService instead
-	taskService     *task.TaskService     // new task management service
-	eventBus        event.EventBus
-	authenticator   auth.DeviceAuthenticator
-	rpcDispatcher   *rpc.Dispatcher
-	rateLimiter     *DeviceRateLimiter
-	admission       *AdmissionController
-	metrics         *ACSMetrics
-	logger          *zap.Logger
-	requestIDPrefix string // prefix for request IDs, e.g., "acs"
+	sessionStore            SessionStore
+	commandQueue            cmdqueue.CommandQueue // deprecated: use taskService instead
+	taskService             TaskService           // new task management service (interface)
+	eventBus                event.EventBus
+	authenticator           auth.DeviceAuthenticator
+	rpcDispatcher           *rpc.Dispatcher
+	rateLimiter             *DeviceRateLimiter
+	admission               *AdmissionController
+	metrics                 *ACSMetrics
+	logger                  *zap.Logger
+	requestIDPrefix         string // prefix for request IDs, e.g., "acs"
+	enableTestTaskInjection bool   // enable random test task injection (for testing only)
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
@@ -116,11 +119,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Log complete request XML
-	log.Debug("ACS received request",
+	// Log request info (Info level for production visibility)
+	log.Info("ACS received request",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.Int("body_len", len(body)),
-		zap.String("xml", string(body)),
 	)
 
 	// Detect method from body
@@ -132,6 +134,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	method := soap.DetectRPCMethod(body)
 	log.Info("ACS detected RPC method", zap.String("method", string(method)))
+
+	// Check for SOAP Fault first (can be in response to any RPC)
+	if isFault, faultCode, faultMsg := detectSOAPFault(body); isFault {
+		h.handleSOAPFault(w, r, body, faultCode, faultMsg, log)
+		return
+	}
 
 	switch method {
 	case soap.MethodInform:
@@ -242,6 +250,10 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	if err := h.sessionStore.CreateWithID(r.Context(), sessionID, session); err != nil {
 		log.Error("create session by id", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
+
+	// Inject random test tasks for this device (TEST FEATURE)
+	// This is for testing purposes only - can be disabled by commenting out this line
+	h.injectRandomTestTasks(r.Context(), deviceSN, log)
 
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
@@ -528,6 +540,85 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 	if session.ID != "" {
 		h.sessionStore.DeleteByID(ctx, session.ID)
 	}
+}
+
+// handleSOAPFault handles SOAP Fault responses from CPE.
+// It looks up the associated task by CWMP ID and marks it as failed.
+func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body []byte, faultCode int, faultMsg string, log *zap.Logger) {
+	// Extract CWMP ID from the SOAP Header
+	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
+
+	log.Warn("ACS received SOAP Fault",
+		zap.String("cwmp_id", cwmpID),
+		zap.Int("fault_code", faultCode),
+		zap.String("fault_msg", faultMsg),
+	)
+
+	// Look up session from cookie for device context
+	session, sessionID := h.getSessionFromCookie(r, log)
+	if session == nil {
+		log.Warn("SOAP Fault without valid session cookie")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Mark task as failed if task service is available
+	if h.taskService != nil && cwmpID != "" {
+		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
+		if err != nil {
+			log.Warn("get task by cwmp_id for fault", zap.Error(err), zap.String("cwmp_id", cwmpID))
+		} else if taskItem != nil {
+			if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
+				log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+			}
+			log.Info("task marked as failed on SOAP fault",
+				zap.String("task_id", taskItem.ID),
+				zap.String("method", taskItem.Method),
+				zap.String("fault_msg", faultMsg))
+		} else {
+			log.Warn("no task found for cwmp_id in fault", zap.String("cwmp_id", cwmpID))
+		}
+	}
+
+	// Check for more tasks in queue
+	if h.taskService != nil {
+		deviceSN := session.DeviceSN
+		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
+		if err != nil {
+			log.Error("pop next task after fault", zap.Error(err))
+		} else if nextTask != nil {
+			newCWMPID := task.GenerateCWMPID(nextTask.Method)
+			if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
+				log.Error("mark next task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
+			}
+
+			session.State = StateRPCPending
+			session.LastRPC = nextTask.Method
+			session.UpdatedAt = time.Now()
+			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
+
+			cmd := &cmdqueue.Command{
+				ID:         nextTask.ID,
+				Method:     nextTask.Method,
+				Params:     nextTask.Params,
+				CommandKey: nextTask.CommandKey,
+			}
+			respData, err := h.rpcDispatcher.BuildRequest(cmd, newCWMPID)
+			if err != nil {
+				log.Error("build next RPC request after fault", zap.Error(err))
+				h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
+				h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
+			} else {
+				h.setSessionCookie(w, sessionID)
+				h.sendSOAPResponse(w, respData, log)
+				return
+			}
+		}
+	}
+
+	// No more commands — complete the session
+	h.completeSession(r.Context(), session)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
@@ -819,19 +910,132 @@ func truncateString(s string, maxLen int) string {
 func generateRequestIDWithPrefix(prefix string) string {
 	timestamp := time.Now().Format("20060102150405")
 	random := make([]byte, 4)
-	rand.Read(random)
+	cryptorand.Read(random)
 	return prefix + "-" + timestamp + "-" + hex.EncodeToString(random)
 }
 
 // generateSessionID generates a UUID-based session ID for Cookie.
 func generateSessionID() string {
 	uuidBytes := make([]byte, 16)
-	rand.Read(uuidBytes)
+	cryptorand.Read(uuidBytes)
 	// Set version (4) and variant bits per RFC 4122
 	uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40
 	uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80
 	return hex.EncodeToString(uuidBytes)
 }
+
+// ============================================================================
+// TEST FEATURE: Random Task Injection
+// ============================================================================
+// The following method is for testing purposes only.
+// It injects random RPC tasks when a CPE sends an Inform.
+// To disable: comment out the call to injectRandomTestTasks in handleInform.
+// ============================================================================
+
+// rpcTaskTemplate defines a template for generating random RPC tasks
+type rpcTaskTemplate struct {
+	method   string
+	params   json.RawMessage
+	priority int
+}
+
+// testRPCTaskTemplates contains all available RPC task templates for random generation
+var testRPCTaskTemplates = []rpcTaskTemplate{
+	{method: "GetParameterValues", params: json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion","Device.DeviceInfo.HardwareVersion"]}`), priority: 10},
+	{method: "GetParameterValues", params: json.RawMessage(`{"names":["Device.X_0000B9_Config.AntennaConfig"]}`), priority: 10},
+	{method: "SetParameterValues", params: json.RawMessage(`{"parameters":[{"name":"Device.X_0000B9_Config.TestParam","value":"test_value_123"}]}`), priority: 10},
+	{method: "GetParameterNames", params: json.RawMessage(`{"parameter_path":"Device.DeviceInfo","next_level":false}`), priority: 10},
+	{method: "GetParameterNames", params: json.RawMessage(`{"parameter_path":"Device.X_0000B9_Config","next_level":true}`), priority: 10},
+	{method: "GetParameterAttributes", params: json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion"]}`), priority: 10},
+	{method: "SetParameterAttributes", params: json.RawMessage(`{"parameters":[{"name":"Device.X_Test.Param","notification":1}]}`), priority: 10},
+	{method: "Download", params: json.RawMessage(`{"file_type":"1 Firmware Upgrade Image","url":"http://acs.example.com/firmware/v1.0.0.bin","file_size":10485760}`), priority: 5},
+	{method: "Upload", params: json.RawMessage(`{"file_type":"1 Log File","url":"http://acs.example.com/upload/logs","delay_seconds":0}`), priority: 10},
+	{method: "Reboot", params: json.RawMessage(`{}`), priority: 100}, // High priority but should be last
+	{method: "FactoryReset", params: json.RawMessage(`{}`), priority: 100},
+}
+
+// injectRandomTestTasks injects random RPC tasks for testing purposes.
+// This method generates 3-10 random tasks for the device.
+// If Reboot task is generated, it will be moved to the end of the queue.
+// NOTE: This is a test feature - disable by setting enableTestTaskInjection to false.
+func (h *Handler) injectRandomTestTasks(ctx context.Context, deviceSN string, log *zap.Logger) {
+	// Skip if test task injection is disabled
+	if !h.enableTestTaskInjection {
+		return
+	}
+
+	// Skip if TaskService is not available
+	if h.taskService == nil {
+		return
+	}
+
+	// Generate random number of tasks (3-10)
+	numTasks := 3 + rand.Intn(8) // 3 + 0-7 = 3-10
+
+	// Randomly select tasks
+	selectedIndices := make(map[int]bool)
+	var tasks []rpcTaskTemplate
+
+	for len(tasks) < numTasks {
+		idx := rand.Intn(len(testRPCTaskTemplates))
+		if selectedIndices[idx] {
+			continue
+		}
+		selectedIndices[idx] = true
+		tasks = append(tasks, testRPCTaskTemplates[idx])
+	}
+
+	// Sort tasks: Reboot should be last
+	var normalTasks []rpcTaskTemplate
+	var rebootTask *rpcTaskTemplate
+
+	for _, t := range tasks {
+		if t.method == "Reboot" {
+			rebootTask = &t
+		} else {
+			normalTasks = append(normalTasks, t)
+		}
+	}
+
+	// Combine: normal tasks first, then reboot (if exists)
+	finalTasks := normalTasks
+	if rebootTask != nil {
+		finalTasks = append(finalTasks, *rebootTask)
+	}
+
+	// Create tasks in TaskService
+	createdCount := 0
+	for _, t := range finalTasks {
+		req := &task.CreateTaskRequest{
+			DeviceSN:    deviceSN,
+			Method:      t.method,
+			Params:      t.params,
+			Priority:    t.priority,
+			Source:      task.TaskSourceSystem,
+			Description: fmt.Sprintf("Test task: %s", t.method),
+		}
+
+		_, err := h.taskService.CreateTask(ctx, req)
+		if err != nil {
+			log.Warn("failed to create test task",
+				zap.String("device_sn", deviceSN),
+				zap.String("method", t.method),
+				zap.Error(err))
+			continue
+		}
+		createdCount++
+	}
+
+	log.Info("injected random test tasks",
+		zap.String("device_sn", deviceSN),
+		zap.Int("total_selected", len(tasks)),
+		zap.Int("created", createdCount),
+		zap.Bool("has_reboot", rebootTask != nil))
+}
+
+// ============================================================================
+// END TEST FEATURE
+// ============================================================================
 
 // detectSOAPFault 检查 SOAP 响应中是否包含 Fault
 // 返回: (isFault, faultCode, faultString)

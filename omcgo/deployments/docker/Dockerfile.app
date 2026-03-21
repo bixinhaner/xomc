@@ -20,6 +20,9 @@ FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates tzdata
 
+# Create log directory with proper permissions
+RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
+
 COPY --from=builder /build/bin/omcgo-app /usr/local/bin/omcgo-app
 COPY --from=builder /build/bin/omcgo-migrate /usr/local/bin/omcgo-migrate
 COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.yaml

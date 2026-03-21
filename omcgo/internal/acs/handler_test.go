@@ -3,6 +3,7 @@ package acs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -790,4 +792,433 @@ func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 	// Session should be deleted after completion.
 	s, _ := store.GetByID(context.Background(), sessionCookie.Value)
 	assert.Nil(t, s, "session should be deleted after completion")
+}
+
+// ---------------------------------------------------------------------------
+// Tests: TaskService Integration
+// ---------------------------------------------------------------------------
+
+// acsHTaskService is a mock TaskService for testing
+type acsHTaskService struct {
+	mu              sync.Mutex
+	tasks           []*task.Task
+	cwmpIDToTaskMap map[string]*task.Task
+	popIndex        int
+}
+
+func newAcsHTaskService() *acsHTaskService {
+	return &acsHTaskService{
+		tasks:           make([]*task.Task, 0),
+		cwmpIDToTaskMap: make(map[string]*task.Task),
+	}
+}
+
+func (m *acsHTaskService) addTask(t *task.Task) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tasks = append(m.tasks, t)
+}
+
+func (m *acsHTaskService) PopTask(ctx context.Context, deviceSN string) (*task.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := m.popIndex; i < len(m.tasks); i++ {
+		if m.tasks[i].DeviceSN == deviceSN && m.tasks[i].Status == task.TaskStatusPending {
+			m.popIndex = i + 1
+			return m.tasks[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *acsHTaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t.ID == taskID {
+			t.Status = task.TaskStatusSent
+			t.CWMPID = cwmpID
+			m.cwmpIDToTaskMap[cwmpID] = t
+			now := time.Now()
+			t.SentAt = &now
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *acsHTaskService) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t.ID == taskID {
+			t.Status = task.TaskStatusCompleted
+			t.Result = result
+			now := time.Now()
+			t.CompletedAt = &now
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *acsHTaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t.ID == taskID {
+			t.Status = task.TaskStatusFailed
+			t.ErrorCode = errorCode
+			t.ErrorMessage = errorMsg
+			now := time.Now()
+			t.CompletedAt = &now
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *acsHTaskService) GetTaskByCWMPID(ctx context.Context, cwmpID string) (*task.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cwmpIDToTaskMap[cwmpID], nil
+}
+
+func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := &task.Task{
+		ID:          fmt.Sprintf("task-%d", len(m.tasks)+1),
+		DeviceSN:    req.DeviceSN,
+		Method:      req.Method,
+		Params:      req.Params,
+		Priority:    req.Priority,
+		Status:      task.TaskStatusPending,
+		MaxRetries:  req.MaxRetries,
+		CreatedAt:   time.Now(),
+		Source:      req.Source,
+		CreatorID:   req.CreatorID,
+		Description: req.Description,
+	}
+	m.tasks = append(m.tasks, t)
+	return t, nil
+}
+
+// TestTaskQueue_ProcessMultipleRPCMethods tests processing multiple TR069 RPC methods
+// from the task queue when CPE sends empty POST
+func TestTaskQueue_ProcessMultipleRPCMethods(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	taskSvc := newAcsHTaskService()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewACSMetrics(reg)
+	h := &Handler{
+		sessionStore:  store,
+		commandQueue:  &acsHCmdQueue{}, // empty legacy queue
+		taskService:   taskSvc,         // new task service
+		eventBus:      bus,
+		authenticator: &auth.NoopAuthenticator{},
+		rpcDispatcher: rpc.NewDispatcher(),
+		rateLimiter:   NewDeviceRateLimiter(100, 100, 10000, zap.NewNop()),
+		admission:     NewAdmissionController(1000),
+		metrics:       metrics,
+		logger:        zap.NewNop(),
+	}
+
+	deviceSN := "TEST-SN-001"
+
+	// Create tasks for all major TR069 RPC methods (max 10)
+	rpcMethods := []struct {
+		method string
+		params json.RawMessage
+	}{
+		{"GetParameterValues", json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion"]}`)},
+		{"SetParameterValues", json.RawMessage(`{"parameters":[{"name":"Device.X.Test","value":"test"}]}`)},
+		{"GetParameterNames", json.RawMessage(`{"parameter_path":"Device.DeviceInfo","next_level":false}`)},
+		{"GetParameterAttributes", json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion"]}`)},
+		{"SetParameterAttributes", json.RawMessage(`{"parameters":[{"name":"Device.X.Test","notification":1}]}`)},
+		{"Reboot", json.RawMessage(`{}`)},
+		{"Download", json.RawMessage(`{"file_type":"1 Firmware Upgrade Image","url":"http://test.com/fw.bin"}`)},
+		{"Upload", json.RawMessage(`{"file_type":"1 Log File","url":"http://test.com/upload"}`)},
+		{"AddObject", json.RawMessage(`{"object_name":"Device.X.TestObject."}`)},
+		{"FactoryReset", json.RawMessage(`{}`)},
+	}
+
+	// Add tasks to the mock service
+	for i, rpc := range rpcMethods {
+		taskID := fmt.Sprintf("task-%d", i+1)
+		tt := &task.Task{
+			ID:         taskID,
+			DeviceSN:   deviceSN,
+			Method:     rpc.method,
+			Params:     rpc.params,
+			Priority:   10,
+			Status:     task.TaskStatusPending,
+			MaxRetries: 3,
+			CreatedAt:  time.Now(),
+			Source:     task.TaskSourceAPI,
+		}
+		taskSvc.addTask(tt)
+	}
+
+	// Step 1: Send Inform to establish session
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	h.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+	assert.Contains(t, w1.Body.String(), "InformResponse")
+
+	// Extract session cookie
+	cookies := w1.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie, "SESSION cookie should be set")
+
+	// Step 2: Empty POST → should dispatch first task (GetParameterValues)
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
+	h.ServeHTTP(w2, req2)
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Contains(t, w2.Body.String(), "GetParameterValues")
+	assert.Contains(t, w2.Body.String(), "cwmp:ID")
+
+	// Verify task was marked as sent
+	taskSvc.mu.Lock()
+	assert.Equal(t, task.TaskStatusSent, taskSvc.tasks[0].Status)
+	assert.NotEmpty(t, taskSvc.tasks[0].CWMPID)
+	sentCWMPID := taskSvc.tasks[0].CWMPID
+	taskSvc.mu.Unlock()
+
+	t.Logf("Task 1 (GetParameterValues) dispatched with CWMP ID: %s", sentCWMPID)
+
+	// Step 3: Simulate CPE response for GetParameterValues
+	// Build response with matching CWMP ID
+	getParamResp := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">%s</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList soap:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>Device.DeviceInfo.SoftwareVersion</Name>
+          <Value>FW-2.1.0</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soap:Body>
+</soap:Envelope>`, sentCWMPID)
+
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(getParamResp))
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
+	h.ServeHTTP(w3, req3)
+
+	// Should get next task (SetParameterValues) or 204 if no more
+	// Since we have 10 tasks, should return next task
+	if w3.Code == http.StatusOK {
+		assert.Contains(t, w3.Body.String(), "SetParameterValues")
+		t.Logf("Task 2 (SetParameterValues) dispatched")
+
+		// Verify first task was marked as completed
+		taskSvc.mu.Lock()
+		assert.Equal(t, task.TaskStatusCompleted, taskSvc.tasks[0].Status)
+		taskSvc.mu.Unlock()
+	}
+
+	t.Logf("Successfully processed task queue with %d RPC methods", len(rpcMethods))
+}
+
+// TestTaskQueue_MarkTaskCompleted verifies task completion tracking
+func TestTaskQueue_MarkTaskCompleted(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	taskSvc := newAcsHTaskService()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewACSMetrics(reg)
+	h := &Handler{
+		sessionStore:  store,
+		commandQueue:  &acsHCmdQueue{},
+		taskService:   taskSvc,
+		eventBus:      bus,
+		authenticator: &auth.NoopAuthenticator{},
+		rpcDispatcher: rpc.NewDispatcher(),
+		rateLimiter:   NewDeviceRateLimiter(100, 100, 10000, zap.NewNop()),
+		admission:     NewAdmissionController(1000),
+		metrics:       metrics,
+		logger:        zap.NewNop(),
+	}
+
+	deviceSN := "TEST-SN-001"
+
+	// Add a single task
+	taskSvc.addTask(&task.Task{
+		ID:         "task-reboot-1",
+		DeviceSN:   deviceSN,
+		Method:     "Reboot",
+		Params:     json.RawMessage(`{}`),
+		Priority:   10,
+		Status:     task.TaskStatusPending,
+		MaxRetries: 3,
+		CreatedAt:  time.Now(),
+		Source:     task.TaskSourceAPI,
+	})
+
+	// Step 1: Send Inform
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	h.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+
+	cookies := w1.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie)
+
+	// Step 2: Empty POST → dispatch Reboot
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
+	h.ServeHTTP(w2, req2)
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Contains(t, w2.Body.String(), "Reboot")
+
+	taskSvc.mu.Lock()
+	sentCWMPID := taskSvc.tasks[0].CWMPID
+	taskSvc.mu.Unlock()
+
+	// Step 3: Simulate RebootResponse
+	rebootResp := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">%s</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <cwmp:RebootResponse/>
+  </soap:Body>
+</soap:Envelope>`, sentCWMPID)
+
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(rebootResp))
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
+	h.ServeHTTP(w3, req3)
+
+	// No more tasks → 204
+	assert.Equal(t, http.StatusNoContent, w3.Code)
+
+	// Verify task was marked as completed
+	taskSvc.mu.Lock()
+	assert.Equal(t, task.TaskStatusCompleted, taskSvc.tasks[0].Status)
+	assert.NotNil(t, taskSvc.tasks[0].Result)
+	assert.NotNil(t, taskSvc.tasks[0].CompletedAt)
+	taskSvc.mu.Unlock()
+}
+
+// TestTaskQueue_SOAPFaultMarksTaskFailed verifies that SOAP Fault marks task as failed
+func TestTaskQueue_SOAPFaultMarksTaskFailed(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	taskSvc := newAcsHTaskService()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewACSMetrics(reg)
+	h := &Handler{
+		sessionStore:  store,
+		commandQueue:  &acsHCmdQueue{},
+		taskService:   taskSvc,
+		eventBus:      bus,
+		authenticator: &auth.NoopAuthenticator{},
+		rpcDispatcher: rpc.NewDispatcher(),
+		rateLimiter:   NewDeviceRateLimiter(100, 100, 10000, zap.NewNop()),
+		admission:     NewAdmissionController(1000),
+		metrics:       metrics,
+		logger:        zap.NewNop(),
+	}
+
+	deviceSN := "TEST-SN-001"
+
+	// Add a task
+	taskSvc.addTask(&task.Task{
+		ID:         "task-gpv-fault",
+		DeviceSN:   deviceSN,
+		Method:     "GetParameterValues",
+		Params:     json.RawMessage(`{"names":["Device.Invalid.Parameter"]}`),
+		Priority:   10,
+		Status:     task.TaskStatusPending,
+		MaxRetries: 3,
+		CreatedAt:  time.Now(),
+		Source:     task.TaskSourceAPI,
+	})
+
+	// Step 1: Send Inform
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
+	h.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+
+	cookies := w1.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie)
+
+	// Step 2: Empty POST → dispatch GetParameterValues
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(""))
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
+	h.ServeHTTP(w2, req2)
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+
+	taskSvc.mu.Lock()
+	sentCWMPID := taskSvc.tasks[0].CWMPID
+	taskSvc.mu.Unlock()
+
+	// Step 3: Simulate SOAP Fault response
+	faultResp := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soap:Header>
+    <cwmp:ID soap:mustUnderstand="1">%s</cwmp:ID>
+  </soap:Header>
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>Client</faultcode>
+      <faultstring>Invalid parameter name</faultstring>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>`, sentCWMPID)
+
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(faultResp))
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCookie.Value})
+	h.ServeHTTP(w3, req3)
+
+	// Verify task was marked as failed
+	taskSvc.mu.Lock()
+	assert.Equal(t, task.TaskStatusFailed, taskSvc.tasks[0].Status)
+	assert.Contains(t, taskSvc.tasks[0].ErrorMessage, "Invalid parameter name")
+	assert.NotNil(t, taskSvc.tasks[0].CompletedAt)
+	taskSvc.mu.Unlock()
+
+	t.Logf("Task correctly marked as failed on SOAP Fault")
 }
