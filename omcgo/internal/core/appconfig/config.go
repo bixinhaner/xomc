@@ -225,12 +225,13 @@ type LogConfig struct {
 
 // RotationConfig holds log rotation settings.
 type RotationConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`     // enable log rotation
-	MaxSizeMB  int    `mapstructure:"max_size_mb"` // max size in MB before rotation (default: 20)
-	MaxAgeDays int    `mapstructure:"max_age_days"` // max days to retain old log files (default: 7)
-	MaxBackups int    `mapstructure:"max_backups"`  // max number of old log files to retain (default: 100)
-	Compress   bool   `mapstructure:"compress"`     // compress rotated files
-	LocalTime  bool   `mapstructure:"local_time"`   // use local time for rotation
+	Enabled         bool          `mapstructure:"enabled"`          // enable log rotation
+	MaxSizeMB       int           `mapstructure:"max_size_mb"`      // max size in MB before rotation (default: 20)
+	MaxAgeDays      int           `mapstructure:"max_age_days"`     // max days to retain old log files (default: 7)
+	MaxBackups      int           `mapstructure:"max_backups"`      // max number of old log files to retain (default: 100)
+	Compress        bool          `mapstructure:"compress"`         // compress rotated files
+	LocalTime       bool          `mapstructure:"local_time"`       // use local time for rotation
+	RotateInterval  time.Duration `mapstructure:"rotate_interval"`  // time-based rotation interval (e.g., "5m" for 5 minutes)
 }
 
 // Load reads a configuration file and unmarshals it into the target struct.

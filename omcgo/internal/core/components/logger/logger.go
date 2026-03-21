@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/lestrrat-go/file-rotatelogs"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -118,8 +120,60 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 	return logger, nil
 }
 
-// newLumberjackWriter creates a lumberjack writer for log rotation.
+// newLumberjackWriter creates a writer for log rotation.
+// Supports both time-based rotation (RotateInterval) and size-based rotation (MaxSizeMB).
+// If RotateInterval is set, uses time-based rotation; otherwise uses size-based rotation.
 func newLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
+	// Time-based rotation takes precedence
+	if cfg.RotateInterval > 0 {
+		return newTimeBasedRotator(path, cfg)
+	}
+
+	// Fallback to size-based rotation
+	return newSizeBasedRotator(path, cfg)
+}
+
+// newTimeBasedRotator creates a time-based log rotator using file-rotatelogs.
+func newTimeBasedRotator(path string, cfg appconfig.RotationConfig) io.Writer {
+	maxAge := cfg.MaxAgeDays
+	if maxAge <= 0 {
+		maxAge = 7 // default 7 days
+	}
+
+	// Generate rotation filename pattern with timestamp
+	// e.g., /var/log/omcgo/acs.log -> /var/log/omcgo/acs.%Y%m%d%H%M.log
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+
+	rotationPattern := filepath.Join(dir, name+".%Y%m%d%H%M"+ext)
+
+	opts := []rotatelogs.Option{
+		rotatelogs.WithMaxAge(time.Duration(maxAge) * 24 * time.Hour),
+		rotatelogs.WithRotationTime(cfg.RotateInterval),
+	}
+
+	if cfg.LocalTime {
+		opts = append(opts, rotatelogs.WithClock(rotatelogs.Local))
+	} else {
+		opts = append(opts, rotatelogs.WithClock(rotatelogs.UTC))
+	}
+
+	// Create symlink to current log file
+	opts = append(opts, rotatelogs.WithLinkName(path))
+
+	writer, err := rotatelogs.New(rotationPattern, opts...)
+	if err != nil {
+		// Fallback to size-based rotation if time-based fails
+		return newSizeBasedRotator(path, cfg)
+	}
+
+	return writer
+}
+
+// newSizeBasedRotator creates a size-based log rotator using lumberjack.
+func newSizeBasedRotator(path string, cfg appconfig.RotationConfig) io.Writer {
 	maxSize := cfg.MaxSizeMB
 	if maxSize <= 0 {
 		maxSize = 20 // default 20MB

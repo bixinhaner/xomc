@@ -87,6 +87,7 @@ log:
     max_backups: 100 # 最大备份数
     compress: true # 压缩旧文件
     local_time: true # 使用本地时间
+    rotate_interval: "5m" # 每 5 分钟轮转一次
 
 request_id_prefix: "acs"
 
