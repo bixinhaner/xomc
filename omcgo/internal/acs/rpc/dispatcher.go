@@ -179,7 +179,8 @@ func (h *RebootHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 type FactoryResetHandler struct{}
 
 func (h *FactoryResetHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
-	return soap.RenderResponse(soap.FactoryResetTmpl, struct{ ID string }{ID: cmd.CommandKey})
+	data := soap.FactoryResetData{ID: cmd.CommandKey}
+	return soap.RenderResponse(soap.FactoryResetTmpl, data)
 }
 
 type GetParameterAttributesHandler struct{}

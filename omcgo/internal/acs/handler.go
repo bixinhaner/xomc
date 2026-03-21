@@ -240,11 +240,6 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		log.Error("create session by id", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
 
-	// Also store by device SN for backward compatibility
-	if err := h.sessionStore.Create(r.Context(), deviceSN, session); err != nil {
-		log.Error("create session", zap.Error(err), zap.String("device_sn", deviceSN))
-	}
-
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
 
@@ -283,7 +278,6 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		session.State = StateProcessing
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-		h.sessionStore.Update(r.Context(), deviceSN, session) // also update by device SN
 	}
 
 	// Check command queue for pending commands
@@ -297,7 +291,6 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		session.LastRPC = cmd.Method
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-		h.sessionStore.Update(r.Context(), deviceSN, session)
 
 		respData, err := h.rpcDispatcher.BuildRequest(cmd, session.CWMPId)
 		if err != nil {
@@ -356,7 +349,6 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	session.State = StateRPCResponse
 	session.UpdatedAt = time.Now()
 	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-	h.sessionStore.Update(r.Context(), deviceSN, session)
 
 	// Publish RPC response event for provisioning engine.
 	h.publishRPCResponseEvent(r.Context(), deviceSN, method, log)
@@ -372,7 +364,6 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		session.LastRPC = cmd.Method
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-		h.sessionStore.Update(r.Context(), deviceSN, session)
 
 		respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
 		if err != nil {
@@ -394,7 +385,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 }
 
 // completeSession 完成 TR069 会话，释放所有相关资源。
-// 根据 Session.ID 和 Session.DeviceSN 删除 Redis 中的会话数据。
+// 根据 Session.ID 删除 Redis 中的会话数据。
 func (h *Handler) completeSession(ctx context.Context, session *Session) {
 	// 释放准入槽位
 	h.admission.Release()
@@ -414,13 +405,10 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 	session.State = StateComplete
 	session.UpdatedAt = time.Now()
 
-	// 删除 Cookie-based Session（主存储）
+	// 删除 Cookie-based Session
 	if session.ID != "" {
 		h.sessionStore.DeleteByID(ctx, session.ID)
 	}
-
-	// 删除 DeviceSN-based Session（兼容存储）
-	h.sessionStore.Delete(ctx, session.DeviceSN)
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {

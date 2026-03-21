@@ -26,72 +26,32 @@ import (
 
 type acsHSessionStore struct {
 	mu           sync.Mutex
-	sessions     map[string]*Session // in-memory store keyed by deviceSN
 	sessionsByID map[string]*Session // in-memory store keyed by sessionID
-	createFn     func(ctx context.Context, deviceSN string, session *Session) error
-	getFn        func(ctx context.Context, deviceSN string) (*Session, error)
-	updateFn     func(ctx context.Context, deviceSN string, session *Session) error
-	deleteFn     func(ctx context.Context, deviceSN string) error
-	setTTLFn     func(ctx context.Context, deviceSN string, ttl time.Duration) error
+	getByIDFn    func(ctx context.Context, sessionID string) (*Session, error)
+	createByIDFn func(ctx context.Context, sessionID string, session *Session) error
+	updateByIDFn func(ctx context.Context, sessionID string, session *Session) error
+	deleteByIDFn func(ctx context.Context, sessionID string) error
 }
 
 func newAcsHSessionStore() *acsHSessionStore {
 	return &acsHSessionStore{
-		sessions:     make(map[string]*Session),
 		sessionsByID: make(map[string]*Session),
 	}
 }
 
-func (m *acsHSessionStore) Create(ctx context.Context, deviceSN string, session *Session) error {
-	if m.createFn != nil {
-		return m.createFn(ctx, deviceSN, session)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sessions[deviceSN] = session
-	return nil
-}
-func (m *acsHSessionStore) Get(ctx context.Context, deviceSN string) (*Session, error) {
-	if m.getFn != nil {
-		return m.getFn(ctx, deviceSN)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.sessions[deviceSN], nil
-}
-func (m *acsHSessionStore) Update(ctx context.Context, deviceSN string, session *Session) error {
-	if m.updateFn != nil {
-		return m.updateFn(ctx, deviceSN, session)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sessions[deviceSN] = session
-	return nil
-}
-func (m *acsHSessionStore) Delete(ctx context.Context, deviceSN string) error {
-	if m.deleteFn != nil {
-		return m.deleteFn(ctx, deviceSN)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.sessions, deviceSN)
-	return nil
-}
-func (m *acsHSessionStore) SetTTL(ctx context.Context, deviceSN string, ttl time.Duration) error {
-	if m.setTTLFn != nil {
-		return m.setTTLFn(ctx, deviceSN, ttl)
-	}
-	return nil
-}
-
-// Cookie-based session methods
 func (m *acsHSessionStore) GetByID(ctx context.Context, sessionID string) (*Session, error) {
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, sessionID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.sessionsByID[sessionID], nil
 }
 
 func (m *acsHSessionStore) CreateWithID(ctx context.Context, sessionID string, session *Session) error {
+	if m.createByIDFn != nil {
+		return m.createByIDFn(ctx, sessionID, session)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session.ID = sessionID
@@ -100,6 +60,9 @@ func (m *acsHSessionStore) CreateWithID(ctx context.Context, sessionID string, s
 }
 
 func (m *acsHSessionStore) UpdateByID(ctx context.Context, sessionID string, session *Session) error {
+	if m.updateByIDFn != nil {
+		return m.updateByIDFn(ctx, sessionID, session)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session.ID = sessionID
@@ -108,6 +71,9 @@ func (m *acsHSessionStore) UpdateByID(ctx context.Context, sessionID string, ses
 }
 
 func (m *acsHSessionStore) DeleteByID(ctx context.Context, sessionID string) error {
+	if m.deleteByIDFn != nil {
+		return m.deleteByIDFn(ctx, sessionID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessionsByID, sessionID)
@@ -353,7 +319,6 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 		CWMPId:    "test-cwmp-id",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	store.Create(context.Background(), deviceSN, session)
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
@@ -363,10 +328,9 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	// Session should be marked complete.
-	s, _ := store.Get(context.Background(), deviceSN)
-	require.NotNil(t, s)
-	assert.Equal(t, StateComplete, s.State)
+	// Session should be deleted after completion.
+	s, _ := store.GetByID(context.Background(), sessionID)
+	assert.Nil(t, s)
 }
 
 func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
@@ -386,7 +350,6 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 		CWMPId:    "cmd-cwmp-id",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	store.Create(context.Background(), deviceSN, session)
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
@@ -412,7 +375,7 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 	assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
 	assert.Contains(t, w.Body.String(), "GetParameterValues")
 	// Session should transition to RPC_PENDING.
-	s, _ := store.Get(context.Background(), deviceSN)
+	s, _ := store.GetByID(context.Background(), sessionID)
 	require.NotNil(t, s)
 	assert.Equal(t, StateRPCPending, s.State)
 }
@@ -464,16 +427,12 @@ func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
 	assert.NotEmpty(t, sessionCookie.Value)
 
 	// Session should be created with StateInformReceived.
-	s, _ := store.Get(context.Background(), "TEST-SN-001")
+	s, _ := store.GetByID(context.Background(), sessionCookie.Value)
 	require.NotNil(t, s)
 	assert.Equal(t, StateInformReceived, s.State)
 	assert.Equal(t, "100001", s.CWMPId)
 	assert.Equal(t, sessionCookie.Value, s.ID)
-
-	// Session should also be stored by ID.
-	sByID, _ := store.GetByID(context.Background(), sessionCookie.Value)
-	require.NotNil(t, sByID)
-	assert.Equal(t, "TEST-SN-001", sByID.DeviceSN)
+	assert.Equal(t, "TEST-SN-001", s.DeviceSN)
 
 	// Event should be published with bootstrap subject.
 	bus.mu.Lock()
@@ -575,7 +534,6 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 		CWMPId:    "100001",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	store.Create(context.Background(), deviceSN, session)
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
@@ -585,10 +543,9 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	// Session should be complete.
-	s, _ := store.Get(context.Background(), deviceSN)
-	require.NotNil(t, s)
-	assert.Equal(t, StateComplete, s.State)
+	// Session should be deleted after completion.
+	s, _ := store.GetByID(context.Background(), sessionID)
+	assert.Nil(t, s)
 	// RPC response event should be published.
 	bus.mu.Lock()
 	defer bus.mu.Unlock()
@@ -614,7 +571,6 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 		CWMPId:    "100001",
 	}
 	store.CreateWithID(context.Background(), sessionID, session)
-	store.Create(context.Background(), deviceSN, session)
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
 
@@ -637,7 +593,7 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "Reboot")
 	// Session should be RPC_PENDING with LastRPC=Reboot.
-	s, _ := store.Get(context.Background(), deviceSN)
+	s, _ := store.GetByID(context.Background(), sessionID)
 	require.NotNil(t, s)
 	assert.Equal(t, StateRPCPending, s.State)
 	assert.Equal(t, "Reboot", s.LastRPC)
@@ -713,18 +669,15 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 	store.CreateWithID(context.Background(), "session-complete", session)
-	store.Create(context.Background(), "SN-COMPLETE", session)
 
 	h.completeSession(context.Background(), session)
 
 	assert.Equal(t, StateComplete, session.State)
 	assert.Equal(t, int64(0), h.admission.Current())
 
-	// 验证 Session 已从两个存储中删除
+	// 验证 Session 已从存储中删除
 	sByID, _ := store.GetByID(context.Background(), "session-complete")
 	assert.Nil(t, sByID)
-	sBySN, _ := store.Get(context.Background(), "SN-COMPLETE")
-	assert.Nil(t, sBySN)
 }
 
 func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
@@ -779,10 +732,9 @@ func TestFullSessionLifecycle_InformThenEmpty(t *testing.T) {
 	h.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusNoContent, w2.Code)
 
-	// Session should be complete.
-	s, _ := store.Get(context.Background(), "TEST-SN-001")
-	require.NotNil(t, s)
-	assert.Equal(t, StateComplete, s.State)
+	// Session should be deleted after completion.
+	s, _ := store.GetByID(context.Background(), sessionCookie.Value)
+	assert.Nil(t, s, "session should be deleted after completion")
 }
 
 func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
@@ -835,8 +787,7 @@ func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 	h.ServeHTTP(w3, req3)
 	assert.Equal(t, http.StatusNoContent, w3.Code)
 
-	// Session complete.
-	s, _ := store.Get(context.Background(), "TEST-SN-001")
-	require.NotNil(t, s)
-	assert.Equal(t, StateComplete, s.State)
+	// Session should be deleted after completion.
+	s, _ := store.GetByID(context.Background(), sessionCookie.Value)
+	assert.Nil(t, s, "session should be deleted after completion")
 }

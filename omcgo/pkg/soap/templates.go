@@ -168,6 +168,12 @@ type SetParameterAttributesData struct {
 	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
+// FactoryResetData contains data for FactoryReset template.
+type FactoryResetData struct {
+	ID             string
+	NoMoreRequests int // 0=more requests coming, 1=last request
+}
+
 type SetParameterAttributeData struct {
 	Name               string
 	NotificationChange bool
