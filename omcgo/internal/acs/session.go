@@ -6,171 +6,170 @@ import (
 	"time"
 )
 
-// SessionState represents the state of a TR069/CWMP session.
-// The session follows a state machine pattern that tracks the lifecycle
-// of a TR069 conversation between ACS and CPE.
+// SessionState 表示 TR069/CWMP 会话的状态。
+// 会话遵循状态机模式，追踪 ACS 与 CPE 之间 TR069 对话的生命周期。
 //
-// State Machine Diagram:
+// 状态机图示：
 //
-//	                            Inform
-//	                              │
-//	                              ▼
-//	                    ┌─────────────────┐
-//	                    │ INFORM_RECEIVED │←─────────────────┐
-//	                    └────────┬────────┘                  │
-//	                             │                           │
-//	                      Empty POST                        │
-//	                             │                           │
-//	                             ▼                           │
-//	                    ┌─────────────────┐                  │
-//	     ┌─────────────│   PROCESSING    │←────────┐        │
-//	     │             └────────┬────────┘         │        │
-//	     │                      │                  │        │
-//	     │            ┌─────────┴─────────┐        │        │
-//	     │            │                   │        │        │
-//	     │       有待发命令            无待发命令    │        │
-//	     │            │                   │        │        │
-//	     │            ▼                   ▼        │        │
-//	     │   ┌─────────────────┐   ┌──────────┐   │        │
-//	     │   │   RPC_PENDING   │   │ COMPLETE │   │        │
-//	     │   └────────┬────────┘   └──────────┘   │        │
-//	     │            │                          │        │
-//	     │     CPE Response                      │        │
-//	     │            │                          │        │
-//	     │            ▼                          │        │
-//	     │   ┌─────────────────┐                  │        │
-//	     │   │   RPC_RESPONSE  │──────────────────┘        │
-//	     │   └────────┬────────┘   有更多命令              │
-//	     │            │                                    │
-//	     │     ┌──────┴──────┐                             │
-//	     │     │             │                             │
-//	     │  有更多命令    无更多命令                         │
-//	     │     │             │                             │
-//	     │     │             ▼                             │
-//	     │     │      ┌──────────┐                         │
-//	     └─────┴─────→│ COMPLETE │                         │
-//	                  └──────────┘                         │
-//	                       │                                │
-//	                       │ 会话结束                        │
-//	                       ▼                                │
-//	                  ┌──────────┐                          │
-//	                  │   IDLE   │──────────────────────────┘
-//	                  └──────────┘     新 Inform 到达
+//	                          Inform
+//	                            │
+//	                            ▼
+//	                  ┌─────────────────┐
+//	                  │ INFORM_RECEIVED │←─────────────────┐
+//	                  └────────┬────────┘                  │
+//	                           │                           │
+//	                    Empty POST                        │
+//	                           │                           │
+//	                           ▼                           │
+//	                  ┌─────────────────┐                  │
+//	   ┌─────────────│   PROCESSING    │←────────┐        │
+//	   │             └────────┬────────┘         │        │
+//	   │                      │                  │        │
+//	   │            ┌─────────┴─────────┐        │        │
+//	   │            │                   │        │        │
+//	   │       有待发命令            无待发命令    │        │
+//	   │            │                   │        │        │
+//	   │            ▼                   ▼        │        │
+//	   │   ┌─────────────────┐   ┌──────────┐   │        │
+//	   │   │   RPC_PENDING   │   │ COMPLETE │   │        │
+//	   │   └────────┬────────┘   └──────────┘   │        │
+//	   │            │                          │        │
+//	   │     CPE Response                      │        │
+//	   │            │                          │        │
+//	   │            ▼                          │        │
+//	   │   ┌─────────────────┐                  │        │
+//	   │   │   RPC_RESPONSE  │──────────────────┘        │
+//	   │   └────────┬────────┘   有更多命令              │
+//	   │            │                                    │
+//	   │     ┌──────┴──────┐                             │
+//	   │     │             │                             │
+//	   │  有更多命令    无更多命令                         │
+//	   │     │             │                             │
+//	   │     │             ▼                             │
+//	   │     │      ┌──────────┐                         │
+//	   └─────┴─────→│ COMPLETE │                         │
+//	                └──────────┘                         │
+//	                     │                                │
+//	                     │ 会话结束                        │
+//	                     ▼                                │
+//	                ┌──────────┐                          │
+//	                │   IDLE   │──────────────────────────┘
+//	                └──────────┘     新 Inform 到达
 type SessionState string
 
 const (
-	// StateIdle indicates no active session. This is the initial state
-	// before a CPE sends an Inform, and the final state after session completion.
-	// Next: INFORM_RECEIVED (when new Inform arrives)
+	// StateIdle 表示无活跃会话。这是 CPE 发送 Inform 之前的初始状态，
+	// 也是会话完成后的最终状态。
+	// 下一状态：INFORM_RECEIVED（新 Inform 到达时）
 	StateIdle SessionState = "IDLE"
 
-	// StateInformReceived indicates ACS has received and parsed an Inform from CPE.
-	// The session is created, Cookie is set, and device events are published.
-	// ACS will send InformResponse and wait for CPE's empty POST.
-	// Next: PROCESSING (on empty POST), COMPLETE (on error/session close)
+	// StateInformReceived 表示 ACS 已接收并解析了 CPE 发来的 Inform。
+	// 此时创建会话、设置 Cookie、发布设备事件。
+	// ACS 将发送 InformResponse 并等待 CPE 的空 POST。
+	// 下一状态：PROCESSING（收到空 POST），COMPLETE（错误/会话关闭）
 	StateInformReceived SessionState = "INFORM_RECEIVED"
 
-	// StateProcessing indicates CPE has sent an empty POST after InformResponse.
-	// ACS checks command queue for pending commands to send to CPE.
-	// Next: RPC_PENDING (if commands exist), COMPLETE (if no commands)
+	// StateProcessing 表示 CPE 在 InformResponse 后发送了空 POST。
+	// ACS 检查命令队列中是否有待发送给 CPE 的命令。
+	// 下一状态：RPC_PENDING（有命令），COMPLETE（无命令）
 	StateProcessing SessionState = "PROCESSING"
 
-	// StateRPCPending indicates ACS has sent an RPC request to CPE and is waiting for response.
-	// The LastRPC field is set to the method name of the pending request.
-	// Next: RPC_RESPONSE (when CPE responds)
+	// StateRPCPending 表示 ACS 已向 CPE 发送 RPC 请求，正在等待响应。
+	// LastRPC 字段被设置为待处理请求的方法名。
+	// 下一状态：RPC_RESPONSE（CPE 响应时）
 	StateRPCPending SessionState = "RPC_PENDING"
 
-	// StateRPCResponse indicates ACS has received an RPC response from CPE.
-	// ACS processes the response and checks for more commands in queue.
-	// Next: PROCESSING (if more commands), RPC_PENDING (for chained commands), COMPLETE (if done)
+	// StateRPCResponse 表示 ACS 已收到 CPE 的 RPC 响应。
+	// ACS 处理响应并检查队列中是否有更多命令。
+	// 下一状态：PROCESSING（处理响应后检查命令），RPC_PENDING（链式命令），COMPLETE（完成）
 	StateRPCResponse SessionState = "RPC_RESPONSE"
 
-	// StateComplete indicates the TR069 session has ended normally.
-	// Resources are released: admission slot freed, metrics recorded, session deleted.
-	// ACS sends empty HTTP 204 response to signal CPE that session is closed.
-	// Next: IDLE (ready for new session)
+	// StateComplete 表示 TR069 会话已正常结束。
+	// 资源被释放：准入槽位释放、指标记录、会话删除。
+	// ACS 发送空的 HTTP 204 响应通知 CPE 会话已关闭。
+	// 下一状态：IDLE（准备好接收新会话）
 	StateComplete SessionState = "COMPLETE"
 )
 
-// Session represents an active TR069/CWMP session with a CPE device.
-// Sessions are created on Inform and deleted on completion or timeout.
-// They are stored in Redis with TTL for automatic cleanup.
+// Session 表示与 CPE 设备之间的活跃 TR069/CWMP 会话。
+// 会话在 Inform 时创建，在完成或超时时删除。
+// 存储在 Redis 中并设置 TTL 以实现自动清理。
 type Session struct {
-	// ID is the unique session identifier (UUID v4 format), used as Cookie value.
-	// Generated on Inform, returned to CPE via Set-Cookie header.
-	// CPE must include this in subsequent requests via Cookie header.
+	// ID 是唯一的会话标识符（UUID v4 格式），用作 Cookie 值。
+	// 在 Inform 时生成，通过 Set-Cookie 响应头返回给 CPE。
+	// CPE 必须在后续请求中通过 Cookie 请求头携带此值。
 	ID string `json:"id"`
 
-	// DeviceSN is the device serial number, extracted from Inform.DeviceId.SerialNumber.
-	// Used as the primary key for device lookup and command queue access.
+	// DeviceSN 是设备序列号，从 Inform.DeviceId.SerialNumber 提取。
+	// 用作设备查找和命令队列访问的主键。
 	DeviceSN string `json:"device_sn"`
 
-	// State is the current session state in the state machine.
+	// State 是状态机中的当前会话状态。
 	State SessionState `json:"state"`
 
-	// LastRPC is the method name of the most recent RPC sent to CPE.
-	// Set when entering RPC_PENDING state. Used for logging and debugging.
-	// Example: "GetParameterValues", "SetParameterValues", "Reboot"
+	// LastRPC 是最近发送给 CPE 的 RPC 方法名。
+	// 在进入 RPC_PENDING 状态时设置。用于日志记录和调试。
+	// 示例："GetParameterValues"、"SetParameterValues"、"Reboot"
 	LastRPC string `json:"last_rpc"`
 
-	// InstanceID is typically the CPE's RemoteAddr (IP:Port), used for
-	// connection-level tracking and logging. May be used for connSessions fallback.
+	// InstanceID 通常是 CPE 的 RemoteAddr（IP:Port），
+	// 用于连接级别的追踪和日志记录。可能作为 connSessions 的备用方案。
 	InstanceID string `json:"instance_id"`
 
-	// StartedAt is when the session was created (Inform received).
+	// StartedAt 是会话创建时间（收到 Inform 时）。
 	StartedAt time.Time `json:"started_at"`
 
-	// UpdatedAt is when the session state was last modified.
+	// UpdatedAt 是会话状态最后修改时间。
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// InformEvents contains the event codes from the Inform message.
-	// Example: "0 BOOTSTRAP", "2 PERIODIC", "4 VALUE CHANGE"
+	// InformEvents 包含 Inform 消息中的事件码。
+	// 示例："0 BOOTSTRAP"、"2 PERIODIC"、"4 VALUE CHANGE"
 	InformEvents []string `json:"inform_events"`
 
-	// CWMPId is the CWMP ID from the Inform's soap:Header, used to correlate
-	// requests and responses in the SOAP conversation.
+	// CWMPId 是 Inform 的 soap:Header 中的 CWMP ID，
+	// 用于关联 SOAP 对话中的请求和响应。
 	CWMPId string `json:"cwmp_id"`
 
-	// SessionTimeout is the CPE's suggested session timeout in seconds,
-	// typically from Device.ManagementServer.SessionTimeout parameter.
-	// ACS may use this to set session TTL in Redis.
+	// SessionTimeout 是 CPE 建议的会话超时时间（秒），
+	// 通常来自 Device.ManagementServer.SessionTimeout 参数。
+	// ACS 可使用此值设置 Redis 中的会话 TTL。
 	SessionTimeout int `json:"session_timeout"`
 }
 
-// validTransitions defines the allowed state transitions.
-// This enforces the TR069 session protocol flow and prevents invalid state changes.
+// validTransitions 定义允许的状态转换。
+// 这确保了 TR069 会话协议流程，防止无效的状态变更。
 var validTransitions = map[SessionState][]SessionState{
-	// IDLE can only transition to INFORM_RECEIVED (new session starts)
+	// IDLE 只能转换到 INFORM_RECEIVED（新会话开始）
 	StateIdle: {StateInformReceived},
 
-	// INFORM_RECEIVED can transition to:
-	// - PROCESSING: CPE sent empty POST, checking for commands
-	// - COMPLETE: Session closed prematurely (error, timeout, or no response)
+	// INFORM_RECEIVED 可转换到：
+	// - PROCESSING：CPE 发送了空 POST，正在检查命令
+	// - COMPLETE：会话提前关闭（错误、超时或无响应）
 	StateInformReceived: {StateProcessing, StateComplete},
 
-	// PROCESSING can transition to:
-	// - RPC_PENDING: Commands found in queue, sending to CPE
-	// - COMPLETE: No commands, session ends normally
+	// PROCESSING 可转换到：
+	// - RPC_PENDING：队列中找到命令，正在发送给 CPE
+	// - COMPLETE：无命令，会话正常结束
 	StateProcessing: {StateRPCPending, StateComplete},
 
-	// RPC_PENDING can only transition to RPC_RESPONSE (CPE responded)
+	// RPC_PENDING 只能转换到 RPC_RESPONSE（CPE 响应）
 	StateRPCPending: {StateRPCResponse},
 
-	// RPC_RESPONSE can transition to:
-	// - PROCESSING: Check for more commands after processing response
-	// - RPC_PENDING: Chain to next command immediately
-	// - COMPLETE: No more commands, session ends
+	// RPC_RESPONSE 可转换到：
+	// - PROCESSING：处理响应后检查更多命令
+	// - RPC_PENDING：立即链式执行下一个命令
+	// - COMPLETE：无更多命令，会话结束
 	StateRPCResponse: {StateProcessing, StateRPCPending, StateComplete},
 
-	// COMPLETE transitions back to IDLE (ready for new session)
+	// COMPLETE 转换回 IDLE（准备好接收新会话）
 	StateComplete: {StateIdle},
 }
 
-// TransitionTo attempts to move the session to a new state.
+// TransitionTo 尝试将会话转换到新状态。
 func (s *Session) TransitionTo(newState SessionState) error {
 	allowed, ok := validTransitions[s.State]
 	if !ok {
-		return fmt.Errorf("no transitions defined for state %s", s.State)
+		return fmt.Errorf("状态 %s 未定义转换规则", s.State)
 	}
 
 	for _, a := range allowed {
@@ -181,16 +180,16 @@ func (s *Session) TransitionTo(newState SessionState) error {
 		}
 	}
 
-	return fmt.Errorf("invalid session transition: %s → %s", s.State, newState)
+	return fmt.Errorf("无效的会话状态转换: %s → %s", s.State, newState)
 }
 
-// MarshalJSON serializes the session to JSON for Redis storage.
+// MarshalJSON 将会话序列化为 JSON，用于 Redis 存储。
 func (s *Session) MarshalJSON() ([]byte, error) {
 	type Alias Session
 	return json.Marshal((*Alias)(s))
 }
 
-// UnmarshalJSON deserializes the session from JSON.
+// UnmarshalJSON 从 JSON 反序列化会话。
 func (s *Session) UnmarshalJSON(data []byte) error {
 	type Alias Session
 	return json.Unmarshal(data, (*Alias)(s))
