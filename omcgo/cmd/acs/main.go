@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/bootstrap"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -53,6 +54,15 @@ func runACS(cmd *cobra.Command, args []string) error {
 	sessionStore := acs.NewRedisSessionStore(app.Redis, cfg.Session.Timeout)
 	cmdQueue := cmdqueue.NewRedisCommandQueue(app.Redis)
 
+	// Create TaskService if PostgreSQL is available
+	var taskService *task.TaskService
+	if app.PgPool != nil {
+		taskQueue := task.NewRedisTaskQueue(app.Redis)
+		taskRepo := task.NewPgTaskRepository(app.PgPool)
+		taskService = task.NewTaskService(taskQueue, taskRepo, app.Logger)
+		app.Logger.Info("task service initialized")
+	}
+
 	// Get request ID prefix from config, default to "acs"
 	requestIDPrefix := cfg.RequestIDPrefix
 	if requestIDPrefix == "" {
@@ -62,6 +72,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 	deps := acs.NewDefaultDeps(
 		sessionStore,
 		cmdQueue,
+		taskService,
 		app.EventBus,
 		cfg.Auth.Mode, cfg.Auth.Username, cfg.Auth.Password,
 		cfg.RateLimit,

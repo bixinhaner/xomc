@@ -12,6 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
@@ -27,7 +28,8 @@ type ACSServer struct {
 // ServerDeps holds the dependencies for the ACS server.
 type ServerDeps struct {
 	SessionStore    SessionStore
-	CommandQueue    cmdqueue.CommandQueue
+	CommandQueue    cmdqueue.CommandQueue // deprecated: use TaskService instead
+	TaskService     *task.TaskService     // new task management service
 	EventBus        event.EventBus
 	Authenticator   auth.DeviceAuthenticator
 	RPCDispatcher   *rpc.Dispatcher
@@ -44,6 +46,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	h := &Handler{
 		sessionStore:    deps.SessionStore,
 		commandQueue:    deps.CommandQueue,
+		taskService:     deps.TaskService,
 		eventBus:        deps.EventBus,
 		authenticator:   deps.Authenticator,
 		rpcDispatcher:   deps.RPCDispatcher,
@@ -126,6 +129,7 @@ func RegisterMetrics(reg prometheus.Registerer) *ACSMetrics {
 func NewDefaultDeps(
 	sessionStore SessionStore,
 	cmdQueue cmdqueue.CommandQueue,
+	taskSvc *task.TaskService,
 	eventBus event.EventBus,
 	authMode, authUser, authPass string,
 	rateCfg appconfig.RateLimitConfig,
@@ -137,6 +141,7 @@ func NewDefaultDeps(
 	return ServerDeps{
 		SessionStore:    sessionStore,
 		CommandQueue:    cmdQueue,
+		TaskService:     taskSvc,
 		EventBus:        eventBus,
 		Authenticator:   auth.NewAuthenticator(authMode, authUser, authPass),
 		RPCDispatcher:   rpc.NewDispatcher(),

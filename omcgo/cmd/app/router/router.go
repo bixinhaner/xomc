@@ -40,6 +40,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/provision"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // Setup creates all repository/service/handler instances and registers routes.
@@ -248,6 +249,14 @@ func Setup(r *gin.Engine, deps *Deps) {
 
 	// Software routes
 	softwareHandler.RegisterRoutes(v1)
+
+	// Task Queue module (设备任务队列)
+	taskQueue := task.NewRedisTaskQueue(redisClient)
+	taskRepo := task.NewPgTaskRepository(pgPool)
+	taskService := task.NewTaskService(taskQueue, taskRepo, logger)
+	taskHandler := task.NewHandler(taskService)
+	taskHandler.RegisterRoutes(v1)
+	logger.Info("task queue module initialized")
 
 	// Interop Testing module (F10)
 	testRunner := interop.NewConformanceTestRunner(deviceRepo, paramRepo, dmRegistry, cmdQueue, logger)

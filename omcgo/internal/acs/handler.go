@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
@@ -36,7 +38,8 @@ type connSessionEntry struct {
 // Handler processes TR069/CWMP HTTP requests.
 type Handler struct {
 	sessionStore    SessionStore
-	commandQueue    cmdqueue.CommandQueue
+	commandQueue    cmdqueue.CommandQueue // deprecated: use taskService instead
+	taskService     *task.TaskService     // new task management service
 	eventBus        event.EventBus
 	authenticator   auth.DeviceAuthenticator
 	rpcDispatcher   *rpc.Dispatcher
@@ -280,7 +283,55 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 	}
 
-	// Check command queue for pending commands
+	// Priority 1: Try new TaskService
+	if h.taskService != nil {
+		taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)
+		if err != nil {
+			log.Error("pop task from queue", zap.Error(err))
+		} else if taskItem != nil {
+			// Generate CWMP ID for this task
+			cwmpID := task.GenerateCWMPID(taskItem.Method)
+
+			// Mark task as sent
+			if err := h.taskService.MarkTaskSent(r.Context(), taskItem.ID, cwmpID); err != nil {
+				log.Error("mark task sent", zap.Error(err), zap.String("task_id", taskItem.ID))
+			}
+
+			// Update session state
+			session.State = StateRPCPending
+			session.LastRPC = taskItem.Method
+			session.UpdatedAt = time.Now()
+			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
+
+			// Build RPC request with CWMP ID
+			cmd := &cmdqueue.Command{
+				ID:         taskItem.ID,
+				Method:     taskItem.Method,
+				Params:     taskItem.Params,
+				CommandKey: taskItem.CommandKey,
+			}
+			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
+			if err != nil {
+				log.Error("build RPC request from task", zap.Error(err))
+				h.metrics.RPCErrorsTotal.WithLabelValues(taskItem.Method).Inc()
+				// Mark task as failed
+				h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, 0, err.Error())
+			} else {
+				log.Info("ACS sending RPC request from task",
+					zap.String("device_sn", deviceSN),
+					zap.String("method", taskItem.Method),
+					zap.String("task_id", taskItem.ID),
+					zap.String("cwmp_id", cwmpID),
+				)
+				// Set session cookie in response
+				h.setSessionCookie(w, sessionID)
+				h.sendSOAPResponse(w, respData, log)
+				return
+			}
+		}
+	}
+
+	// Priority 2: Fallback to legacy command queue (for backward compatibility)
 	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 	if err != nil {
 		log.Error("pop command queue", zap.Error(err))
@@ -350,10 +401,78 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	session.UpdatedAt = time.Now()
 	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
+	// Check if this is a task-based RPC (new task queue system)
+	if h.taskService != nil && cwmpID != "" {
+		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
+		if err != nil {
+			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
+		} else if taskItem != nil {
+			// Check for SOAP fault in response
+			if isFault, faultCode, faultMsg := detectSOAPFault(body); isFault {
+				// Task failed with SOAP fault
+				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
+					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+				}
+				log.Warn("task failed with SOAP fault",
+					zap.String("task_id", taskItem.ID),
+					zap.Int("fault_code", faultCode),
+					zap.String("fault_msg", faultMsg))
+			} else {
+				// Task completed successfully - store raw response as result
+				resultJSON, _ := json.Marshal(map[string]interface{}{
+					"method":       string(method),
+					"raw_response": string(body),
+				})
+				if markErr := h.taskService.MarkTaskCompleted(r.Context(), taskItem.ID, resultJSON); markErr != nil {
+					log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+				}
+				log.Info("task completed", zap.String("task_id", taskItem.ID), zap.String("method", taskItem.Method))
+			}
+		}
+	}
+
 	// Publish RPC response event for provisioning engine.
 	h.publishRPCResponseEvent(r.Context(), deviceSN, method, log)
 
-	// Check if there are more commands in the queue (multi-step RPC).
+	// Priority 1: Try new TaskService for next task
+	if h.taskService != nil {
+		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
+		if err != nil {
+			log.Error("pop task from queue", zap.Error(err))
+		} else if nextTask != nil {
+			// Generate CWMP ID for this task
+			newCWMPID := task.GenerateCWMPID(nextTask.Method)
+
+			// Mark task as sent
+			if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
+				log.Error("mark task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
+			}
+
+			session.State = StateRPCPending
+			session.LastRPC = nextTask.Method
+			session.UpdatedAt = time.Now()
+			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
+
+			cmd := &cmdqueue.Command{
+				ID:         nextTask.ID,
+				Method:     nextTask.Method,
+				Params:     nextTask.Params,
+				CommandKey: nextTask.CommandKey,
+			}
+			respData, err := h.rpcDispatcher.BuildRequest(cmd, newCWMPID)
+			if err != nil {
+				log.Error("build next RPC request from task", zap.Error(err))
+				h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
+				h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
+			} else {
+				h.setSessionCookie(w, sessionID)
+				h.sendSOAPResponse(w, respData, log)
+				return
+			}
+		}
+	}
+
+	// Priority 2: Fallback to legacy command queue (for backward compatibility)
 	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 	if err != nil {
 		log.Error("pop command queue", zap.Error(err))
@@ -712,4 +831,35 @@ func generateSessionID() string {
 	uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40
 	uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80
 	return hex.EncodeToString(uuidBytes)
+}
+
+// detectSOAPFault 检查 SOAP 响应中是否包含 Fault
+// 返回: (isFault, faultCode, faultString)
+func detectSOAPFault(body []byte) (bool, int, string) {
+	// 简单检查 XML 中是否包含 Fault 元素
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, "<Fault>") || strings.Contains(bodyStr, "<soap:Fault>") || strings.Contains(bodyStr, "<SOAP-ENV:Fault>") {
+		// 提取 faultcode 和 faultstring (简化处理)
+		faultCode := 0
+		faultString := "SOAP fault"
+
+		// 尝试提取 faultcode
+		if codeStart := strings.Index(bodyStr, "<faultcode>"); codeStart != -1 {
+			codeStart += len("<faultcode>")
+			if codeEnd := strings.Index(bodyStr[codeStart:], "</faultcode>"); codeEnd != -1 {
+				faultString = strings.TrimSpace(bodyStr[codeStart : codeStart+codeEnd])
+			}
+		}
+
+		// 尝试提取 faultstring
+		if strStart := strings.Index(bodyStr, "<faultstring>"); strStart != -1 {
+			strStart += len("<faultstring>")
+			if strEnd := strings.Index(bodyStr[strStart:], "</faultstring>"); strEnd != -1 {
+				faultString = strings.TrimSpace(bodyStr[strStart : strStart+strEnd])
+			}
+		}
+
+		return true, faultCode, faultString
+	}
+	return false, 0, ""
 }

@@ -90,7 +90,7 @@ func InitForApp(ctx context.Context, cfg *appconfig.AppConfig) (*App, error) {
 	return app, nil
 }
 
-// InitForACS initializes infrastructure for the ACS engine (Redis + NATS + MinIO).
+// InitForACS initializes infrastructure for the ACS engine (Redis + NATS + MinIO + PostgreSQL).
 func InitForACS(ctx context.Context, cfg *appconfig.ACSConfig) (*App, error) {
 	app, err := newBase(cfg.Log, cfg.Metrics.Port)
 	if err != nil {
@@ -102,6 +102,12 @@ func InitForACS(ctx context.Context, cfg *appconfig.ACSConfig) (*App, error) {
 	}
 	if err := app.connectNATS(ctx, cfg.NATS); err != nil {
 		return nil, err
+	}
+	// PostgreSQL connection for task persistence
+	if cfg.DB.DSN != "" {
+		if err := app.connectPostgres(ctx, cfg.DB); err != nil {
+			return nil, err
+		}
 	}
 	// MinIO connection for file upload proxy
 	if cfg.MinIO.Endpoint != "" {

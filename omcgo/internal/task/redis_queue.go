@@ -21,11 +21,11 @@ const (
 
 // RedisTaskQueue 实现 TaskQueue 接口
 type RedisTaskQueue struct {
-	client *redis.Client
+	client redis.UniversalClient
 }
 
 // NewRedisTaskQueue 创建 Redis 任务队列
-func NewRedisTaskQueue(client *redis.Client) *RedisTaskQueue {
+func NewRedisTaskQueue(client redis.UniversalClient) *RedisTaskQueue {
 	return &RedisTaskQueue{client: client}
 }
 
