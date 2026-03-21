@@ -261,7 +261,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 // The ACS should then either send an RPC request or an empty response to close the session.
 func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.Logger) {
 	// Look up session from Cookie
-	session, sessionID := h.getSessionFromCookie(r)
+	session, sessionID := h.getSessionFromCookie(r, log)
 	if session == nil {
 		// No valid session — just close.
 		log.Warn("empty POST without valid session cookie", zap.String("remote_addr", r.RemoteAddr))
@@ -333,7 +333,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	)
 
 	// Look up session from Cookie
-	session, sessionID := h.getSessionFromCookie(r)
+	session, sessionID := h.getSessionFromCookie(r, log)
 	if session == nil {
 		log.Warn("no valid session cookie for RPC response", zap.String("remote_addr", r.RemoteAddr))
 		w.WriteHeader(http.StatusNoContent)
@@ -428,7 +428,7 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 	// Get deviceSN from Cookie session
 	deviceSN := ""
 	var sessionID string
-	if session, sid := h.getSessionFromCookie(r); session != nil {
+	if session, sid := h.getSessionFromCookie(r, log); session != nil {
 		deviceSN = session.DeviceSN
 		sessionID = sid
 	}
@@ -479,7 +479,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 	// Get deviceSN from Cookie session
 	deviceSN := ""
 	var sessionID string
-	if session, sid := h.getSessionFromCookie(r); session != nil {
+	if session, sid := h.getSessionFromCookie(r, log); session != nil {
 		deviceSN = session.DeviceSN
 		sessionID = sid
 	}
@@ -657,17 +657,18 @@ func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte, log *zap.
 
 // getSessionFromCookie retrieves the session from the Cookie header.
 // Returns nil if no valid session cookie found.
-func (h *Handler) getSessionFromCookie(r *http.Request) (*Session, string) {
+// The log parameter should be a context-aware logger with request_id.
+func (h *Handler) getSessionFromCookie(r *http.Request, log *zap.Logger) (*Session, string) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil {
-		h.logger.Debug("no session cookie", zap.Error(err), zap.String("remote_addr", r.RemoteAddr))
+		log.Debug("no session cookie", zap.Error(err), zap.String("remote_addr", r.RemoteAddr))
 		return nil, ""
 	}
 
 	sessionID := cookie.Value
 	session, err := h.sessionStore.GetByID(r.Context(), sessionID)
 	if err != nil {
-		h.logger.Error("get session by cookie", zap.Error(err), zap.String("session_id", sessionID))
+		log.Error("get session by cookie", zap.Error(err), zap.String("session_id", sessionID))
 		return nil, sessionID
 	}
 

@@ -4,26 +4,21 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"go.uber.org/zap"
 )
 
 // RequestLogger returns a Gin middleware that logs request details.
-func RequestLogger(logger *zap.Logger) gin.HandlerFunc {
+// It uses the request_id from context (set by RequestID middleware) for tracing.
+func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		requestID := c.GetHeader("X-Request-ID")
-		if requestID == "" {
-			requestID = uuid.New().String()
-		}
-		c.Set("request_id", requestID)
-		c.Header("X-Request-ID", requestID)
-
 		start := time.Now()
 		c.Next()
 		duration := time.Since(start)
 
-		logger.Info("request",
-			zap.String("request_id", requestID),
+		// Use context-aware logger which automatically includes request_id
+		log := logger.L(c.Request.Context())
+		log.Info("request",
 			zap.String("method", c.Request.Method),
 			zap.String("path", c.Request.URL.Path),
 			zap.Int("status", c.Writer.Status()),

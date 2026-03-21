@@ -162,7 +162,7 @@ func Setup(r *gin.Engine, deps *Deps) {
 	r.Use(middleware.CORS(middleware.CORSConfig{
 		AllowOrigins: corsOrigins,
 	}))
-	r.Use(middleware.RequestLogger(logger))
+	r.Use(middleware.RequestLogger())
 	r.Use(middleware.PrometheusMetrics(metricsReg))
 
 	// Unified JSON 404 for unmatched routes
