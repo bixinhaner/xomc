@@ -22,22 +22,28 @@ func NewHandler(service *TaskService) *Handler {
 }
 
 // RegisterRoutes 注册路由
+// 所有接口使用查询参数 device_sn 而非路径参数，避免与 /devices/:id 路由冲突
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
-	tasks := r.Group("/devices/:device_sn/tasks")
+	tasks := r.Group("/devices/tasks")
 	{
-		tasks.POST("", h.CreateTask)
-		tasks.GET("", h.GetTaskHistory)
-		tasks.GET("/pending", h.GetPendingTasks)
-		tasks.GET("/:task_id", h.GetTask)
-		tasks.DELETE("/:task_id", h.CancelTask)
-		tasks.GET("/stats", h.GetTaskStats)
+		tasks.POST("", h.CreateTask)              // POST /api/v1/devices/tasks?device_sn=xxx
+		tasks.GET("", h.GetTaskHistory)           // GET /api/v1/devices/tasks?device_sn=xxx
+		tasks.GET("/pending", h.GetPendingTasks)  // GET /api/v1/devices/tasks/pending?device_sn=xxx
+		tasks.GET("/:task_id", h.GetTask)         // GET /api/v1/devices/tasks/:task_id
+		tasks.DELETE("/:task_id", h.CancelTask)   // DELETE /api/v1/devices/tasks/:task_id
+		tasks.GET("/stats", h.GetTaskStats)       // GET /api/v1/devices/tasks/stats?device_sn=xxx
+		tasks.POST("/batch", h.BatchCreateTasks)  // POST /api/v1/devices/tasks/batch?device_sn=xxx
+		tasks.POST("/:task_id/retry", h.RetryTask) // POST /api/v1/devices/tasks/:task_id/retry
 	}
+
+	// 管理员接口
+	r.POST("/tasks/purge", h.PurgeOldTasks)
 }
 
 // CreateTask 创建任务
-// POST /api/v1/devices/:device_sn/tasks
+// POST /api/v1/devices/tasks?device_sn=xxx
 func (h *Handler) CreateTask(c *gin.Context) {
-	deviceSN := c.Param("device_sn")
+	deviceSN := c.Query("device_sn")
 	if deviceSN == "" {
 		errors.AbortWithError(c, http.StatusBadRequest, errors.ErrInvalidInput)
 		return
@@ -80,7 +86,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 }
 
 // GetTask 获取任务详情
-// GET /api/v1/devices/:device_sn/tasks/:task_id
+// GET /api/v1/devices/tasks/:task_id
 func (h *Handler) GetTask(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
@@ -107,9 +113,9 @@ func (h *Handler) GetTask(c *gin.Context) {
 }
 
 // GetPendingTasks 获取待处理任务列表
-// GET /api/v1/devices/:device_sn/tasks/pending
+// GET /api/v1/devices/tasks/pending?device_sn=xxx
 func (h *Handler) GetPendingTasks(c *gin.Context) {
-	deviceSN := c.Param("device_sn")
+	deviceSN := c.Query("device_sn")
 	if deviceSN == "" {
 		errors.AbortWithError(c, http.StatusBadRequest, errors.ErrInvalidInput)
 		return
@@ -132,9 +138,9 @@ func (h *Handler) GetPendingTasks(c *gin.Context) {
 }
 
 // GetTaskHistory 获取任务历史
-// GET /api/v1/devices/:device_sn/tasks
+// GET /api/v1/devices/tasks?device_sn=xxx
 func (h *Handler) GetTaskHistory(c *gin.Context) {
-	deviceSN := c.Param("device_sn")
+	deviceSN := c.Query("device_sn")
 	if deviceSN == "" {
 		errors.AbortWithError(c, http.StatusBadRequest, errors.ErrInvalidInput)
 		return
@@ -173,7 +179,7 @@ func (h *Handler) GetTaskHistory(c *gin.Context) {
 }
 
 // CancelTask 取消任务
-// DELETE /api/v1/devices/:device_sn/tasks/:task_id
+// DELETE /api/v1/devices/tasks/:task_id
 func (h *Handler) CancelTask(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
@@ -203,9 +209,9 @@ func (h *Handler) CancelTask(c *gin.Context) {
 }
 
 // GetTaskStats 获取任务统计
-// GET /api/v1/devices/:device_sn/tasks/stats
+// GET /api/v1/devices/tasks/stats?device_sn=xxx
 func (h *Handler) GetTaskStats(c *gin.Context) {
-	deviceSN := c.Param("device_sn")
+	deviceSN := c.Query("device_sn")
 	if deviceSN == "" {
 		errors.AbortWithError(c, http.StatusBadRequest, errors.ErrInvalidInput)
 		return
@@ -227,16 +233,16 @@ func (h *Handler) GetTaskStats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"by_status":   stats,
+			"by_status":    stats,
 			"queue_length": queueLen,
 		},
 	})
 }
 
 // BatchCreateTasks 批量创建任务
-// POST /api/v1/devices/:device_sn/tasks/batch
+// POST /api/v1/devices/tasks/batch?device_sn=xxx
 func (h *Handler) BatchCreateTasks(c *gin.Context) {
-	deviceSN := c.Param("device_sn")
+	deviceSN := c.Query("device_sn")
 	if deviceSN == "" {
 		errors.AbortWithError(c, http.StatusBadRequest, errors.ErrInvalidInput)
 		return
@@ -282,7 +288,7 @@ func (h *Handler) BatchCreateTasks(c *gin.Context) {
 }
 
 // RetryTask 重试任务
-// POST /api/v1/devices/:device_sn/tasks/:task_id/retry
+// POST /api/v1/devices/tasks/:task_id/retry
 func (h *Handler) RetryTask(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
