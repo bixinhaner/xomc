@@ -2,10 +2,52 @@
 -- 000047: 初始化数据模型定义
 --    为系统提供开箱即用的 TR069 数据模型
 --    支持三级回退：product -> oui -> carrier_default
+--
+--    采用先删除后插入策略，避免部分唯一索引冲突
 -- ============================================================================
 
 -- ============================================================================
--- 1. 运营商默认级数据模型 (carrier_default scope)
+-- 1. 清理可能冲突的数据
+--    删除所有可能触发唯一约束冲突的记录
+-- ============================================================================
+
+-- 删除 carrier_default 级别可能冲突的记录
+DELETE FROM data_model_definitions
+WHERE scope = 'carrier_default'
+AND is_active = true
+AND (carrier, technology) IN (
+    ('cmcc', 'lte'),
+    ('cmcc', 'nr'),
+    ('ctcc', 'lte'),
+    ('cucc', 'lte')
+);
+
+-- 删除 oui 级别可能冲突的记录
+DELETE FROM data_model_definitions
+WHERE scope = 'oui'
+AND is_active = true
+AND (carrier, technology, oui) IN (
+    ('cmcc', 'lte', '001A2B')
+);
+
+-- 删除 product 级别可能冲突的记录
+DELETE FROM data_model_definitions
+WHERE scope = 'product'
+AND is_active = true
+AND (carrier, technology, oui, product_class) IN (
+    ('cmcc', 'lte', '001A2B', 'SmallCell-LTE')
+);
+
+-- 删除相同 ID 的记录（如果存在）
+DELETE FROM data_model_definitions WHERE id = '30000047-0001-4000-8000-000000000001';
+DELETE FROM data_model_definitions WHERE id = '30000047-0001-4000-8000-000000000002';
+DELETE FROM data_model_definitions WHERE id = '30000047-0001-4000-8000-000000000003';
+DELETE FROM data_model_definitions WHERE id = '30000047-0001-4000-8000-000000000004';
+DELETE FROM data_model_definitions WHERE id = '30000047-0002-4000-8000-000000000001';
+DELETE FROM data_model_definitions WHERE id = '30000047-0003-4000-8000-000000000001';
+
+-- ============================================================================
+-- 2. 运营商默认级数据模型 (carrier_default scope)
 --    最低优先级，作为所有设备的兜底
 -- ============================================================================
 
@@ -26,7 +68,7 @@ INSERT INTO data_model_definitions (
         "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}
     }'::jsonb,
     '中国移动 LTE 默认数据模型，适用于所有未识别的 LTE 设备'
-) ON CONFLICT (id) DO NOTHING;
+);
 
 -- CMCC NR 默认模型
 INSERT INTO data_model_definitions (
@@ -42,7 +84,7 @@ INSERT INTO data_model_definitions (
         "Device.ManagementServer": {"access": "rw"}
     }'::jsonb,
     '中国移动 NR 默认数据模型'
-) ON CONFLICT (id) DO NOTHING;
+);
 
 -- CTCC LTE 默认模型
 INSERT INTO data_model_definitions (
@@ -57,7 +99,7 @@ INSERT INTO data_model_definitions (
         "Device.ManagementServer": {"access": "rw"}
     }'::jsonb,
     '中国电信 LTE 默认数据模型'
-) ON CONFLICT (id) DO NOTHING;
+);
 
 -- CUCC LTE 默认模型
 INSERT INTO data_model_definitions (
@@ -72,10 +114,10 @@ INSERT INTO data_model_definitions (
         "Device.ManagementServer": {"access": "rw"}
     }'::jsonb,
     '中国联通 LTE 默认数据模型'
-) ON CONFLICT (id) DO NOTHING;
+);
 
 -- ============================================================================
--- 2. OUI 级数据模型 (oui scope)
+-- 3. OUI 级数据模型 (oui scope)
 --    厂商级默认，适用于特定厂商的所有产品
 -- ============================================================================
 
@@ -106,10 +148,10 @@ INSERT INTO data_model_definitions (
         "Device.IP.Interface.1.IPv4Address.1.IPAddress": {"access": "r", "type": "string"}
     }'::jsonb,
     'BaiCells 厂商 LTE 设备默认配置'
-) ON CONFLICT (id) DO NOTHING;
+);
 
 -- ============================================================================
--- 3. Product 级数据模型 (product scope)
+-- 4. Product 级数据模型 (product scope)
 --    最具体的配置，针对特定产品型号
 -- ============================================================================
 
@@ -140,4 +182,4 @@ INSERT INTO data_model_definitions (
         "Device.IP.Interface.1.IPv4Address.1.IPAddress": {"access": "r", "type": "string"}
     }'::jsonb,
     'BaiCells SmallCell-LTE 产品数据模型，用于自动开站'
-) ON CONFLICT (id) DO NOTHING;
+);

@@ -23,7 +23,7 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
 
 COPY --from=builder /build/bin/omcgo-acs /usr/local/bin/omcgo-acs
-COPY --from=builder /build/cmd/acs/etc/config.prod.yaml /etc/omcgo/acs.yaml
+COPY --from=builder /build/cmd/acs/etc/config.dev.yaml /etc/omcgo/acs.yaml
 
 EXPOSE 7547 7548 9090
 

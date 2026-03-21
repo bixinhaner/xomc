@@ -53,6 +53,8 @@ func newBase(logCfg appconfig.LogConfig, metricsPort int) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init logger: %w", err)
 	}
+	// Set as global logger so logger.L(ctx) can access it via zap.L()
+	zap.ReplaceGlobals(logger)
 	return &App{
 		Logger:      logger,
 		GS:          components.NewGracefulShutdown(30*time.Second, logger),
