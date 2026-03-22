@@ -333,15 +333,15 @@
 
 ## 四、缺失功能清单
 
-以下功能在代码中未发现实现或仅为桩代码：
+> **更新（2026-03-22）**：以下 5 项缺失功能已全部实现，缺失清单清零。
 
-| 功能 | 现状 | 影响 |
-|------|------|------|
-| gRPC App→ACS 通信 | TODO 标记，未实现 | 设备重启/配置下发需 ACS 配合时依赖 |
-| `omcctl` CLI 管理工具 | 骨架代码 | 运维工具缺失（低优先级） |
-| CAPTCHA/防暴力破解 | 未实现 | 登录安全风险 |
-| API Key 认证（程序化访问） | 未实现 | 北向/OSS 集成时可能需要 |
-| Webhook 请求签名 | 未实现 | 北向推送验证 |
+| 功能 | 现状 | 实现方案 |
+|------|------|---------|
+| gRPC App→ACS 通信 | ✅ 已实现 | 通过 Redis 命令队列 + Connection Request 实现设备命令下发（`device/service.go`） |
+| `omcctl` CLI 管理工具 | ✅ 已实现 | 完整 CLI 工具：device/alarm/pm/system 四大子命令，支持 API Key 认证和 table/json 输出 |
+| CAPTCHA/防暴力破解 | ✅ 已实现 | 数学验证码（Redis 存储）+ 登录失败计数 + 自动账户锁定（3 次→CAPTCHA，10 次→锁定 30 分钟） |
+| API Key 认证（程序化访问） | ✅ 已实现 | 完整 API Key 生命周期（创建/列表/吊销），bcrypt 哈希存储，X-API-Key 头认证 |
+| Webhook 请求签名 | ✅ 已实现 | HMAC-SHA256 签名（`X-Webhook-Signature` + `X-Webhook-Timestamp`），防篡改 + 防重放 |
 
 ---
 
