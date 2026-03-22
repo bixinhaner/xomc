@@ -110,7 +110,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	if cfg.Provision.AutoDiscovery.Enabled {
 		discoverySvc := provision.NewDiscoveryService(
 			discoveryLogRepo, dmRepo, dmRegistry, cmdQueue,
-			cfg.Provision.AutoDiscovery, logger,
+			deps.Redis, cfg.Provision.AutoDiscovery, logger,
 		)
 		provisionEngine.SetDiscoveryService(discoverySvc)
 		logger.Info("auto-discovery service enabled")

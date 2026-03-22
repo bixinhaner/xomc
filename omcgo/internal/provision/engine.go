@@ -486,9 +486,10 @@ func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	// Call discovery service to process the result.
+	// Call discovery service to process this level's GPN response.
+	// HandleLevelGPNResponse returns a non-nil DataModel only when all levels are done.
 	if e.discoveryService != nil {
-		dm, err := e.discoveryService.HandleDiscoveryResult(ctx, dev, payload.ParameterInfos)
+		dm, err := e.discoveryService.HandleLevelGPNResponse(ctx, dev, payload.ParameterInfos)
 		if err != nil {
 			e.logger.Error("handle discovery result", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 			return nil

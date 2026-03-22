@@ -111,6 +111,7 @@ type AutoDiscoveryConfig struct {
 	GPVBatchSize      int           `mapstructure:"gpv_batch_size"`
 	GPVTimeout        time.Duration `mapstructure:"gpv_timeout"`
 	AutoActivateModel bool          `mapstructure:"auto_activate_model"`
+	ExcludePaths      []string      `mapstructure:"exclude_paths"`
 }
 
 // AutoSyncConfig holds settings for automatic parameter value synchronization.
