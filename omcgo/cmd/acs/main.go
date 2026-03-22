@@ -8,6 +8,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/spf13/cobra"
@@ -89,6 +90,31 @@ func runACS(cmd *cobra.Command, args []string) error {
 	go func() {
 		errCh <- acsServer.Start()
 	}()
+
+	// Start STUN UDP server for NAT traversal and Connection Request
+	if cfg.STUN.Enabled {
+		stunStore := stun.NewStore(inf.Redis, inf.Logger)
+		stunCfg := stun.Config{
+			Enabled:      cfg.STUN.Enabled,
+			ListenAddr:   cfg.STUN.ListenAddr,
+			WorkerSize:   cfg.STUN.WorkerSize,
+			BufferSize:   cfg.STUN.BufferSize,
+			CacheTTL:     cfg.STUN.CacheTTL,
+			SharedSecret: cfg.STUN.SharedSecret,
+		}
+		stunServer := stun.NewServer(stunCfg, stunStore, inf.Logger)
+		if inf.MetricsReg != nil {
+			stunServer.SetMetrics(stun.NewMetrics(inf.MetricsReg))
+		}
+		inf.GS.Register("stun-udp", 2, func(ctx context.Context) error { return stunServer.Stop() })
+
+		go func() {
+			if err := stunServer.Start(context.Background()); err != nil {
+				inf.Logger.Error("STUN server error", zap.Error(err))
+			}
+		}()
+		inf.Logger.Info("STUN UDP server enabled", zap.String("addr", cfg.STUN.ListenAddr))
+	}
 
 	return inf.WaitAndShutdown(errCh)
 }

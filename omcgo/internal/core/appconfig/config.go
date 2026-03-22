@@ -15,6 +15,7 @@ type ACSConfig struct {
 	Session                 SessionConfig      `mapstructure:"session"`
 	RateLimit               RateLimitConfig    `mapstructure:"rate_limit"`
 	Auth                    AuthConfig         `mapstructure:"auth"`
+	STUN                    STUNConfig         `mapstructure:"stun"`
 	Redis                   RedisConfig        `mapstructure:"redis"`
 	NATS                    NATSConfig         `mapstructure:"nats"`
 	DB                      PostgresConfig     `mapstructure:"db"`
@@ -25,6 +26,16 @@ type ACSConfig struct {
 	Log                     LogConfig          `mapstructure:"log"`
 	RequestIDPrefix         string             `mapstructure:"request_id_prefix"`          // 请求 ID 前缀，如 "acs"
 	EnableTestTaskInjection bool               `mapstructure:"enable_test_task_injection"` // 启用随机测试任务注入（仅用于测试）
+}
+
+// STUNConfig holds STUN UDP server settings for NAT traversal and Connection Request.
+type STUNConfig struct {
+	Enabled      bool          `mapstructure:"enabled"`
+	ListenAddr   string        `mapstructure:"listen_addr"`   // UDP listen address, e.g. ":3478"
+	WorkerSize   int           `mapstructure:"worker_size"`   // number of reader goroutines
+	BufferSize   int           `mapstructure:"buffer_size"`   // UDP read buffer size in bytes
+	CacheTTL     time.Duration `mapstructure:"cache_ttl"`     // STUN address cache TTL
+	SharedSecret string        `mapstructure:"shared_secret"` // HMAC-SHA1 secret for CPE UDP CR
 }
 
 // UploadConfig holds file upload server settings.

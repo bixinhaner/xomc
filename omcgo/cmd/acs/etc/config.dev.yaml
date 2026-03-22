@@ -26,6 +26,14 @@ auth:
   username: ""
   password: ""
 
+stun:
+  enabled: true
+  listen_addr: ":3478"
+  worker_size: 4
+  buffer_size: 2048
+  cache_ttl: 30m
+  shared_secret: "dps"
+
 redis:
   addrs:
     - "localhost:6379"
