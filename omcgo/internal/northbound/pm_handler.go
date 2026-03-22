@@ -12,19 +12,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// PMHandler wraps PM counter and KPI repositories for northbound export.
+// PMHandler handles northbound PM and KPI export endpoints.
 type PMHandler struct {
-	counterRepo counter.CounterRepository
-	kpiRepo     kpi.KPIRepository
-	logger      *zap.Logger
+	svc    *NorthboundService
+	logger *zap.Logger
 }
 
 // NewPMHandler creates a new PMHandler.
-func NewPMHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, logger *zap.Logger) *PMHandler {
+func NewPMHandler(svc *NorthboundService, logger *zap.Logger) *PMHandler {
 	return &PMHandler{
-		counterRepo: counterRepo,
-		kpiRepo:     kpiRepo,
-		logger:      logger,
+		svc:    svc,
+		logger: logger,
 	}
 }
 
@@ -67,7 +65,7 @@ func (h *PMHandler) ExportPM(c *gin.Context) {
 		filter.CounterGroup = &req.CounterGroup
 	}
 
-	result, err := h.counterRepo.Query(c.Request.Context(), filter)
+	result, err := h.svc.ExportPM(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.Error("northbound PM export failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "pm export failed"})
@@ -125,7 +123,7 @@ func (h *PMHandler) ExportKPI(c *gin.Context) {
 		}
 	}
 
-	result, err := h.kpiRepo.Query(c.Request.Context(), filter)
+	result, err := h.svc.ExportKPI(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.Error("northbound KPI export failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "kpi export failed"})

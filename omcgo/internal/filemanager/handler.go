@@ -1,39 +1,29 @@
 package filemanager
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // Handler provides HTTP handlers for the file manager REST API.
 type Handler struct {
-	repo        FileRepository
-	minioClient *minio.Client
-	bucket      string
-	cmdQueue    cmdqueue.CommandQueue
-	logger      *zap.Logger
+	service *FileService
+	logger  *zap.Logger
 }
 
 // NewHandler creates a new file manager Handler.
-func NewHandler(repo FileRepository, minioClient *minio.Client, bucket string, cmdQueue cmdqueue.CommandQueue, logger *zap.Logger) *Handler {
+func NewHandler(service *FileService, logger *zap.Logger) *Handler {
 	return &Handler{
-		repo:        repo,
-		minioClient: minioClient,
-		bucket:      bucket,
-		cmdQueue:    cmdQueue,
-		logger:      logger.Named("filemanager-handler"),
+		service: service,
+		logger:  logger.Named("filemanager-handler"),
 	}
 }
 
@@ -74,7 +64,7 @@ func (h *Handler) List(c *gin.Context) {
 		filter.Search = &q
 	}
 
-	result, err := h.repo.List(c.Request.Context(), filter)
+	result, err := h.service.ListFiles(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -100,44 +90,11 @@ func (h *Handler) Upload(c *gin.Context) {
 	deviceSN := c.PostForm("device_sn")
 	uploader := c.PostForm("uploader")
 
-	// Build MinIO path: managed-files/{file_type}/{date}/{filename}
-	objectPath := fmt.Sprintf("managed-files/%s/%s/%s", fileType, time.Now().Format("2006-01-02"), header.Filename)
-
 	contentType := header.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
 
-	// Upload to MinIO
-	_, err = h.minioClient.PutObject(c.Request.Context(), h.bucket, objectPath, file, header.Size,
-		minio.PutObjectOptions{ContentType: contentType})
+	mf, err := h.service.UploadFile(c.Request.Context(), file, header.Size, header.Filename, contentType, FileType(fileType), description, uploader, deviceSN)
 	if err != nil {
-		h.logger.Error("upload file to MinIO", zap.String("path", objectPath), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("upload to storage: %w", err))
-		return
-	}
-
-	// Save metadata to DB
-	mf := &ManagedFile{
-		FileName:    header.Filename,
-		FileType:    FileType(fileType),
-		FileSize:    header.Size,
-		MinIOPath:   objectPath,
-		ContentType: contentType,
-		Status:      FileReady,
-	}
-	if uploader != "" {
-		mf.Uploader = &uploader
-	}
-	if deviceSN != "" {
-		mf.DeviceSN = &deviceSN
-	}
-	if description != "" {
-		mf.Description = &description
-	}
-
-	if err := h.repo.Create(c.Request.Context(), mf); err != nil {
-		h.logger.Error("create file record", zap.Error(err))
+		h.logger.Error("upload file", zap.Error(err))
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -153,7 +110,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.repo.GetByID(c.Request.Context(), id)
+	mf, err := h.service.GetFileByID(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -170,21 +127,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 
-	// Fetch file metadata to get MinIO path for cleanup
-	mf, err := h.repo.GetByID(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
-		return
-	}
-
-	// Delete from MinIO
-	if err := h.minioClient.RemoveObject(c.Request.Context(), h.bucket, mf.MinIOPath, minio.RemoveObjectOptions{}); err != nil {
-		h.logger.Warn("remove file from MinIO", zap.String("path", mf.MinIOPath), zap.Error(err))
-		// Continue with DB deletion even if MinIO removal fails
-	}
-
-	// Delete metadata from DB
-	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
+	if err := h.service.DeleteFile(c.Request.Context(), id); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -200,16 +143,9 @@ func (h *Handler) Download(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.repo.GetByID(c.Request.Context(), id)
+	obj, mf, err := h.service.DownloadFile(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
-		return
-	}
-
-	obj, err := h.minioClient.GetObject(c.Request.Context(), h.bucket, mf.MinIOPath, minio.GetObjectOptions{})
-	if err != nil {
-		h.logger.Error("get file from MinIO", zap.String("path", mf.MinIOPath), zap.Error(err))
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("retrieve from storage: %w", err))
 		return
 	}
 	defer obj.Close()
@@ -239,77 +175,23 @@ func (h *Handler) Distribute(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.repo.GetByID(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
-		return
-	}
-
 	var req DistributeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	if h.cmdQueue == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
+	succeeded, failed, err := h.service.DistributeFile(c.Request.Context(), id, req.DeviceSNs)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
-	taskID := uuid.New().String()
-	downloadURL := fmt.Sprintf("minio://%s/%s", h.bucket, mf.MinIOPath)
-	tr069FileType := mapFileTypeToTR069(mf.FileType)
-
-	var succeeded, failed int
-	for _, deviceSN := range req.DeviceSNs {
-		params, _ := json.Marshal(map[string]string{
-			"CommandKey": taskID,
-			"FileType":   tr069FileType,
-			"URL":        downloadURL,
-			"TargetFileName": mf.FileName,
-		})
-		cmd := &cmdqueue.Command{
-			Method:     "Download",
-			Params:     params,
-			Priority:   5,
-			CommandKey: fmt.Sprintf("dist-%s-%s", taskID, deviceSN),
-		}
-		if err := h.cmdQueue.Push(c.Request.Context(), deviceSN, cmd); err != nil {
-			h.logger.Warn("push download command failed",
-				zap.String("device_sn", deviceSN),
-				zap.Error(err),
-			)
-			failed++
-			continue
-		}
-		succeeded++
-	}
-
-	h.logger.Info("file distribution queued",
-		zap.String("task_id", taskID),
-		zap.String("file_id", mf.ID.String()),
-		zap.Int("succeeded", succeeded),
-		zap.Int("failed", failed),
-	)
-
 	c.JSON(http.StatusOK, gin.H{
-		"task_id":      taskID,
-		"file_id":      mf.ID.String(),
+		"file_id":      id.String(),
 		"device_count": len(req.DeviceSNs),
 		"succeeded":    succeeded,
 		"failed":       failed,
 		"status":       "queued",
 	})
-}
-
-// mapFileTypeToTR069 maps our FileType to TR-069 FileType codes.
-func mapFileTypeToTR069(ft FileType) string {
-	switch ft {
-	case FileFirmware:
-		return "1" // Firmware Upgrade Image
-	case FileConfig:
-		return "3" // Vendor Configuration File
-	default:
-		return "3" // Default to vendor config
-	}
 }

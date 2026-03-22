@@ -1,5 +1,6 @@
 .PHONY: build build-acs build-app build-worker build-migrate build-omcctl \
-       test test-coverage test-integration lint vet generate \
+       test test-coverage test-integration test-integration-up test-integration-down \
+       lint vet generate \
        migrate-up migrate-down docker-build docker-up docker-down clean
 
 # Build
@@ -29,7 +30,13 @@ test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 
 test-integration:
-	go test ./test/integration/... -v -tags=integration -count=1
+	bash scripts/integration_test.sh
+
+test-integration-up:
+	docker compose -f deployments/docker/docker-compose.test.yml up -d --wait
+
+test-integration-down:
+	docker compose -f deployments/docker/docker-compose.test.yml down -v
 
 # Quality
 lint:

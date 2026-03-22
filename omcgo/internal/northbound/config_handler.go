@@ -5,21 +5,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/device"
 	"go.uber.org/zap"
 )
 
-// ConfigHandler wraps DeviceParameterRepository for northbound config snapshot export.
+// ConfigHandler handles northbound config snapshot export endpoints.
 type ConfigHandler struct {
-	paramRepo device.DeviceParameterRepository
-	logger    *zap.Logger
+	svc    *NorthboundService
+	logger *zap.Logger
 }
 
 // NewConfigHandler creates a new ConfigHandler.
-func NewConfigHandler(paramRepo device.DeviceParameterRepository, logger *zap.Logger) *ConfigHandler {
+func NewConfigHandler(svc *NorthboundService, logger *zap.Logger) *ConfigHandler {
 	return &ConfigHandler{
-		paramRepo: paramRepo,
-		logger:    logger,
+		svc:    svc,
+		logger: logger,
 	}
 }
 
@@ -32,7 +31,7 @@ func (h *ConfigHandler) ExportConfig(c *gin.Context) {
 		return
 	}
 
-	params, err := h.paramRepo.GetByDevice(c.Request.Context(), deviceID)
+	params, err := h.svc.ExportConfig(c.Request.Context(), deviceID)
 	if err != nil {
 		h.logger.Error("northbound config export failed",
 			zap.String("device_id", deviceIDStr),

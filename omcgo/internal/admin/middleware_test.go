@@ -325,6 +325,108 @@ func TestAuditLogger_WritesOnPost(t *testing.T) {
 	_ = auditCreated
 }
 
+func TestRequireResourcePermission_MapsMethodToAction(t *testing.T) {
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+	userID := uuid.New()
+
+	pair, err := jwtService.GenerateTokenPair(&Claims{
+		UserID:   userID,
+		Username: "operator",
+		Roles:    []string{"operator"},
+	})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		method         string
+		expectedAction string
+		allowed        bool
+		expectedStatus int
+	}{
+		{"GET maps to read", http.MethodGet, "read", true, http.StatusOK},
+		{"HEAD maps to read", http.MethodHead, "read", true, http.StatusOK},
+		{"POST maps to write", http.MethodPost, "write", true, http.StatusOK},
+		{"PUT maps to write", http.MethodPut, "write", true, http.StatusOK},
+		{"PATCH maps to write", http.MethodPatch, "write", true, http.StatusOK},
+		{"DELETE maps to delete", http.MethodDelete, "delete", true, http.StatusOK},
+		{"GET denied", http.MethodGet, "read", false, http.StatusForbidden},
+		{"POST denied", http.MethodPost, "write", false, http.StatusForbidden},
+		{"DELETE denied", http.MethodDelete, "delete", false, http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedAction string
+			roleRepo := &mockRoleRepo{
+				checkPermissionFn: func(ctx context.Context, uid uuid.UUID, resource, action string) (bool, error) {
+					capturedAction = action
+					assert.Equal(t, "devices", resource)
+					return tt.allowed, nil
+				},
+			}
+
+			r := gin.New()
+			r.Use(RequireAuth(jwtService))
+			r.Use(RequireResourcePermission(roleRepo, "devices"))
+			handler := func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			}
+			r.GET("/test", handler)
+			r.HEAD("/test", handler)
+			r.POST("/test", handler)
+			r.PUT("/test", handler)
+			r.PATCH("/test", handler)
+			r.DELETE("/test", handler)
+
+			req := httptest.NewRequest(tt.method, "/test", nil)
+			req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedAction, capturedAction)
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
+}
+
+func TestRequireResourcePermission_NoAuth(t *testing.T) {
+	roleRepo := &mockRoleRepo{}
+
+	r := gin.New()
+	r.Use(RequireResourcePermission(roleRepo, "devices"))
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHttpMethodToAction(t *testing.T) {
+	tests := []struct {
+		method   string
+		expected string
+	}{
+		{http.MethodGet, "read"},
+		{http.MethodHead, "read"},
+		{http.MethodOptions, "read"},
+		{http.MethodPost, "write"},
+		{http.MethodPut, "write"},
+		{http.MethodPatch, "write"},
+		{http.MethodDelete, "delete"},
+		{"UNKNOWN", "read"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			assert.Equal(t, tt.expected, httpMethodToAction(tt.method))
+		})
+	}
+}
+
 func TestAuditLogger_SkipsGetRequests(t *testing.T) {
 	auditCreated := false
 	auditRepo := &mockAuditRepo{

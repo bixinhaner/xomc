@@ -6,32 +6,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/internal/northbound/push"
-	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
 )
 
 // Router registers northbound/OSS API routes.
 type Router struct {
+	svc           *NorthboundService
 	pmHandler     *PMHandler
 	alarmHandler  *AlarmHandler
 	configHandler *ConfigHandler
-	pushEngine    *push.Engine
-	syncService   *nbsync.Service
 }
 
 // NewRouter creates a new northbound Router.
-func NewRouter(
-	pmHandler *PMHandler,
-	alarmHandler *AlarmHandler,
-	configHandler *ConfigHandler,
-	pushEngine *push.Engine,
-	syncService *nbsync.Service,
-) *Router {
+func NewRouter(svc *NorthboundService) *Router {
+	logger := svc.logger
 	return &Router{
-		pmHandler:     pmHandler,
-		alarmHandler:  alarmHandler,
-		configHandler: configHandler,
-		pushEngine:    pushEngine,
-		syncService:   syncService,
+		svc:           svc,
+		pmHandler:     NewPMHandler(svc, logger),
+		alarmHandler:  NewAlarmHandler(svc, logger),
+		configHandler: NewConfigHandler(svc, logger),
 	}
 }
 
@@ -56,7 +48,7 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 func (r *Router) listTargets(c *gin.Context) {
-	targets := r.pushEngine.ListTargets()
+	targets := r.svc.PushEngine().ListTargets()
 	c.JSON(http.StatusOK, gin.H{"items": targets, "total": len(targets)})
 }
 
@@ -79,13 +71,13 @@ func (r *Router) addTarget(c *gin.Context) {
 		Enabled:    req.Enabled,
 	}
 
-	r.pushEngine.AddTarget(target)
+	r.svc.PushEngine().AddTarget(target)
 	c.JSON(http.StatusCreated, gin.H{"message": "push target added", "id": req.ID})
 }
 
 func (r *Router) removeTarget(c *gin.Context) {
 	id := c.Param("id")
-	if !r.pushEngine.RemoveTarget(id) {
+	if !r.svc.PushEngine().RemoveTarget(id) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "push target not found"})
 		return
 	}
@@ -94,7 +86,7 @@ func (r *Router) removeTarget(c *gin.Context) {
 
 func (r *Router) fullSync(c *gin.Context) {
 	dataType := c.DefaultQuery("data_type", "device")
-	result, err := r.syncService.FullSync(c.Request.Context(), dataType)
+	result, err := r.svc.SyncService().FullSync(c.Request.Context(), dataType)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -116,7 +108,7 @@ func (r *Router) incrementalSync(c *gin.Context) {
 		return
 	}
 
-	result, err := r.syncService.IncrementalSync(c.Request.Context(), dataType, since)
+	result, err := r.svc.SyncService().IncrementalSync(c.Request.Context(), dataType, since)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

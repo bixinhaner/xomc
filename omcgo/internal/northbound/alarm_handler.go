@@ -10,16 +10,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// AlarmHandler wraps AlarmStore for northbound alarm sync and export.
+// AlarmHandler handles northbound alarm export and sync endpoints.
 type AlarmHandler struct {
-	store  alarm.AlarmStore
+	svc    *NorthboundService
 	logger *zap.Logger
 }
 
 // NewAlarmHandler creates a new AlarmHandler.
-func NewAlarmHandler(store alarm.AlarmStore, logger *zap.Logger) *AlarmHandler {
+func NewAlarmHandler(svc *NorthboundService, logger *zap.Logger) *AlarmHandler {
 	return &AlarmHandler{
-		store:  store,
+		svc:    svc,
 		logger: logger,
 	}
 }
@@ -59,7 +59,7 @@ func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
 		}
 	}
 
-	result, err := h.store.ListActive(c.Request.Context(), filter)
+	result, err := h.svc.ExportAlarms(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.Error("northbound alarm export failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "alarm export failed"})
@@ -71,15 +71,13 @@ func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
 
 // ListActiveAlarms returns all active alarms for northbound sync.
 func (h *AlarmHandler) ListActiveAlarms(c *gin.Context) {
-	filter := alarm.AlarmFilter{
-		ListRequest: model.DefaultListRequest(),
-	}
-	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+	listReq := model.DefaultListRequest()
+	if err := c.ShouldBindQuery(&listReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	result, err := h.store.ListActive(c.Request.Context(), filter)
+	result, err := h.svc.ListActiveAlarms(c.Request.Context(), listReq)
 	if err != nil {
 		h.logger.Error("northbound alarm list failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "alarm list failed"})

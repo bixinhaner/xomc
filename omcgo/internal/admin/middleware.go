@@ -119,6 +119,71 @@ func RequireCarrier() gin.HandlerFunc {
 	}
 }
 
+// RequireResourcePermission returns a Gin middleware that dynamically determines
+// the permission action based on the HTTP method and checks the user has the
+// corresponding resource permission.
+//
+// Method → action mapping:
+//   - GET, HEAD, OPTIONS → "read"
+//   - POST, PUT, PATCH   → "write"
+//   - DELETE              → "delete"
+func RequireResourcePermission(roleRepo RoleRepository, resource string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		action := httpMethodToAction(c.Request.Method)
+
+		userIDVal, exists := c.Get(CtxKeyUserID)
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "authentication required",
+			})
+			return
+		}
+
+		userID, ok := userIDVal.(uuid.UUID)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "invalid user context",
+			})
+			return
+		}
+
+		allowed, err := roleRepo.CheckPermission(c.Request.Context(), userID, resource, action)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "permission check failed",
+			})
+			return
+		}
+
+		if !allowed {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"code":    403,
+				"message": "insufficient permissions",
+			})
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// httpMethodToAction maps an HTTP method to a permission action string.
+func httpMethodToAction(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "read"
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return "write"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return "read"
+	}
+}
+
 // AuditLogger returns a Gin middleware that records write operations
 // (POST, PUT, PATCH, DELETE) to the audit log.
 func AuditLogger(auditRepo AuditRepository) gin.HandlerFunc {
