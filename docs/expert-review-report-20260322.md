@@ -6,6 +6,7 @@
 > **更新记录**：
 > - 2026-03-22 P0 全部 9 项已修复（编译通过 + 全量测试通过）
 > - 2026-03-22 P1 全部 8 项已修复（编译通过 + 全量测试通过 + 类型检查通过）
+> - 2026-03-22 P2 全部 9 项已修复（编译通过 + 全量测试通过 + 类型检查通过）
 
 ---
 
@@ -319,19 +320,19 @@ F07 网元直连    ███░░░░░░░ 35%   ← 仅框架，CMCC �
 | 16 | DeviceGrouping 拆分为子组件 | 前端 | ✅ 已修复 | 1573 行拆分为 6 个文件：`index.tsx`（572 行，状态管理+组合）、`GroupTreePanel.tsx`（249）、`DeviceListPanel.tsx`（162）、`GroupDialogs.tsx`（490）、`DeviceDialogs.tsx`（260）、`types.ts`（74） |
 | 17 | 启用集成测试自动化（docker-compose） | 测试 | ✅ 已修复 | 新增 `docker-compose.test.yml`（PG+Redis+NATS tmpfs 测试容器）、`integration_test.sh`（编排脚本，支持 -v/-k 参数）、`testutil_test.go`（共享 DB/Redis 连接辅助）、Makefile 新增 `test-integration`/`test-integration-up`/`test-integration-down` 三个 target |
 
-### P2 — 中优先级（1 个月内，预计 80h）
+### P2 — 中优先级（1 个月内，预计 80h）— ✅ 全部已修复
 
-| # | 问题 | 来源 | 修复时间 |
-|---|------|------|---------|
-| 18 | CTCC 适配器补齐（参数/KPI/告警） | 电信业务 | 20h |
-| 19 | CUCC 适配器补齐 | 电信业务 | 20h |
-| 20 | PM 数据分层策略（15 天热 + 冷归档） | 数据存储 | 12h |
-| 21 | JSONB 字段添加 GIN 索引 | 数据存储 | 4h |
-| 22 | 业务 Prometheus 指标补充 | 运维 | 8h |
-| 23 | context.Background() 改为 shutdown context | Go 工程 | 6h |
-| 24 | 登录失败审计日志 | 安全 | 4h |
-| 25 | 前端 KPI 指标国际化 | 前端 | 2h |
-| 26 | 添加 `go test -race` 到构建流程 | 测试 | 4h |
+| # | 问题 | 来源 | 状态 | 修复说明 |
+|---|------|------|------|---------|
+| 18 | CTCC 适配器补齐（参数/KPI/告警） | 电信业务 | ✅ 已修复 | 新增 params.go/kpi.go/defaults.go，重写 adapter.go：LTE+NR 参数映射（含 `X_CTCC_` 私有扩展）、16 个 KPI 公式（LTE 10 + NR 6）、16 个告警码、OUI/模板，carrier_test 扩展至 9 个子测试 |
+| 19 | CUCC 适配器补齐 | 电信业务 | ✅ 已修复 | 新增 params.go/kpi.go/defaults.go，重写 adapter.go：NR-only 参数映射（34 个，含 `X_CUCC_` 私有扩展）、17 个 NR KPI 公式、19 个告警码、OUI/模板 |
+| 20 | PM 数据分层策略（15 天热 + 冷归档） | 数据存储 | ✅ 已修复 | 迁移 000049：4 张时序表（pm_counters/kpi_values/mr_records/alarms_history）启用 TimescaleDB 压缩（15/30 天）+ 保留（90/365 天），PM handler 添加默认 24h 时间范围保护防全表扫描 |
+| 21 | JSONB 字段添加 GIN 索引 | 数据存储 | ✅ 已修复 | 迁移 000050：22 张表 36 个 GIN 索引，按优先级分三层（大表 jsonb_path_ops、中表 jsonb_path_ops、配置表默认 GIN），IF NOT EXISTS 幂等 |
+| 22 | 业务 Prometheus 指标补充 | 运维 | ✅ 已修复 | 新增 4 个 metrics.go（device/alarm/task/pm），8 个指标：设备总数/注册数、活动告警/接收数、待处理任务/完成数、PM 文件处理数/耗时，注入 service 层，app+worker 均注册 |
+| 23 | context.Background() 改为 shutdown context | Go 工程 | ✅ 已修复 | 修复 3 处：datamodel/registry 缓存刷新（从 stopCh 派生 ctx）、NATSEventBus 事件处理（构造时创建 ctx/cancel）、HeartbeatMonitor（Start 创建可取消 base ctx） |
+| 24 | 登录失败审计日志 | 安全 | ✅ 已修复 | 复用 audit_logs 表，Login handler 异步写入审计记录（login_success/login_failed），失败原因分类（user_not_found/account_disabled/wrong_password），结构化 zap 日志，3 个新测试 |
+| 25 | 前端 KPI 指标国际化 | 前端 | ✅ 已修复 | 新增 40 个 i18n key（zh-CN + en-US），覆盖 8 个页面组件（KPIStandardReport/PerformanceCharts/ThresholdConfig/ExtractionWizard/HistoricalKPI/StationReport/LTEStandardReport/DeviceDetail），硬编码中文全部改为 t() 调用 |
+| 26 | 添加 `go test -race` 到构建流程 | 测试 | ✅ 已修复 | Makefile 新增 `test-race` target（`go test -race -count=1 ./...`），保持原 `test` target 不变 |
 
 ### P3 — 长期优化（3 个月内）
 
@@ -391,7 +392,7 @@ OMC 项目**架构设计优秀、代码工程质量良好**，但在**多运营�
 | E2E 测试用例 | ~332 个 |
 | API 端点 | 198 个 |
 | 高风险问题 | 9 个（P0）✅ 全部已修复 |
-| 中风险问题 | 8 个（P1）✅ 全部已修复 + 9 个（P2） |
+| 中风险问题 | 8 个（P1）✅ 全部已修复 + 9 个（P2）✅ 全部已修复 |
 | 低风险问题 | 9 个（P3） |
 
 ### 建议行动计划
@@ -400,7 +401,7 @@ OMC 项目**架构设计优秀、代码工程质量良好**，但在**多运营�
 |------|------|---------|
 | 本周 | P0 全部修复（20h） | ✅ 安全风险消除，关键缺陷修复 |
 | 2 周 | P1 完成（60h） | ✅ 测试覆盖率 33%→45%，架构违规修复，前端类型安全加固 |
-| 1 个月 | P2 完成（80h） | CTCC/CUCC 可用，数据层优化，覆盖率→55% |
+| 1 个月 | P2 完成（80h） | ✅ CTCC/CUCC 适配器补齐，数据层优化，业务指标+审计日志+KPI 国际化 |
 | 3 个月 | P3 推进 | F07/F08 完整实现，全面可观测性，覆盖率→60% |
 
 ### 下次审查建议
