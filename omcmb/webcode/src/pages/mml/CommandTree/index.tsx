@@ -19,20 +19,14 @@ interface CommandRow extends Record<string, unknown> {
   productTypes: string[];
 }
 
-const COMMAND_CATEGORIES = [
-  {
-    title: '全部命令',
-    key: 'all',
-    children: [
-      { title: '小区管理', key: '小区管理' },
-      { title: '邻区管理', key: '邻区管理' },
-      { title: '基站管理', key: '基站管理' },
-      { title: '告警查询', key: '告警查询' },
-      { title: '性能采集', key: '性能采集' },
-      { title: '传输管理', key: '传输管理' },
-      { title: '版本管理', key: '版本管理' },
-    ],
-  },
+const CATEGORY_KEYS = [
+  { titleKey: 'mml.category.cellMgmt', key: '小区管理' },
+  { titleKey: 'mml.category.neighborMgmt', key: '邻区管理' },
+  { titleKey: 'mml.category.bsMgmt', key: '基站管理' },
+  { titleKey: 'mml.category.alarmQuery', key: '告警查询' },
+  { titleKey: 'mml.category.perfCollect', key: '性能采集' },
+  { titleKey: 'mml.category.transMgmt', key: '传输管理' },
+  { titleKey: 'mml.category.versionMgmt', key: '版本管理' },
 ];
 
 const mockCommands: MMLCommand[] = [
@@ -54,6 +48,14 @@ export default function CommandTree() {
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+
+  const commandCategories = useMemo(() => [
+    {
+      title: t('mml.category.all'),
+      key: 'all',
+      children: CATEGORY_KEYS.map((c) => ({ title: t(c.titleKey), key: c.key })),
+    },
+  ], [t]);
 
   const { data, isLoading, refetch } = useMMLCommands({
     keyword: searchValue,
@@ -148,7 +150,7 @@ export default function CommandTree() {
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
         <Tree
-          treeData={COMMAND_CATEGORIES as DataNode[]}
+          treeData={commandCategories as DataNode[]}
           onSelect={(keys) => {
             const key = keys[0] as string;
             setSelectedCategory(key && key !== 'all' ? key : '');

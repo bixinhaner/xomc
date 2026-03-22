@@ -89,29 +89,29 @@ export default function TopologySettings() {
   const collapseItems = [
     {
       key: 'layout',
-      label: '布局算法',
+      label: t('topology.settings.layoutAlgorithm'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="布局算法" name="layoutAlgorithm">
+          <Form.Item label={t('topology.settings.layoutAlgorithm')} name="layoutAlgorithm">
             <Select
               options={[
-                { label: '力导向布局 (Force-Directed)', value: 'force' },
-                { label: '树形布局 (Tree)', value: 'tree' },
-                { label: '环形布局 (Circular)', value: 'circular' },
-                { label: '分层布局 (Hierarchy)', value: 'hierarchy' },
+                { label: t('topology.settings.forceDirected'), value: 'force' },
+                { label: t('topology.settings.treeLayout'), value: 'tree' },
+                { label: t('topology.settings.circularLayout'), value: 'circular' },
+                { label: t('topology.settings.hierarchyLayout'), value: 'hierarchy' },
               ]}
               onChange={(val) => setLayoutAlgo(val as string)}
             />
           </Form.Item>
           {layoutAlgo === 'force' && (
             <>
-              <Form.Item label="斥力强度" name="forceStrength">
+              <Form.Item label={t('topology.settings.forceStrength')} name="forceStrength">
                 <InputNumber style={{ width: '100%' }} min={-1000} max={0} />
               </Form.Item>
-              <Form.Item label="链接距离" name="forceDistance">
+              <Form.Item label={t('topology.settings.linkDistance')} name="forceDistance">
                 <Slider min={50} max={400} />
               </Form.Item>
-              <Form.Item label="引力强度" name="forceGravity">
+              <Form.Item label={t('topology.settings.gravityStrength')} name="forceGravity">
                 <InputNumber style={{ width: '100%' }} min={0} max={1} step={0.05} />
               </Form.Item>
             </>
@@ -121,78 +121,78 @@ export default function TopologySettings() {
     },
     {
       key: 'node',
-      label: '节点样式',
+      label: t('topology.settings.nodeStyle'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="节点大小 (px)" name="nodeSize">
+          <Form.Item label={t('topology.settings.nodeSize')} name="nodeSize">
             <Slider min={12} max={48} marks={{ 12: '12', 24: '24', 36: '36', 48: '48' }} />
           </Form.Item>
-          <Form.Item label="节点形状" name="nodeShape">
-            <Select options={[{ label: '圆形', value: 'circle' }, { label: '矩形', value: 'rect' }, { label: '菱形', value: 'diamond' }]} />
+          <Form.Item label={t('topology.settings.nodeShape')} name="nodeShape">
+            <Select options={[{ label: t('topology.settings.circle'), value: 'circle' }, { label: t('topology.settings.rect'), value: 'rect' }, { label: t('topology.settings.diamond'), value: 'diamond' }]} />
           </Form.Item>
-          <Form.Item label="节点不透明度" name="nodeOpacity">
+          <Form.Item label={t('topology.settings.nodeOpacity')} name="nodeOpacity">
             <Slider min={0.3} max={1} step={0.1} marks={{ 0.3: '30%', 0.7: '70%', 1: '100%' }} />
           </Form.Item>
-          <Form.Item label="节点字体大小" name="nodeFontSize">
+          <Form.Item label={t('topology.settings.nodeFontSize')} name="nodeFontSize">
             <InputNumber min={8} max={20} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="显示节点标签" name="showNodeLabel" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showNodeLabel')} name="showNodeLabel" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
         </div>
       ),
     },
     {
       key: 'edge',
-      label: '连线样式',
+      label: t('topology.settings.edgeStyle'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="连线宽度 (px)" name="edgeWidth">
+          <Form.Item label={t('topology.settings.edgeWidth')} name="edgeWidth">
             <Slider min={1} max={6} marks={{ 1: '1', 3: '3', 6: '6' }} />
           </Form.Item>
-          <Form.Item label="连线样式" name="edgeStyle">
-            <Select options={[{ label: '实线', value: 'solid' }, { label: '虚线', value: 'dashed' }, { label: '点线', value: 'dotted' }]} />
+          <Form.Item label={t('topology.settings.edgeLineStyle')} name="edgeStyle">
+            <Select options={[{ label: t('topology.settings.solid'), value: 'solid' }, { label: t('topology.settings.dashed'), value: 'dashed' }, { label: t('topology.settings.dotted'), value: 'dotted' }]} />
           </Form.Item>
-          <Form.Item label="连线弯曲度" name="edgeCurvature">
-            <Slider min={0} max={0.8} step={0.1} marks={{ 0: '直线', 0.4: '弯曲', 0.8: '强弯' }} />
+          <Form.Item label={t('topology.settings.edgeCurvature')} name="edgeCurvature">
+            <Slider min={0} max={0.8} step={0.1} marks={{ 0: t('topology.settings.straight'), 0.4: t('topology.settings.curved'), 0.8: t('topology.settings.strongCurve') }} />
           </Form.Item>
-          <Form.Item label="显示连线标签" name="showEdgeLabel" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showEdgeLabel')} name="showEdgeLabel" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="显示箭头" name="edgeArrow" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showArrow')} name="edgeArrow" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
         </div>
       ),
     },
     {
       key: 'display',
-      label: '显示选项',
+      label: t('topology.settings.displayOptions'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="显示状态标记" name="showStatusBadge" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showStatusBadge')} name="showStatusBadge" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="显示设备类型" name="showDeviceType" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showDeviceType')} name="showDeviceType" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="显示告警数量" name="showAlarmCount" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showAlarmCount')} name="showAlarmCount" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="启用动画效果" name="enableAnimation" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.enableAnimation')} name="enableAnimation" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="动画时长 (ms)" name="animationDuration">
+          <Form.Item label={t('topology.settings.animationDuration')} name="animationDuration">
             <InputNumber min={100} max={2000} step={100} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="自动刷新间隔 (秒)" name="autoRefreshInterval">
+          <Form.Item label={t('topology.settings.autoRefreshInterval')} name="autoRefreshInterval">
             <Select
               options={[
-                { label: '不自动刷新', value: 0 },
-                { label: '10秒', value: 10 },
-                { label: '30秒', value: 30 },
-                { label: '60秒', value: 60 },
-                { label: '5分钟', value: 300 },
+                { label: t('topology.settings.noAutoRefresh'), value: 0 },
+                { label: `10${t('topology.settings.seconds')}`, value: 10 },
+                { label: `30${t('topology.settings.seconds')}`, value: 30 },
+                { label: `60${t('topology.settings.seconds')}`, value: 60 },
+                { label: '5min', value: 300 },
               ]}
             />
           </Form.Item>
@@ -201,20 +201,20 @@ export default function TopologySettings() {
     },
     {
       key: 'interaction',
-      label: '交互设置',
+      label: t('topology.settings.interaction'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="允许拖拽节点" name="enableDrag" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.enableDrag')} name="enableDrag" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="允许缩放" name="enableZoom" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.enableZoom')} name="enableZoom" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="允许平移" name="enablePan" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.enablePan')} name="enablePan" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="显示悬浮提示" name="enableTooltip" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('topology.settings.showTooltip')} name="enableTooltip" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
         </div>
       ),
@@ -235,7 +235,7 @@ export default function TopologySettings() {
     >
       <Card>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
-          以下设置将影响拓扑图的显示效果，修改后需保存才能生效。
+          {t('topology.settings.hint')}
         </Typography.Text>
         <Form
           form={form}

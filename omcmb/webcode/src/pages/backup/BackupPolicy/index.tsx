@@ -84,38 +84,38 @@ export default function BackupPolicy() {
   };
 
   const WEEKDAY_OPTIONS = [
-    { label: '周日', value: 0 },
-    { label: '周一', value: 1 },
-    { label: '周二', value: 2 },
-    { label: '周三', value: 3 },
-    { label: '周四', value: 4 },
-    { label: '周五', value: 5 },
-    { label: '周六', value: 6 },
+    { label: t('backup.policy.weekday.sun'), value: 0 },
+    { label: t('backup.policy.weekday.mon'), value: 1 },
+    { label: t('backup.policy.weekday.tue'), value: 2 },
+    { label: t('backup.policy.weekday.wed'), value: 3 },
+    { label: t('backup.policy.weekday.thu'), value: 4 },
+    { label: t('backup.policy.weekday.fri'), value: 5 },
+    { label: t('backup.policy.weekday.sat'), value: 6 },
   ];
 
   const collapseItems = [
     {
       key: 'retention',
-      label: '保留策略',
+      label: t('backup.policy.retention'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="保留天数" name="retentionDays" rules={[{ required: true }]}>
+          <Form.Item label={t('backup.policy.retentionDays')} name="retentionDays" rules={[{ required: true }]}>
             <Select
               options={[
-                { label: '7天', value: 7 },
-                { label: '14天', value: 14 },
-                { label: '30天', value: 30 },
-                { label: '60天', value: 60 },
-                { label: '90天', value: 90 },
-                { label: '180天', value: 180 },
-                { label: '365天', value: 365 },
+                { label: `7 ${t('backup.policy.days')}`, value: 7 },
+                { label: `14 ${t('backup.policy.days')}`, value: 14 },
+                { label: `30 ${t('backup.policy.days')}`, value: 30 },
+                { label: `60 ${t('backup.policy.days')}`, value: 60 },
+                { label: `90 ${t('backup.policy.days')}`, value: 90 },
+                { label: `180 ${t('backup.policy.days')}`, value: 180 },
+                { label: `365 ${t('backup.policy.days')}`, value: 365 },
               ]}
             />
           </Form.Item>
-          <Form.Item label="最大备份数量" name="maxBackupCount" rules={[{ required: true }]}>
+          <Form.Item label={t('backup.policy.maxBackupCount')} name="maxBackupCount" rules={[{ required: true }]}>
             <InputNumber min={1} max={10000} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="最少保留备份数" name="minBackupCount" rules={[{ required: true }]}>
+          <Form.Item label={t('backup.policy.minBackupCount')} name="minBackupCount" rules={[{ required: true }]}>
             <InputNumber min={1} max={100} style={{ width: '100%' }} />
           </Form.Item>
         </div>
@@ -123,27 +123,27 @@ export default function BackupPolicy() {
     },
     {
       key: 'cleanup',
-      label: '自动清理',
+      label: t('backup.policy.autoCleanup'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="启用自动清理" name="autoCleanup" valuePropName="checked">
+          <Form.Item label={t('backup.policy.enableAutoCleanup')} name="autoCleanup" valuePropName="checked">
             <Switch
-              checkedChildren="开"
-              unCheckedChildren="关"
+              checkedChildren={t('common.on')}
+              unCheckedChildren={t('common.off')}
               onChange={(val) => setAutoCleanup(val)}
             />
           </Form.Item>
           {autoCleanup && (
             <>
-              <Form.Item label="清理执行时间" name="cleanupTime" rules={[{ required: true }]}>
+              <Form.Item label={t('backup.policy.cleanupTime')} name="cleanupTime" rules={[{ required: true }]}>
                 <Select
-                  options={['00:00', '01:00', '02:00', '03:00', '04:00', '05:00'].map((t) => ({ label: t, value: t }))}
+                  options={['00:00', '01:00', '02:00', '03:00', '04:00', '05:00'].map((v) => ({ label: v, value: v }))}
                 />
               </Form.Item>
-              <Form.Item label="清理执行日期" name="cleanupDayOfWeek">
-                <Select options={[{ label: '每天', value: -1 }, ...WEEKDAY_OPTIONS]} />
+              <Form.Item label={t('backup.policy.cleanupDay')} name="cleanupDayOfWeek">
+                <Select options={[{ label: t('backup.policy.everyday'), value: -1 }, ...WEEKDAY_OPTIONS]} />
               </Form.Item>
-              <Form.Item label="至少保留最近N份" name="keepLastN" rules={[{ required: true }]}>
+              <Form.Item label={t('backup.policy.keepLastN')} name="keepLastN" rules={[{ required: true }]}>
                 <InputNumber min={1} max={50} style={{ width: '100%' }} />
               </Form.Item>
             </>
@@ -153,29 +153,29 @@ export default function BackupPolicy() {
     },
     {
       key: 'compression',
-      label: '压缩设置',
+      label: t('backup.policy.compression'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="启用压缩" name="enableCompression" valuePropName="checked">
+          <Form.Item label={t('backup.policy.enableCompression')} name="enableCompression" valuePropName="checked">
             <Switch
-              checkedChildren="开"
-              unCheckedChildren="关"
+              checkedChildren={t('common.on')}
+              unCheckedChildren={t('common.off')}
               onChange={(val) => setEnableCompression(val)}
             />
           </Form.Item>
           {enableCompression && (
             <>
-              <Form.Item label="压缩格式" name="compressionFormat">
+              <Form.Item label={t('backup.policy.compressionFormat')} name="compressionFormat">
                 <Select
                   options={[
-                    { label: 'GZIP (标准)', value: 'gzip' },
-                    { label: 'BZIP2 (高压缩)', value: 'bzip2' },
-                    { label: 'LZ4 (快速)', value: 'lz4' },
-                    { label: 'ZSTD (均衡)', value: 'zstd' },
+                    { label: t('backup.policy.gzipStandard'), value: 'gzip' },
+                    { label: t('backup.policy.bzip2High'), value: 'bzip2' },
+                    { label: t('backup.policy.lz4Fast'), value: 'lz4' },
+                    { label: t('backup.policy.zstdBalanced'), value: 'zstd' },
                   ]}
                 />
               </Form.Item>
-              <Form.Item label="压缩级别 (1-9)" name="compressionLevel">
+              <Form.Item label={t('backup.policy.compressionLevel')} name="compressionLevel">
                 <InputNumber min={1} max={9} style={{ width: '100%' }} />
               </Form.Item>
             </>
@@ -185,42 +185,42 @@ export default function BackupPolicy() {
     },
     {
       key: 'storage',
-      label: '存储设置',
+      label: t('backup.policy.storage'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="存储后端" name="storageBackend" rules={[{ required: true }]}>
+          <Form.Item label={t('backup.policy.storageBackend')} name="storageBackend" rules={[{ required: true }]}>
             <Select
               options={[
-                { label: '本地存储', value: 'local' },
-                { label: 'FTP服务器', value: 'ftp' },
-                { label: 'SFTP服务器', value: 'sftp' },
-                { label: 'NFS共享', value: 'nfs' },
+                { label: t('backup.policy.localStorage'), value: 'local' },
+                { label: t('backup.policy.ftpServer'), value: 'ftp' },
+                { label: t('backup.policy.sftpServer'), value: 'sftp' },
+                { label: t('backup.policy.nfsShare'), value: 'nfs' },
               ]}
               onChange={(val) => setStorageBackend(val as string)}
             />
           </Form.Item>
           {storageBackend === 'local' ? (
-            <Form.Item label="本地路径" name="localPath" rules={[{ required: true }]}>
+            <Form.Item label={t('backup.policy.localPath')} name="localPath" rules={[{ required: true }]}>
               <input
                 style={{ width: '100%', padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 14 }}
                 placeholder="/var/backup/omc"
               />
             </Form.Item>
           ) : (
-            <Form.Item label="FTP配置" name="ftpConfigId" rules={[{ required: true }]}>
+            <Form.Item label={t('backup.policy.ftpConfig')} name="ftpConfigId" rules={[{ required: true }]}>
               <Select
-                placeholder="请选择FTP配置"
+                placeholder={t('backup.policy.selectFtpConfig')}
                 options={[
-                  { label: '主备份FTP服务器', value: '1' },
-                  { label: '异地备份SFTP', value: '2' },
+                  { label: t('backup.policy.primaryFtp'), value: '1' },
+                  { label: t('backup.policy.remoteSftp'), value: '2' },
                 ]}
               />
             </Form.Item>
           )}
-          <Form.Item label="最大存储空间 (GB)" name="maxStorageGB" rules={[{ required: true }]}>
+          <Form.Item label={t('backup.policy.maxStorageGB')} name="maxStorageGB" rules={[{ required: true }]}>
             <InputNumber min={1} max={100000} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="存储空间告警阈值 (%)" name="alertThresholdPercent" rules={[{ required: true }]}>
+          <Form.Item label={t('backup.policy.alertThreshold')} name="alertThresholdPercent" rules={[{ required: true }]}>
             <InputNumber min={50} max={95} style={{ width: '100%' }} />
           </Form.Item>
         </div>
@@ -228,21 +228,21 @@ export default function BackupPolicy() {
     },
     {
       key: 'encryption',
-      label: '加密设置',
+      label: t('backup.policy.encryption'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="启用加密" name="enableEncryption" valuePropName="checked">
+          <Form.Item label={t('backup.policy.enableEncryption')} name="enableEncryption" valuePropName="checked">
             <Switch
-              checkedChildren="开"
-              unCheckedChildren="关"
+              checkedChildren={t('common.on')}
+              unCheckedChildren={t('common.off')}
               onChange={(val) => setEnableEncryption(val)}
             />
           </Form.Item>
           {enableEncryption && (
-            <Form.Item label="加密算法" name="encryptionAlgorithm">
+            <Form.Item label={t('backup.policy.encryptionAlgorithm')} name="encryptionAlgorithm">
               <Select
                 options={[
-                  { label: 'AES-256-GCM (推荐)', value: 'AES-256-GCM' },
+                  { label: 'AES-256-GCM', value: 'AES-256-GCM' },
                   { label: 'AES-256-CBC', value: 'AES-256-CBC' },
                   { label: 'ChaCha20-Poly1305', value: 'ChaCha20-Poly1305' },
                 ]}
@@ -254,13 +254,13 @@ export default function BackupPolicy() {
     },
     {
       key: 'alert',
-      label: '告警设置',
+      label: t('backup.policy.alert'),
       children: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-          <Form.Item label="失败告警" name="alertOnFailure" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+          <Form.Item label={t('backup.policy.failureAlert')} name="alertOnFailure" valuePropName="checked">
+            <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
           </Form.Item>
-          <Form.Item label="告警邮箱" name="alertEmail">
+          <Form.Item label={t('backup.policy.alertEmail')} name="alertEmail">
             <input
               style={{ width: '100%', padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 14 }}
               placeholder="admin@example.com"
@@ -285,7 +285,7 @@ export default function BackupPolicy() {
     >
       <Card>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
-          备份策略配置影响所有备份任务的默认行为。修改后需保存才能生效。
+          {t('backup.policy.hint')}
         </Typography.Text>
         <Form
           form={form}

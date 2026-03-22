@@ -8,8 +8,14 @@ import { useMMLCommands, useExecuteMMLCommand } from '@/hooks/api/useMML';
 import type { MMLCommand } from '@/types/mml';
 import { useT } from '@/hooks/useT';
 
-const COMMAND_CATEGORIES = [
-  'BSC配置', '小区管理', '邻区管理', '告警查询', '性能采集', '传输管理', '版本管理',
+const COMMAND_CATEGORY_KEYS = [
+  { key: 'BSC配置', labelKey: 'mml.category.bscConfig' },
+  { key: '小区管理', labelKey: 'mml.category.cellMgmt' },
+  { key: '邻区管理', labelKey: 'mml.category.neighborMgmt' },
+  { key: '告警查询', labelKey: 'mml.category.alarmQuery' },
+  { key: '性能采集', labelKey: 'mml.category.perfCollect' },
+  { key: '传输管理', labelKey: 'mml.category.transMgmt' },
+  { key: '版本管理', labelKey: 'mml.category.versionMgmt' },
 ];
 
 const mockCommands: MMLCommand[] = [
@@ -143,7 +149,7 @@ export default function CommandMode() {
           style={{ width: '100%' }}
           placeholder={t('common.pleaseSelect')}
           allowClear
-          options={COMMAND_CATEGORIES.map((c) => ({ label: c, value: c }))}
+          options={COMMAND_CATEGORY_KEYS.map((c) => ({ label: t(c.labelKey), value: c.key }))}
           value={selectedCategory || undefined}
           onChange={(val) => setSelectedCategory(val ?? '')}
         />

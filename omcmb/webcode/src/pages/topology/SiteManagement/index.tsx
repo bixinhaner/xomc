@@ -22,10 +22,10 @@ interface SiteRow extends Record<string, unknown> {
   status: 'active' | 'inactive' | 'maintenance';
 }
 
-const STATUS_MAP: Record<string, { color: string; text: string }> = {
-  active: { color: 'success', text: '正常' },
-  inactive: { color: 'default', text: '未激活' },
-  maintenance: { color: 'warning', text: '维护中' },
+const STATUS_MAP: Record<string, { color: string; key: string }> = {
+  active: { color: 'success', key: 'topology.site.active' },
+  inactive: { color: 'default', key: 'topology.site.inactive' },
+  maintenance: { color: 'warning', key: 'topology.site.maintenance' },
 };
 
 const DOMAIN_OPTIONS = [
@@ -135,7 +135,7 @@ export default function SiteManagement() {
       width: 90,
       render: (val) => {
         const cfg = STATUS_MAP[val as string] ?? STATUS_MAP.inactive;
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+        return <Tag color={cfg.color}>{t(cfg.key)}</Tag>;
       },
     },
     {
