@@ -135,13 +135,13 @@ export const topologyApi = {
     return (data.items || []).map((g) => mapGroupToDomain(g));
   },
 
-  async createGroup(data: { name: string; parent_id?: string; description?: string }): Promise<any> {
-    const { data: result } = await http.post('/groups', data);
+  async createGroup(data: { name: string; parent_id?: string; description?: string }): Promise<BackendDeviceGroup> {
+    const { data: result } = await http.post<BackendDeviceGroup>('/groups', data);
     return result;
   },
 
-  async updateGroup(id: string, data: { name?: string; description?: string }): Promise<any> {
-    const { data: result } = await http.put(`/groups/${id}`, data);
+  async updateGroup(id: string, data: { name?: string; description?: string }): Promise<BackendDeviceGroup> {
+    const { data: result } = await http.put<BackendDeviceGroup>(`/groups/${id}`, data);
     return result;
   },
 
@@ -157,9 +157,14 @@ export const topologyApi = {
     await http.delete(`/groups/${groupId}/devices/${deviceId}`);
   },
 
-  async getGroupDevices(groupId: string, params?: any): Promise<any> {
-    const { data } = await http.get(`/groups/${groupId}/devices`, { params });
-    return data;
+  async getGroupDevices(groupId: string, params?: Record<string, unknown>): Promise<PageResponse<Record<string, unknown>>> {
+    const { data } = await http.get<{ items: Record<string, unknown>[]; total: number; page: number; page_size: number }>(`/groups/${groupId}/devices`, { params });
+    return {
+      items: data.items || [],
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
   },
 
   async getSites(params?: { domainId?: string }): Promise<PageResponse<Site>> {

@@ -189,8 +189,8 @@ export const reportsApi = {
     return { url: data.url, fileName: data.file_name };
   },
 
-  async getSampleData(): Promise<any> {
-    const { data } = await http.get('/reports/sample-data');
+  async getSampleData(): Promise<Record<string, unknown>> {
+    const { data } = await http.get<Record<string, unknown>>('/reports/sample-data');
     return data;
   },
 };
