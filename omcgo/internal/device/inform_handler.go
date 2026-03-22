@@ -47,17 +47,17 @@ func NewInformHandler(
 func (h *InformHandler) Subscribe(bus event.EventBus) error {
 	h.logger.Info("subscribing to device inform events...")
 
-	if _, err := bus.QueueSubscribe(event.SubjectDeviceBootstrap, "device-manager", h.handleBootstrap); err != nil {
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceBootstrap, "device-mgr-bootstrap", h.handleBootstrap); err != nil {
 		return fmt.Errorf("subscribe bootstrap: %w", err)
 	}
 	h.logger.Info("subscribed to bootstrap events", zap.String("subject", event.SubjectDeviceBootstrap))
 
-	if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-manager", h.handlePeriodic); err != nil {
+	if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-mgr-periodic", h.handlePeriodic); err != nil {
 		return fmt.Errorf("subscribe periodic: %w", err)
 	}
 	h.logger.Info("subscribed to periodic events", zap.String("subject", event.SubjectDevicePeriodic))
 
-	if _, err := bus.QueueSubscribe(event.SubjectDeviceValueChange, "device-manager", h.handlePeriodic); err != nil {
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceValueChange, "device-mgr-valuechange", h.handlePeriodic); err != nil {
 		return fmt.Errorf("subscribe value_change: %w", err)
 	}
 	h.logger.Info("subscribed to value_change events", zap.String("subject", event.SubjectDeviceValueChange))

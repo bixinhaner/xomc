@@ -85,9 +85,9 @@ start_process() {
     # 4. 确保日志目录存在
     mkdir -p "$(dirname "$log_file")"
 
-    # 5. 启动
+    # 5. 启动（设置开发环境变量）
     cd "$OMCGO_DIR"
-    "$bin" > "$log_file" 2>&1 &
+    OMCGO_ENV=dev "$bin" > "$log_file" 2>&1 &
     echo $! > "$pid_file"
     sleep 2
 
