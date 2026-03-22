@@ -7,6 +7,7 @@
 > - 2026-03-22 P0 全部 9 项已修复（编译通过 + 全量测试通过）
 > - 2026-03-22 P1 全部 8 项已修复（编译通过 + 全量测试通过 + 类型检查通过）
 > - 2026-03-22 P2 全部 9 项已修复（编译通过 + 全量测试通过 + 类型检查通过）
+> - 2026-03-22 P3 全部 9 项已修复（编译通过 + 全量测试通过 + 类型检查通过）— **全部 35 项审查问题已修复**
 
 ---
 
@@ -334,19 +335,19 @@ F07 网元直连    ███░░░░░░░ 35%   ← 仅框架，CMCC �
 | 25 | 前端 KPI 指标国际化 | 前端 | ✅ 已修复 | 新增 40 个 i18n key（zh-CN + en-US），覆盖 8 个页面组件（KPIStandardReport/PerformanceCharts/ThresholdConfig/ExtractionWizard/HistoricalKPI/StationReport/LTEStandardReport/DeviceDetail），硬编码中文全部改为 t() 调用 |
 | 26 | 添加 `go test -race` 到构建流程 | 测试 | ✅ 已修复 | Makefile 新增 `test-race` target（`go test -race -count=1 ./...`），保持原 `test` target 不变 |
 
-### P3 — 长期优化（3 个月内）
+### P3 — 长期优化（3 个月内）— ✅ 全部已修复
 
-| # | 问题 | 来源 |
-|---|------|------|
-| 27 | F07 网元直连完整实现 | 电信业务 |
-| 28 | F08 北向 OSS 可靠性加固 | 电信业务 |
-| 29 | OpenTelemetry Span 覆盖 | 运维 |
-| 30 | 前端 E2E UI 测试（Playwright） | 测试 |
-| 31 | K8s NetworkPolicy + RBAC | 运维 |
-| 32 | Digest Auth 升级为 SHA-256 | 安全 |
-| 33 | 代码覆盖率追踪与趋势分析 | 测试 |
-| 34 | 过大 Repository 接口拆分 | Go 工程 |
-| 35 | bootstrap 从 core 移至 cmd | 架构 |
+| # | 问题 | 来源 | 状态 | 修复说明 |
+|---|------|------|------|---------|
+| 27 | F07 网元直连完整实现 | 电信业务 | ✅ 已修复 | 新增 model/repository/service/pg_repository + 迁移 000051（nedirect_sessions/commands 表），handler 重构为 service 代理，实现连接管理/命令透传/会话超时/事件发布，36 个测试 |
+| 28 | F08 北向 OSS 可靠性加固 | 电信业务 | ✅ 已修复 | 新增 `core/reliability/` 可复用包（retry 指数退避 + CircuitBreaker 三态熔断），northbound push 实现 Outbox 模式（迁移 000052）+ 死信队列 + 4 个管理 API，23 个测试 |
+| 29 | OpenTelemetry Span 覆盖 | 运维 | ✅ 已修复 | HTTP Tracing 中间件（Gin）、OTELSQLTracer（pgx 查询 Span，组合模式）、业务 Span（ACS handleInform/Device RegisterFromInform/Provision HandleBootstrap/Task Create&Pop），三个部署单元 InitTracer |
+| 30 | 前端 E2E UI 测试（Playwright） | 测试 | ✅ 已修复 | playwright.config.ts + auth/navigation helper + 5 个测试套件（auth/device-list/alarm/performance/device-detail）共 19 个用例，Mock 模式运行 |
+| 31 | K8s NetworkPolicy + RBAC | 运维 | ✅ 已修复 | 4 个 NetworkPolicy（default-deny + app/acs/worker 精确入出站规则）、3 个 ServiceAccount + Role/RoleBinding（最小权限读 ConfigMap/Secret）、.dockerignore |
+| 32 | Digest Auth 升级为 SHA-256 | 安全 | ✅ 已修复 | 双算法 challenge（SHA-256 优先 + MD5 降级向后兼容）、qop=auth 支持（RFC 7616）、8 个新测试覆盖全路径 |
+| 33 | 代码覆盖率追踪与趋势分析 | 测试 | ✅ 已修复 | Makefile 新增 test-cover/cover-report/cover-summary/cover-check（阈值 40%），coverage_trend.sh 趋势脚本（CSV 历史 + 变化方向） |
+| 34 | 过大 Repository 接口拆分 | Go 工程 | ✅ 已修复 | 5 个过大接口拆为 14 个小接口（RoleRepo→5、DeviceGroupRepo→3、TaskRepo→2、DataModelRepo→2、DeviceRepo→2），3 个消费者窄化依赖，组合接口保持向后兼容 |
+| 35 | bootstrap 从 core 移至 cmd | 架构 | ✅ 已修复 | 删除 `core/bootstrap/` 包，新建 `components/infra.go`（共享基础设施），3 个 `cmd/*/bootstrap.go`（各自初始化序列），app/acs/worker 特有字段通过嵌入 Infra 组合 |
 
 ---
 
@@ -393,7 +394,7 @@ OMC 项目**架构设计优秀、代码工程质量良好**，但在**多运营�
 | API 端点 | 198 个 |
 | 高风险问题 | 9 个（P0）✅ 全部已修复 |
 | 中风险问题 | 8 个（P1）✅ 全部已修复 + 9 个（P2）✅ 全部已修复 |
-| 低风险问题 | 9 个（P3） |
+| 低风险问题 | 9 个（P3）✅ 全部已修复 |
 
 ### 建议行动计划
 
@@ -402,7 +403,7 @@ OMC 项目**架构设计优秀、代码工程质量良好**，但在**多运营�
 | 本周 | P0 全部修复（20h） | ✅ 安全风险消除，关键缺陷修复 |
 | 2 周 | P1 完成（60h） | ✅ 测试覆盖率 33%→45%，架构违规修复，前端类型安全加固 |
 | 1 个月 | P2 完成（80h） | ✅ CTCC/CUCC 适配器补齐，数据层优化，业务指标+审计日志+KPI 国际化 |
-| 3 个月 | P3 推进 | F07/F08 完整实现，全面可观测性，覆盖率→60% |
+| 3 个月 | P3 推进 | ✅ F07/F08 完整实现，OTEL Span 覆盖，SHA-256 升级，Playwright E2E，K8s 安全加固 |
 
 ### 下次审查建议
 
