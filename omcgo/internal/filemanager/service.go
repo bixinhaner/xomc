@@ -102,7 +102,7 @@ func (s *FileService) DownloadFile(ctx context.Context, id uuid.UUID) (*minio.Ob
 func (s *FileService) DeleteFile(ctx context.Context, id uuid.UUID) error {
 	mf, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get file for delete: %w", err)
 	}
 
 	// Delete from MinIO — warn on failure but continue with DB deletion

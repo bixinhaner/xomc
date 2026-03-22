@@ -148,7 +148,10 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		return e.failTask(ctx, task, fmt.Errorf("transition to configuring: %w", err))
 	}
 
-	steps := BuildProvisioningSteps(tmpl)
+	steps, err := BuildProvisioningSteps(tmpl)
+	if err != nil {
+		return e.failTask(ctx, task, fmt.Errorf("build provisioning steps: %w", err))
+	}
 	task.TotalSteps = len(steps)
 	if err := e.taskRepo.Update(ctx, task); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("update task steps: %w", err))

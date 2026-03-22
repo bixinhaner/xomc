@@ -162,7 +162,7 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateUserRequest) (*User, error) {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get user: %w", err)
 	}
 
 	if req.DisplayName != nil {
@@ -179,7 +179,7 @@ func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateU
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update user: %w", err)
 	}
 
 	roles, _ := s.roleRepo.GetUserRoles(ctx, user.ID)
@@ -201,7 +201,7 @@ func (s *AdminService) ListUsers(ctx context.Context, filter UserFilter) (*model
 func (s *AdminService) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get user: %w", err)
 	}
 
 	roles, err := s.roleRepo.GetUserRoles(ctx, user.ID)
@@ -215,10 +215,10 @@ func (s *AdminService) GetUser(ctx context.Context, id uuid.UUID) (*User, error)
 // AssignRole assigns a role to a user.
 func (s *AdminService) AssignRole(ctx context.Context, userID, roleID uuid.UUID) error {
 	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
-		return err
+		return fmt.Errorf("get user for role assignment: %w", err)
 	}
 	if _, err := s.roleRepo.GetByID(ctx, roleID); err != nil {
-		return err
+		return fmt.Errorf("get role for assignment: %w", err)
 	}
 	return s.roleRepo.AssignRole(ctx, userID, roleID)
 }
@@ -251,7 +251,7 @@ func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, newPassw
 func (s *AdminService) LockUser(ctx context.Context, id uuid.UUID) error {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get user for lock: %w", err)
 	}
 	user.Status = UserStatusDisabled
 	return s.userRepo.Update(ctx, user)
@@ -261,7 +261,7 @@ func (s *AdminService) LockUser(ctx context.Context, id uuid.UUID) error {
 func (s *AdminService) UnlockUser(ctx context.Context, id uuid.UUID) error {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get user for unlock: %w", err)
 	}
 	user.Status = UserStatusActive
 	return s.userRepo.Update(ctx, user)
@@ -271,7 +271,7 @@ func (s *AdminService) UnlockUser(ctx context.Context, id uuid.UUID) error {
 func (s *AdminService) GetRole(ctx context.Context, id uuid.UUID) (*Role, error) {
 	role, err := s.roleRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get role: %w", err)
 	}
 	perms, err := s.roleRepo.GetPermissions(ctx, id)
 	if err != nil {
@@ -313,7 +313,7 @@ func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*
 func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateRoleRequest) (*Role, error) {
 	role, err := s.roleRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get role for update: %w", err)
 	}
 
 	if req.Name != nil {

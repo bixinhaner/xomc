@@ -107,5 +107,8 @@ func (r *PgDeviceParameterRepository) GetByPath(ctx context.Context, deviceID uu
 func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error {
 	query, args, _ := psql.Delete("device_parameters").Where(sq.Eq{"device_id": deviceID}).ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete device parameters: %w", err)
+	}
+	return nil
 }

@@ -74,7 +74,7 @@ func (s *TaskService) GetTask(ctx context.Context, taskID string) (*Task, error)
 	// 优先从 Redis 获取（更实时）
 	task, err := s.queue.GetByID(ctx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get task from queue: %w", err)
 	}
 	if task != nil {
 		return task, nil
@@ -89,7 +89,7 @@ func (s *TaskService) GetTaskByCWMPID(ctx context.Context, cwmpID string) (*Task
 	// 从 Redis 获取
 	task, err := s.queue.GetByCWMPID(ctx, cwmpID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get task by cwmp_id from queue: %w", err)
 	}
 	if task != nil {
 		return task, nil
@@ -104,7 +104,7 @@ func (s *TaskService) GetPendingTasks(ctx context.Context, deviceSN string, limi
 	// 从 PostgreSQL 获取所有 pending 状态任务
 	tasks, err := s.repo.GetPendingByDevice(ctx, deviceSN)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get pending tasks: %w", err)
 	}
 
 	if limit > 0 && len(tasks) > limit {
@@ -142,13 +142,13 @@ func (s *TaskService) GetQueueLength(ctx context.Context, deviceSN string) (int6
 func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
 	// 更新 Redis
 	if err := s.queue.MarkTaskSent(ctx, taskID, cwmpID); err != nil {
-		return err
+		return fmt.Errorf("mark task sent in queue: %w", err)
 	}
 
 	// 同步更新 PostgreSQL
 	task, err := s.queue.GetByID(ctx, taskID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get sent task: %w", err)
 	}
 	if task != nil {
 		if err := s.repo.Update(ctx, task); err != nil {
@@ -167,13 +167,13 @@ func (s *TaskService) MarkTaskSent(ctx context.Context, taskID, cwmpID string) e
 func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {
 	// 更新 Redis
 	if err := s.queue.MarkTaskCompleted(ctx, taskID, result); err != nil {
-		return err
+		return fmt.Errorf("mark task completed in queue: %w", err)
 	}
 
 	// 同步更新 PostgreSQL
 	task, err := s.queue.GetByID(ctx, taskID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get completed task: %w", err)
 	}
 	if task != nil {
 		if err := s.repo.Update(ctx, task); err != nil {
@@ -197,13 +197,13 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
 	// 更新 Redis
 	if err := s.queue.MarkTaskFailed(ctx, taskID, errorCode, errorMsg); err != nil {
-		return err
+		return fmt.Errorf("mark task failed in queue: %w", err)
 	}
 
 	// 同步更新 PostgreSQL
 	task, err := s.queue.GetByID(ctx, taskID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get failed task: %w", err)
 	}
 	if task != nil {
 		if err := s.repo.Update(ctx, task); err != nil {
@@ -228,7 +228,7 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 	task, err := s.GetTask(ctx, taskID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get task for cancel: %w", err)
 	}
 	if task == nil {
 		return fmt.Errorf("task not found: %s", taskID)
@@ -246,12 +246,12 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 
 	// 从 Redis 删除
 	if err := s.queue.Delete(ctx, taskID); err != nil {
-		return err
+		return fmt.Errorf("delete task from queue: %w", err)
 	}
 
 	// 更新 PostgreSQL
 	if err := s.repo.Update(ctx, task); err != nil {
-		return err
+		return fmt.Errorf("update cancelled task: %w", err)
 	}
 
 	if s.metrics != nil {
@@ -285,7 +285,7 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 	// 获取 sent 状态超过 5 分钟的任务
 	staleTasks, err := s.queue.GetStaleSentTasks(ctx, deviceSN, "5m")
 	if err != nil {
-		return err
+		return fmt.Errorf("get stale tasks: %w", err)
 	}
 
 	for _, task := range staleTasks {

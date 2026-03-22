@@ -29,7 +29,8 @@ func TestBuildProvisioningSteps_WithParameters(t *testing.T) {
 		Active:       true,
 	}
 
-	steps := BuildProvisioningSteps(tmpl)
+	steps, err := BuildProvisioningSteps(tmpl)
+	require.NoError(t, err)
 
 	// Expect 3 steps: GetParameterValues, SetParameterValues, Reboot.
 	require.Len(t, steps, 3)
@@ -42,7 +43,7 @@ func TestBuildProvisioningSteps_WithParameters(t *testing.T) {
 
 	// Verify GPV params contain the parameter names.
 	var gpvParams map[string]interface{}
-	err := json.Unmarshal(steps[0].Params, &gpvParams)
+	err = json.Unmarshal(steps[0].Params, &gpvParams)
 	require.NoError(t, err)
 	paramNames, ok := gpvParams["parameter_names"].([]interface{})
 	require.True(t, ok)
@@ -85,7 +86,8 @@ func TestBuildProvisioningSteps_EmptyParameters(t *testing.T) {
 		Active:       true,
 	}
 
-	steps := BuildProvisioningSteps(tmpl)
+	steps, err := BuildProvisioningSteps(tmpl)
+	require.NoError(t, err)
 
 	// With empty parameters: no GPV (extractParameterNames returns empty),
 	// no SPV (len(tmpl.Parameters) > 0 but the map is empty, however
@@ -113,7 +115,8 @@ func TestBuildProvisioningSteps_NilParameters(t *testing.T) {
 		Active:       true,
 	}
 
-	steps := BuildProvisioningSteps(tmpl)
+	steps, err := BuildProvisioningSteps(tmpl)
+	require.NoError(t, err)
 
 	// With nil parameters: extractParameterNames returns nil (empty),
 	// len(nil) == 0 for json.RawMessage, so no GPV and no SPV.
@@ -130,7 +133,8 @@ func TestBuildProvisioningSteps_OrderIsSequential(t *testing.T) {
 		Active:     true,
 	}
 
-	steps := BuildProvisioningSteps(tmpl)
+	steps, err := BuildProvisioningSteps(tmpl)
+	require.NoError(t, err)
 	for i, s := range steps {
 		assert.Equal(t, i+1, s.Order, "step %d should have Order=%d", i, i+1)
 	}

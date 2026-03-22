@@ -175,13 +175,17 @@ func scanCommand(row pgx.Row) (*MMLCommand, error) {
 		return nil, err
 	}
 	if paramTemplateJSON != nil {
-		_ = json.Unmarshal(paramTemplateJSON, &c.ParamTemplate)
+		if err := json.Unmarshal(paramTemplateJSON, &c.ParamTemplate); err != nil {
+			return nil, fmt.Errorf("unmarshal param_template: %w", err)
+		}
 	}
 	if c.ParamTemplate == nil {
 		c.ParamTemplate = map[string]interface{}{}
 	}
 	if productTypesJSON != nil {
-		_ = json.Unmarshal(productTypesJSON, &c.ProductTypes)
+		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
+			return nil, fmt.Errorf("unmarshal product_types: %w", err)
+		}
 	}
 	if c.ProductTypes == nil {
 		c.ProductTypes = []string{}
@@ -202,13 +206,17 @@ func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
 		return nil, err
 	}
 	if paramTemplateJSON != nil {
-		_ = json.Unmarshal(paramTemplateJSON, &c.ParamTemplate)
+		if err := json.Unmarshal(paramTemplateJSON, &c.ParamTemplate); err != nil {
+			return nil, fmt.Errorf("unmarshal param_template: %w", err)
+		}
 	}
 	if c.ParamTemplate == nil {
 		c.ParamTemplate = map[string]interface{}{}
 	}
 	if productTypesJSON != nil {
-		_ = json.Unmarshal(productTypesJSON, &c.ProductTypes)
+		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
+			return nil, fmt.Errorf("unmarshal product_types: %w", err)
+		}
 	}
 	if c.ProductTypes == nil {
 		c.ProductTypes = []string{}
@@ -233,7 +241,10 @@ func NewPgScriptRepository(pool *pgxpool.Pool) *PgScriptRepository {
 }
 
 func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) error {
-	tagsJSON, _ := json.Marshal(script.Tags)
+	tagsJSON, err := json.Marshal(script.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
 
 	query, args, err := psql.Insert("mml_scripts").
 		Columns("script_name", "description", "content",
@@ -275,7 +286,10 @@ func (r *PgScriptRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLScr
 }
 
 func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) error {
-	tagsJSON, _ := json.Marshal(script.Tags)
+	tagsJSON, err := json.Marshal(script.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
 
 	query, args, err := psql.Update("mml_scripts").
 		Set("script_name", script.ScriptName).
@@ -406,7 +420,9 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 		return nil, err
 	}
 	if tagsJSON != nil {
-		_ = json.Unmarshal(tagsJSON, &s.Tags)
+		if err := json.Unmarshal(tagsJSON, &s.Tags); err != nil {
+			return nil, fmt.Errorf("unmarshal tags: %w", err)
+		}
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
@@ -427,7 +443,9 @@ func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 		return nil, err
 	}
 	if tagsJSON != nil {
-		_ = json.Unmarshal(tagsJSON, &s.Tags)
+		if err := json.Unmarshal(tagsJSON, &s.Tags); err != nil {
+			return nil, fmt.Errorf("unmarshal tags: %w", err)
+		}
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
@@ -452,9 +470,18 @@ func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 }
 
 func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
-	deviceSNsJSON, _ := json.Marshal(task.DeviceSNs)
-	commandsJSON, _ := json.Marshal(task.Commands)
-	resultsJSON, _ := json.Marshal(task.Results)
+	deviceSNsJSON, err := json.Marshal(task.DeviceSNs)
+	if err != nil {
+		return fmt.Errorf("marshal device_sns: %w", err)
+	}
+	commandsJSON, err := json.Marshal(task.Commands)
+	if err != nil {
+		return fmt.Errorf("marshal commands: %w", err)
+	}
+	resultsJSON, err := json.Marshal(task.Results)
+	if err != nil {
+		return fmt.Errorf("marshal results: %w", err)
+	}
 
 	query, args, err := psql.Insert("mml_tasks").
 		Columns("task_name", "script_id", "device_sns",
@@ -496,9 +523,18 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask,
 }
 
 func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
-	deviceSNsJSON, _ := json.Marshal(task.DeviceSNs)
-	commandsJSON, _ := json.Marshal(task.Commands)
-	resultsJSON, _ := json.Marshal(task.Results)
+	deviceSNsJSON, err := json.Marshal(task.DeviceSNs)
+	if err != nil {
+		return fmt.Errorf("marshal device_sns: %w", err)
+	}
+	commandsJSON, err := json.Marshal(task.Commands)
+	if err != nil {
+		return fmt.Errorf("marshal commands: %w", err)
+	}
+	resultsJSON, err := json.Marshal(task.Results)
+	if err != nil {
+		return fmt.Errorf("marshal results: %w", err)
+	}
 
 	query, args, err := psql.Update("mml_tasks").
 		Set("task_name", task.TaskName).
@@ -599,19 +635,25 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 		return nil, err
 	}
 	if deviceSNsJSON != nil {
-		_ = json.Unmarshal(deviceSNsJSON, &t.DeviceSNs)
+		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
+			return nil, fmt.Errorf("unmarshal device_sns: %w", err)
+		}
 	}
 	if t.DeviceSNs == nil {
 		t.DeviceSNs = []string{}
 	}
 	if commandsJSON != nil {
-		_ = json.Unmarshal(commandsJSON, &t.Commands)
+		if err := json.Unmarshal(commandsJSON, &t.Commands); err != nil {
+			return nil, fmt.Errorf("unmarshal commands: %w", err)
+		}
 	}
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
 	}
 	if resultsJSON != nil {
-		_ = json.Unmarshal(resultsJSON, &t.Results)
+		if err := json.Unmarshal(resultsJSON, &t.Results); err != nil {
+			return nil, fmt.Errorf("unmarshal results: %w", err)
+		}
 	}
 	if t.Results == nil {
 		t.Results = []map[string]interface{}{}
@@ -632,19 +674,25 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 		return nil, err
 	}
 	if deviceSNsJSON != nil {
-		_ = json.Unmarshal(deviceSNsJSON, &t.DeviceSNs)
+		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
+			return nil, fmt.Errorf("unmarshal device_sns: %w", err)
+		}
 	}
 	if t.DeviceSNs == nil {
 		t.DeviceSNs = []string{}
 	}
 	if commandsJSON != nil {
-		_ = json.Unmarshal(commandsJSON, &t.Commands)
+		if err := json.Unmarshal(commandsJSON, &t.Commands); err != nil {
+			return nil, fmt.Errorf("unmarshal commands: %w", err)
+		}
 	}
 	if t.Commands == nil {
 		t.Commands = []map[string]interface{}{}
 	}
 	if resultsJSON != nil {
-		_ = json.Unmarshal(resultsJSON, &t.Results)
+		if err := json.Unmarshal(resultsJSON, &t.Results); err != nil {
+			return nil, fmt.Errorf("unmarshal results: %w", err)
+		}
 	}
 	if t.Results == nil {
 		t.Results = []map[string]interface{}{}

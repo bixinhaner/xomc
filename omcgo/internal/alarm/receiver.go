@@ -2,6 +2,7 @@ package alarm
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,7 +43,7 @@ func (r *AlarmReceiver) Subscribe(eventBus event.EventBus) error {
 		r.handleAlarmEvent,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("subscribe alarm events: %w", err)
 	}
 	r.logger.Info("alarm receiver subscribed", zap.String("subject", event.SubjectDeviceAlarm))
 	return nil
@@ -52,13 +53,13 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 	var payload AlarmPayload
 	if err := evt.DecodePayload(&payload); err != nil {
 		r.logger.Error("decode alarm payload", zap.Error(err))
-		return err
+		return fmt.Errorf("decode alarm payload: %w", err)
 	}
 
 	deviceID, err := uuid.Parse(payload.DeviceID)
 	if err != nil {
 		r.logger.Error("parse device_id", zap.Error(err), zap.String("device_id", payload.DeviceID))
-		return err
+		return fmt.Errorf("parse device_id: %w", err)
 	}
 
 	alarm := &model.Alarm{
@@ -78,7 +79,7 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 			zap.Error(err),
 			zap.String("device_sn", payload.DeviceSN),
 			zap.String("alarm_code", payload.AlarmCode))
-		return err
+		return fmt.Errorf("process alarm: %w", err)
 	}
 
 	return nil

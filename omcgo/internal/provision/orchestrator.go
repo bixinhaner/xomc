@@ -23,15 +23,18 @@ const (
 
 // BuildProvisioningSteps generates the sequence of RPC steps needed to
 // provision a device according to the given template.
-func BuildProvisioningSteps(tmpl *template.ConfigTemplate) []ProvisioningStep {
+func BuildProvisioningSteps(tmpl *template.ConfigTemplate) ([]ProvisioningStep, error) {
 	var steps []ProvisioningStep
 
 	// Step 1: GetParameterValues — read current device configuration.
 	paramNames := extractParameterNames(tmpl.Parameters)
 	if len(paramNames) > 0 {
-		gpvParams, _ := json.Marshal(map[string]interface{}{
+		gpvParams, err := json.Marshal(map[string]interface{}{
 			"parameter_names": paramNames,
 		})
+		if err != nil {
+			return nil, fmt.Errorf("marshal gpv params: %w", err)
+		}
 		steps = append(steps, ProvisioningStep{
 			Order:    len(steps) + 1,
 			Method:   MethodGetParameterValues,
@@ -54,9 +57,12 @@ func BuildProvisioningSteps(tmpl *template.ConfigTemplate) []ProvisioningStep {
 
 	// Step 3: Reboot (optional — only if template has many parameter changes).
 	// For now, always include a reboot step as most provisioning requires it.
-	rebootParams, _ := json.Marshal(map[string]string{
+	rebootParams, err := json.Marshal(map[string]string{
 		"command_key": fmt.Sprintf("provision-%d", time.Now().Unix()),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal reboot params: %w", err)
+	}
 	steps = append(steps, ProvisioningStep{
 		Order:    len(steps) + 1,
 		Method:   MethodReboot,
@@ -65,7 +71,7 @@ func BuildProvisioningSteps(tmpl *template.ConfigTemplate) []ProvisioningStep {
 		Required: false,
 	})
 
-	return steps
+	return steps, nil
 }
 
 // EnqueueSteps pushes provisioning steps into the device's Redis command queue.

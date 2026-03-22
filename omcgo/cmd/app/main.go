@@ -41,6 +41,12 @@ func runApp(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
+	// P1-8: Validate JWT secret in production mode.
+	// In non-dev/test environments, reject weak or default secrets.
+	if err := validateJWTSecret(cfg.JWT.Secret); err != nil {
+		return fmt.Errorf("JWT secret validation failed: %w", err)
+	}
+
 	app, err := initApp(context.Background(), &cfg)
 	if err != nil {
 		return err
@@ -73,6 +79,32 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return app.ListenAndServe(engine, addr)
+}
+
+// defaultJWTSecret is the placeholder secret shipped in dev/test config files.
+const defaultJWTSecret = "change-me-in-production-minimum-32-characters!!"
+
+// validateJWTSecret checks that the JWT secret is strong enough for production use.
+// In development or test mode (OMCGO_ENV=dev|test or GIN_MODE=debug), validation is skipped.
+func validateJWTSecret(secret string) error {
+	env := os.Getenv("OMCGO_ENV")
+	ginMode := os.Getenv("GIN_MODE")
+
+	// Skip validation for dev/test environments.
+	if env == "dev" || env == "test" || env == "development" || ginMode == "debug" || ginMode == "test" {
+		return nil
+	}
+
+	if secret == "" {
+		return fmt.Errorf("JWT secret must not be empty")
+	}
+	if len(secret) < 32 {
+		return fmt.Errorf("JWT secret must be at least 32 characters, got %d", len(secret))
+	}
+	if secret == defaultJWTSecret {
+		return fmt.Errorf("JWT secret must not be the default placeholder value — set a unique secret via OMCGO_JWT_SECRET environment variable")
+	}
+	return nil
 }
 
 // parseStringSlice parses a comma-separated string into a slice.

@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
@@ -19,17 +22,65 @@ const (
 	auditActionLogout       = "logout"
 )
 
+// Login rate limiting constants.
+const (
+	loginRateLimit    = 5               // max login attempts per IP per window
+	loginRateWindow   = 1 * time.Minute // rate limit window
+	limiterCleanupAge = 5 * time.Minute // remove idle limiters after this duration
+)
+
+// ipLimiterEntry holds a per-IP rate limiter and the last time it was accessed.
+type ipLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
 // Handler provides HTTP endpoints for admin operations.
 type Handler struct {
-	service *AdminService
-	logger  *zap.Logger
+	service      *AdminService
+	logger       *zap.Logger
+	loginLimiter sync.Map // map[string]*ipLimiterEntry
 }
 
 // NewHandler creates a new admin Handler.
 func NewHandler(service *AdminService, logger *zap.Logger) *Handler {
-	return &Handler{
+	h := &Handler{
 		service: service,
 		logger:  logger.Named("admin-handler"),
+	}
+	// Start background goroutine to clean up stale IP rate limiters.
+	go h.cleanupLoginLimiters()
+	return h
+}
+
+// getIPLimiter returns a rate.Limiter for the given IP, creating one if needed.
+func (h *Handler) getIPLimiter(ip string) *rate.Limiter {
+	now := time.Now()
+	if val, ok := h.loginLimiter.Load(ip); ok {
+		entry := val.(*ipLimiterEntry)
+		entry.lastSeen = now
+		return entry.limiter
+	}
+	// rate.NewLimiter(rate.Every(window/limit), limit) allows `limit` requests per window.
+	limiter := rate.NewLimiter(rate.Every(loginRateWindow/time.Duration(loginRateLimit)), loginRateLimit)
+	entry := &ipLimiterEntry{limiter: limiter, lastSeen: now}
+	actual, _ := h.loginLimiter.LoadOrStore(ip, entry)
+	return actual.(*ipLimiterEntry).limiter
+}
+
+// cleanupLoginLimiters periodically removes stale per-IP rate limiters.
+func (h *Handler) cleanupLoginLimiters() {
+	ticker := time.NewTicker(limiterCleanupAge)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-limiterCleanupAge)
+		h.loginLimiter.Range(func(key, value any) bool {
+			entry := value.(*ipLimiterEntry)
+			if entry.lastSeen.Before(cutoff) {
+				h.loginLimiter.Delete(key)
+			}
+			return true
+		})
 	}
 }
 
@@ -72,13 +123,24 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 }
 
 func (h *Handler) Login(c *gin.Context) {
+	clientIP := c.ClientIP()
+
+	// Per-IP login rate limiting: reject if too many attempts.
+	if limiter := h.getIPLimiter(clientIP); !limiter.Allow() {
+		h.logger.Warn("login rate limited",
+			zap.String("ip", clientIP),
+		)
+		commonerrors.AbortWithError(c, http.StatusTooManyRequests,
+			errors.New("too many login attempts, please try again later"))
+		return
+	}
+
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	clientIP := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 
 	tokenPair, err := h.service.Login(c.Request.Context(), req.Username, req.Password)

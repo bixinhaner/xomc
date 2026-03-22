@@ -33,8 +33,14 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 	device.CreatedAt = now
 	device.UpdatedAt = now
 
-	extData, _ := json.Marshal(device.ExtensionData)
-	eventsData, _ := json.Marshal(device.LastInformEvents)
+	extData, err := json.Marshal(device.ExtensionData)
+	if err != nil {
+		return fmt.Errorf("marshal extension_data: %w", err)
+	}
+	eventsData, err := json.Marshal(device.LastInformEvents)
+	if err != nil {
+		return fmt.Errorf("marshal last_inform_events: %w", err)
+	}
 
 	// INET column requires nil for empty values, not empty string
 	var ipAddr interface{}
@@ -89,8 +95,14 @@ func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (
 }
 
 func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) error {
-	extData, _ := json.Marshal(device.ExtensionData)
-	eventsData, _ := json.Marshal(device.LastInformEvents)
+	extData, err := json.Marshal(device.ExtensionData)
+	if err != nil {
+		return fmt.Errorf("marshal extension_data: %w", err)
+	}
+	eventsData, err := json.Marshal(device.LastInformEvents)
+	if err != nil {
+		return fmt.Errorf("marshal last_inform_events: %w", err)
+	}
 
 	// INET column requires nil for empty values, not empty string
 	var ipAddr interface{}
@@ -121,13 +133,19 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 	}
 
 	_, err = r.pool.Exec(ctx, query, args...)
-	return err
+	if err != nil {
+		return fmt.Errorf("update device: %w", err)
+	}
+	return nil
 }
 
 func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query, args, _ := psql.Delete("devices").Where(sq.Eq{"id": id}).ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete device: %w", err)
+	}
+	return nil
 }
 
 func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
@@ -213,18 +231,27 @@ func (r *PgDeviceRepository) UpdateStatus(ctx context.Context, id uuid.UUID, sta
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
-	return err
+	if err != nil {
+		return fmt.Errorf("update device status: %w", err)
+	}
+	return nil
 }
 
 func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
-	eventsData, _ := json.Marshal(events)
-	query, args, _ := psql.Update("devices").
+	eventsData, err := json.Marshal(events)
+	if err != nil {
+		return fmt.Errorf("marshal last_inform_events: %w", err)
+	}
+	query, args, err := psql.Update("devices").
 		Set("last_inform_at", at).
 		Set("last_inform_events", eventsData).
 		Where(sq.Eq{"serial_number": sn}).
 		ToSql()
-	_, err := r.pool.Exec(ctx, query, args...)
-	return err
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update last inform: %w", err)
+	}
+	return nil
 }
 
 func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
@@ -236,7 +263,7 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query device count by status: %w", err)
 	}
 	defer rows.Close()
 
@@ -245,7 +272,7 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 		var status model.DeviceStatus
 		var count int64
 		if err := rows.Scan(&status, &count); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan device count: %w", err)
 		}
 		result[status] = count
 	}
@@ -291,10 +318,14 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		d.IPAddress = *ipAddr
 	}
 	if len(extData) > 0 {
-		json.Unmarshal(extData, &d.ExtensionData)
+		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
+			return nil, fmt.Errorf("unmarshal extension_data: %w", err)
+		}
 	}
 	if len(eventsData) > 0 {
-		json.Unmarshal(eventsData, &d.LastInformEvents)
+		if err := json.Unmarshal(eventsData, &d.LastInformEvents); err != nil {
+			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
+		}
 	}
 	return &d, nil
 }
@@ -323,10 +354,14 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		d.IPAddress = *ipAddr
 	}
 	if len(extData) > 0 {
-		json.Unmarshal(extData, &d.ExtensionData)
+		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
+			return nil, fmt.Errorf("unmarshal extension_data: %w", err)
+		}
 	}
 	if len(eventsData) > 0 {
-		json.Unmarshal(eventsData, &d.LastInformEvents)
+		if err := json.Unmarshal(eventsData, &d.LastInformEvents); err != nil {
+			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
+		}
 	}
 	return &d, nil
 }
