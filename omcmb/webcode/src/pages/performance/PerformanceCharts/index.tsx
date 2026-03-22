@@ -19,15 +19,15 @@ function formatTimestamp(ts: string): string {
   }
 }
 
-const KPI_OPTIONS = [
-  { label: 'RRC建立成功率', value: 'RRC_SR' },
-  { label: 'E-RAB建立成功率', value: 'ERAB_SR' },
-  { label: '切换成功率', value: 'HO_SR' },
-  { label: '下行吞吐量', value: 'DL_THROUGHPUT' },
-  { label: '上行吞吐量', value: 'UL_THROUGHPUT' },
-  { label: '最大用户数', value: 'MAX_USERS' },
-  { label: '无线可用率', value: 'AVAILABILITY' },
-  { label: 'PDCP丢包率', value: 'PDCP_LOSS' },
+const KPI_OPTION_KEYS: { labelKey: string; value: string }[] = [
+  { labelKey: 'kpi.rrcSetupSuccessRate', value: 'RRC_SR' },
+  { labelKey: 'kpi.erabSetupSuccessRate', value: 'ERAB_SR' },
+  { labelKey: 'kpi.handoverSuccessRate', value: 'HO_SR' },
+  { labelKey: 'kpi.dlThroughput', value: 'DL_THROUGHPUT' },
+  { labelKey: 'kpi.ulThroughput', value: 'UL_THROUGHPUT' },
+  { labelKey: 'kpi.maxUsers', value: 'MAX_USERS' },
+  { labelKey: 'kpi.availability', value: 'AVAILABILITY' },
+  { labelKey: 'kpi.pdcpLossRate', value: 'PDCP_LOSS' },
 ];
 
 const DEVICE_OPTIONS = [
@@ -71,6 +71,9 @@ function generateMockTimeSeries(kpiCode: string, points = 24) {
 
 export default function PerformanceCharts() {
   const t = useT();
+  const KPI_OPTIONS = useMemo(() =>
+    KPI_OPTION_KEYS.map((k) => ({ label: t(k.labelKey), value: k.value })),
+  [t]);
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedKPIs, setSelectedKPIs] = useState<string[]>(['RRC_SR', 'DL_THROUGHPUT']);
   const [selectedDevice, setSelectedDevice] = useState<string>('ENB00001');

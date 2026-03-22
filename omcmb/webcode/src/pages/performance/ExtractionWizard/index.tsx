@@ -30,11 +30,11 @@ interface ResultRow extends Record<string, unknown> {
   timestamp: string;
 }
 
-const mockResults: ResultRow[] = [
-  { id: '1', stationName: '北京朝阳基站01', sn: 'ENB00001', kpiCode: 'RRC_SR', kpiName: 'RRC建立成功率', value: 99.2, unit: '%', timestamp: '2026-03-02 10:00:00' },
-  { id: '2', stationName: '北京朝阳基站01', sn: 'ENB00001', kpiCode: 'DL_THROUGHPUT', kpiName: '下行吞吐量', value: 145.6, unit: 'Mbps', timestamp: '2026-03-02 10:00:00' },
-  { id: '3', stationName: '北京海淀基站01', sn: 'ENB00002', kpiCode: 'RRC_SR', kpiName: 'RRC建立成功率', value: 98.9, unit: '%', timestamp: '2026-03-02 10:00:00' },
-  { id: '4', stationName: '北京海淀基站01', sn: 'ENB00002', kpiCode: 'DL_THROUGHPUT', kpiName: '下行吞吐量', value: 132.1, unit: 'Mbps', timestamp: '2026-03-02 10:00:00' },
+const MOCK_RESULTS_RAW = [
+  { id: '1', stationName: '北京朝阳基站01', sn: 'ENB00001', kpiCode: 'RRC_SR', kpiNameKey: 'kpi.rrcSetupSuccessRate', value: 99.2, unit: '%', timestamp: '2026-03-02 10:00:00' },
+  { id: '2', stationName: '北京朝阳基站01', sn: 'ENB00001', kpiCode: 'DL_THROUGHPUT', kpiNameKey: 'kpi.dlThroughput', value: 145.6, unit: 'Mbps', timestamp: '2026-03-02 10:00:00' },
+  { id: '3', stationName: '北京海淀基站01', sn: 'ENB00002', kpiCode: 'RRC_SR', kpiNameKey: 'kpi.rrcSetupSuccessRate', value: 98.9, unit: '%', timestamp: '2026-03-02 10:00:00' },
+  { id: '4', stationName: '北京海淀基站01', sn: 'ENB00002', kpiCode: 'DL_THROUGHPUT', kpiNameKey: 'kpi.dlThroughput', value: 132.1, unit: 'Mbps', timestamp: '2026-03-02 10:00:00' },
 ];
 
 const DEVICE_OPTIONS = [
@@ -58,6 +58,10 @@ export default function ExtractionWizard() {
   const { data: kpisData } = useAllKPIs();
   const { data: seriesData } = useMultipleKPISeries(selectedKPIs, selectedDevices[0]);
 
+  const mockResults: ResultRow[] = useMemo(() =>
+    MOCK_RESULTS_RAW.map((r) => ({ ...r, kpiName: t(r.kpiNameKey) })),
+  [t]);
+
   const WIZARD_STEPS = useMemo(() => [
     { title: t('perf.kpiName'), description: t('common.pleaseSelect') },
     { title: t('device.name'), description: t('common.pleaseSelect') },
@@ -72,13 +76,13 @@ export default function ExtractionWizard() {
   })).concat(
     selectedKPIs.length === 0
       ? [
-          { key: 'RRC_SR', label: 'RRC建立成功率', description: '无线接入 · %' },
-          { key: 'ERAB_SR', label: 'E-RAB建立成功率', description: '无线接入 · %' },
-          { key: 'HO_SR', label: '切换成功率', description: '切换 · %' },
-          { key: 'DL_THROUGHPUT', label: '下行吞吐量', description: '吞吐量 · Mbps' },
-          { key: 'UL_THROUGHPUT', label: '上行吞吐量', description: '吞吐量 · Mbps' },
-          { key: 'MAX_USERS', label: '最大用户数', description: '用户 · 个' },
-          { key: 'AVAILABILITY', label: '无线可用率', description: '质量 · %' },
+          { key: 'RRC_SR', label: t('kpi.rrcSetupSuccessRate'), description: `${t('kpi.tree.radioAccess')} · %` },
+          { key: 'ERAB_SR', label: t('kpi.erabSetupSuccessRate'), description: `${t('kpi.tree.radioAccess')} · %` },
+          { key: 'HO_SR', label: t('kpi.handoverSuccessRate'), description: `${t('kpi.tree.handover')} · %` },
+          { key: 'DL_THROUGHPUT', label: t('kpi.dlThroughput'), description: `${t('kpi.dlThroughput')} · Mbps` },
+          { key: 'UL_THROUGHPUT', label: t('kpi.ulThroughput'), description: `${t('kpi.ulThroughput')} · Mbps` },
+          { key: 'MAX_USERS', label: t('kpi.maxUsers'), description: `${t('kpi.tree.userCount')} · 个` },
+          { key: 'AVAILABILITY', label: t('kpi.availability'), description: `${t('kpi.tree.quality')} · %` },
         ]
       : []
   );

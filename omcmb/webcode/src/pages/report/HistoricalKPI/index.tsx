@@ -10,14 +10,14 @@ import LineChart from '@/components/Charts/LineChart';
 import type { LineSeries } from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 
-const kpiOptions = [
-  { label: '无线接通率', value: 'accessRate' },
-  { label: '切换成功率', value: 'hoSuccessRate' },
-  { label: 'PRB利用率', value: 'prbUtil' },
-  { label: '掉话率', value: 'dropRate' },
-  { label: '在线用户数', value: 'onlineUsers' },
-  { label: '下行吞吐量(Mbps)', value: 'dlThroughput' },
-  { label: '上行吞吐量(Mbps)', value: 'ulThroughput' },
+const KPI_OPTION_KEYS: { labelKey: string; value: string }[] = [
+  { labelKey: 'kpi.accessRate', value: 'accessRate' },
+  { labelKey: 'kpi.handoverSuccessRate', value: 'hoSuccessRate' },
+  { labelKey: 'kpi.prbUtilization', value: 'prbUtil' },
+  { labelKey: 'kpi.dropRate', value: 'dropRate' },
+  { labelKey: 'kpi.onlineUsers', value: 'onlineUsers' },
+  { labelKey: 'kpi.dlThroughput', value: 'dlThroughput' },
+  { labelKey: 'kpi.ulThroughput', value: 'ulThroughput' },
 ];
 
 const generateTimePoints = (count: number, granularity: string): string[] => {
@@ -61,6 +61,9 @@ interface KPIDataRow {
 
 export default function HistoricalKPI() {
   const t = useT();
+  const kpiOptions = useMemo(() =>
+    KPI_OPTION_KEYS.map((k) => ({ label: t(k.labelKey), value: k.value })),
+  [t]);
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedKPIs, setSelectedKPIs] = useState<string[]>(['accessRate', 'hoSuccessRate']);
   const [page, setPage] = useState(1);

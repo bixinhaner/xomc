@@ -762,6 +762,74 @@ const messages: Record<string, string> = {
   'perf.value':       'Value',
   'perf.timestamp':   'Timestamp',
 
+  // KPI indicator names
+  'kpi.rrcSetupSuccessRate':   'RRC Setup Success Rate',
+  'kpi.erabSetupSuccessRate':  'E-RAB Setup Success Rate',
+  'kpi.handoverSuccessRate':   'Handover Success Rate',
+  'kpi.dlThroughput':          'DL Throughput',
+  'kpi.ulThroughput':          'UL Throughput',
+  'kpi.maxUsers':              'Max Users',
+  'kpi.availability':          'Radio Availability',
+  'kpi.pdcpLossRate':          'PDCP Loss Rate',
+  'kpi.dlPeakThroughput':      'DL Peak Throughput',
+  'kpi.ulPeakThroughput':      'UL Peak Throughput',
+  'kpi.maxOnlineUsers':        'Max Online Users',
+  'kpi.accessRate':            'Radio Access Rate',
+  'kpi.dropRate':              'Call Drop Rate',
+  'kpi.prbUtilization':        'PRB Utilization',
+  'kpi.onlineUsers':           'Online Users',
+  'kpi.volteMos':              'VoLTE Call Quality',
+
+  // KPI tree categories
+  'kpi.tree.all':              'All KPIs',
+  'kpi.tree.radioAccess':      'Radio Access',
+  'kpi.tree.rrcAccess':        'RRC Access',
+  'kpi.tree.erab':             'E-RAB',
+  'kpi.tree.handover':         'Handover',
+  'kpi.tree.radioResource':    'Radio Resource',
+  'kpi.tree.userCount':        'User Count',
+  'kpi.tree.ulThroughput':     'UL Throughput',
+  'kpi.tree.dlThroughput':     'DL Throughput',
+  'kpi.tree.quality':          'Quality Metrics',
+  'kpi.tree.pdcpLoss':         'PDCP Loss Rate',
+  'kpi.tree.availability':     'Radio Availability',
+
+  // Report categories
+  'report.category.kpi':              'KPI Reports',
+  'report.category.kpiDaily':         'Daily KPI Report',
+  'report.category.kpiWeekly':        'Weekly KPI Report',
+  'report.category.kpiMonthly':       'Monthly KPI Report',
+  'report.category.availability':     'Availability Reports',
+  'report.category.availStation':     'Station Availability Report',
+  'report.category.availCell':        'Cell Availability Report',
+  'report.category.capacity':         'Capacity Reports',
+  'report.category.capPrb':           'PRB Utilization Report',
+  'report.category.capUser':          'User Count Report',
+  'report.category.quality':          'Quality Reports',
+  'report.category.qualVoice':        'VoLTE Quality Report',
+  'report.category.qualData':         'Data Service Quality Report',
+  'report.category.mobility':         'Mobility Reports',
+  'report.category.mobHandover':      'Handover Report',
+  'report.category.mobRach':          'Random Access Report',
+
+  // Device KPI categories
+  'kpi.category.traffic':         'Traffic',
+  'kpi.category.availability':    'Availability',
+  'kpi.category.utilization':     'Utilization',
+  'kpi.category.accessibility':   'Accessibility',
+  'kpi.category.retainability':   'Retainability',
+  'kpi.category.mobility':        'Mobility',
+
+  // Device-specific KPI indicators
+  'kpi.enbDlPrbUtil':             'DL PRB Utilization Rate',
+  'kpi.enbUlPrbUtil':             'UL PRB Utilization Rate',
+  'kpi.enbHoS1SuccRate':          'Inter-eNB S1 Handover Success Rate',
+  'kpi.enbHoX2SuccRate':          'Inter-eNB X2 Handover Success Rate',
+  'kpi.enbHoInterSuccRate':       'Inter-eNB Handover Success Rate',
+  'kpi.enbRrcSetupSuccRate':      'RRC Connection Setup Success Rate',
+  'kpi.enbAvgDlThroughput':       'Avg DL Throughput',
+  'kpi.enbAvgUlThroughput':       'Avg UL Throughput',
+
   // -------------------------------------------------------------------------
   // Config labels
   // -------------------------------------------------------------------------

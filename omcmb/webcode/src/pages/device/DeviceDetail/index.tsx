@@ -50,58 +50,53 @@ interface KPIConfig {
   category: string;
 }
 
-// KPI 类别
-const KPI_CATEGORIES: Record<string, string> = {
-  traffic: '业务量',
-  availability: '可用性',
-  utilization: '使用率',
-  accessibility: '接入性',
-  retainability: '保持性',
-  mobility: '移动性',
-};
+interface KPIConfigRaw {
+  key: string;
+  labelKey: string;
+  unit: string;
+  category: string;
+}
 
 // eNB KPI 配置 (8 项)
-const ENB_KPI_CONFIG: KPIConfig[] = [
-  // 使用率 (2)
-  { key: 'enbDownlinkPRBUtilizationRate', label: '下行PRB利用率', unit: '%', category: 'utilization' },
-  { key: 'enbUplinkPRBUtilizationRate', label: '上行PRB利用率', unit: '%', category: 'utilization' },
-  // 移动性 (3)
-  { key: 'enbHoS1SuccRate', label: 'eNB间S1切换成功率', unit: '%', category: 'mobility' },
-  { key: 'enbHoX2SuccRate', label: 'eNB间X2切换成功率', unit: '%', category: 'mobility' },
-  { key: 'enbHoInterEnbSuccRate', label: 'eNB间切换成功率', unit: '%', category: 'mobility' },
-  // 接入性 (1)
-  { key: 'enbRrcSetupSuccessRate', label: 'RRC连接建立成功率', unit: '%', category: 'accessibility' },
-  // 业务量 (2)
-  { key: 'enbAvgThroughputDL', label: '平均下行吞吐率', unit: 'Mbps', category: 'traffic' },
-  { key: 'enbAvgThroughputUL', label: '平均上行吞吐率', unit: 'Mbps', category: 'traffic' },
+const ENB_KPI_CONFIG_RAW: KPIConfigRaw[] = [
+  { key: 'enbDownlinkPRBUtilizationRate', labelKey: 'kpi.enbDlPrbUtil', unit: '%', category: 'utilization' },
+  { key: 'enbUplinkPRBUtilizationRate', labelKey: 'kpi.enbUlPrbUtil', unit: '%', category: 'utilization' },
+  { key: 'enbHoS1SuccRate', labelKey: 'kpi.enbHoS1SuccRate', unit: '%', category: 'mobility' },
+  { key: 'enbHoX2SuccRate', labelKey: 'kpi.enbHoX2SuccRate', unit: '%', category: 'mobility' },
+  { key: 'enbHoInterEnbSuccRate', labelKey: 'kpi.enbHoInterSuccRate', unit: '%', category: 'mobility' },
+  { key: 'enbRrcSetupSuccessRate', labelKey: 'kpi.enbRrcSetupSuccRate', unit: '%', category: 'accessibility' },
+  { key: 'enbAvgThroughputDL', labelKey: 'kpi.enbAvgDlThroughput', unit: 'Mbps', category: 'traffic' },
+  { key: 'enbAvgThroughputUL', labelKey: 'kpi.enbAvgUlThroughput', unit: 'Mbps', category: 'traffic' },
 ];
 
 // gNB KPI 配置 (4 项)
-const GNB_KPI_CONFIG: KPIConfig[] = [
-  // 业务量 (2)
-  { key: 'gnbThroughputDL', label: 'Throughput DL', unit: 'Mbps', category: 'traffic' },
-  { key: 'gnbThroughputUL', label: 'Throughput UL', unit: 'Mbps', category: 'traffic' },
-  // 使用率 (2)
-  { key: 'gnbDownlinkPRBUtilizationRate', label: 'Downlink PRB Utilization Rate', unit: '%', category: 'utilization' },
-  { key: 'gnbUplinkPRBUtilizationRate', label: 'Uplink PRB Utilization Rate', unit: '%', category: 'utilization' },
+const GNB_KPI_CONFIG_RAW: KPIConfigRaw[] = [
+  { key: 'gnbThroughputDL', labelKey: 'kpi.dlThroughput', unit: 'Mbps', category: 'traffic' },
+  { key: 'gnbThroughputUL', labelKey: 'kpi.ulThroughput', unit: 'Mbps', category: 'traffic' },
+  { key: 'gnbDownlinkPRBUtilizationRate', labelKey: 'kpi.enbDlPrbUtil', unit: '%', category: 'utilization' },
+  { key: 'gnbUplinkPRBUtilizationRate', labelKey: 'kpi.enbUlPrbUtil', unit: '%', category: 'utilization' },
 ];
 
 // GSM KPI 配置 (3 项)
-const GSM_KPI_CONFIG: KPIConfig[] = [
-  { key: 'gsmCallSetupSuccRate', label: 'KPI.CallSetupSuccRate', unit: '%', category: 'accessibility' },
-  { key: 'gsmCallDropRate', label: 'KPI.CallDropRate', unit: '%', category: 'retainability' },
-  { key: 'gsmHandoverSuccessRate', label: 'KPI.HandoverSuccessRate', unit: '%', category: 'mobility' },
+const GSM_KPI_CONFIG_RAW: KPIConfigRaw[] = [
+  { key: 'gsmCallSetupSuccRate', labelKey: 'kpi.accessRate', unit: '%', category: 'accessibility' },
+  { key: 'gsmCallDropRate', labelKey: 'kpi.dropRate', unit: '%', category: 'retainability' },
+  { key: 'gsmHandoverSuccessRate', labelKey: 'kpi.handoverSuccessRate', unit: '%', category: 'mobility' },
 ];
 
+function translateKPIConfigs(raw: KPIConfigRaw[], t: (id: string) => string): KPIConfig[] {
+  return raw.map((r) => ({ ...r, label: t(r.labelKey) }));
+}
+
 // 根据 networkType 获取 KPI 配置
-const getKPIConfig = (networkType: string): KPIConfig[] => {
+const getKPIConfig = (networkType: string, t: (id: string) => string): KPIConfig[] => {
   switch (networkType) {
     case 'eNB':
-      return ENB_KPI_CONFIG;
+      return translateKPIConfigs(ENB_KPI_CONFIG_RAW, t);
     case 'gNB':
-      return GNB_KPI_CONFIG;
+      return translateKPIConfigs(GNB_KPI_CONFIG_RAW, t);
     case 'GSM':
-      return GSM_KPI_CONFIG;
+      return translateKPIConfigs(GSM_KPI_CONFIG_RAW, t);
     default:
       return [];
   }
@@ -426,7 +421,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
   const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
 
   const networkType = device.networkType ?? '';
-  const kpiConfig = getKPIConfig(networkType);
+  const kpiConfig = getKPIConfig(networkType, t);
 
   if (kpiConfig.length === 0) {
     return (

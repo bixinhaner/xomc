@@ -28,26 +28,29 @@ const ALARM_LEVEL_COLORS: Record<string, string> = {
   critical: 'purple',
 };
 
-const KPI_OPTIONS = [
-  { label: 'RRC建立成功率', value: 'RRC_SR', unit: '%' },
-  { label: 'E-RAB建立成功率', value: 'ERAB_SR', unit: '%' },
-  { label: '切换成功率', value: 'HO_SR', unit: '%' },
-  { label: '下行吞吐量', value: 'DL_THROUGHPUT', unit: 'Mbps' },
-  { label: '上行吞吐量', value: 'UL_THROUGHPUT', unit: 'Mbps' },
-  { label: '无线可用率', value: 'AVAILABILITY', unit: '%' },
-  { label: 'PDCP丢包率', value: 'PDCP_LOSS', unit: '%' },
+const KPI_OPTION_KEYS: { labelKey: string; value: string; unit: string }[] = [
+  { labelKey: 'kpi.rrcSetupSuccessRate', value: 'RRC_SR', unit: '%' },
+  { labelKey: 'kpi.erabSetupSuccessRate', value: 'ERAB_SR', unit: '%' },
+  { labelKey: 'kpi.handoverSuccessRate', value: 'HO_SR', unit: '%' },
+  { labelKey: 'kpi.dlThroughput', value: 'DL_THROUGHPUT', unit: 'Mbps' },
+  { labelKey: 'kpi.ulThroughput', value: 'UL_THROUGHPUT', unit: 'Mbps' },
+  { labelKey: 'kpi.availability', value: 'AVAILABILITY', unit: '%' },
+  { labelKey: 'kpi.pdcpLossRate', value: 'PDCP_LOSS', unit: '%' },
 ];
 
-const mockData: ThresholdRow[] = [
-  { id: '1', thresholdName: 'RRC成功率低告警', kpiName: 'RRC建立成功率', kpiCode: 'RRC_SR', warningValue: 97, criticalValue: 95, unit: '%', alarmLevel: 'major', enabled: true, updateTime: '2026-01-15 10:00:00' },
-  { id: '2', thresholdName: 'ERAB成功率低告警', kpiName: 'E-RAB建立成功率', kpiCode: 'ERAB_SR', warningValue: 97, criticalValue: 95, unit: '%', alarmLevel: 'major', enabled: true, updateTime: '2026-01-15 10:00:00' },
-  { id: '3', thresholdName: '切换成功率低告警', kpiName: '切换成功率', kpiCode: 'HO_SR', warningValue: 96, criticalValue: 93, unit: '%', alarmLevel: 'warning', enabled: true, updateTime: '2026-02-01 09:00:00' },
-  { id: '4', thresholdName: '可用率低告警', kpiName: '无线可用率', kpiCode: 'AVAILABILITY', warningValue: 99.95, criticalValue: 99.9, unit: '%', alarmLevel: 'critical', enabled: false, updateTime: '2026-02-10 14:00:00' },
-  { id: '5', thresholdName: 'PDCP丢包率高告警', kpiName: 'PDCP丢包率', kpiCode: 'PDCP_LOSS', warningValue: 0.1, criticalValue: 0.5, unit: '%', alarmLevel: 'major', enabled: true, updateTime: '2026-02-15 11:00:00' },
+const MOCK_DATA_RAW = [
+  { id: '1', thresholdName: 'RRC成功率低告警', kpiNameKey: 'kpi.rrcSetupSuccessRate', kpiCode: 'RRC_SR', warningValue: 97, criticalValue: 95, unit: '%', alarmLevel: 'major' as const, enabled: true, updateTime: '2026-01-15 10:00:00' },
+  { id: '2', thresholdName: 'ERAB成功率低告警', kpiNameKey: 'kpi.erabSetupSuccessRate', kpiCode: 'ERAB_SR', warningValue: 97, criticalValue: 95, unit: '%', alarmLevel: 'major' as const, enabled: true, updateTime: '2026-01-15 10:00:00' },
+  { id: '3', thresholdName: '切换成功率低告警', kpiNameKey: 'kpi.handoverSuccessRate', kpiCode: 'HO_SR', warningValue: 96, criticalValue: 93, unit: '%', alarmLevel: 'warning' as const, enabled: true, updateTime: '2026-02-01 09:00:00' },
+  { id: '4', thresholdName: '可用率低告警', kpiNameKey: 'kpi.availability', kpiCode: 'AVAILABILITY', warningValue: 99.95, criticalValue: 99.9, unit: '%', alarmLevel: 'critical' as const, enabled: false, updateTime: '2026-02-10 14:00:00' },
+  { id: '5', thresholdName: 'PDCP丢包率高告警', kpiNameKey: 'kpi.pdcpLossRate', kpiCode: 'PDCP_LOSS', warningValue: 0.1, criticalValue: 0.5, unit: '%', alarmLevel: 'major' as const, enabled: true, updateTime: '2026-02-15 11:00:00' },
 ];
 
 export default function ThresholdConfig() {
   const t = useT();
+  const KPI_OPTIONS = useMemo(() =>
+    KPI_OPTION_KEYS.map((k) => ({ label: t(k.labelKey), value: k.value, unit: k.unit })),
+  [t]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [modalVisible, setModalVisible] = useState(false);
@@ -59,6 +62,9 @@ export default function ThresholdConfig() {
   const updateThreshold = useUpdateThreshold();
   const deleteThresholds = useDeleteThresholds();
 
+  const mockData: ThresholdRow[] = useMemo(() =>
+    MOCK_DATA_RAW.map((r) => ({ ...r, kpiName: t(r.kpiNameKey) })),
+  [t]);
   const tableSource = (data?.items ?? mockData) as unknown as ThresholdRow[];
 
   const ALARM_LEVEL_OPTIONS = useMemo(() => [

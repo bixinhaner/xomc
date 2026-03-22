@@ -66,11 +66,11 @@ export default function StationReport() {
       label: t('perf.kpiName'),
       type: 'select',
       options: [
-        { label: '无线接通率', value: 'access_rate' },
-        { label: '切换成功率', value: 'ho_success_rate' },
-        { label: 'PRB利用率', value: 'prb_utilization' },
-        { label: '掉话率', value: 'drop_rate' },
-        { label: 'VoLTE通话质量', value: 'volte_quality' },
+        { label: t('kpi.accessRate'), value: 'access_rate' },
+        { label: t('kpi.handoverSuccessRate'), value: 'ho_success_rate' },
+        { label: t('kpi.prbUtilization'), value: 'prb_utilization' },
+        { label: t('kpi.dropRate'), value: 'drop_rate' },
+        { label: t('kpi.volteMos'), value: 'volte_quality' },
       ],
     },
     {

@@ -765,6 +765,74 @@ const messages: Record<string, string> = {
   'perf.value':       '值',
   'perf.timestamp':   '时间戳',
 
+  // KPI indicator names
+  'kpi.rrcSetupSuccessRate':   'RRC建立成功率',
+  'kpi.erabSetupSuccessRate':  'E-RAB建立成功率',
+  'kpi.handoverSuccessRate':   '切换成功率',
+  'kpi.dlThroughput':          '下行吞吐量',
+  'kpi.ulThroughput':          '上行吞吐量',
+  'kpi.maxUsers':              '最大用户数',
+  'kpi.availability':          '无线可用率',
+  'kpi.pdcpLossRate':          'PDCP丢包率',
+  'kpi.dlPeakThroughput':      '下行峰值吞吐量',
+  'kpi.ulPeakThroughput':      '上行峰值吞吐量',
+  'kpi.maxOnlineUsers':        '最大在线用户数',
+  'kpi.accessRate':            '无线接通率',
+  'kpi.dropRate':              '掉话率',
+  'kpi.prbUtilization':        'PRB利用率',
+  'kpi.onlineUsers':           '在线用户数',
+  'kpi.volteMos':              'VoLTE通话质量',
+
+  // KPI tree categories
+  'kpi.tree.all':              '全部KPI',
+  'kpi.tree.radioAccess':      '无线接入',
+  'kpi.tree.rrcAccess':        'RRC接入',
+  'kpi.tree.erab':             'E-RAB',
+  'kpi.tree.handover':         '切换',
+  'kpi.tree.radioResource':    '无线资源',
+  'kpi.tree.userCount':        '用户数',
+  'kpi.tree.ulThroughput':     '上行吞吐量',
+  'kpi.tree.dlThroughput':     '下行吞吐量',
+  'kpi.tree.quality':          '质量指标',
+  'kpi.tree.pdcpLoss':         'PDCP误包率',
+  'kpi.tree.availability':     '无线可用率',
+
+  // Report categories
+  'report.category.kpi':              'KPI报表',
+  'report.category.kpiDaily':         '日KPI报表',
+  'report.category.kpiWeekly':        '周KPI报表',
+  'report.category.kpiMonthly':       '月KPI报表',
+  'report.category.availability':     '可用性报表',
+  'report.category.availStation':     '基站可用性报表',
+  'report.category.availCell':        '小区可用性报表',
+  'report.category.capacity':         '容量报表',
+  'report.category.capPrb':           'PRB利用率报表',
+  'report.category.capUser':          '用户数报表',
+  'report.category.quality':          '质量报表',
+  'report.category.qualVoice':        'VoLTE质量报表',
+  'report.category.qualData':         '数据业务质量报表',
+  'report.category.mobility':         '移动性报表',
+  'report.category.mobHandover':      '切换报表',
+  'report.category.mobRach':          '随机接入报表',
+
+  // Device KPI categories
+  'kpi.category.traffic':         '业务量',
+  'kpi.category.availability':    '可用性',
+  'kpi.category.utilization':     '使用率',
+  'kpi.category.accessibility':   '接入性',
+  'kpi.category.retainability':   '保持性',
+  'kpi.category.mobility':        '移动性',
+
+  // Device-specific KPI indicators
+  'kpi.enbDlPrbUtil':             '下行PRB利用率',
+  'kpi.enbUlPrbUtil':             '上行PRB利用率',
+  'kpi.enbHoS1SuccRate':          'eNB间S1切换成功率',
+  'kpi.enbHoX2SuccRate':          'eNB间X2切换成功率',
+  'kpi.enbHoInterSuccRate':       'eNB间切换成功率',
+  'kpi.enbRrcSetupSuccRate':      'RRC连接建立成功率',
+  'kpi.enbAvgDlThroughput':       '平均下行吞吐率',
+  'kpi.enbAvgUlThroughput':       '平均上行吞吐率',
+
   // -------------------------------------------------------------------------
   // Config labels
   // -------------------------------------------------------------------------

@@ -8,41 +8,41 @@ import type { DataTableColumn } from '@/components/DataTable';
 import { useReportRecords, useDownloadReport } from '@/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
 
-const reportCategories: DataNode[] = [
+const REPORT_CATEGORY_KEYS = [
   {
-    key: 'kpi', title: 'KPI报表',
+    key: 'kpi', titleKey: 'report.category.kpi',
     children: [
-      { key: 'kpi-daily', title: '日KPI报表' },
-      { key: 'kpi-weekly', title: '周KPI报表' },
-      { key: 'kpi-monthly', title: '月KPI报表' },
+      { key: 'kpi-daily', titleKey: 'report.category.kpiDaily' },
+      { key: 'kpi-weekly', titleKey: 'report.category.kpiWeekly' },
+      { key: 'kpi-monthly', titleKey: 'report.category.kpiMonthly' },
     ],
   },
   {
-    key: 'availability', title: '可用性报表',
+    key: 'availability', titleKey: 'report.category.availability',
     children: [
-      { key: 'avail-station', title: '基站可用性报表' },
-      { key: 'avail-cell', title: '小区可用性报表' },
+      { key: 'avail-station', titleKey: 'report.category.availStation' },
+      { key: 'avail-cell', titleKey: 'report.category.availCell' },
     ],
   },
   {
-    key: 'capacity', title: '容量报表',
+    key: 'capacity', titleKey: 'report.category.capacity',
     children: [
-      { key: 'cap-prb', title: 'PRB利用率报表' },
-      { key: 'cap-user', title: '用户数报表' },
+      { key: 'cap-prb', titleKey: 'report.category.capPrb' },
+      { key: 'cap-user', titleKey: 'report.category.capUser' },
     ],
   },
   {
-    key: 'quality', title: '质量报表',
+    key: 'quality', titleKey: 'report.category.quality',
     children: [
-      { key: 'qual-voice', title: 'VoLTE质量报表' },
-      { key: 'qual-data', title: '数据业务质量报表' },
+      { key: 'qual-voice', titleKey: 'report.category.qualVoice' },
+      { key: 'qual-data', titleKey: 'report.category.qualData' },
     ],
   },
   {
-    key: 'mobility', title: '移动性报表',
+    key: 'mobility', titleKey: 'report.category.mobility',
     children: [
-      { key: 'mob-handover', title: '切换报表' },
-      { key: 'mob-rach', title: '随机接入报表' },
+      { key: 'mob-handover', titleKey: 'report.category.mobHandover' },
+      { key: 'mob-rach', titleKey: 'report.category.mobRach' },
     ],
   },
 ];
@@ -84,6 +84,16 @@ function formatFileSize(bytes: number): string {
 
 export default function LTEStandardReport() {
   const t = useT();
+  const reportCategories: DataNode[] = useMemo(() =>
+    REPORT_CATEGORY_KEYS.map((cat) => ({
+      key: cat.key,
+      title: t(cat.titleKey),
+      children: cat.children.map((child) => ({
+        key: child.key,
+        title: t(child.titleKey),
+      })),
+    })),
+  [t]);
   const [selectedCategory, setSelectedCategory] = useState<string>('kpi-daily');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);

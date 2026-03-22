@@ -19,50 +19,53 @@ interface KPIReportRow extends Record<string, unknown> {
   category: string;
 }
 
-const KPI_TREE_DATA: DataNode[] = [
-  {
-    title: '全部KPI',
-    key: 'all',
-    children: [
-      {
-        title: '无线接入',
-        key: 'radio-access',
-        children: [
-          { title: 'RRC接入', key: 'rrc' },
-          { title: 'E-RAB', key: 'erab' },
-          { title: '切换', key: 'handover' },
-        ],
-      },
-      {
-        title: '无线资源',
-        key: 'radio-resource',
-        children: [
-          { title: '用户数', key: 'user-count' },
-          { title: '上行吞吐量', key: 'ul-throughput' },
-          { title: '下行吞吐量', key: 'dl-throughput' },
-        ],
-      },
-      {
-        title: '质量指标',
-        key: 'quality',
-        children: [
-          { title: 'PDCP误包率', key: 'pdcp-loss' },
-          { title: '无线可用率', key: 'availability' },
-        ],
-      },
-    ],
-  },
-];
+function useKPITreeData(): DataNode[] {
+  const t = useT();
+  return useMemo(() => [
+    {
+      title: t('kpi.tree.all'),
+      key: 'all',
+      children: [
+        {
+          title: t('kpi.tree.radioAccess'),
+          key: 'radio-access',
+          children: [
+            { title: t('kpi.tree.rrcAccess'), key: 'rrc' },
+            { title: t('kpi.tree.erab'), key: 'erab' },
+            { title: t('kpi.tree.handover'), key: 'handover' },
+          ],
+        },
+        {
+          title: t('kpi.tree.radioResource'),
+          key: 'radio-resource',
+          children: [
+            { title: t('kpi.tree.userCount'), key: 'user-count' },
+            { title: t('kpi.tree.ulThroughput'), key: 'ul-throughput' },
+            { title: t('kpi.tree.dlThroughput'), key: 'dl-throughput' },
+          ],
+        },
+        {
+          title: t('kpi.tree.quality'),
+          key: 'quality',
+          children: [
+            { title: t('kpi.tree.pdcpLoss'), key: 'pdcp-loss' },
+            { title: t('kpi.tree.availability'), key: 'availability' },
+          ],
+        },
+      ],
+    },
+  ], [t]);
+}
 
-const mockData: KPIReportRow[] = [
-  { id: '1', kpiName: 'RRC建立成功率', kpiCode: 'RRC_SR', unit: '%', currentValue: 99.2, threshold: 95, status: 'normal', trend: [98, 99, 99.5, 98.8, 99.2, 99.1, 99.2], category: 'rrc' },
-  { id: '2', kpiName: 'E-RAB建立成功率', kpiCode: 'ERAB_SR', unit: '%', currentValue: 98.7, threshold: 95, status: 'normal', trend: [97, 98, 98.5, 98.7, 98.6, 98.8, 98.7], category: 'erab' },
-  { id: '3', kpiName: '切换成功率', kpiCode: 'HO_SR', unit: '%', currentValue: 93.5, threshold: 95, status: 'warning', trend: [96, 95, 94, 93, 93.5, 94, 93.5], category: 'handover' },
-  { id: '4', kpiName: '下行峰值吞吐量', kpiCode: 'DL_THROUGHPUT', unit: 'Mbps', currentValue: 145.6, threshold: 100, status: 'normal', trend: [120, 135, 140, 145, 142, 148, 145.6], category: 'dl-throughput' },
-  { id: '5', kpiName: '上行峰值吞吐量', kpiCode: 'UL_THROUGHPUT', unit: 'Mbps', currentValue: 45.2, threshold: 30, status: 'normal', trend: [40, 42, 44, 45, 44.5, 46, 45.2], category: 'ul-throughput' },
-  { id: '6', kpiName: '最大在线用户数', kpiCode: 'MAX_USERS', unit: '个', currentValue: 856, threshold: 1000, status: 'normal', trend: [800, 820, 840, 856, 850, 860, 856], category: 'user-count' },
-  { id: '7', kpiName: '无线可用率', kpiCode: 'AVAILABILITY', unit: '%', currentValue: 99.95, threshold: 99.9, status: 'normal', trend: [99.9, 99.95, 99.92, 99.95, 99.98, 99.95, 99.95], category: 'availability' },
-  { id: '8', kpiName: 'PDCP丢包率', kpiCode: 'PDCP_LOSS', unit: '%', currentValue: 0.08, threshold: 0.1, status: 'normal', trend: [0.05, 0.06, 0.07, 0.08, 0.07, 0.09, 0.08], category: 'pdcp-loss' },
+const MOCK_DATA_RAW = [
+  { id: '1', kpiNameKey: 'kpi.rrcSetupSuccessRate', kpiCode: 'RRC_SR', unit: '%', currentValue: 99.2, threshold: 95, status: 'normal' as const, trend: [98, 99, 99.5, 98.8, 99.2, 99.1, 99.2], category: 'rrc' },
+  { id: '2', kpiNameKey: 'kpi.erabSetupSuccessRate', kpiCode: 'ERAB_SR', unit: '%', currentValue: 98.7, threshold: 95, status: 'normal' as const, trend: [97, 98, 98.5, 98.7, 98.6, 98.8, 98.7], category: 'erab' },
+  { id: '3', kpiNameKey: 'kpi.handoverSuccessRate', kpiCode: 'HO_SR', unit: '%', currentValue: 93.5, threshold: 95, status: 'warning' as const, trend: [96, 95, 94, 93, 93.5, 94, 93.5], category: 'handover' },
+  { id: '4', kpiNameKey: 'kpi.dlPeakThroughput', kpiCode: 'DL_THROUGHPUT', unit: 'Mbps', currentValue: 145.6, threshold: 100, status: 'normal' as const, trend: [120, 135, 140, 145, 142, 148, 145.6], category: 'dl-throughput' },
+  { id: '5', kpiNameKey: 'kpi.ulPeakThroughput', kpiCode: 'UL_THROUGHPUT', unit: 'Mbps', currentValue: 45.2, threshold: 30, status: 'normal' as const, trend: [40, 42, 44, 45, 44.5, 46, 45.2], category: 'ul-throughput' },
+  { id: '6', kpiNameKey: 'kpi.maxOnlineUsers', kpiCode: 'MAX_USERS', unit: '个', currentValue: 856, threshold: 1000, status: 'normal' as const, trend: [800, 820, 840, 856, 850, 860, 856], category: 'user-count' },
+  { id: '7', kpiNameKey: 'kpi.availability', kpiCode: 'AVAILABILITY', unit: '%', currentValue: 99.95, threshold: 99.9, status: 'normal' as const, trend: [99.9, 99.95, 99.92, 99.95, 99.98, 99.95, 99.95], category: 'availability' },
+  { id: '8', kpiNameKey: 'kpi.pdcpLossRate', kpiCode: 'PDCP_LOSS', unit: '%', currentValue: 0.08, threshold: 0.1, status: 'normal' as const, trend: [0.05, 0.06, 0.07, 0.08, 0.07, 0.09, 0.08], category: 'pdcp-loss' },
 ];
 
 // Simple sparkline mini-chart using SVG
@@ -88,10 +91,15 @@ function Sparkline({ data, color = 'var(--color-primary-600)' }: { data: number[
 
 export default function KPIStandardReport() {
   const t = useT();
+  const kpiTreeData = useKPITreeData();
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+
+  const mockData: KPIReportRow[] = useMemo(() =>
+    MOCK_DATA_RAW.map((r) => ({ ...r, kpiName: t(r.kpiNameKey) })),
+  [t]);
 
   const filteredSource = selectedCategory && selectedCategory !== 'all'
     ? mockData.filter((r) => r.category === selectedCategory)
@@ -161,7 +169,7 @@ export default function KPIStandardReport() {
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
         <Tree
-          treeData={KPI_TREE_DATA}
+          treeData={kpiTreeData}
           onSelect={(keys) => {
             const key = keys[0] as string;
             setSelectedCategory(key ?? '');
