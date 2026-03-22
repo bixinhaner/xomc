@@ -61,20 +61,19 @@ func TestGetNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "carrier not found")
 }
 
-func TestMustGetPanic(t *testing.T) {
+func TestMustGetError(t *testing.T) {
 	r := NewRegistry()
-	assert.Panics(t, func() {
-		r.MustGet("nonexistent")
-	})
+	_, err := r.MustGet("nonexistent")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "carrier not found")
 }
 
 func TestMustGetSuccess(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&registryMockCarrier{code: "safe"})
-	assert.NotPanics(t, func() {
-		got := r.MustGet("safe")
-		assert.Equal(t, model.CarrierCode("safe"), got.Code())
-	})
+	got, err := r.MustGet("safe")
+	require.NoError(t, err)
+	assert.Equal(t, model.CarrierCode("safe"), got.Code())
 }
 
 func TestAll(t *testing.T) {

@@ -149,7 +149,10 @@ func handlerNewTestRouter(
 	roleRepo *handlerMockRoleRepo,
 ) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	jwt := NewJWTService("test-secret-key-minimum-32-chars!!")
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	if err != nil {
+		panic(err)
+	}
 	svc := NewAdminService(userRepo, roleRepo, &handlerMockAuditRepo{}, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
 	r := gin.New()

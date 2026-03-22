@@ -38,13 +38,10 @@ func (r *CarrierRegistry) Get(code model.CarrierCode) (Carrier, error) {
 	return c, nil
 }
 
-// MustGet returns the carrier adapter or panics if not found.
-func (r *CarrierRegistry) MustGet(code model.CarrierCode) Carrier {
-	c, err := r.Get(code)
-	if err != nil {
-		panic(err)
-	}
-	return c
+// MustGet returns the carrier adapter or logs an error and returns nil if not found.
+// Deprecated: prefer Get which returns an explicit error.
+func (r *CarrierRegistry) MustGet(code model.CarrierCode) (Carrier, error) {
+	return r.Get(code)
 }
 
 // All returns all registered carrier adapters.

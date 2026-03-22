@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -44,6 +45,7 @@ type App struct {
 	Carriers   *carrier.CarrierRegistry
 	CmdQueue   *cmdqueue.RedisCommandQueue
 	MetricsReg *prometheus.Registry
+	Health     *components.HealthChecker
 
 	metricsPort int
 }
@@ -59,6 +61,7 @@ func newBase(logCfg appconfig.LogConfig, metricsPort int) (*App, error) {
 		Logger:      logger,
 		GS:          components.NewGracefulShutdown(30*time.Second, logger),
 		MetricsReg:  prometheus.NewRegistry(),
+		Health:      components.NewHealthChecker(),
 		metricsPort: metricsPort,
 	}, nil
 }
@@ -160,6 +163,9 @@ func (a *App) connectPostgres(ctx context.Context, cfg appconfig.PostgresConfig)
 	}
 	a.PgPool = pool
 	a.GS.Register("postgres", 4, func(ctx context.Context) error { pool.Close(); return nil })
+	a.Health.Register("postgres", func(ctx context.Context) error {
+		return pool.Ping(ctx)
+	})
 	return nil
 }
 
@@ -170,6 +176,9 @@ func (a *App) connectTimescale(ctx context.Context, cfg appconfig.PostgresConfig
 	}
 	a.TsPool = pool
 	a.GS.Register("timescale", 4, func(ctx context.Context) error { pool.Close(); return nil })
+	a.Health.Register("timescale", func(ctx context.Context) error {
+		return pool.Ping(ctx)
+	})
 	return nil
 }
 
@@ -180,6 +189,9 @@ func (a *App) connectRedis(cfg appconfig.RedisConfig) error {
 	}
 	a.Redis = client
 	a.GS.Register("redis", 3, func(ctx context.Context) error { return client.Close() })
+	a.Health.Register("redis", func(ctx context.Context) error {
+		return client.Ping(ctx).Err()
+	})
 	return nil
 }
 
@@ -265,6 +277,23 @@ func (a *App) WaitAndShutdown(errCh <-chan error) error {
 func (a *App) startMetrics() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(a.MetricsReg, promhttp.HandlerOpts{}))
+	metricsMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		results := a.Health.CheckAll(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		code := 200
+		for _, result := range results {
+			if result.Status != "healthy" {
+				code = 503
+				break
+			}
+		}
+		w.WriteHeader(code)
+		data, _ := json.Marshal(map[string]interface{}{
+			"status":     map[bool]string{true: "ok", false: "degraded"}[code == 200],
+			"components": results,
+		})
+		w.Write(data)
+	})
 	metricsServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", a.metricsPort),
 		Handler: metricsMux,

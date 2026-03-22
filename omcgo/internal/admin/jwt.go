@@ -24,25 +24,34 @@ type jwtClaims struct {
 	jwt.RegisteredClaims
 }
 
+const minJWTSecretLength = 32
+
 // NewJWTService creates a new JWTService with the given secret and default TTLs.
-func NewJWTService(secret string) *JWTService {
+// Returns an error if the secret is empty or shorter than 32 characters.
+func NewJWTService(secret string) (*JWTService, error) {
+	if len(secret) < minJWTSecretLength {
+		return nil, fmt.Errorf("JWT secret must be at least %d characters, got %d", minJWTSecretLength, len(secret))
+	}
 	return &JWTService{
 		secret:          []byte(secret),
 		accessTokenTTL:  30 * time.Minute,
 		refreshTokenTTL: 7 * 24 * time.Hour,
-	}
+	}, nil
 }
 
 // NewJWTServiceWithTTL creates a JWTService with custom TTLs.
-func NewJWTServiceWithTTL(secret string, accessTTL, refreshTTL time.Duration) *JWTService {
-	s := NewJWTService(secret)
+func NewJWTServiceWithTTL(secret string, accessTTL, refreshTTL time.Duration) (*JWTService, error) {
+	s, err := NewJWTService(secret)
+	if err != nil {
+		return nil, err
+	}
 	if accessTTL > 0 {
 		s.accessTokenTTL = accessTTL
 	}
 	if refreshTTL > 0 {
 		s.refreshTokenTTL = refreshTTL
 	}
-	return s
+	return s, nil
 }
 
 // GenerateTokenPair creates a new access/refresh token pair.

@@ -3,9 +3,12 @@ package alarm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+const alarmKeyTTL = 24 * time.Hour
 
 // RedisAlarmStore provides Redis-based L1 cache for active alarm deduplication.
 type RedisAlarmStore struct {
@@ -26,9 +29,13 @@ func (s *RedisAlarmStore) Exists(ctx context.Context, deviceSN, alarmCode string
 	return s.client.HExists(ctx, alarmKey(deviceSN), alarmCode).Result()
 }
 
-// Set records an active alarm in Redis.
+// Set records an active alarm in Redis and refreshes the key TTL.
 func (s *RedisAlarmStore) Set(ctx context.Context, deviceSN, alarmCode, alarmID string) error {
-	return s.client.HSet(ctx, alarmKey(deviceSN), alarmCode, alarmID).Err()
+	key := alarmKey(deviceSN)
+	if err := s.client.HSet(ctx, key, alarmCode, alarmID).Err(); err != nil {
+		return err
+	}
+	return s.client.Expire(ctx, key, alarmKeyTTL).Err()
 }
 
 // Get returns the alarm ID for a given device and alarm code.

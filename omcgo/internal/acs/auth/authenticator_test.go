@@ -114,7 +114,7 @@ func TestDigestAuthenticator_InvalidNonce(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, identity)
-	assert.Contains(t, err.Error(), "invalid nonce")
+	assert.Contains(t, err.Error(), "invalid or expired nonce")
 }
 
 func TestDigestAuthenticator_MissingAuth(t *testing.T) {

@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -44,7 +45,7 @@ import (
 )
 
 // Setup creates all repository/service/handler instances and registers routes.
-func Setup(r *gin.Engine, deps *Deps) {
+func Setup(r *gin.Engine, deps *Deps) error {
 	pgPool := deps.PgPool
 	tsPool := deps.TsPool
 	redisClient := deps.Redis
@@ -111,7 +112,10 @@ func Setup(r *gin.Engine, deps *Deps) {
 	userRepo := admin.NewPgUserRepository(pgPool)
 	roleRepo := admin.NewPgRoleRepository(pgPool)
 	auditRepo := admin.NewPgAuditRepository(pgPool)
-	jwtService := admin.NewJWTServiceWithTTL(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
+	jwtService, err := admin.NewJWTServiceWithTTL(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
+	if err != nil {
+		return fmt.Errorf("init JWT service: %w", err)
+	}
 	adminService := admin.NewAdminService(userRepo, roleRepo, auditRepo, jwtService, logger)
 	adminHandler := admin.NewHandler(adminService, logger)
 	logger.Info("admin/RBAC module initialized")
@@ -362,4 +366,6 @@ func Setup(r *gin.Engine, deps *Deps) {
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(admin.RequirePermission(roleRepo, "users", "admin"))
 	adminHandler.RegisterAdminRoutes(adminGroup)
+
+	return nil
 }

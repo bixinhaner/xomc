@@ -83,7 +83,9 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 		"carrier":     string(fw.Carrier),
 		"version":     fw.Version,
 	}); err == nil {
-		_ = s.eventBus.Publish(ctx, event.SubjectFirmwareUploaded, evt)
+		if pubErr := s.eventBus.Publish(ctx, event.SubjectFirmwareUploaded, evt); pubErr != nil {
+			s.logger.Warn("publish firmware.uploaded event", zap.Error(pubErr))
+		}
 	}
 
 	return nil
@@ -128,12 +130,15 @@ func (s *SoftwareService) StartUpgrade(ctx context.Context, deviceID, firmwareID
 
 	// Push Download command to command queue
 	downloadURL := fmt.Sprintf("minio://%s/%s", s.firmwareBkt, fw.MinIOPath)
-	paramsJSON, _ := json.Marshal(map[string]interface{}{
+	paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
 		"url":       downloadURL,
 		"file_type": "1", // firmware
 		"file_size": fw.FileSize,
 		"file_name": fw.FileName,
 	})
+	if marshalErr != nil {
+		return nil, fmt.Errorf("marshal download params: %w", marshalErr)
+	}
 	cmd := &cmdqueue.Command{
 		Method: "Download",
 		Params: paramsJSON,
@@ -155,7 +160,9 @@ func (s *SoftwareService) StartUpgrade(ctx context.Context, deviceID, firmwareID
 		"device_id":   deviceID.String(),
 		"firmware_id": firmwareID.String(),
 	}); err == nil {
-		_ = s.eventBus.Publish(ctx, event.SubjectUpgradeStarted, evt)
+		if pubErr := s.eventBus.Publish(ctx, event.SubjectUpgradeStarted, evt); pubErr != nil {
+			s.logger.Warn("publish upgrade.started event", zap.Error(pubErr))
+		}
 	}
 
 	return task, nil
@@ -197,33 +204,48 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, deviceIDs []uuid.UUI
 			dev, err := s.deviceRepo.GetByID(ctx, did)
 			if err != nil {
 				s.logger.Error("get device for batch upgrade", zap.String("device_id", did.String()), zap.Error(err))
-				_ = s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeFailed, err.Error())
+				if statusErr := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeFailed, err.Error()); statusErr != nil {
+				s.logger.Error("update upgrade status to failed", zap.Error(statusErr))
+			}
 				task.Status = UpgradeFailed
 				results <- *task
 				return
 			}
 
-			fw, _ := s.firmwareRepo.GetByID(ctx, firmwareID)
+			fw, fwErr := s.firmwareRepo.GetByID(ctx, firmwareID)
+		if fwErr != nil {
+			s.logger.Error("get firmware for batch upgrade", zap.Error(fwErr))
+		}
 			if fw != nil {
 				downloadURL := fmt.Sprintf("minio://%s/%s", s.firmwareBkt, fw.MinIOPath)
-				batchParamsJSON, _ := json.Marshal(map[string]interface{}{
+				batchParamsJSON, marshalErr := json.Marshal(map[string]interface{}{
 					"url":       downloadURL,
 					"file_type": "1",
 					"file_size": fw.FileSize,
 					"file_name": fw.FileName,
 				})
-				cmd := &cmdqueue.Command{
-					Method: "Download",
-					Params: batchParamsJSON,
+				if marshalErr != nil {
+					s.logger.Error("marshal batch download params", zap.Error(marshalErr))
+				} else {
+					cmd := &cmdqueue.Command{
+						Method: "Download",
+						Params: batchParamsJSON,
+					}
+					if pushErr := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); pushErr != nil {
+						s.logger.Error("push batch download command", zap.String("device_sn", dev.SerialNumber), zap.Error(pushErr))
+					}
 				}
-				_ = s.cmdQueue.Push(ctx, dev.SerialNumber, cmd)
 
 				if dev.ConnectionRequestURL != "" {
-					_ = s.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL)
+					if crErr := s.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL); crErr != nil {
+						s.logger.Warn("send connection request in batch", zap.String("device_sn", dev.SerialNumber), zap.Error(crErr))
+					}
 				}
 			}
 
-			_ = s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeDownloading, "")
+			if statusErr := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeDownloading, ""); statusErr != nil {
+				s.logger.Error("update upgrade status to downloading", zap.Error(statusErr))
+			}
 			task.Status = UpgradeDownloading
 			results <- *task
 		}(deviceID)
@@ -282,7 +304,9 @@ func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.
 			"task_id":   task.ID.String(),
 			"device_id": dev.ID.String(),
 		}); err == nil {
-			_ = s.eventBus.Publish(ctx, event.SubjectUpgradeCompleted, completedEvt)
+			if pubErr := s.eventBus.Publish(ctx, event.SubjectUpgradeCompleted, completedEvt); pubErr != nil {
+				s.logger.Warn("publish upgrade.completed event", zap.Error(pubErr))
+			}
 		}
 	}
 

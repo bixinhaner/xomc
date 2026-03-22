@@ -94,7 +94,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
 		if e.redisStore != nil {
-			_ = e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmCode, existing.ID.String())
+			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmCode, existing.ID.String()); redisErr != nil {
+				e.logger.Warn("redis set alarm dedup key", zap.Error(redisErr))
+			}
 		}
 		return nil
 	}
@@ -111,7 +113,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	}
 
 	if e.redisStore != nil {
-		_ = e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmCode, alarm.ID.String())
+		if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmCode, alarm.ID.String()); redisErr != nil {
+			e.logger.Warn("redis set new alarm dedup key", zap.Error(redisErr))
+		}
 	}
 
 	// 5. Publish alarm.raised event
@@ -156,7 +160,9 @@ func (e *AlarmEngine) Acknowledge(ctx context.Context, alarmID uuid.UUID, by str
 	if e.eventBus != nil {
 		evt, err := event.NewEvent(event.SubjectAlarmAcknowledged, alarm)
 		if err == nil {
-			_ = e.eventBus.Publish(ctx, event.SubjectAlarmAcknowledged, evt)
+			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmAcknowledged, evt); pubErr != nil {
+				e.logger.Warn("publish alarm.acknowledged event", zap.Error(pubErr))
+			}
 		}
 	}
 
@@ -194,13 +200,17 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 
 	// Remove from Redis
 	if e.redisStore != nil {
-		_ = e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmCode)
+		if redisErr := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmCode); redisErr != nil {
+			e.logger.Warn("redis delete alarm dedup key", zap.Error(redisErr))
+		}
 	}
 
 	if e.eventBus != nil {
 		evt, err := event.NewEvent(event.SubjectAlarmCleared, alarm)
 		if err == nil {
-			_ = e.eventBus.Publish(ctx, event.SubjectAlarmCleared, evt)
+			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmCleared, evt); pubErr != nil {
+				e.logger.Warn("publish alarm.cleared event", zap.Error(pubErr))
+			}
 		}
 	}
 

@@ -11,7 +11,8 @@ import (
 )
 
 func TestJWTService_GenerateTokenPair(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	carrier := model.CarrierCMCC
 
 	claims := &Claims{
@@ -30,7 +31,8 @@ func TestJWTService_GenerateTokenPair(t *testing.T) {
 }
 
 func TestJWTService_ValidateAccessToken(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	userID := uuid.New()
 	carrier := model.CarrierCTCC
 
@@ -54,7 +56,8 @@ func TestJWTService_ValidateAccessToken(t *testing.T) {
 }
 
 func TestJWTService_ValidateRefreshToken(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	userID := uuid.New()
 
 	original := &Claims{
@@ -74,7 +77,8 @@ func TestJWTService_ValidateRefreshToken(t *testing.T) {
 }
 
 func TestJWTService_AccessTokenRejectsRefreshToken(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	pair, err := svc.GenerateTokenPair(&Claims{
 		UserID:   uuid.New(),
@@ -89,7 +93,8 @@ func TestJWTService_AccessTokenRejectsRefreshToken(t *testing.T) {
 }
 
 func TestJWTService_RefreshTokenRejectsAccessToken(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	pair, err := svc.GenerateTokenPair(&Claims{
 		UserID:   uuid.New(),
@@ -104,8 +109,10 @@ func TestJWTService_RefreshTokenRejectsAccessToken(t *testing.T) {
 }
 
 func TestJWTService_InvalidSecret(t *testing.T) {
-	svc1 := NewJWTService("secret-one-minimum-32-characters!!")
-	svc2 := NewJWTService("secret-two-minimum-32-characters!!")
+	svc1, err := NewJWTService("secret-one-minimum-32-characters!!")
+	require.NoError(t, err)
+	svc2, err := NewJWTService("secret-two-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	pair, err := svc1.GenerateTokenPair(&Claims{
 		UserID:   uuid.New(),
@@ -138,9 +145,10 @@ func TestJWTService_ExpiredToken(t *testing.T) {
 }
 
 func TestJWTService_InvalidTokenString(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
-	_, err := svc.ValidateAccessToken("invalid-token-string")
+	_, err = svc.ValidateAccessToken("invalid-token-string")
 	assert.Error(t, err)
 
 	_, err = svc.ValidateRefreshToken("")
@@ -148,7 +156,8 @@ func TestJWTService_InvalidTokenString(t *testing.T) {
 }
 
 func TestJWTService_NilCarrier(t *testing.T) {
-	svc := NewJWTService("test-secret-minimum-32-characters!!")
+	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	pair, err := svc.GenerateTokenPair(&Claims{
 		UserID:   uuid.New(),

@@ -221,7 +221,10 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 // --- Helper ---
 
 func newTestService(userRepo *mockUserRepo, roleRepo *mockRoleRepo, auditRepo *mockAuditRepo) *AdminService {
-	jwt := NewJWTService("test-secret-minimum-32-characters!!")
+	jwt, err := NewJWTService("test-secret-minimum-32-characters!!")
+	if err != nil {
+		panic(err)
+	}
 	logger := zap.NewNop()
 	return NewAdminService(userRepo, roleRepo, auditRepo, jwt, logger)
 }
@@ -314,7 +317,8 @@ func TestAdminService_Login_DisabledAccount(t *testing.T) {
 
 func TestAdminService_RefreshToken_Success(t *testing.T) {
 	userID := uuid.New()
-	jwt := NewJWTService("test-secret-minimum-32-characters!!")
+	jwt, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	original, err := jwt.GenerateTokenPair(&Claims{
 		UserID:   userID,
@@ -344,7 +348,8 @@ func TestAdminService_RefreshToken_Success(t *testing.T) {
 
 func TestAdminService_RefreshToken_DisabledUser(t *testing.T) {
 	userID := uuid.New()
-	jwt := NewJWTService("test-secret-minimum-32-characters!!")
+	jwt, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	original, err := jwt.GenerateTokenPair(&Claims{
 		UserID:   userID,

@@ -56,7 +56,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	router.Setup(engine, &router.Deps{
+	if err := router.Setup(engine, &router.Deps{
 		PgPool:          app.PgPool,
 		TsPool:          app.TsPool,
 		Redis:           app.Redis,
@@ -68,7 +68,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 		Logger:          app.Logger,
 		GS:              app.GS,
 		MetricsReg:      app.MetricsReg,
-	})
+	}); err != nil {
+		return fmt.Errorf("setup routes: %w", err)
+	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	return app.ListenAndServe(engine, addr)

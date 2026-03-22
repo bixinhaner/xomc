@@ -58,9 +58,18 @@ func (r *PgDefinitionRepository) Create(ctx context.Context, def *ReportDefiniti
 		def.DeviceGroups = []string{}
 	}
 
-	formatJSON, _ := json.Marshal(def.Format)
-	kpiJSON, _ := json.Marshal(def.KPICodes)
-	groupsJSON, _ := json.Marshal(def.DeviceGroups)
+	formatJSON, err := json.Marshal(def.Format)
+	if err != nil {
+		return fmt.Errorf("marshal format: %w", err)
+	}
+	kpiJSON, err := json.Marshal(def.KPICodes)
+	if err != nil {
+		return fmt.Errorf("marshal kpi_codes: %w", err)
+	}
+	groupsJSON, err := json.Marshal(def.DeviceGroups)
+	if err != nil {
+		return fmt.Errorf("marshal device_groups: %w", err)
+	}
 
 	query, args, err := psql.Insert("report_definitions").
 		Columns("report_name", "report_type", "description", "format", "period",
@@ -107,9 +116,18 @@ func (r *PgDefinitionRepository) GetByID(ctx context.Context, id uuid.UUID) (*Re
 func (r *PgDefinitionRepository) Update(ctx context.Context, def *ReportDefinition) error {
 	def.UpdatedAt = time.Now()
 
-	formatJSON, _ := json.Marshal(def.Format)
-	kpiJSON, _ := json.Marshal(def.KPICodes)
-	groupsJSON, _ := json.Marshal(def.DeviceGroups)
+	formatJSON, err := json.Marshal(def.Format)
+	if err != nil {
+		return fmt.Errorf("marshal format: %w", err)
+	}
+	kpiJSON, err := json.Marshal(def.KPICodes)
+	if err != nil {
+		return fmt.Errorf("marshal kpi_codes: %w", err)
+	}
+	groupsJSON, err := json.Marshal(def.DeviceGroups)
+	if err != nil {
+		return fmt.Errorf("marshal device_groups: %w", err)
+	}
 
 	query, args, err := psql.Update("report_definitions").
 		Set("report_name", def.ReportName).
@@ -259,21 +277,27 @@ func scanDefinition(row pgx.Row) (*ReportDefinition, error) {
 	}
 
 	if formatJSON != nil {
-		_ = json.Unmarshal(formatJSON, &d.Format)
+		if unmarshalErr := json.Unmarshal(formatJSON, &d.Format); unmarshalErr != nil {
+			return nil, fmt.Errorf("unmarshal format: %w", unmarshalErr)
+		}
 	}
 	if d.Format == nil {
 		d.Format = []string{}
 	}
 
 	if kpiJSON != nil {
-		_ = json.Unmarshal(kpiJSON, &d.KPICodes)
+		if unmarshalErr := json.Unmarshal(kpiJSON, &d.KPICodes); unmarshalErr != nil {
+			return nil, fmt.Errorf("unmarshal kpi_codes: %w", unmarshalErr)
+		}
 	}
 	if d.KPICodes == nil {
 		d.KPICodes = []string{}
 	}
 
 	if groupsJSON != nil {
-		_ = json.Unmarshal(groupsJSON, &d.DeviceGroups)
+		if unmarshalErr := json.Unmarshal(groupsJSON, &d.DeviceGroups); unmarshalErr != nil {
+			return nil, fmt.Errorf("unmarshal device_groups: %w", unmarshalErr)
+		}
 	}
 	if d.DeviceGroups == nil {
 		d.DeviceGroups = []string{}
@@ -317,21 +341,27 @@ func scanDefinitionRow(rows pgx.Rows) (*ReportDefinition, error) {
 	}
 
 	if formatJSON != nil {
-		_ = json.Unmarshal(formatJSON, &d.Format)
+		if unmarshalErr := json.Unmarshal(formatJSON, &d.Format); unmarshalErr != nil {
+			return nil, fmt.Errorf("unmarshal format: %w", unmarshalErr)
+		}
 	}
 	if d.Format == nil {
 		d.Format = []string{}
 	}
 
 	if kpiJSON != nil {
-		_ = json.Unmarshal(kpiJSON, &d.KPICodes)
+		if unmarshalErr := json.Unmarshal(kpiJSON, &d.KPICodes); unmarshalErr != nil {
+			return nil, fmt.Errorf("unmarshal kpi_codes: %w", unmarshalErr)
+		}
 	}
 	if d.KPICodes == nil {
 		d.KPICodes = []string{}
 	}
 
 	if groupsJSON != nil {
-		_ = json.Unmarshal(groupsJSON, &d.DeviceGroups)
+		if unmarshalErr := json.Unmarshal(groupsJSON, &d.DeviceGroups); unmarshalErr != nil {
+			return nil, fmt.Errorf("unmarshal device_groups: %w", unmarshalErr)
+		}
 	}
 	if d.DeviceGroups == nil {
 		d.DeviceGroups = []string{}

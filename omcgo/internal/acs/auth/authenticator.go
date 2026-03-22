@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -53,21 +55,42 @@ func (a *BasicAuthenticator) Challenge(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="ACS"`)
 }
 
+const nonceTTL = 5 * time.Minute
+
 // DigestAuthenticator implements HTTP Digest authentication.
 type DigestAuthenticator struct {
 	Username string
 	Password string
 	realm    string
-	nonces   map[string]bool
+	mu       sync.Mutex
+	nonces   map[string]time.Time
 }
 
 // NewDigestAuthenticator creates a Digest auth handler.
 func NewDigestAuthenticator(username, password string) *DigestAuthenticator {
-	return &DigestAuthenticator{
+	da := &DigestAuthenticator{
 		Username: username,
 		Password: password,
 		realm:    "ACS",
-		nonces:   make(map[string]bool),
+		nonces:   make(map[string]time.Time),
+	}
+	go da.cleanupLoop()
+	return da
+}
+
+// cleanupLoop periodically removes expired nonces.
+func (a *DigestAuthenticator) cleanupLoop() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.mu.Lock()
+		now := time.Now()
+		for nonce, created := range a.nonces {
+			if now.Sub(created) > nonceTTL {
+				delete(a.nonces, nonce)
+			}
+		}
+		a.mu.Unlock()
 	}
 }
 
@@ -83,10 +106,16 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 	uri := params["uri"]
 	response := params["response"]
 
-	if !a.nonces[nonce] {
-		return nil, fmt.Errorf("invalid nonce")
+	a.mu.Lock()
+	created, exists := a.nonces[nonce]
+	if exists {
+		delete(a.nonces, nonce)
 	}
-	delete(a.nonces, nonce)
+	a.mu.Unlock()
+
+	if !exists || time.Since(created) > nonceTTL {
+		return nil, fmt.Errorf("invalid or expired nonce")
+	}
 
 	// Compute expected digest response
 	ha1 := md5Hash(fmt.Sprintf("%s:%s:%s", username, a.realm, a.Password))
@@ -102,7 +131,9 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 
 func (a *DigestAuthenticator) Challenge(w http.ResponseWriter) {
 	nonce := uuid.New().String()
-	a.nonces[nonce] = true
+	a.mu.Lock()
+	a.nonces[nonce] = time.Now()
+	a.mu.Unlock()
 	w.Header().Set("WWW-Authenticate",
 		fmt.Sprintf(`Digest realm="%s", nonce="%s", qop="auth"`, a.realm, nonce))
 }

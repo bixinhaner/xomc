@@ -32,7 +32,8 @@ func setupRouter(middlewares ...gin.HandlerFunc) *gin.Engine {
 }
 
 func TestRequireAuth_ValidToken(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	userID := uuid.New()
 	carrier := model.CarrierCMCC
 
@@ -81,7 +82,8 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 }
 
 func TestRequireAuth_MissingHeader(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	r := setupRouter(RequireAuth(jwtService))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -92,7 +94,8 @@ func TestRequireAuth_MissingHeader(t *testing.T) {
 }
 
 func TestRequireAuth_InvalidFormat(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	r := setupRouter(RequireAuth(jwtService))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -104,7 +107,8 @@ func TestRequireAuth_InvalidFormat(t *testing.T) {
 }
 
 func TestRequireAuth_InvalidToken(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	r := setupRouter(RequireAuth(jwtService))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -116,7 +120,8 @@ func TestRequireAuth_InvalidToken(t *testing.T) {
 }
 
 func TestRequireAuth_RefreshTokenRejected(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	pair, err := jwtService.GenerateTokenPair(&Claims{
 		UserID:   uuid.New(),
@@ -136,7 +141,8 @@ func TestRequireAuth_RefreshTokenRejected(t *testing.T) {
 }
 
 func TestRequirePermission_Allowed(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	userID := uuid.New()
 
 	pair, err := jwtService.GenerateTokenPair(&Claims{
@@ -168,7 +174,8 @@ func TestRequirePermission_Allowed(t *testing.T) {
 }
 
 func TestRequirePermission_Denied(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	userID := uuid.New()
 
 	pair, err := jwtService.GenerateTokenPair(&Claims{
@@ -216,7 +223,8 @@ func TestRequirePermission_NoAuth(t *testing.T) {
 }
 
 func TestRequireCarrier_WithCarrier(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 	carrier := model.CarrierCMCC
 
 	pair, err := jwtService.GenerateTokenPair(&Claims{
@@ -252,7 +260,8 @@ func TestRequireCarrier_WithCarrier(t *testing.T) {
 }
 
 func TestRequireCarrier_NilCarrier(t *testing.T) {
-	jwtService := NewJWTService("test-secret-minimum-32-characters!!")
+	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
 
 	pair, err := jwtService.GenerateTokenPair(&Claims{
 		UserID:   uuid.New(),

@@ -112,9 +112,13 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 		}
 
 		// Build Upload command (TR-069 FileType "2" = VendorConfigurationFile)
-		paramsJSON, _ := json.Marshal(map[string]interface{}{
+		paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
 			"file_type": "2",
 		})
+		if marshalErr != nil {
+			e.logger.Warn("marshal upload params", zap.String("device_sn", targetSN), zap.Error(marshalErr))
+			continue
+		}
 		cmd := &cmdqueue.Command{
 			Method: "Upload",
 			Params: paramsJSON,
@@ -140,7 +144,9 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 
 		// Update progress
 		task.Progress = (i + 1) * 100 / total
-		_ = e.taskRepo.Update(ctx, task)
+		if updateErr := e.taskRepo.Update(ctx, task); updateErr != nil {
+			e.logger.Warn("update backup task progress", zap.Error(updateErr))
+		}
 	}
 
 	// Complete task
@@ -170,7 +176,9 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 		"status":  string(task.Status),
 	})
 	if err == nil {
-		_ = e.eventBus.Publish(ctx, event.SubjectBackupTaskDone, doneEvt)
+		if pubErr := e.eventBus.Publish(ctx, event.SubjectBackupTaskDone, doneEvt); pubErr != nil {
+			e.logger.Warn("publish backup.task.done event", zap.Error(pubErr))
+		}
 	}
 
 	return nil

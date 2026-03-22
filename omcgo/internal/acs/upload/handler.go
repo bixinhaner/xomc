@@ -2,8 +2,11 @@ package upload
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -59,24 +62,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Validate Basic Auth credentials
-	// username, password, ok := r.BasicAuth()
-	// if !ok {
-	// 	h.logger.Warn("missing basic auth credentials")
-	// 	w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
-	// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
-	// 	return
-	// }
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		h.logger.Warn("missing basic auth credentials")
+		w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-	// // Validate against global credentials using constant-time comparison
-	// if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
-	// 	subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
-	// 	h.logger.Warn("invalid upload credentials",
-	// 		zap.String("username", username),
-	// 	)
-	// 	w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
-	// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
-	// 	return
-	// }
+	if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
+		h.logger.Warn("invalid upload credentials",
+			zap.String("username", username),
+		)
+		w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	// 3. Extract fileType and filename from query params
 	fileType := r.URL.Query().Get("fileType")
@@ -88,6 +90,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if filename == "" {
 		http.Error(w, "missing filename parameter", http.StatusBadRequest)
+		return
+	}
+
+	// 3.1 Path traversal protection: strip directory components and reject suspicious filenames
+	filename = filepath.Base(filename)
+	if filename == "." || filename == ".." || strings.Contains(filename, "..") {
+		h.logger.Warn("path traversal attempt blocked", zap.String("filename", r.URL.Query().Get("filename")))
+		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}
 
