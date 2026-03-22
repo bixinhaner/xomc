@@ -77,6 +77,8 @@ func registerSubscribers(app *bootstrap.App, cfg *appconfig.WorkerConfig) {
 	pmParser := collector.NewPMXMLParser()
 	pmFileStore := pm.NewPgPMFileStore(app.PgPool)
 	pmCollector := collector.NewPMCollector(app.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, app.EventBus, logger)
+	pmMetrics := pm.NewPMMetrics(app.MetricsReg)
+	pmCollector.SetMetrics(pmMetrics)
 	if err := pmCollector.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
@@ -86,6 +88,8 @@ func registerSubscribers(app *bootstrap.App, cfg *appconfig.WorkerConfig) {
 	alarmPgStore := alarm.NewPgAlarmStore(app.PgPool, app.TsPool)
 	alarmRedisStore := alarm.NewRedisAlarmStore(app.Redis)
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, app.Carriers, app.EventBus, logger)
+	alarmMetrics := alarm.NewAlarmMetrics(app.MetricsReg)
+	alarmEngine.SetMetrics(alarmMetrics)
 	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, logger)
 	if err := alarmReceiver.Subscribe(app.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))

@@ -20,6 +20,7 @@ type HeartbeatMonitor struct {
 	deviceRepo DeviceRepository
 	cron       *cron.Cron
 	logger     *zap.Logger
+	cancel     context.CancelFunc
 }
 
 // NewHeartbeatMonitor creates a new HeartbeatMonitor.
@@ -33,18 +34,24 @@ func NewHeartbeatMonitor(redis redis.UniversalClient, deviceRepo DeviceRepositor
 
 // Start begins the periodic heartbeat check using a cron scheduler.
 func (m *HeartbeatMonitor) Start() {
+	baseCtx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
 	m.cron = cron.New()
 	m.cron.AddFunc("@every 60s", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		ctx, timeoutCancel := context.WithTimeout(baseCtx, 30*time.Second)
+		defer timeoutCancel()
 		m.CheckHeartbeats(ctx)
 	})
 	m.cron.Start()
 	m.logger.Info("heartbeat monitor started")
 }
 
-// Stop shuts down the cron scheduler.
+// Stop shuts down the cron scheduler and cancels any in-flight heartbeat checks.
 func (m *HeartbeatMonitor) Stop() {
+	if m.cancel != nil {
+		m.cancel()
+	}
 	if m.cron != nil {
 		m.cron.Stop()
 	}

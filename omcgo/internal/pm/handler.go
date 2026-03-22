@@ -24,12 +24,18 @@ type Handler struct {
 	fileStore   PMFileStore
 	minioClient *minio.Client
 	pmBucket    string
+	metrics     *PMMetrics
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new PM handler.
 func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, logger *zap.Logger) *Handler {
 	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, fileStore: fileStore, minioClient: minioClient, pmBucket: pmBucket, logger: logger}
+}
+
+// SetMetrics attaches Prometheus metrics to the handler.
+func (h *Handler) SetMetrics(m *PMMetrics) {
+	h.metrics = m
 }
 
 // RegisterRoutes registers PM API routes.
@@ -92,6 +98,17 @@ func (h *Handler) ListCounters(c *gin.Context) {
 		if t, err := time.Parse(time.RFC3339, q.EndTime); err == nil {
 			filter.EndTime = t
 		}
+	}
+	// Default time range guard: prevent full-table scans on compressed hypertable.
+	// If no time range specified, default to last 24 hours.
+	if filter.StartTime.IsZero() && filter.EndTime.IsZero() {
+		filter.EndTime = time.Now()
+		filter.StartTime = filter.EndTime.Add(-24 * time.Hour)
+	} else if filter.StartTime.IsZero() {
+		// If only end_time given, look back 24 hours from it
+		filter.StartTime = filter.EndTime.Add(-24 * time.Hour)
+	} else if filter.EndTime.IsZero() {
+		filter.EndTime = time.Now()
 	}
 	result, err := h.counterRepo.Query(c.Request.Context(), filter)
 	if err != nil {
@@ -182,6 +199,15 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 		if t, err := time.Parse(time.RFC3339, q.EndTime); err == nil {
 			filter.EndTime = t
 		}
+	}
+	// Default time range guard: prevent full-table scans on compressed hypertable.
+	if filter.StartTime.IsZero() && filter.EndTime.IsZero() {
+		filter.EndTime = time.Now()
+		filter.StartTime = filter.EndTime.Add(-24 * time.Hour)
+	} else if filter.StartTime.IsZero() {
+		filter.StartTime = filter.EndTime.Add(-24 * time.Hour)
+	} else if filter.EndTime.IsZero() {
+		filter.EndTime = time.Now()
 	}
 	result, err := h.kpiRepo.Query(c.Request.Context(), filter)
 	if err != nil {

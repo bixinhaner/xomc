@@ -12,6 +12,14 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// Login failure sentinel errors used for audit log classification.
+// These are internal to the service and handler; callers receive generic ErrUnauthorized/ErrForbidden.
+var (
+	errLoginUserNotFound    = fmt.Errorf("user not found")
+	errLoginAccountDisabled = fmt.Errorf("account disabled")
+	errLoginWrongPassword   = fmt.Errorf("wrong password")
+)
+
 // AdminService provides user management, authentication, and RBAC functionality.
 type AdminService struct {
 	userRepo  UserRepository
@@ -42,15 +50,15 @@ func NewAdminService(
 func (s *AdminService) Login(ctx context.Context, username, password string) (*TokenPair, error) {
 	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
-		return nil, commonerrors.ErrUnauthorized
+		return nil, fmt.Errorf("%w: %w", errLoginUserNotFound, commonerrors.ErrUnauthorized)
 	}
 
 	if user.Status != UserStatusActive {
-		return nil, commonerrors.NewBusinessError(7001, "account is disabled", commonerrors.ErrForbidden)
+		return nil, fmt.Errorf("%w: %w", errLoginAccountDisabled, commonerrors.ErrForbidden)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return nil, commonerrors.ErrUnauthorized
+		return nil, fmt.Errorf("%w: %w", errLoginWrongPassword, commonerrors.ErrUnauthorized)
 	}
 
 	roles, err := s.roleRepo.GetUserRoles(ctx, user.ID)

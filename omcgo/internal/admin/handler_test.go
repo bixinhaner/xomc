@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -330,6 +331,160 @@ func TestHandler_DeleteUser_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.True(t, deleteCalled)
+}
+
+func TestClassifyLoginFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "user not found",
+			err:      fmt.Errorf("%w: %w", errLoginUserNotFound, commonerrors.ErrUnauthorized),
+			expected: "user_not_found",
+		},
+		{
+			name:     "account disabled",
+			err:      fmt.Errorf("%w: %w", errLoginAccountDisabled, commonerrors.ErrForbidden),
+			expected: "account_disabled",
+		},
+		{
+			name:     "wrong password",
+			err:      fmt.Errorf("%w: %w", errLoginWrongPassword, commonerrors.ErrUnauthorized),
+			expected: "wrong_password",
+		},
+		{
+			name:     "unknown error",
+			err:      fmt.Errorf("some other error"),
+			expected: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := classifyLoginFailure(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHandler_Login_AuditLog_OnFailure(t *testing.T) {
+	userRepo := &handlerMockUserRepo{
+		getByUsernameFn: func(_ context.Context, _ string) (*User, error) {
+			return &User{
+				ID:           uuid.New(),
+				PasswordHash: handlerHashPassword("correct"),
+				Status:       UserStatusActive,
+			}, nil
+		},
+	}
+
+	auditCreated := make(chan *AuditLog, 1)
+	auditRepo := &handlerMockAuditRepoWithCapture{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			auditCreated <- log
+			return nil
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, auditRepo, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+	r := gin.New()
+	api := r.Group("/api/v1")
+	h.RegisterAuthRoutes(api)
+
+	w := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
+		handlerJSON(LoginRequest{Username: "admin", Password: "wrong"}))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "TestAgent/1.0")
+	r.ServeHTTP(w, httpReq)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// Wait for the async audit log goroutine
+	select {
+	case log := <-auditCreated:
+		assert.Equal(t, "login_failed", log.Action)
+		assert.Equal(t, "admin", log.Username)
+		assert.Equal(t, "auth", log.Resource)
+		assert.Equal(t, "TestAgent/1.0", log.UserAgent)
+		assert.Equal(t, "wrong_password", log.Details["reason"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("audit log was not created within timeout")
+	}
+}
+
+func TestHandler_Login_AuditLog_OnSuccess(t *testing.T) {
+	userRepo := &handlerMockUserRepo{
+		getByUsernameFn: func(_ context.Context, username string) (*User, error) {
+			return &User{
+				ID:           uuid.New(),
+				Username:     username,
+				PasswordHash: handlerHashPassword("correct"),
+				Status:       UserStatusActive,
+			}, nil
+		},
+	}
+	roleRepo := &handlerMockRoleRepo{
+		getUserRolesFn: func(_ context.Context, _ uuid.UUID) ([]Role, error) {
+			return []Role{{Name: "admin"}}, nil
+		},
+	}
+
+	auditCreated := make(chan *AuditLog, 1)
+	auditRepo := &handlerMockAuditRepoWithCapture{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			auditCreated <- log
+			return nil
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, roleRepo, auditRepo, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+	r := gin.New()
+	api := r.Group("/api/v1")
+	h.RegisterAuthRoutes(api)
+
+	w := httptest.NewRecorder()
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
+		handlerJSON(LoginRequest{Username: "admin", Password: "correct"}))
+	httpReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, httpReq)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case log := <-auditCreated:
+		assert.Equal(t, "login_success", log.Action)
+		assert.Equal(t, "admin", log.Username)
+		assert.Equal(t, "auth", log.Resource)
+	case <-time.After(2 * time.Second):
+		t.Fatal("audit log was not created within timeout")
+	}
+}
+
+// handlerMockAuditRepoWithCapture captures audit log Create calls for test assertions.
+type handlerMockAuditRepoWithCapture struct {
+	createFn func(ctx context.Context, log *AuditLog) error
+}
+
+func (m *handlerMockAuditRepoWithCapture) Create(ctx context.Context, log *AuditLog) error {
+	if m.createFn != nil {
+		return m.createFn(ctx, log)
+	}
+	return nil
+}
+
+func (m *handlerMockAuditRepoWithCapture) List(_ context.Context, _ AuditLogFilter) (*model.ListResponse[AuditLog], error) {
+	return &model.ListResponse[AuditLog]{Items: []AuditLog{}}, nil
 }
 
 func TestHandler_ListRoles(t *testing.T) {

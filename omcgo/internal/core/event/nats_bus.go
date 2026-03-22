@@ -20,14 +20,19 @@ type NATSEventBus struct {
 	subs   []*nats.Subscription
 	mu     sync.Mutex
 	logger *zap.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewNATSEventBus creates an EventBus backed by NATS JetStream.
 func NewNATSEventBus(conn *nats.Conn, js nats.JetStreamContext, logger *zap.Logger) *NATSEventBus {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &NATSEventBus{
 		conn:   conn,
 		js:     js,
 		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
@@ -78,6 +83,9 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 }
 
 func (b *NATSEventBus) Close() error {
+	// Cancel the shared context so in-flight event handlers are notified.
+	b.cancel()
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -100,7 +108,7 @@ func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
 			return
 		}
 
-		if err := handler(context.Background(), evt); err != nil {
+		if err := handler(b.ctx, evt); err != nil {
 			meta, _ := msg.Metadata()
 			deliveries := uint64(1)
 			if meta != nil {

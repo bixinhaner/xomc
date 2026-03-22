@@ -1,5 +1,5 @@
 .PHONY: build build-acs build-app build-worker build-migrate build-omcctl \
-       test test-coverage test-integration test-integration-up test-integration-down \
+       test test-race test-coverage test-integration test-integration-up test-integration-down \
        lint vet generate \
        migrate-up migrate-down docker-build docker-up docker-down clean
 
@@ -23,7 +23,10 @@ build-omcctl:
 
 # Test
 test:
-	go test ./... -v -race -count=1
+	go test ./... -v -count=1
+
+test-race:  ## Run tests with race detector (slower, use for CI or pre-release)
+	go test -race -count=1 ./...
 
 test-coverage:
 	go test ./... -coverprofile=coverage.out

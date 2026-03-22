@@ -13,9 +13,10 @@ import (
 // TaskService 任务管理服务
 // 协调 Redis 队列（运行时）和 PostgreSQL（持久化）
 type TaskService struct {
-	queue  *RedisTaskQueue
-	repo   *PgTaskRepository
-	logger *zap.Logger
+	queue   *RedisTaskQueue
+	repo    *PgTaskRepository
+	metrics *TaskMetrics
+	logger  *zap.Logger
 }
 
 // NewTaskService 创建任务服务
@@ -25,6 +26,11 @@ func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logg
 		repo:   repo,
 		logger: log,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the service.
+func (s *TaskService) SetMetrics(m *TaskMetrics) {
+	s.metrics = m
 }
 
 // CreateTask 创建新任务
@@ -41,6 +47,10 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		// 回滚 PostgreSQL 记录
 		s.repo.Delete(ctx, task.ID)
 		return nil, fmt.Errorf("enqueue task: %w", err)
+	}
+
+	if s.metrics != nil {
+		s.metrics.PendingTotal.Inc()
 	}
 
 	logger.L(ctx).Info("task created",
@@ -149,6 +159,11 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 		}
 	}
 
+	if s.metrics != nil {
+		s.metrics.CompletedTotal.WithLabelValues("success").Inc()
+		s.metrics.PendingTotal.Dec()
+	}
+
 	logger.L(ctx).Info("task completed",
 		zap.String("task_id", taskID),
 		zap.String("method", task.Method))
@@ -172,6 +187,11 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 		if err := s.repo.Update(ctx, task); err != nil {
 			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
 		}
+	}
+
+	if s.metrics != nil {
+		s.metrics.CompletedTotal.WithLabelValues("failed").Inc()
+		s.metrics.PendingTotal.Dec()
 	}
 
 	logger.L(ctx).Info("task failed",
@@ -210,6 +230,11 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 	// 更新 PostgreSQL
 	if err := s.repo.Update(ctx, task); err != nil {
 		return err
+	}
+
+	if s.metrics != nil {
+		s.metrics.CompletedTotal.WithLabelValues("expired").Inc()
+		s.metrics.PendingTotal.Dec()
 	}
 
 	logger.L(ctx).Info("task cancelled", zap.String("task_id", taskID))

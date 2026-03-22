@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -8,6 +10,13 @@ import (
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+)
+
+// Audit log action constants for authentication events.
+const (
+	auditActionLoginSuccess = "login_success"
+	auditActionLoginFailed  = "login_failed"
+	auditActionLogout       = "logout"
 )
 
 // Handler provides HTTP endpoints for admin operations.
@@ -69,14 +78,79 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	clientIP := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+
 	tokenPair, err := h.service.Login(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
+		// Classify the failure reason for audit logging
+		reason := classifyLoginFailure(err)
+
+		h.logger.Warn("login failed",
+			zap.String("username", req.Username),
+			zap.String("ip", clientIP),
+			zap.String("reason", reason),
+		)
+
+		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, reason)
+
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return
 	}
 
+	h.logger.Info("login success",
+		zap.String("username", req.Username),
+		zap.String("ip", clientIP),
+	)
+
+	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, "")
+
 	c.JSON(http.StatusOK, tokenPair)
+}
+
+// classifyLoginFailure maps internal login errors to human-readable failure reasons.
+func classifyLoginFailure(err error) string {
+	switch {
+	case errors.Is(err, errLoginUserNotFound):
+		return "user_not_found"
+	case errors.Is(err, errLoginAccountDisabled):
+		return "account_disabled"
+	case errors.Is(err, errLoginWrongPassword):
+		return "wrong_password"
+	default:
+		return "unknown"
+	}
+}
+
+// recordAuthAuditLog writes an authentication audit log entry asynchronously.
+// It uses a background context to avoid cancellation when the HTTP request completes.
+func (h *Handler) recordAuthAuditLog(action, username string, userID *uuid.UUID, ip, userAgent, reason string) {
+	details := map[string]interface{}{}
+	if reason != "" {
+		details["reason"] = reason
+	}
+
+	auditLog := &AuditLog{
+		UserID:    userID,
+		Username:  username,
+		Action:    action,
+		Resource:  "auth",
+		Details:   details,
+		IPAddress: ip,
+		UserAgent: userAgent,
+	}
+
+	// Fire and forget — audit logging must not block the login flow
+	go func() {
+		if err := h.service.auditRepo.Create(context.Background(), auditLog); err != nil {
+			h.logger.Error("failed to write auth audit log",
+				zap.String("action", action),
+				zap.String("username", username),
+				zap.Error(err),
+			)
+		}
+	}()
 }
 
 func (h *Handler) Refresh(c *gin.Context) {

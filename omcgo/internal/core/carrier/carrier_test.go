@@ -159,15 +159,102 @@ func TestCMCCCarrier(t *testing.T) {
 func TestCTCCCarrier(t *testing.T) {
 	c := ctcc.New()
 
-	assert.Equal(t, model.CarrierCTCC, c.Code())
-	assert.Equal(t, "中国电信", c.Name())
+	t.Run("identity", func(t *testing.T) {
+		assert.Equal(t, model.CarrierCTCC, c.Code())
+		assert.Equal(t, "中国电信", c.Name())
+	})
 
-	techs := c.SupportedTechnologies()
-	assert.Contains(t, techs, model.TechLTE)
-	assert.Contains(t, techs, model.TechNR)
+	t.Run("technologies", func(t *testing.T) {
+		techs := c.SupportedTechnologies()
+		assert.Contains(t, techs, model.TechLTE)
+		assert.Contains(t, techs, model.TechNR)
+	})
 
-	versions := c.DefaultDataModelVersions(model.TechNR)
-	assert.Contains(t, versions, "V2.8.7")
+	t.Run("data_model_versions", func(t *testing.T) {
+		lteVersions := c.DefaultDataModelVersions(model.TechLTE)
+		assert.Contains(t, lteVersions, "V1.0.2")
+
+		nrVersions := c.DefaultDataModelVersions(model.TechNR)
+		assert.Contains(t, nrVersions, "V2.8.7")
+	})
+
+	t.Run("parameter_mapping_roundtrip", func(t *testing.T) {
+		testPaths := []string{
+			"Device.X_CTCC.ENBId",
+			"Device.X_CTCC.SiteName",
+			"Device.X_CTCC.PMEnable",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID",
+			"Device.DeviceInfo.SerialNumber",
+			"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI",
+		}
+		for _, path := range testPaths {
+			unified := c.MapParameterToUnified(path)
+			assert.NotEmpty(t, unified, "path: %s", path)
+			back := c.MapUnifiedToParameter(unified)
+			assert.Equal(t, path, back, "roundtrip failed for path: %s -> %s -> %s", path, unified, back)
+		}
+	})
+
+	t.Run("kpi_definitions", func(t *testing.T) {
+		lteKPIs := c.KPIDefinitions(model.TechLTE)
+		assert.NotEmpty(t, lteKPIs)
+		// Check RRC success rate is defined
+		found := false
+		for _, kpi := range lteKPIs {
+			if kpi.Name == "lte_rrc_setup_success_rate" {
+				found = true
+				assert.Equal(t, "%", kpi.Unit)
+				assert.NotEmpty(t, kpi.Counters)
+			}
+		}
+		assert.True(t, found, "RRC setup success rate KPI should be defined")
+
+		nrKPIs := c.KPIDefinitions(model.TechNR)
+		assert.NotEmpty(t, nrKPIs)
+	})
+
+	t.Run("provisioning_templates", func(t *testing.T) {
+		lteTemplates := c.ProvisioningTemplates(model.TechLTE)
+		require.NotEmpty(t, lteTemplates)
+		assert.Equal(t, "ctcc_lte_default", lteTemplates[0].Name)
+		assert.NotEmpty(t, lteTemplates[0].Parameters)
+		assert.NotEmpty(t, lteTemplates[0].Required)
+
+		nrTemplates := c.ProvisioningTemplates(model.TechNR)
+		require.NotEmpty(t, nrTemplates)
+		assert.Equal(t, "ctcc_nr_default", nrTemplates[0].Name)
+	})
+
+	t.Run("alarm_severity", func(t *testing.T) {
+		assert.Equal(t, model.AlarmCritical, c.AlarmSeverityMapping("CELL_UNAVAILABLE"))
+		assert.Equal(t, model.AlarmCritical, c.AlarmSeverityMapping("SCTP_LINK_FAILURE"))
+		assert.Equal(t, model.AlarmMajor, c.AlarmSeverityMapping("RADIO_FAILURE"))
+		assert.Equal(t, model.AlarmMajor, c.AlarmSeverityMapping("BACKHAUL_FAILURE"))
+		assert.Equal(t, model.AlarmMinor, c.AlarmSeverityMapping("POWER_DEGRADED"))
+		assert.Equal(t, model.AlarmWarning, c.AlarmSeverityMapping("UNKNOWN_CODE"))
+	})
+
+	t.Run("known_oui_products", func(t *testing.T) {
+		lteProducts := c.KnownOUIProductClasses(model.TechLTE)
+		assert.NotEmpty(t, lteProducts)
+		// Huawei should be known for CTCC
+		found := false
+		for _, p := range lteProducts {
+			if p.OUI == "00E0FC" {
+				found = true
+			}
+		}
+		assert.True(t, found, "Huawei OUI should be in CTCC known products")
+	})
+
+	t.Run("validate_parameter", func(t *testing.T) {
+		// Valid PLMNID
+		err := c.ValidateParameter("Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID", "46011")
+		assert.NoError(t, err)
+		// Invalid PLMNID (too short)
+		err = c.ValidateParameter("Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID", "460")
+		assert.Error(t, err)
+	})
 }
 
 func TestCUCCCarrier(t *testing.T) {

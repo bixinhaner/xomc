@@ -19,6 +19,7 @@ type DeviceService struct {
 	paramRepo  DeviceParameterRepository
 	heartbeat  *HeartbeatMonitor
 	eventBus   event.EventBus
+	metrics    *DeviceMetrics
 	logger     *zap.Logger
 }
 
@@ -37,6 +38,11 @@ func NewDeviceService(
 		eventBus:   eventBus,
 		logger:     logger,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the service.
+func (s *DeviceService) SetMetrics(m *DeviceMetrics) {
+	s.metrics = m
 }
 
 // RegisterFromInform creates a new device from a bootstrap Inform message.
@@ -107,6 +113,12 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	s.logger.Info("RegisterFromInform: device created in DB successfully",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber))
+
+	// Record registration metric
+	if s.metrics != nil {
+		s.metrics.RegistrationsTotal.WithLabelValues(string(carrier)).Inc()
+		s.metrics.DevicesTotal.WithLabelValues(string(device.Status), string(carrier)).Inc()
+	}
 
 	// Store parameters
 	s.logger.Debug("RegisterFromInform: storing inform parameters",
@@ -219,6 +231,12 @@ func (s *DeviceService) TransitionStatus(ctx context.Context, deviceID uuid.UUID
 		return fmt.Errorf("update status: %w", err)
 	}
 
+	// Update gauge: decrement old status, increment new status
+	if s.metrics != nil {
+		s.metrics.DevicesTotal.WithLabelValues(string(device.Status), string(device.Carrier)).Dec()
+		s.metrics.DevicesTotal.WithLabelValues(string(newStatus), string(device.Carrier)).Inc()
+	}
+
 	s.logger.Info("device status transitioned",
 		zap.String("device_id", deviceID.String()),
 		zap.String("from", string(device.Status)),
@@ -250,7 +268,19 @@ func (s *DeviceService) GetDeviceParameters(ctx context.Context, deviceID uuid.U
 
 // CountByStatus returns device counts grouped by status.
 func (s *DeviceService) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
-	return s.deviceRepo.CountByStatus(ctx, carrier)
+	counts, err := s.deviceRepo.CountByStatus(ctx, carrier)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sync gauge metrics with actual DB counts
+	if s.metrics != nil && carrier != nil {
+		for status, count := range counts {
+			s.metrics.DevicesTotal.WithLabelValues(string(status), string(*carrier)).Set(float64(count))
+		}
+	}
+
+	return counts, nil
 }
 
 func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid.UUID, params []tr069.ParameterValueStruct) {

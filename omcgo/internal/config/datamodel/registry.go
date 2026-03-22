@@ -304,14 +304,22 @@ func (r *DataModelRegistry) Start() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 
+		// Derive a context that is cancelled when Stop() closes stopCh,
+		// so in-flight Redis calls are promptly cancelled on shutdown.
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-r.stopCh
+			cancel()
+		}()
+
 		// Perform an initial sync on startup.
-		r.refreshLocalCache(context.Background())
+		r.refreshLocalCache(ctx)
 
 		for {
 			select {
 			case <-ticker.C:
-				r.refreshLocalCache(context.Background())
-			case <-r.stopCh:
+				r.refreshLocalCache(ctx)
+			case <-ctx.Done():
 				r.logger.Info("data model cache watcher stopped")
 				return
 			}

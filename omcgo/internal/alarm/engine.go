@@ -3,6 +3,7 @@ package alarm
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,7 @@ type AlarmEngine struct {
 	redisStore      *RedisAlarmStore
 	carrierRegistry *carrier.CarrierRegistry
 	eventBus        event.EventBus
+	metrics         *AlarmMetrics
 	logger          *zap.Logger
 }
 
@@ -36,6 +38,16 @@ func NewAlarmEngine(
 		eventBus:        eventBus,
 		logger:          logger,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the engine.
+func (e *AlarmEngine) SetMetrics(m *AlarmMetrics) {
+	e.metrics = m
+}
+
+// severityLabel converts an AlarmSeverity to a Prometheus label string.
+func severityLabel(s model.AlarmSeverity) string {
+	return strconv.Itoa(int(s))
 }
 
 // Process handles an incoming alarm: maps severity, deduplicates, and persists.
@@ -110,6 +122,13 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 
 	if err := e.store.SaveActive(ctx, alarm); err != nil {
 		return fmt.Errorf("save active alarm: %w", err)
+	}
+
+	// Record metrics for new alarm
+	if e.metrics != nil {
+		sev := severityLabel(alarm.Severity)
+		e.metrics.ReceivedTotal.WithLabelValues(sev).Inc()
+		e.metrics.ActiveTotal.WithLabelValues(sev, string(alarm.Carrier)).Inc()
 	}
 
 	if e.redisStore != nil {
@@ -196,6 +215,11 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 	// Remove from active
 	if err := e.store.RemoveActive(ctx, alarmID); err != nil {
 		return fmt.Errorf("remove active alarm: %w", err)
+	}
+
+	// Decrement active alarm gauge
+	if e.metrics != nil {
+		e.metrics.ActiveTotal.WithLabelValues(severityLabel(alarm.Severity), string(alarm.Carrier)).Dec()
 	}
 
 	// Remove from Redis

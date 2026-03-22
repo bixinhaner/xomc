@@ -69,6 +69,8 @@ func Setup(r *gin.Engine, deps *Deps) error {
 
 	// Device services
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, eventBus, logger)
+	deviceMetrics := device.NewDeviceMetrics(metricsReg)
+	deviceService.SetMetrics(deviceMetrics)
 
 	// Subscribe InformHandler to events
 	informHandler := device.NewInformHandler(deviceService, carrierRegistry, model.CarrierCMCC, logger)
@@ -145,6 +147,8 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	alarmRedisStore := alarm.NewRedisAlarmStore(redisClient)
 	alarmPgStore := alarm.NewPgAlarmStore(pgPool, tsPool)
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, carrierRegistry, eventBus, logger)
+	alarmMetrics := alarm.NewAlarmMetrics(metricsReg)
+	alarmEngine.SetMetrics(alarmMetrics)
 
 	// MR module components
 	mrStore := mr.NewPgMRStore(pgPool, tsPool)
@@ -224,6 +228,8 @@ func Setup(r *gin.Engine, deps *Deps) error {
 
 	// PM routes → resource "pm"
 	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, pmTaskRepo, pmFileStore, minioClient, cfg.MinIO.Buckets.PMFiles, logger)
+	pmMetrics := pm.NewPMMetrics(metricsReg)
+	pmHandler.SetMetrics(pmMetrics)
 	pmHandler.RegisterRoutes(permGroup("pm"))
 
 	// Alarm routes → resource "alarms"
@@ -267,6 +273,8 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	taskQueue := task.NewRedisTaskQueue(redisClient)
 	taskRepo := task.NewPgTaskRepository(pgPool)
 	taskService := task.NewTaskService(taskQueue, taskRepo, logger)
+	taskMetrics := task.NewTaskMetrics(metricsReg)
+	taskService.SetMetrics(taskMetrics)
 	taskHandler := task.NewHandler(taskService)
 	taskHandler.RegisterRoutes(permGroup("devices"))
 	logger.Info("task queue module initialized")

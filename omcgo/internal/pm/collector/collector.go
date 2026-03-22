@@ -34,6 +34,7 @@ type PMCollector struct {
 	kpiEngine   *kpi.KPIEngine
 	fileStore   pm.PMFileStore
 	eventBus    event.EventBus
+	metrics     *pm.PMMetrics
 	logger      *zap.Logger
 }
 
@@ -52,6 +53,11 @@ func NewPMCollector(
 	}
 }
 
+// SetMetrics attaches Prometheus metrics to the collector.
+func (c *PMCollector) SetMetrics(m *pm.PMMetrics) {
+	c.metrics = m
+}
+
 // Subscribe registers the collector to listen for PM file received events.
 func (c *PMCollector) Subscribe(bus event.EventBus) error {
 	_, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", c.handleFileReceived)
@@ -63,6 +69,8 @@ func (c *PMCollector) Subscribe(bus event.EventBus) error {
 }
 
 func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) error {
+	startTime := time.Now()
+
 	var payload FileReceivedPayload
 	if err := evt.DecodePayload(&payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
@@ -110,13 +118,27 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	content, err := c.parser.Parse(obj, deviceID)
 	if err != nil {
+		if c.metrics != nil {
+			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
+			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+		}
 		return fmt.Errorf("parse pm xml: %w", err)
 	}
 
 	c.logger.Info("parsed PM file", zap.Int("counters", len(content.Counters)))
 
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
+		if c.metrics != nil {
+			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
+			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+		}
 		return fmt.Errorf("batch insert counters: %w", err)
+	}
+
+	// Record success metrics
+	if c.metrics != nil {
+		c.metrics.FilesProcessedTotal.WithLabelValues("success").Inc()
+		c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
 	}
 
 	// Update file parsed status
