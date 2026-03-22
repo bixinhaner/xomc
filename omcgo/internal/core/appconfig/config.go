@@ -75,15 +75,17 @@ type NorthboundConfig struct {
 
 // PushTargetConfig defines a single northbound push target.
 type PushTargetConfig struct {
-	ID         string   `mapstructure:"id"`
-	URL        string   `mapstructure:"url"`
-	AuthType   string   `mapstructure:"auth_type"`
-	AuthToken  string   `mapstructure:"auth_token"`
-	DataTypes  []string `mapstructure:"data_types"`
-	Format     string   `mapstructure:"format"`
-	BatchSize  int      `mapstructure:"batch_size"`
-	RetryCount int      `mapstructure:"retry_count"`
-	Enabled    bool     `mapstructure:"enabled"`
+	ID             string   `mapstructure:"id"`
+	URL            string   `mapstructure:"url"`
+	AuthType       string   `mapstructure:"auth_type"`
+	AuthToken      string   `mapstructure:"auth_token"`
+	DataTypes      []string `mapstructure:"data_types"`
+	Format         string   `mapstructure:"format"`
+	BatchSize      int      `mapstructure:"batch_size"`
+	RetryCount     int      `mapstructure:"retry_count"`
+	Enabled        bool     `mapstructure:"enabled"`
+	SigningEnabled bool     `mapstructure:"signing_enabled"`
+	SigningSecret  string   `mapstructure:"signing_secret"`
 }
 
 // NEDirectConfig holds NE Direct connection settings (CMCC only).

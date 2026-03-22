@@ -19,15 +19,17 @@ import (
 
 // Target is the runtime representation of a push target.
 type Target struct {
-	ID         string   `json:"id"`
-	URL        string   `json:"url"`
-	AuthType   string   `json:"auth_type"`
-	AuthToken  string   `json:"auth_token"`
-	DataTypes  []string `json:"data_types"`
-	Format     string   `json:"format"`
-	BatchSize  int      `json:"batch_size"`
-	RetryCount int      `json:"retry_count"`
-	Enabled    bool     `json:"enabled"`
+	ID             string   `json:"id"`
+	URL            string   `json:"url"`
+	AuthType       string   `json:"auth_type"`
+	AuthToken      string   `json:"auth_token,omitempty"`
+	DataTypes      []string `json:"data_types"`
+	Format         string   `json:"format"`
+	BatchSize      int      `json:"batch_size"`
+	RetryCount     int      `json:"retry_count"`
+	Enabled        bool     `json:"enabled"`
+	SigningEnabled bool     `json:"signing_enabled"`
+	SigningSecret  string   `json:"-"` // never expose in API responses
 }
 
 // Engine manages push targets and delivers events to external systems via HTTP.
@@ -253,6 +255,14 @@ func (e *Engine) deliver(ctx context.Context, t *Target, evt event.Event) error 
 			req.Header.Set("Authorization", "Basic "+t.AuthToken)
 		}
 
+		// HMAC-SHA256 webhook signing for payload integrity and replay protection
+		if t.SigningEnabled && t.SigningSecret != "" {
+			ts := time.Now().Unix()
+			sig := SignPayload(t.SigningSecret, ts, body)
+			req.Header.Set("X-Webhook-Signature", "sha256="+sig)
+			req.Header.Set("X-Webhook-Timestamp", fmt.Sprintf("%d", ts))
+		}
+
 		resp, err := e.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("push HTTP request (attempt %d): %w", attempt+1, err)
@@ -299,14 +309,16 @@ func matchesDataType(types []string, dt string) bool {
 
 func targetFromConfig(ct appconfig.PushTargetConfig) *Target {
 	return &Target{
-		ID:         ct.ID,
-		URL:        ct.URL,
-		AuthType:   ct.AuthType,
-		AuthToken:  ct.AuthToken,
-		DataTypes:  ct.DataTypes,
-		Format:     ct.Format,
-		BatchSize:  ct.BatchSize,
-		RetryCount: ct.RetryCount,
-		Enabled:    ct.Enabled,
+		ID:             ct.ID,
+		URL:            ct.URL,
+		AuthType:       ct.AuthType,
+		AuthToken:      ct.AuthToken,
+		DataTypes:      ct.DataTypes,
+		Format:         ct.Format,
+		BatchSize:      ct.BatchSize,
+		RetryCount:     ct.RetryCount,
+		Enabled:        ct.Enabled,
+		SigningEnabled: ct.SigningEnabled,
+		SigningSecret:  ct.SigningSecret,
 	}
 }
