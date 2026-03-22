@@ -4,49 +4,49 @@ server:
   tls_port: 8444
   grpc_port: 50051
   tls:
-    enabled: false
-    cert_file: ""
-    key_file: ""
+    enabled: true
+    cert_file: "${TLS_CERT_FILE}"
+    key_file: "${TLS_KEY_FILE}"
 
 db:
-  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  dsn: "${DB_DSN}"  # e.g. postgres://omcgo:xxx@db-host:5432/omcgo?sslmode=require
   max_conns: 50
   min_conns: 10
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
   health_check_interval: 30s
-  log_sql: true
+  log_sql: false
   log_sql_params: false
   log_sql_slow_threshold: 1000
 
 tsdb:
-  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  dsn: "${TSDB_DSN}"  # e.g. postgres://omcgo:xxx@tsdb-host:5432/omcgo?sslmode=require
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
   health_check_interval: 30s
-  log_sql: true
+  log_sql: false
   log_sql_params: false
   log_sql_slow_threshold: 2000
 
 redis:
   addrs:
-    - "localhost:6379"
-  password: ""
+    - "${REDIS_ADDR}"
+  password: "${REDIS_PASSWORD}"
   db: 0
   pool_size: 200
 
 nats:
-  url: "nats://localhost:4222"
+  url: "${NATS_URL}"
   max_reconnect: -1
   reconnect_wait: 2s
 
 minio:
-  endpoint: "localhost:9000"
-  access_key: "minioadmin"
-  secret_key: "minioadmin"
-  use_ssl: false
+  endpoint: "${MINIO_ENDPOINT}"
+  access_key: "${MINIO_ACCESS_KEY}"
+  secret_key: "${MINIO_SECRET_KEY}"
+  use_ssl: true
   buckets:
     pm_files: "pm-files"
     mr_files: "mr-files"
@@ -56,14 +56,13 @@ minio:
     reports: "reports"
 
 jwt:
-  secret: "change-me-in-production-minimum-32-characters!!"
+  secret: "${JWT_SECRET}"  # minimum 32 characters, must not be default value
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 
 cors:
   allow_origins:
-    - "http://localhost:3000"
-    - "http://127.0.0.1:3000"
+    - "${CORS_ORIGIN}"
 
 northbound:
   push_targets: []
