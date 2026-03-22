@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats } from '@/types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter } from '@/types/device';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // Backend device model from Go struct
@@ -376,13 +376,13 @@ export const deviceApi = {
     }));
   },
 
-  async getStats(): Promise<any> {
-    const { data } = await http.get('/devices/stats');
+  async getStats(): Promise<DeviceStats> {
+    const { data } = await http.get<DeviceStats>('/devices/stats');
     return data;
   },
 
-  async getParameters(id: string): Promise<any> {
-    const { data } = await http.get(`/devices/${id}/parameters`);
+  async getParameters(id: string): Promise<{ items: DeviceParameter[]; total: number }> {
+    const { data } = await http.get<{ items: DeviceParameter[]; total: number }>(`/devices/${id}/parameters`);
     return data;
   },
 

@@ -1,5 +1,5 @@
 import http from '../http';
-import type { KPI, Measurement, KPISeries, PerformanceThreshold } from '@/types/performance';
+import type { KPI, Measurement, KPISeries, PerformanceThreshold, PerformanceTask, AggregatedCounter, AggregatedCounterQuery, KPICalculationRequest, KPICalculationResult } from '@/types/performance';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // --- Backend response types ---
@@ -181,7 +181,7 @@ function mapBackendPMTask(b: BackendPMTask) {
   };
 }
 
-function mapToBackendPMTask(t: any) {
+function mapToBackendPMTask(t: Partial<PerformanceTask>) {
   return {
     task_name: t.taskName,
     task_type: t.taskType,
@@ -327,8 +327,8 @@ export const pmApi = {
   },
 
   // Threshold CRUD
-  async getThresholds(params?: any): Promise<PageResponse<PerformanceThreshold>> {
-    const { data } = await http.get('/pm/thresholds', { params });
+  async getThresholds(params?: PageRequest): Promise<PageResponse<PerformanceThreshold>> {
+    const { data } = await http.get<BackendListResponse<BackendKPIThreshold>>('/pm/thresholds', { params });
     const items = (data.items || []).map((t: BackendKPIThreshold) => mapBackendThreshold(t));
     return {
       items,
@@ -347,7 +347,7 @@ export const pmApi = {
       enabled: data.enabled ?? true,
       description: data.thresholdName || '',
     };
-    const { data: result } = await http.post('/pm/thresholds', payload);
+    const { data: result } = await http.post<BackendKPIThreshold>('/pm/thresholds', payload);
     return mapBackendThreshold(result);
   },
 
@@ -359,7 +359,7 @@ export const pmApi = {
     if (data.operator !== undefined) payload.comparison = mapOperatorToComparison(data.operator);
     if (data.enabled !== undefined) payload.enabled = data.enabled;
     if (data.thresholdName !== undefined) payload.description = data.thresholdName;
-    const { data: result } = await http.put(`/pm/thresholds/${id}`, payload);
+    const { data: result } = await http.put<BackendKPIThreshold>(`/pm/thresholds/${id}`, payload);
     return mapBackendThreshold(result);
   },
 
@@ -370,23 +370,23 @@ export const pmApi = {
   },
 
   // Aggregated counters & KPI calculation
-  async getAggregatedCounters(params?: any): Promise<any> {
-    const { data } = await http.get('/pm/counters/aggregated', { params });
+  async getAggregatedCounters(params?: AggregatedCounterQuery): Promise<{ items: AggregatedCounter[] }> {
+    const { data } = await http.get<{ items: AggregatedCounter[] }>('/pm/counters/aggregated', { params });
     return data;
   },
 
-  async calculateKPI(params: { kpi_name: string; device_ids?: string[]; start_time?: string; end_time?: string }): Promise<any> {
-    const { data } = await http.post('/pm/kpi/calculate', params);
+  async calculateKPI(params: KPICalculationRequest): Promise<{ items: KPICalculationResult[]; total: number }> {
+    const { data } = await http.post<{ items: KPICalculationResult[]; total: number }>('/pm/kpi/calculate', params);
     return data;
   },
 
   // PM Tasks
-  async getTasks(params: any) {
-    const { data } = await http.get<any>('/pm/tasks', { params });
+  async getTasks(params: PageRequest): Promise<PageResponse<ReturnType<typeof mapBackendPMTask>>> {
+    const { data } = await http.get<BackendListResponse<BackendPMTask>>('/pm/tasks', { params });
     return { items: (data.items || []).map(mapBackendPMTask), total: data.total, page: data.page, pageSize: data.page_size };
   },
-  async createTask(taskData: any) {
-    const { data } = await http.post<any>('/pm/tasks', mapToBackendPMTask(taskData));
+  async createTask(taskData: Partial<PerformanceTask>): Promise<ReturnType<typeof mapBackendPMTask>> {
+    const { data } = await http.post<BackendPMTask>('/pm/tasks', mapToBackendPMTask(taskData));
     return mapBackendPMTask(data);
   },
 };

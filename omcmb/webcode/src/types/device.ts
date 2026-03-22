@@ -157,6 +157,21 @@ export interface DeviceFilter {
   groupId?: string;
 }
 
+/** 设备统计数据 — 按状态分类的设备数量 */
+export interface DeviceStats {
+  counts: Record<string, number>;
+}
+
+/** 设备参数 — TR069 参数路径和值 */
+export interface DeviceParameter {
+  deviceId: string;
+  parameterPath: string;
+  parameterValue: string;
+  parameterType: string;
+  writable: boolean;
+  lastUpdatedAt: string;
+}
+
 /** 设备列表统计数据 — 基于筛选条件的全量统计（非当前页） */
 export interface DeviceListStats {
   total: number;

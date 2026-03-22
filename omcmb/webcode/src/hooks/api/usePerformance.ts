@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { PerformanceThreshold } from '@/types/performance';
+import type { PerformanceThreshold, AggregatedCounterQuery, KPICalculationRequest } from '@/types/performance';
 import type { PageRequest } from '@/types/pagination';
 import { performanceService } from '@/mock/services/performanceService';
 import { pmApi } from '@/services/api/pmApi';
@@ -126,7 +126,7 @@ export function useCreatePerformanceTask() {
   });
 }
 
-export function useAggregatedCounters(params?: any) {
+export function useAggregatedCounters(params?: AggregatedCounterQuery) {
   return useQuery({
     queryKey: ['performance', 'counters', 'aggregated', params],
     queryFn: () => pmApi.getAggregatedCounters(params),
@@ -136,7 +136,7 @@ export function useAggregatedCounters(params?: any) {
 
 export function useCalculateKPI() {
   return useMutation({
-    mutationFn: (params: { kpi_name: string; device_ids?: string[]; start_time?: string; end_time?: string }) =>
+    mutationFn: (params: KPICalculationRequest) =>
       pmApi.calculateKPI(params),
   });
 }

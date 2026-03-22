@@ -72,3 +72,43 @@ export interface KPISeries {
   data: KPIDataPoint[];
   unit: string;
 }
+
+export interface AggregatedCounter {
+  bucket: string;
+  deviceId: string;
+  cellId: string;
+  counterGroup: string;
+  counterName: string;
+  sumValue: number;
+  avgValue: number;
+  minValue: number;
+  maxValue: number;
+  sampleCount: number;
+}
+
+export interface KPICalculationRequest {
+  device_id: string;
+  cell_id?: string;
+  start_time: string;
+  end_time: string;
+  carrier: string;
+  technology: string;
+}
+
+export interface KPICalculationResult {
+  time: string;
+  deviceId: string;
+  cellId: string;
+  kpiName: string;
+  kpiValue: number;
+  carrier: string;
+  technology: string;
+}
+
+export interface AggregatedCounterQuery {
+  device_id?: string;
+  cell_id?: string;
+  counter_group?: string;
+  start_time?: string;
+  end_time?: string;
+}
