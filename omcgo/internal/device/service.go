@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -21,8 +22,20 @@ type DeviceService struct {
 	paramRepo  DeviceParameterRepository
 	heartbeat  *HeartbeatMonitor
 	eventBus   event.EventBus
+	cmdQueue   CommandQueue
+	connReq    ConnectionRequester
 	metrics    *DeviceMetrics
 	logger     *zap.Logger
+}
+
+// CommandQueue defines the interface for queuing RPC commands to devices.
+type CommandQueue interface {
+	Push(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error
+}
+
+// ConnectionRequester sends Connection Request to wake a CPE device.
+type ConnectionRequester interface {
+	Send(ctx context.Context, deviceSN string, url string) error
 }
 
 // NewDeviceService creates a new DeviceService.
@@ -40,6 +53,62 @@ func NewDeviceService(
 		eventBus:   eventBus,
 		logger:     logger,
 	}
+}
+
+// SetCommandQueue sets the ACS command queue for device operations.
+func (s *DeviceService) SetCommandQueue(q CommandQueue) {
+	s.cmdQueue = q
+}
+
+// SetConnectionRequester sets the connection request client.
+func (s *DeviceService) SetConnectionRequester(cr ConnectionRequester) {
+	s.connReq = cr
+}
+
+// RebootDevice queues a Reboot command for the given device via the ACS command queue.
+func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
+	device, err := s.deviceRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get device for reboot: %w", err)
+	}
+	if device == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	if s.cmdQueue == nil {
+		return fmt.Errorf("command queue not configured")
+	}
+
+	cmd := &cmdqueue.Command{
+		ID:       uuid.New().String(),
+		Method:   "Reboot",
+		Priority: 0, // highest priority
+	}
+	cmd.CommandKey = cmd.ID
+
+	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+		return fmt.Errorf("queue reboot command: %w", err)
+	}
+
+	s.logger.Info("reboot command queued",
+		zap.String("device_id", id.String()),
+		zap.String("serial_number", device.SerialNumber),
+		zap.String("command_id", cmd.ID),
+	)
+
+	// Optionally trigger Connection Request to wake the device immediately
+	if s.connReq != nil && device.ConnectionRequestURL != "" {
+		go func() {
+			if err := s.connReq.Send(context.Background(), device.SerialNumber, device.ConnectionRequestURL); err != nil {
+				s.logger.Warn("connection request for reboot failed",
+					zap.String("serial_number", device.SerialNumber),
+					zap.Error(err),
+				)
+			}
+		}()
+	}
+
+	return nil
 }
 
 // SetMetrics attaches Prometheus metrics to the service.

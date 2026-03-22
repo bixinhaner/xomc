@@ -222,12 +222,16 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 // RebootDevice handles POST /api/v1/devices/:id/reboot.
 func (h *Handler) RebootDevice(c *gin.Context) {
-	_, err := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 
-	// TODO: Queue reboot command via ACS command queue (requires gRPC call to ACS)
+	if err := h.service.RebootDevice(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{"message": "reboot command queued"})
 }

@@ -67,8 +67,13 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	heartbeatMonitor.Start()
 	gs.Register("heartbeat", 1, func(ctx context.Context) error { heartbeatMonitor.Stop(); return nil })
 
+	// Connection Request client (shared by device + software modules)
+	connReqClient := connreq.NewClient(redisClient, logger)
+
 	// Device services
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, eventBus, logger)
+	deviceService.SetCommandQueue(cmdQueue)
+	deviceService.SetConnectionRequester(connReqClient)
 	deviceMetrics := device.NewDeviceMetrics(metricsReg)
 	deviceService.SetMetrics(deviceMetrics)
 
@@ -120,12 +125,18 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	}
 	adminService := admin.NewAdminService(userRepo, roleRepo, auditRepo, jwtService, logger)
 	adminHandler := admin.NewHandler(adminService, logger)
+	captchaService := admin.NewCaptchaService(redisClient)
+	loginGuard := admin.NewLoginGuard(redisClient)
+	adminHandler.SetCaptchaService(captchaService)
+	adminHandler.SetLoginGuard(loginGuard)
+	apiKeyRepo := admin.NewPgAPIKeyRepository(pgPool)
+	apiKeySvc := admin.NewAPIKeyService(apiKeyRepo, userRepo, logger)
+	apiKeyHandler := admin.NewAPIKeyHandler(apiKeySvc)
 	logger.Info("admin/RBAC module initialized")
 
 	// Software Management module
 	firmwareRepo := software.NewPgFirmwareRepository(pgPool)
 	upgradeRepo := software.NewPgUpgradeTaskRepository(pgPool)
-	connReqClient := connreq.NewClient(redisClient, logger)
 	softwareService := software.NewSoftwareService(
 		firmwareRepo, upgradeRepo, deviceRepo, cmdQueue, connReqClient,
 		minioClient, cfg.MinIO.Buckets.Firmware, eventBus, logger,
@@ -190,9 +201,9 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	publicV1 := r.Group("/api/v1")
 	adminHandler.RegisterAuthRoutes(publicV1)
 
-	// Protected API v1 routes (JWT authentication required)
+	// Protected API v1 routes (JWT or API Key authentication required)
 	v1 := r.Group("/api/v1")
-	v1.Use(admin.RequireAuth(jwtService))
+	v1.Use(admin.RequireAuthWithAPIKey(jwtService, apiKeySvc, userRepo))
 	v1.Use(admin.RequireCarrier())
 	v1.Use(admin.AuditLogger(auditRepo))
 
@@ -384,6 +395,9 @@ func Setup(r *gin.Engine, deps *Deps) error {
 				zap.Int("port", cfg.NEDirect.Port))
 		}
 	}
+
+	// API Key management routes (authenticated users can manage their own keys)
+	apiKeyHandler.RegisterRoutes(v1)
 
 	// Admin management routes (require admin permission)
 	adminGroup := v1.Group("/admin")
