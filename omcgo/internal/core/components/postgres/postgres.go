@@ -12,6 +12,7 @@ import (
 
 // NewPostgresPool creates a new PostgreSQL connection pool.
 // If logger is provided and LogSQL is enabled, SQL queries will be logged.
+// The tracer also emits OpenTelemetry spans when a TracerProvider is configured.
 func NewPostgresPool(ctx context.Context, cfg appconfig.PostgresConfig, log *zap.Logger) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
@@ -34,9 +35,11 @@ func NewPostgresPool(ctx context.Context, cfg appconfig.PostgresConfig, log *zap
 		poolCfg.HealthCheckPeriod = cfg.HealthCheckInterval
 	}
 
-	// Attach SQL tracer if logging is enabled
+	// Attach SQL tracer if logging is enabled.
+	// OTELSQLTracer wraps the base SQLTracer and adds OpenTelemetry spans.
+	// When tracing is disabled (no-op TracerProvider), OTEL overhead is negligible.
 	if cfg.LogSQL && log != nil {
-		poolCfg.ConnConfig.Tracer = NewSQLTracer(log, cfg.LogSQLParams, cfg.LogSQLSlowThreshold)
+		poolCfg.ConnConfig.Tracer = NewOTELSQLTracer(log, cfg.LogSQLParams, cfg.LogSQLSlowThreshold)
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)

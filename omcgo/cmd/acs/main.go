@@ -9,7 +9,6 @@ import (
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
-	"github.com/omcgo/omcgo/internal/core/bootstrap"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -43,24 +42,24 @@ func runACS(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
-	app, err := bootstrap.InitForACS(context.Background(), &cfg)
+	inf, err := initACS(context.Background(), &cfg)
 	if err != nil {
 		return err
 	}
-	defer app.Logger.Sync()
-	app.Logger.Info("omcgo-acs starting", zap.String("config", cfgPath))
+	defer inf.Logger.Sync()
+	inf.Logger.Info("omcgo-acs starting", zap.String("config", cfgPath))
 
 	// Create ACS-specific components
-	sessionStore := acs.NewRedisSessionStore(app.Redis, cfg.Session.Timeout)
-	cmdQueue := cmdqueue.NewRedisCommandQueue(app.Redis)
+	sessionStore := acs.NewRedisSessionStore(inf.Redis, cfg.Session.Timeout)
+	cmdQueue := cmdqueue.NewRedisCommandQueue(inf.Redis)
 
 	// Create TaskService if PostgreSQL is available
 	var taskService *task.TaskService
-	if app.PgPool != nil {
-		taskQueue := task.NewRedisTaskQueue(app.Redis)
-		taskRepo := task.NewPgTaskRepository(app.PgPool)
-		taskService = task.NewTaskService(taskQueue, taskRepo, app.Logger)
-		app.Logger.Info("task service initialized")
+	if inf.PgPool != nil {
+		taskQueue := task.NewRedisTaskQueue(inf.Redis)
+		taskRepo := task.NewPgTaskRepository(inf.PgPool)
+		taskService = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+		inf.Logger.Info("task service initialized")
 	}
 
 	// Get request ID prefix from config, default to "acs"
@@ -73,25 +72,25 @@ func runACS(cmd *cobra.Command, args []string) error {
 		sessionStore,
 		cmdQueue,
 		taskService,
-		app.EventBus,
+		inf.EventBus,
 		cfg.Auth.Mode, cfg.Auth.Username, cfg.Auth.Password,
 		cfg.RateLimit,
 		cfg.Session.MaxConcurrent,
-		app.MetricsReg,
-		app.Logger,
+		inf.MetricsReg,
+		inf.Logger,
 		requestIDPrefix,
 		cfg.EnableTestTaskInjection,
 	)
 
 	acsServer := acs.NewACSServer(cfg, deps)
-	app.GS.Register("acs-http", 1, func(ctx context.Context) error { return acsServer.Shutdown(ctx) })
+	inf.GS.Register("acs-http", 1, func(ctx context.Context) error { return acsServer.Shutdown(ctx) })
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- acsServer.Start()
 	}()
 
-	return app.WaitAndShutdown(errCh)
+	return inf.WaitAndShutdown(errCh)
 }
 
 // parseStringSlice parses a comma-separated string into a slice.

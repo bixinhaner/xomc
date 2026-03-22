@@ -21,7 +21,7 @@ import (
 //  2. oui      — carrier + tech + oui
 //  3. carrier_default — carrier + tech
 type DataModelRegistry struct {
-	repo         DataModelRepository
+	repo         DataModelReader
 	cache        *DataModelCache
 	localCache   sync.Map // L1 in-memory cache: string -> *DataModel
 	cacheVersion int64
@@ -30,7 +30,7 @@ type DataModelRegistry struct {
 }
 
 // NewDataModelRegistry creates a new DataModelRegistry.
-func NewDataModelRegistry(repo DataModelRepository, cache *DataModelCache, logger *zap.Logger) *DataModelRegistry {
+func NewDataModelRegistry(repo DataModelReader, cache *DataModelCache, logger *zap.Logger) *DataModelRegistry {
 	return &DataModelRegistry{
 		repo:   repo,
 		cache:  cache,

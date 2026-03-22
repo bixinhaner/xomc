@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/core/tracing"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -35,6 +37,12 @@ func (s *TaskService) SetMetrics(m *TaskMetrics) {
 
 // CreateTask 创建新任务
 func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*Task, error) {
+	ctx, span := tracing.StartSpan(ctx, tracing.TaskTracerName, "Task CreateTask",
+		attribute.String("task.device_sn", req.DeviceSN),
+		attribute.String("task.method", req.Method),
+	)
+	defer span.End()
+
 	task := NewTask(req)
 
 	// 1. 持久化到 PostgreSQL
@@ -108,7 +116,21 @@ func (s *TaskService) GetPendingTasks(ctx context.Context, deviceSN string, limi
 
 // PopTask 弹出队首任务（供 ACS Handler 调用）
 func (s *TaskService) PopTask(ctx context.Context, deviceSN string) (*Task, error) {
-	return s.queue.Pop(ctx, deviceSN)
+	ctx, span := tracing.StartSpan(ctx, tracing.TaskTracerName, "Task PopTask",
+		attribute.String("task.device_sn", deviceSN),
+	)
+	defer span.End()
+
+	t, err := s.queue.Pop(ctx, deviceSN)
+	if err != nil {
+		tracing.RecordError(span, err)
+	} else if t != nil {
+		span.SetAttributes(
+			attribute.String("task.id", t.ID),
+			attribute.String("task.method", t.Method),
+		)
+	}
+	return t, err
 }
 
 // GetQueueLength 获取队列长度

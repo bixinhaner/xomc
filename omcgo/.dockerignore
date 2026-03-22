@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Documentation
+doc/
+docs/
+*.md
+LICENSE
+
+# Test artifacts
+test/
+scripts/
+coverage.out
+*.test
+
+# Build artifacts
+bin/
+dist/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Deployment manifests (not needed in image)
+deployments/
+
+# Data model seed files (loaded at runtime, not baked into image)
+datamodels/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+*.tmp
+*.log

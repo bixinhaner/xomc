@@ -59,7 +59,7 @@ func RequireAuth(jwt *JWTService) gin.HandlerFunc {
 
 // RequirePermission returns a Gin middleware that checks the authenticated
 // user has the specified resource-action permission.
-func RequirePermission(roleRepo RoleRepository, resource, action string) gin.HandlerFunc {
+func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get(CtxKeyUserID)
 		if !exists {
@@ -127,7 +127,7 @@ func RequireCarrier() gin.HandlerFunc {
 //   - GET, HEAD, OPTIONS → "read"
 //   - POST, PUT, PATCH   → "write"
 //   - DELETE              → "delete"
-func RequireResourcePermission(roleRepo RoleRepository, resource string) gin.HandlerFunc {
+func RequireResourcePermission(roleRepo PermissionChecker, resource string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		action := httpMethodToAction(c.Request.Method)
 

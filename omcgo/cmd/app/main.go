@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/cmd/app/router"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
-	"github.com/omcgo/omcgo/internal/core/bootstrap"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -42,7 +41,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
-	app, err := bootstrap.InitForApp(context.Background(), &cfg)
+	app, err := initApp(context.Background(), &cfg)
 	if err != nil {
 		return err
 	}

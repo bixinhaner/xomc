@@ -1,5 +1,6 @@
 .PHONY: build build-acs build-app build-worker build-migrate build-omcctl \
        test test-race test-coverage test-integration test-integration-up test-integration-down \
+       test-cover cover-report cover-summary cover-check \
        lint vet generate \
        migrate-up migrate-down docker-build docker-up docker-down clean
 
@@ -31,6 +32,26 @@ test-race:  ## Run tests with race detector (slower, use for CI or pre-release)
 test-coverage:
 	go test ./... -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
+
+test-cover:  ## Run tests with coverage profile
+	go test -coverprofile=coverage.out ./...
+
+cover-report: test-cover  ## Generate HTML coverage report
+	go tool cover -html=coverage.out -o coverage.html
+
+cover-summary: test-cover  ## Print per-package coverage summary
+	go tool cover -func=coverage.out
+
+COVER_THRESHOLD ?= 40
+cover-check: test-cover  ## Check coverage meets minimum threshold (default 40%)
+	@total=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$NF}' | tr -d '%'); \
+	echo "Total coverage: $${total}%  (threshold: $(COVER_THRESHOLD)%)"; \
+	if [ $$(echo "$${total} < $(COVER_THRESHOLD)" | bc) -eq 1 ]; then \
+		echo "FAIL: coverage $${total}% is below threshold $(COVER_THRESHOLD)%"; \
+		exit 1; \
+	else \
+		echo "OK: coverage $${total}% meets threshold $(COVER_THRESHOLD)%"; \
+	fi
 
 test-integration:
 	bash scripts/integration_test.sh

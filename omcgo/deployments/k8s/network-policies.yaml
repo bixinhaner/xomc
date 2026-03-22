@@ -1,0 +1,235 @@
+# NetworkPolicy — OMC 系统网络隔离策略
+# 命名空间: omcgo
+# 策略: 默认拒绝所有入站 + 按组件最小权限放行
+---
+# 1. 默认拒绝所有入站流量
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: omcgo
+  labels:
+    app.kubernetes.io/part-of: omcgo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# 2. omcgo-app: 管理面 REST API
+#    入站: :8080 (Ingress / 前端), :9091 (Prometheus)
+#    出站: PostgreSQL(:5432), Redis(:6379), NATS(:4222), MinIO(:9000)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app
+  namespace: omcgo
+  labels:
+    app.kubernetes.io/part-of: omcgo
+spec:
+  podSelector:
+    matchLabels:
+      app: omcgo-app
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 允许 Ingress Controller 访问 :8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    # 允许同命名空间 acs 通过 gRPC 访问（预留）
+    - from:
+        - podSelector:
+            matchLabels:
+              app: omcgo-acs
+      ports:
+        - protocol: TCP
+          port: 8080
+    # 允许 Prometheus 抓取 metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9091
+  egress:
+    # PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # NATS
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    # MinIO
+    - to:
+        - podSelector:
+            matchLabels:
+              app: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+    # DNS 解析（CoreDNS）
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# 3. omcgo-acs: TR069 ACS 引擎
+#    入站: :7547/:7548 (CPE 接入, LoadBalancer), :9091 (Prometheus)
+#    出站: Redis(:6379), NATS(:4222), app gRPC(:8080)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-acs
+  namespace: omcgo
+  labels:
+    app.kubernetes.io/part-of: omcgo
+spec:
+  podSelector:
+    matchLabels:
+      app: omcgo-acs
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 允许外部 CPE 接入（通过 LoadBalancer）
+    # 使用空 from 表示允许所有来源，因为 CPE 来自任意 IP
+    - ports:
+        - protocol: TCP
+          port: 7547
+        - protocol: TCP
+          port: 7548
+    # 允许 Prometheus 抓取 metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9091
+  egress:
+    # Redis（会话存储 + 命令队列）
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # NATS（事件发布）
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    # app gRPC（ACS → App 进程间通信）
+    - to:
+        - podSelector:
+            matchLabels:
+              app: omcgo-app
+      ports:
+        - protocol: TCP
+          port: 8080
+    # DNS 解析
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# 4. omcgo-worker: 后台工作进程
+#    入站: :9091 仅 Prometheus（无业务入站）
+#    出站: PostgreSQL(:5432), Redis(:6379), NATS(:4222), MinIO(:9000)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker
+  namespace: omcgo
+  labels:
+    app.kubernetes.io/part-of: omcgo
+spec:
+  podSelector:
+    matchLabels:
+      app: omcgo-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 仅允许 Prometheus 抓取 metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9091
+  egress:
+    # PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # NATS
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    # MinIO
+    - to:
+        - podSelector:
+            matchLabels:
+              app: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+    # DNS 解析
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

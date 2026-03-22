@@ -10,12 +10,12 @@ import (
 
 // DeviceGroupService provides business logic for device group management.
 type DeviceGroupService struct {
-	repo   DeviceGroupRepository
+	repo   GroupReader
 	logger *zap.Logger
 }
 
 // NewDeviceGroupService creates a new DeviceGroupService.
-func NewDeviceGroupService(repo DeviceGroupRepository, logger *zap.Logger) *DeviceGroupService {
+func NewDeviceGroupService(repo GroupReader, logger *zap.Logger) *DeviceGroupService {
 	return &DeviceGroupService{repo: repo, logger: logger}
 }
 

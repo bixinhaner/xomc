@@ -10,9 +10,11 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/device"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -76,6 +78,13 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 
 // HandleBootstrap processes a device bootstrap event and initiates the provisioning workflow.
 func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapEvent) error {
+	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleBootstrap",
+		attribute.String("provision.device_sn", evt.SerialNumber),
+		attribute.String("provision.device_id", evt.DeviceID.String()),
+		attribute.String("provision.carrier", evt.Carrier),
+	)
+	defer span.End()
+
 	e.logger.Info("provisioning started for device",
 		zap.String("device_sn", evt.SerialNumber),
 		zap.String("device_id", evt.DeviceID.String()),

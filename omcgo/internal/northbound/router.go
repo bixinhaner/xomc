@@ -2,9 +2,12 @@ package northbound
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/northbound/push"
 )
 
@@ -14,6 +17,7 @@ type Router struct {
 	pmHandler     *PMHandler
 	alarmHandler  *AlarmHandler
 	configHandler *ConfigHandler
+	outboxRepo    push.OutboxRepository // may be nil if outbox is not configured
 }
 
 // NewRouter creates a new northbound Router.
@@ -27,6 +31,11 @@ func NewRouter(svc *NorthboundService) *Router {
 	}
 }
 
+// SetOutboxRepo sets the outbox repository for dead letter queue endpoints.
+func (r *Router) SetOutboxRepo(repo push.OutboxRepository) {
+	r.outboxRepo = repo
+}
+
 // RegisterRoutes registers northbound API routes on the given router group.
 func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 	nb := rg.Group("/northbound")
@@ -35,6 +44,14 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 		nb.GET("/push/targets", r.listTargets)
 		nb.POST("/push/targets", r.addTarget)
 		nb.DELETE("/push/targets/:id", r.removeTarget)
+
+		// Circuit breaker status
+		nb.GET("/push/targets/:id/circuit", r.getCircuitBreaker)
+		nb.POST("/push/targets/:id/circuit/reset", r.resetCircuitBreaker)
+
+		// Dead letter queue
+		nb.GET("/push/deadletter", r.listDeadLetters)
+		nb.POST("/push/deadletter/:id/replay", r.replayDeadLetter)
 
 		// Sync endpoints
 		nb.GET("/sync/full", r.fullSync)
@@ -82,6 +99,79 @@ func (r *Router) removeTarget(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "push target removed", "id": id})
+}
+
+func (r *Router) getCircuitBreaker(c *gin.Context) {
+	id := c.Param("id")
+	cb := r.svc.PushEngine().GetCircuitBreaker(id)
+	if cb == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "push target not found"})
+		return
+	}
+
+	failureCount, threshold := cb.Counters()
+	state := cb.State()
+	c.JSON(http.StatusOK, gin.H{
+		"target_id":     id,
+		"state":         state.String(),
+		"failure_count": failureCount,
+		"threshold":     threshold,
+	})
+}
+
+func (r *Router) resetCircuitBreaker(c *gin.Context) {
+	id := c.Param("id")
+	cb := r.svc.PushEngine().GetCircuitBreaker(id)
+	if cb == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "push target not found"})
+		return
+	}
+
+	cb.Reset()
+	c.JSON(http.StatusOK, gin.H{"message": "circuit breaker reset", "target_id": id, "state": reliability.StateClosed.String()})
+}
+
+func (r *Router) listDeadLetters(c *gin.Context) {
+	if r.outboxRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "outbox not configured"})
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	entries, total, err := r.outboxRepo.ListDead(c.Request.Context(), limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": entries, "total": total})
+}
+
+func (r *Router) replayDeadLetter(c *gin.Context) {
+	if r.outboxRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "outbox not configured"})
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid uuid"})
+		return
+	}
+
+	if err := r.outboxRepo.Replay(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "dead letter replayed", "id": idStr})
 }
 
 func (r *Router) fullSync(c *gin.Context) {

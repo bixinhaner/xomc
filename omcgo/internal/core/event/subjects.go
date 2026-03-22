@@ -95,6 +95,9 @@ const (
 
 // NE Direct events
 const (
-	SubjectNEDirectRegister = "nedirect.register"
-	SubjectNEDirectFault    = "nedirect.fault"
+	SubjectNEDirectRegister   = "nedirect.register"
+	SubjectNEDirectFault      = "nedirect.fault"
+	SubjectNEDirectConnect    = "nedirect.session.connect"
+	SubjectNEDirectDisconnect = "nedirect.session.disconnect"
+	SubjectNEDirectCommand    = "nedirect.command.sent"
 )

@@ -167,6 +167,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 		requestIDPrefix = "app" // default prefix for app service
 	}
 	r.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{Prefix: requestIDPrefix}))
+	r.Use(middleware.Tracing("omcgo-app"))
 
 	r.Use(middleware.CORS(middleware.CORSConfig{
 		AllowOrigins: corsOrigins,
@@ -368,7 +369,10 @@ func Setup(r *gin.Engine, deps *Deps) error {
 
 	// NE Direct module (CMCC only)
 	if cfg.NEDirect.Enabled {
-		neHandler := nedirect.NewHandler(deviceService, alarmEngine, eventBus, logger)
+		neSessionRepo := nedirect.NewPgSessionRepository(pgPool)
+		neCommandRepo := nedirect.NewPgCommandRepository(pgPool)
+		neService := nedirect.NewService(neSessionRepo, neCommandRepo, deviceService, alarmEngine, eventBus, logger)
+		neHandler := nedirect.NewHandler(neService, logger)
 		neServer := nedirect.NewServer(cfg.NEDirect, neHandler, logger)
 		if err := neServer.Start(); err != nil {
 			logger.Error("ne-direct server start failed", zap.Error(err))

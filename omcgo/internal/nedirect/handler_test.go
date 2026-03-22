@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/alarm"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -19,125 +20,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// --- Mock implementations ---
-
-type mockDeviceRepo struct {
-	devices map[string]*model.Device
-}
-
-func newMockDeviceRepo() *mockDeviceRepo {
-	return &mockDeviceRepo{devices: make(map[string]*model.Device)}
-}
-
-func (m *mockDeviceRepo) Create(ctx context.Context, d *model.Device) error {
-	m.devices[d.SerialNumber] = d
-	return nil
-}
-func (m *mockDeviceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error) {
-	for _, d := range m.devices {
-		if d.ID == id {
-			return d, nil
-		}
-	}
-	return nil, nil
-}
-func (m *mockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
-	d, ok := m.devices[sn]
-	if !ok {
-		return nil, nil
-	}
-	return d, nil
-}
-func (m *mockDeviceRepo) Update(ctx context.Context, d *model.Device) error   { return nil }
-func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error      { return nil }
-func (m *mockDeviceRepo) List(ctx context.Context, filter device.DeviceFilter) (*model.ListResponse[model.Device], error) {
-	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
-}
-func (m *mockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error {
-	return nil
-}
-func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
-	return nil
-}
-func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
-	return nil, nil
-}
-
-type mockParamRepo struct {
-	params map[uuid.UUID][]model.DeviceParameter
-}
-
-func newMockParamRepo() *mockParamRepo {
-	return &mockParamRepo{params: make(map[uuid.UUID][]model.DeviceParameter)}
-}
-
-func (m *mockParamRepo) BatchUpsert(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error {
-	m.params[deviceID] = params
-	return nil
-}
-func (m *mockParamRepo) GetByDevice(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error) {
-	return m.params[deviceID], nil
-}
-func (m *mockParamRepo) GetByPath(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error) {
-	return nil, nil
-}
-func (m *mockParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error { return nil }
-
-type mockAlarmStore struct {
-	alarms []*model.Alarm
-}
-
-func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error {
-	m.alarms = append(m.alarms, a)
-	return nil
-}
-func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
-	return nil, nil
-}
-func (m *mockAlarmStore) GetActiveByDeviceAndCode(ctx context.Context, deviceSN, alarmCode string) (*model.Alarm, error) {
-	return nil, nil
-}
-func (m *mockAlarmStore) UpdateActive(ctx context.Context, a *model.Alarm) error { return nil }
-func (m *mockAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error   { return nil }
-func (m *mockAlarmStore) ListActive(ctx context.Context, filter alarm.AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	return model.NewListResponse([]model.Alarm{}, 0, 1, 20), nil
-}
-func (m *mockAlarmStore) Archive(ctx context.Context, a *model.Alarm) error { return nil }
-func (m *mockAlarmStore) ListHistory(ctx context.Context, filter alarm.AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	return model.NewListResponse([]model.Alarm{}, 0, 1, 20), nil
-}
-func (m *mockAlarmStore) Statistics(ctx context.Context, filter alarm.AlarmFilter) (*alarm.AlarmStatistics, error) {
-	return &alarm.AlarmStatistics{}, nil
-}
-
-type mockEventBus struct {
-	published []event.Event
-}
-
-func (m *mockEventBus) Publish(ctx context.Context, subject string, e event.Event) error {
-	m.published = append(m.published, e)
-	return nil
-}
-func (m *mockEventBus) Subscribe(subject string, handler event.EventHandler) (event.Subscription, error) {
-	return &mockSubscription{}, nil
-}
-func (m *mockEventBus) QueueSubscribe(subject, queue string, handler event.EventHandler) (event.Subscription, error) {
-	return &mockSubscription{}, nil
-}
-func (m *mockEventBus) Close() error { return nil }
-
-type mockSubscription struct{}
-
-func (m *mockSubscription) Unsubscribe() error { return nil }
-
 // --- Test helpers ---
 
-func testLogger() *zap.Logger {
-	logger, _ := zap.NewDevelopment()
-	return logger
-}
-
-func setupHandler(existingDevices map[string]*model.Device, params map[uuid.UUID][]model.DeviceParameter) (*Handler, *mockEventBus) {
+func setupHandler(
+	existingDevices map[string]*model.Device,
+	params map[uuid.UUID][]model.DeviceParameter,
+) (*Handler, *mockEventBus) {
 	deviceRepo := newMockDeviceRepo()
 	if existingDevices != nil {
 		deviceRepo.devices = existingDevices
@@ -149,16 +37,42 @@ func setupHandler(existingDevices map[string]*model.Device, params map[uuid.UUID
 	}
 
 	alarmStore := &mockAlarmStore{}
-	alarmEngine := alarm.NewAlarmEngine(alarmStore, nil, nil, nil, testLogger())
+	alarmEngine := alarm.NewAlarmEngine(alarmStore, nil, nil, nil, zap.NewNop())
 	eventBus := &mockEventBus{}
+	deviceService := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
 
-	deviceService := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, testLogger())
-	handler := NewHandler(deviceService, alarmEngine, eventBus, testLogger())
+	sessionRepo := &mockSessionRepo{}
+	commandRepo := &mockCommandRepo{}
+
+	svc := NewService(sessionRepo, commandRepo, deviceService, alarmEngine, eventBus, zap.NewNop())
+	handler := NewHandler(svc, zap.NewNop())
 
 	return handler, eventBus
 }
 
-// --- Tests ---
+func setupHandlerWithSession(
+	existingDevices map[string]*model.Device,
+	sessionRepo *mockSessionRepo,
+	commandRepo *mockCommandRepo,
+) (*Handler, *mockEventBus) {
+	deviceRepo := newMockDeviceRepo()
+	if existingDevices != nil {
+		deviceRepo.devices = existingDevices
+	}
+
+	paramRepo := newMockParamRepo()
+	alarmStore := &mockAlarmStore{}
+	alarmEngine := alarm.NewAlarmEngine(alarmStore, nil, nil, nil, zap.NewNop())
+	eventBus := &mockEventBus{}
+	deviceService := device.NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
+
+	svc := NewService(sessionRepo, commandRepo, deviceService, alarmEngine, eventBus, zap.NewNop())
+	handler := NewHandler(svc, zap.NewNop())
+
+	return handler, eventBus
+}
+
+// --- Tests: HandleRegister ---
 
 func TestHandleRegister_NewDevice(t *testing.T) {
 	handler, eventBus := setupHandler(nil, nil)
@@ -246,6 +160,8 @@ func TestHandleRegister_WrongMethod(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+// --- Tests: HandleConfig ---
+
 func TestHandleConfig_Success(t *testing.T) {
 	deviceID := uuid.New()
 	devices := map[string]*model.Device{
@@ -299,6 +215,8 @@ func TestHandleConfig_DeviceNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// --- Tests: HandleStatus ---
+
 func TestHandleStatus_Success(t *testing.T) {
 	deviceID := uuid.New()
 	now := time.Now()
@@ -351,6 +269,8 @@ func TestHandleStatus_DeviceNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// --- Tests: HandleFault ---
 
 func TestHandleFault_Success(t *testing.T) {
 	deviceID := uuid.New()
@@ -414,6 +334,188 @@ func TestHandleFault_WrongMethod(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+// --- Tests: HandleConnect ---
+
+func TestHandleConnect_Success(t *testing.T) {
+	deviceID := uuid.New()
+	devices := map[string]*model.Device{
+		"SN-CONN": {
+			ID:           deviceID,
+			SerialNumber: "SN-CONN",
+			Status:       model.DeviceActive,
+			IPAddress:    "10.0.0.10",
+		},
+	}
+
+	sessionRepo := &mockSessionRepo{}
+	handler, eventBus := setupHandlerWithSession(devices, sessionRepo, &mockCommandRepo{})
+
+	body := ConnectRequest{
+		DeviceSN: "SN-CONN",
+		UserID:   "user1",
+		Username: "admin",
+	}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/nedirect/connect", bytes.NewReader(b))
+	w := httptest.NewRecorder()
+
+	handler.HandleConnect(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp Session
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, "SN-CONN", resp.DeviceSN)
+	assert.Equal(t, SessionActive, resp.Status)
+
+	require.Len(t, eventBus.published, 1)
+	assert.Equal(t, event.SubjectNEDirectConnect, eventBus.published[0].Subject)
+}
+
+func TestHandleConnect_MissingFields(t *testing.T) {
+	handler, _ := setupHandler(nil, nil)
+
+	body := ConnectRequest{DeviceSN: "SN-001"} // missing user_id
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/nedirect/connect", bytes.NewReader(b))
+	w := httptest.NewRecorder()
+
+	handler.HandleConnect(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// --- Tests: HandleDisconnect ---
+
+func TestHandleDisconnect_Success(t *testing.T) {
+	sessionID := uuid.New()
+	activeSession := &Session{
+		ID:       sessionID,
+		DeviceSN: "SN-001",
+		Status:   SessionActive,
+	}
+
+	sessionRepo := &mockSessionRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*Session, error) {
+			if id == sessionID {
+				return activeSession, nil
+			}
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	handler, _ := setupHandlerWithSession(nil, sessionRepo, &mockCommandRepo{})
+
+	body := map[string]string{"session_id": sessionID.String()}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/nedirect/disconnect", bytes.NewReader(b))
+	w := httptest.NewRecorder()
+
+	handler.HandleDisconnect(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleDisconnect_InvalidID(t *testing.T) {
+	handler, _ := setupHandler(nil, nil)
+
+	body := map[string]string{"session_id": "not-a-uuid"}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/nedirect/disconnect", bytes.NewReader(b))
+	w := httptest.NewRecorder()
+
+	handler.HandleDisconnect(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// --- Tests: HandleCommand ---
+
+func TestHandleCommand_Success(t *testing.T) {
+	sessionID := uuid.New()
+	activeSession := &Session{
+		ID:       sessionID,
+		DeviceSN: "SN-001",
+		Status:   SessionActive,
+	}
+
+	sessionRepo := &mockSessionRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*Session, error) {
+			if id == sessionID {
+				return activeSession, nil
+			}
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	handler, eventBus := setupHandlerWithSession(nil, sessionRepo, &mockCommandRepo{})
+
+	body := SendCommandRequest{
+		SessionID: sessionID.String(),
+		Command:   "DSP CELLINFO;",
+	}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/nedirect/command", bytes.NewReader(b))
+	w := httptest.NewRecorder()
+
+	handler.HandleCommand(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp Command
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, "DSP CELLINFO;", resp.CommandStr)
+	assert.Equal(t, CommandPending, resp.Status)
+
+	require.Len(t, eventBus.published, 1)
+	assert.Equal(t, event.SubjectNEDirectCommand, eventBus.published[0].Subject)
+}
+
+func TestHandleCommand_MissingCommand(t *testing.T) {
+	handler, _ := setupHandler(nil, nil)
+
+	body := SendCommandRequest{
+		SessionID: uuid.New().String(),
+		Command:   "", // empty
+	}
+	b, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/nedirect/command", bytes.NewReader(b))
+	w := httptest.NewRecorder()
+
+	handler.HandleCommand(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// --- Tests: HandleListSessions ---
+
+func TestHandleListSessions_Success(t *testing.T) {
+	sessionRepo := &mockSessionRepo{
+		listFn: func(ctx context.Context, filter SessionFilter) (*model.ListResponse[Session], error) {
+			return model.NewListResponse([]Session{}, 0, 1, 20), nil
+		},
+	}
+
+	handler, _ := setupHandlerWithSession(nil, sessionRepo, &mockCommandRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/nedirect/sessions", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleListSessions(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// --- Tests: RegisterRoutes ---
+
 func TestRegisterRoutes(t *testing.T) {
 	handler, _ := setupHandler(nil, nil)
 	mux := http.NewServeMux()
@@ -428,6 +530,10 @@ func TestRegisterRoutes(t *testing.T) {
 		{http.MethodPost, "/nedirect/config"},
 		{http.MethodGet, "/nedirect/status?serial_number=test"},
 		{http.MethodPost, "/nedirect/fault"},
+		{http.MethodPost, "/nedirect/connect"},
+		{http.MethodPost, "/nedirect/disconnect"},
+		{http.MethodPost, "/nedirect/command"},
+		{http.MethodGet, "/nedirect/sessions"},
 	}
 
 	for _, ep := range endpoints {

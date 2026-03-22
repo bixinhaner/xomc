@@ -20,9 +20,11 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -172,6 +174,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Per TR069 spec: Inform → InformResponse (always). RPC dispatch happens on the
 // subsequent Empty POST via handleEmpty().
 func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
+	ctx, span := tracing.StartSpan(r.Context(), tracing.ACSTracerName, "ACS HandleInform",
+		attribute.String("acs.remote_addr", r.RemoteAddr),
+		attribute.Int("acs.body_len", len(body)),
+	)
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	// Log complete request XML
 	log.Debug("ACS received Inform request",
 		zap.String("remote_addr", r.RemoteAddr),
@@ -182,6 +191,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// Parse Inform
 	inform, cwmpID, err := soap.DecodeInform(bytes.NewReader(body))
 	if err != nil {
+		tracing.RecordError(span, err)
 		log.Error("decode Inform", zap.Error(err),
 			zap.String("remote_addr", r.RemoteAddr),
 			zap.String("xml", string(body)),
@@ -191,6 +201,12 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	}
 
 	deviceSN := inform.DeviceId.SerialNumber
+	span.SetAttributes(
+		attribute.String("acs.device_sn", deviceSN),
+		attribute.String("acs.oui", inform.DeviceId.OUI),
+		attribute.String("acs.product_class", inform.DeviceId.ProductClass),
+		attribute.String("acs.cwmp_id", cwmpID),
+	)
 
 	// Log parsed Inform details
 	log.Info("ACS parsed Inform",
@@ -286,6 +302,10 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 // Per TR069 spec, after InformResponse the CPE sends an empty POST.
 // The ACS should then either send an RPC request or an empty response to close the session.
 func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.Logger) {
+	ctx, span := tracing.StartSpan(r.Context(), tracing.ACSTracerName, "ACS HandleEmpty")
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	// Look up session from Cookie
 	session, sessionID := h.getSessionFromCookie(r, log)
 	if session == nil {
@@ -298,6 +318,10 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	}
 
 	deviceSN := session.DeviceSN
+	span.SetAttributes(
+		attribute.String("acs.device_sn", deviceSN),
+		attribute.String("acs.session_state", string(session.State)),
+	)
 
 	// Transition from InformReceived → Processing
 	if session.State == StateInformReceived {
@@ -393,8 +417,15 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 }
 
 func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body []byte, method soap.RPCMethod, log *zap.Logger) {
+	ctx, span := tracing.StartSpan(r.Context(), tracing.ACSTracerName, "ACS HandleRPCResponse",
+		attribute.String("acs.rpc_method", string(method)),
+	)
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	// Extract CWMP ID from the SOAP response.
 	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
+	span.SetAttributes(attribute.String("acs.cwmp_id", cwmpID))
 
 	// Log complete response XML
 	log.Debug("ACS received RPC response",

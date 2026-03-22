@@ -10,6 +10,7 @@ bin/
 *.test
 *.out
 coverage.*
+coverage_history.csv
 
 # Dependency
 vendor/

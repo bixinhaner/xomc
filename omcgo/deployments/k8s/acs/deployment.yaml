@@ -21,6 +21,7 @@ spec:
         prometheus.io/port: "9091"
         prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: omcgo-acs
       containers:
         - name: acs
           image: omcgo/acs:latest

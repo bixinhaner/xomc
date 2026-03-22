@@ -2,14 +2,24 @@ package auth
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
+	"hash"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+// digestAlgorithm represents a supported Digest Auth hash algorithm.
+type digestAlgorithm string
+
+const (
+	algorithmMD5    digestAlgorithm = "MD5"
+	algorithmSHA256 digestAlgorithm = "SHA-256"
 )
 
 // DeviceIdentity holds identifying information extracted during authentication.
@@ -105,6 +115,9 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 	nonce := params["nonce"]
 	uri := params["uri"]
 	response := params["response"]
+	nc := params["nc"]
+	cnonce := params["cnonce"]
+	qop := params["qop"]
 
 	a.mu.Lock()
 	created, exists := a.nonces[nonce]
@@ -117,10 +130,20 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 		return nil, fmt.Errorf("invalid or expired nonce")
 	}
 
-	// Compute expected digest response
-	ha1 := md5Hash(fmt.Sprintf("%s:%s:%s", username, a.realm, a.Password))
-	ha2 := md5Hash(fmt.Sprintf("%s:%s", r.Method, uri))
-	expected := md5Hash(fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+	// Determine algorithm from client response; default to MD5 for backward compatibility
+	algo := parseAlgorithm(params["algorithm"])
+	hashFn := hashFuncFor(algo)
+
+	// Compute expected digest response (RFC 7616)
+	ha1 := digestHash(hashFn, fmt.Sprintf("%s:%s:%s", username, a.realm, a.Password))
+	ha2 := digestHash(hashFn, fmt.Sprintf("%s:%s", r.Method, uri))
+
+	var expected string
+	if qop == "auth" && nc != "" && cnonce != "" {
+		expected = digestHash(hashFn, fmt.Sprintf("%s:%s:%s:%s:%s:%s", ha1, nonce, nc, cnonce, qop, ha2))
+	} else {
+		expected = digestHash(hashFn, fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+	}
 
 	if subtle.ConstantTimeCompare([]byte(response), []byte(expected)) != 1 {
 		return nil, fmt.Errorf("invalid digest response")
@@ -134,12 +157,41 @@ func (a *DigestAuthenticator) Challenge(w http.ResponseWriter) {
 	a.mu.Lock()
 	a.nonces[nonce] = time.Now()
 	a.mu.Unlock()
-	w.Header().Set("WWW-Authenticate",
-		fmt.Sprintf(`Digest realm="%s", nonce="%s", qop="auth"`, a.realm, nonce))
+	// Offer SHA-256 (preferred) and MD5 (fallback) per RFC 7616.
+	// Each algorithm gets its own WWW-Authenticate header so the CPE can pick one.
+	w.Header().Add("WWW-Authenticate",
+		fmt.Sprintf(`Digest realm="%s", nonce="%s", qop="auth", algorithm=SHA-256`, a.realm, nonce))
+	w.Header().Add("WWW-Authenticate",
+		fmt.Sprintf(`Digest realm="%s", nonce="%s", qop="auth", algorithm=MD5`, a.realm, nonce))
 }
 
-func md5Hash(s string) string {
-	return fmt.Sprintf("%x", md5.Sum([]byte(s)))
+// digestHash computes a hex-encoded hash using the given hash constructor.
+func digestHash(newHash func() hash.Hash, s string) string {
+	h := newHash()
+	h.Write([]byte(s))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// hashFuncFor returns the hash.Hash constructor for a given digest algorithm.
+func hashFuncFor(algo digestAlgorithm) func() hash.Hash {
+	switch algo {
+	case algorithmSHA256:
+		return sha256.New
+	default:
+		return md5.New
+	}
+}
+
+// parseAlgorithm normalizes the algorithm parameter from client response.
+func parseAlgorithm(s string) digestAlgorithm {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "SHA-256":
+		return algorithmSHA256
+	case "MD5", "":
+		return algorithmMD5
+	default:
+		return algorithmMD5
+	}
 }
 
 func parseDigestAuth(s string) map[string]string {

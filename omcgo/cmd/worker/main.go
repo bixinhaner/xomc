@@ -11,7 +11,6 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/backup"
-	"github.com/omcgo/omcgo/internal/core/bootstrap"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
@@ -53,95 +52,95 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
-	app, err := bootstrap.InitForWorker(context.Background(), &cfg)
+	w, err := initWorker(context.Background(), &cfg)
 	if err != nil {
 		return err
 	}
-	defer app.Logger.Sync()
-	app.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
+	defer w.Logger.Sync()
+	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
 	// Register all event subscribers
-	registerSubscribers(app, &cfg)
+	registerSubscribers(w, &cfg)
 
-	app.Logger.Info("omcgo-worker ready, waiting for events...")
-	return app.WaitAndShutdown(nil)
+	w.Logger.Info("omcgo-worker ready, waiting for events...")
+	return w.WaitAndShutdown(nil)
 }
 
-func registerSubscribers(app *bootstrap.App, cfg *appconfig.WorkerConfig) {
-	logger := app.Logger
+func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
+	logger := w.Logger
 
 	// PM Collector
-	counterRepo := counter.NewPgCounterRepository(app.TsPool)
-	kpiRepo := kpi.NewPgKPIRepository(app.TsPool)
-	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, app.Carriers, logger)
+	counterRepo := counter.NewPgCounterRepository(w.TsPool)
+	kpiRepo := kpi.NewPgKPIRepository(w.TsPool)
+	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, w.Carriers, logger)
 	pmParser := collector.NewPMXMLParser()
-	pmFileStore := pm.NewPgPMFileStore(app.PgPool)
-	pmCollector := collector.NewPMCollector(app.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, app.EventBus, logger)
-	pmMetrics := pm.NewPMMetrics(app.MetricsReg)
+	pmFileStore := pm.NewPgPMFileStore(w.PgPool)
+	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, w.EventBus, logger)
+	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
-	if err := pmCollector.Subscribe(app.EventBus); err != nil {
+	if err := pmCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
 	logger.Info("PM collector started")
 
 	// Alarm Receiver
-	alarmPgStore := alarm.NewPgAlarmStore(app.PgPool, app.TsPool)
-	alarmRedisStore := alarm.NewRedisAlarmStore(app.Redis)
-	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, app.Carriers, app.EventBus, logger)
-	alarmMetrics := alarm.NewAlarmMetrics(app.MetricsReg)
+	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)
+	alarmRedisStore := alarm.NewRedisAlarmStore(w.Redis)
+	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, w.Carriers, w.EventBus, logger)
+	alarmMetrics := alarm.NewAlarmMetrics(w.MetricsReg)
 	alarmEngine.SetMetrics(alarmMetrics)
 	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, logger)
-	if err := alarmReceiver.Subscribe(app.EventBus); err != nil {
+	if err := alarmReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
 	}
 	logger.Info("alarm receiver started")
 
 	// MR Collector
-	mrStore := mr.NewPgMRStore(app.PgPool, app.TsPool)
-	mrCollector := mrcollector.NewMRCollector(app.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, app.EventBus, logger)
-	if err := mrCollector.Subscribe(app.EventBus); err != nil {
+	mrStore := mr.NewPgMRStore(w.PgPool, w.TsPool)
+	mrCollector := mrcollector.NewMRCollector(w.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, w.EventBus, logger)
+	if err := mrCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}
 	logger.Info("MR collector started")
 
 	// Transfer Bridge
-	deviceRepo := device.NewPgDeviceRepository(app.PgPool)
+	deviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	transferBridge := transfer.NewTransferBridge(
-		deviceRepo, app.MinIO,
+		deviceRepo, w.MinIO,
 		cfg.MinIO.Buckets.PMFiles, cfg.MinIO.Buckets.MRFiles, cfg.MinIO.Buckets.Logs,
-		app.EventBus, logger,
+		w.EventBus, logger,
 	)
-	if err := transferBridge.Subscribe(app.EventBus); err != nil {
+	if err := transferBridge.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe transfer bridge", zap.Error(err))
 	}
 	logger.Info("transfer bridge started")
 
 	// Backup Executor
-	backupTaskRepo := backup.NewPgTaskRepository(app.PgPool)
-	cmdQueue := cmdqueue.NewRedisCommandQueue(app.Redis)
-	connReqClient := connreq.NewClient(app.Redis, logger)
+	backupTaskRepo := backup.NewPgTaskRepository(w.PgPool)
+	cmdQueue := cmdqueue.NewRedisCommandQueue(w.Redis)
+	connReqClient := connreq.NewClient(w.Redis, logger)
 	backupExecutor := backup.NewBackupExecutor(
 		backupTaskRepo, deviceRepo, cmdQueue, connReqClient,
-		app.EventBus, logger,
+		w.EventBus, logger,
 	)
-	if err := backupExecutor.Subscribe(app.EventBus); err != nil {
+	if err := backupExecutor.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe backup executor", zap.Error(err))
 	}
 	logger.Info("backup executor started")
 
 	// Report Generator
-	reportDefRepo := report.NewPgDefinitionRepository(app.PgPool)
-	reportRecordRepo := report.NewPgRecordRepository(app.PgPool)
+	reportDefRepo := report.NewPgDefinitionRepository(w.PgPool)
+	reportRecordRepo := report.NewPgRecordRepository(w.PgPool)
 	reportBucket := cfg.MinIO.Buckets.Reports
 	if reportBucket == "" {
 		reportBucket = "reports"
 	}
 	reportGenerator := report.NewReportGenerator(
 		reportRecordRepo, reportDefRepo, kpiRepo, alarmPgStore,
-		app.MinIO, reportBucket,
-		app.EventBus, logger,
+		w.MinIO, reportBucket,
+		w.EventBus, logger,
 	)
-	if err := reportGenerator.Subscribe(app.EventBus); err != nil {
+	if err := reportGenerator.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe report generator", zap.Error(err))
 	}
 	logger.Info("report generator started")

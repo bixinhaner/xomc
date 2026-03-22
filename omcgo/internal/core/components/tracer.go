@@ -7,6 +7,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
@@ -15,6 +16,13 @@ import (
 // NewTracerProvider initializes an OpenTelemetry TracerProvider.
 // If tracing is disabled, it returns a no-op provider.
 func NewTracerProvider(ctx context.Context, cfg appconfig.TracerConfig, serviceName string) (*sdktrace.TracerProvider, error) {
+	// Always set up W3C TraceContext propagation so spans can be correlated
+	// across services even when tracing is first disabled then enabled.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
 	if !cfg.Enabled {
 		tp := sdktrace.NewTracerProvider()
 		otel.SetTracerProvider(tp)

@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"go.uber.org/zap"
 )
 
@@ -31,17 +32,20 @@ type Target struct {
 
 // Engine manages push targets and delivers events to external systems via HTTP.
 type Engine struct {
-	mu      sync.RWMutex
-	targets map[string]*Target
-	client  *http.Client
-	logger  *zap.Logger
-	subs    []event.Subscription
+	mu              sync.RWMutex
+	targets         map[string]*Target
+	circuitBreakers map[string]*reliability.CircuitBreaker
+	client          *http.Client
+	logger          *zap.Logger
+	subs            []event.Subscription
+	outboxRepo      OutboxRepository // nil means direct delivery (no outbox)
 }
 
 // NewEngine creates a new push Engine with initial targets loaded from config.
 func NewEngine(cfgTargets []appconfig.PushTargetConfig, logger *zap.Logger) *Engine {
 	e := &Engine{
-		targets: make(map[string]*Target),
+		targets:         make(map[string]*Target),
+		circuitBreakers: make(map[string]*reliability.CircuitBreaker),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -51,13 +55,26 @@ func NewEngine(cfgTargets []appconfig.PushTargetConfig, logger *zap.Logger) *Eng
 	for _, ct := range cfgTargets {
 		t := targetFromConfig(ct)
 		e.targets[t.ID] = t
+		e.circuitBreakers[t.ID] = reliability.NewCircuitBreaker(reliability.DefaultCircuitBreakerConfig())
 	}
 
 	return e
 }
 
+// SetOutboxRepo sets the outbox repository, enabling the outbox delivery pattern.
+// When set, events are written to the outbox table and delivered by the OutboxWorker.
+func (e *Engine) SetOutboxRepo(repo OutboxRepository) {
+	e.outboxRepo = repo
+}
+
 // Subscribe registers event handlers for northbound/OSS events.
+// When outbox is configured, events are enqueued rather than delivered directly.
 func (e *Engine) Subscribe(eventBus event.EventBus) error {
+	handler := e.handleEvent
+	if e.outboxRepo != nil {
+		handler = e.EnqueueEvent
+	}
+
 	subjects := []string{
 		event.SubjectOSSAlarmForward,
 		event.SubjectOSSPMExport,
@@ -65,14 +82,20 @@ func (e *Engine) Subscribe(eventBus event.EventBus) error {
 	}
 
 	for _, subject := range subjects {
-		sub, err := eventBus.Subscribe(subject, e.handleEvent)
+		sub, err := eventBus.Subscribe(subject, handler)
 		if err != nil {
 			return fmt.Errorf("subscribe to %s: %w", subject, err)
 		}
 		e.subs = append(e.subs, sub)
 	}
 
-	e.logger.Info("push engine subscribed to OSS events", zap.Int("targets", len(e.targets)))
+	mode := "direct"
+	if e.outboxRepo != nil {
+		mode = "outbox"
+	}
+	e.logger.Info("push engine subscribed to OSS events",
+		zap.Int("targets", len(e.targets)),
+		zap.String("mode", mode))
 	return nil
 }
 
@@ -92,6 +115,9 @@ func (e *Engine) AddTarget(t *Target) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.targets[t.ID] = t
+	if _, ok := e.circuitBreakers[t.ID]; !ok {
+		e.circuitBreakers[t.ID] = reliability.NewCircuitBreaker(reliability.DefaultCircuitBreakerConfig())
+	}
 	e.logger.Info("push target added", zap.String("id", t.ID), zap.String("url", t.URL))
 }
 
@@ -103,6 +129,7 @@ func (e *Engine) RemoveTarget(id string) bool {
 		return false
 	}
 	delete(e.targets, id)
+	delete(e.circuitBreakers, id)
 	e.logger.Info("push target removed", zap.String("id", id))
 	return true
 }
@@ -131,6 +158,13 @@ func (e *Engine) GetTarget(id string) *Target {
 	return &cp
 }
 
+// GetCircuitBreaker returns the circuit breaker for a target, or nil if not found.
+func (e *Engine) GetCircuitBreaker(targetID string) *reliability.CircuitBreaker {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.circuitBreakers[targetID]
+}
+
 // handleEvent dispatches an incoming event to all matching push targets.
 func (e *Engine) handleEvent(ctx context.Context, evt event.Event) error {
 	dataType := dataTypeFromSubject(evt.Subject)
@@ -149,11 +183,28 @@ func (e *Engine) handleEvent(ctx context.Context, evt event.Event) error {
 	e.mu.RUnlock()
 
 	for _, t := range targets {
+		cb := e.GetCircuitBreaker(t.ID)
+		if cb != nil {
+			if err := cb.Allow(); err != nil {
+				e.logger.Warn("push skipped: circuit breaker open",
+					zap.String("target_id", t.ID),
+					zap.String("subject", evt.Subject))
+				continue
+			}
+		}
+
 		if err := e.deliver(ctx, t, evt); err != nil {
+			if cb != nil {
+				cb.RecordFailure()
+			}
 			e.logger.Error("push delivery failed",
 				zap.String("target_id", t.ID),
 				zap.String("subject", evt.Subject),
 				zap.Error(err))
+		} else {
+			if cb != nil {
+				cb.RecordSuccess()
+			}
 		}
 	}
 

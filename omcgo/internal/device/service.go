@@ -9,7 +9,9 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/pkg/tr069"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -47,6 +49,13 @@ func (s *DeviceService) SetMetrics(m *DeviceMetrics) {
 
 // RegisterFromInform creates a new device from a bootstrap Inform message.
 func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.InformMessage, carrier model.CarrierCode) (*model.Device, error) {
+	ctx, span := tracing.StartSpan(ctx, tracing.DeviceTracerName, "Device RegisterFromInform",
+		attribute.String("device.serial_number", inform.DeviceId.SerialNumber),
+		attribute.String("device.oui", inform.DeviceId.OUI),
+		attribute.String("device.carrier", string(carrier)),
+	)
+	defer span.End()
+
 	s.logger.Info("RegisterFromInform: start",
 		zap.String("serial_number", inform.DeviceId.SerialNumber),
 		zap.String("oui", inform.DeviceId.OUI),
