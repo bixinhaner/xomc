@@ -45,11 +45,14 @@ func (d *Dispatcher) Register(method string, handler RPCHandler) {
 }
 
 // BuildRequest builds a SOAP request for the given command.
+// cwmpID is used as the SOAP Header cwmp:ID (distinct from CommandKey which is the RPC-level key).
 func (d *Dispatcher) BuildRequest(cmd *cmdqueue.Command, cwmpID string) ([]byte, error) {
 	handler, ok := d.handlers[cmd.Method]
 	if !ok {
 		return nil, fmt.Errorf("unknown RPC method: %s", cmd.Method)
 	}
+	// Set CWMPID on command so handlers can use it for the SOAP header ID
+	cmd.CWMPID = cwmpID
 	return handler.BuildRequest(cmd)
 }
 
@@ -65,7 +68,7 @@ func (h *GetParameterValuesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte,
 		return nil, fmt.Errorf("parse GetParameterValues params: %w", err)
 	}
 
-	data := soap.GetParameterValuesData{ID: cmd.CommandKey}
+	data := soap.GetParameterValuesData{ID: cmd.CWMPID}
 	for _, name := range params.Names {
 		data.Params = append(data.Params, soap.ParameterNameData{Name: name})
 	}
@@ -87,7 +90,7 @@ func (h *SetParameterValuesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte,
 	}
 
 	data := soap.SetParameterValuesData{
-		ID:  cmd.CommandKey,
+		ID:  cmd.CWMPID,
 		Key: cmd.CommandKey,
 	}
 	for _, v := range params.Values {
@@ -114,7 +117,7 @@ func (h *GetParameterNamesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, 
 	}
 
 	data := soap.GetParameterNamesData{
-		ID: cmd.CommandKey, Path: params.Path, NextLevel: params.NextLevel,
+		ID: cmd.CWMPID, Path: params.Path, NextLevel: params.NextLevel,
 	}
 	return soap.RenderResponse(soap.GetParameterNamesTmpl, data)
 }
@@ -128,7 +131,7 @@ func (h *AddObjectHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse AddObject params: %w", err)
 	}
-	data := soap.AddObjectData{ID: cmd.CommandKey, ObjectName: params.ObjectName, Key: cmd.CommandKey}
+	data := soap.AddObjectData{ID: cmd.CWMPID, ObjectName: params.ObjectName, Key: cmd.CommandKey}
 	return soap.RenderResponse(soap.AddObjectTmpl, data)
 }
 
@@ -141,7 +144,7 @@ func (h *DeleteObjectHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse DeleteObject params: %w", err)
 	}
-	data := soap.DeleteObjectData{ID: cmd.CommandKey, ObjectName: params.ObjectName, Key: cmd.CommandKey}
+	data := soap.DeleteObjectData{ID: cmd.CWMPID, ObjectName: params.ObjectName, Key: cmd.CommandKey}
 	return soap.RenderResponse(soap.DeleteObjectTmpl, data)
 }
 
@@ -152,7 +155,7 @@ func (h *DownloadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse Download params: %w", err)
 	}
-	params.ID = cmd.CommandKey
+	params.ID = cmd.CWMPID
 	params.CommandKey = cmd.CommandKey
 	return soap.RenderResponse(soap.DownloadTmpl, params)
 }
@@ -164,7 +167,7 @@ func (h *UploadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse Upload params: %w", err)
 	}
-	params.ID = cmd.CommandKey
+	params.ID = cmd.CWMPID
 	params.CommandKey = cmd.CommandKey
 	return soap.RenderResponse(soap.UploadTmpl, params)
 }
@@ -172,14 +175,14 @@ func (h *UploadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 type RebootHandler struct{}
 
 func (h *RebootHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
-	data := soap.RebootData{ID: cmd.CommandKey, CommandKey: cmd.CommandKey}
+	data := soap.RebootData{ID: cmd.CWMPID, CommandKey: cmd.CommandKey}
 	return soap.RenderResponse(soap.RebootTmpl, data)
 }
 
 type FactoryResetHandler struct{}
 
 func (h *FactoryResetHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
-	data := soap.FactoryResetData{ID: cmd.CommandKey}
+	data := soap.FactoryResetData{ID: cmd.CWMPID}
 	return soap.RenderResponse(soap.FactoryResetTmpl, data)
 }
 
@@ -193,7 +196,7 @@ func (h *GetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]b
 		return nil, fmt.Errorf("parse GetParameterAttributes params: %w", err)
 	}
 
-	data := soap.GetParameterAttributesData{ID: cmd.CommandKey}
+	data := soap.GetParameterAttributesData{ID: cmd.CWMPID}
 	for _, name := range params.Names {
 		data.Params = append(data.Params, soap.ParameterNameData{Name: name})
 	}
@@ -216,7 +219,7 @@ func (h *SetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]b
 		return nil, fmt.Errorf("parse SetParameterAttributes params: %w", err)
 	}
 
-	data := soap.SetParameterAttributesData{ID: cmd.CommandKey}
+	data := soap.SetParameterAttributesData{ID: cmd.CWMPID}
 	for _, a := range params.Attributes {
 		data.Params = append(data.Params, soap.SetParameterAttributeData{
 			Name:               a.Name,

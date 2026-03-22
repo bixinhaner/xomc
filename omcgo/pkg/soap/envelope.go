@@ -1,10 +1,10 @@
 package soap
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
-	"strings"
 )
 
 // SOAP/CWMP XML namespace constants.
@@ -107,35 +107,33 @@ func ParseEnvelope(r io.Reader) (*Envelope, error) {
 	return &env, nil
 }
 
-// DetectRPCMethod identifies the RPC method from raw SOAP body content.
+// DetectRPCMethod identifies the RPC method from raw SOAP body content
+// by parsing the XML and extracting the first child element of <soap:Body>.
+// Per SOAP/CWMP spec, the RPC method is always the first (and only) child element of Body.
 func DetectRPCMethod(bodyContent []byte) RPCMethod {
-	s := string(bodyContent)
+	decoder := xml.NewDecoder(bytes.NewReader(bodyContent))
+	var inBody bool
 
-	// Check for known method names in the body XML.
-	// Order matters: longer/more-specific names must come before shorter substrings
-	// (e.g., AutonomousTransferComplete before TransferComplete).
-	methods := []RPCMethod{
-		MethodInform,
-		MethodAutonomousTransferComplete,
-		MethodTransferComplete,
-		MethodGetParameterValuesResp,
-		MethodSetParameterValuesResp,
-		MethodGetParameterAttributesResp,
-		MethodSetParameterAttributesResp,
-		MethodGetParameterNamesResp,
-		MethodAddObjectResp,
-		MethodDeleteObjectResp,
-		MethodDownloadResp,
-		MethodUploadResp,
-		MethodRebootResp,
-		MethodFactoryResetResp,
-		MethodScheduleInformResp,
-		MethodFault,
-	}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
 
-	for _, m := range methods {
-		if strings.Contains(s, string(m)) {
-			return m
+		se, ok := token.(xml.StartElement)
+		if !ok {
+			continue
+		}
+
+		if se.Name.Local == "Body" {
+			inBody = true
+			continue
+		}
+
+		if inBody {
+			// The first child element of soap:Body is the RPC method.
+			// e.g., <cwmp:Inform>, <cwmp:GetParameterValuesResponse>, <cwmp:FactoryReset/>
+			return RPCMethod(se.Name.Local)
 		}
 	}
 

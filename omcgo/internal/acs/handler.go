@@ -254,8 +254,17 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	}
 
 	// Inject random test tasks for this device (TEST FEATURE)
-	// This is for testing purposes only - can be disabled by commenting out this line
-	h.injectRandomTestTasks(r, deviceSN, log)
+	// Skip injection for TransferComplete/AutonomousTransferComplete sessions —
+	// those sessions have a specific purpose and should not be polluted with test tasks.
+	isTC := tr069.HasEvent(inform.Event, tr069.EventTransferComplete)
+	isATC := tr069.IsAutonomousTransferComplete(inform.Event)
+	if !isTC && !isATC {
+		h.injectRandomTestTasks(r, deviceSN, log)
+	} else {
+		log.Debug("skipped test task injection for TC/ATC session",
+			zap.String("device_sn", deviceSN),
+			zap.Strings("events", eventCodes))
+	}
 
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
@@ -378,6 +387,8 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	h.completeSession(r.Context(), session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
+	// Connection: close tells CPE to close the TCP connection.
+	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -514,6 +525,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	h.completeSession(r.Context(), session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
+	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -620,6 +632,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 
 	// No more commands — complete the session
 	h.completeSession(r.Context(), session)
+	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -841,12 +854,10 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 }
 
 func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *zap.Logger) {
-	// CurrentTime is formatted as ISO 8601 dateTime per TR069 spec
-	// This helps CPE devices synchronize their clocks with the ACS
-	currentTime := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	// TR-069 spec: InformResponse only contains MaxEnvelopes.
+	// CurrentTime is not a standard field and has been removed for protocol compliance.
 	resp, err := soap.RenderResponse(soap.InformResponseTmpl, soap.InformResponseData{
-		ID:          cwmpID,
-		CurrentTime: currentTime,
+		ID: cwmpID,
 	})
 	if err != nil {
 		log.Error("render InformResponse", zap.Error(err))
@@ -945,13 +956,13 @@ type rpcTaskTemplate struct {
 var testRPCTaskTemplates = []rpcTaskTemplate{
 	{method: "GetParameterValues", params: json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion","Device.DeviceInfo.HardwareVersion"]}`), priority: 10},
 	{method: "GetParameterValues", params: json.RawMessage(`{"names":["Device.X_0000B9_Config.AntennaConfig"]}`), priority: 10},
-	{method: "SetParameterValues", params: json.RawMessage(`{"parameters":[{"name":"Device.X_0000B9_Config.TestParam","value":"test_value_123"}]}`), priority: 10},
-	{method: "GetParameterNames", params: json.RawMessage(`{"parameter_path":"Device.DeviceInfo","next_level":false}`), priority: 10},
-	{method: "GetParameterNames", params: json.RawMessage(`{"parameter_path":"Device.X_0000B9_Config","next_level":true}`), priority: 10},
+	{method: "SetParameterValues", params: json.RawMessage(`{"values":[{"name":"Device.X_0000B9_Config.TestParam","value":"test_value_123","type":"xsd:string"}]}`), priority: 10},
+	{method: "GetParameterNames", params: json.RawMessage(`{"path":"Device.DeviceInfo.","next_level":false}`), priority: 10},
+	{method: "GetParameterNames", params: json.RawMessage(`{"path":"Device.X_0000B9_Config.","next_level":true}`), priority: 10},
 	{method: "GetParameterAttributes", params: json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion"]}`), priority: 10},
-	{method: "SetParameterAttributes", params: json.RawMessage(`{"parameters":[{"name":"Device.X_Test.Param","notification":1}]}`), priority: 10},
+	{method: "SetParameterAttributes", params: json.RawMessage(`{"attributes":[{"name":"Device.X_Test.Param","notification_change":true,"notification":1}]}`), priority: 10},
 	{method: "Download", params: json.RawMessage(`{"file_type":"1 Firmware Upgrade Image","url":"http://acs.example.com/firmware/v1.0.0.bin","file_size":10485760}`), priority: 5},
-	{method: "Upload", params: json.RawMessage(`{"file_type":"1 Log File","url":"http://acs.example.com/upload/logs","delay_seconds":0}`), priority: 10},
+	{method: "Upload", params: json.RawMessage(`{"file_type":"2 Vendor Log File","url":"http://acs.example.com/upload/logs","delay_seconds":0}`), priority: 10},
 	{method: "Reboot", params: json.RawMessage(`{}`), priority: 100}, // High priority but should be last
 	{method: "FactoryReset", params: json.RawMessage(`{}`), priority: 100},
 }

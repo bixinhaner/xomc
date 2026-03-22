@@ -113,27 +113,27 @@ type DeleteObjectData struct {
 }
 
 type DownloadData struct {
-	ID             string
-	CommandKey     string
-	FileType       string
-	URL            string
-	Username       string
-	Password       string
-	FileSize       int64
-	TargetFileName string
-	DelaySeconds   int
-	NoMoreRequests int // 0=more requests coming, 1=last request
+	ID             string `json:"id"`
+	CommandKey     string `json:"command_key"`
+	FileType       string `json:"file_type"`
+	URL            string `json:"url"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	FileSize       int64  `json:"file_size"`
+	TargetFileName string `json:"target_file_name"`
+	DelaySeconds   int    `json:"delay_seconds"`
+	NoMoreRequests int    `json:"no_more_requests"` // 0=more requests coming, 1=last request
 }
 
 type UploadData struct {
-	ID             string
-	CommandKey     string
-	FileType       string
-	URL            string
-	Username       string
-	Password       string
-	DelaySeconds   int
-	NoMoreRequests int // 0=more requests coming, 1=last request
+	ID             string `json:"id"`
+	CommandKey     string `json:"command_key"`
+	FileType       string `json:"file_type"`
+	URL            string `json:"url"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	DelaySeconds   int    `json:"delay_seconds"`
+	NoMoreRequests int    `json:"no_more_requests"` // 0=more requests coming, 1=last request
 }
 
 type RebootData struct {

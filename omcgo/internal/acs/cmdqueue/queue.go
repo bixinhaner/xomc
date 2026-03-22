@@ -19,6 +19,7 @@ type Command struct {
 	CreatedAt  time.Time       `json:"created_at"`
 	ExpiresAt  *time.Time      `json:"expires_at,omitempty"`
 	CommandKey string          `json:"command_key"`
+	CWMPID     string          `json:"cwmp_id"` // SOAP Header cwmp:ID (distinct from CommandKey)
 }
 
 // CommandQueue defines the interface for device command queues.

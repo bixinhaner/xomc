@@ -62,7 +62,8 @@ func TestGetParameterValuesHandler(t *testing.T) {
 	assert.Contains(t, body, "cwmp:GetParameterValues")
 	assert.Contains(t, body, "Device.DeviceInfo.ModelName")
 	assert.Contains(t, body, "Device.DeviceInfo.SerialNumber")
-	assert.Contains(t, body, "test-key-1")
+	// SOAP header cwmp:ID should be the cwmpID parameter, not CommandKey
+	assert.Contains(t, body, "cwmp-id-1")
 }
 
 func TestSetParameterValuesHandler(t *testing.T) {
@@ -154,13 +155,13 @@ func TestDownloadHandler(t *testing.T) {
 		Method:     "Download",
 		CommandKey: "dl-key-1",
 		Params: json.RawMessage(`{
-			"FileType": "1 Firmware Upgrade Image",
-			"URL": "http://fileserver.example.com/firmware.bin",
-			"Username": "dluser",
-			"Password": "dlpass",
-			"FileSize": 1048576,
-			"TargetFileName": "firmware.bin",
-			"DelaySeconds": 0
+			"file_type": "1 Firmware Upgrade Image",
+			"url": "http://fileserver.example.com/firmware.bin",
+			"username": "dluser",
+			"password": "dlpass",
+			"file_size": 1048576,
+			"target_file_name": "firmware.bin",
+			"delay_seconds": 0
 		}`),
 	}
 
