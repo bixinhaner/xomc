@@ -30,6 +30,7 @@ import { useCurrentAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@/types/alarm';
 import type { Device } from '@/types/device';
+import ParameterTreeTab from './ParameterTreeTab';
 
 const { Title, Text } = Typography;
 
@@ -771,6 +772,13 @@ export default function DeviceDetail() {
                   />
                 </div>
               ),
+            },
+            {
+              key: 'parameters',
+              label: '参数树',
+              children: device ? (
+                <ParameterTreeTab deviceId={device.id} />
+              ) : null,
             },
             {
               key: 'config',
