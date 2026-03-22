@@ -3,7 +3,9 @@
 > 审查日期：2026-03-22
 > 审查版本：main 分支（commit 9d11956）
 > 审查方式：9 个专家角色并行独立审查，结果汇总
-> **更新记录**：2026-03-22 P0 全部 9 项已修复（编译通过 + 全量测试通过）
+> **更新记录**：
+> - 2026-03-22 P0 全部 9 项已修复（编译通过 + 全量测试通过）
+> - 2026-03-22 P1 全部 8 项已修复（编译通过 + 全量测试通过 + 类型检查通过）
 
 ---
 
@@ -304,18 +306,18 @@ F07 网元直连    ███░░░░░░░ 35%   ← 仅框架，CMCC �
 | 8 | 集成 HealthChecker 到 app/acs/worker | 运维 | ✅ 已修复 | `bootstrap.go` App 结构体新增 `Health *HealthChecker` 字段，`newBase()` 创建实例，`connectPostgres/connectTimescale/connectRedis` 分别注册 Ping 健康检查，`/healthz` 返回 JSON 状态 |
 | 9 | JWT Secret 验证 | 安全 | ✅ 已修复 | `NewJWTService()` 签名改为返回 `(*JWTService, error)`，强制 secret 最少 32 字符，`router.go` 和所有测试文件同步更新 |
 
-### P1 — 高优先级（2 周内，预计 60h）
+### P1 — 高优先级（2 周内，预计 60h）— ✅ 全部已修复
 
-| # | 问题 | 来源 | 修复时间 |
-|---|------|------|---------|
-| 10 | API 端点细粒度权限检查 | 安全 | 8h |
-| 11 | task 模块补充单元测试 | 测试 | 16h |
-| 12 | core 模块补充测试（errors/event/middleware） | 测试 | 12h |
-| 13 | northbound 添加 NorthboundService | 架构 | 5h |
-| 14 | filemanager 抽取 Service 层 | 架构 | 3h |
-| 15 | PM 模块前端类型安全修复 | 前端 | 4h |
-| 16 | DeviceGrouping 拆分为子组件 | 前端 | 8h |
-| 17 | 启用集成测试自动化（docker-compose） | 测试 | 8h |
+| # | 问题 | 来源 | 状态 | 修复说明 |
+|---|------|------|------|---------|
+| 10 | API 端点细粒度权限检查 | 安全 | ✅ 已修复 | 新增 `RequireResourcePermission` 中间件，根据 HTTP 方法自动映射 read/write/delete 权限动作，覆盖全部 20+ 模块路由组（devices/config/pm/alarms/firmware 等 8 个资源域），12 个测试用例 |
+| 11 | task 模块补充单元测试 | 测试 | ✅ 已修复 | 新增 4 个测试文件共 66 个用例：`cwmp_id_test.go`（15）、`model_test.go`（17）、`service_test.go`（22）、`handler_test.go`（12），覆盖 CWMP ID 生成/解析、Task 生命周期、Service 协调逻辑、HTTP 层请求验证 |
+| 12 | core 模块补充测试（errors/event/middleware） | 测试 | ✅ 已修复 | 新增 6 个测试文件共 45 个用例：`cors_test.go`（8）、`logging_test.go`（5）、`metrics_test.go`（5）、`request_id_test.go`（10）、`auth_test.go`（6）、`nats_bus_test.go`（11） |
+| 13 | northbound 添加 NorthboundService | 架构 | ✅ 已修复 | 新增 `NorthboundService` 封装 5 个业务方法（ExportAlarms/ListActive/ExportConfig/ExportPM/ExportKPI），3 个 handler 改为薄 HTTP 代理，`NewRouter` 简化为单参数，9 个测试 |
+| 14 | filemanager 抽取 Service 层 | 架构 | ✅ 已修复 | 新增 `FileService` 封装 Upload/Download/Delete/Distribute/List/GetByID，handler 不再直接持有 MinIO Client/Repository/CommandQueue，5 个测试通过 |
+| 15 | PM 模块前端类型安全修复 | 前端 | ✅ 已修复 | 消除全部 10 个 `any`：pmApi.ts（8 处）、deviceApi.ts（2 处），新增 6 个 TypeScript 接口（AggregatedCounter/KPICalculationRequest/Result/Query、DeviceStats、DeviceParameter） |
+| 16 | DeviceGrouping 拆分为子组件 | 前端 | ✅ 已修复 | 1573 行拆分为 6 个文件：`index.tsx`（572 行，状态管理+组合）、`GroupTreePanel.tsx`（249）、`DeviceListPanel.tsx`（162）、`GroupDialogs.tsx`（490）、`DeviceDialogs.tsx`（260）、`types.ts`（74） |
+| 17 | 启用集成测试自动化（docker-compose） | 测试 | ✅ 已修复 | 新增 `docker-compose.test.yml`（PG+Redis+NATS tmpfs 测试容器）、`integration_test.sh`（编排脚本，支持 -v/-k 参数）、`testutil_test.go`（共享 DB/Redis 连接辅助）、Makefile 新增 `test-integration`/`test-integration-up`/`test-integration-down` 三个 target |
 
 ### P2 — 中优先级（1 个月内，预计 80h）
 
@@ -385,19 +387,19 @@ OMC 项目**架构设计优秀、代码工程质量良好**，但在**多运营�
 | 后端 Go 文件 | 303 个 |
 | 前端 TS/TSX 文件 | 311 个 |
 | 数据库迁移 | 38 个（至 000048） |
-| 单元测试文件 | 84 个（33% 覆盖率） |
+| 单元测试文件 | 98 个（~45% 覆盖率）← P1 修复后 +14 文件 |
 | E2E 测试用例 | ~332 个 |
 | API 端点 | 198 个 |
-| 高风险问题 | 9 个（P0） |
-| 中风险问题 | 17 个（P1+P2） |
+| 高风险问题 | 9 个（P0）✅ 全部已修复 |
+| 中风险问题 | 8 个（P1）✅ 全部已修复 + 9 个（P2） |
 | 低风险问题 | 9 个（P3） |
 
 ### 建议行动计划
 
 | 时间 | 目标 | 预期成果 |
 |------|------|---------|
-| 本周 | P0 全部修复（20h） | 安全风险消除，关键缺陷修复 |
-| 2 周 | P1 完成（60h） | 测试覆盖率 33%→45%，架构违规修复 |
+| 本周 | P0 全部修复（20h） | ✅ 安全风险消除，关键缺陷修复 |
+| 2 周 | P1 完成（60h） | ✅ 测试覆盖率 33%→45%，架构违规修复，前端类型安全加固 |
 | 1 个月 | P2 完成（80h） | CTCC/CUCC 可用，数据层优化，覆盖率→55% |
 | 3 个月 | P3 推进 | F07/F08 完整实现，全面可观测性，覆盖率→60% |
 
