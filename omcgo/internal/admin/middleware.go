@@ -22,8 +22,47 @@ const (
 
 // RequireAuth returns a Gin middleware that validates JWT access tokens
 // and sets user information in the request context.
+// It also supports X-API-Key header for programmatic access.
 func RequireAuth(jwt *JWTService) gin.HandlerFunc {
+	return RequireAuthWithAPIKey(jwt, nil, nil)
+}
+
+// RequireAuthWithAPIKey returns a Gin middleware that validates either a JWT Bearer token
+// or an X-API-Key header, and sets user information in the request context.
+func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo UserRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Try X-API-Key header first
+		apiKey := c.GetHeader("X-API-Key")
+		if apiKey != "" && apiKeySvc != nil && userRepo != nil {
+			key, err := apiKeySvc.Validate(c.Request.Context(), apiKey)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"code":    401,
+					"message": "invalid or expired API key",
+				})
+				return
+			}
+
+			// Load user to get carrier and roles
+			user, err := userRepo.GetByID(c.Request.Context(), key.UserID)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"code":    401,
+					"message": "API key owner not found",
+				})
+				return
+			}
+
+			c.Set(CtxKeyUserID, user.ID)
+			c.Set(CtxKeyUsername, user.Username)
+			c.Set(CtxKeyCarrier, user.Carrier)
+			// Use empty roles for API key — scoped by key scopes
+			c.Set(CtxKeyRoles, []string{})
+			c.Next()
+			return
+		}
+
+		// Fall back to Bearer JWT
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{

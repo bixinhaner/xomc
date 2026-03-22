@@ -68,6 +68,10 @@ const (
 	ErrCodeAuthCaptchaRequired    = global.ErrCodeAuthCaptchaRequired
 	ErrCodeAuthCaptchaInvalid     = global.ErrCodeAuthCaptchaInvalid
 	ErrCodeAuthAccountLocked      = global.ErrCodeAuthAccountLocked
+	ErrCodeAPIKeyNotFound         = global.ErrCodeAPIKeyNotFound
+	ErrCodeAPIKeyRevoked          = global.ErrCodeAPIKeyRevoked
+	ErrCodeAPIKeyExpired          = global.ErrCodeAPIKeyExpired
+	ErrCodeAPIKeyForbidden        = global.ErrCodeAPIKeyForbidden
 )
 
 // Software / Firmware (8000-8999)

@@ -66,6 +66,10 @@ const (
 	ErrCodeAuthCaptchaRequired    = 7010
 	ErrCodeAuthCaptchaInvalid     = 7011
 	ErrCodeAuthAccountLocked      = 7012
+	ErrCodeAPIKeyNotFound         = 7013
+	ErrCodeAPIKeyRevoked          = 7014
+	ErrCodeAPIKeyExpired          = 7015
+	ErrCodeAPIKeyForbidden        = 7016
 )
 
 // Software / Firmware (8000-8999)
