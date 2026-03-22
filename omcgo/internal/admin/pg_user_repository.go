@@ -19,7 +19,8 @@ var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var userColumns = []string{
 	"id", "username", "password_hash", "display_name", "email",
-	"carrier", "status", "last_login_at", "created_at", "updated_at",
+	"carrier", "status", "failed_login_attempts", "locked_until",
+	"last_failed_login_at", "last_login_at", "created_at", "updated_at",
 }
 
 // PgUserRepository implements UserRepository using PostgreSQL.
@@ -47,7 +48,8 @@ func (r *PgUserRepository) Create(ctx context.Context, user *User) error {
 		Values(
 			user.ID, user.Username, user.PasswordHash, user.DisplayName,
 			nullableString(user.Email), nullableCarrier(user.Carrier),
-			user.Status, nullableTime(user.LastLoginAt),
+			user.Status, user.FailedLoginAttempts, nullableTime(user.LockedUntil),
+			nullableTime(user.LastFailedLoginAt), nullableTime(user.LastLoginAt),
 			user.CreatedAt, user.UpdatedAt,
 		).
 		ToSql()
@@ -267,7 +269,8 @@ func scanUser(row pgx.Row) (*User, error) {
 	var email, carrier *string
 	err := row.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email,
-		&carrier, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+		&carrier, &u.Status, &u.FailedLoginAttempts, &u.LockedUntil,
+		&u.LastFailedLoginAt, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -290,7 +293,8 @@ func scanUserFromRows(rows pgx.Rows) (*User, error) {
 	var email, carrier *string
 	err := rows.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email,
-		&carrier, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+		&carrier, &u.Status, &u.FailedLoginAttempts, &u.LockedUntil,
+		&u.LastFailedLoginAt, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan user row: %w", err)
@@ -303,6 +307,44 @@ func scanUserFromRows(rows pgx.Rows) (*User, error) {
 		u.Carrier = &cc
 	}
 	return &u, nil
+}
+
+// UpdateLoginSecurity updates the failed login attempt counter and lock fields.
+func (r *PgUserRepository) UpdateLoginSecurity(ctx context.Context, id uuid.UUID, failedAttempts int, lockedUntil *time.Time) error {
+	now := time.Now()
+	query, args, err := psql.Update("users").
+		Set("failed_login_attempts", failedAttempts).
+		Set("locked_until", nullableTime(lockedUntil)).
+		Set("last_failed_login_at", now).
+		Set("updated_at", now).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update login security SQL: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update login security: %w", err)
+	}
+	return nil
+}
+
+// ResetLoginSecurity clears failed login attempts and lock on successful login.
+func (r *PgUserRepository) ResetLoginSecurity(ctx context.Context, id uuid.UUID) error {
+	query, args, err := psql.Update("users").
+		Set("failed_login_attempts", 0).
+		Set("locked_until", nil).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build reset login security SQL: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("reset login security: %w", err)
+	}
+	return nil
 }
 
 func nullableString(s string) interface{} {

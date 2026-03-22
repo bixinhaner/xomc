@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -51,6 +52,11 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errLoginUserNotFound, commonerrors.ErrUnauthorized)
+	}
+
+	// Check if account is temporarily locked due to brute-force
+	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		return nil, commonerrors.NewBusinessError(7012, "account temporarily locked due to too many failed attempts", commonerrors.ErrForbidden)
 	}
 
 	if user.Status != UserStatusActive {
@@ -255,6 +261,20 @@ func (s *AdminService) LockUser(ctx context.Context, id uuid.UUID) error {
 	}
 	user.Status = UserStatusDisabled
 	return s.userRepo.Update(ctx, user)
+}
+
+// LockUserByUsername temporarily locks a user account due to brute-force protection.
+func (s *AdminService) LockUserByUsername(ctx context.Context, username string, duration time.Duration) {
+	user, err := s.userRepo.GetByUsername(ctx, username)
+	if err != nil {
+		return
+	}
+	lockedUntil := time.Now().Add(duration)
+	if repo, ok := s.userRepo.(*PgUserRepository); ok {
+		if err := repo.UpdateLoginSecurity(ctx, user.ID, int(lockThreshold), &lockedUntil); err != nil {
+			s.logger.Error("lock user by username", zap.Error(err), zap.String("username", username))
+		}
+	}
 }
 
 // UnlockUser re-enables a user account by setting its status to active.

@@ -63,6 +63,9 @@ const (
 	ErrCodeRoleNotFound           = 7007
 	ErrCodeRoleInUse              = 7008
 	ErrCodePermissionDenied       = 7009
+	ErrCodeAuthCaptchaRequired    = 7010
+	ErrCodeAuthCaptchaInvalid     = 7011
+	ErrCodeAuthAccountLocked      = 7012
 )
 
 // Software / Firmware (8000-8999)

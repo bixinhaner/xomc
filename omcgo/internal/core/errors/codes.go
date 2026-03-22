@@ -65,6 +65,9 @@ const (
 	ErrCodeRoleNotFound           = global.ErrCodeRoleNotFound
 	ErrCodeRoleInUse              = global.ErrCodeRoleInUse
 	ErrCodePermissionDenied       = global.ErrCodePermissionDenied
+	ErrCodeAuthCaptchaRequired    = global.ErrCodeAuthCaptchaRequired
+	ErrCodeAuthCaptchaInvalid     = global.ErrCodeAuthCaptchaInvalid
+	ErrCodeAuthAccountLocked      = global.ErrCodeAuthAccountLocked
 )
 
 // Software / Firmware (8000-8999)

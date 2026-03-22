@@ -38,6 +38,8 @@ type ipLimiterEntry struct {
 // Handler provides HTTP endpoints for admin operations.
 type Handler struct {
 	service      *AdminService
+	captcha      *CaptchaService
+	loginGuard   *LoginGuard
 	logger       *zap.Logger
 	loginLimiter sync.Map // map[string]*ipLimiterEntry
 }
@@ -51,6 +53,16 @@ func NewHandler(service *AdminService, logger *zap.Logger) *Handler {
 	// Start background goroutine to clean up stale IP rate limiters.
 	go h.cleanupLoginLimiters()
 	return h
+}
+
+// SetCaptchaService sets the CAPTCHA service for login protection.
+func (h *Handler) SetCaptchaService(cs *CaptchaService) {
+	h.captcha = cs
+}
+
+// SetLoginGuard sets the brute-force login guard.
+func (h *Handler) SetLoginGuard(lg *LoginGuard) {
+	h.loginGuard = lg
 }
 
 // getIPLimiter returns a rate.Limiter for the given IP, creating one if needed.
@@ -90,6 +102,7 @@ func (h *Handler) RegisterAuthRoutes(rg *gin.RouterGroup) {
 	{
 		auth.POST("/login", h.Login)
 		auth.POST("/refresh", h.Refresh)
+		auth.GET("/captcha", h.GetCaptcha)
 	}
 }
 
@@ -141,9 +154,30 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	ctx := c.Request.Context()
 	userAgent := c.Request.UserAgent()
 
-	tokenPair, err := h.service.Login(c.Request.Context(), req.Username, req.Password)
+	// Brute-force protection: check if CAPTCHA is required for this username.
+	if h.loginGuard != nil && h.captcha != nil {
+		if h.loginGuard.RequiresCaptcha(ctx, req.Username) {
+			if req.CaptchaID == "" || req.CaptchaAnswer == "" {
+				c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
+					"code":    7010,
+					"message": "captcha required due to multiple failed attempts",
+				})
+				return
+			}
+			if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+					"code":    7011,
+					"message": "invalid captcha answer",
+				})
+				return
+			}
+		}
+	}
+
+	tokenPair, err := h.service.Login(ctx, req.Username, req.Password)
 	if err != nil {
 		// Classify the failure reason for audit logging
 		reason := classifyLoginFailure(err)
@@ -156,9 +190,26 @@ func (h *Handler) Login(c *gin.Context) {
 
 		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, reason)
 
+		// Record brute-force failure and potentially lock account
+		if h.loginGuard != nil {
+			count, _ := h.loginGuard.RecordFailure(ctx, req.Username)
+			if h.loginGuard.ShouldLock(count) {
+				h.service.LockUserByUsername(ctx, req.Username, h.loginGuard.LockDuration())
+				h.logger.Warn("account auto-locked due to brute force",
+					zap.String("username", req.Username),
+					zap.Int64("failed_count", count),
+				)
+			}
+		}
+
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return
+	}
+
+	// On successful login, reset brute-force counter
+	if h.loginGuard != nil {
+		h.loginGuard.Reset(ctx, req.Username)
 	}
 
 	h.logger.Info("login success",
@@ -169,6 +220,23 @@ func (h *Handler) Login(c *gin.Context) {
 	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, "")
 
 	c.JSON(http.StatusOK, tokenPair)
+}
+
+// GetCaptcha handles GET /api/v1/auth/captcha — generates a new CAPTCHA challenge.
+func (h *Handler) GetCaptcha(c *gin.Context) {
+	if h.captcha == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			errors.New("captcha service not configured"))
+		return
+	}
+
+	challenge, err := h.captcha.Generate(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, challenge)
 }
 
 // classifyLoginFailure maps internal login errors to human-readable failure reasons.

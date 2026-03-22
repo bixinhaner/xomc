@@ -17,17 +17,20 @@ const (
 
 // User represents a system user.
 type User struct {
-	ID           uuid.UUID          `json:"id"`
-	Username     string             `json:"username"`
-	PasswordHash string             `json:"-"`
-	DisplayName  string             `json:"display_name"`
-	Email        string             `json:"email,omitempty"`
-	Carrier      *model.CarrierCode `json:"carrier,omitempty"`
-	Status       UserStatus         `json:"status"`
-	Roles        []Role             `json:"roles,omitempty"`
-	LastLoginAt  *time.Time         `json:"last_login_at,omitempty"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
+	ID                  uuid.UUID          `json:"id"`
+	Username            string             `json:"username"`
+	PasswordHash        string             `json:"-"`
+	DisplayName         string             `json:"display_name"`
+	Email               string             `json:"email,omitempty"`
+	Carrier             *model.CarrierCode `json:"carrier,omitempty"`
+	Status              UserStatus         `json:"status"`
+	Roles               []Role             `json:"roles,omitempty"`
+	FailedLoginAttempts int                `json:"failed_login_attempts"`
+	LockedUntil         *time.Time         `json:"locked_until,omitempty"`
+	LastFailedLoginAt   *time.Time         `json:"last_failed_login_at,omitempty"`
+	LastLoginAt         *time.Time         `json:"last_login_at,omitempty"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
 }
 
 // Role represents a named role with associated permissions.
@@ -117,8 +120,10 @@ type UpdateUserRequest struct {
 
 // LoginRequest is the input for user authentication.
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username      string `json:"username" binding:"required"`
+	Password      string `json:"password" binding:"required"`
+	CaptchaID     string `json:"captcha_id"`
+	CaptchaAnswer string `json:"captcha_answer"`
 }
 
 // RefreshRequest is the input for refreshing a JWT token.
