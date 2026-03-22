@@ -200,13 +200,69 @@ func (r *DataModelRegistry) fetchModel(ctx context.Context, id uuid.UUID) (*Data
 	return dm, nil
 }
 
+// ResolveWithFirmware performs four-level fallback resolution including firmware version.
+//
+// Resolution priority (highest to lowest):
+//  1. product+firmware — carrier + tech + oui + productClass + firmwareVersion
+//  2. product          — carrier + tech + oui + productClass (firmware IS NULL)
+//  3. oui              — carrier + tech + oui
+//  4. carrier_default  — carrier + tech
+func (r *DataModelRegistry) ResolveWithFirmware(ctx context.Context, carrier model.CarrierCode,
+	tech model.Technology, oui, productClass, firmwareVersion string) (*DataModel, error) {
+
+	key := localCacheKeyWithFirmware(carrier, tech, oui, productClass, firmwareVersion)
+
+	// Check L1 cache.
+	if val, ok := r.localCache.Load(key); ok {
+		return val.(*DataModel), nil
+	}
+
+	// Four-level DB fallback.
+	dm, err := r.resolveFromDBWithFirmware(ctx, carrier, tech, oui, productClass, firmwareVersion)
+	if err != nil {
+		return nil, fmt.Errorf("resolve data model with firmware: %w", err)
+	}
+	if dm == nil {
+		return nil, nil
+	}
+
+	r.localCache.Store(key, dm)
+
+	if r.cache != nil {
+		if cacheErr := r.cache.SetResolveResult(ctx, string(carrier), string(tech), oui, productClass, dm.ID); cacheErr != nil {
+			r.logger.Warn("failed to write resolve result to L2 cache", zap.String("key", key), zap.Error(cacheErr))
+		}
+	}
+
+	return dm, nil
+}
+
+// resolveFromDBWithFirmware performs four-level fallback including firmware version.
+func (r *DataModelRegistry) resolveFromDBWithFirmware(ctx context.Context, carrier model.CarrierCode,
+	tech model.Technology, oui, productClass, firmwareVersion string) (*DataModel, error) {
+
+	// Level 1 (product+firmware): most specific.
+	if oui != "" && productClass != "" && firmwareVersion != "" {
+		dm, err := r.repo.FindActiveWithFirmware(ctx, carrier, tech, oui, productClass, firmwareVersion, model.ScopeProduct)
+		if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
+			return nil, fmt.Errorf("find active product+firmware model: %w", err)
+		}
+		if dm != nil {
+			return dm, nil
+		}
+	}
+
+	// Level 2-4: delegate to existing three-level fallback.
+	return r.resolveFromDB(ctx, carrier, tech, oui, productClass)
+}
+
 // ResolveForDevice is a convenience wrapper that resolves the data model for a device
 // using the device's carrier, technology, OUI, and product class.
 func (r *DataModelRegistry) ResolveForDevice(ctx context.Context, device *model.Device) (*DataModel, error) {
 	if device == nil {
 		return nil, fmt.Errorf("resolve data model for device: device is nil")
 	}
-	return r.Resolve(ctx, device.Carrier, device.Technology, device.OUI, device.ProductClass)
+	return r.ResolveWithFirmware(ctx, device.Carrier, device.Technology, device.OUI, device.ProductClass, device.FirmwareVersion)
 }
 
 // InvalidateCache invalidates L1 and L2 caches for a specific data model.
@@ -340,4 +396,9 @@ func (r *DataModelRegistry) Stop() {
 // Format: {carrier}:{tech}:{oui}:{productClass}
 func localCacheKey(carrier model.CarrierCode, tech model.Technology, oui, productClass string) string {
 	return fmt.Sprintf("%s:%s:%s:%s", carrier, tech, oui, productClass)
+}
+
+// localCacheKeyWithFirmware builds the L1 cache key including firmware version.
+func localCacheKeyWithFirmware(carrier model.CarrierCode, tech model.Technology, oui, productClass, firmwareVersion string) string {
+	return fmt.Sprintf("%s:%s:%s:%s:%s", carrier, tech, oui, productClass, firmwareVersion)
 }

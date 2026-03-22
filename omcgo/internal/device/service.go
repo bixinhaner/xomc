@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -111,6 +112,75 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// SetParameters queues a SetParameterValues RPC command for the given device.
+func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, params []ParameterValueItem) error {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("get device for set params: %w", err)
+	}
+	if device == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	if s.cmdQueue == nil {
+		return fmt.Errorf("command queue not configured")
+	}
+
+	// Build SPV parameter list.
+	spvParams := make([]map[string]string, 0, len(params))
+	for _, p := range params {
+		paramType := p.Type
+		if paramType == "" {
+			paramType = "xsd:string"
+		}
+		spvParams = append(spvParams, map[string]string{
+			"name":  p.Path,
+			"value": p.Value,
+			"type":  paramType,
+		})
+	}
+
+	paramsJSON, err := json.Marshal(map[string]interface{}{
+		"parameter_list": spvParams,
+		"parameter_key":  fmt.Sprintf("ui-spv-%d", time.Now().Unix()),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal SPV params: %w", err)
+	}
+
+	cmd := &cmdqueue.Command{
+		ID:         uuid.New().String(),
+		Method:     "SetParameterValues",
+		Params:     paramsJSON,
+		Priority:   5,
+		CommandKey: fmt.Sprintf("ui-spv-%s", uuid.New().String()[:8]),
+	}
+
+	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+		return fmt.Errorf("queue SPV command: %w", err)
+	}
+
+	s.logger.Info("set parameter values command queued",
+		zap.String("device_id", deviceID.String()),
+		zap.String("serial_number", device.SerialNumber),
+		zap.Int("param_count", len(params)),
+	)
+
+	return nil
+}
+
+// ParameterValueItem represents a single parameter to set.
+type ParameterValueItem struct {
+	Path  string `json:"path"`
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}
+
+// GetCommandQueue returns the command queue, or nil if not configured.
+func (s *DeviceService) GetCommandQueue() CommandQueue {
+	return s.cmdQueue
+}
+
 // SetMetrics attaches Prometheus metrics to the service.
 func (s *DeviceService) SetMetrics(m *DeviceMetrics) {
 	s.metrics = m
@@ -214,7 +284,8 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("oui", device.OUI),
 	)
 
-	s.publishDeviceRegistered(ctx, device)
+	// Note: device.registered event is published by InformHandler, not here,
+	// so that both new and existing devices (BOOTSTRAP/BOOT) trigger provisioning.
 
 	return device, nil
 }
@@ -386,7 +457,9 @@ func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid
 	}
 }
 
-func (s *DeviceService) publishDeviceRegistered(ctx context.Context, device *model.Device) {
+// PublishDeviceRegistered publishes a device.registered event for the given device.
+// Called by InformHandler on BOOTSTRAP/BOOT events to trigger provisioning engine.
+func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *model.Device) {
 	if s.eventBus == nil {
 		return
 	}

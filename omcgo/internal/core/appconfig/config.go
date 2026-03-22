@@ -55,6 +55,7 @@ type AppConfig struct {
 	CORS            CORSConfig       `mapstructure:"cors"`
 	Northbound      NorthboundConfig `mapstructure:"northbound"`
 	NEDirect        NEDirectConfig   `mapstructure:"ne_direct"`
+	Provision       ProvisionConfig  `mapstructure:"provision"`
 	Metrics         MetricsConfig    `mapstructure:"metrics"`
 	Tracer          TracerConfig     `mapstructure:"tracer"`
 	Log             LogConfig        `mapstructure:"log"`
@@ -93,6 +94,31 @@ type NEDirectConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Host    string `mapstructure:"host"`
 	Port    int    `mapstructure:"port"`
+}
+
+// ProvisionConfig holds provisioning and auto-discovery settings.
+type ProvisionConfig struct {
+	Enabled       bool                `mapstructure:"enabled"`
+	AutoDiscovery AutoDiscoveryConfig `mapstructure:"auto_discovery"`
+	AutoSync      AutoSyncConfig      `mapstructure:"auto_sync"`
+}
+
+// AutoDiscoveryConfig holds settings for automatic parameter tree discovery.
+type AutoDiscoveryConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	MaxConcurrent     int           `mapstructure:"max_concurrent"`
+	GPNTimeout        time.Duration `mapstructure:"gpn_timeout"`
+	GPVBatchSize      int           `mapstructure:"gpv_batch_size"`
+	GPVTimeout        time.Duration `mapstructure:"gpv_timeout"`
+	AutoActivateModel bool          `mapstructure:"auto_activate_model"`
+}
+
+// AutoSyncConfig holds settings for automatic parameter value synchronization.
+type AutoSyncConfig struct {
+	Enabled              bool `mapstructure:"enabled"`
+	SyncOnBootstrap      bool `mapstructure:"sync_on_bootstrap"`
+	SyncOnFirmwareChange bool `mapstructure:"sync_on_firmware_change"`
+	MaxConcurrent        int  `mapstructure:"max_concurrent"`
 }
 
 // WorkerConfig is the configuration for the background worker process.

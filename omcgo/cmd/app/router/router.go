@@ -100,10 +100,30 @@ func Setup(r *gin.Engine, deps *Deps) error {
 
 	// Provisioning module
 	provisionRepo := provision.NewPgProvisioningTaskRepository(pgPool)
+	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(pgPool)
 	provisionEngine := provision.NewProvisioningEngine(
 		provisionRepo, deviceService, dmRegistry, templateService,
-		carrierRegistry, cmdQueue, eventBus, logger,
+		carrierRegistry, cmdQueue, eventBus, cfg.Provision, logger,
 	)
+
+	// Set up auto-discovery and auto-sync services if enabled.
+	if cfg.Provision.AutoDiscovery.Enabled {
+		discoverySvc := provision.NewDiscoveryService(
+			discoveryLogRepo, dmRepo, dmRegistry, cmdQueue,
+			cfg.Provision.AutoDiscovery, logger,
+		)
+		provisionEngine.SetDiscoveryService(discoverySvc)
+		logger.Info("auto-discovery service enabled")
+	}
+	if cfg.Provision.AutoSync.Enabled {
+		syncSvc := provision.NewSyncService(
+			paramRepo, discoveryLogRepo, cmdQueue,
+			cfg.Provision.AutoSync, cfg.Provision.AutoDiscovery.GPVBatchSize, logger,
+		)
+		provisionEngine.SetSyncService(syncSvc)
+		logger.Info("auto-sync service enabled")
+	}
+
 	if err := provisionEngine.Subscribe(eventBus); err != nil {
 		logger.Warn("subscribe provisioning engine", zap.Error(err))
 	}
@@ -222,6 +242,10 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	// Device routes → resource "devices"
 	deviceHandler := device.NewHandler(deviceService)
 	deviceHandler.RegisterRoutes(permGroup("devices"))
+
+	// Parameter tree routes → resource "devices"
+	paramTreeHandler := device.NewParameterTreeHandler(deviceService, paramRepo, logger)
+	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
 	// DataModel routes → resource "datamodels"
 	dmHandler := datamodel.NewHandler(dmRepo, ouiRepo, dmRegistry, dmImporter)

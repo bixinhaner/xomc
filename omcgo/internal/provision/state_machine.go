@@ -5,10 +5,12 @@ import "fmt"
 // validTransitions defines the allowed state transitions for provisioning tasks.
 var validTransitions = map[ProvisioningState][]ProvisioningState{
 	StateDiscovered:  {StateIdentifying, StateFailed},
-	StateIdentifying: {StateMatching, StateFailed},
+	StateIdentifying: {StateMatching, StateDiscovering, StateSyncing, StateFailed},
 	StateMatching:    {StateConfiguring, StateFailed},
 	StateConfiguring: {StateVerifying, StateFailed},
 	StateVerifying:   {StateCompleted, StateFailed},
+	StateDiscovering: {StateSyncing, StateCompleted, StateFailed},
+	StateSyncing:     {StateCompleted, StateFailed},
 	// Terminal states — no transitions allowed.
 	StateCompleted: {},
 	StateFailed:    {},

@@ -73,6 +73,21 @@ ne_direct:
   host: "0.0.0.0"
   port: 7549
 
+provision:
+  enabled: true
+  auto_discovery:
+    enabled: true
+    max_concurrent: 10
+    gpn_timeout: 60s
+    gpv_batch_size: 50
+    gpv_timeout: 30s
+    auto_activate_model: true
+  auto_sync:
+    enabled: true
+    sync_on_bootstrap: true
+    sync_on_firmware_change: true
+    max_concurrent: 20
+
 metrics:
   port: 9091
 

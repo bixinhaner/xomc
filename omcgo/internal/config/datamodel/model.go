@@ -17,6 +17,14 @@ const (
 	StatusDeprecated DataModelStatus = "deprecated"
 )
 
+// DataModelSourceType indicates how the data model was created.
+type DataModelSourceType string
+
+const (
+	SourceManual         DataModelSourceType = "manual"
+	SourceAutoDiscovered DataModelSourceType = "auto_discovered"
+)
+
 // DataModel represents a TR069 data model definition.
 type DataModel struct {
 	ID              uuid.UUID            `json:"id"`
@@ -25,12 +33,14 @@ type DataModel struct {
 	Version         string               `json:"version"`
 	OUI             string               `json:"oui,omitempty"`
 	ProductClass    string               `json:"product_class,omitempty"`
+	FirmwareVersion string               `json:"firmware_version,omitempty"`
 	Scope           model.DataModelScope `json:"scope"`
 	Status          DataModelStatus      `json:"status"`
 	IsActive        bool                 `json:"is_active"`
 	RootObject      string               `json:"root_object"`
 	ParameterTree   json.RawMessage      `json:"parameter_tree"`
 	Source          string               `json:"source,omitempty"`
+	SourceType      DataModelSourceType  `json:"source_type"`
 	ImportedBy      string               `json:"imported_by,omitempty"`
 	SpecDocumentRef string               `json:"spec_document_ref,omitempty"`
 	Description     string               `json:"description,omitempty"`

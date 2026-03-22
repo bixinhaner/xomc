@@ -22,8 +22,9 @@ var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 // dataModelColumns lists all columns for scanning data_model_definitions rows.
 var dataModelColumns = []string{
 	"id", "carrier", "technology", "version", "oui", "product_class",
+	"firmware_version",
 	"scope", "status", "is_active", "root_object", "parameter_tree",
-	"source", "imported_by", "spec_document_ref", "description",
+	"source", "source_type", "imported_by", "spec_document_ref", "description",
 	"created_at", "updated_at",
 }
 
@@ -64,8 +65,9 @@ func (r *PgDataModelRepository) Create(ctx context.Context, dm *DataModel) error
 		Values(
 			dm.ID, dm.Carrier, dm.Technology, dm.Version,
 			nullableString(dm.OUI), nullableString(dm.ProductClass),
+			nullableString(dm.FirmwareVersion),
 			dm.Scope, dm.Status, dm.IsActive, dm.RootObject, dm.ParameterTree,
-			nullableString(dm.Source), nullableString(dm.ImportedBy),
+			nullableString(dm.Source), dm.SourceType, nullableString(dm.ImportedBy),
 			nullableString(dm.SpecDocumentRef), nullableString(dm.Description),
 			dm.CreatedAt, dm.UpdatedAt,
 		).
@@ -109,12 +111,14 @@ func (r *PgDataModelRepository) Update(ctx context.Context, dm *DataModel) error
 		Set("version", dm.Version).
 		Set("oui", nullableString(dm.OUI)).
 		Set("product_class", nullableString(dm.ProductClass)).
+		Set("firmware_version", nullableString(dm.FirmwareVersion)).
 		Set("scope", dm.Scope).
 		Set("status", dm.Status).
 		Set("is_active", dm.IsActive).
 		Set("root_object", dm.RootObject).
 		Set("parameter_tree", dm.ParameterTree).
 		Set("source", nullableString(dm.Source)).
+		Set("source_type", dm.SourceType).
 		Set("imported_by", nullableString(dm.ImportedBy)).
 		Set("spec_document_ref", nullableString(dm.SpecDocumentRef)).
 		Set("description", nullableString(dm.Description)).
@@ -286,6 +290,47 @@ func (r *PgDataModelRepository) FindActive(ctx context.Context, carrier model.Ca
 	return dm, nil
 }
 
+// FindActiveWithFirmware finds an active data model matching carrier/tech/oui/productClass/firmwareVersion.
+func (r *PgDataModelRepository) FindActiveWithFirmware(ctx context.Context, carrier model.CarrierCode,
+	tech model.Technology, oui, productClass, firmwareVersion string, scope model.DataModelScope) (*DataModel, error) {
+
+	builder := psql.Select(dataModelColumns...).
+		From("data_model_definitions").
+		Where(sq.And{
+			sq.Eq{"carrier": carrier},
+			sq.Eq{"technology": tech},
+			sq.Eq{"scope": scope},
+			sq.Eq{"is_active": true},
+		})
+
+	if oui == "" {
+		builder = builder.Where("oui IS NULL")
+	} else {
+		builder = builder.Where(sq.Eq{"oui": oui})
+	}
+	if productClass == "" {
+		builder = builder.Where("product_class IS NULL")
+	} else {
+		builder = builder.Where(sq.Eq{"product_class": productClass})
+	}
+	if firmwareVersion == "" {
+		builder = builder.Where("firmware_version IS NULL")
+	} else {
+		builder = builder.Where(sq.Eq{"firmware_version": firmwareVersion})
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find active with firmware SQL: %w", err)
+	}
+
+	dm, err := scanDataModel(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		return nil, err
+	}
+	return dm, nil
+}
+
 // Activate transitions a data model to active status within a transaction.
 // Any previously active model with the same classification is deprecated.
 func (r *PgDataModelRepository) Activate(ctx context.Context, id uuid.UUID) error {
@@ -335,6 +380,11 @@ func (r *PgDataModelRepository) Activate(ctx context.Context, id uuid.UUID) erro
 		deprecateBuilder = deprecateBuilder.Where("product_class IS NULL")
 	} else {
 		deprecateBuilder = deprecateBuilder.Where(sq.Eq{"product_class": dm.ProductClass})
+	}
+	if dm.FirmwareVersion == "" {
+		deprecateBuilder = deprecateBuilder.Where("firmware_version IS NULL")
+	} else {
+		deprecateBuilder = deprecateBuilder.Where(sq.Eq{"firmware_version": dm.FirmwareVersion})
 	}
 
 	deprecateSQL, deprecateArgs, err := deprecateBuilder.ToSql()
@@ -663,6 +713,7 @@ func scanDataModel(row pgx.Row) (*DataModel, error) {
 	var (
 		oui             sql.NullString
 		productClass    sql.NullString
+		firmwareVersion sql.NullString
 		source          sql.NullString
 		importedBy      sql.NullString
 		specDocumentRef sql.NullString
@@ -672,9 +723,9 @@ func scanDataModel(row pgx.Row) (*DataModel, error) {
 
 	err := row.Scan(
 		&dm.ID, &dm.Carrier, &dm.Technology, &dm.Version,
-		&oui, &productClass,
+		&oui, &productClass, &firmwareVersion,
 		&dm.Scope, &dm.Status, &dm.IsActive, &dm.RootObject, &parameterTree,
-		&source, &importedBy, &specDocumentRef, &description,
+		&source, &dm.SourceType, &importedBy, &specDocumentRef, &description,
 		&dm.CreatedAt, &dm.UpdatedAt,
 	)
 	if err != nil {
@@ -690,6 +741,9 @@ func scanDataModel(row pgx.Row) (*DataModel, error) {
 	}
 	if productClass.Valid {
 		dm.ProductClass = productClass.String
+	}
+	if firmwareVersion.Valid {
+		dm.FirmwareVersion = firmwareVersion.String
 	}
 	if source.Valid {
 		dm.Source = source.String
@@ -715,6 +769,7 @@ func scanDataModels(rows pgx.Rows) ([]DataModel, error) {
 		var (
 			oui             sql.NullString
 			productClass    sql.NullString
+			firmwareVersion sql.NullString
 			source          sql.NullString
 			importedBy      sql.NullString
 			specDocumentRef sql.NullString
@@ -724,9 +779,9 @@ func scanDataModels(rows pgx.Rows) ([]DataModel, error) {
 
 		err := rows.Scan(
 			&dm.ID, &dm.Carrier, &dm.Technology, &dm.Version,
-			&oui, &productClass,
+			&oui, &productClass, &firmwareVersion,
 			&dm.Scope, &dm.Status, &dm.IsActive, &dm.RootObject, &parameterTree,
-			&source, &importedBy, &specDocumentRef, &description,
+			&source, &dm.SourceType, &importedBy, &specDocumentRef, &description,
 			&dm.CreatedAt, &dm.UpdatedAt,
 		)
 		if err != nil {
@@ -739,6 +794,9 @@ func scanDataModels(rows pgx.Rows) ([]DataModel, error) {
 		}
 		if productClass.Valid {
 			dm.ProductClass = productClass.String
+		}
+		if firmwareVersion.Valid {
+			dm.FirmwareVersion = firmwareVersion.String
 		}
 		if source.Valid {
 			dm.Source = source.String

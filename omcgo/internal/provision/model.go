@@ -16,6 +16,8 @@ const (
 	StateMatching    ProvisioningState = "matching"
 	StateConfiguring ProvisioningState = "configuring"
 	StateVerifying   ProvisioningState = "verifying"
+	StateDiscovering ProvisioningState = "discovering" // 自动发现参数树
+	StateSyncing     ProvisioningState = "syncing"     // 同步设备参数值
 	StateCompleted   ProvisioningState = "completed"
 	StateFailed      ProvisioningState = "failed"
 )
@@ -61,5 +63,45 @@ func NewProvisioningTask(deviceID uuid.UUID) *ProvisioningTask {
 		DeviceID:   deviceID,
 		Status:     StateDiscovered,
 		MaxRetries: 3,
+	}
+}
+
+// DiscoveryStatus represents the status of a parameter discovery log entry.
+type DiscoveryStatus string
+
+const (
+	DiscoveryPending     DiscoveryStatus = "pending"
+	DiscoveryDiscovering DiscoveryStatus = "discovering"
+	DiscoverySyncing     DiscoveryStatus = "syncing"
+	DiscoveryCompleted   DiscoveryStatus = "completed"
+	DiscoveryFailed      DiscoveryStatus = "failed"
+)
+
+// ParameterDiscoveryLog records the parameter discovery process for a device.
+type ParameterDiscoveryLog struct {
+	ID              uuid.UUID       `json:"id"`
+	DeviceID        uuid.UUID       `json:"device_id"`
+	DeviceSN        string          `json:"device_sn"`
+	OUI             string          `json:"oui"`
+	ProductClass    string          `json:"product_class"`
+	FirmwareVersion string          `json:"firmware_version"`
+	ParameterCount  int             `json:"parameter_count"`
+	DataModelID     *uuid.UUID      `json:"data_model_id,omitempty"`
+	Status          DiscoveryStatus `json:"status"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+// NewParameterDiscoveryLog creates a new discovery log in pending state.
+func NewParameterDiscoveryLog(deviceID uuid.UUID, deviceSN, oui, productClass, firmwareVersion string) *ParameterDiscoveryLog {
+	return &ParameterDiscoveryLog{
+		ID:              uuid.New(),
+		DeviceID:        deviceID,
+		DeviceSN:        deviceSN,
+		OUI:             oui,
+		ProductClass:    productClass,
+		FirmwareVersion: firmwareVersion,
+		Status:          DiscoveryPending,
 	}
 }

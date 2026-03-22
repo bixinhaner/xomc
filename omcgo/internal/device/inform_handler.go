@@ -110,6 +110,12 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 		zap.String("serial_number", device.SerialNumber),
 		zap.String("carrier", string(carrierCode)),
 	)
+
+	// Always publish device.registered on BOOTSTRAP/BOOT events,
+	// so that provisioning engine triggers auto-discovery/sync
+	// for both new and existing devices.
+	h.service.PublishDeviceRegistered(ctx, device)
+
 	return nil
 }
 

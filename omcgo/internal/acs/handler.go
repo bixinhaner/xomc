@@ -486,8 +486,8 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		}
 	}
 
-	// Publish RPC response event for provisioning engine.
-	h.publishRPCResponseEvent(r.Context(), deviceSN, method, log)
+	// Publish RPC response event for provisioning engine (includes raw body for GPN/GPV processing).
+	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, log)
 
 	// Priority 1: Try new TaskService for next task
 	if h.taskService != nil {
@@ -796,7 +796,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 	// Determine primary subject based on event codes (priority order).
 	var subject string
 	switch {
-	case tr069.IsBootstrap(inform.Event):
+	case tr069.IsBootstrap(inform.Event), tr069.IsBoot(inform.Event):
 		subject = event.SubjectDeviceBootstrap
 	case tr069.IsAlarm(inform.Event):
 		subject = event.SubjectDeviceAlarm
@@ -839,7 +839,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		zap.Strings("event_codes", eventCodes))
 }
 
-func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, log *zap.Logger) {
+func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, log *zap.Logger) {
 	var subject string
 	switch method {
 	case soap.MethodGetParameterValuesResp:
@@ -871,6 +871,33 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	payload := map[string]interface{}{
 		"device_sn": deviceSN,
 		"method":    string(method),
+	}
+
+	// For GPN/GPV responses, parse the SOAP body and include structured data
+	// instead of raw XML to avoid NATS message size limits.
+	switch method {
+	case soap.MethodGetParameterNamesResp:
+		paramInfos, _, parseErr := soap.DecodeGetParameterNamesResponse(bytes.NewReader(body))
+		if parseErr != nil {
+			log.Warn("parse GPN response for event", zap.Error(parseErr))
+		} else {
+			payload["parameter_infos"] = paramInfos
+			log.Info("GPN response parsed for event",
+				zap.String("device_sn", deviceSN),
+				zap.Int("parameter_count", len(paramInfos)),
+			)
+		}
+	case soap.MethodGetParameterValuesResp:
+		paramValues, _, parseErr := soap.DecodeGetParameterValuesResponse(bytes.NewReader(body))
+		if parseErr != nil {
+			log.Warn("parse GPV response for event", zap.Error(parseErr))
+		} else {
+			payload["parameter_values"] = paramValues
+			log.Info("GPV response parsed for event",
+				zap.String("device_sn", deviceSN),
+				zap.Int("parameter_count", len(paramValues)),
+			)
+		}
 	}
 
 	evt, err := event.NewEvent(subject, payload)

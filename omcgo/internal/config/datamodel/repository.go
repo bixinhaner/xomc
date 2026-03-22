@@ -13,6 +13,8 @@ type DataModelReader interface {
 	List(ctx context.Context, filter DataModelFilter) (*model.ListResponse[DataModel], error)
 	FindActive(ctx context.Context, carrier model.CarrierCode, tech model.Technology,
 		oui, productClass string, scope model.DataModelScope) (*DataModel, error)
+	FindActiveWithFirmware(ctx context.Context, carrier model.CarrierCode, tech model.Technology,
+		oui, productClass, firmwareVersion string, scope model.DataModelScope) (*DataModel, error)
 	Statistics(ctx context.Context) (*DataModelStats, error)
 }
 
