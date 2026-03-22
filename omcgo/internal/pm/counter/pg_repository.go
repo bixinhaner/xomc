@@ -40,6 +40,15 @@ func (r *PgCounterRepository) BatchInsert(ctx context.Context, counters []model.
 
 var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
+// allowedSortColumns prevents SQL injection in ORDER BY clauses.
+var allowedSortColumns = map[string]bool{
+	"time":          true,
+	"counter_name":  true,
+	"counter_value": true,
+	"device_id":     true,
+	"created_at":    true,
+}
+
 func applyCounterFilters(qb squirrel.SelectBuilder, filter CounterFilter) squirrel.SelectBuilder {
 	if filter.DeviceID != nil {
 		qb = qb.Where(squirrel.Eq{"device_id": *filter.DeviceID})
@@ -80,14 +89,14 @@ func (r *PgCounterRepository) Query(ctx context.Context, filter CounterFilter) (
 		filter,
 	)
 	sortBy := "time"
-	if filter.SortBy != "" {
+	if filter.SortBy != "" && allowedSortColumns[filter.SortBy] {
 		sortBy = filter.SortBy
 	}
 	sortDir := "DESC"
 	if filter.SortDir == "asc" {
 		sortDir = "ASC"
 	}
-	qb = qb.OrderBy(fmt.Sprintf("%s %s", sortBy, sortDir)).
+	qb = qb.OrderBy(sortBy + " " + sortDir).
 		Limit(uint64(filter.Limit())).Offset(uint64(filter.Offset()))
 
 	sql, args, err := qb.ToSql()

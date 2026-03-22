@@ -174,6 +174,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	}))
 	r.Use(middleware.RequestLogger())
 	r.Use(middleware.PrometheusMetrics(metricsReg))
+	r.Use(middleware.SecurityHeaders())
 
 	// Unified JSON 404 for unmatched routes
 	r.NoRoute(func(c *gin.Context) {

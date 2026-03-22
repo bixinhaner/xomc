@@ -15,6 +15,19 @@ import (
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
+// allowedSortColumns prevents SQL injection in ORDER BY clauses.
+var allowedSortColumns = map[string]bool{
+	"created_at":     true,
+	"updated_at":     true,
+	"serial_number":  true,
+	"status":         true,
+	"carrier":        true,
+	"technology":     true,
+	"model":          true,
+	"manufacturer":   true,
+	"last_inform_at": true,
+}
+
 // PgDeviceRepository implements DeviceRepository using PostgreSQL.
 type PgDeviceRepository struct {
 	pool *pgxpool.Pool
@@ -185,13 +198,15 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
 
 	// Apply pagination
-	sortBy := filter.SortBy
-	if sortBy == "" {
-		sortBy = "created_at"
+	sortBy := "created_at"
+	if filter.SortBy != "" && allowedSortColumns[filter.SortBy] {
+		sortBy = filter.SortBy
 	}
-	sortDir := filter.SortDir
-	if sortDir == "" {
-		sortDir = "desc"
+	sortDir := "DESC"
+	if filter.SortDir == "desc" || filter.SortDir == "" {
+		sortDir = "DESC"
+	} else if filter.SortDir == "asc" {
+		sortDir = "ASC"
 	}
 	builder = builder.
 		OrderBy(sortBy + " " + sortDir).

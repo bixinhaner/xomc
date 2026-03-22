@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
@@ -17,6 +18,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
+
+var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // FrontendDeviceStats matches the frontend's expected device_stats format.
 type FrontendDeviceStats struct {
@@ -211,8 +214,15 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 
 	// 5. Count devices with active alarms
 	g.Go(func() error {
-		query := `SELECT COUNT(DISTINCT device_id) FROM alarms_active WHERE status = 'active'`
-		if err := s.pgPool.QueryRow(ctx, query).Scan(&alarmDeviceCount); err != nil {
+		query, args, err := psql.Select("COUNT(DISTINCT device_id)").
+			From("alarms_active").
+			Where(sq.Eq{"status": "active"}).
+			ToSql()
+		if err != nil {
+			s.logger.Warn("dashboard: build alarm device count query failed", zap.Error(err))
+			return nil
+		}
+		if err := s.pgPool.QueryRow(ctx, query, args...).Scan(&alarmDeviceCount); err != nil {
 			s.logger.Warn("dashboard: alarm device count failed", zap.Error(err))
 		}
 		return nil
@@ -324,6 +334,7 @@ func (s *Service) GetAlarmTrend(ctx context.Context, days int) ([]AlarmTrendEntr
 		days = 365
 	}
 
+	// Complex aggregation with DATE(), CASE WHEN, COALESCE — raw SQL preferred over Squirrel for readability
 	query := `
 		SELECT
 			DATE(raised_at) AS d,
@@ -437,8 +448,17 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 			g2, gctx := errgroup.WithContext(ctx)
 
 			g2.Go(func() error {
-				onlineQuery := `SELECT COUNT(*) FROM devices WHERE id = ANY($1) AND status = 'active'`
-				if err := s.pgPool.QueryRow(gctx, onlineQuery, deviceIDs).Scan(&entry.OnlineCount); err != nil {
+				onlineQuery, args, err := psql.Select("COUNT(*)").
+					From("devices").
+					Where("id = ANY(?)", deviceIDs).
+					Where(sq.Eq{"status": "active"}).
+					ToSql()
+				if err != nil {
+					s.logger.Warn("dashboard: build online devices query failed",
+						zap.String("group", entry.Region), zap.Error(err))
+					return nil
+				}
+				if err := s.pgPool.QueryRow(gctx, onlineQuery, args...).Scan(&entry.OnlineCount); err != nil {
 					s.logger.Warn("dashboard: count online devices failed",
 						zap.String("group", entry.Region), zap.Error(err))
 				}
@@ -446,8 +466,16 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 			})
 
 			g2.Go(func() error {
-				alarmQuery := `SELECT COUNT(*) FROM alarms_active WHERE device_id = ANY($1)`
-				if err := s.pgPool.QueryRow(gctx, alarmQuery, deviceIDs).Scan(&entry.AlarmCount); err != nil {
+				alarmQuery, args, err := psql.Select("COUNT(*)").
+					From("alarms_active").
+					Where("device_id = ANY(?)", deviceIDs).
+					ToSql()
+				if err != nil {
+					s.logger.Warn("dashboard: build group alarms query failed",
+						zap.String("group", entry.Region), zap.Error(err))
+					return nil
+				}
+				if err := s.pgPool.QueryRow(gctx, alarmQuery, args...).Scan(&entry.AlarmCount); err != nil {
 					s.logger.Warn("dashboard: count group alarms failed",
 						zap.String("group", entry.Region), zap.Error(err))
 				}
@@ -465,11 +493,16 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 
 // GetWidgetLayout retrieves the widget layout for a specific user.
 func (s *Service) GetWidgetLayout(ctx context.Context, userID uuid.UUID) (*WidgetLayout, error) {
-	query := `SELECT id, user_id, layout, created_at, updated_at
-		FROM dashboard_widgets WHERE user_id = $1`
+	query, args, err := psql.Select("id", "user_id", "layout", "created_at", "updated_at").
+		From("dashboard_widgets").
+		Where(sq.Eq{"user_id": userID}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build widget layout query: %w", err)
+	}
 
 	var w WidgetLayout
-	err := s.pgPool.QueryRow(ctx, query, userID).Scan(
+	err = s.pgPool.QueryRow(ctx, query, args...).Scan(
 		&w.ID, &w.UserID, &w.Layout, &w.CreatedAt, &w.UpdatedAt,
 	)
 	if err != nil {
@@ -487,13 +520,17 @@ func (s *Service) GetWidgetLayout(ctx context.Context, userID uuid.UUID) (*Widge
 
 // SaveWidgetLayout upserts the widget layout for a specific user.
 func (s *Service) SaveWidgetLayout(ctx context.Context, userID uuid.UUID, layout json.RawMessage) (*WidgetLayout, error) {
-	query := `INSERT INTO dashboard_widgets (user_id, layout)
-		VALUES ($1, $2)
-		ON CONFLICT (user_id) DO UPDATE SET layout = EXCLUDED.layout, updated_at = NOW()
-		RETURNING id, user_id, layout, created_at, updated_at`
+	query, args, err := psql.Insert("dashboard_widgets").
+		Columns("user_id", "layout").
+		Values(userID, layout).
+		Suffix("ON CONFLICT (user_id) DO UPDATE SET layout = EXCLUDED.layout, updated_at = NOW() RETURNING id, user_id, layout, created_at, updated_at").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build upsert widget layout query: %w", err)
+	}
 
 	var w WidgetLayout
-	err := s.pgPool.QueryRow(ctx, query, userID, layout).Scan(
+	err = s.pgPool.QueryRow(ctx, query, args...).Scan(
 		&w.ID, &w.UserID, &w.Layout, &w.CreatedAt, &w.UpdatedAt,
 	)
 	if err != nil {
@@ -504,6 +541,7 @@ func (s *Service) SaveWidgetLayout(ctx context.Context, userID uuid.UUID, layout
 
 // GetAlarmTypePie returns alarm counts grouped by alarm_type.
 func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, error) {
+	// Complex aggregation with COALESCE/NULLIF and GROUP BY alias — raw SQL preferred over Squirrel for readability
 	query := `SELECT
 			COALESCE(NULLIF(alarm_type, ''), '其他告警') AS atype,
 			COUNT(*) AS cnt
@@ -544,12 +582,18 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		result[name] = []KPITimeSeriesEntry{}
 	}
 
-	query := `SELECT kpi_name, time, kpi_value
-		FROM kpi_values
-		WHERE kpi_name = ANY($1) AND time >= $2 AND time <= $3
-		ORDER BY kpi_name, time ASC`
+	query, args, err := psql.Select("kpi_name", "time", "kpi_value").
+		From("kpi_values").
+		Where("kpi_name = ANY(?)", kpiNames).
+		Where(sq.GtOrEq{"time": startTime}).
+		Where(sq.LtOrEq{"time": endTime}).
+		OrderBy("kpi_name", "time ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build kpi time series query: %w", err)
+	}
 
-	rows, err := s.pgPool.Query(ctx, query, kpiNames, startTime, endTime)
+	rows, err := s.pgPool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query kpi time series: %w", err)
 	}

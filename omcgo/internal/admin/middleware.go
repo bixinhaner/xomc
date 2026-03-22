@@ -1,8 +1,10 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -223,9 +225,13 @@ func AuditLogger(auditRepo AuditRepository) gin.HandlerFunc {
 			UserAgent: c.Request.UserAgent(),
 		}
 
-		// Fire and forget — audit logging should not block the response
+		// Fire and forget — audit logging should not block the response.
+		// Use context.Background() because the request context will be
+		// canceled after the handler returns.
 		go func() {
-			_ = auditRepo.Create(c.Request.Context(), log)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = auditRepo.Create(ctx, log)
 		}()
 	}
 }
