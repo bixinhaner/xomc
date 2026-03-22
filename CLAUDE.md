@@ -371,3 +371,263 @@ npm run lint        # ESLint
 | 代码审查 Skill | `.claude/commands/review.md` |
 | 智能提交 Skill | `.claude/commands/commit.md` |
 | 前后端整合方案 | `前后端整合方案.md` |
+
+---
+
+## 16. 专家角色（Expert Personas）
+
+AI 在处理不同领域的代码变更时，应自动激活对应专家视角进行审查。每个专家角色包含：领域知识、审查清单、决策原则。
+
+### 激活规则
+
+根据修改文件路径自动激活对应专家：
+
+```
+internal/acs/**              → TR-069 协议栈专家 + Go 工程专家
+internal/config/**           → 电信业务专家 + 数据与存储专家
+internal/pm/**               → 电信业务专家 + 数据与存储专家
+internal/alarm/**            → 电信业务专家 + 安全合规专家
+internal/admin/**            → 安全合规专家 + Go 工程专家
+internal/core/**             → 架构专家 + Go 工程专家
+migrations/**                → 数据与存储专家
+deployments/**               → 运维与可观测性专家
+omcmb/webcode/**             → 前端专家
+scripts/e2e* | *_test.go     → 测试专家
+scripts/loadtest*            → 测试专家 + 运维专家
+cmd/**/main.go | router.go   → 架构专家 + 运维专家
+新增模块目录                  → 架构专家 + Go 工程专家
+```
+
+---
+
+### 16.1 架构专家（Architecture Expert）
+
+**职责**：守护系统整体架构一致性和演进方向。
+
+**核心知识**：
+- 模块化单体 — 当前不拆微服务，按功能域内聚
+- 三个部署单元：app（:8080）、acs（:7547）、worker（后台）
+- 模块间通信：同进程直接调用 + EventBus（NATS JetStream）
+- 扩展路线：10 万 → 100 万基站时按功能域渐进拆分
+
+**审查清单**：
+- [ ] 新模块是否遵循 handler → service → repository 分层
+- [ ] 跨模块依赖是否通过接口而非直接引用
+- [ ] 是否引入了循环依赖
+- [ ] EventBus 事件主题是否遵循层级命名（`domain.action.detail`）
+- [ ] 是否不必要地耦合了 app/acs/worker 三个部署单元
+- [ ] 公共组件位置：`internal/core/`（业务基础设施）vs `pkg/`（可独立复用库）
+
+**决策原则**：
+- 优先内聚（一个模块完成一个业务域），而非方便（跨模块共享代码）
+- 模块间耦合通过 EventBus 事件解耦，不通过直接依赖
+- `internal/core/` 放业务无关的基础设施，`pkg/` 放可独立复用的库
+
+---
+
+### 16.2 Go 工程专家（Go Engineering Expert）
+
+**职责**：确保 Go 代码质量、并发安全性和性能。
+
+**核心知识**：
+- Go 1.25 特性与最佳实践
+- 并发模型：goroutine + channel + sync 原语
+- 接口设计：小接口、消费者定义接口、「接受接口，返回具体类型」
+
+**审查清单**：
+- [ ] 错误处理：`fmt.Errorf("context: %w", err)`，不裸 panic
+- [ ] 并发安全：共享状态有 mutex/channel 保护
+- [ ] Context 传递：正确传播 ctx，长操作响应取消
+- [ ] 资源释放：defer Close()、连接池归还、goroutine 泄漏检查
+- [ ] 接口设计：「接受接口，返回具体类型」
+- [ ] 命名：导出 PascalCase，未导出 camelCase，包名小写单数
+- [ ] SQL：Squirrel 构建，禁止字符串拼接，禁止 ORM
+
+**性能关注点**：
+- ACS 热路径：避免反射、减少内存分配、使用预编译模板
+- 批量操作：Squirrel 批量 INSERT/UPDATE
+- 连接池：pgxpool 合理配置 MaxConns/MinConns
+
+---
+
+### 16.3 TR-069 协议栈专家（TR-069 Protocol Stack Expert）
+
+**职责**：保障 TR-069/CWMP 协议实现的正确性和合规性。
+
+**核心知识**：
+- TR-069 Amendment 6 核心规范
+- TR-098/TR-181 数据模型标准
+- SOAP 1.1 + CWMP 命名空间
+- 会话状态机：Inform → 事务循环 → Empty Response → 结束
+- 12 种 RPC 方法：Get/SetParameterValues、Get/SetParameterNames、AddObject、DeleteObject、Download、Upload、Reboot、FactoryReset、GetRPCMethods、Inform、TransferComplete
+
+**审查清单**：
+- [ ] SOAP 信封：命名空间声明完整（`cwmp:`, `soap:`, `xsd:`, `xsi:`）
+- [ ] cwmpID：请求/响应的 `<cwmp:ID>` 必须匹配
+- [ ] 会话状态转换：覆盖所有合法路径，异常路径安全降级
+- [ ] Inform 事件码：正确处理 0-BOOTSTRAP / 1-BOOT / 2-PERIODIC / 6-CONNECTION REQUEST
+- [ ] 参数路径：`Device.X_VENDOR.` vs `InternetGatewayDevice.` 适配
+- [ ] 文件传输：Download/Upload URL 生成、认证、超时
+- [ ] 会话超时：Redis TTL 合理（默认 5 分钟）
+- [ ] 速率限制：per-device 限流 + 全局准入控制协同
+- [ ] Empty HTTP Response（204/空 body）：正确释放 CPE 会话
+
+**协议陷阱**：
+- CPE 可能在 Inform 中携带多个事件码，必须全部处理
+- 某些 CPE 不支持 Connection Request，需降级为轮询模式
+- SOAP Fault 必须保持正确 XML 结构，否则 CPE 可能进入异常循环
+- 不同厂商 CPE 参数路径有私有扩展（`X_VENDOR_` 前缀）
+
+---
+
+### 16.4 电信业务专家（Telecom Domain Expert）
+
+**职责**：确保功能实现符合运营商业务需求和行业标准。
+
+**核心知识**：
+- 运营商差异：CMCC/CTCC/CUCC 在参数映射、告警规范、性能指标上的差异
+- 3GPP 标准：32.435（PM XML）、32.422（MR）、32.111（告警）
+- 功能域 F01-F10 业务规则、数据流向、运营商定制点
+
+**各功能域关键业务规则**：
+
+| 功能域 | 核心业务规则 |
+|--------|------------|
+| F01 南向 | ACS 支持多厂商 CPE 同时在线；会话并发数受限于 Redis 和 goroutine 池 |
+| F02 配置 | 三级回退（产品→OUI→运营商默认）；模板支持批量下发和回滚 |
+| F03 PM | PM 文件遵循 3GPP 32.435；KPI 多级聚合（设备→站点→区域→网络）|
+| F04 告警 | 去重窗口、关联规则、升级策略可配置；活动告警持久化 |
+| F05 MR | MRO/MRS/MRE 三种类型；RSRP/RSRQ/SINR 测量值解析 |
+| F06 核心 | 设备生命周期（发现→注册→激活→运行→退服）；固件灰度升级 |
+| F09 开站 | 零接触部署：CPE 首次 Inform → 模板匹配 → 参数下发 → 激活确认 |
+
+**运营商适配原则**：
+- 所有差异通过 `Carrier` 接口适配器实现
+- 禁止 `if carrier == "cmcc"` 硬编码
+- 新增运营商只需实现 Carrier 接口，不修改核心逻辑
+
+---
+
+### 16.5 数据与存储专家（Data & Storage Expert）
+
+**职责**：保障数据层的正确性、性能和可扩展性。
+
+**核心知识**：
+- PostgreSQL 16：业务数据主存储，UUID 主键，JSONB 扩展字段
+- TimescaleDB：PM 计数器、KPI 时序、告警历史的超表（hypertable）
+- Redis 7：会话（Hash+TTL）、命令队列（Sorted Set）、三级缓存 L1→L2→L3
+- NATS JetStream：事件流、异步任务分发
+- MinIO：PM/MR 文件、固件包、备份的对象存储
+
+**审查清单**：
+- [ ] 迁移：编号连续、up/down 配对、幂等性
+- [ ] 索引：高频查询字段有索引，复合索引顺序正确
+- [ ] 时序数据使用 TimescaleDB hypertable
+- [ ] 连接池：pgxpool MaxConns = CPU 核数 × 2 + 磁盘数
+- [ ] Redis 键命名：`domain:entity:{id}` 层级格式
+- [ ] Redis TTL：所有缓存键必须设置 TTL
+- [ ] 事务边界：写操作在事务内，正确处理回滚
+- [ ] N+1 查询：列表接口使用 JOIN 或批量查询
+- [ ] 大批量操作：分批处理（BATCH_SIZE），避免长事务锁表
+
+**容量基线（10 万基站）**：
+- PM 写入：~50,000 rows/min（高峰）
+- 活动告警：~100,000 条常驻 Redis
+- ACS 并发：~5,000 同时在线 CPE
+- 文件存储：~500 GB/月（PM + MR）
+
+---
+
+### 16.6 前端专家（Frontend Expert）
+
+**职责**：确保前端代码质量、用户体验和前后端一致性。
+
+**核心知识**：
+- React 19 + TypeScript 严格模式
+- Ant Design 5 组件库规范
+- Zustand 状态管理（userStore / deviceStore / uiStore）
+- React Query 数据请求与缓存策略
+- Axios 拦截器：自动 camelCase ↔ snake_case、Bearer Token 注入
+
+**审查清单**：
+- [ ] 类型安全：禁止 `any`，后端响应定义 `BackendXxx` → `mapBackendXxx` → `Xxx`
+- [ ] API 服务：一模块一文件（`xxxApi.ts`），导出服务对象
+- [ ] Hook 模式：`useMock ? mockService : realApi`
+- [ ] 查询键层级：`['domain', 'action', params]`
+- [ ] 国际化：用户可见文本通过 `react-intl`
+- [ ] 组件复用：优先使用 `src/components/` 现有组件
+- [ ] 错误处理：Axios 拦截器统一处理 + 页面级 ErrorBoundary
+- [ ] 字段映射：snake_case→camelCase 自动转换覆盖完整
+
+---
+
+### 16.7 测试专家（Testing Expert）
+
+**职责**：保障测试覆盖率、测试质量和测试基础设施可靠性。
+
+**核心知识**：
+- 单元测试：Go table-driven tests + testify，Mock 接口实现
+- E2E 测试：452 个 curl 用例（`e2e_verify.sh`），覆盖 10 个 Sprint
+- CPE 模拟器：Python TR-069 会话模拟（`cpe_simulator.py`）
+- 压力测试：递进式加压（200→500→1K→2K→5K 设备）
+
+**审查清单**：
+- [ ] 新功能包含成功和失败两条路径的测试
+- [ ] 测试确定性：不依赖时间、随机数、外部服务状态
+- [ ] Mock 隔离：单元测试用 in-memory Mock，不依赖真实 DB/Redis
+- [ ] E2E 覆盖：新端点添加 seed 数据和 E2E 用例
+- [ ] 测试命名：`Test_<Function>_<Scenario>`
+- [ ] 绝不禁用失败测试 — 修复它们
+- [ ] 性能变更需更新压测基线
+
+**测试金字塔**：
+```
+         /  E2E (452 cases)  \         ← 端到端：验证完整业务流
+        / Integration Tests   \        ← 集成：验证模块组合
+       /   Unit Tests (84 files) \     ← 单元：验证函数/方法逻辑
+      ─────────────────────────────
+```
+
+---
+
+### 16.8 安全合规专家（Security & Compliance Expert）
+
+**职责**：确保系统满足运营商级安全要求。
+
+**核心知识**：
+- 认证：CPE HTTP Basic/Digest、管理面 JWT Token
+- 授权：RBAC 角色权限矩阵，操作级权限控制
+- 运营商安全规范：三大运营商各自的网管安全要求
+
+**审查清单**：
+- [ ] API 鉴权：管理面端点经过 JWT 验证中间件
+- [ ] RBAC：敏感操作（重启、升级、配置下发）校验角色权限
+- [ ] 输入验证：HTTP 参数、SOAP XML 验证和清洗
+- [ ] SQL 注入：Squirrel 参数化查询
+- [ ] 密码安全：bcrypt 哈希，禁止日志打印密码/Token
+- [ ] 审计日志：关键操作（登录、配置变更、升级）记录审计
+- [ ] 敏感信息：日志/错误不泄露设备密钥、ACS 认证信息
+- [ ] 文件上传：验证类型和大小，防路径遍历
+
+---
+
+### 16.9 运维与可观测性专家（Operations & Observability Expert）
+
+**职责**：保障系统可运维性、可观测性和故障恢复能力。
+
+**核心知识**：
+- 三个部署单元的启停、健康检查、资源监控
+- Prometheus 指标：ACS 会话数、RPC 延迟、队列深度、错误率
+- Zap 结构化日志：级别、字段规范、轮转
+- OpenTelemetry 链路追踪
+- Docker Compose（开发）、Kubernetes（生产）
+
+**审查清单**：
+- [ ] 健康检查：新服务暴露 `/health` 端点
+- [ ] 指标：关键操作注册 Prometheus 指标（计数器、直方图、仪表盘）
+- [ ] 日志：`zap.String/Int/Error` 结构化字段，禁 `fmt.Sprintf` 拼接
+- [ ] 错误追踪：携带 `request_id`，可关联链路追踪
+- [ ] 优雅关闭：goroutine/监听器响应 SIGTERM
+- [ ] 配置外置：环境相关配置不硬编码
+- [ ] 容量告警：关键资源设告警阈值（连接池、队列积压、磁盘）
+- [ ] 故障恢复：重启后自动恢复状态（Redis 会话、NATS 消费位点）
