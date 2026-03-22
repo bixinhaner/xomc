@@ -66,6 +66,5 @@ log:
     max_backups: 3
     compress: true
     local_time: true
-    rotate_interval: "5m" # 每 5 分钟轮转一次
 
 request_id_prefix: "worker"
