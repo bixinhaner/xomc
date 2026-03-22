@@ -308,16 +308,16 @@
 | 8 | JWT Secret 启动校验非默认值 | 安全 | ✅ 已修复 — validateJWTSecret() 校验长度/非默认值，生产模式启动失败则退出 |
 | 9 | 前端添加 Vitest 配置 + 关键 Hook 测试 | 前端 | ✅ 已修复 — Vitest + jsdom + @testing-library，12 个测试用例全部通过 |
 
-### P2 — 中优先级（本 Sprint 完成）
+### P2 — 中优先级（本 Sprint 完成） ✅ 已全部修复
 
-| # | 问题 | 模块 | 工作量 |
-|---|------|------|--------|
-| 10 | 动态 ORDER BY 添加白名单校验 | 数据库 | 2h |
-| 11 | Dashboard 硬编码 SQL 迁移到 Squirrel | 数据库 | 2h |
-| 12 | i18n 硬编码字符串覆盖（~12-15 文件） | 前端 | 4h |
-| 13 | HTTP 安全响应头中间件 | 安全 | 1h |
-| 14 | 生产启用 TLS | 运维 | 2h |
-| 15 | 审计日志 context 改用 shutdown-aware | 后端 | 30min |
+| # | 问题 | 模块 | 状态 |
+|---|------|------|------|
+| 10 | 动态 ORDER BY 添加白名单校验 | 数据库 | ✅ 已修复 — pm/counter 和 device 两个 repository 添加 allowedSortColumns 白名单 |
+| 11 | Dashboard 硬编码 SQL 迁移到 Squirrel | 数据库 | ✅ 已修复 — 5 个简单查询+1 个 INSERT 迁移到 Squirrel，2 个复杂聚合保留原生 SQL 并加注释 |
+| 12 | i18n 硬编码字符串覆盖（~12-15 文件） | 前端 | ✅ 已修复 — 5 个页面组件 ~200 处硬编码字符串替换为 t() 调用，新增 ~90 个 i18n 键 |
+| 13 | HTTP 安全响应头中间件 | 安全 | ✅ 已修复 — SecurityHeaders 中间件设置 6 个安全头 + HSTS，已注册到 router |
+| 14 | 生产启用 TLS | 运维 | ✅ 已修复（P0 阶段，config.prod.yaml 已启用 TLS + 环境变量注入证书路径） |
+| 15 | 审计日志 context 改用 shutdown-aware | 后端 | ✅ 已修复 — goroutine 改用 context.WithTimeout(context.Background(), 5s) |
 
 ### P3 — 低优先级（后续迭代）
 
