@@ -176,7 +176,7 @@ func newTimeBasedRotator(path string, cfg appconfig.RotationConfig) io.Writer {
 func newSizeBasedRotator(path string, cfg appconfig.RotationConfig) io.Writer {
 	maxSize := cfg.MaxSizeMB
 	if maxSize <= 0 {
-		maxSize = 20 // default 20MB
+		maxSize = 5 // default 5MB
 	}
 
 	maxAge := cfg.MaxAgeDays
@@ -186,7 +186,7 @@ func newSizeBasedRotator(path string, cfg appconfig.RotationConfig) io.Writer {
 
 	maxBackups := cfg.MaxBackups
 	if maxBackups <= 0 {
-		maxBackups = 100 // default 100 files
+		maxBackups = 20 // default 20 files
 	}
 
 	return &lumberjack.Logger{
