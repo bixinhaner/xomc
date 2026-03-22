@@ -101,10 +101,17 @@ func (s *DiscoveryService) StartDiscovery(ctx context.Context, dev *model.Device
 func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model.Device,
 	paramInfos []tr069.ParameterInfoStruct) (*datamodel.DataModel, error) {
 
-	// Get the latest discovery log for this device.
+	// Get the latest discovery log for this device (may not exist for manual triggers).
 	log, err := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if err != nil {
-		return nil, fmt.Errorf("get discovery log: %w", err)
+		// No discovery log found — this is a manual trigger. Create one on-the-fly.
+		log = NewParameterDiscoveryLog(dev.ID, dev.SerialNumber, dev.OUI, dev.ProductClass, dev.FirmwareVersion)
+		log.Status = DiscoveryDiscovering
+		if createErr := s.discoveryRepo.Create(ctx, log); createErr != nil {
+			s.logger.Warn("create discovery log for manual trigger", zap.Error(createErr))
+			// Continue without log — don't fail the discovery.
+			log = nil
+		}
 	}
 
 	// Check if a matching DataModel was created by another concurrent device.
@@ -114,10 +121,12 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		return nil, fmt.Errorf("check existing data model: %w", err)
 	}
 	if existingDM != nil {
-		log.DataModelID = &existingDM.ID
-		log.ParameterCount = len(paramInfos)
-		log.Status = DiscoveryCompleted
-		_ = s.discoveryRepo.Update(ctx, log)
+		if log != nil {
+			log.DataModelID = &existingDM.ID
+			log.ParameterCount = len(paramInfos)
+			log.Status = DiscoveryCompleted
+			_ = s.discoveryRepo.Update(ctx, log)
+		}
 		s.logger.Info("data model already exists, skipping creation",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("model_id", existingDM.ID.String()),
@@ -128,9 +137,11 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 	// Build parameter tree from GPN response.
 	paramTree, err := buildParameterTree(paramInfos)
 	if err != nil {
-		log.Status = DiscoveryFailed
-		log.ErrorMessage = err.Error()
-		_ = s.discoveryRepo.Update(ctx, log)
+		if log != nil {
+			log.Status = DiscoveryFailed
+			log.ErrorMessage = err.Error()
+			_ = s.discoveryRepo.Update(ctx, log)
+		}
 		return nil, fmt.Errorf("build parameter tree: %w", err)
 	}
 
@@ -148,8 +159,8 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		RootObject:      detectRootObject(paramInfos),
 		ParameterTree:   paramTree,
 		SourceType:      datamodel.SourceAutoDiscovered,
-		Source:          fmt.Sprintf("auto-discovery from device %s", dev.SerialNumber),
-		Description:     fmt.Sprintf("自动发现: %s %s (FW: %s)", dev.OUI, dev.ProductClass, dev.FirmwareVersion),
+		Source:          "auto_discovered",
+		Description:     fmt.Sprintf("自动发现: %s %s (FW: %s) from %s", dev.OUI, dev.ProductClass, dev.FirmwareVersion, dev.SerialNumber),
 	}
 
 	if s.config.AutoActivateModel {
@@ -158,20 +169,24 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 	}
 
 	if err := s.dmRepo.Create(ctx, dm); err != nil {
-		log.Status = DiscoveryFailed
-		log.ErrorMessage = err.Error()
-		_ = s.discoveryRepo.Update(ctx, log)
+		if log != nil {
+			log.Status = DiscoveryFailed
+			log.ErrorMessage = err.Error()
+			_ = s.discoveryRepo.Update(ctx, log)
+		}
 		return nil, fmt.Errorf("create data model: %w", err)
 	}
 
 	// Update discovery log.
-	log.DataModelID = &dm.ID
-	log.ParameterCount = len(paramInfos)
-	log.Status = DiscoveryCompleted
-	if err := s.discoveryRepo.Update(ctx, log); err != nil {
-		s.logger.Warn("update discovery log after model creation",
-			zap.Error(err),
-		)
+	if log != nil {
+		log.DataModelID = &dm.ID
+		log.ParameterCount = len(paramInfos)
+		log.Status = DiscoveryCompleted
+		if err := s.discoveryRepo.Update(ctx, log); err != nil {
+			s.logger.Warn("update discovery log after model creation",
+				zap.Error(err),
+			)
+		}
 	}
 
 	// Invalidate cache so new model is discoverable.
