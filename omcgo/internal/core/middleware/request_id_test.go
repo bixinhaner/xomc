@@ -196,7 +196,7 @@ func TestGenerateRequestIDWithPrefix_Format(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.prefix, func(t *testing.T) {
-			id := generateRequestIDWithPrefix(tt.prefix)
+			id := GenerateRequestIDWithPrefix(tt.prefix)
 			assert.Regexp(t, regexp.MustCompile(tt.pattern), id)
 		})
 	}

@@ -47,7 +47,7 @@ func RequestIDWithConfig(cfg RequestIDConfig) gin.HandlerFunc {
 
 		// 2. Generate new ID if not present
 		if requestID == "" {
-			requestID = generateRequestIDWithPrefix(prefix)
+			requestID = GenerateRequestIDWithPrefix(prefix)
 		}
 
 		// 3. Store in Go context for logger
@@ -64,10 +64,10 @@ func RequestIDWithConfig(cfg RequestIDConfig) gin.HandlerFunc {
 	}
 }
 
-// generateRequestIDWithPrefix generates a unique request ID with a custom prefix.
+// GenerateRequestIDWithPrefix generates a unique request ID with a custom prefix.
 // Format: {prefix}-{timestamp}-{random}
 // Example: app-20260319150430-a1b2c3d4
-func generateRequestIDWithPrefix(prefix string) string {
+func GenerateRequestIDWithPrefix(prefix string) string {
 	timestamp := time.Now().Format("20060102150405")
 	random := make([]byte, 4)
 	rand.Read(random)

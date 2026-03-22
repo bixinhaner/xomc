@@ -19,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/task"
@@ -28,8 +29,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// RequestIDHeader is the header key for request ID
-const RequestIDHeader = "X-Request-ID"
 
 // SessionCookieName is the cookie name for TR069 session ID
 const SessionCookieName = "SESSION"
@@ -89,13 +88,13 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Generate or propagate Request ID
-	requestID := r.Header.Get(RequestIDHeader)
+	requestID := r.Header.Get(middleware.RequestIDHeader)
 	if requestID == "" {
 		prefix := h.requestIDPrefix
 		if prefix == "" {
 			prefix = "acs" // default prefix
 		}
-		requestID = generateRequestIDWithPrefix(prefix)
+		requestID = middleware.GenerateRequestIDWithPrefix(prefix)
 	}
 
 	// Store Request ID in context for logger and downstream services
@@ -103,7 +102,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	// Set Request ID in response header for client correlation
-	w.Header().Set(RequestIDHeader, requestID)
+	w.Header().Set(middleware.RequestIDHeader, requestID)
 
 	// Create context-aware logger with request_id
 	log := logger.L(ctx)
@@ -948,15 +947,6 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// generateRequestIDWithPrefix generates a unique request ID with a custom prefix.
-// Format: {prefix}-{timestamp}-{random}
-// Example: acs-20260319150430-a1b2c3d4
-func generateRequestIDWithPrefix(prefix string) string {
-	timestamp := time.Now().Format("20060102150405")
-	random := make([]byte, 4)
-	cryptorand.Read(random)
-	return prefix + "-" + timestamp + "-" + hex.EncodeToString(random)
-}
 
 // generateSessionID generates a UUID-based session ID for Cookie.
 func generateSessionID() string {
