@@ -1,5 +1,6 @@
 # PID 文件
 *.pid
 
-# 日志目录
-logs/
+# 日志文件（保留目录结构）
+logs/*.log
+logs/**/*.log
