@@ -296,17 +296,17 @@
 | 1 | 生产配置含开发凭据（DB/JWT/MinIO） | 运维 | ✅ 已修复 — 三个部署单元 config.prod.yaml 全部改为环境变量注入，启用 TLS/SSL |
 | 2 | 缺失 `000047_seed_data_models.down.sql` | 数据库 | ✅ 已修复 — 创建 down 迁移，按 ID 删除 6 条种子记录 |
 
-### P1 — 高优先级（本周完成）
+### P1 — 高优先级（本周完成） ✅ 已全部修复
 
-| # | 问题 | 模块 | 工作量 |
-|---|------|------|--------|
-| 3 | 31+ 处裸 `return err` 需包装上下文 | 后端 | 3h |
-| 4 | 6 处 JSON Marshal/Unmarshal 错误被忽略 | 后端 | 1h |
-| 5 | PostgreSQL `sslmode=require` 生产启用 | 安全 | 30min |
-| 6 | ACS 生产认证模式改为 `digest`/`basic` | 安全 | 30min |
-| 7 | 登录端点添加速率限制 | 安全 | 2h |
-| 8 | JWT Secret 启动校验非默认值 | 安全 | 1h |
-| 9 | 前端添加 Vitest 配置 + 关键 Hook 测试 | 前端 | 1-2d |
+| # | 问题 | 模块 | 状态 |
+|---|------|------|------|
+| 3 | 31+ 处裸 `return err` 需包装上下文 | 后端 | ✅ 已修复 — 6 个文件 33 处错误全部包装 fmt.Errorf 上下文 |
+| 4 | 6 处 JSON Marshal/Unmarshal 错误被忽略 | 后端 | ✅ 已修复 — orchestrator/mml/device 三模块 25+ 处 JSON 错误均正确处理 |
+| 5 | PostgreSQL `sslmode=require` 生产启用 | 安全 | ✅ 已修复（P0 阶段，DSN 改为环境变量，示例含 sslmode=require） |
+| 6 | ACS 生产认证模式改为 `digest`/`basic` | 安全 | ✅ 已修复（P0 阶段，config.prod.yaml auth.mode 改为 digest） |
+| 7 | 登录端点添加速率限制 | 安全 | ✅ 已修复 — per-IP 内存限流器 5 次/分钟，超限返回 429 |
+| 8 | JWT Secret 启动校验非默认值 | 安全 | ✅ 已修复 — validateJWTSecret() 校验长度/非默认值，生产模式启动失败则退出 |
+| 9 | 前端添加 Vitest 配置 + 关键 Hook 测试 | 前端 | ✅ 已修复 — Vitest + jsdom + @testing-library，12 个测试用例全部通过 |
 
 ### P2 — 中优先级（本 Sprint 完成）
 
