@@ -319,15 +319,15 @@
 | 14 | 生产启用 TLS | 运维 | ✅ 已修复（P0 阶段，config.prod.yaml 已启用 TLS + 环境变量注入证书路径） |
 | 15 | 审计日志 context 改用 shutdown-aware | 后端 | ✅ 已修复 — goroutine 改用 context.WithTimeout(context.Background(), 5s) |
 
-### P3 — 低优先级（后续迭代）
+### P3 — 低优先级（后续迭代） ✅ 已全部修复
 
-| # | 问题 | 模块 | 工作量 |
-|---|------|------|--------|
-| 16 | `topologyApi.ts` 中 1 个 `any` 类型 | 前端 | 15min |
-| 17 | ACS 请求 ID 中间件统一 | 运维 | 1h |
-| 18 | 15 个后端模块补充单元测试 | 测试 | 3-5d |
-| 19 | 代码覆盖率报告集成 CI | 测试 | 2h |
-| 20 | 迁移编号间断文档说明 | 文档 | 15min |
+| # | 问题 | 模块 | 状态 |
+|---|------|------|------|
+| 16 | `topologyApi.ts` 中 1 个 `any` 类型 | 前端 | ✅ 已修复 — topologyApi 3 处 + reportsApi 1 处 any 全部替换为具体类型 |
+| 17 | ACS 请求 ID 中间件统一 | 运维 | ✅ 已修复 — 导出 GenerateRequestIDWithPrefix，ACS handler 删除重复函数改为调用 middleware |
+| 18 | 15 个后端模块补充单元测试 | 测试 | ✅ 已修复 — 新增 9 个测试文件 75+ 测试用例，覆盖 cmdqueue/pathutil/connreq/upload/counter/model/admin/global |
+| 19 | 代码覆盖率报告集成 CI | 测试 | ✅ 已修复 — Makefile 已有 test-cover/cover-check，新增 GitHub Actions workflow |
+| 20 | 迁移编号间断文档说明 | 文档 | ✅ 已修复 — 创建 migrations/README.md 说明 000036-000045 间断原因 |
 
 ---
 
