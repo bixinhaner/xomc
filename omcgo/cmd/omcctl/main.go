@@ -7,6 +7,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	flagServer string
+	flagAPIKey string
+	flagOutput string
+)
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "omcctl",
@@ -14,10 +20,15 @@ func main() {
 		Long:  "Command-line tool for managing OMC devices, alarms, PM data, and system operations",
 	}
 
-	rootCmd.PersistentFlags().String("server", "http://localhost:8080", "OMC App server address")
+	rootCmd.PersistentFlags().StringVar(&flagServer, "server", "http://localhost:8080", "OMC App server address")
+	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", os.Getenv("OMCCTL_API_KEY"), "API key for authentication")
+	rootCmd.PersistentFlags().StringVar(&flagOutput, "output", "table", "Output format: table or json")
 
 	rootCmd.AddCommand(
 		newDeviceCmd(),
+		newAlarmCmd(),
+		newPMCmd(),
+		newSystemCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -26,31 +37,6 @@ func main() {
 	}
 }
 
-func newDeviceCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "device",
-		Short: "Device management commands",
-	}
-
-	cmd.AddCommand(
-		&cobra.Command{
-			Use:   "list",
-			Short: "List devices",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				fmt.Println("listing devices...")
-				return nil
-			},
-		},
-		&cobra.Command{
-			Use:   "get [id]",
-			Short: "Get device details",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				fmt.Printf("getting device %s...\n", args[0])
-				return nil
-			},
-		},
-	)
-
-	return cmd
+func getClient() *OMCClient {
+	return NewOMCClient(flagServer, flagAPIKey)
 }
