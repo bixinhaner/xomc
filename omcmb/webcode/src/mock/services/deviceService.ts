@@ -124,4 +124,8 @@ export const deviceService = {
     await delay(80, 150);
     return mockNEs.find((n) => n.sn === sn) ?? null;
   },
+
+  async reboot(_id: string): Promise<void> {
+    await delay(200, 500);
+  },
 };

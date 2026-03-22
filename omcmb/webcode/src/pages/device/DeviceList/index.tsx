@@ -20,7 +20,7 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useDeviceList } from '@/hooks/api/useDevices';
+import { useDeviceList, useBatchRebootDevices } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@/types/device';
 
@@ -113,6 +113,7 @@ export default function DeviceList() {
   );
 
   const { data, isLoading, refetch } = useDeviceList(queryParams);
+  const batchReboot = useBatchRebootDevices();
   const devices: Device[] = data?.items ?? [];
   const total = data?.total ?? 0;
   const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
@@ -233,20 +234,29 @@ export default function DeviceList() {
 
   // 批量操作通用确认弹窗
   const handleBatchAction = useCallback(
-    (actionLabel: string, ids: React.Key[]) => {
+    (actionLabel: string, ids: React.Key[], actionKey?: string) => {
       modal.confirm({
         title: t('common.confirm'),
         content: `${actionLabel} ${ids.length} ${t('device.count.unit')}`,
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
-        onOk: () => {
-          // TODO: 接入对应批量操作 API
-          void message.success(t('common.commandSent'));
+        onOk: async () => {
+          if (actionKey === 'batch-reboot') {
+            try {
+              await batchReboot.mutateAsync(ids.map(String));
+              void message.success(t('common.commandSent'));
+            } catch {
+              void message.error(t('common.operationFailed'));
+            }
+          } else {
+            // TODO: 接入其余批量操作 API（同步、TR069采集、日志采集、重置配置）
+            void message.success(t('common.commandSent'));
+          }
           setSelectedRowKeys([]);
         },
       });
     },
-    [modal, message, t]
+    [modal, message, t, batchReboot]
   );
 
   // 导出 — 直接选择格式后触发
@@ -747,32 +757,32 @@ export default function DeviceList() {
       key: 'batch-sync',
       label: t('common.batchSync'),
       icon: <SyncOutlined />,
-      onClick: (keys) => handleBatchAction(t('common.batchSync'), keys),
+      onClick: (keys) => handleBatchAction(t('common.batchSync'), keys, 'batch-sync'),
     },
     {
       key: 'batch-reboot',
       label: t('common.batchReboot'),
       icon: <ReloadOutlined />,
-      onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys),
+      onClick: (keys) => handleBatchAction(t('common.batchReboot'), keys, 'batch-reboot'),
     },
     {
       key: 'batch-tr069-collect',
       label: t('device.action.tr069Collect'),
       icon: <CloudDownloadOutlined />,
-      onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys),
+      onClick: (keys) => handleBatchAction(t('device.action.tr069Collect'), keys, 'batch-tr069-collect'),
     },
     {
       key: 'batch-log-collect',
       label: t('device.action.logCollect'),
       icon: <FileTextOutlined />,
-      onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys),
+      onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys, 'batch-log-collect'),
     },
     {
       key: 'batch-reset-config',
       label: t('device.action.resetConfig'),
       icon: <ExclamationCircleOutlined />,
       danger: true,
-      onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys),
+      onClick: (keys) => handleBatchAction(t('device.action.resetConfig'), keys, 'batch-reset-config'),
     },
   ], [handleBatchAction, t]);
 

@@ -85,3 +85,29 @@ export function useNEBySn(sn: string) {
     enabled: Boolean(sn),
   });
 }
+
+export function useRebootDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.reboot(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
+  });
+}
+
+export function useBatchRebootDevices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.reboot(id)));
+      const failed = results.filter((r) => r.status === 'rejected');
+      if (failed.length > 0) {
+        throw new Error(`${failed.length}/${ids.length} devices failed to reboot`);
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
+  });
+}
