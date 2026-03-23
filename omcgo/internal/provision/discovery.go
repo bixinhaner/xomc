@@ -247,6 +247,20 @@ func (s *DiscoveryService) finalizeDiscovery(ctx context.Context, dev *model.Dev
 	return s.HandleDiscoveryResult(ctx, dev, allParams)
 }
 
+// CleanupState removes Redis tracking keys for an in-progress discovery.
+// Called when a device reconnects and we need to restart discovery from scratch.
+func (s *DiscoveryService) CleanupState(ctx context.Context, deviceSN string) {
+	pendingKey := discoveryPendingKey(deviceSN)
+	paramsKey := discoveryParamsKey(deviceSN)
+	deleted, _ := s.redis.Del(ctx, pendingKey, paramsKey).Result()
+	if deleted > 0 {
+		s.logger.Info("cleaned up stale discovery Redis state",
+			zap.String("device_sn", deviceSN),
+			zap.Int64("keys_deleted", deleted),
+		)
+	}
+}
+
 // isExcludedPath checks if a path should be skipped during discovery.
 func (s *DiscoveryService) isExcludedPath(path string) bool {
 	for _, excluded := range s.config.ExcludePaths {

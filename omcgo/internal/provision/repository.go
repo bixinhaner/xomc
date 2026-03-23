@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,4 +16,7 @@ type ProvisioningTaskRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
 	List(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
 	CountByStatus(ctx context.Context) (map[ProvisioningState]int64, error)
+	// FailStale marks all non-terminal tasks older than maxAge as failed.
+	// Returns the number of tasks affected.
+	FailStale(ctx context.Context, maxAge time.Duration) (int64, error)
 }

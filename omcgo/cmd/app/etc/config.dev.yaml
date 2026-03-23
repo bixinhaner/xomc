@@ -79,6 +79,7 @@ ne_direct:
 
 provision:
   enabled: true
+  task_timeout: 15m
   auto_discovery:
     enabled: true
     max_concurrent: 10

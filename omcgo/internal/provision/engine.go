@@ -136,15 +136,23 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		zap.String("device_id", evt.DeviceID.String()),
 	)
 
-	// 0. Deduplication: skip if there is already an active (non-terminal) task for this device.
+	// 0. Reset-on-BOOT: if there is an existing non-terminal task, fail it and start fresh.
+	// This handles the case where a device went offline mid-provisioning and reconnected.
+	// The stale task would otherwise block new provisioning until the reaper cleans it up.
 	existingTask, _ := e.taskRepo.GetByDeviceID(ctx, evt.DeviceID)
 	if existingTask != nil && !IsTerminal(existingTask.Status) {
-		e.logger.Info("provisioning skipped: active task already exists",
+		e.logger.Warn("cancelling stale provisioning task for reconnected device",
 			zap.String("device_sn", evt.SerialNumber),
 			zap.String("existing_task_id", existingTask.ID.String()),
 			zap.String("existing_status", string(existingTask.Status)),
+			zap.Duration("task_age", time.Since(existingTask.CreatedAt)),
 		)
-		return nil
+		_ = e.failTask(ctx, existingTask,
+			fmt.Errorf("device reconnected with BOOT, cancelling stale task in state %s", existingTask.Status))
+		// Clean up residual discovery Redis state (pending counter + accumulated params).
+		if e.discoveryService != nil {
+			e.discoveryService.CleanupState(ctx, evt.SerialNumber)
+		}
 	}
 
 	// 1. Create provisioning task.
@@ -560,4 +568,41 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 	}
 
 	return nil
+}
+
+// StartTaskReaper launches a background goroutine that periodically fails
+// provisioning tasks stuck in non-terminal states beyond the configured timeout.
+// This prevents stale tasks from permanently blocking new provisioning for a device.
+func (e *ProvisioningEngine) StartTaskReaper() {
+	timeout := e.config.TaskTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Minute
+	}
+	// Scan interval = half the timeout, so stale tasks are caught reasonably fast.
+	interval := timeout / 2
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+
+	e.logger.Info("provisioning task reaper started",
+		zap.Duration("timeout", timeout),
+		zap.Duration("interval", interval))
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx := context.Background()
+			n, err := e.taskRepo.FailStale(ctx, timeout)
+			if err != nil {
+				e.logger.Error("provisioning task reaper: fail stale tasks", zap.Error(err))
+				continue
+			}
+			if n > 0 {
+				e.logger.Warn("provisioning task reaper: timed out stale tasks",
+					zap.Int64("count", n),
+					zap.Duration("timeout", timeout))
+			}
+		}
+	}()
 }

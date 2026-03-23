@@ -132,6 +132,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	if err := provisionEngine.Subscribe(eventBus); err != nil {
 		logger.Warn("subscribe provisioning engine", zap.Error(err))
 	}
+	provisionEngine.StartTaskReaper()
 
 	// Topology module
 	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)

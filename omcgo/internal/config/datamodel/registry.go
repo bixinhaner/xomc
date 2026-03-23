@@ -272,9 +272,14 @@ func (r *DataModelRegistry) InvalidateCache(ctx context.Context, dm *DataModel) 
 		return fmt.Errorf("invalidate cache: data model is nil")
 	}
 
-	// Invalidate L1: remove the exact key for this model's parameters.
+	// Invalidate L1: remove both key formats (with and without firmware version).
+	// ResolveWithFirmware stores with firmware-specific key; older Resolve uses without.
 	key := localCacheKey(dm.Carrier, dm.Technology, dm.OUI, dm.ProductClass)
 	r.localCache.Delete(key)
+	if dm.FirmwareVersion != "" {
+		keyWithFW := localCacheKeyWithFirmware(dm.Carrier, dm.Technology, dm.OUI, dm.ProductClass, dm.FirmwareVersion)
+		r.localCache.Delete(keyWithFW)
+	}
 
 	// Invalidate L2: remove model content and resolve results from Redis.
 	if r.cache != nil {

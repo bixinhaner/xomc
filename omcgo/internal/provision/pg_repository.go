@@ -245,6 +245,30 @@ func (r *PgProvisioningTaskRepository) CountByStatus(ctx context.Context) (map[P
 	return result, rows.Err()
 }
 
+func (r *PgProvisioningTaskRepository) FailStale(ctx context.Context, maxAge time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-maxAge)
+	query, args, err := psql.Update("provisioning_tasks").
+		Set("status", StateFailed).
+		Set("error_message", fmt.Sprintf("task timed out after %s", maxAge)).
+		Set("completed_at", time.Now()).
+		Set("updated_at", time.Now()).
+		Where(sq.And{
+			sq.NotEq{"status": string(StateCompleted)},
+			sq.NotEq{"status": string(StateFailed)},
+			sq.Lt{"updated_at": cutoff},
+		}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build fail stale tasks SQL: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("fail stale tasks: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // --- Helper functions ---
 
 func nullableString(s string) interface{} {

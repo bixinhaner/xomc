@@ -33,6 +33,7 @@ type mockTaskRepo struct {
 	UpdateStatusFn func(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
 	ListFn         func(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
 	CountByStatusFn func(ctx context.Context) (map[ProvisioningState]int64, error)
+	FailStaleFn    func(ctx context.Context, maxAge time.Duration) (int64, error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *ProvisioningTask) error {
@@ -82,6 +83,13 @@ func (m *mockTaskRepo) CountByStatus(ctx context.Context) (map[ProvisioningState
 		return m.CountByStatusFn(ctx)
 	}
 	return nil, nil
+}
+
+func (m *mockTaskRepo) FailStale(ctx context.Context, maxAge time.Duration) (int64, error) {
+	if m.FailStaleFn != nil {
+		return m.FailStaleFn(ctx, maxAge)
+	}
+	return 0, nil
 }
 
 // ---------------------------------------------------------------------------
