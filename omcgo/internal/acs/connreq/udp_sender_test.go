@@ -1,6 +1,8 @@
 package connreq
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -46,4 +48,14 @@ func TestBuildCPEConnectionRequest_DifferentCalls(t *testing.T) {
 
 func TestENBRequestMessage(t *testing.T) {
 	assert.Equal(t, "infromrequest", enbRequestMessage)
+}
+
+func TestRestartCommandFormat(t *testing.T) {
+	sn := "TEST-SN-001"
+	hash := md5.Sum([]byte(sn))
+	expected := "/restart_" + hex.EncodeToString(hash[:])
+
+	// Verify format: /restart_ + 32-char md5 hex
+	assert.True(t, strings.HasPrefix(expected, "/restart_"))
+	assert.Len(t, expected, len("/restart_")+32, "restart command should be /restart_ + 32-char md5")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -20,6 +21,7 @@ var (
 type Dispatcher struct {
 	httpClient *Client
 	udpSender  *UDPSender
+	metrics    *DispatcherMetrics
 	logger     *zap.Logger
 }
 
@@ -31,6 +33,11 @@ func NewDispatcher(httpClient *Client, udpSender *UDPSender, logger *zap.Logger)
 		udpSender:  udpSender,
 		logger:     logger,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the dispatcher.
+func (d *Dispatcher) SetMetrics(m *DispatcherMetrics) {
+	d.metrics = m
 }
 
 // Send attempts to wake a device via Connection Request.
@@ -48,26 +55,32 @@ func NewDispatcher(httpClient *Client, udpSender *UDPSender, logger *zap.Logger)
 func (d *Dispatcher) Send(ctx context.Context, deviceSN, httpURL, serverAddr string, isENB bool) error {
 	// Try UDP Connection Request first (works through NAT)
 	if d.udpSender != nil {
+		start := time.Now()
 		err := d.udpSender.Send(ctx, deviceSN, serverAddr, isENB)
 		if err == nil {
 			d.logger.Debug("udp connection request sent",
 				zap.String("device_sn", deviceSN))
+			d.recordMetrics("udp", "success", time.Since(start))
 			return nil
 		}
 		if !errors.Is(err, ErrNoSTUNAddress) {
 			d.logger.Warn("udp connection request failed, trying http",
 				zap.String("device_sn", deviceSN),
 				zap.Error(err))
+			d.recordMetrics("udp", "failure", time.Since(start))
 		}
 	}
 
 	// Fall back to HTTP Connection Request
 	if d.httpClient != nil && httpURL != "" {
+		start := time.Now()
 		if err := d.httpClient.Send(ctx, deviceSN, httpURL); err != nil {
+			d.recordMetrics("http", "failure", time.Since(start))
 			return fmt.Errorf("http connection request: %w", err)
 		}
 		d.logger.Debug("http connection request sent",
 			zap.String("device_sn", deviceSN))
+		d.recordMetrics("http", "success", time.Since(start))
 		return nil
 	}
 
@@ -75,4 +88,12 @@ func (d *Dispatcher) Send(ctx context.Context, deviceSN, httpURL, serverAddr str
 	d.logger.Debug("no connection request method available, waiting for periodic inform",
 		zap.String("device_sn", deviceSN))
 	return ErrNoConnectionMethod
+}
+
+func (d *Dispatcher) recordMetrics(method, result string, duration time.Duration) {
+	if d.metrics == nil {
+		return
+	}
+	d.metrics.SentTotal.WithLabelValues(method, result).Inc()
+	d.metrics.DurationSeconds.WithLabelValues(method).Observe(duration.Seconds())
 }

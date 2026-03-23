@@ -19,14 +19,15 @@ import (
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	deviceRepo DeviceRepository
-	paramRepo  DeviceParameterRepository
-	heartbeat  *HeartbeatMonitor
-	eventBus   event.EventBus
-	cmdQueue   CommandQueue
-	connReq    ConnectionRequester
-	metrics    *DeviceMetrics
-	logger     *zap.Logger
+	deviceRepo  DeviceRepository
+	paramRepo   DeviceParameterRepository
+	heartbeat   *HeartbeatMonitor
+	eventBus    event.EventBus
+	cmdQueue    CommandQueue
+	connReq     ConnectionRequester
+	stunUpdater StunAddressUpdater
+	metrics     *DeviceMetrics
+	logger      *zap.Logger
 }
 
 // CommandQueue defines the interface for queuing RPC commands to devices.
@@ -37,6 +38,11 @@ type CommandQueue interface {
 // ConnectionRequester sends Connection Request to wake a CPE device.
 type ConnectionRequester interface {
 	Send(ctx context.Context, deviceSN string, url string) error
+}
+
+// StunAddressUpdater syncs device STUN addresses to the address cache.
+type StunAddressUpdater interface {
+	SetFromInform(ctx context.Context, deviceSN, udpAddr string) error
 }
 
 // NewDeviceService creates a new DeviceService.
@@ -64,6 +70,12 @@ func (s *DeviceService) SetCommandQueue(q CommandQueue) {
 // SetConnectionRequester sets the connection request client.
 func (s *DeviceService) SetConnectionRequester(cr ConnectionRequester) {
 	s.connReq = cr
+}
+
+// SetStunAddressUpdater sets the STUN address updater for syncing
+// UDPConnectionRequestAddress from Inform to the STUN address cache.
+func (s *DeviceService) SetStunAddressUpdater(u StunAddressUpdater) {
+	s.stunUpdater = u
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
@@ -226,22 +238,27 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("technology", string(tech)))
 
 	now := time.Now()
+	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
+
 	device := &model.Device{
-		ID:                   uuid.New(),
-		SerialNumber:         inform.DeviceId.SerialNumber,
-		OUI:                  inform.DeviceId.OUI,
-		ProductClass:         inform.DeviceId.ProductClass,
-		Manufacturer:         inform.DeviceId.Manufacturer,
-		Carrier:              carrier,
-		Technology:           tech,
-		Status:               model.DeviceActive,
-		FirmwareVersion:      findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
-		ConnectionRequestURL: findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
-		LastInformAt:         &now,
-		LastInformEvents:     tr069.EventCodes(inform.Event),
-		InformInterval:       300,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+		ID:                            uuid.New(),
+		SerialNumber:                  inform.DeviceId.SerialNumber,
+		OUI:                           inform.DeviceId.OUI,
+		ProductClass:                  inform.DeviceId.ProductClass,
+		Manufacturer:                  inform.DeviceId.Manufacturer,
+		Carrier:                       carrier,
+		Technology:                    tech,
+		Status:                        model.DeviceActive,
+		FirmwareVersion:               findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
+		ConnectionRequestURL:          findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
+		IPAddress:                     udpAddr,
+		NatDetected:                   udpAddr != "",
+		UDPConnectionRequestAddress:   udpAddr,
+		LastInformAt:                  &now,
+		LastInformEvents:              tr069.EventCodes(inform.Event),
+		InformInterval:                300,
+		CreatedAt:                     now,
+		UpdatedAt:                     now,
 	}
 
 	s.logger.Info("RegisterFromInform: creating device in DB",
@@ -261,6 +278,15 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	s.logger.Info("RegisterFromInform: device created in DB successfully",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber))
+
+	// Sync UDP address to STUN cache
+	if udpAddr != "" && s.stunUpdater != nil {
+		if err := s.stunUpdater.SetFromInform(ctx, device.SerialNumber, udpAddr); err != nil {
+			s.logger.Warn("sync udp address to stun store on register",
+				zap.String("serial_number", device.SerialNumber),
+				zap.Error(err))
+		}
+	}
 
 	// Record registration metric
 	if s.metrics != nil {
@@ -322,9 +348,20 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
 
-	ipAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
-	if ipAddr != "" {
-		device.IPAddress = ipAddr
+	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
+	if udpAddr != "" {
+		device.IPAddress = udpAddr
+		device.UDPConnectionRequestAddress = udpAddr
+		device.NatDetected = true
+
+		// Sync to STUN address cache for UDP Connection Request
+		if s.stunUpdater != nil {
+			if err := s.stunUpdater.SetFromInform(ctx, device.SerialNumber, udpAddr); err != nil {
+				s.logger.Warn("sync udp address to stun store",
+					zap.String("serial_number", device.SerialNumber),
+					zap.Error(err))
+			}
+		}
 	}
 
 	// Auto-transition to active when device informs (it's communicating, so it's online)

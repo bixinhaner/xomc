@@ -20,8 +20,10 @@ type Device struct {
 	Status               DeviceStatus           `json:"status" db:"status"`
 	FirmwareVersion      string                 `json:"firmware_version" db:"firmware_version"`
 	IPAddress            string                 `json:"ip_address" db:"ip_address"`
-	ConnectionRequestURL string                 `json:"connection_request_url" db:"connection_request_url"`
-	LastInformAt         *time.Time             `json:"last_inform_at,omitempty" db:"last_inform_at"`
+	ConnectionRequestURL          string         `json:"connection_request_url" db:"connection_request_url"`
+	NatDetected                   bool           `json:"nat_detected" db:"nat_detected"`
+	UDPConnectionRequestAddress   string         `json:"udp_connection_request_address,omitempty" db:"udp_connection_request_address"`
+	LastInformAt                  *time.Time     `json:"last_inform_at,omitempty" db:"last_inform_at"`
 	LastInformEvents     []string               `json:"last_inform_events,omitempty" db:"last_inform_events"`
 	InformInterval       int                    `json:"inform_interval" db:"inform_interval"`
 	SiteName             string                 `json:"site_name" db:"site_name"`

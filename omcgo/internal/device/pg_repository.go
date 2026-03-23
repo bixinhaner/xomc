@@ -61,16 +61,23 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 		ipAddr = device.IPAddress
 	}
 
+	var udpAddr interface{}
+	if device.UDPConnectionRequestAddress != "" {
+		udpAddr = device.UDPConnectionRequestAddress
+	}
+
 	query, args, err := psql.Insert("devices").
 		Columns("id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
 			"carrier", "technology", "status", "firmware_version", "ip_address",
-			"connection_request_url", "last_inform_at", "last_inform_events",
+			"connection_request_url", "nat_detected", "udp_connection_request_address",
+			"last_inform_at", "last_inform_events",
 			"inform_interval", "site_name", "site_id", "latitude", "longitude",
 			"extension_data", "created_at", "updated_at").
 		Values(device.ID, device.SerialNumber, device.OUI, device.ProductClass,
 			device.Manufacturer, device.ModelName, device.Carrier, device.Technology,
 			device.Status, device.FirmwareVersion, ipAddr,
-			device.ConnectionRequestURL, device.LastInformAt, eventsData,
+			device.ConnectionRequestURL, device.NatDetected, udpAddr,
+			device.LastInformAt, eventsData,
 			device.InformInterval, device.SiteName, device.SiteID,
 			device.Latitude, device.Longitude, extData, device.CreatedAt, device.UpdatedAt).
 		ToSql()
@@ -123,6 +130,11 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		ipAddr = device.IPAddress
 	}
 
+	var udpAddr interface{}
+	if device.UDPConnectionRequestAddress != "" {
+		udpAddr = device.UDPConnectionRequestAddress
+	}
+
 	query, args, err := psql.Update("devices").
 		Set("oui", device.OUI).
 		Set("product_class", device.ProductClass).
@@ -132,6 +144,8 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("firmware_version", device.FirmwareVersion).
 		Set("ip_address", ipAddr).
 		Set("connection_request_url", device.ConnectionRequestURL).
+		Set("nat_detected", device.NatDetected).
+		Set("udp_connection_request_address", udpAddr).
 		Set("last_inform_at", device.LastInformAt).
 		Set("last_inform_events", eventsData).
 		Set("inform_interval", device.InformInterval).
@@ -307,7 +321,9 @@ func deviceColumns() []string {
 	return []string{
 		"id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
 		"carrier", "technology", "data_model_id", "status", "firmware_version",
-		"host(ip_address) as ip_address", "connection_request_url", "last_inform_at", "last_inform_events",
+		"host(ip_address) as ip_address", "connection_request_url",
+		"nat_detected", "udp_connection_request_address",
+		"last_inform_at", "last_inform_events",
 		"inform_interval", "site_name", "site_id", "latitude", "longitude",
 		"extension_data", "created_at", "updated_at",
 	}
@@ -316,12 +332,14 @@ func deviceColumns() []string {
 func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	var d model.Device
 	var extData, eventsData []byte
-	var ipAddr *string
+	var ipAddr, udpAddr *string
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer, &d.ModelName,
 		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &d.FirmwareVersion,
-		&ipAddr, &d.ConnectionRequestURL, &d.LastInformAt, &eventsData,
+		&ipAddr, &d.ConnectionRequestURL,
+		&d.NatDetected, &udpAddr,
+		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &d.SiteName, &d.SiteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt,
 	)
@@ -331,6 +349,9 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 
 	if ipAddr != nil {
 		d.IPAddress = *ipAddr
+	}
+	if udpAddr != nil {
+		d.UDPConnectionRequestAddress = *udpAddr
 	}
 	if len(extData) > 0 {
 		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
@@ -352,12 +373,14 @@ type scannable interface {
 func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	var d model.Device
 	var extData, eventsData []byte
-	var ipAddr *string
+	var ipAddr, udpAddr *string
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer, &d.ModelName,
 		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &d.FirmwareVersion,
-		&ipAddr, &d.ConnectionRequestURL, &d.LastInformAt, &eventsData,
+		&ipAddr, &d.ConnectionRequestURL,
+		&d.NatDetected, &udpAddr,
+		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &d.SiteName, &d.SiteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt,
 	)
@@ -367,6 +390,9 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 
 	if ipAddr != nil {
 		d.IPAddress = *ipAddr
+	}
+	if udpAddr != nil {
+		d.UDPConnectionRequestAddress = *udpAddr
 	}
 	if len(extData) > 0 {
 		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {

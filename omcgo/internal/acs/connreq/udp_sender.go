@@ -3,6 +3,7 @@ package connreq
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -96,6 +97,28 @@ func sendUDP(addr *net.UDPAddr, data []byte, logger *zap.Logger) error {
 		return fmt.Errorf("udp send to %s failed: %w", addr, lastErr)
 	}
 	return nil
+}
+
+// SendRestart sends a UDP restart command to an unresponsive base station.
+// Format: "/restart_{md5(deviceSN)}" — this is a last-resort mechanism
+// for devices that do not respond to normal Connection Requests.
+func (s *UDPSender) SendRestart(ctx context.Context, deviceSN string) error {
+	info, err := s.store.Get(ctx, deviceSN)
+	if err != nil {
+		return fmt.Errorf("lookup stun address: %w", err)
+	}
+	if info == nil {
+		return ErrNoSTUNAddress
+	}
+
+	hash := md5.Sum([]byte(deviceSN))
+	msg := []byte("/restart_" + hex.EncodeToString(hash[:]))
+
+	s.logger.Info("sending udp restart command",
+		zap.String("device_sn", deviceSN),
+		zap.String("addr", info.UDPAddr().String()))
+
+	return sendUDP(info.UDPAddr(), msg, s.logger)
 }
 
 // buildCPEConnectionRequest constructs the HTTP-like UDP Connection Request

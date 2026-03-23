@@ -68,13 +68,17 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	heartbeatMonitor.Start()
 	gs.Register("heartbeat", 1, func(ctx context.Context) error { heartbeatMonitor.Stop(); return nil })
 
-	// Connection Request client (shared by device + software modules)
+	// Connection Request client (shared by device + software + task modules)
 	connReqClient := connreq.NewClient(redisClient, logger)
+
+	// STUN address store (shared Redis L2, used by UDP sender and device service)
+	stunStore := stun.NewStore(redisClient, logger)
 
 	// Device services
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, eventBus, logger)
 	deviceService.SetCommandQueue(cmdQueue)
 	deviceService.SetConnectionRequester(connReqClient)
+	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(metricsReg)
 	deviceService.SetMetrics(deviceMetrics)
 
@@ -315,9 +319,9 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	taskService.SetMetrics(taskMetrics)
 
 	// Wire Connection Request into TaskService for automatic device wake-up
-	stunStore := stun.NewStore(redisClient, logger)
 	udpSender := connreq.NewUDPSender(stunStore, cfg.ConnReq.SharedSecret, logger)
 	crDispatcher := connreq.NewDispatcher(connReqClient, udpSender, logger)
+	crDispatcher.SetMetrics(connreq.NewDispatcherMetrics(metricsReg))
 	taskService.SetConnectionRequester(
 		&taskDeviceLookup{repo: deviceRepo},
 		&taskCRSender{dispatcher: crDispatcher, serverAddr: cfg.ConnReq.ServerAddr},
