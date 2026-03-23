@@ -45,6 +45,7 @@ const messages: Record<string, string> = {
   'common.noData':         '暂无数据',
   'common.placeholder':    '请输入',
   'common.pleaseSelect':   '请选择',
+  'common.selectRequired': '请选择',
   'common.all':            '全部',
   'common.yes':            '是',
   'common.no':             '否',

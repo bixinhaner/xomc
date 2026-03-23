@@ -45,6 +45,7 @@ const messages: Record<string, string> = {
   'common.noData':         'No Data',
   'common.placeholder':    'Please enter',
   'common.pleaseSelect':   'Please select',
+  'common.selectRequired': 'Please select',
   'common.all':            'All',
   'common.yes':            'Yes',
   'common.no':             'No',
