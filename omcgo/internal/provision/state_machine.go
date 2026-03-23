@@ -6,7 +6,7 @@ import "fmt"
 var validTransitions = map[ProvisioningState][]ProvisioningState{
 	StateDiscovered:  {StateIdentifying, StateFailed},
 	StateIdentifying: {StateMatching, StateDiscovering, StateSyncing, StateFailed},
-	StateMatching:    {StateConfiguring, StateFailed},
+	StateMatching:    {StateConfiguring, StateDiscovering, StateSyncing, StateFailed},
 	StateConfiguring: {StateVerifying, StateFailed},
 	StateVerifying:   {StateCompleted, StateFailed},
 	StateDiscovering: {StateSyncing, StateCompleted, StateFailed},

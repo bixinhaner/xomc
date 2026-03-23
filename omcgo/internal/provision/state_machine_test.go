@@ -17,6 +17,8 @@ func TestValidateTransition(t *testing.T) {
 		{"discovered -> identifying", StateDiscovered, StateIdentifying, false},
 		{"identifying -> matching", StateIdentifying, StateMatching, false},
 		{"matching -> configuring", StateMatching, StateConfiguring, false},
+		{"matching -> discovering", StateMatching, StateDiscovering, false},
+		{"matching -> syncing", StateMatching, StateSyncing, false},
 		{"configuring -> verifying", StateConfiguring, StateVerifying, false},
 		{"verifying -> completed", StateVerifying, StateCompleted, false},
 
