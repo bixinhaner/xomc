@@ -86,7 +86,7 @@ export default function CurrentAlarms() {
   }), [t]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholder') },
+    { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholderNew') },
     { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
     {
       name: 'severity',
@@ -166,13 +166,17 @@ export default function CurrentAlarms() {
   );
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
+    const keyword = values.keyword as string;
     setFilterParams({
       severity: values.severity as AlarmFilter['severity'],
       eventType: values.eventType as AlarmFilter['eventType'],
       neType: values.neType as string,
       unread: values.unread as '0' | '1',
       dealState: values.dealState as AlarmFilter['dealState'],
-      keyword: values.keyword as string,
+      // 同一个关键字用于告警标识（精确）、可能原因（模糊）、网元定位（模糊）
+      alarmIdentifier: keyword,
+      alarmName: keyword,
+      equipInfo: keyword,
     });
     setCurrentPage(1);
   }, []);

@@ -59,8 +59,26 @@ function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
   if (filter.ackStatus) result = result.filter((a) => a.ackStatus === filter.ackStatus);
   if (filter.deviceSn) result = result.filter((a) => a.deviceSn.includes(filter.deviceSn!));
   if (filter.alarmCode) result = result.filter((a) => a.alarmCode.includes(filter.alarmCode!));
-  if (filter.alarmName) result = result.filter((a) => a.alarmName.includes(filter.alarmName!));
   if (filter.neType) result = result.filter((a) => a.neType === filter.neType);
+
+  // 告警标识 - 精确查询
+  if (filter.alarmIdentifier) {
+    const identifier = filter.alarmIdentifier.toLowerCase();
+    result = result.filter((a) => a.alarmIdentifier.toLowerCase() === identifier);
+  }
+
+  // 可能原因 - 模糊查询
+  if (filter.alarmName) {
+    const name = filter.alarmName.toLowerCase();
+    result = result.filter((a) => a.alarmName.toLowerCase().includes(name));
+  }
+
+  // 网元定位 - 模糊查询
+  if (filter.equipInfo) {
+    const equip = filter.equipInfo.toLowerCase();
+    result = result.filter((a) => a.equipInfo.toLowerCase().includes(equip));
+  }
+
   if (filter.keyword) {
     const kw = filter.keyword.toLowerCase();
     result = result.filter(

@@ -641,6 +641,7 @@ const messages: Record<string, string> = {
   'alarm.keyword':           '关键字',
   'alarm.search':             '搜索',
   'alarm.searchPlaceholder':   '告警码 / 可能原因 / 网元定位',
+  'alarm.searchPlaceholderNew': '告警标识（精确） / 可能原因 / 网元定位',
 
   // 告警库字段
   'alarm.deviceTypeName':        '告警源',

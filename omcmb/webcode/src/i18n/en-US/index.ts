@@ -642,6 +642,7 @@ const messages: Record<string, string> = {
   'alarm.keyword':           'Keyword',
   'alarm.search':             'Search',
   'alarm.searchPlaceholder':  'ID / Possible Cause / Equipment Info',
+  'alarm.searchPlaceholderNew': 'Alarm ID (Exact) / Possible Cause / Equipment Info',
   'alarm.eventTime':         'Event Time',
   'alarm.neType':            'Alarm Source',
   'alarm.detail':            'Detail',

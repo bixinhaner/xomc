@@ -90,8 +90,9 @@ export interface AlarmFilter {
   unread?: '0' | '1';                     // 阅读状态
   deviceSn?: string;
   alarmCode?: string;
-  alarmName?: string;
-  alarmIdentifier?: string;               // 告警唯一标识
+  alarmName?: string;                     // 可能原因（模糊查询）
+  alarmIdentifier?: string;               // 告警唯一标识（精确查询）
+  equipInfo?: string;                     // 网元定位（模糊查询）
   keyword?: string;                       // 关键字搜索
   timeRange?: [string, string];           // 故障时间范围
   searchType?: 'Fuzzy' | 'Precise';       // 搜索方式：模糊/精确
