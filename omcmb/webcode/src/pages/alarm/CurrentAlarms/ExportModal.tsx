@@ -1,12 +1,19 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Checkbox, Collapse, Modal, Radio, Tag } from 'antd';
-import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { DatePicker, Modal, Spin, Tree, Typography } from 'antd';
+import type { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
+import { FolderOutlined } from '@ant-design/icons';
+import type { DataNode, TreeProps } from 'antd/es/tree';
 import { useT } from '@/hooks/useT';
+import { useDeviceGroups } from '@/hooks/api/useDevices';
+import type { DeviceGroup } from '@/types/device';
 
-/** 导出列定义 */
-interface ExportColumn {
-  code: string;
-  label: string;
+const { RangePicker } = DatePicker;
+const { Text } = Typography;
+
+export interface ExportParams {
+  deviceGroupIds: string[];
+  timeRange?: [string, string];
 }
 
 interface ExportModalProps {
@@ -16,118 +23,94 @@ interface ExportModalProps {
   confirmLoading?: boolean;
 }
 
-export interface ExportParams {
-  selectedColumns: string[];
-  format: 'csv' | 'xlsx';
+// 构建树形数据，支持 checkable
+function buildTreeData(
+  groups: DeviceGroup[],
+  checkedKeys: string[]
+): DataNode[] {
+  // 找出根节点（parentId 为 null 的节点）
+  const rootGroups = groups.filter((g) => g.parentId === null);
+
+  function buildNode(group: DeviceGroup): DataNode {
+    const children = groups.filter((g) => g.parentId === group.id);
+    const isChecked = checkedKeys.includes(group.id);
+
+    return {
+      key: group.id,
+      title: (
+        <span>
+          <FolderOutlined style={{ marginRight: 6, color: '#FA8C16' }} />
+          {group.name}
+          <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+            ({group.deviceCount})
+          </Text>
+        </span>
+      ),
+      icon: null,
+      children: children.length > 0 ? children.map(buildNode) : undefined,
+    };
+  }
+
+  return rootGroups.map(buildNode);
 }
 
-// ---------------------------------------------------------------------------
-// 告警导出列定义
-// ---------------------------------------------------------------------------
-const ALARM_COLUMNS: ExportColumn[] = [
-  { code: 'alarmId', label: '告警码' },
-  { code: 'severity', label: '告警级别' },
-  { code: 'alarmIdentifier', label: '告警标识' },
-  { code: 'alarmName', label: '可能原因' },
-  { code: 'neType', label: '基站制式' },
-  { code: 'equipInfo', label: '网元定位' },
-  { code: 'eventType', label: '事件类型' },
-  { code: 'dealState', label: '告警状态' },
-  { code: 'alarmType', label: '告警类型' },
-  { code: 'eventTime', label: '告警时间' },
-  { code: 'updTime', label: '更新时间' },
-  { code: 'specificProblem', label: '具体故障' },
-  { code: 'alarmCount', label: '告警次数' },
-  { code: 'dealMemo', label: '描述' },
-];
-
-// ---------------------------------------------------------------------------
-// 默认必选字段 — 与告警列表默认显示列一致，导出时始终勾选且不可取消
-// ---------------------------------------------------------------------------
-const DEFAULT_LOCKED_CODES = new Set([
-  'alarmId',         // 告警码
-  'severity',        // 告警级别
-  'alarmIdentifier', // 告警标识
-  'alarmName',       // 可能原因
-  'neType',          // 基站制式
-  'equipInfo',       // 网元定位
-  'eventTime',       // 告警时间
-]);
+// 获取所有节点的 key
+function getAllGroupIds(groups: DeviceGroup[]): string[] {
+  return groups.map((g) => g.id);
+}
 
 export default function ExportModal({ open, onClose, onConfirm, confirmLoading }: ExportModalProps) {
   const t = useT();
-  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set(DEFAULT_LOCKED_CODES));
-  const [format, setFormat] = useState<'csv' | 'xlsx'>('xlsx');
+  const { data: deviceGroups = [], isLoading: groupsLoading } = useDeviceGroups();
+  const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
+  const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
 
-  const handleCheckAll = useCallback((columns: ExportColumn[], checked: boolean) => {
-    setSelectedCodes((prev) => {
-      const next = new Set(prev);
-      for (const col of columns) {
-        if (DEFAULT_LOCKED_CODES.has(col.code)) continue;
-        if (checked) next.add(col.code); else next.delete(col.code);
-      }
-      return next;
-    });
-  }, []);
+  // 重置状态
+  useEffect(() => {
+    if (!open) {
+      setCheckedKeys([]);
+      setTimeRange(null);
+    }
+  }, [open]);
 
-  const handleToggle = useCallback((code: string, checked: boolean) => {
-    if (DEFAULT_LOCKED_CODES.has(code)) return;
-    setSelectedCodes((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(code); else next.delete(code);
-      return next;
-    });
+  const handleCheck: TreeProps['onCheck'] = useCallback((checked, info) => {
+    // checked 可能是字符串数组或 { checked: string[], halfChecked: string[] }
+    if (Array.isArray(checked)) {
+      setCheckedKeys(checked as string[]);
+    } else {
+      setCheckedKeys((checked as { checked: string[] }).checked);
+    }
   }, []);
 
   const handleOk = useCallback(() => {
     onConfirm({
-      selectedColumns: Array.from(selectedCodes),
-      format,
+      deviceGroupIds: checkedKeys,
+      timeRange: timeRange ? [timeRange[0].toISOString(), timeRange[1].toISOString()] : undefined,
     });
-  }, [onConfirm, selectedCodes, format]);
+  }, [onConfirm, checkedKeys, timeRange]);
 
   const handleCancel = useCallback(() => {
-    setSelectedCodes(new Set(DEFAULT_LOCKED_CODES));
-    setFormat('xlsx');
+    setCheckedKeys([]);
+    setTimeRange(null);
     onClose();
   }, [onClose]);
 
-  const checkedCount = ALARM_COLUMNS.filter((c) => selectedCodes.has(c.code)).length;
-  const allChecked = checkedCount === ALARM_COLUMNS.length;
-  const indeterminate = checkedCount > 0 && checkedCount < ALARM_COLUMNS.length;
+  const treeData = useMemo(
+    () => buildTreeData(deviceGroups, checkedKeys),
+    [deviceGroups, checkedKeys]
+  );
 
-  const collapseItems = useMemo(() => [
-    {
-      key: 'alarm',
-      label: (
-        <span onClick={(e) => e.stopPropagation()}>
-          <Checkbox
-            checked={allChecked}
-            indeterminate={indeterminate}
-            onChange={(e: CheckboxChangeEvent) => handleCheckAll(ALARM_COLUMNS, e.target.checked)}
-            style={{ marginRight: 8 }}
-          />
-          {t('export.selectFields')}
-          <Tag style={{ marginLeft: 8, fontSize: 11 }}>{checkedCount}/{ALARM_COLUMNS.length}</Tag>
-        </span>
-      ),
-      children: (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0' }}>
-          {ALARM_COLUMNS.map((col) => (
-            <div key={col.code} style={{ width: '33.3%', minWidth: 150 }}>
-              <Checkbox
-                checked={selectedCodes.has(col.code)}
-                disabled={DEFAULT_LOCKED_CODES.has(col.code)}
-                onChange={(e: CheckboxChangeEvent) => handleToggle(col.code, e.target.checked)}
-              >
-                {col.label}
-              </Checkbox>
-            </div>
-          ))}
-        </div>
-      ),
-    },
-  ], [t, allChecked, indeterminate, checkedCount, selectedCodes, handleCheckAll, handleToggle]);
+  // 全选/取消全选
+  const allGroupIds = useMemo(() => getAllGroupIds(deviceGroups), [deviceGroups]);
+  const isAllChecked = deviceGroups.length > 0 && checkedKeys.length === allGroupIds.length;
+
+  const handleCheckAll = useCallback((checked: boolean) => {
+    if (checked) {
+      setCheckedKeys(allGroupIds);
+    } else {
+      setCheckedKeys([]);
+    }
+  }, [allGroupIds]);
 
   return (
     <Modal
@@ -141,22 +124,79 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
       width={600}
       destroyOnClose
     >
-      {/* 1. 列表字段 */}
+      {/* 1. 设备组选择 - 树形结构 */}
       <div style={{ marginBottom: 16 }}>
-        <Collapse
-          defaultActiveKey={['alarm']}
-          items={collapseItems}
-          size="small"
-        />
+        <div
+          style={{
+            marginBottom: 8,
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span>{t('export.selectDeviceGroup')}</span>
+          <span
+            style={{
+              fontSize: 12,
+              color: '#1677ff',
+              cursor: 'pointer',
+              fontWeight: 'normal',
+            }}
+            onClick={() => handleCheckAll(!isAllChecked)}
+          >
+            {isAllChecked ? t('common.unselectAll') : t('common.selectAll')}
+          </span>
+        </div>
+        <Spin spinning={groupsLoading}>
+          <div
+            style={{
+              border: '1px solid #d9d9d9',
+              borderRadius: 6,
+              padding: 8,
+              maxHeight: 280,
+              overflowY: 'auto',
+              background: '#fafafa',
+            }}
+          >
+            {deviceGroups.length === 0 && !groupsLoading ? (
+              <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>
+                {t('common.noData')}
+              </div>
+            ) : (
+              <Tree
+                checkable
+                checkedKeys={checkedKeys}
+                onCheck={handleCheck}
+                treeData={treeData}
+                defaultExpandAll
+                style={{ fontSize: 13, background: 'transparent' }}
+              />
+            )}
+          </div>
+        </Spin>
+        <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+          {t('export.selectedCount', { count: checkedKeys.length })}
+        </div>
       </div>
 
-      {/* 2. 导出格式 */}
+      {/* 2. 故障时间段 */}
       <div>
-        <span style={{ fontWeight: 'bold', marginRight: 12 }}>{t('export.format')}</span>
-        <Radio.Group value={format} onChange={(e) => setFormat(e.target.value as 'csv' | 'xlsx')}>
-          <Radio value="xlsx">XLSX</Radio>
-          <Radio value="csv">CSV</Radio>
-        </Radio.Group>
+        <div style={{ marginBottom: 8, fontWeight: 'bold' }}>{t('export.timeRange')}</div>
+        <RangePicker
+          showTime
+          value={timeRange}
+          onChange={(dates) => setTimeRange(dates as [Dayjs, Dayjs] | null)}
+          style={{ width: '100%' }}
+          placeholder={[t('export.startTime'), t('export.endTime')]}
+          ranges={{
+            [t('export.today')]: [dayjs().startOf('day'), dayjs().endOf('day')],
+            [t('export.thisWeek')]: [dayjs().startOf('week'), dayjs().endOf('week')],
+            [t('export.thisMonth')]: [dayjs().startOf('month'), dayjs().endOf('month')],
+            [t('export.last7Days')]: [dayjs().subtract(7, 'days').startOf('day'), dayjs().endOf('day')],
+            [t('export.last30Days')]: [dayjs().subtract(30, 'days').startOf('day'), dayjs().endOf('day')],
+          }}
+        />
       </div>
     </Modal>
   );

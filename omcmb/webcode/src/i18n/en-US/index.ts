@@ -1067,6 +1067,17 @@ const messages: Record<string, string> = {
   'export.licenseInfo':         'Export License Info',
   'export.licenseDesc':         'Export device license info simultaneously',
   'export.format':              'Format',
+  'export.selectDeviceGroup':   'Select Device Group',
+  'export.timeRange':           'Fault Time Range',
+  'export.startTime':           'Start Time',
+  'export.endTime':             'End Time',
+  'export.today':               'Today',
+  'export.thisWeek':            'This Week',
+  'export.thisMonth':           'This Month',
+  'export.last7Days':           'Last 7 Days',
+  'export.last30Days':          'Last 30 Days',
+  'export.startExport':         'Start Export',
+  'export.selectedCount':       '{count} device groups selected',
 
   // -------------------------------------------------------------------------
   // FilterBar — search & filter labels

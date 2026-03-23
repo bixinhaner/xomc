@@ -99,10 +99,21 @@ export const deviceService = {
       { id: 'grp-default', name: '默认设备组', parentId: null, deviceCount: 0, description: '默认设备组' },
       { id: 'grp-east', name: '华东大区', parentId: null, deviceCount: 0, description: '华东区所有设备' },
       { id: 'grp-south', name: '华南大区', parentId: null, deviceCount: 0, description: '华南区所有设备' },
+      { id: 'grp-north', name: '华北大区', parentId: null, deviceCount: 0, description: '华北区所有设备' },
+      { id: 'grp-west', name: '西部大区', parentId: null, deviceCount: 0, description: '西部区所有设备' },
       // 二级节点 (parentId 指向一级) - 可选择
       { id: 'grp-bj', name: '北京', parentId: 'grp-default', deviceCount: 20, description: '北京市设备' },
       { id: 'grp-sh', name: '上海', parentId: 'grp-east', deviceCount: 20, description: '上海市设备' },
+      { id: 'grp-nj', name: '南京', parentId: 'grp-east', deviceCount: 15, description: '南京市设备' },
+      { id: 'grp-hz', name: '杭州', parentId: 'grp-east', deviceCount: 18, description: '杭州市设备' },
       { id: 'grp-gz', name: '广州', parentId: 'grp-south', deviceCount: 20, description: '广州市设备' },
+      { id: 'grp-sz', name: '深圳', parentId: 'grp-south', deviceCount: 25, description: '深圳市设备' },
+      { id: 'grp-dg', name: '东莞', parentId: 'grp-south', deviceCount: 12, description: '东莞市设备' },
+      { id: 'grp-tj', name: '天津', parentId: 'grp-north', deviceCount: 16, description: '天津市设备' },
+      { id: 'grp-sjz', name: '石家庄', parentId: 'grp-north', deviceCount: 10, description: '石家庄市设备' },
+      { id: 'grp-cd', name: '成都', parentId: 'grp-west', deviceCount: 22, description: '成都市设备' },
+      { id: 'grp-xa', name: '西安', parentId: 'grp-west', deviceCount: 14, description: '西安市设备' },
+      { id: 'grp-cq', name: '重庆', parentId: 'grp-west', deviceCount: 19, description: '重庆市设备' },
     ];
   },
 

@@ -1070,6 +1070,17 @@ const messages: Record<string, string> = {
   'export.licenseInfo':         '导出License信息',
   'export.licenseDesc':         '同时导出设备License信息',
   'export.format':              '导出格式',
+  'export.selectDeviceGroup':   '选择设备组',
+  'export.timeRange':           '故障时间段',
+  'export.startTime':           '开始时间',
+  'export.endTime':             '结束时间',
+  'export.today':               '今天',
+  'export.thisWeek':            '本周',
+  'export.thisMonth':           '本月',
+  'export.last7Days':           '最近7天',
+  'export.last30Days':          '最近30天',
+  'export.startExport':         '开始导出',
+  'export.selectedCount':       '已选择 {count} 个设备组',
 
   // -------------------------------------------------------------------------
   // FilterBar — search & filter labels
