@@ -899,7 +899,7 @@ export default function KPIStandardReport() {
               handleSelectChange(keys, rows as KPIIndicatorRow[]);
             }}
             batchActions={batchActions}
-            extraToolbarLeft={
+            extraToolbarRight={
               <Space size={8}>
                 <Input
                   size="small"
