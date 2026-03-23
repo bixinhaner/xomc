@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/alarm"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/middleware"
@@ -312,6 +313,16 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	taskService := task.NewTaskService(taskQueue, taskRepo, logger)
 	taskMetrics := task.NewTaskMetrics(metricsReg)
 	taskService.SetMetrics(taskMetrics)
+
+	// Wire Connection Request into TaskService for automatic device wake-up
+	stunStore := stun.NewStore(redisClient, logger)
+	udpSender := connreq.NewUDPSender(stunStore, cfg.ConnReq.SharedSecret, logger)
+	crDispatcher := connreq.NewDispatcher(connReqClient, udpSender, logger)
+	taskService.SetConnectionRequester(
+		&taskDeviceLookup{repo: deviceRepo},
+		&taskCRSender{dispatcher: crDispatcher, serverAddr: cfg.ConnReq.ServerAddr},
+	)
+
 	taskHandler := task.NewHandler(taskService)
 	taskHandler.RegisterRoutes(permGroup("devices"))
 	logger.Info("task queue module initialized")
@@ -429,4 +440,33 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	adminHandler.RegisterAdminRoutes(adminGroup)
 
 	return nil
+}
+
+// taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.
+type taskDeviceLookup struct {
+	repo device.DeviceReader
+}
+
+func (a *taskDeviceLookup) GetConnectionRequestURL(ctx context.Context, deviceSN string) (string, error) {
+	dev, err := a.repo.GetBySerialNumber(ctx, deviceSN)
+	if err != nil {
+		return "", fmt.Errorf("lookup device %s: %w", deviceSN, err)
+	}
+	if dev == nil {
+		return "", nil
+	}
+	return dev.ConnectionRequestURL, nil
+}
+
+// taskCRSender adapts connreq.Dispatcher to task.ConnectionRequestSender,
+// pre-binding serverAddr and isENB which are deployment-level constants.
+type taskCRSender struct {
+	dispatcher *connreq.Dispatcher
+	serverAddr string
+}
+
+func (a *taskCRSender) Send(ctx context.Context, deviceSN, httpURL string) error {
+	// Default isENB=true: OMC manages base stations primarily.
+	// TODO: determine isENB from device model when DeviceType field is available.
+	return a.dispatcher.Send(ctx, deviceSN, httpURL, a.serverAddr, true)
 }

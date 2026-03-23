@@ -54,6 +54,14 @@ type CORSConfig struct {
 	AllowOrigins []string `mapstructure:"allow_origins"`
 }
 
+// ConnReqConfig holds Connection Request settings for the app process.
+type ConnReqConfig struct {
+	// ServerAddr is the ACS server's externally reachable address for CPE UDP CR URL field.
+	// Example: "acs.example.com:7547" or "10.0.0.1:7547"
+	ServerAddr   string `mapstructure:"server_addr"`
+	SharedSecret string `mapstructure:"shared_secret"` // HMAC-SHA1 secret for CPE UDP CR
+}
+
 // AppConfig is the configuration for the main application.
 type AppConfig struct {
 	Server          AppServerConfig  `mapstructure:"server"`
@@ -64,6 +72,7 @@ type AppConfig struct {
 	MinIO           MinIOConfig      `mapstructure:"minio"`
 	JWT             JWTConfig        `mapstructure:"jwt"`
 	CORS            CORSConfig       `mapstructure:"cors"`
+	ConnReq         ConnReqConfig    `mapstructure:"conn_req"`
 	Northbound      NorthboundConfig `mapstructure:"northbound"`
 	NEDirect        NEDirectConfig   `mapstructure:"ne_direct"`
 	Provision       ProvisionConfig  `mapstructure:"provision"`

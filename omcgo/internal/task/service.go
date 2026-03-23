@@ -12,13 +12,26 @@ import (
 	"go.uber.org/zap"
 )
 
+// DeviceLookup retrieves a device's Connection Request URL by serial number.
+type DeviceLookup interface {
+	GetConnectionRequestURL(ctx context.Context, deviceSN string) (httpURL string, err error)
+}
+
+// ConnectionRequestSender wakes a device via Connection Request.
+// The implementation should handle serverAddr, isENB, and other transport-level details internally.
+type ConnectionRequestSender interface {
+	Send(ctx context.Context, deviceSN, httpURL string) error
+}
+
 // TaskService 任务管理服务
 // 协调 Redis 队列（运行时）和 PostgreSQL（持久化）
 type TaskService struct {
-	queue   *RedisTaskQueue
-	repo    *PgTaskRepository
-	metrics *TaskMetrics
-	logger  *zap.Logger
+	queue        *RedisTaskQueue
+	repo         *PgTaskRepository
+	metrics      *TaskMetrics
+	deviceLookup DeviceLookup
+	connReq      ConnectionRequestSender
+	logger       *zap.Logger
 }
 
 // NewTaskService 创建任务服务
@@ -33,6 +46,12 @@ func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logg
 // SetMetrics attaches Prometheus metrics to the service.
 func (s *TaskService) SetMetrics(m *TaskMetrics) {
 	s.metrics = m
+}
+
+// SetConnectionRequester enables automatic device wake-up on task creation.
+func (s *TaskService) SetConnectionRequester(dl DeviceLookup, cr ConnectionRequestSender) {
+	s.deviceLookup = dl
+	s.connReq = cr
 }
 
 // CreateTask 创建新任务
@@ -60,6 +79,9 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	if s.metrics != nil {
 		s.metrics.PendingTotal.Inc()
 	}
+
+	// 3. 异步触发 Connection Request 唤醒设备
+	s.wakeDevice(task.DeviceSN)
 
 	logger.L(ctx).Info("task created",
 		zap.String("task_id", task.ID),
@@ -372,6 +394,7 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRe
 	}
 
 	// 逐个推送到队列
+	wakeDevices := make(map[string]struct{})
 	var pushed []*Task
 	for _, task := range tasks {
 		if err := s.queue.Push(ctx, task); err != nil {
@@ -379,6 +402,12 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRe
 			continue
 		}
 		pushed = append(pushed, task)
+		wakeDevices[task.DeviceSN] = struct{}{}
+	}
+
+	// 唤醒所有涉及的设备（去重）
+	for sn := range wakeDevices {
+		s.wakeDevice(sn)
 	}
 
 	return pushed, nil
@@ -388,6 +417,31 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRe
 func (s *TaskService) PurgeOldTasks(ctx context.Context, retentionDays int) (int64, error) {
 	before := time.Now().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
 	return s.repo.PurgeOldTasks(ctx, before)
+}
+
+// wakeDevice sends a Connection Request to wake the device asynchronously.
+// This is fire-and-forget: errors are logged but do not block task creation.
+func (s *TaskService) wakeDevice(deviceSN string) {
+	if s.deviceLookup == nil || s.connReq == nil {
+		return
+	}
+
+	go func() {
+		ctx := context.Background()
+		httpURL, err := s.deviceLookup.GetConnectionRequestURL(ctx, deviceSN)
+		if err != nil {
+			s.logger.Warn("lookup device for connection request",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+			return
+		}
+
+		if err := s.connReq.Send(ctx, deviceSN, httpURL); err != nil {
+			s.logger.Warn("send connection request",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+		}
+	}()
 }
 
 // TaskHistoryOptions 任务历史查询选项（定义在 model.go）

@@ -55,6 +55,10 @@ minio:
     logs: "logs"
     reports: "reports"
 
+conn_req:
+  server_addr: "localhost:7547"  # ACS external address for CPE UDP CR URL
+  shared_secret: "dps"            # HMAC-SHA1 secret for CPE UDP CR signing
+
 jwt:
   secret: "change-me-in-production-minimum-32-characters!!"
   access_token_ttl: 30m
