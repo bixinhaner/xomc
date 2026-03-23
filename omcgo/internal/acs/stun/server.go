@@ -93,12 +93,12 @@ func (s *Server) SetMetrics(m *Metrics) {
 // Start begins listening for UDP packets on the configured address.
 // This method blocks until Stop is called or a fatal error occurs.
 func (s *Server) Start(ctx context.Context) error {
-	addr, err := net.ResolveUDPAddr("udp", s.config.ListenAddr)
+	addr, err := net.ResolveUDPAddr("udp4", s.config.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("resolve stun listen addr: %w", err)
 	}
 
-	conn, err := net.ListenUDP("udp", addr)
+	conn, err := net.ListenUDP("udp4", addr)
 	if err != nil {
 		return fmt.Errorf("listen stun udp: %w", err)
 	}
