@@ -75,6 +75,7 @@ ne_direct:
 
 provision:
   enabled: true
+  auto_configure: false
   auto_discovery:
     enabled: false
     max_concurrent: 10

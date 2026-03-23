@@ -204,9 +204,15 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		return e.failTask(ctx, task, fmt.Errorf("match template: %w", err))
 	}
 
-	if tmpl != nil {
-		// Path A: classic provisioning with template.
+	if tmpl != nil && e.config.AutoConfigure {
+		// Path A: classic provisioning with template (requires parameter path mapping).
 		return e.handleTemplateProvisioning(ctx, task, dev, tmpl, evt.SerialNumber)
+	}
+	if tmpl != nil {
+		e.logger.Info("template matched but auto_configure disabled, skipping Path A",
+			zap.String("device_sn", evt.SerialNumber),
+			zap.String("template_id", tmpl.ID.String()),
+		)
 	}
 
 	// No template matched. Check auto-sync and auto-discovery paths.

@@ -131,6 +131,7 @@ type NEDirectConfig struct {
 // ProvisionConfig holds provisioning and auto-discovery settings.
 type ProvisionConfig struct {
 	Enabled       bool                `mapstructure:"enabled"`
+	AutoConfigure bool                `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
 	TaskTimeout   time.Duration       `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
 	AutoDiscovery AutoDiscoveryConfig `mapstructure:"auto_discovery"`
 	AutoSync      AutoSyncConfig      `mapstructure:"auto_sync"`

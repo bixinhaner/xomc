@@ -79,6 +79,7 @@ ne_direct:
 
 provision:
   enabled: true
+  auto_configure: false  # Path A 自动下发配置暂禁用（需参数路径映射层）
   task_timeout: 15m
   auto_discovery:
     enabled: true
