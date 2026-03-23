@@ -414,7 +414,6 @@ export default function KPIStandardReport() {
         }
       }
     }
-    }
 
     // 按搜索词过滤
     if (tableSearchValue) {
