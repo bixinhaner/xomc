@@ -34,11 +34,11 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'device-list',      label: 'nav.device.list',       path: '/device/list' },
       { key: 'device-register',  label: 'nav.device.register',   path: '/device/register' },
       { key: 'device-group',     label: 'nav.device.group',       path: '/device/group' },
-      { key: 'device-ne',        label: 'nav.device.ne',          path: '/device/ne' },
-      { key: 'device-monitor',   label: 'nav.device.monitor',     path: '/device/monitor' },
+      // { key: 'device-ne',        label: 'nav.device.ne',          path: '/device/ne' },           // 隐藏
+      // { key: 'device-monitor',   label: 'nav.device.monitor',     path: '/device/monitor' },       // 隐藏
       { key: 'device-launch',    label: 'nav.device.commission',  path: '/device/commission' },
-      { key: 'device-transfer',  label: 'nav.device.handover',    path: '/device/handover' },
-      { key: 'device-resource',  label: 'nav.device.stats',       path: '/device/stats' },
+      // { key: 'device-transfer',  label: 'nav.device.handover',    path: '/device/handover' },      // 隐藏
+      // { key: 'device-resource',  label: 'nav.device.stats',       path: '/device/stats' },         // 隐藏
       { key: 'device-import',    label: 'nav.device.import',      path: '/device/import' },
       { key: 'device-rule',      label: 'nav.device.rules',       path: '/device/rules' },
       { key: 'device-recycle',   label: 'nav.device.recycle',     path: '/device/recycle' },
@@ -54,9 +54,9 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'alarm-stats',        label: 'nav.alarm.statistics',     path: '/alarm/statistics' },
       { key: 'alarm-rule',         label: 'nav.alarm.rules',          path: '/alarm/rules' },
       { key: 'alarm-knowledge',    label: 'nav.alarm.library',        path: '/alarm/library' },
-      { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },
+      // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
       { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },
-      { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' },
+      // { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' }, // 隐藏
       { key: 'alarm-custom-stats', label: 'nav.alarm.customStats',    path: '/alarm/custom-stats' },
     ],
   },

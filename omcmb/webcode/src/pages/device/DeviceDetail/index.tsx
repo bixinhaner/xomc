@@ -146,15 +146,6 @@ const generateCategoryTrendSeries = (kpis: KPIConfig[], mode: 'day' | 'week') =>
   }));
 };
 
-const MOCK_CONFIG_PARAMS = [
-  { key: 'heartbeatInterval', name: 'heartbeatInterval', value: '30', unit: 's', category: 'Connection' },
-  { key: 'reconnectRetry', name: 'reconnectRetry', value: '3', unit: '-', category: 'Connection' },
-  { key: 'maxBandwidth', name: 'maxBandwidth', value: '100', unit: 'Mbps', category: 'Network' },
-  { key: 'qosLevel', name: 'QoS', value: '3', unit: '-', category: 'Network' },
-  { key: 'logLevel', name: 'logLevel', value: 'INFO', unit: '-', category: 'System' },
-  { key: 'ntpServer', name: 'NTP Server', value: '10.0.0.1', unit: '-', category: 'System' },
-];
-
 // ─── 字段定义组件 ────────────────────────────────────────────────────────
 
 interface FieldItem {
@@ -779,27 +770,6 @@ export default function DeviceDetail() {
               children: device ? (
                 <ParameterTreeTab deviceId={device.id} />
               ) : null,
-            },
-            {
-              key: 'config',
-              label: '简易开站',
-              children: (
-                <div style={{ padding: '0 0 16px' }}>
-                  <Table
-                    size="small"
-                    dataSource={MOCK_CONFIG_PARAMS}
-                    rowKey="key"
-                    pagination={false}
-                    columns={[
-                      { title: t('table.name'), dataIndex: 'name', key: 'name', width: 200 },
-                      { title: 'Key', dataIndex: 'key', key: 'key', width: 200, render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text> },
-                      { title: t('table.result'), dataIndex: 'value', key: 'value', width: 150, render: (v: string) => <Text strong>{v}</Text> },
-                      { title: t('table.type'), dataIndex: 'unit', key: 'unit', width: 80 },
-                      { title: t('table.vendor'), dataIndex: 'category', key: 'category', width: 120, render: (v: string) => <Tag>{v}</Tag> },
-                    ]}
-                  />
-                </div>
-              ),
             },
           ]}
         />

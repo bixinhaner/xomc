@@ -167,6 +167,7 @@ export default function AlarmStatistics() {
                     series={series}
                     height="100%"
                     stacked
+                    barWidth={10}
                     borderRadius={0}
                   />
                 </div>
