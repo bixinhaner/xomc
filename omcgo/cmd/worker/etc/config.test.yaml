@@ -58,7 +58,7 @@ log:
   format: "json"
   output_paths:
     - "stdout"
-    - "/var/log/omcgo/worker.log"
+    - "../run/logs/worker/worker.log"
   rotation:
     enabled: true
     max_size_mb: 5
@@ -66,7 +66,5 @@ log:
     max_backups: 20
     compress: true
     local_time: true
-
-request_id_prefix: "worker"
 
 request_id_prefix: "worker"

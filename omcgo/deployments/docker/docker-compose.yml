@@ -1,14 +1,14 @@
 # OMC Docker Compose Configuration
 #
-# Log files are mounted to ~/data/logs/omcgo on the host:
-#   ~/data/logs/omcgo/acs/acs.log     - ACS service logs
-#   ~/data/logs/omcgo/app/app.log     - App service logs
-#   ~/data/logs/omcgo/worker/worker.log - Worker service logs
+# Log files are mounted to project directory on the host:
+#   run/logs/acs/acs.log     - ACS service logs
+#   run/logs/app/app.log     - App service logs
+#   run/logs/worker/worker.log - Worker service logs
 #
 # View logs:
-#   tail -f ~/data/logs/omcgo/acs/acs.log
-#   tail -f ~/data/logs/omcgo/app/app.log
-#   tail -f ~/data/logs/omcgo/worker/worker.log
+#   tail -f run/logs/acs/acs.log
+#   tail -f run/logs/app/app.log
+#   tail -f run/logs/worker/worker.log
 #
 # Log rotation is handled by lumberjack (configured in config.yaml):
 #   - Max file size: 20MB
@@ -122,9 +122,9 @@ services:
       OMCGO_METRICS_PORT: "9090"
       OMCGO_LOG_LEVEL: "info"
       OMCGO_LOG_FORMAT: "json"
-      OMCGO_LOG_OUTPUT_PATHS: "stdout,/var/log/omcgo/acs.log"
+      OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/acs/acs.log"
     volumes:
-      - ~/data/logs/omcgo/acs:/var/log/omcgo
+      - ../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
@@ -158,9 +158,9 @@ services:
       OMCGO_METRICS_PORT: "9091"
       OMCGO_LOG_LEVEL: "info"
       OMCGO_LOG_FORMAT: "json"
-      OMCGO_LOG_OUTPUT_PATHS: "stdout,/var/log/omcgo/app.log"
+      OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/app/app.log"
     volumes:
-      - ~/data/logs/omcgo/app:/var/log/omcgo
+      - ../../run/logs/app:/run/logs/app
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
@@ -191,9 +191,9 @@ services:
       OMCGO_METRICS_PORT: "9092"
       OMCGO_LOG_LEVEL: "info"
       OMCGO_LOG_FORMAT: "json"
-      OMCGO_LOG_OUTPUT_PATHS: "stdout,/var/log/omcgo/worker.log"
+      OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/worker/worker.log"
     volumes:
-      - ~/data/logs/omcgo/worker:/var/log/omcgo
+      - ../../run/logs/worker:/run/logs/worker
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
