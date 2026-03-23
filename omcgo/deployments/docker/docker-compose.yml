@@ -124,7 +124,7 @@ services:
       OMCGO_LOG_FORMAT: "json"
       OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/acs/acs.log"
     volumes:
-      - ../../run/logs/acs:/run/logs/acs
+      - ../../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
@@ -160,7 +160,7 @@ services:
       OMCGO_LOG_FORMAT: "json"
       OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/app/app.log"
     volumes:
-      - ../../run/logs/app:/run/logs/app
+      - ../../../run/logs/app:/run/logs/app
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
@@ -193,7 +193,7 @@ services:
       OMCGO_LOG_FORMAT: "json"
       OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/worker/worker.log"
     volumes:
-      - ../../run/logs/worker:/run/logs/worker
+      - ../../../run/logs/worker:/run/logs/worker
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
