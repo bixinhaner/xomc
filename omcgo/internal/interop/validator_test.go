@@ -83,6 +83,10 @@ func (m *mockDataModelRepo) Deprecate(_ context.Context, _ uuid.UUID) error   { 
 func (m *mockDataModelRepo) Statistics(_ context.Context) (*datamodel.DataModelStats, error) {
 	return &datamodel.DataModelStats{}, nil
 }
+func (m *mockDataModelRepo) FindActiveWithFirmware(_ context.Context, _ model.CarrierCode, _ model.Technology,
+	_, _, _ string, _ model.DataModelScope) (*datamodel.DataModel, error) {
+	return nil, nil
+}
 
 func newTestValidator(t *testing.T, dev *model.Device, dm *datamodel.DataModel, deviceParams []model.DeviceParameter) *DataModelValidator {
 	t.Helper()

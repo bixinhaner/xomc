@@ -89,6 +89,10 @@ func (m *dmHDataModelRepo) Statistics(ctx context.Context) (*DataModelStats, err
 	}
 	return &DataModelStats{}, nil
 }
+func (m *dmHDataModelRepo) FindActiveWithFirmware(ctx context.Context, carrier model.CarrierCode, tech model.Technology,
+	oui, productClass, firmwareVersion string, scope model.DataModelScope) (*DataModel, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Mock: OUIRepository (dmH prefix)

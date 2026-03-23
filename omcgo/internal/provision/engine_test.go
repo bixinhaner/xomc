@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -214,6 +215,7 @@ func newEngineHarness(deviceRepo device.DeviceRepository) *engineHarness {
 		carrierReg,
 		cmdQueue,
 		evtBus,
+		appconfig.ProvisionConfig{},
 		logger,
 	)
 
@@ -886,6 +888,10 @@ func (m *mockDataModelRepo) Statistics(ctx context.Context) (*datamodel.DataMode
 	return nil, nil
 }
 
+func (m *mockDataModelRepo) FindActiveWithFirmware(ctx context.Context, carrier model.CarrierCode, tech model.Technology, oui, productClass, firmwareVersion string, scope model.DataModelScope) (*datamodel.DataModel, error) {
+	return nil, nil
+}
+
 func newFullEngineHarness() *fullEngineHarness {
 	logger := zap.NewNop()
 	taskRepo := &mockTaskRepo{}
@@ -908,6 +914,7 @@ func newFullEngineHarness() *fullEngineHarness {
 		carrierReg,
 		cmdQueue,
 		evtBus,
+		appconfig.ProvisionConfig{},
 		logger,
 	)
 
