@@ -34,6 +34,14 @@ stun:
   cache_ttl: 30m
   shared_secret: "dps"
 
+# 会话结束续唤：当会话结束时命令队列仍有积压命令，立即发送 CR 触发设备重新连接
+# 避免等待设备下一次周期性 Inform（通常 60 秒），大幅提升命令下发效率
+post_session_wake:
+  enabled: true
+  delay_after: 1s          # 会话结束后等待时间（给 CPE 喘息时间）
+  max_continuous: 200       # 单设备最大连续续唤次数（安全阀，防止无限循环）
+  cooldown_ttl: 5m          # 连续续唤计数冷却时间（过期后重置计数）
+
 redis:
   addrs:
     - "localhost:6379"

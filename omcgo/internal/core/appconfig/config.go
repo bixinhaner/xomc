@@ -15,7 +15,8 @@ type ACSConfig struct {
 	Session                 SessionConfig      `mapstructure:"session"`
 	RateLimit               RateLimitConfig    `mapstructure:"rate_limit"`
 	Auth                    AuthConfig         `mapstructure:"auth"`
-	STUN                    STUNConfig         `mapstructure:"stun"`
+	STUN                    STUNConfig             `mapstructure:"stun"`
+	PostSessionWake         PostSessionWakeConfig  `mapstructure:"post_session_wake"`
 	Redis                   RedisConfig        `mapstructure:"redis"`
 	NATS                    NATSConfig         `mapstructure:"nats"`
 	DB                      PostgresConfig     `mapstructure:"db"`
@@ -36,6 +37,17 @@ type STUNConfig struct {
 	BufferSize   int           `mapstructure:"buffer_size"`   // UDP read buffer size in bytes
 	CacheTTL     time.Duration `mapstructure:"cache_ttl"`     // STUN address cache TTL
 	SharedSecret string        `mapstructure:"shared_secret"` // HMAC-SHA1 secret for CPE UDP CR
+}
+
+// PostSessionWakeConfig holds settings for post-session Connection Request wake-up.
+// When a TR069 session ends with remaining commands in the queue,
+// the ACS can immediately send a Connection Request to trigger a new session,
+// instead of waiting for the device's next periodic Inform.
+type PostSessionWakeConfig struct {
+	Enabled       bool          `mapstructure:"enabled"`        // 是否启用会话结束续唤
+	DelayAfter    time.Duration `mapstructure:"delay_after"`    // 会话结束后延迟多久发 CR（给 CPE 喘息时间）
+	MaxContinuous int           `mapstructure:"max_continuous"` // 单设备最大连续续唤次数（防止无限循环）
+	CooldownTTL   time.Duration `mapstructure:"cooldown_ttl"`   // 连续续唤冷却 TTL（过期后重置计数）
 }
 
 // UploadConfig holds file upload server settings.

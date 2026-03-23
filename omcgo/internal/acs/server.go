@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -36,8 +37,11 @@ type ServerDeps struct {
 	RateLimiter             *DeviceRateLimiter
 	Admission               *AdmissionController
 	Metrics                 *ACSMetrics
-	UploadHandler           *upload.Handler        // CPE file upload handler (supports query params and path-based token)
-	UploadConfig            *appconfig.UploadConfig // upload server configuration for generating upload URLs
+	UploadHandler           *upload.Handler             // CPE file upload handler (supports query params and path-based token)
+	UploadConfig            *appconfig.UploadConfig     // upload server configuration for generating upload URLs
+	ConnReqSender           ConnectionRequester         // post-session wake: send CR when queue not empty
+	PostSessionWakeCfg      appconfig.PostSessionWakeConfig // post-session wake configuration
+	RedisClient             redis.Cmdable               // Redis client for continuous wake counter
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -59,6 +63,9 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		requestIDPrefix:         deps.RequestIDPrefix,
 		enableTestTaskInjection: deps.EnableTestTaskInjection,
 		uploadConfig:            deps.UploadConfig,
+		connReqSender:           deps.ConnReqSender,
+		postSessionWakeCfg:      deps.PostSessionWakeCfg,
+		redisClient:             deps.RedisClient,
 	}
 
 	mux := http.NewServeMux()

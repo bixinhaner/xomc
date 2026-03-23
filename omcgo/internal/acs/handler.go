@@ -25,9 +25,16 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
+
+// ConnectionRequester sends a Connection Request to wake a device.
+// Used by the Handler for post-session wake when the command queue is not empty.
+type ConnectionRequester interface {
+	Send(ctx context.Context, deviceSN string) error
+}
 
 
 // SessionCookieName is the cookie name for TR069 session ID
@@ -54,6 +61,10 @@ type Handler struct {
 	requestIDPrefix         string                  // prefix for request IDs, e.g., "acs"
 	enableTestTaskInjection bool                    // enable random test task injection (for testing only)
 	uploadConfig            *appconfig.UploadConfig // upload server configuration for generating upload URLs
+	// Post-session wake: send Connection Request when session ends with remaining commands.
+	connReqSender       ConnectionRequester
+	postSessionWakeCfg  appconfig.PostSessionWakeConfig
+	redisClient         redis.Cmdable // for continuous wake counter
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
@@ -290,6 +301,9 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 
 	// Publish events
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
+
+	// Reset continuous wake counter — device has connected, allow new wake cycle.
+	h.resetContinuousWake(r.Context(), deviceSN)
 
 	// Per TR069 spec: Always send InformResponse first.
 	// Command queue will be checked on the subsequent Empty POST.
@@ -608,6 +622,98 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 	if session.ID != "" {
 		h.sessionStore.DeleteByID(ctx, session.ID)
 	}
+
+	// 异步检查队列并续唤设备
+	if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && session.DeviceSN != "" {
+		go h.postSessionWake(session.DeviceSN)
+	}
+}
+
+// postSessionWake checks if the device still has pending commands after a session ends.
+// If so, it sends a Connection Request to trigger a new Inform immediately,
+// instead of waiting for the device's next periodic Inform (~60s+).
+// This dramatically speeds up command queue drain (e.g., parameter discovery).
+func (h *Handler) postSessionWake(deviceSN string) {
+	if h.connReqSender == nil || !h.postSessionWakeCfg.Enabled {
+		return
+	}
+
+	ctx := context.Background()
+
+	// Check combined queue depth (task queue + legacy command queue).
+	var remaining int64
+	if h.taskService != nil {
+		if n, err := h.taskService.GetQueueLength(ctx, deviceSN); err == nil {
+			remaining += n
+		}
+	}
+	if h.commandQueue != nil {
+		if n, err := h.commandQueue.Len(ctx, deviceSN); err == nil {
+			remaining += n
+		}
+	}
+
+	if remaining == 0 {
+		return // 队列已空，无需续唤
+	}
+
+	// Check continuous wake counter (prevent infinite loop).
+	maxContinuous := h.postSessionWakeCfg.MaxContinuous
+	if maxContinuous <= 0 {
+		maxContinuous = 200
+	}
+	cooldownTTL := h.postSessionWakeCfg.CooldownTTL
+	if cooldownTTL <= 0 {
+		cooldownTTL = 5 * time.Minute
+	}
+
+	counterKey := "acs:continuous_wake:" + deviceSN
+	count, err := h.redisClient.Incr(ctx, counterKey).Result()
+	if err != nil {
+		h.logger.Warn("post-session wake: incr counter failed",
+			zap.String("device_sn", deviceSN), zap.Error(err))
+		return
+	}
+	h.redisClient.Expire(ctx, counterKey, cooldownTTL)
+
+	if int(count) > maxContinuous {
+		h.logger.Warn("post-session wake: max continuous reached, backing off",
+			zap.String("device_sn", deviceSN),
+			zap.Int64("remaining", remaining),
+			zap.Int64("continuous_count", count),
+			zap.Int("max_continuous", maxContinuous))
+		return
+	}
+
+	// Short delay to let CPE finish closing the previous session.
+	delay := h.postSessionWakeCfg.DelayAfter
+	if delay <= 0 {
+		delay = time.Second
+	}
+	time.Sleep(delay)
+
+	// Send Connection Request.
+	if err := h.connReqSender.Send(ctx, deviceSN); err != nil {
+		h.logger.Warn("post-session wake: CR failed",
+			zap.String("device_sn", deviceSN),
+			zap.Int64("remaining", remaining),
+			zap.Error(err))
+	} else {
+		h.logger.Info("post-session wake: CR sent",
+			zap.String("device_sn", deviceSN),
+			zap.Int64("remaining", remaining),
+			zap.Int64("continuous_count", count))
+		h.metrics.PostSessionWakeTotal.Inc()
+	}
+}
+
+// resetContinuousWake resets the continuous wake counter when a device sends an Inform.
+// This allows the counter to restart when the device reconnects.
+func (h *Handler) resetContinuousWake(ctx context.Context, deviceSN string) {
+	if h.redisClient == nil || !h.postSessionWakeCfg.Enabled {
+		return
+	}
+	h.redisClient.Del(ctx, "acs:continuous_wake:"+deviceSN)
 }
 
 // handleSOAPFault handles SOAP Fault responses from CPE.

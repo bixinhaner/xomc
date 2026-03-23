@@ -8,6 +8,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/task"
@@ -83,6 +84,28 @@ func runACS(cmd *cobra.Command, args []string) error {
 		cfg.EnableTestTaskInjection,
 	)
 
+	// Setup STUN store and UDP sender (needed for both STUN server and post-session wake)
+	var stunStore *stun.Store
+	var udpSender *connreq.UDPSender
+	if cfg.STUN.Enabled {
+		stunStore = stun.NewStore(inf.Redis, inf.Logger)
+		udpSender = connreq.NewUDPSender(stunStore, cfg.STUN.SharedSecret, inf.Logger)
+	}
+
+	// Setup post-session wake: send Connection Request when session ends with remaining commands.
+	if cfg.PostSessionWake.Enabled && udpSender != nil {
+		dispatcher := connreq.NewDispatcher(nil, udpSender, inf.Logger)
+		if inf.MetricsReg != nil {
+			dispatcher.SetMetrics(connreq.NewDispatcherMetrics(inf.MetricsReg))
+		}
+		deps.ConnReqSender = &acsConnReqSender{dispatcher: dispatcher, isENB: true}
+		deps.PostSessionWakeCfg = cfg.PostSessionWake
+		deps.RedisClient = inf.Redis
+		inf.Logger.Info("post-session wake enabled",
+			zap.Duration("delay_after", cfg.PostSessionWake.DelayAfter),
+			zap.Int("max_continuous", cfg.PostSessionWake.MaxContinuous))
+	}
+
 	acsServer := acs.NewACSServer(cfg, deps)
 	inf.GS.Register("acs-http", 1, func(ctx context.Context) error { return acsServer.Shutdown(ctx) })
 
@@ -92,8 +115,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Start STUN UDP server for NAT traversal and Connection Request
-	if cfg.STUN.Enabled {
-		stunStore := stun.NewStore(inf.Redis, inf.Logger)
+	if cfg.STUN.Enabled && stunStore != nil {
 		stunCfg := stun.Config{
 			Enabled:      cfg.STUN.Enabled,
 			ListenAddr:   cfg.STUN.ListenAddr,
@@ -117,6 +139,18 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}
 
 	return inf.WaitAndShutdown(errCh)
+}
+
+// acsConnReqSender adapts connreq.Dispatcher to the acs.ConnectionRequester interface.
+// For post-session wake, we only use UDP (STUN-based) since the device's HTTP URL
+// is not readily available in the ACS handler context.
+type acsConnReqSender struct {
+	dispatcher *connreq.Dispatcher
+	isENB      bool
+}
+
+func (s *acsConnReqSender) Send(ctx context.Context, deviceSN string) error {
+	return s.dispatcher.Send(ctx, deviceSN, "", "", s.isENB)
 }
 
 // parseStringSlice parses a comma-separated string into a slice.

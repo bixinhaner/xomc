@@ -11,6 +11,7 @@ type ACSMetrics struct {
 	SessionDuration      prometheus.Histogram
 	RateLimitRejected    prometheus.Counter
 	RateLimitDeviceCount prometheus.Gauge
+	PostSessionWakeTotal prometheus.Counter
 }
 
 // NewACSMetrics creates and registers ACS metrics.
@@ -46,6 +47,10 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 			Name: "acs_rate_limit_device_count",
 			Help: "Number of devices tracked by the rate limiter",
 		}),
+		PostSessionWakeTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "acs_post_session_wake_total",
+			Help: "Total number of post-session Connection Requests sent to wake devices with remaining commands",
+		}),
 	}
 
 	reg.MustRegister(
@@ -56,6 +61,7 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 		m.SessionDuration,
 		m.RateLimitRejected,
 		m.RateLimitDeviceCount,
+		m.PostSessionWakeTotal,
 	)
 
 	return m

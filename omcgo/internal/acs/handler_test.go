@@ -884,6 +884,18 @@ func (m *acsHTaskService) GetTaskByCWMPID(ctx context.Context, cwmpID string) (*
 	return m.cwmpIDToTaskMap[cwmpID], nil
 }
 
+func (m *acsHTaskService) GetQueueLength(ctx context.Context, deviceSN string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var count int64
+	for i := m.popIndex; i < len(m.tasks); i++ {
+		if m.tasks[i].DeviceSN == deviceSN && m.tasks[i].Status == task.TaskStatusPending {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

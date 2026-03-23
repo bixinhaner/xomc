@@ -27,4 +27,7 @@ type TaskService interface {
 
 	// GetTaskByCWMPID retrieves a task by its CWMP ID.
 	GetTaskByCWMPID(ctx context.Context, cwmpID string) (*task.Task, error)
+
+	// GetQueueLength returns the number of pending tasks for a device.
+	GetQueueLength(ctx context.Context, deviceSN string) (int64, error)
 }
