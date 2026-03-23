@@ -1,6 +1,6 @@
 # 参数模版存储与匹配方案
 
-> 版本：v1.1 | 日期：2026-03-23 | 状态：Phase 1-5 已实现，Phase 6 部分完成
+> 版本：v1.2 | 日期：2026-03-23 | 状态：全部完成
 
 ---
 
@@ -546,9 +546,9 @@ func (h *DataModelHandler) Import(c *gin.Context) {
 - [x] 优化 `resolveFromDBWithFirmware` 使用 `FindActiveForMatch`
 
 ### Phase 4: 过期清理 ✅
-- [x] 实现 `DataModelCleaner`
-- [ ] 在 `cmd/app/main.go` 注册 cron 任务（待集成）
-- [x] `appconfig` 增加过期配置字段
+- [x] 实现 `DataModelCleaner`（含 `Start/Stop` 生命周期，基于 `robfig/cron/v3`）
+- [x] 在 `router.go` 注册 cron 任务 + 优雅关闭
+- [x] `appconfig` 增加过期配置字段（默认值：auto 15天、manual 60天、cron "0 3 * * *"）
 
 ### Phase 5: Discovery 适配 ✅
 - [x] `HandleDiscoveryResult` 中确保 auto 模版 `firmware_version = ""`
@@ -556,9 +556,9 @@ func (h *DataModelHandler) Import(c *gin.Context) {
 
 ### Phase 6: 测试 ✅
 - [x] 匹配优先级测试（二级精确匹配 + source_type 排序）
-- [ ] 过期清理测试（待补充专项测试）
-- [ ] 并发访问更新测试（待补充专项测试）
-- [x] 所有现有测试通过（52 个测试模块，0 失败）
+- [x] 过期清理测试（6 个用例：无过期/有过期/DB 错误/自定义天数/启停/无效 cron）
+- [x] 并发访问更新测试（5 个用例：60 分钟限流/窗口过期后放行/不同模型不限流/100 并发安全/错误不存储）
+- [x] 所有 52 个测试模块通过，0 失败
 
 ---
 
