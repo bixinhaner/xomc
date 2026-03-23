@@ -1,174 +1,611 @@
-import { useState, useMemo } from 'react';
-import { Button, Input, Space, Tag, Tree, Typography, message } from 'antd';
-import { SearchOutlined, DownloadOutlined } from '@ant-design/icons';
+import { useState, useMemo, useCallback } from 'react';
+import { App, Button, Form, Input, Modal, Select, Space, Tag, Tree, Typography } from 'antd';
+import { PlusOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn } from '@/components/DataTable';
+import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 
-interface KPIReportRow extends Record<string, unknown> {
+// KPI 指标数据接口
+interface KPIIndicatorRow extends Record<string, unknown> {
+  kpiId: string;                    // 指标ID
+  kpiName: string;                  // 指标名称
+  productType: string;              // 产品类型
+  custName: string;                 // 自定义指标名称
+  indicatorLevel: 'device' | 'plmn'; // 等级
+  unit: string;                     // 单位
+  isCustomize: 0 | 1;               // 是否自定义指标
+  isEnable: 0 | 1;                  // 是否启用测量
+  indicatorType: 'counter' | 'kpi'; // 指标类型
+  updater: string;                  // 更新人
+  updateTime: string;               // 更新时间
+}
+
+// 指标功能集数据
+interface FunctionSetItem {
   id: string;
-  kpiName: string;
-  kpiCode: string;
-  unit: string;
-  currentValue: number;
-  threshold: number;
-  status: 'normal' | 'warning' | 'critical';
-  trend: number[];
-  category: string;
+  name: string;
+  networkType: 'eNB' | 'gNB' | 'GSM';
+  description: string;
+  kpiCount: number;
 }
 
-function useKPITreeData(): DataNode[] {
-  const t = useT();
-  return useMemo(() => [
-    {
-      title: t('kpi.tree.all'),
-      key: 'all',
-      children: [
-        {
-          title: t('kpi.tree.radioAccess'),
-          key: 'radio-access',
-          children: [
-            { title: t('kpi.tree.rrcAccess'), key: 'rrc' },
-            { title: t('kpi.tree.erab'), key: 'erab' },
-            { title: t('kpi.tree.handover'), key: 'handover' },
-          ],
-        },
-        {
-          title: t('kpi.tree.radioResource'),
-          key: 'radio-resource',
-          children: [
-            { title: t('kpi.tree.userCount'), key: 'user-count' },
-            { title: t('kpi.tree.ulThroughput'), key: 'ul-throughput' },
-            { title: t('kpi.tree.dlThroughput'), key: 'dl-throughput' },
-          ],
-        },
-        {
-          title: t('kpi.tree.quality'),
-          key: 'quality',
-          children: [
-            { title: t('kpi.tree.pdcpLoss'), key: 'pdcp-loss' },
-            { title: t('kpi.tree.availability'), key: 'availability' },
-          ],
-        },
-      ],
-    },
-  ], [t]);
-}
-
-const MOCK_DATA_RAW = [
-  { id: '1', kpiNameKey: 'kpi.rrcSetupSuccessRate', kpiCode: 'RRC_SR', unit: '%', currentValue: 99.2, threshold: 95, status: 'normal' as const, trend: [98, 99, 99.5, 98.8, 99.2, 99.1, 99.2], category: 'rrc' },
-  { id: '2', kpiNameKey: 'kpi.erabSetupSuccessRate', kpiCode: 'ERAB_SR', unit: '%', currentValue: 98.7, threshold: 95, status: 'normal' as const, trend: [97, 98, 98.5, 98.7, 98.6, 98.8, 98.7], category: 'erab' },
-  { id: '3', kpiNameKey: 'kpi.handoverSuccessRate', kpiCode: 'HO_SR', unit: '%', currentValue: 93.5, threshold: 95, status: 'warning' as const, trend: [96, 95, 94, 93, 93.5, 94, 93.5], category: 'handover' },
-  { id: '4', kpiNameKey: 'kpi.dlPeakThroughput', kpiCode: 'DL_THROUGHPUT', unit: 'Mbps', currentValue: 145.6, threshold: 100, status: 'normal' as const, trend: [120, 135, 140, 145, 142, 148, 145.6], category: 'dl-throughput' },
-  { id: '5', kpiNameKey: 'kpi.ulPeakThroughput', kpiCode: 'UL_THROUGHPUT', unit: 'Mbps', currentValue: 45.2, threshold: 30, status: 'normal' as const, trend: [40, 42, 44, 45, 44.5, 46, 45.2], category: 'ul-throughput' },
-  { id: '6', kpiNameKey: 'kpi.maxOnlineUsers', kpiCode: 'MAX_USERS', unit: '个', currentValue: 856, threshold: 1000, status: 'normal' as const, trend: [800, 820, 840, 856, 850, 860, 856], category: 'user-count' },
-  { id: '7', kpiNameKey: 'kpi.availability', kpiCode: 'AVAILABILITY', unit: '%', currentValue: 99.95, threshold: 99.9, status: 'normal' as const, trend: [99.9, 99.95, 99.92, 99.95, 99.98, 99.95, 99.95], category: 'availability' },
-  { id: '8', kpiNameKey: 'kpi.pdcpLossRate', kpiCode: 'PDCP_LOSS', unit: '%', currentValue: 0.08, threshold: 0.1, status: 'normal' as const, trend: [0.05, 0.06, 0.07, 0.08, 0.07, 0.09, 0.08], category: 'pdcp-loss' },
+const MOCK_FUNCTION_SETS: FunctionSetItem[] = [
+  { id: 'fs-1', name: '接入类指标', networkType: 'eNB', description: 'RRC、ERAB等接入相关KPI', kpiCount: 15 },
+  { id: 'fs-2', name: '切换类指标', networkType: 'eNB', description: '切换成功率相关KPI', kpiCount: 8 },
+  { id: 'fs-3', name: '吞吐量指标', networkType: 'gNB', description: '上下行吞吐量KPI', kpiCount: 12 },
+  { id: 'fs-4', name: '可用性指标', networkType: 'GSM', description: '基站可用性KPI', kpiCount: 6 },
 ];
 
-// Simple sparkline mini-chart using SVG
-function Sparkline({ data, color = 'var(--color-primary-600)' }: { data: number[]; color?: string }) {
-  if (!data.length) return null;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const w = 60;
-  const h = 20;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`).join(' ');
+// Mock KPI 指标数据
+const MOCK_KPI_DATA: KPIIndicatorRow[] = [
+  { kpiId: 'RRC_CONN_REQ', kpiName: 'RRC连接请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
+  { kpiId: 'RRC_CONN_SUCC', kpiName: 'RRC连接成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
+  { kpiId: 'RRC_SR', kpiName: 'RRC连接成功率', productType: 'BBU', custName: '接入成功率', indicatorLevel: 'plmn', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', updater: 'user1', updateTime: '2024-03-21 14:20:00' },
+  { kpiId: 'ERAB_SETUP_REQ', kpiName: 'ERAB建立请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 0, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
+  { kpiId: 'ERAB_SETUP_SUCC', kpiName: 'ERAB建立成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
+  { kpiId: 'HO_EXEC', kpiName: '切换执行次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
+  { kpiId: 'HO_SUCC', kpiName: '切换成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
+  { kpiId: 'DL_THROUGHPUT', kpiName: '下行吞吐量', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
+  { kpiId: 'UL_THROUGHPUT', kpiName: '上行吞吐量', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
+  { kpiId: 'CUSTOM_KPI_001', kpiName: '自定义接入指标', productType: 'BBU', custName: '我的接入指标', indicatorLevel: 'device', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', updater: 'user1', updateTime: '2024-03-22 08:30:00' },
+];
+
+// 二级节点配置
+const SECOND_LEVEL_NODES = [
+  { key: 'call', labelKey: 'kpi.tree.call' },
+  { key: 'context', labelKey: 'kpi.tree.context' },
+  { key: 'customize', labelKey: 'kpi.tree.customize' },
+  { key: 'data', labelKey: 'kpi.tree.data' },
+  { key: 'drb', labelKey: 'kpi.tree.drb' },
+  { key: 'endc-mn', labelKey: 'kpi.tree.endcMn' },
+  { key: 'eqpt', labelKey: 'kpi.tree.eqpt' },
+  { key: 'erab', labelKey: 'kpi.tree.erab' },
+  { key: 'ho', labelKey: 'kpi.tree.ho' },
+  { key: 'custom', labelKey: 'kpi.tree.custom' },
+];
+
+// 产品类型选项
+const PRODUCT_TYPE_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: 'BBU', value: 'BBU' },
+  { label: 'RRU', value: 'RRU' },
+  { label: 'AAU', value: 'AAU' },
+];
+
+// 等级选项
+const LEVEL_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: 'Device', value: 'device' },
+  { label: 'PLMN', value: 'plmn' },
+];
+
+// 树节点带悬停图标的渲染
+interface TreeNodeTitleProps {
+  title: string;
+  nodeKey: string;
+  isCustom?: boolean;
+  onAdd?: (key: string) => void;
+  onDelete?: (key: string) => void;
+}
+
+function TreeNodeTitle({ title, nodeKey, isCustom, onAdd, onDelete }: TreeNodeTitleProps) {
+  const [hovered, setHovered] = useState(false);
+
   return (
-    <svg width={w} height={h} style={{ display: 'block' }}>
-      <polyline
-        points={pts}
-        fill="none"
-        stroke={color}
-        strokeWidth={1.5}
-      />
-    </svg>
+    <div
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minHeight: 24 }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span>{title}</span>
+      {hovered && onAdd && (
+        <Space size={0}>
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd(nodeKey);
+            }}
+            style={{ fontSize: 12, padding: '0 4px' }}
+          />
+          {isCustom && onDelete && (
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              danger
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(nodeKey);
+              }}
+              style={{ fontSize: 12, padding: '0 4px' }}
+            />
+          )}
+        </Space>
+      )}
+    </div>
   );
+}
+
+function useKPITreeData(
+  t: (id: string) => string,
+  customNodes: { key: string; parentKey: string; title: string }[],
+  onAddNode: (parentKey: string) => void,
+  onDeleteNode: (nodeKey: string) => void,
+  searchValue: string
+): DataNode[] {
+  return useMemo(() => {
+    const lowerSearch = searchValue.toLowerCase();
+
+    // 检查节点是否匹配搜索
+    const nodeMatchesSearch = (label: string): boolean => {
+      if (!searchValue) return true;
+      return label.toLowerCase().includes(lowerSearch);
+    };
+
+    // 构建二级节点
+    const buildSecondLevelNodes = (parentKey: string): DataNode[] => {
+      // 预定义节点
+      const predefinedNodes: DataNode[] = SECOND_LEVEL_NODES.map((node) => {
+        const nodeKey = `${parentKey}-${node.key}`;
+        const isCustom = node.key === 'custom';
+        const label = t(node.labelKey);
+
+        // 查找该节点下的自定义子节点
+        const childCustomNodes = customNodes.filter((cn) => cn.parentKey === nodeKey);
+
+        // 过滤子节点
+        const filteredChildren = childCustomNodes.filter((cn) => nodeMatchesSearch(cn.title));
+
+        // 如果有搜索词，检查是否匹配
+        const selfMatches = nodeMatchesSearch(label);
+        const hasMatchingChildren = filteredChildren.length > 0;
+
+        // 如果搜索词存在且节点和子节点都不匹配，则不显示
+        if (searchValue && !selfMatches && !hasMatchingChildren) {
+          return null;
+        }
+
+        return {
+          title: (
+            <TreeNodeTitle
+              title={label}
+              nodeKey={nodeKey}
+              isCustom={isCustom}
+              onAdd={onAddNode}
+              onDelete={isCustom ? onDeleteNode : undefined}
+            />
+          ),
+          key: nodeKey,
+          children: filteredChildren.length > 0 ? filteredChildren.map((cn) => ({
+            title: (
+              <TreeNodeTitle
+                title={cn.title}
+                nodeKey={cn.key}
+                isCustom
+                onAdd={onAddNode}
+                onDelete={onDeleteNode}
+              />
+            ),
+            key: cn.key,
+            isLeaf: true,
+          })) : undefined,
+        };
+      }).filter(Boolean) as DataNode[];
+
+      return predefinedNodes;
+    };
+
+    // 构建一级节点
+    const buildFirstLevelNodes = (): DataNode[] => {
+      const nodes = [
+        { key: 'enb-set', labelKey: 'kpi.tree.enbSet' },
+        { key: 'gnb-set', labelKey: 'kpi.tree.gnbSet' },
+        { key: 'gsm-set', labelKey: 'kpi.tree.gsmSet' },
+      ];
+
+      return nodes.map((node) => {
+        const children = buildSecondLevelNodes(node.key);
+        const label = t(node.labelKey);
+
+        // 如果有搜索词，检查一级节点标签或子节点是否匹配
+        if (searchValue) {
+          const labelMatches = nodeMatchesSearch(label);
+          const hasChildren = children.length > 0;
+          if (!labelMatches && !hasChildren) {
+            return null;
+          }
+        }
+
+        return {
+          title: label,
+          key: node.key,
+          children: children.length > 0 ? children : undefined,
+        };
+      }).filter(Boolean) as DataNode[];
+    };
+
+    const firstLevelNodes = buildFirstLevelNodes();
+
+    // 检查根节点是否匹配
+    if (searchValue) {
+      const rootLabel = t('kpi.tree.all');
+      if (!nodeMatchesSearch(rootLabel) && firstLevelNodes.length === 0) {
+        return [];
+      }
+    }
+
+    return [
+      {
+        title: t('kpi.tree.all'),
+        key: 'all',
+        children: firstLevelNodes,
+      },
+    ];
+  }, [t, customNodes, onAddNode, onDeleteNode, searchValue]);
 }
 
 export default function KPIStandardReport() {
   const t = useT();
-  const kpiTreeData = useKPITreeData();
+  const { message, modal } = App.useApp();
   const [selectedCategory, setSelectedCategory] = useState<string>('');
-  const [searchValue, setSearchValue] = useState('');
+  const [treeSearchValue, setTreeSearchValue] = useState('');
+  const [tableSearchValue, setTableSearchValue] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  const mockData: KPIReportRow[] = useMemo(() =>
-    MOCK_DATA_RAW.map((r) => ({ ...r, kpiName: t(r.kpiNameKey) })),
-  [t]);
+  // 筛选状态
+  const [productType, setProductType] = useState<string>('');
+  const [indicatorLevel, setIndicatorLevel] = useState<string>('');
 
-  const filteredSource = selectedCategory && selectedCategory !== 'all'
-    ? mockData.filter((r) => r.category === selectedCategory)
-    : mockData;
+  // 已选指标
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [selectedRows, setSelectedRows] = useState<KPIIndicatorRow[]>([]);
 
-  const STATUS_MAP: Record<string, { color: string; text: string }> = useMemo(() => ({
-    normal: { color: 'success', text: t('status.success') },
-    warning: { color: 'warning', text: t('alarm.severity.warning') },
-    critical: { color: 'error', text: t('alarm.severity.critical') },
-  }), [t]);
+  // Add function set modal state
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addForm] = Form.useForm<{ name: string; networkType: 'eNB' | 'gNB' | 'GSM'; description: string }>();
+  const [functionSets, setFunctionSets] = useState<FunctionSetItem[]>(MOCK_FUNCTION_SETS);
 
-  const columns: DataTableColumn<KPIReportRow>[] = useMemo(() => [
-    { key: 'kpiName', title: t('perf.kpiName'), dataIndex: 'kpiName', width: 180 },
-    { key: 'kpiCode', title: t('perf.kpiCode'), dataIndex: 'kpiCode', width: 150, mono: true, copyable: true },
-    { key: 'unit', title: t('perf.unit'), dataIndex: 'unit', width: 70 },
-    { key: 'currentValue', title: t('perf.value'), dataIndex: 'currentValue', width: 100 },
-    { key: 'threshold', title: t('perf.threshold'), dataIndex: 'threshold', width: 90 },
+  // Custom tree nodes state
+  const [customNodes, setCustomNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
+
+  // Add node modal state
+  const [addNodeModalOpen, setAddNodeModalOpen] = useState(false);
+  const [addNodeForm] = Form.useForm<{ name: string }>();
+  const [currentParentKey, setCurrentParentKey] = useState<string>('');
+
+  // 当前选中的功能集名称
+  const selectedFunctionSetName = useMemo(() => {
+    if (!selectedCategory) return t('kpi.allIndicators');
+    // 从树节点 key 中提取名称
+    return selectedCategory;
+  }, [selectedCategory, t]);
+
+  // Handle add node to tree
+  const handleAddNode = useCallback((parentKey: string) => {
+    setCurrentParentKey(parentKey);
+    setAddNodeModalOpen(true);
+    addNodeForm.resetFields();
+  }, [addNodeForm]);
+
+  // Handle delete node from tree
+  const handleDeleteNode = useCallback((nodeKey: string) => {
+    modal.confirm({
+      title: t('common.confirm'),
+      content: t('common.confirmDelete'),
+      onOk: () => {
+        setCustomNodes((prev) => prev.filter((n) => n.key !== nodeKey));
+        void message.success(t('common.success'));
+      },
+    });
+  }, [modal, message, t]);
+
+  const kpiTreeData = useKPITreeData(t, customNodes, handleAddNode, handleDeleteNode, treeSearchValue);
+
+  // 过滤数据
+  const filteredData = useMemo(() => {
+    let data = [...MOCK_KPI_DATA];
+
+    // 按搜索词过滤
+    if (tableSearchValue) {
+      const lowerSearch = tableSearchValue.toLowerCase();
+      data = data.filter(
+        (row) =>
+          row.kpiId.toLowerCase().includes(lowerSearch) ||
+          row.kpiName.toLowerCase().includes(lowerSearch)
+      );
+    }
+
+    // 按产品类型过滤
+    if (productType) {
+      data = data.filter((row) => row.productType === productType);
+    }
+
+    // 按等级过滤
+    if (indicatorLevel) {
+      data = data.filter((row) => row.indicatorLevel === indicatorLevel);
+    }
+
+    return data;
+  }, [tableSearchValue, productType, indicatorLevel]);
+
+  // 处理选中行变化
+  const handleSelectChange = useCallback((newSelectedRowKeys: React.Key[], newSelectedRows: KPIIndicatorRow[]) => {
+    setSelectedRowKeys(newSelectedRowKeys);
+    setSelectedRows(newSelectedRows);
+  }, []);
+
+  // 删除自定义指标
+  const handleDeleteIndicator = useCallback((kpiId: string) => {
+    modal.confirm({
+      title: t('common.confirm'),
+      content: t('common.confirmDelete'),
+      onOk: () => {
+        void message.success(t('common.success'));
+      },
+    });
+  }, [modal, message, t]);
+
+  // 批量操作定义
+  const batchActions = useMemo((): BatchAction[] => [
     {
-      key: 'status',
-      title: t('table.status'),
-      dataIndex: 'status',
-      width: 90,
-      render: (val) => {
-        const cfg = STATUS_MAP[val as string] ?? STATUS_MAP.normal;
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+      key: 'enableMeasure',
+      label: t('kpi.measure'),
+      icon: <CheckOutlined />,
+      onClick: (keys: React.Key[]) => {
+        modal.confirm({
+          title: t('common.confirm'),
+          content: t('kpi.confirmEnableMeasure'),
+          onOk: () => {
+            void message.success(t('common.success'));
+            setSelectedRowKeys([]);
+            setSelectedRows([]);
+          },
+        });
       },
     },
     {
-      key: 'trend',
-      title: t('perf.timeRange'),
-      dataIndex: 'trend',
-      width: 80,
-      render: (val, record) => {
-        const arr = val as number[];
-        const color = record.status === 'critical' ? '#ff4d4f' : record.status === 'warning' ? '#faad14' : '#52c41a';
-        return <Sparkline data={arr} color={color} />;
+      key: 'disableMeasure',
+      label: t('kpi.cancelMeasure'),
+      icon: <CloseOutlined />,
+      onClick: (keys: React.Key[]) => {
+        modal.confirm({
+          title: t('common.confirm'),
+          content: t('kpi.confirmDisableMeasure'),
+          onOk: () => {
+            void message.success(t('common.success'));
+            setSelectedRowKeys([]);
+            setSelectedRows([]);
+          },
+        });
       },
     },
+  ], [modal, message, t]);
+
+  // 表格列定义
+  const columns: DataTableColumn<KPIIndicatorRow>[] = useMemo(() => [
     {
-      key: 'action',
-      title: t('table.operation'),
-      dataIndex: 'id',
-      width: 80,
-      fixed: 'right',
-      render: () => (
-        <Button type="link" size="small" icon={<DownloadOutlined />}>
-          {t('common.detail')}
-        </Button>
+      key: 'operation',
+      title: '',
+      dataIndex: 'kpiId',
+      width: 120,
+      fixed: 'left',
+      render: (_, row) => (
+        <Space size={4}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+          >
+            {t('common.edit')}
+          </Button>
+          {row.isCustomize === 1 && (
+            <Button
+              type="link"
+              size="small"
+              icon={<DeleteOutlined />}
+              danger
+              onClick={() => handleDeleteIndicator(row.kpiId)}
+            >
+              {t('common.delete')}
+            </Button>
+          )}
+        </Space>
       ),
     },
-  ], [t, STATUS_MAP]);
+    {
+      key: 'isEnable',
+      title: t('kpi.measure'),
+      dataIndex: 'isEnable',
+      width: 60,
+      render: (val) => (
+        <Tag color={val === 1 ? 'success' : 'default'}>
+          {val === 1 ? t('common.yes') : t('common.no')}
+        </Tag>
+      ),
+    },
+    {
+      key: 'kpiId',
+      title: t('kpi.counterId'),
+      dataIndex: 'kpiId',
+      width: 140,
+      mono: true,
+      copyable: true,
+    },
+    {
+      key: 'kpiName',
+      title: t('kpi.counterName'),
+      dataIndex: 'kpiName',
+      width: 180,
+    },
+    {
+      key: 'productType',
+      title: t('kpi.productType'),
+      dataIndex: 'productType',
+      width: 90,
+    },
+    {
+      key: 'custName',
+      title: t('kpi.customName'),
+      dataIndex: 'custName',
+      width: 140,
+      render: (val) => val || '-',
+    },
+    {
+      key: 'indicatorLevel',
+      title: t('kpi.level'),
+      dataIndex: 'indicatorLevel',
+      width: 70,
+      render: (val) => val === 'device' ? 'Device' : 'PLMN',
+    },
+    {
+      key: 'unit',
+      title: t('kpi.unit'),
+      dataIndex: 'unit',
+      width: 60,
+    },
+    {
+      key: 'isCustomize',
+      title: t('kpi.indicatorType'),
+      dataIndex: 'isCustomize',
+      width: 90,
+      render: (val) => (
+        <Tag color={val === 1 ? 'blue' : 'default'}>
+          {val === 1 ? t('kpi.customIndicator') : t('kpi.baseIndicator')}
+        </Tag>
+      ),
+    },
+    {
+      key: 'updater',
+      title: t('kpi.updater'),
+      dataIndex: 'updater',
+      width: 80,
+    },
+    {
+      key: 'updateTime',
+      title: t('kpi.updateTime'),
+      dataIndex: 'updateTime',
+      width: 150,
+    },
+  ], [t, handleDeleteIndicator]);
+
+  // Handle add function set
+  const handleAddFunctionSet = useCallback(async () => {
+    try {
+      const values = await addForm.validateFields();
+
+      // Check for duplicate name
+      const isDuplicate = functionSets.some(
+        (fs) => fs.name.toLowerCase() === values.name.toLowerCase()
+      );
+      if (isDuplicate) {
+        void message.error(t('perf.functionSetNameDuplicate'));
+        return;
+      }
+
+      // Add new function set
+      const newItem: FunctionSetItem = {
+        id: `fs-${Date.now()}`,
+        name: values.name,
+        networkType: values.networkType,
+        description: values.description || '',
+        kpiCount: 0,
+      };
+      setFunctionSets((prev) => [...prev, newItem]);
+      void message.success(t('common.success'));
+      setAddModalOpen(false);
+      addForm.resetFields();
+    } catch {
+      // validation error
+    }
+  }, [addForm, functionSets, message, t]);
+
+  // Handle add tree node
+  const handleAddTreeNode = useCallback(async () => {
+    try {
+      const values = await addNodeForm.validateFields();
+      const newNode = {
+        key: `node-${Date.now()}`,
+        parentKey: currentParentKey,
+        title: values.name,
+      };
+      setCustomNodes((prev) => [...prev, newNode]);
+      void message.success(t('common.success'));
+      setAddNodeModalOpen(false);
+      addNodeForm.resetFields();
+    } catch {
+      // validation error
+    }
+  }, [addNodeForm, currentParentKey, message, t]);
 
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '12px 12px 8px' }}>
-        <Typography.Text strong style={{ fontSize: 13 }}>{t('perf.category')}</Typography.Text>
+      <div
+        style={{
+          padding: '12px 12px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderBottom: '1px solid #f0f0f0',
+        }}
+      >
+        <Typography.Title level={5} style={{ margin: 0, fontSize: 14 }}>
+          {t('perf.functionSet')}
+        </Typography.Title>
+        <Button
+          type="text"
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={() => setAddModalOpen(true)}
+        >
+          {t('common.add')}
+        </Button>
       </div>
-      <div style={{ padding: '0 12px 8px' }}>
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
         <Input
           size="small"
           placeholder={t('common.search')}
           prefix={<SearchOutlined />}
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
+          value={treeSearchValue}
+          onChange={(e) => setTreeSearchValue(e.target.value)}
           allowClear
         />
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
+        <style>{`
+          .kpi-tree {
+            background: transparent;
+            width: 100%;
+          }
+          .kpi-tree .ant-tree-list {
+            width: 100%;
+          }
+          .kpi-tree .ant-tree-treenode {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+          .kpi-tree .ant-tree-node-content-wrapper {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+          }
+          .kpi-tree .ant-tree-title {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-right: 1px;
+          }
+        `}</style>
         <Tree
+          className="kpi-tree"
           treeData={kpiTreeData}
           onSelect={(keys) => {
             const key = keys[0] as string;
@@ -182,28 +619,164 @@ export default function KPIStandardReport() {
   );
 
   return (
-    <TreeListPageLayout tree={treePanel}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography.Text strong style={{ fontSize: 14 }}>{t('nav.performance.kpiStandard')}</Typography.Text>
-        <Space>
-          <Button icon={<DownloadOutlined />} onClick={() => void message.info(t('common.exportInProgress'))}>{t('common.export')}</Button>
-        </Space>
-      </div>
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        <DataTable<KPIReportRow>
-          tableId="kpi-standard-report"
-          columns={columns}
-          dataSource={filteredSource}
-          loading={false}
-          rowKey="id"
-          total={filteredSource.length}
-          currentPage={page}
-          pageSize={pageSize}
-          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          onExport={() => void message.info(t('common.exportInProgress'))}
-          scroll={{ x: 900 }}
-        />
-      </div>
-    </TreeListPageLayout>
+    <>
+      <TreeListPageLayout tree={treePanel}>
+        {/* 标题行 */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 12px' }}>
+          <Typography.Title level={5} style={{ margin: 0 }}>
+            {selectedFunctionSetName}
+            <Typography.Text type="secondary" style={{ fontSize: 13, marginLeft: 8, fontWeight: 400 }}>
+              {t('table.total')} {filteredData.length}
+            </Typography.Text>
+          </Typography.Title>
+          <Button type="primary" icon={<DownloadOutlined />} onClick={() => void message.info(t('common.exportInProgress'))}>
+            {t('common.export')}
+          </Button>
+        </div>
+
+        {/* 数据表格 */}
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <DataTable<KPIIndicatorRow>
+            tableId="kpi-management"
+            columns={columns}
+            dataSource={filteredData}
+            loading={false}
+            rowKey="kpiId"
+            total={filteredData.length}
+            currentPage={page}
+            pageSize={pageSize}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            scroll={{ x: 1200 }}
+            selectable
+            selectedRowKeys={selectedRowKeys}
+            onSelectionChange={(keys, rows) => {
+              handleSelectChange(keys, rows as KPIIndicatorRow[]);
+            }}
+            batchActions={batchActions}
+            extraToolbarLeft={
+              <Space size={8}>
+                <Input
+                  size="small"
+                  placeholder={t('kpi.searchPlaceholder')}
+                  prefix={<SearchOutlined />}
+                  value={tableSearchValue}
+                  onChange={(e) => setTableSearchValue(e.target.value)}
+                  allowClear
+                  style={{ width: 200 }}
+                />
+                <Select
+                  size="small"
+                  placeholder={t('kpi.productType')}
+                  value={productType}
+                  onChange={setProductType}
+                  options={PRODUCT_TYPE_OPTIONS}
+                  style={{ width: 100 }}
+                  allowClear
+                />
+                <Select
+                  size="small"
+                  placeholder={t('kpi.level')}
+                  value={indicatorLevel}
+                  onChange={setIndicatorLevel}
+                  options={LEVEL_OPTIONS}
+                  style={{ width: 100 }}
+                  allowClear
+                />
+              </Space>
+            }
+          />
+        </div>
+      </TreeListPageLayout>
+
+      {/* Add Function Set Modal */}
+      <Modal
+        title={t('common.add')}
+        open={addModalOpen}
+        onOk={() => void handleAddFunctionSet()}
+        onCancel={() => {
+          setAddModalOpen(false);
+          addForm.resetFields();
+        }}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={520}
+      >
+        <Form
+          form={addForm}
+          layout="vertical"
+          requiredMark="optional"
+        >
+          <Form.Item
+            name="name"
+            label={t('perf.functionSetName')}
+            rules={[
+              { required: true, message: t('perf.functionSetNameRequired') },
+              { max: 200, message: t('perf.functionSetNameMax') },
+            ]}
+          >
+            <Input
+              placeholder={t('perf.functionSetNamePlaceholder')}
+              maxLength={200}
+              showCount
+            />
+          </Form.Item>
+          <Form.Item
+            name="networkType"
+            label={t('perf.networkType')}
+            rules={[{ required: true, message: t('common.selectRequired') }]}
+          >
+            <Select
+              placeholder={t('perf.networkTypePlaceholder')}
+              options={[
+                { label: 'eNB', value: 'eNB' },
+                { label: 'gNB', value: 'gNB' },
+                { label: 'GSM', value: 'GSM' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label={t('perf.description')}
+          >
+            <Input.TextArea
+              placeholder={t('perf.descriptionPlaceholder')}
+              rows={3}
+              maxLength={500}
+              showCount
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Add Tree Node Modal */}
+      <Modal
+        title={t('common.add')}
+        open={addNodeModalOpen}
+        onOk={() => void handleAddTreeNode()}
+        onCancel={() => {
+          setAddNodeModalOpen(false);
+          addNodeForm.resetFields();
+        }}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={400}
+      >
+        <Form
+          form={addNodeForm}
+          layout="vertical"
+        >
+          <Form.Item
+            name="name"
+            label={t('common.name')}
+            rules={[
+              { required: true, message: t('common.nameRequired') },
+              { max: 100, message: t('common.nameMax100') },
+            ]}
+          >
+            <Input placeholder={t('common.namePlaceholder')} maxLength={100} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   );
 }
