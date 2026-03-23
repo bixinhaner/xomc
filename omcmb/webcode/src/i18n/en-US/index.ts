@@ -830,6 +830,8 @@ const messages: Record<string, string> = {
   'kpi.cancelMeasure':         'Cancel Measure',
   'kpi.counterId':             'Counter/Indicator ID',
   'kpi.counterName':           'Counter/Indicator Name',
+  'kpi.indicatorName':         'Indicator Name',
+  'kpi.belongFunctionSet':     'Function Set',
   'kpi.productType':           'Product Type',
   'kpi.customName':            'Custom Name',
   'kpi.level':                 'Level',

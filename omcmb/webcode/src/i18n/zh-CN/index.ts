@@ -833,6 +833,8 @@ const messages: Record<string, string> = {
   'kpi.cancelMeasure':         '取消测量',
   'kpi.counterId':             'Counter/指标ID',
   'kpi.counterName':           'Counter/指标名称',
+  'kpi.indicatorName':         '指标名称',
+  'kpi.belongFunctionSet':     '所属指标集',
   'kpi.productType':           '产品类型',
   'kpi.customName':            '自定义指标名称',
   'kpi.level':                 '等级',

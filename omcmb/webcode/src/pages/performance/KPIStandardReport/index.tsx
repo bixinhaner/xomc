@@ -890,29 +890,29 @@ export default function KPIStandardReport() {
         >
           <Form.Item
             name="name"
-            label={t('perf.functionSetName')}
+            label={t('kpi.indicatorName')}
             rules={[
-              { required: true, message: t('perf.functionSetNameRequired') },
-              { max: 200, message: t('perf.functionSetNameMax') },
+              { required: true, message: t('kpi.nameRequired') },
+              { max: 200, message: t('kpi.nameMax50') },
             ]}
           >
             <Input
-              placeholder={t('perf.functionSetNamePlaceholder')}
+              placeholder={t('kpi.namePlaceholder')}
               maxLength={200}
               showCount
             />
           </Form.Item>
           <Form.Item
             name="networkType"
-            label={t('perf.networkType')}
+            label={t('kpi.belongFunctionSet')}
             rules={[{ required: true, message: t('common.selectRequired') }]}
           >
             <Select
-              placeholder={t('perf.networkTypePlaceholder')}
+              placeholder={t('common.pleaseSelect')}
               options={[
-                { label: 'eNB', value: 'eNB' },
-                { label: 'gNB', value: 'gNB' },
-                { label: 'GSM', value: 'GSM' },
+                { label: t('kpi.tree.enbSet'), value: 'eNB' },
+                { label: t('kpi.tree.gnbSet'), value: 'gNB' },
+                { label: t('kpi.tree.gsmSet'), value: 'GSM' },
               ]}
             />
           </Form.Item>
