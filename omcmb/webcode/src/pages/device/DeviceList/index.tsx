@@ -22,6 +22,8 @@ import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
+import { useTaskStore } from '@/store/taskStore';
+import type { SingleTask } from '@/types/task';
 import type { Device } from '@/types/device';
 
 const { Link } = Typography;
@@ -43,6 +45,10 @@ export default function DeviceList() {
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  // Task store
+  const addTask = useTaskStore((s) => s.addTask);
+  const setPanelExpanded = useTaskStore((s) => s.setPanelExpanded);
+  const setActiveTab = useTaskStore((s) => s.setActiveTab);
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
     return localStorage.getItem('omc_remark_label') || 'Remark';
@@ -241,6 +247,64 @@ export default function DeviceList() {
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         onOk: async () => {
+          // 获取选中设备的详细信息
+          const selectedDevices = devices.filter((d) => ids.includes(d.id));
+
+          // 为每个选中的设备创建任务
+          const now = new Date().toISOString();
+          selectedDevices.forEach((device) => {
+            const taskTypeMap: Record<string, string> = {
+              'batch-sync': t('common.batchSync'),
+              'batch-reboot': t('common.batchReboot'),
+              'batch-tr069-collect': t('device.action.tr069Collect'),
+              'batch-log-collect': t('device.action.logCollect'),
+              'batch-reset-config': t('device.action.resetConfig'),
+            };
+
+            const task: SingleTask = {
+              id: device.sn,
+              neName: device.name || device.hostName || device.sn,
+              neSn: device.sn,
+              type: taskTypeMap[actionKey ?? ''] || actionLabel,
+              currentStep: 1,
+              totalSteps: 3,
+              status: 'running',
+              message: t('task.status.running'),
+              progress: 33,
+              createdAt: now,
+              updatedAt: now,
+            };
+            addTask(task);
+
+            // 模拟任务完成（实际项目中应由后端 WebSocket/SSE 推送更新）
+            if (actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect') {
+              setTimeout(() => {
+                useTaskStore.getState().updateTask(device.sn, {
+                  status: 'success',
+                  progress: 100,
+                  currentStep: 3,
+                  message: t('task.status.completed'),
+                  updatedAt: new Date().toISOString(),
+                });
+              }, 3000 + Math.random() * 2000);
+            } else {
+              // 其他操作快速完成
+              setTimeout(() => {
+                useTaskStore.getState().updateTask(device.sn, {
+                  status: 'success',
+                  progress: 100,
+                  currentStep: 3,
+                  message: t('task.status.completed'),
+                  updatedAt: new Date().toISOString(),
+                });
+              }, 1000 + Math.random() * 1000);
+            }
+          });
+
+          // 展开任务面板并切换到 single tab
+          setActiveTab('single');
+          setPanelExpanded(true);
+
           if (actionKey === 'batch-reboot') {
             try {
               await batchReboot.mutateAsync(ids.map(String));
@@ -256,7 +320,7 @@ export default function DeviceList() {
         },
       });
     },
-    [modal, message, t, batchReboot]
+    [modal, message, t, batchReboot, devices, addTask, setPanelExpanded, setActiveTab]
   );
 
   // 导出 — 直接选择格式后触发

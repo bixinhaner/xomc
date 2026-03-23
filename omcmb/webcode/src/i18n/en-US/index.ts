@@ -724,6 +724,14 @@ const messages: Record<string, string> = {
   'task.export':          'Export Tasks',
   'task.progress':        'Progress',
   'task.status':          'Status',
+  'task.status.running':  'Running',
+  'task.status.completed':'Completed',
+  'task.status.success':  'Success',
+  'task.status.failed':   'Failed',
+  'task.view':            'View',
+  'task.detail':          'Task Detail',
+  'task.fileName':        'File Name',
+  'task.fileSize':        'File Size',
   'task.startTime':       'Start Time',
   'task.endTime':         'End Time',
   'task.message':         'Message',
@@ -1655,6 +1663,8 @@ const messages: Record<string, string> = {
   // Device Rules
   // -------------------------------------------------------------------------
   'device.rules.title':             'Device Rules',
+  'device.rules.priority':          'Priority',
+  'device.rules.rule':              'Rule',
   'device.rules.targetGroup':       'Target Device Group',
   'device.rules.basicSettings':     'Basic Settings',
   'device.rules.matchingRule':      'Matching Rule',

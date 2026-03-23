@@ -727,6 +727,14 @@ const messages: Record<string, string> = {
   'task.export':          '导出任务',
   'task.progress':        '进度',
   'task.status':          '状态',
+  'task.status.running':  '进行中',
+  'task.status.completed':'完成',
+  'task.status.success':  '成功',
+  'task.status.failed':   '失败',
+  'task.view':            '查看',
+  'task.detail':          '任务详情',
+  'task.fileName':        '文件名',
+  'task.fileSize':        '文件大小',
   'task.startTime':       '开始时间',
   'task.endTime':         '结束时间',
   'task.message':         '消息',
@@ -1659,6 +1667,8 @@ const messages: Record<string, string> = {
   // Device Rules (设备归属规则)
   // -------------------------------------------------------------------------
   'device.rules.title':             '设备规则',
+  'device.rules.priority':          '优先级',
+  'device.rules.rule':              '规则',
   'device.rules.targetGroup':       '目标设备组',
   'device.rules.basicSettings':     '基本设置',
   'device.rules.matchingRule':      '匹配规则',

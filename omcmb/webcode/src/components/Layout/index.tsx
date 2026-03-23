@@ -24,11 +24,9 @@ export default function AppShell() {
   const { isTouchPrimary } = useIsTouchDevice();
   const location = useLocation();
 
-  // 判断是否隐藏任务面板（设备列表页面和设备详情页面隐藏）
+  // 判断是否隐藏任务面板（设备详情页面隐藏）
   const hideTaskPanel = useMemo(() => {
     return (
-      location.pathname === '/device/list' ||
-      location.pathname.startsWith('/device/list/') ||
       location.pathname.startsWith('/device/detail/')
     );
   }, [location.pathname]);

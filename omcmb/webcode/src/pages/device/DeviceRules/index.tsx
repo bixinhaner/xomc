@@ -464,9 +464,9 @@ export default function DeviceRules() {
     () => [
       {
         key: 'sort',
-        title: '',
+        title: t('device.rules.priority'),
         dataIndex: 'id',
-        width: 50,
+        width: 70,
         render: (_val, _record, index) => {
           const items: MenuProps['items'] = [
             {
@@ -536,7 +536,7 @@ export default function DeviceRules() {
       },
       {
         key: 'enable',
-        title: 'Enable',
+        title: t('common.enable'),
         dataIndex: 'enable',
         width: 80,
         render: (_val, record) => (
@@ -549,7 +549,7 @@ export default function DeviceRules() {
       },
       {
         key: 'operators',
-        title: t('device.rules.operation'),
+        title: t('device.rules.rule'),
         dataIndex: 'operators',
         ellipsis: true,
         render: (val) => (
