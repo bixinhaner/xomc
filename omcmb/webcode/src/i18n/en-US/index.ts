@@ -650,7 +650,12 @@ const messages: Record<string, string> = {
   // Alarm library fields
   'alarm.deviceTypeName':        'Alarm Source',
   'alarm.explanation':           'Explanation',
-  'alarm.librarySearchPlaceholder': 'Alarm Identifier / Possible Cause / Alarm Source',
+  'alarm.librarySearchPlaceholder': 'Alarm Identifier / Possible Cause / Explanation',
+  'alarm.library.id':            'Alarm ID',
+  'alarm.library.add':           'Add Alarm',
+  'alarm.library.edit':          'Edit Alarm',
+  'alarm.library.deleteConfirm': 'Are you sure you want to delete this alarm?',
+  'alarm.library.alarmSource':   'Alarm Source',
 
   // Deal states
   'alarm.dealState.unconfirmedUncleared': 'Unconfirmed & Active',
@@ -1010,8 +1015,12 @@ const messages: Record<string, string> = {
   'common.confirmDelete':   'Confirm Delete',
   'common.deleteConfirmMsg':'Are you sure you want to delete the selected {count} records? This cannot be undone.',
   'common.deleteSuccess':   'Deleted successfully',
+  'common.addSuccess':      'Added successfully',
+  'common.updateSuccess':   'Updated successfully',
   'common.operationSuccess':'Operation succeeded',
   'common.exportInProgress':'Exporting...',
+  'common.exportSuccess':   'Exported successfully',
+  'common.exportFailed':    'Export failed',
   'common.featureInDev':    'Feature in development',
   'common.realTimeConn':    'Real-time Connected',
   'common.unacked':         '{count} unacknowledged',
