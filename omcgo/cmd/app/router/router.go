@@ -97,6 +97,23 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	dmRegistry.Start()
 	gs.Register("datamodel-registry", 1, func(ctx context.Context) error { dmRegistry.Stop(); return nil })
 	dmImporter := datamodel.NewDataModelImporter(dmRepo, importLogRepo)
+
+	// DataModel expiry cleaner (periodic cleanup of idle templates)
+	expiryConf := cfg.DataModelExpiry
+	if expiryConf.AutoMaxIdleDays <= 0 {
+		expiryConf.AutoMaxIdleDays = 15
+	}
+	if expiryConf.ManualMaxIdleDays <= 0 {
+		expiryConf.ManualMaxIdleDays = 60
+	}
+	if expiryConf.CleanupCron == "" {
+		expiryConf.CleanupCron = "0 3 * * *"
+	}
+	dmCleaner := datamodel.NewDataModelCleaner(dmRepo, dmCache, expiryConf.AutoMaxIdleDays, expiryConf.ManualMaxIdleDays, logger)
+	if err := dmCleaner.Start(expiryConf.CleanupCron); err != nil {
+		return fmt.Errorf("start datamodel cleaner: %w", err)
+	}
+	gs.Register("datamodel-cleaner", 1, func(ctx context.Context) error { dmCleaner.Stop(); return nil })
 	logger.Info("datamodel registry started")
 
 	// ConfigTemplate module
