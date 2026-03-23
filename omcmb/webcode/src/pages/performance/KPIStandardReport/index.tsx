@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { App, Button, Form, Input, Modal, Select, Space, Tag, Tree, Typography } from 'antd';
+import { App, Button, Drawer, Form, Input, Modal, Radio, Select, Space, Tag, Tree, Typography } from 'antd';
 import { PlusOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
@@ -271,6 +271,21 @@ export default function KPIStandardReport() {
   const [addForm] = Form.useForm<{ name: string; networkType: 'eNB' | 'gNB' | 'GSM'; description: string }>();
   const [functionSets, setFunctionSets] = useState<FunctionSetItem[]>(MOCK_FUNCTION_SETS);
 
+  // Add indicator drawer state
+  const [addDrawerOpen, setAddDrawerOpen] = useState(false);
+  const [addIndicatorForm] = Form.useForm<{
+    indicatorType: 'kpi' | 'counter';
+    indicatorLevel: 'device' | 'plmn';
+    kpiName: string;
+    custName: string;
+    catagoryId: string;
+    unit: string;
+    statisType: string;
+    isEnable: string;
+    definition: string;
+  }>();
+  const [currentIndicatorType, setCurrentIndicatorType] = useState<'kpi' | 'counter'>('kpi');
+
   // Custom tree nodes state
   const [customNodes, setCustomNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
 
@@ -286,12 +301,14 @@ export default function KPIStandardReport() {
     return selectedCategory;
   }, [selectedCategory, t]);
 
-  // Handle add node to tree
+  // Handle add node to tree - 打开新建指标抽屉
   const handleAddNode = useCallback((parentKey: string) => {
     setCurrentParentKey(parentKey);
-    setAddNodeModalOpen(true);
-    addNodeForm.resetFields();
-  }, [addNodeForm]);
+    // 打开新建指标抽屉，而不是简单的 Modal
+    setAddDrawerOpen(true);
+    addIndicatorForm.resetFields();
+    setCurrentIndicatorType('kpi');
+  }, [addIndicatorForm]);
 
   // Handle delete node from tree
   const handleDeleteNode = useCallback((nodeKey: string) => {
@@ -543,6 +560,21 @@ export default function KPIStandardReport() {
     }
   }, [addNodeForm, currentParentKey, message, t]);
 
+  // Handle add indicator
+  const handleAddIndicator = useCallback(async () => {
+    try {
+      const values = await addIndicatorForm.validateFields();
+      console.log('Add indicator values:', values);
+      // TODO: Call API to add indicator
+      void message.success(t('common.success'));
+      setAddDrawerOpen(false);
+      addIndicatorForm.resetFields();
+      setCurrentIndicatorType('kpi');
+    } catch {
+      // validation error
+    }
+  }, [addIndicatorForm, message, t]);
+
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
@@ -561,7 +593,11 @@ export default function KPIStandardReport() {
           type="text"
           size="small"
           icon={<PlusOutlined />}
-          onClick={() => setAddModalOpen(true)}
+          onClick={() => {
+            setAddDrawerOpen(true);
+            addIndicatorForm.resetFields();
+            setCurrentIndicatorType('kpi');
+          }}
         >
           {t('common.add')}
         </Button>
@@ -777,6 +813,229 @@ export default function KPIStandardReport() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Add Indicator Drawer */}
+      <Drawer
+        title={t('kpi.addIndicator')}
+        open={addDrawerOpen}
+        onClose={() => {
+          setAddDrawerOpen(false);
+          addIndicatorForm.resetFields();
+        }}
+        width={600}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => {
+              setAddDrawerOpen(false);
+              addIndicatorForm.resetFields();
+            }}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="primary" onClick={() => void handleAddIndicator()}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
+      >
+        <Form
+          form={addIndicatorForm}
+          layout="vertical"
+          initialValues={{
+            indicatorType: 'kpi',
+            indicatorLevel: 'device',
+          }}
+        >
+          {/* 基本信息 */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8,
+            marginBottom: 16
+          }}>
+            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('kpi.basicInfo')}
+            </div>
+
+            {/* 类型 */}
+            <Form.Item name="indicatorType" label={t('kpi.type')} style={{ marginBottom: 12 }}>
+              <Radio.Group onChange={(e) => setCurrentIndicatorType(e.target.value)}>
+                <Radio value="kpi">Customize KPI</Radio>
+                <Radio value="counter">Customize Counter</Radio>
+              </Radio.Group>
+            </Form.Item>
+
+            {/* 等级 */}
+            <Form.Item name="indicatorLevel" label={t('kpi.level')} style={{ marginBottom: 12 }}>
+              <Radio.Group>
+                <Radio value="device">Device</Radio>
+                <Radio value="plmn">PLMN</Radio>
+              </Radio.Group>
+            </Form.Item>
+
+            {/* 指标名称 */}
+            <Form.Item
+              name="kpiName"
+              label={t('kpi.counterName')}
+              rules={[
+                { required: true, message: t('kpi.nameRequired') },
+                { max: 50, message: t('kpi.nameMax50') },
+              ]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input placeholder={t('kpi.namePlaceholder')} maxLength={50} showCount />
+            </Form.Item>
+
+            {/* 自定义名称 - 仅Counter类型显示 */}
+            {currentIndicatorType === 'counter' && (
+              <Form.Item
+                name="custName"
+                label={t('kpi.customName')}
+                rules={[{ max: 50, message: t('kpi.nameMax50') }]}
+                style={{ marginBottom: 12 }}
+              >
+                <Input placeholder={t('kpi.customNamePlaceholder')} maxLength={50} showCount />
+              </Form.Item>
+            )}
+
+            {/* 所属功能集 - 只读显示 */}
+            <Form.Item
+              name="catagoryId"
+              label={t('kpi.functionSet')}
+              style={{ marginBottom: 12 }}
+            >
+              <Input disabled placeholder={selectedFunctionSetName || t('kpi.functionSetPlaceholder')} />
+            </Form.Item>
+
+            {/* 单位 */}
+            <Form.Item
+              name="unit"
+              label={t('kpi.unit')}
+              rules={[{ required: true, message: t('common.selectRequired') }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Select
+                placeholder={t('kpi.unitPlaceholder')}
+                options={[
+                  { label: '%', value: '%' },
+                  { label: t('kpi.unitTimes'), value: '次' },
+                  { label: 'Mbps', value: 'Mbps' },
+                  { label: 'ms', value: 'ms' },
+                  { label: 'dBm', value: 'dBm' },
+                  { label: 'W', value: 'W' },
+                  { label: t('kpi.unitNone'), value: '' },
+                ]}
+              />
+            </Form.Item>
+
+            {/* 统计类型 */}
+            <Form.Item
+              name="statisType"
+              label={t('kpi.statisType')}
+              rules={[{ required: true, message: t('common.selectRequired') }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Select
+                placeholder={t('kpi.statisTypePlaceholder')}
+                options={[
+                  { label: t('kpi.statisSum'), value: 'sum' },
+                  { label: t('kpi.statisAvg'), value: 'avg' },
+                  { label: t('kpi.statisMax'), value: 'max' },
+                  { label: t('kpi.statisMin'), value: 'min' },
+                  { label: t('kpi.statisPct'), value: 'pct' },
+                ]}
+              />
+            </Form.Item>
+
+            {/* 测量 */}
+            <Form.Item
+              name="isEnable"
+              label={t('kpi.measure')}
+              rules={[{ required: true, message: t('common.selectRequired') }]}
+              style={{ marginBottom: 0 }}
+            >
+              <Select
+                placeholder={t('kpi.measurePlaceholder')}
+                options={[
+                  { label: t('common.yes'), value: '1' },
+                  { label: t('common.no'), value: '0' },
+                ]}
+              />
+            </Form.Item>
+          </div>
+
+          {/* 计算公式 - 仅KPI类型显示 */}
+          {currentIndicatorType === 'kpi' && (
+            <div style={{
+              padding: '16px',
+              background: 'var(--color-fill-quaternary)',
+              borderRadius: 8,
+              marginBottom: 16
+            }}>
+              <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
+                {t('kpi.calcFormula')}
+              </div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                {t('kpi.calcFormulaDesc')}
+              </Typography.Text>
+
+              {/* 公式显示区域 */}
+              <div
+                style={{
+                  minHeight: 80,
+                  padding: '12px',
+                  background: 'var(--color-bg-container)',
+                  borderRadius: 4,
+                  border: '1px solid var(--color-border)',
+                  marginBottom: 12,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}
+              >
+                <Typography.Text type="secondary">
+                  {t('kpi.calcFormulaPlaceholder')}
+                </Typography.Text>
+              </div>
+
+              {/* 运算符按钮 */}
+              <Space wrap size={8} style={{ marginBottom: 12 }}>
+                {['+', '-', '*', '/', '(', ')', '0-9', 'Duration'].map((op) => (
+                  <Button key={op} size="small" style={{ minWidth: 40 }}>
+                    {op}
+                  </Button>
+                ))}
+                <Button size="small" danger>
+                  {t('common.clear')}
+                </Button>
+              </Space>
+
+              {/* 指标选择提示 */}
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('kpi.selectIndicatorTip')}
+              </Typography.Text>
+            </div>
+          )}
+
+          {/* 说明 */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8
+          }}>
+            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('kpi.definition')}
+            </div>
+            <Form.Item name="definition" style={{ marginBottom: 0 }}>
+              <Input.TextArea
+                placeholder={t('kpi.definitionPlaceholder')}
+                rows={4}
+                maxLength={2000}
+                showCount
+              />
+            </Form.Item>
+          </div>
+        </Form>
+      </Drawer>
     </>
   );
 }
