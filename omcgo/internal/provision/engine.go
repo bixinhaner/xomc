@@ -488,10 +488,9 @@ func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Ev
 		zap.Int("parameter_count", len(payload.ParameterInfos)),
 	)
 
-	if len(payload.ParameterInfos) == 0 {
-		e.logger.Warn("no parameters in GPN response", zap.String("device_sn", payload.DeviceSN))
-		return nil
-	}
+	// Note: empty GPN responses (parameter_count=0) must NOT be skipped.
+	// They still need to flow through HandleLevelGPNResponse to decrement
+	// the pending counter, otherwise discovery stalls permanently.
 
 	// Look up the device.
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)

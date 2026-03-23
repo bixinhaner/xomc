@@ -73,6 +73,11 @@ type Handler struct {
 	requestIDPrefix         string                  // prefix for request IDs, e.g., "acs"
 	enableTestTaskInjection bool                    // enable random test task injection (for testing only)
 	uploadConfig            *appconfig.UploadConfig // upload server configuration for generating upload URLs
+	// maxRPCPerSession limits the number of RPC interactions per TR069 session.
+	// When reached, the session is gracefully completed; remaining commands stay
+	// in the queue and are dispatched in subsequent sessions via post-session wake.
+	// 0 means no limit. Recommended: ≤15 to avoid triggering CPE per-session limits.
+	maxRPCPerSession int
 	// Post-session wake: send Connection Request when session ends with remaining commands.
 	connReqSender       ConnectionRequester
 	postSessionWakeCfg  appconfig.PostSessionWakeConfig
@@ -86,6 +91,11 @@ type Handler struct {
 	// Used to detect orphaned sessions: when a new Inform arrives, any existing session
 	// for the same device is cleaned up via completeSession() before creating a new one.
 	deviceSessions sync.Map
+}
+
+// sessionRPCLimitReached returns true if the session has reached the per-session RPC limit.
+func (h *Handler) sessionRPCLimitReached(session *Session) bool {
+	return h.maxRPCPerSession > 0 && session.RPCCount >= h.maxRPCPerSession
 }
 
 // startSessionReaper launches a background goroutine that periodically cleans up
@@ -479,6 +489,23 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 	}
 
+	// Check per-session RPC limit before dispatching more commands.
+	// This prevents overwhelming CPEs that have per-session interaction limits.
+	if h.sessionRPCLimitReached(session) {
+		log.Info("ACS session RPC limit reached, completing session",
+			zap.String("device_sn", deviceSN),
+			zap.String("session_id", sessionID),
+			zap.Int("rpc_count", session.RPCCount),
+			zap.Int("max_rpc_per_session", h.maxRPCPerSession),
+		)
+		// Complete session; post-session wake will trigger a new session
+		// for remaining commands in the queue.
+		h.completeSession(r.Context(), session)
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	// Priority 1: Try new TaskService
 	if h.taskService != nil {
 		taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)
@@ -496,6 +523,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 			// Update session state
 			session.State = StateRPCPending
 			session.LastRPC = taskItem.Method
+			session.RPCCount++
 			session.UpdatedAt = time.Now()
 			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
@@ -540,6 +568,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	if cmd != nil {
 		session.State = StateRPCPending
 		session.LastRPC = cmd.Method
+		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
@@ -648,6 +677,20 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	// Publish RPC response event for provisioning engine (includes raw body for GPN/GPV processing).
 	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, log)
 
+	// Check per-session RPC limit before dispatching next command.
+	if h.sessionRPCLimitReached(session) {
+		log.Info("ACS session RPC limit reached after response, completing session",
+			zap.String("device_sn", deviceSN),
+			zap.String("session_id", sessionID),
+			zap.Int("rpc_count", session.RPCCount),
+			zap.Int("max_rpc_per_session", h.maxRPCPerSession),
+		)
+		h.completeSession(r.Context(), session)
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	// Priority 1: Try new TaskService for next task
 	if h.taskService != nil {
 		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
@@ -664,6 +707,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 			session.State = StateRPCPending
 			session.LastRPC = nextTask.Method
+			session.RPCCount++
 			session.UpdatedAt = time.Now()
 			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
@@ -695,6 +739,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	if cmd != nil {
 		session.State = StateRPCPending
 		session.LastRPC = cmd.Method
+		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 

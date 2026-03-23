@@ -13,10 +13,11 @@ server:
 session:
   timeout: 5m
   max_concurrent: 10000
+  max_rpc_per_session: 50   # 单次会话最大 RPC 交互次数（避免触发基站单会话限制）
 
 rate_limit:
-  per_device: 10            # 每设备每分钟最大 Inform 数
-  burst: 5                  # token bucket 突发容量
+  per_device: 50            # 每设备每分钟最大 Inform 数
+  burst: 50                 # token bucket 突发容量
   max_devices: 100000       # 限流器追踪的最大设备数
   cleanup_interval: 5m      # 不活跃设备清理扫描间隔
   cleanup_timeout: 10m      # 设备不活跃淘汰超时

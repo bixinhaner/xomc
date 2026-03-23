@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,18 @@ func discoveryPendingKey(deviceSN string) string {
 
 func discoveryParamsKey(deviceSN string) string {
 	return fmt.Sprintf("provision:discovery:params:%s", deviceSN)
+}
+
+// discoveryEnqueuedKey tracks which GPN paths have already been enqueued,
+// preventing duplicate commands when discovery spans multiple ACS sessions.
+func discoveryEnqueuedKey(deviceSN string) string {
+	return fmt.Sprintf("provision:discovery:enqueued:%s", deviceSN)
+}
+
+// discoveryStallCheckKey is a Redis mutex key to ensure only one stall-check
+// goroutine runs per device at a time. TTL auto-expires if the goroutine crashes.
+func discoveryStallCheckKey(deviceSN string) string {
+	return fmt.Sprintf("provision:discovery:stall_check:%s", deviceSN)
 }
 
 // DiscoveryService handles automatic parameter tree discovery and data model creation.
@@ -82,7 +95,9 @@ func (s *DiscoveryService) StartDiscovery(ctx context.Context, dev *model.Device
 	// Initialize Redis tracking state: pending=1 (for the root GPN).
 	pendingKey := discoveryPendingKey(dev.SerialNumber)
 	paramsKey := discoveryParamsKey(dev.SerialNumber)
-	s.redis.Del(ctx, pendingKey, paramsKey)
+	enqueuedKey := discoveryEnqueuedKey(dev.SerialNumber)
+	stallKey := discoveryStallCheckKey(dev.SerialNumber)
+	s.redis.Del(ctx, pendingKey, paramsKey, enqueuedKey, stallKey)
 	s.redis.Set(ctx, pendingKey, 1, discoveryStateTTL)
 
 	// Enqueue GetParameterNames for the root object with NextLevel=true.
@@ -126,6 +141,17 @@ func (s *DiscoveryService) StartDiscovery(ctx context.Context, dev *model.Device
 func (s *DiscoveryService) HandleLevelGPNResponse(ctx context.Context, dev *model.Device,
 	paramInfos []tr069.ParameterInfoStruct) (*datamodel.DataModel, error) {
 
+	// Guard: if the pending key no longer exists, discovery has already finalized.
+	// Late-arriving GPN responses (dispatched before finalization) must be ignored
+	// to prevent cascading re-finalizations on a non-existent counter.
+	pendingExists, _ := s.redis.Exists(ctx, discoveryPendingKey(dev.SerialNumber)).Result()
+	if pendingExists == 0 {
+		s.logger.Debug("ignoring late GPN response, discovery already finalized",
+			zap.String("device_sn", dev.SerialNumber),
+		)
+		return nil, nil
+	}
+
 	var leafParams []tr069.ParameterInfoStruct
 	var subObjects []string
 
@@ -163,14 +189,35 @@ func (s *DiscoveryService) HandleLevelGPNResponse(ctx context.Context, dev *mode
 		s.redis.Expire(ctx, paramsKey, discoveryStateTTL)
 	}
 
+	// Filter multi-instance objects: only explore the lowest-numbered instance per parent.
+	var skippedCount int
+	subObjects, skippedCount = filterMultiInstanceObjects(subObjects)
+	if skippedCount > 0 {
+		s.logger.Info("multi-instance objects filtered",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.Int("skipped_instances", skippedCount),
+			zap.Int("remaining_sub_objects", len(subObjects)),
+		)
+	}
+
 	// Queue GPN for each non-excluded sub-object, incrementing pending count.
+	// Use a Redis Set to deduplicate: if a path was already enqueued in this
+	// discovery round, skip it. This prevents duplicate commands when discovery
+	// spans multiple ACS sessions.
+	enqueuedKey := discoveryEnqueuedKey(dev.SerialNumber)
 	for _, objPath := range subObjects {
+		// Check if this path was already enqueued.
+		added, _ := s.redis.SAdd(ctx, enqueuedKey, objPath).Result()
+		if added == 0 {
+			continue // Already enqueued in this discovery round.
+		}
+		s.redis.Expire(ctx, enqueuedKey, discoveryStateTTL)
+
 		gpnParams, _ := json.Marshal(map[string]interface{}{
 			"path":       objPath,
 			"next_level": true,
 		})
 
-		// Use path as part of command key for deduplication.
 		cmdKey := fmt.Sprintf("discovery-gpn-%s-%s",
 			dev.SerialNumber, strings.ReplaceAll(objPath, ".", "_"))
 
@@ -187,6 +234,8 @@ func (s *DiscoveryService) HandleLevelGPNResponse(ctx context.Context, dev *mode
 				zap.Error(err),
 				zap.String("path", objPath),
 			)
+			// Remove from enqueued set since push failed.
+			s.redis.SRem(ctx, enqueuedKey, objPath)
 			continue
 		}
 
@@ -209,6 +258,14 @@ func (s *DiscoveryService) HandleLevelGPNResponse(ctx context.Context, dev *mode
 	)
 
 	if remaining > 0 {
+		// Check if queue is empty — may indicate a stall, but could also be a
+		// temporary race: ACS dispatches commands faster than the provision engine
+		// processes NATS events and enqueues new sub-level GPNs.
+		// Use delayed stall detection instead of immediate force-finalize.
+		queueLen, qErr := s.cmdQueue.Len(ctx, dev.SerialNumber)
+		if qErr == nil && queueLen == 0 {
+			s.scheduleStallRecovery(dev, remaining)
+		}
 		return nil, nil // More levels to explore.
 	}
 
@@ -220,6 +277,7 @@ func (s *DiscoveryService) HandleLevelGPNResponse(ctx context.Context, dev *mode
 func (s *DiscoveryService) finalizeDiscovery(ctx context.Context, dev *model.Device) (*datamodel.DataModel, error) {
 	paramsKey := discoveryParamsKey(dev.SerialNumber)
 	pendingKey := discoveryPendingKey(dev.SerialNumber)
+	enqueuedKey := discoveryEnqueuedKey(dev.SerialNumber)
 
 	// Read all accumulated leaf parameters from Redis.
 	rawParams, err := s.redis.LRange(ctx, paramsKey, 0, -1).Result()
@@ -235,8 +293,9 @@ func (s *DiscoveryService) finalizeDiscovery(ctx context.Context, dev *model.Dev
 		}
 	}
 
-	// Clean up Redis tracking keys.
-	s.redis.Del(ctx, pendingKey, paramsKey)
+	// Clean up Redis tracking keys (including stall check mutex).
+	stallKey := discoveryStallCheckKey(dev.SerialNumber)
+	s.redis.Del(ctx, pendingKey, paramsKey, enqueuedKey, stallKey)
 
 	s.logger.Info("discovery finalized, creating data model",
 		zap.String("device_sn", dev.SerialNumber),
@@ -247,12 +306,68 @@ func (s *DiscoveryService) finalizeDiscovery(ctx context.Context, dev *model.Dev
 	return s.HandleDiscoveryResult(ctx, dev, allParams)
 }
 
+// scheduleStallRecovery launches a background goroutine (at most one per device)
+// that waits a short period and then re-checks whether discovery is truly stalled.
+// This avoids premature force-finalize caused by the race between ACS command
+// dispatch and provision engine NATS processing.
+func (s *DiscoveryService) scheduleStallRecovery(dev *model.Device, currentPending int64) {
+	stallKey := discoveryStallCheckKey(dev.SerialNumber)
+	ctx := context.Background()
+
+	// SETNX mutex: only one stall-check goroutine per device.
+	// TTL = 30s as safety net if goroutine crashes.
+	ok, err := s.redis.SetNX(ctx, stallKey, 1, 30*time.Second).Result()
+	if err != nil || !ok {
+		return // Another stall-check goroutine is already running for this device.
+	}
+
+	go func() {
+		defer s.redis.Del(context.Background(), stallKey)
+
+		// Wait for provision engine to catch up with NATS processing.
+		time.Sleep(15 * time.Second)
+
+		bgCtx := context.Background()
+
+		// Re-check: is discovery still pending?
+		pendingExists, _ := s.redis.Exists(bgCtx, discoveryPendingKey(dev.SerialNumber)).Result()
+		if pendingExists == 0 {
+			return // Discovery already finalized normally.
+		}
+
+		remaining, _ := s.redis.Get(bgCtx, discoveryPendingKey(dev.SerialNumber)).Int64()
+		if remaining <= 0 {
+			return // Pending reached zero, finalizeDiscovery will handle it.
+		}
+
+		queueLen, qErr := s.cmdQueue.Len(bgCtx, dev.SerialNumber)
+		if qErr != nil || queueLen > 0 {
+			return // Queue has items, discovery is progressing.
+		}
+
+		// Stall confirmed: pending > 0 AND queue empty after 15s delay.
+		s.logger.Warn("discovery stall confirmed after delay, force-finalizing",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.Int64("remaining_pending", remaining),
+		)
+
+		if _, err := s.finalizeDiscovery(bgCtx, dev); err != nil {
+			s.logger.Error("force-finalize after stall detection failed",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.Error(err),
+			)
+		}
+	}()
+}
+
 // CleanupState removes Redis tracking keys for an in-progress discovery.
 // Called when a device reconnects and we need to restart discovery from scratch.
 func (s *DiscoveryService) CleanupState(ctx context.Context, deviceSN string) {
 	pendingKey := discoveryPendingKey(deviceSN)
 	paramsKey := discoveryParamsKey(deviceSN)
-	deleted, _ := s.redis.Del(ctx, pendingKey, paramsKey).Result()
+	enqueuedKey := discoveryEnqueuedKey(deviceSN)
+	stallKey := discoveryStallCheckKey(deviceSN)
+	deleted, _ := s.redis.Del(ctx, pendingKey, paramsKey, enqueuedKey, stallKey).Result()
 	if deleted > 0 {
 		s.logger.Info("cleaned up stale discovery Redis state",
 			zap.String("device_sn", deviceSN),
@@ -290,10 +405,9 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		}
 	}
 
-	// Check if a matching auto-discovered DataModel already exists for this OUI+ProductClass.
-	// Auto templates are stored without firmware_version, so we search with empty firmware.
+	// Check if a matching auto-discovered DataModel already exists for this OUI+ProductClass+FirmwareVersion.
 	existingDM, err := s.dmRegistry.ResolveWithFirmware(ctx, dev.Carrier, dev.Technology,
-		dev.OUI, dev.ProductClass, "")
+		dev.OUI, dev.ProductClass, dev.FirmwareVersion)
 	if err != nil {
 		return nil, fmt.Errorf("check existing data model: %w", err)
 	}
@@ -356,7 +470,6 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 	}
 
 	// Create new auto-discovered DataModel.
-	// Auto templates store OUI + ProductClass only (no FirmwareVersion).
 	dm := &datamodel.DataModel{
 		ID:              uuid.New(),
 		Carrier:         dev.Carrier,
@@ -364,14 +477,14 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		Version:         "1.0",
 		OUI:             dev.OUI,
 		ProductClass:    dev.ProductClass,
-		FirmwareVersion: "", // Auto templates do not store firmware version.
+		FirmwareVersion: dev.FirmwareVersion,
 		Scope:           model.ScopeProduct,
 		Status:          datamodel.StatusDraft,
 		RootObject:      detectRootObject(paramInfos),
 		ParameterTree:   paramTree,
 		SourceType:      datamodel.SourceAutoDiscovered,
 		Source:          "auto_discovered",
-		Description:     fmt.Sprintf("自动发现: %s %s from %s", dev.OUI, dev.ProductClass, dev.SerialNumber),
+		Description:     fmt.Sprintf("自动发现: %s %s (FW: %s) from %s", dev.OUI, dev.ProductClass, dev.FirmwareVersion, dev.SerialNumber),
 	}
 
 	if s.config.AutoActivateModel {
@@ -439,6 +552,82 @@ func buildParameterTree(infos []tr069.ParameterInfoStruct) (json.RawMessage, err
 		return nil, fmt.Errorf("marshal parameter tree: %w", err)
 	}
 	return data, nil
+}
+
+// filterMultiInstanceObjects deduplicates multi-instance object paths.
+// TR069 multi-instance objects have numeric instance IDs: "Parent.1.", "Parent.2.", etc.
+// Since all instances share the same parameter structure, we only need to explore
+// the lowest-numbered instance per parent path and skip the rest.
+//
+// Example:
+//
+//	Input:  ["Device.Services.FAPService.1.", "Device.Services.FAPService.2.", "Device.ManagementServer."]
+//	Output: ["Device.Services.FAPService.1.", "Device.ManagementServer."], skipped=1
+func filterMultiInstanceObjects(paths []string) (filtered []string, skippedCount int) {
+	if len(paths) == 0 {
+		return paths, 0
+	}
+
+	// Group by parent path. For each parent, track the lowest numeric instance
+	// and collect non-numeric children.
+	type instanceInfo struct {
+		minNum  int    // lowest instance number seen
+		minPath string // full path of the lowest instance
+		count   int    // total numeric instances seen
+	}
+	instances := make(map[string]*instanceInfo) // parent → info
+	var nonInstancePaths []string               // paths that are not numeric instances
+
+	for _, p := range paths {
+		parent, segment := splitLastSegment(p)
+		if parent == "" {
+			// No parent (top-level object) — always keep.
+			nonInstancePaths = append(nonInstancePaths, p)
+			continue
+		}
+
+		num, err := strconv.Atoi(segment)
+		if err != nil {
+			// Non-numeric segment — regular sub-object, always keep.
+			nonInstancePaths = append(nonInstancePaths, p)
+			continue
+		}
+
+		// Numeric segment — this is a multi-instance entry.
+		info, exists := instances[parent]
+		if !exists {
+			instances[parent] = &instanceInfo{minNum: num, minPath: p, count: 1}
+		} else {
+			info.count++
+			if num < info.minNum {
+				info.minNum = num
+				info.minPath = p
+			}
+		}
+	}
+
+	// Build the filtered list: non-instance paths + one representative per instance group.
+	filtered = make([]string, 0, len(nonInstancePaths)+len(instances))
+	filtered = append(filtered, nonInstancePaths...)
+	for _, info := range instances {
+		filtered = append(filtered, info.minPath)
+		skippedCount += info.count - 1
+	}
+
+	return filtered, skippedCount
+}
+
+// splitLastSegment splits "Device.Services.FAPService.1." into
+// parent="Device.Services.FAPService" and segment="1".
+// The input path is expected to end with ".".
+func splitLastSegment(path string) (parent, segment string) {
+	// Remove trailing dot: "Device.Services.FAPService.1." → "Device.Services.FAPService.1"
+	trimmed := strings.TrimSuffix(path, ".")
+	idx := strings.LastIndex(trimmed, ".")
+	if idx < 0 {
+		return "", trimmed
+	}
+	return trimmed[:idx], trimmed[idx+1:]
 }
 
 // detectRootObject determines the root object from the discovered parameters.

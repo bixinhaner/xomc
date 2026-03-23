@@ -65,6 +65,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		requestIDPrefix:         deps.RequestIDPrefix,
 		enableTestTaskInjection: deps.EnableTestTaskInjection,
 		uploadConfig:            deps.UploadConfig,
+		maxRPCPerSession:        cfg.Session.MaxRPCPerSession,
 		connReqSender:           deps.ConnReqSender,
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
 		redisClient:             deps.RedisClient,

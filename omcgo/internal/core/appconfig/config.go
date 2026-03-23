@@ -206,8 +206,9 @@ type TLSConfig struct {
 
 // SessionConfig holds ACS session settings.
 type SessionConfig struct {
-	Timeout       time.Duration `mapstructure:"timeout"`
-	MaxConcurrent int64         `mapstructure:"max_concurrent"`
+	Timeout          time.Duration `mapstructure:"timeout"`
+	MaxConcurrent    int64         `mapstructure:"max_concurrent"`
+	MaxRPCPerSession int           `mapstructure:"max_rpc_per_session"` // 单次会话最大 RPC 交互次数（0=不限制，建议 ≤15）
 }
 
 // RateLimitConfig holds rate limiting settings.
