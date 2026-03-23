@@ -104,13 +104,20 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	templateService := template.NewConfigTemplateService(templateRepo, logger)
 
 	// Provisioning module
+	// TODO(F09): 自动开站功能暂时禁用，模板参数格式与 TR-069 RPC 格式不匹配待解决
+	// 问题：模板 parameters 存的是友好名称 (pci, earfcn)，但 ACS SPV handler
+	// 期望 TR-069 路径格式 {"values": [{"name": "Device.X.Y", "value": "..."}]}
+	// 需要实现 DataModel 参数映射层后再启用
 	provisionRepo := provision.NewPgProvisioningTaskRepository(pgPool)
 	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(pgPool)
+	_ = discoveryLogRepo // 暂不使用
 	provisionEngine := provision.NewProvisioningEngine(
 		provisionRepo, deviceService, dmRegistry, templateService,
 		carrierRegistry, cmdQueue, eventBus, cfg.Provision, logger,
 	)
+	// provisionEngine 仍传给 Handler 供 API 查询使用，但不订阅事件、不启动 Reaper
 
+	/*
 	// Set up auto-discovery and auto-sync services if enabled.
 	if cfg.Provision.AutoDiscovery.Enabled {
 		discoverySvc := provision.NewDiscoveryService(
@@ -133,6 +140,8 @@ func Setup(r *gin.Engine, deps *Deps) error {
 		logger.Warn("subscribe provisioning engine", zap.Error(err))
 	}
 	provisionEngine.StartTaskReaper()
+	*/
+	logger.Info("provisioning engine disabled (F09 pending template parameter mapping)")
 
 	// Topology module
 	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)
