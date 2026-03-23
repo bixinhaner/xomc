@@ -9,6 +9,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
+	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -42,6 +43,7 @@ type ServerDeps struct {
 	ConnReqSender           ConnectionRequester         // post-session wake: send CR when queue not empty
 	PostSessionWakeCfg      appconfig.PostSessionWakeConfig // post-session wake configuration
 	RedisClient             redis.Cmdable               // Redis client for continuous wake counter
+	StunStore               *stun.Store                 // STUN address cache (shared with STUN server)
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -66,6 +68,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		connReqSender:           deps.ConnReqSender,
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
 		redisClient:             deps.RedisClient,
+		stunStore:               deps.StunStore,
 	}
 
 	mux := http.NewServeMux()

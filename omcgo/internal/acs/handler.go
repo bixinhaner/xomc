@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
+	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/middleware"
@@ -33,7 +34,8 @@ import (
 // ConnectionRequester sends a Connection Request to wake a device.
 // Used by the Handler for post-session wake when the command queue is not empty.
 type ConnectionRequester interface {
-	Send(ctx context.Context, deviceSN string) error
+	// Send sends a Connection Request. httpURL is the device's HTTP CR URL (may be empty).
+	Send(ctx context.Context, deviceSN, httpURL string) error
 }
 
 
@@ -64,7 +66,9 @@ type Handler struct {
 	// Post-session wake: send Connection Request when session ends with remaining commands.
 	connReqSender       ConnectionRequester
 	postSessionWakeCfg  appconfig.PostSessionWakeConfig
-	redisClient         redis.Cmdable // for continuous wake counter
+	redisClient         redis.Cmdable  // for continuous wake counter
+	stunStore           *stun.Store    // for caching device STUN addresses from Inform
+	connReqURLCache     sync.Map       // deviceSN → ConnectionRequestURL (from Inform)
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
@@ -260,6 +264,30 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		zap.Strings("events", eventCodes),
 		zap.Int("param_count", len(inform.ParameterList)),
 	)
+
+	// Cache connection request addresses from Inform for post-session wake.
+	for _, p := range inform.ParameterList {
+		if strings.HasSuffix(p.Name, ".UDPConnectionRequestAddress") && p.Value != "" {
+			if h.stunStore != nil {
+				if err := h.stunStore.SetFromInform(ctx, deviceSN, p.Value); err != nil {
+					log.Warn("cache STUN address from Inform",
+						zap.String("device_sn", deviceSN),
+						zap.String("udp_addr", p.Value),
+						zap.Error(err))
+				} else {
+					log.Debug("cached STUN address from Inform",
+						zap.String("device_sn", deviceSN),
+						zap.String("udp_addr", p.Value))
+				}
+			}
+		}
+		if strings.HasSuffix(p.Name, ".ConnectionRequestURL") && p.Value != "" {
+			h.connReqURLCache.Store(deviceSN, p.Value)
+			log.Debug("cached ConnectionRequestURL from Inform",
+				zap.String("device_sn", deviceSN),
+				zap.String("cr_url", p.Value))
+		}
+	}
 
 	// Create/update session with new Session ID
 	sessionID := generateSessionID()
@@ -634,13 +662,32 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 // instead of waiting for the device's next periodic Inform (~60s+).
 // This dramatically speeds up command queue drain (e.g., parameter discovery).
 func (h *Handler) postSessionWake(deviceSN string) {
+	// Recover from any panic to prevent silent goroutine death.
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("post-session wake: panic recovered",
+				zap.String("device_sn", deviceSN),
+				zap.Any("panic", r))
+		}
+	}()
+
 	if h.connReqSender == nil || !h.postSessionWakeCfg.Enabled {
 		return
 	}
 
 	ctx := context.Background()
 
-	// Check combined queue depth (task queue + legacy command queue).
+	// Short delay FIRST: let CPE close the previous TCP connection and let the
+	// provisioning engine (EventBus subscriber) finish adding new commands to
+	// the queue from RPC response events. Without this delay, the queue appears
+	// empty because the async subscribers haven't processed yet.
+	delay := h.postSessionWakeCfg.DelayAfter
+	if delay <= 0 {
+		delay = time.Second
+	}
+	time.Sleep(delay)
+
+	// Check combined queue depth AFTER delay (task queue + legacy command queue).
 	var remaining int64
 	if h.taskService != nil {
 		if n, err := h.taskService.GetQueueLength(ctx, deviceSN); err == nil {
@@ -685,15 +732,18 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		return
 	}
 
-	// Short delay to let CPE finish closing the previous session.
-	delay := h.postSessionWakeCfg.DelayAfter
-	if delay <= 0 {
-		delay = time.Second
-	}
-	time.Sleep(delay)
-
 	// Send Connection Request.
-	if err := h.connReqSender.Send(ctx, deviceSN); err != nil {
+	// Look up cached ConnectionRequestURL for HTTP fallback.
+	var httpURL string
+	if v, ok := h.connReqURLCache.Load(deviceSN); ok {
+		httpURL, _ = v.(string)
+	}
+
+	// Use a short timeout to avoid blocking on unreachable devices.
+	crCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := h.connReqSender.Send(crCtx, deviceSN, httpURL); err != nil {
 		h.logger.Warn("post-session wake: CR failed",
 			zap.String("device_sn", deviceSN),
 			zap.Int64("remaining", remaining),

@@ -92,9 +92,15 @@ func runACS(cmd *cobra.Command, args []string) error {
 		udpSender = connreq.NewUDPSender(stunStore, cfg.STUN.SharedSecret, inf.Logger)
 	}
 
+	// Always pass STUN store to handler so it caches UDPConnectionRequestAddress from Inform.
+	if stunStore != nil {
+		deps.StunStore = stunStore
+	}
+
 	// Setup post-session wake: send Connection Request when session ends with remaining commands.
-	if cfg.PostSessionWake.Enabled && udpSender != nil {
-		dispatcher := connreq.NewDispatcher(nil, udpSender, inf.Logger)
+	if cfg.PostSessionWake.Enabled {
+		httpClient := connreq.NewClient(inf.Redis, inf.Logger)
+		dispatcher := connreq.NewDispatcher(httpClient, udpSender, inf.Logger)
 		if inf.MetricsReg != nil {
 			dispatcher.SetMetrics(connreq.NewDispatcherMetrics(inf.MetricsReg))
 		}
@@ -149,8 +155,8 @@ type acsConnReqSender struct {
 	isENB      bool
 }
 
-func (s *acsConnReqSender) Send(ctx context.Context, deviceSN string) error {
-	return s.dispatcher.Send(ctx, deviceSN, "", "", s.isENB)
+func (s *acsConnReqSender) Send(ctx context.Context, deviceSN, httpURL string) error {
+	return s.dispatcher.Send(ctx, deviceSN, httpURL, "", s.isENB)
 }
 
 // parseStringSlice parses a comma-separated string into a slice.

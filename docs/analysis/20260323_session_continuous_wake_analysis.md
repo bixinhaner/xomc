@@ -1,12 +1,13 @@
 # ACS 会话结束后自动续唤分析报告
 
 > 日期：2026-03-23
-> 状态：**已实施** (2026-03-23)
+> 状态：**已实施并验证** (2026-03-23)
 > 问题：会话结束时命令队列仍有积压，系统不会主动发送 Connection Request 唤醒设备
 > 影响：3994 条命令只能依赖设备周期性 Inform（~60s/次）逐批消化，严重影响任务下发效率
 >
 > **实施摘要**：在 `completeSession()` 中增加异步续唤机制，会话结束后检查队列深度，
-> 非空则延迟发送 UDP Connection Request。Redis 计数器防止无限循环，handleInform 时重置。
+> 非空则发送 Connection Request（支持 STUN UDP + HTTP 两种方式，自动回退）。
+> Redis 计数器防止无限循环，handleInform 时重置。从 Inform 参数自动缓存设备 CR 地址。
 > 涉及文件：`handler.go`, `task_service.go`, `metrics.go`, `server.go`, `config.go`, `cmd/acs/main.go`
 
 ---
@@ -449,4 +450,42 @@ CPE Inform → INFORM_RECEIVED        │                      ▼
 
 当前 ACS 的 Connection Request 仅在**任务创建时**触发一次，会话结束后完全依赖设备的周期性 Inform 来消化积压命令。这在大量命令（如参数发现）场景下导致严重的效率瓶颈。
 
-**核心修复**：在 `completeSession()` 中增加队列深度检查和异步 CR 触发，实现"队列不空则续唤"的驱动模型。改动量小（~150 行），风险可控（有 max_continuous 安全阀），预期效率提升 ~15 倍。
+**核心修复**：在 `completeSession()` 中增加队列深度检查和异步 CR 触发，实现"队列不空则续唤"的驱动模型。改动量小（~200 行），风险可控（有 max_continuous 安全阀），预期效率提升 ~15 倍。
+
+---
+
+## 10. 实施验证记录 (2026-03-23)
+
+### 10.1 验证过程
+
+| 步骤 | 结果 |
+|------|------|
+| 编译 `go build ./...` | 通过 |
+| 测试 `go test ./internal/acs/...` | 全部通过（8 个包） |
+| 重启服务并观察日志 | postSessionWake 正常触发 |
+
+### 10.2 日志验证
+
+```
+12:13:17 post-session wake: started (device_sn=1202000588233HB0039)
+12:13:18 post-session wake: queue check after delay (cmd_queue_len=8899, remaining=8899)
+12:13:28 connection request failed (device=10.10.3.64:7547, timeout)
+```
+
+### 10.3 发现的问题与修复
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| postSessionWake 日志不出现 | 队列深度检查在 delay 之前，异步命令入队尚未完成导致 remaining=0 提前返回 | 将 `time.Sleep(delay)` 移到队列检查之前 |
+| CR 发送失败：no connection request method | Dispatcher 只有 UDP sender（无 STUN 绑定），没有 HTTP client | 增加 HTTP client 到 Dispatcher |
+| CR 发送失败：设备不可达 | 设备 `10.10.3.64` 在 NAT 后面，HTTP CR 超时 | ① 减少超时至 5s ② 从 Inform 缓存 UDPConnectionRequestAddress 到 STUN Store |
+| 设备无 STUN 绑定 | 设备未配置 STUN keepalive 指向 ACS 的 STUN 服务器 | 需设备侧配置（非代码问题） |
+
+### 10.4 当前状态
+
+- **代码层面**：Post-Session Wake 机制完整实现，支持 STUN UDP + HTTP 双通道
+- **运行时**：依赖设备网络可达性
+  - 如果设备可直接访问（同网段/端口映射）→ HTTP CR 立即生效
+  - 如果设备发送 STUN keepalive → UDP CR 穿越 NAT 生效
+  - 如果两者都不可达 → 回退到被动等待周期 Inform（原有行为）
+- **从 Inform 自动缓存 CR 地址**：handler 从 Inform 参数中提取 `ConnectionRequestURL` 和 `UDPConnectionRequestAddress`，无需额外配置
