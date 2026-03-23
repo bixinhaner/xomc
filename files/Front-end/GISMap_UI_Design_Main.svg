@@ -1,0 +1,497 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" width="1440" height="900">
+  <defs>
+    <!-- Shadows -->
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="8" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="1" stdDeviation="3" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+    <filter id="popupShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+
+    <!-- Gradients -->
+    <linearGradient id="sidebarBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FAFBFC"/>
+      <stop offset="100%" style="stop-color:#F5F7FA"/>
+    </linearGradient>
+    <linearGradient id="onlineMarker" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#73D13D"/>
+      <stop offset="100%" style="stop-color:#52C41A"/>
+    </linearGradient>
+    <linearGradient id="clusterGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#40A9FF"/>
+      <stop offset="100%" style="stop-color:#1890FF"/>
+    </linearGradient>
+    <linearGradient id="alarmGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF7875"/>
+      <stop offset="100%" style="stop-color:#F5222D"/>
+    </linearGradient>
+    <linearGradient id="mapBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8F5E9"/>
+      <stop offset="50%" style="stop-color:#F1F8E9"/>
+      <stop offset="100%" style="stop-color:#E8F5E9"/>
+    </linearGradient>
+
+    <!-- Patterns -->
+    <pattern id="mapGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E0E0E0" stroke-width="0.3"/>
+    </pattern>
+    <pattern id="mapDotGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="10" cy="10" r="0.8" fill="#D0D0D0"/>
+    </pattern>
+
+    <!-- Animations -->
+    <style>
+      @keyframes pulse {
+        0%, 100% { opacity: 0.3; transform: scale(1); }
+        50% { opacity: 0.15; transform: scale(1.2); }
+      }
+      .pulse-ring { animation: pulse 2s ease-in-out infinite; transform-origin: center; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1440" height="900" fill="#F0F2F5"/>
+
+  <!-- ==================== MAP AREA ==================== -->
+  <g id="mapArea">
+    <rect x="280" y="0" width="1160" height="900" fill="url(#mapBg)"/>
+    <rect x="280" y="0" width="1160" height="900" fill="url(#mapGrid)"/>
+    <rect x="280" y="0" width="1160" height="900" fill="url(#mapDotGrid)"/>
+
+    <!-- Simplified Map Content -->
+    <g opacity="0.6">
+      <path d="M380 180 Q480 140 600 200 Q720 160 840 220 Q960 180 1080 240 Q1180 200 1280 260 L1350 300 L1350 650 Q1200 600 1050 650 Q900 620 750 680 Q600 650 450 720 Q350 680 300 620 L300 280 Q340 220 380 180 Z"
+            fill="#FFF" stroke="#D9D9D9" stroke-width="1"/>
+      <path d="M450 280 Q550 320 650 290" fill="none" stroke="#E0E0E0" stroke-width="1" stroke-dasharray="4,4"/>
+      <path d="M400 420 Q520 460 640 440" fill="none" stroke="#E0E0E0" stroke-width="1" stroke-dasharray="4,4"/>
+      <path d="M400 300 Q520 350 640 320 Q780 380 920 350 Q1060 400 1200 370" fill="none" stroke="#B3D9FF" stroke-width="3" opacity="0.6"/>
+    </g>
+
+    <!-- City Labels -->
+    <g font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#8C8C8C">
+      <text x="620" y="350">Beijing</text>
+      <text x="880" y="420">Shanghai</text>
+      <text x="980" y="560">Guangzhou</text>
+      <text x="480" y="480">Chengdu</text>
+      <text x="760" y="540">Wuhan</text>
+    </g>
+  </g>
+
+  <!-- ==================== DEVICE MARKERS ==================== -->
+  <g id="deviceMarkers">
+    <!-- Large Cluster -->
+    <g transform="translate(640, 380)" filter="url(#softShadow)">
+      <circle r="45" fill="url(#clusterGradient)" class="pulse-ring"/>
+      <circle r="32" fill="url(#clusterGradient)"/>
+      <circle r="32" fill="none" stroke="#FFF" stroke-width="2"/>
+      <text y="2" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#FFF" text-anchor="middle" dominant-baseline="middle">128</text>
+    </g>
+
+    <!-- Medium Cluster -->
+    <g transform="translate(900, 450)" filter="url(#softShadow)">
+      <circle r="28" fill="url(#clusterGradient)"/>
+      <circle r="22" fill="url(#clusterGradient)"/>
+      <circle r="22" fill="none" stroke="#FFF" stroke-width="2"/>
+      <text y="1" font-family="SF Pro Display, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#FFF" text-anchor="middle" dominant-baseline="middle">56</text>
+    </g>
+
+    <!-- Small Cluster -->
+    <g transform="translate(1000, 580)" filter="url(#softShadow)">
+      <circle r="20" fill="url(#clusterGradient)"/>
+      <circle r="20" fill="none" stroke="#FFF" stroke-width="2"/>
+      <text y="1" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#FFF" text-anchor="middle" dominant-baseline="middle">23</text>
+    </g>
+
+    <!-- Online Device with Alarm -->
+    <g transform="translate(600, 360)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+      <circle cx="9" cy="-9" r="9" fill="url(#alarmGradient)"/>
+      <text x="9" y="-6" font-family="SF Pro Display, -apple-system, sans-serif" font-size="9" font-weight="700" fill="#FFF" text-anchor="middle">5</text>
+    </g>
+
+    <!-- Online Device with Alarm 2 -->
+    <g transform="translate(660, 410)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+      <circle cx="9" cy="-9" r="9" fill="url(#alarmGradient)"/>
+      <text x="9" y="-6" font-family="SF Pro Display, -apple-system, sans-serif" font-size="9" font-weight="700" fill="#FFF" text-anchor="middle">3</text>
+    </g>
+
+    <!-- Online Device - No Alarm -->
+    <g transform="translate(580, 400)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+    </g>
+
+    <!-- Online Device with 99+ -->
+    <g transform="translate(710, 390)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+      <rect x="3" y="-18" width="18" height="14" rx="7" fill="url(#alarmGradient)"/>
+      <text x="12" y="-9" font-family="SF Pro Display, -apple-system, sans-serif" font-size="8" font-weight="700" fill="#FFF" text-anchor="middle">99+</text>
+    </g>
+
+    <!-- Offline Devices (实心红色圆点) -->
+    <g transform="translate(550, 380)" filter="url(#softShadow)">
+      <circle r="12" fill="#b60808"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+    </g>
+
+    <g transform="translate(740, 420)" filter="url(#softShadow)">
+      <circle r="12" fill="#b60808"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+    </g>
+
+    <!-- More Online Devices -->
+    <g transform="translate(870, 430)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+      <circle cx="9" cy="-9" r="9" fill="url(#alarmGradient)"/>
+      <text x="9" y="-6" font-family="SF Pro Display, -apple-system, sans-serif" font-size="9" font-weight="700" fill="#FFF" text-anchor="middle">2</text>
+    </g>
+
+    <g transform="translate(930, 470)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+    </g>
+
+    <g transform="translate(980, 560)" filter="url(#softShadow)">
+      <circle r="12" fill="url(#onlineMarker)"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+      <circle cx="9" cy="-9" r="9" fill="url(#alarmGradient)"/>
+      <text x="9" y="-6" font-family="SF Pro Display, -apple-system, sans-serif" font-size="9" font-weight="700" fill="#FFF" text-anchor="middle">1</text>
+    </g>
+
+    <!-- Offline Device (实心红色圆点) -->
+    <g transform="translate(1020, 600)" filter="url(#softShadow)">
+      <circle r="12" fill="#b60808"/>
+      <circle r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+    </g>
+  </g>
+
+  <!-- ==================== HOVER TOOLTIP ==================== -->
+  <g id="hoverTooltip" transform="translate(580, 260)" filter="url(#popupShadow)">
+    <rect x="0" y="0" width="260" height="180" rx="12" fill="#FFF"/>
+    <rect x="0" y="0" width="260" height="180" rx="12" fill="none" stroke="#E8E8E8" stroke-width="1"/>
+    <path d="M-10 50 L0 42 L0 58 Z" fill="#FFF"/>
+    <path d="M-10 50 L0 42" fill="none" stroke="#E8E8E8" stroke-width="1"/>
+
+    <rect x="0" y="0" width="260" height="48" rx="12" fill="#FAFAFA"/>
+    <text x="16" y="30" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#262626">📍 Beijing Chaoyang Site 001</text>
+
+    <g transform="translate(16, 64)">
+      <circle cx="6" cy="0" r="6" fill="#52C41A"/>
+      <text x="20" y="4" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#52C41A">在线</text>
+      <text x="56" y="4" font-family="SF Pro Display, -apple-system, sans-serif" font-size="12" fill="#D9D9D9">|</text>
+      <text x="68" y="4" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">告警:</text>
+      <circle cx="108" cy="0" r="10" fill="url(#alarmGradient)"/>
+      <text x="108" y="4" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#FFF" text-anchor="middle">3</text>
+    </g>
+
+    <line x1="16" y1="82" x2="244" y2="82" stroke="#F0F0F0" stroke-width="1"/>
+
+    <g font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="11" fill="#8C8C8C">
+      <text x="16" y="104">序列号:</text>
+      <text x="72" y="104" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#262626">SN2024001</text>
+      <text x="16" y="126">设备组:</text>
+      <text x="72" y="126" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#262626">China / Beijing / Chaoyang group</text>
+      <text x="16" y="148">地址:</text>
+      <text x="72" y="148" fill="#262626">北京市朝阳区建国路88号</text>
+      <text x="16" y="170">坐标:</text>
+      <text x="72" y="170" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#262626">116.4632, 39.9213</text>
+    </g>
+
+    <rect x="16" y="188" width="40" height="3" rx="1.5" fill="#1890FF"/>
+  </g>
+
+  <!-- ==================== NODE SEARCH ==================== -->
+  <g id="nodeSearch" transform="translate(300, 20)">
+    <!-- Search Box -->
+    <rect x="0" y="0" width="320" height="48" rx="12" fill="#FFF" filter="url(#cardShadow)"/>
+    <rect x="0" y="0" width="320" height="48" rx="12" fill="none" stroke="#1890FF" stroke-width="2"/>
+    <circle cx="28" cy="24" r="8" fill="none" stroke="#1890FF" stroke-width="2"/>
+    <line x1="34" y1="30" x2="40" y2="36" stroke="#1890FF" stroke-width="2" stroke-linecap="round"/>
+    <text x="56" y="28" font-family="SF Pro Display, -apple-system, sans-serif" font-size="13" fill="#262626">Beijing Chaoyang...</text>
+    <g transform="translate(270, 14)">
+      <rect x="0" y="0" width="24" height="20" rx="4" fill="#F5F5F5"/>
+      <text x="12" y="15" font-family="SF Pro Display, -apple-system, sans-serif" font-size="12" fill="#8C8C8C" text-anchor="middle">×</text>
+    </g>
+    <path d="M302 18 L308 24 L314 18" fill="none" stroke="#1890FF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Search Results List (下拉展开) -->
+    <g transform="translate(0, 52)">
+      <rect x="0" y="0" width="320" height="220" rx="12" fill="#FFF" filter="url(#popupShadow)"/>
+      <rect x="0" y="0" width="320" height="220" rx="12" fill="none" stroke="#E8E8E8" stroke-width="1"/>
+
+      <!-- Result Item 1 (高亮选中) -->
+      <g transform="translate(12, 12)">
+        <rect x="0" y="0" width="296" height="52" rx="8" fill="#E6F7FF"/>
+        <circle cx="16" cy="26" r="6" fill="#52C41A"/>
+        <text x="32" y="20" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="13" font-weight="500" fill="#262626">Beijing Chaoyang Site 001</text>
+        <text x="32" y="38" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#8C8C8C">SN: SN2024001</text>
+        <text x="200" y="38" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="11" fill="#52C41A">🟢 在线</text>
+      </g>
+
+      <line x1="12" y1="68" x2="308" y2="68" stroke="#F0F0F0" stroke-width="1"/>
+
+      <!-- Result Item 2 (离线) -->
+      <g transform="translate(12, 76)">
+        <rect x="0" y="0" width="296" height="52" rx="8" fill="transparent"/>
+        <circle cx="16" cy="26" r="6" fill="#b60808"/>
+        <text x="32" y="20" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="13" font-weight="500" fill="#262626">Beijing Chaoyang Site 002</text>
+        <text x="32" y="38" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#8C8C8C">SN: SN2024002</text>
+        <text x="200" y="38" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="11" fill="#b60808">🔴 离线</text>
+      </g>
+
+      <line x1="12" y1="132" x2="308" y2="132" stroke="#F0F0F0" stroke-width="1"/>
+
+      <!-- Result Item 3 -->
+      <g transform="translate(12, 140)">
+        <rect x="0" y="0" width="296" height="52" rx="8" fill="transparent"/>
+        <circle cx="16" cy="26" r="6" fill="#52C41A"/>
+        <text x="32" y="20" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="13" font-weight="500" fill="#262626">Beijing Chaoyang Device 003</text>
+        <text x="32" y="38" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#8C8C8C">SN: SN2024003</text>
+        <text x="200" y="38" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="11" fill="#52C41A">🟢 在线</text>
+      </g>
+
+      <!-- Footer: Result Count -->
+      <line x1="0" y1="196" x2="320" y2="196" stroke="#F0F0F0" stroke-width="1"/>
+      <text x="160" y="212" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="11" fill="#8C8C8C" text-anchor="middle">共找到 15 个结果</text>
+    </g>
+  </g>
+
+  <!-- Highlighted Device Marker (搜索结果高亮) -->
+  <g id="highlightedMarker" transform="translate(640, 380)">
+    <!-- 脉冲圈动画 -->
+    <circle r="20" fill="none" stroke="rgba(24, 144, 255, 0.4)" stroke-width="2" opacity="0.8">
+      <animate attributeName="r" from="20" to="45" dur="1.5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" from="0.8" to="0" dur="1.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="20" fill="none" stroke="rgba(24, 144, 255, 0.4)" stroke-width="2" opacity="0.8">
+      <animate attributeName="r" from="20" to="45" dur="1.5s" begin="0.5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" from="0.8" to="0" dur="1.5s" begin="0.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="20" fill="none" stroke="rgba(24, 144, 255, 0.4)" stroke-width="2" opacity="0.8">
+      <animate attributeName="r" from="20" to="45" dur="1.5s" begin="1s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" from="0.8" to="0" dur="1.5s" begin="1s" repeatCount="indefinite"/>
+    </circle>
+    <!-- 放大的标记点 -->
+    <circle r="18" fill="url(#onlineMarker)" stroke="#1890FF" stroke-width="3"/>
+    <circle cx="13" cy="-13" r="11" fill="url(#alarmGradient)"/>
+    <text x="13" y="-9" font-family="SF Pro Display, -apple-system, sans-serif" font-size="10" font-weight="700" fill="#FFF" text-anchor="middle">5</text>
+  </g>
+
+  <!-- ==================== ZOOM CONTROLS ==================== -->
+  <g id="zoomControls" transform="translate(1380, 100)">
+    <rect x="0" y="0" width="44" height="88" rx="12" fill="#FFF" filter="url(#cardShadow)"/>
+    <rect x="0" y="0" width="44" height="88" rx="12" fill="none" stroke="#E8E8E8" stroke-width="1"/>
+    <g transform="translate(22, 22)">
+      <circle r="16" fill="#F5F5F5"/>
+      <line x1="-7" y1="0" x2="7" y2="0" stroke="#262626" stroke-width="2" stroke-linecap="round"/>
+      <line x1="0" y1="-7" x2="0" y2="7" stroke="#262626" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <line x1="10" y1="44" x2="34" y2="44" stroke="#F0F0F0" stroke-width="1"/>
+    <g transform="translate(22, 66)">
+      <circle r="16" fill="#F5F5F5"/>
+      <line x1="-7" y1="0" x2="7" y2="0" stroke="#262626" stroke-width="2" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- ==================== LEFT FILTER PANEL ==================== -->
+  <g id="filterPanel">
+    <rect x="0" y="0" width="280" height="900" fill="url(#sidebarBg)"/>
+    <line x1="280" y1="0" x2="280" y2="900" stroke="#E8E8E8" stroke-width="1"/>
+
+    <!-- Header: Y=0-64 -->
+    <rect x="0" y="0" width="280" height="64" fill="#FFF"/>
+    <text x="20" y="40" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#262626">筛选</text>
+    <line x1="0" y1="64" x2="280" y2="64" stroke="#E8E8E8" stroke-width="1"/>
+
+    <!-- Search Box: Y=80-120 -->
+    <g transform="translate(16, 80)">
+      <rect x="0" y="0" width="248" height="40" rx="8" fill="#FFF" stroke="#D9D9D9" stroke-width="1"/>
+      <circle cx="22" cy="20" r="7" fill="none" stroke="#BFBFBF" stroke-width="1.5"/>
+      <line x1="27" y1="25" x2="32" y2="30" stroke="#BFBFBF" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="44" y="24" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="13" fill="#BFBFBF">搜索设备组</text>
+    </g>
+
+    <!-- Device Group Tree: Y=140-488 (结束于 140+348) -->
+    <g transform="translate(0, 140)">
+      <text x="20" y="0" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" font-weight="500" fill="#8C8C8C">设备组</text>
+
+      <!-- China group: Y=24-64 (展开状态 [-], 无文件夹图标) -->
+      <g transform="translate(0, 24)">
+        <rect x="12" y="0" width="256" height="40" fill="#E6F7FF" rx="8"/>
+        <rect x="16" y="10" width="18" height="18" rx="4" fill="#1890FF"/>
+        <path d="M21 19 L25 23 L31 15" fill="none" stroke="#FFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- [-] 展开状态图标 -->
+        <rect x="44" y="14" width="16" height="16" rx="3" fill="none" stroke="#1890FF" stroke-width="1.5"/>
+        <line x1="47" y1="22" x2="57" y2="22" stroke="#1890FF" stroke-width="2" stroke-linecap="round"/>
+        <text x="68" y="26" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" font-weight="500" fill="#262626">China group</text>
+      </g>
+
+      <!-- Beijing group: Y=68-104 (展开状态 [-], 无文件夹图标) -->
+      <g transform="translate(0, 68)">
+        <rect x="24" y="0" width="244" height="36" fill="#F0F7FF" rx="6"/>
+        <rect x="30" y="9" width="16" height="16" rx="3" fill="#1890FF"/>
+        <path d="M35 17 L38 20 L43 14" fill="none" stroke="#FFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- [-] 展开状态图标 -->
+        <rect x="54" y="10" width="14" height="14" rx="2" fill="none" stroke="#1890FF" stroke-width="1.5"/>
+        <line x1="56.5" y1="17" x2="65.5" y2="17" stroke="#1890FF" stroke-width="1.5" stroke-linecap="round"/>
+        <text x="76" y="22" font-family="SF Pro Display, -apple-system, sans-serif" font-size="13" fill="#262626">Beijing group</text>
+      </g>
+
+      <!-- Chaoyang group: Y=108-140 (收起状态 [+], 无文件夹图标) -->
+      <g transform="translate(0, 108)">
+        <rect x="36" y="0" width="232" height="32" fill="#F0F7FF" rx="6"/>
+        <rect x="42" y="8" width="14" height="14" rx="3" fill="#1890FF"/>
+        <path d="M47 15 L50 18 L55 12" fill="none" stroke="#FFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- [+] 收起状态图标 -->
+        <rect x="64" y="8" width="14" height="14" rx="2" fill="none" stroke="#BFBFBF" stroke-width="1.5"/>
+        <line x1="71" y1="11" x2="71" y2="19" stroke="#BFBFBF" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="67" y1="15" x2="75" y2="15" stroke="#BFBFBF" stroke-width="1.5" stroke-linecap="round"/>
+        <text x="86" y="20" font-family="SF Pro Display, -apple-system, sans-serif" font-size="12" fill="#1890FF">Chaoyang group</text>
+      </g>
+
+      <!-- Haidian group: Y=144-176 (叶子节点, 无图标, 无文件夹) -->
+      <g transform="translate(0, 144)">
+        <rect x="36" y="0" width="232" height="32" fill="transparent" rx="6"/>
+        <rect x="42" y="8" width="14" height="14" rx="3" fill="#FFF" stroke="#D9D9D9" stroke-width="1"/>
+        <!-- 叶子节点：无展开/收起图标，无文件夹图标 -->
+        <text x="64" y="20" font-family="SF Pro Display, -apple-system, sans-serif" font-size="12" fill="#595959">Haidian group</text>
+      </g>
+
+      <!-- Shanghai group: Y=180-216 (收起状态 [+], 无文件夹图标) -->
+      <g transform="translate(0, 180)">
+        <rect x="24" y="0" width="244" height="36" fill="#F0F7FF" rx="6"/>
+        <rect x="30" y="10" width="16" height="16" rx="3" fill="#1890FF"/>
+        <path d="M35 18 L38 21 L43 15" fill="none" stroke="#FFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- [+] 收起状态图标 -->
+        <rect x="54" y="10" width="14" height="14" rx="2" fill="none" stroke="#BFBFBF" stroke-width="1.5"/>
+        <line x1="61" y1="13" x2="61" y2="21" stroke="#BFBFBF" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="57" y1="17" x2="65" y2="17" stroke="#BFBFBF" stroke-width="1.5" stroke-linecap="round"/>
+        <text x="76" y="22" font-family="SF Pro Display, -apple-system, sans-serif" font-size="13" fill="#262626">Shanghai group</text>
+      </g>
+
+      <!-- Guangdong group: Y=220-256 (叶子节点, 无图标, 无文件夹) -->
+      <g transform="translate(0, 220)">
+        <rect x="24" y="0" width="244" height="36" fill="transparent" rx="6"/>
+        <rect x="30" y="10" width="16" height="16" rx="3" fill="#FFF" stroke="#D9D9D9" stroke-width="1"/>
+        <!-- 叶子节点：无展开/收起图标，无文件夹图标 -->
+        <text x="54" y="22" font-family="SF Pro Display, -apple-system, sans-serif" font-size="13" fill="#595959">Guangdong group</text>
+      </g>
+
+      <!-- Zhejiang group: Y=260-296 (叶子节点, 无图标, 无文件夹) -->
+      <g transform="translate(0, 260)">
+        <rect x="24" y="0" width="244" height="36" fill="transparent" rx="6"/>
+        <rect x="30" y="10" width="16" height="16" rx="3" fill="#FFF" stroke="#D9D9D9" stroke-width="1"/>
+        <!-- 叶子节点：无展开/收起图标，无文件夹图标 -->
+        <text x="54" y="22" font-family="SF Pro Display, -apple-system, sans-serif" font-size="13" fill="#595959">Zhejiang group</text>
+      </g>
+
+      <!-- Multi-select Summary: Y=308-348 -->
+      <g transform="translate(0, 308)">
+        <rect x="16" y="0" width="248" height="40" rx="8" fill="#E6F7FF"/>
+        <text x="28" y="26" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="13" fill="#1890FF">已选择 4 个设备组</text>
+      </g>
+    </g>
+    <!-- Device Group Tree ends at Y=140+348=488 -->
+
+    <!-- Status Filter: Y=510-614 (留22px间距) -->
+    <g transform="translate(0, 510)">
+      <line x1="20" y1="0" x2="260" y2="0" stroke="#E8E8E8" stroke-width="1"/>
+      <text x="20" y="32" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" font-weight="500" fill="#8C8C8C">设备状态</text>
+
+      <!-- Online: Y=52-72 -->
+      <g transform="translate(20, 52)">
+        <rect x="0" y="0" width="20" height="20" rx="4" fill="#1890FF"/>
+        <path d="M5 10 L9 14 L15 6" fill="none" stroke="#FFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="48" cy="10" r="7" fill="#52C41A"/>
+        <text x="64" y="14" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="14" fill="#262626">在线</text>
+        <text x="240" y="14" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" fill="#8C8C8C" text-anchor="end">9,200</text>
+      </g>
+
+      <!-- Offline: Y=88-108 -->
+      <g transform="translate(20, 88)">
+        <rect x="0" y="0" width="20" height="20" rx="4" fill="#1890FF"/>
+        <path d="M5 10 L9 14 L15 6" fill="none" stroke="#FFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="48" cy="10" r="7" fill="#b60808"/>
+        <text x="64" y="14" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="14" fill="#262626">离线</text>
+        <text x="240" y="14" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" fill="#b60808" text-anchor="end">800</text>
+      </g>
+    </g>
+    <!-- Status Filter ends at Y=510+108=618 -->
+
+    <!-- Legend: Y=640-780 (留22px间距) -->
+    <g transform="translate(0, 640)">
+      <line x1="20" y1="0" x2="260" y2="0" stroke="#E8E8E8" stroke-width="1"/>
+      <text x="20" y="32" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" font-weight="500" fill="#8C8C8C">图例</text>
+
+      <!-- Online Device: Y=52-72 -->
+      <g transform="translate(20, 52)">
+        <circle cx="10" cy="10" r="10" fill="url(#onlineMarker)"/>
+        <circle cx="10" cy="10" r="10" fill="none" stroke="#FFF" stroke-width="2"/>
+        <text x="32" y="14" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">在线设备</text>
+      </g>
+
+      <!-- Offline Device: Y=52-72 (实心灰色圆点) -->
+      <g transform="translate(140, 52)">
+        <circle cx="10" cy="10" r="10" fill="#b60808"/>
+        <circle cx="10" cy="10" r="10" fill="none" stroke="#FFF" stroke-width="2"/>
+        <text x="32" y="14" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">离线设备</text>
+      </g>
+
+      <!-- Cluster: Y=88-108 -->
+      <g transform="translate(20, 88)">
+        <circle cx="12" cy="12" r="12" fill="url(#clusterGradient)"/>
+        <circle cx="12" cy="12" r="12" fill="none" stroke="#FFF" stroke-width="2"/>
+        <text x="12" y="16" font-family="SF Pro Display, -apple-system, sans-serif" font-size="9" font-weight="700" fill="#FFF" text-anchor="middle">N</text>
+        <text x="36" y="16" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">设备聚合</text>
+      </g>
+
+      <!-- Alarm Badge: Y=88-108 -->
+      <g transform="translate(140, 88)">
+        <circle cx="10" cy="10" r="8" fill="url(#alarmGradient)"/>
+        <text x="10" y="13" font-family="SF Pro Display, -apple-system, sans-serif" font-size="9" font-weight="700" fill="#FFF" text-anchor="middle">3</text>
+        <text x="28" y="14" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">告警数量</text>
+      </g>
+    </g>
+    <!-- Legend ends at Y=640+108=748 -->
+  </g>
+
+  <!-- ==================== STATS PANEL ==================== -->
+  <g id="statsPanel" transform="translate(1160, 740)" filter="url(#cardShadow)">
+    <rect x="0" y="0" width="260" height="140" rx="12" fill="#FFF"/>
+    <rect x="0" y="0" width="260" height="140" rx="12" fill="none" stroke="#E8E8E8" stroke-width="1"/>
+
+    <text x="20" y="32" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="14" font-weight="600" fill="#262626">设备统计</text>
+
+    <line x1="20" y1="48" x2="240" y2="48" stroke="#F0F0F0" stroke-width="1"/>
+
+    <g transform="translate(20, 68)">
+      <text x="0" y="0" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#8C8C8C">总设备</text>
+      <text x="220" y="0" font-family="SF Pro Display, -apple-system, sans-serif" font-size="22" font-weight="700" fill="#262626" text-anchor="end">10,000</text>
+    </g>
+
+    <g transform="translate(20, 96)">
+      <circle cx="8" cy="-4" r="6" fill="#52C41A"/>
+      <text x="24" y="0" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">在线</text>
+      <text x="220" y="0" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#52C41A" text-anchor="end">9,200</text>
+    </g>
+
+    <g transform="translate(20, 120)">
+      <circle cx="8" cy="-4" r="6" fill="#b60808"/>
+      <text x="24" y="0" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12" fill="#595959">离线</text>
+      <text x="220" y="0" font-family="SF Pro Display, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#8C8C8C" text-anchor="end">800</text>
+    </g>
+  </g>
+
+  <!-- Footer -->
+  <text x="720" y="880" font-family="SF Pro Display, -apple-system, sans-serif" font-size="11" fill="#BFBFBF" text-anchor="middle">OMC GIS Map - Topology View v1.5</text>
+
+</svg>
