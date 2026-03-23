@@ -1,8 +1,8 @@
 # STUN/UDP Connection Request 实现方案
 
-> **版本**: v1.2
+> **版本**: v2.0
 > **日期**: 2026-03-23
-> **状态**: Phase 1-3 已完成（STUN Server + UDP CR + Task 集成）
+> **状态**: Phase 1-4 全部完成
 
 ---
 
@@ -375,9 +375,9 @@ acs_connection_request_duration_seconds{method="http|udp"}
 4. ✅ 35 个测试全部通过（消息编解码、地址缓存、消息处理器、服务器集成测试）
 5. ✅ Prometheus 指标支持（packets_received、packets_invalid、store_size）
 
-**待后续 Phase 完成**：
-- `device/service.go` — Inform 处理增强，UDPConnectionRequestAddress → StunStore
-- 数据库迁移（可选字段）
+**后续已完成**：
+- ✅ `device/service.go` — Inform 处理增强，UDPConnectionRequestAddress → StunStore
+- ✅ 数据库迁移 `000034_add_device_stun_fields`（nat_detected + udp_connection_request_address）
 
 ### Phase 3: UDP Connection Request 发送 ✅ 已完成
 
@@ -389,14 +389,15 @@ acs_connection_request_duration_seconds{method="http|udp"}
 3. ✅ 支持两种设备格式：eNB（"infromrequest"纯文本）和 CPE（HTTP-like + HMAC 签名）
 4. ✅ `connreq/udp_sender_test.go` + `connreq/dispatcher_test.go` — 测试覆盖
 
-### Phase 4: 基站重启 + 监控
+### Phase 4: 基站重启 + 监控 ✅ 已完成
 
 **目标**：完善基站管理能力
 
-**改动**：
-1. 基站 UDP 重启命令（`/restart_{md5}`）
-2. Prometheus 指标
-3. 缓存监控 + 告警
+**已完成**：
+1. ✅ `connreq/udp_sender.go` — `SendRestart()` 发送 `/restart_{md5(SN)}` UDP 包到不可达设备
+2. ✅ `connreq/metrics.go` — Dispatcher Prometheus 指标（`acs_connection_request_sent_total`、`acs_connection_request_duration_seconds`）
+3. ✅ `connreq/dispatcher.go` — 集成指标记录到 Send() 方法
+4. ✅ STUN Server 缓存监控已在 Phase 2 完成（`acs_stun_store_size`、`acs_stun_packets_received_total`）
 
 ---
 
@@ -437,46 +438,50 @@ ACS 本身就需要水平扩展，STUN Server 嵌入后自然随之扩展。Go �
 ## 6. 与现有模块的交互
 
 ```
-                    ┌──────────────────────────────────────────────┐
-                    │                  omcgo-app                    │
-                    │                                              │
-                    │  TaskService ──→ Dispatcher.Send()            │
-                    │  DeviceService ──→ Dispatcher.Send()          │
-                    │  SoftwareService ──→ Dispatcher.Send()        │
-                    │  BackupExecutor ──→ Dispatcher.Send()         │
-                    │                         │                     │
-                    └─────────────────────────┼─────────────────────┘
-                                              │ gRPC / NATS
-                    ┌─────────────────────────┼─────────────────────┐
-                    │                  omcgo-acs                     │
-                    │                         ▼                     │
-                    │  ┌─── Dispatcher ───────────────┐             │
-                    │  │  ├─ HTTP Client (已有)       │             │
-                    │  │  └─ UDP Sender (新增)        │             │
-                    │  └──────────────────────────────┘             │
-                    │                         │                     │
-                    │  ┌─── STUN Server ──────┼──────┐              │
-                    │  │  UDP :3478           │      │              │
-                    │  │  └─ StunStore (L1+L2)       │              │
-                    │  └─────────────────────────────┘              │
-                    │                                               │
-                    │  ┌─── ACS Handler ─────────────────────┐     │
-                    │  │  HTTP :7547                          │     │
-                    │  │  Inform Event 6 → 弹出任务 → 下发   │     │
-                    │  └─────────────────────────────────────┘     │
-                    └───────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                       omcgo-app                           │
+│                                                          │
+│  TaskService.CreateTask()                                │
+│    └─ wakeDevice() (goroutine)                           │
+│         └─ taskCRSender.Send()                           │
+│              └─ Dispatcher.Send()                        │
+│                   ├─ UDPSender ── STUN Store (Redis L2)  │
+│                   │    ├─ eNB: "infromrequest"            │
+│                   │    └─ CPE: HTTP-like + HMAC-SHA1      │
+│                   └─ HTTP Client (已有, Digest Auth)     │
+│                                                          │
+│  DeviceService.UpdateFromInform()                        │
+│    └─ UDPConnectionRequestAddress → StunStore.SetFromInform()│
+│                                                          │
+│  SoftwareService / DeviceService                         │
+│    └─ connReqClient.Send() (HTTP only, 已有)             │
+│                                                          │
+│  UDPSender.SendRestart()  ← 兜底重启（不可达设备）       │
+│    └─ "/restart_{md5(SN)}" UDP 包                        │
+└──────────────────────────────────────────────────────────┘
+                          │ Redis (STUN 地址共享)
+┌─────────────────────────┼────────────────────────────────┐
+│                  omcgo-acs                                │
+│                         │                                │
+│  ┌─── STUN Server ──────┼──────┐                         │
+│  │  UDP :3478                  │                         │
+│  │  ├─ 标准 STUN → StunStore   │                         │
+│  │  └─ 非标准 SN → StunStore   │                         │
+│  │  └─ StunStore (L1+L2 Redis) │                         │
+│  └─────────────────────────────┘                         │
+│                                                          │
+│  ┌─── ACS Handler ─────────────────────────────────┐    │
+│  │  HTTP :7547                                      │    │
+│  │  Inform Event 6 → 弹出 Redis 任务队列 → 下发 RPC │    │
+│  └──────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
 ```
 
-**注意**：由于 app 和 acs 是两个独立进程，`Dispatcher` 位于 acs 进程中。app 进程中的 TaskService 触发 CR 需要通过 gRPC 调用 acs 进程的 Dispatcher，或者通过 NATS 发布事件让 acs 侧消费。
-
-**推荐方案**：通过 NATS 事件解耦
-
-```
-app 进程: TaskService.CreateTask() → NATS Publish "task.created" {device_sn, task_id}
-acs 进程: 订阅 "task.created" → Dispatcher.Send(device_sn)
-```
-
-这样 app 和 acs 完全解耦，ACS 多实例时只有一个实例消费并发送 CR。
+**实际实现方案**：Dispatcher 位于 app 进程中，直接通过 Redis L2 读取 STUN 地址。
+无需 gRPC/NATS 跨进程通信，因为：
+- STUN 地址通过 Redis 在 app 和 acs 进程间共享
+- HTTP CR 客户端本就在 app 进程中
+- UDP 发送只需 `net.DialUDP()`，无需经过 ACS 进程
 
 ---
 
@@ -491,12 +496,13 @@ acs 进程: 订阅 "task.created" → Dispatcher.Send(device_sn)
 | `internal/acs/stun/processor.go` | 标准/非标准消息处理 | ✅ |
 | `internal/acs/stun/store.go` | 地址缓存（L1 内存 + L2 Redis） | ✅ |
 | `internal/acs/stun/*_test.go` | STUN 测试（35 个） | ✅ |
-| `internal/acs/connreq/dispatcher.go` | CR 调度器（UDP 优先 + HTTP 回退） | ✅ |
-| `internal/acs/connreq/udp_sender.go` | UDP CR 消息构造与发送（eNB + CPE） | ✅ |
+| `internal/acs/connreq/dispatcher.go` | CR 调度器（UDP 优先 + HTTP 回退 + Prometheus 指标） | ✅ |
+| `internal/acs/connreq/udp_sender.go` | UDP CR 消息构造与发送（eNB + CPE + Restart） | ✅ |
+| `internal/acs/connreq/metrics.go` | Dispatcher Prometheus 指标 | ✅ |
 | `internal/acs/connreq/dispatcher_test.go` | Dispatcher 测试 | ✅ |
 | `internal/acs/connreq/udp_sender_test.go` | UDP Sender 测试 | ✅ |
-| `migrations/000034_add_device_stun_fields.up.sql` | DB 迁移 | ⬜ 待需要时创建 |
-| `migrations/000034_add_device_stun_fields.down.sql` | DB 回滚 | ⬜ 待需要时创建 |
+| `migrations/000034_add_device_stun_fields.up.sql` | DB 迁移（nat_detected + udp_connection_request_address） | ✅ |
+| `migrations/000034_add_device_stun_fields.down.sql` | DB 回滚 | ✅ |
 
 ### 修改文件
 
@@ -504,12 +510,14 @@ acs 进程: 订阅 "task.created" → Dispatcher.Send(device_sn)
 |------|---------|------|
 | `internal/task/service.go` | 添加 DeviceLookup/ConnectionRequestSender 接口 + wakeDevice() 异步触发 | ✅ |
 | `internal/core/appconfig/config.go` | 新增 STUNConfig（ACS）和 ConnReqConfig（App） | ✅ |
+| `internal/core/model/device.go` | 新增 NatDetected、UDPConnectionRequestAddress 字段 | ✅ |
+| `internal/device/service.go` | Inform 处理增强：UDPAddr → 设备模型 + StunStore 同步 | ✅ |
+| `internal/device/pg_repository.go` | CRUD 支持 nat_detected + udp_connection_request_address 列 | ✅ |
 | `cmd/acs/main.go` | 启动 STUN Server | ✅ |
 | `cmd/acs/etc/config.dev.yaml` | 添加 stun 配置节 | ✅ |
-| `cmd/app/router/router.go` | 注入 STUN Store + UDPSender + Dispatcher 到 TaskService | ✅ |
+| `cmd/app/router/router.go` | 注入 StunStore + UDPSender + Dispatcher + Metrics 到各 Service | ✅ |
 | `cmd/app/etc/config.dev.yaml` | 添加 conn_req 配置节 | ✅ |
-| `internal/device/service.go` | Inform 处理增强，同步 UDPAddr → StunStore | ⬜ 后续优化 |
-| 各运营商 `params.go` | 确认 UDPConnectionRequestAddress 映射 | ⬜ 后续优化 |
+| 各运营商 `params.go` | 无需修改：UDPConnectionRequestAddress 是标准 TR-069 参数，直接提取 | ✅ 已确认 |
 
 ---
 
