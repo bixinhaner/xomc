@@ -290,20 +290,54 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		}
 	}
 
-	// Check if a matching DataModel was created by another concurrent device.
+	// Check if a matching auto-discovered DataModel already exists for this OUI+ProductClass.
+	// Auto templates are stored without firmware_version, so we search with empty firmware.
 	existingDM, err := s.dmRegistry.ResolveWithFirmware(ctx, dev.Carrier, dev.Technology,
-		dev.OUI, dev.ProductClass, dev.FirmwareVersion)
+		dev.OUI, dev.ProductClass, "")
 	if err != nil {
 		return nil, fmt.Errorf("check existing data model: %w", err)
 	}
-	if existingDM != nil {
+	if existingDM != nil && existingDM.SourceType == datamodel.SourceAutoDiscovered {
+		// Update existing auto template's parameter tree instead of creating a new one.
+		paramTree, buildErr := buildParameterTree(paramInfos)
+		if buildErr != nil {
+			if log != nil {
+				log.Status = DiscoveryFailed
+				log.ErrorMessage = buildErr.Error()
+				_ = s.discoveryRepo.Update(ctx, log)
+			}
+			return nil, fmt.Errorf("build parameter tree for update: %w", buildErr)
+		}
+		existingDM.ParameterTree = paramTree
+		if updateErr := s.dmRepo.Update(ctx, existingDM); updateErr != nil {
+			s.logger.Warn("failed to update existing auto template, will create new",
+				zap.Error(updateErr),
+			)
+		} else {
+			if log != nil {
+				log.DataModelID = &existingDM.ID
+				log.ParameterCount = len(paramInfos)
+				log.Status = DiscoveryCompleted
+				_ = s.discoveryRepo.Update(ctx, log)
+			}
+			s.logger.Info("existing auto template updated",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("model_id", existingDM.ID.String()),
+			)
+			if existingDM.IsActive {
+				_ = s.dmRegistry.InvalidateCache(ctx, existingDM)
+			}
+			return existingDM, nil
+		}
+	} else if existingDM != nil {
+		// A manual template already exists for this OUI+ProductClass — skip creation.
 		if log != nil {
 			log.DataModelID = &existingDM.ID
 			log.ParameterCount = len(paramInfos)
 			log.Status = DiscoveryCompleted
 			_ = s.discoveryRepo.Update(ctx, log)
 		}
-		s.logger.Info("data model already exists, skipping creation",
+		s.logger.Info("manual template already exists, skipping auto creation",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("model_id", existingDM.ID.String()),
 		)
@@ -321,7 +355,8 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		return nil, fmt.Errorf("build parameter tree: %w", err)
 	}
 
-	// Create new DataModel.
+	// Create new auto-discovered DataModel.
+	// Auto templates store OUI + ProductClass only (no FirmwareVersion).
 	dm := &datamodel.DataModel{
 		ID:              uuid.New(),
 		Carrier:         dev.Carrier,
@@ -329,14 +364,14 @@ func (s *DiscoveryService) HandleDiscoveryResult(ctx context.Context, dev *model
 		Version:         "1.0",
 		OUI:             dev.OUI,
 		ProductClass:    dev.ProductClass,
-		FirmwareVersion: dev.FirmwareVersion,
+		FirmwareVersion: "", // Auto templates do not store firmware version.
 		Scope:           model.ScopeProduct,
 		Status:          datamodel.StatusDraft,
 		RootObject:      detectRootObject(paramInfos),
 		ParameterTree:   paramTree,
 		SourceType:      datamodel.SourceAutoDiscovered,
 		Source:          "auto_discovered",
-		Description:     fmt.Sprintf("自动发现: %s %s (FW: %s) from %s", dev.OUI, dev.ProductClass, dev.FirmwareVersion, dev.SerialNumber),
+		Description:     fmt.Sprintf("自动发现: %s %s from %s", dev.OUI, dev.ProductClass, dev.SerialNumber),
 	}
 
 	if s.config.AutoActivateModel {

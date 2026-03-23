@@ -25,7 +25,7 @@ var dataModelColumns = []string{
 	"firmware_version",
 	"scope", "status", "is_active", "root_object", "parameter_tree",
 	"source", "source_type", "imported_by", "spec_document_ref", "description",
-	"created_at", "updated_at",
+	"last_accessed_at", "created_at", "updated_at",
 }
 
 // allowedSortColumns defines columns that can be used for ordering data model queries.
@@ -57,6 +57,7 @@ func (r *PgDataModelRepository) Create(ctx context.Context, dm *DataModel) error
 		dm.ID = uuid.New()
 	}
 	now := time.Now()
+	dm.LastAccessedAt = now
 	dm.CreatedAt = now
 	dm.UpdatedAt = now
 
@@ -69,7 +70,7 @@ func (r *PgDataModelRepository) Create(ctx context.Context, dm *DataModel) error
 			dm.Scope, dm.Status, dm.IsActive, dm.RootObject, dm.ParameterTree,
 			nullableString(dm.Source), dm.SourceType, nullableString(dm.ImportedBy),
 			nullableString(dm.SpecDocumentRef), nullableString(dm.Description),
-			dm.CreatedAt, dm.UpdatedAt,
+			dm.LastAccessedAt, dm.CreatedAt, dm.UpdatedAt,
 		).
 		ToSql()
 	if err != nil {
@@ -521,6 +522,90 @@ func (r *PgDataModelRepository) Statistics(ctx context.Context) (*DataModelStats
 	return stats, nil
 }
 
+// TouchLastAccessed updates last_accessed_at to the current time for a data model.
+func (r *PgDataModelRepository) TouchLastAccessed(ctx context.Context, id uuid.UUID) error {
+	query, args, err := psql.Update("data_model_definitions").
+		Set("last_accessed_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build touch last_accessed_at SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("touch last_accessed_at for %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteExpired removes data models that have exceeded their idle period.
+// Auto-discovered templates expire after autoMaxAge days, manual templates after manualMaxAge days.
+func (r *PgDataModelRepository) DeleteExpired(ctx context.Context, autoMaxAge, manualMaxAge int) (int64, error) {
+	query := `DELETE FROM data_model_definitions
+		WHERE (source_type = 'auto_discovered' AND last_accessed_at < NOW() - make_interval(days => $1))
+		   OR (source_type = 'manual' AND last_accessed_at < NOW() - make_interval(days => $2))`
+
+	tag, err := r.pool.Exec(ctx, query, autoMaxAge, manualMaxAge)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired data models: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// FindActiveForMatch performs two-level precise matching for parameter templates.
+//
+// Level 1: OUI + ProductClass + FirmwareVersion (exact firmware match)
+// Level 2: OUI + ProductClass with firmware_version IS NULL or empty (manual > auto_discovered)
+//
+// Returns nil, nil if no matching template is found.
+func (r *PgDataModelRepository) FindActiveForMatch(ctx context.Context,
+	carrier model.CarrierCode, tech model.Technology,
+	oui, productClass, firmwareVersion string) (*DataModel, error) {
+
+	if oui == "" || productClass == "" {
+		return nil, nil
+	}
+
+	query := `SELECT ` + joinColumns(dataModelColumns) + ` FROM data_model_definitions
+		WHERE is_active = true
+		  AND scope = 'product'
+		  AND carrier = $1
+		  AND technology = $2
+		  AND oui = $3
+		  AND product_class = $4
+		  AND (
+		      (firmware_version = $5 AND $5 != '')
+		      OR
+		      (firmware_version IS NULL OR firmware_version = '')
+		  )
+		ORDER BY
+		  CASE WHEN firmware_version = $5 AND $5 != '' THEN 1 ELSE 2 END,
+		  CASE source_type WHEN 'manual' THEN 0 ELSE 1 END
+		LIMIT 1`
+
+	dm, err := scanDataModel(r.pool.QueryRow(ctx, query, carrier, tech, oui, productClass, firmwareVersion))
+	if err != nil {
+		if err == commonerrors.ErrNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find active for match: %w", err)
+	}
+	return dm, nil
+}
+
+// joinColumns joins column names with commas for use in raw SQL queries.
+func joinColumns(cols []string) string {
+	result := ""
+	for i, col := range cols {
+		if i > 0 {
+			result += ", "
+		}
+		result += col
+	}
+	return result
+}
+
 // --- PgImportLogRepository ---
 
 // PgImportLogRepository implements ImportLogRepository using PostgreSQL.
@@ -726,7 +811,7 @@ func scanDataModel(row pgx.Row) (*DataModel, error) {
 		&oui, &productClass, &firmwareVersion,
 		&dm.Scope, &dm.Status, &dm.IsActive, &dm.RootObject, &parameterTree,
 		&source, &dm.SourceType, &importedBy, &specDocumentRef, &description,
-		&dm.CreatedAt, &dm.UpdatedAt,
+		&dm.LastAccessedAt, &dm.CreatedAt, &dm.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -782,7 +867,7 @@ func scanDataModels(rows pgx.Rows) ([]DataModel, error) {
 			&oui, &productClass, &firmwareVersion,
 			&dm.Scope, &dm.Status, &dm.IsActive, &dm.RootObject, &parameterTree,
 			&source, &dm.SourceType, &importedBy, &specDocumentRef, &description,
-			&dm.CreatedAt, &dm.UpdatedAt,
+			&dm.LastAccessedAt, &dm.CreatedAt, &dm.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan data model row: %w", err)

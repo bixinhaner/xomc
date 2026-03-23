@@ -93,6 +93,16 @@ func (m *dmHDataModelRepo) FindActiveWithFirmware(ctx context.Context, carrier m
 	oui, productClass, firmwareVersion string, scope model.DataModelScope) (*DataModel, error) {
 	return nil, nil
 }
+func (m *dmHDataModelRepo) FindActiveForMatch(ctx context.Context, carrier model.CarrierCode, tech model.Technology,
+	oui, productClass, firmwareVersion string) (*DataModel, error) {
+	return nil, nil
+}
+func (m *dmHDataModelRepo) TouchLastAccessed(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+func (m *dmHDataModelRepo) DeleteExpired(ctx context.Context, autoMaxAge, manualMaxAge int) (int64, error) {
+	return 0, nil
+}
 
 // ---------------------------------------------------------------------------
 // Mock: OUIRepository (dmH prefix)

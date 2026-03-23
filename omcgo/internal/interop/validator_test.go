@@ -87,6 +87,14 @@ func (m *mockDataModelRepo) FindActiveWithFirmware(_ context.Context, _ model.Ca
 	_, _, _ string, _ model.DataModelScope) (*datamodel.DataModel, error) {
 	return nil, nil
 }
+func (m *mockDataModelRepo) FindActiveForMatch(_ context.Context, _ model.CarrierCode, _ model.Technology,
+	_, _, _ string) (*datamodel.DataModel, error) {
+	return m.dm, nil
+}
+func (m *mockDataModelRepo) TouchLastAccessed(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockDataModelRepo) DeleteExpired(_ context.Context, _, _ int) (int64, error) {
+	return 0, nil
+}
 
 func newTestValidator(t *testing.T, dev *model.Device, dm *datamodel.DataModel, deviceParams []model.DeviceParameter) *DataModelValidator {
 	t.Helper()

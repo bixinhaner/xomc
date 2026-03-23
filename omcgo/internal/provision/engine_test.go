@@ -223,7 +223,7 @@ func newEngineHarness(deviceRepo device.DeviceRepository) *engineHarness {
 		carrierReg,
 		cmdQueue,
 		evtBus,
-		appconfig.ProvisionConfig{},
+		appconfig.ProvisionConfig{AutoConfigure: true},
 		logger,
 	)
 
@@ -900,6 +900,18 @@ func (m *mockDataModelRepo) FindActiveWithFirmware(ctx context.Context, carrier 
 	return nil, nil
 }
 
+func (m *mockDataModelRepo) FindActiveForMatch(ctx context.Context, carrier model.CarrierCode, tech model.Technology, oui, productClass, firmwareVersion string) (*datamodel.DataModel, error) {
+	return nil, nil
+}
+
+func (m *mockDataModelRepo) TouchLastAccessed(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockDataModelRepo) DeleteExpired(ctx context.Context, autoMaxAge, manualMaxAge int) (int64, error) {
+	return 0, nil
+}
+
 func newFullEngineHarness() *fullEngineHarness {
 	logger := zap.NewNop()
 	taskRepo := &mockTaskRepo{}
@@ -922,7 +934,7 @@ func newFullEngineHarness() *fullEngineHarness {
 		carrierReg,
 		cmdQueue,
 		evtBus,
-		appconfig.ProvisionConfig{},
+		appconfig.ProvisionConfig{AutoConfigure: true},
 		logger,
 	)
 

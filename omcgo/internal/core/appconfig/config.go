@@ -76,22 +76,23 @@ type ConnReqConfig struct {
 
 // AppConfig is the configuration for the main application.
 type AppConfig struct {
-	Server          AppServerConfig  `mapstructure:"server"`
-	DB              PostgresConfig   `mapstructure:"db"`
-	TSDB            PostgresConfig   `mapstructure:"tsdb"`
-	Redis           RedisConfig      `mapstructure:"redis"`
-	NATS            NATSConfig       `mapstructure:"nats"`
-	MinIO           MinIOConfig      `mapstructure:"minio"`
-	JWT             JWTConfig        `mapstructure:"jwt"`
-	CORS            CORSConfig       `mapstructure:"cors"`
-	ConnReq         ConnReqConfig    `mapstructure:"conn_req"`
-	Northbound      NorthboundConfig `mapstructure:"northbound"`
-	NEDirect        NEDirectConfig   `mapstructure:"ne_direct"`
-	Provision       ProvisionConfig  `mapstructure:"provision"`
-	Metrics         MetricsConfig    `mapstructure:"metrics"`
-	Tracer          TracerConfig     `mapstructure:"tracer"`
-	Log             LogConfig        `mapstructure:"log"`
-	RequestIDPrefix string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
+	Server          AppServerConfig      `mapstructure:"server"`
+	DB              PostgresConfig       `mapstructure:"db"`
+	TSDB            PostgresConfig       `mapstructure:"tsdb"`
+	Redis           RedisConfig          `mapstructure:"redis"`
+	NATS            NATSConfig           `mapstructure:"nats"`
+	MinIO           MinIOConfig          `mapstructure:"minio"`
+	JWT             JWTConfig            `mapstructure:"jwt"`
+	CORS            CORSConfig           `mapstructure:"cors"`
+	ConnReq         ConnReqConfig        `mapstructure:"conn_req"`
+	Northbound      NorthboundConfig     `mapstructure:"northbound"`
+	NEDirect        NEDirectConfig       `mapstructure:"ne_direct"`
+	Provision       ProvisionConfig      `mapstructure:"provision"`
+	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
+	Metrics         MetricsConfig        `mapstructure:"metrics"`
+	Tracer          TracerConfig         `mapstructure:"tracer"`
+	Log             LogConfig            `mapstructure:"log"`
+	RequestIDPrefix string               `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
 }
 
 // JWTConfig holds JWT authentication settings.
@@ -154,6 +155,13 @@ type AutoSyncConfig struct {
 	SyncOnBootstrap      bool `mapstructure:"sync_on_bootstrap"`
 	SyncOnFirmwareChange bool `mapstructure:"sync_on_firmware_change"`
 	MaxConcurrent        int  `mapstructure:"max_concurrent"`
+}
+
+// DataModelExpiryConfig holds settings for automatic data model template expiration.
+type DataModelExpiryConfig struct {
+	AutoMaxIdleDays   int    `mapstructure:"auto_max_idle_days"`   // Max idle days for auto_discovered templates (default: 15)
+	ManualMaxIdleDays int    `mapstructure:"manual_max_idle_days"` // Max idle days for manual templates (default: 60)
+	CleanupCron       string `mapstructure:"cleanup_cron"`         // Cron expression for cleanup (default: "0 3 * * *")
 }
 
 // WorkerConfig is the configuration for the background worker process.

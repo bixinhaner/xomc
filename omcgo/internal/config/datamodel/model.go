@@ -44,6 +44,7 @@ type DataModel struct {
 	ImportedBy      string               `json:"imported_by,omitempty"`
 	SpecDocumentRef string               `json:"spec_document_ref,omitempty"`
 	Description     string               `json:"description,omitempty"`
+	LastAccessedAt  time.Time            `json:"last_accessed_at"`
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at"`
 }

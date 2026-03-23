@@ -21,12 +21,13 @@ import (
 //  2. oui      — carrier + tech + oui
 //  3. carrier_default — carrier + tech
 type DataModelRegistry struct {
-	repo         DataModelReader
-	cache        *DataModelCache
-	localCache   sync.Map // L1 in-memory cache: string -> *DataModel
-	cacheVersion int64
-	logger       *zap.Logger
-	stopCh       chan struct{}
+	repo           DataModelReader
+	cache          *DataModelCache
+	localCache     sync.Map // L1 in-memory cache: string -> *DataModel
+	touchThrottle  sync.Map // throttle last_accessed_at updates: model_id -> time.Time
+	cacheVersion   int64
+	logger         *zap.Logger
+	stopCh         chan struct{}
 }
 
 // NewDataModelRegistry creates a new DataModelRegistry.
@@ -58,10 +59,12 @@ func (r *DataModelRegistry) Resolve(ctx context.Context, carrier model.CarrierCo
 
 	// Step 1: Check L1 in-memory cache.
 	if val, ok := r.localCache.Load(key); ok {
+		dm := val.(*DataModel)
 		r.logger.Debug("data model resolved from L1 cache",
 			zap.String("key", key),
 		)
-		return val.(*DataModel), nil
+		go r.touchLastAccessedAsync(dm.ID)
+		return dm, nil
 	}
 
 	// Step 2: Check L2 Redis resolve result cache (skip if cache is nil).
@@ -102,8 +105,9 @@ func (r *DataModelRegistry) Resolve(ctx context.Context, carrier model.CarrierCo
 		return nil, nil
 	}
 
-	// Step 4: Write back to L1 + L2 caches.
+	// Step 4: Write back to L1 + L2 caches, touch last accessed.
 	r.localCache.Store(key, dm)
+	go r.touchLastAccessedAsync(dm.ID)
 
 	if r.cache != nil {
 		if cacheErr := r.cache.SetResolveResult(ctx, string(carrier), string(tech), oui, productClass, dm.ID); cacheErr != nil {
@@ -214,10 +218,12 @@ func (r *DataModelRegistry) ResolveWithFirmware(ctx context.Context, carrier mod
 
 	// Check L1 cache.
 	if val, ok := r.localCache.Load(key); ok {
-		return val.(*DataModel), nil
+		dm := val.(*DataModel)
+		go r.touchLastAccessedAsync(dm.ID)
+		return dm, nil
 	}
 
-	// Four-level DB fallback.
+	// Two-level DB matching.
 	dm, err := r.resolveFromDBWithFirmware(ctx, carrier, tech, oui, productClass, firmwareVersion)
 	if err != nil {
 		return nil, fmt.Errorf("resolve data model with firmware: %w", err)
@@ -227,6 +233,7 @@ func (r *DataModelRegistry) ResolveWithFirmware(ctx context.Context, carrier mod
 	}
 
 	r.localCache.Store(key, dm)
+	go r.touchLastAccessedAsync(dm.ID)
 
 	if r.cache != nil {
 		if cacheErr := r.cache.SetResolveResult(ctx, string(carrier), string(tech), oui, productClass, dm.ID); cacheErr != nil {
@@ -237,23 +244,16 @@ func (r *DataModelRegistry) ResolveWithFirmware(ctx context.Context, carrier mod
 	return dm, nil
 }
 
-// resolveFromDBWithFirmware performs four-level fallback including firmware version.
+// resolveFromDBWithFirmware performs two-level precise matching for parameter templates:
+//
+//	Level 1: OUI + ProductClass + FirmwareVersion (exact)
+//	Level 2: OUI + ProductClass (firmware_version IS NULL/empty, manual > auto)
+//
+// This replaces the previous four-level fallback. No OUI-only or carrier_default fallback.
 func (r *DataModelRegistry) resolveFromDBWithFirmware(ctx context.Context, carrier model.CarrierCode,
 	tech model.Technology, oui, productClass, firmwareVersion string) (*DataModel, error) {
 
-	// Level 1 (product+firmware): most specific.
-	if oui != "" && productClass != "" && firmwareVersion != "" {
-		dm, err := r.repo.FindActiveWithFirmware(ctx, carrier, tech, oui, productClass, firmwareVersion, model.ScopeProduct)
-		if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
-			return nil, fmt.Errorf("find active product+firmware model: %w", err)
-		}
-		if dm != nil {
-			return dm, nil
-		}
-	}
-
-	// Level 2-4: delegate to existing three-level fallback.
-	return r.resolveFromDB(ctx, carrier, tech, oui, productClass)
+	return r.repo.FindActiveForMatch(ctx, carrier, tech, oui, productClass, firmwareVersion)
 }
 
 // ResolveForDevice is a convenience wrapper that resolves the data model for a device
@@ -263,6 +263,34 @@ func (r *DataModelRegistry) ResolveForDevice(ctx context.Context, device *model.
 		return nil, fmt.Errorf("resolve data model for device: device is nil")
 	}
 	return r.ResolveWithFirmware(ctx, device.Carrier, device.Technology, device.OUI, device.ProductClass, device.FirmwareVersion)
+}
+
+// touchLastAccessedAsync asynchronously updates last_accessed_at for a data model.
+// Uses a sync.Map throttle to limit updates to at most once per 60 minutes per model,
+// avoiding excessive database writes under high read traffic.
+func (r *DataModelRegistry) touchLastAccessedAsync(id uuid.UUID) {
+	key := id.String()
+	if v, ok := r.touchThrottle.Load(key); ok {
+		if time.Since(v.(time.Time)) < 60*time.Minute {
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// repo implements DataModelReader; we need DataModelWriter.TouchLastAccessed.
+	// Cast to the writer interface if the underlying repo supports it.
+	if writer, ok := r.repo.(DataModelWriter); ok {
+		if err := writer.TouchLastAccessed(ctx, id); err != nil {
+			r.logger.Warn("failed to touch last_accessed_at",
+				zap.String("model_id", id.String()),
+				zap.Error(err),
+			)
+			return
+		}
+		r.touchThrottle.Store(key, time.Now())
+	}
 }
 
 // InvalidateCache invalidates L1 and L2 caches for a specific data model.
