@@ -48,6 +48,16 @@ type connSessionEntry struct {
 	CreatedAt time.Time
 }
 
+// deviceSessionEntry tracks the active session for a device.
+// Used to detect and clean up orphaned sessions when a new Inform arrives
+// before the previous session completed (e.g., CPE didn't respond to RPC,
+// CPE rebooted mid-session, or PERIODIC timer fired during active session).
+type deviceSessionEntry struct {
+	SessionID string
+	DeviceSN  string
+	CreatedAt time.Time
+}
+
 // Handler processes TR069/CWMP HTTP requests.
 type Handler struct {
 	sessionStore            SessionStore
@@ -72,17 +82,24 @@ type Handler struct {
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
+	// deviceSessions maps deviceSN → *deviceSessionEntry for device-level session tracking.
+	// Used to detect orphaned sessions: when a new Inform arrives, any existing session
+	// for the same device is cleaned up via completeSession() before creating a new one.
+	deviceSessions sync.Map
 }
 
 // startSessionReaper launches a background goroutine that periodically cleans up
-// stale connSessions entries (e.g., from dropped TCP connections).
-// It releases admission slots and decrements metrics for reaped sessions.
+// stale sessions from both connSessions and deviceSessions maps.
+// For connSessions: releases admission slots and decrements metrics.
+// For deviceSessions: loads the orphaned session from Redis, calls completeSession()
+// (which triggers postSessionWake if queue has remaining commands), and cleans up.
 func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
 			now := time.Now()
+			// Clean up stale connection-level sessions.
 			h.connSessions.Range(func(key, value interface{}) bool {
 				entry := value.(connSessionEntry)
 				if now.Sub(entry.CreatedAt) > maxAge {
@@ -90,15 +107,68 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 					h.admission.Release()
 					h.metrics.ActiveSessions.Dec()
 					h.metrics.SessionDuration.Observe(now.Sub(entry.CreatedAt).Seconds())
-					h.logger.Warn("reaped stale session",
+					h.logger.Warn("reaped stale conn session",
 						zap.String("device_sn", entry.DeviceSN),
 						zap.String("remote_addr", key.(string)),
 						zap.Duration("age", now.Sub(entry.CreatedAt)))
 				}
 				return true
 			})
+			// Clean up stale device-level sessions (orphaned sessions).
+			// This is the safety net for sessions that were never completed
+			// because the CPE didn't respond to an RPC or rebooted mid-session.
+			h.deviceSessions.Range(func(key, value interface{}) bool {
+				entry := value.(*deviceSessionEntry)
+				if now.Sub(entry.CreatedAt) > maxAge {
+					h.deviceSessions.Delete(key)
+					h.reapOrphanedSession(entry, "reaper")
+				}
+				return true
+			})
 		}
 	}()
+}
+
+// reapOrphanedSession cleans up an orphaned device session.
+// It loads the session from Redis (if still exists), calls completeSession to release
+// resources and trigger postSessionWake, then logs the cleanup.
+func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) {
+	ctx := context.Background()
+
+	// Try to load the session from Redis to get full session data for completeSession.
+	session, err := h.sessionStore.GetByID(ctx, entry.SessionID)
+	if err != nil {
+		h.logger.Warn("reap orphaned session: failed to load from store",
+			zap.String("device_sn", entry.DeviceSN),
+			zap.String("session_id", entry.SessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+
+	if session != nil {
+		h.logger.Info("reap orphaned session: completing",
+			zap.String("device_sn", entry.DeviceSN),
+			zap.String("session_id", entry.SessionID),
+			zap.String("old_state", string(session.State)),
+			zap.Duration("age", time.Since(entry.CreatedAt)),
+			zap.String("reason", reason))
+		h.completeSession(ctx, session)
+	} else {
+		// Session already expired in Redis (TTL). Still release admission + metrics.
+		h.logger.Info("reap orphaned session: session expired in store, releasing resources",
+			zap.String("device_sn", entry.DeviceSN),
+			zap.String("session_id", entry.SessionID),
+			zap.Duration("age", time.Since(entry.CreatedAt)),
+			zap.String("reason", reason))
+		h.admission.Release()
+		h.metrics.ActiveSessions.Dec()
+		h.metrics.SessionDuration.Observe(time.Since(entry.CreatedAt).Seconds())
+		// Still trigger postSessionWake — even though session is gone,
+		// the device may have pending commands in its queue.
+		if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && entry.DeviceSN != "" {
+			go h.postSessionWake(entry.DeviceSN)
+		}
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +310,22 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		return
 	}
 
+	// Clean up orphaned session for this device (if any).
+	// When a CPE sends a new Inform while the previous session was still pending
+	// (e.g., CPE didn't respond to an RPC, rebooted, or PERIODIC timer fired),
+	// the old session is never completed. We detect and clean it up here to:
+	// 1) Release the old admission slot (prevents slot leak)
+	// 2) Trigger postSessionWake for any remaining queued commands
+	// 3) Keep ActiveSessions metric accurate
+	if old, loaded := h.deviceSessions.LoadAndDelete(deviceSN); loaded {
+		oldEntry := old.(*deviceSessionEntry)
+		log.Info("cleaning orphaned session before new Inform",
+			zap.String("device_sn", deviceSN),
+			zap.String("old_session_id", oldEntry.SessionID),
+			zap.Duration("old_session_age", time.Since(oldEntry.CreatedAt)))
+		h.reapOrphanedSession(oldEntry, "new_inform")
+	}
+
 	// Admission control — slot is held until session completes (via completeSession)
 	// or the background reaper cleans it up.
 	if !h.admission.Acquire() {
@@ -306,6 +392,13 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	if err := h.sessionStore.CreateWithID(r.Context(), sessionID, session); err != nil {
 		log.Error("create session by id", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
+
+	// Register device → session mapping for orphan detection.
+	h.deviceSessions.Store(deviceSN, &deviceSessionEntry{
+		SessionID: sessionID,
+		DeviceSN:  deviceSN,
+		CreatedAt: time.Now(),
+	})
 
 	// Inject random test tasks for this device (TEST FEATURE)
 	// Skip injection for TransferComplete/AutonomousTransferComplete sessions —
@@ -618,6 +711,11 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// No more commands — complete the session.
+	log.Info("ACS RPC loop done, completing session",
+		zap.String("device_sn", deviceSN),
+		zap.String("session_id", sessionID),
+		zap.String("session_state", string(session.State)),
+	)
 	h.completeSession(r.Context(), session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
@@ -651,6 +749,16 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 		h.sessionStore.DeleteByID(ctx, session.ID)
 	}
 
+	// 清除设备→会话映射。仅当映射的 SessionID 与当前 session 一致时才删除，
+	// 避免误删已被新 Inform 覆盖的映射。
+	if session.DeviceSN != "" && session.ID != "" {
+		if v, ok := h.deviceSessions.Load(session.DeviceSN); ok {
+			if entry := v.(*deviceSessionEntry); entry.SessionID == session.ID {
+				h.deviceSessions.Delete(session.DeviceSN)
+			}
+		}
+	}
+
 	// 异步检查队列并续唤设备
 	if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && session.DeviceSN != "" {
 		go h.postSessionWake(session.DeviceSN)
@@ -670,6 +778,14 @@ func (h *Handler) postSessionWake(deviceSN string) {
 				zap.Any("panic", r))
 		}
 	}()
+
+	h.logger.Info("post-session wake: goroutine started",
+		zap.String("device_sn", deviceSN),
+		zap.Bool("has_connReqSender", h.connReqSender != nil),
+		zap.Bool("enabled", h.postSessionWakeCfg.Enabled),
+		zap.Bool("has_taskService", h.taskService != nil),
+		zap.Bool("has_commandQueue", h.commandQueue != nil),
+		zap.Bool("has_redisClient", h.redisClient != nil))
 
 	if h.connReqSender == nil || !h.postSessionWakeCfg.Enabled {
 		return
@@ -693,14 +809,25 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		if n, err := h.taskService.GetQueueLength(ctx, deviceSN); err == nil {
 			remaining += n
 		}
+		h.logger.Debug("post-session wake: task queue check",
+			zap.String("device_sn", deviceSN),
+			zap.Int64("task_remaining", remaining))
 	}
 	if h.commandQueue != nil {
+		cmdLen := int64(0)
 		if n, err := h.commandQueue.Len(ctx, deviceSN); err == nil {
+			cmdLen = n
 			remaining += n
 		}
+		h.logger.Debug("post-session wake: cmd queue check",
+			zap.String("device_sn", deviceSN),
+			zap.Int64("cmd_remaining", cmdLen),
+			zap.Int64("total_remaining", remaining))
 	}
 
 	if remaining == 0 {
+		h.logger.Info("post-session wake: queue empty, skip",
+			zap.String("device_sn", deviceSN))
 		return // 队列已空，无需续唤
 	}
 

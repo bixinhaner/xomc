@@ -109,4 +109,4 @@ request_id_prefix: "acs"
 # 测试功能：启用随机 RPC 任务注入
 # 当 CPE 发送 Inform 时，自动为设备生成 3-10 个随机 RPC 任务
 # 仅用于测试，生产环境应设置为 false
-enable_test_task_injection: true
+enable_test_task_injection: false
