@@ -54,6 +54,8 @@ const messages: Record<string, string> = {
   'common.off':            '关',
   'common.normal':         '正常',
   'common.broken':         '损坏',
+  'common.selectAll':      '全选',
+  'common.unselectAll':    '取消全选',
 
   // -------------------------------------------------------------------------
   // Table headers

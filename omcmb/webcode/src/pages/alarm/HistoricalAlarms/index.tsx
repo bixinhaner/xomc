@@ -4,7 +4,6 @@ import {
   CheckOutlined,
   DeleteOutlined,
   ExportOutlined,
-  FilterOutlined,
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -217,24 +216,6 @@ export default function HistoricalAlarms() {
     [refetch, t]
   );
 
-  const handleFilter = useCallback(
-    (ids: string[]) => {
-      modal.confirm({
-        title: t('alarm.filterAlarm'),
-        content: t('alarm.filterAlarmConfirm'),
-        okText: t('common.confirm'),
-        icon: <FilterOutlined />,
-        onOk: async () => {
-          // TODO: 调用过滤告警 API
-          setSelectedRowKeys([]);
-          refetch();
-          message.success(t('common.success'));
-        },
-      });
-    },
-    [refetch, t]
-  );
-
   // 删除告警
   const handleDelete = useCallback(
     (ids: string[]) => {
@@ -429,12 +410,6 @@ export default function HistoricalAlarms() {
   const batchActions = useMemo(
     (): BatchAction[] => [
       {
-        key: 'batch-filter',
-        label: t('alarm.filterAlarm'),
-        icon: <FilterOutlined />,
-        onClick: (keys) => handleFilter(keys as string[]),
-      },
-      {
         key: 'batch-ack',
         label: t('alarm.acknowledge'),
         icon: <CheckOutlined />,
@@ -454,7 +429,7 @@ export default function HistoricalAlarms() {
         onClick: (keys) => handleDelete(keys as string[]),
       },
     ],
-    [handleAcknowledge, handleUnacknowledge, handleFilter, handleDelete]
+    [handleAcknowledge, handleUnacknowledge, handleDelete]
   );
 
   return (

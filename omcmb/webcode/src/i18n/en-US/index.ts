@@ -54,6 +54,8 @@ const messages: Record<string, string> = {
   'common.off':            'Off',
   'common.normal':         'Normal',
   'common.broken':         'Broken',
+  'common.selectAll':      'Select All',
+  'common.unselectAll':    'Unselect All',
 
   // -------------------------------------------------------------------------
   // Table headers

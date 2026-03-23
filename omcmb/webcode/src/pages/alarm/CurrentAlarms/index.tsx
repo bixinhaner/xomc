@@ -5,7 +5,6 @@ import {
   ClearOutlined,
   ExportOutlined,
   EyeOutlined,
-  FilterOutlined,
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -259,23 +258,6 @@ export default function CurrentAlarms() {
     [clearAlarms, clearTargetIds, refetch, t, message]
   );
 
-  const handleFilter = useCallback(
-    (ids: string[]) => {
-      modal.confirm({
-        title: t('alarm.filterAlarm'),
-        content: t('alarm.filterAlarmConfirm'),
-        okText: t('common.confirm'),
-        icon: <FilterOutlined />,
-        onOk: async () => {
-          // TODO: 调用过滤告警 API
-          setSelectedRowKeys([]);
-          refetch();
-          message.success(t('common.success'));
-        },
-      });
-    },
-    [refetch, t]
-  );
 
   const handleMarkRead = useCallback(
     (ids: string[]) => {
@@ -460,12 +442,6 @@ export default function CurrentAlarms() {
   const batchActions = useMemo(
     (): BatchAction[] => [
       {
-        key: 'batch-filter',
-        label: t('alarm.filterAlarm'),
-        icon: <FilterOutlined />,
-        onClick: (keys) => handleFilter(keys as string[]),
-      },
-      {
         key: 'batch-ack',
         label: t('alarm.acknowledge'),
         icon: <CheckOutlined />,
@@ -491,7 +467,7 @@ export default function CurrentAlarms() {
         onClick: (keys) => handleMarkRead(keys as string[]),
       },
     ],
-    [handleAcknowledge, handleUnacknowledge, handleClear, handleFilter, handleMarkRead]
+    [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead]
   );
 
   return (
