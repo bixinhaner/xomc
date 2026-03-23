@@ -30,7 +30,8 @@ dist/
 .gitlab-ci.yml
 
 # Deployment manifests (not needed in image)
-deployments/
+# Note: deployments/docker/entrypoint.sh is needed, so only exclude k8s
+deployments/k8s/
 
 # Data model seed files (loaded at runtime, not baked into image)
 datamodels/
