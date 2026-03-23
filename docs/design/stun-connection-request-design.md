@@ -1,8 +1,8 @@
 # STUN/UDP Connection Request 实现方案
 
-> **版本**: v1.1
+> **版本**: v1.2
 > **日期**: 2026-03-23
-> **状态**: Phase 2 已完成（STUN UDP Server）
+> **状态**: Phase 1-3 已完成（STUN Server + UDP CR + Task 集成）
 
 ---
 
@@ -18,9 +18,9 @@ TR-069 协议要求 CPE（基站）主动发起会话，OMC 无法直接建连�
 | 设备模型存储 ConnectionRequestURL | ✅ 已实现 | `internal/core/model/device.go` |
 | UDPConnectionRequestAddress 提取 | ✅ 已实现 | `internal/device/service.go:325` |
 | Event 6 CONNECTION REQUEST 处理 | ✅ 已实现 | `internal/acs/handler.go:805` |
-| Task 创建后触发 CR | ❌ 未实现 | `internal/task/service.go` 无 CR 逻辑 |
+| Task 创建后触发 CR | ✅ 已实现 | `internal/task/service.go` 异步 wakeDevice() |
 | STUN UDP Server | ✅ 已实现 | `internal/acs/stun/` (4 文件, 35 测试) |
-| UDP Connection Request 发送 | ❌ 未实现 | — |
+| UDP Connection Request 发送 | ✅ 已实现 | `internal/acs/connreq/udp_sender.go` + `dispatcher.go` |
 
 ### 核心问题
 
@@ -351,16 +351,18 @@ acs_connection_request_duration_seconds{method="http|udp"}
 
 ## 4. 实施阶段
 
-### Phase 1: Task → CR 集成（最快见效）
+### Phase 1: Task → CR 集成 ✅ 已完成
 
-**目标**：任务创建后自动触发 HTTP Connection Request
+**目标**：任务创建后自动触发 Connection Request
 
-**改动**：
-1. `task/service.go` — 添加 `ConnectionRequestDispatcher` 接口和异步调用
-2. `cmd/app/router/deps.go` — 注入 connreq.Client 到 TaskService
-3. 需查询设备 ConnectionRequestURL（通过 DeviceRepository）
+**已完成**：
+1. ✅ `task/service.go` — 添加 `DeviceLookup` + `ConnectionRequestSender` 消费者定义接口
+2. ✅ `task/service.go` — `CreateTask()` 和 `BatchCreateTasks()` 中异步调用 `wakeDevice()`
+3. ✅ `cmd/app/router/router.go` — 注入 `taskDeviceLookup` + `taskCRSender` 适配器
+4. ✅ `appconfig/config.go` — 新增 `ConnReqConfig` 配置结构体
+5. ✅ `cmd/app/etc/config.dev.yaml` — 添加 `conn_req` 配置节
 
-**效果**：对于有 HTTP CR URL 的设备（非 NAT），立即可用。
+**效果**：任务创建后立即尝试唤醒设备，优先 UDP CR（NAT 穿透），回退 HTTP CR。
 
 ### Phase 2: STUN Server + 地址缓存 ✅ 已完成
 
@@ -377,15 +379,15 @@ acs_connection_request_duration_seconds{method="http|udp"}
 - `device/service.go` — Inform 处理增强，UDPConnectionRequestAddress → StunStore
 - 数据库迁移（可选字段）
 
-### Phase 3: UDP Connection Request 发送
+### Phase 3: UDP Connection Request 发送 ✅ 已完成
 
 **目标**：实现 UDP CR 发送，完成全链路
 
-**改动**：
-1. `connreq/dispatcher.go` — 统一调度器
-2. `connreq/udp_sender.go` — UDP CR 消息构造 + HMAC 签名 + 发送
-3. 替换各模块中的 `connreq.Client` 为 `Dispatcher`
-4. E2E 测试
+**已完成**：
+1. ✅ `connreq/dispatcher.go` — 统一调度器（UDP 优先 → HTTP 回退 → ErrNoConnectionMethod）
+2. ✅ `connreq/udp_sender.go` — UDP CR 消息构造 + HMAC-SHA1 签名 + 3 次重试发送
+3. ✅ 支持两种设备格式：eNB（"infromrequest"纯文本）和 CPE（HTTP-like + HMAC 签名）
+4. ✅ `connreq/udp_sender_test.go` + `connreq/dispatcher_test.go` — 测试覆盖
 
 ### Phase 4: 基站重启 + 监控
 
@@ -482,28 +484,32 @@ acs 进程: 订阅 "task.created" → Dispatcher.Send(device_sn)
 
 ### 新增文件
 
-| 文件 | 说明 |
-|------|------|
-| `internal/acs/stun/server.go` | STUN UDP 服务器 |
-| `internal/acs/stun/message.go` | STUN 消息编解码 |
-| `internal/acs/stun/processor.go` | 标准/非标准消息处理 |
-| `internal/acs/stun/store.go` | 地址缓存（L1 内存 + L2 Redis） |
-| `internal/acs/stun/server_test.go` | 测试 |
-| `internal/acs/connreq/dispatcher.go` | CR 调度器（HTTP + UDP） |
-| `internal/acs/connreq/udp_sender.go` | UDP CR 消息构造与发送 |
-| `migrations/000034_add_device_stun_fields.up.sql` | DB 迁移 |
-| `migrations/000034_add_device_stun_fields.down.sql` | DB 回滚 |
+| 文件 | 说明 | 状态 |
+|------|------|------|
+| `internal/acs/stun/server.go` | STUN UDP 服务器 | ✅ |
+| `internal/acs/stun/message.go` | STUN 消息编解码 | ✅ |
+| `internal/acs/stun/processor.go` | 标准/非标准消息处理 | ✅ |
+| `internal/acs/stun/store.go` | 地址缓存（L1 内存 + L2 Redis） | ✅ |
+| `internal/acs/stun/*_test.go` | STUN 测试（35 个） | ✅ |
+| `internal/acs/connreq/dispatcher.go` | CR 调度器（UDP 优先 + HTTP 回退） | ✅ |
+| `internal/acs/connreq/udp_sender.go` | UDP CR 消息构造与发送（eNB + CPE） | ✅ |
+| `internal/acs/connreq/dispatcher_test.go` | Dispatcher 测试 | ✅ |
+| `internal/acs/connreq/udp_sender_test.go` | UDP Sender 测试 | ✅ |
+| `migrations/000034_add_device_stun_fields.up.sql` | DB 迁移 | ⬜ 待需要时创建 |
+| `migrations/000034_add_device_stun_fields.down.sql` | DB 回滚 | ⬜ 待需要时创建 |
 
 ### 修改文件
 
-| 文件 | 修改内容 |
-|------|---------|
-| `internal/task/service.go` | 添加 CR 接口 + 异步触发 |
-| `internal/device/service.go` | Inform 处理增强，同步 UDPAddr → StunStore |
-| `internal/core/event/subjects.go` | 新增 `SubjectTaskCreated` 事件 |
-| `cmd/acs/main.go` | 启动 STUN Server |
-| `cmd/app/router/deps.go` | 注入新依赖 |
-| 各运营商 `params.go` | 确认 UDPConnectionRequestAddress 映射 |
+| 文件 | 修改内容 | 状态 |
+|------|---------|------|
+| `internal/task/service.go` | 添加 DeviceLookup/ConnectionRequestSender 接口 + wakeDevice() 异步触发 | ✅ |
+| `internal/core/appconfig/config.go` | 新增 STUNConfig（ACS）和 ConnReqConfig（App） | ✅ |
+| `cmd/acs/main.go` | 启动 STUN Server | ✅ |
+| `cmd/acs/etc/config.dev.yaml` | 添加 stun 配置节 | ✅ |
+| `cmd/app/router/router.go` | 注入 STUN Store + UDPSender + Dispatcher 到 TaskService | ✅ |
+| `cmd/app/etc/config.dev.yaml` | 添加 conn_req 配置节 | ✅ |
+| `internal/device/service.go` | Inform 处理增强，同步 UDPAddr → StunStore | ⬜ 后续优化 |
+| 各运营商 `params.go` | 确认 UDPConnectionRequestAddress 映射 | ⬜ 后续优化 |
 
 ---
 
