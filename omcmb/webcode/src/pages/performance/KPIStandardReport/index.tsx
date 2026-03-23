@@ -18,6 +18,8 @@ interface KPIIndicatorRow extends Record<string, unknown> {
   isCustomize: 0 | 1;               // 是否自定义指标
   isEnable: 0 | 1;                  // 是否启用测量
   indicatorType: 'counter' | 'kpi'; // 指标类型
+  networkType: 'eNB' | 'gNB' | 'GSM'; // 网络类型
+  category: string;                 // 所属分类（call, context, data, drb, erab, ho等）
   updater: string;                  // 更新人
   updateTime: string;               // 更新时间
 }
@@ -40,16 +42,49 @@ const MOCK_FUNCTION_SETS: FunctionSetItem[] = [
 
 // Mock KPI 指标数据
 const MOCK_KPI_DATA: KPIIndicatorRow[] = [
-  { kpiId: 'RRC_CONN_REQ', kpiName: 'RRC连接请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
-  { kpiId: 'RRC_CONN_SUCC', kpiName: 'RRC连接成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
-  { kpiId: 'RRC_SR', kpiName: 'RRC连接成功率', productType: 'BBU', custName: '接入成功率', indicatorLevel: 'plmn', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', updater: 'user1', updateTime: '2024-03-21 14:20:00' },
-  { kpiId: 'ERAB_SETUP_REQ', kpiName: 'ERAB建立请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 0, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
-  { kpiId: 'ERAB_SETUP_SUCC', kpiName: 'ERAB建立成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
-  { kpiId: 'HO_EXEC', kpiName: '切换执行次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
-  { kpiId: 'HO_SUCC', kpiName: '切换成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
-  { kpiId: 'DL_THROUGHPUT', kpiName: '下行吞吐量', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
-  { kpiId: 'UL_THROUGHPUT', kpiName: '上行吞吐量', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
-  { kpiId: 'CUSTOM_KPI_001', kpiName: '自定义接入指标', productType: 'BBU', custName: '我的接入指标', indicatorLevel: 'device', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', updater: 'user1', updateTime: '2024-03-22 08:30:00' },
+  // ========== eNB 指标 ==========
+  // Call 类
+  { kpiId: 'RRC_CONN_REQ', kpiName: 'RRC连接请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'call', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
+  { kpiId: 'RRC_CONN_SUCC', kpiName: 'RRC连接成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'call', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
+  { kpiId: 'RRC_SR', kpiName: 'RRC连接成功率', productType: 'BBU', custName: '接入成功率', indicatorLevel: 'plmn', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'call', updater: 'user1', updateTime: '2024-03-21 14:20:00' },
+  // ERAB 类
+  { kpiId: 'ERAB_SETUP_REQ', kpiName: 'ERAB建立请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 0, indicatorType: 'counter', networkType: 'eNB', category: 'erab', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
+  { kpiId: 'ERAB_SETUP_SUCC', kpiName: 'ERAB建立成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'erab', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
+  { kpiId: 'ERAB_SR', kpiName: 'ERAB建立成功率', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: '%', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'erab', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
+  // HO 类
+  { kpiId: 'HO_EXEC', kpiName: '切换执行次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'ho', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
+  { kpiId: 'HO_SUCC', kpiName: '切换成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'ho', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
+  { kpiId: 'HO_SR', kpiName: '切换成功率', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: '%', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'ho', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
+  // Data 类
+  { kpiId: 'DL_DATA_VOL', kpiName: '下行数据量', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: 'MB', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
+  { kpiId: 'UL_DATA_VOL', kpiName: '上行数据量', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: 'MB', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
+  // DRB 类
+  { kpiId: 'DRB_SETUP_REQ', kpiName: 'DRB建立请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'drb', updater: 'admin', updateTime: '2024-03-16 14:30:00' },
+  { kpiId: 'DRB_SETUP_SUCC', kpiName: 'DRB建立成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'drb', updater: 'admin', updateTime: '2024-03-16 14:30:00' },
+
+  // ========== gNB 指标 ==========
+  // Call 类
+  { kpiId: 'NR_RRC_CONN_REQ', kpiName: 'NR RRC连接请求次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'call', updater: 'admin', updateTime: '2024-03-15 09:00:00' },
+  { kpiId: 'NR_RRC_CONN_SUCC', kpiName: 'NR RRC连接成功次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'call', updater: 'admin', updateTime: '2024-03-15 09:00:00' },
+  { kpiId: 'NR_RRC_SR', kpiName: 'NR RRC连接成功率', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: '%', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'call', updater: 'admin', updateTime: '2024-03-15 09:00:00' },
+  // Data 类
+  { kpiId: 'DL_THROUGHPUT', kpiName: '下行吞吐量', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
+  { kpiId: 'UL_THROUGHPUT', kpiName: '上行吞吐量', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
+  { kpiId: 'NR_DL_THROUGHPUT', kpiName: 'NR下行平均吞吐量', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: 'Gbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'data', updater: 'admin', updateTime: '2024-03-14 16:00:00' },
+  // HO 类
+  { kpiId: 'NR_HO_EXEC', kpiName: 'NR切换执行次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'ho', updater: 'admin', updateTime: '2024-03-13 10:30:00' },
+  { kpiId: 'NR_HO_SUCC', kpiName: 'NR切换成功次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'ho', updater: 'admin', updateTime: '2024-03-13 10:30:00' },
+  // DRB 类
+  { kpiId: 'NR_DRB_SETUP_REQ', kpiName: 'NR DRB建立请求次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'drb', updater: 'admin', updateTime: '2024-03-12 08:00:00' },
+
+  // ========== GSM 指标 ==========
+  { kpiId: 'GSM_CALL_REQ', kpiName: 'GSM呼叫请求次数', productType: 'RRU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'GSM', category: 'call', updater: 'admin', updateTime: '2024-03-11 15:00:00' },
+  { kpiId: 'GSM_CALL_SUCC', kpiName: 'GSM呼叫成功次数', productType: 'RRU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'GSM', category: 'call', updater: 'admin', updateTime: '2024-03-11 15:00:00' },
+  { kpiId: 'GSM_HO_EXEC', kpiName: 'GSM切换执行次数', productType: 'RRU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'GSM', category: 'ho', updater: 'admin', updateTime: '2024-03-10 11:00:00' },
+
+  // ========== 自定义指标 ==========
+  { kpiId: 'CUSTOM_KPI_001', kpiName: '自定义接入指标', productType: 'BBU', custName: '我的接入指标', indicatorLevel: 'device', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'custom', updater: 'user1', updateTime: '2024-03-22 08:30:00' },
+  { kpiId: 'CUSTOM_KPI_002', kpiName: '自定义吞吐量指标', productType: 'AAU', custName: '我的吞吐量指标', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'custom', updater: 'user1', updateTime: '2024-03-22 09:00:00' },
 ];
 
 // 二级节点配置
@@ -351,47 +386,34 @@ export default function KPIStandardReport() {
 
     // 按选中的树节点过滤
     if (selectedCategory && selectedCategory !== 'all') {
-      // 根据节点类型过滤
-      // 实际应用中应该根据API返回对应节点的指标
-      // 这里模拟：根据节点key的前缀匹配
+      // 解析节点类型
       const isEnb = selectedCategory.includes('enb');
       const isGnb = selectedCategory.includes('gnb');
       const isGsm = selectedCategory.includes('gsm');
 
+      // 按网络类型过滤
       if (isEnb) {
-        // 模拟 eNB 指标过滤
-        data = data.filter((row) =>
-          row.kpiId.includes('RRC') ||
-          row.kpiId.includes('ERAB') ||
-          row.kpiId.includes('HO') ||
-          row.isCustomize === 1
-        );
+        data = data.filter((row) => row.networkType === 'eNB');
       } else if (isGnb) {
-        // 模拟 gNB 指标过滤
-        data = data.filter((row) =>
-          row.kpiId.includes('THROUGHPUT') ||
-          row.isCustomize === 1
-        );
+        data = data.filter((row) => row.networkType === 'gNB');
       } else if (isGsm) {
-        // 模拟 GSM 指标过滤
-        data = data.filter((row) => row.isCustomize === 1);
+        data = data.filter((row) => row.networkType === 'GSM');
       }
 
-      // 二级节点进一步过滤
+      // 二级节点进一步过滤（按分类）
       if (selectedCategory.includes('-')) {
         const secondLevelKey = selectedCategory.split('-').pop();
-        // 根据二级节点进一步过滤，这里简化处理
-        if (secondLevelKey === 'call') {
-          data = data.filter((row) =>
-            row.kpiId.includes('RRC') ||
-            row.kpiId.includes('ERAB')
-          );
-        } else if (secondLevelKey === 'ho') {
-          data = data.filter((row) => row.kpiId.includes('HO'));
-        } else if (secondLevelKey === 'custom') {
-          data = data.filter((row) => row.isCustomize === 1);
+        if (secondLevelKey) {
+          // custom 节点显示自定义指标
+          if (secondLevelKey === 'custom') {
+            data = data.filter((row) => row.isCustomize === 1);
+          } else {
+            // 其他节点按 category 字段过滤
+            data = data.filter((row) => row.category === secondLevelKey);
+          }
         }
       }
+    }
     }
 
     // 按搜索词过滤
