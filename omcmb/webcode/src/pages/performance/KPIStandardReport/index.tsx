@@ -285,6 +285,9 @@ export default function KPIStandardReport() {
     definition: string;
   }>();
   const [currentIndicatorType, setCurrentIndicatorType] = useState<'kpi' | 'counter'>('kpi');
+  const [calcFormula, setCalcFormula] = useState<string>('');
+  const [formulaSearchValue, setFormulaSearchValue] = useState<string>('');
+  const [formulaSelectedCategory, setFormulaSelectedCategory] = useState<string>('');
 
   // Custom tree nodes state
   const [customNodes, setCustomNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
@@ -564,16 +567,76 @@ export default function KPIStandardReport() {
   const handleAddIndicator = useCallback(async () => {
     try {
       const values = await addIndicatorForm.validateFields();
-      console.log('Add indicator values:', values);
+      console.log('Add indicator values:', { ...values, arithmetic: calcFormula });
       // TODO: Call API to add indicator
       void message.success(t('common.success'));
       setAddDrawerOpen(false);
       addIndicatorForm.resetFields();
       setCurrentIndicatorType('kpi');
+      setCalcFormula('');
     } catch {
       // validation error
     }
-  }, [addIndicatorForm, message, t]);
+  }, [addIndicatorForm, message, t, calcFormula]);
+
+  // Formula handling functions
+  const handleAddOperator = useCallback((op: string) => {
+    setCalcFormula((prev) => prev + ' ' + op + ' ');
+  }, []);
+
+  const handleAddIndicatorToFormula = useCallback((indicatorId: string, indicatorName: string) => {
+    setCalcFormula((prev) => prev + `[${indicatorId}]`);
+  }, []);
+
+  const handleClearFormula = useCallback(() => {
+    setCalcFormula('');
+  }, []);
+
+  // 计算公式区域的功能集树数据
+  const formulaTreeData = useMemo((): DataNode[] => {
+    const nodes = [
+      { key: 'formula-enb-set', labelKey: 'kpi.tree.enbSet' },
+      { key: 'formula-gnb-set', labelKey: 'kpi.tree.gnbSet' },
+      { key: 'formula-gsm-set', labelKey: 'kpi.tree.gsmSet' },
+    ];
+
+    return nodes.map((node) => {
+      const children = SECOND_LEVEL_NODES.map((child) => ({
+        title: t(child.labelKey),
+        key: `${node.key}-${child.key}`,
+        isLeaf: true,
+      }));
+
+      return {
+        title: t(node.labelKey),
+        key: node.key,
+        children,
+      };
+    });
+  }, [t]);
+
+  // 根据功能集筛选的指标数据
+  const formulaFilteredIndicators = useMemo(() => {
+    if (!formulaSelectedCategory) {
+      return filteredData;
+    }
+    // 简单模拟：根据选中的功能集过滤指标
+    // 实际应用中应根据API返回对应功能集的指标
+    return filteredData;
+  }, [filteredData, formulaSelectedCategory]);
+
+  // 根据搜索词过滤指标
+  const searchedIndicators = useMemo(() => {
+    if (!formulaSearchValue) {
+      return formulaFilteredIndicators;
+    }
+    const lowerSearch = formulaSearchValue.toLowerCase();
+    return formulaFilteredIndicators.filter(
+      (row) =>
+        row.kpiId.toLowerCase().includes(lowerSearch) ||
+        row.kpiName.toLowerCase().includes(lowerSearch)
+    );
+  }, [formulaFilteredIndicators, formulaSearchValue]);
 
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -594,9 +657,8 @@ export default function KPIStandardReport() {
           size="small"
           icon={<PlusOutlined />}
           onClick={() => {
-            setAddDrawerOpen(true);
-            addIndicatorForm.resetFields();
-            setCurrentIndicatorType('kpi');
+            setAddModalOpen(true);
+            addForm.resetFields();
           }}
         >
           {t('common.add')}
@@ -816,7 +878,7 @@ export default function KPIStandardReport() {
 
       {/* Add Indicator Drawer */}
       <Drawer
-        title={t('kpi.addIndicator')}
+        title={`${t('kpi.addIndicator')} - ${selectedFunctionSetName || t('kpi.allIndicators')}`}
         open={addDrawerOpen}
         onClose={() => {
           setAddDrawerOpen(false);
@@ -898,15 +960,6 @@ export default function KPIStandardReport() {
               </Form.Item>
             )}
 
-            {/* 所属功能集 - 只读显示 */}
-            <Form.Item
-              name="catagoryId"
-              label={t('kpi.functionSet')}
-              style={{ marginBottom: 12 }}
-            >
-              <Input disabled placeholder={selectedFunctionSetName || t('kpi.functionSetPlaceholder')} />
-            </Form.Item>
-
             {/* 单位 */}
             <Form.Item
               name="unit"
@@ -972,47 +1025,214 @@ export default function KPIStandardReport() {
               borderRadius: 8,
               marginBottom: 16
             }}>
-              <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
-                {t('kpi.calcFormula')}
+              {/* 标题和说明 */}
+              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <span style={{ fontWeight: 500, color: 'var(--color-text)', marginRight: 8 }}>
+                    {t('kpi.calcFormula')}
+                  </span>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('kpi.calcFormulaDesc')}
+                  </Typography.Text>
+                </div>
+                <Button size="small" danger onClick={handleClearFormula}>
+                  {t('common.clear')}
+                </Button>
               </div>
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                {t('kpi.calcFormulaDesc')}
-              </Typography.Text>
 
               {/* 公式显示区域 */}
               <div
                 style={{
-                  minHeight: 80,
-                  padding: '12px',
-                  background: 'var(--color-bg-container)',
-                  borderRadius: 4,
+                  minHeight: 48,
+                  maxHeight: 100,
+                  padding: '10px 12px',
+                  background: '#fafafa',
+                  borderRadius: 6,
                   border: '1px solid var(--color-border)',
                   marginBottom: 12,
+                  overflow: 'auto',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-all',
+                  fontFamily: 'Consolas, Monaco, monospace',
+                  fontSize: 14,
+                  lineHeight: 1.5,
                 }}
               >
-                <Typography.Text type="secondary">
-                  {t('kpi.calcFormulaPlaceholder')}
-                </Typography.Text>
+                {calcFormula || (
+                  <Typography.Text type="secondary" style={{ fontStyle: 'italic' }}>
+                    {t('kpi.calcFormulaPlaceholder')}
+                  </Typography.Text>
+                )}
               </div>
 
-              {/* 运算符按钮 */}
-              <Space wrap size={8} style={{ marginBottom: 12 }}>
-                {['+', '-', '*', '/', '(', ')', '0-9', 'Duration'].map((op) => (
-                  <Button key={op} size="small" style={{ minWidth: 40 }}>
-                    {op}
+              {/* 运算符和数字按钮 - 分组显示 */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                  {t('kpi.operators')}
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {/* 数学运算符 */}
+                  <Space.Compact size="small">
+                    {['+', '-', '*', '/'].map((op) => (
+                      <Button key={op} style={{ width: 36 }} onClick={() => handleAddOperator(op)}>
+                        {op}
+                      </Button>
+                    ))}
+                  </Space.Compact>
+                  {/* 括号 */}
+                  <Space.Compact size="small">
+                    <Button style={{ width: 36 }} onClick={() => handleAddOperator('(')}>(</Button>
+                    <Button style={{ width: 36 }} onClick={() => handleAddOperator(')')}>)</Button>
+                  </Space.Compact>
+                  {/* 数字 */}
+                  <Space.Compact size="small">
+                    {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'].map((num) => (
+                      <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleAddOperator(num)}>
+                        {num}
+                      </Button>
+                    ))}
+                  </Space.Compact>
+                  {/* 特殊运算符 */}
+                  <Button size="small" onClick={() => handleAddOperator('Duration')}>
+                    Duration
                   </Button>
-                ))}
-                <Button size="small" danger>
-                  {t('common.clear')}
-                </Button>
-              </Space>
+                </div>
+              </div>
 
-              {/* 指标选择提示 */}
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('kpi.selectIndicatorTip')}
-              </Typography.Text>
+              {/* 可选指标区域 */}
+              <div>
+                <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                  {t('kpi.availableIndicators')}
+                </div>
+                {/* 搜索框 */}
+                <Input
+                  size="small"
+                  placeholder={t('kpi.searchPlaceholder')}
+                  prefix={<SearchOutlined />}
+                  value={formulaSearchValue}
+                  onChange={(e) => setFormulaSearchValue(e.target.value)}
+                  allowClear
+                  style={{ width: '100%', marginBottom: 8 }}
+                />
+                {/* 左右分栏 */}
+                <div style={{ display: 'flex', gap: 8, height: 220 }}>
+                  {/* 左侧：功能集树 */}
+                  <div
+                    style={{
+                      width: 130,
+                      flexShrink: 0,
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 6,
+                      background: 'var(--color-bg-container)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <div style={{
+                      padding: '6px 10px',
+                      borderBottom: '1px solid var(--color-border)',
+                      fontWeight: 500,
+                      fontSize: 12,
+                      background: 'var(--color-fill-quaternary)',
+                      flexShrink: 0,
+                    }}>
+                      {t('perf.functionSet')}
+                    </div>
+                    <div style={{ flex: 1, overflow: 'auto' }}>
+                      <Tree
+                        treeData={formulaTreeData}
+                        selectedKeys={formulaSelectedCategory ? [formulaSelectedCategory] : []}
+                        onSelect={(keys) => {
+                          setFormulaSelectedCategory((keys[0] as string) || '');
+                        }}
+                        defaultExpandAll
+                        style={{ fontSize: 12, padding: '4px 0' }}
+                      />
+                    </div>
+                  </div>
+                  {/* 右侧：指标列表 */}
+                  <div
+                    style={{
+                      flex: 1,
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 6,
+                      background: 'var(--color-bg-container)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <div style={{
+                      padding: '6px 10px',
+                      borderBottom: '1px solid var(--color-border)',
+                      fontWeight: 500,
+                      fontSize: 12,
+                      background: 'var(--color-fill-quaternary)',
+                      flexShrink: 0,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}>
+                      <span>{t('kpi.performanceIndicator')}</span>
+                      <span style={{ fontWeight: 400, color: 'var(--color-text-tertiary)' }}>
+                        {searchedIndicators.length}
+                      </span>
+                    </div>
+                    <div style={{ flex: 1, overflow: 'auto' }}>
+                      {searchedIndicators.length > 0 ? (
+                        searchedIndicators.map((indicator) => (
+                          <div
+                            key={indicator.kpiId}
+                            style={{
+                              padding: '5px 10px',
+                              borderBottom: '1px solid var(--color-border-secondary)',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s',
+                            }}
+                            onClick={() => handleAddIndicatorToFormula(indicator.kpiId, indicator.kpiName)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'var(--color-primary-bg)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <code style={{
+                                fontSize: 11,
+                                color: 'var(--color-primary)',
+                                background: 'var(--color-primary-bg)',
+                                padding: '1px 4px',
+                                borderRadius: 3,
+                              }}>
+                                {indicator.kpiId}
+                              </code>
+                              <span style={{
+                                fontSize: 12,
+                                color: 'var(--color-text)',
+                                flex: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {indicator.kpiName}
+                              </span>
+                              <Tag style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>
+                                {indicator.unit || '-'}
+                              </Tag>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
+                          {t('common.noData')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
