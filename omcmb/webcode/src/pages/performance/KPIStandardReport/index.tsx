@@ -297,12 +297,30 @@ export default function KPIStandardReport() {
   const [addNodeForm] = Form.useForm<{ name: string }>();
   const [currentParentKey, setCurrentParentKey] = useState<string>('');
 
+  // 获取树节点名称的辅助函数
+  const getTreeNodeName = useCallback((nodeKey: string): string => {
+    // 一级节点
+    if (nodeKey === 'all') return t('kpi.tree.all');
+    if (nodeKey === 'enb-set') return t('kpi.tree.enbSet');
+    if (nodeKey === 'gnb-set') return t('kpi.tree.gnbSet');
+    if (nodeKey === 'gsm-set') return t('kpi.tree.gsmSet');
+
+    // 二级节点
+    const parts = nodeKey.split('-');
+    if (parts.length >= 2) {
+      const secondLevelKey = parts[parts.length - 1];
+      const node = SECOND_LEVEL_NODES.find(n => n.key === secondLevelKey);
+      if (node) return t(node.labelKey);
+    }
+
+    return nodeKey;
+  }, [t]);
+
   // 当前选中的功能集名称
   const selectedFunctionSetName = useMemo(() => {
     if (!selectedCategory) return t('kpi.allIndicators');
-    // 从树节点 key 中提取名称
-    return selectedCategory;
-  }, [selectedCategory, t]);
+    return getTreeNodeName(selectedCategory);
+  }, [selectedCategory, getTreeNodeName, t]);
 
   // Handle add node to tree - 打开新建指标抽屉
   const handleAddNode = useCallback((parentKey: string) => {
@@ -331,6 +349,51 @@ export default function KPIStandardReport() {
   const filteredData = useMemo(() => {
     let data = [...MOCK_KPI_DATA];
 
+    // 按选中的树节点过滤
+    if (selectedCategory && selectedCategory !== 'all') {
+      // 根据节点类型过滤
+      // 实际应用中应该根据API返回对应节点的指标
+      // 这里模拟：根据节点key的前缀匹配
+      const isEnb = selectedCategory.includes('enb');
+      const isGnb = selectedCategory.includes('gnb');
+      const isGsm = selectedCategory.includes('gsm');
+
+      if (isEnb) {
+        // 模拟 eNB 指标过滤
+        data = data.filter((row) =>
+          row.kpiId.includes('RRC') ||
+          row.kpiId.includes('ERAB') ||
+          row.kpiId.includes('HO') ||
+          row.isCustomize === 1
+        );
+      } else if (isGnb) {
+        // 模拟 gNB 指标过滤
+        data = data.filter((row) =>
+          row.kpiId.includes('THROUGHPUT') ||
+          row.isCustomize === 1
+        );
+      } else if (isGsm) {
+        // 模拟 GSM 指标过滤
+        data = data.filter((row) => row.isCustomize === 1);
+      }
+
+      // 二级节点进一步过滤
+      if (selectedCategory.includes('-')) {
+        const secondLevelKey = selectedCategory.split('-').pop();
+        // 根据二级节点进一步过滤，这里简化处理
+        if (secondLevelKey === 'call') {
+          data = data.filter((row) =>
+            row.kpiId.includes('RRC') ||
+            row.kpiId.includes('ERAB')
+          );
+        } else if (secondLevelKey === 'ho') {
+          data = data.filter((row) => row.kpiId.includes('HO'));
+        } else if (secondLevelKey === 'custom') {
+          data = data.filter((row) => row.isCustomize === 1);
+        }
+      }
+    }
+
     // 按搜索词过滤
     if (tableSearchValue) {
       const lowerSearch = tableSearchValue.toLowerCase();
@@ -352,7 +415,7 @@ export default function KPIStandardReport() {
     }
 
     return data;
-  }, [tableSearchValue, productType, indicatorLevel]);
+  }, [selectedCategory, tableSearchValue, productType, indicatorLevel]);
 
   // 处理选中行变化
   const handleSelectChange = useCallback((newSelectedRowKeys: React.Key[], newSelectedRows: KPIIndicatorRow[]) => {
