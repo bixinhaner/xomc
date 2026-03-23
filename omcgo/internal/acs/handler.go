@@ -273,6 +273,13 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// those sessions have a specific purpose and should not be polluted with test tasks.
 	isTC := tr069.HasEvent(inform.Event, tr069.EventTransferComplete)
 	isATC := tr069.IsAutonomousTransferComplete(inform.Event)
+	log.Info("ACS task injection check",
+		zap.String("device_sn", deviceSN),
+		zap.Bool("test_task_injection_enabled", h.enableTestTaskInjection),
+		zap.Bool("task_service_available", h.taskService != nil),
+		zap.Bool("is_tc", isTC),
+		zap.Bool("is_atc", isATC),
+	)
 	if !isTC && !isATC {
 		h.injectRandomTestTasks(r, deviceSN, log)
 	} else {
@@ -320,6 +327,14 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	span.SetAttributes(
 		attribute.String("acs.device_sn", deviceSN),
 		attribute.String("acs.session_state", string(session.State)),
+	)
+
+	log.Info("ACS HandleEmpty started",
+		zap.String("device_sn", deviceSN),
+		zap.String("session_id", sessionID),
+		zap.String("session_state", string(session.State)),
+		zap.Bool("task_service_available", h.taskService != nil),
+		zap.Bool("command_queue_available", h.commandQueue != nil),
 	)
 
 	// Transition from InformReceived → Processing
@@ -374,6 +389,10 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				h.sendSOAPResponse(w, respData, log)
 				return
 			}
+		} else {
+			log.Info("ACS TaskService.PopTask returned nil",
+				zap.String("device_sn", deviceSN),
+				zap.String("reason", "no pending tasks in queue"))
 		}
 	}
 
@@ -407,6 +426,11 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	}
 
 	// No more commands — complete the session.
+	log.Info("ACS HandleEmpty no tasks found, completing session",
+		zap.String("device_sn", deviceSN),
+		zap.String("session_id", sessionID),
+		zap.String("session_state", string(session.State)),
+	)
 	h.completeSession(r.Context(), session)
 
 	// Send truly empty response to signal end of session (no body per TR069 spec).
