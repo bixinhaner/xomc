@@ -472,10 +472,15 @@ func buildTree(params []model.DeviceParameter) []*ParameterTreeNode {
 }
 
 // stripLeafNodes 递归移除树中的所有叶子节点，只保留对象/文件夹节点。
+// 同时过滤掉数据模型模板占位符（如 {i}），这些是多实例对象的模板路径，不应展示。
 func stripLeafNodes(nodes []*ParameterTreeNode) []*ParameterTreeNode {
 	var result []*ParameterTreeNode
 	for _, node := range nodes {
 		if node.IsLeaf {
+			continue
+		}
+		// 跳过数据模型模板占位符节点（如 {i}、{i+1} 等）
+		if strings.Contains(node.Name, "{") {
 			continue
 		}
 		// 递归处理子节点
