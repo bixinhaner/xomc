@@ -109,7 +109,7 @@ log:
   format: "json"
   output_paths:
     - "stdout"
-    - "../run/logs/app/app.log"
+    - "/run/logs/app/app.log"
   rotation:
     enabled: true
     max_size_mb: 5

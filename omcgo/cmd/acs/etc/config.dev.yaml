@@ -96,7 +96,7 @@ log:
   format: "json"
   output_paths:
     - "stdout"
-    - "../run/logs/acs/acs.log"
+    - "/run/logs/acs/acs.log"
   rotation:
     enabled: true # 是否启用轮转
     max_size_mb: 5 # 单文件最大 MB
