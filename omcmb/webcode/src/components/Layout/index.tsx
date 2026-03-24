@@ -24,12 +24,8 @@ export default function AppShell() {
   const { isTouchPrimary } = useIsTouchDevice();
   const location = useLocation();
 
-  // 判断是否隐藏任务面板（设备详情页面隐藏）
-  const hideTaskPanel = useMemo(() => {
-    return (
-      location.pathname.startsWith('/device/detail/')
-    );
-  }, [location.pathname]);
+  // 隐藏任务面板
+  const hideTaskPanel = true;
 
   // Auto-collapse sidebar on tablet
   useEffect(() => {

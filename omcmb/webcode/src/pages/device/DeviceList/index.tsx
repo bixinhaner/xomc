@@ -1,16 +1,19 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { App, Button, Dropdown, Input, Popconfirm, Popover, Space, Tag, Tooltip, Typography } from 'antd';
+import { App, Badge, Button, Dropdown, Input, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
+  DownOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
   ExportOutlined,
   FileTextOutlined,
   ReloadOutlined,
   SyncOutlined,
+  UpOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -22,8 +25,6 @@ import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
-import { useTaskStore } from '@/store/taskStore';
-import type { SingleTask } from '@/types/task';
 import type { Device } from '@/types/device';
 
 const { Link } = Typography;
@@ -46,11 +47,19 @@ export default function DeviceList() {
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
-  // Task store
-  const addTask = useTaskStore((s) => s.addTask);
-  const updateTask = useTaskStore((s) => s.updateTask);
-  const setPanelExpanded = useTaskStore((s) => s.setPanelExpanded);
-  const setActiveTab = useTaskStore((s) => s.setActiveTab);
+  // 本地任务面板状态
+  type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
+  interface LocalTask {
+    id: string;
+    sn: string;
+    deviceName: string;
+    type: string;
+    status: TaskStatus;
+    progress: number;
+    message?: string;
+  }
+  const [localTasks, setLocalTasks] = useState<LocalTask[]>([]);
+  const [taskPanelExpanded, setTaskPanelExpanded] = useState(false);
 
   // Remark 列头自定义标签
   const [remarkLabel, setRemarkLabel] = useState(() => {
@@ -253,7 +262,7 @@ export default function DeviceList() {
           // 获取选中设备的详细信息
           const selectedDevices = devices.filter((d) => ids.includes(d.id));
 
-          // 创建任务并添加到全局任务面板
+          // 创建任务并添加到本地任务面板
           const taskTypeMap: Record<string, string> = {
             'batch-sync': t('common.batchSync'),
             'batch-reboot': t('common.batchReboot'),
@@ -262,34 +271,35 @@ export default function DeviceList() {
             'batch-reset-config': t('device.action.resetConfig'),
           };
 
-          selectedDevices.forEach((device, index) => {
-            const taskId = `${actionKey}-${device.sn}-${Date.now()}-${index}`;
-            const newTask: SingleTask = {
-              id: taskId,
-              sn: device.sn,
-              deviceName: device.name || device.hostName || device.sn,
-              type: taskTypeMap[actionKey ?? ''] || actionLabel,
-              status: 'pending',
-              progress: 0,
-            };
+          const newTasks: LocalTask[] = selectedDevices.map((device, index) => ({
+            id: `${actionKey}-${device.sn}-${Date.now()}-${index}`,
+            sn: device.sn,
+            deviceName: device.name || device.hostName || device.sn,
+            type: taskTypeMap[actionKey ?? ''] || actionLabel,
+            status: 'pending' as TaskStatus,
+            progress: 0,
+          }));
 
-            addTask(newTask);
-            setPanelExpanded(true);
-            setActiveTab('single');
+          setLocalTasks((prev) => [...prev, ...newTasks]);
+          setTaskPanelExpanded(true);
 
-            // 模拟任务进度
+          // 模拟任务进度
+          newTasks.forEach((task, index) => {
             setTimeout(() => {
-              updateTask(taskId, { status: 'running', progress: 10 });
+              setLocalTasks((prev) => prev.map((item) =>
+                item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
+              ));
 
               const progressInterval = setInterval(() => {
-                const randomProgress = Math.random() * 15 + 10;
-                updateTask(taskId, (prev) => {
-                  if (prev.progress >= 100) {
+                setLocalTasks((prev) => prev.map((item) => {
+                  if (item.id !== task.id) return item;
+                  if (item.progress >= 100) {
                     clearInterval(progressInterval);
-                    return prev;
+                    return item;
                   }
-                  return { ...prev, progress: Math.min(prev.progress + randomProgress, 90) };
-                });
+                  const randomProgress = Math.random() * 15 + 10;
+                  return { ...item, progress: Math.min(item.progress + randomProgress, 90) };
+                }));
               }, 200);
 
               const completeTime = actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect'
@@ -299,11 +309,14 @@ export default function DeviceList() {
               setTimeout(() => {
                 clearInterval(progressInterval);
                 const success = Math.random() > 0.1;
-                updateTask(taskId, {
-                  status: success ? 'success' : 'failed',
-                  progress: 100,
-                  message: success ? t('task.status.completed') : '操作失败',
-                });
+                setLocalTasks((prev) => prev.map((item) =>
+                  item.id === task.id ? {
+                    ...item,
+                    status: success ? 'success' : 'failed',
+                    progress: 100,
+                    message: success ? t('task.status.completed') : '操作失败',
+                  } : item
+                ));
               }, completeTime);
             }, index * 200);
           });
@@ -322,7 +335,7 @@ export default function DeviceList() {
         },
       });
     },
-    [modal, message, t, batchReboot, devices, addTask, updateTask, setPanelExpanded, setActiveTab]
+    [modal, message, t, batchReboot, devices]
   );
 
   // 导出 — 直接选择格式后触发
@@ -852,56 +865,217 @@ export default function DeviceList() {
     },
   ], [handleBatchAction, t]);
 
+  // 任务面板表格列定义
+  const taskColumns: ColumnsType<LocalTask> = useMemo(() => [
+    {
+      title: 'SN',
+      dataIndex: 'sn',
+      key: 'sn',
+      width: 140,
+      ellipsis: true,
+      render: (sn: string) => (
+        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{sn}</span>
+      ),
+    },
+    {
+      title: t('alarm.deviceName'),
+      dataIndex: 'deviceName',
+      key: 'deviceName',
+      ellipsis: true,
+      width: 120,
+    },
+    {
+      title: t('table.type'),
+      dataIndex: 'type',
+      key: 'type',
+      width: 100,
+      ellipsis: true,
+    },
+    {
+      title: t('table.status'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 80,
+      render: (status: TaskStatus) => {
+        const statusConfig: Record<TaskStatus, { color: string; text: string }> = {
+          pending: { color: 'default', text: t('status.pending') },
+          running: { color: 'processing', text: t('task.status.running') },
+          success: { color: 'success', text: t('task.status.completed') },
+          failed: { color: 'error', text: t('task.status.failed') },
+        };
+        const cfg = statusConfig[status];
+        return (
+          <Tag color={cfg.color} style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>
+            {cfg.text}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: t('task.progress'),
+      dataIndex: 'progress',
+      key: 'progress',
+      width: 120,
+      render: (progress: number, record) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Progress
+            percent={Math.round(progress)}
+            size="small"
+            status={record.status === 'failed' ? 'exception' : record.status === 'success' ? 'success' : 'active'}
+            showInfo={false}
+            style={{ flex: 1, minWidth: 60 }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
+            {Math.round(progress)}%
+          </span>
+        </div>
+      ),
+    },
+  ], [t]);
+
+  // 任务统计
+  const runningCount = localTasks.filter((task) => task.status === 'running').length;
+  const totalCount = localTasks.length;
+
   return (
-    <ListPageLayout
-      title={t('nav.device.list')}
-      extra={
-        <Dropdown
-          menu={{
-            items: [
-              { key: 'xlsx', label: 'XLSX' },
-              { key: 'csv', label: 'CSV' },
-            ],
-            onClick: ({ key }) => handleExport(key),
-          }}
-          trigger={['click']}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{ flex: taskPanelExpanded ? '1 1 calc(100% - 240px)' : '1 1 calc(100% - 40px)', minHeight: 0, display: 'flex', flexDirection: 'column', transition: 'flex 0.25s ease-in-out' }}>
+        <ListPageLayout
+          title={t('nav.device.list')}
+          extra={
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'xlsx', label: 'XLSX' },
+                  { key: 'csv', label: 'CSV' },
+                ],
+                onClick: ({ key }) => handleExport(key),
+              }}
+              trigger={['click']}
+            >
+              <Button type="primary" icon={<ExportOutlined />}>
+                {t('common.export')}
+              </Button>
+            </Dropdown>
+          }
         >
-          <Button type="primary" icon={<ExportOutlined />}>
-            {t('common.export')}
-          </Button>
-        </Dropdown>
-      }
-    >
-      <FilterBar
-        filterId="device-list"
-        fields={FILTER_FIELDS}
-        onSearch={handleSearch}
-        onReset={handleReset}
-        collapsedRows={1}
-      />
+          <FilterBar
+            filterId="device-list"
+            fields={FILTER_FIELDS}
+            onSearch={handleSearch}
+            onReset={handleReset}
+            collapsedRows={1}
+          />
 
-      <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
+          <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
 
-      <DataTable<Device>
-        tableId="device-list-table"
-        columns={columns}
-        dataSource={devices}
-        loading={isLoading}
-        rowKey="id"
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-        total={total}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={(page, size) => {
-          setCurrentPage(page);
-          setPageSize(size);
+          <DataTable<Device>
+            tableId="device-list-table"
+            columns={columns}
+            dataSource={devices}
+            loading={isLoading}
+            rowKey="id"
+            selectable
+            selectedRowKeys={selectedRowKeys}
+            onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+            total={total}
+            pageSize={pageSize}
+            currentPage={currentPage}
+            onPageChange={(page, size) => {
+              setCurrentPage(page);
+              setPageSize(size);
+            }}
+            batchActions={batchActions}
+            onRefresh={() => void refetch()}
+            defaultDensity="compact"
+          />
+        </ListPageLayout>
+      </div>
+
+      {/* 底部任务面板 - 始终显示，默认收起 */}
+      <div
+        style={{
+          flex: taskPanelExpanded ? '0 0 240px' : '0 0 40px',
+          borderTop: '1px solid var(--color-border)',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'var(--color-bg-container)',
+          overflow: 'hidden',
+          transition: 'flex 0.25s ease-in-out',
+          zIndex: 50,
         }}
-        batchActions={batchActions}
-        onRefresh={() => void refetch()}
-        defaultDensity="compact"
-      />
-    </ListPageLayout>
+      >
+        {/* 任务面板标题栏 */}
+        <div
+          onClick={() => setTaskPanelExpanded(!taskPanelExpanded)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            height: 40,
+            padding: '0 16px',
+            borderBottom: taskPanelExpanded ? '1px solid var(--color-border)' : 'none',
+            backgroundColor: 'var(--color-neutral-50)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <Space>
+            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-neutral-800)' }}>
+              {t('task.panel.title')}
+            </span>
+            {totalCount > 0 && (
+              <Badge
+                count={runningCount > 0 ? runningCount : totalCount}
+                size="small"
+                style={{
+                  backgroundColor: runningCount > 0 ? 'var(--color-primary-600)' : '#8c8c8c',
+                  fontSize: 10,
+                }}
+              />
+            )}
+          </Space>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTaskPanelExpanded(!taskPanelExpanded);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 24,
+              height: 24,
+              borderRadius: 4,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--color-neutral-500)',
+              cursor: 'pointer',
+              fontSize: 12,
+              padding: 0,
+            }}
+          >
+            {taskPanelExpanded ? <UpOutlined /> : <DownOutlined />}
+          </button>
+        </div>
+
+        {/* 任务列表 */}
+        {taskPanelExpanded && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <Table<LocalTask>
+              dataSource={localTasks}
+              columns={taskColumns}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              scroll={{ y: 140 }}
+              locale={{ emptyText: t('common.noData') }}
+              style={{ fontSize: 12 }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
