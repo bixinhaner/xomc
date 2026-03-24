@@ -485,13 +485,26 @@ func stripLeafNodes(nodes []*ParameterTreeNode) []*ParameterTreeNode {
 	return result
 }
 
-// DirectChildrenResponse 返回指定前缀下的直接子项（叶子参数 + 子对象摘要）。
+// DirectChildrenResponse 返回指定前缀下的直接子项（富化叶子参数 + 子对象摘要）。
 type DirectChildrenResponse struct {
-	Leaves      []model.DeviceParameter `json:"leaves"`
-	SubObjects  []SubObjectSummary      `json:"sub_objects"`
-	Total       int                     `json:"total"`
-	Page        int                     `json:"page"`
-	PageSize    int                     `json:"page_size"`
+	Items      []ChildParameterItem `json:"items"`
+	SubObjects []SubObjectSummary   `json:"sub_objects"`
+	Total      int                  `json:"total"`
+	Page       int                  `json:"page"`
+	PageSize   int                  `json:"page_size"`
+}
+
+// ChildParameterItem 富化叶子参数，包含数据模型元数据。
+type ChildParameterItem struct {
+	ParameterPath  string                 `json:"parameter_path"`
+	ParameterValue string                 `json:"parameter_value"`
+	ParameterType  string                 `json:"parameter_type"`
+	Writable       bool                   `json:"writable"`
+	LastUpdatedAt  string                 `json:"last_updated_at"`
+	Description    string                 `json:"description,omitempty"`
+	DefaultValue   string                 `json:"default_value,omitempty"`
+	ChangeApplies  string                 `json:"change_applies,omitempty"`
+	Constraints    *datamodel.Constraints `json:"constraints,omitempty"`
 }
 
 // SubObjectSummary 子对象摘要，包含名称和后代参数数量。
@@ -572,31 +585,46 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 		return subObjects[i].Name < subObjects[j].Name
 	})
 
-	// 3. 模型元数据增强叶子参数
+	// 3. 构建富化叶子参数（含数据模型元数据）
+	items := make([]ChildParameterItem, 0, len(leaves))
+	var validator *datamodel.ParameterValidator
 	if h.dmRegistry != nil {
 		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
 		if devErr == nil && dev != nil {
 			dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
 			if dm != nil {
-				validator, _ := datamodel.NewParameterValidator(dm)
-				if validator != nil {
-					for i := range leaves {
-						if def := validator.LookupParam(leaves[i].ParameterPath); def != nil {
-							if def.Writable {
-								leaves[i].Writable = true
-							}
-							if def.Type != "" {
-								leaves[i].ParameterType = model.ParameterType(def.Type)
-							}
-						}
-					}
-				}
+				validator, _ = datamodel.NewParameterValidator(dm)
 			}
 		}
 	}
 
+	for _, p := range leaves {
+		item := ChildParameterItem{
+			ParameterPath:  p.ParameterPath,
+			ParameterValue: p.ParameterValue,
+			ParameterType:  string(p.ParameterType),
+			Writable:       p.Writable,
+			LastUpdatedAt:  p.LastUpdatedAt.Format(time.RFC3339),
+		}
+		if validator != nil {
+			if def := validator.LookupParam(p.ParameterPath); def != nil {
+				if def.Writable {
+					item.Writable = true
+				}
+				if def.Type != "" {
+					item.ParameterType = def.Type
+				}
+				item.Description = def.Description
+				item.DefaultValue = def.DefaultValue
+				item.ChangeApplies = def.ChangeApplies
+				item.Constraints = def.Constraints
+			}
+		}
+		items = append(items, item)
+	}
+
 	c.JSON(http.StatusOK, DirectChildrenResponse{
-		Leaves:     leaves,
+		Items:      items,
 		SubObjects: subObjects,
 		Total:      total,
 		Page:       page,
