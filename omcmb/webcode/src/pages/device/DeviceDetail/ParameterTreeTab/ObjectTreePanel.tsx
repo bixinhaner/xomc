@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Tree, Tag, Space, Typography, Spin, Empty, Tooltip } from 'antd';
-import { FolderOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { Tree, Tag, Space, Typography, Spin, Empty, Tooltip, Button } from 'antd';
+import {
+  FolderOutlined,
+  InfoCircleOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import type { ParameterTreeNode } from '@/types/deviceParameter';
 
@@ -12,6 +17,8 @@ interface ObjectTreePanelProps {
   selectedPath: string;
   searchKeyword: string;
   onSelect: (path: string) => void;
+  onAddObject?: (objectPath: string) => void;
+  onDeleteObject?: (objectPath: string) => void;
 }
 
 function highlightText(text: string, keyword: string): React.ReactNode {
@@ -29,39 +36,95 @@ function highlightText(text: string, keyword: string): React.ReactNode {
   );
 }
 
+/** Check if a node name is a numeric instance identifier */
+function isInstanceNumber(name: string): boolean {
+  return /^\d+$/.test(name);
+}
+
 function convertToAntdTree(
   nodes: ParameterTreeNode[],
-  searchKeyword: string
+  searchKeyword: string,
+  parentMultiInstance: boolean,
+  onAdd?: (path: string) => void,
+  onDelete?: (path: string) => void
 ): DataNode[] {
   return nodes
     .filter((n) => n.isObject)
-    .map((node) => ({
-      key: node.fullPath,
-      icon: <FolderOutlined />,
-      title: (
-        <Space size={4}>
-          <Text strong style={{ fontSize: 13 }}>
-            {searchKeyword ? highlightText(node.name, searchKeyword) : node.name}
-          </Text>
-          {node.multiInstance && (
-            <Tag color="geekblue" style={{ fontSize: 11 }}>
-              {node.instanceCount ?? 0}/{node.maxInstances ?? '?'}
-            </Tag>
-          )}
-          {node.description && (
-            <Tooltip title={node.description}>
-              <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />
-            </Tooltip>
-          )}
-        </Space>
-      ),
-      children: node.children
-        ? convertToAntdTree(node.children, searchKeyword)
-        : undefined,
-      isLeaf:
-        !node.children ||
-        node.children.filter((c) => c.isObject).length === 0,
-    }));
+    .map((node) => {
+      const isInstance = parentMultiInstance && isInstanceNumber(node.name);
+      const isMultiInstanceContainer = Boolean(node.multiInstance || node.canAdd);
+
+      return {
+        key: node.fullPath,
+        icon: <FolderOutlined />,
+        title: (
+          <Space size={4} style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space size={4}>
+              <Text strong style={{ fontSize: 13 }}>
+                {searchKeyword
+                  ? highlightText(node.name, searchKeyword)
+                  : node.name}
+              </Text>
+              {isMultiInstanceContainer && (
+                <Tag color="geekblue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                  {node.instanceCount ?? 0}
+                  {node.maxInstances ? `/${node.maxInstances}` : ''}
+                </Tag>
+              )}
+              {node.description && (
+                <Tooltip title={node.description}>
+                  <InfoCircleOutlined
+                    style={{ color: '#8c8c8c', fontSize: 12 }}
+                  />
+                </Tooltip>
+              )}
+            </Space>
+            <Space size={2}>
+              {isMultiInstanceContainer && node.canAdd && onAdd && (
+                <Tooltip title="添加实例">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<PlusOutlined style={{ fontSize: 12 }} />}
+                    style={{ width: 20, height: 20, minWidth: 20, padding: 0, color: '#52c41a' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAdd(node.fullPath + '.');
+                    }}
+                  />
+                </Tooltip>
+              )}
+              {isInstance && onDelete && (
+                <Tooltip title={`删除实例 ${node.name}`}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<DeleteOutlined style={{ fontSize: 12 }} />}
+                    style={{ width: 20, height: 20, minWidth: 20, padding: 0, color: '#ff4d4f' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(node.fullPath + '.');
+                    }}
+                  />
+                </Tooltip>
+              )}
+            </Space>
+          </Space>
+        ),
+        children: node.children
+          ? convertToAntdTree(
+              node.children,
+              searchKeyword,
+              isMultiInstanceContainer,
+              onAdd,
+              onDelete
+            )
+          : undefined,
+        isLeaf:
+          !node.children ||
+          node.children.filter((c) => c.isObject).length === 0,
+      };
+    });
 }
 
 function filterTree(
@@ -105,6 +168,8 @@ export default function ObjectTreePanel({
   selectedPath,
   searchKeyword,
   onSelect,
+  onAddObject,
+  onDeleteObject,
 }: ObjectTreePanelProps) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
 
@@ -113,7 +178,6 @@ export default function ObjectTreePanel({
     return filterTree(treeData, searchKeyword);
   }, [treeData, searchKeyword]);
 
-  // Initialize: expand first-level nodes when tree data first arrives
   useEffect(() => {
     if (treeData && treeData.length > 0 && expandedKeys.length === 0) {
       setExpandedKeys(
@@ -122,7 +186,6 @@ export default function ObjectTreePanel({
     }
   }, [treeData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When searching, expand all matching nodes; otherwise use user-controlled state
   const activeExpandedKeys = useMemo(() => {
     if (searchKeyword && filteredData.length) {
       return collectAllKeys(filteredData);
@@ -138,8 +201,8 @@ export default function ObjectTreePanel({
   );
 
   const antdTreeData = useMemo(
-    () => convertToAntdTree(filteredData, searchKeyword),
-    [filteredData, searchKeyword]
+    () => convertToAntdTree(filteredData, searchKeyword, false, onAddObject, onDeleteObject),
+    [filteredData, searchKeyword, onAddObject, onDeleteObject]
   );
 
   const handleSelect = useCallback(

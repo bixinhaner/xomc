@@ -11,6 +11,8 @@ import {
   useSyncParameters,
   useDiscoverParameters,
   useSyncStatus,
+  useAddObject,
+  useDeleteObject,
 } from '@/hooks/api/useDeviceParameters';
 import ObjectTreePanel from './ObjectTreePanel';
 import ChildParamTable from './ChildParamTable';
@@ -45,6 +47,8 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
   // Mutations
   const syncMutation = useSyncParameters();
   const discoverMutation = useDiscoverParameters();
+  const addObjectMutation = useAddObject();
+  const deleteObjectMutation = useDeleteObject();
 
   const handleSync = useCallback(() => {
     syncMutation.mutate(
@@ -82,6 +86,32 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
     setPage(newPage);
     setPageSize(newPageSize);
   }, []);
+
+  const handleAddObject = useCallback(
+    (objectPath: string) => {
+      addObjectMutation.mutate(
+        { deviceId, objectPath },
+        {
+          onSuccess: () => message.success(`实例添加命令已下发: ${objectPath}`),
+          onError: () => message.error('添加实例失败'),
+        }
+      );
+    },
+    [deviceId, addObjectMutation]
+  );
+
+  const handleDeleteObject = useCallback(
+    (objectPath: string) => {
+      deleteObjectMutation.mutate(
+        { deviceId, objectPath },
+        {
+          onSuccess: () => message.success(`实例删除命令已下发: ${objectPath}`),
+          onError: () => message.error('删除实例失败'),
+        }
+      );
+    },
+    [deviceId, deleteObjectMutation]
+  );
 
   return (
     <div style={{ padding: '16px 0' }}>
@@ -149,6 +179,8 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
             selectedPath={selectedPath}
             searchKeyword={searchKeyword}
             onSelect={handleSelectNode}
+            onAddObject={handleAddObject}
+            onDeleteObject={handleDeleteObject}
           />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
