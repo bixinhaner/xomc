@@ -36,6 +36,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dm.GET("/statistics", h.Statistics)
 		dm.POST("", h.Create)
 		dm.POST("/import", h.Import)
+		dm.POST("/import-xml", h.ImportXML)
 		dm.POST("/cache/refresh", h.RefreshCache)
 		dm.GET("/:id", h.Get)
 		dm.GET("/:id/export", h.Export)
@@ -262,6 +263,39 @@ func (h *Handler) Deprecate(c *gin.Context) {
 // Import handles POST /api/v1/datamodels/import.
 func (h *Handler) Import(c *gin.Context) {
 	dm, err := h.importer.ImportFromJSON(c.Request.Context(), c.Request.Body, "api")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, dm)
+}
+
+// ImportXML handles POST /api/v1/datamodels/import-xml.
+// Accepts multipart form with an XML file and a carrier query parameter.
+func (h *Handler) ImportXML(c *gin.Context) {
+	carrier := model.CarrierCode(c.PostForm("carrier"))
+	if carrier == "" {
+		carrier = model.CarrierCode(c.Query("carrier"))
+	}
+	if carrier == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "carrier is required (form field or query param)"})
+		return
+	}
+
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		// Fall back to reading raw body if not multipart.
+		dm, err := h.importer.ImportFromXML(c.Request.Context(), c.Request.Body, carrier, "api")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, dm)
+		return
+	}
+	defer file.Close()
+
+	dm, err := h.importer.ImportFromXML(c.Request.Context(), file, carrier, "api")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

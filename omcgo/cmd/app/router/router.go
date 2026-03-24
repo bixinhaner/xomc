@@ -131,19 +131,20 @@ func Setup(r *gin.Engine, deps *Deps) error {
 		carrierRegistry, cmdQueue, eventBus, cfg.Provision, logger,
 	)
 
-	// Set up auto-discovery and auto-sync services if enabled.
-	if cfg.Provision.AutoDiscovery.Enabled {
-		discoverySvc := provision.NewDiscoveryService(
-			discoveryLogRepo, dmRepo, dmRegistry, cmdQueue,
-			deps.Redis, cfg.Provision.AutoDiscovery, logger,
+	// Set up model upload and auto-sync services if enabled.
+	if cfg.Provision.ModelUpload.Enabled {
+		modelUploadSvc := provision.NewModelUploadService(
+			discoveryLogRepo, dmImporter, dmRegistry, cmdQueue,
+			deps.MinIO, cfg.Provision.ModelUpload, logger,
 		)
-		provisionEngine.SetDiscoveryService(discoverySvc)
-		logger.Info("auto-discovery service enabled")
+		provisionEngine.SetModelUploadService(modelUploadSvc)
+		logger.Info("model upload service enabled",
+			zap.String("upload_url", cfg.Provision.ModelUpload.UploadURL))
 	}
 	if cfg.Provision.AutoSync.Enabled {
 		syncSvc := provision.NewSyncService(
 			paramRepo, discoveryLogRepo, cmdQueue,
-			cfg.Provision.AutoSync, cfg.Provision.AutoDiscovery.GPVBatchSize, logger,
+			cfg.Provision.AutoSync, cfg.Provision.AutoSync.GPVBatchSize, logger,
 		)
 		provisionEngine.SetSyncService(syncSvc)
 		logger.Info("auto-sync service enabled")
@@ -155,7 +156,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	provisionEngine.StartTaskReaper()
 	logger.Info("provisioning engine started",
 		zap.Bool("auto_configure", cfg.Provision.AutoConfigure),
-		zap.Bool("auto_discovery", cfg.Provision.AutoDiscovery.Enabled),
+		zap.Bool("model_upload", cfg.Provision.ModelUpload.Enabled),
 		zap.Bool("auto_sync", cfg.Provision.AutoSync.Enabled),
 	)
 

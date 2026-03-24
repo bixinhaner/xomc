@@ -6,10 +6,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
+	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/spf13/cobra"
@@ -83,6 +86,26 @@ func runACS(cmd *cobra.Command, args []string) error {
 		requestIDPrefix,
 		cfg.EnableTestTaskInjection,
 	)
+
+	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
+	if cfg.Upload.Username != "" && inf.MinIO != nil {
+		tokenMgr := upload.NewTokenManager(cfg.Upload.TokenSecret, cfg.Upload.TokenTTL)
+		// SessionStore requires *redis.Client; extract from UniversalClient if possible.
+		var uploadSessionStore *upload.SessionStore
+		if redisClient, ok := inf.Redis.(*redis.Client); ok {
+			uploadSessionStore = upload.NewSessionStore(redisClient, cfg.Upload.TokenTTL)
+		}
+		uploadHandler := upload.NewHandler(
+			tokenMgr, uploadSessionStore, inf.MinIO,
+			cfg.Upload.MaxFileSize, cfg.MinIO.Buckets,
+			cfg.Upload.Username, cfg.Upload.Password,
+			inf.EventBus, inf.Logger,
+		)
+		deps.UploadHandler = uploadHandler
+		deps.UploadConfig = &cfg.Upload
+		inf.Logger.Info("upload handler enabled",
+			zap.String("username", cfg.Upload.Username))
+	}
 
 	// Setup STUN store and UDP sender (needed for both STUN server and post-session wake)
 	var stunStore *stun.Store

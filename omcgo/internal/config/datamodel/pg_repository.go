@@ -24,6 +24,7 @@ var dataModelColumns = []string{
 	"id", "carrier", "technology", "version", "oui", "product_class",
 	"firmware_version",
 	"scope", "status", "is_active", "root_object", "parameter_tree",
+	"object_tree", "model_metadata",
 	"source", "source_type", "imported_by", "spec_document_ref", "description",
 	"last_accessed_at", "created_at", "updated_at",
 }
@@ -68,6 +69,7 @@ func (r *PgDataModelRepository) Create(ctx context.Context, dm *DataModel) error
 			nullableString(dm.OUI), nullableString(dm.ProductClass),
 			nullableString(dm.FirmwareVersion),
 			dm.Scope, dm.Status, dm.IsActive, dm.RootObject, dm.ParameterTree,
+			nullableJSON(dm.ObjectTree), nullableJSON(dm.ModelMetadata),
 			nullableString(dm.Source), dm.SourceType, nullableString(dm.ImportedBy),
 			nullableString(dm.SpecDocumentRef), nullableString(dm.Description),
 			dm.LastAccessedAt, dm.CreatedAt, dm.UpdatedAt,
@@ -118,6 +120,8 @@ func (r *PgDataModelRepository) Update(ctx context.Context, dm *DataModel) error
 		Set("is_active", dm.IsActive).
 		Set("root_object", dm.RootObject).
 		Set("parameter_tree", dm.ParameterTree).
+		Set("object_tree", nullableJSON(dm.ObjectTree)).
+		Set("model_metadata", nullableJSON(dm.ModelMetadata)).
 		Set("source", nullableString(dm.Source)).
 		Set("source_type", dm.SourceType).
 		Set("imported_by", nullableString(dm.ImportedBy)).
@@ -804,12 +808,15 @@ func scanDataModel(row pgx.Row) (*DataModel, error) {
 		specDocumentRef sql.NullString
 		description     sql.NullString
 		parameterTree   []byte
+		objectTree      []byte
+		modelMetadata   []byte
 	)
 
 	err := row.Scan(
 		&dm.ID, &dm.Carrier, &dm.Technology, &dm.Version,
 		&oui, &productClass, &firmwareVersion,
 		&dm.Scope, &dm.Status, &dm.IsActive, &dm.RootObject, &parameterTree,
+		&objectTree, &modelMetadata,
 		&source, &dm.SourceType, &importedBy, &specDocumentRef, &description,
 		&dm.LastAccessedAt, &dm.CreatedAt, &dm.UpdatedAt,
 	)
@@ -821,6 +828,12 @@ func scanDataModel(row pgx.Row) (*DataModel, error) {
 	}
 
 	dm.ParameterTree = json.RawMessage(parameterTree)
+	if len(objectTree) > 0 {
+		dm.ObjectTree = json.RawMessage(objectTree)
+	}
+	if len(modelMetadata) > 0 {
+		dm.ModelMetadata = json.RawMessage(modelMetadata)
+	}
 	if oui.Valid {
 		dm.OUI = oui.String
 	}
@@ -860,12 +873,15 @@ func scanDataModels(rows pgx.Rows) ([]DataModel, error) {
 			specDocumentRef sql.NullString
 			description     sql.NullString
 			parameterTree   []byte
+			objectTree      []byte
+			modelMetadata   []byte
 		)
 
 		err := rows.Scan(
 			&dm.ID, &dm.Carrier, &dm.Technology, &dm.Version,
 			&oui, &productClass, &firmwareVersion,
 			&dm.Scope, &dm.Status, &dm.IsActive, &dm.RootObject, &parameterTree,
+			&objectTree, &modelMetadata,
 			&source, &dm.SourceType, &importedBy, &specDocumentRef, &description,
 			&dm.LastAccessedAt, &dm.CreatedAt, &dm.UpdatedAt,
 		)
@@ -874,6 +890,12 @@ func scanDataModels(rows pgx.Rows) ([]DataModel, error) {
 		}
 
 		dm.ParameterTree = json.RawMessage(parameterTree)
+		if len(objectTree) > 0 {
+			dm.ObjectTree = json.RawMessage(objectTree)
+		}
+		if len(modelMetadata) > 0 {
+			dm.ModelMetadata = json.RawMessage(modelMetadata)
+		}
 		if oui.Valid {
 			dm.OUI = oui.String
 		}

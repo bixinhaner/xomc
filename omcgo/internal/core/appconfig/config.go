@@ -129,24 +129,25 @@ type NEDirectConfig struct {
 	Port    int    `mapstructure:"port"`
 }
 
-// ProvisionConfig holds provisioning and auto-discovery settings.
+// ProvisionConfig holds provisioning settings.
 type ProvisionConfig struct {
-	Enabled       bool                `mapstructure:"enabled"`
-	AutoConfigure bool                `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
-	TaskTimeout   time.Duration       `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
-	AutoDiscovery AutoDiscoveryConfig `mapstructure:"auto_discovery"`
-	AutoSync      AutoSyncConfig      `mapstructure:"auto_sync"`
+	Enabled       bool              `mapstructure:"enabled"`
+	AutoConfigure bool              `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
+	TaskTimeout   time.Duration     `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
+	ModelUpload   ModelUploadConfig `mapstructure:"model_upload"`
+	AutoSync      AutoSyncConfig    `mapstructure:"auto_sync"`
 }
 
-// AutoDiscoveryConfig holds settings for automatic parameter tree discovery.
-type AutoDiscoveryConfig struct {
+// ModelUploadConfig holds settings for parameter model upload via TR-069 Upload RPC.
+// When a device has no matching DataModel, the provision engine dispatches an Upload
+// command (FileType "11") to have the CPE upload its parameter model XML.
+type ModelUploadConfig struct {
 	Enabled           bool          `mapstructure:"enabled"`
-	MaxConcurrent     int           `mapstructure:"max_concurrent"`
-	GPNTimeout        time.Duration `mapstructure:"gpn_timeout"`
-	GPVBatchSize      int           `mapstructure:"gpv_batch_size"`
-	GPVTimeout        time.Duration `mapstructure:"gpv_timeout"`
-	AutoActivateModel bool          `mapstructure:"auto_activate_model"`
-	ExcludePaths      []string      `mapstructure:"exclude_paths"`
+	UploadURL         string        `mapstructure:"upload_url"`          // ACS upload endpoint, e.g. http://acs:7547/smallcell/FileUploadService
+	UploadUsername    string        `mapstructure:"upload_username"`     // HTTP Basic Auth username for CPE upload
+	UploadPassword    string        `mapstructure:"upload_password"`     // HTTP Basic Auth password for CPE upload
+	AutoActivateModel bool          `mapstructure:"auto_activate_model"` // Auto-activate created model
+	UploadTimeout     time.Duration `mapstructure:"upload_timeout"`      // Timeout for Upload RPC (default 5min)
 }
 
 // AutoSyncConfig holds settings for automatic parameter value synchronization.
@@ -155,6 +156,7 @@ type AutoSyncConfig struct {
 	SyncOnBootstrap      bool `mapstructure:"sync_on_bootstrap"`
 	SyncOnFirmwareChange bool `mapstructure:"sync_on_firmware_change"`
 	MaxConcurrent        int  `mapstructure:"max_concurrent"`
+	GPVBatchSize         int  `mapstructure:"gpv_batch_size"`
 }
 
 // DataModelExpiryConfig holds settings for automatic data model template expiration.

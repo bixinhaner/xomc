@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -144,6 +145,156 @@ func (imp *DataModelImporter) ValidateImport(ctx context.Context, reader io.Read
 
 	result.Valid = len(result.Errors) == 0
 	return result, nil
+}
+
+// ImportFromXML reads a CPE-exported parameter model XML, creates a data model
+// in draft status, and logs the import action. The carrier must be provided
+// externally since the XML does not contain carrier information.
+func (imp *DataModelImporter) ImportFromXML(ctx context.Context, reader io.Reader, carrier model.CarrierCode, importedBy string) (*DataModel, error) {
+	parsed, err := ParseParameterModelXML(reader)
+	if err != nil {
+		return nil, fmt.Errorf("parse XML: %w", err)
+	}
+
+	if errs := ValidateXMLModel(parsed); len(errs) > 0 {
+		return nil, fmt.Errorf("validate XML: %s", errs[0])
+	}
+
+	if !carrier.IsValid() {
+		return nil, fmt.Errorf("invalid carrier: %s", carrier)
+	}
+
+	dm, err := buildDataModelFromParsed(parsed, carrier)
+	if err != nil {
+		return nil, fmt.Errorf("build data model from XML: %w", err)
+	}
+	dm.SourceType = SourceManual
+	dm.ImportedBy = importedBy
+
+	if err := imp.repo.Create(ctx, dm); err != nil {
+		return nil, fmt.Errorf("create data model from XML: %w", err)
+	}
+
+	logEntry := &ImportLogEntry{
+		DataModelID: dm.ID,
+		Action:      "imported",
+		PerformedBy: importedBy,
+	}
+	if err := imp.logRepo.Create(ctx, logEntry); err != nil {
+		return dm, nil
+	}
+
+	return dm, nil
+}
+
+// ImportFromXMLForCPE creates or updates a data model from a CPE-uploaded XML.
+// Unlike ImportFromXML, this auto-activates the model and uses SourceCPEUploaded.
+func (imp *DataModelImporter) ImportFromXMLForCPE(ctx context.Context, reader io.Reader, carrier model.CarrierCode, productClass, firmwareVersion string) (*DataModel, error) {
+	parsed, err := ParseParameterModelXML(reader)
+	if err != nil {
+		return nil, fmt.Errorf("parse XML: %w", err)
+	}
+
+	if errs := ValidateXMLModel(parsed); len(errs) > 0 {
+		return nil, fmt.Errorf("validate XML: %s", errs[0])
+	}
+
+	dm, err := buildDataModelFromParsed(parsed, carrier)
+	if err != nil {
+		return nil, fmt.Errorf("build data model from XML: %w", err)
+	}
+	dm.SourceType = SourceCPEUploaded
+	dm.ProductClass = productClass
+	dm.FirmwareVersion = firmwareVersion
+	dm.Status = StatusActive
+	dm.IsActive = true
+	dm.ImportedBy = "cpe_upload"
+
+	if err := imp.repo.Create(ctx, dm); err != nil {
+		return nil, fmt.Errorf("create data model from CPE XML: %w", err)
+	}
+
+	logEntry := &ImportLogEntry{
+		DataModelID: dm.ID,
+		Action:      "imported",
+		PerformedBy: "cpe_upload",
+	}
+	_ = imp.logRepo.Create(ctx, logEntry)
+
+	return dm, nil
+}
+
+// buildDataModelFromParsed converts a ParsedParameterModel into a DataModel.
+func buildDataModelFromParsed(parsed *ParsedParameterModel, carrier model.CarrierCode) (*DataModel, error) {
+	// Map network type to technology.
+	tech := mapNetworkType(parsed.NetworkType)
+
+	// Build parameter tree JSON.
+	paramTree, err := json.Marshal(parsed.Parameters)
+	if err != nil {
+		return nil, fmt.Errorf("marshal parameters: %w", err)
+	}
+
+	// Build object tree JSON.
+	var objectTree json.RawMessage
+	if len(parsed.Objects) > 0 {
+		objData, err := json.Marshal(parsed.Objects)
+		if err != nil {
+			return nil, fmt.Errorf("marshal objects: %w", err)
+		}
+		objectTree = objData
+	}
+
+	// Build model metadata JSON.
+	metadata := map[string]interface{}{
+		"generate_time": parsed.GenerateTime,
+		"model_version": parsed.ModelVersion,
+		"total_entries": parsed.TotalEntries,
+		"serial_number": parsed.SerialNumber,
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+
+	scope := determineScope(parsed.Vendor, "")
+	rootObject := detectRootObjectFromParams(parsed.Parameters)
+
+	dm := &DataModel{
+		ID:            uuid.New(),
+		Carrier:       carrier,
+		Technology:    tech,
+		Version:       parsed.ModelVersion,
+		OUI:           parsed.Vendor,
+		Scope:         scope,
+		Status:        StatusDraft,
+		IsActive:      false,
+		RootObject:    rootObject,
+		ParameterTree: paramTree,
+		ObjectTree:    objectTree,
+		ModelMetadata: json.RawMessage(metadataJSON),
+		Source:        fmt.Sprintf("xml_upload:%s", parsed.SerialNumber),
+		Description:   fmt.Sprintf("参数模型上传: %s %s (SN: %s)", parsed.Vendor, parsed.NetworkType, parsed.SerialNumber),
+	}
+
+	return dm, nil
+}
+
+// mapNetworkType converts XML networkType to internal Technology code.
+func mapNetworkType(networkType string) model.Technology {
+	switch model.Technology(strings.ToLower(networkType)) {
+	case model.TechNR:
+		return model.TechNR
+	default:
+		return model.TechLTE
+	}
+}
+
+// detectRootObjectFromParams determines the root object from parameters.
+func detectRootObjectFromParams(params []Parameter) string {
+	for _, p := range params {
+		if strings.HasPrefix(p.Path, "InternetGatewayDevice.") {
+			return "InternetGatewayDevice."
+		}
+	}
+	return "Device."
 }
 
 // ExportToJSON retrieves a data model by ID and marshals it as JSON.

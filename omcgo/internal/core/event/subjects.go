@@ -51,6 +51,14 @@ const (
 	SubjectProvisionStepDone  = "provision.step.done"
 )
 
+// DataModel events
+const (
+	SubjectDataModelUploadRequested = "datamodel.upload.requested"
+	SubjectDataModelUploadCompleted = "datamodel.upload.completed"
+	SubjectDataModelUploadFailed    = "datamodel.upload.failed"
+	SubjectDataModelFileReceived    = "datamodel.file.received"
+)
+
 // Command response events
 const (
 	SubjectCommandGetParamsResponse      = "command.get_parameters.response"

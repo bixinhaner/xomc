@@ -139,6 +139,9 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 	case "mr":
 		bucket = b.mrBucket
 		objectPath = fmt.Sprintf("%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
+	case "datamodel":
+		bucket = b.logsBucket
+		objectPath = fmt.Sprintf("datamodel/%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
 	default:
 		bucket = b.logsBucket
 		objectPath = fmt.Sprintf("%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
@@ -199,6 +202,30 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 			zap.String("device_sn", payload.DeviceSN),
 			zap.String("path", objectPath))
 
+	case "datamodel":
+		dmPayload := map[string]interface{}{
+			"minio_bucket": bucket,
+			"minio_path":   objectPath,
+			"device_id":    dev.ID.String(),
+			"device_sn":    dev.SerialNumber,
+			"carrier":      string(dev.Carrier),
+			"technology":   string(dev.Technology),
+			"oui":          dev.OUI,
+			"product_class": dev.ProductClass,
+			"firmware_version": dev.FirmwareVersion,
+			"file_size":    fileSize,
+		}
+		dmEvt, err := event.NewEvent(event.SubjectDataModelFileReceived, dmPayload)
+		if err != nil {
+			return fmt.Errorf("create datamodel event: %w", err)
+		}
+		if err := b.eventBus.Publish(ctx, event.SubjectDataModelFileReceived, dmEvt); err != nil {
+			return fmt.Errorf("publish datamodel.file.received: %w", err)
+		}
+		b.logger.Info("published datamodel.file.received",
+			zap.String("device_sn", payload.DeviceSN),
+			zap.String("path", objectPath))
+
 	default:
 		b.logger.Info("log file stored, no downstream event",
 			zap.String("device_sn", payload.DeviceSN),
@@ -208,14 +235,16 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 	return nil
 }
 
-// classifyFileType determines whether a file is PM, MR, or Log based on
+// classifyFileType determines whether a file is PM, MR, DataModel, or Log based on
 // the TR-069 FileType code and the target file name.
 func classifyFileType(fileType, fileName string) string {
 	ft := strings.ToUpper(strings.TrimSpace(fileType))
 	fn := strings.ToUpper(fileName)
 
-	// TR-069 FileType codes: "1"=Firmware, "2"=WebContent, "3"=VendorConfig/Log, "4"=PM, "5"=MR
+	// TR-069 FileType codes: "1"=Firmware, "2"=WebContent, "3"=VendorConfig/Log, "4"=PM, "5"=MR, "11"=ParameterModel
 	switch {
+	case ft == "11" || strings.Contains(ft, "PARAMETER MODEL"):
+		return "datamodel"
 	case ft == "4" || strings.Contains(ft, "PM"):
 		return "pm"
 	case ft == "5" || strings.Contains(ft, "MR"):
@@ -224,6 +253,8 @@ func classifyFileType(fileType, fileName string) string {
 		return "mr"
 	case strings.Contains(fn, "PM") || strings.Contains(fn, "COUNTER"):
 		return "pm"
+	case strings.Contains(fn, "DATAMODEL") || strings.Contains(fn, "PARAMETERMODEL"):
+		return "datamodel"
 	case ft == "3" || strings.Contains(ft, "LOG"):
 		return "log"
 	default:

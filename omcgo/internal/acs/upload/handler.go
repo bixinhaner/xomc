@@ -11,6 +11,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +24,7 @@ type Handler struct {
 	minioClient  *minio.Client
 	maxFileSize  int64
 	buckets      appconfig.BucketConfig
+	eventBus     event.EventBus
 	logger       *zap.Logger
 	// Global credentials for upload authentication
 	username string
@@ -37,6 +39,7 @@ func NewHandler(
 	maxFileSize int64,
 	buckets appconfig.BucketConfig,
 	username, password string,
+	eventBus event.EventBus,
 	logger *zap.Logger,
 ) *Handler {
 	return &Handler{
@@ -47,6 +50,7 @@ func NewHandler(
 		buckets:      buckets,
 		username:     username,
 		password:     password,
+		eventBus:     eventBus,
 		logger:       logger,
 	}
 }
@@ -133,6 +137,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.Int64("size", info.Size),
 	)
 
+	// 6.1. For parameter model uploads (FileType "11"), publish event for processing.
+	if h.isParameterModelUpload(fileType) && h.eventBus != nil {
+		h.publishDataModelEvent(ctx, bucket, objectPath, filename, info.Size)
+	}
+
 	// 7. Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -147,6 +156,8 @@ func (h *Handler) bucketForFileType(fileType string) string {
 		return h.buckets.MRFiles
 	case "6", "Log", "LOG":
 		return h.buckets.Logs
+	case "11", "PARAMETER MODEL":
+		return h.buckets.Logs // Reuse logs bucket for datamodel files.
 	default:
 		return h.buckets.PMFiles
 	}
@@ -174,6 +185,8 @@ func (h *Handler) typeDirectory(fileType string) string {
 		return "mr"
 	case "6", "Log", "LOG":
 		return "logs"
+	case "11", "PARAMETER MODEL":
+		return "datamodel"
 	default:
 		return "uploads"
 	}
@@ -193,4 +206,63 @@ func (h *Handler) DeleteSession(ctx context.Context, deviceSN, commandKey string
 // Used by Upload RPC to include in the SOAP message.
 func (h *Handler) UploadCredentials() (username, password string) {
 	return h.username, h.password
+}
+
+// isParameterModelUpload checks if the file type indicates a parameter model.
+func (h *Handler) isParameterModelUpload(fileType string) bool {
+	ft := strings.ToUpper(strings.TrimSpace(fileType))
+	return ft == "11" || ft == "PARAMETER MODEL"
+}
+
+// publishDataModelEvent publishes a datamodel.file.received event after a parameter model file is uploaded.
+// The filename is expected to contain the device SN: "datamodel_{deviceSN}_{uuid}.xml"
+func (h *Handler) publishDataModelEvent(ctx context.Context, bucket, objectPath, filename string, fileSize int64) {
+	// Extract device SN from filename pattern: datamodel_{deviceSN}_{uuid}.xml
+	deviceSN := extractDeviceSNFromFilename(filename)
+
+	payload := map[string]interface{}{
+		"minio_bucket": bucket,
+		"minio_path":   objectPath,
+		"device_sn":    deviceSN,
+		"file_size":    fileSize,
+		"filename":     filename,
+	}
+
+	evt, err := event.NewEvent(event.SubjectDataModelFileReceived, payload)
+	if err != nil {
+		h.logger.Error("create datamodel event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, event.SubjectDataModelFileReceived, evt); err != nil {
+		h.logger.Error("publish datamodel.file.received", zap.Error(err))
+		return
+	}
+	h.logger.Info("published datamodel.file.received",
+		zap.String("device_sn", deviceSN),
+		zap.String("path", objectPath))
+}
+
+// extractDeviceSNFromFilename extracts device SN from filename pattern.
+// Expected format: "datamodel_{deviceSN}_{uuid}.xml" or "{deviceSN}_datamodel.xml"
+func extractDeviceSNFromFilename(filename string) string {
+	name := strings.TrimSuffix(filename, ".xml")
+	name = strings.TrimSuffix(name, ".gz")
+
+	// Try pattern: datamodel_{SN}_{suffix}
+	if strings.HasPrefix(name, "datamodel_") {
+		rest := strings.TrimPrefix(name, "datamodel_")
+		// Find the last underscore (UUID separator)
+		if idx := strings.LastIndex(rest, "_"); idx > 0 {
+			return rest[:idx]
+		}
+		return rest
+	}
+
+	// Try pattern: {SN}_datamodel
+	if idx := strings.Index(name, "_datamodel"); idx > 0 {
+		return name[:idx]
+	}
+
+	// Fallback: return the full name without extension
+	return name
 }

@@ -8,13 +8,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/tracing"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
-	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.opentelemetry.io/otel/attribute"
@@ -23,17 +23,17 @@ import (
 
 // ProvisioningEngine orchestrates the full auto-provisioning workflow.
 type ProvisioningEngine struct {
-	taskRepo         ProvisioningTaskRepository
-	deviceService    *device.DeviceService
-	dmRegistry       *datamodel.DataModelRegistry
-	templateService  *template.ConfigTemplateService
-	carrierRegistry  *carrier.CarrierRegistry
-	cmdQueue         cmdqueue.CommandQueue
-	eventBus         event.EventBus
-	discoveryService *DiscoveryService
-	syncService      *SyncService
-	config           appconfig.ProvisionConfig
-	logger           *zap.Logger
+	taskRepo           ProvisioningTaskRepository
+	deviceService      *device.DeviceService
+	dmRegistry         *datamodel.DataModelRegistry
+	templateService    *template.ConfigTemplateService
+	carrierRegistry    *carrier.CarrierRegistry
+	cmdQueue           cmdqueue.CommandQueue
+	eventBus           event.EventBus
+	modelUploadService *ModelUploadService
+	syncService        *SyncService
+	config             appconfig.ProvisionConfig
+	logger             *zap.Logger
 }
 
 // NewProvisioningEngine creates a new ProvisioningEngine with all dependencies.
@@ -61,9 +61,9 @@ func NewProvisioningEngine(
 	}
 }
 
-// SetDiscoveryService sets the discovery service for auto-discovery support.
-func (e *ProvisioningEngine) SetDiscoveryService(svc *DiscoveryService) {
-	e.discoveryService = svc
+// SetModelUploadService sets the model upload service for parameter model acquisition.
+func (e *ProvisioningEngine) SetModelUploadService(svc *ModelUploadService) {
+	e.modelUploadService = svc
 }
 
 // SetSyncService sets the sync service for parameter synchronization.
@@ -81,7 +81,7 @@ type bootstrapEvent struct {
 	Technology   string    `json:"technology"`
 }
 
-// Subscribe registers the engine to listen for bootstrap events via queue group.
+// Subscribe registers the engine to listen for bootstrap and model file events.
 func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	_, err := bus.QueueSubscribe(event.SubjectDeviceRegistered, "provisioning", func(ctx context.Context, evt event.Event) error {
 		e.logger.Info("provisioning engine received device.registered event",
@@ -101,13 +101,13 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	}
 	e.logger.Info("provisioning engine subscribed to device.registered events")
 
-	// Subscribe to GPN response for auto-discovery processing.
-	if _, err := bus.QueueSubscribe(event.SubjectCommandGetNamesResponse, "provision-gpn", func(ctx context.Context, evt event.Event) error {
-		return e.handleGPNResponse(ctx, evt)
+	// Subscribe to datamodel.file.received for model upload processing (replaces old GPN flow).
+	if _, err := bus.QueueSubscribe(event.SubjectDataModelFileReceived, "provision-model-upload", func(ctx context.Context, evt event.Event) error {
+		return e.handleDataModelFileReceived(ctx, evt)
 	}); err != nil {
-		e.logger.Warn("failed to subscribe to GPN response", zap.Error(err))
+		e.logger.Warn("failed to subscribe to datamodel.file.received", zap.Error(err))
 	} else {
-		e.logger.Info("provisioning engine subscribed to GPN response events")
+		e.logger.Info("provisioning engine subscribed to datamodel.file.received events")
 	}
 
 	// Subscribe to GPV response for parameter sync processing.
@@ -137,8 +137,6 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	)
 
 	// 0. Reset-on-BOOT: if there is an existing non-terminal task, fail it and start fresh.
-	// This handles the case where a device went offline mid-provisioning and reconnected.
-	// The stale task would otherwise block new provisioning until the reaper cleans it up.
 	existingTask, _ := e.taskRepo.GetByDeviceID(ctx, evt.DeviceID)
 	if existingTask != nil && !IsTerminal(existingTask.Status) {
 		e.logger.Warn("cancelling stale provisioning task for reconnected device",
@@ -149,9 +147,8 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		)
 		_ = e.failTask(ctx, existingTask,
 			fmt.Errorf("device reconnected with BOOT, cancelling stale task in state %s", existingTask.Status))
-		// Clean up residual discovery Redis state (pending counter + accumulated params).
-		if e.discoveryService != nil {
-			e.discoveryService.CleanupState(ctx, evt.SerialNumber)
+		if e.modelUploadService != nil {
+			e.modelUploadService.CleanupState(ctx, evt.SerialNumber)
 		}
 	}
 
@@ -191,7 +188,7 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	//
 	// Path A: Has matching template → classic provisioning flow (configuring).
 	// Path B: Has DataModel + auto_sync enabled → sync parameter values only.
-	// Path C: No DataModel + auto_discovery enabled → discover parameter tree first.
+	// Path C: No DataModel + model_upload enabled → request CPE to upload parameter model XML.
 	// Path D: All switches off or no match → fail task (backward compatible).
 
 	// 3. Try matching template first (Path A).
@@ -215,16 +212,16 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		)
 	}
 
-	// No template matched. Check auto-sync and auto-discovery paths.
+	// No template matched. Check auto-sync and model upload paths.
 
 	// Path B: DataModel exists + auto_sync enabled → sync parameters.
 	if dm != nil && e.config.AutoSync.Enabled && e.syncService != nil {
 		return e.handleAutoSync(ctx, task, dev, dm)
 	}
 
-	// Path C: No DataModel + auto_discovery enabled → discover parameter tree.
-	if dm == nil && e.config.AutoDiscovery.Enabled && e.discoveryService != nil {
-		return e.handleAutoDiscovery(ctx, task, dev)
+	// Path C: No DataModel + model_upload enabled → request CPE parameter model upload.
+	if dm == nil && e.config.ModelUpload.Enabled && e.modelUploadService != nil {
+		return e.handleModelUpload(ctx, task, dev)
 	}
 
 	// Path D: No template, no applicable feature toggle → fail.
@@ -272,20 +269,20 @@ func (e *ProvisioningEngine) handleTemplateProvisioning(ctx context.Context, tas
 	return nil
 }
 
-// handleAutoDiscovery initiates parameter tree discovery (Path C).
-func (e *ProvisioningEngine) handleAutoDiscovery(ctx context.Context, task *ProvisioningTask,
+// handleModelUpload requests the CPE to upload its parameter model XML (Path C).
+func (e *ProvisioningEngine) handleModelUpload(ctx context.Context, task *ProvisioningTask,
 	dev *model.Device) error {
 
 	if err := e.transitionTask(ctx, task, StateDiscovering); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to discovering: %w", err))
 	}
 
-	_, err := e.discoveryService.StartDiscovery(ctx, dev)
+	_, err := e.modelUploadService.RequestModelUpload(ctx, dev)
 	if err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("start discovery: %w", err))
+		return e.failTask(ctx, task, fmt.Errorf("request model upload: %w", err))
 	}
 
-	e.logger.Info("auto-discovery initiated",
+	e.logger.Info("parameter model upload requested",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("task_id", task.ID.String()),
 	)
@@ -301,7 +298,6 @@ func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *Provision
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	// Extract parameter paths from the data model's parameter tree.
 	paramPaths, err := extractPathsFromParameterTree(dm.ParameterTree)
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("extract parameter paths: %w", err))
@@ -460,12 +456,70 @@ func (e *ProvisioningEngine) publishEvent(ctx context.Context, subject string, d
 	}
 }
 
-// gpnResponsePayload is the structured event payload for GetParameterNamesResponse.
-// ACS handler parses the SOAP XML and sends structured data to avoid NATS message size limits.
-type gpnResponsePayload struct {
-	DeviceSN       string                      `json:"device_sn"`
-	Method         string                      `json:"method"`
-	ParameterInfos []tr069.ParameterInfoStruct `json:"parameter_infos"`
+// handleDataModelFileReceived processes datamodel.file.received events.
+// When a CPE uploads its parameter model XML (via Upload RPC FileType "11"),
+// the ACS stores the file in MinIO and publishes this event.
+// The engine downloads the XML, parses it, and creates a DataModel.
+func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, evt event.Event) error {
+	var payload dataModelFilePayload
+	if err := evt.DecodePayload(&payload); err != nil {
+		e.logger.Error("decode datamodel file event", zap.Error(err))
+		return nil
+	}
+
+	e.logger.Info("received datamodel.file.received",
+		zap.String("device_sn", payload.DeviceSN),
+		zap.String("path", payload.MinioPath),
+		zap.Int64("file_size", payload.FileSize),
+	)
+
+	if payload.DeviceSN == "" {
+		e.logger.Warn("datamodel file event missing device_sn, skipping")
+		return nil
+	}
+
+	// Look up the device.
+	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
+	if err != nil {
+		e.logger.Error("find device for datamodel file", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
+
+	if e.modelUploadService == nil {
+		e.logger.Warn("model upload service not configured, skipping datamodel file")
+		return nil
+	}
+
+	dm, err := e.modelUploadService.HandleModelFileReceived(ctx, dev, payload)
+	if err != nil {
+		e.logger.Error("handle model file received", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
+
+	e.logger.Info("data model created from uploaded file",
+		zap.String("device_sn", payload.DeviceSN),
+		zap.String("model_id", dm.ID.String()),
+	)
+
+	// After model creation, auto-sync parameters if sync service is available.
+	if e.syncService != nil && e.config.AutoSync.Enabled {
+		paramPaths, err := extractPathsFromParameterTree(dm.ParameterTree)
+		if err == nil && len(paramPaths) > 0 {
+			if syncErr := e.syncService.StartSync(ctx, dev, paramPaths); syncErr != nil {
+				e.logger.Warn("auto-sync after model upload failed",
+					zap.Error(syncErr),
+					zap.String("device_sn", payload.DeviceSN),
+				)
+			} else {
+				e.logger.Info("auto-sync initiated after model upload",
+					zap.String("device_sn", payload.DeviceSN),
+					zap.Int("param_count", len(paramPaths)),
+				)
+			}
+		}
+	}
+
+	return nil
 }
 
 // gpvResponsePayload is the structured event payload for GetParameterValuesResponse.
@@ -473,67 +527,6 @@ type gpvResponsePayload struct {
 	DeviceSN        string                       `json:"device_sn"`
 	Method          string                       `json:"method"`
 	ParameterValues []tr069.ParameterValueStruct `json:"parameter_values"`
-}
-
-// handleGPNResponse processes GetParameterNamesResponse events from ACS.
-func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Event) error {
-	var payload gpnResponsePayload
-	if err := evt.DecodePayload(&payload); err != nil {
-		e.logger.Error("decode GPN response event", zap.Error(err))
-		return nil
-	}
-
-	e.logger.Info("received GPN response",
-		zap.String("device_sn", payload.DeviceSN),
-		zap.Int("parameter_count", len(payload.ParameterInfos)),
-	)
-
-	// Note: empty GPN responses (parameter_count=0) must NOT be skipped.
-	// They still need to flow through HandleLevelGPNResponse to decrement
-	// the pending counter, otherwise discovery stalls permanently.
-
-	// Look up the device.
-	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
-	if err != nil {
-		e.logger.Error("find device for GPN response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-		return nil
-	}
-
-	// Call discovery service to process this level's GPN response.
-	// HandleLevelGPNResponse returns a non-nil DataModel only when all levels are done.
-	if e.discoveryService != nil {
-		dm, err := e.discoveryService.HandleLevelGPNResponse(ctx, dev, payload.ParameterInfos)
-		if err != nil {
-			e.logger.Error("handle discovery result", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-			return nil
-		}
-		if dm != nil {
-			e.logger.Info("data model created/found from GPN response",
-				zap.String("device_sn", payload.DeviceSN),
-				zap.String("model_id", dm.ID.String()),
-			)
-
-			// After discovery, auto-sync parameters if sync service is available.
-			if e.syncService != nil && e.config.AutoSync.Enabled {
-				paramPaths, err := extractPathsFromParameterTree(dm.ParameterTree)
-				if err == nil && len(paramPaths) > 0 {
-					if syncErr := e.syncService.StartSync(ctx, dev, paramPaths); syncErr != nil {
-						e.logger.Warn("auto-sync after discovery failed",
-							zap.Error(syncErr),
-							zap.String("device_sn", payload.DeviceSN),
-						)
-					} else {
-						e.logger.Info("auto-sync initiated after discovery",
-							zap.String("device_sn", payload.DeviceSN),
-							zap.Int("param_count", len(paramPaths)),
-						)
-					}
-				}
-			}
-		}
-	}
-
-	return nil
 }
 
 // handleGPVResponse processes GetParameterValuesResponse events from ACS.
@@ -553,14 +546,12 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	// Look up the device.
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
 	if err != nil {
 		e.logger.Error("find device for GPV response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 		return nil
 	}
 
-	// Save parameter values to database via sync service.
 	if e.syncService != nil {
 		if err := e.syncService.HandleSyncResult(ctx, dev, payload.ParameterValues); err != nil {
 			e.logger.Error("save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
@@ -577,13 +568,11 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 
 // StartTaskReaper launches a background goroutine that periodically fails
 // provisioning tasks stuck in non-terminal states beyond the configured timeout.
-// This prevents stale tasks from permanently blocking new provisioning for a device.
 func (e *ProvisioningEngine) StartTaskReaper() {
 	timeout := e.config.TaskTimeout
 	if timeout <= 0 {
 		timeout = 15 * time.Minute
 	}
-	// Scan interval = half the timeout, so stale tasks are caught reasonably fast.
 	interval := timeout / 2
 	if interval < 30*time.Second {
 		interval = 30 * time.Second

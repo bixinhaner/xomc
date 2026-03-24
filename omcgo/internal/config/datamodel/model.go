@@ -23,6 +23,7 @@ type DataModelSourceType string
 const (
 	SourceManual         DataModelSourceType = "manual"
 	SourceAutoDiscovered DataModelSourceType = "auto_discovered"
+	SourceCPEUploaded    DataModelSourceType = "cpe_uploaded"
 )
 
 // DataModel represents a TR069 data model definition.
@@ -39,6 +40,8 @@ type DataModel struct {
 	IsActive        bool                 `json:"is_active"`
 	RootObject      string               `json:"root_object"`
 	ParameterTree   json.RawMessage      `json:"parameter_tree"`
+	ObjectTree      json.RawMessage      `json:"object_tree,omitempty"`
+	ModelMetadata   json.RawMessage      `json:"model_metadata,omitempty"`
 	Source          string               `json:"source,omitempty"`
 	SourceType      DataModelSourceType  `json:"source_type"`
 	ImportedBy      string               `json:"imported_by,omitempty"`
@@ -51,13 +54,26 @@ type DataModel struct {
 
 // Parameter describes a single parameter within a data model.
 type Parameter struct {
-	Path        string       `json:"path"`
-	UnifiedName string       `json:"unified_name,omitempty"`
-	Type        string       `json:"type"`
-	Writable    bool         `json:"writable"`
-	Description string       `json:"description,omitempty"`
-	Constraints *Constraints `json:"constraints,omitempty"`
-	Category    string       `json:"category,omitempty"`
+	Path          string       `json:"path"`
+	UnifiedName   string       `json:"unified_name,omitempty"`
+	Type          string       `json:"type"`
+	Writable      bool         `json:"writable"`
+	Description   string       `json:"description,omitempty"`
+	Constraints   *Constraints `json:"constraints,omitempty"`
+	Category      string       `json:"category,omitempty"`
+	Notify        string       `json:"notify,omitempty"`
+	ForcedInform  bool         `json:"forced_inform,omitempty"`
+	DefaultValue  string       `json:"default_value,omitempty"`
+	ChangeApplies string       `json:"change_applies,omitempty"`
+	IsList        bool         `json:"is_list,omitempty"`
+}
+
+// ObjectInfo describes an object node in the parameter tree.
+type ObjectInfo struct {
+	Name         string `json:"name"`
+	Access       string `json:"access"`
+	MaxInstances int    `json:"max_instances"`
+	IsList       bool   `json:"is_list"`
 }
 
 // Constraints defines validation constraints for a parameter.
