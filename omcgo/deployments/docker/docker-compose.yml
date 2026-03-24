@@ -108,7 +108,7 @@ services:
       dockerfile: deployments/docker/Dockerfile.acs
     ports:
       - "9090:9090"
-      - “7547:7547”
+      - "7547:7547"
     environment:
       TZ: "Asia/Shanghai"
       OMCGO_SERVER_HOST: "0.0.0.0"
