@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
+  Checkbox,
   DatePicker,
   Drawer,
   Form,
@@ -12,10 +13,12 @@ import {
   Tag,
   message,
 } from 'antd';
-import type { TableProps, TablePaginationConfig } from 'antd';
+import type { TableProps } from 'antd';
 import { useT } from '@/hooks/useT';
+import { useDeviceList, useDeviceGroups } from '@/hooks/api/useDevices';
 import type { AlarmRule } from '@/types/alarm';
 import type { AlarmSeverity } from '@/types/common';
+import type { Device, DeviceGroup } from '@/types/device';
 import dayjs, { Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;
@@ -44,6 +47,13 @@ const SEVERITY_OPTIONS: { value: AlarmSeverity; label: string; color: string }[]
   { value: 'warning', label: '警告', color: 'gold' },
 ];
 
+// 设备类型配置
+const DEVICE_TYPE_OPTIONS = [
+  { label: 'eNB', value: 'eNB' },
+  { label: 'gNB', value: 'gNB' },
+  { label: 'GSM', value: 'GSM' },
+];
+
 interface AlarmRuleDrawerProps {
   open: boolean;
   mode: 'add' | 'edit' | 'view';
@@ -64,27 +74,6 @@ export interface AlarmRuleFormData {
   timeRange?: [string, string];
 }
 
-// Mock 设备数据
-const mockDevices = [
-  { id: 'dev-001', name: 'eNB-Beijing-001', status: 'online' },
-  { id: 'dev-002', name: 'eNB-Shanghai-001', status: 'offline' },
-  { id: 'dev-003', name: 'gNB-Shenzhen-001', status: 'online' },
-  { id: 'dev-004', name: 'gNB-Guangzhou-001', status: 'online' },
-  { id: 'dev-005', name: 'GSM-Wuhan-001', status: 'online' },
-  { id: 'dev-006', name: 'GSM-Nanjing-001', status: 'offline' },
-  { id: 'dev-007', name: 'eNB-Chengdu-001', status: 'online' },
-  { id: 'dev-008', name: 'gNB-Hangzhou-001', status: 'online' },
-];
-
-// Mock 设备组数据
-const mockDeviceGroups = [
-  { id: 'group-001', name: '北京基站组', deviceCount: 15 },
-  { id: 'group-002', name: '上海基站组', deviceCount: 12 },
-  { id: 'group-003', name: '深圳5G组', deviceCount: 8 },
-  { id: 'group-004', name: 'GSM核心组', deviceCount: 5 },
-  { id: 'group-005', name: '全国eNB组', deviceCount: 30 },
-];
-
 // Mock 告警库数据
 const mockAlarmLibrary = [
   { id: 'alarm-001', alarmIdentifier: 'A0001', alarmName: '小区不可用', eventType: '30003', severity: 'critical' as const },
@@ -98,6 +87,17 @@ const mockAlarmLibrary = [
   { id: 'alarm-009', alarmIdentifier: 'A0009', alarmName: '电源电压异常', eventType: '30004', severity: 'critical' as const },
   { id: 'alarm-010', alarmIdentifier: 'A0010', alarmName: '风扇故障', eventType: '30003', severity: 'warning' as const },
 ];
+
+// 设备数据类型（包含设备类型字段）
+interface DeviceWithType extends Device {
+  deviceType: 'eNB' | 'gNB' | 'GSM';
+}
+
+// 设备组数据类型（包含层级结构）
+interface DeviceGroupWithLevel extends DeviceGroup {
+  level: number;
+  fullName: string;
+}
 
 export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], onClose, onSubmit }: AlarmRuleDrawerProps) {
   const t = useT();
@@ -115,8 +115,111 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   });
   const [alarmError, setAlarmError] = useState<string | null>(null);
 
+  // 设备筛选状态
+  const [deviceFilter, setDeviceFilter] = useState({
+    deviceTypes: [] as string[],
+    snKeyword: '',
+  });
+
+  // 获取设备列表
+  const { data: deviceData, isLoading: deviceLoading } = useDeviceList({
+    page: 1,
+    pageSize: 1000,
+  });
+
+  // 获取设备组列表
+  const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
+
   const isViewMode = mode === 'view';
   const title = mode === 'add' ? t('common.add') : mode === 'edit' ? t('common.edit') : t('common.detail');
+
+  // 处理设备数据，添加设备类型
+  const devicesWithType: DeviceWithType[] = useMemo(() => {
+    const devices = deviceData?.items || [];
+    return devices.map(device => {
+      // 根据设备名称或网络类型判断设备类型
+      let deviceType: 'eNB' | 'gNB' | 'GSM' = 'eNB';
+      const name = device.name?.toLowerCase() || '';
+      const networkType = device.networkType?.toLowerCase() || '';
+
+      if (name.includes('gnb') || networkType.includes('5g') || networkType.includes('nr')) {
+        deviceType = 'gNB';
+      } else if (name.includes('gsm') || networkType.includes('gsm')) {
+        deviceType = 'GSM';
+      }
+
+      return { ...device, deviceType };
+    });
+  }, [deviceData]);
+
+  // 处理设备组数据，构建层级结构
+  const groupsWithLevel: DeviceGroupWithLevel[] = useMemo(() => {
+    const groups = groupsData || [];
+    if (groups.length === 0) return [];
+
+    // 构建父子关系映射
+    const groupMap = new Map<string, DeviceGroupWithLevel>();
+    const rootGroups: DeviceGroupWithLevel[] = [];
+
+    // 第一遍：创建所有节点
+    groups.forEach(g => {
+      groupMap.set(g.id, {
+        ...g,
+        level: 0,
+        fullName: g.name,
+      });
+    });
+
+    // 第二遍：建立层级关系
+    groups.forEach(g => {
+      const node = groupMap.get(g.id)!;
+      if (g.parentId && groupMap.has(g.parentId)) {
+        const parent = groupMap.get(g.parentId)!;
+        node.level = parent.level + 1;
+        node.fullName = `${parent.name} / ${g.name}`;
+      } else {
+        node.level = 0;
+        rootGroups.push(node);
+      }
+    });
+
+    // 按层级排序
+    const result: DeviceGroupWithLevel[] = [];
+    const addToResult = (group: DeviceGroupWithLevel) => {
+      result.push(group);
+      // 添加子节点
+      groups.forEach(g => {
+        if (g.parentId === group.id) {
+          const child = groupMap.get(g.id);
+          if (child) addToResult(child);
+        }
+      });
+    };
+    rootGroups.forEach(g => addToResult(g));
+
+    return result;
+  }, [groupsData]);
+
+  // 根据筛选条件过滤设备
+  const filteredDevices = useMemo(() => {
+    let result = devicesWithType;
+
+    // 按设备类型筛选
+    if (deviceFilter.deviceTypes.length > 0) {
+      result = result.filter(d => deviceFilter.deviceTypes.includes(d.deviceType));
+    }
+
+    // 按SN搜索
+    if (deviceFilter.snKeyword) {
+      const kw = deviceFilter.snKeyword.toLowerCase();
+      result = result.filter(d =>
+        d.sn?.toLowerCase().includes(kw) ||
+        d.name?.toLowerCase().includes(kw)
+      );
+    }
+
+    return result;
+  }, [devicesWithType, deviceFilter]);
 
   // 初始化表单数据
   useEffect(() => {
@@ -138,6 +241,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       setTimeRange(null);
     }
     setAlarmError(null);
+    setDeviceFilter({ deviceTypes: [], snKeyword: '' });
   }, [open, rule, form]);
 
   // 过滤告警库
@@ -183,12 +287,9 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       message.success(t('common.operationSuccess'));
       onClose();
     } catch (error) {
-      // 表单验证错误会自动显示在表单字段下方，不需要额外处理
       if (error && typeof error === 'object' && 'errorFields' in error) {
-        // Ant Design 表单验证错误，Form 组件会自动显示
         return;
       }
-      // 其他错误需要提示用户
       console.error('Submit failed:', error);
       message.error(t('common.operationFailed'));
     } finally {
@@ -204,7 +305,6 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     if (value.length > 100) {
       return Promise.reject(new Error(t('alarm.ruleNameMax100')));
     }
-    // 检查名称是否重复（编辑时排除自身）
     const currentName = rule?.ruleName;
     const isDuplicate = existingNames.some(name => name !== currentName && name === value.trim());
     if (isDuplicate) {
@@ -214,11 +314,12 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   }, [existingNames, rule?.ruleName, t]);
 
   // 设备列表列配置
-  const deviceColumns: TableProps<typeof mockDevices[0]>['columns'] = [
+  const deviceColumns: TableProps<DeviceWithType>['columns'] = [
     {
       title: t('device.sn'),
-      dataIndex: 'id',
-      width: 120,
+      dataIndex: 'sn',
+      width: 140,
+      ellipsis: true,
     },
     {
       title: t('device.name'),
@@ -226,10 +327,19 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       ellipsis: true,
     },
     {
-      title: t('device.connStatus'),
-      dataIndex: 'status',
+      title: t('alarm.deviceType'),
+      dataIndex: 'deviceType',
       width: 80,
-      render: (status) => (
+      render: (deviceType: 'eNB' | 'gNB' | 'GSM') => {
+        const colorMap = { eNB: 'blue', gNB: 'green', GSM: 'orange' };
+        return <Tag color={colorMap[deviceType]}>{deviceType}</Tag>;
+      },
+    },
+    {
+      title: t('device.connStatus'),
+      dataIndex: 'connStatus',
+      width: 80,
+      render: (status: string) => (
         <Tag color={status === 'online' ? 'green' : 'default'} style={{ margin: 0 }}>
           {status === 'online' ? t('device.online') : t('device.offline')}
         </Tag>
@@ -238,11 +348,17 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   ];
 
   // 设备组列表列配置
-  const groupColumns: TableProps<typeof mockDeviceGroups[0]>['columns'] = [
+  const groupColumns: TableProps<DeviceGroupWithLevel>['columns'] = [
     {
       title: t('device.groupName'),
-      dataIndex: 'name',
+      dataIndex: 'fullName',
       ellipsis: true,
+      render: (_fullName: string, record) => (
+        <span style={{ paddingLeft: record.level * 20 }}>
+          {record.level > 0 && <span style={{ color: '#999' }}>└ </span>}
+          {record.name}
+        </span>
+      ),
     },
     {
       title: t('device.count.total'),
@@ -369,23 +485,43 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
             </Radio.Group>
 
             {deviceSelectionMode === 'devices' ? (
-              <Table
-                rowSelection={deviceRowSelection}
-                columns={deviceColumns}
-                dataSource={mockDevices}
-                rowKey="id"
-                size="small"
-                pagination={{ pageSize: 5, size: 'small' }}
-                scroll={{ y: 180 }}
-              />
+              <>
+                {/* 设备类型筛选 + SN搜索 */}
+                <Space wrap size="small">
+                  <Checkbox.Group
+                    options={DEVICE_TYPE_OPTIONS}
+                    value={deviceFilter.deviceTypes}
+                    onChange={(values) => setDeviceFilter(prev => ({ ...prev, deviceTypes: values as string[] }))}
+                  />
+                  <Input.Search
+                    placeholder={t('alarm.searchDeviceSnPlaceholder')}
+                    style={{ width: 200 }}
+                    value={deviceFilter.snKeyword}
+                    onChange={(e) => setDeviceFilter(prev => ({ ...prev, snKeyword: e.target.value }))}
+                    allowClear
+                    size="small"
+                  />
+                </Space>
+                <Table
+                  rowSelection={deviceRowSelection}
+                  columns={deviceColumns}
+                  dataSource={filteredDevices}
+                  rowKey="id"
+                  size="small"
+                  loading={deviceLoading}
+                  pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
+                  scroll={{ y: 180 }}
+                />
+              </>
             ) : (
               <Table
                 rowSelection={groupRowSelection}
                 columns={groupColumns}
-                dataSource={mockDeviceGroups}
+                dataSource={groupsWithLevel}
                 rowKey="id"
                 size="small"
-                pagination={{ pageSize: 5, size: 'small' }}
+                loading={groupsLoading}
+                pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
                 scroll={{ y: 180 }}
               />
             )}

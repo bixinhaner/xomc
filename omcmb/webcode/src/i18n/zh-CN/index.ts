@@ -1418,6 +1418,8 @@ const messages: Record<string, string> = {
   'alarm.ruleNameDuplicate': '规则名称已存在',
   'alarm.selectAtLeastOne': '请至少选择一条告警',
   'alarm.deviceSelection': '设备选择',
+  'alarm.searchDeviceSnPlaceholder': '搜索设备SN/名称',
+  'alarm.deviceTypeFilter': '设备类型',
 
   // -------------------------------------------------------------------------
   // Time duration
