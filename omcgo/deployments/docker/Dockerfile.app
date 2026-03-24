@@ -25,12 +25,16 @@ RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
 
 COPY --from=builder /build/bin/omcgo-app /usr/local/bin/omcgo-app
 COPY --from=builder /build/bin/omcgo-migrate /usr/local/bin/omcgo-migrate
-COPY --from=builder /build/cmd/app/etc/config.dev.yaml /etc/omcgo/app.yaml
+COPY --from=builder /build/cmd/app/etc/config.dev.yaml /etc/omcgo/app.dev.yaml
+COPY --from=builder /build/cmd/app/etc/config.test.yaml /etc/omcgo/app.test.yaml
+COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.prod.yaml
 COPY --from=builder /build/migrations /etc/omcgo/migrations
 COPY deployments/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+ENV TZ=Asia/Shanghai
+ENV OMCGO_SERVICE=app
+
 EXPOSE 8081 8444 9091 50051
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["--config", "/etc/omcgo/app.yaml"]

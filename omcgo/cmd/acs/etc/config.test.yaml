@@ -28,18 +28,18 @@ auth:
 
 redis:
   addrs:
-    - "localhost:6379"
+    - "redis:6379"
   password: ""
   db: 0
   pool_size: 100
 
 nats:
-  url: "nats://localhost:4222"
+  url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
 
 db:
-  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m

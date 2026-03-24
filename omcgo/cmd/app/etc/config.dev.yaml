@@ -9,7 +9,7 @@ server:
     key_file: ""
 
 db:
-  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 50
   min_conns: 10
   max_conn_lifetime: 30m
@@ -20,7 +20,7 @@ db:
   log_sql_slow_threshold: 500
 
 tsdb:
-  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
@@ -32,18 +32,18 @@ tsdb:
 
 redis:
   addrs:
-    - "localhost:6379"
+    - "redis:6379"
   password: ""
   db: 0
   pool_size: 200
 
 nats:
-  url: "nats://localhost:4222"
+  url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
 
 minio:
-  endpoint: "localhost:9000"
+  endpoint: "minio:9000"
   access_key: "minioadmin"
   secret_key: "minioadmin"
   use_ssl: false
@@ -56,7 +56,7 @@ minio:
     reports: "reports"
 
 conn_req:
-  server_addr: "localhost:7547"  # ACS external address for CPE UDP CR URL
+  server_addr: "acs:7547"  # ACS external address for CPE UDP CR URL
   shared_secret: "dps"            # HMAC-SHA1 secret for CPE UDP CR signing
 
 jwt:

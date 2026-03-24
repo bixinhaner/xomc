@@ -110,20 +110,7 @@ services:
       - "9090:9090"
       - "7547:7547"
     environment:
-      TZ: "Asia/Shanghai"
-      OMCGO_SERVER_HOST: "0.0.0.0"
-      OMCGO_SERVER_PORT: "7547"
-      OMCGO_REDIS_ADDRS: "redis:6379"
-      OMCGO_NATS_URL: "nats://nats:4222"
-      OMCGO_DB_DSN: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
-      OMCGO_MINIO_ENDPOINT: "minio:9000"
-      OMCGO_MINIO_ACCESS_KEY: "minioadmin"
-      OMCGO_MINIO_SECRET_KEY: "minioadmin"
-      OMCGO_MINIO_USE_SSL: "false"
-      OMCGO_METRICS_PORT: "9090"
-      OMCGO_LOG_LEVEL: "info"
-      OMCGO_LOG_FORMAT: "json"
-      OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/acs/acs.log"
+      OMCGO_ENV: "${OMCGO_ENV:-dev}"
     volumes:
       - ../../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
@@ -145,21 +132,7 @@ services:
       - "8082:8082"
       - "9091:9091"
     environment:
-      TZ: "Asia/Shanghai"
-      OMCGO_SERVER_HOST: "0.0.0.0"
-      OMCGO_SERVER_PORT: "8082"
-      OMCGO_DB_DSN: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
-      OMCGO_TSDB_DSN: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
-      OMCGO_REDIS_ADDRS: "redis:6379"
-      OMCGO_NATS_URL: "nats://nats:4222"
-      OMCGO_MINIO_ENDPOINT: "minio:9000"
-      OMCGO_MINIO_ACCESS_KEY: "minioadmin"
-      OMCGO_MINIO_SECRET_KEY: "minioadmin"
-      OMCGO_MINIO_USE_SSL: "false"
-      OMCGO_METRICS_PORT: "9091"
-      OMCGO_LOG_LEVEL: "info"
-      OMCGO_LOG_FORMAT: "json"
-      OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/app/app.log"
+      OMCGO_ENV: "${OMCGO_ENV:-dev}"
     volumes:
       - ../../../run/logs/app:/run/logs/app
       - /etc/localtime:/etc/localtime:ro
@@ -180,19 +153,7 @@ services:
     ports:
       - "9092:9092"
     environment:
-      TZ: "Asia/Shanghai"
-      OMCGO_DB_DSN: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
-      OMCGO_TSDB_DSN: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
-      OMCGO_REDIS_ADDRS: "redis:6379"
-      OMCGO_NATS_URL: "nats://nats:4222"
-      OMCGO_MINIO_ENDPOINT: "minio:9000"
-      OMCGO_MINIO_ACCESS_KEY: "minioadmin"
-      OMCGO_MINIO_SECRET_KEY: "minioadmin"
-      OMCGO_MINIO_USE_SSL: "false"
-      OMCGO_METRICS_PORT: "9092"
-      OMCGO_LOG_LEVEL: "info"
-      OMCGO_LOG_FORMAT: "json"
-      OMCGO_LOG_OUTPUT_PATHS: "stdout,/run/logs/worker/worker.log"
+      OMCGO_ENV: "${OMCGO_ENV:-dev}"
     volumes:
       - ../../../run/logs/worker:/run/logs/worker
       - /etc/localtime:/etc/localtime:ro

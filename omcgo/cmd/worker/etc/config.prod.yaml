@@ -1,5 +1,5 @@
 db:
-  dsn: "${DB_DSN}"
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -10,7 +10,7 @@ db:
   log_sql_slow_threshold: 1000
 
 tsdb:
-  dsn: "${TSDB_DSN}"
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -22,21 +22,21 @@ tsdb:
 
 redis:
   addrs:
-    - "${REDIS_ADDR}"
-  password: "${REDIS_PASSWORD}"
+    - "redis:6379"
+  password: ""
   db: 0
   pool_size: 100
 
 nats:
-  url: "${NATS_URL}"
+  url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
 
 minio:
-  endpoint: "${MINIO_ENDPOINT}"
-  access_key: "${MINIO_ACCESS_KEY}"
-  secret_key: "${MINIO_SECRET_KEY}"
-  use_ssl: true
+  endpoint: "minio:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
   buckets:
     pm_files: "pm-files"
     mr_files: "mr-files"
@@ -54,16 +54,16 @@ tracer:
   sample_rate: 1.0
 
 log:
-  level: "info"
+  level: "warn"
   format: "json"
   output_paths:
     - "stdout"
     - "/run/logs/worker/worker.log"
   rotation:
     enabled: true
-    max_size_mb: 5
-    max_age_days: 7
-    max_backups: 20
+    max_size_mb: 20
+    max_age_days: 30
+    max_backups: 50
     compress: true
     local_time: true
 

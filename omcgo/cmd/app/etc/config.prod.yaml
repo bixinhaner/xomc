@@ -4,12 +4,12 @@ server:
   tls_port: 8444
   grpc_port: 50051
   tls:
-    enabled: true
-    cert_file: "${TLS_CERT_FILE}"
-    key_file: "${TLS_KEY_FILE}"
+    enabled: false
+    cert_file: ""
+    key_file: ""
 
 db:
-  dsn: "${DB_DSN}"  # e.g. postgres://omcgo:xxx@db-host:5432/omcgo?sslmode=require
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 50
   min_conns: 10
   max_conn_lifetime: 30m
@@ -20,7 +20,7 @@ db:
   log_sql_slow_threshold: 1000
 
 tsdb:
-  dsn: "${TSDB_DSN}"  # e.g. postgres://omcgo:xxx@tsdb-host:5432/omcgo?sslmode=require
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
@@ -32,21 +32,21 @@ tsdb:
 
 redis:
   addrs:
-    - "${REDIS_ADDR}"
-  password: "${REDIS_PASSWORD}"
+    - "redis:6379"
+  password: ""
   db: 0
   pool_size: 200
 
 nats:
-  url: "${NATS_URL}"
+  url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
 
 minio:
-  endpoint: "${MINIO_ENDPOINT}"
-  access_key: "${MINIO_ACCESS_KEY}"
-  secret_key: "${MINIO_SECRET_KEY}"
-  use_ssl: true
+  endpoint: "minio:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
   buckets:
     pm_files: "pm-files"
     mr_files: "mr-files"
@@ -55,14 +55,19 @@ minio:
     logs: "logs"
     reports: "reports"
 
+conn_req:
+  server_addr: "acs:7547"
+  shared_secret: "dps"
+
 jwt:
-  secret: "${JWT_SECRET}"  # minimum 32 characters, must not be default value
+  secret: "omcgo-prod-jwt-secret-key-minimum-32-characters!!"
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 
 cors:
   allow_origins:
-    - "${CORS_ORIGIN}"
+    - "http://localhost:8080"
+    - "http://localhost:8081"
 
 northbound:
   push_targets: []
@@ -75,6 +80,7 @@ ne_direct:
 provision:
   enabled: true
   auto_configure: false
+  task_timeout: 15m
   auto_discovery:
     enabled: false
     max_concurrent: 10
@@ -97,16 +103,16 @@ tracer:
   sample_rate: 1.0
 
 log:
-  level: "info"
+  level: "warn"
   format: "json"
   output_paths:
     - "stdout"
     - "/run/logs/app/app.log"
   rotation:
     enabled: true
-    max_size_mb: 5
-    max_age_days: 7
-    max_backups: 20
+    max_size_mb: 20
+    max_age_days: 30
+    max_backups: 50
     compress: true
     local_time: true
 

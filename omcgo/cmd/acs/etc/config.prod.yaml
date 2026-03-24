@@ -3,9 +3,9 @@ server:
   port: 7547
   tls_port: 7548
   tls:
-    enabled: true
-    cert_file: "${TLS_CERT_FILE}"
-    key_file: "${TLS_KEY_FILE}"
+    enabled: false
+    cert_file: ""
+    key_file: ""
   read_timeout: 30s
   write_timeout: 30s
   idle_timeout: 120s
@@ -13,6 +13,7 @@ server:
 session:
   timeout: 5m
   max_concurrent: 10000
+  max_rpc_per_session: 50
 
 rate_limit:
   per_device: 10
@@ -22,24 +23,38 @@ rate_limit:
   cleanup_timeout: 10m
 
 auth:
-  mode: "digest"
-  username: "${ACS_AUTH_USERNAME}"
-  password: "${ACS_AUTH_PASSWORD}"
+  mode: "none"
+  username: ""
+  password: ""
+
+stun:
+  enabled: true
+  listen_addr: ":3478"
+  worker_size: 4
+  buffer_size: 2048
+  cache_ttl: 30m
+  shared_secret: "dps"
+
+post_session_wake:
+  enabled: true
+  delay_after: 1s
+  max_continuous: 200
+  cooldown_ttl: 5m
 
 redis:
   addrs:
-    - "${REDIS_ADDR}"
-  password: "${REDIS_PASSWORD}"
+    - "redis:6379"
+  password: ""
   db: 0
   pool_size: 100
 
 nats:
-  url: "${NATS_URL}"
+  url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
 
 db:
-  dsn: "${DB_DSN}"
+  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -48,9 +63,9 @@ db:
 
 minio:
   endpoint: "minio:9000"
-  access_key: "${MINIO_ACCESS_KEY}"
-  secret_key: "${MINIO_SECRET_KEY}"
-  use_ssl: true
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
   buckets:
     pm_files: "pm-files"
     mr_files: "mr-files"
@@ -60,11 +75,11 @@ minio:
     reports: "reports"
 
 upload:
-  base_url: "${ACS_BASE_URL}"  # e.g. https://acs.example.com
+  base_url: "http://acs:7547"
   path: "/smallcell/FileUploadService"
-  username: "${UPLOAD_USERNAME}"
-  password: "${UPLOAD_PASSWORD}"
-  max_file_size: 104857600  # 100MB
+  username: "upload_user"
+  password: "secure_upload_password_123"
+  max_file_size: 104857600
 
 metrics:
   port: 9090
@@ -75,23 +90,19 @@ tracer:
   sample_rate: 1.0
 
 log:
-  level: "info"
+  level: "warn"
   format: "json"
   output_paths:
     - "stdout"
     - "/run/logs/acs/acs.log"
   rotation:
     enabled: true
-    max_size_mb: 5
-    max_age_days: 7
-    max_backups: 20
+    max_size_mb: 20
+    max_age_days: 30
+    max_backups: 50
     compress: true
     local_time: true
 
 request_id_prefix: "acs"
 
-# 测试功能：启用随机 RPC 任务注入
-# 当 CPE 发送 Inform 时，自动为设备生成 3-10 个随机 RPC 任务
-# 仅用于测试，生产环境应设置为 false
 enable_test_task_injection: false
-
