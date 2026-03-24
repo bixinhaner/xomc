@@ -418,6 +418,42 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     columnWidth: 40,
   };
 
+  // 设备全选/取消全选
+  const handleDeviceSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      setSelectedDevices(filteredDevices.map(d => d.id));
+    } else {
+      setSelectedDevices([]);
+    }
+  }, [filteredDevices]);
+
+  // 设备组全选/取消全选
+  const handleGroupSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      setSelectedGroups(groupsWithLevel.map(g => g.id));
+    } else {
+      setSelectedGroups([]);
+    }
+  }, [groupsWithLevel]);
+
+  // 告警全选/取消全选
+  const handleAlarmSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      setSelectedAlarms(filteredAlarms.map(a => a.id));
+      setAlarmError(null);
+    } else {
+      setSelectedAlarms([]);
+    }
+  }, [filteredAlarms]);
+
+  // 计算全选状态
+  const isAllDevicesSelected = filteredDevices.length > 0 && selectedDevices.length === filteredDevices.length;
+  const isAllGroupsSelected = groupsWithLevel.length > 0 && selectedGroups.length === groupsWithLevel.length;
+  const isAllAlarmsSelected = filteredAlarms.length > 0 && selectedAlarms.length === filteredAlarms.length;
+  const isIndeterminateDevices = selectedDevices.length > 0 && selectedDevices.length < filteredDevices.length;
+  const isIndeterminateGroups = selectedGroups.length > 0 && selectedGroups.length < groupsWithLevel.length;
+  const isIndeterminateAlarms = selectedAlarms.length > 0 && selectedAlarms.length < filteredAlarms.length;
+
   return (
     <Drawer
       title={title}
@@ -486,7 +522,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
             {deviceSelectionMode === 'devices' ? (
               <>
-                {/* 设备类型筛选 + SN搜索 */}
+                {/* 设备类型筛选 + SN搜索 + 全选 */}
                 <Space wrap size="small">
                   <Checkbox.Group
                     options={DEVICE_TYPE_OPTIONS}
@@ -501,6 +537,14 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                     allowClear
                     size="small"
                   />
+                  <Checkbox
+                    checked={isAllDevicesSelected}
+                    indeterminate={isIndeterminateDevices}
+                    onChange={(e) => handleDeviceSelectAll(e.target.checked)}
+                    disabled={isViewMode || filteredDevices.length === 0}
+                  >
+                    {t('common.selectAll')}
+                  </Checkbox>
                 </Space>
                 <Table
                   rowSelection={deviceRowSelection}
@@ -512,18 +556,39 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
                   scroll={{ y: 180 }}
                 />
+                {selectedDevices.length > 0 && (
+                  <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                    {t('table.selected', { count: selectedDevices.length })}
+                  </div>
+                )}
               </>
             ) : (
-              <Table
-                rowSelection={groupRowSelection}
-                columns={groupColumns}
-                dataSource={groupsWithLevel}
-                rowKey="id"
-                size="small"
-                loading={groupsLoading}
-                pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
-                scroll={{ y: 180 }}
-              />
+              <>
+                {/* 设备组全选 */}
+                <Checkbox
+                  checked={isAllGroupsSelected}
+                  indeterminate={isIndeterminateGroups}
+                  onChange={(e) => handleGroupSelectAll(e.target.checked)}
+                  disabled={isViewMode || groupsWithLevel.length === 0}
+                >
+                  {t('common.selectAll')}
+                </Checkbox>
+                <Table
+                  rowSelection={groupRowSelection}
+                  columns={groupColumns}
+                  dataSource={groupsWithLevel}
+                  rowKey="id"
+                  size="small"
+                  loading={groupsLoading}
+                  pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
+                  scroll={{ y: 180 }}
+                />
+                {selectedGroups.length > 0 && (
+                  <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                    {t('table.selected', { count: selectedGroups.length })}
+                  </div>
+                )}
+              </>
             )}
           </Space>
         </Form.Item>
@@ -564,6 +629,14 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                 allowClear
                 size="small"
               />
+              <Checkbox
+                checked={isAllAlarmsSelected}
+                indeterminate={isIndeterminateAlarms}
+                onChange={(e) => handleAlarmSelectAll(e.target.checked)}
+                disabled={isViewMode || filteredAlarms.length === 0}
+              >
+                {t('common.selectAll')}
+              </Checkbox>
             </Space>
             <Table
               rowSelection={alarmRowSelection}
