@@ -58,13 +58,14 @@ interface BackendParameterTreeNode {
 }
 
 interface BackendSyncStatus {
-  device_id: string;
+  device_id?: string;
   status: string;
-  total_batches: number;
-  completed_batches: number;
-  total_parameters: number;
-  synced_parameters: number;
-  percentage: number;
+  total_batches?: number;
+  completed_batches?: number;
+  total_parameters?: number;
+  synced_parameters?: number;
+  percentage?: number;
+  pending_commands?: number;
   started_at?: string;
   completed_at?: string;
   error?: string;
@@ -172,14 +173,27 @@ function mapBackendTreeNode(bn: BackendParameterTreeNode): ParameterTreeNode {
 }
 
 function mapBackendSyncStatus(bs: BackendSyncStatus): ParameterSyncStatus {
+  // Backend may return simplified fields (status, total_parameters, pending_commands)
+  // instead of full batch-level tracking. Derive missing fields when possible.
+  const totalParams = bs.total_parameters ?? 0;
+  const pending = bs.pending_commands ?? 0;
+  const isComplete = bs.status === 'completed' || (bs.status === 'idle' && totalParams > 0);
+
+  let percentage = bs.percentage ?? 0;
+  if (percentage === 0 && bs.status === 'syncing' && pending > 0) {
+    // Cannot compute exact percentage without total batches; show indeterminate.
+    percentage = 0;
+  }
+  if (isComplete) percentage = 100;
+
   return {
-    deviceId: bs.device_id,
-    status: bs.status as ParameterSyncStatus['status'],
-    totalBatches: bs.total_batches,
-    completedBatches: bs.completed_batches,
-    totalParameters: bs.total_parameters,
-    syncedParameters: bs.synced_parameters,
-    percentage: bs.percentage,
+    deviceId: bs.device_id ?? '',
+    status: (bs.status === 'idle' ? 'idle' : bs.status) as ParameterSyncStatus['status'],
+    totalBatches: bs.total_batches ?? pending,
+    completedBatches: bs.completed_batches ?? 0,
+    totalParameters: totalParams,
+    syncedParameters: bs.synced_parameters ?? (isComplete ? totalParams : 0),
+    percentage,
     startedAt: bs.started_at,
     completedAt: bs.completed_at,
     error: bs.error,
@@ -214,10 +228,11 @@ export const deviceParameterApi = {
   },
 
   async getParameterTree(deviceId: string): Promise<ParameterTreeNode[]> {
-    const { data } = await http.get<BackendParameterTreeNode[]>(
+    const { data } = await http.get<{ tree: BackendParameterTreeNode[]; total: number }>(
       `/devices/${deviceId}/parameters/tree`
     );
-    return (data || []).map(mapBackendTreeNode);
+    const nodes = data.tree ?? data as unknown as BackendParameterTreeNode[];
+    return (Array.isArray(nodes) ? nodes : []).map(mapBackendTreeNode);
   },
 
   async updateParameters(

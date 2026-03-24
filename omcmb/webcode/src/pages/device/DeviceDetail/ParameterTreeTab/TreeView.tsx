@@ -286,6 +286,12 @@ export default function TreeView({
     return filterTree(treeData, searchKeyword);
   }, [treeData, searchKeyword]);
 
+  const defaultKeys = useMemo(() => {
+    // Default: expand first level nodes so the tree is not fully collapsed.
+    if (!filteredData.length) return [];
+    return filteredData.map((n) => n.fullPath);
+  }, [filteredData]);
+
   const expandedKeys = useMemo(() => {
     if (!searchKeyword || !filteredData.length) return undefined;
     return collectAllKeys(filteredData);
@@ -319,10 +325,12 @@ export default function TreeView({
         showIcon
         showLine={{ showLeafIcon: false }}
         treeData={antdTreeData}
-        defaultExpandedKeys={expandedKeys}
+        defaultExpandedKeys={defaultKeys}
         expandedKeys={searchKeyword ? expandedKeys : undefined}
         autoExpandParent={Boolean(searchKeyword)}
         blockNode
+        virtual
+        height={600}
         style={{ padding: '8px 0' }}
       />
 

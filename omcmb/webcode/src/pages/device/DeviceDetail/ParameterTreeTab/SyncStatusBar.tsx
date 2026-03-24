@@ -33,6 +33,9 @@ export default function SyncStatusBar({ syncStatus }: SyncStatusBarProps) {
   const config = statusConfig[syncStatus.status as keyof typeof statusConfig];
   if (!config) return null;
 
+  const hasBatchInfo = syncStatus.totalBatches > 0;
+  const hasPercentage = syncStatus.percentage > 0 && syncStatus.percentage < 100;
+
   return (
     <Alert
       type={config.type}
@@ -44,18 +47,49 @@ export default function SyncStatusBar({ syncStatus }: SyncStatusBarProps) {
           <Space>
             <Text strong>{config.message}</Text>
             <Text type="secondary">
-              {syncStatus.completedBatches}/{syncStatus.totalBatches} 批次
-              {' | '}
-              {syncStatus.syncedParameters}/{syncStatus.totalParameters} 参数
+              {hasBatchInfo
+                ? `${syncStatus.completedBatches}/${syncStatus.totalBatches} 批次 | `
+                : ''}
+              {syncStatus.totalParameters > 0
+                ? `已同步 ${syncStatus.totalParameters} 参数`
+                : '等待设备响应...'}
+              {syncStatus.status === 'syncing' && syncStatus.totalBatches > 0 && (
+                ` | 待处理 ${syncStatus.totalBatches} 条命令`
+              )}
             </Text>
           </Space>
           {syncStatus.status === 'syncing' && (
-            <Progress
-              percent={syncStatus.percentage}
-              size="small"
-              status="active"
-              strokeColor="#1677ff"
-            />
+            hasPercentage ? (
+              <Progress
+                percent={syncStatus.percentage}
+                size="small"
+                status="active"
+                strokeColor="#1677ff"
+              />
+            ) : (
+              <div style={{
+                height: 8,
+                borderRadius: 4,
+                background: '#f0f0f0',
+                overflow: 'hidden',
+                position: 'relative',
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  height: '100%',
+                  width: '30%',
+                  background: 'linear-gradient(90deg, #1677ff, #69b1ff)',
+                  borderRadius: 4,
+                  animation: 'syncIndeterminate 1.5s ease-in-out infinite',
+                }} />
+                <style>{`
+                  @keyframes syncIndeterminate {
+                    0% { left: -30%; }
+                    100% { left: 100%; }
+                  }
+                `}</style>
+              </div>
+            )
           )}
           {syncStatus.status === 'completed' && (
             <Progress

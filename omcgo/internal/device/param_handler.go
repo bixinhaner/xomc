@@ -627,6 +627,8 @@ func enrichTreeWithModel(nodes []*ParameterTreeNode, v *datamodel.ParameterValid
 	for _, node := range nodes {
 		if node.IsLeaf {
 			if def := v.LookupParam(node.FullPath); def != nil {
+				node.Writable = def.Writable
+				node.Type = def.Type
 				node.Description = def.Description
 				node.ChangeApplies = def.ChangeApplies
 				node.DefaultValue = def.DefaultValue
