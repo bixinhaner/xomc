@@ -165,12 +165,14 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       <div style={{ display: 'flex', gap: 16, minHeight: 500 }}>
         <div
           style={{
-            width: 360,
+            width: 320,
             flexShrink: 0,
-            border: '1px solid #f0f0f0',
+            border: '1px solid #e8e8e8',
             borderRadius: 8,
-            overflow: 'auto',
+            overflow: 'hidden',
             maxHeight: 700,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            background: '#fff',
           }}
         >
           <ObjectTreePanel
