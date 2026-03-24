@@ -8,6 +8,7 @@ import type {
   ParameterSchemaResponse,
   ParameterUpdateResponse,
   ChildParameter,
+  DirectChildrenResponse,
 } from '@/types/deviceParameter';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { delay, paginate } from '../utils';
@@ -282,7 +283,7 @@ export const deviceParameterService = {
     deviceId: string,
     pathPrefix: string,
     params?: { page?: number; pageSize?: number }
-  ): Promise<PageResponse<ChildParameter>> {
+  ): Promise<DirectChildrenResponse> {
     await delay(100, 300);
     void deviceId;
     const prefix = pathPrefix.endsWith('.') ? pathPrefix : pathPrefix + '.';
@@ -290,7 +291,6 @@ export const deviceParameterService = {
     const children: ChildParameter[] = mockParameters
       .filter((p) => {
         if (!p.parameterPath.startsWith(prefix)) return false;
-        // Must be a direct child (no more dots after prefix)
         const remainder = p.parameterPath.slice(prefix.length);
         return !remainder.includes('.');
       })
@@ -304,7 +304,8 @@ export const deviceParameterService = {
       }));
     const page = params?.page ?? 1;
     const pageSize = params?.pageSize ?? 50;
-    return paginate(children, page, pageSize);
+    const paged = paginate(children, page, pageSize);
+    return { ...paged, subObjects: [] };
   },
 
   async addObject(deviceId: string, objectPath: string): Promise<void> {

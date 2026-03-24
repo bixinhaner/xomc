@@ -160,6 +160,7 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
             page={page}
             pageSize={pageSize}
             onPageChange={handlePageChange}
+            onNavigate={handleSelectNode}
           />
         </div>
       </div>

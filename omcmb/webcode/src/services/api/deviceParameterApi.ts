@@ -10,6 +10,7 @@ import type {
   ParameterUpdateResponse,
   ParameterConstraints,
   ChildParameter,
+  DirectChildrenResponse,
 } from '@/types/deviceParameter';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
@@ -349,13 +350,24 @@ export const deviceParameterApi = {
     deviceId: string,
     pathPrefix: string,
     params?: { page?: number; pageSize?: number }
-  ): Promise<PageResponse<ChildParameter>> {
-    const { data } = await http.get<BackendListResponse<BackendChildParameter>>(
+  ): Promise<DirectChildrenResponse> {
+    const { data } = await http.get<{
+      items: BackendChildParameter[];
+      sub_objects: { name: string; full_path: string; child_count: number }[];
+      total: number;
+      page: number;
+      page_size: number;
+    }>(
       `/devices/${deviceId}/parameters/children`,
       { params: { path_prefix: pathPrefix, page: params?.page ?? 1, page_size: params?.pageSize ?? 50 } }
     );
     return {
       items: (data.items || []).map(mapBackendChildParameter),
+      subObjects: (data.sub_objects || []).map((o) => ({
+        name: o.name,
+        fullPath: o.full_path,
+        childCount: o.child_count,
+      })),
       total: data.total,
       page: data.page,
       pageSize: data.page_size,

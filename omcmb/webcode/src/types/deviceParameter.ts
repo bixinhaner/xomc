@@ -126,6 +126,22 @@ export interface ChildParameter {
   constraints?: ParameterConstraints;
 }
 
+/** 子对象摘要（某前缀下的直接子文件夹） */
+export interface SubObjectSummary {
+  name: string;
+  fullPath: string;
+  childCount: number;
+}
+
+/** getDirectChildren 组合响应（叶子参数 + 子对象摘要） */
+export interface DirectChildrenResponse {
+  items: ChildParameter[];
+  subObjects: SubObjectSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 /** 参数更新响应 */
 export interface ParameterUpdateResponse {
   message: string;
