@@ -195,3 +195,63 @@ func (r *PgDeviceParameterRepository) SearchByKeyword(ctx context.Context, devic
 	}
 	return params, nil
 }
+
+func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, deviceID uuid.UUID, prefix string, limit, offset int) ([]model.DeviceParameter, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// 直接叶子参数：匹配前缀，但去掉前缀后不再包含 "."
+	// 即 parameter_path LIKE 'prefix%' AND parameter_path NOT LIKE 'prefix%.%'
+	likePrefix := prefix + "%"
+	notLikeDeeper := prefix + "%.%"
+
+	// 先查总数
+	countQuery, countArgs, err := psql.Select("COUNT(*)").
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(sq.Like{"parameter_path": likePrefix}).
+		Where(sq.NotLike{"parameter_path": notLikeDeeper}).
+		ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count direct child leaves: %w", err)
+	}
+
+	// 查分页数据
+	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(sq.Like{"parameter_path": likePrefix}).
+		Where(sq.NotLike{"parameter_path": notLikeDeeper}).
+		OrderBy("parameter_path ASC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset)).
+		ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build direct children query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query direct child leaves: %w", err)
+	}
+	defer rows.Close()
+
+	var params []model.DeviceParameter
+	for rows.Next() {
+		var p model.DeviceParameter
+		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan parameter: %w", err)
+		}
+		params = append(params, p)
+	}
+	if params == nil {
+		params = []model.DeviceParameter{}
+	}
+	return params, total, nil
+}

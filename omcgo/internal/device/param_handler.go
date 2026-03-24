@@ -42,6 +42,7 @@ func (h *ParameterTreeHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	devices := rg.Group("/devices")
 	{
 		devices.GET("/:id/parameters/tree", h.GetParameterTree)
+		devices.GET("/:id/parameters/children", h.GetDirectChildren)
 		devices.GET("/:id/parameters/search", h.SearchParameters)
 		devices.GET("/:id/parameters/schema", h.GetParameterSchema)
 		devices.PUT("/:id/parameters", h.SetParameterValues)
@@ -140,6 +141,12 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 				}
 			}
 		}
+	}
+
+	// objects_only=true 时只返回对象/文件夹节点，去掉所有叶子节点。
+	// 用于左侧树面板，将 ~5925 节点缩减为 ~200 个文件夹节点。
+	if c.DefaultQuery("objects_only", "false") == "true" {
+		tree = stripLeafNodes(tree)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"tree": tree, "total": len(params)})
@@ -462,6 +469,139 @@ func buildTree(params []model.DeviceParameter) []*ParameterTreeNode {
 	}
 
 	return root.Children
+}
+
+// stripLeafNodes 递归移除树中的所有叶子节点，只保留对象/文件夹节点。
+func stripLeafNodes(nodes []*ParameterTreeNode) []*ParameterTreeNode {
+	var result []*ParameterTreeNode
+	for _, node := range nodes {
+		if node.IsLeaf {
+			continue
+		}
+		// 递归处理子节点
+		node.Children = stripLeafNodes(node.Children)
+		result = append(result, node)
+	}
+	return result
+}
+
+// DirectChildrenResponse 返回指定前缀下的直接子项（叶子参数 + 子对象摘要）。
+type DirectChildrenResponse struct {
+	Leaves      []model.DeviceParameter `json:"leaves"`
+	SubObjects  []SubObjectSummary      `json:"sub_objects"`
+	Total       int                     `json:"total"`
+	Page        int                     `json:"page"`
+	PageSize    int                     `json:"page_size"`
+}
+
+// SubObjectSummary 子对象摘要，包含名称和后代参数数量。
+type SubObjectSummary struct {
+	Name       string `json:"name"`
+	FullPath   string `json:"full_path"`
+	ChildCount int    `json:"child_count"`
+}
+
+// GetDirectChildren handles GET /api/v1/devices/:id/parameters/children.
+// 返回指定 path_prefix 下的直接叶子参数（分页）和直接子对象列表。
+func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	pathPrefix := c.Query("path_prefix")
+	if pathPrefix == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("path_prefix is required"))
+		return
+	}
+
+	page := 1
+	if p := c.Query("page"); p != "" {
+		if parsed, parseErr := strconv.Atoi(p); parseErr == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	pageSize := 50
+	if ps := c.Query("page_size"); ps != "" {
+		if parsed, parseErr := strconv.Atoi(ps); parseErr == nil && parsed > 0 && parsed <= 200 {
+			pageSize = parsed
+		}
+	}
+	offset := (page - 1) * pageSize
+
+	// 1. 获取直接叶子参数（分页）
+	leaves, total, err := h.paramRepo.GetDirectChildLeaves(c.Request.Context(), id, pathPrefix, pageSize, offset)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	// 2. 计算直接子对象：获取该前缀下所有更深层级的参数，提取第一级子路径段
+	allDescendants, err := h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	subObjectCounts := make(map[string]int) // segment name -> 后代参数计数
+	for _, p := range allDescendants {
+		suffix := strings.TrimPrefix(p.ParameterPath, pathPrefix)
+		if suffix == "" {
+			continue
+		}
+		// 如果 suffix 不包含 "."，是直接叶子（已通过 SQL 查询获取），跳过
+		dotIdx := strings.Index(suffix, ".")
+		if dotIdx < 0 {
+			continue
+		}
+		segment := suffix[:dotIdx]
+		subObjectCounts[segment]++
+	}
+
+	subObjects := make([]SubObjectSummary, 0, len(subObjectCounts))
+	for segment, count := range subObjectCounts {
+		subObjects = append(subObjects, SubObjectSummary{
+			Name:       segment,
+			FullPath:   pathPrefix + segment,
+			ChildCount: count,
+		})
+	}
+	// 按名称排序
+	sort.Slice(subObjects, func(i, j int) bool {
+		return subObjects[i].Name < subObjects[j].Name
+	})
+
+	// 3. 模型元数据增强叶子参数
+	if h.dmRegistry != nil {
+		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
+		if devErr == nil && dev != nil {
+			dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
+			if dm != nil {
+				validator, _ := datamodel.NewParameterValidator(dm)
+				if validator != nil {
+					for i := range leaves {
+						if def := validator.LookupParam(leaves[i].ParameterPath); def != nil {
+							if def.Writable {
+								leaves[i].Writable = true
+							}
+							if def.Type != "" {
+								leaves[i].ParameterType = model.ParameterType(def.Type)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, DirectChildrenResponse{
+		Leaves:     leaves,
+		SubObjects: subObjects,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+	})
 }
 
 // GetParameterSchema handles GET /api/v1/devices/:id/parameters/schema.
