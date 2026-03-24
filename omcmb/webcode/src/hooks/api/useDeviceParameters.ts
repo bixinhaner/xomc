@@ -86,6 +86,22 @@ export function useSyncStatus(deviceId: string, enabled: boolean) {
   });
 }
 
+export function useObjectTree(deviceId: string) {
+  return useQuery({
+    queryKey: ['devices', 'object-tree', deviceId],
+    queryFn: () => api.getObjectTree(deviceId),
+    enabled: Boolean(deviceId),
+  });
+}
+
+export function useDirectChildren(deviceId: string, pathPrefix: string, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: ['devices', 'children', deviceId, pathPrefix, page, pageSize],
+    queryFn: () => api.getDirectChildren(deviceId, pathPrefix, { page, pageSize }),
+    enabled: Boolean(deviceId) && Boolean(pathPrefix),
+  });
+}
+
 export function useParameterSchema(deviceId: string, pathPrefix?: string) {
   return useQuery({
     queryKey: ['devices', 'parameter-schema', deviceId, pathPrefix],

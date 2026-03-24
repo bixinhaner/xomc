@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Tree, Tag, Space, Typography, Spin, Empty, Tooltip, Popconfirm, message } from 'antd';
 import {
   EditOutlined,
@@ -281,21 +281,34 @@ export default function TreeView({
     );
   };
 
+  // Controlled expansion — expand level by level, never auto-expand all.
+  const [userExpandedKeys, setUserExpandedKeys] = useState<React.Key[]>([]);
+
   const filteredData = useMemo(() => {
     if (!treeData) return [];
     return filterTree(treeData, searchKeyword);
   }, [treeData, searchKeyword]);
 
-  const defaultKeys = useMemo(() => {
-    // Default: expand first level nodes so the tree is not fully collapsed.
-    if (!filteredData.length) return [];
-    return filteredData.map((n) => n.fullPath);
-  }, [filteredData]);
+  // Initialize: expand first-level nodes when tree data first arrives.
+  useEffect(() => {
+    if (treeData && treeData.length > 0 && userExpandedKeys.length === 0) {
+      setUserExpandedKeys(treeData.map((n) => n.fullPath));
+    }
+  }, [treeData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const expandedKeys = useMemo(() => {
-    if (!searchKeyword || !filteredData.length) return undefined;
-    return collectAllKeys(filteredData);
-  }, [filteredData, searchKeyword]);
+  // When searching, expand all matching object nodes; otherwise use user state.
+  const activeExpandedKeys = useMemo(() => {
+    if (searchKeyword && filteredData.length) {
+      return collectAllKeys(filteredData);
+    }
+    return userExpandedKeys;
+  }, [searchKeyword, filteredData, userExpandedKeys]);
+
+  const handleExpand = useCallback((keys: React.Key[]) => {
+    if (!searchKeyword) {
+      setUserExpandedKeys(keys);
+    }
+  }, [searchKeyword]);
 
   const antdTreeData = useMemo(
     () => convertToAntdTree(filteredData, setEditTarget, handleAddObject, handleDeleteObject, searchKeyword),
@@ -325,8 +338,8 @@ export default function TreeView({
         showIcon
         showLine={{ showLeafIcon: false }}
         treeData={antdTreeData}
-        defaultExpandedKeys={defaultKeys}
-        expandedKeys={searchKeyword ? expandedKeys : undefined}
+        expandedKeys={activeExpandedKeys}
+        onExpand={handleExpand}
         autoExpandParent={Boolean(searchKeyword)}
         blockNode
         virtual

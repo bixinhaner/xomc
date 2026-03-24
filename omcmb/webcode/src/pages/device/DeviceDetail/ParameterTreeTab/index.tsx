@@ -1,51 +1,34 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Input, Radio, Space, Tooltip, message } from 'antd';
+import React, { useCallback, useState } from 'react';
+import { Button, Input, Space, Tooltip, message } from 'antd';
 import {
   SearchOutlined,
   SyncOutlined,
-  ApartmentOutlined,
-  TableOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
-  useDeviceParameters,
-  useDeviceParameterTree,
+  useObjectTree,
+  useDirectChildren,
   useSyncParameters,
   useDiscoverParameters,
   useSyncStatus,
 } from '@/hooks/api/useDeviceParameters';
-import TreeView from './TreeView';
-import TableView from './TableView';
+import ObjectTreePanel from './ObjectTreePanel';
+import ChildParamTable from './ChildParamTable';
 import SyncStatusBar from './SyncStatusBar';
-
-type ViewMode = 'tree' | 'table';
 
 interface ParameterTreeTabProps {
   deviceId: string;
 }
 
 export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>('tree');
+  const [selectedPath, setSelectedPath] = useState<string>('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Queries
-  const parametersQuery = useDeviceParameters(
-    deviceId,
-    useMemo(
-      () => ({
-        page,
-        pageSize,
-        search: searchKeyword || undefined,
-      }),
-      [page, pageSize, searchKeyword]
-    )
-  );
-
-  const treeQuery = useDeviceParameterTree(deviceId);
-
+  const treeQuery = useObjectTree(deviceId);
+  const childrenQuery = useDirectChildren(deviceId, selectedPath, page, pageSize);
   const { data: syncStatus } = useSyncStatus(deviceId, isSyncing);
 
   // Stop polling when sync completes or fails
@@ -54,7 +37,6 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       syncStatus &&
       (syncStatus.status === 'completed' || syncStatus.status === 'failed')
     ) {
-      // Keep visible for a moment then stop polling
       const timer = setTimeout(() => setIsSyncing(false), 5000);
       return () => clearTimeout(timer);
     }
@@ -91,14 +73,14 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
     });
   }, [deviceId, discoverMutation]);
 
+  const handleSelectNode = useCallback((path: string) => {
+    setSelectedPath(path);
+    setPage(1);
+  }, []);
+
   const handlePageChange = useCallback((newPage: number, newPageSize: number) => {
     setPage(newPage);
     setPageSize(newPageSize);
-  }, []);
-
-  const handleSearch = useCallback((value: string) => {
-    setSearchKeyword(value);
-    setPage(1);
   }, []);
 
   return (
@@ -114,30 +96,13 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
           gap: 8,
         }}
       >
-        <Space wrap>
-          <Input.Search
-            placeholder="搜索参数路径或值"
-            allowClear
-            onSearch={handleSearch}
-            style={{ width: 280 }}
-            prefix={<SearchOutlined />}
-          />
-          <Radio.Group
-            value={viewMode}
-            onChange={(e) => setViewMode(e.target.value as ViewMode)}
-            optionType="button"
-            buttonStyle="solid"
-            size="middle"
-          >
-            <Radio.Button value="tree">
-              <ApartmentOutlined /> 树形
-            </Radio.Button>
-            <Radio.Button value="table">
-              <TableOutlined /> 列表
-            </Radio.Button>
-          </Radio.Group>
-        </Space>
-
+        <Input.Search
+          placeholder="搜索参数路径或值"
+          allowClear
+          onSearch={setSearchKeyword}
+          style={{ width: 280 }}
+          prefix={<SearchOutlined />}
+        />
         <Space>
           <Tooltip title="从设备同步全部参数值（异步执行）">
             <Button
@@ -166,24 +131,38 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       {/* Sync Progress */}
       <SyncStatusBar syncStatus={syncStatus} />
 
-      {/* Content */}
-      {viewMode === 'tree' ? (
-        <TreeView
-          deviceId={deviceId}
-          treeData={treeQuery.data}
-          loading={treeQuery.isLoading}
-          searchKeyword={searchKeyword}
-        />
-      ) : (
-        <TableView
-          deviceId={deviceId}
-          data={parametersQuery.data}
-          loading={parametersQuery.isLoading}
-          page={page}
-          pageSize={pageSize}
-          onPageChange={handlePageChange}
-        />
-      )}
+      {/* Split Layout: Tree + Table */}
+      <div style={{ display: 'flex', gap: 16, minHeight: 500 }}>
+        <div
+          style={{
+            width: 360,
+            flexShrink: 0,
+            border: '1px solid #f0f0f0',
+            borderRadius: 8,
+            overflow: 'auto',
+            maxHeight: 700,
+          }}
+        >
+          <ObjectTreePanel
+            treeData={treeQuery.data}
+            loading={treeQuery.isLoading}
+            selectedPath={selectedPath}
+            searchKeyword={searchKeyword}
+            onSelect={handleSelectNode}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ChildParamTable
+            deviceId={deviceId}
+            pathPrefix={selectedPath}
+            data={childrenQuery.data}
+            loading={childrenQuery.isLoading}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={handlePageChange}
+          />
+        </div>
+      </div>
     </div>
   );
 }

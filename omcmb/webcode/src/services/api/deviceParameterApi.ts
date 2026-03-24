@@ -9,6 +9,7 @@ import type {
   ParameterSchemaResponse,
   ParameterUpdateResponse,
   ParameterConstraints,
+  ChildParameter,
 } from '@/types/deviceParameter';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
@@ -77,6 +78,18 @@ interface BackendListResponse<T> {
   page: number;
   page_size: number;
   total_pages: number;
+}
+
+interface BackendChildParameter {
+  parameter_path: string;
+  parameter_value: string;
+  parameter_type: string;
+  writable: boolean;
+  last_updated_at: string;
+  description?: string;
+  default_value?: string;
+  change_applies?: string;
+  constraints?: BackendConstraints;
 }
 
 interface BackendSchemaItem {
@@ -169,6 +182,20 @@ function mapBackendTreeNode(bn: BackendParameterTreeNode): ParameterTreeNode {
     changeApplies: bn.change_applies,
     defaultValue: bn.default_value,
     constraints: mapBackendConstraints(bn.constraints),
+  };
+}
+
+function mapBackendChildParameter(bp: BackendChildParameter): ChildParameter {
+  return {
+    parameterPath: bp.parameter_path,
+    parameterValue: bp.parameter_value,
+    parameterType: bp.parameter_type as ChildParameter['parameterType'],
+    writable: bp.writable,
+    lastUpdatedAt: bp.last_updated_at,
+    description: bp.description,
+    defaultValue: bp.default_value,
+    changeApplies: bp.change_applies,
+    constraints: mapBackendConstraints(bp.constraints),
   };
 }
 
@@ -306,6 +333,32 @@ export const deviceParameterApi = {
         isList: o.is_list,
       })),
       total: data.total,
+    };
+  },
+
+  async getObjectTree(deviceId: string): Promise<ParameterTreeNode[]> {
+    const { data } = await http.get<{ tree: BackendParameterTreeNode[]; total: number }>(
+      `/devices/${deviceId}/parameters/tree`,
+      { params: { objects_only: true } }
+    );
+    const nodes = data.tree ?? data as unknown as BackendParameterTreeNode[];
+    return (Array.isArray(nodes) ? nodes : []).map(mapBackendTreeNode);
+  },
+
+  async getDirectChildren(
+    deviceId: string,
+    pathPrefix: string,
+    params?: { page?: number; pageSize?: number }
+  ): Promise<PageResponse<ChildParameter>> {
+    const { data } = await http.get<BackendListResponse<BackendChildParameter>>(
+      `/devices/${deviceId}/parameters/children`,
+      { params: { path_prefix: pathPrefix, page: params?.page ?? 1, page_size: params?.pageSize ?? 50 } }
+    );
+    return {
+      items: (data.items || []).map(mapBackendChildParameter),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
     };
   },
 

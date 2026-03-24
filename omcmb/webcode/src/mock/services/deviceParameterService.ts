@@ -7,6 +7,7 @@ import type {
   ParameterSyncOptions,
   ParameterSchemaResponse,
   ParameterUpdateResponse,
+  ChildParameter,
 } from '@/types/deviceParameter';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { delay, paginate } from '../utils';
@@ -260,6 +261,50 @@ export const deviceParameterService = {
       total: filtered.length,
     };
     void deviceId;
+  },
+
+  async getObjectTree(deviceId: string): Promise<ParameterTreeNode[]> {
+    await delay(200, 500);
+    void deviceId;
+    // Return only object nodes from the mock tree
+    function filterObjects(nodes: ParameterTreeNode[]): ParameterTreeNode[] {
+      return nodes
+        .filter((n) => n.isObject)
+        .map((n) => ({
+          ...n,
+          children: n.children ? filterObjects(n.children) : undefined,
+        }));
+    }
+    return filterObjects(buildMockTree());
+  },
+
+  async getDirectChildren(
+    deviceId: string,
+    pathPrefix: string,
+    params?: { page?: number; pageSize?: number }
+  ): Promise<PageResponse<ChildParameter>> {
+    await delay(100, 300);
+    void deviceId;
+    const prefix = pathPrefix.endsWith('.') ? pathPrefix : pathPrefix + '.';
+    // Find direct leaf children under pathPrefix
+    const children: ChildParameter[] = mockParameters
+      .filter((p) => {
+        if (!p.parameterPath.startsWith(prefix)) return false;
+        // Must be a direct child (no more dots after prefix)
+        const remainder = p.parameterPath.slice(prefix.length);
+        return !remainder.includes('.');
+      })
+      .map((p) => ({
+        parameterPath: p.parameterPath,
+        parameterValue: p.parameterValue,
+        parameterType: p.parameterType,
+        writable: p.writable,
+        lastUpdatedAt: p.lastUpdatedAt,
+        description: `Parameter ${p.parameterPath.split('.').pop()}`,
+      }));
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 50;
+    return paginate(children, page, pageSize);
   },
 
   async addObject(deviceId: string, objectPath: string): Promise<void> {

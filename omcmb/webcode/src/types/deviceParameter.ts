@@ -113,6 +113,19 @@ export interface ParameterSchemaResponse {
   total: number;
 }
 
+/** 子参数（getDirectChildren 返回的叶子参数，含模型元数据） */
+export interface ChildParameter {
+  parameterPath: string;
+  parameterValue: string;
+  parameterType: ParameterType;
+  writable: boolean;
+  lastUpdatedAt: string;
+  description?: string;
+  defaultValue?: string;
+  changeApplies?: string;
+  constraints?: ParameterConstraints;
+}
+
 /** 参数更新响应 */
 export interface ParameterUpdateResponse {
   message: string;
