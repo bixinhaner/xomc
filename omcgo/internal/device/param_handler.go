@@ -808,20 +808,43 @@ func enrichTreeWithModel(nodes []*ParameterTreeNode, v *datamodel.ParameterValid
 				node.Constraints = def.Constraints
 			}
 		} else {
-			objPath := node.FullPath + "."
-			if obj := v.LookupObject(objPath); obj != nil {
-				node.MultiInstance = datamodel.ContainsPlaceholder(obj.Name) || obj.MaxInstances > 0
-				node.MaxInstances = obj.MaxInstances
-				node.MinInstances = datamodel.GetMinInstances(*obj)
-				node.InstanceCount = len(node.Children)
-				node.CanAdd = obj.Access == "READ_WRITE" &&
-					(obj.MaxInstances == 0 || node.InstanceCount < obj.MaxInstances)
-				node.CanDelete = obj.Access == "READ_WRITE" &&
-					node.InstanceCount > node.MinInstances
+			// 判断是否为多实例容器：子节点中有数字命名的实例（如 1, 2, 3）。
+			// 不能依赖 LookupObject 返回的模板定义，因为实例节点（如 Interface.1）
+			// 也会匹配到模板（如 Interface.{12}），导致误标记。
+			instanceCount := 0
+			for _, child := range node.Children {
+				if !child.IsLeaf && isNumericName(child.Name) {
+					instanceCount++
+				}
+			}
+			if instanceCount > 0 {
+				node.MultiInstance = true
+				node.InstanceCount = instanceCount
+				// 通过第一个实例子节点反查数据模型模板定义，获取约束信息。
+				for _, child := range node.Children {
+					if !child.IsLeaf && isNumericName(child.Name) {
+						templatePath := child.FullPath + "."
+						if obj := v.LookupObject(templatePath); obj != nil {
+							node.MaxInstances = obj.MaxInstances
+							node.MinInstances = datamodel.GetMinInstances(*obj)
+							node.CanAdd = obj.Access == "READ_WRITE" &&
+								(obj.MaxInstances == 0 || instanceCount < obj.MaxInstances)
+							node.CanDelete = obj.Access == "READ_WRITE" &&
+								instanceCount > node.MinInstances
+						}
+						break
+					}
+				}
 			}
 		}
 		enrichTreeWithModel(node.Children, v)
 	}
+}
+
+// isNumericName 判断节点名是否为纯数字（多实例对象的实例编号）。
+func isNumericName(name string) bool {
+	_, err := strconv.Atoi(name)
+	return err == nil
 }
 
 // AddObjectRequest defines the request body for adding a multi-instance object.
