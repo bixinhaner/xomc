@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { App, Modal, Tag } from 'antd';
+import { App, Button, Tag } from 'antd';
 import {
   DeleteOutlined,
   ExportOutlined,
+  ImportOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -10,6 +11,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import ImportModal from './ImportModal';
 
 // 设备类型
 type DeviceType = 'eNB' | 'gNB' | 'CPE';
@@ -139,6 +141,7 @@ export default function RecycleBin() {
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   // 过滤数据
   const filteredData = useMemo(() => {
@@ -197,6 +200,17 @@ export default function RecycleBin() {
     },
     [t, modal, message]
   );
+
+  // 打开导入弹窗
+  const handleOpenImportModal = useCallback(() => {
+    setImportModalOpen(true);
+  }, []);
+
+  // 导入完成
+  const handleImportComplete = useCallback(() => {
+    // TODO: 刷新数据
+    message.success(t('common.success'));
+  }, [message, t]);
 
   // 筛选字段配置
   const FILTER_FIELDS: FilterField[] = useMemo(
@@ -308,7 +322,15 @@ export default function RecycleBin() {
   );
 
   return (
-    <ListPageLayout title={t('nav.device.recycle')} subtitle={`${t('table.total')} ${filteredData.length}`}>
+    <ListPageLayout
+      title={t('nav.device.recycle')}
+      subtitle={`${t('table.total')} ${filteredData.length}`}
+      extra={
+        <Button type="primary" icon={<ImportOutlined />} onClick={handleOpenImportModal}>
+          {t('common.import')}
+        </Button>
+      }
+    >
       <FilterBar
         filterId="recycle-bin"
         fields={FILTER_FIELDS}
@@ -338,6 +360,12 @@ export default function RecycleBin() {
         onPageChange={(p) => setCurrentPage(p)}
         batchActions={batchActions}
         defaultDensity="compact"
+      />
+
+      <ImportModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onConfirm={handleImportComplete}
       />
     </ListPageLayout>
   );

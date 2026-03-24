@@ -1745,6 +1745,16 @@ const messages: Record<string, string> = {
   'recycle.restoreConfirm':         '确认将选中的 {count} 个设备移出回收站？',
   'recycle.deleteConfirm':          '确认删除选中的 {count} 个设备？此操作不可恢复。',
   'recycle.searchPlaceholder':      '小站编码 / MAC地址',
+  'recycle.importConfirm':          '确认批量导入设备到回收站？',
+  'recycle.importTips':             '导入说明',
+  'recycle.importFormatTip':        '仅支持 CSV 格式文件',
+  'recycle.importSizeTip':          '文件大小不超过 10MB',
+  'recycle.importColumnTip':        '文件需包含序列号、MAC地址等必填字段',
+  'recycle.importSelectFile':       '点击或拖拽文件到此区域上传',
+  'recycle.importCsvOnly':          '仅支持 .csv 格式',
+  'recycle.importFormatError':      '文件格式错误，仅支持 CSV 格式',
+  'recycle.importSizeError':        '文件大小超过 10MB 限制',
+  'recycle.importSuccess':          '导入成功',
 
   // Status
   'status.enabled':                 '已启用',

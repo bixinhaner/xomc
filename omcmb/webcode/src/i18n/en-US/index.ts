@@ -1742,6 +1742,16 @@ const messages: Record<string, string> = {
   'recycle.restoreConfirm':         'Confirm to restore {count} selected device(s) from recycle bin?',
   'recycle.deleteConfirm':          'Confirm to delete {count} selected device(s)? This action cannot be undone.',
   'recycle.searchPlaceholder':      'Serial Number / MAC Address',
+  'recycle.importConfirm':          'Confirm to batch import devices to recycle bin?',
+  'recycle.importTips':             'Import Instructions',
+  'recycle.importFormatTip':        'Only CSV format is supported',
+  'recycle.importSizeTip':          'File size must not exceed 10MB',
+  'recycle.importColumnTip':        'File must contain required fields such as serial number, MAC address',
+  'recycle.importSelectFile':       'Click or drag file to this area to upload',
+  'recycle.importCsvOnly':          'Only .csv format is supported',
+  'recycle.importFormatError':      'Invalid file format, only CSV is supported',
+  'recycle.importSizeError':        'File size exceeds 10MB limit',
+  'recycle.importSuccess':          'Import successful',
 
   // Status
   'status.enabled':                 'Enabled',
