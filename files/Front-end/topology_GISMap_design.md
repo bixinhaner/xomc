@@ -852,52 +852,57 @@ Response:
 
 ### 6.1 组件架构
 
+> **设计原则**：遵循现有 `omcmb/webcode` 项目结构规范，扩展现有文件而非创建新模块。
+
 ```
-src/components/GISMap/
-├── index.tsx                    # GISMap 主组件（对外入口）
-├── core/
-│   ├── OLMap.ts                 # OpenLayers 地图核心类
-│   ├── layers/
-│   │   ├── TileLayer.ts         # 瓦片底图层
-│   │   ├── DeviceLayer.ts       # 设备标记层（Vector）
-│   │   └── ClusterLayer.ts      # 聚合层
-│   └── interactions/
-│       ├── HoverInteraction.ts  # 悬停交互
-│       └── ClickInteraction.ts  # 点击交互
+src/
 ├── components/
-│   ├── MapMarker.tsx            # 设备标记样式组件
-│   ├── MapCluster.tsx           # 聚合圆圈组件
-│   ├── MapPopup.tsx             # 悬浮提示组件（名称+状态+告警数，无操作按钮）
-│   ├── MapControls.tsx          # 地图控制按钮（仅放大/缩小）
-│   ├── MapStatsPanel.tsx        # 统计面板组件
-│   ├── MapLegend.tsx            # 图例组件
-│   └── GroupTree.tsx            # 设备组树形筛选组件
-├── hooks/
-│   ├── useOLMap.ts              # OpenLayers 地图初始化 Hook
-│   ├── useDeviceLayer.ts        # 设备图层 Hook
-│   ├── useClusterSource.ts      # 聚合数据源 Hook
-│   ├── useMapGeoData.ts         # 地图数据 Hook
-│   ├── useMapStats.ts           # 统计数据 Hook
-│   └── useMapViewport.ts        # 视图状态 Hook
-├── utils/
-│   ├── featureUtils.ts          # OpenLayers Feature 工具
-│   ├── styleUtils.ts            # 样式工具（颜色/图标）
-│   └── geoUtils.ts              # 地理计算工具
-├── constants.ts                 # 常量配置
-├── types.ts                     # 类型定义
-└── styles.module.css            # 样式文件
-
-src/services/api/
-└── mapApi.ts                    # 地图相关 API
-
-src/hooks/api/
-└── useMap.ts                    # 地图 React Query Hooks
+│   └── GISMap/                      # GISMap 组件目录
+│       ├── index.tsx                # GISMap 主组件（对外入口）
+│       ├── MapMarker.tsx            # 设备标记样式组件
+│       ├── MapCluster.tsx           # 聚合圆圈组件
+│       ├── MapPopup.tsx             # 悬浮提示组件（名称+状态+告警数，无操作按钮）
+│       ├── MapControls.tsx          # 地图控制按钮（仅放大/缩小）
+│       ├── MapStatsPanel.tsx        # 统计面板组件
+│       ├── GroupTree.tsx            # 设备组树形筛选组件
+│       ├── useOLMap.ts              # OpenLayers 地图初始化 Hook（核心逻辑）
+│       ├── useDeviceLayer.ts        # 设备图层 Hook
+│       ├── useClusterSource.ts      # 聚合数据源 Hook
+│       ├── featureUtils.ts          # OpenLayers Feature 工具
+│       ├── styleUtils.ts            # 样式工具（颜色/图标）
+│       ├── geoUtils.ts              # 地理计算工具
+│       ├── constants.ts             # 常量配置
+│       └── styles.module.css        # 样式文件
+│
+├── services/api/
+│   └── topologyApi.ts               # 【扩展】新增地图相关 API 方法
+│
+├── hooks/api/
+│   └── useTopology.ts               # 【扩展】新增地图相关 React Query Hooks
+│
+├── types/
+│   └── map.ts                       # 【新增】地图相关类型定义
+│
+└── pages/topology/GISMapView/
+    └── index.tsx                    # 页面入口（已存在，需适配）
 ```
 
-### 6.2 OpenLayers 核心实现
+**与现有项目结构的对齐说明**：
+
+| 设计方案 | 现有项目 | 说明 |
+|----------|----------|------|
+| `topologyApi.ts` 扩展 | 已存在 `topologyApi.ts` | 复用现有文件，新增地图 API 方法 |
+| `useTopology.ts` 扩展 | 已存在 `useTopology.ts` | 复用现有文件，新增地图 Hooks |
+| `src/types/map.ts` | 现有 `src/types/` 目录 | 遵循现有类型定义规范 |
+| GISMap 组件扁平结构 | 现有 GISMap 组件 | 简化结构，避免过度分层 |
+
+### 6.2 OpenLayers 核心实现（Hook 风格）
+
+> **设计原则**：使用自定义 Hook 封装 OpenLayers 逻辑，符合 React 函数式组件风格。
 
 ```typescript
-// core/OLMap.ts
+// components/GISMap/useOLMap.ts
+import { useEffect, useRef, useCallback, useState } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
@@ -906,19 +911,33 @@ import VectorSource from 'ol/source/Vector';
 import Cluster from 'ol/source/Cluster';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
+import Feature from 'ol/Feature';
+import Point from 'ol/geom/Point';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { defaults as defaultControls } from 'ol/control';
 import { Style, Circle, Fill, Stroke, Text } from 'ol/style';
+import type { MapDevice, MapViewport, MapOptions } from '@/types/map';
+import { DEVICE_STATUS_CONFIG } from './constants';
 
-export class OLMapCore {
-  private map: Map | null = null;
-  private deviceSource: VectorSource | null = null;
-  private clusterSource: Cluster | null = null;
+interface UseOLMapReturn {
+  mapRef: React.RefObject<HTMLDivElement>;
+  updateDevices: (devices: MapDevice[]) => void;
+  getViewport: () => MapViewport | null;
+  flyTo: (lng: number, lat: number, zoom?: number) => void;
+  highlightDevice: (deviceId: string) => void;
+}
 
-  /**
-   * 初始化地图
-   */
-  init(container: HTMLElement, options: MapOptions): void {
+export function useOLMap(options: MapOptions): UseOLMapReturn {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<Map | null>(null);
+  const deviceSourceRef = useRef<VectorSource | null>(null);
+  const clusterSourceRef = useRef<Cluster | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  // 初始化地图
+  useEffect(() => {
+    if (!mapRef.current || mapInstanceRef.current) return;
+
     // 创建瓦片图层
     const tileLayer = new TileLayer({
       source: options.tileUrl
@@ -927,24 +946,24 @@ export class OLMapCore {
     });
 
     // 创建设备数据源
-    this.deviceSource = new VectorSource();
+    deviceSourceRef.current = new VectorSource();
 
     // 创建聚合数据源
-    this.clusterSource = new Cluster({
-      source: this.deviceSource,
+    clusterSourceRef.current = new Cluster({
+      source: deviceSourceRef.current,
       distance: options.clusterDistance || 40,
     });
 
     // 创建设备图层
     const deviceLayer = new VectorLayer({
-      source: this.clusterSource,
-      style: this.createClusterStyle.bind(this),
+      source: clusterSourceRef.current,
+      style: createClusterStyle,
       zIndex: 10,
     });
 
     // 创建地图实例
-    this.map = new Map({
-      target: container,
+    mapInstanceRef.current = new Map({
+      target: mapRef.current,
       layers: [tileLayer, deviceLayer],
       view: new View({
         center: fromLonLat(options.center || [104.0, 35.0]),
@@ -955,19 +974,28 @@ export class OLMapCore {
       controls: defaultControls({ zoom: false }),
     });
 
-    this.bindEvents();
-  }
+    setIsReady(true);
 
-  /**
-   * 创建聚合样式
-   */
-  private createClusterStyle(feature: any): Style {
-    const size = feature.get('features').length;
+    // 绑定事件
+    bindMapEvents(mapInstanceRef.current, options);
+
+    // 清理函数
+    return () => {
+      mapInstanceRef.current?.setTarget(undefined);
+      mapInstanceRef.current = null;
+      deviceSourceRef.current = null;
+      clusterSourceRef.current = null;
+    };
+  }, []);
+
+  // 创建聚合样式
+  const createClusterStyle = useCallback((feature: Feature): Style => {
+    const features = feature.get('features') as Feature[];
+    const size = features?.length || 0;
 
     if (size === 1) {
       // 单个设备标记
-      const device = feature.get('features')[0];
-      return this.createDeviceStyle(device);
+      return createDeviceStyle(features[0]);
     }
 
     // 聚合圈样式
@@ -984,14 +1012,12 @@ export class OLMapCore {
         font: 'bold 12px sans-serif',
       }),
     });
-  }
+  }, []);
 
-  /**
-   * 创建设备标记样式
-   */
-  private createDeviceStyle(device: any): Style {
-    const status = device.get('status');
-    const config = DEVICE_STATUS_CONFIG[status];
+  // 创建设备标记样式
+  const createDeviceStyle = useCallback((feature: Feature): Style => {
+    const status = feature.get('status') as keyof typeof DEVICE_STATUS_CONFIG;
+    const config = DEVICE_STATUS_CONFIG[status] || DEVICE_STATUS_CONFIG.offline;
 
     return new Style({
       image: new Circle({
@@ -1000,37 +1026,36 @@ export class OLMapCore {
         stroke: new Stroke({ color: '#fff', width: 2 }),
       }),
     });
-  }
+  }, []);
 
-  /**
-   * 更新设备数据
-   */
-  updateDevices(devices: DeviceGeo[]): void {
-    if (!this.deviceSource) return;
+  // 更新设备数据
+  const updateDevices = useCallback((devices: MapDevice[]) => {
+    if (!deviceSourceRef.current) return;
 
     // 清除现有数据
-    this.deviceSource.clear();
+    deviceSourceRef.current.clear();
 
     // 添加新数据
     const features = devices.map(device => {
       const feature = new Feature({
-        geometry: new Point(fromLonLat([device.longitude, device.latitude])),
+        geometry: new Point(fromLonLat([device.lng, device.lat])),
         ...device,
       });
       feature.setId(device.id);
       return feature;
     });
 
-    this.deviceSource.addFeatures(features);
-  }
+    deviceSourceRef.current.addFeatures(features);
+  }, []);
 
-  /**
-   * 获取当前视图状态
-   */
-  getViewport(): MapViewport {
-    const view = this.map!.getView();
+  // 获取当前视图状态
+  const getViewport = useCallback((): MapViewport | null => {
+    if (!mapInstanceRef.current) return null;
+
+    const map = mapInstanceRef.current;
+    const view = map.getView();
     const center = toLonLat(view.getCenter()!);
-    const extent = view.calculateExtent(this.map!.getSize());
+    const extent = view.calculateExtent(map.getSize());
 
     return {
       centerLng: center[0],
@@ -1043,23 +1068,69 @@ export class OLMapCore {
         maxLat: toLonLat([extent[2], extent[3]])[1],
       },
     };
-  }
+  }, []);
 
-  /**
-   * 销毁地图
-   */
-  destroy(): void {
-    this.map?.setTarget(undefined);
-    this.map = null;
-    this.deviceSource = null;
-    this.clusterSource = null;
-  }
+  // 飞行到指定位置
+  const flyTo = useCallback((lng: number, lat: number, zoom = 14) => {
+    if (!mapInstanceRef.current) return;
+
+    const view = mapInstanceRef.current.getView();
+    view.animate({
+      center: fromLonLat([lng, lat]),
+      zoom,
+      duration: 1000,
+    });
+  }, []);
+
+  // 高亮设备
+  const highlightDevice = useCallback((deviceId: string) => {
+    // 实现高亮动画逻辑
+    // ...
+  }, []);
+
+  return {
+    mapRef,
+    updateDevices,
+    getViewport,
+    flyTo,
+    highlightDevice,
+    isReady,
+  };
+}
+
+// 绑定地图事件
+function bindMapEvents(map: Map, options: MapOptions): void {
+  // 视图变化事件
+  map.on('moveend', () => {
+    if (options.onViewportChange) {
+      const view = map.getView();
+      const center = toLonLat(view.getCenter()!);
+      options.onViewportChange({
+        centerLng: center[0],
+        centerLat: center[1],
+        zoom: view.getZoom()!,
+        bounds: { /* ... */ },
+      });
+    }
+  });
+
+  // 点击事件
+  map.on('click', (evt) => {
+    const features = map.getFeaturesAtPixel(evt.pixel);
+    if (features.length > 0 && options.onDeviceClick) {
+      const feature = features[0] as Feature;
+      const device = feature.get('features')?.[0] || feature;
+      options.onDeviceClick(device.getProperties() as MapDevice);
+    }
+  });
 }
 ```
 
 ### 6.3 核心组件接口
 
 ```typescript
+// types/map.ts
+
 /**
  * GISMap 主组件 Props
  */
@@ -1078,8 +1149,6 @@ interface GISMapProps {
   onViewportChange?: (viewport: MapViewport) => void;
   /** 是否显示统计面板 */
   showStats?: boolean;
-  /** 是否显示图例 */
-  showLegend?: boolean;
   /** 是否显示控制按钮 */
   showControls?: boolean;
   /** 自定义样式 */
@@ -1090,6 +1159,8 @@ interface GISMapProps {
  * MapDevice - 地图设备标记数据
  */
 interface MapDevice {
+  /** 设备ID */
+  id: string;
   /** 纬度 */
   lat: number;
   /** 经度 */
@@ -1102,10 +1173,12 @@ interface MapDevice {
   sn: string;
   /** 设备组ID */
   groupId?: string;
+  /** 设备组名称 */
+  groupName?: string;
   /** 告警数量 */
   alarmCount?: number;
-  /** 附加数据 */
-  data?: Record<string, any>;
+  /** 详细地址 */
+  address?: string;
 }
 
 /**
@@ -1119,101 +1192,252 @@ interface GroupTreeProps {
   /** 是否显示搜索 */
   showSearch?: boolean;
 }
+
+/**
+ * 地图配置选项
+ */
+interface MapOptions {
+  /** 瓦片服务地址（离线模式） */
+  tileUrl?: string;
+  /** 默认中心点 */
+  center?: [number, number];
+  /** 默认缩放级别 */
+  zoom?: number;
+  /** 最小缩放级别 */
+  minZoom?: number;
+  /** 最大缩放级别 */
+  maxZoom?: number;
+  /** 聚合距离 */
+  clusterDistance?: number;
+  /** 设备点击回调 */
+  onDeviceClick?: (device: MapDevice) => void;
+  /** 视图变化回调 */
+  onViewportChange?: (viewport: MapViewport) => void;
+}
 ```
 
-### 6.4 React Query Hooks
+### 6.4 React Query Hooks（扩展 useTopology.ts）
+
+> **设计原则**：扩展现有 `useTopology.ts`，新增地图相关 hooks，遵循项目现有模式。
 
 ```typescript
-// hooks/useMapGeoData.ts
+// hooks/api/useTopology.ts（扩展部分）
+
 import { useQuery } from '@tanstack/react-query';
-import { mapApi } from '@/services/api/mapApi';
+import { topologyApi } from '@/services/api/topologyApi';
+import { useMock } from '@/services/apiSwitch';
+import type { MapFilterParams, DeviceGeo, DeviceCluster, MapStats } from '@/types/map';
 
-interface UseMapGeoDataParams {
-  groupIds?: string[];
-  status?: DeviceStatus[];
-  keyword?: string;
-  bounds?: MapBounds;
-  enabled?: boolean;
-}
+// ── 现有 hooks 保持不变 ──
+// useDomains, useDomainTree, useSites, useTopoNodes, useTopoEdges, useTopoGraph, useGeoData
+// useCreateGroup, useUpdateGroup, useDeleteGroup, useGroupDevices, useAddDeviceToGroup, useRemoveDeviceFromGroup
 
-export function useMapGeoData(params: UseMapGeoDataParams) {
+// ── 新增地图相关 hooks ──
+
+/**
+ * 获取设备地理数据（支持筛选）
+ */
+export function useMapDevicesGeo(params: MapFilterParams) {
   return useQuery({
-    queryKey: ['map', 'geo', params],
-    queryFn: () => mapApi.getDevicesGeo(params),
+    queryKey: ['topology', 'map', 'geo', params],
+    queryFn: () =>
+      useMock
+        ? Promise.resolve({ items: [], total: 0 }) // Mock 实现
+        : topologyApi.getDevicesGeo(params),
     staleTime: 5 * 60 * 1000, // 5分钟
     enabled: params.enabled !== false,
   });
 }
 
-// hooks/useMapAggregation.ts
+/**
+ * 获取聚合数据（大范围视图）
+ */
 export function useMapAggregation(params: {
   bounds: MapBounds;
   zoom: number;
   filters?: MapFilterParams;
 }) {
   return useQuery({
-    queryKey: ['map', 'aggregation', params],
-    queryFn: () => mapApi.getAggregation(params),
+    queryKey: ['topology', 'map', 'aggregation', params],
+    queryFn: () =>
+      useMock
+        ? Promise.resolve({ clusters: [] }) // Mock 实现
+        : topologyApi.getAggregation(params),
     staleTime: 2 * 60 * 1000, // 2分钟
     enabled: params.zoom < 12, // 仅在缩放级别较小时请求
   });
 }
 
-// hooks/useMapStats.ts
-export function useMapStats(params?: { groupId?: string }) {
+/**
+ * 获取地图统计数据
+ */
+export function useMapStats(params?: { groupIds?: string[]; bounds?: string }) {
   return useQuery({
-    queryKey: ['map', 'stats', params],
-    queryFn: () => mapApi.getStats(params),
+    queryKey: ['topology', 'map', 'stats', params],
+    queryFn: () =>
+      useMock
+        ? Promise.resolve({ total: 0, statusCount: {}, alarmCount: 0 }) // Mock 实现
+        : topologyApi.getMapStats(params),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 60 * 1000, // 每分钟刷新
   });
 }
 
-// hooks/useDeviceGroups.ts
-export function useDeviceGroups() {
+/**
+ * 搜索设备（节点查找）
+ */
+export function useMapDeviceSearch(keyword: string) {
   return useQuery({
-    queryKey: ['device-groups', 'tree'],
-    queryFn: () => mapApi.getDeviceGroups(),
-    staleTime: 10 * 60 * 1000, // 10分钟
+    queryKey: ['topology', 'map', 'search', keyword],
+    queryFn: () =>
+      useMock
+        ? Promise.resolve([]) // Mock 实现
+        : topologyApi.searchDevices(keyword),
+    staleTime: 30 * 1000, // 30秒
+    enabled: keyword.length >= 2,
   });
 }
 ```
 
-### 6.5 API 服务层
+### 6.5 API 服务层（扩展 topologyApi.ts）
+
+> **设计原则**：扩展现有 `topologyApi.ts`，新增地图相关 API 方法，遵循项目现有模式（BackendXxx 接口 + mapBackendXxx 转换函数）。
 
 ```typescript
-// services/api/mapApi.ts
+// services/api/topologyApi.ts（扩展部分）
+
 import http from '../http';
-import type { DeviceGeo, DeviceCluster, MapStats, DeviceGroup, MapFilterParams } from '@/types/map';
+import type { DeviceGeo, DeviceCluster, MapStats, MapFilterParams, DeviceSearchResult } from '@/types/map';
 
-export const mapApi = {
-  /**
-   * 获取设备组树
-   */
-  async getDeviceGroups(): Promise<DeviceGroup[]> {
-    const { data } = await http.get<{ items: BackendDeviceGroup[] }>('/groups');
-    return (data.items || []).map(mapBackendDeviceGroup);
-  },
+// ── 新增 Backend 类型定义（snake_case） ──
+
+interface BackendDeviceGeo {
+  id: string;
+  name: string;
+  sn: string;
+  longitude: number;
+  latitude: number;
+  status: string;
+  type?: string;
+  group_id: string;
+  group_name?: string;
+  address?: string;
+  alarm_count?: number;
+}
+
+interface BackendDeviceCluster {
+  id: string;
+  longitude: number;
+  latitude: number;
+  count: number;
+  status_count: Record<string, number>;
+  alarm_count: number;
+  bounds?: {
+    min_lng: number;
+    max_lng: number;
+    min_lat: number;
+    max_lat: number;
+  };
+}
+
+interface BackendMapStats {
+  total: number;
+  status_count: Record<string, number>;
+  alarm_count: number;
+  type_count?: Record<string, number>;
+  viewport_count?: number;
+}
+
+interface BackendSearchResult {
+  id: string;
+  name: string;
+  sn: string;
+  status: string;
+  longitude: number;
+  latitude: number;
+  group_name?: string;
+}
+
+// ── 新增转换函数 ──
+
+function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
+  return {
+    id: bd.id,
+    name: bd.name,
+    sn: bd.sn,
+    longitude: bd.longitude,
+    latitude: bd.latitude,
+    status: bd.status as DeviceStatus,
+    type: bd.type as DeviceType,
+    groupId: bd.group_id,
+    groupName: bd.group_name,
+    address: bd.address,
+    alarmCount: bd.alarm_count,
+  };
+}
+
+function mapBackendCluster(bc: BackendDeviceCluster): DeviceCluster {
+  return {
+    id: bc.id,
+    longitude: bc.longitude,
+    latitude: bc.latitude,
+    count: bc.count,
+    statusCount: bc.status_count as Record<DeviceStatus, number>,
+    alarmCount: bc.alarm_count,
+    bounds: bc.bounds ? {
+      minLng: bc.bounds.min_lng,
+      maxLng: bc.bounds.max_lng,
+      minLat: bc.bounds.min_lat,
+      maxLat: bc.bounds.max_lat,
+    } : undefined,
+  };
+}
+
+function mapBackendStats(bs: BackendMapStats): MapStats {
+  return {
+    total: bs.total,
+    statusCount: bs.status_count as Record<DeviceStatus, number>,
+    alarmCount: bs.alarm_count,
+    typeCount: bs.type_count as Record<DeviceType, number> | undefined,
+    viewportCount: bs.viewport_count,
+  };
+}
+
+function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
+  return {
+    id: bs.id,
+    name: bs.name,
+    sn: bs.sn,
+    status: bs.status as DeviceStatus,
+    longitude: bs.longitude,
+    latitude: bs.latitude,
+    groupName: bs.group_name,
+  };
+}
+
+// ── 扩展现有 topologyApi 对象 ──
+
+export const topologyApi = {
+  // ... 现有方法保持不变 ...
+
+  // ── 新增地图相关 API 方法 ──
 
   /**
-   * 获取设备地理数据
+   * 获取设备地理数据（支持筛选）
    */
-  async getDevicesGeo(params: {
-    groupIds?: string[];
-    status?: string[];
-    keyword?: string;
-    bounds?: string;
-  }): Promise<{ items: DeviceGeo[]; total: number }> {
-    const { data } = await http.get('/devices/geo', {
+  async getDevicesGeo(params: MapFilterParams): Promise<{ items: DeviceGeo[]; total: number }> {
+    const { data } = await http.get<{ items: BackendDeviceGeo[]; total: number }>('/devices/geo', {
       params: {
         group_ids: params.groupIds?.join(','),
         status: params.status?.join(','),
         keyword: params.keyword,
         bounds: params.bounds,
+        page: params.page,
+        page_size: params.pageSize,
       },
     });
     return {
-      items: data.items.map(mapBackendDeviceGeo),
+      items: (data.items || []).map(mapBackendDeviceGeo),
       total: data.total,
     };
   },
@@ -1227,7 +1451,7 @@ export const mapApi = {
     gridSize?: number;
     filters?: MapFilterParams;
   }): Promise<{ clusters: DeviceCluster[] }> {
-    const { data } = await http.post('/devices/geo/aggregate', {
+    const { data } = await http.post<{ clusters: BackendDeviceCluster[] }>('/devices/geo/aggregate', {
       bounds: {
         min_lng: params.bounds.minLng,
         max_lng: params.bounds.maxLng,
@@ -1242,21 +1466,31 @@ export const mapApi = {
       },
     });
     return {
-      clusters: data.clusters.map(mapBackendCluster),
+      clusters: (data.clusters || []).map(mapBackendCluster),
     };
   },
 
   /**
-   * 获取统计数据
+   * 获取地图统计数据
    */
-  async getStats(params?: { groupIds?: string[]; bounds?: string }): Promise<MapStats> {
-    const { data } = await http.get('/devices/geo/stats', {
+  async getMapStats(params?: { groupIds?: string[]; bounds?: string }): Promise<MapStats> {
+    const { data } = await http.get<BackendMapStats>('/devices/geo/stats', {
       params: {
         group_ids: params?.groupIds?.join(','),
         bounds: params?.bounds,
       },
     });
     return mapBackendStats(data);
+  },
+
+  /**
+   * 搜索设备（节点查找）
+   */
+  async searchDevices(keyword: string): Promise<DeviceSearchResult[]> {
+    const { data } = await http.get<{ items: BackendSearchResult[] }>('/devices/search', {
+      params: { keyword },
+    });
+    return (data.items || []).map(mapBackendSearchResult);
   },
 };
 ```
@@ -1536,14 +1770,16 @@ interface MapEvents {
 
 ### A. 相关文件
 
-| 文件 | 路径 |
-|------|------|
-| 地图组件 | src/components/GISMap/ |
-| 地图API | src/services/api/mapApi.ts |
-| 地图Hooks | src/hooks/api/useMap.ts |
-| 类型定义 | src/types/map.ts |
-| 设备组树组件 | src/components/GISMap/components/GroupTree.tsx |
-| 页面使用 | src/pages/topology/GISMapView/ |
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| GISMap 组件 | src/components/GISMap/ | 地图组件目录（扁平结构） |
+| 主入口组件 | src/components/GISMap/index.tsx | GISMap 主组件 |
+| OpenLayers Hook | src/components/GISMap/useOLMap.ts | 地图核心逻辑 Hook |
+| 设备组树组件 | src/components/GISMap/GroupTree.tsx | 设备组树形筛选组件 |
+| 拓扑 API（扩展） | src/services/api/topologyApi.ts | 新增地图相关 API 方法 |
+| 拓扑 Hooks（扩展） | src/hooks/api/useTopology.ts | 新增地图相关 React Query Hooks |
+| 地图类型定义 | src/types/map.ts | 地图相关类型定义 |
+| GISMap 页面 | src/pages/topology/GISMapView/index.tsx | 页面入口（已存在，需适配） |
 
 ### B. 参考资料
 
