@@ -414,9 +414,12 @@ func syncPlanKey(deviceSN string) string {
 }
 
 func (s *SyncService) saveSyncPlan(ctx context.Context, deviceSN string, data []byte) {
-	// Use the command queue's underlying Redis via a simple TTL-set pattern.
-	// The cmdQueue should expose Redis operations, but for now we store
-	// the plan as a command with a special method.
+	// Clear old entries first — Redis Sorted Set members are keyed by their
+	// JSON content, so updating Params creates a new member instead of
+	// replacing the old one. Without clearing, Peek always returns the
+	// stale original plan.
+	_ = s.cmdQueue.Clear(ctx, syncPlanKey(deviceSN))
+
 	planCmd := &cmdqueue.Command{
 		ID:         "sync-plan",
 		Method:     "__sync_plan__",

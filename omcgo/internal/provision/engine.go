@@ -551,7 +551,7 @@ func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Ev
 		zap.Int("parameter_count", len(payload.ParameterInfos)),
 	)
 
-	if payload.DeviceSN == "" || len(payload.ParameterInfos) == 0 {
+	if payload.DeviceSN == "" {
 		return nil
 	}
 
@@ -561,6 +561,8 @@ func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Ev
 		return nil
 	}
 
+	// Always pass to HandleGPNResult (even with empty ParameterInfos) so the
+	// pending GPN count decrements and the sync plan can transition to GPV phase.
 	if e.syncService != nil {
 		if err := e.syncService.HandleGPNResult(ctx, dev, payload.Path, payload.ParameterInfos); err != nil {
 			e.logger.Error("handle GPN result", zap.Error(err), zap.String("device_sn", payload.DeviceSN))

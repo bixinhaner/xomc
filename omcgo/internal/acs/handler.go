@@ -568,6 +568,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	if cmd != nil {
 		session.State = StateRPCPending
 		session.LastRPC = cmd.Method
+		session.LastCommandParams = cmd.Params
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
@@ -675,7 +676,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// Publish RPC response event for provisioning engine (includes raw body for GPN/GPV processing).
-	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, log)
+	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, session.LastCommandParams, log)
 
 	// Check per-session RPC limit before dispatching next command.
 	if h.sessionRPCLimitReached(session) {
@@ -739,6 +740,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	if cmd != nil {
 		session.State = StateRPCPending
 		session.LastRPC = cmd.Method
+		session.LastCommandParams = cmd.Params
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
@@ -1191,7 +1193,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		zap.Strings("event_codes", eventCodes))
 }
 
-func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, log *zap.Logger) {
+func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, lastCmdParams json.RawMessage, log *zap.Logger) {
 	var subject string
 	switch method {
 	case soap.MethodGetParameterValuesResp:
@@ -1225,6 +1227,16 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 		"method":    string(method),
 	}
 
+	// Extract original command path from lastCmdParams (for GPN/GPV correlation).
+	if len(lastCmdParams) > 0 {
+		var cmdMeta struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(lastCmdParams, &cmdMeta); err == nil && cmdMeta.Path != "" {
+			payload["path"] = cmdMeta.Path
+		}
+	}
+
 	// For GPN/GPV responses, parse the SOAP body and include structured data
 	// instead of raw XML to avoid NATS message size limits.
 	switch method {
@@ -1237,6 +1249,7 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 			log.Info("GPN response parsed for event",
 				zap.String("device_sn", deviceSN),
 				zap.Int("parameter_count", len(paramInfos)),
+				zap.String("path", fmt.Sprintf("%v", payload["path"])),
 			)
 		}
 	case soap.MethodGetParameterValuesResp:

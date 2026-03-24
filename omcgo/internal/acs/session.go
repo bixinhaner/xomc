@@ -138,6 +138,10 @@ type Session struct {
 	// RPCCount 记录当前会话中已完成的 RPC 交互次数（请求+响应算一次）。
 	// 用于实施单会话 RPC 次数限制，避免触发基站单会话多次交互限制。
 	RPCCount int `json:"rpc_count"`
+
+	// LastCommandParams 保存最近发送给 CPE 的 RPC 命令参数（JSON）。
+	// 用于在收到响应时关联原始请求上下文（如 GPN 的查询路径）。
+	LastCommandParams json.RawMessage `json:"last_command_params,omitempty"`
 }
 
 // validTransitions 定义允许的状态转换。
