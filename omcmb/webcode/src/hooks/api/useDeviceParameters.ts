@@ -43,6 +43,9 @@ export function useUpdateParameters() {
       void queryClient.invalidateQueries({
         queryKey: ['devices', 'parameter-tree', deviceId],
       });
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'children', deviceId],
+      });
     },
   });
 }

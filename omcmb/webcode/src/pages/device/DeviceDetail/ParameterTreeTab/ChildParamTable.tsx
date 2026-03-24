@@ -1,6 +1,22 @@
-import React, { useState } from 'react';
-import { Table, Tag, Typography, Empty, Tooltip, Space } from 'antd';
-import { EditOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import React, { useCallback, useState } from 'react';
+import {
+  Table,
+  Tag,
+  Typography,
+  Empty,
+  Tooltip,
+  Space,
+  Input,
+  Select,
+  Button,
+  message,
+} from 'antd';
+import {
+  CheckOutlined,
+  CloseOutlined,
+  FolderOpenOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type {
   ChildParameter,
@@ -9,9 +25,9 @@ import type {
   DirectChildrenResponse,
   SubObjectSummary,
 } from '@/types/deviceParameter';
-import ParameterEditModal from './ParameterEditModal';
+import { useUpdateParameters } from '@/hooks/api/useDeviceParameters';
 
-const { Text, Link } = Typography;
+const { Text } = Typography;
 
 const TYPE_COLOR: Record<string, string> = {
   string: 'blue',
@@ -23,15 +39,75 @@ const TYPE_COLOR: Record<string, string> = {
   hexBinary: 'cyan',
 };
 
-interface EditTarget {
-  parameterPath: string;
-  currentValue: string;
-  parameterType: ParameterType;
-  constraints?: ParameterConstraints;
-  description?: string;
-  changeApplies?: string;
-  defaultValue?: string;
+// ---- Validation (extracted from ParameterEditModal) ----
+
+function validateValue(
+  value: string,
+  parameterType: ParameterType,
+  constraints?: ParameterConstraints
+): string | null {
+  if (!value && parameterType !== 'string') return '请输入值';
+
+  if (parameterType === 'int') {
+    const num = Number(value);
+    if (!Number.isInteger(num)) return '请输入整数';
+    if (constraints?.minValue !== undefined && num < constraints.minValue)
+      return `最小值 ${constraints.minValue}`;
+    if (constraints?.maxValue !== undefined && num > constraints.maxValue)
+      return `最大值 ${constraints.maxValue}`;
+  }
+
+  if (parameterType === 'unsignedInt') {
+    const num = Number(value);
+    if (!Number.isInteger(num) || num < 0) return '请输入非负整数';
+    if (constraints?.minValue !== undefined && num < constraints.minValue)
+      return `最小值 ${constraints.minValue}`;
+    if (constraints?.maxValue !== undefined && num > constraints.maxValue)
+      return `最大值 ${constraints.maxValue}`;
+  }
+
+  if (parameterType === 'string' && constraints) {
+    if (constraints.maxLength && value.length > constraints.maxLength)
+      return `最大长度 ${constraints.maxLength}`;
+    if (constraints.minLength && value.length < constraints.minLength)
+      return `最小长度 ${constraints.minLength}`;
+    if (constraints.pattern) {
+      try {
+        if (!new RegExp(constraints.pattern).test(value))
+          return `不匹配模式`;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  if (constraints?.enumValues?.length && !constraints.enumValues.includes(value))
+    return `不在允许值列表中`;
+
+  return null;
 }
+
+// ---- Constraints display ----
+
+function formatConstraints(c?: ParameterConstraints): string {
+  if (!c) return '-';
+  const parts: string[] = [];
+  if (c.minValue !== undefined || c.maxValue !== undefined) {
+    parts.push(`${c.minValue ?? ''} ~ ${c.maxValue ?? ''}`);
+  }
+  if (c.minLength !== undefined || c.maxLength !== undefined) {
+    if (c.minLength && c.maxLength) parts.push(`长度 ${c.minLength}~${c.maxLength}`);
+    else if (c.maxLength) parts.push(`长度 ≤${c.maxLength}`);
+    else if (c.minLength) parts.push(`长度 ≥${c.minLength}`);
+  }
+  if (c.enumValues?.length) {
+    parts.push(c.enumValues.join(' | '));
+  }
+  if (c.pattern) parts.push(`模式: ${c.pattern}`);
+  return parts.length > 0 ? parts.join('; ') : '-';
+}
+
+// ---- Component ----
 
 interface ChildParamTableProps {
   deviceId: string;
@@ -44,7 +120,6 @@ interface ChildParamTableProps {
   onNavigate: (path: string) => void;
 }
 
-/** Extract the last segment of a dotted parameter path as the display name */
 function getParamName(fullPath: string): string {
   const parts = fullPath.split('.');
   return parts[parts.length - 1] || parts[parts.length - 2] || fullPath;
@@ -60,17 +135,76 @@ export default function ChildParamTable({
   onPageChange,
   onNavigate,
 }: ChildParamTableProps) {
-  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const updateMutation = useUpdateParameters();
+
+  const startEdit = useCallback((record: ChildParameter) => {
+    setEditingPath(record.parameterPath);
+    setEditingValue(record.parameterValue);
+    setValidationError(null);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingPath(null);
+    setEditingValue('');
+    setValidationError(null);
+  }, []);
+
+  const handleSave = useCallback(
+    (record: ChildParameter) => {
+      const error = validateValue(editingValue, record.parameterType, record.constraints);
+      if (error) {
+        setValidationError(error);
+        return;
+      }
+      if (editingValue === record.parameterValue) {
+        cancelEdit();
+        return;
+      }
+      updateMutation.mutate(
+        {
+          deviceId,
+          parameters: [
+            {
+              parameterPath: record.parameterPath,
+              parameterValue: editingValue,
+              parameterType: record.parameterType,
+            },
+          ],
+        },
+        {
+          onSuccess: () => {
+            message.success(`参数 ${getParamName(record.parameterPath)} 已下发`);
+            cancelEdit();
+          },
+          onError: () => {
+            message.error('参数下发失败');
+          },
+        }
+      );
+    },
+    [deviceId, editingValue, updateMutation, cancelEdit]
+  );
+
+  const handleValueChange = useCallback(
+    (value: string, parameterType: ParameterType, constraints?: ParameterConstraints) => {
+      setEditingValue(value);
+      setValidationError(validateValue(value, parameterType, constraints));
+    },
+    []
+  );
 
   const columns: ColumnsType<ChildParameter> = [
     {
       title: '参数名',
       dataIndex: 'parameterPath',
       key: 'name',
-      width: 250,
+      width: 200,
       ellipsis: true,
-      render: (v: string) => (
-        <Tooltip title={v}>
+      render: (v: string, record: ChildParameter) => (
+        <Tooltip title={record.description ? `${v}\n${record.description}` : v}>
           <Text code style={{ fontSize: 12 }}>
             {getParamName(v)}
           </Text>
@@ -78,89 +212,196 @@ export default function ChildParamTable({
       ),
     },
     {
-      title: '值',
+      title: '当前值',
       dataIndex: 'parameterValue',
       key: 'value',
-      width: 200,
-      ellipsis: true,
-      render: (v: string) => (
-        <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-          {v || '(空)'}
-        </Text>
-      ),
+      width: 220,
+      render: (_: string, record: ChildParameter) => {
+        const isEditing = editingPath === record.parameterPath;
+
+        if (isEditing) {
+          // Boolean or enum → Select
+          if (record.parameterType === 'boolean') {
+            return (
+              <div>
+                <Select
+                  size="small"
+                  value={editingValue}
+                  onChange={(v) => handleValueChange(v, record.parameterType, record.constraints)}
+                  options={[
+                    { label: 'true', value: 'true' },
+                    { label: 'false', value: 'false' },
+                  ]}
+                  style={{ width: '100%' }}
+                  autoFocus
+                />
+                {validationError && (
+                  <Text type="danger" style={{ fontSize: 11 }}>
+                    {validationError}
+                  </Text>
+                )}
+              </div>
+            );
+          }
+          if (record.constraints?.enumValues?.length) {
+            return (
+              <div>
+                <Select
+                  size="small"
+                  value={editingValue}
+                  onChange={(v) => handleValueChange(v, record.parameterType, record.constraints)}
+                  options={record.constraints.enumValues.map((v) => ({ label: v, value: v }))}
+                  style={{ width: '100%' }}
+                  showSearch
+                  autoFocus
+                />
+                {validationError && (
+                  <Text type="danger" style={{ fontSize: 11 }}>
+                    {validationError}
+                  </Text>
+                )}
+              </div>
+            );
+          }
+          // Default → Input
+          return (
+            <div>
+              <Input
+                size="small"
+                value={editingValue}
+                onChange={(e) =>
+                  handleValueChange(e.target.value, record.parameterType, record.constraints)
+                }
+                onPressEnter={() => handleSave(record)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') cancelEdit();
+                }}
+                status={validationError ? 'error' : undefined}
+                autoFocus
+              />
+              {validationError && (
+                <Text type="danger" style={{ fontSize: 11 }}>
+                  {validationError}
+                </Text>
+              )}
+            </div>
+          );
+        }
+
+        // Read mode
+        return (
+          <Text
+            style={{
+              fontFamily: 'monospace',
+              fontSize: 12,
+              cursor: record.writable ? 'pointer' : 'default',
+              color: record.writable ? '#1677ff' : undefined,
+            }}
+            onClick={() => record.writable && startEdit(record)}
+          >
+            {record.parameterValue || '(空)'}
+          </Text>
+        );
+      },
     },
     {
       title: '类型',
       dataIndex: 'parameterType',
       key: 'type',
-      width: 100,
-      render: (v: string) => (
-        <Tag color={TYPE_COLOR[v] ?? 'default'} style={{ fontSize: 11 }}>
-          {v}
-        </Tag>
+      width: 90,
+      render: (v: string, record: ChildParameter) => (
+        <Space size={2}>
+          <Tag color={TYPE_COLOR[v] ?? 'default'} style={{ fontSize: 11, margin: 0 }}>
+            {v}
+          </Tag>
+          {record.writable && (
+            <Tag color="success" style={{ fontSize: 10, margin: 0 }}>
+              W
+            </Tag>
+          )}
+        </Space>
       ),
     },
     {
-      title: '可写',
-      dataIndex: 'writable',
-      key: 'writable',
-      width: 70,
-      render: (v: boolean) =>
-        v ? (
-          <Tag color="success">可写</Tag>
-        ) : (
-          <Tag color="default">只读</Tag>
-        ),
-    },
-    {
-      title: '描述',
-      dataIndex: 'description',
-      key: 'description',
-      width: 150,
+      title: '默认值',
+      dataIndex: 'defaultValue',
+      key: 'defaultValue',
+      width: 120,
       ellipsis: true,
       render: (v: string) =>
         v ? (
-          <Tooltip title={v}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {v}
+          <Text type="secondary" style={{ fontFamily: 'monospace', fontSize: 11 }}>
+            {v}
+          </Text>
+        ) : (
+          <Text type="quaternary" style={{ fontSize: 11 }}>
+            -
+          </Text>
+        ),
+    },
+    {
+      title: '取值范围',
+      key: 'constraints',
+      width: 160,
+      ellipsis: true,
+      render: (_: unknown, record: ChildParameter) => {
+        const text = formatConstraints(record.constraints);
+        return text !== '-' ? (
+          <Tooltip title={text}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {text}
             </Text>
           </Tooltip>
         ) : (
-          '-'
-        ),
+          <Text type="quaternary" style={{ fontSize: 11 }}>
+            -
+          </Text>
+        );
+      },
     },
     {
       title: '操作',
       key: 'action',
-      width: 60,
+      width: 80,
       fixed: 'right',
-      render: (_: unknown, record: ChildParameter) =>
-        record.writable ? (
-          <EditOutlined
-            style={{ color: '#1677ff', cursor: 'pointer' }}
-            onClick={() =>
-              setEditTarget({
-                parameterPath: record.parameterPath,
-                currentValue: record.parameterValue,
-                parameterType: record.parameterType,
-                constraints: record.constraints,
-                description: record.description,
-                changeApplies: record.changeApplies,
-                defaultValue: record.defaultValue,
-              })
-            }
-          />
-        ) : null,
+      render: (_: unknown, record: ChildParameter) => {
+        const isEditing = editingPath === record.parameterPath;
+        if (isEditing) {
+          return (
+            <Space size={4}>
+              <Button
+                type="primary"
+                size="small"
+                icon={<CheckOutlined />}
+                loading={updateMutation.isPending}
+                disabled={Boolean(validationError)}
+                onClick={() => handleSave(record)}
+              />
+              <Button
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={cancelEdit}
+              />
+            </Space>
+          );
+        }
+        if (!record.writable) return null;
+        return (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0 }}
+            onClick={() => startEdit(record)}
+          >
+            修改
+          </Button>
+        );
+      },
     },
   ];
 
   if (!pathPrefix) {
-    return (
-      <Empty
-        description="请在左侧选择一个参数节点"
-        style={{ padding: 48 }}
-      />
-    );
+    return <Empty description="请在左侧选择一个参数节点" style={{ padding: 48 }} />;
   }
 
   const subObjects = data?.subObjects ?? [];
@@ -176,14 +417,16 @@ export default function ChildParamTable({
         <Text code style={{ fontSize: 12 }}>
           {pathPrefix}
         </Text>
-        {hasSubObjects && (
+        {(hasSubObjects || hasLeaves) && (
           <Text type="secondary" style={{ fontSize: 12, marginLeft: 12 }}>
-            {subObjects.length} 个子对象, {data?.total ?? 0} 个参数
+            {hasSubObjects ? `${subObjects.length} 个子对象` : ''}
+            {hasSubObjects && hasLeaves ? ', ' : ''}
+            {hasLeaves ? `${data?.total ?? 0} 个参数` : ''}
           </Text>
         )}
       </div>
 
-      {/* Sub-object navigation cards */}
+      {/* Sub-object navigation */}
       {hasSubObjects && (
         <div
           style={{
@@ -198,11 +441,7 @@ export default function ChildParamTable({
           {subObjects.map((obj: SubObjectSummary) => (
             <Tag
               key={obj.fullPath}
-              style={{
-                cursor: 'pointer',
-                padding: '4px 10px',
-                fontSize: 13,
-              }}
+              style={{ cursor: 'pointer', padding: '4px 10px', fontSize: 13 }}
               color="processing"
               onClick={() => onNavigate(obj.fullPath + '.')}
             >
@@ -226,7 +465,7 @@ export default function ChildParamTable({
           loading={loading}
           rowKey="parameterPath"
           size="small"
-          scroll={{ x: 900 }}
+          scroll={{ x: 950 }}
           pagination={{
             current: page,
             pageSize,
@@ -240,21 +479,6 @@ export default function ChildParamTable({
       ) : !hasSubObjects && !loading ? (
         <Empty description="该节点下没有直接参数" style={{ padding: 24 }} />
       ) : null}
-
-      {editTarget && (
-        <ParameterEditModal
-          open={Boolean(editTarget)}
-          deviceId={deviceId}
-          parameterPath={editTarget.parameterPath}
-          currentValue={editTarget.currentValue}
-          parameterType={editTarget.parameterType}
-          constraints={editTarget.constraints}
-          description={editTarget.description}
-          changeApplies={editTarget.changeApplies}
-          defaultValue={editTarget.defaultValue}
-          onClose={() => setEditTarget(null)}
-        />
-      )}
     </>
   );
 }
