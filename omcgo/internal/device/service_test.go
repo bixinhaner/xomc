@@ -133,6 +133,18 @@ func (m *mockParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) 
 	return nil
 }
 
+func (m *mockParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
+func (m *mockParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {
+	return 0, nil
+}
+
+func (m *mockParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string, _ int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper: build a DeviceService wired to the given mocks
 // ---------------------------------------------------------------------------

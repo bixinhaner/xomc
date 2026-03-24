@@ -13,4 +13,7 @@ type DeviceParameterRepository interface {
 	GetByDevice(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error)
 	GetByPath(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error)
 	DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error
+	GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error)
+	CountByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int, error)
+	SearchByKeyword(ctx context.Context, deviceID uuid.UUID, keyword string, limit int) ([]model.DeviceParameter, error)
 }

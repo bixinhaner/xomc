@@ -135,6 +135,12 @@ func TestBuildConstraints(t *testing.T) {
 	assert.Equal(t, int64(1), *c.MinValue)
 	assert.Equal(t, int64(65535), *c.MaxValue)
 
+	// String type with min length
+	c = buildConstraints("STRING", "3", "64")
+	require.NotNil(t, c)
+	assert.Equal(t, 64, c.MaxLength)
+	assert.Equal(t, 3, c.MinLength)
+
 	// Empty → nil
 	c = buildConstraints("STRING", "", "")
 	assert.Nil(t, c)

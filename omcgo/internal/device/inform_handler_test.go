@@ -118,6 +118,18 @@ func (m *infMockParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUI
 	return nil
 }
 
+func (m *infMockParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
+func (m *infMockParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {
+	return 0, nil
+}
+
+func (m *infMockParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string, _ int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
 // Mock carrier for registry tests
 type infMockCarrier struct {
 	code         model.CarrierCode

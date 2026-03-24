@@ -276,7 +276,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	deviceHandler.RegisterRoutes(permGroup("devices"))
 
 	// Parameter tree routes → resource "devices"
-	paramTreeHandler := device.NewParameterTreeHandler(deviceService, paramRepo, logger)
+	paramTreeHandler := device.NewParameterTreeHandler(deviceService, paramRepo, dmRegistry, logger)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
 	// DataModel routes → resource "datamodels"

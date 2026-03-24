@@ -73,6 +73,7 @@ type ObjectInfo struct {
 	Name         string `json:"name"`
 	Access       string `json:"access"`
 	MaxInstances int    `json:"max_instances"`
+	MinInstances int    `json:"min_instances"`
 	IsList       bool   `json:"is_list"`
 }
 
@@ -83,6 +84,7 @@ type Constraints struct {
 	EnumValues []string `json:"enum_values,omitempty"`
 	Pattern    string   `json:"pattern,omitempty"`
 	MaxLength  int      `json:"max_length,omitempty"`
+	MinLength  int      `json:"min_length,omitempty"`
 }
 
 // DataModelFilter provides filtering options for listing data models.

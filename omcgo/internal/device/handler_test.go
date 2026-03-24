@@ -132,6 +132,18 @@ func (m *fakeParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) 
 	return nil
 }
 
+func (m *fakeParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
+func (m *fakeParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {
+	return 0, nil
+}
+
+func (m *fakeParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string, _ int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

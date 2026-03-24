@@ -89,6 +89,15 @@ func (m *mockParamRepo) GetByPath(_ context.Context, id uuid.UUID, path string) 
 	return nil, nil
 }
 func (m *mockParamRepo) DeleteByDevice(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (m *mockParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {
+	return 0, nil
+}
+func (m *mockParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string, _ int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
 
 // --- Mock CommandQueue ---
 

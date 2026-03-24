@@ -181,6 +181,15 @@ func (m *mockParamRepo) GetByPath(ctx context.Context, deviceID uuid.UUID, path 
 	return nil, nil
 }
 func (m *mockParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error { return nil }
+func (m *mockParamRepo) GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (m *mockParamRepo) CountByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int, error) {
+	return 0, nil
+}
+func (m *mockParamRepo) SearchByKeyword(ctx context.Context, deviceID uuid.UUID, keyword string, limit int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
 
 type mockAlarmStore struct{}
 

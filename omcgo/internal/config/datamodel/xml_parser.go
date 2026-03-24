@@ -183,7 +183,12 @@ func buildConstraints(xmlType, minStr, maxStr string) *Constraints {
 	isString := strings.ToUpper(xmlType) == "STRING"
 
 	if isString {
-		// For strings, max is max length.
+		// For strings, min is min length, max is max length.
+		if minStr != "" {
+			if minLen, err := strconv.Atoi(minStr); err == nil && minLen > 0 {
+				c.MinLength = minLen
+			}
+		}
 		if maxStr != "" {
 			if maxLen, err := strconv.Atoi(maxStr); err == nil && maxLen > 0 {
 				c.MaxLength = maxLen
@@ -204,7 +209,7 @@ func buildConstraints(xmlType, minStr, maxStr string) *Constraints {
 	}
 
 	// Return nil if no constraints were actually set.
-	if c.MaxLength == 0 && c.MinValue == nil && c.MaxValue == nil {
+	if c.MaxLength == 0 && c.MinLength == 0 && c.MinValue == nil && c.MaxValue == nil {
 		return nil
 	}
 	return c

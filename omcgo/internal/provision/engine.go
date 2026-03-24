@@ -119,6 +119,15 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		e.logger.Info("provisioning engine subscribed to GPV response events")
 	}
 
+	// Subscribe to GPN response for two-phase sync processing.
+	if _, err := bus.QueueSubscribe(event.SubjectCommandGetNamesResponse, "provision-gpn", func(ctx context.Context, evt event.Event) error {
+		return e.handleGPNResponse(ctx, evt)
+	}); err != nil {
+		e.logger.Warn("failed to subscribe to GPN response", zap.Error(err))
+	} else {
+		e.logger.Info("provisioning engine subscribed to GPN response events")
+	}
+
 	return nil
 }
 
@@ -291,6 +300,7 @@ func (e *ProvisioningEngine) handleModelUpload(ctx context.Context, task *Provis
 }
 
 // handleAutoSync initiates parameter value synchronization (Path B).
+// Uses two-phase sync: GPN discovery → GPV partial path fetch.
 func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *ProvisioningTask,
 	dev *model.Device, dm *datamodel.DataModel) error {
 
@@ -298,19 +308,14 @@ func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *Provision
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	paramPaths, err := extractPathsFromParameterTree(dm.ParameterTree)
-	if err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("extract parameter paths: %w", err))
+	// Use two-phase sync with the data model iterator.
+	if err := e.syncService.StartTwoPhaseSync(ctx, dev, dm); err != nil {
+		return e.failTask(ctx, task, fmt.Errorf("start two-phase sync: %w", err))
 	}
 
-	if err := e.syncService.StartSync(ctx, dev, paramPaths); err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("start sync: %w", err))
-	}
-
-	e.logger.Info("auto-sync initiated",
+	e.logger.Info("two-phase auto-sync initiated",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("task_id", task.ID.String()),
-		zap.Int("param_count", len(paramPaths)),
 	)
 
 	return nil
@@ -507,21 +512,58 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		zap.String("model_id", dm.ID.String()),
 	)
 
-	// After model creation, auto-sync parameters if sync service is available.
+	// After model creation, auto-sync parameters using two-phase sync.
 	if e.syncService != nil && e.config.AutoSync.Enabled {
-		paramPaths, err := extractPathsFromParameterTree(dm.ParameterTree)
-		if err == nil && len(paramPaths) > 0 {
-			if syncErr := e.syncService.StartSync(ctx, dev, paramPaths); syncErr != nil {
-				e.logger.Warn("auto-sync after model upload failed",
-					zap.Error(syncErr),
-					zap.String("device_sn", payload.DeviceSN),
-				)
-			} else {
-				e.logger.Info("auto-sync initiated after model upload",
-					zap.String("device_sn", payload.DeviceSN),
-					zap.Int("param_count", len(paramPaths)),
-				)
-			}
+		if syncErr := e.syncService.StartTwoPhaseSync(ctx, dev, dm); syncErr != nil {
+			e.logger.Warn("auto-sync after model upload failed",
+				zap.Error(syncErr),
+				zap.String("device_sn", payload.DeviceSN),
+			)
+		} else {
+			e.logger.Info("two-phase auto-sync initiated after model upload",
+				zap.String("device_sn", payload.DeviceSN),
+			)
+		}
+	}
+
+	return nil
+}
+
+// gpnResponsePayload is the structured event payload for GetParameterNamesResponse.
+type gpnResponsePayload struct {
+	DeviceSN       string                      `json:"device_sn"`
+	Method         string                      `json:"method"`
+	Path           string                      `json:"path"`
+	ParameterInfos []tr069.ParameterInfoStruct `json:"parameter_infos"`
+}
+
+// handleGPNResponse processes GetParameterNamesResponse events for two-phase sync.
+func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Event) error {
+	var payload gpnResponsePayload
+	if err := evt.DecodePayload(&payload); err != nil {
+		e.logger.Error("decode GPN response event", zap.Error(err))
+		return nil
+	}
+
+	e.logger.Info("received GPN response",
+		zap.String("device_sn", payload.DeviceSN),
+		zap.String("path", payload.Path),
+		zap.Int("parameter_count", len(payload.ParameterInfos)),
+	)
+
+	if payload.DeviceSN == "" || len(payload.ParameterInfos) == 0 {
+		return nil
+	}
+
+	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
+	if err != nil {
+		e.logger.Error("find device for GPN response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
+
+	if e.syncService != nil {
+		if err := e.syncService.HandleGPNResult(ctx, dev, payload.Path, payload.ParameterInfos); err != nil {
+			e.logger.Error("handle GPN result", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 		}
 	}
 

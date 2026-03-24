@@ -112,3 +112,86 @@ func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, device
 	}
 	return nil
 }
+
+func (r *PgDeviceParameterRepository) GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
+	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(sq.Like{"parameter_path": prefix + "%"}).
+		OrderBy("parameter_path ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build prefix query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query by prefix: %w", err)
+	}
+	defer rows.Close()
+
+	var params []model.DeviceParameter
+	for rows.Next() {
+		var p model.DeviceParameter
+		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan parameter: %w", err)
+		}
+		params = append(params, p)
+	}
+	if params == nil {
+		params = []model.DeviceParameter{}
+	}
+	return params, nil
+}
+
+func (r *PgDeviceParameterRepository) CountByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int, error) {
+	query, args, err := psql.Select("COUNT(*)").
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(sq.Like{"parameter_path": prefix + "%"}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var count int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count by prefix: %w", err)
+	}
+	return count, nil
+}
+
+func (r *PgDeviceParameterRepository) SearchByKeyword(ctx context.Context, deviceID uuid.UUID, keyword string, limit int) ([]model.DeviceParameter, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(sq.ILike{"parameter_path": "%" + keyword + "%"}).
+		OrderBy("parameter_path ASC").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build search query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search parameters: %w", err)
+	}
+	defer rows.Close()
+
+	var params []model.DeviceParameter
+	for rows.Next() {
+		var p model.DeviceParameter
+		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan parameter: %w", err)
+		}
+		params = append(params, p)
+	}
+	if params == nil {
+		params = []model.DeviceParameter{}
+	}
+	return params, nil
+}
