@@ -1122,6 +1122,8 @@ const messages: Record<string, string> = {
   'table.searchPlaceholder': '搜索...',
   'table.lockRefresh':       '锁定刷新',
   'table.unlockRefresh':     '解锁刷新',
+  'table.enableRealtimeRefresh':  '开启实时刷新',
+  'table.disableRealtimeRefresh': '关闭实时刷新',
 
   // -------------------------------------------------------------------------
   // EmptyState

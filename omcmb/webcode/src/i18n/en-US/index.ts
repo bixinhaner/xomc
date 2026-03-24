@@ -1119,6 +1119,8 @@ const messages: Record<string, string> = {
   'table.searchPlaceholder': 'Search...',
   'table.lockRefresh':       'Lock Refresh',
   'table.unlockRefresh':     'Unlock Refresh',
+  'table.enableRealtimeRefresh':  'Enable Real-time Refresh',
+  'table.disableRealtimeRefresh': 'Disable Real-time Refresh',
 
   // -------------------------------------------------------------------------
   // EmptyState

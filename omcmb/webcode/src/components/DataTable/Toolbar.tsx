@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button, Space, Tooltip } from 'antd';
-import { LockOutlined, ReloadOutlined, UnlockOutlined } from '@ant-design/icons';
+import { ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 import styles from './DataTable.module.css';
 import ColumnVisibility from './ColumnVisibility';
@@ -57,7 +57,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const t = useT();
   const hasSelection = selectedRowKeys.length > 0;
-  const [refreshLocked, setRefreshLocked] = useState(false);
+  const [realtimeRefreshEnabled, setRealtimeRefreshEnabled] = useState(false);
 
   return (
     <div className={styles.toolbar}>
@@ -90,15 +90,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Right side */}
       <Space size={4} className={styles.toolbarRight}>
         {extraRight}
-        <Tooltip title={refreshLocked ? t('table.unlockRefresh') : t('table.lockRefresh')}>
+        <Tooltip title={realtimeRefreshEnabled ? t('table.disableRealtimeRefresh') : t('table.enableRealtimeRefresh')}>
           <Button
-            icon={refreshLocked ? <LockOutlined /> : <UnlockOutlined />}
+            icon={<SyncOutlined spin={realtimeRefreshEnabled} />}
             size="small"
-            type={refreshLocked ? 'primary' : 'default'}
-            ghost={refreshLocked}
+            type={realtimeRefreshEnabled ? 'primary' : 'default'}
+            ghost={realtimeRefreshEnabled}
             onClick={() => {
-              const next = !refreshLocked;
-              setRefreshLocked(next);
+              const next = !realtimeRefreshEnabled;
+              setRealtimeRefreshEnabled(next);
               onRefreshLockChange?.(next);
             }}
           />
@@ -116,7 +116,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <Button
               icon={<ReloadOutlined />}
               size="small"
-              disabled={refreshLocked}
+              disabled={realtimeRefreshEnabled}
               onClick={onRefresh}
             />
           </Tooltip>
