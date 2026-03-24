@@ -11,6 +11,16 @@ export interface DeviceParameter {
 
 export type ParameterType = 'string' | 'int' | 'unsignedInt' | 'boolean' | 'dateTime' | 'base64' | 'hexBinary' | 'object';
 
+/** 参数约束（来自数据模型） */
+export interface ParameterConstraints {
+  minValue?: number;
+  maxValue?: number;
+  enumValues?: string[];
+  pattern?: string;
+  maxLength?: number;
+  minLength?: number;
+}
+
 /** 参数树节点 — 后端返回的树形结构 */
 export interface ParameterTreeNode {
   name: string;
@@ -21,6 +31,17 @@ export interface ParameterTreeNode {
   writable?: boolean;
   lastUpdatedAt?: string;
   children?: ParameterTreeNode[];
+  // Model metadata (enriched from data model)
+  description?: string;
+  multiInstance?: boolean;
+  maxInstances?: number;
+  minInstances?: number;
+  instanceCount?: number;
+  canAdd?: boolean;
+  canDelete?: boolean;
+  changeApplies?: string;
+  defaultValue?: string;
+  constraints?: ParameterConstraints;
 }
 
 /** 参数同步状态 */
@@ -54,4 +75,47 @@ export interface ParameterUpdateRequest {
 /** 参数同步选项 */
 export interface ParameterSyncOptions {
   nextLevel?: boolean;
+}
+
+/** 参数 Schema 项（含模型元数据和当前值） */
+export interface ParameterSchemaItem {
+  path: string;
+  type: string;
+  writable: boolean;
+  description?: string;
+  defaultValue?: string;
+  notify?: string;
+  forcedInform?: boolean;
+  changeApplies?: string;
+  category?: string;
+  isList?: boolean;
+  constraints?: ParameterConstraints;
+  currentValue?: string | null;
+  lastSyncedAt?: string;
+}
+
+/** 多实例对象 Schema 项 */
+export interface ObjectSchemaItem {
+  path: string;
+  access: string;
+  maxInstances: number;
+  minInstances: number;
+  currentInstances: number[];
+  canAdd: boolean;
+  canDeleteAny: boolean;
+  isList: boolean;
+}
+
+/** 参数 Schema 响应 */
+export interface ParameterSchemaResponse {
+  parameters: ParameterSchemaItem[];
+  objects: ObjectSchemaItem[];
+  total: number;
+}
+
+/** 参数更新响应 */
+export interface ParameterUpdateResponse {
+  message: string;
+  parameters: number;
+  rebootRequired: boolean;
 }

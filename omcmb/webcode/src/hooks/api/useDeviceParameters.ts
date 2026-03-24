@@ -85,3 +85,59 @@ export function useSyncStatus(deviceId: string, enabled: boolean) {
     refetchInterval: enabled ? 3000 : false,
   });
 }
+
+export function useParameterSchema(deviceId: string, pathPrefix?: string) {
+  return useQuery({
+    queryKey: ['devices', 'parameter-schema', deviceId, pathPrefix],
+    queryFn: () => api.getParameterSchema(deviceId, pathPrefix),
+    enabled: Boolean(deviceId),
+  });
+}
+
+export function useAddObject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      deviceId,
+      objectPath,
+    }: {
+      deviceId: string;
+      objectPath: string;
+    }) => api.addObject(deviceId, objectPath),
+    onSuccess: (_result, { deviceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameter-tree', deviceId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameters', deviceId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameter-schema', deviceId],
+      });
+    },
+  });
+}
+
+export function useDeleteObject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      deviceId,
+      objectPath,
+    }: {
+      deviceId: string;
+      objectPath: string;
+    }) => api.deleteObject(deviceId, objectPath),
+    onSuccess: (_result, { deviceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameter-tree', deviceId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameters', deviceId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ['devices', 'parameter-schema', deviceId],
+      });
+    },
+  });
+}

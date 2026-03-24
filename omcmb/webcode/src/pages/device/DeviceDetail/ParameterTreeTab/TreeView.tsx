@@ -1,8 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { Tree, Tag, Space, Typography, Spin, Empty } from 'antd';
-import { EditOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
+import { Tree, Tag, Space, Typography, Spin, Empty, Tooltip, Popconfirm, message } from 'antd';
+import {
+  EditOutlined,
+  FolderOutlined,
+  FileOutlined,
+  PlusCircleOutlined,
+  DeleteOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import type { ParameterTreeNode, ParameterType } from '@/types/deviceParameter';
+import { useAddObject, useDeleteObject } from '@/hooks/api/useDeviceParameters';
 import ParameterEditModal from './ParameterEditModal';
 
 const { Text } = Typography;
@@ -29,6 +37,10 @@ interface EditTarget {
   parameterPath: string;
   currentValue: string;
   parameterType: ParameterType;
+  constraints?: ParameterTreeNode['constraints'];
+  description?: string;
+  changeApplies?: string;
+  defaultValue?: string;
 }
 
 function renderLeafTitle(
@@ -59,6 +71,16 @@ function renderLeafTitle(
           可写
         </Tag>
       )}
+      {node.changeApplies === 'RebootRequired' && (
+        <Tag color="warning" style={{ fontSize: 11 }}>
+          需重启
+        </Tag>
+      )}
+      {node.description && (
+        <Tooltip title={node.description}>
+          <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />
+        </Tooltip>
+      )}
       {node.writable && (
         <EditOutlined
           style={{ color: '#1677ff', cursor: 'pointer', fontSize: 14 }}
@@ -68,9 +90,71 @@ function renderLeafTitle(
               parameterPath: node.fullPath,
               currentValue: node.parameterValue ?? '',
               parameterType: node.parameterType ?? 'string',
+              constraints: node.constraints,
+              description: node.description,
+              changeApplies: node.changeApplies,
+              defaultValue: node.defaultValue,
             });
           }}
         />
+      )}
+    </Space>
+  );
+}
+
+function renderObjectTitle(
+  node: ParameterTreeNode,
+  highlightKeyword: string,
+  onAdd: (objectPath: string) => void,
+  onDelete: (objectPath: string) => void,
+) {
+  const nameContent = highlightKeyword
+    ? highlightText(node.name, highlightKeyword)
+    : node.name;
+
+  return (
+    <Space size={8} style={{ lineHeight: '28px' }}>
+      <Text strong style={{ fontSize: 13 }}>
+        {nameContent}
+      </Text>
+      {node.multiInstance && (
+        <Tag color="geekblue" style={{ fontSize: 11 }}>
+          {node.instanceCount ?? 0}/{node.maxInstances ?? '?'}
+        </Tag>
+      )}
+      {node.description && (
+        <Tooltip title={node.description}>
+          <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />
+        </Tooltip>
+      )}
+      {node.canAdd && (
+        <Tooltip title={`添加实例（当前 ${node.instanceCount ?? 0}，最大 ${node.maxInstances ?? '无限制'}）`}>
+          <PlusCircleOutlined
+            style={{ color: '#52c41a', cursor: 'pointer', fontSize: 14 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd(node.fullPath.endsWith('.') ? node.fullPath : node.fullPath + '.');
+            }}
+          />
+        </Tooltip>
+      )}
+      {node.canDelete && (
+        <Popconfirm
+          title="确认删除此实例？"
+          description="删除操作将异步下发到设备。"
+          onConfirm={(e) => {
+            e?.stopPropagation();
+            onDelete(node.fullPath.endsWith('.') ? node.fullPath : node.fullPath + '.');
+          }}
+          onCancel={(e) => e?.stopPropagation()}
+          okText="删除"
+          cancelText="取消"
+        >
+          <DeleteOutlined
+            style={{ color: '#ff4d4f', cursor: 'pointer', fontSize: 14 }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Popconfirm>
       )}
     </Space>
   );
@@ -97,26 +181,21 @@ function highlightText(text: string, keyword: string): React.ReactNode {
 function convertToAntdTree(
   nodes: ParameterTreeNode[],
   onEdit: (target: EditTarget) => void,
+  onAdd: (objectPath: string) => void,
+  onDelete: (objectPath: string) => void,
   searchKeyword: string
 ): DataNode[] {
   return nodes.map((node) => {
     const isLeaf = !node.isObject;
-    const nameContent = searchKeyword
-      ? highlightText(node.name, searchKeyword)
-      : node.name;
 
     const treeNode: DataNode = {
       key: node.fullPath,
       icon: isLeaf ? <FileOutlined /> : <FolderOutlined />,
       title: isLeaf
         ? renderLeafTitle(node, onEdit, searchKeyword)
-        : (
-            <Text strong style={{ fontSize: 13 }}>
-              {nameContent}
-            </Text>
-          ),
+        : renderObjectTitle(node, searchKeyword, onAdd, onDelete),
       children: node.children
-        ? convertToAntdTree(node.children, onEdit, searchKeyword)
+        ? convertToAntdTree(node.children, onEdit, onAdd, onDelete, searchKeyword)
         : undefined,
       isLeaf,
     };
@@ -171,6 +250,36 @@ export default function TreeView({
   searchKeyword,
 }: TreeViewProps) {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const addObjectMutation = useAddObject();
+  const deleteObjectMutation = useDeleteObject();
+
+  const handleAddObject = (objectPath: string) => {
+    addObjectMutation.mutate(
+      { deviceId, objectPath },
+      {
+        onSuccess: () => {
+          message.success('添加实例命令已下发');
+        },
+        onError: () => {
+          message.error('添加实例失败');
+        },
+      }
+    );
+  };
+
+  const handleDeleteObject = (objectPath: string) => {
+    deleteObjectMutation.mutate(
+      { deviceId, objectPath },
+      {
+        onSuccess: () => {
+          message.success('删除实例命令已下发');
+        },
+        onError: () => {
+          message.error('删除实例失败');
+        },
+      }
+    );
+  };
 
   const filteredData = useMemo(() => {
     if (!treeData) return [];
@@ -183,7 +292,8 @@ export default function TreeView({
   }, [filteredData, searchKeyword]);
 
   const antdTreeData = useMemo(
-    () => convertToAntdTree(filteredData, setEditTarget, searchKeyword),
+    () => convertToAntdTree(filteredData, setEditTarget, handleAddObject, handleDeleteObject, searchKeyword),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [filteredData, searchKeyword]
   );
 
@@ -223,6 +333,10 @@ export default function TreeView({
           parameterPath={editTarget.parameterPath}
           currentValue={editTarget.currentValue}
           parameterType={editTarget.parameterType}
+          constraints={editTarget.constraints}
+          description={editTarget.description}
+          changeApplies={editTarget.changeApplies}
+          defaultValue={editTarget.defaultValue}
           onClose={() => setEditTarget(null)}
         />
       )}

@@ -5,6 +5,8 @@ import type {
   ParameterFilter,
   ParameterUpdateRequest,
   ParameterSyncOptions,
+  ParameterSchemaResponse,
+  ParameterUpdateResponse,
 } from '@/types/deviceParameter';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { delay, paginate } from '../utils';
@@ -80,6 +82,20 @@ function buildMockTree(): ParameterTreeNode[] {
     }
   }
 
+  // Enrich FAPService and PLMNList with multi-instance metadata
+  const services = root.children?.find((c) => c.name === 'Services');
+  if (services) {
+    const fapService = services.children?.find((c) => c.name === 'FAPService');
+    if (fapService) {
+      fapService.multiInstance = true;
+      fapService.maxInstances = 4;
+      fapService.minInstances = 1;
+      fapService.instanceCount = 1;
+      fapService.canAdd = true;
+      fapService.canDelete = false;
+    }
+  }
+
   return root.children ?? [];
 }
 
@@ -123,9 +139,8 @@ export const deviceParameterService = {
   async updateParameters(
     deviceId: string,
     parameters: ParameterUpdateRequest[]
-  ): Promise<void> {
+  ): Promise<ParameterUpdateResponse> {
     await delay(300, 600);
-    // Update mock data in place
     for (const update of parameters) {
       const existing = mockParameters.find((p) => p.parameterPath === update.parameterPath);
       if (existing) {
@@ -134,6 +149,11 @@ export const deviceParameterService = {
       }
     }
     void deviceId;
+    return {
+      message: 'set parameter values command queued',
+      parameters: parameters.length,
+      rebootRequired: false,
+    };
   },
 
   async syncParameters(
@@ -141,7 +161,6 @@ export const deviceParameterService = {
     _options?: ParameterSyncOptions
   ): Promise<void> {
     await delay(100, 200);
-    // Start mock sync process
     syncStates.set(deviceId, {
       deviceId,
       status: 'syncing',
@@ -153,7 +172,6 @@ export const deviceParameterService = {
       startedAt: new Date().toISOString(),
     });
 
-    // Simulate gradual progress
     let batch = 0;
     const interval = setInterval(() => {
       batch++;
@@ -180,7 +198,6 @@ export const deviceParameterService = {
 
   async discoverParameters(deviceId: string): Promise<void> {
     await delay(200, 400);
-    // Reuses sync simulation
     return this.syncParameters(deviceId);
   },
 
@@ -197,5 +214,63 @@ export const deviceParameterService = {
         percentage: 0,
       }
     );
+  },
+
+  async getParameterSchema(
+    deviceId: string,
+    pathPrefix?: string
+  ): Promise<ParameterSchemaResponse> {
+    await delay(200, 400);
+    let filtered = mockParameters;
+    if (pathPrefix) {
+      filtered = filtered.filter((p) => p.parameterPath.startsWith(pathPrefix));
+    }
+
+    return {
+      parameters: filtered.map((p) => ({
+        path: p.parameterPath,
+        type: p.parameterType,
+        writable: p.writable,
+        description: `Parameter ${p.parameterPath.split('.').pop()}`,
+        currentValue: p.parameterValue,
+        lastSyncedAt: p.lastUpdatedAt,
+      })),
+      objects: [
+        {
+          path: 'Device.Services.FAPService.',
+          access: 'READ_WRITE',
+          maxInstances: 4,
+          minInstances: 1,
+          currentInstances: [1],
+          canAdd: true,
+          canDeleteAny: false,
+          isList: true,
+        },
+        {
+          path: 'Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.',
+          access: 'READ_WRITE',
+          maxInstances: 6,
+          minInstances: 1,
+          currentInstances: [1],
+          canAdd: true,
+          canDeleteAny: false,
+          isList: true,
+        },
+      ],
+      total: filtered.length,
+    };
+    void deviceId;
+  },
+
+  async addObject(deviceId: string, objectPath: string): Promise<void> {
+    await delay(300, 500);
+    void deviceId;
+    void objectPath;
+  },
+
+  async deleteObject(deviceId: string, objectPath: string): Promise<void> {
+    await delay(300, 500);
+    void deviceId;
+    void objectPath;
   },
 };
