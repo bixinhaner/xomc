@@ -85,9 +85,17 @@ start_process() {
     # 4. 确保日志目录存在
     mkdir -p "$(dirname "$log_file")"
 
-    # 5. 启动（设置开发环境变量）
+    # 5. 启动（设置开发环境变量，优先使用 config.local.yaml）
+    local svc_name="${name#omcgo-}"
+    local local_cfg="$OMCGO_DIR/cmd/$svc_name/etc/config.local.yaml"
+    local dev_cfg="$OMCGO_DIR/cmd/$svc_name/etc/config.dev.yaml"
+    local cfg="$dev_cfg"
+    if [ -f "$local_cfg" ]; then
+        cfg="$local_cfg"
+    fi
+
     cd "$OMCGO_DIR"
-    OMCGO_ENV=dev "$bin" > "$log_file" 2>&1 &
+    OMCGO_ENV=dev "$bin" --config "$cfg" > "$log_file" 2>&1 &
     echo $! > "$pid_file"
     sleep 2
 

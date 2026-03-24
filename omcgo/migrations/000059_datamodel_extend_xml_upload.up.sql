@@ -2,6 +2,9 @@
 -- Adds object_tree, model_metadata columns and expands source_type CHECK.
 
 -- 1. Expand source_type CHECK to include 'cpe_uploaded'.
+--    Drop both possible constraint names (055 used chk_dm_source_type, earlier migrations used the default name).
+ALTER TABLE data_model_definitions
+    DROP CONSTRAINT IF EXISTS chk_dm_source_type;
 ALTER TABLE data_model_definitions
     DROP CONSTRAINT IF EXISTS data_model_definitions_source_type_check;
 ALTER TABLE data_model_definitions

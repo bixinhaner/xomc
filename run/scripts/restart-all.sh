@@ -54,7 +54,9 @@ echo ""
 
 # 4. 执行数据库迁移
 echo "========== 数据库迁移 =========="
-DB_DSN=$(grep -A1 '^db:' "$OMCGO_DIR/cmd/app/etc/config.dev.yaml" | grep 'dsn:' | sed 's/.*dsn: *"\(.*\)"/\1/')
+APP_CFG="$OMCGO_DIR/cmd/app/etc/config.local.yaml"
+[ ! -f "$APP_CFG" ] && APP_CFG="$OMCGO_DIR/cmd/app/etc/config.dev.yaml"
+DB_DSN=$(grep -A1 '^db:' "$APP_CFG" | grep 'dsn:' | sed 's/.*dsn: *"\(.*\)"/\1/')
 if [ -n "$DB_DSN" ]; then
     MIGRATE_OUTPUT=$("$OMCGO_DIR/bin/omcgo-migrate" --dsn "$DB_DSN" --path "$OMCGO_DIR/migrations" up 2>&1) && \
         echo -e "${GREEN}[✓]${NC} $MIGRATE_OUTPUT" || \

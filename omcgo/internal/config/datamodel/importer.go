@@ -206,6 +206,7 @@ func (imp *DataModelImporter) ImportFromXMLForCPE(ctx context.Context, reader io
 	dm.SourceType = SourceCPEUploaded
 	dm.ProductClass = productClass
 	dm.FirmwareVersion = firmwareVersion
+	dm.Scope = determineScope(dm.OUI, productClass)
 	dm.Status = StatusActive
 	dm.IsActive = true
 	dm.ImportedBy = "cpe_upload"
@@ -216,7 +217,7 @@ func (imp *DataModelImporter) ImportFromXMLForCPE(ctx context.Context, reader io
 
 	logEntry := &ImportLogEntry{
 		DataModelID: dm.ID,
-		Action:      "imported",
+		Action:      "created",
 		PerformedBy: "cpe_upload",
 	}
 	_ = imp.logRepo.Create(ctx, logEntry)

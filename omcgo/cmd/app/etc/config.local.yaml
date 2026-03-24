@@ -1,0 +1,119 @@
+server:
+  host: "0.0.0.0"
+  port: 8081
+  tls_port: 8444
+  grpc_port: 50051
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+db:
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  max_conns: 50
+  min_conns: 10
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+  log_sql: true
+  log_sql_params: true
+  log_sql_slow_threshold: 500
+
+tsdb:
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  max_conns: 30
+  min_conns: 5
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+  log_sql: true
+  log_sql_params: false
+  log_sql_slow_threshold: 1000
+
+redis:
+  addrs:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 200
+
+nats:
+  url: "nats://localhost:4222"
+  max_reconnect: -1
+  reconnect_wait: 2s
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  buckets:
+    pm_files: "pm-files"
+    mr_files: "mr-files"
+    firmware: "firmware"
+    config_backup: "config-backup"
+    logs: "logs"
+    reports: "reports"
+
+conn_req:
+  server_addr: "localhost:7547"  # ACS external address for CPE UDP CR URL
+  shared_secret: "dps"            # HMAC-SHA1 secret for CPE UDP CR signing
+
+jwt:
+  secret: "change-me-in-production-minimum-32-characters!!"
+  access_token_ttl: 30m
+  refresh_token_ttl: 168h
+
+cors:
+  allow_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+
+northbound:
+  push_targets: []
+
+ne_direct:
+  enabled: false
+  host: "0.0.0.0"
+  port: 7549
+
+provision:
+  enabled: true
+  auto_configure: false  # Path A 自动下发配置暂禁用（需参数路径映射层）
+  task_timeout: 15m
+  model_upload:
+    enabled: true
+    upload_url: "http://localhost:8080/smallcell/FileUploadService"
+    upload_username: ""
+    upload_password: ""
+    auto_activate_model: true
+    upload_timeout: 5m
+  auto_sync:
+    enabled: true
+    sync_on_bootstrap: true
+    sync_on_firmware_change: true
+    max_concurrent: 20
+
+metrics:
+  port: 9091
+
+tracer:
+  enabled: false
+  endpoint: "localhost:4317"
+  sample_rate: 1.0
+
+log:
+  level: "info"
+  format: "json"
+  output_paths:
+    - "stdout"
+    - "../run/logs/app/app.log"
+  rotation:
+    enabled: true
+    max_size_mb: 5
+    max_age_days: 7
+    max_backups: 3
+    compress: true
+    local_time: true
+
+request_id_prefix: "app"

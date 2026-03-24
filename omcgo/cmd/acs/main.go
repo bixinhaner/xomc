@@ -88,7 +88,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 	)
 
 	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
-	if cfg.Upload.Username != "" && inf.MinIO != nil {
+	if inf.MinIO != nil {
 		tokenMgr := upload.NewTokenManager(cfg.Upload.TokenSecret, cfg.Upload.TokenTTL)
 		// SessionStore requires *redis.Client; extract from UniversalClient if possible.
 		var uploadSessionStore *upload.SessionStore

@@ -1,6 +1,6 @@
 # Binaries
 bin/
-worker
+/worker
 *.exe
 *.exe~
 *.dll
@@ -27,6 +27,9 @@ vendor/
 .env
 .env.local
 .env.*.local
+
+# Local config (each developer maintains their own)
+config.local.yaml
 
 # OS
 .DS_Store

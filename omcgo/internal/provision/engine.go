@@ -413,7 +413,9 @@ func (e *ProvisioningEngine) failTask(ctx context.Context, task *ProvisioningTas
 		"error":     cause.Error(),
 	})
 
-	return cause
+	// Return nil: task failure is a terminal business state, not a processing error.
+	// Returning cause would make the NATS handler NAK the message and trigger redelivery.
+	return nil
 }
 
 func (e *ProvisioningEngine) completeTask(ctx context.Context, task *ProvisioningTask) error {
@@ -482,6 +484,10 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
 	if err != nil {
 		e.logger.Error("find device for datamodel file", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
+	if dev == nil {
+		e.logger.Warn("device not found for datamodel file, skipping", zap.String("device_sn", payload.DeviceSN))
 		return nil
 	}
 

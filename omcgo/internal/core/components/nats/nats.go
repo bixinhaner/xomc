@@ -32,6 +32,8 @@ func DefaultStreams() []StreamDef {
 		{Name: "MR", Subjects: []string{"mr.>"}},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}},
 		{Name: "OSS", Subjects: []string{"oss.>"}},
+		{Name: "PROVISION", Subjects: []string{"provision.>"}},
+		{Name: "DATAMODEL", Subjects: []string{"datamodel.>"}},
 	}
 }
 

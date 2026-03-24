@@ -1,0 +1,113 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  tls_port: 8443
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+
+session:
+  timeout: 5m
+  max_concurrent: 10000
+  max_rpc_per_session: 50   # 单次会话最大 RPC 交互次数（避免触发基站单会话限制）
+
+rate_limit:
+  per_device: 50            # 每设备每分钟最大 Inform 数
+  burst: 50                 # token bucket 突发容量
+  max_devices: 100000       # 限流器追踪的最大设备数
+  cleanup_interval: 5m      # 不活跃设备清理扫描间隔
+  cleanup_timeout: 10m      # 设备不活跃淘汰超时
+
+auth:
+  mode: "none"
+  username: ""
+  password: ""
+
+stun:
+  enabled: true
+  listen_addr: ":3478"
+  worker_size: 4
+  buffer_size: 2048
+  cache_ttl: 30m
+  shared_secret: "dps"
+
+# 会话结束续唤：当会话结束时命令队列仍有积压命令，立即发送 CR 触发设备重新连接
+# 避免等待设备下一次周期性 Inform（通常 60 秒），大幅提升命令下发效率
+post_session_wake:
+  enabled: true
+  delay_after: 1s          # 会话结束后等待时间（给 CPE 喘息时间）
+  max_continuous: 200       # 单设备最大连续续唤次数（安全阀，防止无限循环）
+  cooldown_ttl: 5m          # 连续续唤计数冷却时间（过期后重置计数）
+
+redis:
+  addrs:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+
+nats:
+  url: "nats://localhost:4222"
+  max_reconnect: -1
+  reconnect_wait: 2s
+
+db:
+  dsn: "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable"
+  max_conns: 20
+  min_conns: 5
+  max_conn_lifetime: 30m
+  max_conn_idle_time: 5m
+  health_check_interval: 30s
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  buckets:
+    pm_files: "pm-files"
+    mr_files: "mr-files"
+    firmware: "firmware"
+    config_backup: "config-backup"
+    logs: "logs"
+    reports: "reports"
+
+upload:
+  base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址
+  path: "/smallcell/FileUploadService"
+  username: ""                        # 留空则跳过认证
+  password: ""
+  max_file_size: 104857600            # 100MB
+
+metrics:
+  port: 9090
+
+tracer:
+  enabled: false
+  endpoint: "localhost:4317"
+  sample_rate: 1.0
+
+log:
+  level: "info"
+  format: "json"
+  output_paths:
+    - "stdout"
+    - "../run/logs/acs/acs.log"
+  rotation:
+    enabled: true # 是否启用轮转
+    max_size_mb: 5 # 单文件最大 MB
+    max_age_days: 7 # 保留天数
+    max_backups: 3 # 最大备份数
+    compress: true # 压缩旧文件
+    local_time: true # 使用本地时间
+
+request_id_prefix: "acs"
+
+# 测试功能：启用随机 RPC 任务注入
+# 当 CPE 发送 Inform 时，自动为设备生成 3-10 个随机 RPC 任务
+# 仅用于测试，生产环境应设置为 false
+enable_test_task_injection: false

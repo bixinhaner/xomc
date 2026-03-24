@@ -67,7 +67,7 @@ func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.
 
 	// Build Upload RPC command parameters.
 	uploadParams, err := json.Marshal(map[string]interface{}{
-		"file_type":       "11 X " + dev.OUI + " Parameter Model",
+		"file_type":       "11 " + dev.OUI + " Parameter Model",
 		"url":             uploadURL,
 		"username":        s.config.UploadUsername,
 		"password":        s.config.UploadPassword,

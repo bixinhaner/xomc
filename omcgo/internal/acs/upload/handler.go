@@ -59,29 +59,32 @@ func NewHandler(
 // Route: POST /smallcell/FileUploadService?fileType={type}&filename={name}
 // Auth: HTTP Basic Authentication with global credentials
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 1. Only allow POST method
-	if r.Method != http.MethodPost {
+	// 1. Allow POST and PUT (TR-069 specifies PUT for Upload, some CPEs use POST)
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		h.logger.Warn("upload rejected: unsupported method", zap.String("method", r.Method), zap.String("remote_addr", r.RemoteAddr))
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 2. Validate Basic Auth credentials
-	username, password, ok := r.BasicAuth()
-	if !ok {
-		h.logger.Warn("missing basic auth credentials")
-		w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	// 2. Validate Basic Auth credentials (skip if no credentials configured)
+	if h.username != "" {
+		username, password, ok := r.BasicAuth()
+		if !ok {
+			h.logger.Warn("missing basic auth credentials")
+			w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
-	if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
-		h.logger.Warn("invalid upload credentials",
-			zap.String("username", username),
-		)
-		w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
+		if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
+			h.logger.Warn("invalid upload credentials",
+				zap.String("username", username),
+			)
+			w.Header().Set("WWW-Authenticate", `Basic realm="FileUpload"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	// 3. Extract fileType and filename from query params
