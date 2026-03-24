@@ -11,6 +11,7 @@ import {
   Select,
   Space,
   Switch,
+  Tag,
   Tree,
   Typography,
   Radio,
@@ -21,7 +22,6 @@ import {
   EditOutlined,
   PlusOutlined,
   SyncOutlined,
-  CloseCircleOutlined,
   MenuOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -32,6 +32,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import { useTaskStore } from '@/store/taskStore';
+import type { SingleTask } from '@/types/task';
 
 const { Text } = Typography;
 
@@ -223,6 +225,13 @@ export default function DeviceRules() {
     { id: generateId(), condition: 'contain', value: '' },
   ]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [currentEditingRule, setCurrentEditingRule] = useState<DeviceGroupRule | null>(null);
+
+  // Task store
+  const addTask = useTaskStore((s) => s.addTask);
+  const updateTask = useTaskStore((s) => s.updateTask);
+  const setPanelExpanded = useTaskStore((s) => s.setPanelExpanded);
+  const setActiveTab = useTaskStore((s) => s.setActiveTab);
 
   // 匹配模式
   const matchingMode = Form.useWatch('matchingMode', form);
@@ -384,7 +393,33 @@ export default function DeviceRules() {
 
   // 打开应用规则弹窗
   const handleActive = useCallback((rule: DeviceGroupRule) => {
+    setCurrentEditingRule(rule);
+    setSelectedGroupIds([]);
     setActiveModalOpen(true);
+  }, []);
+
+  // 模拟设备数据
+  const getMockDevices = useCallback((groupIds: string[]): { sn: string; name: string; sourceGroup: string }[] => {
+    const devices: { sn: string; name: string; sourceGroup: string }[] = [];
+    const groupNames: Record<string, string> = {
+      '1': 'Default Group',
+      '2': 'Beijing Region',
+      '3': 'Shanghai Region',
+      '4': 'Guangzhou Region',
+      '5': 'Test Group',
+    };
+
+    groupIds.forEach((groupId, groupIndex) => {
+      const count = Math.floor(Math.random() * 5) + 3; // 每组3-7个设备
+      for (let i = 0; i < count; i++) {
+        devices.push({
+          sn: `ENB${String(groupIndex * 10 + i + 1).padStart(5, '0')}`,
+          name: `设备-${groupNames[groupId] || 'Unknown'}-${i + 1}`,
+          sourceGroup: groupNames[groupId] || groupId,
+        });
+      }
+    });
+    return devices;
   }, []);
 
   // 应用规则
@@ -393,9 +428,58 @@ export default function DeviceRules() {
       void message.warning(t('device.rules.selectAtLeastOne'));
       return;
     }
-    void message.success(t('device.rules.appliedTo', { count: selectedGroupIds.length }));
+
+    // 获取要迁移的设备
+    const devices = getMockDevices(selectedGroupIds);
+    const targetGroup = currentEditingRule?.moveToGroupName || 'Target Group';
+
+    // 创建迁移任务并添加到全局任务面板
+    devices.forEach((device, index) => {
+      const taskId = `migration-${device.sn}-${Date.now()}-${index}`;
+      const newTask: SingleTask = {
+        id: taskId,
+        sn: device.sn,
+        deviceName: device.name,
+        type: '设备迁移',
+        status: 'pending',
+        progress: 0,
+      };
+
+      addTask(newTask);
+      setPanelExpanded(true);
+      setActiveTab('single');
+
+      // 模拟迁移进度
+      setTimeout(() => {
+        updateTask(taskId, { status: 'running', progress: 10 });
+
+        const progressInterval = setInterval(() => {
+          const randomProgress = Math.random() * 30 + 10;
+          updateTask(taskId, (prev) => {
+            if (prev.progress >= 100) {
+              clearInterval(progressInterval);
+              return prev;
+            }
+            return { ...prev, progress: Math.min(prev.progress + randomProgress, 90) };
+          });
+        }, 200);
+
+        // 模拟完成
+        setTimeout(() => {
+          clearInterval(progressInterval);
+          const success = Math.random() > 0.1;
+          updateTask(taskId, {
+            status: success ? 'success' : 'failed',
+            progress: 100,
+            message: success ? '迁移成功' : '连接超时',
+          });
+        }, 1500 + Math.random() * 1000);
+      }, index * 300);
+    });
+
     setActiveModalOpen(false);
-  }, [selectedGroupIds, t]);
+    void message.success(t('common.commandSent'));
+  }, [selectedGroupIds, currentEditingRule, getMockDevices, t, addTask, updateTask, setPanelExpanded, setActiveTab]);
 
   // 添加过滤条件
   const handleAddFilter = useCallback(() => {
