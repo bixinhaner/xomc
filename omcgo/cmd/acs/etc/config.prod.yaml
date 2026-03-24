@@ -1,7 +1,7 @@
 server:
   host: "0.0.0.0"
   port: 7547
-  tls_port: 7548omcgo/test
+  tls_port: 7548
   tls:
     enabled: true
     cert_file: "${TLS_CERT_FILE}"
