@@ -29,6 +29,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U omcgo"]
       interval: 5s
