@@ -341,7 +341,7 @@ export default function CommandInput({
             value={consoleInput}
             onChange={(e) => setConsoleInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入命令... (Ctrl+Enter 执行)"
+            placeholder="输入命令，多个命令用分号隔开"
             prefix={<span style={{ color: '#52c41a', fontFamily: 'monospace' }}>&gt;</span>}
             style={{ flex: 1 }}
           />
