@@ -182,151 +182,135 @@ type SetParameterAttributeData struct {
 	AccessList         []string
 }
 
-// XML Templates
+// XML Templates — Compact mode: no whitespace between elements to avoid CPE parsing issues.
 
-const soapEnvelopeOpen = `<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-                   xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
-                   xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                   xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">{{.ID}}</cwmp:ID>{{if .NoMoreRequests}}
-    <cwmp:NoMoreRequests>{{.NoMoreRequests}}</cwmp:NoMoreRequests>{{end}}
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>`
+const soapEnvelopeOpen = `<?xml version="1.0" encoding="UTF-8"?>` +
+	`<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"` +
+	` xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"` +
+	` xmlns:cwmp="urn:dslforum-org:cwmp-1-0"` +
+	` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"` +
+	` xmlns:xsd="http://www.w3.org/2001/XMLSchema">` +
+	`<SOAP-ENV:Header>` +
+	`<cwmp:ID SOAP-ENV:mustUnderstand="1">{{.ID}}</cwmp:ID>` +
+	`{{- if .NoMoreRequests}}<cwmp:NoMoreRequests>{{.NoMoreRequests}}</cwmp:NoMoreRequests>{{end}}` +
+	`</SOAP-ENV:Header>` +
+	`<SOAP-ENV:Body>`
 
-const soapEnvelopeClose = `
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>`
+const soapEnvelopeClose = `</SOAP-ENV:Body></SOAP-ENV:Envelope>`
 
-const informResponseXML = soapEnvelopeOpen + `
-    <cwmp:InformResponse>
-      <cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes>{{if .CurrentTime}}
-      <cwmp:CurrentTime>{{.CurrentTime}}</cwmp:CurrentTime>{{end}}
-    </cwmp:InformResponse>` + soapEnvelopeClose
+const informResponseXML = soapEnvelopeOpen +
+	`<cwmp:InformResponse>` +
+	`<cwmp:MaxEnvelopes>1</cwmp:MaxEnvelopes>` +
+	`{{- if .CurrentTime}}<cwmp:CurrentTime>{{.CurrentTime}}</cwmp:CurrentTime>{{end}}` +
+	`</cwmp:InformResponse>` + soapEnvelopeClose
 
-const getParameterValuesXML = soapEnvelopeOpen + `
-    <cwmp:GetParameterValues>
-      <cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">
-        {{- range .Params}}
-        <string>{{.Name}}</string>
-        {{- end}}
-      </cwmp:ParameterNames>
-    </cwmp:GetParameterValues>` + soapEnvelopeClose
+const getParameterValuesXML = soapEnvelopeOpen +
+	`<cwmp:GetParameterValues>` +
+	`<cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">` +
+	`{{- range .Params}}<string>{{.Name}}</string>{{end}}` +
+	`</cwmp:ParameterNames>` +
+	`</cwmp:GetParameterValues>` + soapEnvelopeClose
 
-const setParameterValuesXML = soapEnvelopeOpen + `
-    <cwmp:SetParameterValues>
-      <cwmp:ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[{{len .Params}}]">
-        {{- range .Params}}
-        <cwmp:ParameterValueStruct>
-          <cwmp:Name>{{.Name}}</cwmp:Name>
-          <cwmp:Value xsi:type="{{.Type}}">{{.Value}}</cwmp:Value>
-        </cwmp:ParameterValueStruct>
-        {{- end}}
-      </cwmp:ParameterList>
-      <cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>
-    </cwmp:SetParameterValues>` + soapEnvelopeClose
+const setParameterValuesXML = soapEnvelopeOpen +
+	`<cwmp:SetParameterValues>` +
+	`<cwmp:ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[{{len .Params}}]">` +
+	`{{- range .Params}}<cwmp:ParameterValueStruct>` +
+	`<cwmp:Name>{{.Name}}</cwmp:Name>` +
+	`<cwmp:Value xsi:type="{{.Type}}">{{.Value}}</cwmp:Value>` +
+	`</cwmp:ParameterValueStruct>{{end}}` +
+	`</cwmp:ParameterList>` +
+	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
+	`</cwmp:SetParameterValues>` + soapEnvelopeClose
 
-const getParameterNamesXML = soapEnvelopeOpen + `
-    <cwmp:GetParameterNames>
-      <cwmp:ParameterPath>{{.Path}}</cwmp:ParameterPath>
-      <cwmp:NextLevel>{{if .NextLevel}}true{{else}}false{{end}}</cwmp:NextLevel>
-    </cwmp:GetParameterNames>` + soapEnvelopeClose
+const getParameterNamesXML = soapEnvelopeOpen +
+	`<cwmp:GetParameterNames>` +
+	`<cwmp:ParameterPath>{{.Path}}</cwmp:ParameterPath>` +
+	`<cwmp:NextLevel>{{if .NextLevel}}true{{else}}false{{end}}</cwmp:NextLevel>` +
+	`</cwmp:GetParameterNames>` + soapEnvelopeClose
 
-const addObjectXML = soapEnvelopeOpen + `
-    <cwmp:AddObject>
-      <cwmp:ObjectName>{{.ObjectName}}</cwmp:ObjectName>
-      <cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>
-    </cwmp:AddObject>` + soapEnvelopeClose
+const addObjectXML = soapEnvelopeOpen +
+	`<cwmp:AddObject>` +
+	`<cwmp:ObjectName>{{.ObjectName}}</cwmp:ObjectName>` +
+	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
+	`</cwmp:AddObject>` + soapEnvelopeClose
 
-const deleteObjectXML = soapEnvelopeOpen + `
-    <cwmp:DeleteObject>
-      <cwmp:ObjectName>{{.ObjectName}}</cwmp:ObjectName>
-      <cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>
-    </cwmp:DeleteObject>` + soapEnvelopeClose
+const deleteObjectXML = soapEnvelopeOpen +
+	`<cwmp:DeleteObject>` +
+	`<cwmp:ObjectName>{{.ObjectName}}</cwmp:ObjectName>` +
+	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
+	`</cwmp:DeleteObject>` + soapEnvelopeClose
 
-const downloadXML = soapEnvelopeOpen + `
-    <cwmp:Download>
-      <cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>
-      <cwmp:FileType>{{.FileType}}</cwmp:FileType>
-      <cwmp:URL>{{.URL}}</cwmp:URL>
-      <cwmp:Username>{{.Username}}</cwmp:Username>
-      <cwmp:Password>{{.Password}}</cwmp:Password>
-      <cwmp:FileSize>{{.FileSize}}</cwmp:FileSize>
-      <cwmp:TargetFileName>{{.TargetFileName}}</cwmp:TargetFileName>
-      <cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>
-      <cwmp:SuccessURL></cwmp:SuccessURL>
-      <cwmp:FailureURL></cwmp:FailureURL>
-    </cwmp:Download>` + soapEnvelopeClose
+const downloadXML = soapEnvelopeOpen +
+	`<cwmp:Download>` +
+	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`<cwmp:FileType>{{.FileType}}</cwmp:FileType>` +
+	`<cwmp:URL>{{.URL}}</cwmp:URL>` +
+	`<cwmp:Username>{{.Username}}</cwmp:Username>` +
+	`<cwmp:Password>{{.Password}}</cwmp:Password>` +
+	`<cwmp:FileSize>{{.FileSize}}</cwmp:FileSize>` +
+	`<cwmp:TargetFileName>{{.TargetFileName}}</cwmp:TargetFileName>` +
+	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
+	`<cwmp:SuccessURL></cwmp:SuccessURL>` +
+	`<cwmp:FailureURL></cwmp:FailureURL>` +
+	`</cwmp:Download>` + soapEnvelopeClose
 
-const uploadXML = soapEnvelopeOpen + `
-    <cwmp:Upload>
-      <cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>
-      <cwmp:FileType>{{.FileType}}</cwmp:FileType>
-      <cwmp:URL>{{.URL}}</cwmp:URL>
-      <cwmp:Username>{{.Username}}</cwmp:Username>
-      <cwmp:Password>{{.Password}}</cwmp:Password>
-      <cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>
-    </cwmp:Upload>` + soapEnvelopeClose
+const uploadXML = soapEnvelopeOpen +
+	`<cwmp:Upload>` +
+	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`<cwmp:FileType>{{.FileType}}</cwmp:FileType>` +
+	`<cwmp:URL>{{.URL}}</cwmp:URL>` +
+	`<cwmp:Username>{{.Username}}</cwmp:Username>` +
+	`<cwmp:Password>{{.Password}}</cwmp:Password>` +
+	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
+	`</cwmp:Upload>` + soapEnvelopeClose
 
-const rebootXML = soapEnvelopeOpen + `
-    <cwmp:Reboot>
-      <cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>
-    </cwmp:Reboot>` + soapEnvelopeClose
+const rebootXML = soapEnvelopeOpen +
+	`<cwmp:Reboot>` +
+	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`</cwmp:Reboot>` + soapEnvelopeClose
 
-const factoryResetXML = soapEnvelopeOpen + `
-    <cwmp:FactoryReset/>` + soapEnvelopeClose
+const factoryResetXML = soapEnvelopeOpen +
+	`<cwmp:FactoryReset/>` + soapEnvelopeClose
 
-const scheduleInformXML = soapEnvelopeOpen + `
-    <cwmp:ScheduleInform>
-      <cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>
-      <cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>
-    </cwmp:ScheduleInform>` + soapEnvelopeClose
+const scheduleInformXML = soapEnvelopeOpen +
+	`<cwmp:ScheduleInform>` +
+	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
+	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`</cwmp:ScheduleInform>` + soapEnvelopeClose
 
-const faultResponseXML = soapEnvelopeOpen + `
-    <SOAP-ENV:Fault>
-      <faultcode>Client</faultcode>
-      <faultstring>CWMP fault</faultstring>
-      <detail>
-        <cwmp:Fault>
-          <cwmp:FaultCode>{{.FaultCode}}</cwmp:FaultCode>
-          <cwmp:FaultString>{{.FaultString}}</cwmp:FaultString>
-        </cwmp:Fault>
-      </detail>
-    </SOAP-ENV:Fault>` + soapEnvelopeClose
+const faultResponseXML = soapEnvelopeOpen +
+	`<SOAP-ENV:Fault>` +
+	`<faultcode>Client</faultcode>` +
+	`<faultstring>CWMP fault</faultstring>` +
+	`<detail><cwmp:Fault>` +
+	`<cwmp:FaultCode>{{.FaultCode}}</cwmp:FaultCode>` +
+	`<cwmp:FaultString>{{.FaultString}}</cwmp:FaultString>` +
+	`</cwmp:Fault></detail>` +
+	`</SOAP-ENV:Fault>` + soapEnvelopeClose
 
-const transferCompleteResponseXML = soapEnvelopeOpen + `
-    <cwmp:TransferCompleteResponse/>` + soapEnvelopeClose
+const transferCompleteResponseXML = soapEnvelopeOpen +
+	`<cwmp:TransferCompleteResponse/>` + soapEnvelopeClose
 
-const autonomousTransferCompleteResponseXML = soapEnvelopeOpen + `
-    <cwmp:AutonomousTransferCompleteResponse/>` + soapEnvelopeClose
+const autonomousTransferCompleteResponseXML = soapEnvelopeOpen +
+	`<cwmp:AutonomousTransferCompleteResponse/>` + soapEnvelopeClose
 
-const getParameterAttributesXML = soapEnvelopeOpen + `
-    <cwmp:GetParameterAttributes>
-      <cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">
-        {{- range .Params}}
-        <string>{{.Name}}</string>
-        {{- end}}
-      </cwmp:ParameterNames>
-    </cwmp:GetParameterAttributes>` + soapEnvelopeClose
+const getParameterAttributesXML = soapEnvelopeOpen +
+	`<cwmp:GetParameterAttributes>` +
+	`<cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">` +
+	`{{- range .Params}}<string>{{.Name}}</string>{{end}}` +
+	`</cwmp:ParameterNames>` +
+	`</cwmp:GetParameterAttributes>` + soapEnvelopeClose
 
-const setParameterAttributesXML = soapEnvelopeOpen + `
-    <cwmp:SetParameterAttributes>
-      <cwmp:ParameterList SOAP-ENC:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">
-        {{- range .Params}}
-        <cwmp:SetParameterAttributesStruct>
-          <cwmp:Name>{{.Name}}</cwmp:Name>
-          <cwmp:NotificationChange>{{if .NotificationChange}}true{{else}}false{{end}}</cwmp:NotificationChange>
-          <cwmp:Notification>{{.Notification}}</cwmp:Notification>
-          <cwmp:AccessListChange>{{if .AccessListChange}}true{{else}}false{{end}}</cwmp:AccessListChange>
-          <cwmp:AccessList>
-            {{- range .AccessList}}
-            <string>{{.}}</string>
-            {{- end}}
-          </cwmp:AccessList>
-        </cwmp:SetParameterAttributesStruct>
-        {{- end}}
-      </cwmp:ParameterList>
-    </cwmp:SetParameterAttributes>` + soapEnvelopeClose
+const setParameterAttributesXML = soapEnvelopeOpen +
+	`<cwmp:SetParameterAttributes>` +
+	`<cwmp:ParameterList SOAP-ENC:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">` +
+	`{{- range .Params}}<cwmp:SetParameterAttributesStruct>` +
+	`<cwmp:Name>{{.Name}}</cwmp:Name>` +
+	`<cwmp:NotificationChange>{{if .NotificationChange}}true{{else}}false{{end}}</cwmp:NotificationChange>` +
+	`<cwmp:Notification>{{.Notification}}</cwmp:Notification>` +
+	`<cwmp:AccessListChange>{{if .AccessListChange}}true{{else}}false{{end}}</cwmp:AccessListChange>` +
+	`<cwmp:AccessList>{{range .AccessList}}<string>{{.}}</string>{{end}}</cwmp:AccessList>` +
+	`</cwmp:SetParameterAttributesStruct>{{end}}` +
+	`</cwmp:ParameterList>` +
+	`</cwmp:SetParameterAttributes>` + soapEnvelopeClose
 
