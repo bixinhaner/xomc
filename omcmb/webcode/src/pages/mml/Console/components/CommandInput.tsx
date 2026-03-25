@@ -108,7 +108,18 @@ export default function CommandInput({
       key: 'control',
       label: '控制面板',
       children: (
-        <div className="no-scrollbar" style={{ height: '100%', overflow: 'auto', padding: 12 }}>
+        <div
+          className="no-scrollbar"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            overflow: 'auto',
+            padding: 12,
+          }}
+        >
           {selectedCommand ? (
             selectedCommand.params.length > 0 ? (
               <Form layout="vertical" size="small">
@@ -187,7 +198,18 @@ export default function CommandInput({
       key: 'paramPath',
       label: '参数路径指定',
       children: (
-        <div className="no-scrollbar" style={{ height: '100%', overflow: 'auto', padding: 12 }}>
+        <div
+          className="no-scrollbar"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            overflow: 'auto',
+            padding: 12,
+          }}
+        >
           {/* 操作类型 */}
           <Form layout="vertical" size="small">
             <Form.Item label={<span style={{ fontSize: 12 }}>操作类型</span>}>
@@ -302,14 +324,20 @@ export default function CommandInput({
       </div>
 
       {/* Tab 内容区 */}
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        size="small"
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}
-        tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
-        items={tabItems}
-      />
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          size="small"
+          style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
+          styles={{
+            content: { flex: 1, minHeight: 0, overflow: 'hidden' },
+            body: { height: '100%', overflow: 'hidden' },
+          }}
+          items={tabItems}
+        />
+      </div>
 
       {/* 命令输入栏 - 只在控制面板 Tab 显示 */}
       {!isParamPathTab && (
