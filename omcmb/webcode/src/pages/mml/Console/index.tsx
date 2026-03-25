@@ -189,8 +189,8 @@ export default function MMLConsole() {
             minWidth: 0,
           }}
         >
-          {/* 终端输出 */}
-          <div style={{ flex: '0 0 40%', minHeight: 150 }}>
+          {/* 终端输出 - 固定50%高度 */}
+          <div style={{ height: '50%', minHeight: 150 }}>
             <TerminalPanel
               lines={commandExecution.outputLines}
               onClear={commandExecution.clearOutput}
@@ -198,8 +198,8 @@ export default function MMLConsole() {
             />
           </div>
 
-          {/* 命令输入和参数配置 */}
-          <div style={{ flex: '1 1 60%', minHeight: 200 }}>
+          {/* 命令输入和参数配置 - 占据剩余空间 */}
+          <div style={{ flex: 1, minHeight: 200 }}>
             <CommandInput
               selectedDevices={deviceSelection.selectedDevices}
               selectedCommand={commandSelection.selectedCommand}
