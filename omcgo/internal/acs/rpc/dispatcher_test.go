@@ -115,7 +115,7 @@ func TestGetParameterNamesHandler(t *testing.T) {
 	body := string(result)
 	assert.Contains(t, body, "cwmp:GetParameterNames")
 	assert.Contains(t, body, "Device.DeviceInfo.")
-	assert.Contains(t, body, "<NextLevel>true</NextLevel>")
+	assert.Contains(t, body, "<cwmp:NextLevel>true</cwmp:NextLevel>")
 }
 
 func TestRebootHandler(t *testing.T) {
@@ -131,7 +131,7 @@ func TestRebootHandler(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	assert.Contains(t, body, "cwmp:Reboot")
-	assert.Contains(t, body, "<CommandKey>reboot-key-1</CommandKey>")
+	assert.Contains(t, body, "<cwmp:CommandKey>reboot-key-1</cwmp:CommandKey>")
 }
 
 func TestFactoryResetHandler(t *testing.T) {
@@ -172,9 +172,9 @@ func TestDownloadHandler(t *testing.T) {
 	assert.Contains(t, body, "cwmp:Download")
 	assert.Contains(t, body, "1 Firmware Upgrade Image")
 	assert.Contains(t, body, "http://fileserver.example.com/firmware.bin")
-	assert.Contains(t, body, "<CommandKey>dl-key-1</CommandKey>")
-	assert.Contains(t, body, "<Username>dluser</Username>")
-	assert.Contains(t, body, "<Password>dlpass</Password>")
-	assert.Contains(t, body, "<FileSize>1048576</FileSize>")
-	assert.Contains(t, body, "<TargetFileName>firmware.bin</TargetFileName>")
+	assert.Contains(t, body, "<cwmp:CommandKey>dl-key-1</cwmp:CommandKey>")
+	assert.Contains(t, body, "<cwmp:Username>dluser</cwmp:Username>")
+	assert.Contains(t, body, "<cwmp:Password>dlpass</cwmp:Password>")
+	assert.Contains(t, body, "<cwmp:FileSize>1048576</cwmp:FileSize>")
+	assert.Contains(t, body, "<cwmp:TargetFileName>firmware.bin</cwmp:TargetFileName>")
 }
