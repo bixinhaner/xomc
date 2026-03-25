@@ -31,6 +31,9 @@ vendor/
 # Local config (each developer maintains their own)
 config.local.yaml
 
+# Claude Code
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
