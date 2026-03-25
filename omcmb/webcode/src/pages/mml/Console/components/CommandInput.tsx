@@ -10,12 +10,8 @@ import { useT } from '@/hooks/useT';
 const OPERATION_TYPE_OPTIONS = [
   { label: 'LST - 查询', value: 'LST' },
   { label: 'MOD - 修改', value: 'MOD' },
-  { label: 'SET - 设置', value: 'SET' },
   { label: 'ADD - 增加', value: 'ADD' },
-  { label: 'DEL - 删除', value: 'DEL' },
-  { label: 'ACT - 激活', value: 'ACT' },
-  { label: 'DEA - 去激活', value: 'DEA' },
-  { label: 'RST - 重启', value: 'RST' },
+  { label: 'RMV - 删除', value: 'RMV' },
 ];
 
 interface ParamPath {
@@ -47,6 +43,7 @@ export default function CommandInput({
   const t = useT();
   const token = useThemeToken();
   const [consoleInput, setConsoleInput] = useState('');
+  const [activeTab, setActiveTab] = useState('control');
 
   // 参数路径配置状态
   const [operationType, setOperationType] = useState<string>('LST');
@@ -102,6 +99,9 @@ export default function CommandInput({
     );
   }, []);
 
+  // 是否是参数路径指定 Tab
+  const isParamPathTab = activeTab === 'paramPath';
+
   // Tab 项配置
   const tabItems = [
     {
@@ -116,7 +116,7 @@ export default function CommandInput({
                   <Form.Item
                     key={param.name}
                     label={
-                      <span style={{ fontSize: 11 }}>
+                      <span style={{ fontSize: 12 }}>
                         {param.name}
                         {param.required && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
                       </span>
@@ -163,7 +163,7 @@ export default function CommandInput({
                 justifyContent: 'center',
                 height: '100%',
                 color: '#8c8c8c',
-                fontSize: 11,
+                fontSize: 12,
               }}>
                 该命令无需配置参数
               </div>
@@ -175,7 +175,7 @@ export default function CommandInput({
               justifyContent: 'center',
               height: '100%',
               color: '#8c8c8c',
-              fontSize: 11,
+              fontSize: 12,
             }}>
               请先从左侧选择命令
             </div>
@@ -190,7 +190,7 @@ export default function CommandInput({
         <div className="no-scrollbar" style={{ height: '100%', overflow: 'auto', padding: 12 }}>
           {/* 操作类型 */}
           <Form layout="vertical" size="small">
-            <Form.Item label={<span style={{ fontSize: 11 }}>操作类型</span>}>
+            <Form.Item label={<span style={{ fontSize: 12 }}>操作类型</span>}>
               <Select
                 options={OPERATION_TYPE_OPTIONS}
                 value={operationType}
@@ -206,15 +206,14 @@ export default function CommandInput({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              marginBottom: 8,
+              marginBottom: 12,
             }}>
-              <Typography.Text strong style={{ fontSize: 11 }}>参数路径</Typography.Text>
+              <Typography.Text strong style={{ fontSize: 12 }}>参数路径</Typography.Text>
               <Button
                 size="small"
                 type="dashed"
                 icon={<PlusOutlined />}
                 onClick={handleAddParamPath}
-                style={{ fontSize: 11 }}
               >
                 添加路径
               </Button>
@@ -224,9 +223,9 @@ export default function CommandInput({
               {paramPaths.map((item, index) => (
                 <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     color: '#8c8c8c',
-                    width: 20,
+                    width: 24,
                     flexShrink: 0,
                   }}>
                     {index + 1}.
@@ -236,7 +235,7 @@ export default function CommandInput({
                     placeholder="例如: Device.Services.FAPService.1.CellConfig.1"
                     value={item.path}
                     onChange={(e) => handleUpdateParamPath(item.id, e.target.value)}
-                    style={{ flex: 1, fontSize: 11 }}
+                    style={{ flex: 1 }}
                   />
                   <Button
                     size="small"
@@ -254,16 +253,14 @@ export default function CommandInput({
           {/* 帮助提示 */}
           <div style={{
             marginTop: 16,
-            padding: 8,
+            padding: 10,
             background: token.colorBgTextDisabled,
             borderRadius: 4,
-            fontSize: 10,
+            fontSize: 11,
             color: '#8c8c8c',
           }}>
-            <div style={{ marginBottom: 4 }}>提示：</div>
+            <div style={{ marginBottom: 4, fontWeight: 500 }}>提示</div>
             <div>• 参数路径支持 TR-069 参数树路径格式</div>
-            <div>• 可添加多条路径进行批量操作</div>
-            <div>• 路径示例: Device.Services.FAPService.1.CellConfig.LTE.Cell.1</div>
           </div>
         </div>
       ),
@@ -282,21 +279,22 @@ export default function CommandInput({
     }}>
       {/* 头部信息 */}
       <div style={{
-        padding: '8px 12px',
+        padding: '10px 12px',
         borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        background: token.colorBgLayout,
       }}>
         <Descriptions column={2} size="small">
-          <Descriptions.Item label="命令">
+          <Descriptions.Item label={<span style={{ fontSize: 12 }}>命令</span>}>
             {selectedCommand ? (
-              <Typography.Text code style={{ fontSize: 11 }}>
+              <Typography.Text code style={{ fontSize: 12 }}>
                 {selectedCommand.commandCode}
               </Typography.Text>
             ) : (
-              <span style={{ color: '#8c8c8c' }}>未选择</span>
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>未选择</span>
             )}
           </Descriptions.Item>
-          <Descriptions.Item label="设备">
-            <span style={{ fontSize: 11 }}>
+          <Descriptions.Item label={<span style={{ fontSize: 12 }}>设备</span>}>
+            <span style={{ fontSize: 12 }}>
               {selectedDevices.length > 0 ? `${selectedDevices.length} 台` : '未选择'}
             </span>
           </Descriptions.Item>
@@ -305,60 +303,78 @@ export default function CommandInput({
 
       {/* Tab 内容区 */}
       <Tabs
-        defaultActiveKey="control"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         size="small"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}
         tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
         items={tabItems}
       />
 
-      {/* 命令输入栏 */}
-      <div style={{
-        padding: '8px 12px',
-        borderTop: `1px solid ${token.colorBorderSecondary}`,
-        display: 'flex',
-        gap: 8,
-      }}>
-        <Input
-          size="small"
-          value={consoleInput}
-          onChange={(e) => setConsoleInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="输入命令... (Ctrl+Enter 执行)"
-          prefix={<span style={{ color: '#52c41a', fontFamily: 'monospace' }}>&gt;</span>}
-          style={{ flex: 1 }}
-        />
-        <Button
-          size="small"
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          onClick={handleExecute}
-          loading={loading}
-          disabled={selectedDevices.length === 0 || !selectedCommand}
-        >
-          执行
-        </Button>
-      </div>
+      {/* 命令输入栏 - 只在控制面板 Tab 显示 */}
+      {!isParamPathTab && (
+        <div style={{
+          padding: '10px 12px',
+          borderTop: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex',
+          gap: 8,
+        }}>
+          <Input
+            size="small"
+            value={consoleInput}
+            onChange={(e) => setConsoleInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="输入命令... (Ctrl+Enter 执行)"
+            prefix={<span style={{ color: '#52c41a', fontFamily: 'monospace' }}>&gt;</span>}
+            style={{ flex: 1 }}
+          />
+          <Button
+            size="small"
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            onClick={handleExecute}
+            loading={loading}
+            disabled={selectedDevices.length === 0 || !selectedCommand}
+          >
+            执行
+          </Button>
+        </div>
+      )}
 
       {/* 底部操作栏 */}
       <div style={{
-        padding: '8px 12px',
+        padding: '10px 12px',
         borderTop: `1px solid ${token.colorBorderSecondary}`,
         display: 'flex',
-        justifyContent: 'space-between',
+        justifyContent: isParamPathTab ? 'flex-end' : 'space-between',
+        gap: 8,
       }}>
+        {!isParamPathTab && (
+          <Space size={8}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              {selectedDevices.length} 设备 · {selectedCommand?.commandCode || '未选命令'}
+            </Typography.Text>
+          </Space>
+        )}
         <Space size={8}>
-          <Typography.Text type="secondary" style={{ fontSize: 10 }}>
-            {selectedDevices.length} 设备 · {selectedCommand?.commandCode || '未选命令'}
-          </Typography.Text>
-        </Space>
-        <Space size={4}>
+          {isParamPathTab && (
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleExecute}
+              loading={loading}
+              disabled={selectedDevices.length === 0}
+            >
+              执行
+            </Button>
+          )}
           {onReset && (
             <Button size="small" icon={<ReloadOutlined />} onClick={onReset}>
               重置
             </Button>
           )}
-          {onSaveScript && (
+          {onSaveScript && !isParamPathTab && (
             <Button size="small" icon={<SaveOutlined />} onClick={onSaveScript}>
               保存脚本
             </Button>
