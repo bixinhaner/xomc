@@ -92,9 +92,10 @@ export default function MMLConsole() {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '12px 16px',
-          background: `linear-gradient(135deg, ${token.colorPrimary} 0%, ${token.colorPrimaryHover || token.colorPrimary} 100%)`,
+          background: token.colorBgContainer,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+          border: `1px solid ${token.colorBorderSecondary}`,
+          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.04)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -103,15 +104,15 @@ export default function MMLConsole() {
               width: 32,
               height: 32,
               borderRadius: 6,
-              background: 'rgba(255, 255, 255, 0.2)',
+              background: token.colorPrimaryBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <AppstoreOutlined style={{ fontSize: 18, color: '#fff' }} />
+            <AppstoreOutlined style={{ fontSize: 18, color: token.colorPrimary }} />
           </div>
-          <Typography.Title level={5} style={{ margin: 0, color: '#fff' }}>
+          <Typography.Title level={5} style={{ margin: 0 }}>
             {t('nav.mml.console')}
           </Typography.Title>
         </div>
@@ -120,9 +121,9 @@ export default function MMLConsole() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Tag
             style={{
-              background: 'rgba(255, 255, 255, 0.2)',
-              border: 'none',
-              color: '#fff',
+              background: token.colorPrimaryBg,
+              border: `1px solid ${token.colorPrimaryBorder}`,
+              color: token.colorPrimary,
               borderRadius: 12,
               padding: '2px 10px',
             }}
@@ -132,9 +133,9 @@ export default function MMLConsole() {
           {commandSelection.selectedCommand && (
             <Tag
               style={{
-                background: 'rgba(255, 255, 255, 0.3)',
-                border: 'none',
-                color: '#fff',
+                background: token.colorPrimaryBg,
+                border: `1px solid ${token.colorPrimaryBorder}`,
+                color: token.colorPrimary,
                 fontFamily: 'monospace',
                 borderRadius: 12,
                 padding: '2px 10px',
