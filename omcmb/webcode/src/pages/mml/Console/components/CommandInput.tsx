@@ -111,11 +111,7 @@ export default function CommandInput({
         <div
           className="no-scrollbar"
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
+            height: '100%',
             overflow: 'auto',
             padding: 12,
           }}
@@ -201,11 +197,7 @@ export default function CommandInput({
         <div
           className="no-scrollbar"
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
+            height: '100%',
             overflow: 'auto',
             padding: 12,
           }}
@@ -326,15 +318,12 @@ export default function CommandInput({
       {/* Tab 内容区 */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Tabs
+          className="mml-console-tabs"
           activeKey={activeTab}
           onChange={setActiveTab}
           size="small"
           style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
-          styles={{
-            content: { flex: 1, minHeight: 0, overflow: 'hidden' },
-            body: { position: 'relative', height: '100%', overflow: 'hidden' },
-          }}
           items={tabItems}
         />
       </div>

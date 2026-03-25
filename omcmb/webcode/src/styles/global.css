@@ -890,6 +890,36 @@ html, body, #root {
   background: transparent;
 }
 
+/* Hide scrollbar utility class */
+.no-scrollbar,
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.no-scrollbar::-webkit-scrollbar,
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* ===========================================================================
+   MML Console Tabs 修复
+   =========================================================================== */
+/* 修复 Ant Design Tabs 内容区域高度问题 */
+.mml-console-tabs .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+}
+
+.mml-console-tabs .ant-tabs-content {
+  height: 100%;
+}
+
+.mml-console-tabs .ant-tabs-tabpane {
+  position: relative !important;
+  height: 100%;
+}
+
 /* Monospace text */
 .mono {
   font-family: var(--font-family-mono);
