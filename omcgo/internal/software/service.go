@@ -278,6 +278,9 @@ func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.
 	if err != nil {
 		return fmt.Errorf("get device by SN: %w", err)
 	}
+	if dev == nil {
+		return fmt.Errorf("device not found: %s", deviceSN)
+	}
 
 	task, err := s.upgradeRepo.GetActiveByDeviceID(ctx, dev.ID)
 	if err != nil {

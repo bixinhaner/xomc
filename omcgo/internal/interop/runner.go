@@ -69,6 +69,9 @@ func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("lookup device %s: %w", deviceSN, err)
 	}
+	if dev == nil {
+		return nil, fmt.Errorf("device not found: %s", deviceSN)
+	}
 
 	var results []TestResult
 	for _, cat := range ValidTestCategories() {
@@ -93,6 +96,9 @@ func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN stri
 	dev, err := r.deviceRepo.GetBySerialNumber(ctx, deviceSN)
 	if err != nil {
 		return nil, fmt.Errorf("lookup device %s: %w", deviceSN, err)
+	}
+	if dev == nil {
+		return nil, fmt.Errorf("device not found: %s", deviceSN)
 	}
 
 	cases, ok := r.cases[category]

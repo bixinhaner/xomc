@@ -345,6 +345,9 @@ func (e *ProvisioningEngine) HandleRPCResult(ctx context.Context, deviceSN strin
 	if err != nil {
 		return fmt.Errorf("find device by SN %s: %w", deviceSN, err)
 	}
+	if dev == nil {
+		return fmt.Errorf("device not found: %s", deviceSN)
+	}
 
 	task, err := e.taskRepo.GetByDeviceID(ctx, dev.ID)
 	if err != nil {
@@ -560,6 +563,10 @@ func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Ev
 		e.logger.Error("find device for GPN response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 		return nil
 	}
+	if dev == nil {
+		e.logger.Warn("device not found for GPN response, skipping", zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
 
 	// Always pass to HandleGPNResult (even with empty ParameterInfos) so the
 	// pending GPN count decrements and the sync plan can transition to GPV phase.
@@ -599,6 +606,10 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
 	if err != nil {
 		e.logger.Error("find device for GPV response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
+	if dev == nil {
+		e.logger.Warn("device not found for GPV response, skipping", zap.String("device_sn", payload.DeviceSN))
 		return nil
 	}
 

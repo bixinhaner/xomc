@@ -105,9 +105,14 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 	for i, targetSN := range task.TargetIDs {
 		dev, err := e.deviceRepo.GetBySerialNumber(ctx, targetSN)
 		if err != nil {
-			e.logger.Warn("device not found for backup",
+			e.logger.Warn("device lookup failed for backup",
 				zap.String("device_sn", targetSN),
 				zap.Error(err))
+			continue
+		}
+		if dev == nil {
+			e.logger.Warn("device not found for backup, skipping",
+				zap.String("device_sn", targetSN))
 			continue
 		}
 
