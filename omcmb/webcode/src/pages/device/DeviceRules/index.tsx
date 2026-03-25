@@ -8,18 +8,23 @@ import {
   Form,
   Input,
   Modal,
+  Progress,
   Select,
   Space,
   Switch,
+  Table,
   Tag,
   Tree,
   Typography,
   Radio,
 } from 'antd';
 import type { MenuProps } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   DeleteOutlined,
   EditOutlined,
+  ExportOutlined,
+  EyeOutlined,
   PlusOutlined,
   SyncOutlined,
   MenuOutlined,
@@ -32,8 +37,6 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import { useTaskStore } from '@/store/taskStore';
-import type { SingleTask } from '@/types/task';
 
 const { Text } = Typography;
 
@@ -74,25 +77,42 @@ interface DeviceGroupTreeNode {
 
 // Mock 设备组数据
 const MOCK_DEVICE_GROUPS: DeviceGroup[] = [
-  { id: '1', groupName: 'Default Group' },
-  { id: '2', groupName: 'Beijing Region' },
-  { id: '3', groupName: 'Shanghai Region' },
-  { id: '4', groupName: 'Guangzhou Region' },
-  { id: '5', groupName: 'Test Group' },
+  { id: '1', groupName: '默认设备组' },
+  { id: '2', groupName: '北京区域' },
+  { id: '3', groupName: '上海区域' },
+  { id: '4', groupName: '广州区域' },
+  { id: '5', groupName: '测试设备组' },
 ];
 
-// Mock 设备组树
+// Mock 设备组树 - 一级节点为区域，二级节点为设备组
 const MOCK_GROUP_TREE: DeviceGroupTreeNode[] = [
   {
-    id: 'root',
-    groupName: 'All Devices',
+    id: 'region-bj',
+    groupName: '北京区域',
     children: [
-      { id: '1', groupName: 'Default Group' },
-      { id: '2', groupName: 'Beijing Region' },
-      { id: '3', groupName: 'Shanghai Region' },
-      { id: '4', groupName: 'Guangzhou Region' },
-      { id: '5', groupName: 'Test Group' },
+      { id: 'bj-group-1', groupName: '北京核心网' },
+      { id: 'bj-group-2', groupName: '北京郊区' },
     ],
+  },
+  {
+    id: 'region-sh',
+    groupName: '上海区域',
+    children: [
+      { id: 'sh-group-1', groupName: '上海核心网' },
+      { id: 'sh-group-2', groupName: '上海郊区' },
+    ],
+  },
+  {
+    id: 'region-gz',
+    groupName: '广州区域',
+    children: [
+      { id: 'gz-group-1', groupName: '广州核心网' },
+      { id: 'gz-group-2', groupName: '广州郊区' },
+    ],
+  },
+  {
+    id: '1',
+    groupName: '默认设备组',
   },
 ];
 
@@ -227,11 +247,20 @@ export default function DeviceRules() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [currentEditingRule, setCurrentEditingRule] = useState<DeviceGroupRule | null>(null);
 
-  // Task store
-  const addTask = useTaskStore((s) => s.addTask);
-  const updateTask = useTaskStore((s) => s.updateTask);
-  const setPanelExpanded = useTaskStore((s) => s.setPanelExpanded);
-  const setActiveTab = useTaskStore((s) => s.setActiveTab);
+  // 迁移任务抽屉状态
+  type MigrationStatus = 'pending' | 'running' | 'success' | 'failed';
+  interface MigrationTask {
+    id: string;
+    sn: string;
+    deviceName: string;
+    sourceGroup: string;
+    targetGroup: string;
+    status: MigrationStatus;
+    progress: number;
+    message?: string;
+  }
+  const [migrationDrawerOpen, setMigrationDrawerOpen] = useState(false);
+  const [migrationTasks, setMigrationTasks] = useState<MigrationTask[]>([]);
 
   // 匹配模式
   const matchingMode = Form.useWatch('matchingMode', form);
@@ -239,7 +268,7 @@ export default function DeviceRules() {
   // 过滤字段配置
   const FILTER_FIELDS: FilterField[] = useMemo(
     () => [
-      { name: 'operators', label: t('device.rules.operators'), type: 'input' },
+      { name: 'operators', label: t('common.search'), type: 'input', placeholder: t('device.rules.searchPlaceholder') },
       {
         name: 'enable',
         label: t('table.status'),
@@ -433,53 +462,89 @@ export default function DeviceRules() {
     const devices = getMockDevices(selectedGroupIds);
     const targetGroup = currentEditingRule?.moveToGroupName || 'Target Group';
 
-    // 创建迁移任务并添加到全局任务面板
-    devices.forEach((device, index) => {
-      const taskId = `migration-${device.sn}-${Date.now()}-${index}`;
-      const newTask: SingleTask = {
-        id: taskId,
-        sn: device.sn,
-        deviceName: device.name,
-        type: '设备迁移',
-        status: 'pending',
-        progress: 0,
-      };
+    // 创建迁移任务
+    const newTasks: MigrationTask[] = devices.map((device, index) => ({
+      id: `migration-${device.sn}-${Date.now()}-${index}`,
+      sn: device.sn,
+      deviceName: device.name,
+      sourceGroup: device.sourceGroup,
+      targetGroup,
+      status: 'pending' as MigrationStatus,
+      progress: 0,
+    }));
 
-      addTask(newTask);
-      setPanelExpanded(true);
-      setActiveTab('single');
+    // 打开迁移结果抽屉
+    setMigrationTasks(newTasks);
+    setMigrationDrawerOpen(true);
+    setActiveModalOpen(false);
 
-      // 模拟迁移进度
+    // 模拟迁移进度
+    newTasks.forEach((task, index) => {
       setTimeout(() => {
-        updateTask(taskId, { status: 'running', progress: 10 });
+        setMigrationTasks((prev) => prev.map((item) =>
+          item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
+        ));
 
         const progressInterval = setInterval(() => {
-          const randomProgress = Math.random() * 30 + 10;
-          updateTask(taskId, (prev) => {
-            if (prev.progress >= 100) {
+          setMigrationTasks((prev) => prev.map((item) => {
+            if (item.id !== task.id) return item;
+            if (item.progress >= 100) {
               clearInterval(progressInterval);
-              return prev;
+              return item;
             }
-            return { ...prev, progress: Math.min(prev.progress + randomProgress, 90) };
-          });
+            const randomProgress = Math.random() * 30 + 10;
+            return { ...item, progress: Math.min(item.progress + randomProgress, 90) };
+          }));
         }, 200);
 
         // 模拟完成
         setTimeout(() => {
           clearInterval(progressInterval);
           const success = Math.random() > 0.1;
-          updateTask(taskId, {
-            status: success ? 'success' : 'failed',
-            progress: 100,
-            message: success ? '迁移成功' : '连接超时',
-          });
+          setMigrationTasks((prev) => prev.map((item) =>
+            item.id === task.id ? {
+              ...item,
+              status: success ? 'success' : 'failed',
+              progress: 100,
+              message: success ? t('device.rules.migrationSuccess') : t('device.rules.connectionTimeout'),
+            } : item
+          ));
         }, 1500 + Math.random() * 1000);
       }, index * 300);
     });
 
-    setActiveModalOpen(false);
     void message.success(t('common.commandSent'));
-  }, [selectedGroupIds, currentEditingRule, getMockDevices, t, addTask, updateTask, setPanelExpanded, setActiveTab]);
+  }, [selectedGroupIds, currentEditingRule, getMockDevices, t]);
+
+  // 导出迁移结果
+  const handleExportMigration = useCallback(() => {
+    if (migrationTasks.length === 0) return;
+
+    // 构建 CSV 内容
+    const headers = ['SN', t('alarm.deviceName'), t('device.rules.sourceGroup'), t('device.rules.targetGroup'), t('table.status'), t('task.progress'), t('task.message')];
+    const rows = migrationTasks.map((task) => [
+      task.sn,
+      task.deviceName,
+      task.sourceGroup,
+      task.targetGroup,
+      task.status === 'success' ? t('task.status.completed') : task.status === 'failed' ? t('task.status.failed') : task.status === 'running' ? t('task.status.running') : t('status.pending'),
+      `${task.progress}%`,
+      task.message || '',
+    ]);
+
+    const csvContent = [headers, ...rows].map((row) => row.join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `migration_result_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    void message.success(t('common.exportSuccess'));
+  }, [migrationTasks, t]);
 
   // 添加过滤条件
   const handleAddFilter = useCallback(() => {
@@ -663,6 +728,81 @@ export default function DeviceRules() {
     }
     return '';
   }, [matchingMode, nameFilters, t]);
+
+  // 迁移任务表格列定义
+  const migrationColumns: ColumnsType<MigrationTask> = useMemo(() => [
+    {
+      title: 'SN',
+      dataIndex: 'sn',
+      key: 'sn',
+      width: 120,
+      ellipsis: true,
+      render: (sn: string) => (
+        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{sn}</span>
+      ),
+    },
+    {
+      title: t('alarm.deviceName'),
+      dataIndex: 'deviceName',
+      key: 'deviceName',
+      ellipsis: true,
+      width: 120,
+    },
+    {
+      title: t('device.rules.sourceGroup'),
+      dataIndex: 'sourceGroup',
+      key: 'sourceGroup',
+      width: 100,
+      ellipsis: true,
+    },
+    {
+      title: t('device.rules.targetGroup'),
+      dataIndex: 'targetGroup',
+      key: 'targetGroup',
+      width: 100,
+      ellipsis: true,
+    },
+    {
+      title: t('table.status'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 80,
+      render: (status: MigrationStatus) => {
+        const statusConfig: Record<MigrationStatus, { color: string; text: string }> = {
+          pending: { color: 'default', text: t('status.pending') },
+          running: { color: 'processing', text: t('task.status.running') },
+          success: { color: 'success', text: t('task.status.completed') },
+          failed: { color: 'error', text: t('task.status.failed') },
+        };
+        const cfg = statusConfig[status];
+        return (
+          <Tag color={cfg.color} style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>
+            {cfg.text}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: t('task.progress'),
+      dataIndex: 'progress',
+      key: 'progress',
+      width: 120,
+      render: (progress: number, record) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Progress
+            percent={Math.round(progress)}
+            size="small"
+            status={record.status === 'failed' ? 'exception' : record.status === 'success' ? 'success' : 'active'}
+            showInfo={false}
+            style={{ flex: 1, minWidth: 60 }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
+            {Math.round(progress)}%
+          </span>
+        </div>
+      ),
+    },
+  ], [t]);
 
   return (
     <>
@@ -871,7 +1011,7 @@ export default function DeviceRules() {
         >
           <Tree
             checkable
-            defaultExpandedKeys={['root']}
+            defaultExpandedKeys={['region-bj', 'region-sh', 'region-gz']}
             checkedKeys={selectedGroupIds}
             onCheck={(keys) => setSelectedGroupIds(keys as string[])}
             treeData={MOCK_GROUP_TREE.map((node) => ({
@@ -885,6 +1025,58 @@ export default function DeviceRules() {
           />
         </div>
       </Modal>
+
+      {/* 迁移结果抽屉 */}
+      <Drawer
+        title={t('device.rules.migrationResult')}
+        placement="right"
+        width={640}
+        open={migrationDrawerOpen}
+        onClose={() => setMigrationDrawerOpen(false)}
+        styles={{
+          body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%' },
+        }}
+      >
+        {/* 任务统计 */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space size={16}>
+            <span>
+              {t('task.total')}: {migrationTasks.length}
+            </span>
+            <span style={{ color: 'var(--color-primary-600)' }}>
+              {t('task.status.running')}: {migrationTasks.filter((item) => item.status === 'running').length}
+            </span>
+            <span style={{ color: '#52c41a' }}>
+              {t('task.status.completed')}: {migrationTasks.filter((item) => item.status === 'success').length}
+            </span>
+            <span style={{ color: '#ff4d4f' }}>
+              {t('task.status.failed')}: {migrationTasks.filter((item) => item.status === 'failed').length}
+            </span>
+          </Space>
+          <Button
+            size="small"
+            icon={<ExportOutlined />}
+            onClick={handleExportMigration}
+            disabled={migrationTasks.length === 0}
+          >
+            {t('common.export')}
+          </Button>
+        </div>
+
+        {/* 任务列表 */}
+        <div style={{ flex: 1, overflow: 'hidden', padding: 8 }}>
+          <Table<MigrationTask>
+            dataSource={migrationTasks}
+            columns={migrationColumns}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            scroll={{ y: 'calc(100vh - 180px)' }}
+            locale={{ emptyText: t('common.noData') }}
+            style={{ fontSize: 12 }}
+          />
+        </div>
+      </Drawer>
     </>
   );
 }

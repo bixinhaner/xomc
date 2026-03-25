@@ -460,6 +460,7 @@ const messages: Record<string, string> = {
   'device.downloadTemplate':    '下载模板',
   'device.downloadImportTemplate': '下载导入模板',
   'device.selectFile':          '选择文件',
+  'device.clickOrDragUpload':   '点击或拖拽文件到此区域上传',
   'device.selectedFile':        '已选择文件',
   'device.importSuccess':       '导入成功',
   'device.importTip':           '导入说明',
@@ -1747,6 +1748,8 @@ const messages: Record<string, string> = {
   'device.rules.sourceGroup':       '源设备组',
   'device.rules.migrationSuccess':  '迁移成功',
   'device.rules.connectionTimeout': '连接超时',
+  'device.rules.enableStatus':      '启用状态',
+  'device.rules.searchPlaceholder': '请输入规则内容搜索',
 
   // Filter conditions
   'filter.contain':                 '包含',

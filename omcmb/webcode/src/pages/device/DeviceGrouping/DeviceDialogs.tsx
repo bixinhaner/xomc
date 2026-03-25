@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import { Button, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Typography, Upload } from 'antd';
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, InboxOutlined } from '@ant-design/icons';
 import type { FormInstance, UploadFile } from 'antd';
 import type { Device, EngStatus } from '@/types/device';
 
+const { Dragger } = Upload;
 const { Text } = Typography;
 
 interface TargetGroupOption {
@@ -246,17 +247,24 @@ export default function DeviceDialogs({
                 </Button>
               </div>
               <Form.Item style={{ marginBottom: 0 }}>
-                <Upload
-                  accept=".csv,.xlsx,.xls"
+                <Dragger
+                  accept=".csv"
                   maxCount={1}
                   fileList={fileList}
                   beforeUpload={() => false}
                   onChange={(info) => {
                     onFileListChange(info.fileList.slice(-1));
                   }}
+                  style={{ padding: '12px 0' }}
                 >
-                  <Button icon={<UploadOutlined />}>{t('device.selectFile')}</Button>
-                </Upload>
+                  <p className="ant-upload-drag-icon">
+                    <InboxOutlined style={{ fontSize: 32, color: 'var(--color-primary-600)' }} />
+                  </p>
+                  <p className="ant-upload-text" style={{ fontSize: 13 }}>{t('device.clickOrDragUpload')}</p>
+                  <p className="ant-upload-hint" style={{ fontSize: 11, color: '#8c8c8c' }}>
+                    CSV
+                  </p>
+                </Dragger>
               </Form.Item>
             </div>
           )}

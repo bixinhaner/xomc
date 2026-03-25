@@ -460,6 +460,7 @@ const messages: Record<string, string> = {
   'device.downloadTemplate':    'Download Template',
   'device.downloadImportTemplate': 'Download Import Template',
   'device.selectFile':          'Select File',
+  'device.clickOrDragUpload':   'Click or drag file to this area to upload',
   'device.selectedFile':        'Selected file',
   'device.importSuccess':       'Import successful',
   'device.importTip':           'Import Instructions',
@@ -1744,6 +1745,8 @@ const messages: Record<string, string> = {
   'device.rules.sourceGroup':       'Source Group',
   'device.rules.migrationSuccess':  'Migration successful',
   'device.rules.connectionTimeout': 'Connection timeout',
+  'device.rules.enableStatus':      'Enable Status',
+  'device.rules.searchPlaceholder': 'Search by rule content',
 
   // Filter conditions
   'filter.contain':                 'Contains',
