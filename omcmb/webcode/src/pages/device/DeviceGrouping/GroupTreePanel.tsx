@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button, Dropdown, Input, Tree, Typography } from 'antd';
 import {
   DeleteOutlined,
@@ -174,6 +174,9 @@ export default function GroupTreePanel({
   onAddGroup,
   t,
 }: GroupTreePanelProps) {
+  // 默认展开根节点和"默认设备组"
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(['__all__', 'grp-default']);
+
   const filteredTreeData = useMemo(
     () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t),
     [filteredGroups, selectedGroupId, onContextMenu, t]
@@ -230,7 +233,8 @@ export default function GroupTreePanel({
               selectable: false,
             },
           ]}
-          defaultExpandAll
+          expandedKeys={expandedKeys}
+          onExpand={(keys) => setExpandedKeys(keys)}
           selectedKeys={selectedGroupId ? [selectedGroupId] : []}
           onSelect={(keys) => {
             const key = keys[0] as string | undefined;

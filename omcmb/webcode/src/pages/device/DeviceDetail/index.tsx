@@ -30,7 +30,7 @@ import { useCurrentAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@/types/alarm';
 import type { Device } from '@/types/device';
-import ParameterTreeTab from './ParameterTreeTab';
+
 const { Title, Text } = Typography;
 
 const SEVERITY_COLOR: Record<string, string> = {
@@ -648,11 +648,6 @@ export default function DeviceDetail() {
                   {detailGroups.map((group) => renderFieldGroup(group, device))}
                 </div>
               ),
-            },
-            {
-              key: 'parameters',
-              label: '参数管理',
-              children: <ParameterTreeTab deviceId={device.id} />,
             },
             {
               key: 'alarms',

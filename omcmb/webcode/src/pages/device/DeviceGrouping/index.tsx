@@ -73,6 +73,7 @@ export default function DeviceGrouping() {
     longitude: number;
     latitude: number;
     gpsHeight: number;
+    remark: string;
   }>();
 
   // --- Add device to group state ---
@@ -331,6 +332,7 @@ export default function DeviceGrouping() {
       longitude: device.longitude,
       latitude: device.latitude,
       gpsHeight: device.gpsHeight,
+      remark: device.remark || '',
     });
     setEditDeviceModalOpen(true);
   }, [editDeviceForm]);
@@ -384,8 +386,24 @@ export default function DeviceGrouping() {
     }
   }, [addDeviceForm, addDeviceGroupId, fileList, refetch, message, t]);
 
+  const handleExport = useCallback(() => {
+    // TODO: 调用 CSV 导出 API
+    message.success(t('common.exportInProgress'));
+  }, [message, t]);
+
+  const handleImport = useCallback(async (fileList: UploadFile[]) => {
+    if (fileList.length === 0) {
+      void message.error(t('device.fileRequired'));
+      return;
+    }
+    console.log('批量导入设备:', { file: fileList[0] });
+    void message.success(t('device.importSuccess'));
+    await refetch();
+  }, [message, t, refetch]);
+
   const handleDownloadTemplate = useCallback(() => {
-    const csvContent = 'SN\n';
+    // 生成导入模板 CSV
+    const csvContent = 'SN,名称,经度,纬度,高度,备注\n';
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -397,10 +415,6 @@ export default function DeviceGrouping() {
     URL.revokeObjectURL(url);
     void message.success(t('common.download'));
   }, [message, t]);
-
-  const handleExport = useCallback((format: 'xlsx' | 'csv') => {
-    message.success(`Export as ${format.toUpperCase()}`);
-  }, [message]);
 
   // --- Batch actions ---
   const batchActions = useMemo((): BatchAction[] => [
@@ -510,6 +524,8 @@ export default function DeviceGrouping() {
           }}
           onRefresh={() => void refetch()}
           onExport={handleExport}
+          onImport={handleImport}
+          onDownloadTemplate={handleDownloadTemplate}
           onEditDevice={handleEditDevice}
           t={t}
         />

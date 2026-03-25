@@ -29,6 +29,7 @@ export interface DeviceDialogsProps {
     longitude: number;
     latitude: number;
     gpsHeight: number;
+    remark: string;
   }>;
   onEditDeviceOk: () => void;
   onEditDeviceCancel: () => void;
@@ -142,6 +143,12 @@ export default function DeviceDialogs({
             rules={[{ required: true, message: t('common.placeholder') }]}
           >
             <InputNumber style={{ width: '100%' }} precision={1} />
+          </Form.Item>
+          <Form.Item
+            name="remark"
+            label={t('device.remark')}
+          >
+            <Input.TextArea rows={2} maxLength={200} showCount />
           </Form.Item>
         </Form>
       </Modal>

@@ -57,12 +57,14 @@ export default function DeviceList() {
     progress: number;
     message?: string;
     logContent?: string;
+    hasDetail?: boolean; // 是否有详情可查看（只有收集操作才有）
   }
   const [localTasks, setLocalTasks] = useState<LocalTask[]>([]);
 
   // 收集任务抽屉状态
   const [collectDrawerOpen, setCollectDrawerOpen] = useState(false);
   const [collectTasks, setCollectTasks] = useState<LocalTask[]>([]);
+  const [collectDrawerTitle, setCollectDrawerTitle] = useState(''); // 抽屉标题
 
   // 日志详情弹窗状态
   const [logModalOpen, setLogModalOpen] = useState(false);
@@ -290,6 +292,7 @@ export default function DeviceList() {
             type: taskTypeMap[actionKey ?? ''] || actionLabel,
             status: 'pending' as TaskStatus,
             progress: 0,
+            hasDetail: actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect', // 只有收集操作才有详情
           }));
 
           // 判断是否为收集操作（使用抽屉）
@@ -297,6 +300,7 @@ export default function DeviceList() {
 
           if (isCollectAction) {
             // 收集操作：使用右侧抽屉
+            setCollectDrawerTitle(t('task.collectProgress')); // 收集进度
             setCollectTasks(newTasks);
             setCollectDrawerOpen(true);
 
@@ -342,19 +346,20 @@ export default function DeviceList() {
               }, index * 200);
             });
           } else {
-            // 其他操作：使用底部任务面板
-            setLocalTasks((prev) => [...prev, ...newTasks]);
-            setTaskPanelExpanded(true);
+            // 同步/重启操作：也使用右侧抽屉
+            setCollectDrawerTitle(t('task.taskProgress')); // 任务进度
+            setCollectTasks(newTasks);
+            setCollectDrawerOpen(true);
 
             // 模拟任务进度
             newTasks.forEach((task, index) => {
               setTimeout(() => {
-                setLocalTasks((prev) => prev.map((item) =>
+                setCollectTasks((prev) => prev.map((item) =>
                   item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
                 ));
 
                 const progressInterval = setInterval(() => {
-                  setLocalTasks((prev) => prev.map((item) => {
+                  setCollectTasks((prev) => prev.map((item) => {
                     if (item.id !== task.id) return item;
                     if (item.progress >= 100) {
                       clearInterval(progressInterval);
@@ -370,12 +375,18 @@ export default function DeviceList() {
                 setTimeout(() => {
                   clearInterval(progressInterval);
                   const success = Math.random() > 0.1;
-                  setLocalTasks((prev) => prev.map((item) =>
+                  // 生成操作日志
+                  const timestamp = new Date().toISOString();
+                  const logContent = success
+                    ? `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] INFO: ${t('task.log.success')}`
+                    : `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${task.sn}\n[${timestamp}] ERROR: ${t('task.log.failed')}`;
+                  setCollectTasks((prev) => prev.map((item) =>
                     item.id === task.id ? {
                       ...item,
                       status: success ? 'success' : 'failed',
                       progress: 100,
                       message: success ? t('task.status.completed') : t('common.failed'),
+                      logContent,
                     } : item
                   ));
                 }, completeTime);
@@ -936,7 +947,8 @@ export default function DeviceList() {
       width: 70,
       fixed: 'left',
       render: (_: unknown, record: LocalTask) => {
-        // 只有完成或失败状态才显示查看按钮
+        // 只有收集操作（hasDetail=true）且完成或失败状态才显示查看按钮
+        if (!record.hasDetail) return null;
         if (record.status !== 'success' && record.status !== 'failed') return null;
         return (
           <Button
@@ -1074,7 +1086,7 @@ export default function DeviceList() {
 
       {/* 收集任务抽屉 */}
       <Drawer
-        title={t('task.collectProgress')}
+        title={collectDrawerTitle || t('task.collectProgress')}
         placement="right"
         width={480}
         open={collectDrawerOpen}
@@ -1109,7 +1121,7 @@ export default function DeviceList() {
             rowKey="id"
             size="small"
             pagination={false}
-            scroll={{ y: 'calc(100vh - 180px)' }}
+            scroll={{ x: 630, y: 'calc(100vh - 180px)' }}
             locale={{ emptyText: t('common.noData') }}
             style={{ fontSize: 12 }}
           />
