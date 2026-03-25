@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Button, Descriptions, Form, Input, InputNumber, Select, Space, Typography, Tabs } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, ReloadOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { Button, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Typography, Tabs } from 'antd';
+import { PlayCircleOutlined, SaveOutlined, ReloadOutlined, PlusOutlined, MinusCircleOutlined, ExclamationCircleOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -13,6 +13,25 @@ const OPERATION_TYPE_OPTIONS = [
   { label: 'ADD - 增加', value: 'ADD' },
   { label: 'RMV - 删除', value: 'RMV' },
 ];
+
+// 需要确认的危险命令列表
+const DANGEROUS_COMMANDS = [
+  { pattern: /RST/i, name: '重启', description: '此操作将重启设备，设备会暂时断开连接' },
+  { pattern: /FACTORYRESET/i, name: '恢复默认配置', description: '此操作将恢复设备出厂设置，所有配置将被清除' },
+  { pattern: /CELLDEACTIVATE/i, name: '小区去激活', description: '此操作将去激活小区，可能影响网络服务' },
+  { pattern: /RFCTXOFF/i, name: '关闭小区射频', description: '此操作将关闭小区射频发射，会影响无线信号' },
+  { pattern: /COLDREBOOT/i, name: '冷重启', description: '此操作将执行设备冷重启，设备会完全断电重启' },
+];
+
+// 检查命令是否为危险命令
+function checkDangerousCommand(commandCode: string): { isDangerous: boolean; command?: typeof DANGEROUS_COMMANDS[0] } {
+  for (const cmd of DANGEROUS_COMMANDS) {
+    if (cmd.pattern.test(commandCode)) {
+      return { isDangerous: true, command: cmd };
+    }
+  }
+  return { isDangerous: false };
+}
 
 interface ParamPath {
   id: string;
@@ -49,6 +68,10 @@ export default function CommandInput({
   const [operationType, setOperationType] = useState<string>('LST');
   const [paramPaths, setParamPaths] = useState<ParamPath[]>([{ id: '1', path: '' }]);
 
+  // 确认弹窗状态
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState<typeof DANGEROUS_COMMANDS[0] | null>(null);
+
   // 当选中命令变化时，自动填入命令代码
   useEffect(() => {
     if (selectedCommand) {
@@ -56,7 +79,15 @@ export default function CommandInput({
     }
   }, [selectedCommand]);
 
-  // 执行命令
+  // 真正执行命令
+  const doExecute = useCallback(() => {
+    onExecute();
+    setConsoleInput('');
+    setConfirmModalOpen(false);
+    setPendingCommand(null);
+  }, [onExecute]);
+
+  // 执行命令（带危险命令检查）
   const handleExecute = useCallback(() => {
     if (selectedDevices.length === 0) {
       return;
@@ -64,9 +95,29 @@ export default function CommandInput({
     if (!selectedCommand) {
       return;
     }
-    onExecute();
-    setConsoleInput('');
-  }, [selectedDevices, selectedCommand, onExecute]);
+
+    // 检查是否为危险命令
+    const { isDangerous, command } = checkDangerousCommand(selectedCommand.commandCode);
+    if (isDangerous && command) {
+      setPendingCommand(command);
+      setConfirmModalOpen(true);
+      return;
+    }
+
+    // 非危险命令直接执行
+    doExecute();
+  }, [selectedDevices, selectedCommand, doExecute]);
+
+  // 确认执行危险命令
+  const handleConfirmExecute = useCallback(() => {
+    doExecute();
+  }, [doExecute]);
+
+  // 取消执行
+  const handleCancelExecute = useCallback(() => {
+    setConfirmModalOpen(false);
+    setPendingCommand(null);
+  }, []);
 
   // 键盘快捷键
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -466,6 +517,63 @@ export default function CommandInput({
           )}
         </Space>
       </div>
+
+      {/* 危险命令确认弹窗 */}
+      <Modal
+        open={confirmModalOpen}
+        onCancel={handleCancelExecute}
+        onOk={handleConfirmExecute}
+        okText="确认执行"
+        cancelText="取消"
+        okButtonProps={{
+          danger: true,
+          loading: loading,
+        }}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <WarningOutlined style={{ color: '#faad14', fontSize: 20 }} />
+            <span>确认执行危险操作</span>
+          </div>
+        }
+        width={420}
+        centered
+      >
+        <div style={{ padding: '16px 0' }}>
+          <div
+            style={{
+              padding: 16,
+              background: token.colorWarningBg,
+              borderRadius: 8,
+              marginBottom: 16,
+            }}
+          >
+            <Typography.Text strong style={{ fontSize: 14, color: token.colorWarningText }}>
+              {pendingCommand?.name}
+            </Typography.Text>
+          </div>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            {pendingCommand?.description}
+          </Typography.Text>
+          <div style={{ marginTop: 16 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              目标设备：<span style={{ color: token.colorPrimary, fontWeight: 500 }}>{selectedDevices.length} 台</span>
+            </Typography.Text>
+          </div>
+          <div
+            style={{
+              marginTop: 16,
+              padding: 12,
+              background: token.colorBgLayout,
+              borderRadius: 6,
+              border: `1px solid ${token.colorBorderSecondary}`,
+            }}
+          >
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              请确认是否继续执行此操作
+            </Typography.Text>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
