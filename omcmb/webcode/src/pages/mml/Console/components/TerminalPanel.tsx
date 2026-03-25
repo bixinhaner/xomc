@@ -67,12 +67,13 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
     return (
       <div
         style={{
-          background: '#1A1A1A',
-          borderRadius: 6,
+          background: '#0d1117',
+          borderRadius: 8,
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)',
         }}
       >
         {/* 工具栏 */}
@@ -81,21 +82,41 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '6px 12px',
-            background: '#2A2A2A',
-            borderBottom: '1px solid #333',
+            padding: '8px 14px',
+            background: 'linear-gradient(180deg, #21262d 0%, #161b22 100%)',
+            borderBottom: '1px solid #30363d',
           }}
         >
-          <Typography.Text strong style={{ fontSize: 12, color: '#fff' }}>
-            {t('nav.mml.console')}
-          </Typography.Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                background: '#238636',
+                boxShadow: '0 0 8px rgba(35, 134, 54, 0.5)',
+              }}
+            />
+            <Typography.Text
+              strong
+              style={{ fontSize: 12, color: '#c9d1d9', letterSpacing: '0.5px' }}
+            >
+              终端输出
+            </Typography.Text>
+          </div>
           <Space size={4}>
             <Tooltip title="复制输出">
               <Button
                 size="small"
                 icon={<CopyOutlined />}
                 onClick={handleCopy}
-                style={{ background: '#3A3A3A', border: 'none', color: '#ccc' }}
+                style={{
+                  background: '#21262d',
+                  border: '1px solid #30363d',
+                  color: '#8b949e',
+                  borderRadius: 4,
+                }}
+                className="terminal-btn"
               />
             </Tooltip>
             <Tooltip title="清空">
@@ -103,7 +124,12 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
                 size="small"
                 icon={<ClearOutlined />}
                 onClick={onClear}
-                style={{ background: '#3A3A3A', border: 'none', color: '#ccc' }}
+                style={{
+                  background: '#21262d',
+                  border: '1px solid #30363d',
+                  color: '#8b949e',
+                  borderRadius: 4,
+                }}
               />
             </Tooltip>
             {onDownload && (
@@ -112,9 +138,14 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
                   size="small"
                   icon={<DownloadOutlined />}
                   onClick={onDownload}
-                  style={{ background: '#3A3A3A', border: 'none', color: '#ccc' }}
+                  style={{
+                    background: '#21262d',
+                    border: '1px solid #30363d',
+                    color: '#8b949e',
+                    borderRadius: 4,
+                  }}
                 />
-            </Tooltip>
+              </Tooltip>
             )}
           </Space>
         </div>
@@ -126,24 +157,46 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
           style={{
             flex: 1,
             overflow: 'auto',
-            padding: '10px 14px',
-            fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace",
+            padding: '12px 16px',
+            fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace",
             fontSize: 12,
-            lineHeight: 1.6,
-            color: '#52C41A',
+            lineHeight: 1.7,
+            color: '#7ee787',
+            background: 'linear-gradient(180deg, #0d1117 0%, #161b22 100%)',
           }}
         >
           {lines.length === 0 ? (
-            <span style={{ color: '#555' }}>{'> 等待输出...'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#484f58' }}>
+              <span style={{ color: '#7ee787' }}>&gt;</span>
+              <span>等待命令输出...</span>
+            </div>
           ) : (
             lines.map((line, i) => (
-              <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              <div
+                key={i}
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  padding: '2px 0',
+                }}
+              >
                 {line.timestamp && (
-                  <span style={{ color: '#666', marginRight: 8, fontSize: 10 }}>
+                  <span
+                    style={{
+                      color: '#484f58',
+                      marginRight: 10,
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                    }}
+                  >
                     [{line.timestamp}]
                   </span>
                 )}
-                <span style={{ color: LINE_COLORS[line.type ?? 'stdout'] ?? '#52C41A' }}>
+                <span
+                  style={{
+                    color: LINE_COLORS[line.type ?? 'stdout'] ?? '#7ee787',
+                  }}
+                >
                   {line.text}
                 </span>
               </div>

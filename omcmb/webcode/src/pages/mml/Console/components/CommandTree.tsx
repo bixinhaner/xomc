@@ -100,24 +100,29 @@ export default function CommandTree({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 头部 */}
-      <div style={{
-        padding: '8px 12px',
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <Typography.Text strong style={{ fontSize: 12 }}>
+      <div
+        style={{
+          padding: '10px 12px',
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: token.colorBgLayout,
+        }}
+      >
+        <Typography.Text strong style={{ fontSize: 13 }}>
           {t('nav.mml.commands')}
         </Typography.Text>
         {selectedCommand && (
           <span
             style={{
               fontSize: 10,
-              padding: '2px 6px',
+              padding: '2px 8px',
               background: token.colorPrimaryBg,
-              borderRadius: 4,
+              border: `1px solid ${token.colorPrimaryBorder}`,
+              borderRadius: 10,
               fontFamily: 'monospace',
+              color: token.colorPrimary,
             }}
           >
             {selectedCommand.commandCode}
@@ -126,20 +131,20 @@ export default function CommandTree({
       </div>
 
       {/* 搜索和筛选 */}
-      <div style={{ padding: '8px 12px' }}>
+      <div style={{ padding: '10px 12px', background: token.colorBgContainer }}>
         <Input
           size="small"
-          style={{ marginBottom: 6 }}
+          style={{ marginBottom: 8, borderRadius: 4 }}
           placeholder={t('common.search')}
-          prefix={<SearchOutlined />}
+          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
           value={searchText}
           onChange={(e) => onSearchChange(e.target.value)}
           allowClear
         />
         <Select
           size="small"
-          style={{ width: '100%' }}
-          placeholder="分类"
+          style={{ width: '100%', borderRadius: 4 }}
+          placeholder="按分类筛选"
           allowClear
           options={categories.map((c) => ({ label: c, value: c }))}
           value={categoryFilter || undefined}
@@ -148,7 +153,16 @@ export default function CommandTree({
       </div>
 
       {/* 命令树 */}
-      <div className="no-scrollbar" style={{ flex: 1, minHeight: 80, overflow: 'auto', padding: '4px 0' }}>
+      <div
+        className="no-scrollbar"
+        style={{
+          flex: 1,
+          minHeight: 80,
+          overflow: 'auto',
+          padding: '8px 4px',
+          background: token.colorBgContainer,
+        }}
+      >
         {treeData.length > 0 ? (
           <Tree
             showLine={{ showLeafIcon: false }}

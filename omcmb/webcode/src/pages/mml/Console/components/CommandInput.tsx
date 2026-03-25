@@ -282,33 +282,65 @@ export default function CommandInput({
   ];
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: token.colorBgContainer,
-      borderRadius: 6,
-      border: `1px solid ${token.colorBorderSecondary}`,
-      overflow: 'hidden',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: token.colorBgContainer,
+        borderRadius: 8,
+        border: `1px solid ${token.colorBorderSecondary}`,
+        overflow: 'hidden',
+        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.04)',
+      }}
+    >
       {/* 头部信息 */}
-      <div style={{
-        padding: '10px 12px',
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-        background: token.colorBgLayout,
-      }}>
+      <div
+        style={{
+          padding: '10px 14px',
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          background: `linear-gradient(180deg, ${token.colorBgLayout} 0%, ${token.colorBgContainer} 100%)`,
+        }}
+      >
         <Descriptions column={2} size="small">
-          <Descriptions.Item label={<span style={{ fontSize: 12 }}>命令</span>}>
+          <Descriptions.Item
+            label={
+              <span style={{ fontSize: 11, color: token.colorTextSecondary }}>
+                当前命令
+              </span>
+            }
+          >
             {selectedCommand ? (
-              <Typography.Text code style={{ fontSize: 12 }}>
+              <Typography.Text
+                code
+                style={{
+                  fontSize: 12,
+                  background: token.colorPrimaryBg,
+                  border: `1px solid ${token.colorPrimaryBorder}`,
+                  borderRadius: 4,
+                  padding: '1px 6px',
+                }}
+              >
                 {selectedCommand.commandCode}
               </Typography.Text>
             ) : (
-              <span style={{ color: '#8c8c8c', fontSize: 12 }}>未选择</span>
+              <span style={{ color: '#bfbfbf', fontSize: 11 }}>未选择</span>
             )}
           </Descriptions.Item>
-          <Descriptions.Item label={<span style={{ fontSize: 12 }}>设备</span>}>
-            <span style={{ fontSize: 12 }}>
+          <Descriptions.Item
+            label={
+              <span style={{ fontSize: 11, color: token.colorTextSecondary }}>
+                目标设备
+              </span>
+            }
+          >
+            <span
+              style={{
+                fontSize: 11,
+                color: selectedDevices.length > 0 ? token.colorPrimary : '#bfbfbf',
+                fontWeight: selectedDevices.length > 0 ? 500 : 400,
+              }}
+            >
               {selectedDevices.length > 0 ? `${selectedDevices.length} 台` : '未选择'}
             </span>
           </Descriptions.Item>
@@ -330,20 +362,37 @@ export default function CommandInput({
 
       {/* 命令输入栏 - 只在控制面板 Tab 显示 */}
       {!isParamPathTab && (
-        <div style={{
-          padding: '10px 12px',
-          borderTop: `1px solid ${token.colorBorderSecondary}`,
-          display: 'flex',
-          gap: 8,
-        }}>
+        <div
+          style={{
+            padding: '10px 14px',
+            borderTop: `1px solid ${token.colorBorderSecondary}`,
+            display: 'flex',
+            gap: 10,
+            background: token.colorBgLayout,
+          }}
+        >
           <Input
             size="small"
             value={consoleInput}
             onChange={(e) => setConsoleInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入命令，多个命令用分号隔开"
-            prefix={<span style={{ color: '#52c41a', fontFamily: 'monospace' }}>&gt;</span>}
-            style={{ flex: 1 }}
+            prefix={
+              <span
+                style={{
+                  color: token.colorPrimary,
+                  fontFamily: 'monospace',
+                  fontWeight: 'bold',
+                }}
+              >
+                &gt;
+              </span>
+            }
+            style={{
+              flex: 1,
+              borderRadius: 4,
+              fontFamily: "'SFMono-Regular', Consolas, monospace",
+            }}
           />
           <Button
             size="small"
@@ -352,6 +401,7 @@ export default function CommandInput({
             onClick={handleExecute}
             loading={loading}
             disabled={selectedDevices.length === 0 || !selectedCommand}
+            style={{ borderRadius: 4, fontWeight: 500 }}
           >
             执行
           </Button>
@@ -359,17 +409,24 @@ export default function CommandInput({
       )}
 
       {/* 底部操作栏 */}
-      <div style={{
-        padding: '10px 12px',
-        borderTop: `1px solid ${token.colorBorderSecondary}`,
-        display: 'flex',
-        justifyContent: isParamPathTab ? 'flex-end' : 'space-between',
-        gap: 8,
-      }}>
+      <div
+        style={{
+          padding: '10px 14px',
+          borderTop: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex',
+          justifyContent: isParamPathTab ? 'flex-end' : 'space-between',
+          gap: 8,
+          background: token.colorBgLayout,
+        }}
+      >
         {!isParamPathTab && (
           <Space size={8}>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              {selectedDevices.length} 设备 · {selectedCommand?.commandCode || '未选命令'}
+              <span style={{ color: token.colorPrimary }}>{selectedDevices.length}</span> 设备
+              <span style={{ margin: '0 4px', color: token.colorBorder }}>·</span>
+              {selectedCommand?.commandCode || (
+                <span style={{ color: '#bfbfbf' }}>未选命令</span>
+              )}
             </Typography.Text>
           </Space>
         )}
@@ -382,17 +439,28 @@ export default function CommandInput({
               onClick={handleExecute}
               loading={loading}
               disabled={selectedDevices.length === 0}
+              style={{ borderRadius: 4 }}
             >
               执行
             </Button>
           )}
           {onReset && (
-            <Button size="small" icon={<ReloadOutlined />} onClick={onReset}>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={onReset}
+              style={{ borderRadius: 4 }}
+            >
               重置
             </Button>
           )}
           {onSaveScript && !isParamPathTab && (
-            <Button size="small" icon={<SaveOutlined />} onClick={onSaveScript}>
+            <Button
+              size="small"
+              icon={<SaveOutlined />}
+              onClick={onSaveScript}
+              style={{ borderRadius: 4 }}
+            >
               保存脚本
             </Button>
           )}

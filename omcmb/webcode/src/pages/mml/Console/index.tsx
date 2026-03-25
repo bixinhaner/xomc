@@ -81,7 +81,7 @@ export default function MMLConsole() {
         flexDirection: 'column',
         height: '100%',
         background: token.colorBgLayout,
-        padding: 12,
+        padding: 16,
         gap: 12,
       }}
     >
@@ -91,26 +91,55 @@ export default function MMLConsole() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 12px',
-          background: token.colorBgContainer,
-          borderRadius: 6,
-          border: `1px solid ${token.colorBorderSecondary}`,
+          padding: '12px 16px',
+          background: `linear-gradient(135deg, ${token.colorPrimary} 0%, ${token.colorPrimaryHover || token.colorPrimary} 100%)`,
+          borderRadius: 8,
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Typography.Title level={5} style={{ margin: 0 }}>
-            <AppstoreOutlined style={{ marginRight: 8 }} />
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 6,
+              background: 'rgba(255, 255, 255, 0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <AppstoreOutlined style={{ fontSize: 18, color: '#fff' }} />
+          </div>
+          <Typography.Title level={5} style={{ margin: 0, color: '#fff' }}>
             {t('nav.mml.console')}
           </Typography.Title>
         </div>
 
         {/* 状态指示器 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Tag color={deviceSelection.selectedDevices.length > 0 ? 'blue' : 'default'}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Tag
+            style={{
+              background: 'rgba(255, 255, 255, 0.2)',
+              border: 'none',
+              color: '#fff',
+              borderRadius: 12,
+              padding: '2px 10px',
+            }}
+          >
             设备: {deviceSelection.selectedDevices.length}
           </Tag>
           {commandSelection.selectedCommand && (
-            <Tag color="green" style={{ fontFamily: 'monospace' }}>
+            <Tag
+              style={{
+                background: 'rgba(255, 255, 255, 0.3)',
+                border: 'none',
+                color: '#fff',
+                fontFamily: 'monospace',
+                borderRadius: 12,
+                padding: '2px 10px',
+              }}
+            >
               {commandSelection.selectedCommand.commandCode}
             </Tag>
           )}
