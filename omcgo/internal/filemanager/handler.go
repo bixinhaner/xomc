@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -94,7 +95,7 @@ func (h *Handler) Upload(c *gin.Context) {
 
 	mf, err := h.service.UploadFile(c.Request.Context(), file, header.Size, header.Filename, contentType, FileType(fileType), description, uploader, deviceSN)
 	if err != nil {
-		h.logger.Error("upload file", zap.Error(err))
+		logger.L(c.Request.Context()).Error("upload file", zap.Error(err))
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -157,7 +158,7 @@ func (h *Handler) Download(c *gin.Context) {
 	}
 
 	if _, err := io.Copy(c.Writer, obj); err != nil {
-		h.logger.Error("stream file to client", zap.String("file_id", id.String()), zap.Error(err))
+		logger.L(c.Request.Context()).Error("stream file to client", zap.String("file_id", id.String()), zap.Error(err))
 		// Response headers already sent, cannot abort with JSON error
 	}
 }

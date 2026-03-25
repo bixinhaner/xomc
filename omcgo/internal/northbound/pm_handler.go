@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -67,7 +68,7 @@ func (h *PMHandler) ExportPM(c *gin.Context) {
 
 	result, err := h.svc.ExportPM(c.Request.Context(), filter)
 	if err != nil {
-		h.logger.Error("northbound PM export failed", zap.Error(err))
+		logger.L(c.Request.Context()).Error("northbound PM export failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "pm export failed"})
 		return
 	}
@@ -125,7 +126,7 @@ func (h *PMHandler) ExportKPI(c *gin.Context) {
 
 	result, err := h.svc.ExportKPI(c.Request.Context(), filter)
 	if err != nil {
-		h.logger.Error("northbound KPI export failed", zap.Error(err))
+		logger.L(c.Request.Context()).Error("northbound KPI export failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "kpi export failed"})
 		return
 	}

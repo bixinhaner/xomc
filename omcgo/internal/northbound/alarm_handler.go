@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
@@ -61,7 +62,7 @@ func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
 
 	result, err := h.svc.ExportAlarms(c.Request.Context(), filter)
 	if err != nil {
-		h.logger.Error("northbound alarm export failed", zap.Error(err))
+		logger.L(c.Request.Context()).Error("northbound alarm export failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "alarm export failed"})
 		return
 	}
@@ -79,7 +80,7 @@ func (h *AlarmHandler) ListActiveAlarms(c *gin.Context) {
 
 	result, err := h.svc.ListActiveAlarms(c.Request.Context(), listReq)
 	if err != nil {
-		h.logger.Error("northbound alarm list failed", zap.Error(err))
+		logger.L(c.Request.Context()).Error("northbound alarm list failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "alarm list failed"})
 		return
 	}

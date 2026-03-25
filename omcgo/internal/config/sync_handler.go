@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -84,7 +85,7 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 	}
 
 	if err := h.cmdQueue.Push(c.Request.Context(), deviceID, cmd); err != nil {
-		h.logger.Error("push config command", zap.String("device_id", deviceID), zap.Error(err))
+		logger.L(c.Request.Context()).Error("push config command", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -122,7 +123,7 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 	}
 
 	if err := h.cmdQueue.Push(c.Request.Context(), deviceID, cmd); err != nil {
-		h.logger.Error("pull config command", zap.String("device_id", deviceID), zap.Error(err))
+		logger.L(c.Request.Context()).Error("pull config command", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -144,7 +145,7 @@ func (h *SyncHandler) GetSyncStatus(c *gin.Context) {
 
 	count, err := h.cmdQueue.Len(c.Request.Context(), deviceID)
 	if err != nil {
-		h.logger.Error("get sync status", zap.String("device_id", deviceID), zap.Error(err))
+		logger.L(c.Request.Context()).Error("get sync status", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}

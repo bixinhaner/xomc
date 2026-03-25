@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"go.uber.org/zap"
 )
 
@@ -89,7 +90,7 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 
 	existing, isNew, err := h.service.RegisterDevice(r.Context(), req)
 	if err != nil {
-		h.logger.Error("ne-direct register failed", zap.Error(err))
+		logger.L(r.Context()).Error("ne-direct register failed", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -194,7 +195,7 @@ func (h *Handler) HandleFault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.ReportFault(r.Context(), req); err != nil {
-		h.logger.Error("ne-direct fault processing failed",
+		logger.L(r.Context()).Error("ne-direct fault processing failed",
 			zap.String("serial_number", req.SerialNumber),
 			zap.String("alarm_code", req.AlarmCode),
 			zap.Error(err))
@@ -226,7 +227,7 @@ func (h *Handler) HandleConnect(w http.ResponseWriter, r *http.Request) {
 
 	session, err := h.service.Connect(r.Context(), req.DeviceSN, req.UserID, req.Username)
 	if err != nil {
-		h.logger.Error("ne-direct connect failed", zap.Error(err))
+		logger.L(r.Context()).Error("ne-direct connect failed", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "connect failed"})
 		return
 	}
@@ -257,7 +258,7 @@ func (h *Handler) HandleDisconnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.Disconnect(r.Context(), sessionID); err != nil {
-		h.logger.Error("ne-direct disconnect failed", zap.Error(err))
+		logger.L(r.Context()).Error("ne-direct disconnect failed", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "disconnect failed"})
 		return
 	}
@@ -292,7 +293,7 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 
 	cmd, err := h.service.SendCommand(r.Context(), sessionID, req.Command)
 	if err != nil {
-		h.logger.Error("ne-direct command failed", zap.Error(err))
+		logger.L(r.Context()).Error("ne-direct command failed", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "command failed"})
 		return
 	}
@@ -323,7 +324,7 @@ func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.ListSessions(r.Context(), filter)
 	if err != nil {
-		h.logger.Error("ne-direct list sessions failed", zap.Error(err))
+		logger.L(r.Context()).Error("ne-direct list sessions failed", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}

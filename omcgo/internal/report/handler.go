@@ -9,6 +9,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -295,7 +296,7 @@ func (h *Handler) DownloadRecord(c *gin.Context) {
 	if record.MinioPath != "" && h.minioClient != nil {
 		obj, err := h.minioClient.GetObject(c.Request.Context(), h.reportBkt, record.MinioPath, minio.GetObjectOptions{})
 		if err != nil {
-			h.logger.Error("minio get object failed", zap.Error(err))
+			logger.L(c.Request.Context()).Error("minio get object failed", zap.Error(err))
 			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("download report file: %w", err))
 			return
 		}
@@ -303,7 +304,7 @@ func (h *Handler) DownloadRecord(c *gin.Context) {
 
 		stat, err := obj.Stat()
 		if err != nil {
-			h.logger.Error("minio stat failed", zap.Error(err))
+			logger.L(c.Request.Context()).Error("minio stat failed", zap.Error(err))
 			commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("get report file info: %w", err))
 			return
 		}

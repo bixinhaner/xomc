@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +34,7 @@ func (h *ConfigHandler) ExportConfig(c *gin.Context) {
 
 	params, err := h.svc.ExportConfig(c.Request.Context(), deviceID)
 	if err != nil {
-		h.logger.Error("northbound config export failed",
+		logger.L(c.Request.Context()).Error("northbound config export failed",
 			zap.String("device_id", deviceIDStr),
 			zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "config export failed"})
