@@ -745,6 +745,18 @@ const messages: Record<string, string> = {
   'task.message':         'Message',
   'task.clear':           'Clear',
   'task.clearCompleted':  'Clear Completed',
+  'task.collectProgress': 'Collection Progress',
+  'task.logDetail':       'Log Details',
+  'task.total':           'Total',
+  'task.log.start':       'Start collection task',
+  'task.log.connect':     'Connecting to device',
+  'task.log.getDeviceInfo':'Getting device info',
+  'task.log.collectConfig':'Collecting config data',
+  'task.log.collectPerf': 'Collecting performance data',
+  'task.log.collectComplete':'Collection complete, got {count} records',
+  'task.log.success':     'Task completed successfully',
+  'task.log.timeout':     'Connection timeout, device not responding',
+  'task.log.failed':      'Task execution failed',
 
   // -------------------------------------------------------------------------
   // Theme / locale / timezone

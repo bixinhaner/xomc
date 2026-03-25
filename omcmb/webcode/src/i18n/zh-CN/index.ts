@@ -748,6 +748,18 @@ const messages: Record<string, string> = {
   'task.message':         '消息',
   'task.clear':           '清空',
   'task.clearCompleted':  '清除已完成',
+  'task.collectProgress': '收集进度',
+  'task.logDetail':       '日志详情',
+  'task.total':           '总数',
+  'task.log.start':       '开始收集任务',
+  'task.log.connect':     '连接设备',
+  'task.log.getDeviceInfo':'获取设备信息',
+  'task.log.collectConfig':'收集配置数据',
+  'task.log.collectPerf': '收集性能数据',
+  'task.log.collectComplete':'收集完成，共获取 {count} 条记录',
+  'task.log.success':     '任务执行成功',
+  'task.log.timeout':     '连接超时，设备无响应',
+  'task.log.failed':      '任务执行失败',
 
   // -------------------------------------------------------------------------
   // Theme / locale / timezone
