@@ -74,10 +74,12 @@ func (c *DeviceCache) Delete(ctx context.Context, sn string) {
 func (c *DeviceCache) GetOrLoad(ctx context.Context, sn string, loader func(ctx context.Context, sn string) (*model.Device, error)) (*model.Device, error) {
 	// L1: Redis cache
 	if device, ok := c.Get(ctx, sn); ok {
+		c.logger.Debug("device cache hit", zap.String("serial_number", sn))
 		return device, nil
 	}
 
 	// L2: PostgreSQL (via loader)
+	c.logger.Debug("device cache miss, loading from DB", zap.String("serial_number", sn))
 	device, err := loader(ctx, sn)
 	if err != nil {
 		return nil, fmt.Errorf("load device: %w", err)
@@ -86,6 +88,9 @@ func (c *DeviceCache) GetOrLoad(ctx context.Context, sn string, loader func(ctx 
 	// Cache the result (only if found)
 	if device != nil {
 		c.Set(ctx, device)
+		c.logger.Debug("device cache populated", zap.String("serial_number", sn))
+	} else {
+		c.logger.Debug("device not found in DB, skip cache", zap.String("serial_number", sn))
 	}
 
 	return device, nil
