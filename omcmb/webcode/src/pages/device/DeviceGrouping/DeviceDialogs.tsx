@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Progress, Radio, Select, Typography, Upload } from 'antd';
-import { CheckCircleOutlined, DownloadOutlined, InboxOutlined } from '@ant-design/icons';
+import { useCallback, useMemo, useState } from 'react';
+import { Button, Drawer, Form, Input, InputNumber, message, Modal, Radio, Select, Typography, Upload } from 'antd';
+import { DownloadOutlined, InboxOutlined } from '@ant-design/icons';
 import type { FormInstance, UploadFile, UploadProps } from 'antd';
 import type { Device, EngStatus } from '@/types/device';
 
@@ -80,9 +80,6 @@ export default function DeviceDialogs({
 }: DeviceDialogsProps) {
   // Batch import state
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
-  const [importDone, setImportDone] = useState(false);
 
   const ENG_STATUS_OPTIONS = useMemo(() => [
     { label: t('device.engStatus.commissioned'), value: 'commissioned' },
@@ -93,9 +90,6 @@ export default function DeviceDialogs({
   // Reset batch import state
   const resetBatchImportState = useCallback(() => {
     setFileList([]);
-    setImporting(false);
-    setImportProgress(0);
-    setImportDone(false);
   }, []);
 
   // Handle batch import modal close
@@ -115,50 +109,34 @@ export default function DeviceDialogs({
         file.type === 'text/csv' ||
         file.type === 'application/vnd.ms-excel';
       if (!isCsv) {
+        void message.error(t('recycle.importFormatError'));
         return false;
       }
       const isLt10M = file.size / 1024 / 1024 < 10;
       if (!isLt10M) {
+        void message.error(t('recycle.importSizeError'));
         return false;
       }
       setFileList([file]);
-      setImportDone(false);
       return false;
     },
     onRemove: () => {
       setFileList([]);
-      setImportDone(false);
     },
-  }), [fileList]);
+  }), [fileList, t]);
 
   // Execute batch import
   const handleBatchImport = useCallback(async () => {
     if (fileList.length === 0) {
+      void message.warning(t('common.pleaseSelect'));
       return;
     }
 
-    setImporting(true);
-    setImportProgress(0);
-
-    // Simulate import progress
-    for (let p = 0; p <= 100; p += 10) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
-      setImportProgress(p);
-    }
-
-    setImporting(false);
-    setImportDone(true);
-  }, [fileList]);
-
-  // Handle batch import modal OK
-  const handleBatchImportOk = useCallback(() => {
-    if (importDone) {
-      onBatchImportConfirm();
-      handleBatchImportClose();
-    } else if (fileList.length > 0) {
-      void handleBatchImport();
-    }
-  }, [importDone, onBatchImportConfirm, handleBatchImportClose, handleBatchImport, fileList.length]);
+    // 直接提示导入成功并关闭弹窗
+    void message.success(t('device.importSuccess'));
+    onBatchImportConfirm();
+    handleBatchImportClose();
+  }, [fileList, t, onBatchImportConfirm, handleBatchImportClose]);
 
   return (
     <>
@@ -310,11 +288,10 @@ export default function DeviceDialogs({
       <Modal
         title={t('device.batchImport')}
         open={batchImportModalOpen}
-        onOk={handleBatchImportOk}
+        onOk={handleBatchImport}
         onCancel={handleBatchImportClose}
-        okText={importDone ? t('common.finish') : t('common.import')}
-        cancelText={importDone ? t('common.close') : t('common.cancel')}
-        confirmLoading={importing}
+        okText={t('common.import')}
+        cancelText={t('common.cancel')}
         width={520}
         destroyOnClose
       >
@@ -329,32 +306,15 @@ export default function DeviceDialogs({
           </Button>
         </div>
 
-        <Dragger {...uploadProps} disabled={importing || importDone}>
+        <Dragger {...uploadProps}>
           <p className="ant-upload-drag-icon">
             <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
           </p>
-          <p className="ant-upload-text">{t('device.clickOrDragUpload')}</p>
+          <p className="ant-upload-text">{t('recycle.importSelectFile')}</p>
           <p className="ant-upload-hint" style={{ fontSize: 12, color: '#8c8c8c' }}>
-            CSV
+            {t('recycle.importCsvOnly')}
           </p>
         </Dragger>
-
-        {importing && (
-          <div style={{ marginTop: 16 }}>
-            <span style={{ fontSize: 13, color: '#666' }}>{t('common.loading')}</span>
-            <Progress percent={importProgress} status="active" />
-          </div>
-        )}
-
-        {importDone && (
-          <Alert
-            type="success"
-            showIcon
-            icon={<CheckCircleOutlined />}
-            message={t('device.importSuccess')}
-            style={{ marginTop: 16 }}
-          />
-        )}
       </Modal>
     </>
   );
