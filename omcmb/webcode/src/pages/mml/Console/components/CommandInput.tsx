@@ -1,10 +1,27 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Button, Descriptions, Form, Input, InputNumber, Select, Space, Typography } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Descriptions, Form, Input, InputNumber, Select, Space, Typography, Tabs } from 'antd';
+import { PlayCircleOutlined, SaveOutlined, ReloadOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
+
+// 操作类型选项
+const OPERATION_TYPE_OPTIONS = [
+  { label: 'LST - 查询', value: 'LST' },
+  { label: 'MOD - 修改', value: 'MOD' },
+  { label: 'SET - 设置', value: 'SET' },
+  { label: 'ADD - 增加', value: 'ADD' },
+  { label: 'DEL - 删除', value: 'DEL' },
+  { label: 'ACT - 激活', value: 'ACT' },
+  { label: 'DEA - 去激活', value: 'DEA' },
+  { label: 'RST - 重启', value: 'RST' },
+];
+
+interface ParamPath {
+  id: string;
+  path: string;
+}
 
 interface CommandInputProps {
   selectedDevices: ConsoleDevice[];
@@ -30,6 +47,10 @@ export default function CommandInput({
   const t = useT();
   const token = useThemeToken();
   const [consoleInput, setConsoleInput] = useState('');
+
+  // 参数路径配置状态
+  const [operationType, setOperationType] = useState<string>('LST');
+  const [paramPaths, setParamPaths] = useState<ParamPath[]>([{ id: '1', path: '' }]);
 
   // 当选中命令变化时，自动填入命令代码
   useEffect(() => {
@@ -57,6 +78,197 @@ export default function CommandInput({
       handleExecute();
     }
   }, [handleExecute]);
+
+  // 添加参数路径
+  const handleAddParamPath = useCallback(() => {
+    setParamPaths((prev) => [
+      ...prev,
+      { id: String(Date.now()), path: '' },
+    ]);
+  }, []);
+
+  // 删除参数路径
+  const handleRemoveParamPath = useCallback((id: string) => {
+    setParamPaths((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((p) => p.id !== id);
+    });
+  }, []);
+
+  // 更新参数路径
+  const handleUpdateParamPath = useCallback((id: string, path: string) => {
+    setParamPaths((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, path } : p))
+    );
+  }, []);
+
+  // Tab 项配置
+  const tabItems = [
+    {
+      key: 'control',
+      label: '控制面板',
+      children: (
+        <div className="no-scrollbar" style={{ height: '100%', overflow: 'auto', padding: 12 }}>
+          {selectedCommand ? (
+            selectedCommand.params.length > 0 ? (
+              <Form layout="vertical" size="small">
+                {selectedCommand.params.map((param) => (
+                  <Form.Item
+                    key={param.name}
+                    label={
+                      <span style={{ fontSize: 11 }}>
+                        {param.name}
+                        {param.required && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
+                      </span>
+                    }
+                    tooltip={param.description}
+                  >
+                    {param.type === 'enum' ? (
+                      <Select
+                        allowClear={!param.required}
+                        options={param.options?.map((o) => ({
+                          label: String(o.label),
+                          value: o.value,
+                        }))}
+                        value={paramValues[param.name] as string | number | undefined}
+                        onChange={(val) =>
+                          onParamChange({ ...paramValues, [param.name]: val })
+                        }
+                      />
+                    ) : param.type === 'number' ? (
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        min={param.minValue}
+                        max={param.maxValue}
+                        value={paramValues[param.name] as number | undefined}
+                        onChange={(val) =>
+                          onParamChange({ ...paramValues, [param.name]: val ?? '' })
+                        }
+                      />
+                    ) : (
+                      <Input
+                        value={paramValues[param.name] as string | undefined}
+                        onChange={(e) =>
+                          onParamChange({ ...paramValues, [param.name]: e.target.value })
+                        }
+                      />
+                    )}
+                  </Form.Item>
+                ))}
+              </Form>
+            ) : (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                color: '#8c8c8c',
+                fontSize: 11,
+              }}>
+                该命令无需配置参数
+              </div>
+            )
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: '#8c8c8c',
+              fontSize: 11,
+            }}>
+              请先从左侧选择命令
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'paramPath',
+      label: '参数路径指定',
+      children: (
+        <div className="no-scrollbar" style={{ height: '100%', overflow: 'auto', padding: 12 }}>
+          {/* 操作类型 */}
+          <Form layout="vertical" size="small">
+            <Form.Item label={<span style={{ fontSize: 11 }}>操作类型</span>}>
+              <Select
+                options={OPERATION_TYPE_OPTIONS}
+                value={operationType}
+                onChange={setOperationType}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          </Form>
+
+          {/* 参数路径列表 */}
+          <div style={{ marginTop: 8 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 8,
+            }}>
+              <Typography.Text strong style={{ fontSize: 11 }}>参数路径</Typography.Text>
+              <Button
+                size="small"
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={handleAddParamPath}
+                style={{ fontSize: 11 }}
+              >
+                添加路径
+              </Button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {paramPaths.map((item, index) => (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{
+                    fontSize: 10,
+                    color: '#8c8c8c',
+                    width: 20,
+                    flexShrink: 0,
+                  }}>
+                    {index + 1}.
+                  </span>
+                  <Input
+                    size="small"
+                    placeholder="例如: Device.Services.FAPService.1.CellConfig.1"
+                    value={item.path}
+                    onChange={(e) => handleUpdateParamPath(item.id, e.target.value)}
+                    style={{ flex: 1, fontSize: 11 }}
+                  />
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    icon={<MinusCircleOutlined />}
+                    onClick={() => handleRemoveParamPath(item.id)}
+                    disabled={paramPaths.length <= 1}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 帮助提示 */}
+          <div style={{
+            marginTop: 16,
+            padding: 8,
+            background: token.colorBgTextDisabled,
+            borderRadius: 4,
+            fontSize: 10,
+            color: '#8c8c8c',
+          }}>
+            <div style={{ marginBottom: 4 }}>提示：</div>
+            <div>• 参数路径支持 TR-069 参数树路径格式</div>
+            <div>• 可添加多条路径进行批量操作</div>
+            <div>• 路径示例: Device.Services.FAPService.1.CellConfig.LTE.Cell.1</div>
+          </div>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div style={{
@@ -91,80 +303,14 @@ export default function CommandInput({
         </Descriptions>
       </div>
 
-      {/* 参数配置区 */}
-      <div className="no-scrollbar" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
-        {selectedCommand ? (
-          selectedCommand.params.length > 0 ? (
-            <Form layout="vertical" size="small">
-              {selectedCommand.params.map((param) => (
-                <Form.Item
-                  key={param.name}
-                  label={
-                    <span style={{ fontSize: 11 }}>
-                      {param.name}
-                      {param.required && <span style={{ color: '#ff4d4f', marginLeft: 2 }}>*</span>}
-                    </span>
-                  }
-                  tooltip={param.description}
-                >
-                  {param.type === 'enum' ? (
-                    <Select
-                      allowClear={!param.required}
-                      options={param.options?.map((o) => ({
-                        label: String(o.label),
-                        value: o.value,
-                      }))}
-                      value={paramValues[param.name] as string | number | undefined}
-                      onChange={(val) =>
-                        onParamChange({ ...paramValues, [param.name]: val })
-                      }
-                    />
-                  ) : param.type === 'number' ? (
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      min={param.minValue}
-                      max={param.maxValue}
-                      value={paramValues[param.name] as number | undefined}
-                      onChange={(val) =>
-                        onParamChange({ ...paramValues, [param.name]: val ?? '' })
-                      }
-                    />
-                  ) : (
-                    <Input
-                      value={paramValues[param.name] as string | undefined}
-                      onChange={(e) =>
-                        onParamChange({ ...paramValues, [param.name]: e.target.value })
-                      }
-                    />
-                  )}
-                </Form.Item>
-              ))}
-            </Form>
-          ) : (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: '#8c8c8c',
-              fontSize: 11,
-            }}>
-              该命令无需配置参数
-            </div>
-          )
-        ) : (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            color: '#8c8c8c',
-            fontSize: 11,
-          }}>
-            请先从左侧选择命令
-          </div>
-        )}
-      </div>
+      {/* Tab 内容区 */}
+      <Tabs
+        defaultActiveKey="control"
+        size="small"
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}
+        tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
+        items={tabItems}
+      />
 
       {/* 命令输入栏 */}
       <div style={{
