@@ -150,7 +150,7 @@ export default function DeviceTree({
         className="no-scrollbar"
         style={{
           flex: 1,
-          minHeight: 80,
+          minHeight: 0,
           overflow: 'auto',
           background: token.colorBgContainer,
         }}
