@@ -1,6 +1,6 @@
 import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Button, Space, Tooltip } from 'antd';
-import { ClearOutlined, CopyOutlined } from '@ant-design/icons';
+import { ClearOutlined, CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import { message } from 'antd';
 
 export interface TerminalLine {
@@ -20,6 +20,7 @@ export interface TerminalOutputProps {
   autoScroll?: boolean;
   showTimestamp?: boolean;
   style?: React.CSSProperties;
+  onDownload?: () => void;
 }
 
 const LINE_COLORS: Record<string, string> = {
@@ -37,6 +38,7 @@ const TerminalOutput = React.forwardRef<TerminalOutputHandle, TerminalOutputProp
       autoScroll = true,
       showTimestamp = false,
       style,
+      onDownload,
     },
     ref
   ) => {
@@ -115,12 +117,23 @@ const TerminalOutput = React.forwardRef<TerminalOutputHandle, TerminalOutputProp
                 style={{ background: '#3A3A3A', border: 'none', color: '#ccc' }}
               />
             </Tooltip>
+            {onDownload && (
+              <Tooltip title="下载">
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={onDownload}
+                  style={{ background: '#3A3A3A', border: 'none', color: '#ccc' }}
+                />
+              </Tooltip>
+            )}
           </Space>
         </div>
 
         {/* Content */}
         <div
           ref={containerRef}
+          className="no-scrollbar"
           style={{
             height,
             overflowY: 'auto',

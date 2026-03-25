@@ -25,8 +25,8 @@ export default function ListPageLayout({ title, subtitle, children, extra }: Pro
         display: 'flex',
         flexDirection: 'column',
         gap: 16,
-        width: '100%',
-        minHeight: '100%',
+        flex: 1,
+        minHeight: 0,
       }}
     >
       {(title ?? extra) && (
@@ -36,6 +36,7 @@ export default function ListPageLayout({ title, subtitle, children, extra }: Pro
             alignItems: 'flex-start',
             justifyContent: 'space-between',
             gap: 16,
+            flexShrink: 0,
           }}
         >
           {title && (
@@ -53,7 +54,7 @@ export default function ListPageLayout({ title, subtitle, children, extra }: Pro
           {extra && <div style={{ flexShrink: 0 }}>{extra}</div>}
         </div>
       )}
-      <div style={{ flex: 1 }}>{children}</div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{children}</div>
     </div>
   );
 }

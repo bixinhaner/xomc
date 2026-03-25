@@ -108,7 +108,7 @@ export const NAV_CONFIG: NavConfig = [
     children: [
       { key: 'mml-console', label: 'nav.mml.console',  path: '/mml/console' },
       { key: 'mml-script',  label: 'nav.mml.script',   path: '/mml/script' },
-      { key: 'mml-cmd',     label: 'nav.mml.commands',  path: '/mml/commands' },
+      // { key: 'mml-cmd',     label: 'nav.mml.commands',  path: '/mml/commands' },  // 隐藏
     ],
   },
   {

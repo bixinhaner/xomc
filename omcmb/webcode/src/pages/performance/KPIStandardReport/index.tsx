@@ -122,10 +122,11 @@ interface TreeNodeTitleProps {
   nodeKey: string;
   isCustom?: boolean;
   onAdd?: (key: string) => void;
+  onEdit?: (key: string, title: string) => void;
   onDelete?: (key: string) => void;
 }
 
-function TreeNodeTitle({ title, nodeKey, isCustom, onAdd, onDelete }: TreeNodeTitleProps) {
+function TreeNodeTitle({ title, nodeKey, isCustom, onAdd, onEdit, onDelete }: TreeNodeTitleProps) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -147,6 +148,18 @@ function TreeNodeTitle({ title, nodeKey, isCustom, onAdd, onDelete }: TreeNodeTi
             }}
             style={{ fontSize: 12, padding: '0 4px' }}
           />
+          {isCustom && onEdit && (
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(nodeKey, title);
+              }}
+              style={{ fontSize: 12, padding: '0 4px' }}
+            />
+          )}
           {isCustom && onDelete && (
             <Button
               type="text"
@@ -170,6 +183,7 @@ function useKPITreeData(
   t: (id: string) => string,
   customNodes: { key: string; parentKey: string; title: string }[],
   onAddNode: (parentKey: string) => void,
+  onEditNode: (nodeKey: string, title: string) => void,
   onDeleteNode: (nodeKey: string) => void,
   searchValue: string
 ): DataNode[] {
@@ -212,6 +226,7 @@ function useKPITreeData(
               nodeKey={nodeKey}
               isCustom={isCustom}
               onAdd={onAddNode}
+              onEdit={isCustom ? onEditNode : undefined}
               onDelete={isCustom ? onDeleteNode : undefined}
             />
           ),
@@ -223,6 +238,7 @@ function useKPITreeData(
                 nodeKey={cn.key}
                 isCustom
                 onAdd={onAddNode}
+                onEdit={onEditNode}
                 onDelete={onDeleteNode}
               />
             ),
@@ -281,7 +297,7 @@ function useKPITreeData(
         children: firstLevelNodes,
       },
     ];
-  }, [t, customNodes, onAddNode, onDeleteNode, searchValue]);
+  }, [t, customNodes, onAddNode, onEditNode, onDeleteNode, searchValue]);
 }
 
 export default function KPIStandardReport() {
@@ -349,6 +365,12 @@ export default function KPIStandardReport() {
   const [addNodeForm] = Form.useForm<{ name: string }>();
   const [currentParentKey, setCurrentParentKey] = useState<string>('');
 
+  // Edit node modal state
+  const [editNodeModalOpen, setEditNodeModalOpen] = useState(false);
+  const [editNodeForm] = Form.useForm<{ name: string; description: string }>();
+  const [editingNodeKey, setEditingNodeKey] = useState<string>('');
+  const [editingNodeTitle, setEditingNodeTitle] = useState<string>('');
+
   // 获取树节点名称的辅助函数
   const getTreeNodeName = useCallback((nodeKey: string): string => {
     // 一级节点
@@ -395,7 +417,21 @@ export default function KPIStandardReport() {
     });
   }, [modal, message, t]);
 
-  const kpiTreeData = useKPITreeData(t, customNodes, handleAddNode, handleDeleteNode, treeSearchValue);
+  // Handle edit node from tree
+  const handleEditNode = useCallback((nodeKey: string, title: string) => {
+    const node = customNodes.find((n) => n.key === nodeKey);
+    if (node) {
+      setEditingNodeKey(nodeKey);
+      setEditingNodeTitle(title);
+      editNodeForm.setFieldsValue({
+        name: title,
+        description: '', // 描述信息可以从扩展字段获取
+      });
+      setEditNodeModalOpen(true);
+    }
+  }, [customNodes, editNodeForm]);
+
+  const kpiTreeData = useKPITreeData(t, customNodes, handleAddNode, handleEditNode, handleDeleteNode, treeSearchValue);
 
   // 过滤数据
   const filteredData = useMemo(() => {
@@ -711,6 +747,23 @@ export default function KPIStandardReport() {
     }
   }, [addNodeForm, currentParentKey, message, t]);
 
+  // Handle edit tree node
+  const handleEditTreeNode = useCallback(async () => {
+    try {
+      const values = await editNodeForm.validateFields();
+      setCustomNodes((prev) =>
+        prev.map((n) =>
+          n.key === editingNodeKey ? { ...n, title: values.name } : n
+        )
+      );
+      void message.success(t('common.success'));
+      setEditNodeModalOpen(false);
+      editNodeForm.resetFields();
+    } catch {
+      // validation error
+    }
+  }, [editNodeForm, editingNodeKey, message, t]);
+
   // Handle add indicator
   const handleAddIndicator = useCallback(async () => {
     try {
@@ -1020,6 +1073,47 @@ export default function KPIStandardReport() {
             ]}
           >
             <Input placeholder={t('common.namePlaceholder')} maxLength={100} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Edit Tree Node Modal */}
+      <Modal
+        title={t('common.edit')}
+        open={editNodeModalOpen}
+        onOk={() => void handleEditTreeNode()}
+        onCancel={() => {
+          setEditNodeModalOpen(false);
+          editNodeForm.resetFields();
+        }}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={400}
+      >
+        <Form
+          form={editNodeForm}
+          layout="vertical"
+        >
+          <Form.Item
+            name="name"
+            label={t('common.name')}
+            rules={[
+              { required: true, message: t('common.nameRequired') },
+              { max: 100, message: t('common.nameMax100') },
+            ]}
+          >
+            <Input placeholder={t('common.namePlaceholder')} maxLength={100} />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label={t('common.description')}
+          >
+            <Input.TextArea
+              placeholder={t('common.descriptionPlaceholder')}
+              rows={3}
+              maxLength={500}
+              showCount
+            />
           </Form.Item>
         </Form>
       </Modal>
