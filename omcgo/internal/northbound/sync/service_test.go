@@ -121,6 +121,9 @@ func (m *mockParamRepo) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ stri
 func (m *mockParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string, _ int) ([]model.DeviceParameter, error) {
 	return nil, nil
 }
+func (m *mockParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
 
 // --- Tests ---
 

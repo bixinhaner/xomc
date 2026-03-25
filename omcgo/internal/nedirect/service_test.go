@@ -190,6 +190,9 @@ func (m *mockParamRepo) CountByPathPrefix(ctx context.Context, deviceID uuid.UUI
 func (m *mockParamRepo) SearchByKeyword(ctx context.Context, deviceID uuid.UUID, keyword string, limit int) ([]model.DeviceParameter, error) {
 	return nil, nil
 }
+func (m *mockParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
 
 type mockAlarmStore struct{}
 
