@@ -300,6 +300,7 @@ const messages: Record<string, string> = {
   'nav.alarm.notification':   '告警通知',
   'nav.alarm.interfaceFault': '接口故障',
   'nav.alarm.customStats':    '自定义统计',
+  'nav.alarm.customAlarm':    '自定义告警',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Config (new)

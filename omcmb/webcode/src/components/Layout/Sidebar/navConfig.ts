@@ -39,7 +39,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'device-launch',    label: 'nav.device.commission',  path: '/device/commission' },
       // { key: 'device-transfer',  label: 'nav.device.handover',    path: '/device/handover' },      // 隐藏
       // { key: 'device-resource',  label: 'nav.device.stats',       path: '/device/stats' },         // 隐藏
-      { key: 'device-import',    label: 'nav.device.import',      path: '/device/import' },
+      // { key: 'device-import',    label: 'nav.device.import',      path: '/device/import' },        // 隐藏
       { key: 'device-rule',      label: 'nav.device.rules',       path: '/device/rules' },
       { key: 'device-recycle',   label: 'nav.device.recycle',     path: '/device/recycle' },
     ],
@@ -57,7 +57,7 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
       { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },
       // { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' }, // 隐藏
-      { key: 'alarm-custom-stats', label: 'nav.alarm.customStats',    path: '/alarm/custom-stats' },
+      { key: 'alarm-custom-stats', label: 'nav.alarm.customAlarm',    path: '/alarm/custom-stats' },
     ],
   },
   {

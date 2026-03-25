@@ -300,6 +300,7 @@ const messages: Record<string, string> = {
   'nav.alarm.notification':   'Alarm Notification',
   'nav.alarm.interfaceFault': 'Interface Fault',
   'nav.alarm.customStats':    'Custom Statistics',
+  'nav.alarm.customAlarm':    'Custom Alarm',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Config (new)
