@@ -185,20 +185,20 @@ type SetParameterAttributeData struct {
 // XML Templates
 
 const soapEnvelopeOpen = `<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
-               xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
-               xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soap:Header>
-    <cwmp:ID soap:mustUnderstand="1">{{.ID}}</cwmp:ID>{{if .NoMoreRequests}}
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+                   xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
+                   xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">{{.ID}}</cwmp:ID>{{if .NoMoreRequests}}
     <cwmp:NoMoreRequests>{{.NoMoreRequests}}</cwmp:NoMoreRequests>{{end}}
-  </soap:Header>
-  <soap:Body>`
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>`
 
 const soapEnvelopeClose = `
-  </soap:Body>
-</soap:Envelope>`
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>`
 
 const informResponseXML = soapEnvelopeOpen + `
     <cwmp:InformResponse>
@@ -208,7 +208,7 @@ const informResponseXML = soapEnvelopeOpen + `
 
 const getParameterValuesXML = soapEnvelopeOpen + `
     <cwmp:GetParameterValues>
-      <cwmp:ParameterNames soap-enc:arrayType="xsd:string[{{len .Params}}]">
+      <cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">
         {{- range .Params}}
         <string>{{.Name}}</string>
         {{- end}}
@@ -217,7 +217,7 @@ const getParameterValuesXML = soapEnvelopeOpen + `
 
 const setParameterValuesXML = soapEnvelopeOpen + `
     <cwmp:SetParameterValues>
-      <cwmp:ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[{{len .Params}}]">
+      <cwmp:ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[{{len .Params}}]">
         {{- range .Params}}
         <cwmp:ParameterValueStruct>
           <cwmp:Name>{{.Name}}</cwmp:Name>
@@ -285,7 +285,7 @@ const scheduleInformXML = soapEnvelopeOpen + `
     </cwmp:ScheduleInform>` + soapEnvelopeClose
 
 const faultResponseXML = soapEnvelopeOpen + `
-    <soap:Fault>
+    <SOAP-ENV:Fault>
       <faultcode>Client</faultcode>
       <faultstring>CWMP fault</faultstring>
       <detail>
@@ -294,7 +294,7 @@ const faultResponseXML = soapEnvelopeOpen + `
           <cwmp:FaultString>{{.FaultString}}</cwmp:FaultString>
         </cwmp:Fault>
       </detail>
-    </soap:Fault>` + soapEnvelopeClose
+    </SOAP-ENV:Fault>` + soapEnvelopeClose
 
 const transferCompleteResponseXML = soapEnvelopeOpen + `
     <cwmp:TransferCompleteResponse/>` + soapEnvelopeClose
@@ -304,7 +304,7 @@ const autonomousTransferCompleteResponseXML = soapEnvelopeOpen + `
 
 const getParameterAttributesXML = soapEnvelopeOpen + `
     <cwmp:GetParameterAttributes>
-      <cwmp:ParameterNames soap-enc:arrayType="xsd:string[{{len .Params}}]">
+      <cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">
         {{- range .Params}}
         <string>{{.Name}}</string>
         {{- end}}
@@ -313,7 +313,7 @@ const getParameterAttributesXML = soapEnvelopeOpen + `
 
 const setParameterAttributesXML = soapEnvelopeOpen + `
     <cwmp:SetParameterAttributes>
-      <cwmp:ParameterList soap-enc:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">
+      <cwmp:ParameterList SOAP-ENC:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">
         {{- range .Params}}
         <cwmp:SetParameterAttributesStruct>
           <cwmp:Name>{{.Name}}</cwmp:Name>

@@ -108,7 +108,7 @@ func ParseEnvelope(r io.Reader) (*Envelope, error) {
 }
 
 // DetectRPCMethod identifies the RPC method from raw SOAP body content
-// by parsing the XML and extracting the first child element of <soap:Body>.
+// by parsing the XML and extracting the first child element of <SOAP-ENV:Body>.
 // Per SOAP/CWMP spec, the RPC method is always the first (and only) child element of Body.
 func DetectRPCMethod(bodyContent []byte) RPCMethod {
 	decoder := xml.NewDecoder(bytes.NewReader(bodyContent))
@@ -131,7 +131,7 @@ func DetectRPCMethod(bodyContent []byte) RPCMethod {
 		}
 
 		if inBody {
-			// The first child element of soap:Body is the RPC method.
+			// The first child element of SOAP-ENV:Body is the RPC method.
 			// e.g., <cwmp:Inform>, <cwmp:GetParameterValuesResponse>, <cwmp:FactoryReset/>
 			return RPCMethod(se.Name.Local)
 		}

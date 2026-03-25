@@ -126,7 +126,7 @@ type Session struct {
 	// 示例："0 BOOTSTRAP"、"2 PERIODIC"、"4 VALUE CHANGE"
 	InformEvents []string `json:"inform_events"`
 
-	// CWMPId 是 Inform 的 soap:Header 中的 CWMP ID，
+	// CWMPId 是 Inform 的 SOAP-ENV:Header 中的 CWMP ID，
 	// 用于关联 SOAP 对话中的请求和响应。
 	CWMPId string `json:"cwmp_id"`
 
