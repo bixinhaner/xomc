@@ -1,7 +1,7 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Modal, Progress, Upload, message } from 'antd';
+import { useCallback, useState } from 'react';
+import { Modal, Upload, message } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
-import { CheckCircleOutlined, InboxOutlined } from '@ant-design/icons';
+import { InboxOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;
@@ -16,16 +16,10 @@ interface ImportModalProps {
 export default function ImportModal({ open, onClose, onConfirm, confirmLoading }: ImportModalProps) {
   const t = useT();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
-  const [importDone, setImportDone] = useState(false);
 
   // 重置状态
   const resetState = useCallback(() => {
     setFileList([]);
-    setImporting(false);
-    setImportProgress(0);
-    setImportDone(false);
   }, []);
 
   // 关闭弹窗
@@ -58,12 +52,10 @@ export default function ImportModal({ open, onClose, onConfirm, confirmLoading }
       }
 
       setFileList([file]);
-      setImportDone(false);
       return false; // 阻止自动上传
     },
     onRemove: () => {
       setFileList([]);
-      setImportDone(false);
     },
   };
 
@@ -74,43 +66,25 @@ export default function ImportModal({ open, onClose, onConfirm, confirmLoading }
       return;
     }
 
-    setImporting(true);
-    setImportProgress(0);
-
-    // 模拟导入进度
-    for (let p = 0; p <= 100; p += 10) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
-      setImportProgress(p);
-    }
-
-    setImporting(false);
-    setImportDone(true);
-    void message.success(t('status.success'));
-  }, [fileList, t]);
-
-  // 确认完成
-  const handleOk = useCallback(() => {
-    if (importDone) {
-      onConfirm();
-      handleClose();
-    } else {
-      void handleImport();
-    }
-  }, [importDone, onConfirm, handleClose, handleImport]);
+    // 直接提示导入成功并关闭弹窗
+    void message.success(t('recycle.importSuccess'));
+    onConfirm();
+    handleClose();
+  }, [fileList, t, onConfirm, handleClose]);
 
   return (
     <Modal
       title={t('device.batchImport')}
       open={open}
-      onOk={handleOk}
+      onOk={handleImport}
       onCancel={handleClose}
-      okText={importDone ? t('common.finish') : t('common.import')}
-      cancelText={importDone ? t('common.close') : t('common.cancel')}
-      confirmLoading={confirmLoading || importing}
+      okText={t('common.import')}
+      cancelText={t('common.cancel')}
+      confirmLoading={confirmLoading}
       width={520}
       destroyOnClose
     >
-      <Dragger {...uploadProps} disabled={importing || importDone}>
+      <Dragger {...uploadProps}>
         <p className="ant-upload-drag-icon">
           <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
         </p>
@@ -119,23 +93,6 @@ export default function ImportModal({ open, onClose, onConfirm, confirmLoading }
           {t('recycle.importCsvOnly')}
         </p>
       </Dragger>
-
-      {importing && (
-        <div style={{ marginTop: 16 }}>
-          <span style={{ fontSize: 13, color: '#666' }}>{t('common.loading')}</span>
-          <Progress percent={importProgress} status="active" />
-        </div>
-      )}
-
-      {importDone && (
-        <Alert
-          type="success"
-          showIcon
-          icon={<CheckCircleOutlined />}
-          message={t('recycle.importSuccess')}
-          style={{ marginTop: 16 }}
-        />
-      )}
     </Modal>
   );
 }
