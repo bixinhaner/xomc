@@ -83,8 +83,19 @@ export default function DeviceGrouping() {
     addMethod: 'manual' | 'import';
     deviceSnList: string;
   }>();
-  const [fileList, setFileList] = useState<UploadFile[]>([]);
   const addMethod = Form.useWatch('addMethod', addDeviceForm);
+
+  // --- Batch import modal state ---
+  const [batchImportModalOpen, setBatchImportModalOpen] = useState(false);
+
+  // When addMethod changes to 'import', close drawer and open batch import modal
+  useEffect(() => {
+    if (addMethod === 'import' && addDeviceDrawerOpen) {
+      setAddDeviceDrawerOpen(false);
+      addDeviceForm.setFieldsValue({ addMethod: 'manual' });
+      setBatchImportModalOpen(true);
+    }
+  }, [addMethod, addDeviceDrawerOpen, addDeviceForm]);
 
   // --- Data fetching ---
   const queryParams = useMemo(
@@ -159,7 +170,6 @@ export default function DeviceGrouping() {
         setAddDeviceGroupId(groupId);
         addDeviceForm.resetFields();
         addDeviceForm.setFieldsValue({ addMethod: 'manual', deviceSnList: '' });
-        setFileList([]);
         setAddDeviceDrawerOpen(true);
       } else if (cmd === 'edit-level1') {
         const grp = groups.find((g) => g.id === groupId);
@@ -358,33 +368,24 @@ export default function DeviceGrouping() {
   const handleSaveDevices = useCallback(async () => {
     try {
       const values = await addDeviceForm.validateFields();
-      if (values.addMethod === 'manual') {
-        const snList = values.deviceSnList?.trim();
-        if (!snList) {
-          void message.error(t('device.snListRequired'));
-          return;
-        }
-        const snArray = snList.split(/[\n,;]+/).map((sn) => sn.trim()).filter((sn) => sn.length > 0);
-        if (snArray.length === 0) {
-          void message.error(t('device.snListRequired'));
-          return;
-        }
-        console.log('手动添加设备到分组:', { groupId: addDeviceGroupId, snList: snArray });
-        void message.success(t('device.addDeviceSuccess', { count: snArray.length }));
-      } else {
-        if (fileList.length === 0) {
-          void message.error(t('device.fileRequired'));
-          return;
-        }
-        console.log('批量导入设备到分组:', { groupId: addDeviceGroupId, file: fileList[0] });
-        void message.success(t('device.importSuccess'));
+      const snList = values.deviceSnList?.trim();
+      if (!snList) {
+        void message.error(t('device.snListRequired'));
+        return;
       }
+      const snArray = snList.split(/[\n,;]+/).map((sn) => sn.trim()).filter((sn) => sn.length > 0);
+      if (snArray.length === 0) {
+        void message.error(t('device.snListRequired'));
+        return;
+      }
+      console.log('手动添加设备到分组:', { groupId: addDeviceGroupId, snList: snArray });
+      void message.success(t('device.addDeviceSuccess', { count: snArray.length }));
       setAddDeviceDrawerOpen(false);
       await refetch();
     } catch {
       // validation error
     }
-  }, [addDeviceForm, addDeviceGroupId, fileList, refetch, message, t]);
+  }, [addDeviceForm, addDeviceGroupId, refetch, message, t]);
 
   const handleExport = useCallback(() => {
     // TODO: 调用 CSV 导出 API
@@ -501,7 +502,7 @@ export default function DeviceGrouping() {
         addForm.resetFields();
         setAddModalOpen(true);
       }}
-      t={t}
+      t={t as (id: string, values?: Record<string, unknown>) => string}
     />
   );
 
@@ -527,7 +528,7 @@ export default function DeviceGrouping() {
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
           onEditDevice={handleEditDevice}
-          t={t}
+          t={t as (id: string, values?: Record<string, unknown>) => string}
         />
       </TreeListPageLayout>
 
@@ -557,7 +558,7 @@ export default function DeviceGrouping() {
         onEditLevel2DrawerClose={() => setEditLevel2DrawerOpen(false)}
         onSaveEditLevel2={() => void handleSaveEditLevel2()}
         onEditLevel2NameFiltersChange={setEditLevel2NameFilters}
-        t={t}
+        t={t as (id: string, values?: Record<string, unknown>) => string}
       />
 
       <DeviceDialogs
@@ -576,12 +577,16 @@ export default function DeviceGrouping() {
         addDeviceDrawerOpen={addDeviceDrawerOpen}
         addDeviceForm={addDeviceForm}
         addMethod={addMethod}
-        fileList={fileList}
-        onFileListChange={setFileList}
         onAddDeviceDrawerClose={() => setAddDeviceDrawerOpen(false)}
         onSaveDevices={() => void handleSaveDevices()}
+        batchImportModalOpen={batchImportModalOpen}
+        onBatchImportModalClose={() => setBatchImportModalOpen(false)}
+        onBatchImportConfirm={async () => {
+          void message.success(t('device.importSuccess'));
+          await refetch();
+        }}
         onDownloadTemplate={handleDownloadTemplate}
-        t={t}
+        t={t as (id: string, values?: Record<string, unknown>) => string}
       />
     </>
   );

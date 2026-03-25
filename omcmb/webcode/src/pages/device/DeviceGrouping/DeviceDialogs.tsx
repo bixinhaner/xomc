@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
-import { Button, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Typography, Upload } from 'antd';
-import { DownloadOutlined, InboxOutlined } from '@ant-design/icons';
-import type { FormInstance, UploadFile } from 'antd';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Progress, Radio, Select, Typography, Upload } from 'antd';
+import { CheckCircleOutlined, DownloadOutlined, InboxOutlined } from '@ant-design/icons';
+import type { FormInstance, UploadFile, UploadProps } from 'antd';
 import type { Device, EngStatus } from '@/types/device';
 
 const { Dragger } = Upload;
@@ -42,10 +42,13 @@ export interface DeviceDialogsProps {
     deviceSnList: string;
   }>;
   addMethod: string | undefined;
-  fileList: UploadFile[];
-  onFileListChange: (fileList: UploadFile[]) => void;
   onAddDeviceDrawerClose: () => void;
   onSaveDevices: () => void;
+
+  // Batch Import Modal
+  batchImportModalOpen: boolean;
+  onBatchImportModalClose: () => void;
+  onBatchImportConfirm: () => void;
   onDownloadTemplate: () => void;
 
   t: (id: string, values?: Record<string, unknown>) => string;
@@ -67,18 +70,95 @@ export default function DeviceDialogs({
   addDeviceDrawerOpen,
   addDeviceForm,
   addMethod,
-  fileList,
-  onFileListChange,
   onAddDeviceDrawerClose,
   onSaveDevices,
+  batchImportModalOpen,
+  onBatchImportModalClose,
+  onBatchImportConfirm,
   onDownloadTemplate,
   t,
 }: DeviceDialogsProps) {
+  // Batch import state
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importDone, setImportDone] = useState(false);
+
   const ENG_STATUS_OPTIONS = useMemo(() => [
     { label: t('device.engStatus.commissioned'), value: 'commissioned' },
     { label: t('device.engStatus.uncommissioned'), value: 'uncommissioned' },
     { label: t('device.engStatus.decommissioned'), value: 'decommissioned' },
   ], [t]);
+
+  // Reset batch import state
+  const resetBatchImportState = useCallback(() => {
+    setFileList([]);
+    setImporting(false);
+    setImportProgress(0);
+    setImportDone(false);
+  }, []);
+
+  // Handle batch import modal close
+  const handleBatchImportClose = useCallback(() => {
+    resetBatchImportState();
+    onBatchImportModalClose();
+  }, [resetBatchImportState, onBatchImportModalClose]);
+
+  // Upload props for batch import
+  const uploadProps: UploadProps = useMemo(() => ({
+    name: 'file',
+    multiple: false,
+    accept: '.csv',
+    fileList,
+    beforeUpload: (file) => {
+      const isCsv = file.name.toLowerCase().endsWith('.csv') ||
+        file.type === 'text/csv' ||
+        file.type === 'application/vnd.ms-excel';
+      if (!isCsv) {
+        return false;
+      }
+      const isLt10M = file.size / 1024 / 1024 < 10;
+      if (!isLt10M) {
+        return false;
+      }
+      setFileList([file]);
+      setImportDone(false);
+      return false;
+    },
+    onRemove: () => {
+      setFileList([]);
+      setImportDone(false);
+    },
+  }), [fileList]);
+
+  // Execute batch import
+  const handleBatchImport = useCallback(async () => {
+    if (fileList.length === 0) {
+      return;
+    }
+
+    setImporting(true);
+    setImportProgress(0);
+
+    // Simulate import progress
+    for (let p = 0; p <= 100; p += 10) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      setImportProgress(p);
+    }
+
+    setImporting(false);
+    setImportDone(true);
+  }, [fileList]);
+
+  // Handle batch import modal OK
+  const handleBatchImportOk = useCallback(() => {
+    if (importDone) {
+      onBatchImportConfirm();
+      handleBatchImportClose();
+    } else if (fileList.length > 0) {
+      void handleBatchImport();
+    }
+  }, [importDone, onBatchImportConfirm, handleBatchImportClose, handleBatchImport, fileList.length]);
 
   return (
     <>
@@ -154,7 +234,7 @@ export default function DeviceDialogs({
         </Form>
       </Modal>
 
-      {/* Add Device to Group Drawer */}
+      {/* Add Device to Group Drawer (Manual only) */}
       <Drawer
         title={t('device.addDeviceToGroup')}
         open={addDeviceDrawerOpen}
@@ -223,53 +303,59 @@ export default function DeviceDialogs({
               </Form.Item>
             </div>
           )}
-
-          {/* Batch import: file upload */}
-          {addMethod === 'import' && (
-            <div style={{
-              padding: '16px',
-              background: 'var(--color-fill-quaternary)',
-              borderRadius: 8
-            }}>
-              <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
-                {t('device.importFile')}
-              </div>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                {t('device.importFileFormat')}
-              </Text>
-              <div style={{ marginBottom: 12 }}>
-                <Button
-                  icon={<DownloadOutlined />}
-                  size="small"
-                  onClick={onDownloadTemplate}
-                >
-                  {t('device.downloadTemplate')}
-                </Button>
-              </div>
-              <Form.Item style={{ marginBottom: 0 }}>
-                <Dragger
-                  accept=".csv"
-                  maxCount={1}
-                  fileList={fileList}
-                  beforeUpload={() => false}
-                  onChange={(info) => {
-                    onFileListChange(info.fileList.slice(-1));
-                  }}
-                  style={{ padding: '12px 0' }}
-                >
-                  <p className="ant-upload-drag-icon">
-                    <InboxOutlined style={{ fontSize: 32, color: 'var(--color-primary-600)' }} />
-                  </p>
-                  <p className="ant-upload-text" style={{ fontSize: 13 }}>{t('device.clickOrDragUpload')}</p>
-                  <p className="ant-upload-hint" style={{ fontSize: 11, color: '#8c8c8c' }}>
-                    CSV
-                  </p>
-                </Dragger>
-              </Form.Item>
-            </div>
-          )}
         </Form>
       </Drawer>
+
+      {/* Batch Import Modal */}
+      <Modal
+        title={t('device.batchImport')}
+        open={batchImportModalOpen}
+        onOk={handleBatchImportOk}
+        onCancel={handleBatchImportClose}
+        okText={importDone ? t('common.finish') : t('common.import')}
+        cancelText={importDone ? t('common.close') : t('common.cancel')}
+        confirmLoading={importing}
+        width={520}
+        destroyOnClose
+      >
+        {/* Download template button */}
+        <div style={{ marginBottom: 12 }}>
+          <Button
+            icon={<DownloadOutlined />}
+            size="small"
+            onClick={onDownloadTemplate}
+          >
+            {t('device.downloadTemplate')}
+          </Button>
+        </div>
+
+        <Dragger {...uploadProps} disabled={importing || importDone}>
+          <p className="ant-upload-drag-icon">
+            <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
+          </p>
+          <p className="ant-upload-text">{t('device.clickOrDragUpload')}</p>
+          <p className="ant-upload-hint" style={{ fontSize: 12, color: '#8c8c8c' }}>
+            CSV
+          </p>
+        </Dragger>
+
+        {importing && (
+          <div style={{ marginTop: 16 }}>
+            <span style={{ fontSize: 13, color: '#666' }}>{t('common.loading')}</span>
+            <Progress percent={importProgress} status="active" />
+          </div>
+        )}
+
+        {importDone && (
+          <Alert
+            type="success"
+            showIcon
+            icon={<CheckCircleOutlined />}
+            message={t('device.importSuccess')}
+            style={{ marginTop: 16 }}
+          />
+        )}
+      </Modal>
     </>
   );
 }
