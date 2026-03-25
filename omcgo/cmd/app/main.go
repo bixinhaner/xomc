@@ -91,7 +91,8 @@ func validateJWTSecret(secret string) error {
 	ginMode := os.Getenv("GIN_MODE")
 
 	// Skip validation for dev/test environments.
-	if env == "dev" || env == "test" || env == "development" || ginMode == "debug" || ginMode == "test" {
+	// Empty OMCGO_ENV is treated as dev (consistent with entrypoint.sh default).
+	if env == "" || env == "dev" || env == "test" || env == "development" || ginMode == "debug" || ginMode == "test" {
 		return nil
 	}
 
