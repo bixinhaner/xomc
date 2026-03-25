@@ -333,7 +333,7 @@ export default function CommandInput({
           tabBarStyle={{ padding: '0 12px', marginBottom: 0 }}
           styles={{
             content: { flex: 1, minHeight: 0, overflow: 'hidden' },
-            body: { height: '100%', overflow: 'hidden' },
+            body: { position: 'relative', height: '100%', overflow: 'hidden' },
           }}
           items={tabItems}
         />
