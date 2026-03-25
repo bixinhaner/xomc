@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Button, Descriptions, Form, Input, InputNumber, Select, Space, Typography } from 'antd';
 import { PlayCircleOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
@@ -30,6 +30,13 @@ export default function CommandInput({
   const t = useT();
   const token = useThemeToken();
   const [consoleInput, setConsoleInput] = useState('');
+
+  // 当选中命令变化时，自动填入命令代码
+  useEffect(() => {
+    if (selectedCommand) {
+      setConsoleInput(selectedCommand.commandCode);
+    }
+  }, [selectedCommand]);
 
   // 执行命令
   const handleExecute = useCallback(() => {
