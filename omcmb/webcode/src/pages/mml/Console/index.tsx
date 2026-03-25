@@ -219,6 +219,7 @@ export default function MMLConsole() {
         onClose={() => setBatchSnModalOpen(false)}
         onConfirm={handleBatchSnConfirm}
         existingSns={new Set(deviceSelection.selectedDevices.map((d) => d.sn))}
+        allDeviceSns={deviceSelection.allDeviceSns}
       />
     </div>
   );

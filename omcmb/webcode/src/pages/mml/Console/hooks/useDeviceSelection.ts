@@ -81,6 +81,12 @@ export function useDeviceSelection() {
     });
   }, []);
 
+  // 所有设备SN的Set（用于批量输入验证）
+  const allDeviceSns = useMemo(
+    () => new Set(DEVICE_LIST.map((d) => d.sn)),
+    []
+  );
+
   return {
     // 状态
     selectedDevices,
@@ -94,6 +100,7 @@ export function useDeviceSelection() {
     selectedInFiltered,
     totalFiltered: filteredDevices.length,
     totalPages: Math.ceil(filteredDevices.length / DEVICE_PAGE_SIZE),
+    allDeviceSns,
 
     // 操作
     setSearchText,
