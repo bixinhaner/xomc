@@ -75,7 +75,9 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	stunStore := stun.NewStore(redisClient, logger)
 
 	// Device services
+	deviceCache := device.NewDeviceCache(redisClient, logger)
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, eventBus, logger)
+	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetCommandQueue(cmdQueue)
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)

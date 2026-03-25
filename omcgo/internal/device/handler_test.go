@@ -144,6 +144,10 @@ func (m *fakeParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string
 	return nil, nil
 }
 
+func (m *fakeParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

@@ -130,6 +130,10 @@ func (m *infMockParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ str
 	return nil, nil
 }
 
+func (m *infMockParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
+
 // Mock carrier for registry tests
 type infMockCarrier struct {
 	code         model.CarrierCode

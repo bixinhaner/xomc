@@ -145,6 +145,10 @@ func (m *mockParamRepo) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string
 	return nil, nil
 }
 
+func (m *mockParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper: build a DeviceService wired to the given mocks
 // ---------------------------------------------------------------------------
@@ -311,10 +315,10 @@ func TestDeviceService_UpdateFromInform_NotFound(t *testing.T) {
 	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
 	inform := sampleInform("UNKNOWN_SN")
 
+	// Device not found returns (nil, nil) — caller decides whether to auto-register
 	device, err := svc.UpdateFromInform(context.Background(), inform)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, device)
-	assert.Contains(t, err.Error(), "device not found")
 }
 
 // ---------------------------------------------------------------------------

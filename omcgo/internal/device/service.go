@@ -26,6 +26,7 @@ type DeviceService struct {
 	cmdQueue    CommandQueue
 	connReq     ConnectionRequester
 	stunUpdater StunAddressUpdater
+	cache       *DeviceCache
 	metrics     *DeviceMetrics
 	logger      *zap.Logger
 }
@@ -76,6 +77,11 @@ func (s *DeviceService) SetConnectionRequester(cr ConnectionRequester) {
 // UDPConnectionRequestAddress from Inform to the STUN address cache.
 func (s *DeviceService) SetStunAddressUpdater(u StunAddressUpdater) {
 	s.stunUpdater = u
+}
+
+// SetDeviceCache sets the Redis device cache for fast serial number lookups.
+func (s *DeviceService) SetDeviceCache(c *DeviceCache) {
+	s.cache = c
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
@@ -215,9 +221,9 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.Int("param_count", len(inform.ParameterList)))
 
 	// Check if device already exists
-	s.logger.Debug("RegisterFromInform: checking if device exists in DB",
+	s.logger.Debug("RegisterFromInform: checking if device exists",
 		zap.String("serial_number", inform.DeviceId.SerialNumber))
-	existing, err := s.deviceRepo.GetBySerialNumber(ctx, inform.DeviceId.SerialNumber)
+	existing, err := s.getDeviceBySerialNumber(ctx, inform.DeviceId.SerialNumber)
 	if err != nil {
 		s.logger.Error("RegisterFromInform: GetBySerialNumber failed",
 			zap.Error(err),
@@ -279,6 +285,9 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber))
 
+	// Write-through: cache the new device
+	s.cacheDevice(ctx, device)
+
 	// Sync UDP address to STUN cache
 	if udpAddr != "" && s.stunUpdater != nil {
 		if err := s.stunUpdater.SetFromInform(ctx, device.SerialNumber, udpAddr); err != nil {
@@ -321,17 +330,17 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	s.logger.Debug("UpdateFromInform: looking up device",
 		zap.String("serial_number", inform.DeviceId.SerialNumber))
 
-	device, err := s.deviceRepo.GetBySerialNumber(ctx, inform.DeviceId.SerialNumber)
+	device, err := s.getDeviceBySerialNumber(ctx, inform.DeviceId.SerialNumber)
 	if err != nil {
-		s.logger.Error("UpdateFromInform: deviceRepo.GetBySerialNumber failed",
+		s.logger.Error("UpdateFromInform: device lookup failed",
 			zap.Error(err),
 			zap.String("serial_number", inform.DeviceId.SerialNumber))
 		return nil, fmt.Errorf("lookup device: %w", err)
 	}
 	if device == nil {
-		s.logger.Warn("UpdateFromInform: device not found in DB",
+		s.logger.Warn("UpdateFromInform: device not found in DB, caller should register",
 			zap.String("serial_number", inform.DeviceId.SerialNumber))
-		return nil, fmt.Errorf("device not found: %s", inform.DeviceId.SerialNumber)
+		return nil, nil
 	}
 
 	s.logger.Debug("UpdateFromInform: device found, updating",
@@ -388,6 +397,9 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber))
 
+	// Write-through: refresh cache with updated device
+	s.cacheDevice(ctx, device)
+
 	// Store parameters
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
 
@@ -437,9 +449,9 @@ func (s *DeviceService) GetDevice(ctx context.Context, id uuid.UUID) (*model.Dev
 	return s.deviceRepo.GetByID(ctx, id)
 }
 
-// GetBySerialNumber retrieves a device by its serial number.
+// GetBySerialNumber retrieves a device by its serial number (Redis cache → PostgreSQL).
 func (s *DeviceService) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
-	return s.deviceRepo.GetBySerialNumber(ctx, sn)
+	return s.getDeviceBySerialNumber(ctx, sn)
 }
 
 // ListDevices returns a paginated list of devices.
@@ -551,6 +563,23 @@ func findParamValue(params []tr069.ParameterValueStruct, name string) string {
 		}
 	}
 	return ""
+}
+
+// getDeviceBySerialNumber looks up a device with Redis cache → PostgreSQL fallback.
+func (s *DeviceService) getDeviceBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
+	if s.cache != nil {
+		return s.cache.GetOrLoad(ctx, sn, func(ctx context.Context, sn string) (*model.Device, error) {
+			return s.deviceRepo.GetBySerialNumber(ctx, sn)
+		})
+	}
+	return s.deviceRepo.GetBySerialNumber(ctx, sn)
+}
+
+// cacheDevice writes the device to Redis cache after DB mutations.
+func (s *DeviceService) cacheDevice(ctx context.Context, device *model.Device) {
+	if s.cache != nil {
+		s.cache.Set(ctx, device)
+	}
 }
 
 // CreateDevice creates a new device from an API request.

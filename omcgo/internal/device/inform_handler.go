@@ -135,23 +135,46 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		zap.Strings("events", payload.Events))
 
 	inform := payloadToInform(payload)
+	sn := payload.DeviceId.SerialNumber
 
-	h.logger.Debug("handlePeriodic: calling DeviceService.UpdateFromInform",
-		zap.String("serial_number", payload.DeviceId.SerialNumber))
-
-	device, err := h.service.UpdateFromInform(ctx, inform)
+	// Step 1: Check if device exists (Redis cache → PostgreSQL fallback)
+	device, err := h.service.GetBySerialNumber(ctx, sn)
 	if err != nil {
-		h.logger.Error("handlePeriodic: UpdateFromInform failed",
-			zap.Error(err),
-			zap.String("serial_number", payload.DeviceId.SerialNumber),
-		)
+		h.logger.Error("handlePeriodic: device lookup failed",
+			zap.Error(err), zap.String("serial_number", sn))
 		return err
 	}
 
-	h.logger.Debug("handlePeriodic: device updated successfully",
+	// Step 2: Device not found → auto-register
+	if device == nil {
+		h.logger.Info("handlePeriodic: device not found, auto-registering",
+			zap.String("serial_number", sn))
+
+		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
+		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		if regErr != nil {
+			h.logger.Error("handlePeriodic: auto-register failed",
+				zap.Error(regErr), zap.String("serial_number", sn))
+			return regErr
+		}
+		h.logger.Info("handlePeriodic: device auto-registered",
+			zap.String("device_id", registered.ID.String()),
+			zap.String("serial_number", registered.SerialNumber),
+			zap.String("carrier", string(carrierCode)))
+		h.service.PublishDeviceRegistered(ctx, registered)
+		return nil
+	}
+
+	// Step 3: Device exists → update
+	if _, err := h.service.UpdateFromInform(ctx, inform); err != nil {
+		h.logger.Error("handlePeriodic: UpdateFromInform failed",
+			zap.Error(err), zap.String("serial_number", sn))
+		return err
+	}
+
+	h.logger.Debug("handlePeriodic: device updated",
 		zap.String("device_id", device.ID.String()),
-		zap.String("serial_number", device.SerialNumber),
-	)
+		zap.String("serial_number", device.SerialNumber))
 	return nil
 }
 
