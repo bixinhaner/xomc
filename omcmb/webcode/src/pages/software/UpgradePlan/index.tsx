@@ -11,18 +11,20 @@ import {
   Button,
   Tabs,
   Select,
-  Statistic,
   Radio,
   DatePicker,
   Drawer,
   InputNumber,
-  TimePicker,
   Form,
   Divider,
   Table,
+  Card,
+  Dropdown,
+  Descriptions,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, UnorderedListOutlined, DesktopOutlined, PauseOutlined, StopOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -56,6 +58,7 @@ interface UpgradePlanRow extends Record<string, unknown> {
   operateTime: string;
   startTime: string;
   endTime: string;
+  taskName: string;
 }
 
 // 升级类型映射
@@ -76,28 +79,35 @@ const UPGRADE_RESULT_MAP: Record<UpgradeResult, { color: string; text: string }>
 
 // Mock 数据
 const mockData: UpgradePlanRow[] = [
-  { id: '1', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'PM-B4860', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'admin', operateTime: '2026-03-25 09:50:00', startTime: '2026-03-25 10:00:00', endTime: '2026-03-25 10:15:00' },
-  { id: '2', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', deviceGroup: '北京移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'PM-B4860', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'admin', operateTime: '2026-03-25 09:50:00', startTime: '2026-03-25 10:00:00', endTime: '2026-03-25 10:12:00' },
-  { id: '3', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', sourceVersion: 'V1.1.5', targetVersion: 'V1.3.0', upgradeType: 'scheduled', productType: 'QAFA', keepConfig: true, progress: 75, result: 'running', failureReason: '', operator: 'zhangsan', operateTime: '2026-03-25 10:55:00', startTime: '2026-03-25 11:00:00', endTime: '' },
-  { id: '4', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'immediate', productType: 'BaiBNX', keepConfig: false, progress: 100, result: 'failed', failureReason: '固件校验失败', operator: 'lisi', operateTime: '2026-03-25 09:25:00', startTime: '2026-03-25 09:30:00', endTime: '2026-03-25 09:45:00' },
-  { id: '5', deviceSn: 'GNB00002', deviceName: '上海5G基站01', deviceGroup: '上海移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'manual', productType: 'BaiBNX', keepConfig: true, progress: 0, result: 'pending', failureReason: '', operator: 'admin', operateTime: '2026-03-25 11:00:00', startTime: '', endTime: '' },
-  { id: '6', deviceSn: 'ENB00004', deviceName: '广州天河基站01', deviceGroup: '广东移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'QATA', keepConfig: true, progress: 100, result: 'partial', failureReason: '部分配置恢复失败', operator: 'wangwu', operateTime: '2026-03-25 07:55:00', startTime: '2026-03-25 08:00:00', endTime: '2026-03-25 08:30:00' },
-  { id: '7', deviceSn: 'ENB00005', deviceName: '深圳南山基站01', deviceGroup: '广东移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'scheduled', productType: 'QAFB', keepConfig: true, progress: 50, result: 'running', failureReason: '', operator: 'zhangsan', operateTime: '2026-03-25 11:25:00', startTime: '2026-03-25 11:30:00', endTime: '' },
-  { id: '8', deviceSn: 'GNB00003', deviceName: '广州5G基站01', deviceGroup: '广东移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'immediate', productType: 'BaiBNQ', keepConfig: false, progress: 100, result: 'success', failureReason: '', operator: 'admin', operateTime: '2026-03-25 08:55:00', startTime: '2026-03-25 09:00:00', endTime: '2026-03-25 09:20:00' },
-  { id: '9', deviceSn: 'ENB00006', deviceName: '杭州西湖基站01', deviceGroup: '浙江移动', sourceVersion: 'V1.1.5', targetVersion: 'V1.3.0', upgradeType: 'manual', productType: 'RTD', keepConfig: true, progress: 0, result: 'pending', failureReason: '', operator: 'lisi', operateTime: '2026-03-25 12:00:00', startTime: '', endTime: '' },
-  { id: '10', deviceSn: 'ENB00007', deviceName: '南京鼓楼基站01', deviceGroup: '江苏移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'PM-B4860', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'wangwu', operateTime: '2026-03-25 10:25:00', startTime: '2026-03-25 10:30:00', endTime: '2026-03-25 10:45:00' },
-  { id: '11', deviceSn: 'GNB00004', deviceName: '深圳5G基站01', deviceGroup: '广东移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'scheduled', productType: 'BaiBNX', keepConfig: true, progress: 30, result: 'running', failureReason: '', operator: 'admin', operateTime: '2026-03-25 11:55:00', startTime: '2026-03-25 12:00:00', endTime: '' },
-  { id: '12', deviceSn: 'ENB00008', deviceName: '成都武侯基站01', deviceGroup: '四川移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'QAFA', keepConfig: false, progress: 100, result: 'failed', failureReason: '网络连接超时', operator: 'zhangsan', operateTime: '2026-03-25 08:25:00', startTime: '2026-03-25 08:30:00', endTime: '2026-03-25 08:50:00' },
-  { id: '13', deviceSn: 'ENB00009', deviceName: '武汉洪山基站01', deviceGroup: '湖北移动', sourceVersion: 'V1.1.5', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'QATA', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'lisi', operateTime: '2026-03-25 08:55:00', startTime: '2026-03-25 09:00:00', endTime: '2026-03-25 09:18:00' },
-  { id: '14', deviceSn: 'GNB00005', deviceName: '成都5G基站01', deviceGroup: '四川移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'manual', productType: 'BaiBNQ', keepConfig: true, progress: 0, result: 'pending', failureReason: '', operator: 'wangwu', operateTime: '2026-03-25 12:00:00', startTime: '', endTime: '' },
-  { id: '15', deviceSn: 'ENB00010', deviceName: '西安雁塔基站01', deviceGroup: '陕西移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'scheduled', productType: 'QAFB', keepConfig: true, progress: 60, result: 'running', failureReason: '', operator: 'admin', operateTime: '2026-03-25 10:55:00', startTime: '2026-03-25 11:00:00', endTime: '' },
+  { id: '1', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'PM-B4860', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'admin', operateTime: '2026-03-25 09:50:00', startTime: '2026-03-25 10:00:00', endTime: '2026-03-25 10:15:00', taskName: 'PM-B4860批量升级任务' },
+  { id: '2', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', deviceGroup: '北京移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'PM-B4860', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'admin', operateTime: '2026-03-25 09:50:00', startTime: '2026-03-25 10:00:00', endTime: '2026-03-25 10:12:00', taskName: 'PM-B4860批量升级任务' },
+  { id: '3', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', sourceVersion: 'V1.1.5', targetVersion: 'V1.3.0', upgradeType: 'scheduled', productType: 'QAFA', keepConfig: true, progress: 75, result: 'running', failureReason: '', operator: 'zhangsan', operateTime: '2026-03-25 10:55:00', startTime: '2026-03-25 11:00:00', endTime: '', taskName: 'QAFA定时升级任务' },
+  { id: '4', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'immediate', productType: 'BaiBNX', keepConfig: false, progress: 100, result: 'failed', failureReason: '固件校验失败', operator: 'lisi', operateTime: '2026-03-25 09:25:00', startTime: '2026-03-25 09:30:00', endTime: '2026-03-25 09:45:00', taskName: 'BaiBNX固件升级' },
+  { id: '5', deviceSn: 'GNB00002', deviceName: '上海5G基站01', deviceGroup: '上海移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'manual', productType: 'BaiBNX', keepConfig: true, progress: 0, result: 'pending', failureReason: '', operator: 'admin', operateTime: '2026-03-25 11:00:00', startTime: '', endTime: '', taskName: 'BaiBNX手动升级' },
+  { id: '6', deviceSn: 'ENB00004', deviceName: '广州天河基站01', deviceGroup: '广东移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'QATA', keepConfig: true, progress: 100, result: 'partial', failureReason: '部分配置恢复失败', operator: 'wangwu', operateTime: '2026-03-25 07:55:00', startTime: '2026-03-25 08:00:00', endTime: '2026-03-25 08:30:00', taskName: 'QATA紧急升级' },
+  { id: '7', deviceSn: 'ENB00005', deviceName: '深圳南山基站01', deviceGroup: '广东移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'scheduled', productType: 'QAFB', keepConfig: true, progress: 50, result: 'running', failureReason: '', operator: 'zhangsan', operateTime: '2026-03-25 11:25:00', startTime: '2026-03-25 11:30:00', endTime: '', taskName: 'QAFB定时升级任务' },
+  { id: '8', deviceSn: 'GNB00003', deviceName: '广州5G基站01', deviceGroup: '广东移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'immediate', productType: 'BaiBNQ', keepConfig: false, progress: 100, result: 'success', failureReason: '', operator: 'admin', operateTime: '2026-03-25 08:55:00', startTime: '2026-03-25 09:00:00', endTime: '2026-03-25 09:20:00', taskName: 'BaiBNQ批量升级' },
+  { id: '9', deviceSn: 'ENB00006', deviceName: '杭州西湖基站01', deviceGroup: '浙江移动', sourceVersion: 'V1.1.5', targetVersion: 'V1.3.0', upgradeType: 'manual', productType: 'RTD', keepConfig: true, progress: 0, result: 'pending', failureReason: '', operator: 'lisi', operateTime: '2026-03-25 12:00:00', startTime: '', endTime: '', taskName: 'RTD手动升级任务' },
+  { id: '10', deviceSn: 'ENB00007', deviceName: '南京鼓楼基站01', deviceGroup: '江苏移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'PM-B4860', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'wangwu', operateTime: '2026-03-25 10:25:00', startTime: '2026-03-25 10:30:00', endTime: '2026-03-25 10:45:00', taskName: 'PM-B4860批量升级任务' },
+  { id: '11', deviceSn: 'GNB00004', deviceName: '深圳5G基站01', deviceGroup: '广东移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'scheduled', productType: 'BaiBNX', keepConfig: true, progress: 30, result: 'running', failureReason: '', operator: 'admin', operateTime: '2026-03-25 11:55:00', startTime: '2026-03-25 12:00:00', endTime: '', taskName: 'BaiBNX定时升级' },
+  { id: '12', deviceSn: 'ENB00008', deviceName: '成都武侯基站01', deviceGroup: '四川移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'QAFA', keepConfig: false, progress: 100, result: 'failed', failureReason: '网络连接超时', operator: 'zhangsan', operateTime: '2026-03-25 08:25:00', startTime: '2026-03-25 08:30:00', endTime: '2026-03-25 08:50:00', taskName: 'QAFA紧急升级' },
+  { id: '13', deviceSn: 'ENB00009', deviceName: '武汉洪山基站01', deviceGroup: '湖北移动', sourceVersion: 'V1.1.5', targetVersion: 'V1.3.0', upgradeType: 'immediate', productType: 'QATA', keepConfig: true, progress: 100, result: 'success', failureReason: '', operator: 'lisi', operateTime: '2026-03-25 08:55:00', startTime: '2026-03-25 09:00:00', endTime: '2026-03-25 09:18:00', taskName: 'QATA批量升级任务' },
+  { id: '14', deviceSn: 'GNB00005', deviceName: '成都5G基站01', deviceGroup: '四川移动', sourceVersion: 'V2.0.0', targetVersion: 'V2.1.0', upgradeType: 'manual', productType: 'BaiBNQ', keepConfig: true, progress: 0, result: 'pending', failureReason: '', operator: 'wangwu', operateTime: '2026-03-25 12:00:00', startTime: '', endTime: '', taskName: 'BaiBNQ手动升级' },
+  { id: '15', deviceSn: 'ENB00010', deviceName: '西安雁塔基站01', deviceGroup: '陕西移动', sourceVersion: 'V1.2.0', targetVersion: 'V1.3.0', upgradeType: 'scheduled', productType: 'QAFB', keepConfig: true, progress: 60, result: 'running', failureReason: '', operator: 'admin', operateTime: '2026-03-25 10:55:00', startTime: '2026-03-25 11:00:00', endTime: '', taskName: 'QAFB定时升级任务' },
 ];
 
 export default function UpgradePlan() {
   const t = useT();
+  // 页签状态
+  const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
+  // 任务列表状态
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // 设备列表状态
+  const [deviceFilters, setDeviceFilters] = useState<Record<string, unknown>>({});
+  const [devicePage, setDevicePage] = useState(1);
+  const [devicePageSize, setDevicePageSize] = useState(20);
   // 批量输入相关状态
   const [batchInputVisible, setBatchInputVisible] = useState(false);
   const [batchInputValue, setBatchInputValue] = useState('');
@@ -114,6 +124,7 @@ export default function UpgradePlan() {
   const [retryRecord, setRetryRecord] = useState<UpgradePlanRow | null>(null);
   // 批量升级抽屉状态
   const [upgradeDrawerVisible, setUpgradeDrawerVisible] = useState(false);
+  const [taskName, setTaskName] = useState('');
   const [upgradeCategory, setUpgradeCategory] = useState<UpgradeCategory>('software');
   const [executionMethod, setExecutionMethod] = useState<ExecutionMethod>('immediate');
   const [scheduledTime, setScheduledTime] = useState<Dayjs | null>(null);
@@ -424,6 +435,17 @@ export default function UpgradePlan() {
     },
   ], []);
 
+  // 任务列表筛选条件（只有任务名称和时间）
+  const taskFilterFields: FilterField[] = useMemo(() => [
+    { name: 'keyword', label: '任务名称', type: 'input', placeholder: '请输入任务名称' },
+    {
+      name: 'timeRange',
+      label: '时间范围',
+      type: 'date-range',
+      placeholder: '请选择时间范围',
+    },
+  ], []);
+
   // 过滤数据
   const filteredData = useMemo(() => {
     return mockData.filter((row) => {
@@ -481,8 +503,109 @@ export default function UpgradePlan() {
     });
   }, [filters]);
 
+  // 设备列表筛选条件
+  const deviceFilterFields: FilterField[] = useMemo(() => [
+    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
+    {
+      name: 'productType',
+      label: '产品类型',
+      type: 'select',
+      placeholder: '请选择',
+      options: [
+        { label: '全部', value: 'all' },
+        { label: 'PM-B4860', value: 'PM-B4860' },
+        { label: 'QAFA', value: 'QAFA' },
+        { label: 'QATA', value: 'QATA' },
+        { label: 'QAFB', value: 'QAFB' },
+        { label: 'RTD', value: 'RTD' },
+        { label: 'BaiBNX', value: 'BaiBNX' },
+        { label: 'BaiBNQ', value: 'BaiBNQ' },
+        { label: 'BSC', value: 'BSC' },
+        { label: 'BTS', value: 'BTS' },
+      ],
+    },
+    {
+      name: 'deviceGroup',
+      label: '设备组',
+      type: 'select',
+      placeholder: '请选择',
+      options: [
+        { label: '全部', value: 'all' },
+        { label: '北京移动', value: '北京移动' },
+        { label: '上海移动', value: '上海移动' },
+        { label: '广东移动', value: '广东移动' },
+        { label: '浙江移动', value: '浙江移动' },
+        { label: '江苏移动', value: '江苏移动' },
+        { label: '四川移动', value: '四川移动' },
+        { label: '湖北移动', value: '湖北移动' },
+        { label: '陕西移动', value: '陕西移动' },
+      ],
+    },
+    {
+      name: 'onlineStatus',
+      label: '在线状态',
+      type: 'select',
+      placeholder: '请选择',
+      options: [
+        { label: '全部', value: 'all' },
+        { label: '在线', value: 'online' },
+        { label: '离线', value: 'offline' },
+      ],
+    },
+  ], []);
+
+  // 设备列表过滤数据
+  const filteredDeviceData = useMemo(() => {
+    return mockData.filter((row) => {
+      // 关键字搜索
+      if (deviceFilters.keyword && typeof deviceFilters.keyword === 'string') {
+        const keyword = deviceFilters.keyword.toLowerCase();
+        if (!row.deviceSn.toLowerCase().includes(keyword) &&
+            !row.deviceName.toLowerCase().includes(keyword)) {
+          return false;
+        }
+      }
+      // 产品类型
+      if (deviceFilters.productType && deviceFilters.productType !== 'all') {
+        if (row.productType !== deviceFilters.productType) return false;
+      }
+      // 设备组
+      if (deviceFilters.deviceGroup && deviceFilters.deviceGroup !== 'all') {
+        if (row.deviceGroup !== deviceFilters.deviceGroup) return false;
+      }
+      // 在线状态（mock: 根据结果模拟）
+      if (deviceFilters.onlineStatus && deviceFilters.onlineStatus !== 'all') {
+        // 简单模拟：success/running 为在线，其他为离线
+        const isOnline = row.result === 'success' || row.result === 'running';
+        if (deviceFilters.onlineStatus === 'online' && !isOnline) return false;
+        if (deviceFilters.onlineStatus === 'offline' && isOnline) return false;
+      }
+      return true;
+    });
+  }, [deviceFilters]);
+
+  // 设备列表列定义
+  const deviceColumns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
+    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
+    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
+    { key: 'deviceGroup', title: '设备组', dataIndex: 'deviceGroup', width: 100 },
+    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
+    { key: 'sourceVersion', title: '当前版本', dataIndex: 'sourceVersion', width: 100 },
+    {
+      key: 'onlineStatus',
+      title: '在线状态',
+      width: 100,
+      render: (_: unknown, record: UpgradePlanRow) => {
+        const isOnline = record.result === 'success' || record.result === 'running';
+        return <Tag color={isOnline ? 'green' : 'default'}>{isOnline ? '在线' : '离线'}</Tag>;
+      },
+    },
+    { key: 'taskName', title: '任务名称', dataIndex: 'taskName', width: 150, ellipsis: true },
+  ], []);
+
   // 直接打开升级抽屉（不需要预选设备）
   const handleOpenUpgradeDrawer = () => {
+    setTaskName('');
     setDrawerDevices([]);
     setDrawerProductType('');
     setUpgradeCategory('software');
@@ -534,6 +657,11 @@ export default function UpgradePlan() {
 
   // 提交批量升级
   const handleSubmitUpgrade = () => {
+    // 验证任务名称
+    if (!taskName.trim()) {
+      void message.warning('请输入任务名称');
+      return;
+    }
     // 验证设备选择
     if (!selectAllOfType && drawerDevices.length === 0) {
       void message.warning('请选择要升级的设备或勾选"升级该产品类型的全部设备"');
@@ -560,12 +688,132 @@ export default function UpgradePlan() {
       ? `产品类型「${drawerProductType}」全部 ${deviceCount} 台设备`
       : `${deviceCount} 台设备`;
 
-    void message.success(`已创建批量升级任务：${deviceInfo}，${execMethodText}`);
+    void message.success(`已创建批量升级任务「${taskName}」：${deviceInfo}，${execMethodText}`);
 
     // 关闭抽屉并清空选择
     setUpgradeDrawerVisible(false);
+    setTaskName('');
     setSelectAllOfType(false);
   };
+
+  // 任务操作处理函数
+  const handlePauseTask = (record: UpgradePlanRow) => {
+    void message.success(`已暂停任务: ${record.deviceName}`);
+  };
+
+  const handleStopTask = (record: UpgradePlanRow) => {
+    void message.success(`已终止任务: ${record.deviceName}`);
+  };
+
+  const handleViewTaskDetail = (record: UpgradePlanRow) => {
+    setTaskDetailRecord(record);
+  };
+
+  // 删除任务确认状态
+  const [deleteTaskRecord, setDeleteTaskRecord] = useState<UpgradePlanRow | null>(null);
+  // 任务详情抽屉状态
+  const [taskDetailRecord, setTaskDetailRecord] = useState<UpgradePlanRow | null>(null);
+
+  const handleDeleteTaskConfirm = () => {
+    if (deleteTaskRecord) {
+      void message.success(`已删除任务: ${deleteTaskRecord.deviceName}`);
+      setDeleteTaskRecord(null);
+    }
+  };
+
+  // 任务列表列定义
+  const taskColumns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
+    {
+      key: 'operation',
+      title: '操作',
+      width: 80,
+      align: 'center',
+      fixed: 'left',
+      render: (_: unknown, record: UpgradePlanRow) => {
+        const isRunning = record.result === 'running';
+        const items: MenuProps['items'] = [
+          {
+            key: 'pause',
+            label: '暂停',
+            icon: <PauseOutlined />,
+            disabled: !isRunning,
+            onClick: () => handlePauseTask(record),
+          },
+          {
+            key: 'stop',
+            label: '终止',
+            icon: <StopOutlined />,
+            danger: true,
+            disabled: !isRunning,
+            onClick: () => handleStopTask(record),
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            label: '删除',
+            icon: <DeleteOutlined />,
+            danger: true,
+            onClick: () => setDeleteTaskRecord(record),
+          },
+        ];
+        return (
+          <Dropdown menu={{ items }} trigger={['click']}>
+            <Button type="link" size="small" icon={<MoreOutlined />} />
+          </Dropdown>
+        );
+      },
+    },
+    {
+      key: 'taskName',
+      title: '任务名称',
+      dataIndex: 'deviceName',
+      width: 150,
+      ellipsis: true,
+      render: (val: string, record: UpgradePlanRow) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => handleViewTaskDetail(record)}
+          style={{ padding: 0 }}
+        >
+          {val || '-'}
+        </Button>
+      ),
+    },
+    { key: 'operator', title: '操作人', dataIndex: 'operator', width: 100 },
+    { key: 'operateTime', title: '操作时间', dataIndex: 'operateTime', width: 160 },
+    { key: 'targetVersion', title: '升级版本', dataIndex: 'targetVersion', width: 100 },
+    {
+      key: 'upgradeType',
+      title: '升级类型',
+      dataIndex: 'upgradeType',
+      width: 100,
+      render: (val: UpgradeType) => {
+        const cfg = UPGRADE_TYPE_MAP[val] ?? { color: 'default', text: val };
+        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+      },
+    },
+    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
+    {
+      key: 'progress',
+      title: '升级进度',
+      dataIndex: 'progress',
+      width: 120,
+      render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
+    },
+    {
+      key: 'result',
+      title: '结果',
+      dataIndex: 'result',
+      width: 100,
+      render: (val: UpgradeResult) => {
+        const cfg = UPGRADE_RESULT_MAP[val] ?? { color: 'default', text: val };
+        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+      },
+    },
+    { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
+    { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
+  ], []);
 
   const columns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
     {
@@ -651,23 +899,83 @@ export default function UpgradePlan() {
 
   return (
     <ListPageLayout title={t('nav.software.upgradePlan')} extra={headerExtra}>
-      <FilterBar
-        filterId="upgrade-plan-filter"
-        fields={filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
-      />
-      <DataTable<UpgradePlanRow>
-        tableId="upgrade-plan-list"
-        columns={columns}
-        dataSource={filteredData}
-        rowKey="id"
-        total={filteredData.length}
-        currentPage={page}
-        pageSize={pageSize}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        scroll={{ x: 2000 }}
-      />
+      <Card bordered={false}>
+        <style>{`
+          .upgrade-plan-table-wrapper [class*="dataTableWrapper"] {
+            border-radius: 0;
+          }
+        `}</style>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key as 'task' | 'device')}
+          items={[
+            {
+              key: 'task',
+              label: (
+                <span>
+                  <UnorderedListOutlined />
+                  任务列表
+                </span>
+              ),
+              children: (
+                <>
+                  <FilterBar
+                    filterId="upgrade-plan-filter-task"
+                    fields={taskFilterFields}
+                    onSearch={(vals) => { setFilters(vals); setPage(1); }}
+                    onReset={() => { setFilters({}); setPage(1); }}
+                  />
+                  <div className="upgrade-plan-table-wrapper" style={{ borderTop: '12px solid #f5f5f5' }}>
+                    <DataTable<UpgradePlanRow>
+                      tableId="upgrade-plan-list-task"
+                      columns={taskColumns}
+                      dataSource={filteredData}
+                      rowKey="id"
+                      total={filteredData.length}
+                      currentPage={page}
+                      pageSize={pageSize}
+                      onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+                      scroll={{ x: 1600 }}
+                    />
+                  </div>
+                </>
+              ),
+            },
+            {
+              key: 'device',
+              label: (
+                <span>
+                  <DesktopOutlined />
+                  设备列表
+                </span>
+              ),
+              children: (
+                <>
+                  <FilterBar
+                    filterId="upgrade-plan-filter-device"
+                    fields={filterFields}
+                    onSearch={(vals) => { setFilters(vals); setPage(1); }}
+                    onReset={() => { setFilters({}); setPage(1); }}
+                  />
+                  <div className="upgrade-plan-table-wrapper" style={{ borderTop: '12px solid #f5f5f5' }}>
+                    <DataTable<UpgradePlanRow>
+                      tableId="upgrade-plan-list-device"
+                      columns={columns}
+                      dataSource={filteredData}
+                      rowKey="id"
+                      total={filteredData.length}
+                      currentPage={page}
+                      pageSize={pageSize}
+                      onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+                      scroll={{ x: 2000 }}
+                    />
+                  </div>
+                </>
+              ),
+            },
+          ]}
+        />
+      </Card>
 
       {/* 批量输入弹窗 */}
       <Modal
@@ -819,6 +1127,35 @@ export default function UpgradePlan() {
         />
       </Modal>
 
+      {/* 删除任务确认弹窗 */}
+      <Modal
+        title="确认删除"
+        open={!!deleteTaskRecord}
+        onCancel={() => setDeleteTaskRecord(null)}
+        onOk={handleDeleteTaskConfirm}
+        okText="确认删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          message={
+            <div>
+              <p style={{ marginBottom: 8 }}>
+                确定要删除以下升级任务吗？此操作不可恢复。
+              </p>
+              <p style={{ marginBottom: 0 }}>
+                <strong>任务名称：</strong>{deleteTaskRecord?.deviceName}<br />
+                <strong>操作人：</strong>{deleteTaskRecord?.operator}<br />
+                <strong>升级版本：</strong>{deleteTaskRecord?.targetVersion}
+              </p>
+            </div>
+          }
+        />
+      </Modal>
+
       {/* 批量升级抽屉 */}
       <Drawer
         title="批量升级"
@@ -840,6 +1177,17 @@ export default function UpgradePlan() {
         }
       >
         <Form layout="vertical" size="small">
+          {/* 任务名称 */}
+          <Form.Item label="任务名称" required>
+            <Input
+              value={taskName}
+              onChange={(e) => setTaskName(e.target.value)}
+              placeholder="请输入任务名称"
+              maxLength={100}
+              showCount
+            />
+          </Form.Item>
+
           {/* 已选产品类型 */}
           <Form.Item label="产品类型" required>
             <Select
@@ -1038,6 +1386,159 @@ export default function UpgradePlan() {
             </Space>
           </Form.Item>
         </Form>
+      </Drawer>
+
+      {/* 任务详情抽屉 */}
+      <Drawer
+        title="任务详情"
+        placement="right"
+        width={720}
+        open={!!taskDetailRecord}
+        onClose={() => setTaskDetailRecord(null)}
+        footer={null}
+      >
+        {taskDetailRecord && (() => {
+          // 根据任务名称查找该任务下的所有设备
+          const taskName = taskDetailRecord.taskName || taskDetailRecord.deviceName;
+          const taskDevices = mockData.filter(d => (d.taskName || d.deviceName) === taskName);
+          const totalDevices = taskDevices.length;
+
+          // 统计执行结果
+          const resultStats = {
+            success: taskDevices.filter(d => d.result === 'success').length,
+            failed: taskDevices.filter(d => d.result === 'failed').length,
+            running: taskDevices.filter(d => d.result === 'running').length,
+            pending: taskDevices.filter(d => d.result === 'pending').length,
+            partial: taskDevices.filter(d => d.result === 'partial').length,
+          };
+
+          // 计算总体进度
+          const totalProgress = taskDevices.reduce((sum, d) => sum + d.progress, 0);
+          const avgProgress = Math.round(totalProgress / totalDevices);
+
+          return (
+            <>
+              {/* 任务基本信息 */}
+              <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="任务名称" span={2}>{taskName}</Descriptions.Item>
+                <Descriptions.Item label="产品类型">{taskDetailRecord.productType}</Descriptions.Item>
+                <Descriptions.Item label="升级类型">
+                  <Tag color={UPGRADE_TYPE_MAP[taskDetailRecord.upgradeType]?.color}>
+                    {UPGRADE_TYPE_MAP[taskDetailRecord.upgradeType]?.text || taskDetailRecord.upgradeType}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="目标版本">{taskDetailRecord.targetVersion}</Descriptions.Item>
+                <Descriptions.Item label="保留配置">
+                  <Checkbox checked={taskDetailRecord.keepConfig} disabled />
+                </Descriptions.Item>
+                <Descriptions.Item label="操作人">{taskDetailRecord.operator}</Descriptions.Item>
+                <Descriptions.Item label="操作时间">{taskDetailRecord.operateTime || '-'}</Descriptions.Item>
+              </Descriptions>
+
+              {/* 执行进度概览 */}
+              <Card title="执行进度概览" size="small" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+                  <div style={{ flex: '0 0 120px', textAlign: 'center' }}>
+                    <Progress
+                      type="circle"
+                      percent={avgProgress}
+                      size={80}
+                      status={avgProgress === 100 ? 'success' : 'active'}
+                    />
+                    <div style={{ marginTop: 8, color: '#666' }}>总体进度</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <div>
+                        <Tag color="success">成功</Tag>
+                        <span>{resultStats.success} 台</span>
+                      </div>
+                      <div>
+                        <Tag color="error">失败</Tag>
+                        <span>{resultStats.failed} 台</span>
+                      </div>
+                      <div>
+                        <Tag color="processing">升级中</Tag>
+                        <span>{resultStats.running} 台</span>
+                      </div>
+                      <div>
+                        <Tag color="warning">部分成功</Tag>
+                        <span>{resultStats.partial} 台</span>
+                      </div>
+                      <div>
+                        <Tag color="default">等待中</Tag>
+                        <span>{resultStats.pending} 台</span>
+                      </div>
+                    </Space>
+                  </div>
+                  <Divider type="vertical" style={{ height: 120 }} />
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#1890ff' }}>{totalDevices}</div>
+                    <div style={{ color: '#666' }}>设备总数</div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* 设备列表 */}
+              <Card title={`设备列表 (${totalDevices} 台)`} size="small">
+                <Table
+                  size="small"
+                  dataSource={taskDevices}
+                  rowKey="id"
+                  pagination={totalDevices > 10 ? { pageSize: 10 } : false}
+                  scroll={{ y: 300 }}
+                  columns={[
+                    {
+                      title: '基站编码',
+                      dataIndex: 'deviceSn',
+                      width: 100,
+                    },
+                    {
+                      title: '基站名称',
+                      dataIndex: 'deviceName',
+                      ellipsis: true,
+                    },
+                    {
+                      title: '当前版本',
+                      dataIndex: 'sourceVersion',
+                      width: 80,
+                    },
+                    {
+                      title: '进度',
+                      dataIndex: 'progress',
+                      width: 100,
+                      render: (val: number) => (
+                        <Progress
+                          percent={val}
+                          size="small"
+                          status={val === 100 ? 'success' : 'active'}
+                        />
+                      ),
+                    },
+                    {
+                      title: '结果',
+                      dataIndex: 'result',
+                      width: 80,
+                      render: (val: UpgradeResult) => {
+                        const cfg = UPGRADE_RESULT_MAP[val] ?? { color: 'default', text: val };
+                        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+                      },
+                    },
+                    {
+                      title: '失败原因',
+                      dataIndex: 'failureReason',
+                      width: 120,
+                      ellipsis: true,
+                      render: (val: string) => val ? (
+                        <span style={{ color: '#ff4d4f' }}>{val}</span>
+                      ) : '-',
+                    },
+                  ]}
+                />
+              </Card>
+            </>
+          );
+        })()}
       </Drawer>
 
       {/* 添加设备弹窗 */}
