@@ -13,6 +13,7 @@ import {
   Select,
   Statistic,
 } from 'antd';
+import type { Dayjs } from 'dayjs';
 import { PlayCircleOutlined, WarningOutlined, PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -269,6 +270,12 @@ export default function UpgradePlan() {
         { label: '等待中', value: 'pending' },
       ],
     },
+    {
+      name: 'timeRange',
+      label: '时间范围',
+      type: 'date-range',
+      placeholder: '请选择时间范围',
+    },
   ], []);
 
   // 过滤数据
@@ -305,6 +312,24 @@ export default function UpgradePlan() {
       // 结果
       if (filters.result && filters.result !== 'all') {
         if (row.result !== filters.result) return false;
+      }
+      // 时间范围（筛选开始时间或结束时间在范围内的记录）
+      if (filters.timeRange && Array.isArray(filters.timeRange)) {
+        const [start, end] = filters.timeRange as [Dayjs, Dayjs];
+        if (start && end) {
+          const startDate = start.toDate();
+          const endDate = end.endOf('day').toDate();
+          const rowStartTime = row.startTime ? new Date(row.startTime) : null;
+          const rowEndTime = row.endTime ? new Date(row.endTime) : null;
+          // 如果开始时间和结束时间都为空，则不匹配
+          if (!rowStartTime && !rowEndTime) return false;
+          // 检查是否有交集：记录的开始时间或结束时间在筛选范围内
+          const hasOverlap =
+            (rowStartTime && rowStartTime >= startDate && rowStartTime <= endDate) ||
+            (rowEndTime && rowEndTime >= startDate && rowEndTime <= endDate) ||
+            (rowStartTime && rowEndTime && rowStartTime <= startDate && rowEndTime >= endDate);
+          if (!hasOverlap) return false;
+        }
       }
       return true;
     });
