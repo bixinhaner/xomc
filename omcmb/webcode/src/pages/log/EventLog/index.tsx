@@ -15,8 +15,8 @@ import {
 import {
   ExportOutlined,
   BarChartOutlined,
-  EyeOutlined,
 } from '@ant-design/icons';
+import type { Dayjs } from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -73,8 +73,6 @@ export default function EventLog() {
   const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [statisticVisible, setStatisticVisible] = useState(false);
-  const [detailVisible, setDetailVisible] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<EventLog | null>(null);
 
   // 过滤数据
   const filteredData = useMemo(() => {
@@ -88,6 +86,17 @@ export default function EventLog() {
       if (filters.eventName && typeof filters.eventName === 'string') {
         if (row.eventName !== filters.eventName) {
           return false;
+        }
+      }
+      // 时间范围过滤
+      if (filters.timeRange && Array.isArray(filters.timeRange)) {
+        const [startTime, endTime] = filters.timeRange as [Dayjs, Dayjs];
+        const rowTime = row.time;
+        if (startTime && endTime) {
+          const rowDate = new Date(rowTime);
+          if (rowDate < startTime.toDate() || rowDate > endTime.toDate()) {
+            return false;
+          }
         }
       }
       return true;
@@ -105,15 +114,16 @@ export default function EventLog() {
       .sort((a, b) => b.count - a.count);
   }, [filteredData]);
 
-  // 筛选字段
+  // 筛选字段 - 增加时间搜索
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '设备标识', type: 'input', placeholder: '请输入设备唯一标识' },
+    { name: 'keyword', label: '设备编码', type: 'input', placeholder: '请输入设备编码' },
     {
       name: 'eventName',
       label: '事件类型',
       type: 'select',
       options: eventTypes,
     },
+    { name: 'timeRange', label: '时间范围', type: 'date-range', span: 2 },
   ], []);
 
   // 导出
@@ -121,37 +131,25 @@ export default function EventLog() {
     void message.success('正在导出事件日志数据...');
   };
 
-  // 查看详情
-  const handleViewDetail = (record: EventLog) => {
-    setSelectedEvent(record);
-    setDetailVisible(true);
-  };
-
   // 统计
   const handleStatistic = () => {
     setStatisticVisible(true);
   };
 
-  // 表格列
+  // 表格列 - 去掉级别列，去掉操作项
   const columns: DataTableColumn<EventLog>[] = useMemo(() => [
     {
-      key: 'id',
-      title: 'ID',
-      dataIndex: 'id',
-      width: 60,
-    },
-    {
       key: 'neCode',
-      title: '设备唯一标识',
+      title: '设备编码',
       dataIndex: 'neCode',
-      width: 200,
+      width: 140,
       render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
     },
     {
       key: 'neIpAddress',
       title: '基站IP',
       dataIndex: 'neIpAddress',
-      width: 150,
+      width: 140,
       render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
     },
     {
@@ -168,36 +166,10 @@ export default function EventLog() {
       ellipsis: true,
     },
     {
-      key: 'eventLevel',
-      title: '级别',
-      dataIndex: 'eventLevel',
-      width: 80,
-      render: (val: EventLevel) => {
-        const cfg = eventLevelConfig[val];
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
-      },
-    },
-    {
       key: 'time',
       title: '时间',
       dataIndex: 'time',
       width: 160,
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      width: 80,
-      fixed: 'right',
-      render: (_: unknown, record: EventLog) => (
-        <Button
-          type="link"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => handleViewDetail(record)}
-        >
-          详情
-        </Button>
-      ),
     },
   ], []);
 
@@ -209,7 +181,7 @@ export default function EventLog() {
           <Button icon={<BarChartOutlined />} onClick={handleStatistic}>
             统计
           </Button>
-          <Button icon={<ExportOutlined />} onClick={handleExport}>
+          <Button type="primary" icon={<ExportOutlined />} onClick={handleExport}>
             导出
           </Button>
         </Space>
@@ -231,7 +203,7 @@ export default function EventLog() {
         currentPage={1}
         pageSize={20}
         onPageChange={() => {}}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 800 }}
       />
 
       {/* 统计弹窗 */}
@@ -280,35 +252,6 @@ export default function EventLog() {
           </div>
         </div>
       </Modal>
-
-      {/* 详情抽屉 */}
-      <Drawer
-        title="事件详情"
-        placement="right"
-        width={500}
-        open={detailVisible}
-        onClose={() => setDetailVisible(false)}
-      >
-        {selectedEvent && (
-          <div>
-            <p><strong>ID:</strong> {selectedEvent.id}</p>
-            <p><strong>设备唯一标识:</strong> {selectedEvent.neCode}</p>
-            <p><strong>基站IP:</strong> {selectedEvent.neIpAddress}</p>
-            <p>
-              <strong>事件类型:</strong>{' '}
-              <Tag color="blue">{selectedEvent.eventName}</Tag>
-            </p>
-            <p>
-              <strong>事件级别:</strong>{' '}
-              <Tag color={eventLevelConfig[selectedEvent.eventLevel].color}>
-                {eventLevelConfig[selectedEvent.eventLevel].text}
-              </Tag>
-            </p>
-            <p><strong>原因:</strong> {selectedEvent.eventReason}</p>
-            <p><strong>时间:</strong> {selectedEvent.time}</p>
-          </div>
-        )}
-      </Drawer>
     </ListPageLayout>
   );
 }
