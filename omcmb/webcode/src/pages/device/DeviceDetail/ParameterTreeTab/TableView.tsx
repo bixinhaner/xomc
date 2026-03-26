@@ -1,12 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Table, Tag, Typography, Space, Empty } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
+import { EditOutlined, LoadingOutlined } from '@ant-design/icons';
+import type { ColumnsType, TableProps } from 'antd/es/table';
 import type { DeviceParameter, ParameterType } from '@/types/deviceParameter';
 import type { PageResponse } from '@/types/pagination';
 import ParameterEditModal from './ParameterEditModal';
 
 const { Text } = Typography;
+
+// Virtual table row height constant
+const ROW_HEIGHT = 40;
+const MAX_VISIBLE_ROWS = 15;
+const VIRTUAL_SCROLL_HEIGHT = ROW_HEIGHT * MAX_VISIBLE_ROWS;
 
 interface TableViewProps {
   deviceId: string;
@@ -149,25 +154,42 @@ export default function TableView({
     return <Empty description="暂无参数数据，请先执行参数发现" />;
   }
 
+  // Calculate dynamic scroll height and virtual scroll threshold
+  const itemCount = data?.items?.length ?? 0;
+  const scrollY = Math.min(Math.max(ROW_HEIGHT * itemCount, ROW_HEIGHT * 3), VIRTUAL_SCROLL_HEIGHT);
+  const shouldVirtualize = itemCount > MAX_VISIBLE_ROWS;
+
+  const tableProps: TableProps<DeviceParameter> = {
+    columns,
+    dataSource: data?.items ?? [],
+    loading: {
+      spinning: loading,
+      indicator: <LoadingOutlined spin />,
+    },
+    rowKey: 'id',
+    size: 'small',
+    scroll: { x: 1100, y: scrollY },
+    pagination: {
+      current: page,
+      pageSize,
+      total: data?.total ?? 0,
+      showSizeChanger: true,
+      showTotal: (total) => `共 ${total} 条参数`,
+      pageSizeOptions: ['20', '50', '100', '200'],
+      onChange: onPageChange,
+    },
+    // Enable virtual scroll when data exceeds threshold
+    virtual: shouldVirtualize,
+    ...(shouldVirtualize && {
+      rowProps: () => ({
+        style: { height: ROW_HEIGHT },
+      }),
+    }),
+  };
+
   return (
     <>
-      <Table<DeviceParameter>
-        columns={columns}
-        dataSource={data?.items ?? []}
-        loading={loading}
-        rowKey="id"
-        size="small"
-        scroll={{ x: 1100 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total ?? 0,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条参数`,
-          pageSizeOptions: ['20', '50', '100'],
-          onChange: onPageChange,
-        }}
-      />
+      <Table<DeviceParameter> {...tableProps} />
 
       {editTarget && (
         <ParameterEditModal

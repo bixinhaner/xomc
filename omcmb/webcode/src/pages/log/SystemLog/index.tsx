@@ -51,8 +51,8 @@ export default function SystemLogPage() {
     pageSize,
   });
 
-  const allLogs = (data?.list?.length ?? 0) > 0
-    ? (data?.list ?? []) as unknown as SystemLogDetail[]
+  const allLogs = (data?.items?.length ?? 0) > 0
+    ? (data?.items ?? []) as unknown as SystemLogDetail[]
     : mockSystemLogs.filter((log) => {
         if (filters.level && log.level !== filters.level) return false;
         if (filters.source && log.source !== filters.source) return false;
@@ -61,7 +61,7 @@ export default function SystemLogPage() {
       });
 
   const startIndex = (page - 1) * pageSize;
-  const paginated = data?.list ? allLogs : allLogs.slice(startIndex, startIndex + pageSize);
+  const paginated = data?.items ? allLogs : allLogs.slice(startIndex, startIndex + pageSize);
 
   const filterFields: FilterField[] = useMemo(() => [
     {

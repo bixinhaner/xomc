@@ -225,7 +225,7 @@ export default function OperationLogPage() {
       <DataTable
         tableId="operation-log-list"
         columns={columns}
-        dataSource={(data?.list ?? []) as (OperationLog & Record<string, unknown>)[]}
+        dataSource={(data?.items ?? []) as (OperationLog & Record<string, unknown>)[]}
         loading={isLoading}
         rowKey="id"
         total={data?.total ?? 0}

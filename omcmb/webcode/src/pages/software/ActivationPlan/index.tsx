@@ -272,7 +272,7 @@ export default function ActivationPlan() {
           <Form.Item name="targetVersion" label={t('table.version')} rules={[{ required: true }]}>
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={(versionsData?.list ?? []).map((v) => ({
+              options={(versionsData?.items ?? []).map((v) => ({
                 label: `${v.versionCode} (${v.deviceType})`,
                 value: v.versionCode,
               }))}

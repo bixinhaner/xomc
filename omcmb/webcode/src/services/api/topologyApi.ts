@@ -1,6 +1,20 @@
 import http from '../http';
 import type { Domain, DomainLevel, Site, TopoNode, TopoEdge, NodeType, NodeStatus, SiteStatus, EdgeStatus } from '@/types/topology';
 import type { PageResponse } from '@/types/pagination';
+import type {
+  DeviceGeo,
+  DeviceCluster,
+  MapStats,
+  MapFilterParams,
+  DeviceSearchResult,
+  MapBounds,
+  DeviceStatus,
+  DeviceType,
+  BackendDeviceGeo,
+  BackendDeviceCluster,
+  BackendMapStats,
+  BackendSearchResult,
+} from '@/types/map';
 
 // Backend device group model
 interface BackendDeviceGroup {
@@ -227,4 +241,143 @@ export const topologyApi = {
       nodes: (data.nodes || []).map(mapBackendTopoNode),
     };
   },
+
+  // ============ Map API Methods ============
+
+  /**
+   * 获取设备地理数据（支持筛选）
+   */
+  async getDevicesGeo(params?: MapFilterParams): Promise<{ items: DeviceGeo[]; total: number }> {
+    const { data } = await http.get<{ items: BackendDeviceGeo[]; total: number }>('/devices/geo', {
+      params: {
+        group_ids: params?.groupIds?.join(','),
+        status: params?.status?.join(','),
+        type: params?.type?.join(','),
+        keyword: params?.keyword,
+        bounds: params?.bounds,
+        page: params?.page,
+        page_size: params?.pageSize,
+      },
+    });
+    return {
+      items: (data.items || []).map(mapBackendDeviceGeo),
+      total: data.total,
+    };
+  },
+
+  /**
+   * 获取聚合数据
+   */
+  async getAggregation(params: {
+    bounds: MapBounds;
+    zoom: number;
+    gridSize?: number;
+    filters?: MapFilterParams;
+  }): Promise<{ clusters: DeviceCluster[] }> {
+    const { data } = await http.post<{ clusters: BackendDeviceCluster[] }>('/devices/geo/aggregate', {
+      bounds: {
+        min_lng: params.bounds.minLng,
+        max_lng: params.bounds.maxLng,
+        min_lat: params.bounds.minLat,
+        max_lat: params.bounds.maxLat,
+      },
+      zoom: params.zoom,
+      grid_size: params.gridSize || 50,
+      filters: {
+        group_ids: params.filters?.groupIds,
+        status: params.filters?.status,
+      },
+    });
+    return {
+      clusters: (data.clusters || []).map(mapBackendCluster),
+    };
+  },
+
+  /**
+   * 获取地图统计数据
+   */
+  async getMapStats(params?: { groupIds?: string[]; bounds?: string }): Promise<MapStats> {
+    const { data } = await http.get<BackendMapStats>('/devices/geo/stats', {
+      params: {
+        group_ids: params?.groupIds?.join(','),
+        bounds: params?.bounds,
+      },
+    });
+    return mapBackendStats(data);
+  },
+
+  /**
+   * 搜索设备（节点查找）
+   */
+  async searchDevices(keyword: string): Promise<DeviceSearchResult[]> {
+    const { data } = await http.get<{ items: BackendSearchResult[] }>('/devices/search', {
+      params: { keyword },
+    });
+    return (data.items || []).map(mapBackendSearchResult);
+  },
+
+  /**
+   * 获取设备组树（用于地图筛选）
+   */
+  async getGroupTree(): Promise<Domain[]> {
+    const { data } = await http.get<{ items: BackendDeviceGroup[] }>('/groups');
+    return (data.items || []).map((g) => mapGroupToDomain(g));
+  },
 };
+
+// ============ Map Backend Type Mappers ============
+
+function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
+  return {
+    id: bd.id,
+    name: bd.name,
+    sn: bd.sn,
+    longitude: bd.longitude,
+    latitude: bd.latitude,
+    status: bd.status as DeviceStatus,
+    type: bd.type as DeviceType | undefined,
+    groupId: bd.group_id,
+    groupName: bd.group_name,
+    address: bd.address,
+    alarmCount: bd.alarm_count,
+  };
+}
+
+function mapBackendCluster(bc: BackendDeviceCluster): DeviceCluster {
+  return {
+    id: bc.id,
+    longitude: bc.longitude,
+    latitude: bc.latitude,
+    count: bc.count,
+    statusCount: bc.status_count as Record<DeviceStatus, number>,
+    alarmCount: bc.alarm_count,
+    bounds: bc.bounds ? {
+      minLng: bc.bounds.min_lng,
+      maxLng: bc.bounds.max_lng,
+      minLat: bc.bounds.min_lat,
+      maxLat: bc.bounds.max_lat,
+    } : undefined,
+  };
+}
+
+function mapBackendStats(bs: BackendMapStats): MapStats {
+  return {
+    total: bs.total,
+    statusCount: bs.status_count as Record<DeviceStatus, number>,
+    alarmCount: bs.alarm_count,
+    typeCount: bs.type_count as Record<DeviceType, number> | undefined,
+    viewportCount: bs.viewport_count,
+  };
+}
+
+function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
+  return {
+    id: bs.id,
+    name: bs.name,
+    sn: bs.sn,
+    status: bs.status as DeviceStatus,
+    longitude: bs.longitude,
+    latitude: bs.latitude,
+    groupName: bs.group_name,
+  };
+}

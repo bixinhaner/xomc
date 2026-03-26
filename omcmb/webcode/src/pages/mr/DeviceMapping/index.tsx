@@ -46,8 +46,8 @@ export default function DeviceMapping() {
 
   const toggleMapping = useToggleMRMapping();
 
-  const allMappings = (data?.list?.length ?? 0) > 0
-    ? (data?.list ?? []) as MRDeviceMapping[]
+  const allMappings = (data?.items?.length ?? 0) > 0
+    ? (data?.items ?? []) as MRDeviceMapping[]
     : localMappings.filter((m) => {
         if (filters.deviceSn && !m.deviceSn.includes(String(filters.deviceSn))) return false;
         if (filters.enabled !== undefined) {
@@ -58,7 +58,7 @@ export default function DeviceMapping() {
       });
 
   const startIndex = (page - 1) * pageSize;
-  const paginated = data?.list ? allMappings : allMappings.slice(startIndex, startIndex + pageSize);
+  const paginated = data?.items ? allMappings : allMappings.slice(startIndex, startIndex + pageSize);
 
   const columns: DataTableColumn<MRDeviceMapping & Record<string, unknown>>[] = [
     { key: 'deviceSn', title: '设备SN', dataIndex: 'deviceSn', width: 130, render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span> },
@@ -76,7 +76,7 @@ export default function DeviceMapping() {
             checked={Boolean(val)}
             size="small"
             onChange={(checked) => {
-              if (data?.list) {
+              if (data?.items) {
                 toggleMapping.mutate({ id: m.id, enabled: checked }, {
                   onSuccess: () => void message.success(`已${checked ? '启用' : '禁用'} ${m.deviceSn} ${m.cellId} 映射`),
                 });

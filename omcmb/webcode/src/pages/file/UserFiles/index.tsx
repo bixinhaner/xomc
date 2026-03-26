@@ -202,7 +202,7 @@ export default function UserFiles() {
                 <DataTable
                   tableId="user-files-list"
                   columns={userFileColumns}
-                  dataSource={(data?.list ?? []) as (ManagedFile & Record<string, unknown>)[]}
+                  dataSource={(data?.items ?? []) as (ManagedFile & Record<string, unknown>)[]}
                   loading={isLoading}
                   rowKey="id"
                   total={data?.total ?? 0}

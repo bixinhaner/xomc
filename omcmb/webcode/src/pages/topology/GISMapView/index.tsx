@@ -1,258 +1,1036 @@
-import { useState, useMemo } from 'react';
-import { Badge, Input, List, Space, Tag, Tree, Typography } from 'antd';
-import { SearchOutlined, EnvironmentOutlined } from '@ant-design/icons';
-import type { DataNode } from 'antd/es/tree';
-import MapPageLayout from '@/components/Layout/MapPageLayout';
+/**
+ * GIS 地图视图页面
+ * 完全按照 UI 原型图 GISMap_UI_Design_Main.svg 实现
+ */
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { Checkbox } from 'antd';
+import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
-import type { MapDevice } from '@/components/GISMap';
-import { useSites, useDomainTree } from '@/hooks/api/useTopology';
+import type { MapDevice, DeviceGroupNode } from '@/types/map';
 import type { Site } from '@/types/topology';
-import { useT } from '@/hooks/useT';
+import { useSites } from '@/hooks/api/useTopology';
+import { useThemeToken } from '@/hooks/useThemeToken';
 
-const MOCK_SITES: Site[] = [
-  { id: '1', name: '北京朝阳站点01', domainId: 'bj-cy', address: '北京市朝阳区建国路88号', longitude: 116.46, latitude: 39.92, deviceCount: 3, status: 'active' },
-  { id: '2', name: '北京海淀站点01', domainId: 'bj-hd', address: '北京市海淀区中关村大街1号', longitude: 116.31, latitude: 39.98, deviceCount: 2, status: 'active' },
-  { id: '3', name: '北京朝阳站点02', domainId: 'bj-cy', address: '北京市朝阳区望京街道', longitude: 116.49, latitude: 40.00, deviceCount: 1, status: 'maintenance' },
-  { id: '4', name: '上海浦东站点01', domainId: 'sh-pd', address: '上海市浦东新区张江高科技园区', longitude: 121.60, latitude: 31.21, deviceCount: 4, status: 'active' },
-  { id: '5', name: '上海静安站点01', domainId: 'sh-ja', address: '上海市静安区南京西路1882号', longitude: 121.45, latitude: 31.23, deviceCount: 2, status: 'active' },
-  { id: '6', name: '广州天河站点01', domainId: 'gz-th', address: '广州市天河区珠江新城', longitude: 113.33, latitude: 23.12, deviceCount: 3, status: 'active' },
-  { id: '7', name: '深圳南山站点01', domainId: 'sz-ns', address: '深圳市南山区科技园', longitude: 113.93, latitude: 22.53, deviceCount: 2, status: 'active' },
-];
+// ============ Mock Data Generator ============
 
-const SITE_STATUS_MAP_KEYS: Record<string, { color: string; key: string }> = {
-  active: { color: 'success', key: 'status.online' },
-  inactive: { color: 'default', key: 'status.disabled' },
-  maintenance: { color: 'warning', key: 'status.pending' },
+// 城市坐标数据
+const CITY_COORDS: Record<string, { lng: number; lat: number; groupId: string }> = {
+  // 北京
+  'bj-cy': { lng: 116.46, lat: 39.92, groupId: 'bj-cy' },
+  'bj-hd': { lng: 116.31, lat: 39.98, groupId: 'bj-hd' },
+  'bj-dc': { lng: 116.41, lat: 39.93, groupId: 'bj-dc' },
+  'bj-ft': { lng: 116.28, lat: 39.85, groupId: 'bj-ft' },
+  // 上海
+  'sh-pd': { lng: 121.60, lat: 31.21, groupId: 'sh-pd' },
+  'sh-ja': { lng: 121.45, lat: 31.23, groupId: 'sh-ja' },
+  'sh-xh': { lng: 121.48, lat: 31.19, groupId: 'sh-xh' },
+  'sh-mh': { lng: 121.38, lat: 31.12, groupId: 'sh-mh' },
+  // 广州
+  'gz-th': { lng: 113.33, lat: 23.12, groupId: 'gz-th' },
+  'gz-by': { lng: 113.27, lat: 23.18, groupId: 'gz-by' },
+  'gz-hz': { lng: 113.35, lat: 23.09, groupId: 'gz-hz' },
+  // 深圳
+  'sz-ns': { lng: 113.93, lat: 22.53, groupId: 'sz-ns' },
+  'sz-ft': { lng: 114.05, lat: 22.55, groupId: 'sz-ft' },
+  'sz-lh': { lng: 114.12, lat: 22.58, groupId: 'sz-lh' },
+  // 成都
+  'cd-jn': { lng: 104.08, lat: 30.66, groupId: 'cd-jn' },
+  'cd-wh': { lng: 104.02, lat: 30.69, groupId: 'cd-wh' },
+  // 武汉
+  'wh-hk': { lng: 114.28, lat: 30.58, groupId: 'wh-hk' },
+  'wh-wc': { lng: 114.35, lat: 30.55, groupId: 'wh-wc' },
+  // 杭州
+  'hz-xh': { lng: 120.12, lat: 30.28, groupId: 'hz-xh' },
+  'hz-jg': { lng: 120.18, lat: 30.25, groupId: 'hz-jg' },
+  // 南京
+  'nj-xw': { lng: 118.78, lat: 32.06, groupId: 'nj-xw' },
+  'nj-gl': { lng: 118.82, lat: 32.02, groupId: 'nj-gl' },
+  // 西安
+  'xa-ys': { lng: 108.95, lat: 34.27, groupId: 'xa-ys' },
+  'xa-bl': { lng: 108.88, lat: 34.30, groupId: 'xa-bl' },
+  // 重庆
+  'cq-yb': { lng: 106.55, lat: 29.56, groupId: 'cq-yb' },
+  'cq-jlp': { lng: 106.48, lat: 29.52, groupId: 'cq-jlp' },
+  // 天津
+  'tj-hp': { lng: 117.22, lat: 39.12, groupId: 'tj-hp' },
+  'tj-nk': { lng: 117.15, lat: 39.10, groupId: 'tj-nk' },
+  // 苏州
+  'szh-gs': { lng: 120.62, lat: 31.32, groupId: 'szh-gs' },
+  'szh-sz': { lng: 120.58, lat: 31.28, groupId: 'szh-sz' },
 };
 
-const MOCK_DOMAIN_TREE: DataNode[] = [
+// 设备组树数据
+const MOCK_GROUP_TREE: DeviceGroupNode[] = [
   {
-    title: '全国',
-    key: 'cn',
+    id: 'china',
+    name: 'China group',
+    parentId: null,
+    level: 1,
     children: [
       {
-        title: '北京',
-        key: 'bj',
+        id: 'bj',
+        name: 'Beijing group',
+        parentId: 'china',
+        level: 2,
         children: [
-          { title: '朝阳区', key: 'bj-cy' },
-          { title: '海淀区', key: 'bj-hd' },
+          { id: 'bj-cy', name: 'Chaoyang group', parentId: 'bj', level: 3, isLeaf: true },
+          { id: 'bj-hd', name: 'Haidian group', parentId: 'bj', level: 3, isLeaf: true },
+          { id: 'bj-dc', name: 'Dongcheng group', parentId: 'bj', level: 3, isLeaf: true },
+          { id: 'bj-ft', name: 'Fengtai group', parentId: 'bj', level: 3, isLeaf: true },
         ],
       },
       {
-        title: '上海',
-        key: 'sh',
+        id: 'sh',
+        name: 'Shanghai group',
+        parentId: 'china',
+        level: 2,
         children: [
-          { title: '浦东新区', key: 'sh-pd' },
-          { title: '静安区', key: 'sh-ja' },
+          { id: 'sh-pd', name: 'Pudong group', parentId: 'sh', level: 3, isLeaf: true },
+          { id: 'sh-ja', name: 'Jingan group', parentId: 'sh', level: 3, isLeaf: true },
+          { id: 'sh-xh', name: 'Xuhui group', parentId: 'sh', level: 3, isLeaf: true },
+          { id: 'sh-mh', name: 'Minhang group', parentId: 'sh', level: 3, isLeaf: true },
         ],
       },
       {
-        title: '广东',
-        key: 'gd',
+        id: 'gd',
+        name: 'Guangdong group',
+        parentId: 'china',
+        level: 2,
         children: [
-          { title: '广州市', key: 'gz-th' },
-          { title: '深圳市', key: 'sz-ns' },
+          { id: 'gz-th', name: 'Guangzhou Tianhe', parentId: 'gd', level: 3, isLeaf: true },
+          { id: 'gz-by', name: 'Guangzhou Baiyun', parentId: 'gd', level: 3, isLeaf: true },
+          { id: 'sz-ns', name: 'Shenzhen Nanshan', parentId: 'gd', level: 3, isLeaf: true },
+          { id: 'sz-ft', name: 'Shenzhen Futian', parentId: 'gd', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'cd',
+        name: 'Chengdu group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'cd-jn', name: 'Jinniu group', parentId: 'cd', level: 3, isLeaf: true },
+          { id: 'cd-wh', name: 'Wuhou group', parentId: 'cd', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'wh',
+        name: 'Wuhan group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'wh-hk', name: 'Hankou group', parentId: 'wh', level: 3, isLeaf: true },
+          { id: 'wh-wc', name: 'Wuchang group', parentId: 'wh', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'hz',
+        name: 'Zhejiang group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'hz-xh', name: 'Hangzhou Xihu', parentId: 'hz', level: 3, isLeaf: true },
+          { id: 'hz-jg', name: 'Hangzhou Jianggan', parentId: 'hz', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'nj',
+        name: 'Nanjing group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'nj-xw', name: 'Xuanwu group', parentId: 'nj', level: 3, isLeaf: true },
+          { id: 'nj-gl', name: 'Gulou group', parentId: 'nj', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'xa',
+        name: "Xi'an group",
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'xa-ys', name: 'Yanta group', parentId: 'xa', level: 3, isLeaf: true },
+          { id: 'xa-bl', name: 'Beilin group', parentId: 'xa', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'cq',
+        name: 'Chongqing group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'cq-yb', name: 'Yubei group', parentId: 'cq', level: 3, isLeaf: true },
+          { id: 'cq-jlp', name: 'Jiangbei group', parentId: 'cq', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'tj',
+        name: 'Tianjin group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'tj-hp', name: 'Heping group', parentId: 'tj', level: 3, isLeaf: true },
+          { id: 'tj-nk', name: 'Nankai group', parentId: 'tj', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'szh',
+        name: 'Suzhou group',
+        parentId: 'china',
+        level: 2,
+        children: [
+          { id: 'szh-gs', name: 'Gusu group', parentId: 'szh', level: 3, isLeaf: true },
+          { id: 'szh-sz', name: 'Suzhou group', parentId: 'szh', level: 3, isLeaf: true },
         ],
       },
     ],
   },
 ];
 
-const STATUS_DEVICE_COUNT = {
-  online: 12,
-  offline: 2,
-  warning: 3,
-  error: 1,
-};
+// 组ID到组名路径映射
+const GROUP_PATH_MAP: Record<string, string> = {};
+MOCK_GROUP_TREE[0].children?.forEach((province) => {
+  const provinceName = province.name;
+  province.children?.forEach((city) => {
+    GROUP_PATH_MAP[city.id] = `China / ${provinceName.replace(' group', '')} / ${city.name}`;
+  });
+});
 
-export default function GISMapView() {
-  const t = useT();
-  const [searchValue, setSearchValue] = useState('');
-  const [selectedDomain, setSelectedDomain] = useState<string>('');
-  const [selectedSite, setSelectedSite] = useState<Site | null>(null);
+// 生成 Mock 设备数据
+function generateMockDevices(): Site[] {
+  const devices: Site[] = [];
+  const cityIds = Object.keys(CITY_COORDS);
+  let deviceIndex = 0;
 
-  const { data: sitesData } = useSites({ domainId: selectedDomain || undefined });
-  const { data: domainTree } = useDomainTree();
-  void domainTree;
+  cityIds.forEach((cityId) => {
+    const cityCoord = CITY_COORDS[cityId];
+    // 每个城市 3-8 个设备
+    const deviceCount = 3 + Math.floor(Math.random() * 6);
 
-  const sites = (sitesData ?? MOCK_SITES) as Site[];
+    for (let i = 0; i < deviceCount; i++) {
+      deviceIndex++;
+      const isOnline = Math.random() > 0.08; // 92% 在线率
 
-  const filteredSites = sites.filter((s) => {
-    const matchDomain = !selectedDomain || selectedDomain === 'cn' || s.domainId === selectedDomain || s.domainId.startsWith(selectedDomain);
-    const matchSearch = !searchValue || s.name.includes(searchValue) || s.address.includes(searchValue);
-    return matchDomain && matchSearch;
+      // 在城市坐标附近随机偏移
+      const lngOffset = (Math.random() - 0.5) * 0.15;
+      const latOffset = (Math.random() - 0.5) * 0.1;
+
+      devices.push({
+        id: String(deviceIndex).padStart(3, '0'),
+        name: `Device ${String(deviceIndex).padStart(3, '0')} @ ${cityId.toUpperCase()}`,
+        domainId: cityId,
+        address: `Address ${deviceIndex}, District ${cityId.toUpperCase()}`,
+        longitude: cityCoord.lng + lngOffset,
+        latitude: cityCoord.lat + latOffset,
+        deviceCount: 1,
+        status: isOnline ? 'active' : 'inactive',
+      });
+    }
   });
 
-  const mapDevices: MapDevice[] = filteredSites.map((site) => ({
-    lat: site.latitude,
-    lng: site.longitude,
-    name: site.name,
-    status: site.status === 'active' ? 'online' : site.status === 'maintenance' ? 'warning' : 'offline',
-    sn: site.id,
-  }));
+  return devices;
+}
 
-  const leftPanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid #f0f0f0' }}>
-        <Typography.Text strong style={{ fontSize: 13 }}>{t('common.search')}</Typography.Text>
-      </div>
-      <div style={{ padding: '8px 12px' }}>
-        <Input
-          size="small"
-          placeholder={t('common.search')}
-          prefix={<SearchOutlined />}
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-          allowClear
-        />
-      </div>
-      <div style={{ padding: '0 12px 8px' }}>
-        <Typography.Text style={{ fontSize: 12, color: '#8c8c8c' }}>
-          {t('table.total')}: {filteredSites.length}
-        </Typography.Text>
-      </div>
+// 生成 Mock 数据（只生成一次）
+const MOCK_SITES: Site[] = generateMockDevices();
 
-      {/* Domain tree */}
-      <div style={{ padding: '0 8px 4px', borderBottom: '1px solid #f0f0f0' }}>
-        <Tree
-          treeData={MOCK_DOMAIN_TREE}
-          defaultExpandAll
-          showLine
-          onSelect={(keys) => {
-            const key = keys[0] as string;
-            setSelectedDomain(key ?? '');
-          }}
-          style={{ fontSize: 12 }}
-        />
-      </div>
+export default function GISMapView() {
+  const token = useThemeToken();
 
-      {/* Site list */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        <List
-          size="small"
-          dataSource={filteredSites}
-          renderItem={(site) => (
-            <List.Item
-              style={{
-                cursor: 'pointer',
-                background: selectedSite?.id === site.id ? '#e6f4ff' : 'transparent',
-                padding: '6px 12px',
-              }}
-              onClick={() => setSelectedSite(site)}
-            >
-              <div style={{ width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Space size={4}>
-                    <EnvironmentOutlined style={{ color: 'var(--color-primary-600)', fontSize: 12 }} />
-                    <Typography.Text style={{ fontSize: 12, fontWeight: 500 }}>{site.name}</Typography.Text>
-                  </Space>
-                  <Tag color={SITE_STATUS_MAP_KEYS[site.status]?.color} style={{ fontSize: 10, margin: 0 }}>
-                    {t(SITE_STATUS_MAP_KEYS[site.status]?.key)}
-                  </Tag>
-                </div>
-                <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 2 }}>{site.address}</div>
-                <div style={{ fontSize: 11, color: '#8c8c8c' }}>{t('table.total')}: {site.deviceCount}</div>
-              </div>
-            </List.Item>
-          )}
-        />
-      </div>
-    </div>
+  // 状态
+  const [groupSearchValue, setGroupSearchValue] = useState('');
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(['china']);
+  const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>(['china', 'bj', 'sh', 'gd']);
+  const [statusFilter, setStatusFilter] = useState<{ online: boolean; offline: boolean }>({
+    online: true,
+    offline: true,
+  });
+  const [deviceSearchValue, setDeviceSearchValue] = useState('');
+  const [deviceSearchResults, setDeviceSearchResults] = useState<Site[]>([]);
+  const [deviceSearchExpanded, setDeviceSearchExpanded] = useState(false);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  const { data: sitesData } = useSites({});
+  const sites = (sitesData ?? MOCK_SITES) as Site[];
+
+  // ========== 动态统计计算 ==========
+
+  // 全部设备统计
+  const allStats = useMemo(() => {
+    const total = sites.length;
+    const online = sites.filter((s) => s.status === 'active').length;
+    const offline = total - online;
+    return { total, online, offline };
+  }, [sites]);
+
+  // 过滤设备
+  const filteredSites = useMemo(() => {
+    return sites.filter((site) => {
+      // 状态过滤
+      const isOnline = site.status === 'active';
+      if (isOnline && !statusFilter.online) return false;
+      if (!isOnline && !statusFilter.offline) return false;
+
+      // 设备组过滤
+      if (selectedGroupIds.length > 0) {
+        const siteDomain = site.domainId;
+        // 检查是否匹配任何选中的组（包括子组）
+        const matchesGroup = selectedGroupIds.some((gid) => {
+          if (gid === 'china') return true; // 根节点匹配所有
+          return siteDomain === gid || siteDomain.startsWith(gid);
+        });
+        if (!matchesGroup) return false;
+      }
+
+      return true;
+    });
+  }, [sites, statusFilter, selectedGroupIds]);
+
+  // 过滤后设备统计
+  const filteredStats = useMemo(() => {
+    const total = filteredSites.length;
+    const online = filteredSites.filter((s) => s.status === 'active').length;
+    const offline = total - online;
+    return { total, online, offline };
+  }, [filteredSites]);
+
+  // 转换为地图设备
+  const mapDevices: MapDevice[] = useMemo(
+    () =>
+      filteredSites.map((site) => ({
+        id: site.id,
+        lat: site.latitude,
+        lng: site.longitude,
+        name: site.name,
+        status: site.status === 'active' ? 'online' : 'offline',
+        sn: `SN2024${site.id}`,
+        groupName: GROUP_PATH_MAP[site.domainId] || 'China',
+        address: site.address,
+        alarmCount: site.status === 'active' ? Math.floor(Math.random() * 8) : 0,
+      })),
+    [filteredSites]
   );
 
-  return (
-    <MapPageLayout panel={leftPanel} defaultPanelWidth={300}>
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        <GISMap
-          devices={mapDevices}
-          height="100%"
-          onDeviceClick={(device) => {
-            const site = filteredSites.find((s) => s.id === device.sn);
-            if (site) setSelectedSite(site);
-          }}
-        />
+  // 设备搜索
+  const handleDeviceSearch = useCallback(
+    (value: string) => {
+      setDeviceSearchValue(value);
+      if (value.length >= 2) {
+        const results = sites.filter(
+          (s) =>
+            s.name.toLowerCase().includes(value.toLowerCase()) ||
+            s.id.toLowerCase().includes(value.toLowerCase())
+        );
+        setDeviceSearchResults(results);
+        setDeviceSearchExpanded(true);
+      } else {
+        setDeviceSearchResults([]);
+        setDeviceSearchExpanded(false);
+      }
+    },
+    [sites]
+  );
 
-        {/* Floating stats panel */}
+  // 获取所有子节点ID
+  const getAllDescendantIds = useCallback((node: DeviceGroupNode): string[] => {
+    const ids = [node.id];
+    if (node.children) {
+      node.children.forEach((child) => {
+        ids.push(...getAllDescendantIds(child));
+      });
+    }
+    return ids;
+  }, []);
+
+  // 渲染设备组树节点
+  const renderGroupNode = (node: DeviceGroupNode, depth: number = 0): React.ReactNode => {
+    const isLeaf = node.isLeaf || !node.children || node.children.length === 0;
+    const isExpanded = expandedGroupIds.includes(node.id);
+    const isSelected = selectedGroupIds.includes(node.id);
+    const paddingLeft = depth * 12 + 16;
+
+    return (
+      <div key={node.id}>
+        {/* 节点行 */}
         <div
           style={{
-            position: 'absolute',
-            bottom: 24,
-            right: 24,
-            background: 'rgba(255,255,255,0.95)',
-            backdropFilter: 'blur(8px)',
-            borderRadius: 8,
-            padding: '12px 16px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-            minWidth: 200,
-            border: '1px solid #f0f0f0',
-            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            padding: '8px 12px',
+            paddingLeft,
+            cursor: 'pointer',
+            background: isSelected ? '#E6F7FF' : 'transparent',
+            borderRadius: 6,
+            margin: '2px 8px',
+            transition: 'background 0.2s',
+          }}
+          onClick={() => {
+            if (!isLeaf) {
+              setExpandedGroupIds((prev) =>
+                prev.includes(node.id) ? prev.filter((id) => id !== node.id) : [...prev, node.id]
+              );
+            }
           }}
         >
-          <Typography.Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            {t('table.status')}
-          </Typography.Text>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <Badge status="success" text={t('status.online')} />
-              <Typography.Text strong style={{ color: '#52c41a' }}>{STATUS_DEVICE_COUNT.online}</Typography.Text>
+          {/* 复选框 */}
+          <Checkbox
+            checked={selectedGroupIds.includes(node.id)}
+            onChange={(e) => {
+              e.stopPropagation();
+              const ids = getAllDescendantIds(node);
+              if (e.target.checked) {
+                setSelectedGroupIds((prev) => [...new Set([...prev, ...ids])]);
+              } else {
+                setSelectedGroupIds((prev) => prev.filter((id) => !ids.includes(id)));
+              }
+            }}
+            style={{ marginRight: 8 }}
+          />
+
+          {/* 展开/收起图标 (仅非叶子节点) */}
+          {!isLeaf && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpandedGroupIds((prev) =>
+                  prev.includes(node.id) ? prev.filter((id) => id !== node.id) : [...prev, node.id]
+                );
+              }}
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: 2,
+                border: `1.5px solid ${isExpanded ? token.colorPrimary : '#BFBFBF'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 8,
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              {isExpanded ? (
+                <MinusOutlined style={{ fontSize: 8, color: token.colorPrimary }} />
+              ) : (
+                <PlusOutlined style={{ fontSize: 8, color: '#BFBFBF' }} />
+              )}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <Badge status="warning" text={t('status.running')} />
-              <Typography.Text strong style={{ color: '#fa8c16' }}>{STATUS_DEVICE_COUNT.warning}</Typography.Text>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <Badge status="error" text={t('status.failed')} />
-              <Typography.Text strong style={{ color: '#f5222d' }}>{STATUS_DEVICE_COUNT.error}</Typography.Text>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <Badge status="default" text={t('status.offline')} />
-              <Typography.Text strong style={{ color: '#8c8c8c' }}>{STATUS_DEVICE_COUNT.offline}</Typography.Text>
-            </div>
+          )}
+
+          {/* 节点名称 */}
+          <span
+            style={{
+              fontSize: node.level === 1 ? 14 : 13,
+              color: isSelected ? token.colorPrimary : node.level === 1 ? '#262626' : '#595959',
+              fontWeight: isSelected || node.level === 1 ? 500 : 400,
+            }}
+          >
+            {node.name}
+          </span>
+        </div>
+
+        {/* 子节点 */}
+        {isExpanded && !isLeaf && node.children && (
+          <div>{node.children.map((child) => renderGroupNode(child, depth + 1))}</div>
+        )}
+      </div>
+    );
+  };
+
+  // 样式定义
+  const leftPanelStyle: React.CSSProperties = {
+    width: 280,
+    height: '100%',
+    background: 'linear-gradient(180deg, #FAFBFC 0%, #F5F7FA 100%)',
+    borderRight: '1px solid #E8E8E8',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  };
+
+  const searchBoxStyle: React.CSSProperties = {
+    margin: '16px 16px 0',
+    padding: '10px 12px',
+    background: '#FFF',
+    border: '1px solid #D9D9D9',
+    borderRadius: 8,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  };
+
+  const treeContainerStyle: React.CSSProperties = {
+    flex: '0 0 auto',
+    maxHeight: 280,
+    overflow: 'auto',
+    padding: '4px 0',
+  };
+
+  const dividerStyle: React.CSSProperties = {
+    margin: '0 20px',
+    borderTop: '1px solid #E8E8E8',
+  };
+
+  const sectionTitleStyle: React.CSSProperties = {
+    padding: '12px 20px 6px',
+    fontSize: 12,
+    fontWeight: 500,
+    color: '#8C8C8C',
+  };
+
+  const statsPanelStyle: React.CSSProperties = {
+    position: 'absolute',
+    right: 24,
+    bottom: 24,
+    width: 260,
+    background: '#FFF',
+    borderRadius: 12,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    border: '1px solid #E8E8E8',
+    padding: '16px 20px',
+    zIndex: 10,
+  };
+
+  const zoomControlsStyle: React.CSSProperties = {
+    position: 'absolute',
+    right: 24,
+    top: 100,
+    width: 44,
+    background: '#FFF',
+    borderRadius: 12,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    border: '1px solid #E8E8E8',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '6px 0',
+    zIndex: 10,
+  };
+
+  const zoomButtonStyle: React.CSSProperties = {
+    width: 32,
+    height: 32,
+    borderRadius: '50%',
+    background: '#F5F5F5',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: '6px 0',
+    transition: 'background 0.2s',
+  };
+
+  const deviceSearchStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: 300,
+    top: 20,
+    width: 320,
+    zIndex: 500,
+  };
+
+  const searchBoxOuterStyle: React.CSSProperties = {
+    background: '#FFF',
+    borderRadius: 12,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    border: `2px solid ${token.colorPrimary}`,
+    overflow: 'hidden',
+  };
+
+  const searchInputContainerStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 16px',
+    height: 48,
+    gap: 12,
+  };
+
+  const searchResultsStyle: React.CSSProperties = {
+    maxHeight: 220,
+    overflow: 'auto',
+    borderTop: '1px solid #E8E8E8',
+  };
+
+  const searchResultItemStyle = (isHighlighted: boolean): React.CSSProperties => ({
+    padding: '12px 16px',
+    cursor: 'pointer',
+    background: isHighlighted ? '#E6F7FF' : 'transparent',
+    transition: 'background 0.15s',
+  });
+
+  return (
+    <div style={{ display: 'flex', width: '100%', height: '100%', background: '#F0F2F5' }}>
+      {/* ============ 左侧筛选面板 ============ */}
+      <div style={leftPanelStyle}>
+        {/* Header */}
+        <div
+          style={{
+            height: 64,
+            background: '#FFF',
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 20px',
+            borderBottom: '1px solid #E8E8E8',
+          }}
+        >
+          <span style={{ fontSize: 18, fontWeight: 600, color: '#262626' }}>筛选</span>
+        </div>
+
+        {/* 搜索设备组 */}
+        <div style={searchBoxStyle}>
+          <SearchOutlined style={{ color: '#BFBFBF' }} />
+          <input
+            type="text"
+            placeholder="搜索设备组"
+            value={groupSearchValue}
+            onChange={(e) => setGroupSearchValue(e.target.value)}
+            style={{
+              flex: 1,
+              border: 'none',
+              outline: 'none',
+              fontSize: 13,
+              background: 'transparent',
+            }}
+          />
+        </div>
+
+        {/* 设备组树 */}
+        <div style={sectionTitleStyle}>设备组</div>
+        <div style={treeContainerStyle}>
+          {MOCK_GROUP_TREE.map((node) => renderGroupNode(node))}
+        </div>
+
+        {/* 已选择汇总 */}
+        {selectedGroupIds.length > 0 && (
+          <div
+            style={{
+              margin: '8px 16px',
+              padding: '10px 12px',
+              background: '#E6F7FF',
+              borderRadius: 8,
+            }}
+          >
+            <span style={{ fontSize: 13, color: token.colorPrimary }}>
+              已选择 {selectedGroupIds.length} 个设备组
+            </span>
           </div>
-          <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <Typography.Text type="secondary">{t('table.total')}</Typography.Text>
-              <Typography.Text strong>
-                {Object.values(STATUS_DEVICE_COUNT).reduce((a, b) => a + b, 0)}
-              </Typography.Text>
-            </div>
+        )}
+
+        {/* 分隔线 */}
+        <div style={dividerStyle} />
+
+        {/* 设备状态筛选 */}
+        <div style={sectionTitleStyle}>设备状态</div>
+        <div style={{ padding: '0 20px' }}>
+          {/* 在线 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '10px 0',
+            }}
+          >
+            <Checkbox
+              checked={statusFilter.online}
+              onChange={(e) => setStatusFilter((prev) => ({ ...prev, online: e.target.checked }))}
+            />
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
+                margin: '0 8px 0 12px',
+              }}
+            />
+            <span style={{ fontSize: 14, color: '#262626' }}>在线</span>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#8C8C8C' }}>
+              {allStats.online.toLocaleString()}
+            </span>
+          </div>
+
+          {/* 离线 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '10px 0',
+            }}
+          >
+            <Checkbox
+              checked={statusFilter.offline}
+              onChange={(e) => setStatusFilter((prev) => ({ ...prev, offline: e.target.checked }))}
+            />
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: '#b60808',
+                margin: '0 8px 0 12px',
+              }}
+            />
+            <span style={{ fontSize: 14, color: '#262626' }}>离线</span>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
+              {allStats.offline.toLocaleString()}
+            </span>
           </div>
         </div>
 
-        {/* Selected site info card */}
-        {selectedSite && (
+        {/* 分隔线 */}
+        <div style={dividerStyle} />
+
+        {/* 图例 */}
+        <div style={sectionTitleStyle}>图例</div>
+        <div style={{ padding: '0 20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px' }}>
+            {/* 在线设备 */}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
+                  border: '2px solid #FFF',
+                  boxShadow: '0 0 0 1px #E8E8E8',
+                }}
+              />
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>在线设备</span>
+            </div>
+
+            {/* 离线设备 */}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: '#b60808',
+                  border: '2px solid #FFF',
+                  boxShadow: '0 0 0 1px #E8E8E8',
+                }}
+              />
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>离线设备</span>
+            </div>
+
+            {/* 设备聚合 */}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(180deg, #40A9FF 0%, #1890FF 100%)',
+                  border: '2px solid #FFF',
+                  boxShadow: '0 0 0 1px #E8E8E8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>N</span>
+              </div>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>设备聚合</span>
+            </div>
+
+            {/* 告警数量 */}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(180deg, #FF7875 0%, #F5222D 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>3</span>
+              </div>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>告警数量</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============ 地图区域 ============ */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* 地图组件 */}
+        <GISMap
+          devices={mapDevices}
+          height="100%"
+          showStats={false}
+          showControls={false}
+          onDeviceClick={(device) => {
+            console.log('Device clicked:', device);
+          }}
+        />
+
+        {/* ============ 设备搜索 ============ */}
+        <div ref={searchContainerRef} style={deviceSearchStyle}>
+          <div style={searchBoxOuterStyle}>
+            {/* 搜索输入框 */}
+            <div style={searchInputContainerStyle}>
+              {/* 搜索图标 */}
+              <div style={{ position: 'relative', width: 16, height: 16 }}>
+                <div
+                  style={{
+                    width: 12,
+                    height: 12,
+                    border: `2px solid ${token.colorPrimary}`,
+                    borderRadius: '50%',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: -2,
+                    bottom: -2,
+                    width: 6,
+                    height: 2,
+                    background: token.colorPrimary,
+                    transform: 'rotate(45deg)',
+                  }}
+                />
+              </div>
+
+              {/* 输入框 */}
+              <input
+                ref={searchInputRef as any}
+                type="text"
+                value={deviceSearchValue}
+                onChange={(e) => handleDeviceSearch(e.target.value)}
+                onFocus={() => {
+                  if (deviceSearchValue.length >= 2 && deviceSearchResults.length > 0) {
+                    setDeviceSearchExpanded(true);
+                  }
+                }}
+                placeholder="搜索设备名称或序列号..."
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: 13,
+                  color: '#262626',
+                  background: 'transparent',
+                }}
+              />
+
+              {/* 清除按钮 */}
+              {deviceSearchValue && (
+                <div
+                  onClick={() => {
+                    handleDeviceSearch('');
+                  }}
+                  style={{
+                    width: 24,
+                    height: 20,
+                    background: '#F5F5F5',
+                    borderRadius: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontSize: 14, color: '#8C8C8C' }}>×</span>
+                </div>
+              )}
+
+              {/* 展开箭头 */}
+              <div
+                style={{
+                  fontSize: 12,
+                  color: token.colorPrimary,
+                  transform: deviceSearchExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s',
+                }}
+              >
+                ▼
+              </div>
+            </div>
+
+            {/* 搜索结果列表 */}
+            {deviceSearchExpanded && (
+              <div style={searchResultsStyle}>
+                {deviceSearchResults.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#8C8C8C' }}>
+                    🔍
+                    <br />
+                    <span style={{ fontSize: 12 }}>未找到匹配的设备</span>
+                    <br />
+                    <span style={{ fontSize: 11, color: '#BFBFBF' }}>请尝试其他关键词</span>
+                  </div>
+                ) : (
+                  <>
+                    {deviceSearchResults.map((result, index) => {
+                      const isOnline = result.status === 'active';
+                      return (
+                        <div
+                          key={result.id}
+                          style={searchResultItemStyle(index === 0)}
+                          onClick={() => {
+                            setDeviceSearchExpanded(false);
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div
+                              style={{
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                background: isOnline
+                                  ? 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)'
+                                  : '#b60808',
+                              }}
+                            />
+                            <span style={{ fontSize: 13, fontWeight: 500, color: '#262626' }}>
+                              {result.name}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              marginTop: 4,
+                              paddingLeft: 20,
+                            }}
+                          >
+                            <span style={{ fontSize: 11, color: '#8C8C8C' }}>
+                              SN: SN2024{result.id}
+                            </span>
+                            <span style={{ fontSize: 11, color: isOnline ? '#52C41A' : '#b60808' }}>
+                              {isOnline ? '🟢 在线' : '🔴 离线'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* 结果计数 */}
+                    <div
+                      style={{
+                        padding: '10px 16px',
+                        borderTop: '1px solid #F0F0F0',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <span style={{ fontSize: 11, color: '#8C8C8C' }}>
+                        共找到 {deviceSearchResults.length} 个结果
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ============ 缩放控制 ============ */}
+        <div style={zoomControlsStyle}>
+          <button
+            style={zoomButtonStyle}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#E8E8E8')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = '#F5F5F5')}
+            onClick={() => console.log('Zoom in')}
+          >
+            <span style={{ fontSize: 16, fontWeight: 600, color: '#262626' }}>+</span>
+          </button>
+          <div style={{ width: 24, height: 1, background: '#F0F0F0' }} />
+          <button
+            style={zoomButtonStyle}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#E8E8E8')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = '#F5F5F5')}
+            onClick={() => console.log('Zoom out')}
+          >
+            <span style={{ fontSize: 16, fontWeight: 600, color: '#262626' }}>−</span>
+          </button>
+        </div>
+
+        {/* ============ 统计面板 (使用过滤后的数据) ============ */}
+        <div style={statsPanelStyle}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#262626', marginBottom: 8 }}>
+            设备统计
+          </div>
+          <div style={{ borderTop: '1px solid #F0F0F0', margin: '8px 0 16px' }} />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#8C8C8C' }}>总设备</span>
+            <span style={{ fontSize: 22, fontWeight: 700, color: '#262626' }}>
+              {filteredStats.total.toLocaleString()}
+            </span>
+          </div>
+
           <div
             style={{
-              position: 'absolute',
-              top: 16,
-              right: 16,
-              background: 'rgba(255,255,255,0.97)',
-              borderRadius: 8,
-              padding: '12px 16px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-              minWidth: 220,
-              border: '1px solid #f0f0f0',
-              zIndex: 10,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 12,
             }}
           >
-            <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
-              {selectedSite.name}
-            </Typography.Text>
-            <div style={{ fontSize: 12, color: '#595959', marginBottom: 4 }}>{selectedSite.address}</div>
-            <div style={{ fontSize: 12 }}>
-              <span style={{ color: '#8c8c8c' }}>{t('table.site')}: </span>
-              {selectedSite.latitude.toFixed(4)}, {selectedSite.longitude.toFixed(4)}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: '#52C41A',
+                  marginRight: 8,
+                }}
+              />
+              <span style={{ fontSize: 12, color: '#595959' }}>在线</span>
             </div>
-            <div style={{ fontSize: 12 }}>
-              <span style={{ color: '#8c8c8c' }}>{t('table.total')}: </span>
-              {selectedSite.deviceCount}
-            </div>
-            <Tag color={SITE_STATUS_MAP_KEYS[selectedSite.status]?.color} style={{ marginTop: 6 }}>
-              {t(SITE_STATUS_MAP_KEYS[selectedSite.status]?.key)}
-            </Tag>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#52C41A' }}>
+              {filteredStats.online.toLocaleString()}
+            </span>
           </div>
-        )}
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: '#b60808',
+                  marginRight: 8,
+                }}
+              />
+              <span style={{ fontSize: 12, color: '#595959' }}>离线</span>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#8C8C8C' }}>
+              {filteredStats.offline.toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            fontSize: 11,
+            color: '#BFBFBF',
+          }}
+        >
+          OMC GIS Map - Topology View v1.5
+        </div>
       </div>
-    </MapPageLayout>
+    </div>
   );
 }

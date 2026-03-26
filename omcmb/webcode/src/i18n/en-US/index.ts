@@ -67,6 +67,7 @@ const messages: Record<string, string> = {
   'table.createTime':      'Created At',
   'table.updateTime':      'Updated At',
   'table.operation':       'Actions',
+  'table.action':          'Action',
   'table.index':           'No.',
   'table.description':     'Description',
   'table.vendor':          'Vendor',
@@ -1472,6 +1473,7 @@ const messages: Record<string, string> = {
   'device.engStatus.decommissioned': 'Decommissioned',
   'device.networkMode':      'Network Mode',
   'device.count.total':      'Total',
+  'device.statistics':      'Device Statistics',
 
   // -------------------------------------------------------------------------
   // Alarm specific

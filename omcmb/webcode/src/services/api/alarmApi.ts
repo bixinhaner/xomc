@@ -74,7 +74,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     ackTime: ba.acknowledged_at,
     alarmSource: ba.carrier,
     alarmLocation: ba.additional_info?.location,
-    alarmType: ba.alarm_type,
+    alarmType: ba.alarm_type as AlarmType,
     isActive: ba.status === 'active' || ba.status === 'acknowledged',
   };
 }
@@ -144,7 +144,10 @@ function buildAlarmQuery(
     sortOrder: pagination.sortOrder,
   };
 
-  if (filter.severity) query.severity = severityStrToNum[filter.severity];
+  if (filter.severity) {
+    const sev = Array.isArray(filter.severity) ? filter.severity[0] : filter.severity;
+    if (sev) query.severity = severityStrToNum[sev];
+  }
   if (filter.deviceSn) query.device_sn = filter.deviceSn;
   if (filter.timeRange) {
     query.start_time = filter.timeRange[0];

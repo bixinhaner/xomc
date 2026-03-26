@@ -68,8 +68,8 @@ export default function Indicators() {
     },
   ], [t]);
 
-  const allIndicators = (data?.list?.length ?? 0) > 0
-    ? (data?.list ?? []) as unknown as MRIndicator[]
+  const allIndicators = (data?.items?.length ?? 0) > 0
+    ? (data?.items ?? []) as unknown as MRIndicator[]
     : mockIndicators.filter((r) => {
         if (filters.keyword) {
           const kw = String(filters.keyword).toLowerCase();
@@ -81,7 +81,7 @@ export default function Indicators() {
       });
 
   const startIndex = (page - 1) * pageSize;
-  const paginated = data?.list ? allIndicators : allIndicators.slice(startIndex, startIndex + pageSize);
+  const paginated = data?.items ? allIndicators : allIndicators.slice(startIndex, startIndex + pageSize);
 
   const columns: DataTableColumn<MRIndicator & Record<string, unknown>>[] = useMemo(() => [
     { key: 'indicatorName', title: t('mr.indicatorName'), dataIndex: 'indicatorName', width: 140 },

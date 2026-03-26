@@ -1,0 +1,201 @@
+/**
+ * GIS 地图常量配置
+ * @module components/GISMap/constants
+ */
+
+import type { DeviceStatus } from '@/types/map';
+
+/**
+ * 设备状态配置
+ * 根据 UI 设计图: GISMap_UI_Design_Markers.svg
+ */
+export const DEVICE_STATUS_CONFIG: Record<
+  DeviceStatus,
+  {
+    color: string;
+    gradientStart: string;
+    gradientEnd: string;
+    bgColor: string;
+    borderColor: string;
+    text: string;
+    i18nKey: string;
+  }
+> = {
+  online: {
+    color: '#52C41A',
+    gradientStart: '#73D13D',
+    gradientEnd: '#52C41A',
+    bgColor: '#F6FFED',
+    borderColor: '#B7EB8F',
+    text: '在线',
+    i18nKey: 'status.online',
+  },
+  offline: {
+    color: '#b60808',
+    gradientStart: '#b60808',
+    gradientEnd: '#b60808',
+    bgColor: '#FFF1F0',
+    borderColor: '#FFA39E',
+    text: '离线',
+    i18nKey: 'status.offline',
+  },
+};
+
+/**
+ * 聚合标记配置
+ * 根据 UI 设计图: GISMap_UI_Design_Markers.svg
+ */
+export const CLUSTER_CONFIG = {
+  /** 渐变起始色 */
+  gradientStart: '#40A9FF',
+  /** 渐变结束色 */
+  gradientEnd: '#1890FF',
+  /** 最小半径 (px) */
+  minRadius: 16,
+  /** 最大半径 (px) */
+  maxRadius: 40,
+  /** 基础半径 (px) */
+  baseRadius: 16,
+  /** 半径计算系数 */
+  radiusFactor: 10,
+  /** 聚合距离 (px) */
+  distance: 40,
+  /** 小型聚合阈值 (10-49) */
+  smallThreshold: 10,
+  /** 中型聚合阈值 (50-99) */
+  mediumThreshold: 50,
+  /** 大型聚合阈值 (100+) */
+  largeThreshold: 100,
+};
+
+/**
+ * 告警角标配置
+ */
+export const ALARM_BADGE_CONFIG = {
+  /** 渐变起始色 */
+  gradientStart: '#FF7875',
+  /** 渐变结束色 */
+  gradientEnd: '#F5222D',
+  /** 角标半径 (px) */
+  radius: 9,
+  /** 大角标半径 (99+) */
+  largeRadius: 11,
+  /** 字体大小 */
+  fontSize: 9,
+  /** 大字体大小 (99+) */
+  largeFontSize: 8,
+  /** 最大显示数字 */
+  maxDisplay: 99,
+};
+
+/**
+ * 设备标记尺寸配置
+ * 根据 UI 设计图: zoom 级别对应不同尺寸
+ */
+export const MARKER_SIZE_CONFIG = {
+  /** 小尺寸 (zoom >= 15) */
+  small: {
+    radius: 8,
+    zoomMin: 15,
+  },
+  /** 中尺寸 (zoom 12-14) */
+  medium: {
+    radius: 12,
+    zoomMin: 12,
+    zoomMax: 14,
+  },
+  /** 大尺寸 (zoom < 12) */
+  large: {
+    radius: 15,
+    zoomMax: 11,
+  },
+  /** 白色边框宽度 */
+  strokeWidth: 2,
+};
+
+/**
+ * 地图默认配置
+ */
+export const MAP_CONFIG = {
+  /** 默认中心点 [lng, lat] - 中国中心 */
+  defaultCenter: [104.0, 35.0] as [number, number],
+  /** 默认缩放级别 */
+  defaultZoom: 4,
+  /** 最小缩放级别 */
+  minZoom: 1,
+  /** 最大缩放级别 */
+  maxZoom: 18,
+  /** 聚合显示阈值 (zoom < 12 显示聚合) */
+  clusterZoomThreshold: 12,
+  /** OpenStreetMap 瓦片地址 */
+  osmTileUrl: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  /** 离线瓦片地址 (通过环境变量配置) */
+  offlineTileUrl: import.meta.env.VITE_MAP_TILE_URL,
+  /** 视图变化防抖时间 (ms) */
+  viewportDebounce: 300,
+  /** 搜索防抖时间 (ms) */
+  searchDebounce: 300,
+};
+
+/**
+ * 动画配置
+ * 根据 UI 设计图
+ */
+export const ANIMATION_CONFIG = {
+  /** 聚合圈呼吸动画周期 (ms) */
+  pulseDuration: 2000,
+  /** 悬停放大比例 */
+  hoverScale: 1.2,
+  /** 悬停动画时间 (ms) */
+  hoverDuration: 200,
+  /** 点击缩放动画时间 (ms) */
+  clickDuration: 150,
+  /** 搜索高亮脉冲圈数量 */
+  highlightPulseCount: 3,
+  /** 搜索高亮脉冲周期 (ms) */
+  highlightPulseDuration: 1500,
+  /** 飞行动画时间 (ms) */
+  flyDuration: 1000,
+  /** 高亮缩放级别 */
+  highlightZoom: 14,
+};
+
+/**
+ * 颜色配置（用于样式工具）
+ */
+export const COLORS = {
+  // 在线状态
+  onlineStart: '#73D13D',
+  onlineEnd: '#52C41A',
+  onlineBg: '#F6FFED',
+
+  // 离线状态
+  offline: '#b60808',
+  offlineBg: '#FFF1F0',
+
+  // 聚合
+  clusterStart: '#40A9FF',
+  clusterEnd: '#1890FF',
+
+  // 告警
+  alarmStart: '#FF7875',
+  alarmEnd: '#F5222D',
+
+  // 通用
+  white: '#FFFFFF',
+  border: '#E8E8E8',
+  textPrimary: '#262626',
+  textSecondary: '#8C8C8C',
+  primary: '#1890FF',
+  primaryHover: '#40A9FF',
+};
+
+/**
+ * 中国边界范围（用于初始视图）
+ */
+export const CHINA_BOUNDS = {
+  minLng: 73,
+  maxLng: 135,
+  minLat: 18,
+  maxLat: 53,
+};

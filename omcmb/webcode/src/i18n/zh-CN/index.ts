@@ -67,6 +67,7 @@ const messages: Record<string, string> = {
   'table.createTime':      '创建时间',
   'table.updateTime':      '更新时间',
   'table.operation':       '操作',
+  'table.action':          '操作',
   'table.index':           '序号',
   'table.description':     '描述',
   'table.vendor':          '厂商',
@@ -1475,6 +1476,7 @@ const messages: Record<string, string> = {
   'device.engStatus.decommissioned': '已退网',
   'device.networkMode':      '网络制式',
   'device.count.total':      '总数',
+  'device.statistics':      '设备统计',
 
   // -------------------------------------------------------------------------
   // Alarm specific

@@ -1,5 +1,5 @@
 import http from '../http';
-import type { OpsTemplate, OpsCommandRecord, OpsTask } from '@/mock/data/opsTools';
+import type { OpsTemplate, OpsCommandRecord, OpsTask, OpsStep } from '@/mock/data/opsTools';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ function mapBackendTemplate(bt: BackendOpsTemplate): OpsTemplate {
     steps: (bt.steps || []).map((s: Record<string, unknown>, idx: number) => ({
       stepNo: (s.step_no as number) ?? (s.stepNo as number) ?? idx + 1,
       stepName: (s.step_name as string) ?? (s.stepName as string) ?? '',
-      stepType: (s.step_type as string) ?? (s.stepType as string) ?? 'mml',
+      stepType: ((s.step_type as string) ?? (s.stepType as string) ?? 'mml') as OpsStep['stepType'],
       command: (s.command as string) ?? undefined,
       condition: (s.condition as string) ?? undefined,
       waitSeconds: (s.wait_seconds as number) ?? (s.waitSeconds as number) ?? undefined,

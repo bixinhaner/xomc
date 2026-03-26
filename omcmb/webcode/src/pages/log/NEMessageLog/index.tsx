@@ -111,8 +111,8 @@ export default function NEMessageLog() {
     pageSize,
   });
 
-  const allMessages = (data?.list?.length ?? 0) > 0
-    ? (data?.list ?? []) as unknown as NEMessageRecord[]
+  const allMessages = (data?.items?.length ?? 0) > 0
+    ? (data?.items ?? []) as unknown as NEMessageRecord[]
     : mockNEMessages;
 
   const filterFields: FilterField[] = useMemo(() => [

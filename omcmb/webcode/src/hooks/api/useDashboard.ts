@@ -2,13 +2,20 @@ import { useQuery } from '@tanstack/react-query';
 import { dashboardService } from '@/mock/services/dashboardService';
 import { dashboardApi } from '@/services/api/dashboardApi';
 import { useMock } from '@/services/apiSwitch';
+import type { DashboardSummary, DashboardChartData } from '@/mock/data/dashboard';
 
 const api = useMock ? dashboardService : dashboardApi;
 
+export interface DashboardDataResponse {
+  summary: DashboardSummary;
+  chartData: DashboardChartData;
+  widgets: Record<string, unknown>;
+}
+
 export function useDashboardData() {
-  return useQuery({
+  return useQuery<DashboardDataResponse>({
     queryKey: ['dashboard', 'all'],
-    queryFn: () => api.getDashboardData(),
+    queryFn: () => api.getDashboardData() as Promise<DashboardDataResponse>,
     refetchInterval: 30000,
   });
 }

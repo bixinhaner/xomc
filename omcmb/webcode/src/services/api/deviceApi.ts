@@ -25,6 +25,7 @@ interface BackendDevice {
   longitude: number;
   created_at: string;
   updated_at: string;
+  platform_type?: string;
 
   // --- 监控扩展字段 ---
   host_name?: string;
@@ -170,6 +171,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     createTime: bd.created_at,
 
     // 监控扩展字段
+    platformType: bd.platform_type || '',
     hostName: bd.host_name || '',
     productName: bd.product_name || '',
     firmwareVersion: bd.firmware_version || '',

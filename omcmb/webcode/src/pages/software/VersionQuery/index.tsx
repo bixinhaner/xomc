@@ -173,7 +173,7 @@ export default function VersionQuery() {
       <DataTable
         tableId="software-version-list"
         columns={columns}
-        dataSource={(data?.list ?? []) as (SoftwareVersion & Record<string, unknown>)[]}
+        dataSource={(data?.items ?? []) as (SoftwareVersion & Record<string, unknown>)[]}
         loading={isLoading}
         rowKey="id"
         total={data?.total ?? 0}

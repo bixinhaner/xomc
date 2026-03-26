@@ -14,12 +14,12 @@ export type ColumnGroup = 'common' | 'eNB' | 'gNB' | 'GSM';
 export interface DataTableColumn<T> {
   key: string;
   title: string;
-  dataIndex: string;
+  dataIndex?: string;
   width?: number;
   fixed?: 'left' | 'right';
   sorter?: boolean;
   ellipsis?: boolean;
-  render?: (value: unknown, record: T, index: number) => React.ReactNode;
+  render?: (value: any, record: T, index: number) => React.ReactNode;
   filterable?: boolean;
   filterType?: 'text' | 'select' | 'date';
   filterOptions?: { label: string; value: string }[];
@@ -38,7 +38,7 @@ export interface BatchAction {
   onClick: (selectedKeys: React.Key[]) => void;
 }
 
-export interface DataTableProps<T extends Record<string, unknown>> {
+export interface DataTableProps<T> {
   tableId: string;
   columns: DataTableColumn<T>[];
   dataSource: T[];
@@ -72,7 +72,7 @@ const DENSITY_SIZE_MAP: Record<Density, 'small' | 'middle' | 'large'> = {
   comfortable: 'large',
 };
 
-function DataTable<T extends Record<string, unknown>>(
+function DataTable<T>(
   props: DataTableProps<T>
 ): React.ReactElement {
   const {

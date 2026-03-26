@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Badge,
@@ -6,7 +6,6 @@ import {
   Card,
   Col,
   Descriptions,
-  Divider,
   Radio,
   Row,
   Skeleton,
@@ -30,6 +29,7 @@ import { useCurrentAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@/types/alarm';
 import type { Device } from '@/types/device';
+import ParameterTreeTab from './ParameterTreeTab';
 
 const { Title, Text } = Typography;
 
@@ -162,11 +162,13 @@ interface FieldGroup {
 const fmtTime = (v: string | undefined | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-');
 
 // 格式化时长(秒)
-const fmtDuration = (seconds: number | undefined | null) => {
+const fmtDuration = (seconds: number | string | undefined | null) => {
   if (!seconds) return '-';
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
+  const sec = typeof seconds === 'string' ? parseInt(seconds, 10) : seconds;
+  if (isNaN(sec)) return '-';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
   return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
@@ -499,18 +501,6 @@ export default function DeviceDetail() {
     none: t('alarm.severity.none'),
   }), [t]);
 
-  const ENG_STATUS_LABEL: Record<string, string> = useMemo(() => ({
-    commissioned: t('device.engStatus.commissioned'),
-    uncommissioned: t('device.engStatus.uncommissioned'),
-    decommissioned: t('device.engStatus.decommissioned'),
-  }), [t]);
-
-  const MGMT_STATUS_LABEL: Record<string, string> = useMemo(() => ({
-    managed: t('status.managed'),
-    unmanaged: t('status.unmanaged'),
-    'pre-managed': t('status.pending'),
-  }), [t]);
-
   const alarmParams = useMemo(
     () => ({ deviceSn: sn, page: 1, pageSize: 20 } as Parameters<typeof useCurrentAlarms>[0]),
     [sn]
@@ -762,6 +752,13 @@ export default function DeviceDetail() {
                   />
                 </div>
               ),
+            },
+            {
+              key: 'parameters',
+              label: '参数树',
+              children: device ? (
+                <ParameterTreeTab deviceId={device.id} />
+              ) : null,
             },
           ]}
         />

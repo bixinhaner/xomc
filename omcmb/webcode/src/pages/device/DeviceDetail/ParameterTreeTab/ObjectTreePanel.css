@@ -30,7 +30,7 @@
 
 .tree-panel-body {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   padding: 6px 0;
 }
 
@@ -47,6 +47,51 @@
   justify-content: center;
   height: 100%;
   min-height: 200px;
+}
+
+/* Virtuoso tree node styles */
+.virtuoso-tree-node {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px 2px 12px;
+  min-height: 28px;
+  line-height: 28px;
+  border-radius: 6px;
+  margin: 0 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.virtuoso-tree-node:hover {
+  background: #f5f5f5;
+}
+
+.virtuoso-tree-node:hover .tree-node-actions {
+  opacity: 1;
+}
+
+.virtuoso-tree-node-selected,
+.virtuoso-tree-node-selected:hover {
+  background: #e6f4ff;
+}
+
+.virtuoso-tree-node-selected .tree-node-name {
+  color: #1677ff;
+}
+
+/* Switcher (expand/collapse arrow) */
+.virtuoso-tree-switcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 28px;
+  flex-shrink: 0;
+  color: #bfbfbf;
+}
+
+.virtuoso-tree-switcher:hover {
+  color: #1677ff;
 }
 
 /* Tree node layout */
@@ -115,10 +160,6 @@
   flex-shrink: 0;
 }
 
-.ant-tree-treenode:hover .tree-node-actions {
-  opacity: 1;
-}
-
 .tree-action-btn {
   width: 22px !important;
   height: 22px !important;
@@ -148,65 +189,6 @@
   background: #fff2f0 !important;
 }
 
-/* Override Ant Design Tree styles for cleaner look */
-.object-tree-panel .ant-tree {
-  background: transparent;
-  font-size: 13px;
-}
-
-.object-tree-panel .ant-tree .ant-tree-treenode {
-  padding: 0 4px;
-  border-radius: 6px;
-  margin: 0 6px;
-  transition: background 0.15s;
-}
-
-.object-tree-panel .ant-tree .ant-tree-treenode:hover {
-  background: #f5f5f5;
-}
-
-.object-tree-panel .ant-tree .ant-tree-treenode-selected,
-.object-tree-panel .ant-tree .ant-tree-treenode-selected:hover {
-  background: #e6f4ff;
-}
-
-.object-tree-panel .ant-tree .ant-tree-node-content-wrapper {
-  padding: 2px 4px;
-  border-radius: 4px;
-  min-height: 28px;
-  line-height: 28px;
-}
-
-.object-tree-panel .ant-tree .ant-tree-node-content-wrapper:hover {
-  background: transparent;
-}
-
-.object-tree-panel .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-  background: transparent;
-  color: #1677ff;
-}
-
-.object-tree-panel .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .tree-node-name {
-  color: #1677ff;
-}
-
-/* Switcher (expand/collapse arrow) */
-.object-tree-panel .ant-tree .ant-tree-switcher {
-  width: 20px;
-  height: 28px;
-  line-height: 28px;
-  color: #bfbfbf;
-}
-
-.object-tree-panel .ant-tree .ant-tree-switcher:hover {
-  color: #1677ff;
-}
-
-/* Indent guide */
-.object-tree-panel .ant-tree .ant-tree-indent-unit {
-  width: 16px;
-}
-
 /* Scrollbar styling */
 .tree-panel-body::-webkit-scrollbar {
   width: 4px;
@@ -220,9 +202,4 @@
 }
 .tree-panel-body::-webkit-scrollbar-track {
   background: transparent;
-}
-
-/* Virtual scroll needs fixed item height */
-.object-tree-panel .ant-tree .ant-tree-list-holder-inner {
-  padding: 0 2px;
 }

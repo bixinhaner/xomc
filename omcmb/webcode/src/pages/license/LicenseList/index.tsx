@@ -175,7 +175,7 @@ export default function LicenseList() {
       <DataTable
         tableId="license-list"
         columns={columns}
-        dataSource={(data?.list ?? []) as (License & Record<string, unknown>)[]}
+        dataSource={(data?.items ?? []) as (License & Record<string, unknown>)[]}
         loading={isLoading}
         rowKey="id"
         total={data?.total ?? 0}
