@@ -12,9 +12,17 @@ import {
   Tabs,
   Select,
   Statistic,
+  Radio,
+  DatePicker,
+  Drawer,
+  InputNumber,
+  TimePicker,
+  Form,
+  Divider,
+  Table,
 } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -26,6 +34,10 @@ import { useT } from '@/hooks/useT';
 type UpgradeType = 'immediate' | 'scheduled' | 'manual';
 // 升级结果枚举
 type UpgradeResult = 'success' | 'failed' | 'partial' | 'running' | 'pending';
+// 升级类别枚举
+type UpgradeCategory = 'software' | 'patch' | 'fpga';
+// 执行方式枚举
+type ExecutionMethod = 'immediate' | 'suspend' | 'scheduled';
 
 interface UpgradePlanRow extends Record<string, unknown> {
   id: string;
@@ -98,6 +110,48 @@ export default function UpgradePlan() {
     notFound: string[];
     mixedTypes: string[];
   }>({ matched: [], notFound: [], mixedTypes: [] });
+  // 导出相关状态
+  const [exportVisible, setExportVisible] = useState(false);
+  const [exportType, setExportType] = useState<'all' | 'range'>('all');
+  const [exportTimeRange, setExportTimeRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  // 重新执行确认状态
+  const [retryRecord, setRetryRecord] = useState<UpgradePlanRow | null>(null);
+  // 批量升级抽屉状态
+  const [upgradeDrawerVisible, setUpgradeDrawerVisible] = useState(false);
+  const [upgradeCategory, setUpgradeCategory] = useState<UpgradeCategory>('software');
+  const [executionMethod, setExecutionMethod] = useState<ExecutionMethod>('immediate');
+  const [scheduledTime, setScheduledTime] = useState<Dayjs | null>(null);
+  const [upgradeFile, setUpgradeFile] = useState<string | undefined>(undefined);
+  const [drawerKeepConfig, setDrawerKeepConfig] = useState(true);
+  const [retryOffline, setRetryOffline] = useState(true);
+  const [batchSize, setBatchSize] = useState(20);
+  const [drawerDevices, setDrawerDevices] = useState<UpgradePlanRow[]>([]);
+  const [drawerProductType, setDrawerProductType] = useState<string>('');
+  // 抽屉中添加设备的状态
+  const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
+  const [selectedNewDevices, setSelectedNewDevices] = useState<React.Key[]>([]);
+
+  // 可添加的设备列表（同产品类型且不在已选列表中）
+  const availableDevices = useMemo(() => {
+    if (!drawerProductType) return [];
+    const existingIds = new Set(drawerDevices.map((d) => d.id));
+    return mockData.filter((d) => d.productType === drawerProductType && !existingIds.has(d.id));
+  }, [drawerProductType, drawerDevices]);
+
+  // Mock 升级文件列表
+  const upgradeFiles = useMemo(() => [
+    { label: 'V1.3.0_full.bin', value: 'V1.3.0_full.bin', category: 'software', productType: 'PM-B4860' },
+    { label: 'V1.3.0_patch.bin', value: 'V1.3.0_patch.bin', category: 'patch', productType: 'PM-B4860' },
+    { label: 'V2.1.0_full.bin', value: 'V2.1.0_full.bin', category: 'software', productType: 'BaiBNX' },
+    { label: 'V2.1.0_fpga.bin', value: 'V2.1.0_fpga.bin', category: 'fpga', productType: 'BaiBNX' },
+  ], []);
+
+  // 根据产品类型和升级类别过滤文件
+  const filteredFiles = useMemo(() => {
+    return upgradeFiles.filter(
+      (f) => f.productType === drawerProductType && f.category === upgradeCategory
+    );
+  }, [upgradeFiles, drawerProductType, upgradeCategory]);
 
   // 计算已选设备的产品类型
   const selectedTypes = useMemo(() => {
@@ -179,6 +233,89 @@ export default function UpgradePlan() {
     setBatchInputValue('');
     setBatchInputPreview({ matched: [], notFound: [], mixedTypes: [] });
     setBatchInputVisible(true);
+  };
+
+  // 重新执行升级 - 打开确认弹窗
+  const handleRetry = (record: UpgradePlanRow) => {
+    setRetryRecord(record);
+  };
+
+  // 确认重新执行升级
+  const handleRetryConfirm = () => {
+    if (retryRecord) {
+      void message.success(`已重新发起 ${retryRecord.deviceSn} 的升级任务`);
+      setRetryRecord(null);
+    }
+  };
+
+  // 打开导出弹窗
+  const handleOpenExport = () => {
+    setExportType('all');
+    setExportTimeRange(null);
+    setExportVisible(true);
+  };
+
+  // 执行导出
+  const handleExport = () => {
+    let dataToExport: UpgradePlanRow[];
+
+    if (exportType === 'all') {
+      dataToExport = filteredData;
+    } else {
+      if (!exportTimeRange || !exportTimeRange[0] || !exportTimeRange[1]) {
+        void message.warning('请选择时间范围');
+        return;
+      }
+      const startDate = exportTimeRange[0].toDate();
+      const endDate = exportTimeRange[1].endOf('day').toDate();
+      dataToExport = filteredData.filter((row) => {
+        const rowStartTime = row.startTime ? new Date(row.startTime) : null;
+        const rowEndTime = row.endTime ? new Date(row.endTime) : null;
+        if (!rowStartTime && !rowEndTime) return false;
+        return (
+          (rowStartTime && rowStartTime >= startDate && rowStartTime <= endDate) ||
+          (rowEndTime && rowEndTime >= startDate && rowEndTime <= endDate) ||
+          (rowStartTime && rowEndTime && rowStartTime <= startDate && rowEndTime >= endDate)
+        );
+      });
+    }
+
+    if (dataToExport.length === 0) {
+      void message.warning('没有可导出的数据');
+      return;
+    }
+
+    // 生成 CSV 内容
+    const headers = ['基站编码', '基站名称', '设备组', '初始版本', '升级版本', '升级类型', '产品类型', '保留配置', '升级进度', '结果', '失败原因', '操作人', '操作时间', '开始时间', '结束时间'];
+    const rows = dataToExport.map((row) => [
+      row.deviceSn,
+      row.deviceName,
+      row.deviceGroup,
+      row.sourceVersion,
+      row.targetVersion,
+      UPGRADE_TYPE_MAP[row.upgradeType]?.text ?? row.upgradeType,
+      row.productType,
+      row.keepConfig ? '是' : '否',
+      `${row.progress}%`,
+      UPGRADE_RESULT_MAP[row.result]?.text ?? row.result,
+      row.failureReason,
+      row.operator,
+      row.operateTime,
+      row.startTime,
+      row.endTime,
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `升级计划_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    setExportVisible(false);
+    void message.success(`已导出 ${dataToExport.length} 条记录`);
   };
 
   const filterFields: FilterField[] = useMemo(() => [
@@ -335,7 +472,7 @@ export default function UpgradePlan() {
     });
   }, [filters]);
 
-  // 批量升级
+  // 打开批量升级抽屉
   const handleBatchUpgrade = (keys: React.Key[]) => {
     if (keys.length === 0) {
       void message.warning('请先选择要升级的设备');
@@ -346,7 +483,66 @@ export default function UpgradePlan() {
       void message.error('批量升级只能选择相同产品类型的设备');
       return;
     }
-    void message.success(`已开始对 ${keys.length} 个 ${selectedTypes[0] ?? ''} 设备执行批量升级`);
+    // 初始化抽屉状态
+    setDrawerDevices([...selectedRows]);
+    setDrawerProductType(selectedTypes[0] ?? '');
+    setUpgradeCategory('software');
+    setExecutionMethod('immediate');
+    setScheduledTime(null);
+    setUpgradeFile(undefined);
+    setDrawerKeepConfig(true);
+    setRetryOffline(true);
+    setBatchSize(20);
+    setUpgradeDrawerVisible(true);
+  };
+
+  // 从抽屉设备列表中移除设备
+  const handleRemoveDevice = (deviceId: string) => {
+    setDrawerDevices((prev) => prev.filter((d) => d.id !== deviceId));
+  };
+
+  // 打开添加设备弹窗
+  const handleOpenAddDeviceModal = () => {
+    setSelectedNewDevices([]);
+    setAddDeviceModalVisible(true);
+  };
+
+  // 确认添加选中的设备
+  const handleConfirmAddDevices = () => {
+    if (selectedNewDevices.length === 0) {
+      void message.warning('请选择要添加的设备');
+      return;
+    }
+
+    const newDevices = availableDevices.filter((d) => selectedNewDevices.includes(d.id));
+    setDrawerDevices((prev) => [...prev, ...newDevices]);
+    setAddDeviceModalVisible(false);
+    setSelectedNewDevices([]);
+    void message.success(`已添加 ${newDevices.length} 台设备`);
+  };
+
+  // 提交批量升级
+  const handleSubmitUpgrade = () => {
+    if (drawerDevices.length === 0) {
+      void message.warning('请选择要升级的设备');
+      return;
+    }
+    if (!upgradeFile) {
+      void message.warning('请选择升级文件');
+      return;
+    }
+    if (executionMethod === 'scheduled' && !scheduledTime) {
+      void message.warning('请选择定时执行时间');
+      return;
+    }
+
+    // 提交升级任务
+    const execMethodText = executionMethod === 'immediate' ? '立即执行' :
+                          executionMethod === 'suspend' ? '挂起' : `定时执行 (${scheduledTime?.format('YYYY-MM-DD HH:mm')})`;
+    void message.success(`已创建批量升级任务：${drawerDevices.length} 台设备，${execMethodText}`);
+
+    // 关闭抽屉并清空选择
+    setUpgradeDrawerVisible(false);
     setSelectedKeys([]);
     setSelectedRows([]);
   };
@@ -393,7 +589,7 @@ export default function UpgradePlan() {
     );
   }, [selectedKeys.length, hasMixedTypes, selectedTypes]);
 
-  // 工具栏右侧内容 - 批量输入按钮（在实时刷新按钮左侧）
+  // 工具栏右侧内容 - 批量输入按钮
   const extraToolbarRight = useMemo(() => (
     <Button
       size="small"
@@ -405,6 +601,27 @@ export default function UpgradePlan() {
   ), []);
 
   const columns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
+    {
+      key: 'operation',
+      title: '操作',
+      width: 80,
+      align: 'center',
+      render: (_: unknown, record: UpgradePlanRow) => {
+        if (record.result === 'failed') {
+          return (
+            <Button
+              type="link"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => handleRetry(record)}
+            >
+              重新执行
+            </Button>
+          );
+        }
+        return null;
+      },
+    },
     { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
     { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
     { key: 'deviceGroup', title: '设备组', dataIndex: 'deviceGroup', width: 100 },
@@ -453,8 +670,15 @@ export default function UpgradePlan() {
     { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
   ], []);
 
+  // 页面头部导出按钮
+  const headerExtra = useMemo(() => (
+    <Button icon={<DownloadOutlined />} onClick={handleOpenExport}>
+      导出
+    </Button>
+  ), []);
+
   return (
-    <ListPageLayout title={t('nav.software.upgradePlan')}>
+    <ListPageLayout title={t('nav.software.upgradePlan')} extra={headerExtra}>
       <FilterBar
         filterId="upgrade-plan-filter"
         fields={filterFields}
@@ -470,7 +694,7 @@ export default function UpgradePlan() {
         currentPage={page}
         pageSize={pageSize}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        scroll={{ x: 1900 }}
+        scroll={{ x: 2000 }}
         selectable
         selectedRowKeys={selectedKeys}
         onSelectionChange={handleSelectionChange}
@@ -547,6 +771,300 @@ export default function UpgradePlan() {
             }
             style={{ marginBottom: 8 }}
           />
+        )}
+      </Modal>
+
+      {/* 导出弹窗 */}
+      <Modal
+        title="导出升级计划"
+        open={exportVisible}
+        onCancel={() => setExportVisible(false)}
+        onOk={handleExport}
+        okText="导出"
+        cancelText="取消"
+        width={500}
+        okButtonProps={{
+          disabled: exportType === 'range' && (!exportTimeRange || !exportTimeRange[0] || !exportTimeRange[1]),
+        }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Radio.Group
+            value={exportType}
+            onChange={(e) => setExportType(e.target.value)}
+          >
+            <Radio value="all">导出全部</Radio>
+            <Radio value="range">按时间导出</Radio>
+          </Radio.Group>
+        </div>
+
+        {exportType === 'range' && (
+          <div style={{ marginBottom: 16 }}>
+            <DatePicker.RangePicker
+              style={{ width: '100%' }}
+              value={exportTimeRange}
+              onChange={(dates) => setExportTimeRange(dates)}
+              placeholder={['开始时间', '结束时间']}
+            />
+          </div>
+        )}
+
+        <Alert
+          type="info"
+          showIcon
+          message={`将导出 ${exportType === 'all' ? filteredData.length : '符合时间范围的'} 条记录，格式为 CSV`}
+        />
+      </Modal>
+
+      {/* 重新执行确认弹窗 */}
+      <Modal
+        title="确认重新执行"
+        open={!!retryRecord}
+        onCancel={() => setRetryRecord(null)}
+        onOk={handleRetryConfirm}
+        okText="确认"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          message={
+            <div>
+              <p style={{ marginBottom: 8 }}>
+                确定要重新执行以下设备的升级任务吗？
+              </p>
+              <p style={{ marginBottom: 0 }}>
+                <strong>基站编码：</strong>{retryRecord?.deviceSn}<br />
+                <strong>基站名称：</strong>{retryRecord?.deviceName}<br />
+                <strong>目标版本：</strong>{retryRecord?.targetVersion}
+              </p>
+            </div>
+          }
+        />
+      </Modal>
+
+      {/* 批量升级抽屉 */}
+      <Drawer
+        title="批量升级"
+        placement="right"
+        width={600}
+        open={upgradeDrawerVisible}
+        onClose={() => setUpgradeDrawerVisible(false)}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setUpgradeDrawerVisible(false)}>取消</Button>
+            <Button
+              type="primary"
+              onClick={handleSubmitUpgrade}
+              disabled={drawerDevices.length === 0 || !upgradeFile}
+            >
+              确认升级
+            </Button>
+          </Space>
+        }
+      >
+        <Form layout="vertical" size="small">
+          {/* 已选产品类型 */}
+          <Form.Item label="产品类型" required>
+            <Select
+              value={drawerProductType}
+              onChange={(val) => {
+                setDrawerProductType(val);
+                setUpgradeFile(undefined);
+                // 切换产品类型时，清空不匹配的设备
+                setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
+              }}
+              options={[
+                { label: 'PM-B4860', value: 'PM-B4860' },
+                { label: 'QAFA', value: 'QAFA' },
+                { label: 'QATA', value: 'QATA' },
+                { label: 'QAFB', value: 'QAFB' },
+                { label: 'RTD', value: 'RTD' },
+                { label: 'BaiBNX', value: 'BaiBNX' },
+                { label: 'BaiBNQ', value: 'BaiBNQ' },
+              ]}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+
+          {/* 升级类型 */}
+          <Form.Item label="升级类型" required>
+            <Radio.Group
+              value={upgradeCategory}
+              onChange={(e) => {
+                setUpgradeCategory(e.target.value);
+                setUpgradeFile(undefined);
+              }}
+            >
+              <Radio value="software">软件升级</Radio>
+              <Radio value="patch">PATCH升级</Radio>
+              <Radio value="fpga">FPGA升级</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          {/* 已选升级设备 */}
+          <Form.Item label={<span>已选升级设备 <Tag color="blue">{drawerDevices.length} 台</Tag></span>}>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 6 }}>
+              <Table
+                size="small"
+                dataSource={drawerDevices}
+                rowKey="id"
+                pagination={false}
+                columns={[
+                  { title: '基站编码', dataIndex: 'deviceSn', width: 100 },
+                  { title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
+                  { title: '当前版本', dataIndex: 'sourceVersion', width: 80 },
+                  {
+                    title: '',
+                    width: 40,
+                    render: (_: unknown, record: UpgradePlanRow) => (
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleRemoveDevice(record.id)}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            </div>
+            {/* 添加设备按钮 */}
+            <div style={{ marginTop: 8 }}>
+              <Button
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={handleOpenAddDeviceModal}
+                style={{ width: '100%' }}
+                disabled={!drawerProductType}
+              >
+                添加设备
+              </Button>
+            </div>
+          </Form.Item>
+
+          <Divider />
+
+          {/* 升级文件 */}
+          <Form.Item label="升级文件" required>
+            <Select
+              value={upgradeFile}
+              onChange={setUpgradeFile}
+              placeholder="请选择升级文件"
+              style={{ width: '100%' }}
+              options={filteredFiles.map((f) => ({ label: f.label, value: f.value }))}
+            />
+          </Form.Item>
+
+          {/* 是否保留配置 */}
+          <Form.Item>
+            <Checkbox
+              checked={drawerKeepConfig}
+              onChange={(e) => setDrawerKeepConfig(e.target.checked)}
+            >
+              保留配置
+            </Checkbox>
+          </Form.Item>
+
+          <Divider />
+
+          {/* 执行方式 */}
+          <Form.Item label="执行方式" required>
+            <Radio.Group value={executionMethod} onChange={(e) => setExecutionMethod(e.target.value)}>
+              <Radio value="immediate">立即执行</Radio>
+              <Radio value="suspend">挂起</Radio>
+              <Radio value="scheduled">定时执行</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          {/* 定时执行时间 */}
+          {executionMethod === 'scheduled' && (
+            <Form.Item label="执行时间" required>
+              <DatePicker
+                showTime
+                format="YYYY-MM-DD HH:mm"
+                value={scheduledTime}
+                onChange={setScheduledTime}
+                placeholder="请选择执行时间"
+                style={{ width: '100%' }}
+                disabledDate={(current) => current && current < new Date()}
+              />
+            </Form.Item>
+          )}
+
+          <Divider />
+
+          {/* 任务配置 */}
+          <Form.Item label="任务配置">
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Checkbox
+                checked={retryOffline}
+                onChange={(e) => setRetryOffline(e.target.checked)}
+              >
+                离线设备等上线后重试
+              </Checkbox>
+              <Space>
+                <span>每次批量执行设备数：</span>
+                <InputNumber
+                  min={1}
+                  max={100}
+                  value={batchSize}
+                  onChange={(val) => setBatchSize(val ?? 20)}
+                  style={{ width: 80 }}
+                />
+                <span>台</span>
+              </Space>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Drawer>
+
+      {/* 添加设备弹窗 */}
+      <Modal
+        title={`添加设备 - ${drawerProductType}`}
+        open={addDeviceModalVisible}
+        onCancel={() => setAddDeviceModalVisible(false)}
+        onOk={handleConfirmAddDevices}
+        okText="确认添加"
+        cancelText="取消"
+        width={700}
+        okButtonProps={{ disabled: selectedNewDevices.length === 0 }}
+      >
+        {availableDevices.length === 0 ? (
+          <Alert
+            type="info"
+            showIcon
+            message="没有可添加的设备"
+            description={`产品类型为 ${drawerProductType} 的设备已全部在列表中`}
+          />
+        ) : (
+          <>
+            <Alert
+              type="info"
+              showIcon
+              message={`共 ${availableDevices.length} 台设备可选，已选择 ${selectedNewDevices.length} 台`}
+              style={{ marginBottom: 16 }}
+            />
+            <Table
+              size="small"
+              dataSource={availableDevices}
+              rowKey="id"
+              pagination={false}
+              scroll={{ y: 300 }}
+              rowSelection={{
+                selectedRowKeys: selectedNewDevices,
+                onChange: (keys) => setSelectedNewDevices(keys),
+              }}
+              columns={[
+                { title: '基站编码', dataIndex: 'deviceSn', width: 120 },
+                { title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
+                { title: '设备组', dataIndex: 'deviceGroup', width: 100 },
+                { title: '当前版本', dataIndex: 'sourceVersion', width: 100 },
+              ]}
+            />
+          </>
         )}
       </Modal>
     </ListPageLayout>
