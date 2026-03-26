@@ -130,6 +130,7 @@ export default function UpgradePlan() {
   // 抽屉中添加设备的状态
   const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
   const [selectedNewDevices, setSelectedNewDevices] = useState<React.Key[]>([]);
+  const [addDeviceKeyword, setAddDeviceKeyword] = useState('');
 
   // 可添加的设备列表（同产品类型且不在已选列表中）
   const availableDevices = useMemo(() => {
@@ -137,6 +138,15 @@ export default function UpgradePlan() {
     const existingIds = new Set(drawerDevices.map((d) => d.id));
     return mockData.filter((d) => d.productType === drawerProductType && !existingIds.has(d.id));
   }, [drawerProductType, drawerDevices]);
+
+  // 根据关键字过滤的可添加设备列表
+  const filteredAvailableDevices = useMemo(() => {
+    if (!addDeviceKeyword.trim()) return availableDevices;
+    const keyword = addDeviceKeyword.toLowerCase();
+    return availableDevices.filter(
+      (d) => d.deviceSn.toLowerCase().includes(keyword) || d.deviceName.toLowerCase().includes(keyword)
+    );
+  }, [availableDevices, addDeviceKeyword]);
 
   // Mock 升级文件列表
   const upgradeFiles = useMemo(() => [
@@ -504,7 +514,17 @@ export default function UpgradePlan() {
   // 打开添加设备弹窗
   const handleOpenAddDeviceModal = () => {
     setSelectedNewDevices([]);
+    setAddDeviceKeyword('');
     setAddDeviceModalVisible(true);
+  };
+
+  // 全选/取消全选
+  const handleSelectAllDevices = (checked: boolean) => {
+    if (checked) {
+      setSelectedNewDevices(filteredAvailableDevices.map((d) => d.id));
+    } else {
+      setSelectedNewDevices([]);
+    }
   };
 
   // 确认添加选中的设备
@@ -518,6 +538,7 @@ export default function UpgradePlan() {
     setDrawerDevices((prev) => [...prev, ...newDevices]);
     setAddDeviceModalVisible(false);
     setSelectedNewDevices([]);
+    setAddDeviceKeyword('');
     void message.success(`已添加 ${newDevices.length} 台设备`);
   };
 
@@ -1044,15 +1065,34 @@ export default function UpgradePlan() {
             <Alert
               type="info"
               showIcon
-              message={`共 ${availableDevices.length} 台设备可选，已选择 ${selectedNewDevices.length} 台`}
+              message={`共 ${availableDevices.length} 台设备可选，当前显示 ${filteredAvailableDevices.length} 台，已选择 ${selectedNewDevices.length} 台`}
               style={{ marginBottom: 16 }}
             />
+
+            {/* 搜索和全选 */}
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Input.Search
+                placeholder="搜索基站编码或名称"
+                value={addDeviceKeyword}
+                onChange={(e) => setAddDeviceKeyword(e.target.value)}
+                style={{ width: 250 }}
+                allowClear
+              />
+              <Checkbox
+                checked={selectedNewDevices.length === filteredAvailableDevices.length && filteredAvailableDevices.length > 0}
+                indeterminate={selectedNewDevices.length > 0 && selectedNewDevices.length < filteredAvailableDevices.length}
+                onChange={(e) => handleSelectAllDevices(e.target.checked)}
+              >
+                全选 ({filteredAvailableDevices.length} 台)
+              </Checkbox>
+            </div>
+
             <Table
               size="small"
-              dataSource={availableDevices}
+              dataSource={filteredAvailableDevices}
               rowKey="id"
               pagination={false}
-              scroll={{ y: 300 }}
+              scroll={{ y: 250 }}
               rowSelection={{
                 selectedRowKeys: selectedNewDevices,
                 onChange: (keys) => setSelectedNewDevices(keys),
