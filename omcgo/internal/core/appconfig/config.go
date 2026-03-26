@@ -74,6 +74,18 @@ type ConnReqConfig struct {
 	SharedSecret string `mapstructure:"shared_secret"` // HMAC-SHA1 secret for CPE UDP CR
 }
 
+// BatchProcessorConfig holds settings for the Periodic Inform batch processor.
+// When enabled, periodic Inform events are buffered and batch-flushed to DB
+// at configurable intervals, reducing per-device DB write pressure.
+type BatchProcessorConfig struct {
+	Enabled         bool          `mapstructure:"enabled"`          // 是否启用批量处理（false 走原有逐条逻辑）
+	Workers         int           `mapstructure:"workers"`          // 工作协程数（建议 = CPU 核数 / 2）
+	FlushInterval   time.Duration `mapstructure:"flush_interval"`   // 批量刷新间隔（如 10s）
+	MaxBatchSize    int           `mapstructure:"max_batch_size"`   // 单次批量上限
+	InputBuffer     int           `mapstructure:"input_buffer"`     // 每个 worker 输入通道缓冲大小
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"` // 优雅关闭超时
+}
+
 // AppConfig is the configuration for the main application.
 type AppConfig struct {
 	Server          AppServerConfig      `mapstructure:"server"`
@@ -89,6 +101,7 @@ type AppConfig struct {
 	NEDirect        NEDirectConfig       `mapstructure:"ne_direct"`
 	Provision       ProvisionConfig      `mapstructure:"provision"`
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
+	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	Metrics         MetricsConfig        `mapstructure:"metrics"`
 	Tracer          TracerConfig         `mapstructure:"tracer"`
 	Log             LogConfig            `mapstructure:"log"`

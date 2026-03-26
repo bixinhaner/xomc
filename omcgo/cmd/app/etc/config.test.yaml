@@ -55,6 +55,10 @@ minio:
     logs: "logs"
     reports: "reports"
 
+conn_req:
+  server_addr: "acs:7547"
+  shared_secret: "dps"
+
 jwt:
   secret: "change-me-in-production-minimum-32-characters!!"
   access_token_ttl: 30m
@@ -76,6 +80,14 @@ ne_direct:
 provision:
   enabled: true
   auto_configure: false
+  task_timeout: 15m
+  model_upload:
+    enabled: false
+    upload_url: "http://acs:7547/smallcell/FileUploadService"
+    upload_username: ""
+    upload_password: ""
+    auto_activate_model: false
+    upload_timeout: 5m
   auto_discovery:
     enabled: false
     max_concurrent: 10
@@ -88,6 +100,19 @@ provision:
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
+
+datamodel_expiry:
+  auto_max_idle_days: 15
+  manual_max_idle_days: 60
+  cleanup_cron: "0 3 * * *"
+
+batch_processor:
+  enabled: false          # 测试环境默认关闭，走逐条处理便于调试
+  workers: 2
+  flush_interval: 5s
+  max_batch_size: 50
+  input_buffer: 500
+  shutdown_timeout: 10s
 
 metrics:
   port: 9091

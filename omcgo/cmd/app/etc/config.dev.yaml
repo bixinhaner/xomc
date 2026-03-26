@@ -81,6 +81,13 @@ provision:
   enabled: true
   auto_configure: false  # Path A 自动下发配置暂禁用（需参数路径映射层）
   task_timeout: 15m
+  model_upload:
+    enabled: true
+    upload_url: "http://acs:7547/smallcell/FileUploadService"
+    upload_username: ""
+    upload_password: ""
+    auto_activate_model: true
+    upload_timeout: 5m
   auto_discovery:
     enabled: true
     max_concurrent: 10
@@ -95,6 +102,19 @@ provision:
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
+
+datamodel_expiry:
+  auto_max_idle_days: 15
+  manual_max_idle_days: 60
+  cleanup_cron: "0 3 * * *"
+
+batch_processor:
+  enabled: true           # 启用 Periodic Inform 批量处理
+  workers: 2              # 工作协程数
+  flush_interval: 10s     # 批量刷新间隔
+  max_batch_size: 200     # 单次批量上限
+  input_buffer: 2500      # 每个 worker 输入通道缓冲
+  shutdown_timeout: 30s   # 优雅关闭超时
 
 metrics:
   port: 9091

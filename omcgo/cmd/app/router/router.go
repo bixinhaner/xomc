@@ -84,8 +84,29 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	deviceMetrics := device.NewDeviceMetrics(metricsReg)
 	deviceService.SetMetrics(deviceMetrics)
 
+	// BatchInformProcessor（可选，配置启用时生效）
+	var batchProcessor *device.BatchInformProcessor
+	if cfg.BatchProcessor.Enabled {
+		batchProcessor = device.NewBatchInformProcessor(
+			cfg.BatchProcessor,
+			pgPool, redisClient, heartbeatMonitor, deviceCache,
+			stunStore, deviceMetrics, logger,
+		)
+		batchProcessor.Start()
+		gs.Register("batch-processor", 2, func(ctx context.Context) error {
+			batchProcessor.Stop()
+			return nil
+		})
+		logger.Info("batch inform processor enabled",
+			zap.Int("workers", cfg.BatchProcessor.Workers),
+			zap.Duration("flush_interval", cfg.BatchProcessor.FlushInterval))
+	}
+
 	// Subscribe InformHandler to events
 	informHandler := device.NewInformHandler(deviceService, carrierRegistry, model.CarrierCMCC, logger)
+	if batchProcessor != nil {
+		informHandler.SetBatchProcessor(batchProcessor)
+	}
 	if err := informHandler.Subscribe(eventBus); err != nil {
 		logger.Warn("subscribe inform handler", zap.Error(err))
 	}

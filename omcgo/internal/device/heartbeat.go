@@ -2,7 +2,6 @@ package device
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -80,7 +79,7 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 			PageSize: 100,
 		},
 	}
-
+	// 循环检查，直到ctx超时
 	for {
 		result, err := m.deviceRepo.List(ctx, filter)
 		if err != nil {
@@ -118,7 +117,7 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 		filter.Page++
 	}
 
-	_ = fmt.Sprintf("heartbeat check complete") // avoid unused import
+	m.logger.Info("heartbeat check complete")
 }
 
 func statusPtr(s model.DeviceStatus) *model.DeviceStatus {

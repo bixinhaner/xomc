@@ -247,24 +247,24 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
 
 	device := &model.Device{
-		ID:                            uuid.New(),
-		SerialNumber:                  inform.DeviceId.SerialNumber,
-		OUI:                           inform.DeviceId.OUI,
-		ProductClass:                  inform.DeviceId.ProductClass,
-		Manufacturer:                  inform.DeviceId.Manufacturer,
-		Carrier:                       carrier,
-		Technology:                    tech,
-		Status:                        model.DeviceActive,
-		FirmwareVersion:               findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
-		ConnectionRequestURL:          findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
-		IPAddress:                     udpAddr,
-		NatDetected:                   udpAddr != "",
-		UDPConnectionRequestAddress:   udpAddr,
-		LastInformAt:                  &now,
-		LastInformEvents:              tr069.EventCodes(inform.Event),
-		InformInterval:                300,
-		CreatedAt:                     now,
-		UpdatedAt:                     now,
+		ID:                          uuid.New(),
+		SerialNumber:                inform.DeviceId.SerialNumber,
+		OUI:                         inform.DeviceId.OUI,
+		ProductClass:                inform.DeviceId.ProductClass,
+		Manufacturer:                inform.DeviceId.Manufacturer,
+		Carrier:                     carrier,
+		Technology:                  tech,
+		Status:                      model.DeviceActive,
+		FirmwareVersion:             findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
+		ConnectionRequestURL:        findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
+		IPAddress:                   udpAddr,
+		NatDetected:                 udpAddr != "",
+		UDPConnectionRequestAddress: udpAddr,
+		LastInformAt:                &now,
+		LastInformEvents:            tr069.EventCodes(inform.Event),
+		InformInterval:              300,
+		CreatedAt:                   now,
+		UpdatedAt:                   now,
 	}
 
 	s.logger.Info("RegisterFromInform: creating device in DB",
@@ -318,9 +318,6 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.String("carrier", string(carrier)),
 		zap.String("oui", device.OUI),
 	)
-
-	// Note: device.registered event is published by InformHandler, not here,
-	// so that both new and existing devices (BOOTSTRAP/BOOT) trigger provisioning.
 
 	return device, nil
 }

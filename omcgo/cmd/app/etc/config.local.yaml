@@ -94,6 +94,19 @@ provision:
     sync_on_firmware_change: true
     max_concurrent: 20
 
+datamodel_expiry:
+  auto_max_idle_days: 15    # 自动发现模板最大空闲天数
+  manual_max_idle_days: 60  # 手动模板最大空闲天数
+  cleanup_cron: "0 3 * * *" # 清理定时任务 cron 表达式
+
+batch_processor:
+  enabled: false          # 启用 Periodic Inform 批量处理（降低 DB 写入压力）
+  workers: 2              # 工作协程数
+  flush_interval: 10s     # 批量刷新间隔
+  max_batch_size: 200     # 单次批量上限
+  input_buffer: 2500      # 每个 worker 输入通道缓冲
+  shutdown_timeout: 30s   # 优雅关闭超��
+
 metrics:
   port: 9091
 

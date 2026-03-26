@@ -31,37 +31,36 @@ import (
 	"go.uber.org/zap"
 )
 
-// ConnectionRequester sends a Connection Request to wake a device.
-// Used by the Handler for post-session wake when the command queue is not empty.
+// ConnectionRequester 发送 Connection Request 唤醒设备。
+// 用于会话结束后命令队列仍有待执行命令时的续唤机制。
 type ConnectionRequester interface {
-	// Send sends a Connection Request. httpURL is the device's HTTP CR URL (may be empty).
+	// Send 发送 Connection Request。httpURL 为设备的 HTTP CR URL（可能为空）。
 	Send(ctx context.Context, deviceSN, httpURL string) error
 }
 
-// SessionCookieName is the cookie name for TR069 session ID
+// SessionCookieName TR069 会话 ID 的 Cookie 名称
 const SessionCookieName = "SESSION"
 
-// connSessionEntry tracks a connection-level session binding with creation time for TTL cleanup.
+// connSessionEntry 连接级会话绑定，记录创建时间用于 TTL 清理。
 type connSessionEntry struct {
 	DeviceSN  string
 	CreatedAt time.Time
 }
 
-// deviceSessionEntry tracks the active session for a device.
-// Used to detect and clean up orphaned sessions when a new Inform arrives
-// before the previous session completed (e.g., CPE didn't respond to RPC,
-// CPE rebooted mid-session, or PERIODIC timer fired during active session).
+// deviceSessionEntry 跟踪设备的活跃会话。
+// 用于检测和清理孤儿会话：当新 Inform 到达但前一个会话尚未完成时
+//（如 CPE 未响应 RPC、会话中途重启、或周期上报定时器触发），清理旧会话。
 type deviceSessionEntry struct {
 	SessionID string
 	DeviceSN  string
 	CreatedAt time.Time
 }
 
-// Handler processes TR069/CWMP HTTP requests.
+// Handler 处理 TR069/CWMP HTTP 请求。
 type Handler struct {
 	sessionStore            SessionStore
-	commandQueue            cmdqueue.CommandQueue // deprecated: use taskService instead
-	taskService             TaskService           // new task management service (interface)
+	commandQueue            cmdqueue.CommandQueue // 已废弃：请使用 taskService
+	taskService             TaskService           // 新任务管理服务（接口）
 	eventBus                event.EventBus
 	authenticator           auth.DeviceAuthenticator
 	rpcDispatcher           *rpc.Dispatcher
@@ -69,46 +68,44 @@ type Handler struct {
 	admission               *AdmissionController
 	metrics                 *ACSMetrics
 	logger                  *zap.Logger
-	requestIDPrefix         string                  // prefix for request IDs, e.g., "acs"
-	enableTestTaskInjection bool                    // enable random test task injection (for testing only)
-	uploadConfig            *appconfig.UploadConfig // upload server configuration for generating upload URLs
-	// maxRPCPerSession limits the number of RPC interactions per TR069 session.
-	// When reached, the session is gracefully completed; remaining commands stay
-	// in the queue and are dispatched in subsequent sessions via post-session wake.
-	// 0 means no limit. Recommended: ≤15 to avoid triggering CPE per-session limits.
+	requestIDPrefix         string                  // 请求 ID 前缀，如 "acs"
+	enableTestTaskInjection bool                    // 启用随机测试任务注入（仅测试用）
+	uploadConfig            *appconfig.UploadConfig // 上传服务器配置，用于生成上传 URL
+	// maxRPCPerSession 限制每个 TR069 会话的 RPC 交互次数。
+	// 达到上限后优雅结束会话；剩余命令留在队列中，通过会话后续唤在后续会话中下发。
+	// 0 表示不限制。建议：≤15，避免触发 CPE 的单会话交互上限。
 	maxRPCPerSession int
-	// Post-session wake: send Connection Request when session ends with remaining commands.
+	// 会话后续唤：会话结束时如果命令队列仍有待执行命令，发送 Connection Request。
 	connReqSender      ConnectionRequester
 	postSessionWakeCfg appconfig.PostSessionWakeConfig
-	redisClient        redis.Cmdable // for continuous wake counter
-	stunStore          *stun.Store   // for caching device STUN addresses from Inform
-	connReqURLCache    sync.Map      // deviceSN → ConnectionRequestURL (from Inform)
-	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
-	// Entries are cleaned up on session completion or by the background reaper.
+	redisClient        redis.Cmdable // 用于连续唤醒计数器
+	stunStore          *stun.Store   // 缓存 Inform 中的设备 STUN 地址
+	connReqURLCache    sync.Map      // deviceSN → ConnectionRequestURL（来自 Inform）
+	// connSessions 映射 HTTP RemoteAddr → connSessionEntry，用于连接级会话追踪。
+	// 条目在会话完成时或由后台清理器清除。
 	connSessions sync.Map
-	// deviceSessions maps deviceSN → *deviceSessionEntry for device-level session tracking.
-	// Used to detect orphaned sessions: when a new Inform arrives, any existing session
-	// for the same device is cleaned up via completeSession() before creating a new one.
+	// deviceSessions 映射 deviceSN → *deviceSessionEntry，用于设备级会话追踪。
+	// 用于检测孤儿会话：当新 Inform 到达时，同一设备的已有会话会通过 completeSession() 清理。
 	deviceSessions sync.Map
 }
 
-// sessionRPCLimitReached returns true if the session has reached the per-session RPC limit.
+// sessionRPCLimitReached 判断会话是否已达到单会话 RPC 上限。
 func (h *Handler) sessionRPCLimitReached(session *Session) bool {
 	return h.maxRPCPerSession > 0 && session.RPCCount >= h.maxRPCPerSession
 }
 
-// startSessionReaper launches a background goroutine that periodically cleans up
-// stale sessions from both connSessions and deviceSessions maps.
-// For connSessions: releases admission slots and decrements metrics.
-// For deviceSessions: loads the orphaned session from Redis, calls completeSession()
-// (which triggers postSessionWake if queue has remaining commands), and cleans up.
+// startSessionReaper 启动一个后台 goroutine，定期清理
+// connSessions 和 deviceSessions 映射表中的过期会话。
+// 对于 connSessions：释放准入槽位（admission slots）并减少指标计数。
+// 对于 deviceSessions：从 Redis 加载孤立会话，调用 completeSession()
+// （如果队列中仍有剩余命令，该调用会触发 postSessionWake），然后执行清理工作。
 func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
 			now := time.Now()
-			// Clean up stale connection-level sessions.
+			// 清理过期的连接级会话。
 			h.connSessions.Range(func(key, value interface{}) bool {
 				entry := value.(connSessionEntry)
 				if now.Sub(entry.CreatedAt) > maxAge {
@@ -123,9 +120,8 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 				}
 				return true
 			})
-			// Clean up stale device-level sessions (orphaned sessions).
-			// This is the safety net for sessions that were never completed
-			// because the CPE didn't respond to an RPC or rebooted mid-session.
+			// 清理过期的设备级会话（孤儿会话）。
+			// 这是安全网：处理因 CPE 未响应 RPC 或会话中途重启而未完成的会话。
 			h.deviceSessions.Range(func(key, value interface{}) bool {
 				entry := value.(*deviceSessionEntry)
 				if now.Sub(entry.CreatedAt) > maxAge {
@@ -138,13 +134,12 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 	}()
 }
 
-// reapOrphanedSession cleans up an orphaned device session.
-// It loads the session from Redis (if still exists), calls completeSession to release
-// resources and trigger postSessionWake, then logs the cleanup.
+// reapOrphanedSession 清理孤儿设备会话。
+// 从 Redis 加载会话（如果仍存在），调用 completeSession 释放资源并触发 postSessionWake。
 func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) {
 	ctx := context.Background()
 
-	// Try to load the session from Redis to get full session data for completeSession.
+	// 尝试从 Redis 加载会话，获取完整会话数据用于 completeSession。
 	session, err := h.sessionStore.GetByID(ctx, entry.SessionID)
 	if err != nil {
 		h.logger.Warn("reap orphaned session: failed to load from store",
@@ -163,7 +158,7 @@ func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) 
 			zap.String("reason", reason))
 		h.completeSession(ctx, session)
 	} else {
-		// Session already expired in Redis (TTL). Still release admission + metrics.
+		// 会话已在 Redis 中过期（TTL）。仍需释放准入槽位和更新指标。
 		h.logger.Info("reap orphaned session: session expired in store, releasing resources",
 			zap.String("device_sn", entry.DeviceSN),
 			zap.String("session_id", entry.SessionID),
@@ -172,8 +167,7 @@ func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) 
 		h.admission.Release()
 		h.metrics.ActiveSessions.Dec()
 		h.metrics.SessionDuration.Observe(time.Since(entry.CreatedAt).Seconds())
-		// Still trigger postSessionWake — even though session is gone,
-		// the device may have pending commands in its queue.
+		// 仍触发 postSessionWake —— 即使会话已消失，设备队列中可能仍有待执行命令。
 		if h.connReqSender != nil && h.postSessionWakeCfg.Enabled && entry.DeviceSN != "" {
 			go h.postSessionWake(entry.DeviceSN)
 		}
@@ -181,24 +175,24 @@ func (h *Handler) reapOrphanedSession(entry *deviceSessionEntry, reason string) 
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Generate or propagate Request ID
+	// 生成或传播请求 ID
 	requestID := r.Header.Get(middleware.RequestIDHeader)
 	if requestID == "" {
 		prefix := h.requestIDPrefix
 		if prefix == "" {
-			prefix = "acs" // default prefix
+			prefix = "acs" // 默认前缀
 		}
 		requestID = middleware.GenerateRequestIDWithPrefix(prefix)
 	}
 
-	// Store Request ID in context for logger and downstream services
+	// 将请求 ID 存入上下文，供日志和下游服务使用
 	ctx := logger.WithRequestID(r.Context(), requestID)
 	r = r.WithContext(ctx)
 
-	// Set Request ID in response header for client correlation
+	// 将请求 ID 设置到响应头，便于客户端关联
 	w.Header().Set(middleware.RequestIDHeader, requestID)
 
-	// Create context-aware logger with request_id
+	// 创建携带 request_id 的上下文感知日志器
 	log := logger.L(ctx)
 
 	if r.Method != http.MethodPost {
@@ -207,7 +201,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read body
+	// 读取请求体
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Error("read request body", zap.Error(err))
@@ -216,13 +210,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Log request info (Info level for production visibility)
+	// 记录请求信息（Info 级别，生产环境可见）
 	log.Info("ACS received request",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.Int("body_len", len(body)),
 	)
 
-	// Detect method from body
+	// 从请求体检测 RPC 方法
 	trimmed := strings.TrimSpace(string(body))
 	if len(trimmed) == 0 {
 		h.handleEmpty(w, r, log)
@@ -232,7 +226,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	method := soap.DetectRPCMethod(body)
 	log.Info("ACS detected RPC method", zap.String("method", string(method)))
 
-	// Check for SOAP Fault first (can be in response to any RPC)
+	// 优先检查 SOAP Fault（可能出现在任何 RPC 的响应中）
 	if isFault, faultCode, faultMsg := detectSOAPFault(body); isFault {
 		h.handleSOAPFault(w, r, body, faultCode, faultMsg, log)
 		return
@@ -263,9 +257,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleInform processes an Inform message from a CPE device.
-// Per TR069 spec: Inform → InformResponse (always). RPC dispatch happens on the
-// subsequent Empty POST via handleEmpty().
+// handleInform 处理 CPE 设备发送的 Inform 消息。
+// 根据 TR069 规范：Inform → InformResponse（必须）。RPC 下发在后续的空 POST 中通过 handleEmpty() 处理。
 func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
 	ctx, span := tracing.StartSpan(r.Context(), tracing.ACSTracerName, "ACS HandleInform",
 		attribute.String("acs.remote_addr", r.RemoteAddr),
@@ -274,14 +267,14 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	defer span.End()
 	r = r.WithContext(ctx)
 
-	// Log complete request XML
+	// 记录完整的请求 XML
 	log.Debug("ACS received Inform request",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.Int("body_len", len(body)),
 		zap.String("xml", string(body)),
 	)
 
-	// Parse Inform
+	// 解析 Inform
 	inform, cwmpID, err := soap.DecodeInform(bytes.NewReader(body))
 	if err != nil {
 		tracing.RecordError(span, err)
@@ -301,7 +294,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		attribute.String("acs.cwmp_id", cwmpID),
 	)
 
-	// Log parsed Inform details
+	// 记录解析后的 Inform 详情
 	log.Info("ACS parsed Inform",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("device_sn", deviceSN),
@@ -311,7 +304,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		zap.String("cwmp_id", cwmpID),
 	)
 
-	// Rate limiting
+	// 速率限制
 	if !h.rateLimiter.Allow(deviceSN) {
 		h.metrics.RateLimitRejected.Inc()
 		log.Warn("rate limited", zap.String("device_sn", deviceSN))
@@ -319,13 +312,12 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		return
 	}
 
-	// Clean up orphaned session for this device (if any).
-	// When a CPE sends a new Inform while the previous session was still pending
-	// (e.g., CPE didn't respond to an RPC, rebooted, or PERIODIC timer fired),
-	// the old session is never completed. We detect and clean it up here to:
-	// 1) Release the old admission slot (prevents slot leak)
-	// 2) Trigger postSessionWake for any remaining queued commands
-	// 3) Keep ActiveSessions metric accurate
+	// 清理该设备的孤儿会话（如果存在）。
+	// 当 CPE 在前一个会话仍挂起时发送新 Inform（如 CPE 未响应 RPC、重启或周期上报定时器触发），
+	// 旧会话永远不会完成。在此检测并清理，以：
+	// 1) 释放旧的准入槽位（防止槽位泄漏）
+	// 2) 触发 postSessionWake 处理队列中剩余命令
+	// 3) 保持 ActiveSessions 指标准确
 	if old, loaded := h.deviceSessions.LoadAndDelete(deviceSN); loaded {
 		oldEntry := old.(*deviceSessionEntry)
 		log.Info("cleaning orphaned session before new Inform",
@@ -335,18 +327,17 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		h.reapOrphanedSession(oldEntry, "new_inform")
 	}
 
-	// Admission control — slot is held until session completes (via completeSession)
-	// or the background reaper cleans it up.
+	// 准入控制 —— 槽位持有直到会话完成（通过 completeSession）或后台清理器回收。
 	if !h.admission.Acquire() {
 		log.Warn("admission denied", zap.String("device_sn", deviceSN))
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Track active session — will be decremented by completeSession() or reaper.
+	// 跟踪活跃会话 —— 将由 completeSession() 或清理器递减。
 	h.metrics.ActiveSessions.Inc()
 
-	// Record metrics
+	// 记录指标
 	eventCodes := tr069.EventCodes(inform.Event)
 	for _, code := range eventCodes {
 		h.metrics.InformTotal.WithLabelValues(code).Inc()
@@ -360,7 +351,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		zap.Int("param_count", len(inform.ParameterList)),
 	)
 
-	// Cache connection request addresses from Inform for post-session wake.
+	// 缓存 Inform 中的 Connection Request 地址，用于会话后续唤。
 	for _, p := range inform.ParameterList {
 		if strings.HasSuffix(p.Name, ".UDPConnectionRequestAddress") && p.Value != "" {
 			if h.stunStore != nil {
@@ -384,7 +375,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		}
 	}
 
-	// Create/update session with new Session ID
+	// 使用新 Session ID 创建/更新会话
 	sessionID := generateSessionID()
 	session := &Session{
 		ID:           sessionID,
@@ -397,21 +388,21 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		CWMPId:       cwmpID,
 	}
 
-	// Store session by Session ID (Cookie-based lookup)
+	// 按 Session ID 存储会话（基于 Cookie 的查找）
 	if err := h.sessionStore.CreateWithID(r.Context(), sessionID, session); err != nil {
 		log.Error("create session by id", zap.Error(err), zap.String("device_sn", deviceSN))
 	}
 
-	// Register device → session mapping for orphan detection.
+	// 注册设备 → 会话映射，用于孤儿会话检测。
 	h.deviceSessions.Store(deviceSN, &deviceSessionEntry{
 		SessionID: sessionID,
 		DeviceSN:  deviceSN,
 		CreatedAt: time.Now(),
 	})
 
-	// Inject random test tasks for this device (TEST FEATURE)
-	// Skip injection for TransferComplete/AutonomousTransferComplete sessions —
-	// those sessions have a specific purpose and should not be polluted with test tasks.
+	// 为该设备注入随机测试任务（测试功能）
+	// 跳过 TransferComplete/AutonomousTransferComplete 会话 ——
+	// 这些会话有特定用途，不应被测试任务污染。
 	isTC := tr069.HasEvent(inform.Event, tr069.EventTransferComplete)
 	isATC := tr069.IsAutonomousTransferComplete(inform.Event)
 	log.Info("ACS task injection check",
@@ -429,37 +420,37 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 			zap.Strings("events", eventCodes))
 	}
 
-	// Publish events
+	// 发布事件
 	h.publishInformEvents(r.Context(), inform, eventCodes, log)
 
-	// Reset continuous wake counter — device has connected, allow new wake cycle.
+	// 重置连续唤醒计数器 —— 设备已连接，允许新的唤醒周期。
 	h.resetContinuousWake(r.Context(), deviceSN)
 
-	// Per TR069 spec: Always send InformResponse first.
-	// Command queue will be checked on the subsequent Empty POST.
+	// 根据 TR069 规范：必须先发送 InformResponse。
+	// 命令队列将在后续的空 POST 中检查。
 	log.Info("ACS Inform done, sending InformResponse",
 		zap.String("device_sn", deviceSN),
 		zap.String("cwmp_id", cwmpID),
 		zap.String("session_id", sessionID))
 
-	// Set Session Cookie in response header
+	// 在响应头中设置 Session Cookie
 	h.setSessionCookie(w, sessionID)
 
 	h.sendInformResponse(w, cwmpID, log)
 }
 
-// handleEmpty processes an empty POST from the CPE.
-// Per TR069 spec, after InformResponse the CPE sends an empty POST.
-// The ACS should then either send an RPC request or an empty response to close the session.
+// handleEmpty 处理 CPE 发送的空 POST。
+// 根据 TR069 规范，InformResponse 之后 CPE 发送空 POST。
+// ACS 应发送 RPC 请求或空响应来关闭会话。
 func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.Logger) {
 	ctx, span := tracing.StartSpan(r.Context(), tracing.ACSTracerName, "ACS HandleEmpty")
 	defer span.End()
 	r = r.WithContext(ctx)
 
-	// Look up session from Cookie
+	// 从 Cookie 查找会话
 	session, sessionID := h.getSessionFromCookie(r, log)
 	if session == nil {
-		// No valid session — just close.
+		// 无有效会话 —— 直接关闭。
 		log.Warn("empty POST without valid session cookie", zap.String("remote_addr", r.RemoteAddr))
 		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 		w.Header().Set("Connection", "close")
@@ -481,15 +472,15 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		zap.Bool("command_queue_available", h.commandQueue != nil),
 	)
 
-	// Transition from InformReceived → Processing
+	// 状态转换：InformReceived → Processing
 	if session.State == StateInformReceived {
 		session.State = StateProcessing
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 	}
 
-	// Check per-session RPC limit before dispatching more commands.
-	// This prevents overwhelming CPEs that have per-session interaction limits.
+	// 在下发更多命令前检查单会话 RPC 上限。
+	// 防止超出 CPE 的单会话交互限制。
 	if h.sessionRPCLimitReached(session) {
 		log.Info("ACS session RPC limit reached, completing session",
 			zap.String("device_sn", deviceSN),
@@ -497,36 +488,35 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 			zap.Int("rpc_count", session.RPCCount),
 			zap.Int("max_rpc_per_session", h.maxRPCPerSession),
 		)
-		// Complete session; post-session wake will trigger a new session
-		// for remaining commands in the queue.
+		// 完成会话；会话后续唤将为队列中剩余命令触发新会话。
 		h.completeSession(r.Context(), session)
 		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Priority 1: Try new TaskService
+	// 优先级 1：尝试新 TaskService
 	if h.taskService != nil {
 		taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)
 		if err != nil {
 			log.Error("pop task from queue", zap.Error(err))
 		} else if taskItem != nil {
-			// Generate CWMP ID for this task
+			// 为此任务生成 CWMP ID
 			cwmpID := task.GenerateCWMPID(taskItem.Method)
 
-			// Mark task as sent
+			// 标记任务已发送
 			if err := h.taskService.MarkTaskSent(r.Context(), taskItem.ID, cwmpID); err != nil {
 				log.Error("mark task sent", zap.Error(err), zap.String("task_id", taskItem.ID))
 			}
 
-			// Update session state
+			// 更新会话状态
 			session.State = StateRPCPending
 			session.LastRPC = taskItem.Method
 			session.RPCCount++
 			session.UpdatedAt = time.Now()
 			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
-			// Build RPC request with CWMP ID
+			// 使用 CWMP ID 构建 RPC 请求
 			cmd := &cmdqueue.Command{
 				ID:         taskItem.ID,
 				Method:     taskItem.Method,
@@ -537,7 +527,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 			if err != nil {
 				log.Error("build RPC request from task", zap.Error(err))
 				h.metrics.RPCErrorsTotal.WithLabelValues(taskItem.Method).Inc()
-				// Mark task as failed
+				// 标记任务失败
 				h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, 0, err.Error())
 			} else {
 				log.Info("ACS sending RPC request from task",
@@ -546,7 +536,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 					zap.String("task_id", taskItem.ID),
 					zap.String("cwmp_id", cwmpID),
 				)
-				// Set session cookie in response
+				// 在响应中设置 Session Cookie
 				h.setSessionCookie(w, sessionID)
 				h.sendSOAPResponse(w, respData, log)
 				return
@@ -558,7 +548,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		}
 	}
 
-	// Priority 2: Fallback to legacy command queue (for backward compatibility)
+	// 优先级 2：回退到旧版命令队列（向后兼容）
 	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 	if err != nil {
 		log.Error("pop command queue", zap.Error(err))
@@ -582,14 +572,14 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				zap.String("method", cmd.Method),
 				zap.String("xml", string(respData)),
 			)
-			// Set session cookie in response
+			// 在响应中设置 Session Cookie
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
 		}
 	}
 
-	// No more commands — complete the session.
+	// 没有更多命令 —— 完成会话。
 	log.Info("ACS HandleEmpty no tasks found, completing session",
 		zap.String("device_sn", deviceSN),
 		zap.String("session_id", sessionID),
@@ -597,8 +587,8 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	)
 	h.completeSession(r.Context(), session)
 
-	// Send truly empty response to signal end of session (no body per TR069 spec).
-	// Connection: close tells CPE to close the TCP connection.
+	// 发送空响应表示会话结束（根据 TR069 规范无 body）。
+	// Connection: close 告知 CPE 关闭 TCP 连接。
 	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -610,11 +600,11 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	defer span.End()
 	r = r.WithContext(ctx)
 
-	// Extract CWMP ID from the SOAP response.
+	// 从 SOAP 响应中提取 CWMP ID。
 	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
 	span.SetAttributes(attribute.String("acs.cwmp_id", cwmpID))
 
-	// Log complete response XML
+	// 记录完整的响应 XML
 	log.Debug("ACS received RPC response",
 		zap.String("method", string(method)),
 		zap.String("cwmp_id", cwmpID),
@@ -626,7 +616,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		zap.String("cwmp_id", cwmpID),
 	)
 
-	// Look up session from Cookie
+	// 从 Cookie 查找会话
 	session, sessionID := h.getSessionFromCookie(r, log)
 	if session == nil {
 		log.Warn("no valid session cookie for RPC response", zap.String("remote_addr", r.RemoteAddr))
@@ -636,7 +626,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 	deviceSN := session.DeviceSN
 
-	// Record RPC duration (approximate: time since last state update).
+	// 记录 RPC 耗时（近似值：自上次状态更新以来的时间）。
 	rpcDuration := time.Since(session.UpdatedAt).Seconds()
 	h.metrics.RPCDuration.WithLabelValues(string(method)).Observe(rpcDuration)
 
@@ -644,15 +634,15 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	session.UpdatedAt = time.Now()
 	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
-	// Check if this is a task-based RPC (new task queue system)
+	// 检查是否为基于任务的 RPC（新任务队列系统）
 	if h.taskService != nil && cwmpID != "" {
 		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
 		} else if taskItem != nil {
-			// Check for SOAP fault in response
+			// 检查响应中是否有 SOAP Fault
 			if isFault, faultCode, faultMsg := detectSOAPFault(body); isFault {
-				// Task failed with SOAP fault
+				// 任务因 SOAP Fault 失败
 				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
 					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
@@ -661,7 +651,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 					zap.Int("fault_code", faultCode),
 					zap.String("fault_msg", faultMsg))
 			} else {
-				// Task completed successfully - store raw response as result
+				// 任务成功完成 - 将原始响应存为结果
 				resultJSON, _ := json.Marshal(map[string]interface{}{
 					"method":       string(method),
 					"raw_response": string(body),
@@ -674,10 +664,10 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		}
 	}
 
-	// Publish RPC response event for provisioning engine (includes raw body for GPN/GPV processing).
+	// 发布 RPC 响应事件到开通引擎（包含原始 body 用于 GPN/GPV 处理）。
 	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, session.LastCommandParams, log)
 
-	// Check per-session RPC limit before dispatching next command.
+	// 在下发下一条命令前检查单会话 RPC 上限。
 	if h.sessionRPCLimitReached(session) {
 		log.Info("ACS session RPC limit reached after response, completing session",
 			zap.String("device_sn", deviceSN),
@@ -691,16 +681,16 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		return
 	}
 
-	// Priority 1: Try new TaskService for next task
+	// 优先级 1：尝试从新 TaskService 获取下一个任务
 	if h.taskService != nil {
 		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
 		if err != nil {
 			log.Error("pop task from queue", zap.Error(err))
 		} else if nextTask != nil {
-			// Generate CWMP ID for this task
+			// 为此任务生成 CWMP ID
 			newCWMPID := task.GenerateCWMPID(nextTask.Method)
 
-			// Mark task as sent
+			// 标记任务已发送
 			if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
 				log.Error("mark task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
 			}
@@ -730,7 +720,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		}
 	}
 
-	// Priority 2: Fallback to legacy command queue (for backward compatibility)
+	// 优先级 2：回退到旧版命令队列（向后兼容）
 	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
 	if err != nil {
 		log.Error("pop command queue", zap.Error(err))
@@ -749,14 +739,14 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			log.Error("build next RPC request", zap.Error(err))
 			h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
 		} else {
-			// Set session cookie in response
+			// 在响应中设置 Session Cookie
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
 		}
 	}
 
-	// No more commands — complete the session.
+	// 没有更多命令 —— 完成会话。
 	log.Info("ACS RPC loop done, completing session",
 		zap.String("device_sn", deviceSN),
 		zap.String("session_id", sessionID),
@@ -764,7 +754,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	)
 	h.completeSession(r.Context(), session)
 
-	// Send truly empty response to signal end of session (no body per TR069 spec).
+	// 发送空响应表示会话结束（根据 TR069 规范无 body）。
 	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -811,12 +801,12 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 	}
 }
 
-// postSessionWake checks if the device still has pending commands after a session ends.
-// If so, it sends a Connection Request to trigger a new Inform immediately,
-// instead of waiting for the device's next periodic Inform (~60s+).
-// This dramatically speeds up command queue drain (e.g., parameter discovery).
+// postSessionWake 检查会话结束后设备是否仍有待执行命令。
+// 如果有，发送 Connection Request 立即触发新 Inform，
+// 而非等待设备的下一次周期上报（约 60 秒以上）。
+// 这大幅加速了命令队列的消耗（如参数发现）。
 func (h *Handler) postSessionWake(deviceSN string) {
-	// Recover from any panic to prevent silent goroutine death.
+	// 捕获 panic，防止 goroutine 静默退出。
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Error("post-session wake: panic recovered",
@@ -839,17 +829,16 @@ func (h *Handler) postSessionWake(deviceSN string) {
 
 	ctx := context.Background()
 
-	// Short delay FIRST: let CPE close the previous TCP connection and let the
-	// provisioning engine (EventBus subscriber) finish adding new commands to
-	// the queue from RPC response events. Without this delay, the queue appears
-	// empty because the async subscribers haven't processed yet.
+	// 先短暂延迟：等待 CPE 关闭上一个 TCP 连接，并让开通引擎（EventBus 订阅者）
+	// 完成将 RPC 响应事件中的新命令添加到队列。若无此延迟，队列可能看起来为空，
+	// 因为异步订阅者尚未处理完毕。
 	delay := h.postSessionWakeCfg.DelayAfter
 	if delay <= 0 {
 		delay = time.Second
 	}
 	time.Sleep(delay)
 
-	// Check combined queue depth AFTER delay (task queue + legacy command queue).
+	// 延迟后检查合并队列深度（任务队列 + 旧版命令队列）。
 	var remaining int64
 	if h.taskService != nil {
 		if n, err := h.taskService.GetQueueLength(ctx, deviceSN); err == nil {
@@ -877,7 +866,7 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		return // 队列已空，无需续唤
 	}
 
-	// Check continuous wake counter (prevent infinite loop).
+	// 检查连续唤醒计数器（防止无限循环）。
 	maxContinuous := h.postSessionWakeCfg.MaxContinuous
 	if maxContinuous <= 0 {
 		maxContinuous = 200
@@ -905,14 +894,14 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		return
 	}
 
-	// Send Connection Request.
-	// Look up cached ConnectionRequestURL for HTTP fallback.
+	// 发送 Connection Request。
+	// 查找缓存的 ConnectionRequestURL 作为 HTTP 回退。
 	var httpURL string
 	if v, ok := h.connReqURLCache.Load(deviceSN); ok {
 		httpURL, _ = v.(string)
 	}
 
-	// Use a short timeout to avoid blocking on unreachable devices.
+	// 使用短超时，避免在不可达设备上阻塞。
 	crCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -930,8 +919,8 @@ func (h *Handler) postSessionWake(deviceSN string) {
 	}
 }
 
-// resetContinuousWake resets the continuous wake counter when a device sends an Inform.
-// This allows the counter to restart when the device reconnects.
+// resetContinuousWake 在设备发送 Inform 时重置连续唤醒计数器。
+// 设备重新连接时允许计数器重新开始。
 func (h *Handler) resetContinuousWake(ctx context.Context, deviceSN string) {
 	if h.redisClient == nil || !h.postSessionWakeCfg.Enabled {
 		return
@@ -939,10 +928,10 @@ func (h *Handler) resetContinuousWake(ctx context.Context, deviceSN string) {
 	h.redisClient.Del(ctx, "acs:continuous_wake:"+deviceSN)
 }
 
-// handleSOAPFault handles SOAP Fault responses from CPE.
-// It looks up the associated task by CWMP ID and marks it as failed.
+// handleSOAPFault 处理 CPE 返回的 SOAP Fault 响应。
+// 通过 CWMP ID 查找关联任务并标记为失败。
 func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body []byte, faultCode int, faultMsg string, log *zap.Logger) {
-	// Extract CWMP ID from the SOAP Header
+	// 从 SOAP Header 中提取 CWMP ID
 	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
 
 	log.Warn("ACS received SOAP Fault",
@@ -951,7 +940,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		zap.String("fault_msg", faultMsg),
 	)
 
-	// Look up session from cookie for device context
+	// 从 Cookie 查找会话以获取设备上下文
 	session, sessionID := h.getSessionFromCookie(r, log)
 	if session == nil {
 		log.Warn("SOAP Fault without valid session cookie")
@@ -959,7 +948,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		return
 	}
 
-	// Mark task as failed if task service is available
+	// 如果任务服务可用，标记任务失败
 	if h.taskService != nil && cwmpID != "" {
 		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
@@ -977,7 +966,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		}
 	}
 
-	// Check for more tasks in queue
+	// 检查队列中是否有更多任务
 	if h.taskService != nil {
 		deviceSN := session.DeviceSN
 		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
@@ -1013,14 +1002,14 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		}
 	}
 
-	// No more commands — complete the session
+	// 没有更多命令 —— 完成会话
 	h.completeSession(r.Context(), session)
 	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
-	// Log complete request XML
+	// 记录完整的请求 XML
 	log.Debug("ACS received TransferComplete request",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("xml", string(body)),
@@ -1033,7 +1022,7 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// Get deviceSN from Cookie session
+	// 从 Cookie 会话获取 deviceSN
 	deviceSN := ""
 	var sessionID string
 	if session, sid := h.getSessionFromCookie(r, log); session != nil {
@@ -1045,11 +1034,11 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		zap.String("device_sn", deviceSN),
 		zap.String("command_key", tc.CommandKey))
 
-	// Publish event
+	// 发布事件
 	evt, _ := event.NewEvent(event.SubjectDeviceTransferComplete, tc)
 	h.eventBus.Publish(r.Context(), event.SubjectDeviceTransferComplete, evt)
 
-	// Send TransferCompleteResponse
+	// 发送 TransferCompleteResponse
 	resp, err := soap.RenderResponse(soap.TransferCompleteRespTmpl, soap.InformResponseData{ID: cwmpID})
 	if err != nil {
 		log.Error("render TransferCompleteResponse", zap.Error(err))
@@ -1061,17 +1050,17 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		zap.String("device_sn", deviceSN),
 		zap.String("xml", string(resp)),
 	)
-	// Set session cookie in response if available
+	// 如果可用，在响应中设置 Session Cookie
 	if sessionID != "" {
 		h.setSessionCookie(w, sessionID)
 	}
 	h.sendSOAPResponse(w, resp, log)
 }
 
-// handleAutonomousTransferComplete processes an AutonomousTransferComplete message
-// from a CPE device (e.g., PM/MR file upload completion).
+// handleAutonomousTransferComplete 处理 CPE 设备发送的 AutonomousTransferComplete 消息
+//（如 PM/MR 文件上传完成）。
 func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
-	// Log complete request XML
+	// 记录完整的请求 XML
 	log.Debug("ACS received AutonomousTransferComplete request",
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("xml", string(body)),
@@ -1084,7 +1073,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Get deviceSN from Cookie session
+	// 从 Cookie 会话获取 deviceSN
 	deviceSN := ""
 	var sessionID string
 	if session, sid := h.getSessionFromCookie(r, log); session != nil {
@@ -1099,7 +1088,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		zap.Bool("is_download", atc.IsDownload),
 	)
 
-	// Publish event
+	// 发布事件
 	payload := map[string]interface{}{
 		"device_sn":       deviceSN,
 		"announce_url":    atc.AnnounceURL,
@@ -1117,7 +1106,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 	evt, _ := event.NewEvent(event.SubjectDeviceAutonomousTransferComplete, payload)
 	h.eventBus.Publish(r.Context(), event.SubjectDeviceAutonomousTransferComplete, evt)
 
-	// Send AutonomousTransferCompleteResponse
+	// 发送 AutonomousTransferCompleteResponse
 	resp, err := soap.RenderResponse(soap.AutonomousTransferCompleteRespTmpl, soap.InformResponseData{ID: cwmpID})
 	if err != nil {
 		log.Error("render AutonomousTransferCompleteResponse", zap.Error(err))
@@ -1129,7 +1118,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		zap.String("device_sn", deviceSN),
 		zap.String("xml", string(resp)),
 	)
-	// Set session cookie in response if available
+	// 如果可用，在响应中设置 Session Cookie
 	if sessionID != "" {
 		h.setSessionCookie(w, sessionID)
 	}
@@ -1137,7 +1126,7 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 }
 
 func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformMessage, eventCodes []string, log *zap.Logger) {
-	// Build event payload
+	// 构建事件载荷
 	payload := map[string]interface{}{
 		"device_id":      inform.DeviceId,
 		"events":         eventCodes,
@@ -1146,7 +1135,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		"retry_count":    inform.RetryCount,
 	}
 
-	// Determine primary subject based on event codes (priority order).
+	// 根据事件码确定主事件主题（按优先级排序）。
 	var subject string
 	switch {
 	case tr069.IsBootstrap(inform.Event), tr069.IsBoot(inform.Event):
@@ -1226,7 +1215,7 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 		"method":    string(method),
 	}
 
-	// Extract original command path from lastCmdParams (for GPN/GPV correlation).
+	// 从 lastCmdParams 提取原始命令路径（用于 GPN/GPV 关联）。
 	if len(lastCmdParams) > 0 {
 		var cmdMeta struct {
 			Path string `json:"path"`
@@ -1236,8 +1225,8 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 		}
 	}
 
-	// For GPN/GPV responses, parse the SOAP body and include structured data
-	// instead of raw XML to avoid NATS message size limits.
+	// 对于 GPN/GPV 响应，解析 SOAP body 并包含结构化数据，
+	// 而非原始 XML，避免 NATS 消息大小限制。
 	switch method {
 	case soap.MethodGetParameterNamesResp:
 		paramInfos, _, parseErr := soap.DecodeGetParameterNamesResponse(bytes.NewReader(body))
@@ -1275,8 +1264,8 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 }
 
 func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *zap.Logger) {
-	// TR-069 spec: InformResponse only contains MaxEnvelopes.
-	// CurrentTime is not a standard field and has been removed for protocol compliance.
+	// TR-069 规范：InformResponse 仅包含 MaxEnvelopes。
+	// CurrentTime 非标准字段，已移除以符合协议规范。
 	resp, err := soap.RenderResponse(soap.InformResponseTmpl, soap.InformResponseData{
 		ID: cwmpID,
 	})
@@ -1299,9 +1288,9 @@ func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte, log *zap.
 	w.Write(data)
 }
 
-// getSessionFromCookie retrieves the session from the Cookie header.
-// Returns nil if no valid session cookie found.
-// The log parameter should be a context-aware logger with request_id.
+// getSessionFromCookie 从 Cookie 头中获取会话。
+// 未找到有效 Session Cookie 时返回 nil。
+// log 参数应为携带 request_id 的上下文感知日志器。
 func (h *Handler) getSessionFromCookie(r *http.Request, log *zap.Logger) (*Session, string) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil {
@@ -1319,7 +1308,7 @@ func (h *Handler) getSessionFromCookie(r *http.Request, log *zap.Logger) (*Sessi
 	return session, sessionID
 }
 
-// setSessionCookie sets the SESSION cookie in the response header.
+// setSessionCookie 在响应头中设置 SESSION Cookie。
 func (h *Handler) setSessionCookie(w http.ResponseWriter, sessionID string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
@@ -1330,7 +1319,7 @@ func (h *Handler) setSessionCookie(w http.ResponseWriter, sessionID string) {
 	})
 }
 
-// truncateString truncates a string to maxLen characters for logging purposes.
+// truncateString 将字符串截断到 maxLen 字符，用于日志输出。
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -1338,32 +1327,32 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// generateSessionID generates a UUID-based session ID for Cookie.
+// generateSessionID 生成基于 UUID 的 Session ID，用于 Cookie。
 func generateSessionID() string {
 	uuidBytes := make([]byte, 16)
 	cryptorand.Read(uuidBytes)
-	// Set version (4) and variant bits per RFC 4122
+	// 按 RFC 4122 设置版本（4）和变体位
 	uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40
 	uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80
 	return hex.EncodeToString(uuidBytes)
 }
 
 // ============================================================================
-// TEST FEATURE: Random Task Injection
+// 测试功能：随机任务注入
 // ============================================================================
-// The following method is for testing purposes only.
-// It injects random RPC tasks when a CPE sends an Inform.
-// To disable: comment out the call to injectRandomTestTasks in handleInform.
+// 以下方法仅用于测试目的。
+// CPE 发送 Inform 时注入随机 RPC 任务。
+// 禁用方法：注释掉 handleInform 中对 injectRandomTestTasks 的调用。
 // ============================================================================
 
-// rpcTaskTemplate defines a template for generating random RPC tasks
+// rpcTaskTemplate 定义随机 RPC 任务生成模板
 type rpcTaskTemplate struct {
 	method   string
 	params   json.RawMessage
 	priority int
 }
 
-// testRPCTaskTemplates contains all available RPC task templates for random generation
+// testRPCTaskTemplates 包含所有可用的随机生成 RPC 任务模板
 var testRPCTaskTemplates = []rpcTaskTemplate{
 	{method: "GetParameterValues", params: json.RawMessage(`{"names":["Device.DeviceInfo.SoftwareVersion","Device.DeviceInfo.HardwareVersion"]}`), priority: 10},
 	{method: "GetParameterValues", params: json.RawMessage(`{"names":["Device.X_0000B9_Config.AntennaConfig"]}`), priority: 10},
@@ -1374,31 +1363,31 @@ var testRPCTaskTemplates = []rpcTaskTemplate{
 	{method: "SetParameterAttributes", params: json.RawMessage(`{"attributes":[{"name":"Device.X_Test.Param","notification_change":true,"notification":1}]}`), priority: 10},
 	{method: "Download", params: json.RawMessage(`{"file_type":"1 Firmware Upgrade Image","url":"http://acs.example.com/firmware/v1.0.0.bin","file_size":10485760}`), priority: 5},
 	{method: "Upload", params: json.RawMessage(`{"file_type":"2 Vendor Log File","url":"http://acs.example.com/upload/logs","delay_seconds":0}`), priority: 10},
-	{method: "Reboot", params: json.RawMessage(`{}`), priority: 100}, // High priority but should be last
+	{method: "Reboot", params: json.RawMessage(`{}`), priority: 100}, // 高优先级但应排在最后
 	{method: "FactoryReset", params: json.RawMessage(`{}`), priority: 100},
 }
 
-// injectRandomTestTasks injects random RPC tasks for testing purposes.
-// This method generates 3-10 random tasks for the device, plus a fixed PM upload task.
-// If Reboot task is generated, it will be moved to the end of the queue.
-// NOTE: This is a test feature - disable by setting enableTestTaskInjection to false.
+// injectRandomTestTasks 为测试目的注入随机 RPC 任务。
+// 为设备生成 1-3 个随机任务，外加一个固定的 PM 上传任务。
+// 如果生成了 Reboot 任务，会移到队列末尾。
+// 注意：这是测试功能，通过设置 enableTestTaskInjection 为 false 禁用。
 func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *zap.Logger) {
-	// Skip if test task injection is disabled
+	// 如果测试任务注入已禁用则跳过
 	if !h.enableTestTaskInjection {
 		return
 	}
 
-	// Skip if TaskService is not available
+	// 如果 TaskService 不可用则跳过
 	if h.taskService == nil {
 		return
 	}
 
 	ctx := r.Context()
 
-	// Generate random number of tasks (3-10)
+	// 生成随机数量的任务（1-3）
 	numTasks := 1 + rand.Intn(3) // 1 + 0-3 = 1-3
 
-	// Randomly select tasks
+	// 随机选择任务
 	selectedIndices := make(map[int]bool)
 	var tasks []rpcTaskTemplate
 
@@ -1411,13 +1400,13 @@ func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *z
 		tasks = append(tasks, testRPCTaskTemplates[idx])
 	}
 
-	// Fixed: Always inject a PM upload task with real upload URL
+	// 固定：始终注入一个使用真实上传 URL 的 PM 上传任务
 	pmUploadTask := h.createPMUploadTask(r, deviceSN)
 	if pmUploadTask != nil {
 		tasks = append(tasks, *pmUploadTask)
 	}
 
-	// Sort tasks: Reboot should be last
+	// 排序任务：Reboot 应放在最后
 	var normalTasks []rpcTaskTemplate
 	var rebootTask *rpcTaskTemplate
 
@@ -1429,13 +1418,13 @@ func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *z
 		}
 	}
 
-	// Combine: normal tasks first, then reboot (if exists)
+	// 组合：普通任务在前，Reboot 在后（如果存在）
 	finalTasks := normalTasks
 	if rebootTask != nil {
 		finalTasks = append(finalTasks, *rebootTask)
 	}
 
-	// Create tasks in TaskService
+	// 在 TaskService 中创建任务
 	createdCount := 0
 	for _, t := range finalTasks {
 		req := &task.CreateTaskRequest{
@@ -1466,22 +1455,22 @@ func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *z
 		zap.Bool("has_pm_upload", pmUploadTask != nil))
 }
 
-// createPMUploadTask creates a PM file upload task with a real upload URL from config.
-// If base_url is localhost, it will be replaced with the request's host.
-// Returns nil if upload config is not available.
+// createPMUploadTask 使用配置中的真实上传 URL 创建 PM 文件上传任务。
+// 如果 base_url 是 localhost，会替换为请求的 host。
+// 上传配置不可用时返回 nil。
 func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskTemplate {
 	if h.uploadConfig == nil || h.uploadConfig.BaseURL == "" {
 		return nil
 	}
 
-	// Generate upload URL: {BaseURL}{Path}?fileType=PM&filename={deviceSN}_{timestamp}.xml.gz
+	// 生成上传 URL：{BaseURL}{Path}?fileType=PM&filename={deviceSN}_{timestamp}.xml.gz
 	timestamp := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("%s_%s.xml.gz", deviceSN, timestamp)
 
-	// Get base URL, replace localhost with request host if needed
+	// 获取基础 URL，如需要则将 localhost 替换为请求的 host
 	baseURL := h.uploadConfig.BaseURL
 	if isLocalhost(baseURL) {
-		// Use the request's host instead of localhost
+		// 使用请求的 host 替代 localhost
 		scheme := "http"
 		if r.TLS != nil {
 			scheme = "https"
@@ -1489,20 +1478,20 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 		baseURL = fmt.Sprintf("%s://%s", scheme, r.Host)
 	}
 
-	// Build upload URL
+	// 构建上传 URL
 	uploadURL := fmt.Sprintf("%s%s?fileType=PM&filename=%s",
 		baseURL,
 		h.uploadConfig.Path,
 		filename,
 	)
 
-	// Create Upload task params
-	// TR069 Upload RPC parameters:
-	// - FileType: "1 Vendor Configuration File" (1) or "2 Vendor Log File" (2) etc.
-	// - URL: The URL where the CPE should upload the file
-	// - Username/Password: HTTP Basic Auth credentials (optional)
+	// 创建 Upload 任务参数
+	// TR069 Upload RPC 参数：
+	// - FileType: "1 Vendor Configuration File" (1) 或 "2 Vendor Log File" (2) 等
+	// - URL: CPE 上传文件的目标 URL
+	// - Username/Password: HTTP Basic Auth 凭据（可选）
 	params := map[string]interface{}{
-		"file_type":     "1 Vendor Configuration File", // PM data as vendor config
+		"file_type":     "1 Vendor Configuration File", // PM 数据作为厂商配置文件
 		"url":           uploadURL,
 		"delay_seconds": 0,
 	}
@@ -1524,7 +1513,7 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 }
 
 // ============================================================================
-// END TEST FEATURE
+// 测试功能结束
 // ============================================================================
 
 // detectSOAPFault 检查 SOAP 响应中是否包含 Fault
@@ -1558,7 +1547,7 @@ func detectSOAPFault(body []byte) (bool, int, string) {
 	return false, 0, ""
 }
 
-// isLocalhost checks if a URL contains localhost or 127.0.0.1
+// isLocalhost 检查 URL 是否包含 localhost 或 127.0.0.1
 func isLocalhost(url string) bool {
 	return strings.Contains(url, "localhost") ||
 		strings.Contains(url, "127.0.0.1") ||

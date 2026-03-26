@@ -23,6 +23,7 @@ type InformEventPayload struct {
 // InformHandler subscribes to device Inform events and routes them to DeviceService.
 type InformHandler struct {
 	service         *DeviceService
+	batchProcessor  *BatchInformProcessor
 	carrierRegistry *carrier.CarrierRegistry
 	defaultCarrier  model.CarrierCode
 	logger          *zap.Logger
@@ -41,6 +42,11 @@ func NewInformHandler(
 		defaultCarrier:  defaultCarrier,
 		logger:          logger,
 	}
+}
+
+// SetBatchProcessor enables batch processing for periodic Inform events.
+func (h *InformHandler) SetBatchProcessor(bp *BatchInformProcessor) {
+	h.batchProcessor = bp
 }
 
 // Subscribe registers event handlers on the event bus for device Inform events.
@@ -166,6 +172,17 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	}
 
 	// Step 3: Device exists → update
+	// 如果启用了批量处理器，走异步批量路径
+	if h.batchProcessor != nil {
+		params, _ := prepareDeviceUpdate(device, inform)
+		h.batchProcessor.Submit(device, inform, params)
+		h.logger.Debug("handlePeriodic: submitted to batch processor",
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber))
+		return nil
+	}
+
+	// 回退：原有逐条处理逻辑
 	if _, err := h.service.UpdateFromInform(ctx, inform); err != nil {
 		h.logger.Error("handlePeriodic: UpdateFromInform failed",
 			zap.Error(err), zap.String("serial_number", sn))
