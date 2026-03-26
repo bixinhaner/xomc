@@ -20,8 +20,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
-	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/soap"
@@ -37,7 +37,6 @@ type ConnectionRequester interface {
 	// Send sends a Connection Request. httpURL is the device's HTTP CR URL (may be empty).
 	Send(ctx context.Context, deviceSN, httpURL string) error
 }
-
 
 // SessionCookieName is the cookie name for TR069 session ID
 const SessionCookieName = "SESSION"
@@ -79,11 +78,11 @@ type Handler struct {
 	// 0 means no limit. Recommended: ≤15 to avoid triggering CPE per-session limits.
 	maxRPCPerSession int
 	// Post-session wake: send Connection Request when session ends with remaining commands.
-	connReqSender       ConnectionRequester
-	postSessionWakeCfg  appconfig.PostSessionWakeConfig
-	redisClient         redis.Cmdable  // for continuous wake counter
-	stunStore           *stun.Store    // for caching device STUN addresses from Inform
-	connReqURLCache     sync.Map       // deviceSN → ConnectionRequestURL (from Inform)
+	connReqSender      ConnectionRequester
+	postSessionWakeCfg appconfig.PostSessionWakeConfig
+	redisClient        redis.Cmdable // for continuous wake counter
+	stunStore          *stun.Store   // for caching device STUN addresses from Inform
+	connReqURLCache    sync.Map      // deviceSN → ConnectionRequestURL (from Inform)
 	// connSessions maps HTTP RemoteAddr → connSessionEntry for connection-level session tracking.
 	// Entries are cleaned up on session completion or by the background reaper.
 	connSessions sync.Map
@@ -1339,7 +1338,6 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-
 // generateSessionID generates a UUID-based session ID for Cookie.
 func generateSessionID() string {
 	uuidBytes := make([]byte, 16)
@@ -1398,7 +1396,7 @@ func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *z
 	ctx := r.Context()
 
 	// Generate random number of tasks (3-10)
-	numTasks := 3 + rand.Intn(8) // 3 + 0-7 = 3-10
+	numTasks := 1 + rand.Intn(3) // 1 + 0-3 = 1-3
 
 	// Randomly select tasks
 	selectedIndices := make(map[int]bool)
@@ -1504,9 +1502,9 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 	// - URL: The URL where the CPE should upload the file
 	// - Username/Password: HTTP Basic Auth credentials (optional)
 	params := map[string]interface{}{
-		"file_type":      "1 Vendor Configuration File", // PM data as vendor config
-		"url":            uploadURL,
-		"delay_seconds":  0,
+		"file_type":     "1 Vendor Configuration File", // PM data as vendor config
+		"url":           uploadURL,
+		"delay_seconds": 0,
 	}
 	if h.uploadConfig.Username != "" {
 		params["username"] = h.uploadConfig.Username
