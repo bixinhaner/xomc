@@ -241,9 +241,9 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Log
   // -------------------------------------------------------------------------
-  'nav.log.neMessage':  'NE Message Log',
-  'nav.log.heartbeat':  'Heartbeat Log',
-  'nav.log.alarm':      'Alarm Log',
+  'nav.log.device':     'Device Log',
+  'nav.log.exception':  'Exception Log',
+  'nav.log.event':      'Event Log',
   'nav.log.operation':  'Operation Log',
   'nav.log.system':     'System Log',
   'nav.log.config':     'Log Config',

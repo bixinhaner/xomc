@@ -166,12 +166,12 @@ export const NAV_CONFIG: NavConfig = [
     label: 'nav.log',
     iconName: 'FileTextOutlined',
     children: [
-      { key: 'log-ne-msg',   label: 'nav.log.neMessage',   path: '/log/ne-message' },
-      { key: 'log-heartbeat',label: 'nav.log.heartbeat',   path: '/log/heartbeat' },
-      { key: 'log-alarm',    label: 'nav.log.alarm',       path: '/log/alarm' },
-      { key: 'log-operation',label: 'nav.log.operation',   path: '/log/operation' },
-      { key: 'log-system',   label: 'nav.log.system',      path: '/log/system' },
-      { key: 'log-config',   label: 'nav.log.config',      path: '/log/config' },
+      { key: 'log-device',    label: 'nav.log.device',     path: '/log/device' },
+      { key: 'log-exception', label: 'nav.log.exception',  path: '/log/exception' },
+      { key: 'log-event',     label: 'nav.log.event',      path: '/log/event' },
+      // { key: 'log-operation',label: 'nav.log.operation',  path: '/log/operation' },  // 隐藏
+      // { key: 'log-system',   label: 'nav.log.system',     path: '/log/system' },       // 隐藏
+      // { key: 'log-config',   label: 'nav.log.config',     path: '/log/config' },       // 隐藏
     ],
   },
   {

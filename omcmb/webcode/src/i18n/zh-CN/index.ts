@@ -241,9 +241,9 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Log
   // -------------------------------------------------------------------------
-  'nav.log.neMessage':  '网元消息日志',
-  'nav.log.heartbeat':  '心跳日志',
-  'nav.log.alarm':      '告警日志',
+  'nav.log.device':     '设备上报日志',
+  'nav.log.exception':  '设备异常日志',
+  'nav.log.event':      '事件日志',
   'nav.log.operation':  '操作日志',
   'nav.log.system':     '系统日志',
   'nav.log.config':     '日志配置',

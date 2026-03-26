@@ -98,9 +98,9 @@ const UserFiles          = React.lazy(() => import('@/pages/file/UserFiles'));
 const DeviceFiles        = React.lazy(() => import('@/pages/file/DeviceFiles'));
 
 // Log Management
-const NEMessageLog       = React.lazy(() => import('@/pages/log/NEMessageLog'));
-const HeartbeatLog       = React.lazy(() => import('@/pages/log/HeartbeatLog'));
-const AlarmLog           = React.lazy(() => import('@/pages/log/AlarmLog'));
+const DeviceLog          = React.lazy(() => import('@/pages/log/DeviceLog'));
+const ExceptionLog       = React.lazy(() => import('@/pages/log/ExceptionLog'));
+const EventLog           = React.lazy(() => import('@/pages/log/EventLog'));
 const OperationLog       = React.lazy(() => import('@/pages/log/OperationLog'));
 const SystemLog          = React.lazy(() => import('@/pages/log/SystemLog'));
 const LogConfig          = React.lazy(() => import('@/pages/log/LogConfig'));
@@ -263,9 +263,9 @@ export const routes: RouteObject[] = [
       { path: 'file/device-files',        element: withSuspense(DeviceFiles) },
 
       // Log Management
-      { path: 'log/ne-message',  element: withSuspense(NEMessageLog) },
-      { path: 'log/heartbeat',   element: withSuspense(HeartbeatLog) },
-      { path: 'log/alarm',       element: withSuspense(AlarmLog) },
+      { path: 'log/device',      element: withSuspense(DeviceLog) },
+      { path: 'log/exception',   element: withSuspense(ExceptionLog) },
+      { path: 'log/event',       element: withSuspense(EventLog) },
       { path: 'log/operation',   element: withSuspense(OperationLog) },
       { path: 'log/system',      element: withSuspense(SystemLog) },
       { path: 'log/config',      element: withSuspense(LogConfig) },
