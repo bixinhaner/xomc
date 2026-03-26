@@ -108,6 +108,7 @@ const LogConfig          = React.lazy(() => import('@/pages/log/LogConfig'));
 // System Management
 const DeviceClassification = React.lazy(() => import('@/pages/system/DeviceClassification'));
 const UserManagement     = React.lazy(() => import('@/pages/system/UserManagement'));
+const GroupManagement    = React.lazy(() => import('@/pages/system/GroupManagement'));
 const RolePermission     = React.lazy(() => import('@/pages/system/RolePermission'));
 const SysOperationLog    = React.lazy(() => import('@/pages/system/OperationLog'));
 const SystemConfig       = React.lazy(() => import('@/pages/system/SystemConfig'));
@@ -273,6 +274,7 @@ export const routes: RouteObject[] = [
       // System Management
       { path: 'system/device-class',   element: withSuspense(DeviceClassification) },
       { path: 'system/users',          element: withSuspense(UserManagement) },
+      { path: 'system/groups',         element: withSuspense(GroupManagement) },
       { path: 'system/roles',          element: withSuspense(RolePermission) },
       { path: 'system/operation-log',  element: withSuspense(SysOperationLog) },
       { path: 'system/config',         element: withSuspense(SystemConfig) },

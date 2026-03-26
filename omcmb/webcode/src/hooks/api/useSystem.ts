@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User, Role, UserRole, UserStatus } from '@/types/system';
+import type { User, Role, UserRole, UserStatus, Group } from '@/types/system';
 import type { PageRequest } from '@/types/pagination';
 import { systemService } from '@/mock/services/systemService';
 import { adminApi } from '@/services/api/adminApi';
@@ -174,6 +174,66 @@ export function useAllPermissions() {
     queryFn: () =>
       useMock ? systemService.getAllPermissions() : adminApi.getPermissions(),
     staleTime: 10 * 60 * 1000,
+  });
+}
+
+// Groups
+export function useGroups(params: PageRequest & { groupName?: string }) {
+  return useQuery({
+    queryKey: ['system', 'groups', params],
+    queryFn: () =>
+      useMock ? systemService.getGroups(params) : adminApi.getGroups(params),
+  });
+}
+
+export function useAllGroups() {
+  return useQuery({
+    queryKey: ['system', 'groups', 'all'],
+    queryFn: () =>
+      useMock ? systemService.getAllGroups() : adminApi.getAllGroups(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useGroupById(id: string) {
+  return useQuery({
+    queryKey: ['system', 'groups', 'detail', id],
+    queryFn: () =>
+      useMock ? systemService.getGroupById(id) : adminApi.getGroupById(id),
+    enabled: Boolean(id),
+  });
+}
+
+export function useCreateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Omit<Group, 'id' | 'userCount' | 'roleCount' | 'updUser' | 'updTime'>) =>
+      useMock ? systemService.createGroup(data) : adminApi.createGroup(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'groups'] });
+    },
+  });
+}
+
+export function useUpdateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Group> }) =>
+      useMock ? systemService.updateGroup(id, data) : adminApi.updateGroup(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'groups'] });
+    },
+  });
+}
+
+export function useDeleteGroups() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) =>
+      useMock ? systemService.deleteGroups(ids) : adminApi.deleteGroups(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'groups'] });
+    },
   });
 }
 

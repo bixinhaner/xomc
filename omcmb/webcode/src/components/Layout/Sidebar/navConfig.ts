@@ -181,6 +181,7 @@ export const NAV_CONFIG: NavConfig = [
     children: [
       { key: 'sys-device-type', label: 'nav.system.deviceClass',    path: '/system/device-class' },
       { key: 'sys-user',        label: 'nav.system.users',          path: '/system/users' },
+      { key: 'sys-group',       label: 'nav.system.groups',         path: '/system/groups' },
       { key: 'sys-role',        label: 'nav.system.roles',          path: '/system/roles' },
       { key: 'sys-op-log',      label: 'nav.system.operationLog',   path: '/system/operation-log' },
       { key: 'sys-config',      label: 'nav.system.config',         path: '/system/config' },

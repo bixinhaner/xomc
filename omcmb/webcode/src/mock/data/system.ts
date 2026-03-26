@@ -1,4 +1,4 @@
-import type { User, Role, Permission, UserRole } from '@/types/system';
+import type { User, Role, Permission, UserRole, Group } from '@/types/system';
 
 export const mockPermissions: Permission[] = [
   { id: 'perm-001', permCode: 'device:view', permName: '查看设备', module: '设备管理', description: '查看设备列表和详情' },
@@ -192,5 +192,58 @@ export const mockUsers: User[] = [
     status: statuses[9],
     lastLoginTime: new Date(Date.now() - 60 * 86400000).toISOString(),
     createTime: '2023-03-01T00:00:00.000Z',
+  },
+];
+
+export const mockGroups: Group[] = [
+  {
+    id: 'group-001',
+    groupName: '系统管理员组',
+    description: '系统默认管理员组，拥有所有权限',
+    userCount: 2,
+    roleCount: 1,
+    builtIn: 1,
+    updUser: 'admin',
+    updTime: new Date(Date.now() - 86400000 * 30).toISOString(),
+  },
+  {
+    id: 'group-002',
+    groupName: '运维人员组',
+    description: '日常运维人员所属组',
+    userCount: 5,
+    roleCount: 2,
+    builtIn: 2,
+    updUser: 'admin',
+    updTime: new Date(Date.now() - 86400000 * 15).toISOString(),
+  },
+  {
+    id: 'group-003',
+    groupName: '只读用户组',
+    description: '只读访问权限用户组',
+    userCount: 3,
+    roleCount: 1,
+    builtIn: 0,
+    updUser: 'admin',
+    updTime: new Date(Date.now() - 86400000 * 10).toISOString(),
+  },
+  {
+    id: 'group-004',
+    groupName: '安全审计组',
+    description: '安全审计人员专属组',
+    userCount: 1,
+    roleCount: 1,
+    builtIn: 0,
+    updUser: 'admin',
+    updTime: new Date(Date.now() - 86400000 * 5).toISOString(),
+  },
+  {
+    id: 'group-005',
+    groupName: '访客组',
+    description: '临时访客用户组',
+    userCount: 2,
+    roleCount: 1,
+    builtIn: 0,
+    updUser: 'admin',
+    updTime: new Date(Date.now() - 86400000 * 2).toISOString(),
   },
 ];

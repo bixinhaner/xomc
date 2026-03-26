@@ -1,5 +1,5 @@
 import http from '../http';
-import type { User, Role, Permission, UserRole, UserStatus, OperationLog, OperationType } from '@/types/system';
+import type { User, Role, Permission, UserRole, UserStatus, OperationLog, OperationType, Group } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // Backend user model
@@ -32,6 +32,20 @@ interface BackendPermission {
   role_id: string;
   resource: string;
   action: string;
+}
+
+// Backend group model
+interface BackendGroup {
+  id: string;
+  name: string;
+  description: string;
+  built_in: number;
+  user_count: number;
+  role_count: number;
+  upd_user: string;
+  upd_time: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Backend audit log model
@@ -104,6 +118,19 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
     result: 'success',
     message: '',
     operationTime: ba.created_at,
+  };
+}
+
+function mapBackendGroup(bg: BackendGroup): Group {
+  return {
+    id: bg.id,
+    groupName: bg.name,
+    description: bg.description || '',
+    userCount: bg.user_count || 0,
+    roleCount: bg.role_count || 0,
+    builtIn: bg.built_in || 0,
+    updUser: bg.upd_user || '',
+    updTime: bg.upd_time || bg.updated_at || '',
   };
 }
 
@@ -329,5 +356,58 @@ export const adminApi = {
 
   async removeRole(userId: string, roleId: string): Promise<void> {
     await http.delete(`/admin/users/${userId}/roles/${roleId}`);
+  },
+
+  // Groups
+  async getGroups(params: PageRequest & { groupName?: string }): Promise<PageResponse<Group>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+    if (params.groupName) query.search = params.groupName;
+    const { data } = await http.get<BackendListResponse<BackendGroup>>('/admin/groups', { params: query });
+    return {
+      items: (data.items || []).map(mapBackendGroup),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async getAllGroups(): Promise<Group[]> {
+    const { data } = await http.get<BackendGroup[]>('/admin/groups');
+    return (Array.isArray(data) ? data : []).map(mapBackendGroup);
+  },
+
+  async getGroupById(id: string): Promise<Group | null> {
+    try {
+      const { data } = await http.get<BackendGroup>(`/admin/groups/${id}`);
+      return mapBackendGroup(data);
+    } catch {
+      return null;
+    }
+  },
+
+  async createGroup(data: Omit<Group, 'id' | 'userCount' | 'roleCount' | 'updUser' | 'updTime'>): Promise<Group> {
+    const { data: result } = await http.post<BackendGroup>('/admin/groups', {
+      name: data.groupName,
+      description: data.description,
+      built_in: data.builtIn,
+    });
+    return mapBackendGroup(result);
+  },
+
+  async updateGroup(id: string, data: Partial<Group>): Promise<Group> {
+    const payload: Record<string, unknown> = {};
+    if (data.groupName !== undefined) payload.name = data.groupName;
+    if (data.description !== undefined) payload.description = data.description;
+    const { data: result } = await http.put<BackendGroup>(`/admin/groups/${id}`, payload);
+    return mapBackendGroup(result);
+  },
+
+  async deleteGroups(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await http.delete(`/admin/groups/${id}`);
+    }
   },
 };

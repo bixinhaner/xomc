@@ -1,10 +1,11 @@
-import type { User, Role, Permission, UserRole, UserStatus } from '@/types/system';
+import type { User, Role, Permission, UserRole, UserStatus, Group } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
-import { mockUsers, mockRoles, mockPermissions } from '../data/system';
+import { mockUsers, mockRoles, mockPermissions, mockGroups } from '../data/system';
 import { delay, paginate, generateId } from '../utils';
 
 let users = [...mockUsers];
 let roles = [...mockRoles];
+let groups = [...mockGroups];
 
 export const systemService = {
   // Users
@@ -113,6 +114,59 @@ export const systemService = {
   async deleteRoles(ids: string[]): Promise<void> {
     await delay(150, 300);
     roles = roles.filter((r) => !ids.includes(r.id));
+  },
+
+  // Groups
+  async getGroups(params: PageRequest & { groupName?: string }): Promise<PageResponse<Group>> {
+    await delay(80, 150);
+    let filtered = [...groups];
+    if (params.groupName) {
+      const kw = params.groupName.toLowerCase();
+      filtered = filtered.filter((g) => g.groupName.toLowerCase().includes(kw));
+    }
+    return paginate(filtered, params.page, params.pageSize);
+  },
+
+  async getAllGroups(): Promise<Group[]> {
+    await delay(80, 150);
+    return groups;
+  },
+
+  async getGroupById(id: string): Promise<Group | null> {
+    await delay(80, 150);
+    return groups.find((g) => g.id === id) ?? null;
+  },
+
+  async createGroup(data: Omit<Group, 'id' | 'userCount' | 'roleCount' | 'updUser' | 'updTime'>): Promise<Group> {
+    await delay(200, 400);
+    const newGroup: Group = {
+      ...data,
+      id: generateId('group'),
+      userCount: 0,
+      roleCount: 0,
+      updUser: 'admin',
+      updTime: new Date().toISOString(),
+    };
+    groups.push(newGroup);
+    return newGroup;
+  },
+
+  async updateGroup(id: string, data: Partial<Group>): Promise<Group> {
+    await delay(150, 300);
+    const idx = groups.findIndex((g) => g.id === id);
+    if (idx === -1) throw new Error(`Group ${id} not found`);
+    groups[idx] = { ...groups[idx], ...data, updTime: new Date().toISOString() };
+    return groups[idx];
+  },
+
+  async deleteGroups(ids: string[]): Promise<void> {
+    await delay(150, 300);
+    // Cannot delete built-in groups (builtIn = 1 or 2)
+    const toDelete = ids.filter((id) => {
+      const group = groups.find((g) => g.id === id);
+      return group && group.builtIn !== 1 && group.builtIn !== 2;
+    });
+    groups = groups.filter((g) => !toDelete.includes(g.id));
   },
 
   // Permissions

@@ -253,6 +253,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'nav.system.deviceClass':   '设备分类',
   'nav.system.users':         '用户管理',
+  'nav.system.groups':        '用户组管理',
   'nav.system.roles':         '角色权限',
   'nav.system.operationLog':  '操作日志',
   'nav.system.config':        '系统配置',
@@ -723,6 +724,23 @@ const messages: Record<string, string> = {
   'user.role.operator': '操作员',
   'user.role.viewer':   '查看者',
   'user.role.auditor':  '审计员',
+
+  // -------------------------------------------------------------------------
+  // Group management
+  // -------------------------------------------------------------------------
+  'group.groupName':           '组名',
+  'group.userCount':           '用户数',
+  'group.roleCount':           '角色数',
+  'group.updUser':             '操作人',
+  'group.updTime':             '更新时间',
+  'group.description':         '描述',
+  'group.builtIn':             '内置',
+  'group.builtInCannotDelete': '内置用户组无法删除',
+  'group.noGroupsToDelete':    '没有可删除的用户组（内置用户组不可删除）',
+  'group.selectedBuiltIn':     '选中的用户组中有',
+  'group.builtInSkipped':      '个内置用户组将被跳过',
+  'group.associatedRoles':     '关联角色',
+  'group.associatedUsers':     '关联用户',
 
   // -------------------------------------------------------------------------
   // Login page

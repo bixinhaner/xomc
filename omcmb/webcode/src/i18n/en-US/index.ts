@@ -253,6 +253,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'nav.system.deviceClass':   'Device Classification',
   'nav.system.users':         'User Management',
+  'nav.system.groups':        'Group Management',
   'nav.system.roles':         'Role Permission',
   'nav.system.operationLog':  'Operation Log',
   'nav.system.config':        'System Config',
@@ -720,6 +721,23 @@ const messages: Record<string, string> = {
   'user.role.operator': 'Operator',
   'user.role.viewer':   'Viewer',
   'user.role.auditor':  'Auditor',
+
+  // -------------------------------------------------------------------------
+  // Group management
+  // -------------------------------------------------------------------------
+  'group.groupName':           'Group Name',
+  'group.userCount':           'User Count',
+  'group.roleCount':           'Role Count',
+  'group.updUser':             'Operator',
+  'group.updTime':             'Update Time',
+  'group.description':         'Description',
+  'group.builtIn':             'Built-in',
+  'group.builtInCannotDelete': 'Built-in groups cannot be deleted',
+  'group.noGroupsToDelete':    'No groups to delete (built-in groups cannot be deleted)',
+  'group.selectedBuiltIn':     'Selected groups include',
+  'group.builtInSkipped':      'built-in groups that will be skipped',
+  'group.associatedRoles':     'Associated Roles',
+  'group.associatedUsers':     'Associated Users',
 
   // -------------------------------------------------------------------------
   // Login page

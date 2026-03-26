@@ -21,6 +21,17 @@ export interface Role {
   userCount: number;
 }
 
+export interface Group {
+  id: string;
+  groupName: string;
+  description: string;
+  userCount: number;
+  roleCount: number;
+  builtIn: number; // 1,2 = built-in, others = custom
+  updUser: string;
+  updTime: string;
+}
+
 export interface Permission {
   id: string;
   permCode: string;
