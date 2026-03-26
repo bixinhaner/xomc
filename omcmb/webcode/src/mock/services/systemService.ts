@@ -1,4 +1,4 @@
-import type { User, Role, Permission, UserRole, UserStatus, Group } from '@/types/system';
+import type { User, Role, Permission, Group } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { mockUsers, mockRoles, mockPermissions, mockGroups } from '../data/system';
 import { delay, paginate, generateId } from '../utils';
@@ -10,22 +10,24 @@ let groups = [...mockGroups];
 export const systemService = {
   // Users
   async getUsers(
-    params: { role?: UserRole; status?: UserStatus; keyword?: string } & PageRequest
+    params: { userName?: string } & PageRequest
   ): Promise<PageResponse<User>> {
     await delay(100, 200);
     let filtered = [...users];
-    if (params.role) filtered = filtered.filter((u) => u.role === params.role);
-    if (params.status) filtered = filtered.filter((u) => u.status === params.status);
-    if (params.keyword) {
-      const kw = params.keyword.toLowerCase();
+    if (params.userName) {
+      const kw = params.userName.toLowerCase();
       filtered = filtered.filter(
         (u) =>
-          u.username.toLowerCase().includes(kw) ||
-          u.displayName.includes(kw) ||
+          u.userName.toLowerCase().includes(kw) ||
           u.email.toLowerCase().includes(kw)
       );
     }
     return paginate(filtered, params.page, params.pageSize);
+  },
+
+  async getAllUsers(): Promise<User[]> {
+    await delay(80, 150);
+    return users;
   },
 
   async getUserById(id: string): Promise<User | null> {
@@ -55,31 +57,75 @@ export const systemService = {
 
   async deleteUsers(ids: string[]): Promise<void> {
     await delay(150, 300);
-    users = users.filter((u) => !ids.includes(u.id));
+    // Cannot delete built-in users
+    users = users.filter((u) => !ids.includes(u.id) || u.builtIn === 1);
   },
 
-  async resetPassword(id: string, newPassword: string): Promise<void> {
+  async resetPassword(id: string, _newPassword: string): Promise<void> {
     await delay(300, 600);
     void id;
-    void newPassword;
+    void _newPassword;
   },
 
   async lockUser(id: string): Promise<void> {
     await delay(150, 300);
     const idx = users.findIndex((u) => u.id === id);
-    if (idx !== -1) users[idx] = { ...users[idx], status: 'locked' };
+    if (idx !== -1) users[idx] = { ...users[idx], lockStatus: 1 };
   },
 
   async unlockUser(id: string): Promise<void> {
     await delay(150, 300);
     const idx = users.findIndex((u) => u.id === id);
-    if (idx !== -1) users[idx] = { ...users[idx], status: 'active' };
+    if (idx !== -1) users[idx] = { ...users[idx], lockStatus: 0 };
+  },
+
+  async forceLogout(ids: string[]): Promise<void> {
+    await delay(150, 300);
+    ids.forEach((id) => {
+      const idx = users.findIndex((u) => u.id === id);
+      if (idx !== -1) users[idx] = { ...users[idx], onlineStatus: 'offline' };
+    });
+  },
+
+  async moveUsersToGroup(userIds: string[], groupId: string): Promise<void> {
+    await delay(150, 300);
+    const group = groups.find((g) => g.id === groupId);
+    if (group) {
+      userIds.forEach((id) => {
+        const idx = users.findIndex((u) => u.id === id);
+        if (idx !== -1) {
+          if (!users[idx].groupNames.includes(group.groupName)) {
+            users[idx].groupNames.push(group.groupName);
+          }
+        }
+      });
+    }
+  },
+
+  async copyUser(id: string): Promise<User> {
+    await delay(200, 400);
+    const user = users.find((u) => u.id === id);
+    if (!user) throw new Error(`User ${id} not found`);
+    const newUser: User = {
+      ...user,
+      id: generateId('user'),
+      userName: `${user.userName}_copy`,
+      createTime: new Date().toISOString(),
+      lastLoginTime: new Date().toISOString(),
+    };
+    users.push(newUser);
+    return newUser;
   },
 
   // Roles
-  async getRoles(params: PageRequest): Promise<PageResponse<Role>> {
+  async getRoles(params: PageRequest & { roleName?: string }): Promise<PageResponse<Role>> {
     await delay(80, 150);
-    return paginate(roles, params.page, params.pageSize);
+    let filtered = [...roles];
+    if (params.roleName) {
+      const kw = params.roleName.toLowerCase();
+      filtered = filtered.filter((r) => r.roleName.toLowerCase().includes(kw));
+    }
+    return paginate(filtered, params.page, params.pageSize);
   },
 
   async getAllRoles(): Promise<Role[]> {
@@ -92,12 +138,14 @@ export const systemService = {
     return roles.find((r) => r.id === id) ?? null;
   },
 
-  async createRole(data: Omit<Role, 'id' | 'userCount'>): Promise<Role> {
+  async createRole(data: Omit<Role, 'id' | 'userCount' | 'updUser' | 'updTime'>): Promise<Role> {
     await delay(200, 400);
     const newRole: Role = {
       ...data,
       id: generateId('role'),
       userCount: 0,
+      updUser: 'admin',
+      updTime: new Date().toISOString(),
     };
     roles.push(newRole);
     return newRole;
@@ -107,13 +155,14 @@ export const systemService = {
     await delay(150, 300);
     const idx = roles.findIndex((r) => r.id === id);
     if (idx === -1) throw new Error(`Role ${id} not found`);
-    roles[idx] = { ...roles[idx], ...data };
+    roles[idx] = { ...roles[idx], ...data, updTime: new Date().toISOString() };
     return roles[idx];
   },
 
   async deleteRoles(ids: string[]): Promise<void> {
     await delay(150, 300);
-    roles = roles.filter((r) => !ids.includes(r.id));
+    // Cannot delete built-in roles
+    roles = roles.filter((r) => !ids.includes(r.id) || r.builtIn === 1 || r.builtIn === 2);
   },
 
   // Groups

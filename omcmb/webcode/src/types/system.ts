@@ -1,24 +1,30 @@
-export type UserStatus = 'active' | 'inactive' | 'locked';
-export type UserRole = 'admin' | 'operator' | 'viewer' | 'auditor';
+export type UserOnlineStatus = 'online' | 'offline';
+export type UserLockStatus = 0 | 1 | 2; // 0=解锁, 1=有效期锁定, 2=有效期锁定
 
 export interface User {
   id: string;
-  username: string;
-  displayName: string;
+  userName: string;
   email: string;
-  phone: string;
-  role: UserRole;
-  status: UserStatus;
+  groupNames: string[]; // 所属用户组列表
   lastLoginTime: string;
+  source: string; // 来源
+  onlineStatus: UserOnlineStatus; // 在线状态
+  lockStatus: UserLockStatus; // 锁定状态
+  builtIn: number; // 内置用户标识
+  description: string;
   createTime: string;
 }
 
 export interface Role {
   id: string;
   roleName: string;
+  batchOperation: number; // 1=是, 0=否
   description: string;
   permissions: string[];
   userCount: number;
+  updUser: string; // 操作人
+  updTime: string; // 更新时间
+  builtIn: number; // 内置角色标识
 }
 
 export interface Group {

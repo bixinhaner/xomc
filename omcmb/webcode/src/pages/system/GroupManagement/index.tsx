@@ -7,6 +7,8 @@ import {
   Dropdown,
   message,
   Tag,
+  Select,
+  Transfer,
 } from 'antd';
 import {
   PlusOutlined,
@@ -25,6 +27,8 @@ import {
   useCreateGroup,
   useUpdateGroup,
   useDeleteGroups,
+  useAllRoles,
+  useAllUsers,
 } from '@/hooks/api/useSystem';
 import type { Group } from '@/types/system';
 import { useT } from '@/hooks/useT';
@@ -40,12 +44,17 @@ export default function GroupManagement() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [form] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   const { data, isLoading, refetch } = useGroups({
     groupName: filters.groupName as string | undefined,
     page,
     pageSize,
   });
+
+  const { data: allRoles } = useAllRoles();
+  const { data: allUsers } = useAllUsers();
 
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup();
@@ -78,12 +87,16 @@ export default function GroupManagement() {
           groupName: vals.groupName as string,
           description: (vals.description as string) ?? '',
           builtIn: 0,
+          roleIds: selectedRoleIds,
+          userIds: selectedUserIds,
         },
         {
           onSuccess: () => {
             void message.success(t('common.save'));
             setCreateVisible(false);
             form.resetFields();
+            setSelectedRoleIds([]);
+            setSelectedUserIds([]);
           },
         },
       );
@@ -99,6 +112,8 @@ export default function GroupManagement() {
           data: {
             groupName: vals.groupName as string,
             description: vals.description as string,
+            roleIds: selectedRoleIds,
+            userIds: selectedUserIds,
           },
         },
         {
@@ -107,6 +122,8 @@ export default function GroupManagement() {
             setEditVisible(false);
             form.resetFields();
             setSelectedGroup(null);
+            setSelectedRoleIds([]);
+            setSelectedUserIds([]);
           },
         },
       );
@@ -114,7 +131,6 @@ export default function GroupManagement() {
   };
 
   const handleBatchDelete = useCallback((keys: React.Key[]) => {
-    // Filter out built-in groups
     const groupsToDelete = (data?.items || []).filter(
       (g) => keys.includes(g.id) && !isBuiltIn(g)
     );
@@ -208,6 +224,8 @@ export default function GroupManagement() {
                       groupName: group.groupName,
                       description: group.description,
                     });
+                    setSelectedRoleIds([]);
+                    setSelectedUserIds([]);
                     setEditVisible(true);
                   },
                 },
@@ -276,9 +294,14 @@ export default function GroupManagement() {
         title={t('common.add')}
         open={createVisible}
         onOk={handleCreate}
-        onCancel={() => { setCreateVisible(false); form.resetFields(); }}
+        onCancel={() => {
+          setCreateVisible(false);
+          form.resetFields();
+          setSelectedRoleIds([]);
+          setSelectedUserIds([]);
+        }}
         confirmLoading={createGroup.isPending}
-        width={520}
+        width={640}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -289,7 +312,27 @@ export default function GroupManagement() {
             <Input placeholder={t('group.groupName')} />
           </Form.Item>
           <Form.Item name="description" label={t('group.description')}>
-            <Input.TextArea rows={3} placeholder={t('group.description')} />
+            <Input.TextArea rows={2} placeholder={t('group.description')} />
+          </Form.Item>
+          <Form.Item label={t('group.associatedRoles')}>
+            <Select
+              mode="multiple"
+              placeholder={t('common.pleaseSelect')}
+              value={selectedRoleIds}
+              onChange={setSelectedRoleIds}
+              options={(allRoles ?? []).map((r) => ({ label: r.roleName, value: r.id }))}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+          <Form.Item label={t('group.associatedUsers')}>
+            <Select
+              mode="multiple"
+              placeholder={t('common.pleaseSelect')}
+              value={selectedUserIds}
+              onChange={setSelectedUserIds}
+              options={(allUsers ?? []).map((u) => ({ label: u.userName, value: u.id }))}
+              style={{ width: '100%' }}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -299,9 +342,15 @@ export default function GroupManagement() {
         title={t('common.edit')}
         open={editVisible}
         onOk={handleEdit}
-        onCancel={() => { setEditVisible(false); form.resetFields(); setSelectedGroup(null); }}
+        onCancel={() => {
+          setEditVisible(false);
+          form.resetFields();
+          setSelectedGroup(null);
+          setSelectedRoleIds([]);
+          setSelectedUserIds([]);
+        }}
         confirmLoading={updateGroup.isPending}
-        width={520}
+        width={640}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -312,7 +361,27 @@ export default function GroupManagement() {
             <Input placeholder={t('group.groupName')} />
           </Form.Item>
           <Form.Item name="description" label={t('group.description')}>
-            <Input.TextArea rows={3} placeholder={t('group.description')} />
+            <Input.TextArea rows={2} placeholder={t('group.description')} />
+          </Form.Item>
+          <Form.Item label={t('group.associatedRoles')}>
+            <Select
+              mode="multiple"
+              placeholder={t('common.pleaseSelect')}
+              value={selectedRoleIds}
+              onChange={setSelectedRoleIds}
+              options={(allRoles ?? []).map((r) => ({ label: r.roleName, value: r.id }))}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+          <Form.Item label={t('group.associatedUsers')}>
+            <Select
+              mode="multiple"
+              placeholder={t('common.pleaseSelect')}
+              value={selectedUserIds}
+              onChange={setSelectedUserIds}
+              options={(allUsers ?? []).map((u) => ({ label: u.userName, value: u.id }))}
+              style={{ width: '100%' }}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -330,7 +399,7 @@ export default function GroupManagement() {
             <Input readOnly />
           </Form.Item>
           <Form.Item name="description" label={t('group.description')}>
-            <Input.TextArea rows={3} readOnly />
+            <Input.TextArea rows={2} readOnly />
           </Form.Item>
           <Form.Item label={t('group.userCount')}>
             <span>{selectedGroup?.userCount ?? 0}</span>
