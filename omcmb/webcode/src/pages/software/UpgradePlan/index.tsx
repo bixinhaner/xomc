@@ -98,13 +98,9 @@ export default function UpgradePlan() {
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [selectedRows, setSelectedRows] = useState<UpgradePlanRow[]>([]);
   // 批量输入相关状态
   const [batchInputVisible, setBatchInputVisible] = useState(false);
-  const [batchInputTab, setBatchInputTab] = useState<'sn' | 'type'>('sn');
   const [batchInputValue, setBatchInputValue] = useState('');
-  const [selectedProductType, setSelectedProductType] = useState<string | undefined>(undefined);
   const [batchInputPreview, setBatchInputPreview] = useState<{
     matched: UpgradePlanRow[];
     notFound: string[];
@@ -131,6 +127,8 @@ export default function UpgradePlan() {
   const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
   const [selectedNewDevices, setSelectedNewDevices] = useState<React.Key[]>([]);
   const [addDeviceKeyword, setAddDeviceKeyword] = useState('');
+  // 全选该产品类型设备的状态
+  const [selectAllOfType, setSelectAllOfType] = useState(false);
 
   // 可添加的设备列表（同产品类型且不在已选列表中）
   const availableDevices = useMemo(() => {
@@ -148,6 +146,12 @@ export default function UpgradePlan() {
     );
   }, [availableDevices, addDeviceKeyword]);
 
+  // 该产品类型的全部设备总数（用于全选功能）
+  const allDevicesCountOfType = useMemo(() => {
+    if (!drawerProductType) return 0;
+    return mockData.filter((d) => d.productType === drawerProductType).length;
+  }, [drawerProductType]);
+
   // Mock 升级文件列表
   const upgradeFiles = useMemo(() => [
     { label: 'V1.3.0_full.bin', value: 'V1.3.0_full.bin', category: 'software', productType: 'PM-B4860' },
@@ -162,15 +166,6 @@ export default function UpgradePlan() {
       (f) => f.productType === drawerProductType && f.category === upgradeCategory
     );
   }, [upgradeFiles, drawerProductType, upgradeCategory]);
-
-  // 计算已选设备的产品类型
-  const selectedTypes = useMemo(() => {
-    const types = new Set(selectedRows.map((row) => row.productType));
-    return Array.from(types);
-  }, [selectedRows]);
-
-  // 是否选择了不同类型的设备
-  const hasMixedTypes = selectedTypes.length > 1;
 
   // 解析批量输入的设备SN
   const parseBatchInput = (input: string): string[] => {
@@ -213,29 +208,33 @@ export default function UpgradePlan() {
     setBatchInputPreview({ matched, notFound, mixedTypes });
   };
 
-  // 确认批量输入
+  // 确认批量输入（添加到抽屉设备列表）
   const handleBatchInputConfirm = () => {
-    const { matched, mixedTypes } = batchInputPreview;
+    const { matched } = batchInputPreview;
 
     if (matched.length === 0) {
       void message.warning('没有匹配到任何设备');
       return;
     }
 
-    if (mixedTypes.length > 1) {
-      void message.error('批量升级只能选择相同产品类型的设备，请重新输入');
+    // 过滤出符合当前产品类型且不在已选列表中的设备
+    const existingIds = new Set(drawerDevices.map((d) => d.id));
+    const validDevices = matched.filter(
+      (d) => d.productType === drawerProductType && !existingIds.has(d.id)
+    );
+
+    if (validDevices.length === 0) {
+      void message.warning('没有可添加的设备（设备类型不匹配或已存在）');
       return;
     }
 
-    // 设置选中状态
-    const keys = matched.map((r) => r.id);
-    setSelectedKeys(keys);
-    setSelectedRows(matched);
+    // 添加到抽屉设备列表
+    setDrawerDevices((prev) => [...prev, ...validDevices]);
     setBatchInputVisible(false);
     setBatchInputValue('');
     setBatchInputPreview({ matched: [], notFound: [], mixedTypes: [] });
 
-    void message.success(`已匹配 ${matched.length} 个设备，产品类型: ${mixedTypes[0]}`);
+    void message.success(`已添加 ${validDevices.length} 台设备`);
   };
 
   // 打开批量输入弹窗
@@ -482,20 +481,10 @@ export default function UpgradePlan() {
     });
   }, [filters]);
 
-  // 打开批量升级抽屉
-  const handleBatchUpgrade = (keys: React.Key[]) => {
-    if (keys.length === 0) {
-      void message.warning('请先选择要升级的设备');
-      return;
-    }
-    // 校验产品类型是否一致
-    if (hasMixedTypes) {
-      void message.error('批量升级只能选择相同产品类型的设备');
-      return;
-    }
-    // 初始化抽屉状态
-    setDrawerDevices([...selectedRows]);
-    setDrawerProductType(selectedTypes[0] ?? '');
+  // 直接打开升级抽屉（不需要预选设备）
+  const handleOpenUpgradeDrawer = () => {
+    setDrawerDevices([]);
+    setDrawerProductType('');
     setUpgradeCategory('software');
     setExecutionMethod('immediate');
     setScheduledTime(null);
@@ -503,6 +492,7 @@ export default function UpgradePlan() {
     setDrawerKeepConfig(true);
     setRetryOffline(true);
     setBatchSize(20);
+    setSelectAllOfType(false);
     setUpgradeDrawerVisible(true);
   };
 
@@ -544,8 +534,13 @@ export default function UpgradePlan() {
 
   // 提交批量升级
   const handleSubmitUpgrade = () => {
-    if (drawerDevices.length === 0) {
-      void message.warning('请选择要升级的设备');
+    // 验证设备选择
+    if (!selectAllOfType && drawerDevices.length === 0) {
+      void message.warning('请选择要升级的设备或勾选"升级该产品类型的全部设备"');
+      return;
+    }
+    if (selectAllOfType && allDevicesCountOfType === 0) {
+      void message.warning('该产品类型下没有设备');
       return;
     }
     if (!upgradeFile) {
@@ -560,66 +555,17 @@ export default function UpgradePlan() {
     // 提交升级任务
     const execMethodText = executionMethod === 'immediate' ? '立即执行' :
                           executionMethod === 'suspend' ? '挂起' : `定时执行 (${scheduledTime?.format('YYYY-MM-DD HH:mm')})`;
-    void message.success(`已创建批量升级任务：${drawerDevices.length} 台设备，${execMethodText}`);
+    const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
+    const deviceInfo = selectAllOfType
+      ? `产品类型「${drawerProductType}」全部 ${deviceCount} 台设备`
+      : `${deviceCount} 台设备`;
+
+    void message.success(`已创建批量升级任务：${deviceInfo}，${execMethodText}`);
 
     // 关闭抽屉并清空选择
     setUpgradeDrawerVisible(false);
-    setSelectedKeys([]);
-    setSelectedRows([]);
+    setSelectAllOfType(false);
   };
-
-  // 批量操作配置
-  const batchActions: BatchAction[] = useMemo(() => [
-    {
-      key: 'batch-upgrade',
-      label: '批量升级',
-      icon: <PlayCircleOutlined />,
-      onClick: handleBatchUpgrade,
-    },
-  ], [hasMixedTypes, selectedTypes]);
-
-  // 选择变化处理
-  const handleSelectionChange = (keys: React.Key[], rows: UpgradePlanRow[]) => {
-    setSelectedKeys(keys);
-    setSelectedRows(rows);
-  };
-
-  // 工具栏左侧内容 - 显示已选类型信息
-  const extraToolbarLeft = useMemo(() => {
-    if (selectedKeys.length === 0) return null;
-
-    return hasMixedTypes ? (
-      <Alert
-        type="warning"
-        showIcon
-        icon={<WarningOutlined />}
-        message={
-          <Space>
-            <span>已选择 {selectedKeys.length} 台设备</span>
-            <Tag color="warning">类型不一致: {selectedTypes.join(', ')}</Tag>
-            <span style={{ color: '#faad14' }}>批量升级需选择相同产品类型</span>
-          </Space>
-        }
-        style={{ padding: '4px 12px' }}
-      />
-    ) : (
-      <Space>
-        <span>已选择 {selectedKeys.length} 台设备</span>
-        <Tag color="blue">类型: {selectedTypes[0]}</Tag>
-      </Space>
-    );
-  }, [selectedKeys.length, hasMixedTypes, selectedTypes]);
-
-  // 工具栏右侧内容 - 批量输入按钮
-  const extraToolbarRight = useMemo(() => (
-    <Button
-      size="small"
-      icon={<PlusOutlined />}
-      onClick={handleOpenBatchInput}
-    >
-      批量输入
-    </Button>
-  ), []);
 
   const columns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
     {
@@ -691,11 +637,16 @@ export default function UpgradePlan() {
     { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
   ], []);
 
-  // 页面头部导出按钮
+  // 页面头部按钮
   const headerExtra = useMemo(() => (
-    <Button icon={<DownloadOutlined />} onClick={handleOpenExport}>
-      导出
-    </Button>
+    <Space>
+      <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleOpenUpgradeDrawer}>
+        升级
+      </Button>
+      <Button icon={<DownloadOutlined />} onClick={handleOpenExport}>
+        导出
+      </Button>
+    </Space>
   ), []);
 
   return (
@@ -716,27 +667,30 @@ export default function UpgradePlan() {
         pageSize={pageSize}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         scroll={{ x: 2000 }}
-        selectable
-        selectedRowKeys={selectedKeys}
-        onSelectionChange={handleSelectionChange}
-        batchActions={batchActions}
-        extraToolbarLeft={extraToolbarLeft}
-        extraToolbarRight={extraToolbarRight}
       />
 
       {/* 批量输入弹窗 */}
       <Modal
-        title="批量输入设备SN"
+        title={`批量输入设备SN - ${drawerProductType || '请先选择产品类型'}`}
         open={batchInputVisible}
         onCancel={() => setBatchInputVisible(false)}
         onOk={handleBatchInputConfirm}
-        okText="确认选择"
+        okText="确认添加"
         cancelText="取消"
         width={600}
         okButtonProps={{
-          disabled: batchInputPreview.matched.length === 0 || batchInputPreview.mixedTypes.length > 1,
+          disabled: batchInputPreview.matched.length === 0 || !drawerProductType,
         }}
       >
+        {!drawerProductType && (
+          <Alert
+            type="warning"
+            showIcon
+            message="请先选择产品类型"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
         <div style={{ marginBottom: 16 }}>
           <Input.TextArea
             placeholder="请输入设备SN，支持换行、逗号、分号、空格分隔&#10;例如：&#10;ENB00001&#10;ENB00002, ENB00003; GNB00001"
@@ -751,21 +705,21 @@ export default function UpgradePlan() {
         {batchInputPreview.matched.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <Alert
-              type={batchInputPreview.mixedTypes.length > 1 ? 'warning' : 'success'}
+              type={batchInputPreview.mixedTypes.includes(drawerProductType) ? 'success' : 'warning'}
               showIcon
-              icon={batchInputPreview.mixedTypes.length > 1 ? <WarningOutlined /> : undefined}
+              icon={!batchInputPreview.mixedTypes.includes(drawerProductType) ? <WarningOutlined /> : undefined}
               message={
                 <Space direction="vertical" size="small">
                   <span>
                     匹配到 <strong>{batchInputPreview.matched.length}</strong> 个设备
-                    {batchInputPreview.mixedTypes.length === 1 && (
-                      <Tag color="blue" style={{ marginLeft: 8 }}>产品类型: {batchInputPreview.mixedTypes[0]}</Tag>
+                    {batchInputPreview.mixedTypes.includes(drawerProductType) && (
+                      <Tag color="blue" style={{ marginLeft: 8 }}>可添加: {batchInputPreview.matched.filter(d => d.productType === drawerProductType).length} 台</Tag>
                     )}
                   </span>
-                  {batchInputPreview.mixedTypes.length > 1 && (
+                  {!batchInputPreview.mixedTypes.includes(drawerProductType) && drawerProductType && (
                     <span style={{ color: '#faad14' }}>
                       <WarningOutlined style={{ marginRight: 4 }} />
-                      检测到多种产品类型: {batchInputPreview.mixedTypes.join(', ')}，批量升级只能选择相同产品类型
+                      没有产品类型为「{drawerProductType}」的设备，请重新输入
                     </span>
                   )}
                 </Space>
@@ -878,7 +832,7 @@ export default function UpgradePlan() {
             <Button
               type="primary"
               onClick={handleSubmitUpgrade}
-              disabled={drawerDevices.length === 0 || !upgradeFile}
+              disabled={(!selectAllOfType && drawerDevices.length === 0) || !upgradeFile}
             >
               确认升级
             </Button>
@@ -893,7 +847,8 @@ export default function UpgradePlan() {
               onChange={(val) => {
                 setDrawerProductType(val);
                 setUpgradeFile(undefined);
-                // 切换产品类型时，清空不匹配的设备
+                // 切换产品类型时，重置全选状态并清空不匹配的设备
+                setSelectAllOfType(false);
                 setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
               }}
               options={[
@@ -907,6 +862,20 @@ export default function UpgradePlan() {
               ]}
               style={{ width: '100%' }}
             />
+          </Form.Item>
+
+          {/* 全选该产品类型设备 */}
+          <Form.Item>
+            <Checkbox
+              checked={selectAllOfType}
+              onChange={(e) => setSelectAllOfType(e.target.checked)}
+              disabled={!drawerProductType}
+            >
+              升级该产品类型的全部设备
+              {drawerProductType && (
+                <Tag color="blue" style={{ marginLeft: 8 }}>共 {allDevicesCountOfType} 台</Tag>
+              )}
+            </Checkbox>
           </Form.Item>
 
           {/* 升级类型 */}
@@ -925,45 +894,74 @@ export default function UpgradePlan() {
           </Form.Item>
 
           {/* 已选升级设备 */}
-          <Form.Item label={<span>已选升级设备 <Tag color="blue">{drawerDevices.length} 台</Tag></span>}>
-            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 6 }}>
-              <Table
-                size="small"
-                dataSource={drawerDevices}
-                rowKey="id"
-                pagination={false}
-                columns={[
-                  { title: '基站编码', dataIndex: 'deviceSn', width: 100 },
-                  { title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-                  { title: '当前版本', dataIndex: 'sourceVersion', width: 80 },
-                  {
-                    title: '',
-                    width: 40,
-                    render: (_: unknown, record: UpgradePlanRow) => (
-                      <Button
-                        type="text"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={() => handleRemoveDevice(record.id)}
-                      />
-                    ),
-                  },
-                ]}
+          <Form.Item label={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <span>
+                已选升级设备
+                {' '}
+                <Tag color="blue">{selectAllOfType ? allDevicesCountOfType : drawerDevices.length} 台</Tag>
+              </span>
+              {!selectAllOfType && (
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleOpenBatchInput}
+                  disabled={!drawerProductType}
+                >
+                  批量输入
+                </Button>
+              )}
+            </div>
+          }>
+            {selectAllOfType ? (
+              <Alert
+                type="info"
+                showIcon
+                message={`已选择产品类型「${drawerProductType}」的全部设备，共 ${allDevicesCountOfType} 台`}
+                description="执行时将自动查询该产品类型的所有设备进行升级"
               />
-            </div>
-            {/* 添加设备按钮 */}
-            <div style={{ marginTop: 8 }}>
-              <Button
-                type="dashed"
-                icon={<PlusOutlined />}
-                onClick={handleOpenAddDeviceModal}
-                style={{ width: '100%' }}
-                disabled={!drawerProductType}
-              >
-                添加设备
-              </Button>
-            </div>
+            ) : (
+              <>
+                <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 6 }}>
+                  <Table
+                    size="small"
+                    dataSource={drawerDevices}
+                    rowKey="id"
+                    pagination={false}
+                    columns={[
+                      { title: '基站编码', dataIndex: 'deviceSn', width: 100 },
+                      { title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
+                      { title: '当前版本', dataIndex: 'sourceVersion', width: 80 },
+                      {
+                        title: '',
+                        width: 40,
+                        render: (_: unknown, record: UpgradePlanRow) => (
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => handleRemoveDevice(record.id)}
+                          />
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+                {/* 添加设备按钮 */}
+                <div style={{ marginTop: 8 }}>
+                  <Button
+                    type="dashed"
+                    icon={<PlusOutlined />}
+                    onClick={handleOpenAddDeviceModal}
+                    style={{ width: '100%' }}
+                    disabled={!drawerProductType}
+                  >
+                    添加设备
+                  </Button>
+                </div>
+              </>
+            )}
           </Form.Item>
 
           <Divider />
