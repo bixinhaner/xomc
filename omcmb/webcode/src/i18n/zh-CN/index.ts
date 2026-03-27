@@ -745,6 +745,7 @@ const messages: Record<string, string> = {
   'user.confirmBatchResetPassword': '确认重置选中用户的密码？',
   'user.noOnlineUsers':   '选中的用户中没有在线用户',
   'user.passwordMismatch': '两次输入的密码不一致',
+  'user.builtIn':             '内置',
   'user.builtInCannotDelete': '内置用户无法删除',
   'user.noUsersToDelete': '没有可删除的用户（内置用户不可删除）',
   'user.noOnlineUsers':   '选中的用户中没有在线用户',

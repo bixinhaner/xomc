@@ -541,9 +541,15 @@ export default function UserManagement() {
       title: t('user.userName'),
       dataIndex: 'userName',
       width: 130,
-      render: (val) => (
-        <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{String(val)}</span>
-      ),
+      render: (val, record) => {
+        const user = record as User;
+        return (
+          <span>
+            <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{String(val)}</span>
+            {isBuiltIn(user) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('user.builtIn')}</Tag>}
+          </span>
+        );
+      },
     },
     { key: 'email', title: t('user.email'), dataIndex: 'email', ellipsis: true },
     {

@@ -741,6 +741,7 @@ const messages: Record<string, string> = {
   'user.confirmUnlock':   'Confirm unlock selected users?',
   'user.confirmBatchResetPassword': 'Confirm reset password for selected users?',
   'user.passwordMismatch': 'Passwords do not match',
+  'user.builtIn':             'Built-in',
   'user.builtInCannotDelete': 'Built-in users cannot be deleted',
   'user.noUsersToDelete': 'No users to delete (built-in users cannot be deleted)',
   'user.noOnlineUsers':   'No online users in selection',
