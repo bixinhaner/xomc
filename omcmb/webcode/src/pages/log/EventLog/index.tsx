@@ -139,6 +139,13 @@ export default function EventLog() {
   // 表格列 - 去掉级别列，去掉操作项
   const columns: DataTableColumn<EventLog>[] = useMemo(() => [
     {
+      key: 'id',
+      title: 'ID',
+      dataIndex: 'id',
+      width: 80,
+      render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
+    },
+    {
       key: 'neCode',
       title: '设备编码',
       dataIndex: 'neCode',
