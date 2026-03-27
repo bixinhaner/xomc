@@ -94,6 +94,10 @@ func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 	return map[model.DeviceStatus]int64{}, nil
 }
 
+func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return []model.Device{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Mock: DeviceParameterRepository
 // ---------------------------------------------------------------------------

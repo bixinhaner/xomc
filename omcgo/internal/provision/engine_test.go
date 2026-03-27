@@ -313,6 +313,9 @@ func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 	}
 	return nil, nil
 }
+func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return []model.Device{}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Tests: HandleRPCResult

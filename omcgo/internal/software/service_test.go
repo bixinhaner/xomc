@@ -111,6 +111,9 @@ func (m *svcMockDeviceRepo) UpdateLastInform(_ context.Context, _ string, _ time
 func (m *svcMockDeviceRepo) CountByStatus(_ context.Context, _ *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return map[model.DeviceStatus]int64{}, nil
 }
+func (m *svcMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return nil, nil
+}
 
 type svcMockCmdQueue struct {
 	pushFn func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error

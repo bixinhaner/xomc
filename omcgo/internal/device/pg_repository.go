@@ -308,6 +308,44 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 	return result, nil
 }
 
+func (r *PgDeviceRepository) ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error) {
+	builder := psql.Select(deviceColumns()...).From("devices").
+		Where(sq.Eq{"status": model.DeviceActive}).
+		OrderBy("last_inform_at ASC NULLS FIRST", "id ASC").
+		Limit(uint64(limit))
+
+	if cursorTime != nil && cursorID != nil {
+		// Keyset condition: (last_inform_at, id) > (cursorTime, cursorID)
+		// Handles NULL last_inform_at: NULLs sort first, so after we pass them
+		// we only need the non-NULL condition.
+		builder = builder.Where(
+			"(last_inform_at > ? OR (last_inform_at = ? AND id > ?))",
+			*cursorTime, *cursorTime, *cursorID,
+		)
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list active by last inform query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list active by last inform: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, *d)
+	}
+	return devices, nil
+}
+
 func (r *PgDeviceRepository) scanDevice(ctx context.Context, query string, args ...interface{}) (*model.Device, error) {
 	row := r.pool.QueryRow(ctx, query, args...)
 	d, err := scanDeviceFromRow(row)

@@ -20,15 +20,16 @@ import (
 // ---------------------------------------------------------------------------
 
 type hbMockDeviceRepo struct {
-	createFn            func(ctx context.Context, device *model.Device) error
-	getByIDFn           func(ctx context.Context, id uuid.UUID) (*model.Device, error)
-	getBySerialNumberFn func(ctx context.Context, sn string) (*model.Device, error)
-	updateFn            func(ctx context.Context, device *model.Device) error
-	deleteFn            func(ctx context.Context, id uuid.UUID) error
-	listFn              func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
-	updateStatusFn      func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
-	updateLastInformFn  func(ctx context.Context, sn string, at time.Time, events []string) error
-	countByStatusFn     func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
+	createFn                  func(ctx context.Context, device *model.Device) error
+	getByIDFn                 func(ctx context.Context, id uuid.UUID) (*model.Device, error)
+	getBySerialNumberFn       func(ctx context.Context, sn string) (*model.Device, error)
+	updateFn                  func(ctx context.Context, device *model.Device) error
+	deleteFn                  func(ctx context.Context, id uuid.UUID) error
+	listFn                    func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
+	updateStatusFn            func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
+	updateLastInformFn        func(ctx context.Context, sn string, at time.Time, events []string) error
+	countByStatusFn           func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
+	listActiveByLastInformFn  func(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error)
 }
 
 func (m *hbMockDeviceRepo) Create(ctx context.Context, d *model.Device) error {
@@ -85,6 +86,12 @@ func (m *hbMockDeviceRepo) CountByStatus(ctx context.Context, c *model.CarrierCo
 	}
 	return map[model.DeviceStatus]int64{}, nil
 }
+func (m *hbMockDeviceRepo) ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error) {
+	if m.listActiveByLastInformFn != nil {
+		return m.listActiveByLastInformFn(ctx, cursorTime, cursorID, limit)
+	}
+	return []model.Device{}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -137,14 +144,8 @@ func TestCheckHeartbeats_MarkOffline(t *testing.T) {
 	var markedStatus model.DeviceStatus
 
 	repo := &hbMockDeviceRepo{
-		listFn: func(_ context.Context, _ DeviceFilter) (*model.ListResponse[model.Device], error) {
-			return &model.ListResponse[model.Device]{
-				Items:      []model.Device{{ID: deviceID, SerialNumber: "SN-EXPIRED", Status: model.DeviceActive}},
-				Total:      1,
-				Page:       1,
-				PageSize:   100,
-				TotalPages: 1,
-			}, nil
+		listActiveByLastInformFn: func(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+			return []model.Device{{ID: deviceID, SerialNumber: "SN-EXPIRED", Status: model.DeviceActive}}, nil
 		},
 		updateStatusFn: func(_ context.Context, _ uuid.UUID, status model.DeviceStatus) error {
 			markedStatus = status
@@ -161,14 +162,8 @@ func TestCheckHeartbeats_MarkOffline(t *testing.T) {
 func TestCheckHeartbeats_HeartbeatExists(t *testing.T) {
 	updateCalled := false
 	repo := &hbMockDeviceRepo{
-		listFn: func(_ context.Context, _ DeviceFilter) (*model.ListResponse[model.Device], error) {
-			return &model.ListResponse[model.Device]{
-				Items:      []model.Device{{ID: uuid.New(), SerialNumber: "SN-ALIVE", Status: model.DeviceActive}},
-				Total:      1,
-				Page:       1,
-				PageSize:   100,
-				TotalPages: 1,
-			}, nil
+		listActiveByLastInformFn: func(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+			return []model.Device{{ID: uuid.New(), SerialNumber: "SN-ALIVE", Status: model.DeviceActive}}, nil
 		},
 		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ model.DeviceStatus) error {
 			updateCalled = true
@@ -185,7 +180,7 @@ func TestCheckHeartbeats_HeartbeatExists(t *testing.T) {
 
 func TestCheckHeartbeats_RepoError(t *testing.T) {
 	repo := &hbMockDeviceRepo{
-		listFn: func(_ context.Context, _ DeviceFilter) (*model.ListResponse[model.Device], error) {
+		listActiveByLastInformFn: func(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 			return nil, errors.New("db down")
 		},
 	}

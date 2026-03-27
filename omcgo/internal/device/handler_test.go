@@ -98,6 +98,9 @@ func (m *fakeDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 	}
 	return counts, nil
 }
+func (m *fakeDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 

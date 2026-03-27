@@ -71,6 +71,9 @@ func (m *execDeviceRepo) UpdateLastInform(_ context.Context, _ string, _ time.Ti
 func (m *execDeviceRepo) CountByStatus(_ context.Context, _ *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return nil, nil
 }
+func (m *execDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return nil, nil
+}
 
 type execCmdQueue struct {
 	pushed []struct {

@@ -85,6 +85,9 @@ func (m *infMockDeviceRepo) CountByStatus(ctx context.Context, c *model.CarrierC
 	}
 	return map[model.DeviceStatus]int64{}, nil
 }
+func (m *infMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return nil, nil
+}
 
 type infMockParamRepo struct {
 	batchUpsertFn func(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error

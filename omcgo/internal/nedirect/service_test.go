@@ -161,6 +161,9 @@ func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at tim
 func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return nil, nil
 }
+func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
+	return nil, nil
+}
 
 type mockParamRepo struct {
 	params map[uuid.UUID][]model.DeviceParameter

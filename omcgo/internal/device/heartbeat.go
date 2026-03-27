@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
@@ -70,24 +71,26 @@ func (m *HeartbeatMonitor) RefreshHeartbeat(ctx context.Context, deviceSN string
 }
 
 // CheckHeartbeats scans active devices and marks those with expired heartbeats as offline.
+// Uses keyset (cursor) pagination ordered by last_inform_at ASC to:
+//  1. Prioritize checking devices that haven't reported in the longest time.
+//  2. Avoid the sliding-window problem where OFFSET-based pagination skips
+//     devices when earlier rows are mutated (marked offline) during iteration.
 func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
-	// List all active devices
-	filter := DeviceFilter{
-		Status: statusPtr(model.DeviceActive),
-		ListRequest: model.ListRequest{
-			Page:     1,
-			PageSize: 100,
-		},
-	}
-	// 循环检查，直到ctx超时
+	const batchSize = 100
+	var (
+		cursorTime *time.Time
+		cursorID   *uuid.UUID
+		checked    int
+	)
+
 	for {
-		result, err := m.deviceRepo.List(ctx, filter)
+		devices, err := m.deviceRepo.ListActiveByLastInform(ctx, cursorTime, cursorID, batchSize)
 		if err != nil {
 			m.logger.Error("list active devices for heartbeat check", zap.Error(err))
 			return
 		}
 
-		for _, device := range result.Items {
+		for _, device := range devices {
 			key := heartbeatKeyPrefix + device.SerialNumber
 			exists, err := m.redis.Exists(ctx, key).Result()
 			if err != nil {
@@ -98,7 +101,6 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 			}
 
 			if exists == 0 {
-				// Heartbeat expired — mark offline
 				if err := m.deviceRepo.UpdateStatus(ctx, device.ID, model.DeviceOffline); err != nil {
 					m.logger.Error("mark device offline",
 						zap.Error(err),
@@ -111,15 +113,17 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 			}
 		}
 
-		if filter.Page >= result.TotalPages {
+		checked += len(devices)
+
+		if len(devices) < batchSize {
 			break
 		}
-		filter.Page++
+		// Advance cursor to the last device in this batch.
+		last := devices[len(devices)-1]
+		cursorTime = last.LastInformAt
+		cursorID = &last.ID
 	}
 
-	m.logger.Info("heartbeat check complete")
+	m.logger.Info("heartbeat check complete", zap.Int("devices_checked", checked))
 }
 
-func statusPtr(s model.DeviceStatus) *model.DeviceStatus {
-	return &s
-}
