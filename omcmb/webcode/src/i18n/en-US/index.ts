@@ -807,6 +807,14 @@ const messages: Record<string, string> = {
   'role.modules.system':      'System Management',
   'role.modules.report':      'Report Management',
   'role.modules.ops':         'Operations Tools',
+  // Validation messages
+  'role.roleNameMaxLength':   'Role name max 200 characters',
+  'role.roleNameExists':      'Role name already exists',
+  'role.pleaseSelectPermission': 'Please select at least one permission',
+  'role.pleaseSelectDeviceGroup': 'Please select at least one device group',
+  'role.roleNamePlaceholder': 'Please enter role name',
+  'role.descriptionPlaceholder': 'Please enter description',
+  'role.descriptionMaxLength': 'Description max 500 characters',
 
   // -------------------------------------------------------------------------
   // Group management

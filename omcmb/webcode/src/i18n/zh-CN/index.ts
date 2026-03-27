@@ -812,6 +812,15 @@ const messages: Record<string, string> = {
   'role.modules.system':      '系统管理',
   'role.modules.report':      '报表管理',
   'role.modules.ops':         '运维工具',
+  // 校验提示
+  'role.roleNameMaxLength':   '角色名称最大200个字符',
+  'role.roleNameExists':      '角色名称已存在',
+  'role.pleaseSelectPermission': '请至少选择一个权限',
+  'role.pleaseSelectDeviceGroup': '请至少选择一个设备组',
+  'role.roleNamePlaceholder': '请输入角色名称',
+  'role.descriptionPlaceholder': '请输入描述',
+  'role.descriptionMaxLength': '描述最大500个字符',
+  'role.pleaseSelectDeviceGroups': '请选择设备组（可多选）',
 
   // -------------------------------------------------------------------------
   // Group management

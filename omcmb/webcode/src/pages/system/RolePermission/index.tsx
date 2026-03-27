@@ -12,6 +12,7 @@ import {
   Card,
   Select,
   Space,
+  Alert,
 } from 'antd';
 import {
   PlusOutlined,
@@ -151,6 +152,32 @@ export default function RoleManagement() {
   // 权限模块数据
   const permissionModules = useMemo(() => getPermissionModules(t as (id: string, values?: Record<string, unknown>) => string), [t]);
 
+  // 已有的角色名称列表（用于重复检查）
+  const existingRoleNames = useMemo(
+    () => (data?.items ?? []).map((r) => r.roleName.toLowerCase()),
+    [data?.items]
+  );
+
+  // 校验角色名称
+  const validateRoleName = useCallback((_: unknown, value: string) => {
+    if (!value || !value.trim()) {
+      return Promise.reject(new Error(t('common.pleaseInput')));
+    }
+    if (value.length > 200) {
+      return Promise.reject(new Error(t('role.roleNameMaxLength')));
+    }
+    // 编辑模式下，如果名称没有变化，则跳过重复检查
+    const currentName = selectedRole?.roleName?.toLowerCase();
+    if (editVisible && currentName === value.toLowerCase()) {
+      return Promise.resolve();
+    }
+    // 检查是否重复
+    if (existingRoleNames.includes(value.toLowerCase())) {
+      return Promise.reject(new Error(t('role.roleNameExists')));
+    }
+    return Promise.resolve();
+  }, [t, existingRoleNames, selectedRole, editVisible]);
+
   const handleDelete = useCallback((role: Role) => {
     if (isBuiltIn(role)) {
       modal.warning({
@@ -197,7 +224,19 @@ export default function RoleManagement() {
     });
   }, [data?.items, isBuiltIn, t, deleteRoles, modal, message]);
 
+  // 校验并提交创建
   const handleCreate = useCallback(() => {
+    // 校验权限
+    if (checkedPermissions.length === 0) {
+      message.warning(t('role.pleaseSelectPermission'));
+      return;
+    }
+    // 校验设备组
+    if (selectedDeviceGroupIds.length === 0) {
+      message.warning(t('role.pleaseSelectDeviceGroup'));
+      return;
+    }
+
     form.validateFields().then((vals) => {
       createRole.mutate(
         {
@@ -221,8 +260,21 @@ export default function RoleManagement() {
     });
   }, [form, createRole, checkedPermissions, selectedDeviceGroupIds, message, t]);
 
+  // 校验并提交编辑
   const handleEdit = useCallback(() => {
     if (!selectedRole) return;
+
+    // 校验权限
+    if (checkedPermissions.length === 0) {
+      message.warning(t('role.pleaseSelectPermission'));
+      return;
+    }
+    // 校验设备组
+    if (selectedDeviceGroupIds.length === 0) {
+      message.warning(t('role.pleaseSelectDeviceGroup'));
+      return;
+    }
+
     form.validateFields().then((vals) => {
       updateRole.mutate(
         {
@@ -354,7 +406,16 @@ export default function RoleManagement() {
   ], [t, form, isBuiltIn, handleDelete]);
 
   const renderPermissionTree = (readOnly = false) => (
-    <Card title={t('role.permissionConfig')} size="small" style={{ marginTop: 16 }}>
+    <Card
+      title={t('role.permissionConfig')}
+      size="small"
+      style={{ marginTop: 16 }}
+      extra={!readOnly && checkedPermissions.length === 0 ? (
+        <span style={{ color: 'var(--color-error)', fontSize: 12 }}>
+          {t('role.pleaseSelectPermission')}
+        </span>
+      ) : null}
+    >
       <Tree
         checkable
         checkedKeys={checkedPermissions}
@@ -372,20 +433,36 @@ export default function RoleManagement() {
   );
 
   const renderDeviceGroupSelect = (readOnly = false) => (
-    <Form.Item label={t('role.deviceGroups')}>
-      <Select
-        mode="multiple"
-        placeholder={t('role.pleaseSelectDeviceGroups')}
-        value={selectedDeviceGroupIds}
-        onChange={setSelectedDeviceGroupIds}
-        options={deviceGroupOptions}
-        style={{ width: '100%' }}
-        disabled={readOnly}
-        showSearch
-        filterOption={(input, option) =>
-          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-        }
-      />
+    <Form.Item
+      label={t('role.deviceGroups')}
+      required={!readOnly}
+      help={!readOnly && selectedDeviceGroupIds.length === 0 ? t('role.pleaseSelectDeviceGroup') : undefined}
+      validateStatus={!readOnly && selectedDeviceGroupIds.length === 0 ? 'warning' : undefined}
+    >
+      {readOnly ? (
+        <Space wrap>
+          {selectedDeviceGroupIds.length > 0 ? (
+            deviceGroupOptions
+              .filter((opt) => selectedDeviceGroupIds.includes(opt.value))
+              .map((opt) => <Tag key={opt.value}>{opt.label}</Tag>)
+          ) : (
+            <span style={{ color: 'var(--color-text-secondary)' }}>-</span>
+          )}
+        </Space>
+      ) : (
+        <Select
+          mode="multiple"
+          placeholder={t('role.pleaseSelectDeviceGroups')}
+          value={selectedDeviceGroupIds}
+          onChange={setSelectedDeviceGroupIds}
+          options={deviceGroupOptions}
+          style={{ width: '100%' }}
+          showSearch
+          filterOption={(input, option) =>
+            (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+          }
+        />
+      )}
     </Form.Item>
   );
 
@@ -475,9 +552,9 @@ export default function RoleManagement() {
           <Form.Item
             name="roleName"
             label={t('role.roleName')}
-            rules={[{ required: true, message: t('common.pleaseInput') }]}
+            rules={[{ required: true, validator: validateRoleName }]}
           >
-            <Input placeholder={t('role.roleName')} />
+            <Input placeholder={t('role.roleNamePlaceholder')} maxLength={200} showCount />
           </Form.Item>
           <Form.Item
             name="batchOperation"
@@ -488,7 +565,12 @@ export default function RoleManagement() {
             <Switch checkedChildren={t('common.yes')} unCheckedChildren={t('common.no')} />
           </Form.Item>
           <Form.Item name="description" label={t('role.description')}>
-            <Input.TextArea rows={2} placeholder={t('role.description')} />
+            <Input.TextArea
+              rows={2}
+              placeholder={t('role.descriptionPlaceholder')}
+              maxLength={500}
+              showCount
+            />
           </Form.Item>
           {renderDeviceGroupSelect(false)}
           {renderPermissionTree(false)}
@@ -516,9 +598,8 @@ export default function RoleManagement() {
           <Form.Item
             name="roleName"
             label={t('role.roleName')}
-            rules={[{ required: true, message: t('common.pleaseInput') }]}
           >
-            <Input placeholder={t('role.roleName')} />
+            <Input readOnly style={{ color: 'var(--color-text-secondary)' }} />
           </Form.Item>
           <Form.Item
             name="batchOperation"
@@ -528,7 +609,12 @@ export default function RoleManagement() {
             <Switch checkedChildren={t('common.yes')} unCheckedChildren={t('common.no')} />
           </Form.Item>
           <Form.Item name="description" label={t('role.description')}>
-            <Input.TextArea rows={2} placeholder={t('role.description')} />
+            <Input.TextArea
+              rows={2}
+              placeholder={t('role.descriptionPlaceholder')}
+              maxLength={500}
+              showCount
+            />
           </Form.Item>
           {renderDeviceGroupSelect(false)}
           {renderPermissionTree(false)}
@@ -561,17 +647,7 @@ export default function RoleManagement() {
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} readOnly />
           </Form.Item>
-          <Form.Item label={t('role.deviceGroups')}>
-            <Space wrap>
-              {selectedDeviceGroupIds.length > 0 ? (
-                deviceGroupOptions
-                  .filter((opt) => selectedDeviceGroupIds.includes(opt.value))
-                  .map((opt) => <Tag key={opt.value}>{opt.label}</Tag>)
-              ) : (
-                <span style={{ color: 'var(--color-text-secondary)' }}>-</span>
-              )}
-            </Space>
-          </Form.Item>
+          {renderDeviceGroupSelect(true)}
           <Form.Item label={t('role.userCount')}>
             <span>{selectedRole?.userCount ?? 0}</span>
           </Form.Item>
