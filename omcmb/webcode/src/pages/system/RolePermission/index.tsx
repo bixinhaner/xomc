@@ -12,9 +12,9 @@ import {
   Card,
   Radio,
   Space,
-  Collapse,
+  Menu,
 } from 'antd';
-import type { TreeDataNode } from 'antd';
+import type { TreeDataNode, MenuProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -204,6 +204,8 @@ export default function RoleManagement() {
   const [permissionLevels, setPermissionLevels] = useState<Record<string, PermissionLevel>>({});
   // 设备组选择
   const [selectedDeviceGroupIds, setSelectedDeviceGroupIds] = useState<string[]>([]);
+  // 当前选中的权限模块（用于左右分栏布局）
+  const [activeModuleKey, setActiveModuleKey] = useState<string>(PERMISSION_MODULES[0].key);
 
   const { data, isLoading, refetch } = useRoles({
     roleName: filters.roleName as string | undefined,
@@ -536,7 +538,7 @@ export default function RoleManagement() {
     { key: 'description', title: t('role.description'), dataIndex: 'description', ellipsis: true },
   ], [t, form, isBuiltIn, handleDelete]);
 
-  // 渲染权限配置卡片（树形结构：一级菜单 + 二级菜单）
+  // 渲染权限配置卡片（左右分栏布局）
   const renderPermissionConfig = (readOnly = false) => {
     // 渲染单个权限项
     const renderPermissionItem = (moduleKey: string, itemKey: string, title: string) => {
@@ -550,7 +552,7 @@ export default function RoleManagement() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '6px 12px',
+            padding: '10px 12px',
             borderBottom: '1px solid var(--color-border-secondary)',
           }}
         >
@@ -583,6 +585,32 @@ export default function RoleManagement() {
       );
     };
 
+    // 当前选中的模块
+    const activeModule = PERMISSION_MODULES.find((m) => m.key === activeModuleKey) || PERMISSION_MODULES[0];
+
+    // 左侧模块菜单
+    const moduleMenuItems: MenuProps['items'] = PERMISSION_MODULES.map((module) => {
+      // 计算该模块下有权限的子项数量
+      const configuredCount = module.children.filter((child) => {
+        const fullKey = `${module.key}.${child.key}`;
+        return permissionLevels[fullKey] && permissionLevels[fullKey] !== 'none';
+      }).length;
+
+      return {
+        key: module.key,
+        label: (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <span>{t(module.titleKey)}</span>
+            {configuredCount > 0 && (
+              <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>
+                {configuredCount}/{module.children.length}
+              </Tag>
+            )}
+          </div>
+        ),
+      };
+    });
+
     return (
       <Card
         title={t('role.permissionConfig')}
@@ -594,22 +622,26 @@ export default function RoleManagement() {
           </span>
         ) : null}
       >
-        <Collapse
-          defaultActiveKey={PERMISSION_MODULES.map((m) => m.key)}
-          ghost
-          expandIconPosition="end"
-          items={PERMISSION_MODULES.map((module) => ({
-            key: module.key,
-            label: <span style={{ fontWeight: 600 }}>{t(module.titleKey)}</span>,
-            children: (
-              <div style={{ marginLeft: -12, marginRight: -12 }}>
-                {module.children.map((child) =>
-                  renderPermissionItem(module.key, child.key, t(child.titleKey))
-                )}
-              </div>
-            ),
-          }))}
-        />
+        <div style={{ display: 'flex', border: '1px solid var(--color-border)', borderRadius: 6, minHeight: 300 }}>
+          {/* 左侧：模块列表 */}
+          <div style={{ width: 160, borderRight: '1px solid var(--color-border)', background: 'var(--color-fill-quaternary)' }}>
+            <Menu
+              mode="vertical"
+              selectedKeys={[activeModuleKey]}
+              onClick={({ key }) => setActiveModuleKey(key)}
+              items={moduleMenuItems}
+              style={{ border: 'none', background: 'transparent' }}
+            />
+          </div>
+          {/* 右侧：权限配置 */}
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <div style={{ padding: '8px 0' }}>
+              {activeModule.children.map((child) =>
+                renderPermissionItem(activeModule.key, child.key, t(child.titleKey))
+              )}
+            </div>
+          </div>
+        </div>
       </Card>
     );
   };
