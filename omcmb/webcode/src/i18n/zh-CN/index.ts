@@ -800,6 +800,7 @@ const messages: Record<string, string> = {
   'role.deviceGroups':        '设备组',
   'role.pleaseSelectDeviceGroups': '请选择设备组（可多选）',
   // 权限类型
+  'role.permission.none':     '无权限',
   'role.permission.read':     '只读',
   'role.permission.write':    '读写',
   // 功能模块

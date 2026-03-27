@@ -795,6 +795,7 @@ const messages: Record<string, string> = {
   'role.deviceGroups':        'Device Groups',
   'role.pleaseSelectDeviceGroups': 'Please select device groups (multiple)',
   // Permission types
+  'role.permission.none':     'None',
   'role.permission.read':     'Read Only',
   'role.permission.write':    'Read/Write',
   // Modules
