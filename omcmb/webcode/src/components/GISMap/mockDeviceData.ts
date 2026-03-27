@@ -3,12 +3,17 @@
  * 自动生成自 CSV 文件
  * 数据来源: GNB 20260210051225.csv + Station_20260210050140.csv
  * 生成时间: 2026-03-27T08:07:56.738Z
- * 设备总数: 3720
+ * 原始设备数: 3720
+ * 扩展后总数: 10720 (增加 7000 条)
  */
 
 import type { MapDevice } from '@/types/map';
 
-export const mockMapDevices: MapDevice[] = [
+// 需要生成的额外设备数量
+const ADDITIONAL_DEVICE_COUNT = 7000;
+
+// 原始数据
+const baseMockDevices: MapDevice[] = [
   {
     "id": "lte-2",
     "name": "ZED_LUSAKA_IHS_LSK_202A_L700_3",
@@ -44651,10 +44656,63 @@ export const mockMapDevices: MapDevice[] = [
   }
 ];
 
+// 设备组列表（用于随机分配新设备）
+const DEVICE_GROUPS = [
+  'LUSAKA/LTE700',
+  'LUSAKA/LTE1800',
+  'LUSAKA/NR2600',
+  'COPPERBELT/LTE700',
+  'COPPERBELT/LTE1800',
+  'CENTRAL/LTE700',
+  'CENTRAL/LTE1800',
+  'SOUTHERN/LTE700',
+  'SOUTHERN/LTE1800',
+  'NORTHWESTERN/LTE700',
+];
+
+// 基于原始数据生成额外设备
+function generateAdditionalDevices(baseDevices: MapDevice[], count: number): MapDevice[] {
+  const additional: MapDevice[] = [];
+  const baseCount = baseDevices.length;
+
+  for (let i = 0; i < count; i++) {
+    // 随机选择一个基础设备作为模板
+    const template = baseDevices[Math.floor(Math.random() * baseCount)];
+
+    // 随机偏移坐标（约 0.01-0.05 度，约 1-5 公里）
+    const lngOffset = (Math.random() - 0.5) * 0.1;
+    const latOffset = (Math.random() - 0.5) * 0.08;
+
+    // 生成新设备
+    const newDevice: MapDevice = {
+      id: `ext-${baseCount + i + 1}`,
+      name: `ZED_EXT_${template.groupName?.split('/')[0] || 'UNKNOWN'}_${Math.floor(Math.random() * 900) + 100}_CELL_${Math.floor(Math.random() * 3) + 1}`,
+      sn: `EXT${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
+      lng: template.lng + lngOffset,
+      lat: template.lat + latOffset,
+      status: Math.random() > 0.15 ? 'online' : 'offline', // 85% 在线率
+      alarmCount: Math.random() > 0.7 ? Math.floor(Math.random() * 5) : 0, // 30% 有告警
+      groupName: DEVICE_GROUPS[Math.floor(Math.random() * DEVICE_GROUPS.length)],
+      address: '',
+      type: Math.random() > 0.7 ? 'macro' : 'small',
+    };
+
+    additional.push(newDevice);
+  }
+
+  return additional;
+}
+
+// 生成额外设备并合并
+const additionalDevices = generateAdditionalDevices(baseMockDevices, ADDITIONAL_DEVICE_COUNT);
+
+// 导出合并后的设备列表
+export const mockMapDevices: MapDevice[] = [...baseMockDevices, ...additionalDevices];
+
 // 统计信息
 export const mockStats = {
-  total: 3720,
-  online: 2507,
-  offline: 1213,
-  alarms: 4204,
+  total: mockMapDevices.length,
+  online: mockMapDevices.filter(d => d.status === 'online').length,
+  offline: mockMapDevices.filter(d => d.status === 'offline').length,
+  alarms: mockMapDevices.reduce((sum, d) => sum + (d.alarmCount || 0), 0),
 };
