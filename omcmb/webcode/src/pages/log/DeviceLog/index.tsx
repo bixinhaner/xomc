@@ -326,7 +326,23 @@ export default function DeviceLog() {
 
   // 批量下载
   const handleBatchDownload = () => {
-    void message.success(`正在下载 ${selectedRowKeys.length} 个任务的日志文件`);
+    // 过滤出可下载的任务（仅成功状态）
+    const downloadableTasks = filteredData.filter(
+      (task) => selectedRowKeys.includes(task.id) && task.taskStatus === 2
+    );
+
+    if (downloadableTasks.length === 0) {
+      void message.warning('请选择可下载的任务（仅限成功状态）');
+      return;
+    }
+
+    Modal.confirm({
+      title: '批量下载',
+      content: `确定要下载选中的 ${downloadableTasks.length} 个任务的日志文件吗？`,
+      onOk: () => {
+        void message.success(`正在下载 ${downloadableTasks.length} 个任务的日志文件`);
+      },
+    });
   };
 
   // 从已选列表中移除设备
