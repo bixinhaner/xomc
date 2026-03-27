@@ -742,6 +742,8 @@ const messages: Record<string, string> = {
   'user.confirmForceLogout': '确认强制退出登录？',
   'user.confirmLock':     '确认锁定选中的用户？',
   'user.confirmUnlock':   '确认解锁选中的用户？',
+  'user.confirmBatchResetPassword': '确认重置选中用户的密码？',
+  'user.noOnlineUsers':   '选中的用户中没有在线用户',
   'user.passwordMismatch': '两次输入的密码不一致',
   'user.builtInCannotDelete': '内置用户无法删除',
   'user.noUsersToDelete': '没有可删除的用户（内置用户不可删除）',
@@ -751,6 +753,27 @@ const messages: Record<string, string> = {
   'user.role.operator':   '操作员',
   'user.role.viewer':     '查看者',
   'user.role.auditor':    '审计员',
+  'user.addUser':         '添加用户',
+  'user.importUser':      '导入用户',
+  'user.userNameRule':    '3-32个字符，仅支持字母、数字、下划线、减号',
+  'user.pleaseInputUserName': '请输入用户名称',
+  'user.pleaseInputPassword': '请输入密码',
+  'user.pleaseConfirmPassword': '请确认密码',
+  'user.passwordMinLength': '密码长度至少8位',
+  'user.emailFormatError': '邮箱格式不正确',
+  'user.pleaseInputPhone': '请输入手机号',
+  'user.phoneFormatError': '手机号格式不正确',
+  'user.pleaseSelectGroup': '请选择用户组',
+  'user.expireTime':      '到期时间',
+  'user.pleaseSelectExpireTime': '请选择到期时间',
+  'user.noTimeLimit':     '不限制时间',
+  'user.selectFile':      '选择文件',
+  'user.pleaseSelectFile': '请选择文件',
+  'user.selectExcelFile': '选择Excel文件',
+  'user.supportFormat':   '支持格式',
+  'user.downloadTemplate': '下载导入模板',
+  'user.downloadingTemplate': '正在下载模板...',
+  'user.builtInCannotBatchOp': '内置用户不支持批量操作',
 
   // -------------------------------------------------------------------------
   // Role management
@@ -1135,6 +1158,24 @@ const messages: Record<string, string> = {
   'common.hasAlarm':        '有告警',
   'common.noAlarm':         '无告警',
   'common.characters':      '个字符',
+
+  // -------------------------------------------------------------------------
+  // Import panel
+  // -------------------------------------------------------------------------
+  'import.supportFormat':       '支持格式',
+  'import.maxFileSize':         '最大文件大小',
+  'import.formatError':         '文件格式不支持',
+  'import.sizeError':           '文件大小超过 {max}MB 限制',
+  'import.noTemplate':          '未配置下载模板',
+  'import.downloadSuccess':     '模板下载成功',
+  'import.downloadFailed':      '模板下载失败',
+  'import.selectFileFirst':     '请先选择文件',
+  'import.success':             '导入成功',
+  'import.failed':              '导入失败',
+  'import.clickOrDrag':         '点击或拖拽文件到此区域上传',
+  'import.dragHint':            '支持单个文件上传',
+  'import.downloadTemplate':    '下载导入模板',
+  'import.startImport':         '开始导入',
 
   // -------------------------------------------------------------------------
   // Sync params modal

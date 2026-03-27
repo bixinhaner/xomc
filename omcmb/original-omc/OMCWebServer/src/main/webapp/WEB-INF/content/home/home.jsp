@@ -955,7 +955,7 @@
                                 <div class="statisticItemHeaderCls statisticItemHeaderAbsoluteCls">
                                     <div class="statisticChangeBoxCls">
                                         <div class="statisticChangeItemCls">
-                                            <span><%=rb.getString("ShouYe_UEShu")%></span>
+                                            <span><%=rb.getString("ShouYe_UEShu")%></span> 
                                             <span>{{lineNowTotalAndStatus('gsmUeCount','ue_count')}}</span>
                                             <span v-if="lineNowTotalAndStatus('gsmUeCount','ue_count_status') == '1'" class="el-icon el-icon-compare_up upIconCls"></span>
                                             <span v-if="lineNowTotalAndStatus('gsmUeCount','ue_count_status') == '2'" class="el-icon el-icon-compare_up downIconCls rotate180"></span>

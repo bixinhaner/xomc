@@ -757,7 +757,7 @@ export default function DeviceDetail() {
                   />
                 </div>
               ),
-            }
+            },
           ]}
         />
       </Card>

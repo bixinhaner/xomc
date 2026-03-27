@@ -739,6 +739,7 @@ const messages: Record<string, string> = {
   'user.confirmForceLogout': 'Confirm force logout?',
   'user.confirmLock':     'Confirm lock selected users?',
   'user.confirmUnlock':   'Confirm unlock selected users?',
+  'user.confirmBatchResetPassword': 'Confirm reset password for selected users?',
   'user.passwordMismatch': 'Passwords do not match',
   'user.builtInCannotDelete': 'Built-in users cannot be deleted',
   'user.noUsersToDelete': 'No users to delete (built-in users cannot be deleted)',
@@ -748,6 +749,27 @@ const messages: Record<string, string> = {
   'user.role.operator':   'Operator',
   'user.role.viewer':     'Viewer',
   'user.role.auditor':    'Auditor',
+  'user.addUser':         'Add User',
+  'user.importUser':      'Import User',
+  'user.userNameRule':    '3-32 characters, letters, numbers, underscore and hyphen only',
+  'user.pleaseInputUserName': 'Please enter username',
+  'user.pleaseInputPassword': 'Please enter password',
+  'user.pleaseConfirmPassword': 'Please confirm password',
+  'user.passwordMinLength': 'Password must be at least 8 characters',
+  'user.emailFormatError': 'Invalid email format',
+  'user.pleaseInputPhone': 'Please enter phone number',
+  'user.phoneFormatError': 'Invalid phone number format',
+  'user.pleaseSelectGroup': 'Please select user group',
+  'user.expireTime':      'Expire Time',
+  'user.pleaseSelectExpireTime': 'Please select expire time',
+  'user.noTimeLimit':     'No Time Limit',
+  'user.selectFile':      'Select File',
+  'user.pleaseSelectFile': 'Please select a file',
+  'user.selectExcelFile': 'Select Excel File',
+  'user.supportFormat':   'Supported formats',
+  'user.downloadTemplate': 'Download Import Template',
+  'user.downloadingTemplate': 'Downloading template...',
+  'user.builtInCannotBatchOp': 'Built-in users do not support batch operations',
 
   // -------------------------------------------------------------------------
   // Role management
@@ -1132,6 +1154,24 @@ const messages: Record<string, string> = {
   'common.hasAlarm':        'Has Alarm',
   'common.noAlarm':         'No Alarm',
   'common.characters':      'characters',
+
+  // -------------------------------------------------------------------------
+  // Import panel
+  // -------------------------------------------------------------------------
+  'import.supportFormat':       'Supported formats',
+  'import.maxFileSize':         'Max file size',
+  'import.formatError':         'File format not supported',
+  'import.sizeError':           'File size exceeds {max}MB limit',
+  'import.noTemplate':          'Download template not configured',
+  'import.downloadSuccess':     'Template downloaded',
+  'import.downloadFailed':      'Failed to download template',
+  'import.selectFileFirst':     'Please select a file first',
+  'import.success':             'Import successful',
+  'import.failed':              'Import failed',
+  'import.clickOrDrag':         'Click or drag file to this area to upload',
+  'import.dragHint':            'Support for single file upload',
+  'import.downloadTemplate':    'Download Import Template',
+  'import.startImport':         'Start Import',
 
   // -------------------------------------------------------------------------
   // Sync params modal
