@@ -757,14 +757,7 @@ export default function DeviceDetail() {
                   />
                 </div>
               ),
-            },
-            {
-              key: 'parameters',
-              label: '参数树',
-              children: device ? (
-                <ParameterTreeTab deviceId={device.id} />
-              ) : null,
-            },
+            }
           ]}
         />
       </Card>
