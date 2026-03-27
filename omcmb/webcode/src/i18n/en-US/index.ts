@@ -798,6 +798,11 @@ const messages: Record<string, string> = {
   'role.permission.none':     'None',
   'role.permission.read':     'Read Only',
   'role.permission.write':    'Read/Write',
+  // Batch set permissions
+  'role.batchSetPermissions': 'Batch Set',
+  'role.setAllRead':          'All Read Only',
+  'role.setAllWrite':         'All Read/Write',
+  'role.setAllNone':          'Clear All',
   // Modules
   'role.modules.device':      'Device Management',
   'role.modules.alarm':       'Alarm Management',

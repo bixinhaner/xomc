@@ -611,6 +611,18 @@ export default function RoleManagement() {
       };
     });
 
+    // 一键设置当前模块所有权限
+    const setModuleAllPermissions = (level: PermissionLevel) => {
+      setPermissionLevels((prev) => {
+        const newLevels = { ...prev };
+        for (const child of activeModule.children) {
+          const fullKey = `${activeModule.key}.${child.key}`;
+          newLevels[fullKey] = level;
+        }
+        return newLevels;
+      });
+    };
+
     return (
       <Card
         title={t('role.permissionConfig')}
@@ -634,11 +646,47 @@ export default function RoleManagement() {
             />
           </div>
           {/* 右侧：权限配置 */}
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <div style={{ padding: '8px 0' }}>
-              {activeModule.children.map((child) =>
-                renderPermissionItem(activeModule.key, child.key, t(child.titleKey))
-              )}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* 一键配置操作栏 */}
+            {!readOnly && (
+              <div style={{
+                padding: '8px 12px',
+                borderBottom: '1px solid var(--color-border)',
+                background: 'var(--color-fill-quaternary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                  {t('role.batchSetPermissions')}:
+                </span>
+                <Button
+                  size="small"
+                  onClick={() => setModuleAllPermissions('read')}
+                >
+                  {t('role.setAllRead')}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => setModuleAllPermissions('write')}
+                >
+                  {t('role.setAllWrite')}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => setModuleAllPermissions('none')}
+                >
+                  {t('role.setAllNone')}
+                </Button>
+              </div>
+            )}
+            {/* 权限列表 */}
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <div style={{ padding: '8px 0' }}>
+                {activeModule.children.map((child) =>
+                  renderPermissionItem(activeModule.key, child.key, t(child.titleKey))
+                )}
+              </div>
             </div>
           </div>
         </div>

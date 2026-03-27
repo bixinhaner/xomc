@@ -803,6 +803,11 @@ const messages: Record<string, string> = {
   'role.permission.none':     '无权限',
   'role.permission.read':     '只读',
   'role.permission.write':    '读写',
+  // 一键配置
+  'role.batchSetPermissions': '一键配置',
+  'role.setAllRead':          '全部只读',
+  'role.setAllWrite':         '全部读写',
+  'role.setAllNone':          '全部清除',
   // 功能模块
   'role.modules.device':      '设备管理',
   'role.modules.alarm':       '告警管理',
