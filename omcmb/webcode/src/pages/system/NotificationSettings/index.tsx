@@ -163,7 +163,7 @@ export default function NotificationSettings() {
   ];
 
   return (
-    <ListPageLayout title={t('nav.system.notifications')} subtitle={t('nav.system.notifications')}>
+    <ListPageLayout title={t('nav.system.notifications')}>
       <Tabs
         items={[
           {

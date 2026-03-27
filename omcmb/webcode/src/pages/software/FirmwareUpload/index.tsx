@@ -278,7 +278,7 @@ export default function FirmwareUpload() {
         ];
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
-            <Button type="link" size="small" icon={<MoreOutlined />} />
+            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
           </Dropdown>
         );
       },
@@ -332,6 +332,13 @@ export default function FirmwareUpload() {
 
   return (
     <ListPageLayout title="升级文件管理">
+      {/* 覆盖 FilterBar 样式 */}
+      <style>{`
+        .firmware-filter-wrapper [class*="_filterBarWrapper_"] {
+          padding: 0 !important;
+          margin-bottom: 0 !important;
+        }
+      `}</style>
       {/* 文件类型选择 */}
       <Card bordered={false} style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -355,32 +362,29 @@ export default function FirmwareUpload() {
         </div>
       </Card>
 
-      {/* 文件列表 */}
-      <Card bordered={false}>
-        <style>{`
-          .firmware-table-wrapper [class*="dataTableWrapper"] {
-            border-radius: 0;
-          }
-        `}</style>
+      {/* 搜索表单 */}
+      <Card bordered={false} style={{ marginBottom: 16 }} className="firmware-filter-wrapper">
         <FilterBar
           filterId="firmware-filter"
           fields={filterFields}
           onSearch={(vals) => setFilters(vals)}
           onReset={() => setFilters({})}
         />
-        <div className="firmware-table-wrapper" style={{ borderTop: '12px solid #f5f5f5' }}>
-          <DataTable<FirmwareFile>
-            tableId="firmware-list"
-            columns={columns}
-            dataSource={filteredData}
-            rowKey="id"
-            total={filteredData.length}
-            currentPage={1}
-            pageSize={20}
-            onPageChange={() => {}}
-            scroll={{ x: 1100 }}
-          />
-        </div>
+      </Card>
+
+      {/* 文件列表 */}
+      <Card bordered={false}>
+        <DataTable<FirmwareFile>
+          tableId="firmware-list"
+          columns={columns}
+          dataSource={filteredData}
+          rowKey="id"
+          total={filteredData.length}
+          currentPage={1}
+          pageSize={20}
+          onPageChange={() => {}}
+          scroll={{ x: 1100 }}
+        />
       </Card>
 
       {/* 导入/查看/修改文件抽屉 */}

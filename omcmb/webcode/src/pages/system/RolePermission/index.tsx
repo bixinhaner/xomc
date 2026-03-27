@@ -763,7 +763,6 @@ export default function RoleManagement() {
   return (
     <ListPageLayout
       title={t('nav.system.roles')}
-      subtitle={t('nav.system.roles')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
           {t('common.add')}

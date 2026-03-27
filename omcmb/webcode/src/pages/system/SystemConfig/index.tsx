@@ -81,7 +81,7 @@ export default function SystemConfig() {
   };
 
   return (
-    <ListPageLayout title={t('nav.system.config')} subtitle={t('nav.system.config')}>
+    <ListPageLayout title={t('nav.system.config')}>
       <Tabs
         items={[
           {

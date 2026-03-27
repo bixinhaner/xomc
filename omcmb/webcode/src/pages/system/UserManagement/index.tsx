@@ -608,7 +608,6 @@ export default function UserManagement() {
   return (
     <ListPageLayout
       title={t('nav.system.users')}
-      subtitle={t('nav.system.users')}
       extra={
         <>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer} style={{ marginRight: 8 }}>

@@ -9,7 +9,6 @@ import {
   Modal,
   Input,
   Button,
-  Tabs,
   Select,
   Radio,
   DatePicker,
@@ -758,7 +757,7 @@ export default function UpgradePlan() {
         ];
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
-            <Button type="link" size="small" icon={<MoreOutlined />} />
+            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
           </Dropdown>
         );
       },
@@ -899,82 +898,68 @@ export default function UpgradePlan() {
 
   return (
     <ListPageLayout title={t('nav.software.upgradePlan')} extra={headerExtra}>
-      <Card bordered={false}>
-        <style>{`
-          .upgrade-plan-table-wrapper [class*="dataTableWrapper"] {
-            border-radius: 0;
-          }
-        `}</style>
-        <Tabs
-          activeKey={activeTab}
-          onChange={(key) => setActiveTab(key as 'task' | 'device')}
-          items={[
-            {
-              key: 'task',
-              label: (
-                <span>
-                  <UnorderedListOutlined />
-                  任务列表
-                </span>
-              ),
-              children: (
-                <>
-                  <FilterBar
-                    filterId="upgrade-plan-filter-task"
-                    fields={taskFilterFields}
-                    onSearch={(vals) => { setFilters(vals); setPage(1); }}
-                    onReset={() => { setFilters({}); setPage(1); }}
-                  />
-                  <div className="upgrade-plan-table-wrapper" style={{ borderTop: '12px solid #f5f5f5' }}>
-                    <DataTable<UpgradePlanRow>
-                      tableId="upgrade-plan-list-task"
-                      columns={taskColumns}
-                      dataSource={filteredData}
-                      rowKey="id"
-                      total={filteredData.length}
-                      currentPage={page}
-                      pageSize={pageSize}
-                      onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-                      scroll={{ x: 1600 }}
-                    />
-                  </div>
-                </>
-              ),
-            },
-            {
-              key: 'device',
-              label: (
-                <span>
-                  <DesktopOutlined />
-                  设备列表
-                </span>
-              ),
-              children: (
-                <>
-                  <FilterBar
-                    filterId="upgrade-plan-filter-device"
-                    fields={filterFields}
-                    onSearch={(vals) => { setFilters(vals); setPage(1); }}
-                    onReset={() => { setFilters({}); setPage(1); }}
-                  />
-                  <div className="upgrade-plan-table-wrapper" style={{ borderTop: '12px solid #f5f5f5' }}>
-                    <DataTable<UpgradePlanRow>
-                      tableId="upgrade-plan-list-device"
-                      columns={columns}
-                      dataSource={filteredData}
-                      rowKey="id"
-                      total={filteredData.length}
-                      currentPage={page}
-                      pageSize={pageSize}
-                      onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-                      scroll={{ x: 2000 }}
-                    />
-                  </div>
-                </>
-              ),
-            },
-          ]}
+      {/* 覆盖 FilterBar 样式 */}
+      <style>{`
+        .upgrade-plan-filter-wrapper [class*="_filterBarWrapper_"] {
+          padding: 0 !important;
+          margin-bottom: 0 !important;
+        }
+      `}</style>
+
+      {/* 页签选择 */}
+      <Card bordered={false} style={{ marginBottom: 16 }}>
+        <Radio.Group
+          value={activeTab}
+          onChange={(e) => {
+            setActiveTab(e.target.value);
+            setFilters({});
+            setPage(1);
+          }}
+          optionType="button"
+          buttonStyle="solid"
+        >
+          <Radio.Button value="task">任务列表</Radio.Button>
+          <Radio.Button value="device">设备列表</Radio.Button>
+        </Radio.Group>
+      </Card>
+
+      {/* 搜索表单 */}
+      <Card bordered={false} style={{ marginBottom: 16 }} className="upgrade-plan-filter-wrapper">
+        <FilterBar
+          filterId={`upgrade-plan-filter-${activeTab}`}
+          fields={activeTab === 'task' ? taskFilterFields : filterFields}
+          onSearch={(vals) => { setFilters(vals); setPage(1); }}
+          onReset={() => { setFilters({}); setPage(1); }}
         />
+      </Card>
+
+      {/* 列表 */}
+      <Card bordered={false}>
+        {activeTab === 'task' ? (
+          <DataTable<UpgradePlanRow>
+            tableId="upgrade-plan-list-task"
+            columns={taskColumns}
+            dataSource={filteredData}
+            rowKey="id"
+            total={filteredData.length}
+            currentPage={page}
+            pageSize={pageSize}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            scroll={{ x: 1600 }}
+          />
+        ) : (
+          <DataTable<UpgradePlanRow>
+            tableId="upgrade-plan-list-device"
+            columns={columns}
+            dataSource={filteredData}
+            rowKey="id"
+            total={filteredData.length}
+            currentPage={page}
+            pageSize={pageSize}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            scroll={{ x: 2000 }}
+          />
+        )}
       </Card>
 
       {/* 批量输入弹窗 */}

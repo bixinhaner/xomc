@@ -251,7 +251,6 @@ export default function GroupManagement() {
   return (
     <ListPageLayout
       title={t('nav.system.groups')}
-      subtitle={t('nav.system.groups')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
           {t('common.add')}
