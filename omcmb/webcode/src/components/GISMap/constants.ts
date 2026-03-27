@@ -158,6 +158,8 @@ export const ANIMATION_CONFIG = {
   flyDuration: 1000,
   /** 高亮缩放级别 */
   highlightZoom: 14,
+  /** 最大放大程度（用于搜索定位） */
+  maxHighlightZoom: 18,
 };
 
 /**

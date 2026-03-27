@@ -8,7 +8,19 @@
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--color-bg-layout);
+  /* 浅色格条纹理背景 */
+  background-color: #F8FAFC;
+  background-image:
+    linear-gradient(rgba(220, 230, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(220, 230, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(rgba(200, 215, 230, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200, 215, 230, 0.3) 1px, transparent 1px);
+  background-size:
+    100px 100px,
+    100px 100px,
+    20px 20px,
+    20px 20px;
+  background-position: -1px -1px;
   overflow: hidden;
 }
 
@@ -98,10 +110,21 @@
 
 .gisMapContainer :global(.ol-viewport) {
   cursor: grab;
+  /* 让 viewport 透明，显示父容器的格条纹理背景 */
+  background: transparent !important;
 }
 
 .gisMapContainer :global(.ol-viewport:active) {
   cursor: grabbing;
+}
+
+/* 让 OpenLayers canvas 透明 */
+.gisMapContainer :global(.ol-layer) {
+  background: transparent !important;
+}
+
+.gisMapContainer :global(canvas) {
+  background: transparent !important;
 }
 
 /* ============ Marker Pulse Animation ============ */

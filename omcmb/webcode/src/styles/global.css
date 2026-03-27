@@ -924,3 +924,37 @@ html, body, #root {
 .mono {
   font-family: var(--font-family-mono);
 }
+
+/* ===========================================================================
+   GIS Map - OpenLayers 地图格条纹理背景
+   =========================================================================== */
+/* 地图容器 - 格条纹理背景 */
+.gis-map-container {
+  background-color: #F8FAFC !important;
+  background-image:
+    linear-gradient(rgba(220, 230, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(220, 230, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(rgba(200, 215, 230, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200, 215, 230, 0.3) 1px, transparent 1px) !important;
+  background-size:
+    100px 100px,
+    100px 100px,
+    20px 20px,
+    20px 20px !important;
+  background-position: -1px -1px !important;
+}
+
+/* OpenLayers viewport 透明 */
+.gis-map-container .ol-viewport {
+  background: transparent !important;
+}
+
+/* OpenLayers 图层透明 */
+.gis-map-container .ol-layer {
+  background: transparent !important;
+}
+
+/* OpenLayers canvas 透明 */
+.gis-map-container canvas {
+  background: transparent !important;
+}

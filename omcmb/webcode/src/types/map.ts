@@ -234,6 +234,18 @@ export interface GISMapProps {
 }
 
 /**
+ * GISMap 组件暴露的方法接口（通过 ref）
+ */
+export interface GISMapRef {
+  /** 高亮设备并飞行到指定位置（以最大放大程度显示） */
+  highlightAndFlyTo: (device: MapDevice) => void;
+  /** 飞行到指定坐标 */
+  flyTo: (lng: number, lat: number, zoom?: number) => void;
+  /** 获取当前视图状态 */
+  getViewport: () => MapViewport | null;
+}
+
+/**
  * GroupTree 组件 Props
  */
 export interface GroupTreeProps {

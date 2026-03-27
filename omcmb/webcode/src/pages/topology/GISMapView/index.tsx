@@ -2,7 +2,7 @@
  * GIS 地图视图页面
  * 完全按照 UI 原型图 GISMap_UI_Design_Main.svg 实现
  */
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Checkbox } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
@@ -10,6 +10,11 @@ import type { MapDevice, DeviceGroupNode } from '@/types/map';
 import type { Site } from '@/types/topology';
 import { useSites } from '@/hooks/api/useTopology';
 import { useThemeToken } from '@/hooks/useThemeToken';
+
+// 扩展 Site 类型，增加激活状态
+interface ExtendedSite extends Site {
+  activated: boolean; // true: 已激活, false: 未激活
+}
 
 // ============ Mock Data Generator ============
 
@@ -197,8 +202,8 @@ MOCK_GROUP_TREE[0].children?.forEach((province) => {
 });
 
 // 生成 Mock 设备数据
-function generateMockDevices(): Site[] {
-  const devices: Site[] = [];
+function generateMockDevices(): ExtendedSite[] {
+  const devices: ExtendedSite[] = [];
   const cityIds = Object.keys(CITY_COORDS);
   let deviceIndex = 0;
 
@@ -210,6 +215,7 @@ function generateMockDevices(): Site[] {
     for (let i = 0; i < deviceCount; i++) {
       deviceIndex++;
       const isOnline = Math.random() > 0.08; // 92% 在线率
+      const isActivated = Math.random() > 0.1; // 90% 激活率
 
       // 在城市坐标附近随机偏移
       const lngOffset = (Math.random() - 0.5) * 0.15;
@@ -224,6 +230,7 @@ function generateMockDevices(): Site[] {
         latitude: cityCoord.lat + latOffset,
         deviceCount: 1,
         status: isOnline ? 'active' : 'inactive',
+        activated: isActivated,
       });
     }
   });
@@ -232,7 +239,7 @@ function generateMockDevices(): Site[] {
 }
 
 // 生成 Mock 数据（只生成一次）
-const MOCK_SITES: Site[] = generateMockDevices();
+const MOCK_SITES: ExtendedSite[] = generateMockDevices();
 
 export default function GISMapView() {
   const token = useThemeToken();
@@ -241,37 +248,56 @@ export default function GISMapView() {
   const [groupSearchValue, setGroupSearchValue] = useState('');
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(['china']);
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>(['china', 'bj', 'sh', 'gd']);
-  const [statusFilter, setStatusFilter] = useState<{ online: boolean; offline: boolean }>({
+  // 扩展状态筛选：在线/离线 + 激活/未激活
+  const [statusFilter, setStatusFilter] = useState<{
+    online: boolean;
+    offline: boolean;
+    activated: boolean;
+    deactivated: boolean;
+  }>({
     online: true,
     offline: true,
+    activated: true,
+    deactivated: true,
   });
   const [deviceSearchValue, setDeviceSearchValue] = useState('');
-  const [deviceSearchResults, setDeviceSearchResults] = useState<Site[]>([]);
+  const [deviceSearchResults, setDeviceSearchResults] = useState<ExtendedSite[]>([]);
   const [deviceSearchExpanded, setDeviceSearchExpanded] = useState(false);
+  // 高亮设备ID（用于搜索定位）
+  const [highlightedDeviceId, setHighlightedDeviceId] = useState<string | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  // 地图组件引用，用于调用定位方法
+  const mapRef = useRef<{ highlightAndFlyTo: (device: MapDevice) => void }>(null);
+
   const { data: sitesData } = useSites({});
-  const sites = (sitesData ?? MOCK_SITES) as Site[];
+  const sites = (sitesData ?? MOCK_SITES) as ExtendedSite[];
 
   // ========== 动态统计计算 ==========
 
-  // 全部设备统计
+  // 全部设备统计（包含激活/未激活）
   const allStats = useMemo(() => {
     const total = sites.length;
     const online = sites.filter((s) => s.status === 'active').length;
     const offline = total - online;
-    return { total, online, offline };
+    const activated = sites.filter((s) => s.activated).length;
+    const deactivated = total - activated;
+    return { total, online, offline, activated, deactivated };
   }, [sites]);
 
   // 过滤设备
   const filteredSites = useMemo(() => {
     return sites.filter((site) => {
-      // 状态过滤
+      // 在线/离线状态过滤
       const isOnline = site.status === 'active';
       if (isOnline && !statusFilter.online) return false;
       if (!isOnline && !statusFilter.offline) return false;
+
+      // 激活/未激活状态过滤
+      if (site.activated && !statusFilter.activated) return false;
+      if (!site.activated && !statusFilter.deactivated) return false;
 
       // 设备组过滤
       if (selectedGroupIds.length > 0) {
@@ -288,12 +314,14 @@ export default function GISMapView() {
     });
   }, [sites, statusFilter, selectedGroupIds]);
 
-  // 过滤后设备统计
+  // 过滤后设备统计（包含激活/未激活）
   const filteredStats = useMemo(() => {
     const total = filteredSites.length;
     const online = filteredSites.filter((s) => s.status === 'active').length;
     const offline = total - online;
-    return { total, online, offline };
+    const activated = filteredSites.filter((s) => s.activated).length;
+    const deactivated = total - activated;
+    return { total, online, offline, activated, deactivated };
   }, [filteredSites]);
 
   // 转换为地图设备
@@ -343,6 +371,73 @@ export default function GISMapView() {
     }
     return ids;
   }, []);
+
+  // 过滤设备组树（根据搜索值）
+  const filteredGroupTree = useMemo(() => {
+    if (!groupSearchValue.trim()) {
+      return MOCK_GROUP_TREE;
+    }
+
+    const searchLower = groupSearchValue.toLowerCase();
+
+    // 递归过滤树节点，返回匹配的节点及其父节点路径
+    const filterNode = (node: DeviceGroupNode, parentMatch = false): DeviceGroupNode | null => {
+      const nameMatch = node.name.toLowerCase().includes(searchLower);
+      const idMatch = node.id.toLowerCase().includes(searchLower);
+      const selfMatch = nameMatch || idMatch;
+
+      // 处理子节点
+      const filteredChildren: DeviceGroupNode[] = [];
+      if (node.children) {
+        node.children.forEach((child) => {
+          const filteredChild = filterNode(child, selfMatch || parentMatch);
+          if (filteredChild) {
+            filteredChildren.push(filteredChild);
+          }
+        });
+      }
+
+      // 如果自己匹配，或者有匹配的子节点，则保留
+      if (selfMatch || filteredChildren.length > 0) {
+        return {
+          ...node,
+          children: filteredChildren.length > 0 ? filteredChildren : node.children,
+        };
+      }
+
+      return null;
+    };
+
+    // 过滤整棵树
+    const result: DeviceGroupNode[] = [];
+    MOCK_GROUP_TREE.forEach((node) => {
+      const filtered = filterNode(node);
+      if (filtered) {
+        result.push(filtered);
+      }
+    });
+
+    return result;
+  }, [groupSearchValue]);
+
+  // 当搜索值变化时，自动展开匹配的节点
+  useEffect(() => {
+    if (groupSearchValue.trim() && filteredGroupTree.length > 0) {
+      // 收集所有需要展开的节点ID
+      const collectExpandIds = (nodes: DeviceGroupNode[]): string[] => {
+        const ids: string[] = [];
+        nodes.forEach((node) => {
+          if (node.children && node.children.length > 0) {
+            ids.push(node.id);
+            ids.push(...collectExpandIds(node.children));
+          }
+        });
+        return ids;
+      };
+      const expandIds = collectExpandIds(filteredGroupTree);
+      setExpandedGroupIds((prev) => [...new Set([...prev, ...expandIds])]);
+    }
+  }, [groupSearchValue, filteredGroupTree]);
 
   // 渲染设备组树节点
   const renderGroupNode = (node: DeviceGroupNode, depth: number = 0): React.ReactNode => {
@@ -525,7 +620,7 @@ export default function GISMapView() {
 
   const deviceSearchStyle: React.CSSProperties = {
     position: 'absolute',
-    left: 300,
+    left: 20,
     top: 20,
     width: 320,
     zIndex: 500,
@@ -543,7 +638,7 @@ export default function GISMapView() {
     display: 'flex',
     alignItems: 'center',
     padding: '0 16px',
-    height: 48,
+    height: 36,
     gap: 12,
   };
 
@@ -599,7 +694,7 @@ export default function GISMapView() {
         {/* 设备组树 */}
         <div style={sectionTitleStyle}>设备组</div>
         <div style={treeContainerStyle}>
-          {MOCK_GROUP_TREE.map((node) => renderGroupNode(node))}
+          {filteredGroupTree.map((node) => renderGroupNode(node))}
         </div>
 
         {/* 已选择汇总 */}
@@ -675,6 +770,60 @@ export default function GISMapView() {
             <span style={{ fontSize: 14, color: '#262626' }}>离线</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
               {allStats.offline.toLocaleString()}
+            </span>
+          </div>
+
+          {/* 激活 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '10px 0',
+            }}
+          >
+            <Checkbox
+              checked={statusFilter.activated}
+              onChange={(e) => setStatusFilter((prev) => ({ ...prev, activated: e.target.checked }))}
+            />
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: 'linear-gradient(180deg, #69B1FF 0%, #1677FF 100%)',
+                margin: '0 8px 0 12px',
+              }}
+            />
+            <span style={{ fontSize: 14, color: '#262626' }}>激活</span>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#1677FF' }}>
+              {allStats.activated.toLocaleString()}
+            </span>
+          </div>
+
+          {/* 未激活 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '10px 0',
+            }}
+          >
+            <Checkbox
+              checked={statusFilter.deactivated}
+              onChange={(e) => setStatusFilter((prev) => ({ ...prev, deactivated: e.target.checked }))}
+            />
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: '#FAAD14',
+                margin: '0 8px 0 12px',
+              }}
+            />
+            <span style={{ fontSize: 14, color: '#262626' }}>未激活</span>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
+              {allStats.deactivated.toLocaleString()}
             </span>
           </div>
         </div>
@@ -761,6 +910,7 @@ export default function GISMapView() {
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         {/* 地图组件 */}
         <GISMap
+          ref={mapRef}
           devices={mapDevices}
           height="100%"
           showStats={false}
@@ -779,8 +929,8 @@ export default function GISMapView() {
               <div style={{ position: 'relative', width: 16, height: 16 }}>
                 <div
                   style={{
-                    width: 12,
-                    height: 12,
+                    width: 10,
+                    height: 10,
                     border: `2px solid ${token.colorPrimary}`,
                     borderRadius: '50%',
                   }}
@@ -788,8 +938,8 @@ export default function GISMapView() {
                 <div
                   style={{
                     position: 'absolute',
-                    right: -2,
-                    bottom: -2,
+                    right: 2,
+                    bottom: 4,
                     width: 6,
                     height: 2,
                     background: token.colorPrimary,
@@ -874,7 +1024,20 @@ export default function GISMapView() {
                           key={result.id}
                           style={searchResultItemStyle(index === 0)}
                           onClick={() => {
+                            // 关闭搜索结果面板
                             setDeviceSearchExpanded(false);
+                            // 定位并高亮设备
+                            const mapDevice: MapDevice = {
+                              id: result.id,
+                              lat: result.latitude,
+                              lng: result.longitude,
+                              name: result.name,
+                              status: isOnline ? 'online' : 'offline',
+                              sn: `SN2024${result.id}`,
+                              groupName: GROUP_PATH_MAP[result.domainId] || 'China',
+                              address: result.address,
+                            };
+                            mapRef.current?.highlightAndFlyTo(mapDevice);
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1013,6 +1176,57 @@ export default function GISMapView() {
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#8C8C8C' }}>
               {filteredStats.offline.toLocaleString()}
+            </span>
+          </div>
+
+          <div style={{ borderTop: '1px solid #F0F0F0', margin: '12px 0' }} />
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: '#1677FF',
+                  marginRight: 8,
+                }}
+              />
+              <span style={{ fontSize: 12, color: '#595959' }}>激活</span>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#1677FF' }}>
+              {filteredStats.activated.toLocaleString()}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: '#FAAD14',
+                  marginRight: 8,
+                }}
+              />
+              <span style={{ fontSize: 12, color: '#595959' }}>未激活</span>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#FAAD14' }}>
+              {filteredStats.deactivated.toLocaleString()}
             </span>
           </div>
         </div>

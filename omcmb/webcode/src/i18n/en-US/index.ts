@@ -635,6 +635,7 @@ const messages: Record<string, string> = {
   'alarm.stats.hour':        'Hour',
   'alarm.stats.day':         'Day',
   'alarm.stats.alarmCount':  'Alarm Count',
+  'alarm.count':             'Alarm Count',
 
   // Active alarm fields
   'alarm.alarmId':           'ID',
@@ -1608,6 +1609,7 @@ const messages: Record<string, string> = {
   'device.engStatus.decommissioned': 'Decommissioned',
   'device.networkMode':      'Network Mode',
   'device.count.total':      'Total',
+  'device.totalDevices':     'Total Devices',
   'device.statistics':      'Device Statistics',
 
   // -------------------------------------------------------------------------

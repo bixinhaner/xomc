@@ -634,6 +634,7 @@ const messages: Record<string, string> = {
   'alarm.stats.hour':        '小时',
   'alarm.stats.day':         '天',
   'alarm.stats.alarmCount':  '告警数量',
+  'alarm.count':             '告警数量',
 
   // 活动告警字段
   'alarm.alarmId':           '告警码',
@@ -1615,6 +1616,7 @@ const messages: Record<string, string> = {
   'device.engStatus.decommissioned': '已退网',
   'device.networkMode':      '网络制式',
   'device.count.total':      '总数',
+  'device.totalDevices':     '设备总数',
   'device.statistics':      '设备统计',
 
   // -------------------------------------------------------------------------

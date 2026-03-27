@@ -95,22 +95,48 @@ export function createClusterStyle(count: number): Style {
 
 /**
  * 创建高亮设备样式（搜索定位）
- * 放大的绿色圆点 + 蓝色边框
+ * 节点大小不变 + 水波纹扩散效果
  */
-export function createHighlightStyle(device: MapDevice, zoom: number): Style {
+export function createHighlightStyle(
+  device: MapDevice,
+  zoom: number,
+  rippleWaves: { radius: number; opacity: number }[] = []
+): Style[] {
   const baseRadius = getMarkerRadius(zoom);
   const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
 
-  return new Style({
+  const styles: Style[] = [];
+
+  // 水波纹样式：从中心向外扩散的圆环
+  rippleWaves.forEach(wave => {
+    const rippleRadius = baseRadius + wave.radius;
+    if (rippleRadius > baseRadius) {
+      styles.push(new Style({
+        image: new Circle({
+          radius: rippleRadius,
+          fill: new Fill({ color: 'transparent' }),
+          stroke: new Stroke({
+            color: `rgba(24, 144, 255, ${wave.opacity})`, // 蓝色波纹，透明度随扩散降低
+            width: 1, // 细线条
+          }),
+        }),
+      }));
+    }
+  });
+
+  // 基础样式：原始大小的节点（最上层）
+  styles.push(new Style({
     image: new Circle({
-      radius: baseRadius * 1.5,
+      radius: baseRadius,
       fill: new Fill({ color: config.color }),
       stroke: new Stroke({
         color: COLORS.primary,
         width: 3,
       }),
     }),
-  });
+  }));
+
+  return styles;
 }
 
 /**
@@ -158,14 +184,30 @@ export function deviceStyleFunction(feature: Feature, resolution: number): Style
 /**
  * OpenLayers StyleFunction for cluster layer
  */
-export function clusterStyleFunction(feature: Feature, _resolution: number): Style {
+export function clusterStyleFunction(feature: Feature, _resolution: number): Style | Style[] {
   const features = feature.get('features') as Feature[] | undefined;
   const count = features?.length || 1;
 
   if (count === 1 && features) {
-    // 单个设备，使用设备样式
-    const device = features[0].getProperties() as MapDevice;
-    return createDeviceStyle(device, 15); // 默认使用高 zoom 级别
+    // 单个设备
+    const singleFeature = features[0];
+    const device = singleFeature.getProperties() as MapDevice;
+
+    // 检查是否高亮
+    const isHighlighted = singleFeature.get('highlighted');
+    if (isHighlighted) {
+      // 获取水波纹数据
+      const rippleWaves = singleFeature.get('rippleWaves') || [];
+      return createHighlightStyle(device, 15, rippleWaves);
+    }
+
+    // 检查是否悬停
+    const isHovered = singleFeature.get('hovered');
+    if (isHovered) {
+      return createHoverStyle(device, 15);
+    }
+
+    return createDeviceStyle(device, 15);
   }
 
   return createClusterStyle(count);

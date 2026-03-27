@@ -10,7 +10,6 @@ import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import Cluster from 'ol/source/Cluster';
-import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
@@ -39,8 +38,8 @@ interface UseOLMapOptions {
   clusterDistance?: number;
   /** 设备点击回调 */
   onDeviceClick?: (device: MapDevice) => void;
-  /** 设备悬停回调 */
-  onDeviceHover?: (device: MapDevice | null) => void;
+  /** 设备悬停回调（包含鼠标位置） */
+  onDeviceHover?: (device: MapDevice | null, pixel?: { x: number; y: number }) => void;
   /** 视图变化回调 */
   onViewportChange?: (viewport: MapViewport) => void;
   /** 聚合点击回调 */
@@ -95,6 +94,12 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const clusterSourceRef = useRef<Cluster | null>(null);
   const deviceLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const highlightFeatureRef = useRef<Feature | null>(null);
+  // 水波纹动画定时器
+  const pulseAnimationRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 波纹创建定时器
+  const rippleCreateRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 波纹状态数组
+  const rippleWavesRef = useRef<{ radius: number; opacity: number }[]>([]);
 
   const [isReady, setIsReady] = useState(false);
 
@@ -102,14 +107,19 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
-    // 创建瓦片图层
-    const tileSource = tileUrl
-      ? new XYZ({ url: tileUrl }) // 离线瓦片
-      : new OSM(); // OpenStreetMap
+    // 创建瓦片图层（可选：如果提供了 tileUrl 则使用，否则不显示底图）
+    // 地图背景使用 CSS 格条纹理，不再使用 OSM 瓦片
+    const layers: any[] = [];
 
-    const tileLayer = new TileLayer({
-      source: tileSource,
-    });
+    // 只有提供了 tileUrl 才添加瓦片图层
+    if (tileUrl) {
+      const tileSource = new XYZ({ url: tileUrl });
+      const tileLayer = new TileLayer({
+        source: tileSource,
+        opacity: 0.6, // 半透明，让格条纹理背景显示出来
+      });
+      layers.push(tileLayer);
+    }
 
     // 创建设备数据源
     deviceSourceRef.current = new VectorSource();
@@ -126,11 +136,12 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       style: clusterStyleFunction,
       zIndex: 10,
     });
+    layers.push(deviceLayerRef.current);
 
     // 创建地图实例
     mapInstanceRef.current = new Map({
       target: mapRef.current,
-      layers: [tileLayer, deviceLayerRef.current],
+      layers,
       view: new View({
         center: fromLonLat(center),
         zoom,
@@ -154,7 +165,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         onDeviceHover,
         onViewportChange,
         onClusterClick,
-      }
+      },
+      deviceLayerRef.current
     );
 
     setIsReady(true);
@@ -230,7 +242,31 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     });
   }, []);
 
-  // 高亮设备（脉冲动画）
+  // 取消高亮（必须在 highlightDevice 之前定义）
+  const clearHighlight = useCallback(() => {
+    // 清除波纹动画定时器
+    if (pulseAnimationRef.current) {
+      clearInterval(pulseAnimationRef.current);
+      pulseAnimationRef.current = null;
+    }
+
+    // 清除波纹创建定时器
+    if (rippleCreateRef.current) {
+      clearInterval(rippleCreateRef.current);
+      rippleCreateRef.current = null;
+    }
+
+    // 清除波纹状态
+    rippleWavesRef.current = [];
+
+    if (highlightFeatureRef.current) {
+      highlightFeatureRef.current.set('highlighted', false);
+      highlightFeatureRef.current.set('rippleWaves', undefined);
+      highlightFeatureRef.current = null;
+    }
+  }, []);
+
+  // 高亮设备（水波纹动画）
   const highlightDevice = useCallback((deviceId: string) => {
     if (!deviceSourceRef.current || !mapInstanceRef.current) return;
 
@@ -249,16 +285,59 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         const lonLat = toLonLat(coordinate);
         flyTo(lonLat[0], lonLat[1]);
       }
-    }
-  }, [flyTo]);
 
-  // 取消高亮
-  const clearHighlight = useCallback(() => {
-    if (highlightFeatureRef.current) {
-      highlightFeatureRef.current.set('highlighted', false);
-      highlightFeatureRef.current = null;
+      // 初始化波纹状态
+      rippleWavesRef.current = [];
+
+      // 创建新波纹的函数
+      const createRipple = () => {
+        if (!highlightFeatureRef.current) return;
+        rippleWavesRef.current.push({
+          radius: 0,      // 从中心开始
+          opacity: 0.5,   // 初始透明度（更浅）
+        });
+      };
+
+      // 立即创建第一个波纹
+      createRipple();
+
+      // 定时创建新波纹（每 600ms）
+      rippleCreateRef.current = setInterval(() => {
+        createRipple();
+        // 最多同时存在 3 个波纹
+        if (rippleWavesRef.current.length > 3) {
+          rippleWavesRef.current.shift();
+        }
+      }, 600);
+
+      // 波纹扩散动画（每 30ms 更新）
+      pulseAnimationRef.current = setInterval(() => {
+        if (!highlightFeatureRef.current) {
+          if (pulseAnimationRef.current) {
+            clearInterval(pulseAnimationRef.current);
+            pulseAnimationRef.current = null;
+          }
+          return;
+        }
+
+        // 更新所有波纹的状态
+        rippleWavesRef.current = rippleWavesRef.current
+          .map(wave => ({
+            radius: wave.radius + 0.5,     // 半径增长（扩散更慢）
+            opacity: wave.opacity - 0.01,  // 透明度降低
+          }))
+          .filter(wave => wave.opacity > 0); // 移除已消失的波纹
+
+        // 更新 feature 的波纹数据
+        highlightFeatureRef.current.set('rippleWaves', [...rippleWavesRef.current]);
+
+        // 触发地图重新渲染
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.render();
+        }
+      }, 30); // 30ms 更新一次，实现平滑动画
     }
-  }, []);
+  }, [flyTo, clearHighlight]);
 
   // 刷新地图尺寸
   const updateSize = useCallback(() => {
@@ -313,17 +392,18 @@ function bindMapEvents(
   clusterSource: Cluster,
   callbacks: {
     onDeviceClick?: (device: MapDevice) => void;
-    onDeviceHover?: (device: MapDevice | null) => void;
+    onDeviceHover?: (device: MapDevice | null, pixel?: { x: number; y: number }) => void;
     onViewportChange?: (viewport: MapViewport) => void;
     onClusterClick?: (devices: MapDevice[]) => void;
-  }
+  },
+  deviceLayer: VectorLayer<VectorSource>
 ): void {
   const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick } = callbacks;
 
   // 点击事件
   map.on('click', (evt) => {
     const features = map.getFeaturesAtPixel(evt.pixel, {
-      layerFilter: (layer) => layer === map.getLayers().getArray()[1], // 设备图层
+      layerFilter: (layer) => layer === deviceLayer, // 设备图层
     });
 
     if (features.length > 0) {
@@ -362,7 +442,7 @@ function bindMapEvents(
 
   map.on('pointermove', (evt) => {
     const features = map.getFeaturesAtPixel(evt.pixel, {
-      layerFilter: (layer) => layer === map.getLayers().getArray()[1],
+      layerFilter: (layer) => layer === deviceLayer,
     });
 
     if (features.length > 0) {
@@ -385,7 +465,7 @@ function bindMapEvents(
         feature.set('hovered', true);
         hoveredFeature = feature;
 
-        onDeviceHover?.(device);
+        onDeviceHover?.(device, { x: evt.pixel[0], y: evt.pixel[1] });
         map.getTargetElement().style.cursor = 'pointer';
       } else {
         if (hoveredFeature) {
