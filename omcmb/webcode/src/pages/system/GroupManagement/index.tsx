@@ -1,14 +1,13 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
+  App,
   Button,
-  Modal,
+  Drawer,
   Form,
   Input,
   Dropdown,
-  message,
   Tag,
   Select,
-  Transfer,
 } from 'antd';
 import {
   PlusOutlined,
@@ -35,6 +34,7 @@ import { useT } from '@/hooks/useT';
 
 export default function GroupManagement() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -64,23 +64,23 @@ export default function GroupManagement() {
 
   const handleDelete = useCallback((group: Group) => {
     if (isBuiltIn(group)) {
-      Modal.warning({
+      modal.warning({
         title: t('common.warning'),
         content: t('group.builtInCannotDelete'),
       });
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title: t('common.confirmDelete'),
       onOk: () => {
         deleteGroups.mutate([group.id], {
-          onSuccess: () => void message.success(t('common.deleteSuccess')),
+          onSuccess: () => message.success(t('common.deleteSuccess')),
         });
       },
     });
-  }, [isBuiltIn, t, deleteGroups]);
+  }, [isBuiltIn, t, deleteGroups, modal, message]);
 
-  const handleCreate = () => {
+  const handleCreate = useCallback(() => {
     form.validateFields().then((vals) => {
       createGroup.mutate(
         {
@@ -92,7 +92,7 @@ export default function GroupManagement() {
         },
         {
           onSuccess: () => {
-            void message.success(t('common.save'));
+            message.success(t('common.save'));
             setCreateVisible(false);
             form.resetFields();
             setSelectedRoleIds([]);
@@ -101,9 +101,9 @@ export default function GroupManagement() {
         },
       );
     });
-  };
+  }, [form, createGroup, selectedRoleIds, selectedUserIds, message, t]);
 
-  const handleEdit = () => {
+  const handleEdit = useCallback(() => {
     if (!selectedGroup) return;
     form.validateFields().then((vals) => {
       updateGroup.mutate(
@@ -118,7 +118,7 @@ export default function GroupManagement() {
         },
         {
           onSuccess: () => {
-            void message.success(t('common.save'));
+            message.success(t('common.save'));
             setEditVisible(false);
             form.resetFields();
             setSelectedGroup(null);
@@ -128,21 +128,21 @@ export default function GroupManagement() {
         },
       );
     });
-  };
+  }, [selectedGroup, form, updateGroup, selectedRoleIds, selectedUserIds, message, t]);
 
   const handleBatchDelete = useCallback((keys: React.Key[]) => {
     const groupsToDelete = (data?.items || []).filter(
       (g) => keys.includes(g.id) && !isBuiltIn(g)
     );
     if (groupsToDelete.length === 0) {
-      Modal.warning({
+      modal.warning({
         title: t('common.warning'),
         content: t('group.noGroupsToDelete'),
       });
       return;
     }
     const builtInCount = keys.length - groupsToDelete.length;
-    Modal.confirm({
+    modal.confirm({
       title: t('common.confirmDelete'),
       content: builtInCount > 0
         ? `${t('group.selectedBuiltIn')} ${builtInCount} ${t('group.builtInSkipped')}`
@@ -150,13 +150,13 @@ export default function GroupManagement() {
       onOk: () => {
         deleteGroups.mutate(groupsToDelete.map((g) => g.id), {
           onSuccess: () => {
-            void message.success(t('common.deleteSuccess'));
+            message.success(t('common.deleteSuccess'));
             setSelectedKeys([]);
           },
         });
       },
     });
-  }, [data?.items, isBuiltIn, t, deleteGroups]);
+  }, [data?.items, isBuiltIn, t, deleteGroups, modal, message]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'groupName', label: t('group.groupName'), type: 'input', placeholder: t('group.groupName') },
@@ -164,36 +164,11 @@ export default function GroupManagement() {
 
   const columns: DataTableColumn<Group & Record<string, unknown>>[] = useMemo(() => [
     {
-      key: 'groupName',
-      title: t('group.groupName'),
-      dataIndex: 'groupName',
-      width: 200,
-      render: (val, record) => {
-        const group = record as Group;
-        return (
-          <span>
-            {String(val)}
-            {isBuiltIn(group) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('group.builtIn')}</Tag>}
-          </span>
-        );
-      },
-    },
-    { key: 'userCount', title: t('group.userCount'), dataIndex: 'userCount', width: 200 },
-    { key: 'roleCount', title: t('group.roleCount'), dataIndex: 'roleCount', width: 200 },
-    { key: 'updUser', title: t('group.updUser'), dataIndex: 'updUser', width: 200 },
-    {
-      key: 'updTime',
-      title: t('group.updTime'),
-      dataIndex: 'updTime',
-      ellipsis: true,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
-    },
-    {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
       width: 100,
-      fixed: 'right',
+      fixed: 'left',
       render: (_, record) => {
         const group = record as Group;
         return (
@@ -246,6 +221,31 @@ export default function GroupManagement() {
         );
       },
     },
+    {
+      key: 'groupName',
+      title: t('group.groupName'),
+      dataIndex: 'groupName',
+      width: 200,
+      render: (val, record) => {
+        const group = record as Group;
+        return (
+          <span>
+            {String(val)}
+            {isBuiltIn(group) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('group.builtIn')}</Tag>}
+          </span>
+        );
+      },
+    },
+    { key: 'userCount', title: t('group.userCount'), dataIndex: 'userCount', width: 200 },
+    { key: 'roleCount', title: t('group.roleCount'), dataIndex: 'roleCount', width: 200 },
+    { key: 'updUser', title: t('group.updUser'), dataIndex: 'updUser', width: 200 },
+    {
+      key: 'updTime',
+      title: t('group.updTime'),
+      dataIndex: 'updTime',
+      ellipsis: true,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+    },
   ], [t, form, isBuiltIn, handleDelete]);
 
   return (
@@ -289,25 +289,45 @@ export default function GroupManagement() {
         scroll={{ x: 1000 }}
       />
 
-      {/* Create Modal */}
-      <Modal
+      {/* Create Drawer */}
+      <Drawer
         title={t('common.add')}
         open={createVisible}
-        onOk={handleCreate}
-        onCancel={() => {
+        onClose={() => {
           setCreateVisible(false);
           form.resetFields();
           setSelectedRoleIds([]);
           setSelectedUserIds([]);
         }}
-        confirmLoading={createGroup.isPending}
-        width={640}
+        width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setCreateVisible(false);
+                form.resetFields();
+                setSelectedRoleIds([]);
+                setSelectedUserIds([]);
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="primary"
+              loading={createGroup.isPending}
+              onClick={handleCreate}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="groupName"
             label={t('group.groupName')}
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
           >
             <Input placeholder={t('group.groupName')} />
           </Form.Item>
@@ -335,28 +355,49 @@ export default function GroupManagement() {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* Edit Modal */}
-      <Modal
+      {/* Edit Drawer */}
+      <Drawer
         title={t('common.edit')}
         open={editVisible}
-        onOk={handleEdit}
-        onCancel={() => {
+        onClose={() => {
           setEditVisible(false);
           form.resetFields();
           setSelectedGroup(null);
           setSelectedRoleIds([]);
           setSelectedUserIds([]);
         }}
-        confirmLoading={updateGroup.isPending}
-        width={640}
+        width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setEditVisible(false);
+                form.resetFields();
+                setSelectedGroup(null);
+                setSelectedRoleIds([]);
+                setSelectedUserIds([]);
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="primary"
+              loading={updateGroup.isPending}
+              onClick={handleEdit}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="groupName"
             label={t('group.groupName')}
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
           >
             <Input placeholder={t('group.groupName')} />
           </Form.Item>
@@ -384,15 +425,21 @@ export default function GroupManagement() {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* View Modal */}
-      <Modal
+      {/* View Drawer */}
+      <Drawer
         title={t('common.view')}
         open={viewVisible}
-        onCancel={() => { setViewVisible(false); form.resetFields(); setSelectedGroup(null); }}
-        footer={<Button onClick={() => { setViewVisible(false); form.resetFields(); setSelectedGroup(null); }}>{t('common.close')}</Button>}
+        onClose={() => { setViewVisible(false); form.resetFields(); setSelectedGroup(null); }}
         width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button onClick={() => { setViewVisible(false); form.resetFields(); setSelectedGroup(null); }}>
+              {t('common.close')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item name="groupName" label={t('group.groupName')}>
@@ -414,7 +461,7 @@ export default function GroupManagement() {
             <span>{selectedGroup?.updTime ? new Date(selectedGroup.updTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </ListPageLayout>
   );
 }
