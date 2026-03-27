@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import {
   App,
   Button,
@@ -32,7 +32,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import ImportPanel from '@/components/ImportPanel';
+import ImportPanel, { type ImportPanelRef } from '@/components/ImportPanel';
 import {
   useUsers,
   useCreateUser,
@@ -69,6 +69,7 @@ export default function UserManagement() {
   const [moveGroupForm] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [limitTime, setLimitTime] = useState(true);
+  const importPanelRef = useRef<ImportPanelRef>(null);
 
   const { data, isLoading, refetch } = useUsers({
     userName: filters.userName as string | undefined,
@@ -253,7 +254,7 @@ export default function UserManagement() {
     if (hasBuiltInSelected) {
       modal.warning({
         title: t('common.warning'),
-        content: t('user.builtInCannotBatchOperation'),
+        content: t('user.builtInCannotBatchOp'),
       });
       return;
     }
@@ -286,7 +287,7 @@ export default function UserManagement() {
     if (hasBuiltInSelected) {
       modal.warning({
         title: t('common.warning'),
-        content: t('user.builtInCannotBatchOperation'),
+        content: t('user.builtInCannotBatchOp'),
       });
       return;
     }
@@ -310,7 +311,7 @@ export default function UserManagement() {
     if (hasBuiltInSelected) {
       modal.warning({
         title: t('common.warning'),
-        content: t('user.builtInCannotBatchOperation'),
+        content: t('user.builtInCannotBatchOp'),
       });
       return;
     }
@@ -334,7 +335,7 @@ export default function UserManagement() {
     if (hasBuiltInSelected) {
       modal.warning({
         title: t('common.warning'),
-        content: t('user.builtInCannotBatchOperation'),
+        content: t('user.builtInCannotBatchOp'),
       });
       return;
     }
@@ -355,7 +356,7 @@ export default function UserManagement() {
     if (hasBuiltInSelected) {
       modal.warning({
         title: t('common.warning'),
-        content: t('user.builtInCannotBatchOperation'),
+        content: t('user.builtInCannotBatchOp'),
       });
       return;
     }
@@ -669,27 +670,26 @@ export default function UserManagement() {
         }}
         width={520}
         footer={
-          createMode === 'add' ? (
-            <div style={{ textAlign: 'right' }}>
-              <Button
-                style={{ marginRight: 8 }}
-                onClick={() => {
-                  setCreateVisible(false);
-                  form.resetFields();
-                  setLimitTime(true);
-                }}
-              >
-                {t('common.cancel')}
-              </Button>
-              <Button
-                type="primary"
-                loading={createUser.isPending}
-                onClick={handleCreate}
-              >
-                {t('common.confirm')}
-              </Button>
-            </div>
-          ) : null
+          <div style={{ textAlign: 'right' }}>
+            <Button
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setCreateVisible(false);
+                form.resetFields();
+                setLimitTime(true);
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="primary"
+              loading={createMode === 'add' ? createUser.isPending : importPanelRef.current?.loading}
+              disabled={createMode === 'import' && !importPanelRef.current?.canImport}
+              onClick={createMode === 'add' ? handleCreate : () => importPanelRef.current?.handleImport()}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
         }
       >
         {/* 模式切换 */}
@@ -811,6 +811,7 @@ export default function UserManagement() {
         {/* 导入用户 */}
         {createMode === 'import' && (
           <ImportPanel
+            ref={importPanelRef}
             accept=".xlsx,.xls"
             maxSizeMB={10}
             onImport={handleImport}

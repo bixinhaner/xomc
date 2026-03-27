@@ -9,26 +9,37 @@
  *
  * @example
  * <ImportPanel
+ *   ref={importRef}
  *   accept=".xlsx,.xls"
  *   templateUrl="/api/v1/users/import/template"
  *   importUrl="/api/v1/users/import"
  *   onSuccess={() => { refresh(); close(); }}
  * />
+ *
+ * // 父组件调用导入
+ * importRef.current?.handleImport()
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import {
   Button,
   Upload,
   App,
-  Space,
   Alert,
 } from 'antd';
 import {
-  UploadOutlined,
   DownloadOutlined,
   InboxOutlined,
 } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
+
+export interface ImportPanelRef {
+  /** 执行导入操作 */
+  handleImport: () => Promise<void>;
+  /** 是否有选中的文件可导入 */
+  canImport: boolean;
+  /** 是否正在导入中 */
+  loading: boolean;
+}
 
 export interface ImportPanelProps {
   /** 接受的文件格式，如 ".xlsx,.xls" */
@@ -53,7 +64,7 @@ export interface ImportPanelProps {
   showDefaultTips?: boolean;
 }
 
-export default function ImportPanel({
+const ImportPanel = forwardRef<ImportPanelRef, ImportPanelProps>(function ImportPanel({
   accept = '.xlsx,.xls',
   maxSizeMB = 10,
   templateUrl,
@@ -64,7 +75,7 @@ export default function ImportPanel({
   onDownloadTemplate,
   tips,
   showDefaultTips = true,
-}: ImportPanelProps) {
+}, ref) {
   const t = useT();
   const { message } = App.useApp();
   const [fileList, setFileList] = useState<File[]>([]);
@@ -169,6 +180,13 @@ export default function ImportPanel({
     }
   }, [fileList, onImport, importUrl, onSuccess, onError, message, t]);
 
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    handleImport,
+    canImport: fileList.length > 0,
+    loading,
+  }), [handleImport, fileList.length, loading]);
+
   return (
     <div className="import-panel">
       <Upload.Dragger
@@ -201,28 +219,18 @@ export default function ImportPanel({
         />
       )}
 
-      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-        {templateUrl || onDownloadTemplate ? (
-          <Button
-            type="link"
-            icon={<DownloadOutlined />}
-            onClick={handleDownloadTemplate}
-            style={{ padding: 0 }}
-          >
-            {t('import.downloadTemplate')}
-          </Button>
-        ) : <span />}
-
+      {templateUrl || onDownloadTemplate ? (
         <Button
-          type="primary"
-          icon={<UploadOutlined />}
-          loading={loading}
-          disabled={fileList.length === 0}
-          onClick={handleImport}
+          type="link"
+          icon={<DownloadOutlined />}
+          onClick={handleDownloadTemplate}
+          style={{ padding: 0 }}
         >
-          {t('import.startImport')}
+          {t('import.downloadTemplate')}
         </Button>
-      </Space>
+      ) : null}
     </div>
   );
-}
+});
+
+export default ImportPanel;
