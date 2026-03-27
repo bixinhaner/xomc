@@ -185,7 +185,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'sys-role',        label: 'nav.system.roles',          path: '/system/roles' },
       { key: 'sys-op-log',      label: 'nav.system.operationLog',   path: '/system/operation-log' },
       { key: 'sys-config',      label: 'nav.system.config',         path: '/system/config' },
-      { key: 'sys-dict',        label: 'nav.system.dataDict',       path: '/system/data-dict' },
+      { key: 'sys-ui-custom',   label: 'nav.system.uiCustom',       path: '/system/ui-custom' },
       { key: 'sys-notify',      label: 'nav.system.notifications',  path: '/system/notifications' },
       { key: 'sys-home',        label: 'nav.system.dashboard',      path: '/system/dashboard' },
       { key: 'sys-operator',    label: 'nav.system.operators',      path: '/system/operators' },

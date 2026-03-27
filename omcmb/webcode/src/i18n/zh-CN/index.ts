@@ -258,7 +258,7 @@ const messages: Record<string, string> = {
   'nav.system.roles':         '角色权限',
   'nav.system.operationLog':  '操作日志',
   'nav.system.config':        '系统配置',
-  'nav.system.dataDict':      '数据字典',
+  'nav.system.uiCustom':      'UI定制化',
   'nav.system.notifications': '通知设置',
   'nav.system.dashboard':     '系统仪表板',
 

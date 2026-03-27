@@ -19,10 +19,9 @@ import OmcSettings from './OmcSettings';
 import NorthboundSettings from './NorthboundSettings';
 import SasSettings from './SasSettings';
 import LdapSettings from './LdapSettings';
-import UICustomSettings from './UICustomSettings';
 
 // 设置子页签类型
-type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound' | 'sas' | 'ldap' | 'ui';
+type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound' | 'sas' | 'ldap';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; label: string }[] = [
@@ -35,7 +34,6 @@ const settingsTabs: { key: SettingsTab; label: string }[] = [
   { key: 'northbound', label: '北向接口设置' },
   { key: 'sas', label: 'SAS设置' },
   { key: 'ldap', label: 'LDAP协议' },
-  { key: 'ui', label: 'UI定制化' },
 ];
 
 export default function SystemConfig() {
@@ -53,7 +51,6 @@ export default function SystemConfig() {
   const [northboundForm] = Form.useForm();
   const [sasForm] = Form.useForm();
   const [ldapForm] = Form.useForm();
-  const [uiForm] = Form.useForm();
 
   // 获取当前设置页签对应的表单
   const getCurrentForm = () => {
@@ -67,7 +64,6 @@ export default function SystemConfig() {
       northbound: northboundForm,
       sas: sasForm,
       ldap: ldapForm,
-      ui: uiForm,
     };
     return formMap[activeTab];
   };
@@ -106,8 +102,6 @@ export default function SystemConfig() {
         return <SasSettings form={sasForm} />;
       case 'ldap':
         return <LdapSettings form={ldapForm} />;
-      case 'ui':
-        return <UICustomSettings form={uiForm} />;
       default:
         return null;
     }
