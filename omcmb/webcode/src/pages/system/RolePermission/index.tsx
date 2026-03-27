@@ -1,14 +1,13 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
+  App,
   Button,
   Tag,
-  Modal,
+  Drawer,
   Form,
   Input,
-  Select,
   Switch,
   Dropdown,
-  message,
   Tree,
   Card,
 } from 'antd';
@@ -29,7 +28,6 @@ import {
   useCreateRole,
   useUpdateRole,
   useDeleteRoles,
-  useAllPermissions,
 } from '@/hooks/api/useSystem';
 import type { Role } from '@/types/system';
 import { useT } from '@/hooks/useT';
@@ -128,6 +126,7 @@ const permissionModules = [
 
 export default function RoleManagement() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -153,35 +152,35 @@ export default function RoleManagement() {
 
   const handleDelete = useCallback((role: Role) => {
     if (isBuiltIn(role)) {
-      Modal.warning({
+      modal.warning({
         title: t('common.warning'),
         content: t('role.builtInCannotDelete'),
       });
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title: t('common.confirmDelete'),
       onOk: () => {
         deleteRoles.mutate([role.id], {
-          onSuccess: () => void message.success(t('common.deleteSuccess')),
+          onSuccess: () => message.success(t('common.deleteSuccess')),
         });
       },
     });
-  }, [isBuiltIn, t, deleteRoles]);
+  }, [isBuiltIn, t, deleteRoles, modal, message]);
 
   const handleBatchDelete = useCallback((keys: React.Key[]) => {
     const rolesToDelete = (data?.items || []).filter(
       (r) => keys.includes(r.id) && !isBuiltIn(r)
     );
     if (rolesToDelete.length === 0) {
-      Modal.warning({
+      modal.warning({
         title: t('common.warning'),
         content: t('role.noRolesToDelete'),
       });
       return;
     }
     const builtInCount = keys.length - rolesToDelete.length;
-    Modal.confirm({
+    modal.confirm({
       title: t('common.confirmDelete'),
       content: builtInCount > 0
         ? `${t('role.selectedBuiltIn')} ${builtInCount} ${t('role.builtInSkipped')}`
@@ -189,15 +188,15 @@ export default function RoleManagement() {
       onOk: () => {
         deleteRoles.mutate(rolesToDelete.map((r) => r.id), {
           onSuccess: () => {
-            void message.success(t('common.deleteSuccess'));
+            message.success(t('common.deleteSuccess'));
             setSelectedKeys([]);
           },
         });
       },
     });
-  }, [data?.items, isBuiltIn, t, deleteRoles]);
+  }, [data?.items, isBuiltIn, t, deleteRoles, modal, message]);
 
-  const handleCreate = () => {
+  const handleCreate = useCallback(() => {
     form.validateFields().then((vals) => {
       createRole.mutate(
         {
@@ -209,7 +208,7 @@ export default function RoleManagement() {
         },
         {
           onSuccess: () => {
-            void message.success(t('common.save'));
+            message.success(t('common.save'));
             setCreateVisible(false);
             form.resetFields();
             setCheckedPermissions([]);
@@ -217,9 +216,9 @@ export default function RoleManagement() {
         },
       );
     });
-  };
+  }, [form, createRole, checkedPermissions, message, t]);
 
-  const handleEdit = () => {
+  const handleEdit = useCallback(() => {
     if (!selectedRole) return;
     form.validateFields().then((vals) => {
       updateRole.mutate(
@@ -234,7 +233,7 @@ export default function RoleManagement() {
         },
         {
           onSuccess: () => {
-            void message.success(t('common.save'));
+            message.success(t('common.save'));
             setEditVisible(false);
             form.resetFields();
             setSelectedRole(null);
@@ -243,7 +242,7 @@ export default function RoleManagement() {
         },
       );
     });
-  };
+  }, [selectedRole, form, updateRole, checkedPermissions, message, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -251,46 +250,11 @@ export default function RoleManagement() {
 
   const columns: DataTableColumn<Role & Record<string, unknown>>[] = useMemo(() => [
     {
-      key: 'roleName',
-      title: t('role.roleName'),
-      dataIndex: 'roleName',
-      width: 200,
-      render: (val, record) => {
-        const role = record as Role;
-        return (
-          <span>
-            {String(val)}
-            {isBuiltIn(role) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('role.builtIn')}</Tag>}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'batchOperation',
-      title: t('role.batchOperation'),
-      dataIndex: 'batchOperation',
-      width: 120,
-      render: (val) => (
-        <Tag color={val === 1 ? 'green' : 'default'}>
-          {val === 1 ? t('common.yes') : t('common.no')}
-        </Tag>
-      ),
-    },
-    { key: 'updUser', title: t('role.updUser'), dataIndex: 'updUser', width: 150 },
-    {
-      key: 'updTime',
-      title: t('role.updTime'),
-      dataIndex: 'updTime',
-      width: 180,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
-    },
-    { key: 'description', title: t('role.description'), dataIndex: 'description', ellipsis: true },
-    {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
       width: 100,
-      fixed: 'right',
+      fixed: 'left',
       render: (_, record) => {
         const role = record as Role;
         return (
@@ -345,6 +309,41 @@ export default function RoleManagement() {
         );
       },
     },
+    {
+      key: 'roleName',
+      title: t('role.roleName'),
+      dataIndex: 'roleName',
+      width: 200,
+      render: (val, record) => {
+        const role = record as Role;
+        return (
+          <span>
+            {String(val)}
+            {isBuiltIn(role) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('role.builtIn')}</Tag>}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'batchOperation',
+      title: t('role.batchOperation'),
+      dataIndex: 'batchOperation',
+      width: 120,
+      render: (val) => (
+        <Tag color={val === 1 ? 'green' : 'default'}>
+          {val === 1 ? t('common.yes') : t('common.no')}
+        </Tag>
+      ),
+    },
+    { key: 'updUser', title: t('role.updUser'), dataIndex: 'updUser', width: 150 },
+    {
+      key: 'updTime',
+      title: t('role.updTime'),
+      dataIndex: 'updTime',
+      width: 180,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+    },
+    { key: 'description', title: t('role.description'), dataIndex: 'description', ellipsis: true },
   ], [t, form, isBuiltIn, handleDelete]);
 
   const renderPermissionTree = (readOnly = false) => (
@@ -406,24 +405,43 @@ export default function RoleManagement() {
         scroll={{ x: 1100 }}
       />
 
-      {/* Create Modal */}
-      <Modal
+      {/* Create Drawer */}
+      <Drawer
         title={t('common.add')}
         open={createVisible}
-        onOk={handleCreate}
-        onCancel={() => {
+        onClose={() => {
           setCreateVisible(false);
           form.resetFields();
           setCheckedPermissions([]);
         }}
-        confirmLoading={createRole.isPending}
-        width={640}
+        width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setCreateVisible(false);
+                form.resetFields();
+                setCheckedPermissions([]);
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="primary"
+              loading={createRole.isPending}
+              onClick={handleCreate}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="roleName"
             label={t('role.roleName')}
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
           >
             <Input placeholder={t('role.roleName')} />
           </Form.Item>
@@ -440,27 +458,47 @@ export default function RoleManagement() {
           </Form.Item>
           {renderPermissionTree(false)}
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* Edit Modal */}
-      <Modal
+      {/* Edit Drawer */}
+      <Drawer
         title={t('common.edit')}
         open={editVisible}
-        onOk={handleEdit}
-        onCancel={() => {
+        onClose={() => {
           setEditVisible(false);
           form.resetFields();
           setSelectedRole(null);
           setCheckedPermissions([]);
         }}
-        confirmLoading={updateRole.isPending}
-        width={640}
+        width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button
+              style={{ marginRight: 8 }}
+              onClick={() => {
+                setEditVisible(false);
+                form.resetFields();
+                setSelectedRole(null);
+                setCheckedPermissions([]);
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="primary"
+              loading={updateRole.isPending}
+              onClick={handleEdit}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="roleName"
             label={t('role.roleName')}
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
           >
             <Input placeholder={t('role.roleName')} />
           </Form.Item>
@@ -476,20 +514,31 @@ export default function RoleManagement() {
           </Form.Item>
           {renderPermissionTree(false)}
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* View Modal */}
-      <Modal
+      {/* View Drawer */}
+      <Drawer
         title={t('common.view')}
         open={viewVisible}
-        onCancel={() => {
+        onClose={() => {
           setViewVisible(false);
           form.resetFields();
           setSelectedRole(null);
           setCheckedPermissions([]);
         }}
-        footer={<Button onClick={() => { setViewVisible(false); form.resetFields(); setSelectedRole(null); setCheckedPermissions([]); }}>{t('common.close')}</Button>}
-        width={640}
+        width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button onClick={() => {
+              setViewVisible(false);
+              form.resetFields();
+              setSelectedRole(null);
+              setCheckedPermissions([]);
+            }}>
+              {t('common.close')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item name="roleName" label={t('role.roleName')}>
@@ -514,7 +563,7 @@ export default function RoleManagement() {
           </Form.Item>
           {renderPermissionTree(true)}
         </Form>
-      </Modal>
+      </Drawer>
     </ListPageLayout>
   );
 }
