@@ -1,12 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
+  App,
   Button,
   Space,
   Tag,
   Typography,
   Dropdown,
-  Modal,
-  message,
   Drawer,
   Form,
   Select,
@@ -115,6 +114,7 @@ const productTypeOptions = [
 
 export default function DeviceLog() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [createDrawerVisible, setCreateDrawerVisible] = useState(false);
@@ -262,18 +262,18 @@ export default function DeviceLog() {
 
   // 终止任务
   const handleTerminate = (record: DeviceLogTask) => {
-    Modal.confirm({
+    modal.confirm({
       title: '确认终止',
       content: `确定要终止设备 ${record.deviceCode} 的日志收集任务吗？`,
       onOk: () => {
-        void message.success('任务已终止');
+        message.success('任务已终止');
       },
     });
   };
 
   // 下载
   const handleDownload = (record: DeviceLogTask) => {
-    void message.success(`正在下载设备 ${record.deviceCode} 的日志文件`);
+    message.success(`正在下载设备 ${record.deviceCode} 的日志文件`);
   };
 
   // 删除
@@ -284,66 +284,76 @@ export default function DeviceLog() {
 
   const handleDeleteConfirm = () => {
     if (taskToDelete) {
-      void message.success(`已删除任务: ${taskToDelete.deviceCode}`);
+      message.success(`已删除任务: ${taskToDelete.deviceCode}`);
       setDeleteModalVisible(false);
       setTaskToDelete(null);
     }
   };
 
   // 批量删除
-  const handleBatchDelete = () => {
-    // 过滤出可删除的任务（状态为 2/3/4：成功、失败、终止）
-    const deletableTasks = filteredData.filter(
-      (task) => selectedRowKeys.includes(task.id) && [2, 3, 4].includes(task.taskStatus)
-    );
-    // 收集中状态包括：0-等待、1-进行中、5-正在停止上报、7-停止上报失败、8-周期上报设置成功
-    const collectingTasks = filteredData.filter(
-      (task) => selectedRowKeys.includes(task.id) && [0, 1, 5, 7, 8].includes(task.taskStatus)
-    );
+  const handleBatchDelete = useCallback(
+    (ids: React.Key[]) => {
+      // 过滤出可删除的任务（状态为 2/3/4：成功、失败、终止）
+      const deletableTasks = filteredData.filter(
+        (task) => ids.includes(task.id) && [2, 3, 4].includes(task.taskStatus)
+      );
+      // 收集中状态包括：0-等待、1-进行中、5-正在停止上报、7-停止上报失败、8-周期上报设置成功
+      const collectingTasks = filteredData.filter(
+        (task) => ids.includes(task.id) && [0, 1, 5, 7, 8].includes(task.taskStatus)
+      );
 
-    if (collectingTasks.length > 0) {
-      Modal.warning({
-        title: '无法删除',
-        content: `选中的任务中有 ${collectingTasks.length} 个正在收集或等待中，不允许删除。请先终止这些任务后再删除。`,
+      if (collectingTasks.length > 0) {
+        modal.warning({
+          title: '无法删除',
+          content: `选中的任务中有 ${collectingTasks.length} 个正在收集或等待中，不允许删除。请先终止这些任务后再删除。`,
+        });
+        return;
+      }
+
+      if (deletableTasks.length === 0) {
+        message.warning('请选择可删除的任务（成功、失败或终止状态）');
+        return;
+      }
+
+      modal.confirm({
+        title: '批量删除',
+        content: `确定要删除选中的 ${deletableTasks.length} 个任务吗？`,
+        okText: '确认',
+        cancelText: '取消',
+        onOk: () => {
+          message.success(`已删除 ${deletableTasks.length} 个任务`);
+          setSelectedRowKeys([]);
+        },
       });
-      return;
-    }
-
-    if (deletableTasks.length === 0) {
-      void message.warning('请选择可删除的任务（成功、失败或终止状态）');
-      return;
-    }
-
-    Modal.confirm({
-      title: '批量删除',
-      content: `确定要删除选中的 ${deletableTasks.length} 个任务吗？`,
-      onOk: () => {
-        void message.success(`已删除 ${deletableTasks.length} 个任务`);
-        setSelectedRowKeys([]);
-      },
-    });
-  };
+    },
+    [filteredData, modal, message]
+  );
 
   // 批量下载
-  const handleBatchDownload = () => {
-    // 过滤出可下载的任务（仅成功状态）
-    const downloadableTasks = filteredData.filter(
-      (task) => selectedRowKeys.includes(task.id) && task.taskStatus === 2
-    );
+  const handleBatchDownload = useCallback(
+    (ids: React.Key[]) => {
+      // 过滤出可下载的任务（仅成功状态）
+      const downloadableTasks = filteredData.filter(
+        (task) => ids.includes(task.id) && task.taskStatus === 2
+      );
 
-    if (downloadableTasks.length === 0) {
-      void message.warning('请选择可下载的任务（仅限成功状态）');
-      return;
-    }
+      if (downloadableTasks.length === 0) {
+        message.warning('请选择可下载的任务（仅限成功状态）');
+        return;
+      }
 
-    Modal.confirm({
-      title: '批量下载',
-      content: `确定要下载选中的 ${downloadableTasks.length} 个任务的日志文件吗？`,
-      onOk: () => {
-        void message.success(`正在下载 ${downloadableTasks.length} 个任务的日志文件`);
-      },
-    });
-  };
+      modal.confirm({
+        title: '批量下载',
+        content: `确定要下载选中的 ${downloadableTasks.length} 个任务的日志文件吗？`,
+        okText: '确认',
+        cancelText: '取消',
+        onOk: () => {
+          message.success(`正在下载 ${downloadableTasks.length} 个任务的日志文件`);
+        },
+      });
+    },
+    [filteredData, modal, message]
+  );
 
   // 从已选列表中移除设备
   const handleRemoveDevice = (deviceId: string) => {
@@ -369,7 +379,7 @@ export default function DeviceLog() {
   // 确认添加设备
   const handleConfirmAddDevices = () => {
     if (selectedNewDevices.length === 0) {
-      void message.warning('请至少选择一个设备');
+      message.warning('请至少选择一个设备');
       return;
     }
     const newDevices = availableDevices.filter((d) => selectedNewDevices.includes(d.id));
@@ -377,7 +387,7 @@ export default function DeviceLog() {
     setAddDeviceModalVisible(false);
     setSelectedNewDevices([]);
     setAddDeviceKeyword('');
-    void message.success(`已添加 ${newDevices.length} 台设备`);
+    message.success(`已添加 ${newDevices.length} 台设备`);
   };
 
   // 打开批量输入弹窗
@@ -389,7 +399,7 @@ export default function DeviceLog() {
   // 确认批量输入
   const handleConfirmBatchInput = () => {
     if (!batchInputValue.trim()) {
-      void message.warning('请输入设备编码');
+      message.warning('请输入设备编码');
       return;
     }
     const codes = batchInputValue
@@ -415,7 +425,7 @@ export default function DeviceLog() {
     }
     if (newDevices.length > 0) {
       setSelectedDevices((prev) => [...prev, ...newDevices]);
-      void message.success(`已添加 ${newDevices.length} 台设备`);
+      message.success(`已添加 ${newDevices.length} 台设备`);
     }
     setBatchInputModalVisible(false);
     setBatchInputValue('');
@@ -425,11 +435,11 @@ export default function DeviceLog() {
   const handleCreateTask = () => {
     form.validateFields().then((values) => {
       if (selectedDevices.length === 0) {
-        void message.warning('请至少选择一个设备');
+        message.warning('请至少选择一个设备');
         return;
       }
       console.log('创建任务:', { ...values, devices: selectedDevices });
-      void message.success(`任务创建成功，已选择 ${selectedDevices.length} 个设备`);
+      message.success(`任务创建成功，已选择 ${selectedDevices.length} 个设备`);
       setCreateDrawerVisible(false);
       form.resetFields();
       setSelectedDevices([]);
@@ -445,21 +455,24 @@ export default function DeviceLog() {
   };
 
   // 批量操作
-  const batchActions: BatchAction[] = [
-    {
-      key: 'delete',
-      label: '批量删除',
-      icon: <DeleteOutlined />,
-      danger: true,
-      onClick: handleBatchDelete,
-    },
-    {
-      key: 'download',
-      label: '批量下载',
-      icon: <DownloadOutlined />,
-      onClick: handleBatchDownload,
-    },
-  ];
+  const batchActions: BatchAction[] = useMemo(
+    () => [
+      {
+        key: 'delete',
+        label: '批量删除',
+        icon: <DeleteOutlined />,
+        danger: true,
+        onClick: handleBatchDelete,
+      },
+      {
+        key: 'download',
+        label: '批量下载',
+        icon: <DownloadOutlined />,
+        onClick: handleBatchDownload,
+      },
+    ],
+    [handleBatchDelete, handleBatchDownload]
+  );
 
   // 表格列
   const columns: DataTableColumn<DeviceLogTask>[] = useMemo(() => [
