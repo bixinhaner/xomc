@@ -248,17 +248,25 @@ function generateMockDevices(): ExtendedSite[] {
 const MOCK_SITES: ExtendedSite[] = generateMockDevices();
 
 // 将 mockMapDevices 转换为 ExtendedSite 格式（用于大量数据测试）
-const LARGE_MOCK_SITES: ExtendedSite[] = mockMapDevices.map((device) => ({
-  id: device.id,
-  name: device.name,
-  domainId: device.groupName?.split('/')[0] || 'LUSAKA',
-  address: device.address || '',
-  longitude: device.lng,
-  latitude: device.lat,
-  deviceCount: 1,
-  status: device.status === 'online' ? 'active' : 'inactive',
-  activated: true,
-}));
+// 使用确定性算法计算 activated 状态（基于设备 ID 哈希）
+const LARGE_MOCK_SITES: ExtendedSite[] = mockMapDevices.map((device) => {
+  const isOnline = device.status === 'online';
+  // 基于设备 ID 计算稳定的"随机"值（0-1）
+  const hashValue = device.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100 / 100;
+  // 在线设备 95% 激活，离线设备 70% 激活
+  const activated = isOnline ? hashValue < 0.95 : hashValue < 0.70;
+  return {
+    id: device.id,
+    name: device.name,
+    domainId: device.groupName?.split('/')[0] || 'LUSAKA',
+    address: device.address || '',
+    longitude: device.lng,
+    latitude: device.lat,
+    deviceCount: 1,
+    status: isOnline ? 'active' : 'inactive',
+    activated,
+  };
+});
 
 // 大量 Mock 数据的设备组树
 const LARGE_MOCK_GROUP_TREE: DeviceGroupNode[] = [
