@@ -445,7 +445,7 @@ export default function DeviceLog() {
   };
 
   // 批量操作
-  const batchActions: BatchAction[] = useMemo(() => [
+  const batchActions: BatchAction[] = [
     {
       key: 'delete',
       label: '批量删除',
@@ -459,7 +459,7 @@ export default function DeviceLog() {
       icon: <DownloadOutlined />,
       onClick: handleBatchDownload,
     },
-  ], [selectedRowKeys]);
+  ];
 
   // 表格列
   const columns: DataTableColumn<DeviceLogTask>[] = useMemo(() => [
