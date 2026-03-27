@@ -11,6 +11,12 @@ import type { Site } from '@/types/topology';
 import { useSites } from '@/hooks/api/useTopology';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
+// 导入大量 Mock 数据（约 3720 条设备）
+import { mockMapDevices, mockStats } from '@/components/GISMap/mockDeviceData';
+
+// 是否使用大量 Mock 数据进行测试
+const USE_LARGE_MOCK_DATA = true;
+
 // 扩展 Site 类型，增加激活状态
 interface ExtendedSite extends Site {
   activated: boolean; // true: 已激活, false: 未激活
@@ -241,13 +247,71 @@ function generateMockDevices(): ExtendedSite[] {
 // 生成 Mock 数据（只生成一次）
 const MOCK_SITES: ExtendedSite[] = generateMockDevices();
 
+// 将 mockMapDevices 转换为 ExtendedSite 格式（用于大量数据测试）
+const LARGE_MOCK_SITES: ExtendedSite[] = mockMapDevices.map((device) => ({
+  id: device.id,
+  name: device.name,
+  domainId: device.groupName?.split('/')[0] || 'LUSAKA',
+  address: device.address || '',
+  longitude: device.lng,
+  latitude: device.lat,
+  deviceCount: 1,
+  status: device.status === 'online' ? 'active' : 'inactive',
+  activated: true,
+}));
+
+// 大量 Mock 数据的设备组树
+const LARGE_MOCK_GROUP_TREE: DeviceGroupNode[] = [
+  {
+    id: 'zambia',
+    name: 'Zambia Network',
+    parentId: null,
+    level: 1,
+    children: [
+      {
+        id: 'LUSAKA',
+        name: 'Lusaka Region',
+        parentId: 'zambia',
+        level: 2,
+        children: [
+          { id: 'LUSAKA/LTE700', name: 'LTE700', parentId: 'LUSAKA', level: 3, isLeaf: true },
+          { id: 'LUSAKA/NR2600', name: 'NR2600', parentId: 'LUSAKA', level: 3, isLeaf: true },
+        ],
+      },
+      {
+        id: 'COPPERBELT',
+        name: 'Copperbelt Region',
+        parentId: 'zambia',
+        level: 2,
+        isLeaf: true,
+      },
+      {
+        id: 'CENTRAL',
+        name: 'Central Region',
+        parentId: 'zambia',
+        level: 2,
+        isLeaf: true,
+      },
+    ],
+  },
+];
+
+// 大量 Mock 数据的组路径映射
+const LARGE_GROUP_PATH_MAP: Record<string, string> = {
+  'LUSAKA': 'Zambia / Lusaka',
+  'LUSAKA/LTE700': 'Zambia / Lusaka / LTE700',
+  'LUSAKA/NR2600': 'Zambia / Lusaka / NR2600',
+  'COPPERBELT': 'Zambia / Copperbelt',
+  'CENTRAL': 'Zambia / Central',
+};
+
 export default function GISMapView() {
   const token = useThemeToken();
 
   // 状态
   const [groupSearchValue, setGroupSearchValue] = useState('');
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(['china']);
-  const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>(['china', 'bj', 'sh', 'gd']);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(['zambia']);
+  const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>(['zambia', 'LUSAKA']);
   // 扩展状态筛选：在线/离线 + 激活/未激活
   const [statusFilter, setStatusFilter] = useState<{
     online: boolean;
@@ -273,7 +337,15 @@ export default function GISMapView() {
   const mapRef = useRef<{ highlightAndFlyTo: (device: MapDevice) => void }>(null);
 
   const { data: sitesData } = useSites({});
-  const sites = (sitesData ?? MOCK_SITES) as ExtendedSite[];
+
+  // 根据开关选择使用大量 Mock 数据还是普通 Mock 数据
+  const sites = USE_LARGE_MOCK_DATA
+    ? LARGE_MOCK_SITES
+    : ((sitesData ?? MOCK_SITES) as ExtendedSite[]);
+
+  // 选择对应的设备组树
+  const groupTree = USE_LARGE_MOCK_DATA ? LARGE_MOCK_GROUP_TREE : MOCK_GROUP_TREE;
+  const groupPathMap = USE_LARGE_MOCK_DATA ? LARGE_GROUP_PATH_MAP : GROUP_PATH_MAP;
 
   // ========== 动态统计计算 ==========
 
@@ -334,11 +406,11 @@ export default function GISMapView() {
         name: site.name,
         status: site.status === 'active' ? 'online' : 'offline',
         sn: `SN2024${site.id}`,
-        groupName: GROUP_PATH_MAP[site.domainId] || 'China',
+        groupName: groupPathMap[site.domainId] || 'Zambia',
         address: site.address,
         alarmCount: site.status === 'active' ? Math.floor(Math.random() * 8) : 0,
       })),
-    [filteredSites]
+    [filteredSites, groupPathMap]
   );
 
   // 设备搜索
@@ -375,7 +447,7 @@ export default function GISMapView() {
   // 过滤设备组树（根据搜索值）
   const filteredGroupTree = useMemo(() => {
     if (!groupSearchValue.trim()) {
-      return MOCK_GROUP_TREE;
+      return groupTree;
     }
 
     const searchLower = groupSearchValue.toLowerCase();
@@ -410,7 +482,7 @@ export default function GISMapView() {
 
     // 过滤整棵树
     const result: DeviceGroupNode[] = [];
-    MOCK_GROUP_TREE.forEach((node) => {
+    groupTree.forEach((node) => {
       const filtered = filterNode(node);
       if (filtered) {
         result.push(filtered);
@@ -913,6 +985,8 @@ export default function GISMapView() {
           ref={mapRef}
           devices={mapDevices}
           height="100%"
+          defaultCenter={USE_LARGE_MOCK_DATA ? [28.3, -15.4] : [116.4, 39.9]}
+          defaultZoom={USE_LARGE_MOCK_DATA ? 11 : 5}
           showStats={false}
           showControls={false}
           onDeviceClick={(device) => {
@@ -1034,7 +1108,7 @@ export default function GISMapView() {
                               name: result.name,
                               status: isOnline ? 'online' : 'offline',
                               sn: `SN2024${result.id}`,
-                              groupName: GROUP_PATH_MAP[result.domainId] || 'China',
+                              groupName: groupPathMap[result.domainId] || 'Zambia',
                               address: result.address,
                             };
                             mapRef.current?.highlightAndFlyTo(mapDevice);
