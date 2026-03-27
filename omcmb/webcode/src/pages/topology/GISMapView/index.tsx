@@ -376,7 +376,7 @@ export default function GISMapView() {
         const siteDomain = site.domainId;
         // 检查是否匹配任何选中的组（包括子组）
         const matchesGroup = selectedGroupIds.some((gid) => {
-          if (gid === 'china') return true; // 根节点匹配所有
+          if (gid === 'china' || gid === 'zambia') return true; // 根节点匹配所有
           return siteDomain === gid || siteDomain.startsWith(gid);
         });
         if (!matchesGroup) return false;
