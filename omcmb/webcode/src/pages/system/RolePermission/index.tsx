@@ -613,7 +613,6 @@ export default function RoleManagement() {
       </Card>
     );
   };
-  );
 
   // 渲染设备组树形选择
   const renderDeviceGroupTree = (readOnly = false) => {
