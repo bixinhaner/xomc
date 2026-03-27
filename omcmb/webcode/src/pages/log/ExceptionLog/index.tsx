@@ -376,14 +376,14 @@ export default function ExceptionLog() {
     {
       key: 'operation',
       title: '操作',
-      width: 60,
+      width: 100,
       align: 'center',
       render: (_: unknown, record: ExceptionLog) => {
         const items = getActionMenu(record);
         if (items.length === 0) return '-';
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
-            <Button type="link" size="small" icon={<MoreOutlined />} />
+            <Button size="small" icon={<MoreOutlined />}>更多</Button>
           </Dropdown>
         );
       },
