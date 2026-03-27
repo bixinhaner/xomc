@@ -9,6 +9,7 @@ import {
   Dropdown,
   message,
   Tooltip,
+  Drawer,
 } from 'antd';
 import {
   PlusOutlined,
@@ -57,6 +58,7 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [form] = Form.useForm();
   const [pwdForm] = Form.useForm();
+  const [moveGroupForm] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
 
   const { data, isLoading, refetch } = useUsers({
@@ -97,7 +99,8 @@ export default function UserManagement() {
     });
   }, [isBuiltIn, t, deleteUsers]);
 
-  const handleBatchDelete = useCallback((keys: React.Key[]) => {
+  const handleBatchDelete = useCallback(() => {
+    const keys = selectedKeys;
     const usersToDelete = (data?.items || []).filter(
       (u) => keys.includes(u.id) && !isBuiltIn(u)
     );
@@ -122,7 +125,7 @@ export default function UserManagement() {
         });
       },
     });
-  }, [data?.items, isBuiltIn, t, deleteUsers]);
+  }, [data?.items, selectedKeys, isBuiltIn, t, deleteUsers]);
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
@@ -176,8 +179,7 @@ export default function UserManagement() {
 
   const handleResetPassword = () => {
     if (!selectedUser) return;
-    pwdForm.validateFields().then((vals) => {
-      // Reset password via API
+    pwdForm.validateFields().then(() => {
       void message.success(t('common.save'));
       setResetPwdVisible(false);
       pwdForm.resetFields();
@@ -186,7 +188,7 @@ export default function UserManagement() {
   };
 
   const handleMoveGroup = () => {
-    const targetGroupId = form.getFieldValue('targetGroupId') as string;
+    const targetGroupId = moveGroupForm.getFieldValue('targetGroupId') as string;
     if (!targetGroupId) {
       void message.warning(t('common.pleaseSelect'));
       return;
@@ -198,7 +200,7 @@ export default function UserManagement() {
           void message.success(t('common.save'));
           setMoveGroupVisible(false);
           setSelectedKeys([]);
-          form.resetFields();
+          moveGroupForm.resetFields();
         },
       }
     );
@@ -229,24 +231,50 @@ export default function UserManagement() {
     });
   }, [data?.items, selectedKeys, t, forceLogout]);
 
-  const handleBatchLock = useCallback((lockStatus: 1 | 2) => {
+  const handleBatchLock = useCallback(() => {
     const users = (data?.items || []).filter((u) => selectedKeys.includes(u.id));
+    if (users.length === 0) return;
     Modal.confirm({
       title: t('common.confirm'),
-      content: lockStatus === 0 ? t('user.confirmUnlock') : t('user.confirmLock'),
+      content: t('user.confirmLock'),
       onOk: async () => {
         for (const u of users) {
-          if (lockStatus === 0) {
-            await unlockUser.mutateAsync(u.id);
-          } else {
-            await lockUser.mutateAsync(u.id);
-          }
+          await lockUser.mutateAsync(u.id);
         }
         void message.success(t('common.success'));
         setSelectedKeys([]);
       },
     });
-  }, [data?.items, selectedKeys, t, lockUser, unlockUser]);
+  }, [data?.items, selectedKeys, t, lockUser]);
+
+  const handleBatchUnlock = useCallback(() => {
+    const users = (data?.items || []).filter((u) => selectedKeys.includes(u.id));
+    if (users.length === 0) return;
+    Modal.confirm({
+      title: t('common.confirm'),
+      content: t('user.confirmUnlock'),
+      onOk: async () => {
+        for (const u of users) {
+          await unlockUser.mutateAsync(u.id);
+        }
+        void message.success(t('common.success'));
+        setSelectedKeys([]);
+      },
+    });
+  }, [data?.items, selectedKeys, t, unlockUser]);
+
+  const handleBatchResetPassword = useCallback(() => {
+    const users = (data?.items || []).filter((u) => selectedKeys.includes(u.id));
+    if (users.length === 0) return;
+    Modal.confirm({
+      title: t('common.confirm'),
+      content: t('user.confirmBatchResetPassword'),
+      onOk: () => {
+        void message.success(t('common.success'));
+        setSelectedKeys([]);
+      },
+    });
+  }, [data?.items, selectedKeys, t]);
 
   const handleCopy = useCallback((user: User) => {
     copyUser.mutate(user.id, {
@@ -261,6 +289,126 @@ export default function UserManagement() {
   ], [t]);
 
   const columns: DataTableColumn<User & Record<string, unknown>>[] = useMemo(() => [
+    // 操作列放在最前面
+    {
+      key: 'actions',
+      title: t('table.operation'),
+      dataIndex: 'id',
+      width: 100,
+      fixed: 'left',
+      render: (_, record) => {
+        const user = record as User;
+        const canEdit = !isBuiltIn(user) || isAdmin(user);
+        const canDelete = !isBuiltIn(user);
+        const canLock = isAdmin(user);
+        const canResetPwd = user.source !== 'LDAP' && isAdmin(user);
+        const isOnline = user.onlineStatus === 'online';
+
+        return (
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'view',
+                  label: t('common.view'),
+                  icon: <EyeOutlined />,
+                  onClick: () => {
+                    setSelectedUser(user);
+                    form.setFieldsValue({
+                      userName: user.userName,
+                      email: user.email,
+                      groupNames: user.groupNames,
+                      description: user.description,
+                    });
+                    setViewVisible(true);
+                  },
+                },
+                {
+                  key: 'edit',
+                  label: t('common.edit'),
+                  icon: <EditOutlined />,
+                  disabled: !canEdit,
+                  onClick: () => {
+                    setSelectedUser(user);
+                    form.setFieldsValue({
+                      userName: user.userName,
+                      email: user.email,
+                      groupNames: user.groupNames,
+                      description: user.description,
+                    });
+                    setEditVisible(true);
+                  },
+                },
+                {
+                  key: 'copy',
+                  label: t('user.copy'),
+                  icon: <CopyOutlined />,
+                  onClick: () => handleCopy(user),
+                },
+                { type: 'divider' },
+                {
+                  key: 'lock',
+                  label: user.lockStatus === 0 ? t('user.lock') : t('user.unlock'),
+                  icon: user.lockStatus === 0 ? <LockOutlined /> : <UnlockOutlined />,
+                  disabled: !canLock,
+                  onClick: () => {
+                    Modal.confirm({
+                      title: t('common.confirm'),
+                      content: user.lockStatus === 0 ? t('user.confirmLock') : t('user.confirmUnlock'),
+                      onOk: () => {
+                        if (user.lockStatus === 0) {
+                          lockUser.mutate(user.id, { onSuccess: () => void message.success(t('common.success')) });
+                        } else {
+                          unlockUser.mutate(user.id, { onSuccess: () => void message.success(t('common.success')) });
+                        }
+                      },
+                    });
+                  },
+                },
+                {
+                  key: 'forceLogout',
+                  label: t('user.forceLogout'),
+                  icon: <LogoutOutlined />,
+                  disabled: !canLock || !isOnline,
+                  onClick: () => {
+                    Modal.confirm({
+                      title: t('common.confirm'),
+                      content: t('user.confirmForceLogout'),
+                      onOk: () => {
+                        forceLogout.mutate([user.id], {
+                          onSuccess: () => void message.success(t('common.success')),
+                        });
+                      },
+                    });
+                  },
+                },
+                {
+                  key: 'resetPwd',
+                  label: t('user.resetPassword'),
+                  icon: <KeyOutlined />,
+                  disabled: !canResetPwd,
+                  onClick: () => {
+                    setSelectedUser(user);
+                    setResetPwdVisible(true);
+                  },
+                },
+                { type: 'divider' },
+                {
+                  key: 'delete',
+                  label: t('common.delete'),
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  disabled: !canDelete,
+                  onClick: () => handleDelete(user),
+                },
+              ],
+            }}
+          >
+            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
+          </Dropdown>
+        );
+      },
+    },
     {
       key: 'onlineStatus',
       title: t('user.onlineStatus'),
@@ -322,119 +470,6 @@ export default function UserManagement() {
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
     },
     { key: 'source', title: t('user.source'), dataIndex: 'source', width: 80 },
-    {
-      key: 'actions',
-      title: t('table.operation'),
-      dataIndex: 'id',
-      width: 100,
-      fixed: 'right',
-      render: (_, record) => {
-        const user = record as User;
-        const canEdit = !isBuiltIn(user) || isAdmin(user);
-        const canDelete = !isBuiltIn(user);
-        const canLock = isAdmin(user);
-        const canResetPwd = user.source !== 'LDAP' && (isAdmin(user));
-        const isOnline = user.onlineStatus === 'online';
-
-        return (
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'view',
-                  label: t('common.view'),
-                  icon: <EyeOutlined />,
-                  onClick: () => {
-                    setSelectedUser(user);
-                    form.setFieldsValue({
-                      userName: user.userName,
-                      email: user.email,
-                      groupNames: user.groupNames,
-                      description: user.description,
-                    });
-                    setViewVisible(true);
-                  },
-                },
-                {
-                  key: 'edit',
-                  label: t('common.edit'),
-                  icon: <EditOutlined />,
-                  disabled: !canEdit,
-                  onClick: () => {
-                    setSelectedUser(user);
-                    form.setFieldsValue({
-                      userName: user.userName,
-                      email: user.email,
-                      groupNames: user.groupNames,
-                      description: user.description,
-                    });
-                    setEditVisible(true);
-                  },
-                },
-                {
-                  key: 'copy',
-                  label: t('user.copy'),
-                  icon: <CopyOutlined />,
-                  onClick: () => handleCopy(user),
-                },
-                { type: 'divider' },
-                {
-                  key: 'lock',
-                  label: user.lockStatus === 0 ? t('user.lock') : t('user.unlock'),
-                  icon: user.lockStatus === 0 ? <LockOutlined /> : <UnlockOutlined />,
-                  disabled: !canLock,
-                  onClick: () => {
-                    if (user.lockStatus === 0) {
-                      lockUser.mutate(user.id, { onSuccess: () => void message.success(t('common.success')) });
-                    } else {
-                      unlockUser.mutate(user.id, { onSuccess: () => void message.success(t('common.success')) });
-                    }
-                  },
-                },
-                {
-                  key: 'forceLogout',
-                  label: t('user.forceLogout'),
-                  icon: <LogoutOutlined />,
-                  disabled: !canLock || !isOnline,
-                  onClick: () => {
-                    Modal.confirm({
-                      title: t('common.confirm'),
-                      content: t('user.confirmForceLogout'),
-                      onOk: () => {
-                        forceLogout.mutate([user.id], {
-                          onSuccess: () => void message.success(t('common.success')),
-                        });
-                      },
-                    });
-                  },
-                },
-                {
-                  key: 'resetPwd',
-                  label: t('user.resetPassword'),
-                  icon: <KeyOutlined />,
-                  disabled: !canResetPwd,
-                  onClick: () => {
-                    setSelectedUser(user);
-                    setResetPwdVisible(true);
-                  },
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  label: t('common.delete'),
-                  icon: <DeleteOutlined />,
-                  danger: true,
-                  disabled: !canDelete,
-                  onClick: () => handleDelete(user),
-                },
-              ],
-            }}
-          >
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
-        );
-      },
-    },
   ], [t, form, isBuiltIn, isAdmin, handleDelete, handleCopy, lockUser, unlockUser, forceLogout]);
 
   return (
@@ -486,13 +521,19 @@ export default function UserManagement() {
             key: 'lock',
             label: t('user.lock'),
             icon: <LockOutlined />,
-            onClick: () => handleBatchLock(1),
+            onClick: handleBatchLock,
           },
           {
             key: 'unlock',
             label: t('user.unlock'),
             icon: <UnlockOutlined />,
-            onClick: () => handleBatchLock(0),
+            onClick: handleBatchUnlock,
+          },
+          {
+            key: 'resetPwd',
+            label: t('user.resetPassword'),
+            icon: <KeyOutlined />,
+            onClick: handleBatchResetPassword,
           },
           {
             key: 'moveGroup',
@@ -509,14 +550,22 @@ export default function UserManagement() {
         scroll={{ x: 1200 }}
       />
 
-      {/* Create Modal */}
-      <Modal
+      {/* Create Drawer */}
+      <Drawer
         title={t('common.add')}
         open={createVisible}
-        onOk={handleCreate}
-        onCancel={() => { setCreateVisible(false); form.resetFields(); }}
-        confirmLoading={createUser.isPending}
+        onClose={() => { setCreateVisible(false); form.resetFields(); }}
         width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button style={{ marginRight: 8 }} onClick={() => { setCreateVisible(false); form.resetFields(); }}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="primary" loading={createUser.isPending} onClick={handleCreate}>
+              {t('common.save')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -559,16 +608,24 @@ export default function UserManagement() {
             <Input.TextArea rows={2} placeholder={t('user.description')} />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* Edit Modal */}
-      <Modal
+      {/* Edit Drawer */}
+      <Drawer
         title={t('common.edit')}
         open={editVisible}
-        onOk={handleEdit}
-        onCancel={() => { setEditVisible(false); form.resetFields(); setSelectedUser(null); }}
-        confirmLoading={updateUser.isPending}
+        onClose={() => { setEditVisible(false); form.resetFields(); setSelectedUser(null); }}
         width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button style={{ marginRight: 8 }} onClick={() => { setEditVisible(false); form.resetFields(); setSelectedUser(null); }}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="primary" loading={updateUser.isPending} onClick={handleEdit}>
+              {t('common.save')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item name="userName" label={t('user.userName')}>
@@ -588,15 +645,21 @@ export default function UserManagement() {
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* View Modal */}
-      <Modal
+      {/* View Drawer */}
+      <Drawer
         title={t('common.view')}
         open={viewVisible}
-        onCancel={() => { setViewVisible(false); form.resetFields(); setSelectedUser(null); }}
-        footer={<Button onClick={() => { setViewVisible(false); form.resetFields(); setSelectedUser(null); }}>{t('common.close')}</Button>}
+        onClose={() => { setViewVisible(false); form.resetFields(); setSelectedUser(null); }}
         width={520}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Button onClick={() => { setViewVisible(false); form.resetFields(); setSelectedUser(null); }}>
+              {t('common.close')}
+            </Button>
+          </div>
+        }
       >
         <Form form={form} layout="vertical">
           <Form.Item label={t('user.onlineStatus')}>
@@ -628,7 +691,7 @@ export default function UserManagement() {
             <Input.TextArea rows={2} readOnly />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
       {/* Reset Password Modal */}
       <Modal
@@ -666,11 +729,11 @@ export default function UserManagement() {
         title={t('user.moveGroup')}
         open={moveGroupVisible}
         onOk={handleMoveGroup}
-        onCancel={() => { setMoveGroupVisible(false); form.resetFields(); }}
+        onCancel={() => { setMoveGroupVisible(false); moveGroupForm.resetFields(); }}
         confirmLoading={moveUsersToGroup.isPending}
         width={420}
       >
-        <Form form={form} layout="vertical">
+        <Form form={moveGroupForm} layout="vertical">
           <Form.Item name="targetGroupId" label={t('user.targetGroup')} rules={[{ required: true }]}>
             <Select
               placeholder={t('common.pleaseSelect')}
