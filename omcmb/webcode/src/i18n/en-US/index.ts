@@ -823,6 +823,32 @@ const messages: Record<string, string> = {
   'role.descriptionMaxLength': 'Description max 500 characters',
 
   // -------------------------------------------------------------------------
+  // Log management
+  // -------------------------------------------------------------------------
+  'log.operationLog':     'Operation Log',
+  'log.securityLog':      'Security Log',
+  'log.systemLog':        'System Log',
+  'log.northboundLog':    'Northbound Log',
+  'log.detail':           'Log Detail',
+  'log.operator':         'Operator',
+  'log.clientIp':         'IP Address',
+  'log.logName':          'Log Name',
+  'log.detailContent':    'Detail',
+  'log.result':           'Result',
+  'log.reason':           'Failure Reason',
+  'log.startTime':        'Start Time',
+  'log.endTime':          'End Time',
+  'log.timeRange':        'Time Range',
+  'log.exportSuccess':    'Export Success',
+  'log.searchPlaceholder':'Operator / IP Address / Log Name',
+  'log.viewOldVersion':   'View Old Version',
+  'log.type':             'Type',
+  'log.reqParams':        'Request Params',
+  'log.resParams':        'Response Params',
+  'log.createTime':       'Response Time',
+  'log.export':           'Export',
+
+  // -------------------------------------------------------------------------
   // Group management
   // -------------------------------------------------------------------------
   'group.groupName':           'Group Name',

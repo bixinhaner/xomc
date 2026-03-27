@@ -829,6 +829,33 @@ const messages: Record<string, string> = {
   'role.pleaseSelectDeviceGroups': '请选择设备组（可多选）',
 
   // -------------------------------------------------------------------------
+  // Log management
+  // -------------------------------------------------------------------------
+  'log.operationLog':     '操作日志',
+  'log.securityLog':      '安全日志',
+  'log.systemLog':        '系统日志',
+  'log.northboundLog':    '北向接口日志',
+  'log.detail':           '日志详情',
+  'log.operator':         '用户名称',
+  'log.clientIp':         'IP地址',
+  'log.logName':          '日志名称',
+  'log.detailContent':    '详细记录',
+  'log.detail':           '详细记录',
+  'log.result':           '结果',
+  'log.reason':           '失败原因',
+  'log.startTime':        '操作开始时间',
+  'log.endTime':          '操作结束时间',
+  'log.timeRange':        '时间范围',
+  'log.exportSuccess':    '导出成功',
+  'log.searchPlaceholder':'用户名称 / IP地址 / 日志名称',
+  'log.viewOldVersion':   '查看旧版本',
+  'log.type':             '类型',
+  'log.reqParams':        '北向接口请求',
+  'log.resParams':        '北向接口返回',
+  'log.createTime':       '响应时间',
+  'log.export':           '导出',
+
+  // -------------------------------------------------------------------------
   // Group management
   // -------------------------------------------------------------------------
   'group.groupName':           '组名',

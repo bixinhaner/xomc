@@ -62,13 +62,19 @@ export type OperationType =
 
 export interface OperationLog {
   id: string;
-  operator: string;
-  clientIp: string;
-  module: string;
-  operationType: OperationType;
-  target: string;
-  content: string;
-  result: OperationResult;
-  message: string;
-  operationTime: string;
+  operator: string;         // 用户名称
+  clientIp: string;         // IP地址
+  logName: string;          // 日志名称
+  detail: string;           // 详细记录
+  result: '1' | '0';        // 结果：1-成功，0-失败
+  reason: string;           // 失败原因
+  startTime: string;        // 操作开始时间
+  endTime: string;          // 操作结束时间
+  // 兼容旧字段
+  module?: string;
+  operationType?: OperationType;
+  target?: string;
+  content?: string;
+  message?: string;
+  operationTime?: string;
 }
