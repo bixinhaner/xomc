@@ -12,10 +12,9 @@ import {
   Card,
   Radio,
   Space,
-  Row,
-  Col,
+  Collapse,
 } from 'antd';
-import type { TreeDataNode, TreeProps } from 'antd';
+import type { TreeDataNode } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -42,17 +41,132 @@ import { useT } from '@/hooks/useT';
 // 权限类型
 type PermissionLevel = 'none' | 'read' | 'write';
 
-// 权限模块定义
-const getPermissionModules = (t: (id: string, values?: Record<string, unknown>) => string) => [
-  { key: 'device', title: t('role.modules.device') },
-  { key: 'alarm', title: t('role.modules.alarm') },
-  { key: 'performance', title: t('role.modules.performance') },
-  { key: 'software', title: t('role.modules.software') },
-  { key: 'file', title: t('role.modules.file') },
-  { key: 'log', title: t('role.modules.log') },
-  { key: 'system', title: t('role.modules.system') },
-  { key: 'report', title: t('role.modules.report') },
-  { key: 'ops', title: t('role.modules.ops') },
+// 权限子菜单项定义
+interface PermissionSubItem {
+  key: string;
+  titleKey: string;
+}
+
+// 权限模块定义（一级菜单 + 二级菜单）
+interface PermissionModule {
+  key: string;
+  titleKey: string;
+  children: PermissionSubItem[];
+}
+
+// 完整的权限模块结构（一级 + 二级菜单）
+const PERMISSION_MODULES: PermissionModule[] = [
+  {
+    key: 'device',
+    titleKey: 'role.modules.device',
+    children: [
+      { key: 'list', titleKey: 'nav.device.list' },
+      { key: 'register', titleKey: 'nav.device.register' },
+      { key: 'group', titleKey: 'nav.device.group' },
+      { key: 'detail', titleKey: 'nav.device.detail' },
+      { key: 'ne', titleKey: 'nav.device.ne' },
+      { key: 'monitor', titleKey: 'nav.device.monitor' },
+      { key: 'commission', titleKey: 'nav.device.commission' },
+      { key: 'stats', titleKey: 'nav.device.stats' },
+      { key: 'import', titleKey: 'nav.device.import' },
+      { key: 'rules', titleKey: 'nav.device.rules' },
+    ],
+  },
+  {
+    key: 'alarm',
+    titleKey: 'role.modules.alarm',
+    children: [
+      { key: 'current', titleKey: 'nav.alarm.current' },
+      { key: 'history', titleKey: 'nav.alarm.history' },
+      { key: 'statistics', titleKey: 'nav.alarm.statistics' },
+      { key: 'rules', titleKey: 'nav.alarm.rules' },
+      { key: 'library', titleKey: 'nav.alarm.library' },
+      { key: 'sync', titleKey: 'nav.alarm.sync' },
+    ],
+  },
+  {
+    key: 'performance',
+    titleKey: 'role.modules.performance',
+    children: [
+      { key: 'kpiStandard', titleKey: 'nav.performance.kpiStandard' },
+      { key: 'kpiStation', titleKey: 'nav.performance.kpiStation' },
+      { key: 'extraction', titleKey: 'nav.performance.extraction' },
+      { key: 'charts', titleKey: 'nav.performance.charts' },
+      { key: 'threshold', titleKey: 'nav.performance.threshold' },
+      { key: 'files', titleKey: 'nav.performance.files' },
+      { key: 'taskConfig', titleKey: 'nav.performance.taskConfig' },
+    ],
+  },
+  {
+    key: 'software',
+    titleKey: 'role.modules.software',
+    children: [
+      { key: 'version', titleKey: 'nav.software.version' },
+      { key: 'upgradePlan', titleKey: 'nav.software.upgradePlan' },
+      { key: 'activation', titleKey: 'nav.software.activation' },
+      { key: 'firmware', titleKey: 'nav.software.firmware' },
+    ],
+  },
+  {
+    key: 'file',
+    titleKey: 'role.modules.file',
+    children: [
+      { key: 'configRetrieval', titleKey: 'nav.file.configRetrieval' },
+      { key: 'configDistribution', titleKey: 'nav.file.configDistribution' },
+      { key: 'logRetrieval', titleKey: 'nav.file.logRetrieval' },
+      { key: 'perfRetrieval', titleKey: 'nav.file.perfRetrieval' },
+      { key: 'mrRetrieval', titleKey: 'nav.file.mrRetrieval' },
+      { key: 'userFiles', titleKey: 'nav.file.userFiles' },
+      { key: 'deviceFiles', titleKey: 'nav.file.deviceFiles' },
+    ],
+  },
+  {
+    key: 'log',
+    titleKey: 'role.modules.log',
+    children: [
+      { key: 'device', titleKey: 'nav.log.device' },
+      { key: 'exception', titleKey: 'nav.log.exception' },
+      { key: 'event', titleKey: 'nav.log.event' },
+      { key: 'operation', titleKey: 'nav.log.operation' },
+      { key: 'system', titleKey: 'nav.log.system' },
+      { key: 'config', titleKey: 'nav.log.config' },
+    ],
+  },
+  {
+    key: 'system',
+    titleKey: 'role.modules.system',
+    children: [
+      { key: 'deviceClass', titleKey: 'nav.system.deviceClass' },
+      { key: 'users', titleKey: 'nav.system.users' },
+      { key: 'groups', titleKey: 'nav.system.groups' },
+      { key: 'roles', titleKey: 'nav.system.roles' },
+      { key: 'operationLog', titleKey: 'nav.system.operationLog' },
+      { key: 'config', titleKey: 'nav.system.config' },
+      { key: 'dataDict', titleKey: 'nav.system.dataDict' },
+      { key: 'notifications', titleKey: 'nav.system.notifications' },
+    ],
+  },
+  {
+    key: 'report',
+    titleKey: 'role.modules.report',
+    children: [
+      { key: 'lteStandard', titleKey: 'nav.report.lteStandard' },
+      { key: 'station', titleKey: 'nav.report.station' },
+      { key: 'historicalKpi', titleKey: 'nav.report.historicalKpi' },
+      { key: 'pollStats', titleKey: 'nav.report.pollStats' },
+    ],
+  },
+  {
+    key: 'ops',
+    titleKey: 'role.modules.ops',
+    children: [
+      { key: 'templates', titleKey: 'nav.ops.templates' },
+      { key: 'commands', titleKey: 'nav.ops.commands' },
+      { key: 'tasks', titleKey: 'nav.ops.tasks' },
+      { key: 'networkDiagnosis', titleKey: 'nav.ops.networkDiagnosis' },
+      { key: 'downloads', titleKey: 'nav.ops.downloads' },
+    ],
+  },
 ];
 
 // 构建设备组树形数据
@@ -117,24 +231,33 @@ export default function RoleManagement() {
 
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
 
-  // 权限模块数据
-  const permissionModules = useMemo(() => getPermissionModules(t as (id: string, values?: Record<string, unknown>) => string), [t]);
-
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
     () => (data?.items ?? []).map((r) => r.roleName.toLowerCase()),
     [data?.items]
   );
 
+  // 获取所有权限项的 key（格式：module.subItem）
+  const allPermissionKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const module of PERMISSION_MODULES) {
+      for (const child of module.children) {
+        keys.push(`${module.key}.${child.key}`);
+      }
+    }
+    return keys;
+  }, []);
+
   // 将 permissionLevels 转换为 permissions 数组（用于提交）
+  // 格式：["device.list:read", "device.list:write", ...]
   const permissionsToArray = useCallback((levels: Record<string, PermissionLevel>): string[] => {
     const result: string[] = [];
-    for (const [module, level] of Object.entries(levels)) {
+    for (const [key, level] of Object.entries(levels)) {
       if (level === 'read' || level === 'write') {
-        result.push(`${module}:read`);
+        result.push(`${key}:read`);
       }
       if (level === 'write') {
-        result.push(`${module}:write`);
+        result.push(`${key}:write`);
       }
     }
     return result;
@@ -143,9 +266,8 @@ export default function RoleManagement() {
   // 将 permissions 数组转换为 permissionLevels
   const arrayToPermissionLevels = useCallback((permissions: string[]): Record<string, PermissionLevel> => {
     const result: Record<string, PermissionLevel> = {};
-    const moduleKeys = permissionModules.map((m) => m.key);
 
-    for (const key of moduleKeys) {
+    for (const key of allPermissionKeys) {
       const hasRead = permissions.includes(`${key}:read`);
       const hasWrite = permissions.includes(`${key}:write`);
       if (hasWrite) {
@@ -157,7 +279,7 @@ export default function RoleManagement() {
       }
     }
     return result;
-  }, [permissionModules]);
+  }, [allPermissionKeys]);
 
   // 检查是否至少选择了一个权限
   const hasAnyPermission = useMemo(
@@ -414,62 +536,83 @@ export default function RoleManagement() {
     { key: 'description', title: t('role.description'), dataIndex: 'description', ellipsis: true },
   ], [t, form, isBuiltIn, handleDelete]);
 
-  // 渲染权限配置卡片
-  const renderPermissionConfig = (readOnly = false) => (
-    <Card
-      title={t('role.permissionConfig')}
-      size="small"
-      style={{ marginTop: 16 }}
-      extra={!readOnly && !hasAnyPermission ? (
-        <span style={{ color: 'var(--color-error)', fontSize: 12 }}>
-          {t('role.pleaseSelectPermission')}
-        </span>
-      ) : null}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {permissionModules.map((module) => (
-          <Row
-            key={module.key}
-            align="middle"
-            style={{
-              padding: '8px 12px',
-              background: 'var(--color-fill-quaternary)',
-              borderRadius: 4,
-            }}
-          >
-            <Col flex="auto">
-              <span style={{ fontWeight: 500 }}>{module.title}</span>
-            </Col>
-            <Col>
-              {readOnly ? (
-                <Tag color={permissionLevels[module.key] === 'write' ? 'green' : permissionLevels[module.key] === 'read' ? 'blue' : 'default'}>
-                  {permissionLevels[module.key] === 'write'
-                    ? t('role.permission.write')
-                    : permissionLevels[module.key] === 'read'
-                      ? t('role.permission.read')
-                      : t('role.permission.none')}
-                </Tag>
-              ) : (
-                <Radio.Group
-                  value={permissionLevels[module.key] || 'none'}
-                  onChange={(e) => {
-                    setPermissionLevels((prev) => ({
-                      ...prev,
-                      [module.key]: e.target.value,
-                    }));
-                  }}
-                  size="small"
-                >
-                  <Radio.Button value="none">{t('role.permission.none')}</Radio.Button>
-                  <Radio.Button value="read">{t('role.permission.read')}</Radio.Button>
-                  <Radio.Button value="write">{t('role.permission.write')}</Radio.Button>
-                </Radio.Group>
-              )}
-            </Col>
-          </Row>
-        ))}
-      </div>
-    </Card>
+  // 渲染权限配置卡片（树形结构：一级菜单 + 二级菜单）
+  const renderPermissionConfig = (readOnly = false) => {
+    // 渲染单个权限项
+    const renderPermissionItem = (moduleKey: string, itemKey: string, title: string) => {
+      const fullKey = `${moduleKey}.${itemKey}`;
+      const level = permissionLevels[fullKey] || 'none';
+
+      return (
+        <div
+          key={fullKey}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 12px',
+            borderBottom: '1px solid var(--color-border-secondary)',
+          }}
+        >
+          <span>{title}</span>
+          {readOnly ? (
+            <Tag color={level === 'write' ? 'green' : level === 'read' ? 'blue' : 'default'}>
+              {level === 'write'
+                ? t('role.permission.write')
+                : level === 'read'
+                  ? t('role.permission.read')
+                  : t('role.permission.none')}
+            </Tag>
+          ) : (
+            <Radio.Group
+              value={level}
+              onChange={(e) => {
+                setPermissionLevels((prev) => ({
+                  ...prev,
+                  [fullKey]: e.target.value,
+                }));
+              }}
+              size="small"
+            >
+              <Radio.Button value="none">{t('role.permission.none')}</Radio.Button>
+              <Radio.Button value="read">{t('role.permission.read')}</Radio.Button>
+              <Radio.Button value="write">{t('role.permission.write')}</Radio.Button>
+            </Radio.Group>
+          )}
+        </div>
+      );
+    };
+
+    return (
+      <Card
+        title={t('role.permissionConfig')}
+        size="small"
+        style={{ marginTop: 16 }}
+        extra={!readOnly && !hasAnyPermission ? (
+          <span style={{ color: 'var(--color-error)', fontSize: 12 }}>
+            {t('role.pleaseSelectPermission')}
+          </span>
+        ) : null}
+      >
+        <Collapse
+          defaultActiveKey={PERMISSION_MODULES.map((m) => m.key)}
+          ghost
+          expandIconPosition="end"
+          items={PERMISSION_MODULES.map((module) => ({
+            key: module.key,
+            label: <span style={{ fontWeight: 600 }}>{t(module.titleKey)}</span>,
+            children: (
+              <div style={{ marginLeft: -12, marginRight: -12 }}>
+                {module.children.map((child) =>
+                  renderPermissionItem(module.key, child.key, t(child.titleKey))
+                )}
+              </div>
+            ),
+          }))}
+        />
+      </Card>
+    );
+  };
   );
 
   // 渲染设备组树形选择
