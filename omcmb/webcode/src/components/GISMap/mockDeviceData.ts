@@ -4,13 +4,13 @@
  * 数据来源: GNB 20260210051225.csv + Station_20260210050140.csv
  * 生成时间: 2026-03-27T08:07:56.738Z
  * 原始设备数: 3720
- * 扩展后总数: 10720 (增加 7000 条)
+ * 扩展后总数: 40000 (增加 36280 条)
  */
 
 import type { MapDevice } from '@/types/map';
 
-// 需要生成的额外设备数量
-const ADDITIONAL_DEVICE_COUNT = 7000;
+// 需要生成的额外设备数量 (40000 - 3720 = 36280)
+const ADDITIONAL_DEVICE_COUNT = 36280;
 
 // 原始数据
 const baseMockDevices: MapDevice[] = [
