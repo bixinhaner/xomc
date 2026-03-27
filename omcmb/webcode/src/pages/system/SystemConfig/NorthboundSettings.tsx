@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Form, Input, Switch, Divider, Space, Table, Button, Modal, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Form, Input, Switch, Space, Table, Button, Modal, Tag, Card, message } from 'antd';
+import { PlusOutlined, MoreOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 
@@ -8,7 +8,7 @@ interface NorthboundUser {
   id: string;
   userName: string;
   userPwd: string;
-  userEnable: boolean;
+  userEnable: string;
   responseTime: string;
 }
 
@@ -18,9 +18,21 @@ interface NorthboundSettingsProps {
 
 // Mock 数据
 const mockUsers: NorthboundUser[] = [
-  { id: '1', userName: 'northuser1', userPwd: '******', userEnable: true, responseTime: '2026-01-15 10:30:00' },
-  { id: '2', userName: 'northuser2', userPwd: '******', userEnable: false, responseTime: '2026-02-20 14:15:00' },
+  { id: '1', userName: 'northuser1', userPwd: '******', userEnable: '1', responseTime: '2026-01-15 10:30:00' },
+  { id: '2', userName: 'northuser2', userPwd: '******', userEnable: '0', responseTime: '2026-02-20 14:15:00' },
 ];
+
+// 设置行样式
+const settingRowStyle: React.CSSProperties = {
+  marginBottom: 16,
+};
+
+// 信息项样式
+const infoItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+};
 
 export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
   const t = useT();
@@ -40,7 +52,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
     userForm.setFieldsValue({
       userName: user.userName,
       userPwd: '',
-      userEnable: user.userEnable,
+      userEnable: user.userEnable === '1',
     });
     setModalVisible(true);
   };
@@ -50,15 +62,27 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
     void message.success('删除成功');
   };
 
+  const handleToggleEnable = (user: NorthboundUser) => {
+    const newEnable = user.userEnable === '1' ? '0' : '1';
+    setUsers(users.map(u => u.id === user.id ? { ...u, userEnable: newEnable } : u));
+    void message.success(newEnable === '1' ? '已启用' : '已禁用');
+  };
+
   const handleModalOk = () => {
     userForm.validateFields().then((values) => {
       if (editingUser) {
-        setUsers(users.map(u => u.id === editingUser.id ? { ...u, ...values } : u));
+        setUsers(users.map(u => u.id === editingUser.id ? {
+          ...u,
+          ...values,
+          userEnable: values.userEnable ? '1' : '0'
+        } : u));
         void message.success('修改成功');
       } else {
         const newUser: NorthboundUser = {
           id: Date.now().toString(),
-          ...values,
+          userName: values.userName,
+          userPwd: values.userPwd || '******',
+          userEnable: values.userEnable ? '1' : '0',
           responseTime: new Date().toLocaleString(),
         };
         setUsers([...users, newUser]);
@@ -70,12 +94,24 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
 
   const columns: ColumnsType<NorthboundUser> = [
     {
+      title: '',
+      key: 'operation',
+      width: 50,
+      render: (_: unknown, record: NorthboundUser) => (
+        <Button size="small" icon={<MoreOutlined />} onClick={() => handleEditUser(record)} />
+      ),
+    },
+    {
       title: '是否启用',
       dataIndex: 'userEnable',
       key: 'userEnable',
       width: 100,
-      render: (val: boolean) => (
-        <Tag color={val ? 'green' : 'default'}>{val ? '启用' : '禁用'}</Tag>
+      render: (val: string, record: NorthboundUser) => (
+        <Switch
+          size="small"
+          checked={val === '1'}
+          onChange={() => handleToggleEnable(record)}
+        />
       ),
     },
     {
@@ -87,27 +123,11 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
       title: '密码',
       dataIndex: 'userPwd',
       key: 'userPwd',
-      render: () => '******',
     },
     {
       title: '创建时间',
       dataIndex: 'responseTime',
       key: 'responseTime',
-    },
-    {
-      title: '操作',
-      key: 'operation',
-      width: 120,
-      render: (_: unknown, record: NorthboundUser) => (
-        <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => handleEditUser(record)}>
-            编辑
-          </Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteUser(record.id)}>
-            删除
-          </Button>
-        </Space>
-      ),
     },
   ];
 
@@ -116,36 +136,45 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
       <Form form={form} layout="vertical" size="small" initialValues={{
         northboundIp: '192.168.1.100',
         northboundPort: 8081,
-        northboundServiceStatus: 'running',
+        northboundServiceStatus: '1',
       }}>
-        {/* 基本信息 */}
-        <Divider orientation="left" plain>基本信息</Divider>
-        <Space>
-          <Form.Item name="northboundIp" label="IP地址">
-            <Input disabled style={{ width: 150 }} />
-          </Form.Item>
-          <Form.Item name="northboundPort" label="端口">
-            <Input disabled style={{ width: 100 }} />
-          </Form.Item>
-          <Form.Item name="northboundServiceStatus" label="服务状态">
-            <Tag color="green">运行中</Tag>
-          </Form.Item>
-        </Space>
+        {/* 服务信息 */}
+        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>服务信息</span>} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 32 }}>
+            <div style={infoItemStyle}>
+              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>IP地址：</span>
+              <span style={{ fontWeight: 500 }}>192.168.1.100</span>
+            </div>
+            <div style={infoItemStyle}>
+              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>端口：</span>
+              <span style={{ fontWeight: 500 }}>8081</span>
+            </div>
+            <div style={infoItemStyle}>
+              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>服务状态：</span>
+              <Tag color="green">运行中</Tag>
+            </div>
+          </div>
+        </Card>
 
-        {/* 用户列表 */}
-        <Divider orientation="left" plain>用户列表</Divider>
-        <div style={{ marginBottom: 16 }}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddUser}>
-            添加用户
-          </Button>
-        </div>
-        <Table
-          dataSource={users}
-          columns={columns}
-          rowKey="id"
-          pagination={false}
+        {/* 用户管理 */}
+        <Card
           size="small"
-        />
+          title={<span style={{ fontSize: 14, fontWeight: 600 }}>用户管理</span>}
+          extra={
+            <Button type="primary" icon={<PlusOutlined />} size="small" onClick={handleAddUser}>
+              添加
+            </Button>
+          }
+        >
+          <Table
+            dataSource={users}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            bordered
+          />
+        </Card>
       </Form>
 
       {/* 添加/编辑用户弹窗 */}

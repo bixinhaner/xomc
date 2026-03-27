@@ -1,10 +1,31 @@
-import { Form, Input, InputNumber, Switch, Divider, Space, Button, message } from 'antd';
+import { Form, Input, InputNumber, Switch, Checkbox, Space, Button, Card, message } from 'antd';
 import { ApiOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 
 interface LdapSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
 }
+
+// 设置行样式
+const settingRowStyle: React.CSSProperties = {
+  marginBottom: 16,
+};
+
+// 子设置区域样式
+const subSettingStyle: React.CSSProperties = {
+  marginTop: 12,
+  padding: '16px',
+  backgroundColor: '#fafafa',
+  borderRadius: 4,
+};
+
+// 表单项组样式
+const formGroupStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 16,
+  marginBottom: 12,
+};
 
 export default function LdapSettings({ form }: LdapSettingsProps) {
   const t = useT();
@@ -26,37 +47,56 @@ export default function LdapSettings({ form }: LdapSettingsProps) {
       ldapUser: '',
       ldapPwd: '',
     }}>
-      <Divider orientation="left" plain>LDAP协议</Divider>
-      <Form.Item name="ldapEnable" label="LDAP启用" valuePropName="checked">
-        <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-      </Form.Item>
-      <Space>
-        <Form.Item name="ldapIp" label="LDAP IP" rules={[{ required: true, message: '请输入LDAP服务器IP' }]}>
-          <Input placeholder="192.168.1.50" style={{ width: 180 }} />
-        </Form.Item>
-        <Form.Item name="ldapPort" label="LDAP端口">
-          <InputNumber min={1} max={65535} style={{ width: 120 }} />
-        </Form.Item>
-      </Space>
-      <Form.Item name="ldapSSL" label="SSL/TLS" valuePropName="checked" extra="启用SSL/TLS加密">
-        <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-      </Form.Item>
-      <Form.Item name="ldapBase" label="LDAP Base" rules={[{ required: true, message: '请输入LDAP基础DN' }]}>
-        <Input placeholder="dc=example,dc=com" />
-      </Form.Item>
-      <Space>
-        <Form.Item name="ldapUser" label="LDAP用户" rules={[{ required: true, message: '请输入LDAP绑定用户' }]}>
-          <Input placeholder="cn=admin,dc=example,dc=com" style={{ width: 250 }} />
-        </Form.Item>
-        <Form.Item name="ldapPwd" label="LDAP密码" rules={[{ required: true, message: '请输入LDAP绑定密码' }]}>
-          <Input.Password placeholder="请输入密码" style={{ width: 200 }} />
-        </Form.Item>
-      </Space>
-      <Form.Item>
-        <Button type="primary" ghost icon={<ApiOutlined />} onClick={handleTestLdap}>
-          测试LDAP连接
-        </Button>
-      </Form.Item>
+      {/* LDAP服务设置 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>LDAP服务设置</span>}>
+        {/* LDAP Enable */}
+        <div style={settingRowStyle}>
+          <Space>
+            <span>LDAP Enable</span>
+            <Form.Item name="ldapEnable" noStyle valuePropName="checked">
+              <Switch size="small" />
+            </Form.Item>
+            <Button type="primary" size="small" onClick={handleTestLdap}>
+              测试
+            </Button>
+          </Space>
+        </div>
+
+        {/* 服务器配置 */}
+        <div style={subSettingStyle}>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>服务器配置</div>
+
+          <div style={formGroupStyle}>
+            <Form.Item label="LDAP IP" name="ldapIp" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 180 }} placeholder="192.168.1.50" />
+            </Form.Item>
+            <Form.Item label="LDAP Port" name="ldapPort" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 100 }} placeholder="389" />
+            </Form.Item>
+            <Form.Item name="ldapSSL" valuePropName="checked" noStyle style={{ marginTop: 30 }}>
+              <Checkbox>SSL/TLS</Checkbox>
+            </Form.Item>
+          </div>
+
+          <div style={formGroupStyle}>
+            <Form.Item label="LDAP Base" name="ldapBase" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 300 }} placeholder="dc=example,dc=com" />
+            </Form.Item>
+          </div>
+
+          <div style={formGroupStyle}>
+            <Form.Item label="LDAP User" name="ldapUser" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 300 }} placeholder="cn=admin,dc=example,dc=com" />
+            </Form.Item>
+          </div>
+
+          <div style={formGroupStyle}>
+            <Form.Item label="LDAP Password" name="ldapPwd" style={{ marginBottom: 0 }}>
+              <Input.Password style={{ width: 200 }} placeholder="请输入密码" />
+            </Form.Item>
+          </div>
+        </div>
+      </Card>
     </Form>
   );
 }

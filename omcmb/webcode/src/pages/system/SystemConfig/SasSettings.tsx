@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Form, Switch, Divider, Space, Table, Button, Modal, Input, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Form, Switch, Space, Table, Button, Modal, Input, Card, message } from 'antd';
+import { PlusOutlined, MoreOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 
@@ -11,6 +11,7 @@ interface SasProvider {
   certName: string;
   validTimeStr: string;
   updateTimeStr: string;
+  uploadSuccess: number;
 }
 
 interface SasSettingsProps {
@@ -19,9 +20,14 @@ interface SasSettingsProps {
 
 // Mock 数据
 const mockProviders: SasProvider[] = [
-  { id: '1', providerName: 'SAS-Provider-1', url: 'https://sas.example.com/api', certName: 'cert_sas_1.pem', validTimeStr: '2027-06-15', updateTimeStr: '2026-03-20 10:00:00' },
-  { id: '2', providerName: 'SAS-Provider-2', url: 'https://sas2.example.com/api', certName: 'cert_sas_2.pem', validTimeStr: '2027-12-31', updateTimeStr: '2026-02-10 14:30:00' },
+  { id: '1', providerName: 'SAS-Provider-1', url: 'https://sas.example.com/api', certName: 'cert_sas_1.pem', validTimeStr: '2027-06-15', updateTimeStr: '2026-03-20 10:00:00', uploadSuccess: 1 },
+  { id: '2', providerName: 'SAS-Provider-2', url: 'https://sas2.example.com/api', certName: 'cert_sas_2.pem', validTimeStr: '2027-12-31', updateTimeStr: '2026-02-10 14:30:00', uploadSuccess: 0 },
 ];
+
+// 设置行样式
+const settingRowStyle: React.CSSProperties = {
+  marginBottom: 16,
+};
 
 export default function SasSettings({ form }: SasSettingsProps) {
   const t = useT();
@@ -66,6 +72,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
           ...values,
           validTimeStr: '2027-12-31',
           updateTimeStr: new Date().toLocaleString(),
+          uploadSuccess: 1,
         };
         setProviders([...providers, newProvider]);
         void message.success('添加成功');
@@ -75,6 +82,14 @@ export default function SasSettings({ form }: SasSettingsProps) {
   };
 
   const columns: ColumnsType<SasProvider> = [
+    {
+      title: '',
+      key: 'operation',
+      width: 50,
+      render: (_: unknown, record: SasProvider) => (
+        <Button size="small" type="text" icon={<MoreOutlined />} onClick={() => handleEditProvider(record)} />
+      ),
+    },
     {
       title: 'Provider名称',
       dataIndex: 'providerName',
@@ -90,9 +105,13 @@ export default function SasSettings({ form }: SasSettingsProps) {
       title: 'TLS证书',
       key: 'cert',
       render: (_: unknown, record: SasProvider) => (
-        <Space direction="vertical" size={0}>
-          <span>{record.certName}</span>
-          <Tag color="green">有效期至 {record.validTimeStr}</Tag>
+        <Space>
+          {record.uploadSuccess === 1 ? (
+            <span style={{ color: '#67D972' }}>●</span>
+          ) : (
+            <span style={{ color: '#E88282' }}>●</span>
+          )}
+          <span>{record.certName}({record.validTimeStr})</span>
         </Space>
       ),
     },
@@ -100,21 +119,6 @@ export default function SasSettings({ form }: SasSettingsProps) {
       title: '更新时间',
       dataIndex: 'updateTimeStr',
       key: 'updateTimeStr',
-    },
-    {
-      title: '操作',
-      key: 'operation',
-      width: 120,
-      render: (_: unknown, record: SasProvider) => (
-        <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => handleEditProvider(record)}>
-            编辑
-          </Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteProvider(record.id)}>
-            删除
-          </Button>
-        </Space>
-      ),
     },
   ];
 
@@ -124,25 +128,34 @@ export default function SasSettings({ form }: SasSettingsProps) {
         mainLogHbEnable: false,
       }}>
         {/* SAS心跳日志 */}
-        <Divider orientation="left" plain>SAS心跳日志</Divider>
-        <Form.Item name="mainLogHbEnable" label="SAS心跳日志" valuePropName="checked">
-          <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-        </Form.Item>
+        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>SAS心跳日志</span>} style={{ marginBottom: 16 }}>
+          <Space>
+            <span>SAS心跳日志开关</span>
+            <Form.Item name="mainLogHbEnable" valuePropName="checked" noStyle>
+              <Switch size="small" />
+            </Form.Item>
+          </Space>
+        </Card>
 
         {/* SAS Provider列表 */}
-        <Divider orientation="left" plain>SAS Provider列表</Divider>
-        <div style={{ marginBottom: 16 }}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddProvider}>
-            添加Provider
-          </Button>
-        </div>
-        <Table
-          dataSource={providers}
-          columns={columns}
-          rowKey="id"
-          pagination={false}
+        <Card
           size="small"
-        />
+          title={<span style={{ fontSize: 14, fontWeight: 600 }}>SAS Provider列表</span>}
+          extra={
+            <Button type="primary" icon={<PlusOutlined />} size="small" onClick={handleAddProvider}>
+              添加
+            </Button>
+          }
+        >
+          <Table
+            dataSource={providers}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            bordered
+          />
+        </Card>
       </Form>
 
       {/* 添加/编辑Provider弹窗 */}
