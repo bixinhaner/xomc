@@ -3,255 +3,142 @@ import {
   Button,
   Card,
   Form,
-  Input,
-  InputNumber,
-  Switch,
-  Select,
-  Divider,
   message,
   Tabs,
+  Space,
 } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import LayoutPicker from './LayoutPicker';
+import BasicSettings from './BasicSettings';
+import SecuritySettings from './SecuritySettings';
+import DeviceSettings from './DeviceSettings';
+import NotificationSettings from './NotificationSettings';
+import StorageSettings from './StorageSettings';
+import OmcSettings from './OmcSettings';
+import NorthboundSettings from './NorthboundSettings';
+import SasSettings from './SasSettings';
+import LdapSettings from './LdapSettings';
+import UICustomSettings from './UICustomSettings';
 
-interface SystemConfigValues {
-  systemName: string;
-  systemLogo: string;
-  sessionTimeout: number;
-  maxLoginAttempts: number;
-  lockDuration: number;
-  passwordMinLength: number;
-  passwordComplexity: boolean;
-  passwordExpiry: number;
-  enableTwoFactor: boolean;
-  smtpHost: string;
-  smtpPort: number;
-  smtpUser: string;
-  smtpPassword: string;
-  smtpSsl: boolean;
-  senderEmail: string;
-  dataRetentionDays: number;
-  autoCleanup: boolean;
-  backupPath: string;
-  maxFileSize: number;
-  allowedFileTypes: string[];
-}
+// 设置子页签类型
+type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound' | 'sas' | 'ldap' | 'ui';
 
-const defaultValues: SystemConfigValues = {
-  systemName: 'OMC 网络管理平台',
-  systemLogo: '',
-  sessionTimeout: 30,
-  maxLoginAttempts: 5,
-  lockDuration: 30,
-  passwordMinLength: 8,
-  passwordComplexity: true,
-  passwordExpiry: 90,
-  enableTwoFactor: false,
-  smtpHost: 'smtp.example.com',
-  smtpPort: 587,
-  smtpUser: 'noreply@example.com',
-  smtpPassword: '',
-  smtpSsl: true,
-  senderEmail: 'omc-noreply@example.com',
-  dataRetentionDays: 365,
-  autoCleanup: true,
-  backupPath: '/data/backup',
-  maxFileSize: 1024,
-  allowedFileTypes: ['xml', 'cfg', 'json', 'tar.gz', 'zip'],
-};
+// 设置子页签配置
+const settingsTabs: { key: SettingsTab; label: string }[] = [
+  { key: 'basic', label: '基本设置' },
+  { key: 'security', label: '安全设置' },
+  { key: 'device', label: '设备设置' },
+  { key: 'notify', label: '通知设置' },
+  { key: 'storage', label: '存储设置' },
+  { key: 'omc', label: '网管设置' },
+  { key: 'northbound', label: '北向接口设置' },
+  { key: 'sas', label: 'SAS设置' },
+  { key: 'ldap', label: 'LDAP协议' },
+  { key: 'ui', label: 'UI定制化' },
+];
 
 export default function SystemConfig() {
   const t = useT();
-  const [basicForm] = Form.useForm<SystemConfigValues>();
-  const [securityForm] = Form.useForm<SystemConfigValues>();
-  const [notifyForm] = Form.useForm<SystemConfigValues>();
-  const [storageForm] = Form.useForm<SystemConfigValues>();
+  const [activeTab, setActiveTab] = useState<SettingsTab>('basic');
   const [saving, setSaving] = useState(false);
 
-  const handleSave = (form: ReturnType<typeof Form.useForm>[0], section: string) => {
-    form.validateFields().then(() => {
+  // 各设置模块的表单实例
+  const [basicForm] = Form.useForm();
+  const [securityForm] = Form.useForm();
+  const [deviceForm] = Form.useForm();
+  const [notifyForm] = Form.useForm();
+  const [storageForm] = Form.useForm();
+  const [omcForm] = Form.useForm();
+  const [northboundForm] = Form.useForm();
+  const [sasForm] = Form.useForm();
+  const [ldapForm] = Form.useForm();
+  const [uiForm] = Form.useForm();
+
+  // 获取当前设置页签对应的表单
+  const getCurrentForm = () => {
+    const formMap: Record<SettingsTab, ReturnType<typeof Form.useForm>[0]> = {
+      basic: basicForm,
+      security: securityForm,
+      device: deviceForm,
+      notify: notifyForm,
+      storage: storageForm,
+      omc: omcForm,
+      northbound: northboundForm,
+      sas: sasForm,
+      ldap: ldapForm,
+      ui: uiForm,
+    };
+    return formMap[activeTab];
+  };
+
+  // 保存当前设置
+  const handleSave = () => {
+    getCurrentForm().validateFields().then(() => {
       setSaving(true);
       setTimeout(() => {
         setSaving(false);
         void message.success(t('common.save'));
       }, 800);
+    }).catch(() => {
+      void message.error('请检查表单填写是否正确');
     });
   };
 
+  // 渲染设置内容
+  const renderSettingsContent = () => {
+    switch (activeTab) {
+      case 'basic':
+        return <BasicSettings form={basicForm} />;
+      case 'security':
+        return <SecuritySettings form={securityForm} />;
+      case 'device':
+        return <DeviceSettings form={deviceForm} />;
+      case 'notify':
+        return <NotificationSettings form={notifyForm} />;
+      case 'storage':
+        return <StorageSettings form={storageForm} />;
+      case 'omc':
+        return <OmcSettings form={omcForm} />;
+      case 'northbound':
+        return <NorthboundSettings form={northboundForm} />;
+      case 'sas':
+        return <SasSettings form={sasForm} />;
+      case 'ldap':
+        return <LdapSettings form={ldapForm} />;
+      case 'ui':
+        return <UICustomSettings form={uiForm} />;
+      default:
+        return null;
+    }
+  };
+
+  // Tabs 配置
+  const tabItems = settingsTabs.map((tab) => ({
+    key: tab.key,
+    label: tab.label,
+  }));
+
   return (
     <ListPageLayout title={t('nav.system.config')}>
+      {/* 页签切换 - 放在 Card 外部 */}
       <Tabs
-        items={[
-          {
-            key: 'layout',
-            label: t('layout.title'),
-            children: (
-              <Card>
-                <LayoutPicker />
-              </Card>
-            ),
-          },
-          {
-            key: 'basic',
-            label: t('nav.system.config'),
-            children: (
-              <Card
-                extra={
-                  <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(basicForm, t('common.save'))}>
-                    {t('common.save')}
-                  </Button>
-                }
-              >
-                <Form
-                  form={basicForm}
-                  layout="vertical"
-                  initialValues={defaultValues}
-                  style={{ maxWidth: 600 }}
-                >
-                  <Divider orientation="left" plain>{t('nav.system.config')}</Divider>
-                  <Form.Item name="systemName" label={t('table.name')} rules={[{ required: true }]}>
-                    <Input placeholder={t('table.name')} />
-                  </Form.Item>
-                  <Form.Item name="systemLogo" label="Logo URL">
-                    <Input placeholder="Logo URL" />
-                  </Form.Item>
-                  <Divider orientation="left" plain>{t('nav.system.config')}</Divider>
-                  <Form.Item name="sessionTimeout" label={t('perf.timeRange')} rules={[{ required: true }]}>
-                    <InputNumber min={5} max={480} style={{ width: '100%' }} addonAfter="min" />
-                  </Form.Item>
-                </Form>
-              </Card>
-            ),
-          },
-          {
-            key: 'security',
-            label: t('nav.system.config'),
-            children: (
-              <Card
-                extra={
-                  <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(securityForm, t('common.save'))}>
-                    {t('common.save')}
-                  </Button>
-                }
-              >
-                <Form
-                  form={securityForm}
-                  layout="vertical"
-                  initialValues={defaultValues}
-                  style={{ maxWidth: 600 }}
-                >
-                  <Form.Item name="maxLoginAttempts" label={t('nav.system.config')} rules={[{ required: true }]}>
-                    <InputNumber min={3} max={20} style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="lockDuration" label={t('perf.timeRange')}>
-                    <InputNumber min={1} max={1440} style={{ width: '100%' }} addonAfter="min" />
-                  </Form.Item>
-                  <Form.Item name="enableTwoFactor" label={t('common.enable')} valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item name="passwordMinLength" label={t('user.password')} rules={[{ required: true }]}>
-                    <InputNumber min={6} max={32} style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="passwordComplexity" label={t('user.password')} valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item name="passwordExpiry" label={t('perf.timeRange')}>
-                    <InputNumber min={0} max={365} style={{ width: '100%' }} addonAfter="days" />
-                  </Form.Item>
-                </Form>
-              </Card>
-            ),
-          },
-          {
-            key: 'notify',
-            label: t('nav.system.notifications'),
-            children: (
-              <Card
-                extra={
-                  <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(notifyForm, t('common.save'))}>
-                    {t('common.save')}
-                  </Button>
-                }
-              >
-                <Form
-                  form={notifyForm}
-                  layout="vertical"
-                  initialValues={defaultValues}
-                  style={{ maxWidth: 600 }}
-                >
-                  <Form.Item name="smtpHost" label="SMTP Host" rules={[{ required: true }]}>
-                    <Input placeholder="smtp.example.com" />
-                  </Form.Item>
-                  <Form.Item name="smtpPort" label="SMTP Port" rules={[{ required: true }]}>
-                    <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="smtpUser" label={t('user.username')} rules={[{ required: true }]}>
-                    <Input />
-                  </Form.Item>
-                  <Form.Item name="smtpPassword" label={t('user.password')}>
-                    <Input.Password />
-                  </Form.Item>
-                  <Form.Item name="smtpSsl" label="SSL/TLS" valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item name="senderEmail" label={t('user.email')} rules={[{ type: 'email' }]}>
-                    <Input placeholder="noreply@example.com" />
-                  </Form.Item>
-                </Form>
-              </Card>
-            ),
-          },
-          {
-            key: 'storage',
-            label: t('nav.system.config'),
-            children: (
-              <Card
-                extra={
-                  <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(storageForm, t('common.save'))}>
-                    {t('common.save')}
-                  </Button>
-                }
-              >
-                <Form
-                  form={storageForm}
-                  layout="vertical"
-                  initialValues={defaultValues}
-                  style={{ maxWidth: 600 }}
-                >
-                  <Form.Item name="dataRetentionDays" label={t('perf.timeRange')} rules={[{ required: true }]}>
-                    <InputNumber min={30} max={3650} style={{ width: '100%' }} addonAfter="days" />
-                  </Form.Item>
-                  <Form.Item name="autoCleanup" label={t('common.enable')} valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item name="backupPath" label={t('table.description')} rules={[{ required: true }]}>
-                    <Input placeholder="/data/backup" />
-                  </Form.Item>
-                  <Form.Item name="maxFileSize" label={t('table.total')} rules={[{ required: true }]}>
-                    <InputNumber min={1} max={10240} style={{ width: '100%' }} addonAfter="MB" />
-                  </Form.Item>
-                  <Form.Item name="allowedFileTypes" label={t('table.type')}>
-                    <Select
-                      mode="tags"
-                      placeholder={t('common.pleaseSelect')}
-                      options={[
-                        { label: 'xml', value: 'xml' },
-                        { label: 'cfg', value: 'cfg' },
-                        { label: 'json', value: 'json' },
-                        { label: 'tar.gz', value: 'tar.gz' },
-                        { label: 'zip', value: 'zip' },
-                        { label: 'bin', value: 'bin' },
-                      ]}
-                    />
-                  </Form.Item>
-                </Form>
-              </Card>
-            ),
-          },
-        ]}
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as SettingsTab)}
+        items={tabItems}
       />
+      {/* 设置内容 - 放在 Card 内部 */}
+      <Card bordered={false}>
+        {renderSettingsContent()}
+      </Card>
+      {/* 底部保存按钮 */}
+      <div style={{ marginTop: 16, textAlign: 'center' }}>
+        <Space>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
+            {t('common.save')}
+          </Button>
+        </Space>
+      </div>
     </ListPageLayout>
   );
 }
