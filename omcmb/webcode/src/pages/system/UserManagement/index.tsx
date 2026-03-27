@@ -44,6 +44,7 @@ import {
   useCopyUser,
   useMoveUsersToGroup,
   useAllGroups,
+  useAllDeviceGroups,
 } from '@/hooks/api/useSystem';
 import type { User } from '@/types/system';
 import { useT } from '@/hooks/useT';
@@ -78,6 +79,22 @@ export default function UserManagement() {
   });
 
   const { data: allGroups } = useAllGroups();
+  const { data: allDeviceGroups } = useAllDeviceGroups();
+
+  // 设备组分类：内置和自定义
+  const builtInDeviceGroups = useMemo(
+    () => (allDeviceGroups ?? []).filter((g) => g.builtIn === 1 && g.parentId !== null),
+    [allDeviceGroups]
+  );
+  const customDeviceGroups = useMemo(
+    () => (allDeviceGroups ?? []).filter((g) => g.builtIn === 0),
+    [allDeviceGroups]
+  );
+
+  // 设备组选择状态：类型和选中值
+  const [deviceGroupType, setDeviceGroupType] = useState<'builtIn' | 'custom'>('builtIn');
+  const [selectedBuiltInGroupId, setSelectedBuiltInGroupId] = useState<string | undefined>();
+  const [selectedCustomGroupIds, setSelectedCustomGroupIds] = useState<string[]>([]);
 
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -148,12 +165,18 @@ export default function UserManagement() {
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
+      // 根据设备组类型获取选中的设备组
+      const deviceGroupIds = deviceGroupType === 'builtIn'
+        ? (selectedBuiltInGroupId ? [selectedBuiltInGroupId] : [])
+        : selectedCustomGroupIds;
+
       const userData = {
         userName: vals.userName as string,
         password: vals.password as string,
         email: vals.email as string,
         phone: vals.phone as string,
         groupNames: (vals.groupNames as string[]) || [],
+        deviceGroupIds,
         lockStatus: vals.lockStatus ? 1 : 0,
         expireTime: limitTime ? undefined : vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
         description: (vals.description as string) ?? '',
@@ -167,6 +190,9 @@ export default function UserManagement() {
           setCreateVisible(false);
           form.resetFields();
           setLimitTime(true);
+          setDeviceGroupType('builtIn');
+          setSelectedBuiltInGroupId(undefined);
+          setSelectedCustomGroupIds([]);
         },
       });
     });
@@ -667,6 +693,9 @@ export default function UserManagement() {
           setCreateVisible(false);
           form.resetFields();
           setLimitTime(true);
+          setDeviceGroupType('builtIn');
+          setSelectedBuiltInGroupId(undefined);
+          setSelectedCustomGroupIds([]);
         }}
         width={520}
         footer={
@@ -677,6 +706,9 @@ export default function UserManagement() {
                 setCreateVisible(false);
                 form.resetFields();
                 setLimitTime(true);
+                setDeviceGroupType('builtIn');
+                setSelectedBuiltInGroupId(undefined);
+                setSelectedCustomGroupIds([]);
               }}
             >
               {t('common.cancel')}
@@ -767,6 +799,40 @@ export default function UserManagement() {
                 placeholder={t('common.pleaseSelect')}
                 options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
               />
+            </Form.Item>
+            {/* 设备组选择 */}
+            <Form.Item label={t('user.deviceGroup')}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Radio.Group
+                  value={deviceGroupType}
+                  onChange={(e) => {
+                    setDeviceGroupType(e.target.value);
+                    setSelectedBuiltInGroupId(undefined);
+                    setSelectedCustomGroupIds([]);
+                  }}
+                >
+                  <Radio value="builtIn">{t('user.builtInDeviceGroup')}</Radio>
+                  <Radio value="custom">{t('user.customDeviceGroup')}</Radio>
+                </Radio.Group>
+                {deviceGroupType === 'builtIn' ? (
+                  <Select
+                    placeholder={t('user.pleaseSelectDeviceGroup')}
+                    value={selectedBuiltInGroupId}
+                    onChange={setSelectedBuiltInGroupId}
+                    options={builtInDeviceGroups.map((g) => ({ label: g.name, value: g.id }))}
+                    style={{ width: '100%' }}
+                  />
+                ) : (
+                  <Select
+                    mode="multiple"
+                    placeholder={t('user.pleaseSelectDeviceGroup')}
+                    value={selectedCustomGroupIds}
+                    onChange={setSelectedCustomGroupIds}
+                    options={customDeviceGroups.map((g) => ({ label: g.name, value: g.id }))}
+                    style={{ width: '100%' }}
+                  />
+                )}
+              </div>
             </Form.Item>
             <Form.Item name="lockStatus" label={t('user.lockStatus')} valuePropName="checked">
               <Checkbox>{t('user.locked')}</Checkbox>

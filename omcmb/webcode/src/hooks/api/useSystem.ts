@@ -4,6 +4,7 @@ import type { PageRequest } from '@/types/pagination';
 import { systemService } from '@/mock/services/systemService';
 import { adminApi } from '@/services/api/adminApi';
 import { systemApi } from '@/services/api/systemApi';
+import { deviceService } from '@/mock/services/deviceService';
 import { useMock } from '@/services/apiSwitch';
 
 // Users
@@ -279,5 +280,14 @@ export function useSystemInfo() {
     queryKey: ['system', 'info'],
     queryFn: () => useMock ? systemService.getSystemInfo() : systemApi.getSystemInfo(),
     refetchInterval: 60000,
+  });
+}
+
+// Device Groups
+export function useAllDeviceGroups() {
+  return useQuery({
+    queryKey: ['system', 'deviceGroups', 'all'],
+    queryFn: () => deviceService.getGroups(),
+    staleTime: 5 * 60 * 1000,
   });
 }
