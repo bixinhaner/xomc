@@ -796,6 +796,22 @@ const messages: Record<string, string> = {
   'role.selectedBuiltIn':     '选中的角色中有',
   'role.builtInSkipped':      '个内置角色将被跳过',
   'role.permissions':         '权限列表',
+  'role.permissionConfig':    '权限配置',
+  'role.deviceGroups':        '设备组',
+  'role.pleaseSelectDeviceGroups': '请选择设备组（可多选）',
+  // 权限类型
+  'role.permission.read':     '只读',
+  'role.permission.write':    '读写',
+  // 功能模块
+  'role.modules.device':      '设备管理',
+  'role.modules.alarm':       '告警管理',
+  'role.modules.performance': '性能管理',
+  'role.modules.software':    '软件版本',
+  'role.modules.file':        '文件管理',
+  'role.modules.log':         '日志管理',
+  'role.modules.system':      '系统管理',
+  'role.modules.report':      '报表管理',
+  'role.modules.ops':         '运维工具',
 
   // -------------------------------------------------------------------------
   // Group management

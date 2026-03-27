@@ -792,6 +792,21 @@ const messages: Record<string, string> = {
   'role.selectedBuiltIn':     'Selected roles include',
   'role.builtInSkipped':      'built-in roles that will be skipped',
   'role.permissions':         'Permissions',
+  'role.deviceGroups':        'Device Groups',
+  'role.pleaseSelectDeviceGroups': 'Please select device groups (multiple)',
+  // Permission types
+  'role.permission.read':     'Read Only',
+  'role.permission.write':    'Read/Write',
+  // Modules
+  'role.modules.device':      'Device Management',
+  'role.modules.alarm':       'Alarm Management',
+  'role.modules.performance': 'Performance Management',
+  'role.modules.software':    'Software Version',
+  'role.modules.file':        'File Management',
+  'role.modules.log':         'Log Management',
+  'role.modules.system':      'System Management',
+  'role.modules.report':      'Report Management',
+  'role.modules.ops':         'Operations Tools',
 
   // -------------------------------------------------------------------------
   // Group management

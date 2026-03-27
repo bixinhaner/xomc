@@ -10,6 +10,8 @@ import {
   Dropdown,
   Tree,
   Card,
+  Select,
+  Space,
 } from 'antd';
 import {
   PlusOutlined,
@@ -28,98 +30,83 @@ import {
   useCreateRole,
   useUpdateRole,
   useDeleteRoles,
+  useAllDeviceGroups,
 } from '@/hooks/api/useSystem';
 import type { Role } from '@/types/system';
 import { useT } from '@/hooks/useT';
 
-// Permission tree data
-const permissionModules = [
+// Permission tree data - 每个模块包含只读/读写两种权限
+const getPermissionModules = (t: (id: string, values?: Record<string, unknown>) => string) => [
   {
     key: 'device',
-    title: '设备管理',
+    title: t('role.modules.device'),
     children: [
-      { key: 'device:view', title: '查看设备列表' },
-      { key: 'device:create', title: '创建设备' },
-      { key: 'device:update', title: '编辑设备' },
-      { key: 'device:delete', title: '删除设备' },
-      { key: 'device:config', title: '配置管理' },
+      { key: 'device:read', title: t('role.permission.read') },
+      { key: 'device:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'alarm',
-    title: '告警管理',
+    title: t('role.modules.alarm'),
     children: [
-      { key: 'alarm:view', title: '查看告警' },
-      { key: 'alarm:confirm', title: '确认告警' },
-      { key: 'alarm:clear', title: '清除告警' },
-      { key: 'alarm:config', title: '配置告警规则' },
+      { key: 'alarm:read', title: t('role.permission.read') },
+      { key: 'alarm:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'performance',
-    title: '性能管理',
+    title: t('role.modules.performance'),
     children: [
-      { key: 'performance:view', title: '查看性能数据' },
-      { key: 'performance:export', title: '导出性能数据' },
-      { key: 'performance:config', title: '配置采集策略' },
+      { key: 'performance:read', title: t('role.permission.read') },
+      { key: 'performance:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'software',
-    title: '软件版本',
+    title: t('role.modules.software'),
     children: [
-      { key: 'software:view', title: '查看版本列表' },
-      { key: 'software:upload', title: '上传固件' },
-      { key: 'software:upgrade', title: '发起升级' },
-      { key: 'software:delete', title: '删除版本' },
+      { key: 'software:read', title: t('role.permission.read') },
+      { key: 'software:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'file',
-    title: '文件管理',
+    title: t('role.modules.file'),
     children: [
-      { key: 'file:view', title: '查看文件' },
-      { key: 'file:download', title: '下载文件' },
-      { key: 'file:upload', title: '上传文件' },
-      { key: 'file:delete', title: '删除文件' },
+      { key: 'file:read', title: t('role.permission.read') },
+      { key: 'file:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'log',
-    title: '日志管理',
+    title: t('role.modules.log'),
     children: [
-      { key: 'log:view', title: '查看日志' },
-      { key: 'log:export', title: '导出日志' },
-      { key: 'log:config', title: '配置日志策略' },
+      { key: 'log:read', title: t('role.permission.read') },
+      { key: 'log:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'system',
-    title: '系统管理',
+    title: t('role.modules.system'),
     children: [
-      { key: 'system:user', title: '用户管理' },
-      { key: 'system:role', title: '角色权限管理' },
-      { key: 'system:group', title: '用户组管理' },
-      { key: 'system:config', title: '系统配置' },
-      { key: 'system:dict', title: '数据字典' },
+      { key: 'system:read', title: t('role.permission.read') },
+      { key: 'system:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'report',
-    title: '报表管理',
+    title: t('role.modules.report'),
     children: [
-      { key: 'report:view', title: '查看报表' },
-      { key: 'report:generate', title: '生成报表' },
-      { key: 'report:download', title: '下载报表' },
+      { key: 'report:read', title: t('role.permission.read') },
+      { key: 'report:write', title: t('role.permission.write') },
     ],
   },
   {
     key: 'ops',
-    title: '运维工具',
+    title: t('role.modules.ops'),
     children: [
-      { key: 'ops:template', title: '模板管理' },
-      { key: 'ops:command', title: '命令执行' },
-      { key: 'ops:diagnosis', title: '网络诊断' },
+      { key: 'ops:read', title: t('role.permission.read') },
+      { key: 'ops:write', title: t('role.permission.write') },
     ],
   },
 ];
@@ -137,6 +124,7 @@ export default function RoleManagement() {
   const [form] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [checkedPermissions, setCheckedPermissions] = useState<string[]>([]);
+  const [selectedDeviceGroupIds, setSelectedDeviceGroupIds] = useState<string[]>([]);
 
   const { data, isLoading, refetch } = useRoles({
     roleName: filters.roleName as string | undefined,
@@ -144,11 +132,24 @@ export default function RoleManagement() {
     pageSize,
   });
 
+  const { data: allDeviceGroups } = useAllDeviceGroups();
+
+  // 设备组选项（所有设备组都可批量选择）
+  const deviceGroupOptions = useMemo(
+    () => (allDeviceGroups ?? [])
+      .filter((g) => g.parentId !== null) // 只显示二级节点
+      .map((g) => ({ label: g.name, value: g.id })),
+    [allDeviceGroups]
+  );
+
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
   const deleteRoles = useDeleteRoles();
 
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
+
+  // 权限模块数据
+  const permissionModules = useMemo(() => getPermissionModules(t as (id: string, values?: Record<string, unknown>) => string), [t]);
 
   const handleDelete = useCallback((role: Role) => {
     if (isBuiltIn(role)) {
@@ -204,6 +205,7 @@ export default function RoleManagement() {
           batchOperation: vals.batchOperation ? 1 : 0,
           description: (vals.description as string) ?? '',
           permissions: checkedPermissions,
+          deviceGroupIds: selectedDeviceGroupIds,
           builtIn: 0,
         },
         {
@@ -212,11 +214,12 @@ export default function RoleManagement() {
             setCreateVisible(false);
             form.resetFields();
             setCheckedPermissions([]);
+            setSelectedDeviceGroupIds([]);
           },
         },
       );
     });
-  }, [form, createRole, checkedPermissions, message, t]);
+  }, [form, createRole, checkedPermissions, selectedDeviceGroupIds, message, t]);
 
   const handleEdit = useCallback(() => {
     if (!selectedRole) return;
@@ -229,6 +232,7 @@ export default function RoleManagement() {
             batchOperation: vals.batchOperation ? 1 : 0,
             description: vals.description as string,
             permissions: checkedPermissions,
+            deviceGroupIds: selectedDeviceGroupIds,
           },
         },
         {
@@ -238,11 +242,12 @@ export default function RoleManagement() {
             form.resetFields();
             setSelectedRole(null);
             setCheckedPermissions([]);
+            setSelectedDeviceGroupIds([]);
           },
         },
       );
     });
-  }, [selectedRole, form, updateRole, checkedPermissions, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissions, selectedDeviceGroupIds, message, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -273,6 +278,7 @@ export default function RoleManagement() {
                       description: role.description,
                     });
                     setCheckedPermissions(role.permissions || []);
+                    setSelectedDeviceGroupIds((role as Role & { deviceGroupIds?: string[] }).deviceGroupIds || []);
                     setViewVisible(true);
                   },
                 },
@@ -289,6 +295,7 @@ export default function RoleManagement() {
                       description: role.description,
                     });
                     setCheckedPermissions(role.permissions || []);
+                    setSelectedDeviceGroupIds((role as Role & { deviceGroupIds?: string[] }).deviceGroupIds || []);
                     setEditVisible(true);
                   },
                 },
@@ -364,6 +371,48 @@ export default function RoleManagement() {
     </Card>
   );
 
+  const renderDeviceGroupSelect = (readOnly = false) => (
+    <Form.Item label={t('role.deviceGroups')}>
+      <Select
+        mode="multiple"
+        placeholder={t('role.pleaseSelectDeviceGroups')}
+        value={selectedDeviceGroupIds}
+        onChange={setSelectedDeviceGroupIds}
+        options={deviceGroupOptions}
+        style={{ width: '100%' }}
+        disabled={readOnly}
+        showSearch
+        filterOption={(input, option) =>
+          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+        }
+      />
+    </Form.Item>
+  );
+
+  // 关闭抽屉时重置状态
+  const handleCloseCreate = useCallback(() => {
+    setCreateVisible(false);
+    form.resetFields();
+    setCheckedPermissions([]);
+    setSelectedDeviceGroupIds([]);
+  }, [form]);
+
+  const handleCloseEdit = useCallback(() => {
+    setEditVisible(false);
+    form.resetFields();
+    setSelectedRole(null);
+    setCheckedPermissions([]);
+    setSelectedDeviceGroupIds([]);
+  }, [form]);
+
+  const handleCloseView = useCallback(() => {
+    setViewVisible(false);
+    form.resetFields();
+    setSelectedRole(null);
+    setCheckedPermissions([]);
+    setSelectedDeviceGroupIds([]);
+  }, [form]);
+
   return (
     <ListPageLayout
       title={t('nav.system.roles')}
@@ -409,29 +458,14 @@ export default function RoleManagement() {
       <Drawer
         title={t('common.add')}
         open={createVisible}
-        onClose={() => {
-          setCreateVisible(false);
-          form.resetFields();
-          setCheckedPermissions([]);
-        }}
+        onClose={handleCloseCreate}
         width={520}
         footer={
           <div style={{ textAlign: 'right' }}>
-            <Button
-              style={{ marginRight: 8 }}
-              onClick={() => {
-                setCreateVisible(false);
-                form.resetFields();
-                setCheckedPermissions([]);
-              }}
-            >
+            <Button style={{ marginRight: 8 }} onClick={handleCloseCreate}>
               {t('common.cancel')}
             </Button>
-            <Button
-              type="primary"
-              loading={createRole.isPending}
-              onClick={handleCreate}
-            >
+            <Button type="primary" loading={createRole.isPending} onClick={handleCreate}>
               {t('common.confirm')}
             </Button>
           </div>
@@ -456,6 +490,7 @@ export default function RoleManagement() {
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} placeholder={t('role.description')} />
           </Form.Item>
+          {renderDeviceGroupSelect(false)}
           {renderPermissionTree(false)}
         </Form>
       </Drawer>
@@ -464,31 +499,14 @@ export default function RoleManagement() {
       <Drawer
         title={t('common.edit')}
         open={editVisible}
-        onClose={() => {
-          setEditVisible(false);
-          form.resetFields();
-          setSelectedRole(null);
-          setCheckedPermissions([]);
-        }}
+        onClose={handleCloseEdit}
         width={520}
         footer={
           <div style={{ textAlign: 'right' }}>
-            <Button
-              style={{ marginRight: 8 }}
-              onClick={() => {
-                setEditVisible(false);
-                form.resetFields();
-                setSelectedRole(null);
-                setCheckedPermissions([]);
-              }}
-            >
+            <Button style={{ marginRight: 8 }} onClick={handleCloseEdit}>
               {t('common.cancel')}
             </Button>
-            <Button
-              type="primary"
-              loading={updateRole.isPending}
-              onClick={handleEdit}
-            >
+            <Button type="primary" loading={updateRole.isPending} onClick={handleEdit}>
               {t('common.confirm')}
             </Button>
           </div>
@@ -512,6 +530,7 @@ export default function RoleManagement() {
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} placeholder={t('role.description')} />
           </Form.Item>
+          {renderDeviceGroupSelect(false)}
           {renderPermissionTree(false)}
         </Form>
       </Drawer>
@@ -520,21 +539,11 @@ export default function RoleManagement() {
       <Drawer
         title={t('common.view')}
         open={viewVisible}
-        onClose={() => {
-          setViewVisible(false);
-          form.resetFields();
-          setSelectedRole(null);
-          setCheckedPermissions([]);
-        }}
+        onClose={handleCloseView}
         width={520}
         footer={
           <div style={{ textAlign: 'right' }}>
-            <Button onClick={() => {
-              setViewVisible(false);
-              form.resetFields();
-              setSelectedRole(null);
-              setCheckedPermissions([]);
-            }}>
+            <Button onClick={handleCloseView}>
               {t('common.close')}
             </Button>
           </div>
@@ -551,6 +560,17 @@ export default function RoleManagement() {
           </Form.Item>
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} readOnly />
+          </Form.Item>
+          <Form.Item label={t('role.deviceGroups')}>
+            <Space wrap>
+              {selectedDeviceGroupIds.length > 0 ? (
+                deviceGroupOptions
+                  .filter((opt) => selectedDeviceGroupIds.includes(opt.value))
+                  .map((opt) => <Tag key={opt.value}>{opt.label}</Tag>)
+              ) : (
+                <span style={{ color: 'var(--color-text-secondary)' }}>-</span>
+              )}
+            </Space>
           </Form.Item>
           <Form.Item label={t('role.userCount')}>
             <span>{selectedRole?.userCount ?? 0}</span>
