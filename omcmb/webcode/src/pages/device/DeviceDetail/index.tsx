@@ -640,6 +640,11 @@ export default function DeviceDetail() {
               ),
             },
             {
+              key: 'parameters',
+              label: t('device.parameterTree'),
+              children: <ParameterTreeTab deviceId={device.id} />,
+            },
+            {
               key: 'alarms',
               label: (
                 <span>

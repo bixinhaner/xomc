@@ -403,6 +403,7 @@ const messages: Record<string, string> = {
   'device.group.cell':          '小区信息',
   'device.group.status':        '状态信息',
   'device.group.other':         '其他信息',
+  'device.parameterTree':       '参数树',
   'device.type.eNB':        'eNB基站',
   'device.type.gNB':        'gNB基站',
   'device.type.CPE':        'CPE终端',

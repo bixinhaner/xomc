@@ -403,6 +403,7 @@ const messages: Record<string, string> = {
   'device.group.cell':        'Cell Info',
   'device.group.status':      'Status Info',
   'device.group.other':       'Other Info',
+  'device.parameterTree':     'Parameter Tree',
   'device.type.eNB':        'eNB Base Station',
   'device.type.gNB':        'gNB Base Station',
   'device.type.CPE':        'CPE Terminal',
