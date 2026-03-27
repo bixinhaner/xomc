@@ -684,7 +684,6 @@ export default function UserManagement() {
             <Button
               type="primary"
               loading={createMode === 'add' ? createUser.isPending : importPanelRef.current?.loading}
-              disabled={createMode === 'import' && !importPanelRef.current?.canImport}
               onClick={createMode === 'add' ? handleCreate : () => importPanelRef.current?.handleImport()}
             >
               {t('common.confirm')}
