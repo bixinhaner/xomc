@@ -59,7 +59,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
   };
 
   const handleDeleteProvider = (id: string) => {
-    // 使用 setTimeout 确保 Dropdown 关闭后再显示 Modal
+    // 使用 setTimeout 确保 Dropdown 完全关闭后再显示 Modal
     setTimeout(() => {
       Modal.confirm({
         title: '确认删除',
@@ -71,7 +71,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
           void message.success('删除成功');
         },
       });
-    }, 100);
+    }, 200);
   };
 
   const getOperationMenu = (record: SasProvider): MenuProps['items'] => [
@@ -143,7 +143,11 @@ export default function SasSettings({ form }: SasSettingsProps) {
       width: 50,
       fixed: 'left',
       render: (_: unknown, record: SasProvider) => (
-        <Dropdown menu={{ items: getOperationMenu(record) }} trigger={['click']}>
+        <Dropdown
+          menu={{ items: getOperationMenu(record) }}
+          trigger={['click']}
+          destroyPopupOnHide
+        >
           <Button size="small" type="text" icon={<MoreOutlined />} />
         </Dropdown>
       ),
