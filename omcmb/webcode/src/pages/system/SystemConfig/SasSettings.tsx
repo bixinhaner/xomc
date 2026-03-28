@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Switch, Space, Table, Button, Modal, Input, Radio, Card, message, Upload, Dropdown } from 'antd';
+import { Form, Switch, Space, Table, Button, Modal, Input, Radio, Card, Upload, Dropdown, App } from 'antd';
 import { PlusOutlined, MoreOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { MenuProps } from 'antd';
@@ -27,6 +27,7 @@ const mockProviders: SasProvider[] = [
 
 export default function SasSettings({ form }: SasSettingsProps) {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [providers, setProviders] = useState<SasProvider[]>(mockProviders);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProvider, setEditingProvider] = useState<SasProvider | null>(null);
@@ -59,19 +60,16 @@ export default function SasSettings({ form }: SasSettingsProps) {
   };
 
   const handleDeleteProvider = (id: string) => {
-    // 使用 setTimeout 确保 Dropdown 完全关闭后再显示 Modal
-    setTimeout(() => {
-      Modal.confirm({
-        title: '确认删除',
-        content: '确定要删除此SAS Provider吗？',
-        okText: '确定',
-        cancelText: '取消',
-        onOk: () => {
-          setProviders(providers.filter(p => p.id !== id));
-          void message.success('删除成功');
-        },
-      });
-    }, 200);
+    modal.confirm({
+      title: '确认删除',
+      content: '确定要删除此SAS Provider吗？',
+      okText: '确定',
+      cancelText: '取消',
+      onOk: () => {
+        setProviders(providers.filter(p => p.id !== id));
+        message.success('删除成功');
+      },
+    });
   };
 
   const getOperationMenu = (record: SasProvider): MenuProps['items'] => [
