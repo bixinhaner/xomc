@@ -59,16 +59,19 @@ export default function SasSettings({ form }: SasSettingsProps) {
   };
 
   const handleDeleteProvider = (id: string) => {
-    Modal.confirm({
-      title: '确认删除',
-      content: '确定要删除此SAS Provider吗？',
-      okText: '确定',
-      cancelText: '取消',
-      onOk: () => {
-        setProviders(providers.filter(p => p.id !== id));
-        void message.success('删除成功');
-      },
-    });
+    // 使用 setTimeout 确保 Dropdown 关闭后再显示 Modal
+    setTimeout(() => {
+      Modal.confirm({
+        title: '确认删除',
+        content: '确定要删除此SAS Provider吗？',
+        okText: '确定',
+        cancelText: '取消',
+        onOk: () => {
+          setProviders(providers.filter(p => p.id !== id));
+          void message.success('删除成功');
+        },
+      });
+    }, 100);
   };
 
   const getOperationMenu = (record: SasProvider): MenuProps['items'] => [
