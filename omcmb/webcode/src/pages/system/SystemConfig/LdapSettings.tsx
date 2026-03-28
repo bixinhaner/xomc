@@ -30,6 +30,9 @@ const formGroupStyle: React.CSSProperties = {
 export default function LdapSettings({ form }: LdapSettingsProps) {
   const t = useT();
 
+  // 监听LDAP开关状态
+  const ldapEnable = Form.useWatch('ldapEnable', form);
+
   const handleTestLdap = () => {
     void message.info('正在测试LDAP连接...');
     setTimeout(() => {
@@ -56,7 +59,7 @@ export default function LdapSettings({ form }: LdapSettingsProps) {
             <Form.Item name="ldapEnable" noStyle valuePropName="checked">
               <Switch size="small" />
             </Form.Item>
-            <Button type="primary" size="small" onClick={handleTestLdap}>
+            <Button type="primary" size="small" onClick={handleTestLdap} disabled={!ldapEnable}>
               测试
             </Button>
           </Space>
@@ -68,31 +71,31 @@ export default function LdapSettings({ form }: LdapSettingsProps) {
 
           <div style={formGroupStyle}>
             <Form.Item label="LDAP IP" name="ldapIp" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 180 }} placeholder="192.168.1.50" />
+              <Input style={{ width: 180 }} placeholder="192.168.1.50" disabled={!ldapEnable} />
             </Form.Item>
             <Form.Item label="LDAP Port" name="ldapPort" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 100 }} placeholder="389" />
+              <Input style={{ width: 100 }} placeholder="389" disabled={!ldapEnable} />
             </Form.Item>
             <Form.Item name="ldapSSL" valuePropName="checked" noStyle style={{ marginTop: 30 }}>
-              <Checkbox>SSL/TLS</Checkbox>
+              <Checkbox disabled={!ldapEnable}>SSL/TLS</Checkbox>
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
             <Form.Item label="LDAP Base" name="ldapBase" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 300 }} placeholder="dc=example,dc=com" />
+              <Input style={{ width: 300 }} placeholder="dc=example,dc=com" disabled={!ldapEnable} />
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
             <Form.Item label="LDAP User" name="ldapUser" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 300 }} placeholder="cn=admin,dc=example,dc=com" />
+              <Input style={{ width: 300 }} placeholder="cn=admin,dc=example,dc=com" disabled={!ldapEnable} />
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
             <Form.Item label="LDAP Password" name="ldapPwd" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 200 }} placeholder="请输入密码" />
+              <Input.Password style={{ width: 200 }} placeholder="请输入密码" disabled={!ldapEnable} />
             </Form.Item>
           </div>
         </div>
