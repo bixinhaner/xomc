@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Select, Card, Space, Divider } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Select, Card, Space } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -14,58 +14,65 @@ const settingRowStyle: React.CSSProperties = {
 
 // 子设置区域样式
 const subSettingStyle: React.CSSProperties = {
-  marginLeft: 0,
   marginTop: 12,
   padding: '12px 16px',
   backgroundColor: '#fafafa',
   borderRadius: 4,
 };
 
-// 分组标题样式
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#555',
-  marginBottom: 12,
-  paddingBottom: 8,
-  borderBottom: '1px solid #e8e8e8',
-};
+// 磁盘空间选项
+const diskSpaceOptions = [
+  { text: '10%', value: '10%' },
+  { text: '20%', value: '20%' },
+  { text: '30%', value: '30%' },
+  { text: '40%', value: '40%' },
+  { text: '50%', value: '50%' },
+  { text: '60%', value: '60%' },
+  { text: '70%', value: '70%' },
+  { text: '80%', value: '80%' },
+  { text: '90%', value: '90%' },
+];
 
 export default function StorageSettings({ form }: StorageSettingsProps) {
   const t = useT();
 
+  // 监听FTP转发复选框状态
+  const logFtpEnable = Form.useWatch('logFtpEnable', form);
+
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
-      logDataSaveDays: '',
-      rebootLogDataSaveDays: '',
-      rebootLogSaveCount: '',
+      logDataSaveDays: 90,
+      rebootLogDataSaveDays: 60,
+      rebootLogSaveCount: 2,
       sysOperateLogDataSaveDays: 90,
       logFtpEnable: false,
-      logFtpType: '',
+      logFtpType: 'ftp',
       logFtpSavePath: '/',
-      logFtpIpAddr: '',
-      logFtpPort: '',
-      logFtpUser: '',
+      logFtpIpAddr: '127.0.0.1',
+      logFtpPort: 21,
+      logFtpUser: 'ftpuser',
       logFtpPassword: '',
-      alarmHisMaxHoldTime: '',
-      kpiFilesSaveDays: '',
-      kpiReportDataSaveDays: '',
-      kpiStorge15DataDays: '',
+      alarmHisMaxHoldTime: 90,
+      kpiFilesSaveDays: 7,
+      kpiReportDataSaveDays: 7,
+      kpiStorge15DataDays: 30,
       kpiStorge60DataDays: 30,
-      kpiStorge1440DataDays: '',
-      kpiWeekAndMonthSwitch: false,
-      mrFileSaveDays: '',
+      kpiStorge1440DataDays: 365,
+      kpiWeekAndMonthSwitch: true,
+      mrFileSaveDays: 3,
       signalingTraceSaveDays: 7,
+      varDiskAlarmThresHold: '10%',
+      homeDiskAlarmThresHold: '10%',
+      usrDiskAlarmThresHold: '10%',
+      rootDiskAlarmThresHold: '10%',
     }}>
-      {/* 日志存储设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>日志存储设置</span>} style={{ marginBottom: 16 }}>
-        {/* 日志存储 */}
+      {/* 日志设置 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>日志设置</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>日志存储</div>
           <Space>
-            <span>设备原始文件存储</span>
+            <span>原始文件：设备上报的源文件将存储</span>
             <Form.Item name="logDataSaveDays" noStyle>
-              <Select style={{ width: 70 }} size="small">
+              <Select style={{ width: 70 }}>
                 <Option value={30}>1</Option>
                 <Option value={90}>3</Option>
                 <Option value={180}>6</Option>
@@ -75,13 +82,11 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           </Space>
         </div>
 
-        {/* 异常日志存储 */}
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>异常日志存储</div>
-          <Space wrap style={{ marginBottom: 8 }}>
-            <span>设备原始文件存储</span>
+          <Space>
+            <span>异常日志存储：设备上报的源文件将存储</span>
             <Form.Item name="rebootLogDataSaveDays" noStyle>
-              <Select style={{ width: 70 }} size="small">
+              <Select style={{ width: 70 }}>
                 <Option value={1}>1</Option>
                 <Option value={7}>7</Option>
                 <Option value={30}>30</Option>
@@ -91,27 +96,29 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
             </Form.Item>
             <span>天</span>
           </Space>
-          <div style={subSettingStyle}>
-            <Space>
-              <span>保留异常日志次数</span>
-              <Form.Item name="rebootLogSaveCount" noStyle>
-                <Select style={{ width: 70 }} size="small">
-                  <Option value={1}>1</Option>
-                  <Option value={2}>2</Option>
-                </Select>
-              </Form.Item>
-              <span>次，更多日志将覆盖</span>
-            </Space>
-          </div>
         </div>
 
-        {/* 操作日志 */}
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>操作日志</div>
           <Space>
-            <span>操作日志存储时长</span>
+            <span>每个设备最多保留最近</span>
+            <Form.Item name="rebootLogSaveCount" noStyle>
+              <Select style={{ width: 70 }}>
+                <Option value={1}>1</Option>
+                <Option value={2}>2</Option>
+                <Option value={3}>3</Option>
+                <Option value={4}>4</Option>
+                <Option value={5}>5</Option>
+              </Select>
+            </Form.Item>
+            <span>次异常日志，更多的日志则将覆盖最早的那次</span>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Space>
+            <span>用户操作日志将存储</span>
             <Form.Item name="sysOperateLogDataSaveDays" noStyle>
-              <Select style={{ width: 70 }} size="small">
+              <Select style={{ width: 70 }}>
                 <Option value={90}>3</Option>
                 <Option value={180}>6</Option>
                 <Option value={360}>12</Option>
@@ -123,138 +130,191 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           </Space>
         </div>
 
-        {/* 远程存储 */}
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>远程存储</div>
           <Form.Item name="logFtpEnable" valuePropName="checked" noStyle>
-            <Checkbox>日志转发到远程地址</Checkbox>
+            <Checkbox>日志文件将转发到远端地址</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
               <Form.Item label="FTP协议" name="logFtpType" style={{ marginBottom: 0 }}>
-                <Select style={{ width: 80 }} size="small">
-                  <Option value="sftp">SFTP</Option>
+                <Select style={{ width: 100 }} disabled={!logFtpEnable}>
                   <Option value="ftp">FTP</Option>
+                  <Option value="sftp">SFTP</Option>
                 </Select>
               </Form.Item>
               <Form.Item label="上传路径" name="logFtpSavePath" style={{ marginBottom: 0 }}>
-                <Input style={{ width: 280 }} placeholder="/" />
+                <Input style={{ width: 200 }} disabled={!logFtpEnable} />
               </Form.Item>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
               <Form.Item label="IP地址" name="logFtpIpAddr" style={{ marginBottom: 0 }}>
-                <Input style={{ width: 140 }} placeholder="请输入IP地址" />
+                <Input style={{ width: 140 }} disabled={!logFtpEnable} />
               </Form.Item>
               <Form.Item label="端口" name="logFtpPort" style={{ marginBottom: 0 }}>
-                <InputNumber style={{ width: 80 }} />
+                <InputNumber style={{ width: 80 }} disabled={!logFtpEnable} />
               </Form.Item>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              <Form.Item label="用户名称" name="logFtpUser" style={{ marginBottom: 0 }}>
-                <Input style={{ width: 180 }} maxLength={60} placeholder="请输入用户名" />
+              <Form.Item label="用户名" name="logFtpUser" style={{ marginBottom: 0 }}>
+                <Input style={{ width: 160 }} disabled={!logFtpEnable} />
               </Form.Item>
               <Form.Item label="密码" name="logFtpPassword" style={{ marginBottom: 0 }}>
-                <Input.Password style={{ width: 140 }} placeholder="请输入密码" />
+                <Input.Password style={{ width: 140 }} disabled={!logFtpEnable} />
               </Form.Item>
             </div>
           </div>
         </div>
       </Card>
 
-      {/* 数据存储设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>数据存储设置</span>}>
-        {/* 告警 */}
+      {/* 告警 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>告警</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>告警</div>
           <Space>
-            <span>历史告警存储天数，数据库数据存储</span>
+            <span>历史告警存储：历史告警在数据库最多存储</span>
             <Form.Item name="alarmHisMaxHoldTime" noStyle>
-              <InputNumber style={{ width: 60 }} disabled />
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
+            </Form.Item>
+            <span>天</span>
+          </Space>
+        </div>
+      </Card>
+
+      {/* KPI */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>KPI</span>} style={{ marginBottom: 16 }}>
+        <div style={settingRowStyle}>
+          <Space>
+            <span>KPI文件存储：设备上报的原始文件在服务器最多存储</span>
+            <Form.Item name="kpiFilesSaveDays" noStyle>
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
             <span>天</span>
           </Space>
         </div>
 
-        {/* KPI指标 */}
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>KPI指标</div>
-          <div style={{ marginBottom: 12 }}>
-            <Space>
-              <span>KPI文件存储天数，设备报告存储</span>
-              <Form.Item name="kpiFilesSaveDays" noStyle>
-                <InputNumber style={{ width: 60 }} disabled />
-              </Form.Item>
-              <span>天</span>
-            </Space>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <Space>
-              <span>KPI报表文件存储天数，KPI报表存储</span>
-              <Form.Item name="kpiReportDataSaveDays" noStyle>
-                <InputNumber style={{ width: 60 }} disabled />
-              </Form.Item>
-              <span>天</span>
-            </Space>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <Space>
-              <span>KPI原始数据在服务器最多存储</span>
-              <Form.Item name="kpiStorge15DataDays" noStyle>
-                <InputNumber style={{ width: 60 }} disabled />
-              </Form.Item>
-              <span>天</span>
-            </Space>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <Space>
-              <span>KPI小时数据在服务器最多存储</span>
-              <Form.Item name="kpiStorge60DataDays" noStyle>
-                <Select style={{ width: 70 }} size="small">
-                  <Option value={30}>30</Option>
-                  <Option value={60}>60</Option>
-                  <Option value={90}>90</Option>
-                </Select>
-              </Form.Item>
-              <span>天</span>
-            </Space>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <Space>
-              <span>KPI天数据在服务器最多存储</span>
-              <Form.Item name="kpiStorge1440DataDays" noStyle>
-                <InputNumber style={{ width: 60 }} disabled />
-              </Form.Item>
-              <span>天</span>
-            </Space>
-          </div>
-          <div>
-            <Form.Item name="kpiWeekAndMonthSwitch" valuePropName="checked" noStyle>
-              <Checkbox>支持周月查询粒度</Checkbox>
+          <Space>
+            <span>KPI报表文件存储：根据KPI查询模板生成的报表文件将在服务器最多存储</span>
+            <Form.Item name="kpiReportDataSaveDays" noStyle>
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
-          </div>
+            <span>天</span>
+          </Space>
         </div>
 
-        {/* MR测量报告 */}
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>MR测量报告</div>
           <Space>
-            <span>MR存储天数，设备报告原始文件存储</span>
+            <span>KPI原始数据存储：KPI原始数据在服务器最多存储</span>
+            <Form.Item name="kpiStorge15DataDays" noStyle>
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
+            </Form.Item>
+            <span>天</span>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Space>
+            <span>KPI小时数据存储：KPI小时数据在服务器最多存储</span>
+            <Form.Item name="kpiStorge60DataDays" noStyle>
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
+            </Form.Item>
+            <span>天</span>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Space>
+            <span>KPI天数据存储：KPI天数据在服务器最多存储</span>
+            <Form.Item name="kpiStorge1440DataDays" noStyle>
+              <InputNumber min={1} max={730} style={{ width: 70 }} />
+            </Form.Item>
+            <span>天</span>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Form.Item name="kpiWeekAndMonthSwitch" valuePropName="checked" noStyle>
+            <Checkbox>支持周和月统计粒度</Checkbox>
+          </Form.Item>
+        </div>
+      </Card>
+
+      {/* MR */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>MR</span>} style={{ marginBottom: 16 }}>
+        <div style={settingRowStyle}>
+          <Space>
+            <span>MR原始文件存储：设备上报的原始文件将在服务器最多存储</span>
             <Form.Item name="mrFileSaveDays" noStyle>
-              <InputNumber style={{ width: 60 }} disabled />
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
             <span>天</span>
           </Space>
         </div>
+      </Card>
 
-        {/* 信令追踪 */}
-        <div style={{ ...settingRowStyle, marginBottom: 0 }}>
-          <div style={sectionTitleStyle}>信令追踪</div>
+      {/* 信令追踪 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>信令追踪</span>} style={{ marginBottom: 16 }}>
+        <div style={settingRowStyle}>
           <Space>
-            <span>信令追踪文件存储，设备报告存储</span>
+            <span>信令追踪文件存储：设备上报的原始文件在服务器最多存储</span>
             <Form.Item name="signalingTraceSaveDays" noStyle>
-              <InputNumber style={{ width: 60 }} disabled />
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
             <span>天</span>
+          </Space>
+        </div>
+      </Card>
+
+      {/* 磁盘告警 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>磁盘告警</span>}>
+        <div style={settingRowStyle}>
+          <Space>
+            <span>日志目录磁盘可用存储百分比</span>
+            <Form.Item name="varDiskAlarmThresHold" noStyle>
+              <Select style={{ width: 100 }}>
+                {diskSpaceOptions.map(opt => (
+                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Space>
+            <span>数据目录磁盘可用存储百分比</span>
+            <Form.Item name="homeDiskAlarmThresHold" noStyle>
+              <Select style={{ width: 100 }}>
+                {diskSpaceOptions.map(opt => (
+                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Space>
+            <span>应用目录磁盘可用存储百分比</span>
+            <Form.Item name="usrDiskAlarmThresHold" noStyle>
+              <Select style={{ width: 100 }}>
+                {diskSpaceOptions.map(opt => (
+                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Space>
+        </div>
+
+        <div style={settingRowStyle}>
+          <Space>
+            <span>根目录磁盘可用存储百分比</span>
+            <Form.Item name="rootDiskAlarmThresHold" noStyle>
+              <Select style={{ width: 100 }}>
+                {diskSpaceOptions.map(opt => (
+                  <Option key={opt.value} value={opt.value}>{opt.text}</Option>
+                ))}
+              </Select>
+            </Form.Item>
           </Space>
         </div>
       </Card>
