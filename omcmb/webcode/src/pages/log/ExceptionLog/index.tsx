@@ -7,6 +7,9 @@ import {
   message,
   Drawer,
   Dropdown,
+  Descriptions,
+  Divider,
+  Card,
 } from 'antd';
 import {
   ExportOutlined,
@@ -379,6 +382,10 @@ export default function ExceptionLog() {
       width: 100,
       align: 'center',
       render: (_: unknown, record: ExceptionLog) => {
+        // 收集中状态不允许任何操作，显示"-"
+        if (record.manualCollectionStatus === '1') {
+          return '-';
+        }
         const items = getActionMenu(record);
         if (items.length === 0) return '-';
         return (
@@ -522,36 +529,88 @@ export default function ExceptionLog() {
       <Drawer
         title="日志文件详情"
         placement="right"
-        width={600}
+        width={640}
         open={logDetailVisible}
         onClose={() => setLogDetailVisible(false)}
       >
         {selectedLog && (
           <div>
-            <p><strong>设备编码:</strong> {selectedLog.deviceCode}</p>
-            <p><strong>设备名称:</strong> {selectedLog.deviceName}</p>
-            <p><strong>异常类型:</strong> {selectedLog.operationName}</p>
-            <p><strong>发生时间:</strong> {selectedLog.opStartTime}</p>
-            <p><strong>运行时间:</strong> {selectedLog.runtimeBeforeReboot ?? '-'}</p>
-            <p><strong>死机原因:</strong> {selectedLog.haltDetailReason ?? '-'}</p>
-            <p><strong>文件名:</strong> {selectedLog.fileName}</p>
-            <div style={{ marginTop: 16 }}>
-              <strong>日志内容:</strong>
-              <pre style={{
-                background: '#f5f5f5',
-                padding: 12,
-                marginTop: 8,
-                maxHeight: 400,
-                overflow: 'auto',
-              }}>
-                {`[2026-03-26 10:00:00] WARN: Watchdog timeout detected
+            {/* 设备信息 */}
+            <Card size="small" title="设备信息" style={{ marginBottom: 16 }}>
+              <Descriptions column={2} size="small">
+                <Descriptions.Item label="设备编码">
+                  <Typography.Text style={{ fontFamily: 'monospace' }}>{selectedLog.deviceCode}</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="设备名称">{selectedLog.deviceName}</Descriptions.Item>
+                <Descriptions.Item label="设备类型">{selectedLog.deviceType}</Descriptions.Item>
+                <Descriptions.Item label="基站IP">
+                  <Typography.Text style={{ fontFamily: 'monospace' }}>{selectedLog.operateIp}</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="产品类型">{selectedLog.product}</Descriptions.Item>
+                <Descriptions.Item label="软件版本">{selectedLog.softwareVersion}</Descriptions.Item>
+                <Descriptions.Item label="在线状态">
+                  <Tag color={selectedLog.onlineStatus === '1' ? 'success' : 'default'}>
+                    {selectedLog.onlineStatus === '1' ? '在线' : '离线'}
+                  </Tag>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            {/* 异常信息 */}
+            <Card size="small" title="异常信息" style={{ marginBottom: 16 }}>
+              <Descriptions column={2} size="small">
+                <Descriptions.Item label="异常类型">
+                  <Tag color="orange">{selectedLog.operationName}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="收集状态">
+                  <Tag color={collectStatusConfig[selectedLog.manualCollectionStatus].color}>
+                    {collectStatusConfig[selectedLog.manualCollectionStatus].text}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="发生时间">{selectedLog.opStartTime}</Descriptions.Item>
+                <Descriptions.Item label="运行时间">{selectedLog.runtimeBeforeReboot ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="死机原因" span={2}>{selectedLog.haltDetailReason ?? '-'}</Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            {/* 文件信息 */}
+            {selectedLog.fileName && (
+              <Card size="small" title="文件信息">
+                <Descriptions column={1} size="small">
+                  <Descriptions.Item label="文件名">
+                    <Typography.Text style={{ fontFamily: 'monospace' }} copyable>
+                      {selectedLog.fileName}
+                    </Typography.Text>
+                  </Descriptions.Item>
+                </Descriptions>
+
+                <Divider style={{ margin: '12px 0' }} />
+
+                <div>
+                  <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>日志内容预览</Typography.Text>
+                  <pre style={{
+                    background: '#1e1e1e',
+                    color: '#d4d4d4',
+                    padding: 12,
+                    marginTop: 8,
+                    maxHeight: 300,
+                    overflow: 'auto',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                  }}>
+                    {`[2026-03-26 10:00:00] WARN: Watchdog timeout detected
 [2026-03-26 10:00:01] ERROR: System restarting...
 [2026-03-26 10:00:02] INFO: Boot sequence initiated
 [2026-03-26 10:00:05] INFO: Hardware check passed
 [2026-03-26 10:00:10] INFO: Network interface up
+[2026-03-26 10:00:15] INFO: Services starting...
+[2026-03-26 10:00:20] INFO: System ready
 ...`}
-              </pre>
-            </div>
+                  </pre>
+                </div>
+              </Card>
+            )}
           </div>
         )}
       </Drawer>
