@@ -138,6 +138,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
       title: '',
       key: 'operation',
       width: 50,
+      fixed: 'left',
       render: (_: unknown, record: SasProvider) => (
         <Dropdown menu={{ items: getOperationMenu(record) }} trigger={['click']}>
           <Button size="small" type="text" icon={<MoreOutlined />} />
@@ -149,19 +150,22 @@ export default function SasSettings({ form }: SasSettingsProps) {
       dataIndex: 'providerName',
       key: 'providerName',
       width: 150,
+      ellipsis: true,
     },
     {
       title: '服务器URL',
       dataIndex: 'url',
       key: 'url',
+      width: 250,
       ellipsis: true,
     },
     {
       title: 'TLS证书',
       key: 'cert',
-      width: 280,
+      width: 260,
+      ellipsis: true,
       render: (_: unknown, record: SasProvider) => (
-        <Space>
+        <Space style={{ whiteSpace: 'nowrap' }}>
           {record.uploadSuccess === 1 ? (
             <span style={{ color: '#52c41a' }}>●</span>
           ) : (
@@ -176,6 +180,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
       dataIndex: 'updateTimeStr',
       key: 'updateTimeStr',
       width: 160,
+      ellipsis: true,
     },
   ];
 
@@ -207,6 +212,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
             pagination={false}
             size="small"
             bordered
+            scroll={{ x: 'max-content' }}
             style={{ height: 300 }}
           />
         </Card>
