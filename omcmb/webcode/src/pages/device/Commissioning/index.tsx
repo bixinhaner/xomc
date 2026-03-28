@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Modal, Space, Steps, Tag, Typography, message } from 'antd';
+import { App, Button, Modal, Space, Steps, Tag, Typography } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  EyeOutlined,
+  EditOutlined,
   LoadingOutlined,
   PlusOutlined,
-  ReloadOutlined,
+  RedoOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -14,62 +15,69 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import AddDrawer from './AddDrawer';
 
 const { Text } = Typography;
 
+type StationType = 'eNB' | 'gNB' | 'GSM';
+type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+
 interface CommissioningTask {
   id: string;
-  taskId: string;
-  siteName: string;
-  deviceSn: string;
+  stationCode: string;
+  stationName: string;
+  stationType: StationType;
+  status: TaskStatus;
   currentStep: string;
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
-  createTime: string;
-  updateTime: string;
-  operator: string;
   progress: number;
+  operator: string;
+  createTime: string;
+  operateTime: string;
 }
 
 const MOCK_TASKS: CommissioningTask[] = [
   {
-    id: '1', taskId: 'COMM-2024-001', siteName: '北京朝阳站-001', deviceSn: 'SN-BJ001',
+    id: '1', stationCode: 'BJ-CY-001', stationName: '北京朝阳站-001', stationType: 'eNB',
     currentStep: '参数配置', status: 'running', createTime: '2024-03-01 09:00:00',
-    updateTime: '2024-03-01 09:32:00', operator: '张工', progress: 60,
+    operateTime: '2024-03-01 09:32:00', operator: '张工', progress: 60,
   },
   {
-    id: '2', taskId: 'COMM-2024-002', siteName: '上海浦东站-002', deviceSn: 'SN-SH002',
+    id: '2', stationCode: 'SH-PD-002', stationName: '上海浦东站-002', stationType: 'gNB',
     currentStep: '射频调试', status: 'success', createTime: '2024-03-01 08:00:00',
-    updateTime: '2024-03-01 10:15:00', operator: '李工', progress: 100,
+    operateTime: '2024-03-01 10:15:00', operator: '李工', progress: 100,
   },
   {
-    id: '3', taskId: 'COMM-2024-003', siteName: '广州天河站-003', deviceSn: 'SN-GZ003',
+    id: '3', stationCode: 'GZ-TH-003', stationName: '广州天河站-003', stationType: 'eNB',
     currentStep: '设备注册', status: 'failed', createTime: '2024-03-01 07:30:00',
-    updateTime: '2024-03-01 08:45:00', operator: '王工', progress: 20,
+    operateTime: '2024-03-01 08:45:00', operator: '王工', progress: 20,
   },
   {
-    id: '4', taskId: 'COMM-2024-004', siteName: '深圳南山站-004', deviceSn: 'SN-SZ004',
+    id: '4', stationCode: 'SZ-NS-004', stationName: '深圳南山站-004', stationType: 'GSM',
     currentStep: '待开始', status: 'pending', createTime: '2024-03-01 10:00:00',
-    updateTime: '2024-03-01 10:00:00', operator: '赵工', progress: 0,
+    operateTime: '2024-03-01 10:00:00', operator: '赵工', progress: 0,
   },
   {
-    id: '5', taskId: 'COMM-2024-005', siteName: '成都武侯站-005', deviceSn: 'SN-CD005',
+    id: '5', stationCode: 'CD-WH-005', stationName: '成都武侯站-005', stationType: 'gNB',
     currentStep: '网络测试', status: 'running', createTime: '2024-03-01 08:30:00',
-    updateTime: '2024-03-01 09:55:00', operator: '陈工', progress: 80,
+    operateTime: '2024-03-01 09:55:00', operator: '陈工', progress: 80,
   },
 ];
 
-const COMMISSIONING_STEPS = ['Step 1', 'Step 2', 'Step 3', 'Step 4', 'Step 5', 'Step 6'];
-
 export default function Commissioning() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const [tasks, setTasks] = useState<CommissioningTask[]>(MOCK_TASKS);
   const [isLoading] = useState(false);
   const [detailTask, setDetailTask] = useState<CommissioningTask | null>(null);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
+  const [addDrawerOpen, setAddDrawerOpen] = useState(false);
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<CommissioningTask | null>(null);
+  const [submitLoading, setSubmitLoading] = useState(false);
 
-  const STATUS_CONFIG: Record<CommissioningTask['status'], { label: string; color: string; icon: React.ReactNode }> = useMemo(() => ({
+  const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; icon: React.ReactNode }> = useMemo(() => ({
     pending: { label: t('status.pending'), color: 'default', icon: null },
     running: { label: t('status.running'), color: 'processing', icon: <LoadingOutlined /> },
     success: { label: t('status.success'), color: 'success', icon: <CheckCircleOutlined /> },
@@ -77,10 +85,25 @@ export default function Commissioning() {
     cancelled: { label: t('status.cancelled'), color: 'default', icon: null },
   }), [t]);
 
+  const STATION_TYPE_MAP: Record<StationType, { label: string; color: string }> = {
+    eNB: { label: '4G (eNB)', color: 'blue' },
+    gNB: { label: '5G (gNB)', color: 'green' },
+    GSM: { label: '2G (GSM)', color: 'orange' },
+  };
+
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'taskId', label: t('table.index'), type: 'input' },
-    { name: 'siteName', label: t('table.site'), type: 'input' },
-    { name: 'deviceSn', label: t('device.sn'), type: 'input' },
+    { name: 'stationCode', label: '基站编码', type: 'input' },
+    { name: 'stationName', label: '基站名称', type: 'input' },
+    {
+      name: 'stationType',
+      label: '基站类型',
+      type: 'select',
+      options: [
+        { label: '4G (eNB)', value: 'eNB' },
+        { label: '5G (gNB)', value: 'gNB' },
+        { label: '2G (GSM)', value: 'GSM' },
+      ],
+    },
     {
       name: 'status',
       label: t('table.status'),
@@ -97,11 +120,11 @@ export default function Commissioning() {
   ], [t]);
 
   const filteredTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (filterParams.status && t.status !== filterParams.status) return false;
-      if (filterParams.taskId && !t.taskId.toLowerCase().includes(String(filterParams.taskId).toLowerCase())) return false;
-      if (filterParams.siteName && !t.siteName.toLowerCase().includes(String(filterParams.siteName).toLowerCase())) return false;
-      if (filterParams.deviceSn && !t.deviceSn.toLowerCase().includes(String(filterParams.deviceSn).toLowerCase())) return false;
+    return tasks.filter((task) => {
+      if (filterParams.status && task.status !== filterParams.status) return false;
+      if (filterParams.stationType && task.stationType !== filterParams.stationType) return false;
+      if (filterParams.stationCode && !task.stationCode.toLowerCase().includes(String(filterParams.stationCode).toLowerCase())) return false;
+      if (filterParams.stationName && !task.stationName.toLowerCase().includes(String(filterParams.stationName).toLowerCase())) return false;
       return true;
     });
   }, [tasks, filterParams]);
@@ -116,30 +139,144 @@ export default function Commissioning() {
     setCurrentPage(1);
   }, []);
 
+  // 处理新增提交
+  const handleAddSubmit = useCallback((values: Record<string, unknown>) => {
+    setSubmitLoading(true);
+    console.log('新增开通任务:', values);
+    // 模拟API调用
+    setTimeout(() => {
+      message.success(t('common.success'));
+      setSubmitLoading(false);
+      setAddDrawerOpen(false);
+    }, 1000);
+  }, [t]);
+
+  // 处理编辑
+  const handleEdit = useCallback((record: CommissioningTask) => {
+    setSelectedTask(record);
+    setEditDrawerOpen(true);
+  }, []);
+
+  // 处理编辑提交
+  const handleEditSubmit = useCallback((values: Record<string, unknown>) => {
+    setSubmitLoading(true);
+    console.log('编辑开通任务:', values);
+    setTimeout(() => {
+      message.success(t('common.success'));
+      setSubmitLoading(false);
+      setEditDrawerOpen(false);
+      setSelectedTask(null);
+    }, 1000);
+  }, [t, message]);
+
+  // 处理重新执行（仅失败状态）
+  const handleRetry = useCallback((record: CommissioningTask) => {
+    modal.confirm({
+      title: '确认重新执行',
+      content: `确定要重新执行开通任务 "${record.stationName}" 吗？`,
+      onOk: () => {
+        setTasks((prev) =>
+          prev.map((tk) =>
+            tk.id === record.id ? { ...tk, status: 'running', progress: 0, currentStep: 'Step 1' } : tk
+          )
+        );
+        message.success('任务已重新执行');
+      },
+    });
+  }, [modal, message]);
+
+  // 处理删除
+  const handleDelete = useCallback((record: CommissioningTask) => {
+    modal.confirm({
+      title: t('common.confirmDelete'),
+      content: `确定要删除开通任务 "${record.stationName}" 吗？`,
+      onOk: () => {
+        setTasks((prev) => prev.filter((tk) => tk.id !== record.id));
+        message.success(t('common.deleteSuccess'));
+      },
+    });
+  }, [modal, message, t]);
+
   const columns = useMemo(
     (): DataTableColumn<CommissioningTask>[] => [
+      // 操作列放在最前面
       {
-        key: 'taskId',
-        title: t('table.index'),
-        dataIndex: 'taskId',
-        width: 150,
-        mono: true,
-        render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(v)}</Text>,
+        key: 'actions',
+        title: t('table.operation'),
+        dataIndex: 'id',
+        width: 180,
+        fixed: 'left',
+        render: (_val, record) => (
+          <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => handleEdit(record)}
+              disabled={record.status === 'running'}
+            >
+              {t('common.edit')}
+            </Button>
+            {record.status === 'failed' && (
+              <Button
+                type="link"
+                size="small"
+                icon={<RedoOutlined />}
+                onClick={() => handleRetry(record)}
+              >
+                重新执行
+              </Button>
+            )}
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record)}
+              disabled={record.status === 'running'}
+            >
+              {t('common.delete')}
+            </Button>
+          </Space>
+        ),
       },
-      { key: 'siteName', title: t('table.site'), dataIndex: 'siteName', width: 180, ellipsis: true },
       {
-        key: 'deviceSn',
-        title: t('device.sn'),
-        dataIndex: 'deviceSn',
-        width: 150,
+        key: 'stationCode',
+        title: '基站编码',
+        dataIndex: 'stationCode',
+        width: 140,
         mono: true,
-        copyable: true,
-        render: (v) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(v)}</Text>,
+        render: (v, record) => (
+          <Button
+            type="link"
+            size="small"
+            style={{ fontFamily: 'monospace', fontSize: 12, padding: 0 }}
+            onClick={() => setDetailTask(record)}
+          >
+            {String(v)}
+          </Button>
+        ),
       },
-      { key: 'currentStep', title: t('table.status'), dataIndex: 'currentStep', width: 120 },
+      {
+        key: 'stationName',
+        title: '基站名称',
+        dataIndex: 'stationName',
+        width: 180,
+        ellipsis: true,
+      },
+      {
+        key: 'stationType',
+        title: '基站类型',
+        dataIndex: 'stationType',
+        width: 110,
+        render: (v) => {
+          const typeConfig = STATION_TYPE_MAP[v as StationType];
+          return <Tag color={typeConfig?.color}>{typeConfig?.label || v}</Tag>;
+        },
+      },
       {
         key: 'status',
-        title: t('table.result'),
+        title: t('table.status'),
         dataIndex: 'status',
         width: 100,
         render: (_val, record) => {
@@ -152,99 +289,35 @@ export default function Commissioning() {
         },
       },
       {
+        key: 'operator',
+        title: t('table.operator'),
+        dataIndex: 'operator',
+        width: 90,
+      },
+      {
         key: 'createTime',
         title: t('table.createTime'),
         dataIndex: 'createTime',
         width: 160,
       },
-      { key: 'operator', title: t('table.operator'), dataIndex: 'operator', width: 90 },
       {
-        key: 'actions',
-        title: t('table.operation'),
-        dataIndex: 'id',
+        key: 'operateTime',
+        title: '操作时间',
+        dataIndex: 'operateTime',
         width: 160,
-        fixed: 'right',
-        render: (_val, record) => (
-          <Space size={4}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => setDetailTask(record)}
-            >
-              {t('common.detail')}
-            </Button>
-            {record.status === 'pending' && (
-              <Button
-                type="link"
-                size="small"
-                onClick={() => {
-                  setTasks((prev) =>
-                    prev.map((tk) =>
-                      tk.id === record.id ? { ...tk, status: 'running', currentStep: 'Step 1' } : tk
-                    )
-                  );
-                  void message.success(t('common.execute'));
-                }}
-              >
-                {t('common.execute')}
-              </Button>
-            )}
-            {record.status === 'failed' && (
-              <Button
-                type="link"
-                size="small"
-                onClick={() => {
-                  setTasks((prev) =>
-                    prev.map((tk) =>
-                      tk.id === record.id ? { ...tk, status: 'running', progress: 0 } : tk
-                    )
-                  );
-                  void message.info(t('common.refresh'));
-                }}
-              >
-                {t('common.refresh')}
-              </Button>
-            )}
-            {record.status === 'running' && (
-              <Button
-                type="link"
-                size="small"
-                danger
-                onClick={() => {
-                  setTasks((prev) =>
-                    prev.map((tk) =>
-                      tk.id === record.id ? { ...tk, status: 'cancelled' } : tk
-                    )
-                  );
-                  void message.warning(t('common.cancel'));
-                }}
-              >
-                {t('common.cancel')}
-              </Button>
-            )}
-          </Space>
-        ),
       },
     ],
-    [t, STATUS_CONFIG]
+    [t, STATUS_CONFIG, STATION_TYPE_MAP, handleEdit, handleRetry, handleDelete]
   );
-
-  const currentStepIndex = detailTask
-    ? COMMISSIONING_STEPS.indexOf(detailTask.currentStep)
-    : -1;
 
   return (
     <>
       <ListPageLayout
         title={t('nav.device.commission')}
         extra={
-          <Space>
-            <Button icon={<ReloadOutlined />}>{t('common.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              {t('common.add')}
-            </Button>
-          </Space>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddDrawerOpen(true)}>
+            {t('common.add')}
+          </Button>
         }
       >
         <FilterBar
@@ -271,7 +344,7 @@ export default function Commissioning() {
 
       {/* Detail Modal */}
       <Modal
-        title={`${t('common.detail')} - ${detailTask?.taskId ?? ''}`}
+        title={`开站详情 - ${detailTask?.stationName ?? ''}`}
         open={Boolean(detailTask)}
         onCancel={() => setDetailTask(null)}
         footer={<Button onClick={() => setDetailTask(null)}>{t('common.close')}</Button>}
@@ -279,43 +352,21 @@ export default function Commissioning() {
       >
         {detailTask && (
           <div style={{ padding: '16px 0' }}>
-            <Steps
-              direction="vertical"
-              size="small"
-              current={currentStepIndex >= 0 ? currentStepIndex : 0}
-              status={
-                detailTask.status === 'failed'
-                  ? 'error'
-                  : detailTask.status === 'success'
-                  ? 'finish'
-                  : 'process'
-              }
-              items={COMMISSIONING_STEPS.map((step, idx) => ({
-                title: step,
-                description:
-                  idx < currentStepIndex
-                    ? t('status.success')
-                    : idx === currentStepIndex
-                    ? detailTask.status === 'failed'
-                      ? t('status.failed')
-                      : t('status.running')
-                    : t('status.pending'),
-              }))}
-            />
-            <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 6 }}>
+            <div style={{ padding: '12px 16px', background: '#fafafa', borderRadius: 6 }}>
               <table style={{ width: '100%', fontSize: 13 }}>
                 <tbody>
                   {[
-                    { label: t('table.index'), value: detailTask.taskId },
-                    { label: t('table.site'), value: detailTask.siteName },
-                    { label: t('device.sn'), value: detailTask.deviceSn },
+                    { label: '基站编码', value: detailTask.stationCode },
+                    { label: '基站名称', value: detailTask.stationName },
+                    { label: '基站类型', value: STATION_TYPE_MAP[detailTask.stationType]?.label },
+                    { label: t('table.status'), value: STATUS_CONFIG[detailTask.status]?.label },
                     { label: t('table.operator'), value: detailTask.operator },
                     { label: t('table.createTime'), value: detailTask.createTime },
-                    { label: t('table.updateTime'), value: detailTask.updateTime },
+                    { label: '操作时间', value: detailTask.operateTime },
                   ].map(({ label, value }) => (
                     <tr key={label}>
-                      <td style={{ padding: '4px 0', color: '#8c8c8c', width: 100 }}>{label}</td>
-                      <td style={{ padding: '4px 0', fontWeight: 500 }}>{value}</td>
+                      <td style={{ padding: '8px 0', color: '#8c8c8c', width: 100 }}>{label}</td>
+                      <td style={{ padding: '8px 0', fontWeight: 500 }}>{value}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -324,6 +375,31 @@ export default function Commissioning() {
           </div>
         )}
       </Modal>
+
+      {/* Add Drawer */}
+      <AddDrawer
+        open={addDrawerOpen}
+        onClose={() => setAddDrawerOpen(false)}
+        onSubmit={handleAddSubmit}
+        loading={submitLoading}
+      />
+
+      {/* Edit Drawer */}
+      <AddDrawer
+        open={editDrawerOpen}
+        onClose={() => {
+          setEditDrawerOpen(false);
+          setSelectedTask(null);
+        }}
+        onSubmit={handleEditSubmit}
+        loading={submitLoading}
+        initialValues={selectedTask ? {
+          stationCode: selectedTask.stationCode,
+          stationName: selectedTask.stationName,
+          stationType: selectedTask.stationType,
+        } : undefined}
+        mode="edit"
+      />
     </>
   );
 }
