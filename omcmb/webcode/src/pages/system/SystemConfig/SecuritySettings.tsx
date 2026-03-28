@@ -5,16 +5,6 @@ interface SecuritySettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
 }
 
-// 分组标题样式
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 600,
-  marginBottom: 16,
-  paddingBottom: 8,
-  borderBottom: '1px solid #f0f0f0',
-  color: '#333',
-};
-
 // 设置行样式
 const settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
@@ -35,22 +25,22 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
       modifyPWD: false,
-      defaultPasswd: '',
+      defaultPasswd: 'OMC@123456',
       passwordContent: false,
-      pwdMinLength: 8,
-      pwdMaxLength: 32,
+      pwdMinLength: 10,
+      pwdMaxLength: 23,
       checkUserCodeEnable: false,
       expires: false,
-      validPeriod: 90,
-      promptBeforeDays: 7,
+      validPeriod: 70,
+      promptBeforeDays: 6,
       verifyEnable: false,
-      attemptTimes: 3,
-      sumTimes: 5,
-      unlockMinu: 30,
-      limitMinus: 5,
-      limitCount: 10,
-      limitTimes: 30,
-      userSessionExpirationMin: 30,
+      attemptTimes: 5,
+      sumTimes: 8,
+      unlockMinu: 2,
+      limitMinus: 1,
+      limitCount: 30,
+      limitTimes: 120,
+      userSessionExpirationMin: 0,
       isBrowserAutoRecordPass: false,
       autoLockUserDayEnable: false,
       autoLockUserDay: 90,
@@ -58,40 +48,41 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       enabledFlag: false,
       msg: '',
     }}>
-      {/* 密码策略 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>密码策略</span>} style={{ marginBottom: 16 }}>
-        {/* 默认密码 */}
+      {/* 默认密码 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>默认密码</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="modifyPWD" valuePropName="checked" noStyle>
-            <Checkbox>首次登录修改密码</Checkbox>
+            <Checkbox>用户需要在首次登录时修改默认密码</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <Space>
               将
               <Form.Item name="defaultPasswd" noStyle>
-                <Input style={{ width: 100 }} maxLength={50} placeholder="请输入默认密码" />
+                <Input style={{ width: 120 }} maxLength={50} />
               </Form.Item>
-              作为密码重置后的默认密码
+              作为默认密码登录，用户被密码重置后使用此密码
             </Space>
           </div>
         </div>
+      </Card>
 
-        {/* 密码强度 */}
+      {/* 密码强度 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>密码强度</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="passwordContent" valuePropName="checked" noStyle>
-            <Checkbox>密码必须两种类型</Checkbox>
+            <Checkbox>密码需要包含数字、小写字母、大写字母和特殊字符(.!@#$%^&*?)</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <div style={{ marginBottom: 8 }}>用户密码长度：</div>
             <Space size="large">
               <Space>
-                <span>最小值</span>
+                最小值
                 <Form.Item name="pwdMinLength" noStyle>
                   <InputNumber min={6} max={32} style={{ width: 60 }} />
                 </Form.Item>
               </Space>
               <Space>
-                <span>最大值</span>
+                最大值
                 <Form.Item name="pwdMaxLength" noStyle>
                   <InputNumber min={6} max={64} style={{ width: 60 }} />
                 </Form.Item>
@@ -99,126 +90,130 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
             </Space>
           </div>
         </div>
+      </Card>
 
-        {/* 密码有效期 */}
+      {/* 用户 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>用户</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <Form.Item name="expires" valuePropName="checked" noStyle>
-            <Checkbox>用户修改密码频率</Checkbox>
-          </Form.Item>
-          <div style={subSettingStyle}>
-            <Space>
-              <Form.Item name="validPeriod" noStyle>
-                <InputNumber min={1} max={365} style={{ width: 60 }} />
-              </Form.Item>
-              <span>天修改一次密码，系统会在到期前</span>
-              <Form.Item name="promptBeforeDays" noStyle>
-                <InputNumber min={1} max={30} style={{ width: 60 }} />
-              </Form.Item>
-              <span>天提示</span>
-            </Space>
-          </div>
+          <Space>
+            <span style={{ fontWeight: 500 }}>用户名称：</span>
+            <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>
+              只能包含数字、26个小写字母、大写字母和减号(-)、下划线(_)、破折号(-)
+            </span>
+          </Space>
         </div>
       </Card>
 
-      {/* 登录安全 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>登录安全</span>} style={{ marginBottom: 16 }}>
-        {/* 最大允许登录错误次数 */}
+      {/* 密码有效期 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>密码有效期</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>最大允许登录错误次数</div>
+          <Space wrap>
+            <Form.Item name="expires" valuePropName="checked" noStyle>
+              <Checkbox>密码有效期为</Checkbox>
+            </Form.Item>
+            <Form.Item name="validPeriod" noStyle>
+              <InputNumber min={1} max={365} style={{ width: 60 }} />
+            </Form.Item>
+            <span>天修改一次密码，系统将在到期前</span>
+            <Form.Item name="promptBeforeDays" noStyle>
+              <InputNumber min={1} max={30} style={{ width: 60 }} />
+            </Form.Item>
+            <span>天提醒</span>
+          </Space>
+        </div>
+      </Card>
+
+      {/* 登录锁定 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>登录锁定</span>} style={{ marginBottom: 16 }}>
+        <div style={settingRowStyle}>
           <Space wrap>
             <Form.Item name="verifyEnable" valuePropName="checked" noStyle>
-              <Checkbox>验证码验证时的用户名或密码提示</Checkbox>
+              <Checkbox>用户登录需要验证码验证，如果用户名或密码输入错误</Checkbox>
             </Form.Item>
-            <Space>
-              <Form.Item name="attemptTimes" noStyle>
-                <InputNumber min={1} max={10} style={{ width: 60 }} />
-              </Form.Item>
-              <span>次，锁定时间</span>
-            </Space>
+            <Form.Item name="attemptTimes" noStyle>
+              <InputNumber min={1} max={10} style={{ width: 60 }} />
+            </Form.Item>
+            <span>次，将被要求输入验证码</span>
           </Space>
-          <div style={{ ...subSettingStyle, marginTop: 12 }}>
-            <Space>
-              登录失败
-              <Form.Item name="sumTimes" noStyle>
-                <InputNumber min={1} max={20} style={{ width: 60 }} />
-              </Form.Item>
-              <span>次后用户锁定</span>
-              <Form.Item name="unlockMinu" noStyle>
-                <InputNumber min={1} max={1440} style={{ width: 60 }} />
-              </Form.Item>
-              <span>分钟</span>
-            </Space>
-          </div>
         </div>
-
-        {/* IP限流 */}
-        <div style={settingRowStyle}>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>IP限流</div>
+        <div style={subSettingStyle}>
           <Space wrap>
-            当在
+            如果用户名或密码尝试错误
+            <Form.Item name="sumTimes" noStyle>
+              <InputNumber min={1} max={20} style={{ width: 60 }} />
+            </Form.Item>
+            <span>次，将锁定账户</span>
+            <Form.Item name="unlockMinu" noStyle>
+              <InputNumber min={1} max={1440} style={{ width: 60 }} />
+            </Form.Item>
+            <span>分钟</span>
+          </Space>
+        </div>
+      </Card>
+
+      {/* IP限流 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>IP限流</span>} style={{ marginBottom: 16 }}>
+        <div style={settingRowStyle}>
+          <Space wrap>
+            如果你在
             <Form.Item name="limitMinus" noStyle>
               <InputNumber min={1} max={60} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟内连续错误</span>
+            <span>分钟内连续输入错误的密码或用户名</span>
             <Form.Item name="limitCount" noStyle>
               <InputNumber min={1} max={100} style={{ width: 60 }} />
             </Form.Item>
-            <span>次，IP加入黑名单，</span>
+            <span>次，登录IP将被锁定，</span>
             <Form.Item name="limitTimes" noStyle>
               <InputNumber min={1} max={1440} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟后自动释放</span>
+            <span>分钟后自动解锁</span>
           </Space>
         </div>
+      </Card>
 
-        {/* 锁屏时间 */}
+      {/* 屏幕锁定 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>屏幕锁定</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>锁屏时间</div>
           <Space>
-            用户非活动状态
+            如果用户
             <Form.Item name="userSessionExpirationMin" noStyle>
-              <InputNumber min={1} max={480} style={{ width: 60 }} />
+              <InputNumber min={0} max={480} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟后请锁屏</span>
+            <span>分钟没有任何操作，系统将会自动锁屏</span>
           </Space>
         </div>
+      </Card>
 
-        {/* 浏览器记录密码 */}
+      {/* 禁止浏览器自动记录密码 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>禁止浏览器自动记录密码</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="isBrowserAutoRecordPass" valuePropName="checked" noStyle>
-            <Checkbox>开启浏览器记录密码</Checkbox>
+            <Checkbox>禁止浏览器自动记录密码</Checkbox>
           </Form.Item>
         </div>
       </Card>
 
-      {/* 用户管理 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>用户管理</span>} style={{ marginBottom: 16 }}>
-        {/* 用户 */}
+      {/* 账户锁定 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>账户锁定</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <div style={{ marginBottom: 8 }}>
-            <span style={{ fontWeight: 500 }}>用户名称：</span>
-            <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>用户名必含字符提示</span>
-          </div>
-        </div>
-
-        {/* 自动锁定 */}
-        <div style={settingRowStyle}>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>自动锁定</div>
           <Space>
-            <Form.Item name="autoLockUserDayEnable" valuePropName="checked" noStyle>
-              <Checkbox>自动锁定超过</Checkbox>
+            <Form.Item name="autoLockUserDayEnable" noStyle valuePropName="checked">
+              <Checkbox>连续未登录omc超过</Checkbox>
             </Form.Item>
             <Form.Item name="autoLockUserDay" noStyle>
               <InputNumber min={1} max={365} style={{ width: 60 }} />
             </Form.Item>
-            <span>天未登录的用户</span>
+            <span>天，锁定账户</span>
           </Space>
         </div>
+      </Card>
 
-        {/* 最大会话限制 */}
+      {/* 最大会话限制 */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>最大会话限制</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <Form.Item name="isOnlyOneUserLoginEnable" valuePropName="checked" noStyle>
-            <Checkbox>同一用户只允许一个会话登录</Checkbox>
+          <Form.Item name="isOnlyOneUserLoginEnable" noStyle valuePropName="checked">
+            <Checkbox>允许用户同时在多个设备登陆</Checkbox>
           </Form.Item>
         </div>
       </Card>
@@ -227,7 +222,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>登录提示</span>}>
         <div style={settingRowStyle}>
           <Form.Item name="enabledFlag" valuePropName="checked" noStyle>
-            <Checkbox>通知用户消息</Checkbox>
+            <Checkbox>用户每次登录时，系统推送消息通知</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <Form.Item name="msg" noStyle>

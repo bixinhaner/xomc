@@ -32,11 +32,15 @@ const sectionTitleStyle: React.CSSProperties = {
 
 // 磁盘空间选项
 const diskSpaceOptions = [
-  { text: '50%', value: 50 },
-  { text: '60%', value: 60 },
-  { text: '70%', value: 70 },
-  { text: '80%', value: 80 },
-  { text: '90%', value: 90 },
+  { text: '10%', value: '10%' },
+  { text: '20%', value: '20%' },
+  { text: '30%', value: '30%' },
+  { text: '40%', value: '40%' },
+  { text: '50%', value: '50%' },
+  { text: '60%', value: '60%' },
+  { text: '70%', value: '70%' },
+  { text: '80%', value: '80%' },
+  { text: '90%', value: '90%' },
 ];
 
 export default function OmcSettings({ form }: OmcSettingsProps) {
@@ -53,11 +57,11 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
     <Form form={form} layout="vertical" size="small" initialValues={{
       rsysLogEnable: '0',
       rsysLogIp: '',
-      rsysLogPort: 514,
-      varDiskAlarmThresHold: 80,
-      homeDiskAlarmThresHold: 80,
-      usrDiskAlarmThresHold: 80,
-      rootDiskAlarmThresHold: 80,
+      rsysLogPort: '',
+      varDiskAlarmThresHold: '10%',
+      homeDiskAlarmThresHold: '10%',
+      usrDiskAlarmThresHold: '10%',
+      rootDiskAlarmThresHold: '10%',
     }}>
       {/* OMC协议设置 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>OMC协议设置</span>} style={{ marginBottom: 16 }}>

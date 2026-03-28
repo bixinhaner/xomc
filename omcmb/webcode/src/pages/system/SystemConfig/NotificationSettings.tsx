@@ -43,7 +43,7 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
       mailUsername: '',
       mailPassword: '',
       mailHost: '',
-      mailPort: 25,
+      mailPort: '',
     }}>
       {/* 邮件通知服务 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>邮件通知服务</span>}>

@@ -26,8 +26,8 @@ export default function BasicSettings({ form }: BasicSettingsProps) {
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
       mrVendor: '',
-      mrOMCName: 'OMC',
-      timezoneCode: 'Asia/Shanghai',
+      mrOMCName: '',
+      timezoneCode: '',
     }}>
       {/* 基本信息 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>基本信息</span>} style={{ marginBottom: 16 }}>
