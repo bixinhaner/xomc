@@ -112,20 +112,38 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       {/* CPE信号强度 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>CPE信号强度</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <span>按照设定的范围显示信号强度</span>
-          <span style={{ marginLeft: 16 }}>弱&lt; -100</span>
-          <span style={{ marginLeft: 16 }}>正常&lt; -80</span>
-          <span style={{ marginLeft: 16 }}>强</span>
+          <span style={{ marginRight: 16 }}>按照设定的范围显示信号强度</span>
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff1f0', borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff4d4f', marginRight: 8 }} />
+            弱&lt; -100
+          </span>
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff7e6', borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fa8c16', marginRight: 8 }} />
+            正常&lt; -80
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#f6ffed', borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#52c41a', marginRight: 8 }} />
+            强
+          </span>
         </div>
       </Card>
 
       {/* UE信号强度 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>UE信号强度</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <span>按照设定的范围显示信号强度</span>
-          <span style={{ marginLeft: 16 }}>弱&lt; -100</span>
-          <span style={{ marginLeft: 16 }}>正常&lt; -80</span>
-          <span style={{ marginLeft: 16 }}>强</span>
+          <span style={{ marginRight: 16 }}>按照设定的范围显示信号强度</span>
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff1f0', borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff4d4f', marginRight: 8 }} />
+            弱&lt; -100
+          </span>
+          <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff7e6', borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fa8c16', marginRight: 8 }} />
+            正常&lt; -80
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#f6ffed', borderRadius: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#52c41a', marginRight: 8 }} />
+            强
+          </span>
         </div>
       </Card>
 
