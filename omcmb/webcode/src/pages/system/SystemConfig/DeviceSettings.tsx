@@ -26,6 +26,10 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       nameSettingEnable: true,
       prompt: false,
       accessContralEnable: false,
+      rsrpVal0: -100,
+      rsrpVal1: -80,
+      uersrpVal0: -100,
+      uersrpVal1: -80,
       uploadSelected: '3',
       deviceOfflineEnable: false,
       deviceOfflineSaveDay: 90,
@@ -115,11 +119,17 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
           <span style={{ marginRight: 16 }}>按照设定的范围显示信号强度</span>
           <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff1f0', borderRadius: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff4d4f', marginRight: 8 }} />
-            弱&lt; -100
+            弱&lt;
+            <Form.Item name="rsrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
+              <InputNumber min={-150} max={0} style={{ width: 60 }} />
+            </Form.Item>
           </span>
           <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff7e6', borderRadius: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fa8c16', marginRight: 8 }} />
-            正常&lt; -80
+            正常&lt;
+            <Form.Item name="rsrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
+              <InputNumber min={-150} max={0} style={{ width: 60 }} />
+            </Form.Item>
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#f6ffed', borderRadius: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#52c41a', marginRight: 8 }} />
@@ -134,11 +144,17 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
           <span style={{ marginRight: 16 }}>按照设定的范围显示信号强度</span>
           <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff1f0', borderRadius: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff4d4f', marginRight: 8 }} />
-            弱&lt; -100
+            弱&lt;
+            <Form.Item name="uersrpVal0" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
+              <InputNumber min={-150} max={0} style={{ width: 60 }} />
+            </Form.Item>
           </span>
           <span style={{ marginRight: 16, display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#fff7e6', borderRadius: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#fa8c16', marginRight: 8 }} />
-            正常&lt; -80
+            正常&lt;
+            <Form.Item name="uersrpVal1" noStyle style={{ marginLeft: 4, marginRight: 4 }}>
+              <InputNumber min={-150} max={0} style={{ width: 60 }} />
+            </Form.Item>
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', backgroundColor: '#f6ffed', borderRadius: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#52c41a', marginRight: 8 }} />
