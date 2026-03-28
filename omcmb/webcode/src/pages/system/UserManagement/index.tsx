@@ -165,10 +165,15 @@ export default function UserManagement() {
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
-      // 根据设备组类型获取选中的设备组
+      // 验证设备组必填
       const deviceGroupIds = deviceGroupType === 'builtIn'
         ? (selectedBuiltInGroupId ? [selectedBuiltInGroupId] : [])
         : selectedCustomGroupIds;
+
+      if (deviceGroupIds.length === 0) {
+        message.warning(t('user.pleaseSelectDeviceGroup'));
+        return;
+      }
 
       const userData = {
         userName: vals.userName as string,
@@ -800,7 +805,24 @@ export default function UserManagement() {
               />
             </Form.Item>
             {/* 设备组选择 */}
-            <Form.Item label={t('user.deviceGroup')}>
+            <Form.Item
+              label={t('user.deviceGroup')}
+              required
+              help={
+                deviceGroupType === 'builtIn' && !selectedBuiltInGroupId
+                  ? t('user.pleaseSelectDeviceGroup')
+                  : deviceGroupType === 'custom' && selectedCustomGroupIds.length === 0
+                    ? t('user.pleaseSelectDeviceGroup')
+                    : undefined
+              }
+              validateStatus={
+                deviceGroupType === 'builtIn' && !selectedBuiltInGroupId
+                  ? 'error'
+                  : deviceGroupType === 'custom' && selectedCustomGroupIds.length === 0
+                    ? 'error'
+                    : undefined
+              }
+            >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <Radio.Group
                   value={deviceGroupType}
@@ -820,6 +842,7 @@ export default function UserManagement() {
                     onChange={setSelectedBuiltInGroupId}
                     options={builtInDeviceGroups.map((g) => ({ label: g.name, value: g.id }))}
                     style={{ width: '100%' }}
+                    status={!selectedBuiltInGroupId ? 'error' : undefined}
                   />
                 ) : (
                   <Select
@@ -829,6 +852,7 @@ export default function UserManagement() {
                     onChange={setSelectedCustomGroupIds}
                     options={customDeviceGroups.map((g) => ({ label: g.name, value: g.id }))}
                     style={{ width: '100%' }}
+                    status={selectedCustomGroupIds.length === 0 ? 'error' : undefined}
                   />
                 )}
               </div>
