@@ -30,6 +30,9 @@ const formGroupStyle: React.CSSProperties = {
 export default function NotificationSettings({ form }: NotificationSettingsProps) {
   const t = useT();
 
+  // 监听复选框状态
+  const emEnabel = Form.useWatch('emEnabel', form);
+
   const handleTestEmail = () => {
     void message.info('正在发送测试邮件...');
     setTimeout(() => {
@@ -48,14 +51,9 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
       {/* 邮件通知服务 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>邮件通知服务</span>}>
         <div style={settingRowStyle}>
-          <Space>
-            <Form.Item name="emEnabel" valuePropName="checked" noStyle>
-              <Checkbox>通知邮件服务器</Checkbox>
-            </Form.Item>
-            <Button type="primary" size="small" onClick={handleTestEmail}>
-              测试
-            </Button>
-          </Space>
+          <Form.Item name="emEnabel" valuePropName="checked" noStyle>
+            <Checkbox>通知邮件服务器</Checkbox>
+          </Form.Item>
         </div>
 
         <div style={subSettingStyle}>
@@ -63,20 +61,27 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
 
           <div style={formGroupStyle}>
             <Form.Item label="邮箱" name="mailUsername" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 280 }} placeholder="noreply@example.com" prefix={<MailOutlined />} />
+              <Input style={{ width: 280 }} placeholder="noreply@example.com" prefix={<MailOutlined />} disabled={!emEnabel} />
             </Form.Item>
             <Form.Item label="密码" name="mailPassword" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 180 }} placeholder="请输入邮箱密码" maxLength={50} />
+              <Input.Password style={{ width: 180 }} placeholder="请输入邮箱密码" maxLength={50} disabled={!emEnabel} />
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
             <Form.Item label="SMTP服务器" name="mailHost" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 280 }} placeholder="smtp.example.com" />
+              <Input style={{ width: 280 }} placeholder="smtp.example.com" disabled={!emEnabel} />
             </Form.Item>
-            <Form.Item label="端口" name="mailPort" style={{ marginBottom: 0 }}>
-              <InputNumber min={1} max={65535} style={{ width: 100 }} />
-            </Form.Item>
+            <Space>
+              <Form.Item label="端口" name="mailPort" style={{ marginBottom: 0 }}>
+                <InputNumber min={1} max={65535} style={{ width: 100 }} disabled={!emEnabel} />
+              </Form.Item>
+              <Form.Item style={{ marginBottom: 0, marginTop: 24 }}>
+                <Button type="primary" size="small" onClick={handleTestEmail} disabled={!emEnabel}>
+                  测试
+                </Button>
+              </Form.Item>
+            </Space>
           </div>
         </div>
       </Card>
