@@ -172,7 +172,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>历史告警存储：历史告警在数据库最多存储</span>
             <Form.Item name="alarmHisMaxHoldTime" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
+              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
@@ -185,7 +185,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>KPI文件存储：设备上报的原始文件在服务器最多存储</span>
             <Form.Item name="kpiFilesSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
+              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
@@ -195,7 +195,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>KPI报表文件存储：根据KPI查询模板生成的报表文件将在服务器最多存储</span>
             <Form.Item name="kpiReportDataSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
+              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
@@ -205,7 +205,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>KPI原始数据存储：KPI原始数据在服务器最多存储</span>
             <Form.Item name="kpiStorge15DataDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
+              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
@@ -225,7 +225,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>KPI天数据存储：KPI天数据在服务器最多存储</span>
             <Form.Item name="kpiStorge1440DataDays" noStyle>
-              <InputNumber min={1} max={730} style={{ width: 70 }} />
+              <InputNumber min={1} max={730} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
@@ -244,7 +244,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>MR原始文件存储：设备上报的原始文件将在服务器最多存储</span>
             <Form.Item name="mrFileSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
+              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
@@ -257,7 +257,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>信令追踪文件存储：设备上报的原始文件在服务器最多存储</span>
             <Form.Item name="signalingTraceSaveDays" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} />
+              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
             <span>天</span>
           </Space>
