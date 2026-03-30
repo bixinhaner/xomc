@@ -802,3 +802,18 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 	return s.deviceRepo.Delete(ctx, id)
 }
+
+// ListGeo returns devices with geographic coordinates for map display.
+func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	return s.deviceRepo.ListGeo(ctx, filter)
+}
+
+// GetGeoStats returns device statistics for map display.
+func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error) {
+	return s.deviceRepo.GetGeoStats(ctx, groupIDs)
+}
+
+// SearchDevices searches devices by keyword for map display.
+func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error) {
+	return s.deviceRepo.SearchDevices(ctx, keyword, limit)
+}

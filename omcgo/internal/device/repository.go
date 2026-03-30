@@ -30,6 +30,53 @@ type DeviceFilter struct {
 	model.ListRequest
 }
 
+// GeoDeviceFilter specifies criteria for listing devices with geo data.
+type GeoDeviceFilter struct {
+	GroupIDs []string
+	Status   []model.DeviceStatus
+	Keyword  string
+	Bounds   *GeoBounds
+	Page     int
+	PageSize int
+}
+
+// GeoBounds defines a geographic bounding box.
+type GeoBounds struct {
+	MinLng float64
+	MaxLng float64
+	MinLat float64
+	MaxLat float64
+}
+
+// GeoDevice represents device data for map display.
+type GeoDevice struct {
+	ID           uuid.UUID         `json:"id"`
+	SerialNumber string            `json:"sn"`
+	Name         string            `json:"name"`
+	Status       model.DeviceStatus `json:"status"`
+	Latitude     float64           `json:"latitude"`
+	Longitude    float64           `json:"longitude"`
+	GroupID      *uuid.UUID        `json:"group_id,omitempty"`
+	GroupName    string            `json:"group_name,omitempty"`
+	Address      string            `json:"address,omitempty"`
+	AlarmCount   int               `json:"alarm_count"`
+	Type         string            `json:"type,omitempty"`
+}
+
+// GeoStats represents device statistics for map display.
+type GeoStats struct {
+	Total       int64                        `json:"total"`
+	StatusCount map[model.DeviceStatus]int64 `json:"status_count"`
+	AlarmCount  int64                        `json:"alarm_count"`
+	Center      *GeoCenter                   `json:"center,omitempty"` // 平均经纬度中心点
+}
+
+// GeoCenter represents the geographic center point of all devices.
+type GeoCenter struct {
+	Latitude  float64 `json:"lat"`
+	Longitude float64 `json:"lng"`
+}
+
 // DeviceReader provides read-only access to devices.
 type DeviceReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error)
@@ -42,6 +89,12 @@ type DeviceReader interface {
 	// Pass cursorTime=nil for the first batch. Subsequent calls should pass the
 	// last_inform_at of the last device returned, along with its ID as cursorID.
 	ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error)
+	// ListGeo returns devices with geographic coordinates for map display.
+	ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error)
+	// GetGeoStats returns device statistics for map display.
+	GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error)
+	// SearchDevices searches devices by keyword for map display.
+	SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error)
 }
 
 // DeviceWriter provides write operations for devices.

@@ -444,3 +444,259 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	}
 	return &d, nil
 }
+
+// ListGeo returns devices with geographic coordinates for map display.
+func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	// Build base query with device group join
+	builder := psql.Select(
+		"d.id", "d.serial_number", "d.serial_number as name", "d.status",
+		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
+		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+	).From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		Where(sq.NotEq{"d.latitude": nil}).
+		Where(sq.NotEq{"d.longitude": nil})
+
+	// Apply filters
+	if len(filter.GroupIDs) > 0 {
+		builder = builder.Where(sq.Eq{"dg.id": filter.GroupIDs})
+	}
+	if len(filter.Status) > 0 {
+		builder = builder.Where(sq.Eq{"d.status": filter.Status})
+	}
+	if filter.Keyword != "" {
+		builder = builder.Where(sq.Or{
+			sq.ILike{"d.serial_number": "%" + filter.Keyword + "%"},
+			sq.ILike{"d.site_name": "%" + filter.Keyword + "%"},
+		})
+	}
+
+	// Get total count with a separate query
+	countBuilder := psql.Select("COUNT(DISTINCT d.id)").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		Where(sq.NotEq{"d.latitude": nil}).
+		Where(sq.NotEq{"d.longitude": nil})
+
+	if len(filter.GroupIDs) > 0 {
+		countBuilder = countBuilder.Where(sq.Eq{"dg.id": filter.GroupIDs})
+	}
+	if len(filter.Status) > 0 {
+		countBuilder = countBuilder.Where(sq.Eq{"d.status": filter.Status})
+	}
+	if filter.Keyword != "" {
+		countBuilder = countBuilder.Where(sq.Or{
+			sq.ILike{"d.serial_number": "%" + filter.Keyword + "%"},
+			sq.ILike{"d.site_name": "%" + filter.Keyword + "%"},
+		})
+	}
+
+	countQuery, countArgs, _ := countBuilder.ToSql()
+	var total int64
+	err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count geo devices: %w", err)
+	}
+
+	// Apply pagination
+	if filter.PageSize > 0 {
+		builder = builder.Limit(uint64(filter.PageSize))
+	}
+	if filter.Page > 1 && filter.PageSize > 0 {
+		offset := uint64((filter.Page - 1) * filter.PageSize)
+		builder = builder.Offset(offset)
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build list geo query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list geo devices: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []GeoDevice
+	for rows.Next() {
+		var d GeoDevice
+		var groupID *uuid.UUID
+		var groupName, address, deviceType *string
+		var alarmCount int
+
+		err := rows.Scan(
+			&d.ID, &d.SerialNumber, &d.Name, &d.Status,
+			&d.Latitude, &d.Longitude, &groupID, &groupName,
+			&address, &alarmCount, &deviceType,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan geo device: %w", err)
+		}
+
+		d.GroupID = groupID
+		if groupName != nil {
+			d.GroupName = *groupName
+		}
+		if address != nil {
+			d.Address = *address
+		}
+		if deviceType != nil {
+			d.Type = *deviceType
+		}
+		d.AlarmCount = alarmCount
+
+		devices = append(devices, d)
+	}
+
+	if devices == nil {
+		devices = []GeoDevice{}
+	}
+
+	return devices, total, nil
+}
+
+// GetGeoStats returns device statistics for map display.
+func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error) {
+	// Build base condition for all queries
+	baseCondition := sq.And{
+		sq.NotEq{"d.latitude": nil},
+		sq.NotEq{"d.longitude": nil},
+	}
+
+	// Query 1: Get status counts
+	statusBuilder := psql.Select("d.status", "COUNT(*) as cnt").
+		From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		Where(baseCondition).
+		GroupBy("d.status")
+
+	if len(groupIDs) > 0 {
+		statusBuilder = statusBuilder.Where(sq.Eq{"dg.id": groupIDs})
+	}
+
+	query, args, _ := statusBuilder.ToSql()
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get geo stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &GeoStats{
+		StatusCount: make(map[model.DeviceStatus]int64),
+	}
+
+	for rows.Next() {
+		var status model.DeviceStatus
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("scan geo stats: %w", err)
+		}
+		stats.StatusCount[status] = count
+		stats.Total += count
+	}
+
+	// Query 2: Calculate center point (average latitude and longitude)
+	centerBuilder := psql.Select(
+		"AVG(d.latitude) as avg_lat",
+		"AVG(d.longitude) as avg_lng",
+	).
+		From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		Where(baseCondition)
+
+	if len(groupIDs) > 0 {
+		centerBuilder = centerBuilder.Where(sq.Eq{"dg.id": groupIDs})
+	}
+
+	centerQuery, centerArgs, _ := centerBuilder.ToSql()
+	var avgLat, avgLng *float64
+	err = r.pool.QueryRow(ctx, centerQuery, centerArgs...).Scan(&avgLat, &avgLng)
+	if err != nil {
+		return nil, fmt.Errorf("get geo center: %w", err)
+	}
+
+	if avgLat != nil && avgLng != nil {
+		stats.Center = &GeoCenter{
+			Latitude:  *avgLat,
+			Longitude: *avgLng,
+		}
+	}
+
+	return stats, nil
+}
+
+// SearchDevices searches devices by keyword for map display.
+func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error) {
+	if keyword == "" {
+		return []GeoDevice{}, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	builder := psql.Select(
+		"d.id", "d.serial_number", "d.serial_number as name", "d.status",
+		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
+		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+	).From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		Where(sq.Or{
+			sq.ILike{"d.serial_number": "%" + keyword + "%"},
+			sq.ILike{"d.site_name": "%" + keyword + "%"},
+		}).
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build search devices query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search devices: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []GeoDevice
+	for rows.Next() {
+		var d GeoDevice
+		var groupID *uuid.UUID
+		var groupName, address, deviceType *string
+		var alarmCount int
+
+		err := rows.Scan(
+			&d.ID, &d.SerialNumber, &d.Name, &d.Status,
+			&d.Latitude, &d.Longitude, &groupID, &groupName,
+			&address, &alarmCount, &deviceType,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+
+		d.GroupID = groupID
+		if groupName != nil {
+			d.GroupName = *groupName
+		}
+		if address != nil {
+			d.Address = *address
+		}
+		if deviceType != nil {
+			d.Type = *deviceType
+		}
+		d.AlarmCount = alarmCount
+
+		devices = append(devices, d)
+	}
+
+	if devices == nil {
+		devices = []GeoDevice{}
+	}
+
+	return devices, nil
+}

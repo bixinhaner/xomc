@@ -2,6 +2,8 @@ package device
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,6 +27,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		devices.GET("", h.ListDevices)
 		devices.GET("/stats", h.GetStats)
+		devices.GET("/geo", h.ListGeo)           // Map device geo data
+		devices.GET("/geo/stats", h.GetGeoStats) // Map device statistics
+		devices.GET("/search", h.SearchDevices)  // Search devices for map
 		devices.GET("/:id", h.GetDevice)
 		devices.GET("/:id/parameters", h.GetDeviceParameters)
 		devices.POST("", h.CreateDevice)
@@ -258,4 +263,127 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "reboot command queued"})
+}
+
+// ListGeo handles GET /api/v1/devices/geo.
+// Returns devices with geographic coordinates for map display.
+func (h *Handler) ListGeo(c *gin.Context) {
+	var filter GeoDeviceFilter
+
+	// Parse group_ids (comma-separated)
+	if groupIDs := c.Query("group_ids"); groupIDs != "" {
+		filter.GroupIDs = strings.Split(groupIDs, ",")
+	}
+
+	// Parse status (comma-separated)
+	if statusStr := c.Query("status"); statusStr != "" {
+		statusList := strings.Split(statusStr, ",")
+		filter.Status = make([]model.DeviceStatus, 0, len(statusList))
+		for _, s := range statusList {
+			filter.Status = append(filter.Status, model.DeviceStatus(s))
+		}
+	}
+
+	// Parse keyword
+	filter.Keyword = c.Query("keyword")
+
+	// Parse bounds (format: minLng,maxLng,minLat,maxLat)
+	if boundsStr := c.Query("bounds"); boundsStr != "" {
+		parts := strings.Split(boundsStr, ",")
+		if len(parts) == 4 {
+			minLng, _ := strconv.ParseFloat(parts[0], 64)
+			maxLng, _ := strconv.ParseFloat(parts[1], 64)
+			minLat, _ := strconv.ParseFloat(parts[2], 64)
+			maxLat, _ := strconv.ParseFloat(parts[3], 64)
+			filter.Bounds = &GeoBounds{
+				MinLng: minLng,
+				MaxLng: maxLng,
+				MinLat: minLat,
+				MaxLat: maxLat,
+			}
+		}
+	}
+
+	// Parse pagination
+	filter.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	filter.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "1000"))
+	if filter.PageSize <= 0 {
+		filter.PageSize = 1000
+	}
+	if filter.PageSize > 10000 {
+		filter.PageSize = 10000
+	}
+
+	devices, total, err := h.service.ListGeo(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": devices,
+		"total": total,
+	})
+}
+
+// GetGeoStats handles GET /api/v1/devices/geo/stats.
+// Returns device statistics for map display.
+func (h *Handler) GetGeoStats(c *gin.Context) {
+	var groupIDs []string
+
+	// Parse group_ids (comma-separated)
+	if groupIDsStr := c.Query("group_ids"); groupIDsStr != "" {
+		groupIDs = strings.Split(groupIDsStr, ",")
+	}
+
+	stats, err := h.service.GetGeoStats(c.Request.Context(), groupIDs)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	// Convert status count to frontend expected format (online/offline)
+	result := gin.H{
+		"total": stats.Total,
+		"status_count": gin.H{
+			"online":  stats.StatusCount[model.DeviceActive],
+			"offline": stats.StatusCount[model.DeviceOffline],
+		},
+	}
+
+	// Add center point if available
+	if stats.Center != nil {
+		result["center"] = gin.H{
+			"lat": stats.Center.Latitude,
+			"lng": stats.Center.Longitude,
+		}
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// SearchDevices handles GET /api/v1/devices/search.
+// Searches devices by keyword for map display.
+func (h *Handler) SearchDevices(c *gin.Context) {
+	keyword := c.Query("keyword")
+	if len(keyword) < 2 {
+		c.JSON(http.StatusOK, gin.H{"items": []GeoDevice{}})
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	devices, err := h.service.SearchDevices(c.Request.Context(), keyword, limit)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": devices})
 }
