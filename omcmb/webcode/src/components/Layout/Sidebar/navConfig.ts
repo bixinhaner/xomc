@@ -32,7 +32,7 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'ClusterOutlined',
     children: [
       { key: 'device-list',      label: 'nav.device.list',       path: '/device/list' },
-      { key: 'device-register',  label: 'nav.device.register',   path: '/device/register' },
+      // { key: 'device-register',  label: 'nav.device.register',   path: '/device/register' },  // 隐藏设备注册菜单
       { key: 'device-group',     label: 'nav.device.group',       path: '/device/group' },
       // { key: 'device-ne',        label: 'nav.device.ne',          path: '/device/ne' },           // 隐藏
       // { key: 'device-monitor',   label: 'nav.device.monitor',     path: '/device/monitor' },       // 隐藏
@@ -181,7 +181,7 @@ export const NAV_CONFIG: NavConfig = [
     children: [
       { key: 'sys-device-type', label: 'nav.system.deviceClass',    path: '/system/device-class' },
       { key: 'sys-user',        label: 'nav.system.users',          path: '/system/users' },
-      { key: 'sys-group',       label: 'nav.system.groups',         path: '/system/groups' },
+      // { key: 'sys-group',       label: 'nav.system.groups',         path: '/system/groups' },  // 隐藏用户组菜单
       { key: 'sys-role',        label: 'nav.system.roles',          path: '/system/roles' },
       { key: 'sys-op-log',      label: 'nav.system.operationLog',   path: '/system/operation-log' },
       { key: 'sys-config',      label: 'nav.system.config',         path: '/system/config' },

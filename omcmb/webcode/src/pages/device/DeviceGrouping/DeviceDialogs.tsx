@@ -44,11 +44,6 @@ export interface DeviceDialogsProps {
   addMethod: string | undefined;
   onAddDeviceDrawerClose: () => void;
   onSaveDevices: () => void;
-
-  // Batch Import Modal
-  batchImportModalOpen: boolean;
-  onBatchImportModalClose: () => void;
-  onBatchImportConfirm: () => void;
   onDownloadTemplate: () => void;
 
   t: (id: string, values?: Record<string, unknown>) => string;
@@ -72,9 +67,6 @@ export default function DeviceDialogs({
   addMethod,
   onAddDeviceDrawerClose,
   onSaveDevices,
-  batchImportModalOpen,
-  onBatchImportModalClose,
-  onBatchImportConfirm,
   onDownloadTemplate,
   t,
 }: DeviceDialogsProps) {
@@ -86,17 +78,6 @@ export default function DeviceDialogs({
     { label: t('device.engStatus.uncommissioned'), value: 'uncommissioned' },
     { label: t('device.engStatus.decommissioned'), value: 'decommissioned' },
   ], [t]);
-
-  // Reset batch import state
-  const resetBatchImportState = useCallback(() => {
-    setFileList([]);
-  }, []);
-
-  // Handle batch import modal close
-  const handleBatchImportClose = useCallback(() => {
-    resetBatchImportState();
-    onBatchImportModalClose();
-  }, [resetBatchImportState, onBatchImportModalClose]);
 
   // Upload props for batch import
   const uploadProps: UploadProps = useMemo(() => ({
@@ -132,11 +113,11 @@ export default function DeviceDialogs({
       return;
     }
 
-    // 直接提示导入成功并关闭弹窗
+    // 直接提示导入成功并关闭抽屉
     void message.success(t('device.importSuccess'));
-    onBatchImportConfirm();
-    handleBatchImportClose();
-  }, [fileList, t, onBatchImportConfirm, handleBatchImportClose]);
+    setFileList([]);
+    onAddDeviceDrawerClose();
+  }, [fileList, t, onAddDeviceDrawerClose]);
 
   return (
     <>
@@ -212,7 +193,7 @@ export default function DeviceDialogs({
         </Form>
       </Modal>
 
-      {/* Add Device to Group Drawer (Manual only) */}
+      {/* Add Device to Group Drawer (Manual or Import in same drawer) */}
       <Drawer
         title={t('device.addDeviceToGroup')}
         open={addDeviceDrawerOpen}
@@ -222,8 +203,8 @@ export default function DeviceDialogs({
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={onAddDeviceDrawerClose}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={onSaveDevices}>
-              {t('common.confirm')}
+            <Button type="primary" onClick={addMethod === 'import' ? handleBatchImport : onSaveDevices}>
+              {addMethod === 'import' ? t('common.import') : t('common.confirm')}
             </Button>
           </div>
         }
@@ -281,41 +262,39 @@ export default function DeviceDialogs({
               </Form.Item>
             </div>
           )}
+
+          {/* Batch import: Upload area (shown in same drawer) */}
+          {addMethod === 'import' && (
+            <div style={{
+              padding: '16px',
+              background: 'var(--color-fill-quaternary)',
+              borderRadius: 8
+            }}>
+              {/* Download template button */}
+              <div style={{ marginBottom: 12 }}>
+                <Button
+                  icon={<DownloadOutlined />}
+                  size="small"
+                  onClick={onDownloadTemplate}
+                >
+                  {t('device.downloadTemplate')}
+                </Button>
+              </div>
+
+              <Dragger {...uploadProps}>
+                <p className="ant-upload-drag-icon">
+                  <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
+                </p>
+                <p className="ant-upload-text">{t('recycle.importSelectFile')}</p>
+                <p className="ant-upload-hint" style={{ fontSize: 12, color: '#8c8c8c' }}>
+                  {t('recycle.importCsvOnly')}
+                </p>
+              </Dragger>
+            </div>
+          )}
         </Form>
       </Drawer>
 
-      {/* Batch Import Modal */}
-      <Modal
-        title={t('device.batchImport')}
-        open={batchImportModalOpen}
-        onOk={handleBatchImport}
-        onCancel={handleBatchImportClose}
-        okText={t('common.import')}
-        cancelText={t('common.cancel')}
-        width={520}
-        destroyOnClose
-      >
-        {/* Download template button */}
-        <div style={{ marginBottom: 12 }}>
-          <Button
-            icon={<DownloadOutlined />}
-            size="small"
-            onClick={onDownloadTemplate}
-          >
-            {t('device.downloadTemplate')}
-          </Button>
-        </div>
-
-        <Dragger {...uploadProps}>
-          <p className="ant-upload-drag-icon">
-            <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
-          </p>
-          <p className="ant-upload-text">{t('recycle.importSelectFile')}</p>
-          <p className="ant-upload-hint" style={{ fontSize: 12, color: '#8c8c8c' }}>
-            {t('recycle.importCsvOnly')}
-          </p>
-        </Dragger>
-      </Modal>
     </>
   );
 }

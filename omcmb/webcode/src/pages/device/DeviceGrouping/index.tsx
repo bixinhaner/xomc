@@ -85,18 +85,6 @@ export default function DeviceGrouping() {
   }>();
   const addMethod = Form.useWatch('addMethod', addDeviceForm);
 
-  // --- Batch import modal state ---
-  const [batchImportModalOpen, setBatchImportModalOpen] = useState(false);
-
-  // When addMethod changes to 'import', close drawer and open batch import modal
-  useEffect(() => {
-    if (addMethod === 'import' && addDeviceDrawerOpen) {
-      setAddDeviceDrawerOpen(false);
-      addDeviceForm.setFieldsValue({ addMethod: 'manual' });
-      setBatchImportModalOpen(true);
-    }
-  }, [addMethod, addDeviceDrawerOpen, addDeviceForm]);
-
   // --- Data fetching ---
   const queryParams = useMemo(
     () => ({ page: currentPage, pageSize, groupId: selectedGroupId ?? undefined } as Parameters<typeof useDeviceList>[0]),
@@ -579,12 +567,6 @@ export default function DeviceGrouping() {
         addMethod={addMethod}
         onAddDeviceDrawerClose={() => setAddDeviceDrawerOpen(false)}
         onSaveDevices={() => void handleSaveDevices()}
-        batchImportModalOpen={batchImportModalOpen}
-        onBatchImportModalClose={() => setBatchImportModalOpen(false)}
-        onBatchImportConfirm={async () => {
-          void message.success(t('device.importSuccess'));
-          await refetch();
-        }}
         onDownloadTemplate={handleDownloadTemplate}
         t={t as (id: string, values?: Record<string, unknown>) => string}
       />

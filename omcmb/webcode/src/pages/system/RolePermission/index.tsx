@@ -599,7 +599,6 @@ export default function RoleManagement() {
         );
       },
     },
-    { key: 'roleCode', title: '角色标识', dataIndex: 'roleCode', width: 120, render: (v) => v || '-' },
     {
       key: 'dataPermission',
       title: '数据权限',
@@ -609,17 +608,6 @@ export default function RoleManagement() {
         const ids = val as string[];
         const count = ids?.length || 0;
         return <Tag color={count > 0 ? 'blue' : 'default'}>{count} 个设备组</Tag>;
-      },
-    },
-    {
-      key: 'funcPermission',
-      title: '功能权限',
-      dataIndex: 'permissions',
-      width: 100,
-      render: (val) => {
-        const perms = val as string[];
-        const count = perms?.length || 0;
-        return <Tag color={count > 0 ? 'green' : 'default'}>{count} 项权限</Tag>;
       },
     },
     {
@@ -919,7 +907,7 @@ export default function RoleManagement() {
 
     return (
       <Form.Item
-        label={t('role.deviceGroups')}
+        label={t('role.dataPermission')}
         required={!readOnly}
         help={!readOnly && selectedSecondLevelCount === 0 ? t('role.pleaseSelectDeviceGroup') : undefined}
         validateStatus={!readOnly && selectedSecondLevelCount === 0 ? 'warning' : undefined}

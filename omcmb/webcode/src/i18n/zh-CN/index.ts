@@ -798,6 +798,7 @@ const messages: Record<string, string> = {
   'role.builtInSkipped':      '个内置角色将被跳过',
   'role.permissions':         '权限列表',
   'role.permissionConfig':    '权限配置',
+  'role.dataPermission':      '数据权限',
   'role.deviceGroups':        '设备组',
   'role.pleaseSelectDeviceGroups': '请选择设备组（可多选）',
   // 权限类型

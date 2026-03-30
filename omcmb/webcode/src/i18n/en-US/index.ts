@@ -793,6 +793,7 @@ const messages: Record<string, string> = {
   'role.selectedBuiltIn':     'Selected roles include',
   'role.builtInSkipped':      'built-in roles that will be skipped',
   'role.permissions':         'Permissions',
+  'role.dataPermission':      'Data Permission',
   'role.deviceGroups':        'Device Groups',
   'role.pleaseSelectDeviceGroups': 'Please select device groups (multiple)',
   // Permission types
