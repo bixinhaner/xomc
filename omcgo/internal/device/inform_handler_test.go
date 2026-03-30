@@ -137,6 +137,18 @@ func (m *infMockParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, 
 	return nil, 0, nil
 }
 
+func (m *infMockParamRepo) GetByGroup(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
+func (m *infMockParamRepo) GetByFAPInstance(_ context.Context, _ uuid.UUID, _ int) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
+func (m *infMockParamRepo) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID, _ int, _ string) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
 // Mock carrier for registry tests
 type infMockCarrier struct {
 	code         model.CarrierCode

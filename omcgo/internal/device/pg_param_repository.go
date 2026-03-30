@@ -12,6 +12,24 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// paramColumns defines the standard column set for device_parameters queries.
+var paramColumns = []string{
+	"device_id", "parameter_path", "parameter_value",
+	"parameter_type", "writable", "last_updated_at",
+	"fap_instance", "param_group",
+}
+
+// scanParam scans a row into a DeviceParameter struct.
+func scanParam(s interface{ Scan(dest ...any) error }) (model.DeviceParameter, error) {
+	var p model.DeviceParameter
+	err := s.Scan(
+		&p.DeviceID, &p.ParameterPath, &p.ParameterValue,
+		&p.ParameterType, &p.Writable, &p.LastUpdatedAt,
+		&p.FAPInstance, &p.ParamGroup,
+	)
+	return p, err
+}
+
 // PgDeviceParameterRepository implements DeviceParameterRepository using PostgreSQL.
 type PgDeviceParameterRepository struct {
 	pool *pgxpool.Pool
@@ -32,9 +50,18 @@ func (r *PgDeviceParameterRepository) BatchUpsert(ctx context.Context, deviceID 
 
 	for _, p := range params {
 		query, args, err := psql.Insert("device_parameters").
-			Columns("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
-			Values(deviceID, p.ParameterPath, p.ParameterValue, p.ParameterType, p.Writable, now).
-			Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET parameter_value = EXCLUDED.parameter_value, parameter_type = EXCLUDED.parameter_type, writable = EXCLUDED.writable, last_updated_at = EXCLUDED.last_updated_at").
+			Columns("device_id", "parameter_path", "parameter_value",
+				"parameter_type", "writable", "last_updated_at",
+				"fap_instance", "param_group").
+			Values(deviceID, p.ParameterPath, p.ParameterValue,
+				p.ParameterType, p.Writable, now,
+				ExtractFAPInstance(p.ParameterPath),
+				ClassifyParamGroup(p.ParameterPath)).
+			Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET " +
+				"parameter_value = EXCLUDED.parameter_value, " +
+				"parameter_type = EXCLUDED.parameter_type, " +
+				"writable = EXCLUDED.writable, " +
+				"last_updated_at = EXCLUDED.last_updated_at").
 			ToSql()
 		if err != nil {
 			return fmt.Errorf("build upsert query: %w", err)
@@ -54,7 +81,7 @@ func (r *PgDeviceParameterRepository) BatchUpsert(ctx context.Context, deviceID 
 }
 
 func (r *PgDeviceParameterRepository) GetByDevice(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+	query, args, err := psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		OrderBy("parameter_path ASC").
@@ -71,8 +98,8 @@ func (r *PgDeviceParameterRepository) GetByDevice(ctx context.Context, deviceID 
 
 	var params []model.DeviceParameter
 	for rows.Next() {
-		var p model.DeviceParameter
-		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+		p, err := scanParam(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan parameter: %w", err)
 		}
 		params = append(params, p)
@@ -85,7 +112,7 @@ func (r *PgDeviceParameterRepository) GetByDevice(ctx context.Context, deviceID 
 }
 
 func (r *PgDeviceParameterRepository) GetByPath(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error) {
-	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+	query, args, err := psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID, "parameter_path": path}).
 		ToSql()
@@ -93,8 +120,7 @@ func (r *PgDeviceParameterRepository) GetByPath(ctx context.Context, deviceID uu
 		return nil, fmt.Errorf("build query: %w", err)
 	}
 
-	var p model.DeviceParameter
-	err = r.pool.QueryRow(ctx, query, args...).Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt)
+	p, err := scanParam(r.pool.QueryRow(ctx, query, args...))
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -114,7 +140,7 @@ func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, device
 }
 
 func (r *PgDeviceParameterRepository) GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+	query, args, err := psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": prefix + "%"}).
@@ -132,8 +158,8 @@ func (r *PgDeviceParameterRepository) GetByPathPrefix(ctx context.Context, devic
 
 	var params []model.DeviceParameter
 	for rows.Next() {
-		var p model.DeviceParameter
-		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+		p, err := scanParam(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan parameter: %w", err)
 		}
 		params = append(params, p)
@@ -165,7 +191,7 @@ func (r *PgDeviceParameterRepository) SearchByKeyword(ctx context.Context, devic
 	if limit <= 0 {
 		limit = 100
 	}
-	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+	query, args, err := psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.ILike{"parameter_path": "%" + keyword + "%"}).
@@ -184,8 +210,8 @@ func (r *PgDeviceParameterRepository) SearchByKeyword(ctx context.Context, devic
 
 	var params []model.DeviceParameter
 	for rows.Next() {
-		var p model.DeviceParameter
-		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+		p, err := scanParam(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan parameter: %w", err)
 		}
 		params = append(params, p)
@@ -223,7 +249,7 @@ func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, 
 	}
 
 	// 查分页数据
-	query, args, err := psql.Select("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
+	query, args, err := psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": likePrefix}).
@@ -244,8 +270,8 @@ func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, 
 
 	var params []model.DeviceParameter
 	for rows.Next() {
-		var p model.DeviceParameter
-		if err := rows.Scan(&p.DeviceID, &p.ParameterPath, &p.ParameterValue, &p.ParameterType, &p.Writable, &p.LastUpdatedAt); err != nil {
+		p, err := scanParam(rows)
+		if err != nil {
 			return nil, 0, fmt.Errorf("scan parameter: %w", err)
 		}
 		params = append(params, p)
@@ -254,4 +280,94 @@ func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, 
 		params = []model.DeviceParameter{}
 	}
 	return params, total, nil
+}
+
+func (r *PgDeviceParameterRepository) GetByGroup(ctx context.Context, deviceID uuid.UUID, group string) ([]model.DeviceParameter, error) {
+	query, args, err := psql.Select(paramColumns...).
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID, "param_group": group}).
+		OrderBy("parameter_path ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build group query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query by group: %w", err)
+	}
+	defer rows.Close()
+
+	var params []model.DeviceParameter
+	for rows.Next() {
+		p, err := scanParam(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan parameter: %w", err)
+		}
+		params = append(params, p)
+	}
+	if params == nil {
+		params = []model.DeviceParameter{}
+	}
+	return params, nil
+}
+
+func (r *PgDeviceParameterRepository) GetByFAPInstance(ctx context.Context, deviceID uuid.UUID, instance int) ([]model.DeviceParameter, error) {
+	query, args, err := psql.Select(paramColumns...).
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID, "fap_instance": instance}).
+		OrderBy("parameter_path ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build fap instance query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query by fap instance: %w", err)
+	}
+	defer rows.Close()
+
+	var params []model.DeviceParameter
+	for rows.Next() {
+		p, err := scanParam(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan parameter: %w", err)
+		}
+		params = append(params, p)
+	}
+	if params == nil {
+		params = []model.DeviceParameter{}
+	}
+	return params, nil
+}
+
+func (r *PgDeviceParameterRepository) GetByFAPInstanceAndGroup(ctx context.Context, deviceID uuid.UUID, instance int, group string) ([]model.DeviceParameter, error) {
+	query, args, err := psql.Select(paramColumns...).
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceID, "fap_instance": instance, "param_group": group}).
+		OrderBy("parameter_path ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build fap instance+group query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query by fap instance and group: %w", err)
+	}
+	defer rows.Close()
+
+	var params []model.DeviceParameter
+	for rows.Next() {
+		p, err := scanParam(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan parameter: %w", err)
+		}
+		params = append(params, p)
+	}
+	if params == nil {
+		params = []model.DeviceParameter{}
+	}
+	return params, nil
 }

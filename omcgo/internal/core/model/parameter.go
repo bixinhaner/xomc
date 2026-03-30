@@ -14,6 +14,8 @@ type DeviceParameter struct {
 	ParameterType  ParameterType `json:"parameter_type" db:"parameter_type"`
 	Writable       bool          `json:"writable" db:"writable"`
 	LastUpdatedAt  time.Time     `json:"last_updated_at" db:"last_updated_at"`
+	FAPInstance    int           `json:"fap_instance" db:"fap_instance"`
+	ParamGroup     string        `json:"param_group" db:"param_group"`
 }
 
 // ParameterDefinition describes a parameter in a data model definition.

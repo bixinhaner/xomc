@@ -153,6 +153,18 @@ func (m *mockParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ s
 	return nil, 0, nil
 }
 
+func (m *mockParamRepo) GetByGroup(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
+func (m *mockParamRepo) GetByFAPInstance(_ context.Context, _ uuid.UUID, _ int) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
+func (m *mockParamRepo) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID, _ int, _ string) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper: build a DeviceService wired to the given mocks
 // ---------------------------------------------------------------------------

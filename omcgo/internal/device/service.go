@@ -679,46 +679,48 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 		result.Info = info
 	}
 
-	// Get all parameters for prefix-based assembly
-	allParams, err := s.paramRepo.GetByDevice(ctx, deviceID)
+	// MME pool — 按分组查询取代 LIKE
+	mmeParams, err := s.paramRepo.GetByGroup(ctx, deviceID, "mme_pool")
 	if err != nil {
-		s.logger.Warn("get device parameters for detail composite",
+		s.logger.Warn("get mme_pool params",
 			zap.String("device_id", deviceID.String()),
 			zap.Error(err))
-		return result, nil
 	}
-
-	// MME pool
-	mmeParams := filterByPrefix(allParams, "MmePoolConfigParam.")
 	result.MMEPool = AssembleMMEPool(mmeParams)
 
 	// License
-	licenseParams := filterByPrefix(allParams, "X_COM_LICENSE.")
+	licenseParams, err := s.paramRepo.GetByGroup(ctx, deviceID, "license")
+	if err != nil {
+		s.logger.Warn("get license params",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+	}
 	result.License = AssembleLicenseDetail(licenseParams)
 
 	// Antenna
-	antennaParams := filterByPrefix(allParams, "AntennaInfo.")
+	antennaParams, err := s.paramRepo.GetByGroup(ctx, deviceID, "antenna")
+	if err != nil {
+		s.logger.Warn("get antenna params",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+	}
 	result.Antenna = AssembleAntennaInfo(antennaParams)
 
-	// Cells
+	// Cells — 需要跨多个 group，仍用全量查询
 	numOfCells := 1
 	if result.Info != nil && result.Info.NumOfCells > 0 {
 		numOfCells = result.Info.NumOfCells
 	}
+	allParams, err := s.paramRepo.GetByDevice(ctx, deviceID)
+	if err != nil {
+		s.logger.Warn("get all params for cells",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+		return result, nil
+	}
 	result.Cells = AssembleCells(allParams, numOfCells)
 
 	return result, nil
-}
-
-// filterByPrefix returns parameters whose path contains the given substring.
-func filterByPrefix(params []model.DeviceParameter, substr string) []model.DeviceParameter {
-	var result []model.DeviceParameter
-	for _, p := range params {
-		if containsAny(p.ParameterPath, substr) {
-			result = append(result, p)
-		}
-	}
-	return result
 }
 
 // CreateDevice creates a new device from an API request.

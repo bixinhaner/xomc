@@ -151,6 +151,18 @@ func (m *fakeParamRepo) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ s
 	return nil, 0, nil
 }
 
+func (m *fakeParamRepo) GetByGroup(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
+func (m *fakeParamRepo) GetByFAPInstance(_ context.Context, _ uuid.UUID, _ int) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
+func (m *fakeParamRepo) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID, _ int, _ string) ([]model.DeviceParameter, error) {
+	return []model.DeviceParameter{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
