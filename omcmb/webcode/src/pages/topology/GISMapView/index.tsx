@@ -87,17 +87,29 @@ export default function GISMapView() {
   const { data: domainTree, isLoading: isLoadingTree } = useDomainTree();
 
   // 获取设备地理数据
-  const filterParams = useMemo(() => ({
-    groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
-    status: [
+  const filterParams = useMemo(() => {
+    const statusList: ('online' | 'offline')[] = [
       ...(statusFilter.online ? ['online' as const] : []),
       ...(statusFilter.offline ? ['offline' as const] : []),
-    ],
-    enabled: true,
-    pageSize: 10000, // 获取大量数据
-  }), [selectedGroupIds, statusFilter]);
+    ];
+    return {
+      groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
+      // 如果两个状态都被选中（默认情况），不传 status 参数让后端返回全部
+      // 如果只有一个被选中，传对应的状态
+      // 如果都没选中，传空数组表示不查询任何设备
+      status: statusList.length === 2 ? undefined : statusList,
+      enabled: true,
+      pageSize: 10000, // 获取大量数据
+    };
+  }, [selectedGroupIds, statusFilter]);
 
   const { data: devicesGeoData, isLoading: isLoadingDevices } = useMapDevicesGeo(filterParams);
+
+  // Debug: 输出 filterParams 和结果
+  useEffect(() => {
+    console.log('[GISMapView] filterParams:', filterParams);
+    console.log('[GISMapView] devicesGeoData:', devicesGeoData);
+  }, [filterParams, devicesGeoData]);
 
   // 获取地图统计数据
   const { data: mapStatsData, isLoading: isLoadingStats } = useMapStats({
@@ -128,12 +140,14 @@ export default function GISMapView() {
         total: 0,
         online: 0,
         offline: 0,
+        center: undefined,
       };
     }
     return {
       total: mapStatsData.total,
       online: mapStatsData.statusCount?.online ?? 0,
       offline: mapStatsData.statusCount?.offline ?? 0,
+      center: mapStatsData.center,
     };
   }, [mapStatsData]);
 
@@ -656,8 +670,8 @@ export default function GISMapView() {
             ref={mapRef}
             devices={mapDevices}
             height="100%"
-            defaultCenter={[116.4, 39.9]}
-            defaultZoom={5}
+            defaultCenter={stats.center ? [stats.center.lng, stats.center.lat] : [28.221, -14.607]}
+            defaultZoom={6}
             showStats={false}
             showControls={false}
             onDeviceClick={(device) => {

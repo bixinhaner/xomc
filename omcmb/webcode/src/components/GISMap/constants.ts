@@ -117,10 +117,10 @@ export const MARKER_SIZE_CONFIG = {
  * 地图默认配置
  */
 export const MAP_CONFIG = {
-  /** 默认中心点 [lng, lat] - 中国中心 */
-  defaultCenter: [104.0, 35.0] as [number, number],
+  /** 默认中心点 [lng, lat] - 赞比亚中心 (所有设备经纬度平均值) */
+  defaultCenter: [28.221, -14.607] as [number, number],
   /** 默认缩放级别 */
-  defaultZoom: 4,
+  defaultZoom: 6,
   /** 最小缩放级别 */
   minZoom: 1,
   /** 最大缩放级别 */

@@ -149,6 +149,18 @@ export interface MapStats {
   typeCount?: Record<DeviceType, number>;
   /** 当前视图内设备数 */
   viewportCount?: number;
+  /** 地图中心点（设备经纬度平均值） */
+  center?: GeoCenter;
+}
+
+/**
+ * 地理中心点
+ */
+export interface GeoCenter {
+  /** 纬度 */
+  lat: number;
+  /** 经度 */
+  lng: number;
 }
 
 /**
@@ -349,6 +361,11 @@ export interface BackendMapStats {
   alarm_count: number;
   type_count?: Record<string, number>;
   viewport_count?: number;
+  /** 地图中心点（设备经纬度平均值） */
+  center?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 /**

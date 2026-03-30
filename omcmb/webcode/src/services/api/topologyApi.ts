@@ -367,6 +367,7 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
     alarmCount: bs.alarm_count,
     typeCount: bs.type_count as Record<DeviceType, number> | undefined,
     viewportCount: bs.viewport_count,
+    center: bs.center ? { lat: bs.center.lat, lng: bs.center.lng } : undefined,
   };
 }
 
