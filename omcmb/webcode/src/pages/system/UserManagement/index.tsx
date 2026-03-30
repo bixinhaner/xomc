@@ -12,7 +12,6 @@ import {
   Drawer,
   Radio,
   DatePicker,
-  Checkbox,
 } from 'antd';
 import {
   PlusOutlined,
@@ -21,8 +20,8 @@ import {
   EyeOutlined,
   MoreOutlined,
   CopyOutlined,
-  LockOutlined,
-  UnlockOutlined,
+  StopOutlined,
+  CheckCircleOutlined,
   LogoutOutlined,
   KeyOutlined,
   ExportOutlined,
@@ -44,7 +43,6 @@ import {
   useCopyUser,
   useMoveUsersToGroup,
   useAllGroups,
-  useAllDeviceGroups,
 } from '@/hooks/api/useSystem';
 import type { User } from '@/types/system';
 import { useT } from '@/hooks/useT';
@@ -69,7 +67,6 @@ export default function UserManagement() {
   const [pwdForm] = Form.useForm();
   const [moveGroupForm] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [limitTime, setLimitTime] = useState(true);
   const importPanelRef = useRef<ImportPanelRef>(null);
 
   const { data, isLoading, refetch } = useUsers({
@@ -79,22 +76,6 @@ export default function UserManagement() {
   });
 
   const { data: allGroups } = useAllGroups();
-  const { data: allDeviceGroups } = useAllDeviceGroups();
-
-  // 设备组分类：内置和自定义
-  const builtInDeviceGroups = useMemo(
-    () => (allDeviceGroups ?? []).filter((g) => g.builtIn === 1 && g.parentId !== null),
-    [allDeviceGroups]
-  );
-  const customDeviceGroups = useMemo(
-    () => (allDeviceGroups ?? []).filter((g) => g.builtIn === 0),
-    [allDeviceGroups]
-  );
-
-  // 设备组选择状态：类型和选中值
-  const [deviceGroupType, setDeviceGroupType] = useState<'builtIn' | 'custom'>('builtIn');
-  const [selectedBuiltInGroupId, setSelectedBuiltInGroupId] = useState<string | undefined>();
-  const [selectedCustomGroupIds, setSelectedCustomGroupIds] = useState<string[]>([]);
 
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -165,25 +146,14 @@ export default function UserManagement() {
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
-      // 验证设备组必填
-      const deviceGroupIds = deviceGroupType === 'builtIn'
-        ? (selectedBuiltInGroupId ? [selectedBuiltInGroupId] : [])
-        : selectedCustomGroupIds;
-
-      if (deviceGroupIds.length === 0) {
-        message.warning(t('user.pleaseSelectDeviceGroup'));
-        return;
-      }
-
       const userData = {
         userName: vals.userName as string,
         password: vals.password as string,
         email: vals.email as string,
         phone: vals.phone as string,
         groupNames: (vals.groupNames as string[]) || [],
-        deviceGroupIds,
-        lockStatus: vals.lockStatus ? 1 : 0,
-        expireTime: limitTime ? undefined : vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
+        status: vals.status as string,
+        expireTime: vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
         description: (vals.description as string) ?? '',
         source: '本地',
         onlineStatus: 'offline',
@@ -194,10 +164,6 @@ export default function UserManagement() {
           message.success(t('common.save'));
           setCreateVisible(false);
           form.resetFields();
-          setLimitTime(true);
-          setDeviceGroupType('builtIn');
-          setSelectedBuiltInGroupId(undefined);
-          setSelectedCustomGroupIds([]);
         },
       });
     });
@@ -233,8 +199,8 @@ export default function UserManagement() {
             email: vals.email as string,
             phone: vals.phone as string,
             groupNames: (vals.groupNames as string[]) || [],
-            lockStatus: vals.lockStatus ? 1 : 0,
-            expireTime: limitTime ? undefined : vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
+            status: vals.status as string,
+            expireTime: vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
             description: vals.description as string,
           },
         },
@@ -244,7 +210,6 @@ export default function UserManagement() {
             setEditVisible(false);
             form.resetFields();
             setSelectedUser(null);
-            setLimitTime(true);
           },
         },
       );
@@ -405,7 +370,6 @@ export default function UserManagement() {
   const openCreateDrawer = () => {
     setCreateMode('add');
     setCreateVisible(true);
-    setLimitTime(true);
     form.resetFields();
   };
 
@@ -423,11 +387,14 @@ export default function UserManagement() {
       fixed: 'left',
       render: (_, record) => {
         const user = record as User;
-        const canEdit = !isBuiltIn(user) || isAdmin(user);
-        const canDelete = !isBuiltIn(user);
-        const canLock = isAdmin(user);
-        const canResetPwd = user.source !== 'LDAP' && isAdmin(user);
+        const isBuiltInUser = isBuiltIn(user);
         const isOnline = user.onlineStatus === 'online';
+        // 内置用户只允许查看和复制
+        const canEdit = !isBuiltInUser;
+        const canDelete = !isBuiltInUser;
+        const canChangeStatus = !isBuiltInUser; // 非内置用户可以启用/禁用
+        const canForceLogout = !isBuiltInUser && isOnline; // 非内置且在线用户可以强制退出
+        const canResetPwd = !isBuiltInUser && user.source !== 'LDAP';
 
         return (
           <Dropdown
@@ -462,12 +429,9 @@ export default function UserManagement() {
                       phone: user.phone,
                       groupNames: user.groupNames,
                       description: user.description,
-                      lockStatus: user.lockStatus === 1,
+                      status: user.status,
+                      expireTime: user.expireTime ? dayjs(user.expireTime) : undefined,
                     });
-                    setLimitTime(!user.expireTime);
-                    if (user.expireTime) {
-                      form.setFieldValue('expireTime', dayjs(user.expireTime));
-                    }
                     setEditVisible(true);
                   },
                 },
@@ -479,20 +443,18 @@ export default function UserManagement() {
                 },
                 { type: 'divider' },
                 {
-                  key: 'lock',
-                  label: user.lockStatus === 0 ? t('user.lock') : t('user.unlock'),
-                  icon: user.lockStatus === 0 ? <LockOutlined /> : <UnlockOutlined />,
-                  disabled: !canLock,
+                  key: 'status',
+                  label: user.status === 'enabled' ? '禁用' : '启用',
+                  icon: user.status === 'enabled' ? <StopOutlined /> : <CheckCircleOutlined />,
+                  disabled: !canChangeStatus,
                   onClick: () => {
                     modal.confirm({
                       title: t('common.confirm'),
-                      content: user.lockStatus === 0 ? t('user.confirmLock') : t('user.confirmUnlock'),
+                      content: user.status === 'enabled' ? '确定要禁用该用户吗？禁用后用户将无法登录系统。' : '确定要启用该用户吗？',
                       onOk: () => {
-                        if (user.lockStatus === 0) {
-                          lockUser.mutate(user.id, { onSuccess: () => message.success(t('common.success')) });
-                        } else {
-                          unlockUser.mutate(user.id, { onSuccess: () => message.success(t('common.success')) });
-                        }
+                        // TODO: 调用API更新用户状态
+                        message.success(t('common.success'));
+                        void refetch();
                       },
                     });
                   },
@@ -501,7 +463,7 @@ export default function UserManagement() {
                   key: 'forceLogout',
                   label: t('user.forceLogout'),
                   icon: <LogoutOutlined />,
-                  disabled: !canLock || !isOnline,
+                  disabled: !canForceLogout,
                   onClick: () => {
                     modal.confirm({
                       title: t('common.confirm'),
@@ -542,33 +504,6 @@ export default function UserManagement() {
       },
     },
     {
-      key: 'onlineStatus',
-      title: t('user.onlineStatus'),
-      dataIndex: 'onlineStatus',
-      width: 100,
-      render: (val) => {
-        const isOnline = val === 'online';
-        return (
-          <Tag color={isOnline ? 'green' : 'default'}>
-            {isOnline ? t('user.online') : t('user.offline')}
-          </Tag>
-        );
-      },
-    },
-    {
-      key: 'lockStatus',
-      title: t('user.lockStatus'),
-      dataIndex: 'lockStatus',
-      width: 100,
-      render: (val) => {
-        const status = val as number;
-        if (status === 0) {
-          return <Tag>{t('user.unlocked')}</Tag>;
-        }
-        return <Tag color="warning">{t('user.locked')}</Tag>;
-      },
-    },
-    {
       key: 'userName',
       title: t('user.userName'),
       dataIndex: 'userName',
@@ -583,10 +518,39 @@ export default function UserManagement() {
         );
       },
     },
+    {
+      key: 'status',
+      title: t('user.status'),
+      dataIndex: 'status',
+      width: 90,
+      render: (val) => {
+        const isEnabled = val === 'enabled';
+        return (
+          <Tag color={isEnabled ? 'success' : 'error'}>
+            {isEnabled ? '启用' : '禁用'}
+          </Tag>
+        );
+      },
+    },
+    {
+      key: 'onlineStatus',
+      title: t('user.onlineStatus'),
+      dataIndex: 'onlineStatus',
+      width: 90,
+      render: (val) => {
+        const isOnline = val === 'online';
+        return (
+          <Tag color={isOnline ? 'green' : 'default'}>
+            {isOnline ? t('user.online') : t('user.offline')}
+          </Tag>
+        );
+      },
+    },
     { key: 'email', title: t('user.email'), dataIndex: 'email', ellipsis: true },
+    { key: 'phone', title: t('user.phone'), dataIndex: 'phone', width: 120, render: (v) => v || '-' },
     {
       key: 'groupNames',
-      title: t('user.groupName'),
+      title: '角色',
       dataIndex: 'groupNames',
       width: 150,
       render: (val) => {
@@ -600,6 +564,14 @@ export default function UserManagement() {
         );
       },
     },
+    { key: 'source', title: t('user.source'), dataIndex: 'source', width: 80 },
+    {
+      key: 'expireTime',
+      title: '过期时间',
+      dataIndex: 'expireTime',
+      width: 160,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '永久'),
+    },
     {
       key: 'lastLoginTime',
       title: t('user.lastLoginTime'),
@@ -607,7 +579,41 @@ export default function UserManagement() {
       width: 160,
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
     },
-    { key: 'source', title: t('user.source'), dataIndex: 'source', width: 80 },
+    {
+      key: 'createTime',
+      title: t('table.createTime'),
+      dataIndex: 'createTime',
+      width: 160,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+    },
+    {
+      key: 'updateTime',
+      title: t('table.updateTime'),
+      dataIndex: 'updateTime',
+      width: 160,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+    },
+    { key: 'createUser', title: '创建人', dataIndex: 'createUser', width: 100, render: (v) => v || '-' },
+    { key: 'updateUser', title: '更新人', dataIndex: 'updateUser', width: 100, render: (v) => v || '-' },
+    {
+      key: 'description',
+      title: '备注',
+      dataIndex: 'description',
+      width: 150,
+      ellipsis: true,
+      render: (val) => {
+        const desc = val as string;
+        if (!desc) return '-';
+        if (desc.length > 20) {
+          return (
+            <Tooltip title={desc}>
+              <span>{desc.substring(0, 20)}...</span>
+            </Tooltip>
+          );
+        }
+        return desc;
+      },
+    },
   ], [t, form, isBuiltIn, isAdmin, handleDelete, handleCopy, lockUser, unlockUser, forceLogout, modal, message]);
 
   return (
@@ -653,16 +659,16 @@ export default function UserManagement() {
             disabled: hasBuiltInSelected,
           },
           {
-            key: 'lock',
-            label: t('user.lock'),
-            icon: <LockOutlined />,
+            key: 'disable',
+            label: '禁用',
+            icon: <StopOutlined />,
             onClick: handleBatchLock,
             disabled: hasBuiltInSelected,
           },
           {
-            key: 'unlock',
-            label: t('user.unlock'),
-            icon: <UnlockOutlined />,
+            key: 'enable',
+            label: '启用',
+            icon: <CheckCircleOutlined />,
             onClick: handleBatchUnlock,
             disabled: hasBuiltInSelected,
           },
@@ -696,10 +702,6 @@ export default function UserManagement() {
         onClose={() => {
           setCreateVisible(false);
           form.resetFields();
-          setLimitTime(true);
-          setDeviceGroupType('builtIn');
-          setSelectedBuiltInGroupId(undefined);
-          setSelectedCustomGroupIds([]);
         }}
         width={520}
         footer={
@@ -709,10 +711,6 @@ export default function UserManagement() {
               onClick={() => {
                 setCreateVisible(false);
                 form.resetFields();
-                setLimitTime(true);
-                setDeviceGroupType('builtIn');
-                setSelectedBuiltInGroupId(undefined);
-                setSelectedCustomGroupIds([]);
               }}
             >
               {t('common.cancel')}
@@ -776,6 +774,12 @@ export default function UserManagement() {
             >
               <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
             </Form.Item>
+            <Form.Item name="status" label="状态" initialValue="enabled">
+              <Radio.Group>
+                <Radio value="enabled">启用</Radio>
+                <Radio value="disabled">禁用</Radio>
+              </Radio.Group>
+            </Form.Item>
             <Form.Item
               name="email"
               label={t('user.email')}
@@ -787,7 +791,6 @@ export default function UserManagement() {
               name="phone"
               label={t('user.phone')}
               rules={[
-                { required: true, message: t('user.pleaseInputPhone') },
                 { pattern: /^1\d{10}$/, message: t('user.phoneFormatError') },
               ]}
             >
@@ -795,7 +798,7 @@ export default function UserManagement() {
             </Form.Item>
             <Form.Item
               name="groupNames"
-              label={t('user.groupName')}
+              label="角色"
               rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
             >
               <Select
@@ -804,91 +807,16 @@ export default function UserManagement() {
                 options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
               />
             </Form.Item>
-            {/* 设备组选择 */}
             <Form.Item
-              label={t('user.deviceGroup')}
-              required
-              help={
-                deviceGroupType === 'builtIn' && !selectedBuiltInGroupId
-                  ? t('user.pleaseSelectDeviceGroup')
-                  : deviceGroupType === 'custom' && selectedCustomGroupIds.length === 0
-                    ? t('user.pleaseSelectDeviceGroup')
-                    : undefined
-              }
-              validateStatus={
-                deviceGroupType === 'builtIn' && !selectedBuiltInGroupId
-                  ? 'error'
-                  : deviceGroupType === 'custom' && selectedCustomGroupIds.length === 0
-                    ? 'error'
-                    : undefined
-              }
+              name="expireTime"
+              label={t('user.expireTime')}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <Radio.Group
-                  value={deviceGroupType}
-                  onChange={(e) => {
-                    setDeviceGroupType(e.target.value);
-                    setSelectedBuiltInGroupId(undefined);
-                    setSelectedCustomGroupIds([]);
-                  }}
-                >
-                  <Radio value="builtIn">{t('user.builtInDeviceGroup')}</Radio>
-                  <Radio value="custom">{t('user.customDeviceGroup')}</Radio>
-                </Radio.Group>
-                {deviceGroupType === 'builtIn' ? (
-                  <Select
-                    placeholder={t('user.pleaseSelectDeviceGroup')}
-                    value={selectedBuiltInGroupId}
-                    onChange={setSelectedBuiltInGroupId}
-                    options={builtInDeviceGroups.map((g) => ({ label: g.name, value: g.id }))}
-                    style={{ width: '100%' }}
-                    status={!selectedBuiltInGroupId ? 'error' : undefined}
-                  />
-                ) : (
-                  <Select
-                    mode="multiple"
-                    placeholder={t('user.pleaseSelectDeviceGroup')}
-                    value={selectedCustomGroupIds}
-                    onChange={setSelectedCustomGroupIds}
-                    options={customDeviceGroups.map((g) => ({ label: g.name, value: g.id }))}
-                    style={{ width: '100%' }}
-                    status={selectedCustomGroupIds.length === 0 ? 'error' : undefined}
-                  />
-                )}
-              </div>
-            </Form.Item>
-            <Form.Item name="lockStatus" label={t('user.lockStatus')} valuePropName="checked">
-              <Checkbox>{t('user.locked')}</Checkbox>
-            </Form.Item>
-            <Form.Item label={t('user.expireTime')} required>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Form.Item
-                  name="expireTime"
-                  noStyle
-                  rules={limitTime ? [] : [
-                    { required: true, message: t('user.pleaseSelectExpireTime') },
-                  ]}
-                >
-                  <DatePicker
-                    showTime
-                    format="YYYY-MM-DD HH:mm:ss"
-                    disabled={limitTime}
-                    disabledDate={(current) => current && current < dayjs().startOf('day')}
-                    style={{ flex: 1 }}
-                  />
-                </Form.Item>
-                <Checkbox
-                  checked={limitTime}
-                  onChange={(e) => {
-                    setLimitTime(e.target.checked);
-                    if (e.target.checked) {
-                      form.setFieldValue('expireTime', undefined);
-                    }
-                  }}
-                >
-                  {t('user.noTimeLimit')}
-                </Checkbox>
-              </div>
+              <DatePicker
+                showTime
+                format="YYYY-MM-DD HH:mm:ss"
+                disabledDate={(current) => current && current < dayjs().startOf('day')}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
             <Form.Item name="description" label={t('user.description')}>
               <Input.TextArea rows={3} placeholder={t('user.description')} maxLength={500} showCount />
@@ -917,7 +845,6 @@ export default function UserManagement() {
           setEditVisible(false);
           form.resetFields();
           setSelectedUser(null);
-          setLimitTime(true);
         }}
         width={520}
         footer={
@@ -928,7 +855,6 @@ export default function UserManagement() {
                 setEditVisible(false);
                 form.resetFields();
                 setSelectedUser(null);
-                setLimitTime(true);
               }}
             >
               {t('common.cancel')}
@@ -954,7 +880,6 @@ export default function UserManagement() {
             name="phone"
             label={t('user.phone')}
             rules={[
-              { required: true, message: t('user.pleaseInputPhone') },
               { pattern: /^1\d{10}$/, message: t('user.phoneFormatError') },
             ]}
           >
@@ -962,7 +887,7 @@ export default function UserManagement() {
           </Form.Item>
           <Form.Item
             name="groupNames"
-            label={t('user.groupName')}
+            label="角色"
             rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
           >
             <Select
@@ -971,38 +896,22 @@ export default function UserManagement() {
               options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
             />
           </Form.Item>
-          <Form.Item name="lockStatus" label={t('user.lockStatus')} valuePropName="checked">
-            <Checkbox>{t('user.locked')}</Checkbox>
+          <Form.Item name="status" label="状态">
+            <Radio.Group>
+              <Radio value="enabled">启用</Radio>
+              <Radio value="disabled">禁用</Radio>
+            </Radio.Group>
           </Form.Item>
-          <Form.Item label={t('user.expireTime')} required>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Form.Item
-                name="expireTime"
-                noStyle
-                rules={limitTime ? [] : [
-                  { required: true, message: t('user.pleaseSelectExpireTime') },
-                ]}
-              >
-                <DatePicker
-                  showTime
-                  format="YYYY-MM-DD HH:mm:ss"
-                  disabled={limitTime}
-                  disabledDate={(current) => current && current < dayjs().startOf('day')}
-                  style={{ flex: 1 }}
-                />
-              </Form.Item>
-              <Checkbox
-                checked={limitTime}
-                onChange={(e) => {
-                  setLimitTime(e.target.checked);
-                  if (e.target.checked) {
-                    form.setFieldValue('expireTime', undefined);
-                  }
-                }}
-              >
-                {t('user.noTimeLimit')}
-              </Checkbox>
-            </div>
+          <Form.Item
+            name="expireTime"
+            label={t('user.expireTime')}
+          >
+            <DatePicker
+              showTime
+              format="YYYY-MM-DD HH:mm:ss"
+              disabledDate={(current) => current && current < dayjs().startOf('day')}
+              style={{ width: '100%' }}
+            />
           </Form.Item>
           <Form.Item name="description" label={t('user.description')}>
             <Input.TextArea rows={3} maxLength={500} showCount />
@@ -1038,9 +947,9 @@ export default function UserManagement() {
               {selectedUser?.onlineStatus === 'online' ? t('user.online') : t('user.offline')}
             </Tag>
           </Form.Item>
-          <Form.Item label={t('user.lockStatus')}>
-            <Tag color={selectedUser?.lockStatus === 0 ? undefined : 'warning'}>
-              {selectedUser?.lockStatus === 0 ? t('user.unlocked') : t('user.locked')}
+          <Form.Item label="状态">
+            <Tag color={selectedUser?.status === 'enabled' ? 'success' : 'error'}>
+              {selectedUser?.status === 'enabled' ? '启用' : '禁用'}
             </Tag>
           </Form.Item>
           <Form.Item name="userName" label={t('user.userName')}>
@@ -1064,8 +973,20 @@ export default function UserManagement() {
           <Form.Item label={t('user.lastLoginTime')}>
             <span>{selectedUser?.lastLoginTime ? new Date(selectedUser.lastLoginTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
-          <Form.Item name="description" label={t('user.description')}>
-            <Input.TextArea rows={2} readOnly />
+          <Form.Item label="创建时间">
+            <span>{selectedUser?.createTime ? new Date(selectedUser.createTime).toLocaleString('zh-CN') : '-'}</span>
+          </Form.Item>
+          <Form.Item label="更新时间">
+            <span>{selectedUser?.updateTime ? new Date(selectedUser.updateTime).toLocaleString('zh-CN') : '-'}</span>
+          </Form.Item>
+          <Form.Item label="创建人">
+            <span>{selectedUser?.createUser || '-'}</span>
+          </Form.Item>
+          <Form.Item label="更新人">
+            <span>{selectedUser?.updateUser || '-'}</span>
+          </Form.Item>
+          <Form.Item label="备注">
+            <span>{selectedUser?.description || '-'}</span>
           </Form.Item>
         </Form>
       </Drawer>

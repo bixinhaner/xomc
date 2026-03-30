@@ -1,18 +1,24 @@
 export type UserOnlineStatus = 'online' | 'offline';
-export type UserLockStatus = 0 | 1 | 2; // 0=解锁, 1=有效期锁定, 2=有效期锁定
+export type UserStatus = 'enabled' | 'disabled'; // 启用/禁用
 
 export interface User {
   id: string;
   userName: string;
   email: string;
-  groupNames: string[]; // 所属用户组列表
-  lastLoginTime: string;
-  source: string; // 来源
+  phone?: string; // 手机号（可选）
+  groupNames: string[]; // 所属用户组列表（角色）
+  department?: string; // 部门
+  lastLoginTime?: string; // 登录时间
+  source: string; // 登录来源
   onlineStatus: UserOnlineStatus; // 在线状态
-  lockStatus: UserLockStatus; // 锁定状态
+  status: UserStatus; // 状态：启用/禁用
+  expireTime?: string; // 过期时间
   builtIn: number; // 内置用户标识
-  description: string;
-  createTime: string;
+  description?: string; // 备注
+  createTime: string; // 创建时间
+  updateTime?: string; // 更新时间
+  createUser?: string; // 创建人
+  updateUser?: string; // 更新人
 }
 
 export interface Role {
