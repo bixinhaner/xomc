@@ -62,6 +62,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	// Device repositories
 	deviceRepo := device.NewPgDeviceRepository(pgPool)
 	paramRepo := device.NewPgDeviceParameterRepository(pgPool)
+	deviceInfoRepo := device.NewPgDeviceInfoRepository(pgPool)
 
 	// HeartbeatMonitor
 	heartbeatMonitor := device.NewHeartbeatMonitor(redisClient, deviceRepo, logger)
@@ -78,11 +79,16 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	deviceCache := device.NewDeviceCache(redisClient, logger)
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, eventBus, logger)
 	deviceService.SetDeviceCache(deviceCache)
+	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
 	deviceService.SetCommandQueue(cmdQueue)
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(metricsReg)
 	deviceService.SetMetrics(deviceMetrics)
+
+	// InfoSyncer: extracts TR069 parameters into device_info for fast queries
+	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, carrierRegistry, logger)
+	deviceService.SetInfoSyncer(infoSyncer)
 
 	// BatchInformProcessor（可选，配置启用时生效）
 	var batchProcessor *device.BatchInformProcessor
@@ -297,6 +303,10 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	// Device routes → resource "devices"
 	deviceHandler := device.NewHandler(deviceService)
 	deviceHandler.RegisterRoutes(permGroup("devices"))
+
+	// Device info routes (extended info, enums, activate/deactivate) → resource "devices"
+	deviceInfoHandler := device.NewDeviceInfoHandler(deviceService)
+	deviceInfoHandler.RegisterRoutes(permGroup("devices"))
 
 	// Parameter tree routes → resource "devices"
 	paramTreeHandler := device.NewParameterTreeHandler(deviceService, paramRepo, dmRegistry, logger)

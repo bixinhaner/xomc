@@ -38,4 +38,9 @@ type Carrier interface {
 
 	// ValidateParameter validates a parameter value against carrier-specific rules.
 	ValidateParameter(path string, value string) error
+
+	// GetInfoParamMapping returns a mapping from TR069 parameter paths to device_info column names.
+	// Used by the info sync mechanism to extract key radio parameters from device_parameters
+	// and denormalize them into the device_info table for fast list/filter queries.
+	GetInfoParamMapping(tech model.Technology) map[string]string
 }

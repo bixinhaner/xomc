@@ -19,16 +19,18 @@ import (
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	deviceRepo  DeviceRepository
-	paramRepo   DeviceParameterRepository
-	heartbeat   *HeartbeatMonitor
-	eventBus    event.EventBus
-	cmdQueue    CommandQueue
-	connReq     ConnectionRequester
-	stunUpdater StunAddressUpdater
-	cache       *DeviceCache
-	metrics     *DeviceMetrics
-	logger      *zap.Logger
+	deviceRepo     DeviceRepository
+	paramRepo      DeviceParameterRepository
+	deviceInfoRepo DeviceInfoRepository
+	infoSyncer     *InfoSyncer
+	heartbeat      *HeartbeatMonitor
+	eventBus       event.EventBus
+	cmdQueue       CommandQueue
+	connReq        ConnectionRequester
+	stunUpdater    StunAddressUpdater
+	cache          *DeviceCache
+	metrics        *DeviceMetrics
+	logger         *zap.Logger
 }
 
 // CommandQueue defines the interface for queuing RPC commands to devices.
@@ -82,6 +84,16 @@ func (s *DeviceService) SetStunAddressUpdater(u StunAddressUpdater) {
 // SetDeviceCache sets the Redis device cache for fast serial number lookups.
 func (s *DeviceService) SetDeviceCache(c *DeviceCache) {
 	s.cache = c
+}
+
+// SetDeviceInfoRepo sets the device info repository for extended info management.
+func (s *DeviceService) SetDeviceInfoRepo(repo DeviceInfoRepository) {
+	s.deviceInfoRepo = repo
+}
+
+// SetInfoSyncer sets the parameter-to-device_info syncer.
+func (s *DeviceService) SetInfoSyncer(syncer *InfoSyncer) {
+	s.infoSyncer = syncer
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
@@ -288,6 +300,13 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	// Write-through: cache the new device
 	s.cacheDevice(ctx, device)
 
+	// Create device_info record for extended info
+	if err := s.CreateDeviceInfo(ctx, device.ID); err != nil {
+		s.logger.Warn("create device_info for new device",
+			zap.String("device_id", device.ID.String()),
+			zap.Error(err))
+	}
+
 	// Sync UDP address to STUN cache
 	if udpAddr != "" && s.stunUpdater != nil {
 		if err := s.stunUpdater.SetFromInform(ctx, device.SerialNumber, udpAddr); err != nil {
@@ -400,6 +419,15 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// Store parameters
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
 
+	// Sync key parameters to device_info for fast query access
+	if s.infoSyncer != nil {
+		if err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology); err != nil {
+			s.logger.Warn("sync device info from parameters",
+				zap.String("device_id", device.ID.String()),
+				zap.Error(err))
+		}
+	}
+
 	// Refresh heartbeat
 	if s.heartbeat != nil {
 		s.heartbeat.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
@@ -476,6 +504,52 @@ func (s *DeviceService) CountByStatus(ctx context.Context, carrier *model.Carrie
 	}
 
 	return counts, nil
+}
+
+// ListDevicesWithInfo returns a paginated list of devices joined with extended info.
+func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	if s.deviceInfoRepo == nil {
+		// Fallback: if device_info repo not configured, use standard list
+		result, err := s.deviceRepo.List(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]DeviceWithInfo, len(result.Items))
+		for i, d := range result.Items {
+			items[i] = DeviceWithInfo{Device: d}
+		}
+		return model.NewListResponse(items, result.Total, result.Page, result.PageSize), nil
+	}
+	return s.deviceInfoRepo.ListDevicesWithInfo(ctx, filter)
+}
+
+// GetDeviceInfo retrieves extended info for a device.
+func (s *DeviceService) GetDeviceInfo(ctx context.Context, deviceID uuid.UUID) (*DeviceInfo, error) {
+	if s.deviceInfoRepo == nil {
+		return nil, nil
+	}
+	return s.deviceInfoRepo.GetByDeviceID(ctx, deviceID)
+}
+
+// UpdateDeviceInfo updates the manually editable device info fields.
+func (s *DeviceService) UpdateDeviceInfo(ctx context.Context, deviceID uuid.UUID, req UpdateDeviceInfoRequest, updater string) error {
+	if s.deviceInfoRepo == nil {
+		return fmt.Errorf("device info repository not configured")
+	}
+	return s.deviceInfoRepo.UpdateManualFields(ctx, deviceID, req, updater)
+}
+
+// CreateDeviceInfo creates the initial device_info record for a newly registered device.
+func (s *DeviceService) CreateDeviceInfo(ctx context.Context, deviceID uuid.UUID) error {
+	if s.deviceInfoRepo == nil {
+		return nil
+	}
+	now := time.Now()
+	info := &DeviceInfo{
+		DeviceID:        deviceID,
+		FirstOnlineTime: &now,
+	}
+	return s.deviceInfoRepo.Create(ctx, info)
 }
 
 func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid.UUID, params []tr069.ParameterValueStruct) {

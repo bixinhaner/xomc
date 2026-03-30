@@ -155,8 +155,23 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if search := c.Query("search"); search != "" {
 		filter.Search = &search
 	}
+	if manufacturer := c.Query("manufacturer"); manufacturer != "" {
+		filter.Manufacturer = &manufacturer
+	}
+	if productClass := c.Query("product_class"); productClass != "" {
+		filter.ProductClass = &productClass
+	}
+	if rfStatus := c.Query("rf_status"); rfStatus != "" {
+		filter.RFStatus = &rfStatus
+	}
+	if cellStatus := c.Query("cell_status"); cellStatus != "" {
+		filter.CellStatus = &cellStatus
+	}
+	if projectStatus := c.Query("project_status"); projectStatus != "" {
+		filter.ProjectStatus = &projectStatus
+	}
 
-	result, err := h.service.ListDevices(c.Request.Context(), filter)
+	result, err := h.service.ListDevicesWithInfo(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

@@ -1,6 +1,6 @@
-# 0023 设备列表管理系统 — 差距分析与实现方���
+# 0023 设备列表管理系统 — 差距分析与实现方案
 
-> 基于《2/4/5G设备列表管理系统 后端开发设计文档》与当前代码库的对比分析。
+> 基于《2/4/5G设备列表管理系统 后端开发设计文档》及 `files/Back-end/` 目录下全部 9 份设计文档与当前代码库的对比分析。
 
 ---
 
@@ -44,7 +44,9 @@ migrations/000001_create_devices.up.sql，按 carrier 分区
 
 ```sql
 CREATE TABLE device_info (
-    device_id         UUID PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+    device_id         UUID PRIMARY KEY,
+    -- 注意：devices 是分区表，PG 不支持对分区表的外键引用，
+    -- 因此不加 REFERENCES 约束，由应用层维护 1:1 关系。
 
     -- 运维标识
     device_name       VARCHAR(128),                -- 设备名称（用户自定义）
@@ -87,12 +89,9 @@ CREATE TABLE device_info (
 );
 
 -- 索引
-CREATE INDEX idx_device_info_rf_status    ON device_info (rf_status);
-CREATE INDEX idx_device_info_cell_status  ON device_info (cell_status);
+CREATE INDEX idx_device_info_rf_status      ON device_info (rf_status);
+CREATE INDEX idx_device_info_cell_status    ON device_info (cell_status);
 CREATE INDEX idx_device_info_project_status ON device_info (project_status);
-CREATE INDEX idx_device_info_search ON device_info USING gin (
-    (COALESCE(device_name,'') || ' ' || COALESCE(address,'')) gin_trgm_ops
-);
 
 -- updated_at 触发器
 CREATE TRIGGER trigger_device_info_updated_at
@@ -147,19 +146,30 @@ CREATE TRIGGER trigger_device_info_updated_at
 | 设备重启 | ✅ 已实现 | POST /api/v1/devices/:id/reboot |
 | 设备分组管理 | ✅ 已实现（独立模块） | `topology/` 模块，层级树结构 |
 | 排序（多字段） | ✅ 已实现 | ListRequest.SortBy/SortDir，9 个可排序列 |
+| 固件上传/列表/删除 | ✅ 已实现 | `software/` 模块 |
+| 升级任务（单设备/批量） | ✅ 已实现 | `software/` TriggerUpgrade/BatchUpgrade |
+| STUN/UDP 穿越 | ✅ 已实现 | `acs/stun/` 模块 |
+| Connection Request 调度 | ✅ 已实现 | `acs/connreq/` Dispatcher |
 
-### 2.2 未实现功能
+### 2.2 Phase 1 已实现功能（本轮实施）
+
+| # | 功能 | 状态 | 实现文件 |
+|---|------|------|---------|
+| G01 | `device_info` 表与模块搭建 | ✅ 已完成 | `migrations/000062_create_device_info.up.sql`、`device/device_info_model.go`、`device/device_info_repository.go`、`device/device_info_pg_repository.go`、`device/device_info_handler.go` |
+| G02 | 设备列表 JOIN 查询 + 扩展过滤 | ✅ 已完成 | `device/device_info_pg_repository.go` ListDevicesWithInfo()、`device/repository.go` DeviceFilter 扩展、`device/handler.go` 新增查询参数 |
+| G03 | 参数自动同步到 `device_info` | ✅ 已完成 | `device/info_sync.go` InfoSyncer、`core/carrier/carrier.go` GetInfoParamMapping()、三运营商适配器实现 |
+| G06 | 枚举值查询接口 | ✅ 已完成 | `device/device_info_handler.go` GET /api/v1/devices/enums |
+| G07 | 多字段模糊搜索扩展 | ✅ 已完成 | `device/device_info_pg_repository.go` ListDevicesWithInfo() 搜索条件 |
+| G08 | 设备操作：激活/去激活 | ✅ 已完成 | `device/device_info_handler.go` PUT /activate、/deactivate |
+
+### 2.3 未实现功能（原始差距）
+
+来源：《2/4/5G设备列表管理系统 后端开发设计文档》
 
 | # | 功能 | 设计文档章节 | 优先级 | 复杂度 |
 |---|------|------------|--------|--------|
-| G01 | `device_info` 表与模块搭建 | 2.1.1 | **P0** | 中 |
-| G02 | 设备列表 JOIN 查询 + 扩展过滤 | 3.2.1 | **P0** | 中 |
-| G03 | 参数自动同步到 `device_info` | — | **P0** | 中 |
 | G04 | 设备列表导出（CSV/Excel） | 3.2.6 | **P1** | 中 |
 | G05 | 列自定义配置（用户级） | 3.2.2, 4.3 | **P1** | 低 |
-| G06 | 枚举值查询接口 | 3.3 | **P1** | 低 |
-| G07 | 多字段模糊搜索扩展 | 4.2.1 | **P1** | 低 |
-| G08 | 设备操作：激活/去激活 | 3.2.4 | **P1** | 低 |
 | G09 | 设备操作：射频开关 | 3.2.4 | **P1** | 中 |
 | G10 | 设备操作：日志收集 | 3.2.4 | **P2** | 中 |
 | G11 | 设备操作：报文收集 | 3.2.4 | **P2** | 中 |
@@ -167,73 +177,40 @@ CREATE TRIGGER trigger_device_info_updated_at
 | G13 | 逻辑删除 | 5.2 | **P2** | 中 |
 | G14 | 敏感字段加密（MAC/经纬度） | 5.3 | **P3** | 中 |
 
+### 2.4 新增未实现功能（扩展分析）
+
+来源：`files/Back-end/` 目录下 8 份补充设计文档。
+
+| # | 功能 | 来源文档 | 优先级 | 复杂度 | 说明 |
+|---|------|---------|--------|--------|------|
+| G15 | 设备日志收集 — 即时模式 | 日志收集功能逻辑设计文档 §3 | **P1** | 高 | 通过 TR069 Upload RPC 触发运行日志/安全日志上传，7 态任务状态机，超时/重试 |
+| G16 | 设备日志收集 — 周期模式 | 日志收集功能逻辑设计文档 §4 | **P2** | 高 | 定期自动收集日志，cron 调度，粒度配置（每小时/每天/自定义） |
+| G17 | 日志收集 — 平台适配 | 日志收集功能逻辑设计文档 §6 | **P1** | 中 | 4G/5G 平台参数路径差异（FileType、URL、Username、Password），Carrier 适配��扩展 |
+| G18 | 固件升级回退 | 设备升级回退流程设计文档 §7 | **P1** | 高 | 回退 = GetParameterValues 查询 ROLLBACK_ENABLE → SetParameterValues 触发回退 → 等待 RebootComplete |
+| G19 | 升级任务挂起/恢复/终止 | 设备升级回退流程设计文档 §8 | **P2** | 中 | 任务暂停（不再下发）/恢复（继续排队）/终止（标记放弃），当前仅支持创建和完成 |
+| G20 | 5G 升级完成事件处理 | 设备升级回退流程设计文档 §5.2 | **P1** | 中 | 5G 设备 Inform 携带事件码 102 (M_Download + TRANSFER COMPLETE) 时标记升级成功 |
+| G21 | 设备注册 — 批量 Excel 导入 | 设备注册功能说明 §3 方式二 | **P1** | 中 | 下载 Excel 模板 → 填写设备信息 → 上传解析 → 校验（SN格式/GPS范围/高度） → 入库 → 错误报告 |
+| G22 | 设备预注册 | 设备注册功能说明 §3 方式一 | **P2** | 低 | 管理员手动录入 SN 等基本信息，设备上线前预创建记录，首次 Inform 时匹配合并 |
+| G23 | 异常重启日志 — BOOT 检测 | 设备异常重启日志 §4 | **P1** | 高 | Inform 事件码包含 `1 BOOT`（非 0 BOOTSTRAP）时判定为异常重启，提取 MainReason/DetailReason 参数 |
+| G24 | 异常重启日志 — 自动收集 | 设备异常重启日志 §5 | **P1** | 高 | BOOT 检测后自动��队，通过 GetParameterValues 获取故障日志 URL，Upload RPC 收集日志文件 |
+| G25 | 异常重启日志 — 手动收集 | 设备异常重启日志 §6 | **P2** | 中 | 运维人员手动触发重启日志收集，SetParameterValues 设置 FaultLogURL → Upload → TransferComplete |
+| G26 | 异常重启日志 — 列表/导出/清理 | 设备异常重启日志 §8-§11 | **P2** | 中 | 列表查询（按时间/SN/原因过滤）、详情查看、文件下载、批量导出、自动清理策略（单设备上限 + 总量上限 + 磁盘阈值） |
+| G27 | STUN UDP — 心跳保活增强 | STUN-UDPServer §5 | **P3** | 低 | 当前 STUN 模块已实现基础功能，需增强: UDP 心跳超时检测���连接状态���步到 device_info |
+
 ---
 
 ## 3. 各功能实现方案
 
-### G01: `device_info` 表与模块搭建
+### G01: `device_info` 表与模块搭建 ✅ 已完成
 
-**需求**：新建 `device_info` 表，实现 CRUD，提供独立的管理 API。
+**实现文件**：
+- `migrations/000062_create_device_info.up.sql` — DDL（无外键约束，因 devices 是分区表）
+- `internal/device/device_info_model.go` — DeviceInfo、DeviceWithInfo、UpdateDeviceInfoRequest 结构体
+- `internal/device/device_info_repository.go` — DeviceInfoRepository 接口
+- `internal/device/device_info_pg_repository.go` — PostgreSQL 实现（Squirrel + pgx）
+- `internal/device/device_info_handler.go` — GET/PUT /devices/:id/info
 
-**新增文件**：
-
-```
-internal/device/
-    device_info_model.go          — DeviceInfo 结构体
-    device_info_repository.go     — 接口定义
-    device_info_pg_repository.go  — PostgreSQL 实现
-    device_info_handler.go        — HTTP 处理
-migrations/
-    000XXX_create_device_info.up.sql
-    000XXX_create_device_info.down.sql
-```
-
-**DeviceInfo 模型**：
-
-```go
-type DeviceInfo struct {
-    DeviceID        uuid.UUID  `json:"device_id"`
-    DeviceName      string     `json:"device_name"`
-    Address         string     `json:"address"`
-    Remark          string     `json:"remark"`
-    ProjectStatus   string     `json:"project_status"`
-    Height          *float64   `json:"height"`
-
-    // 无线参数（自动同步）
-    ECI             string     `json:"eci"`
-    PCI             string     `json:"pci"`
-    CellID          string     `json:"cell_id"`
-    FreqPoint       string     `json:"freq_point"`
-    Bandwidth       *float64   `json:"bandwidth"`
-    TransmitPower   *float64   `json:"transmit_power"`
-    PLMN            string     `json:"plmn"`
-
-    // 状态
-    RFStatus        string     `json:"rf_status"`
-    CellStatus      string     `json:"cell_status"`
-    MMEStatus       string     `json:"mme_status"`
-    SyncStatus      string     `json:"sync_status"`
-    KPIStatus       string     `json:"kpi_status"`
-
-    // 硬件
-    MAC             string     `json:"mac"`
-    HardwareVersion string     `json:"hardware_version"`
-
-    // 时间
-    FirstOnlineTime *time.Time `json:"first_online_time"`
-    LastOfflineTime *time.Time `json:"last_offline_time"`
-    RunTime         int64      `json:"run_time"`
-
-    // 审计
-    Creator         string     `json:"creator"`
-    Updater         string     `json:"updater"`
-
-    CreatedAt       time.Time  `json:"created_at"`
-    UpdatedAt       time.Time  `json:"updated_at"`
-}
-```
-
-**接口设计**：
+**API 端点**：
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -241,17 +218,18 @@ type DeviceInfo struct {
 | `/api/v1/devices/:id/info` | PUT | 更新手动填写字段（name/address/remark/project_status/height） |
 
 **实现要点**：
-- 设备通过 `RegisterFromInform` 注册时，自动创建空的 `device_info` 记录
+- 设备通过 `RegisterFromInform` 注册时，自动创建空的 `device_info` 记录（设置 first_online_time）
 - PUT 仅允许更新手动字段，无线参数/状态字段由同步机制自动填充
-- `device_info` 不单独查，主要随 `devices` 一起 JOIN 查询
+- `DeviceService.SetDeviceInfoRepo()` 注入，nil 安全降级
 
 ---
 
-### G02: 设备列表 JOIN 查询 + 扩展过滤
+### G02: 设备列表 JOIN 查询 + 扩展过滤 ✅ 已完成
 
-**需求**：设备列表 API 返回 `devices` + `device_info` 合并数据，支持按 `device_info` 字段过滤/排序。
-
-**改动文件**：`device/pg_repository.go`、`device/repository.go`、`device/handler.go`
+**改动文件**：
+- `device/device_info_pg_repository.go` — ListDevicesWithInfo() 方法
+- `device/repository.go` — DeviceFilter 扩展
+- `device/handler.go` — 新增查询参数
 
 **DeviceFilter 扩展**：
 
@@ -264,117 +242,53 @@ type DeviceFilter struct {
     OUI          *string
     SN           *string
     Search       *string
-    // --- 新增 (device_info 表) ---
-    Manufacturer *string    // devices.manufacturer 精准
-    ProductClass *string    // devices.product_class 精准
-    RFStatus     *string    // device_info.rf_status 精准
-    CellStatus   *string    // device_info.cell_status 精准
-    ProjectStatus *string   // device_info.project_status 精准
+    // --- 新增 ---
+    Manufacturer  *string    // devices.manufacturer 精准
+    ProductClass  *string    // devices.product_class 精准
+    RFStatus      *string    // device_info.rf_status 精准
+    CellStatus    *string    // device_info.cell_status 精准
+    ProjectStatus *string    // device_info.project_status 精准
     model.ListRequest
 }
 ```
 
-**List() 查询改造**：
+**查询模式**：`FROM devices d LEFT JOIN device_info di ON di.device_id = d.id`，返回 `DeviceWithInfo` 平铺结构。
 
-```go
-// 从单表查询改为 LEFT JOIN
-builder := psql.Select(deviceWithInfoColumns()...).
-    From("devices d").
-    LeftJoin("device_info di ON di.device_id = d.id")
+**排序扩展**：支持 `device_name`、`rf_status`、`cell_status`、`bandwidth`、`transmit_power` 等 device_info 字段排序。
 
-// 新增过滤条件
-if filter.RFStatus != nil {
-    builder = builder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
-}
-if filter.CellStatus != nil {
-    builder = builder.Where(sq.Eq{"di.cell_status": *filter.CellStatus})
-}
-```
-
-**返回模型**：API 响应中 `device_info` 字段平铺到设备对象中（前端无需感知双表）：
-
-```json
-{
-  "id": "...",
-  "serial_number": "BCI-SN-001",
-  "status": "active",
-  "manufacturer": "Baicells",
-  "device_name": "朝阳区基站A",
-  "eci": "460001234",
-  "pci": "120",
-  "rf_status": "开启",
-  "cell_status": "正常",
-  "address": "北京市朝阳区XX路XX号",
-  ...
-}
-```
-
-**排序扩展**：
-
-```go
-var allowedSortColumns = map[string]string{
-    // 现有
-    "created_at":     "d.created_at",
-    "serial_number":  "d.serial_number",
-    "status":         "d.status",
-    "last_inform_at": "d.last_inform_at",
-    // 新增
-    "device_name":    "di.device_name",
-    "rf_status":      "di.rf_status",
-    "cell_status":    "di.cell_status",
-    "bandwidth":      "di.bandwidth",
-    "transmit_power": "di.transmit_power",
-}
-```
+**降级策略**：`ListDevicesWithInfo()` 在 deviceInfoRepo 为 nil 时，降级为标准 `List()` 结果包装。
 
 ---
 
-### G03: 参数自动同步到 `device_info`
+### G03: 参数自动同步到 `device_info` ✅ 已完成
 
-**需求**：设备 Inform 后，自动将关键 TR069 参数提取到 `device_info` 表。
-
-**新增文件**：`internal/device/info_sync.go`
+**实现文件**：
+- `internal/device/info_sync.go` — InfoSyncer
+- `internal/core/carrier/carrier.go` — Carrier 接口新增 GetInfoParamMapping()
+- `internal/core/carrier/cmcc/adapter.go` — CMCC LTE + NR 参数映射
+- `internal/core/carrier/ctcc/adapter.go` — CTCC LTE + NR 参数映射
+- `internal/core/carrier/cucc/adapter.go` — CUCC NR 参数映射
 
 **同步策略**：
 
 | 触发时机 | 同步内容 |
 |---------|---------|
-| 设备注册（Bootstrap Inform） | 创建 `device_info`，记录 first_online_time，提取 MAC/硬件版本 |
-| 周期性 Inform | 更新无线参数（eci/pci/freq_point/bandwidth 等） |
-| 参数变更事件 (`device.inform.value_change`) | 更新变更的参数字段 |
-| 状态变更（active→offline） | 记录 last_offline_time，累加 run_time |
-| 告警事件 | 更新 rf_status/cell_status/kpi_status |
+| 设备注册（Bootstrap Inform） | 创建 `device_info`，记录 first_online_time |
+| 周期性 Inform（UpdateFromInform） | 通过 InfoSyncer.SyncFromParameters 更新无线参数 |
+| 设备离线（HeartbeatMonitor） | InfoSyncer.RecordOffline 记录 last_offline_time |
 
-**参数路径映射**（Carrier 接口方法）：
+**Carrier 接口方法**：
 
 ```go
 // 每个运营商适配器实现此方法，返回 TR069 参数路径 → device_info 字段的映射
-type Carrier interface {
-    // ...existing methods...
-    GetInfoParamMapping(tech Technology) map[string]string
-}
+GetInfoParamMapping(tech Technology) map[string]string
 
-// CMCC LTE 示例
-func (c *CMCCCarrier) GetInfoParamMapping(tech Technology) map[string]string {
-    if tech == TechLTE {
-        return map[string]string{
-            "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity": "eci",
-            "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":        "pci",
-            "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL":         "freq_point",
-            "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":      "bandwidth",
-            "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower": "transmit_power",
-            "Device.DeviceInfo.X_VENDOR_MACAddress":                                "mac",
-            "Device.DeviceInfo.HardwareVersion":                                    "hardware_version",
-        }
-    }
-    // NR mapping...
-}
+// CMCC LTE 示例映射
+"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity" → "eci"
+"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID"        → "pci"
+"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL"         → "freq_point"
+"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"      → "bandwidth"
 ```
-
-**实现要点**：
-- 同步逻辑订阅 `device.inform.periodic` 和 `device.inform.value_change` 事件
-- 批量同步：复用 `BatchInformProcessor`，在 flush 时顺带更新 `device_info`
-- 仅在参数值变化时写入，避免无意义 UPDATE
 
 ---
 
@@ -402,29 +316,6 @@ internal/device/export_service.go    — 导出逻辑（流式写入）
 - 导出字段包含 `devices` + `device_info` 合并数据
 - 导出列可基于用户列配置（G05），无配置则使用默认列
 - V1 同步处理（设 5 分钟超时），V2 再引入异步任务
-
-**默认导出列**：
-
-```go
-var defaultExportColumns = []ExportColumn{
-    {Field: "serial_number", Header: "设备序列号"},
-    {Field: "device_name", Header: "设备名称"},
-    {Field: "status", Header: "连接状态"},
-    {Field: "carrier", Header: "运营商"},
-    {Field: "technology", Header: "网络制式"},
-    {Field: "manufacturer", Header: "制造商"},
-    {Field: "model_name", Header: "设备型号"},
-    {Field: "ip_address", Header: "IP地址"},
-    {Field: "eci", Header: "ECI"},
-    {Field: "pci", Header: "PCI"},
-    {Field: "rf_status", Header: "射频状态"},
-    {Field: "cell_status", Header: "小区状态"},
-    {Field: "firmware_version", Header: "软件版本"},
-    {Field: "site_name", Header: "站点名称"},
-    {Field: "address", Header: "物理地址"},
-    {Field: "last_inform_at", Header: "最后心跳时间"},
-}
-```
 
 ---
 
@@ -457,71 +348,34 @@ CREATE TABLE user_column_configs (
 
 ---
 
-### G06: 枚举值查询接口
+### G06: 枚举值查询接口 ✅ 已完成
 
-**需求**：前端下拉选单需要后端提供枚举值。
+**实现文件**：`internal/device/device_info_handler.go`
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/v1/devices/enums` | GET | 返回所有枚举值 |
+**端点**：`GET /api/v1/devices/enums`
 
-**响应**：
-
-```json
-{
-  "carrier": [
-    {"value": "cmcc", "label": "中国移动"},
-    {"value": "ctcc", "label": "中国电信"},
-    {"value": "cucc", "label": "中国联通"}
-  ],
-  "technology": [{"value": "lte", "label": "LTE (4G)"}, {"value": "nr", "label": "NR (5G)"}],
-  "status": [{"value": "active", "label": "在线"}, {"value": "offline", "label": "离线"}, ...],
-  "rf_status": [{"value": "on", "label": "开启"}, {"value": "off", "label": "关闭"}, {"value": "error", "label": "异常"}],
-  "cell_status": [{"value": "normal", "label": "正常"}, {"value": "fault", "label": "故障"}, ...],
-  "project_status": [{"value": "building", "label": "在建"}, {"value": "delivered", "label": "已交付"}, ...]
-}
-```
-
-纯内存计算，无数据库查询。
+返回枚举值：carrier、technology、status、rf_status、cell_status、mme_status、sync_status、project_status。纯内存计算，无数据库查询。
 
 ---
 
-### G07: 多字段模糊搜索扩展
+### G07: 多字段模糊搜索扩展 ✅ 已完成
 
-**当前**：`DeviceFilter.Search` 仅匹配 `serial_number` 和 `site_name`。
+**实现文件**：`internal/device/device_info_pg_repository.go` ListDevicesWithInfo()
 
-**扩展后**：关键词同时匹配 `devices` + `device_info` 中的多个字段。
-
-```go
-if filter.Search != nil {
-    keyword := "%" + *filter.Search + "%"
-    builder = builder.Where(
-        sq.Or{
-            sq.ILike{"d.serial_number": keyword},
-            sq.ILike{"d.site_name": keyword},
-            sq.ILike{"d.manufacturer": keyword},
-            sq.ILike{"d.model_name": keyword},
-            sq.ILike{"d.firmware_version": keyword},
-            sq.Expr("host(d.ip_address)::text ILIKE ?", keyword),
-            sq.ILike{"di.device_name": keyword},   // 新增
-            sq.ILike{"di.address": keyword},        // 新增
-        },
-    )
-}
-```
+搜索条件已扩展为同时匹配：`d.serial_number`、`d.site_name`、`d.manufacturer`、`d.model_name`、`di.device_name`、`di.address`。
 
 ---
 
-### G08: 设备操作 — 激活/去激活
+### G08: 设备操作 — 激活/去激活 ✅ 已完成
 
-复用现有 `TransitionStatus` 逻辑。
+**实现文件**：`internal/device/device_info_handler.go`
 
 ```
 PUT /api/v1/devices/:id/activate       — 状态 → active
 PUT /api/v1/devices/:id/deactivate     — 状态 → maintenance
 ```
 
-`state_machine.go` 已支持 `Active ↔ Maintenance` 转换，无需���改。
+复用 `state_machine.go` 的 `TransitionStatus` 逻辑。
 
 ---
 
@@ -537,7 +391,7 @@ PUT /api/v1/devices/:id/rf-switch      — body: {"enabled": true/false}
 
 ---
 
-### G10: 设备操作 — 日志收集
+### G10: 设备操作 — 日志收集（基础）
 
 通过 TR069 Upload RPC 触发设备上传日志到 MinIO。
 
@@ -547,6 +401,8 @@ body: {"log_type": "system", "start_time": "...", "end_time": "..."}
 ```
 
 流程：生成 MinIO presigned URL → Upload RPC 命令入队 → 设备上传 → TransferComplete 回调。
+
+> 注：G15/G16/G17 是日志收集的完整实现方案，G10 为最简化版本。
 
 ---
 
@@ -603,45 +459,448 @@ CREATE INDEX idx_devices_deleted ON devices (deleted_at) WHERE deleted_at IS NUL
 
 ---
 
+### G15: 设备日志收集 — 即时模式（新增）
+
+**来源**：《日志收集功能逻辑设计文档》§3
+
+**需求**：运维人员手动触发设备运行日志/安全日志收集，支持 4G/5G 差异化参数路径。
+
+**新增文件**：
+
+```
+internal/device/logcollect/
+    model.go              — LogCollectTask 结构体、7 态状态机
+    repository.go         — 接口定义
+    pg_repository.go      — PostgreSQL 实现
+    handler.go            — HTTP 处理
+    service.go            — 业务逻辑（入队、状态流转、超时检测）
+migrations/
+    000XXX_create_log_collect_tasks.up.sql
+```
+
+**任务状态机**（7 态）：
+
+```
+PENDING(0) → QUEUED(1) → DOWNLOADING(2) → UPLOADING(3) → COMPLETED(4)
+                                                      ├─→ FAILED(5)
+                                                      └─→ TIMEOUT(6)
+```
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/devices/:id/log-collect` | POST | 创建即时日志收集任务 |
+| `/api/v1/devices/:id/log-collect` | GET | 查询设备日志收集记录 |
+| `/api/v1/log-collect/tasks` | GET | 全局日志收集任务列表 |
+| `/api/v1/log-collect/tasks/:task_id` | GET | 任务详情 |
+| `/api/v1/log-collect/tasks/:task_id/file` | GET | 下载日志文件 |
+
+**平台适配（Carrier 接口扩展）**：
+
+```go
+// 新增 Carrier 方法
+GetLogCollectParams(tech Technology) LogCollectParamPaths
+
+type LogCollectParamPaths struct {
+    FileType string  // Upload RPC 的 FileType 参数值
+    URL      string  // 设备上传目标 URL 参数路径
+    Username string  // FTP/HTTP 认证用户名参数路径
+    Password string  // FTP/HTTP 认证密码参数路径
+}
+```
+
+**实现要点**：
+- 入队前检查设备在线状态和已有任务（避免重复）
+- 生成 MinIO presigned URL 作为上传目标
+- 通过 `cmdQueue` 下发 Upload RPC
+- 监听 TransferComplete 事件标记完成
+- 超时检测：定时扫描 QUEUED/DOWNLOADING 状态超过阈值的任务
+
+---
+
+### G16: 设备日志收集 — 周期模式（新增）
+
+**来源**：《日志收集功能逻辑设计文档》§4
+
+**需求**：按计划定期自动收集设备日志。
+
+**新增文件**：
+
+```
+internal/device/logcollect/
+    periodic_service.go   — 周期任务调度
+migrations/
+    000XXX_create_log_collect_schedules.up.sql
+```
+
+**数据模型**：
+
+```sql
+CREATE TABLE log_collect_schedules (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id   UUID NOT NULL,
+    log_type    VARCHAR(32) NOT NULL,      -- running_log / security_log
+    cron_expr   VARCHAR(64) NOT NULL,      -- cron 表达式
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    created_by  VARCHAR(64),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**实现要点**：
+- 使用 `robfig/cron/v3` 调度
+- 每次触发创建一条 `log_collect_tasks` 记录
+- 复用 G15 的即时收集流程
+
+---
+
+### G17: 日志收集 — 平台适配（新增）
+
+**来源**：《日志收集功能逻辑设计文档》§6
+
+**需求**：4G LTE 和 5G NR 平台的日志收集参数路径不同。
+
+**改动文件**：三个运营商适配器（cmcc/ctcc/cucc adapter.go）
+
+**4G LTE 参数路径**：
+```
+FileType = "4 Vendor Log File"
+URL      = "Device.DeviceInfo.VendorLogFile.1.URL"
+Username = "Device.DeviceInfo.VendorLogFile.1.Username"
+Password = "Device.DeviceInfo.VendorLogFile.1.Password"
+```
+
+**5G NR 参数路径**：
+```
+FileType = "4 Vendor Log File"
+URL      = "Device.Services.FAPService.1.FAPControl.NR.LogFile.1.URL"
+Username = "Device.Services.FAPService.1.FAPControl.NR.LogFile.1.Username"
+Password = "Device.Services.FAPService.1.FAPControl.NR.LogFile.1.Password"
+```
+
+---
+
+### G18: 固件升级回退（新增）
+
+**来源**：《设备升级回退流程设计文档》§7
+
+**需求**：升级后发现问题，回退到前一版本固件。
+
+**改动文件**：`internal/software/service.go`、`internal/software/handler.go`
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/upgrade-tasks/:id/rollback` | POST | 对已完成的升级任务发起回退 |
+
+**回退流程**：
+
+```
+1. GetParameterValues(SoftwareImage.{i}.Active) 确认当前激活分区
+2. GetParameterValues(SoftwareImage.{i}.RollbackEnable) 检查是否支持回退
+3. SetParameterValues(SoftwareImage.{i}.RollbackEnable = true) 触发回退
+4. 等待设备重启 + Inform (event=102 或 1 BOOT)
+5. GetParameterValues 确认版本已恢复
+```
+
+**平台差异**：
+
+| 平台 | 回退参数路径 |
+|------|------------|
+| 4G LTE | `Device.Services.FAPService.1.FAPControl.LTE.SoftwareImage.{i}.RollbackEnable` |
+| 5G NR | `Device.Services.FAPService.1.FAPControl.NR.SoftwareImage.{i}.RollbackEnable` |
+
+---
+
+### G19: 升级任务挂起/恢复/终止（新增）
+
+**来源**：《设备升级回退流程设计文档》§8
+
+**需求**：批量升级场景下，需要暂停/恢复/终止正在进行的升级任务。
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/upgrade-tasks/:id/suspend` | PUT | 挂起（不再向设备下发） |
+| `/api/v1/upgrade-tasks/:id/resume` | PUT | 恢复（重新排入队列） |
+| `/api/v1/upgrade-tasks/:id/terminate` | PUT | 终止（标记放弃） |
+
+---
+
+### G20: 5G 升级完成事件处理（新增）
+
+**来源**：《设备升级回退流程设计文档》§5.2
+
+**需求**：5G 设备升级完成后通过 Inform 事件码 `102`（M Download + TRANSFER COMPLETE）通知。
+
+**改动文件**：`internal/device/inform_handler.go`
+
+**实现要点**：
+- InformHandler 解析事件码列表，检测 `102` 或 `M Download`
+- 匹配到活跃的升级任务后标记为 COMPLETED
+- 更新 `devices.firmware_version` 为新版本
+
+---
+
+### G21: 设备注册 — 批量 Excel 导入（新增）
+
+**来源**：《设备注册功能说明》§3 方式二
+
+**需求**：通过 Excel 模板批量导入设备信息，用于预注册。
+
+**新增文件**：
+
+```
+internal/device/import_handler.go     — 文件上传 + 解析
+internal/device/import_service.go     — 校验 + 批量入库
+```
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/devices/import/template` | GET | 下载 Excel 模板 |
+| `/api/v1/devices/import` | POST | 上传 Excel 文件，批量导入 |
+
+**Excel 模板字段**：设备序列号（必填）、设备名称、站点名称、经度、纬度、高度、地址、备注、设备分组
+
+**校验规则**：
+- SN 格式校验（长度、字符集）
+- SN 唯一性检查（不允许与已有设备重复）
+- 经度 -180~180，纬度 -90~90
+- 高度 0~1000m
+- 设备分组存在性校验
+
+**实现要点**：
+- 使用 `excelize/v2` 解析上传文件
+- 分批校验 + 入库（每批 100 条）
+- 返回导入结果（成功数 + 失败列表 + 失败原因）
+- 预注册设备 status = `registered`，等待首次 Inform 匹配
+
+---
+
+### G22: 设备预注册（新增）
+
+**来源**：《设备注册功能说明》§3 方式一
+
+**需求**：管理员手动录入设备 SN 等基本信息，设备上线前预创建记录。
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/devices/pre-register` | POST | 预注册单台设备 |
+
+**实现要点**：
+- 创建 `devices` 记录（status=registered）+ `device_info` 记录
+- 首次 Inform 时通过 SN 匹配，更新为 active 并合并 Inform 信息
+- 已在 `RegisterFromInform` 中有 `GetBySerialNumber` 逻辑，扩展为: 存在则 update，不存在则 create
+
+---
+
+### G23: 异常重启日志 — BOOT 检测（新增）
+
+**来源**：《设备异常重启日志功能流程规范文档》§4
+
+**需求**：检测设备异常重启（Inform 事件码 `1 BOOT` 但不含 `0 BOOTSTRAP`），提取故障原因。
+
+**改动文件**：`internal/device/inform_handler.go`
+
+**检测逻辑**：
+
+```go
+// 在 handleInform 中
+events := inform.Events // e.g. ["1 BOOT", "2 PERIODIC"]
+hasBoot := slices.Contains(events, "1 BOOT")
+hasBootstrap := slices.Contains(events, "0 BOOTSTRAP")
+
+if hasBoot && !hasBootstrap {
+    // 异常重启！提取原因
+    mainReason := paramValues["Device.DeviceInfo.X_VENDOR_MainFaultReason"]
+    detailReason := paramValues["Device.DeviceInfo.X_VENDOR_DetailFaultReason"]
+    // 发布事件 device.reboot.abnormal
+}
+```
+
+**平台差异（故障原因参数路径）**：
+
+| 平台 | MainReason | DetailReason |
+|------|-----------|-------------|
+| 4G LTE | `Device.DeviceInfo.X_BAICELLS_MainFaultReason` | `Device.DeviceInfo.X_BAICELLS_DetailFaultReason` |
+| 5G NR | `Device.Services.FAPService.1.FAPControl.NR.X_BAICELLS_MainFaultReason` | 同级 DetailFaultReason |
+
+---
+
+### G24: 异常重启日志 — 自动收集（新增）
+
+**来源**：《设备异常重启日志功能流程规范文档》§5
+
+**需求**：检测到异常重启后，自动收集设备故障日志。
+
+**新增文件**：
+
+```
+internal/device/rebootlog/
+    model.go              — RebootLogEntry 结构体
+    repository.go         — 接口定义
+    pg_repository.go      — PostgreSQL 实现
+    service.go            — 自动/手动收集逻辑
+    handler.go            — HTTP 处理
+migrations/
+    000XXX_create_device_reboot_logs.up.sql
+```
+
+**数据模型**：
+
+```sql
+CREATE TABLE device_reboot_logs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id       UUID NOT NULL,
+    serial_number   VARCHAR(128) NOT NULL,
+    reboot_time     TIMESTAMPTZ NOT NULL,
+    main_reason     VARCHAR(256),
+    detail_reason   TEXT,
+    collection_mode VARCHAR(20) NOT NULL,  -- auto / manual
+    log_file_path   VARCHAR(512),          -- MinIO 路径
+    log_file_size   BIGINT,
+    status          VARCHAR(20) NOT NULL,  -- detected / collecting / collected / failed
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_reboot_logs_device ON device_reboot_logs (device_id, reboot_time DESC);
+```
+
+**流程**：
+1. 订阅 `device.reboot.abnormal` 事件
+2. 创建 `device_reboot_logs` 记录（status=detected）
+3. 通过 GetParameterValues 获取 FaultLogFile URL
+4. 如有日志文件 → Upload RPC 收集到 MinIO
+5. TransferComplete → 更新 status=collected
+
+---
+
+### G25: 异常重启日志 — 手动收集（新增）
+
+**来源**：《设备异常重启日志功能流程规范文档》§6
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/devices/:id/reboot-logs/collect` | POST | 手动触发重启日志收集 |
+
+**流程**：SetParameterValues 设置 FaultLogURL → 设备主动上传 → TransferComplete 回调。
+
+---
+
+### G26: 异常重启日志 — 列表/导出/清理（新增）
+
+**来源**：《设备异常重启日志功能流程规范文档》§8-§11
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/reboot-logs` | GET | 异常重启日志列表（分页、过滤） |
+| `/api/v1/reboot-logs/:id` | GET | 日志详情 |
+| `/api/v1/reboot-logs/:id/file` | GET | 下载日志文件 |
+| `/api/v1/reboot-logs/export` | POST | 批量导出 |
+
+**清理策略**：
+- 单设备日志上限（如 100 条），超出删除最早记录
+- 全局总量上限（如 100,000 条）
+- 磁盘使用率阈值（如 > 80% 时触发清理）
+- 定时清理任务（cron）
+
+---
+
+### G27: STUN UDP — 心跳保活增强（新增）
+
+**来源**：《STUN-UDPServer业务说明》§5
+
+**当前状态**：`acs/stun/` 模块已实现基础 STUN 功能和 Store。
+
+**增强需求**：
+- UDP 心跳超时检测（超过 2×interval 未收到心跳标记设备 unreachable）
+- 连接状态同步到 `device_info`（通过 InfoSyncer）
+
+---
+
 ## 4. 实施优先级与排期
 
-### Phase 1（基础搭建，~8d）
+### Phase 1 ✅ 已完成（基础搭建）
+
+| 序号 | 功能 | 状态 |
+|------|------|------|
+| G01 | `device_info` 表 + CRUD + API | ✅ 完成 |
+| G03 | 参数��动同步机制 | ✅ 完成 |
+| G02 | 列表 JOIN 查询 + 扩展过滤 | ✅ 完成 |
+| G06 | ��举值接口 | ✅ 完成 |
+| G07 | 多字段模糊搜索 | ✅ 完成 |
+| G08 | 激活/去激活 | ✅ 完成 |
+
+### Phase 2（核心操作，~10d）
 
 | 序号 | 功能 | 工作量 | 依赖 |
 |------|------|--------|------|
-| G01 | `device_info` 表 + CRUD + API | 2d | 迁移 |
-| G03 | 参数自动同步机制 | 2d | G01, Carrier 接口 |
-| G02 | 列表 JOIN 查询 + 扩展过滤 | 2d | G01 |
-| G06 | 枚举值接口 | 0.5d | 无 |
-| G07 | 多字段模糊搜索 | 0.5d | G02 |
-| G08 | 激活/去激活 | 0.5d | 无 |
-
-### Phase 2（功能完善，~7d）
-
-| 序号 | 功能 | 工作量 | 依赖 |
-|------|------|--------|------|
-| G05 | 列自定义配置 | 1d | 迁移 |
-| G04 | 设备列表导出 | 2d | G02 |
 | G09 | 射频开关 | 1d | Carrier 接口 |
+| G04 | 设备列表导出 | 2d | G02 |
+| G21 | 批量 Excel 导入 | 2d | excelize 库 |
+| G22 | 设备预注册 | 1d | G21 |
 | G12 | 设备详情聚合 | 1.5d | alarm/kpi 模块 |
+| G20 | 5G 升级完成事件 | 1d | software 模块 |
+| G05 | 列自定义配置 | 1d | 迁移 |
+
+### Phase 3（日志收集体系，~12d）
+
+| 序号 | 功能 | 工作量 | 依赖 |
+|------|------|--------|------|
+| G15 | 日志收集 — 即时模式 | 3d | Upload RPC, MinIO |
+| G17 | 日志收集 — 平台适配 | 1d | Carrier 接口 |
+| G16 | 日志收集 — 周期模式 | 2d | G15 |
+| G23 | 异常重启 — BOOT 检测 | 1.5d | InformHandler |
+| G24 | 异常重启 — 自动收集 | 2d | G23, Upload RPC |
+| G25 | 异常重启 — 手动收集 | 1d | G24 |
+| G26 | 异常重启 — 列表/导出/清理 | 1.5d | G24 |
+
+### Phase 4（升级增强，~5d）
+
+| 序号 | 功能 | 工作量 | 依赖 |
+|------|------|--------|------|
+| G18 | 固件升级回退 | 2d | software 模块 |
+| G19 | 升级任务挂起/恢复/终止 | 1.5d | G18 |
+| G11 | 报文收集 | 1.5d | Carrier + Upload |
+
+### Phase 5（安全与增强，~5d）
+
+| 序号 | 功能 | 工作量 | 依赖 |
+|------|------|--------|------|
 | G13 | 逻辑删除 | 1.5d | 全局改造 |
-
-### Phase 3（高级操作，~4d）
-
-| 序号 | 功能 | 工作量 | 依赖 |
-|------|------|--------|------|
-| G10 | 日志收集 | 2d | transfer 模块 |
-| G11 | 报文收��� | 2d | Carrier + transfer |
-
-### Phase 4（安全加固）
-
-| 序号 | 功能 | 工作量 | 依赖 |
-|------|------|--------|------|
+| G27 | STUN 心跳增强 | 1d | stun 模块 |
 | G14 | 敏感字段加密 | 3d | 运营商安全要求确认 |
 
 ---
 
-## 5. 与设计文档的差异说明
+## 5. 设计文档来源索引
+
+| 文档 | 路径 | 涉及 Gap 项 |
+|------|------|-----------|
+| 2/4/5G设备列表管理系统 — 后端开发设计文档 | `files/Back-end/2_4_5G设备列表管理系统 - 后端开发设计文档.md` | G01-G14（原始） |
+| 日志收集功能逻辑设计文档 | `files/Back-end/日志收集功能逻辑设计文档.md` | G15, G16, G17 |
+| 设备升级回退流程设计文档 | `files/Back-end/设备升级回退流程设计文档.md` | G18, G19, G20 |
+| 设备注册功能说明 | `files/Back-end/设备注册功能说明.md` | G21, G22 |
+| 设备异常重启日志功能流程规范文档 | `files/Back-end/设备异常重启日志功能流程规范文档.md` | G23, G24, G25, G26 |
+| STUN-UDPServer业务说明 | `files/Back-end/STUN-UDPServer业务说明.md` | G27 |
+| TR069报文全解析 | `files/Back-end/TR069报文全解析.md` | 参数路径参考 |
+| 系统管理模块开发设计文档 | `files/Back-end/系统管理模块开发设计文档.md` | admin 模块（已实现） |
+| 设备注册与设备分组管理系统 | `files/Back-end/设备注册与设备分组管理系统 开发设计文档.md` | G21, G22 + topology（已实现） |
+
+---
+
+## 6. 与设计文档的差异说明
 
 | 设计文档内容 | 本方案处理 | 理由 |
 |-------------|----------|------|
@@ -653,3 +912,4 @@ CREATE INDEX idx_devices_deleted ON devices (deleted_at) WHERE deleted_at IS NUL
 | 逻辑删除 `is_delete` | 使用 `deleted_at` 时间戳 | 更灵活，可知删除时间 |
 | 独立操作日志表 | 复用 `syslog/` 审计日志模块 | 避免重复建设 |
 | 射频参数仅在主表 | 同时保留 `device_parameters`（完整参数树）+ `device_info`（快捷列） | `device_parameters` 是 TR069 标准模型，`device_info` 是查询优化 |
+| 外键 REFERENCES devices(id) | 无外键约束，应用层维护 1:1 | PG 分区表不支持被外键引用 |

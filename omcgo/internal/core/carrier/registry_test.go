@@ -32,6 +32,7 @@ func (m *registryMockCarrier) ProvisioningTemplates(_ model.Technology) []*Provi
 func (m *registryMockCarrier) KPIDefinitions(_ model.Technology) []*KPIDefinition            { return nil }
 func (m *registryMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity             { return 0 }
 func (m *registryMockCarrier) ValidateParameter(_ string, _ string) error                    { return nil }
+func (m *registryMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string      { return nil }
 
 // ---------------------------------------------------------------------------
 // Tests

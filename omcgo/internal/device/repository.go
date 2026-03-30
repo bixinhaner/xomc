@@ -15,7 +15,15 @@ type DeviceFilter struct {
 	Status     *model.DeviceStatus
 	OUI        *string
 	SN         *string // exact match on serial_number
-	Search     *string // fuzzy search on serial_number/site_name
+	Search     *string // fuzzy search across serial_number/site_name/manufacturer/device_name/address
+
+	// Extended filters (device_info / devices additional fields)
+	Manufacturer  *string // devices.manufacturer exact match
+	ProductClass  *string // devices.product_class exact match
+	RFStatus      *string // device_info.rf_status exact match
+	CellStatus    *string // device_info.cell_status exact match
+	ProjectStatus *string // device_info.project_status exact match
+
 	model.ListRequest
 }
 

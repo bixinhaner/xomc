@@ -82,6 +82,32 @@ func (c *CMCCCarrier) ValidateParameter(path string, value string) error {
 // SupportsDirectConnection returns true as CMCC supports NE direct connection (网元直连).
 func (c *CMCCCarrier) SupportsDirectConnection() bool { return true }
 
+// GetInfoParamMapping returns TR069 parameter path → device_info column mapping for CMCC.
+func (c *CMCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]string {
+	if tech == model.TechLTE {
+		return map[string]string{
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":          "eci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":                 "pci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":              "freq_point",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":               "bandwidth",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower":      "transmit_power",
+			"Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID":            "plmn",
+			"Device.DeviceInfo.X_CMCC_MACAddress":                                           "mac",
+			"Device.DeviceInfo.HardwareVersion":                                              "hardware_version",
+		}
+	}
+	// NR mapping
+	return map[string]string{
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":    "cell_id",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":             "pci",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":       "freq_point",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth":  "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":   "plmn",
+		"Device.DeviceInfo.X_CMCC_MACAddress":                                  "mac",
+		"Device.DeviceInfo.HardwareVersion":                                     "hardware_version",
+	}
+}
+
 // alarmSeverityMap maps CMCC alarm codes to standard severity levels.
 var alarmSeverityMap = map[string]model.AlarmSeverity{
 	"CELL_UNAVAILABLE":   model.AlarmCritical,

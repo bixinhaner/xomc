@@ -78,6 +78,29 @@ func (c *CTCCCarrier) ValidateParameter(path string, value string) error {
 	return nil
 }
 
+// GetInfoParamMapping returns TR069 parameter path → device_info column mapping for CTCC.
+func (c *CTCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]string {
+	if tech == model.TechLTE {
+		return map[string]string{
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":          "eci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":                 "pci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":              "freq_point",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":               "bandwidth",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower":      "transmit_power",
+			"Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID":            "plmn",
+			"Device.DeviceInfo.HardwareVersion":                                              "hardware_version",
+		}
+	}
+	return map[string]string{
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":    "cell_id",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":             "pci",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":       "freq_point",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth":  "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":   "plmn",
+		"Device.DeviceInfo.HardwareVersion":                                     "hardware_version",
+	}
+}
+
 // alarmSeverityMap maps CTCC alarm codes to standard severity levels.
 // CTCC uses its own alarm code system but maps to the same standard severities.
 var alarmSeverityMap = map[string]model.AlarmSeverity{

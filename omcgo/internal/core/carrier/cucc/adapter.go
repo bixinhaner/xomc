@@ -75,6 +75,22 @@ func (c *CUCCCarrier) ValidateParameter(path string, value string) error {
 	return nil
 }
 
+// GetInfoParamMapping returns TR069 parameter path → device_info column mapping for CUCC.
+// CUCC only supports NR (5G).
+func (c *CUCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]string {
+	if tech != model.TechNR {
+		return nil
+	}
+	return map[string]string{
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":    "cell_id",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":             "pci",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":       "freq_point",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth":  "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":   "plmn",
+		"Device.DeviceInfo.HardwareVersion":                                     "hardware_version",
+	}
+}
+
 // alarmSeverityMap maps CUCC alarm codes to standard severity levels.
 var alarmSeverityMap = map[string]model.AlarmSeverity{
 	// Critical alarms
