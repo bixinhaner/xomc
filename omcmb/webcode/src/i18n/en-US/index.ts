@@ -255,7 +255,7 @@ const messages: Record<string, string> = {
   'nav.system.deviceClass':   'Device Classification',
   'nav.system.users':         'User Management',
   'nav.system.groups':        'Group Management',
-  'nav.system.roles':         'Role Permission',
+  'nav.system.roles':         'Role',
   'nav.system.operationLog':  'Operation Log',
   'nav.system.config':        'System Config',
   'nav.system.dataDict':      'Data Dictionary',
@@ -822,6 +822,14 @@ const messages: Record<string, string> = {
   'role.roleNamePlaceholder': 'Please enter role name',
   'role.descriptionPlaceholder': 'Please enter description',
   'role.descriptionMaxLength': 'Description max 500 characters',
+  // Menu permissions
+  'role.menuPermission':      'Menu Permission',
+  'role.selectAll':           'Select All',
+  'role.deselectAll':         'Deselect All',
+  'role.readOnly':            'Read Only',
+  'role.readWrite':           'Read Write',
+  'role.selectAllRead':       'Select All Read',
+  'role.selectAllWrite':      'Select All Write',
 
   // -------------------------------------------------------------------------
   // Log management

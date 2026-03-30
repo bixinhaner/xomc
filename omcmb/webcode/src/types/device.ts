@@ -143,6 +143,10 @@ export interface DeviceGroup {
   description: string;
   /** 是否为内置设备组：1=内置, 0=自定义 */
   builtIn: number;
+  /** 基站制式：LTE, 5G, GSM 等 */
+  networkType?: string;
+  /** 产品类型 */
+  productType?: string;
 }
 
 export interface DeviceFilter {

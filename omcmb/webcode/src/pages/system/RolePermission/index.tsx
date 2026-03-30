@@ -13,6 +13,9 @@ import {
   Radio,
   Space,
   Menu,
+  Select,
+  Checkbox,
+  Divider,
 } from 'antd';
 import type { TreeDataNode, MenuProps } from 'antd';
 import {
@@ -21,6 +24,8 @@ import {
   DeleteOutlined,
   EyeOutlined,
   MoreOutlined,
+  DownOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -38,8 +43,11 @@ import type { Role } from '@/types/system';
 import type { DeviceGroup } from '@/types/device';
 import { useT } from '@/hooks/useT';
 
-// 权限类型
-type PermissionLevel = 'none' | 'read' | 'write';
+// 权限类型（分别跟踪只读和读写）
+interface PermissionState {
+  read: boolean;   // 只读权限
+  write: boolean;  // 读写权限
+}
 
 // 权限子菜单项定义
 interface PermissionSubItem {
@@ -169,23 +177,81 @@ const PERMISSION_MODULES: PermissionModule[] = [
   },
 ];
 
-// 构建设备组树形数据
-const buildDeviceGroupTreeData = (groups: DeviceGroup[]): TreeDataNode[] => {
+// 基站制式选项
+const NETWORK_TYPE_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: 'LTE (4G)', value: 'LTE' },
+  { label: '5G NR', value: '5G' },
+  { label: 'GSM (2G)', value: 'GSM' },
+];
+
+// 产品类型选项
+const PRODUCT_TYPE_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: '宏基站', value: 'Macro' },
+  { label: '小基站', value: 'Small Cell' },
+  { label: '皮基站', value: 'Pico' },
+];
+
+// 构建设备组树形数据（带筛选）
+const buildDeviceGroupTreeData = (
+  groups: DeviceGroup[],
+  networkTypeFilter?: string,
+  productTypeFilter?: string
+): TreeDataNode[] => {
+  // 筛选二级节点
+  let filteredChildGroups = groups.filter((g) => g.parentId);
+
+  // 应用筛选条件
+  if (networkTypeFilter) {
+    filteredChildGroups = filteredChildGroups.filter(
+      (g) => g.networkType === networkTypeFilter || !g.networkType
+    );
+  }
+  if (productTypeFilter) {
+    filteredChildGroups = filteredChildGroups.filter(
+      (g) => g.productType === productTypeFilter || !g.productType
+    );
+  }
+
   // 一级节点
   const rootGroups = groups.filter((g) => !g.parentId);
-  // 二级节点
-  const childGroups = groups.filter((g) => g.parentId);
 
-  return rootGroups.map((root) => ({
-    key: root.id,
-    title: root.name,
-    children: childGroups
-      .filter((child) => child.parentId === root.id)
-      .map((child) => ({
-        key: child.id,
-        title: child.name,
-      })),
-  }));
+  return rootGroups
+    .map((root) => {
+      const children = filteredChildGroups
+        .filter((child) => child.parentId === root.id)
+        .map((child) => ({
+          key: child.id,
+          title: (
+            <span>
+              {child.name}
+              {child.networkType && (
+                <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>
+                  {child.networkType}
+                </Tag>
+              )}
+              {child.productType && (
+                <Tag color="green" style={{ marginLeft: 4, fontSize: 10 }}>
+                  {child.productType}
+                </Tag>
+              )}
+            </span>
+          ),
+        }));
+
+      // 如果没有子节点且不是自定义组，则不显示
+      if (children.length === 0 && root.builtIn === 1) {
+        return null;
+      }
+
+      return {
+        key: root.id,
+        title: root.name,
+        children,
+      };
+    })
+    .filter((node): node is TreeDataNode => node !== null);
 };
 
 export default function RoleManagement() {
@@ -200,12 +266,14 @@ export default function RoleManagement() {
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [form] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  // 权限配置：Record<模块key, 权限级别>
-  const [permissionLevels, setPermissionLevels] = useState<Record<string, PermissionLevel>>({});
+  // 权限配置：Record<模块key, { read: boolean, write: boolean }>
+  const [permissionLevels, setPermissionLevels] = useState<Record<string, PermissionState>>({});
   // 设备组选择
   const [selectedDeviceGroupIds, setSelectedDeviceGroupIds] = useState<string[]>([]);
-  // 当前选中的权限模块（用于左右分栏布局）
-  const [activeModuleKey, setActiveModuleKey] = useState<string>(PERMISSION_MODULES[0].key);
+  // 设备组筛选条件
+  const [deviceGroupNetworkType, setDeviceGroupNetworkType] = useState<string>('');
+  const [deviceGroupProductType, setDeviceGroupProductType] = useState<string>('');
+
 
   const { data, isLoading, refetch } = useRoles({
     roleName: filters.roleName as string | undefined,
@@ -215,11 +283,32 @@ export default function RoleManagement() {
 
   const { data: allDeviceGroups } = useAllDeviceGroups();
 
-  // 设备组树形数据（一级+二级节点）
+  // 设备组树形数据（一级+二级节点，支持筛选）
   const deviceGroupTreeData = useMemo(
-    () => buildDeviceGroupTreeData(allDeviceGroups ?? []),
-    [allDeviceGroups]
+    () => buildDeviceGroupTreeData(allDeviceGroups ?? [], deviceGroupNetworkType, deviceGroupProductType),
+    [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductType]
   );
+
+  // 筛选后的二级节点ID列表
+  const filteredSecondLevelIds = useMemo(() => {
+    let filtered = (allDeviceGroups ?? []).filter((g) => g.parentId);
+    if (deviceGroupNetworkType) {
+      filtered = filtered.filter((g) => g.networkType === deviceGroupNetworkType || !g.networkType);
+    }
+    if (deviceGroupProductType) {
+      filtered = filtered.filter((g) => g.productType === deviceGroupProductType || !g.productType);
+    }
+    return filtered.map((g) => g.id);
+  }, [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductType]);
+
+  // 筛选后的一级节点ID列表（用于全选时同时选中父节点）
+  const filteredFirstLevelIds = useMemo(() => {
+    const secondLevelNodes = (allDeviceGroups ?? []).filter((g) =>
+      filteredSecondLevelIds.includes(g.id)
+    );
+    const parentIds = new Set(secondLevelNodes.map((g) => g.parentId).filter(Boolean));
+    return Array.from(parentIds) as string[];
+  }, [allDeviceGroups, filteredSecondLevelIds]);
 
   // 所有二级节点 ID（用于验证是否至少选择了一个）
   const allSecondLevelIds = useMemo(
@@ -252,13 +341,13 @@ export default function RoleManagement() {
 
   // 将 permissionLevels 转换为 permissions 数组（用于提交）
   // 格式：["device.list:read", "device.list:write", ...]
-  const permissionsToArray = useCallback((levels: Record<string, PermissionLevel>): string[] => {
+  const permissionsToArray = useCallback((levels: Record<string, PermissionState>): string[] => {
     const result: string[] = [];
-    for (const [key, level] of Object.entries(levels)) {
-      if (level === 'read' || level === 'write') {
+    for (const [key, state] of Object.entries(levels)) {
+      if (state.read) {
         result.push(`${key}:read`);
       }
-      if (level === 'write') {
+      if (state.write) {
         result.push(`${key}:write`);
       }
     }
@@ -266,26 +355,20 @@ export default function RoleManagement() {
   }, []);
 
   // 将 permissions 数组转换为 permissionLevels
-  const arrayToPermissionLevels = useCallback((permissions: string[]): Record<string, PermissionLevel> => {
-    const result: Record<string, PermissionLevel> = {};
+  const arrayToPermissionLevels = useCallback((permissions: string[]): Record<string, PermissionState> => {
+    const result: Record<string, PermissionState> = {};
 
     for (const key of allPermissionKeys) {
       const hasRead = permissions.includes(`${key}:read`);
       const hasWrite = permissions.includes(`${key}:write`);
-      if (hasWrite) {
-        result[key] = 'write';
-      } else if (hasRead) {
-        result[key] = 'read';
-      } else {
-        result[key] = 'none';
-      }
+      result[key] = { read: hasRead, write: hasWrite };
     }
     return result;
   }, [allPermissionKeys]);
 
   // 检查是否至少选择了一个权限
   const hasAnyPermission = useMemo(
-    () => Object.values(permissionLevels).some((level) => level !== 'none'),
+    () => Object.values(permissionLevels).some((level) => level.read || level.write),
     [permissionLevels]
   );
 
@@ -505,7 +588,7 @@ export default function RoleManagement() {
       key: 'roleName',
       title: t('role.roleName'),
       dataIndex: 'roleName',
-      width: 200,
+      width: 150,
       render: (val, record) => {
         const role = record as Role;
         return (
@@ -516,179 +599,283 @@ export default function RoleManagement() {
         );
       },
     },
+    { key: 'roleCode', title: '角色标识', dataIndex: 'roleCode', width: 120, render: (v) => v || '-' },
+    {
+      key: 'dataPermission',
+      title: '数据权限',
+      dataIndex: 'deviceGroupIds',
+      width: 100,
+      render: (val) => {
+        const ids = val as string[];
+        const count = ids?.length || 0;
+        return <Tag color={count > 0 ? 'blue' : 'default'}>{count} 个设备组</Tag>;
+      },
+    },
+    {
+      key: 'funcPermission',
+      title: '功能权限',
+      dataIndex: 'permissions',
+      width: 100,
+      render: (val) => {
+        const perms = val as string[];
+        const count = perms?.length || 0;
+        return <Tag color={count > 0 ? 'green' : 'default'}>{count} 项权限</Tag>;
+      },
+    },
     {
       key: 'batchOperation',
-      title: t('role.batchOperation'),
+      title: '批量操作权限',
       dataIndex: 'batchOperation',
-      width: 120,
+      width: 110,
       render: (val) => (
         <Tag color={val === 1 ? 'green' : 'default'}>
-          {val === 1 ? t('common.yes') : t('common.no')}
+          {val === 1 ? '批量操作' : '单一操作'}
         </Tag>
       ),
     },
-    { key: 'updUser', title: t('role.updUser'), dataIndex: 'updUser', width: 150 },
+    { key: 'description', title: '角色描述', dataIndex: 'description', width: 150, ellipsis: true, render: (v) => v || '-' },
+    { key: 'createUser', title: '创建人', dataIndex: 'createUser', width: 100, render: (v) => v || '-' },
     {
-      key: 'updTime',
-      title: t('role.updTime'),
-      dataIndex: 'updTime',
-      width: 180,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+      key: 'createTime',
+      title: '创建时间',
+      dataIndex: 'createTime',
+      width: 160,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
     },
-    { key: 'description', title: t('role.description'), dataIndex: 'description', ellipsis: true },
+    { key: 'updateUser', title: '更新人', dataIndex: 'updateUser', width: 100, render: (v) => v || '-' },
+    {
+      key: 'updateTime',
+      title: '更新时间',
+      dataIndex: 'updateTime',
+      width: 160,
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
+    },
   ], [t, form, isBuiltIn, handleDelete]);
 
-  // 渲染权限配置卡片（左右分栏布局）
-  const renderPermissionConfig = (readOnly = false) => {
-    // 渲染单个权限项
-    const renderPermissionItem = (moduleKey: string, itemKey: string, title: string) => {
-      const fullKey = `${moduleKey}.${itemKey}`;
-      const level = permissionLevels[fullKey] || 'none';
+  // 构建菜单权限树形数据（带只读/读写复选框）
+  const buildPermissionTreeData = useCallback((
+    readOnly: boolean,
+    onReadChange: (fullKey: string, checked: boolean, isParent: boolean, moduleKey?: string) => void,
+    onWriteChange: (fullKey: string, checked: boolean, isParent: boolean, moduleKey?: string) => void
+  ): TreeDataNode[] => {
+    return PERMISSION_MODULES.map((module) => {
+      const parentKey = module.key;
+      const allChildKeys = module.children.map((child) => `${module.key}.${child.key}`);
 
-      return (
-        <div
-          key={fullKey}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 12px',
-            borderBottom: '1px solid var(--color-border-secondary)',
-          }}
-        >
-          <span>{title}</span>
-          {readOnly ? (
-            <Tag color={level === 'write' ? 'green' : level === 'read' ? 'blue' : 'default'}>
-              {level === 'write'
-                ? t('role.permission.write')
-                : level === 'read'
-                  ? t('role.permission.read')
-                  : t('role.permission.none')}
-            </Tag>
-          ) : (
-            <Radio.Group
-              value={level}
-              onChange={(e) => {
-                setPermissionLevels((prev) => ({
-                  ...prev,
-                  [fullKey]: e.target.value,
-                }));
-              }}
-              size="small"
-            >
-              <Radio.Button value="none">{t('role.permission.none')}</Radio.Button>
-              <Radio.Button value="read">{t('role.permission.read')}</Radio.Button>
-              <Radio.Button value="write">{t('role.permission.write')}</Radio.Button>
-            </Radio.Group>
-          )}
-        </div>
-      );
-    };
+      // 计算一级菜单的复选框状态
+      const childReadStates = allChildKeys.map((key) => permissionLevels[key]?.read ?? false);
+      const childWriteStates = allChildKeys.map((key) => permissionLevels[key]?.write ?? false);
 
-    // 当前选中的模块
-    const activeModule = PERMISSION_MODULES.find((m) => m.key === activeModuleKey) || PERMISSION_MODULES[0];
+      const allReadChecked = childReadStates.every(Boolean) && allChildKeys.length > 0;
+      const someReadChecked = childReadStates.some(Boolean) && !allReadChecked;
+      const allWriteChecked = childWriteStates.every(Boolean) && allChildKeys.length > 0;
+      const someWriteChecked = childWriteStates.some(Boolean) && !allWriteChecked;
 
-    // 左侧模块菜单
-    const moduleMenuItems: MenuProps['items'] = PERMISSION_MODULES.map((module) => {
-      // 计算该模块下有权限的子项数量
-      const configuredCount = module.children.filter((child) => {
+      // 构建二级菜单节点
+      const childNodes = module.children.map((child) => {
         const fullKey = `${module.key}.${child.key}`;
-        return permissionLevels[fullKey] && permissionLevels[fullKey] !== 'none';
-      }).length;
+        const readChecked = permissionLevels[fullKey]?.read ?? false;
+        const writeChecked = permissionLevels[fullKey]?.write ?? false;
+
+        return {
+          key: fullKey,
+          title: (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, width: '100%' }}>
+              <span style={{ minWidth: 100 }}>{t(child.titleKey)}</span>
+              <Checkbox
+                checked={readChecked}
+                onChange={(e) => onReadChange(fullKey, e.target.checked, false)}
+                disabled={readOnly}
+                style={{ marginLeft: 'auto' }}
+              >
+                <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.readOnly')}</span>
+              </Checkbox>
+              <Checkbox
+                checked={writeChecked}
+                onChange={(e) => onWriteChange(fullKey, e.target.checked, false)}
+                disabled={readOnly}
+              >
+                <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.readWrite')}</span>
+              </Checkbox>
+            </div>
+          ),
+          isLeaf: true,
+        };
+      });
 
       return {
-        key: module.key,
-        label: (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <span>{t(module.titleKey)}</span>
-            {configuredCount > 0 && (
-              <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>
-                {configuredCount}/{module.children.length}
-              </Tag>
-            )}
+        key: parentKey,
+        title: (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, width: '100%' }}>
+            <span style={{ fontWeight: 500, minWidth: 100 }}>{t(module.titleKey)}</span>
+            <Checkbox
+              checked={allReadChecked}
+              indeterminate={someReadChecked}
+              onChange={(e) => onReadChange(parentKey, e.target.checked, true, module.key)}
+              disabled={readOnly}
+              style={{ marginLeft: 'auto' }}
+            >
+              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.readOnly')}</span>
+            </Checkbox>
+            <Checkbox
+              checked={allWriteChecked}
+              indeterminate={someWriteChecked}
+              onChange={(e) => onWriteChange(parentKey, e.target.checked, true, module.key)}
+              disabled={readOnly}
+            >
+              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.readWrite')}</span>
+            </Checkbox>
           </div>
         ),
+        children: childNodes,
       };
     });
+  }, [permissionLevels, t]);
 
-    // 一键设置当前模块所有权限
-    const setModuleAllPermissions = (level: PermissionLevel) => {
+  // 处理只读复选框变化
+  const handleReadChange = useCallback((fullKey: string, checked: boolean, isParent: boolean, moduleKey?: string) => {
+    setPermissionLevels((prev) => {
+      const newLevels = { ...prev };
+
+      if (isParent && moduleKey) {
+        // 一级菜单：级联到所有子菜单
+        const module = PERMISSION_MODULES.find((m) => m.key === moduleKey);
+        if (module) {
+          for (const child of module.children) {
+            const childKey = `${moduleKey}.${child.key}`;
+            newLevels[childKey] = {
+              ...(newLevels[childKey] ?? { read: false, write: false }),
+              read: checked,
+            };
+          }
+        }
+      } else {
+        // 二级菜单：只更新当前项
+        newLevels[fullKey] = {
+          ...(newLevels[fullKey] ?? { read: false, write: false }),
+          read: checked,
+        };
+      }
+
+      return newLevels;
+    });
+  }, []);
+
+  // 处理读写复选框变化
+  const handleWriteChange = useCallback((fullKey: string, checked: boolean, isParent: boolean, moduleKey?: string) => {
+    setPermissionLevels((prev) => {
+      const newLevels = { ...prev };
+
+      if (isParent && moduleKey) {
+        // 一级菜单：级联到所有子菜单
+        const module = PERMISSION_MODULES.find((m) => m.key === moduleKey);
+        if (module) {
+          for (const child of module.children) {
+            const childKey = `${moduleKey}.${child.key}`;
+            newLevels[childKey] = {
+              ...(newLevels[childKey] ?? { read: false, write: false }),
+              write: checked,
+            };
+          }
+        }
+      } else {
+        // 二级菜单：只更新当前项
+        newLevels[fullKey] = {
+          ...(newLevels[fullKey] ?? { read: false, write: false }),
+          write: checked,
+        };
+      }
+
+      return newLevels;
+    });
+  }, []);
+
+  // 渲染菜单权限配置（树形结构）
+  const renderPermissionConfig = (readOnly = false) => {
+    // 全选所有权限（只读）
+    const handleSelectAllRead = () => {
       setPermissionLevels((prev) => {
         const newLevels = { ...prev };
-        for (const child of activeModule.children) {
-          const fullKey = `${activeModule.key}.${child.key}`;
-          newLevels[fullKey] = level;
+        for (const module of PERMISSION_MODULES) {
+          for (const child of module.children) {
+            const fullKey = `${module.key}.${child.key}`;
+            newLevels[fullKey] = {
+              ...(newLevels[fullKey] ?? { read: false, write: false }),
+              read: true,
+            };
+          }
         }
         return newLevels;
       });
     };
 
+    // 全选所有权限（读写）
+    const handleSelectAllWrite = () => {
+      setPermissionLevels((prev) => {
+        const newLevels = { ...prev };
+        for (const module of PERMISSION_MODULES) {
+          for (const child of module.children) {
+            const fullKey = `${module.key}.${child.key}`;
+            newLevels[fullKey] = {
+              ...(newLevels[fullKey] ?? { read: false, write: false }),
+              write: true,
+            };
+          }
+        }
+        return newLevels;
+      });
+    };
+
+    // 取消全选所有权限
+    const handleDeselectAll = () => {
+      setPermissionLevels((prev) => {
+        const newLevels = { ...prev };
+        for (const module of PERMISSION_MODULES) {
+          for (const child of module.children) {
+            const fullKey = `${module.key}.${child.key}`;
+            newLevels[fullKey] = { read: false, write: false };
+          }
+        }
+        return newLevels;
+      });
+    };
+
+    // 构建树形数据
+    const treeData = buildPermissionTreeData(
+      readOnly,
+      handleReadChange,
+      handleWriteChange
+    );
+
     return (
       <Card
-        title={t('role.permissionConfig')}
+        title={t('role.menuPermission')}
         size="small"
         style={{ marginTop: 16 }}
-        extra={!readOnly && !hasAnyPermission ? (
-          <span style={{ color: 'var(--color-error)', fontSize: 12 }}>
-            {t('role.pleaseSelectPermission')}
-          </span>
-        ) : null}
+        extra={
+          !readOnly ? (
+            <Space>
+              <Button size="small" onClick={handleSelectAllRead}>
+                {t('role.selectAllRead')}
+              </Button>
+              <Button size="small" onClick={handleSelectAllWrite}>
+                {t('role.selectAllWrite')}
+              </Button>
+              <Button size="small" onClick={handleDeselectAll}>
+                {t('role.deselectAll')}
+              </Button>
+            </Space>
+          ) : null
+        }
       >
-        <div style={{ display: 'flex', border: '1px solid var(--color-border)', borderRadius: 6, minHeight: 300 }}>
-          {/* 左侧：模块列表 */}
-          <div style={{ width: 160, borderRight: '1px solid var(--color-border)', background: 'var(--color-fill-quaternary)' }}>
-            <Menu
-              mode="vertical"
-              selectedKeys={[activeModuleKey]}
-              onClick={({ key }) => setActiveModuleKey(key)}
-              items={moduleMenuItems}
-              style={{ border: 'none', background: 'transparent' }}
-            />
-          </div>
-          {/* 右侧：权限配置 */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            {/* 一键配置操作栏 */}
-            {!readOnly && (
-              <div style={{
-                padding: '8px 12px',
-                borderBottom: '1px solid var(--color-border)',
-                background: 'var(--color-fill-quaternary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}>
-                <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                  {t('role.batchSetPermissions')}:
-                </span>
-                <Button
-                  size="small"
-                  onClick={() => setModuleAllPermissions('read')}
-                >
-                  {t('role.setAllRead')}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setModuleAllPermissions('write')}
-                >
-                  {t('role.setAllWrite')}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setModuleAllPermissions('none')}
-                >
-                  {t('role.setAllNone')}
-                </Button>
-              </div>
-            )}
-            {/* 权限列表 */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
-              <div style={{ padding: '8px 0' }}>
-                {activeModule.children.map((child) =>
-                  renderPermissionItem(activeModule.key, child.key, t(child.titleKey))
-                )}
-              </div>
-            </div>
-          </div>
+        <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, maxHeight: 400, overflow: 'auto' }}>
+          <Tree
+            treeData={treeData}
+            defaultExpandAll
+            selectable={false}
+            showIcon={false}
+            blockNode
+          />
         </div>
       </Card>
     );
@@ -696,10 +883,39 @@ export default function RoleManagement() {
 
   // 渲染设备组树形选择
   const renderDeviceGroupTree = (readOnly = false) => {
-    // 只检查二级节点是否被选中
+    // 只检查二级节点是否被选中（基于筛选后的数据）
     const selectedSecondLevelCount = selectedDeviceGroupIds.filter((id) =>
-      allSecondLevelIds.includes(id)
+      filteredSecondLevelIds.includes(id)
     ).length;
+
+    // 全选/取消全选
+    const handleSelectAll = (checked: boolean) => {
+      if (checked) {
+        // 选中所有筛选后的节点（包括一级和二级）
+        setSelectedDeviceGroupIds((prev) => {
+          const newIds = new Set(prev);
+          // 添加一级节点
+          filteredFirstLevelIds.forEach((id) => newIds.add(id));
+          // 添加二级节点
+          filteredSecondLevelIds.forEach((id) => newIds.add(id));
+          return Array.from(newIds);
+        });
+      } else {
+        // 取消选中所有筛选后的节点（包括一级和二级）
+        setSelectedDeviceGroupIds((prev) =>
+          prev.filter((id) => !filteredSecondLevelIds.includes(id) && !filteredFirstLevelIds.includes(id))
+        );
+      }
+    };
+
+    // 是否全选（基于筛选后的数据）
+    const isAllSelected =
+      filteredSecondLevelIds.length > 0 &&
+      filteredSecondLevelIds.every((id) => selectedDeviceGroupIds.includes(id));
+
+    // 是否部分选中
+    const isIndeterminate =
+      selectedSecondLevelCount > 0 && selectedSecondLevelCount < filteredSecondLevelIds.length;
 
     return (
       <Form.Item
@@ -719,17 +935,58 @@ export default function RoleManagement() {
             )}
           </Space>
         ) : (
-          <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: 8, maxHeight: 300, overflow: 'auto' }}>
-            <Tree
-              checkable
-              checkedKeys={selectedDeviceGroupIds}
-              treeData={deviceGroupTreeData}
-              defaultExpandAll
-              onCheck={(checked) => {
-                setSelectedDeviceGroupIds(checked as string[]);
+          <div style={{ border: '1px solid var(--color-border)', borderRadius: 6 }}>
+            {/* 筛选区域 */}
+            <div
+              style={{
+                padding: '8px 12px',
+                borderBottom: '1px solid var(--color-border)',
+                background: 'var(--color-fill-quaternary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
               }}
-              selectable={false}
-            />
+            >
+              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>筛选：</span>
+              <Select
+                size="small"
+                style={{ width: 120 }}
+                value={deviceGroupNetworkType}
+                onChange={(val) => setDeviceGroupNetworkType(val)}
+                options={NETWORK_TYPE_OPTIONS}
+                placeholder="基站制式"
+              />
+              <Select
+                size="small"
+                style={{ width: 120 }}
+                value={deviceGroupProductType}
+                onChange={(val) => setDeviceGroupProductType(val)}
+                options={PRODUCT_TYPE_OPTIONS}
+                placeholder="产品类型"
+              />
+              <Divider type="vertical" style={{ height: 20, margin: 0 }} />
+              <Checkbox
+                checked={isAllSelected}
+                indeterminate={isIndeterminate}
+                onChange={(e) => handleSelectAll(e.target.checked)}
+              >
+                全选
+              </Checkbox>
+            </div>
+            {/* 树形选择区域 */}
+            <div style={{ padding: 8, maxHeight: 280, overflow: 'auto' }}>
+              <Tree
+                checkable
+                checkedKeys={selectedDeviceGroupIds}
+                treeData={deviceGroupTreeData}
+                defaultExpandAll
+                onCheck={(checked) => {
+                  setSelectedDeviceGroupIds(checked as string[]);
+                }}
+                selectable={false}
+              />
+            </div>
           </div>
         )}
       </Form.Item>
@@ -920,11 +1177,17 @@ export default function RoleManagement() {
           <Form.Item label={t('role.userCount')}>
             <span>{selectedRole?.userCount ?? 0}</span>
           </Form.Item>
-          <Form.Item label={t('role.updUser')}>
-            <span>{selectedRole?.updUser ?? '-'}</span>
+          <Form.Item label="创建人">
+            <span>{selectedRole?.createUser ?? '-'}</span>
           </Form.Item>
-          <Form.Item label={t('role.updTime')}>
-            <span>{selectedRole?.updTime ? new Date(selectedRole.updTime).toLocaleString('zh-CN') : '-'}</span>
+          <Form.Item label="创建时间">
+            <span>{selectedRole?.createTime ? new Date(selectedRole.createTime).toLocaleString('zh-CN') : '-'}</span>
+          </Form.Item>
+          <Form.Item label="更新人">
+            <span>{selectedRole?.updateUser ?? '-'}</span>
+          </Form.Item>
+          <Form.Item label="更新时间">
+            <span>{selectedRole?.updateTime ? new Date(selectedRole.updateTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
           {renderPermissionConfig(true)}
         </Form>

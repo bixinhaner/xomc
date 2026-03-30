@@ -23,79 +23,219 @@ export const mockPermissions: Permission[] = [
   { id: 'perm-020', permCode: 'backup:manage', permName: '管理备份', module: '备份管理', description: '创建和管理备份任务' },
 ];
 
+// 生成所有权限的读写权限（格式：module.subItem:read/write）
+const generateAllPermissions = (): string[] => {
+  const perms: string[] = [];
+  const modules = [
+    { key: 'device', children: ['list', 'register', 'group', 'detail', 'ne', 'monitor', 'commission', 'stats', 'import', 'rules'] },
+    { key: 'alarm', children: ['current', 'history', 'statistics', 'rules', 'library', 'sync'] },
+    { key: 'performance', children: ['kpiStandard', 'kpiStation', 'extraction', 'charts', 'threshold', 'files', 'taskConfig'] },
+    { key: 'software', children: ['version', 'upgradePlan', 'activation', 'firmware'] },
+    { key: 'file', children: ['configRetrieval', 'configDistribution', 'logRetrieval', 'perfRetrieval', 'mrRetrieval', 'userFiles', 'deviceFiles'] },
+    { key: 'log', children: ['device', 'exception', 'event', 'operation', 'system', 'config'] },
+    { key: 'system', children: ['deviceClass', 'users', 'groups', 'roles', 'operationLog', 'config', 'dataDict', 'notifications'] },
+    { key: 'report', children: ['lteStandard', 'station', 'historicalKpi', 'pollStats'] },
+    { key: 'ops', children: ['templates', 'commands', 'tasks', 'networkDiagnosis', 'downloads'] },
+  ];
+  for (const mod of modules) {
+    for (const child of mod.children) {
+      perms.push(`${mod.key}.${child}:read`);
+      perms.push(`${mod.key}.${child}:write`);
+    }
+  }
+  return perms;
+};
+
+// 生成只读权限
+const generateReadPermissions = (moduleKeys: string[]): string[] => {
+  const perms: string[] = [];
+  const modules = [
+    { key: 'device', children: ['list', 'register', 'group', 'detail', 'ne', 'monitor', 'commission', 'stats', 'import', 'rules'] },
+    { key: 'alarm', children: ['current', 'history', 'statistics', 'rules', 'library', 'sync'] },
+    { key: 'performance', children: ['kpiStandard', 'kpiStation', 'extraction', 'charts', 'threshold', 'files', 'taskConfig'] },
+    { key: 'software', children: ['version', 'upgradePlan', 'activation', 'firmware'] },
+    { key: 'file', children: ['configRetrieval', 'configDistribution', 'logRetrieval', 'perfRetrieval', 'mrRetrieval', 'userFiles', 'deviceFiles'] },
+    { key: 'log', children: ['device', 'exception', 'event', 'operation', 'system', 'config'] },
+    { key: 'system', children: ['deviceClass', 'users', 'groups', 'roles', 'operationLog', 'config', 'dataDict', 'notifications'] },
+    { key: 'report', children: ['lteStandard', 'station', 'historicalKpi', 'pollStats'] },
+    { key: 'ops', children: ['templates', 'commands', 'tasks', 'networkDiagnosis', 'downloads'] },
+  ];
+  for (const mod of modules) {
+    if (moduleKeys.includes(mod.key)) {
+      for (const child of mod.children) {
+        perms.push(`${mod.key}.${child}:read`);
+      }
+    }
+  }
+  return perms;
+};
+
 export const mockRoles: Role[] = [
   {
     id: 'role-001',
     roleName: '系统管理员',
+    roleCode: 'SYSTEM_ADMIN',
     batchOperation: 1,
     description: '拥有所有权限，可管理系统所有功能',
-    permissions: mockPermissions.map((p) => p.permCode),
+    permissions: generateAllPermissions(),
+    deviceGroupIds: ['dg-001', 'dg-002', 'dg-003', 'dg-004'],
     userCount: 2,
-    updUser: 'admin',
-    updTime: new Date(Date.now() - 86400000 * 30).toISOString(),
     builtIn: 1,
+    createUser: 'system',
+    updateUser: 'admin',
+    createTime: '2020-01-01T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 30).toISOString(),
   },
   {
     id: 'role-002',
     roleName: '网络运维员',
+    roleCode: 'NET_OPS',
     batchOperation: 1,
     description: '可执行日常运维操作，包括告警处理、配置下发和MML执行',
     permissions: [
-      'device:view', 'device:update',
-      'alarm:view', 'alarm:acknowledge', 'alarm:clear',
-      'performance:view', 'performance:export',
-      'config:view', 'config:update',
-      'mml:execute',
-      'software:view',
-      'backup:view',
+      // 设备管理 - 读写
+      'device.list:read', 'device.list:write',
+      'device.detail:read', 'device.detail:write',
+      'device.monitor:read', 'device.monitor:write',
+      // 告警管理 - 读写
+      'alarm.current:read', 'alarm.current:write',
+      'alarm.history:read',
+      // 性能管理 - 读写
+      'performance.kpiStandard:read', 'performance.kpiStation:read',
+      'performance.charts:read', 'performance.charts:write',
+      // 配置管理 - 读写
+      'file.configRetrieval:read', 'file.configDistribution:read', 'file.configDistribution:write',
+      // 运维工具 - 读写
+      'ops.commands:read', 'ops.commands:write',
+      'ops.templates:read',
+      // 软件管理 - 只读
+      'software.version:read',
+      // 备份 - 只读
+      'file.deviceFiles:read',
     ],
+    deviceGroupIds: ['dg-001', 'dg-002'],
     userCount: 5,
-    updUser: 'admin',
-    updTime: new Date(Date.now() - 86400000 * 15).toISOString(),
     builtIn: 1,
+    createUser: 'admin',
+    updateUser: 'admin',
+    createTime: '2020-06-15T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 15).toISOString(),
   },
   {
     id: 'role-003',
     roleName: '只读用户',
+    roleCode: 'READ_ONLY',
     batchOperation: 0,
     description: '只能查看数据，不能执行任何写操作',
-    permissions: [
-      'device:view',
-      'alarm:view',
-      'performance:view',
-      'config:view',
-      'software:view',
-      'backup:view',
-    ],
+    permissions: generateReadPermissions(['device', 'alarm', 'performance', 'software', 'file', 'log', 'report']),
+    deviceGroupIds: ['dg-001'],
     userCount: 3,
-    updUser: 'admin',
-    updTime: new Date(Date.now() - 86400000 * 10).toISOString(),
     builtIn: 2,
+    createUser: 'admin',
+    updateUser: 'admin',
+    createTime: '2021-01-10T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 10).toISOString(),
   },
   {
     id: 'role-004',
     roleName: '安全审计员',
+    roleCode: 'SECURITY_AUDITOR',
     batchOperation: 0,
     description: '专注于安全审计和日志查看，不可执行业务操作',
     permissions: [
-      'device:view',
-      'alarm:view',
+      'device.list:read',
+      'alarm.current:read', 'alarm.history:read',
+      'log.operation:read', 'log.system:read', 'log.event:read',
     ],
+    deviceGroupIds: ['dg-001', 'dg-003'],
     userCount: 1,
-    updUser: 'admin',
-    updTime: new Date(Date.now() - 86400000 * 5).toISOString(),
     builtIn: 0,
+    createUser: 'admin',
+    updateUser: 'zhangwei',
+    createTime: '2022-03-20T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 5).toISOString(),
   },
   {
     id: 'role-005',
     roleName: '访客',
+    roleCode: 'GUEST',
     batchOperation: 0,
     description: '临时访问权限，只能查看仪表盘概览',
-    permissions: ['device:view'],
+    permissions: ['device.list:read', 'device.monitor:read'],
+    deviceGroupIds: ['dg-001'],
     userCount: 2,
-    updUser: 'admin',
-    updTime: new Date(Date.now() - 86400000 * 2).toISOString(),
     builtIn: 0,
+    createUser: 'admin',
+    updateUser: 'admin',
+    createTime: '2022-08-01T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+  {
+    id: 'role-006',
+    roleName: '性能分析师',
+    roleCode: 'PERF_ANALYST',
+    batchOperation: 1,
+    description: '负责性能数据分析和报表生成',
+    permissions: [
+      'device.list:read', 'device.detail:read',
+      'performance.kpiStandard:read', 'performance.kpiStandard:write',
+      'performance.kpiStation:read', 'performance.kpiStation:write',
+      'performance.charts:read', 'performance.charts:write',
+      'performance.threshold:read', 'performance.threshold:write',
+      'performance.extraction:read', 'performance.extraction:write',
+      'alarm.current:read',
+      'report.lteStandard:read', 'report.station:read', 'report.historicalKpi:read',
+    ],
+    deviceGroupIds: ['dg-001', 'dg-002', 'dg-003'],
+    userCount: 3,
+    builtIn: 0,
+    createUser: 'admin',
+    updateUser: 'liming',
+    createTime: '2023-02-15T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 3).toISOString(),
+  },
+  {
+    id: 'role-007',
+    roleName: '配置管理员',
+    roleCode: 'CONFIG_MGR',
+    batchOperation: 1,
+    description: '负责设备配置管理和模板维护',
+    permissions: [
+      'device.list:read', 'device.detail:read',
+      'file.configRetrieval:read', 'file.configRetrieval:write',
+      'file.configDistribution:read', 'file.configDistribution:write',
+      'file.deviceFiles:read', 'file.deviceFiles:write',
+      'system.config:read', 'system.config:write',
+    ],
+    deviceGroupIds: ['dg-001', 'dg-002'],
+    userCount: 2,
+    builtIn: 0,
+    createUser: 'admin',
+    updateUser: 'wangfang',
+    createTime: '2023-05-10T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000 * 7).toISOString(),
+  },
+  {
+    id: 'role-008',
+    roleName: '软件升级员',
+    roleCode: 'SW_UPGRADER',
+    batchOperation: 1,
+    description: '负责软件版本管理和升级操作',
+    permissions: [
+      'device.list:read', 'device.detail:read',
+      'software.version:read', 'software.version:write',
+      'software.upgradePlan:read', 'software.upgradePlan:write',
+      'software.activation:read', 'software.activation:write',
+      'software.firmware:read',
+      'file.deviceFiles:read',
+    ],
+    deviceGroupIds: ['dg-001'],
+    userCount: 2,
+    builtIn: 0,
+    createUser: 'zhangwei',
+    updateUser: 'admin',
+    createTime: '2023-07-20T00:00:00.000Z',
+    updateTime: new Date(Date.now() - 86400000).toISOString(),
   },
 ];
 

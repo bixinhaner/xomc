@@ -24,13 +24,17 @@ export interface User {
 export interface Role {
   id: string;
   roleName: string;
+  roleCode: string; // 角色标识（系统内唯一编码）
   batchOperation: number; // 1=是, 0=否
   description: string;
   permissions: string[];
+  deviceGroupIds?: string[]; // 数据权限（设备组）
   userCount: number;
-  updUser: string; // 操作人
-  updTime: string; // 更新时间
   builtIn: number; // 内置角色标识
+  createUser?: string; // 创建人
+  updateUser?: string; // 更新人
+  createTime?: string; // 创建时间
+  updateTime?: string; // 更新时间
 }
 
 export interface Group {
