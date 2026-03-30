@@ -30,11 +30,15 @@ type DeviceInfo struct {
 	PLMN          string   `json:"plmn"`
 
 	// 状态
-	RFStatus   string `json:"rf_status"`
-	CellStatus string `json:"cell_status"`
-	MMEStatus  string `json:"mme_status"`
-	SyncStatus string `json:"sync_status"`
-	KPIStatus  string `json:"kpi_status"`
+	RFStatus      string `json:"rf_status"`
+	CellStatus    string `json:"cell_status"`
+	MMEStatus     string `json:"mme_status"`
+	SyncStatus    string `json:"sync_status"`
+	KPIStatus     string `json:"kpi_status"`
+	NumOfCells    int    `json:"num_of_cells"`
+	GPSStatus     string `json:"gps_status"`
+	AlarmSeverity string `json:"alarm_severity"`
+	LicenseStatus string `json:"license_status"`
 
 	// 硬件
 	MAC             string `json:"mac"`
@@ -83,11 +87,15 @@ type DeviceWithInfo struct {
 	TransmitPower *float64 `json:"transmit_power"`
 	PLMN          *string  `json:"plmn"`
 
-	RFStatus   *string `json:"rf_status"`
-	CellStatus *string `json:"cell_status"`
-	MMEStatus  *string `json:"mme_status"`
-	SyncStatus *string `json:"sync_status"`
-	KPIStatus  *string `json:"kpi_status"`
+	RFStatus      *string `json:"rf_status"`
+	CellStatus    *string `json:"cell_status"`
+	MMEStatus     *string `json:"mme_status"`
+	SyncStatus    *string `json:"sync_status"`
+	KPIStatus     *string `json:"kpi_status"`
+	NumOfCells    *int    `json:"num_of_cells"`
+	GPSStatus     *string `json:"gps_status"`
+	AlarmSeverity *string `json:"alarm_severity"`
+	LicenseStatus *string `json:"license_status"`
 
 	MAC             *string `json:"mac"`
 	HardwareVersion *string `json:"hardware_version"`

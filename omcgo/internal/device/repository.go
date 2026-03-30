@@ -23,6 +23,9 @@ type DeviceFilter struct {
 	RFStatus      *string // device_info.rf_status exact match
 	CellStatus    *string // device_info.cell_status exact match
 	ProjectStatus *string // device_info.project_status exact match
+	GPSStatus     *string // device_info.gps_status exact match
+	AlarmSeverity *string // device_info.alarm_severity exact match
+	LicenseStatus *string // device_info.license_status exact match
 
 	model.ListRequest
 }

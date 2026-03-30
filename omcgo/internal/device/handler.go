@@ -170,6 +170,15 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if projectStatus := c.Query("project_status"); projectStatus != "" {
 		filter.ProjectStatus = &projectStatus
 	}
+	if gpsStatus := c.Query("gps_status"); gpsStatus != "" {
+		filter.GPSStatus = &gpsStatus
+	}
+	if alarmSeverity := c.Query("alarm_severity"); alarmSeverity != "" {
+		filter.AlarmSeverity = &alarmSeverity
+	}
+	if licenseStatus := c.Query("license_status"); licenseStatus != "" {
+		filter.LicenseStatus = &licenseStatus
+	}
 
 	result, err := h.service.ListDevicesWithInfo(c.Request.Context(), filter)
 	if err != nil {

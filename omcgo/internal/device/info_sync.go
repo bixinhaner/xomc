@@ -11,6 +11,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// universalInformMapping maps TR069 parameter paths to device_info columns
+// for parameters that are identical across all carriers (not carrier-specific).
+var universalInformMapping = map[string]string{
+	"Device.DeviceInfo.X_COM_STATION_RUN_Time":                          "run_time",
+	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
+}
+
 // InfoSyncer extracts key TR069 parameters from device_parameters
 // and updates the corresponding device_info columns for fast query access.
 type InfoSyncer struct {
@@ -67,6 +74,22 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 			fields[infoColumn] = val
 		}
 	}
+
+	// Universal Inform mapping (carrier-agnostic direct fields)
+	for paramPath, infoColumn := range universalInformMapping {
+		if val, ok := paramValues[paramPath]; ok && val != "" {
+			fields[infoColumn] = val
+		}
+	}
+
+	// Computed quick-query columns from multiple parameters
+	fields["cell_status"] = CalcCellStatus(paramValues)
+	fields["mme_status"] = CalcMMEStatus(paramValues)
+	fields["sync_status"] = CalcSyncStatus(paramValues)
+	fields["rf_status"] = CalcRFStatus(paramValues)
+	fields["gps_status"] = CalcGPSStatus(paramValues)
+	fields["num_of_cells"] = CalcNumOfCells(paramValues)
+	fields["license_status"] = CalcLicenseStatus(paramValues)
 
 	if len(fields) == 0 {
 		return nil

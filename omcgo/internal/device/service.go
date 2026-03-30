@@ -653,6 +653,74 @@ func (s *DeviceService) cacheDevice(ctx context.Context, device *model.Device) {
 	}
 }
 
+// GetDeviceDetailComposite assembles a comprehensive device detail view by querying
+// device, device_info, and device_parameters (via prefix queries for MME/License/Antenna/Cells).
+func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID uuid.UUID) (*DeviceDetailComposite, error) {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	if device == nil {
+		return nil, nil
+	}
+
+	result := &DeviceDetailComposite{
+		Device: device,
+	}
+
+	// Get device_info
+	if s.deviceInfoRepo != nil {
+		info, err := s.deviceInfoRepo.GetByDeviceID(ctx, deviceID)
+		if err != nil {
+			s.logger.Warn("get device info for detail composite",
+				zap.String("device_id", deviceID.String()),
+				zap.Error(err))
+		}
+		result.Info = info
+	}
+
+	// Get all parameters for prefix-based assembly
+	allParams, err := s.paramRepo.GetByDevice(ctx, deviceID)
+	if err != nil {
+		s.logger.Warn("get device parameters for detail composite",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+		return result, nil
+	}
+
+	// MME pool
+	mmeParams := filterByPrefix(allParams, "MmePoolConfigParam.")
+	result.MMEPool = AssembleMMEPool(mmeParams)
+
+	// License
+	licenseParams := filterByPrefix(allParams, "X_COM_LICENSE.")
+	result.License = AssembleLicenseDetail(licenseParams)
+
+	// Antenna
+	antennaParams := filterByPrefix(allParams, "AntennaInfo.")
+	result.Antenna = AssembleAntennaInfo(antennaParams)
+
+	// Cells
+	numOfCells := 1
+	if result.Info != nil && result.Info.NumOfCells > 0 {
+		numOfCells = result.Info.NumOfCells
+	}
+	result.Cells = AssembleCells(allParams, numOfCells)
+
+	return result, nil
+}
+
+// filterByPrefix returns parameters whose path contains the given substring.
+func filterByPrefix(params []model.DeviceParameter, substr string) []model.DeviceParameter {
+	var result []model.DeviceParameter
+	for _, p := range params {
+		if containsAny(p.ParameterPath, substr) {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 // CreateDevice creates a new device from an API request.
 func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceRequest) (*model.Device, error) {
 	existing, err := s.deviceRepo.GetBySerialNumber(ctx, req.SerialNumber)

@@ -900,6 +900,512 @@ CREATE INDEX idx_reboot_logs_device ON device_reboot_logs (device_id, reboot_tim
 
 ---
 
+## 7. TR069 报文字段全景分析
+
+> 基于《TR069报文全解析.md》中实际抓包的 252 个参数，分析每个字段的存储去向和利用方式。
+
+### 7.1 存储架构与设计原则
+
+#### 核心原则：device_info 是 device_parameters 的「物化视图」
+
+device_info 表**仅提取设备列表页必须展示/过滤/排序的少量字段**（控制在 25 列以内），
+其余所有 TR069 参数统一存入 device_parameters K-V 表。设备详情页、配置下发、参数对比等场景直接从 device_parameters 读取。
+
+**不在 device_info 中使用 JSONB 列存储 TR069 参数**。理由：
+
+| # | 问题 | 说明 |
+|---|------|------|
+| 1 | **数据冗余** | device_parameters 已存储全量参数，JSONB 是重复副本，引入一致性风险 |
+| 2 | **丢失参数路径** | JSONB 结构化后丢失 TR069 原始路径，配置下发（SetParameterValues）时需反向查找 |
+| 3 | **更新代价高** | 修改 JSONB 中单个字段需 读取→反序列化→修改→序列化→写回 整个 JSON |
+| 4 | **违背 TR069 数据模型** | TR069 参数树天然是层级 K-V 结构，device_parameters 正是这种结构的自然映射 |
+| 5 | **多实例不可控** | MME 16 组×3 字段=48 参数，License 4 组×8 字段=32 参数，小区数动态变化——JSONB 无法规范化 |
+
+#### 行业规范依据
+
+| 规范 | 要求 | 对存储设计的指导 |
+|------|------|-----------------|
+| **3GPP 32.600** MO 信息模型 | MO 实例数可变（小区、MME 连接、License 条目） | 多实例对象不应拍平到设备主表，K-V 天然支持 |
+| **BBF TR-069 Amendment 6** | 参数路径 = 对象层级地址，多实例用 `{i}` | 保留原始路径是配置下发的前提，K-V 完美保留 |
+| **运营商北向接口规范** | 设备列表固定 15-20 列，详情页按子树分 Tab | device_info 精简列 + device_parameters 按前缀查询 |
+| **商用网管实践**���U2000/NetNumen） | 列表页固定列，详情页从参数 K-V 存储动态组装 | 不把 MME Pool、License 塞进设备主表 |
+
+#### 252 个参数的存储去向
+
+| 存储层 | 参数数量 | 说明 |
+|--------|---------|------|
+| devices 表具名列 | ~8 | 设备身份/版本/IP，Inform 自动写入 |
+| device_info 具名列 | ~18 | 列表展示/过滤必需的运行状态字段（仅新增 `num_of_cells` 1 列） |
+| device_parameters K-V | **全部 252** | 所有参数完整保留原始路径（含已提取到快查列的） |
+| 独立业务表 | 告警参数 | CurrentAlarm → alarm 模块独立管理 |
+
+#### 容量估算（10 万设备）
+
+| 方案 | 存储量 | 写入模式 |
+|------|--------|---------|
+| device_info 26 列 | ~50 MB（10 万行 × 500B） | 每 5 分钟 Inform 更新 ~13 列 |
+| device_parameters 252 参数/设备 | ~5 GB（2500 万行 × 200B） | Inform + ACS 查询后批量 UPSERT |
+
+5 GB 对 PostgreSQL 完全可接受（有 `varchar_pattern_ops` 前缀索引），
+不值得在 device_info 增加 JSONB 冗余列来避免一次前缀查询。
+
+### 7.1.1 参数来源分类
+
+| 分类 | 来源 | 参数数量 | 特点 |
+|------|------|---------|------|
+| **A. Inform 自动携带** | 每次 Inform 设备主动上报 | 37 | 实时性最高，自动获取，无需额外 RPC |
+| **B. ACS 主动查询** | GetParameterValues 按需获取 | 215 | 需 ACS 主动发起查询，可按需调整查询频率 |
+
+**三层存储模型**：
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Tier 1: 快查列 — devices / device_info 表的具名列            │
+│  用途：设备列表展示、过滤、排序（~26 列）                      │
+│  准入标准：列表页必须展示 或 必须支持 WHERE/ORDER BY           │
+│  示例：rf_status, cell_status, eci, pci, bandwidth            │
+├──────────────────────────────────────────────────────────────┤
+│  Tier 2: 完整参数树 — device_parameters K-V 表                │
+│  用途：所有 TR069 参数按原始路径 K-V 存储                      │
+│  场景：设备详情页、参数配置/对比/审计、配置下发                  │
+│  已实现：Inform 后全量写入 device_parameters                   │
+├──────────────────────────────────────────────────────────────┤
+│  Tier 3: 独立业务表 — alarms / license / etc                  │
+│  用途：有独立生命周期的业务数据                                 │
+│  示例：告警 → alarm 模块，License → license 模块               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 7.2 Inform 参数详细分析（37 个）
+
+Inform 参数在每次心跳时自动携带，实时性最高。
+
+#### 7.2.1 已捕获到快查列（8 个） ✅
+
+| # | TR069 参数路径 | 值示例 | 存储位置 | 快查列 |
+|---|---------------|--------|---------|--------|
+| 10 | `Device.DeviceInfo.SoftwareVersion` | BaiBLQ_5.1.10 | devices | firmware_version |
+| 3 | `Device.DeviceInfo.HardwareVersion` | A01 | device_info | hardware_version |
+| 24 | `FAPService.1.FAPControl.LTE.RFTxStatus` | true | device_info | rf_status |
+| 23 | `FAPService.1.FAPControl.LTE.OpState` | true | device_info | cell_status |
+| 2 | `Device.DeviceInfo.FAP_adminstate` | true | device_info | cell_status |
+| 22 | `FAPService.1.FAPControl.LTE.Gateway.ExistPlmnidList` | 314030,46000 | device_info | plmn |
+| 16 | `Device.DeviceInfo.X_COM_STATION_RUN_Time` | 40d 4h 58m 29s | device_info | run_time |
+| 18 | `Device.ManagementServer.ConnectionRequestURL` | http://172.21.100.43:7547 | devices | connection_request_url |
+
+#### 7.2.2 未捕获到快查列的有价值参数（12 个）
+
+| # | TR069 参数路径 | 值示例 | 建议存储 | 建议列名 | 优先级 | 说明 |
+|---|---------------|--------|---------|---------|--------|------|
+| 15 | `Device.DeviceInfo.X_COM_GPS_Status` | 0 | device_info 快查列 | `gps_status` | **P1** | GPS 状态，影响定位和同步，列表需展示/过滤 |
+| 21 | `FAPService.1.FAPControl.LTE.CellOpState` | 0 | device_info 快查列 | 合入 `cell_status` 计算 | **P1** | 小区运行状态（0=停止,1=运行），三维判定 cell_status |
+| 28 | `FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus` | Critical | device_info 快查列 | `alarm_severity` | **P1** | 设备最高告警级别，列表红/橙/黄视觉指示 |
+| 1 | `Device.DeviceInfo.DnPrefix` | 00256D | device_parameters | — | P3 | DN 前缀，仅详情页参考，不需列表过滤 |
+| 11 | `Device.DeviceInfo.X_COM_1588_Status` | 0 | device_parameters | — | P3 | IEEE 1588 同步状态，参与 sync_status 计算 |
+| 12 | `Device.DeviceInfo.X_COM_BDS_Status` | 0 | device_parameters | — | P3 | 北斗卫星状态，参与 sync_status 计算 |
+| 14 | `Device.DeviceInfo.X_COM_GLONASS_Status` | 0 | device_parameters | — | P3 | GLONASS 卫星状态，参与 sync_status 计算 |
+| 25 | `FAPService.1.FAPControl.LTE.Slot` | 1 | device_parameters | — | P3 | 槽位号 |
+| 29-35 | `FAPService.2.FAPControl.LTE.*` | — | device_parameters | — | P2 | 小区 2 参数（多实例，按前缀查询） |
+| 36-37 | `FAPService.Ipsec.IPSEC_TUNNEL{1,2}_STATUS` | false | device_parameters | — | P3 | IPSec 隧道状态 |
+| 4 | `Device.DeviceInfo.ProvisioningCode` | (空) | device_parameters | — | P3 | 配置码，开站流程参考 |
+| 5-8 | `Device.DeviceInfo.SAS.*` | — | device_parameters | — | P3 | CBRS SAS 参数（海外部署） |
+
+#### 7.2.3 Inform 参数存储结论
+
+**现状**：Inform 的全部 37 个参数已存入 `device_parameters`（K-V），但仅 8 个提取到快查列。
+
+**建议新增到快查列的 Inform 字段**（仅 2 个，控制列数）：
+
+| 新增列 | 类型 | 来源参数 | 理由 |
+|--------|------|---------|------|
+| `gps_status` | VARCHAR(20) | `X_COM_GPS_Status` | GPS 状态是基站运维核心指标，列表需展示和过滤 |
+| `alarm_severity` | VARCHAR(20) | `X_RADISYS_COM_AlarmStatus` | 设备最高告警级别，红/橙/黄视觉指示 |
+
+**建议增强 cell_status 计算逻辑**：
+- `FAP_adminstate`（管理状态）+ `OpState`（运行状态）+ `CellOpState`（小区运行状态）→ 三者综合判定 `cell_status`
+- 不新增列，在现有 `cell_status` 列上改进计算逻辑
+
+**其余 Inform 参数全部留在 device_parameters**：
+- 多小区参数（`FAPService.2.*`、`FAPService.3.*`）→ 设备详情页按前缀 `FAPService.2.%` 查询
+- 卫星状态（BDS/GPS/GLONASS/1588）→ 参与 `sync_status` 快查列的计算逻辑，原始值留 K-V
+- IPSec 隧道状态 → 设备详情页展示，不需列表过滤
+
+---
+
+### 7.3 GetParameterValues 参数详细分析（215 个）
+
+以下按 ACS 查询分组分析，与报文中的"第 N 组"对应。
+
+#### 7.3.1 设备身份与状态查询
+
+| 组 | TR069 参数 | 值示例 | 当前存储 | 建议 |
+|----|-----------|--------|---------|------|
+| 3 | `X_COM_MODULE_TYPE` | pBS3202 | devices.model_name ✅ | 已处理 |
+| 10 | `IP.Interface.1.IPv4Address.1.IPAddress` | 172.21.100.43 | devices.ip_address ✅ | 已处理 |
+| 2 | `SoftwareCtrl.SystemBackupVersion` | (空) | device_parameters | Tier 2 保留（详情页展示） |
+| 16 | `ETH1_STATUS_SPEED` | 100Mb/s | device_parameters | Tier 2 保留（详情页展示） |
+| 11 | `3GPPSpecVersion` | E_UTRA | device_parameters | Tier 3 保留 |
+| 17 | `ManagementServer.X_COM_ssl_enable` | true | device_parameters | Tier 3 保留 |
+| 15 | `X_COM_ApLteturboEnable` | 0 | device_parameters | Tier 3 保留 |
+
+#### 7.3.2 GPS / 定位查询
+
+| 组 | TR069 参数 | 值示例 | 当前存储 | 建议 |
+|----|-----------|--------|---------|------|
+| 5 | `FAP.GPS.LockedLatitude` | 0 | devices.latitude ✅ | 已处理 |
+| 5 | `FAP.GPS.LockedLongitude` | 0 | devices.longitude ✅ | 已处理 |
+| 5 | `FAP.GPS.LockedLatitude2` | 0 | device_parameters | Tier 3（小区 2 位置） |
+| 5 | `FAP.GPS.LockedLongitude2` | 0 | device_parameters | Tier 3（小区 2 位置） |
+| 4 | `X_COM_GPS_Satellite_count` | 0 | device_parameters | Tier 2 保留（详情页展示，不需列表过滤） |
+| 4 | `X_COM_GPS_Satellite_level` | (空) | device_parameters | Tier 3 |
+| 6 | `AntennaInfo.Height` | 0 | device_info.height ✅ | 已处理 |
+| 6 | `AntennaInfo.Height2` | 0 | device_parameters | Tier 3（小区 2 高度） |
+
+#### 7.3.3 天线参数查询
+
+| 组 | TR069 参数 | 值示例 | 当前存储 | 建议 |
+|----|-----------|--------|---------|------|
+| 11 | `AntennaInfo.Azimuth` | 0 | device_parameters | Tier 2（详情页天线 Tab 展示） |
+| 11 | `AntennaInfo.Beamwidth` | 0 | device_parameters | Tier 2 |
+| 11 | `AntennaInfo.Downtilt` | 0 | device_parameters | Tier 2 |
+| 11 | `AntennaInfo.Gain` | 0 | device_parameters | Tier 2 |
+| 11 | `AntennaInfo.HeightType` | AGL | device_parameters | Tier 2 |
+| 11 | `AntennaPortsCount` | 2 | device_parameters | Tier 2 |
+| 11 | `indoorDeployment` | false | device_parameters | Tier 2（CBRS 相关，非列表必需） |
+| 11 | `cbsdCategory` | B | device_parameters | Tier 2（CBRS 海外） |
+
+**天线参数展示方式**：设备详情页按前缀 `AntennaInfo.%` 查询 device_parameters，Service 层组装为结构化 DTO 返回前端。不在 device_info 冗余存储。
+
+#### 7.3.4 射频控制查询
+
+| 组 | TR069 参数 | 值示例 | 当前存储 | 建议 |
+|----|-----------|--------|---------|------|
+| 1 | `CellConfig.LTE.RAN.RF.X_COM_RadioEnable` | true | device_parameters | 与 `rf_status` 逻辑合并：`RFTxStatus`(Inform 自动) + `RadioEnable`(查询确认) |
+
+#### 7.3.5 许可证信息查询（约 42 个参数）
+
+**当前状态**：全部存入 device_parameters，未提取到快查列。
+
+**报文结构**（4 个 Capacity 条目）：
+
+| 参数 | 含义 | 示例值 |
+|------|------|--------|
+| `X_COM_LICENSE.Code` | 许可证代码 | FAP |
+| `X_COM_LICENSE.GenerateDate` | 生成日期 | 20240831 |
+| `X_COM_LICENSE.SeqNum` | 序列号 | 14 |
+| `X_COM_LICENSE.Version` | 版本号 | 1 |
+| `X_COM_LICENSE.Capacity.{i}.ID` | 容量 ID | FAP044 |
+| `X_COM_LICENSE.Capacity.{i}.Description` | 描述 | Hardware Locked License... |
+| `X_COM_LICENSE.Capacity.{i}.State` | 状态(1=有效,0=未启用) | 1 |
+| `X_COM_LICENSE.Capacity.{i}.ValidPeriod` | 有效天数 | 180 |
+| `X_COM_LICENSE.Capacity.{i}.RemainingPeriod` | 剩余天数 | 0 |
+| `X_COM_LICENSE.Capacity.{i}.DelayAvaiable` | 宽限天数 | 2 |
+
+**存储建议**：
+
+| 存储目标 | 内容 | 说明 |
+|---------|------|------|
+| device_info 快查列 | `license_status` VARCHAR(20) | 整体状态计算值：active / expiring / expired |
+| device_info 快查列 | `license_expire_days` INTEGER | 最近到期天数（取所有 Capacity 中最小的 RemainingPeriod） |
+| device_parameters | 全部 42 个参数 | K-V 原始值 ✅ 已有 |
+
+**不使用 JSONB 存储 License 摘要**。理由：
+- device_parameters 已保留完整 License 参数路径，详情页按前缀 `X_COM_LICENSE.%` 查询即可
+- JSONB 冗余会引入 42 个参数的双写一致性问题
+- `license_status` 和 `license_expire_days` 两个计算值足以支持列表页展示和过滤
+
+**License 详情页展示方式**：Service 层从 device_parameters 按前缀查询，组装为结构化 DTO：
+```go
+// 从 device_parameters 查询 License 参数
+rows := repo.FindByPrefix(ctx, deviceID, "Device.Services.FAPService.1.X_COM_LICENSE.")
+// Service 层组装为 LicenseDetail DTO 返回前端
+```
+
+#### 7.3.6 MME 池配置查询（约 48 个参数）
+
+**关键注释**（来自报文文档）：
+> "MME的数据要加入主表，MME1Status，MMEIp1，PLMNID 数据形成 json 结构 `[{MME1Status:1,MMEIp1:172.19.9.34,PLMNID:46000}]`"
+
+**存储建议**：
+
+| 存储目标 | 内容 | 说明 |
+|---------|------|------|
+| device_info 快查列 | `mme_status` VARCHAR(20) | 整体 MME 连接状态计算值（根据有效 MME 数量判定） |
+| device_parameters | 全部 48 个参数 K-V | ✅ 已有，原始路径完整保留 |
+
+**不使用 JSONB 存储 MME 池**。理由：
+- 16 组 × 3 字段 = 48 个参数，device_parameters 已按 `MmePoolConfigParam.{i}.` 前缀完整存储
+- 配置下发（修改 MME IP）需要原始 TR069 路径，JSONB 丢失了路径信息
+- `mme_status` 计算值（"connected"/"partial"/"disconnected"）足以支持列表过滤
+
+**MME 详情页展示方式**：
+```go
+// 从 device_parameters 查询 MME 参数
+rows := repo.FindByPrefix(ctx, deviceID, "Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.")
+// Service 层过滤有效条目（Status=1 或 IP 非 0.0.0.0），组装为 []MMEEntry DTO
+```
+
+> 注意：16 个 MME 条目中大部分为空（IP=0.0.0.0, Status=0），展示时由 Service 层过滤，仅返回有效条目。
+
+#### 7.3.7 告警信息查询（约 30 个参数）
+
+**当前状态**：告警数据由独立 `alarm` 模块处理。
+
+| 参数类别 | 存储去向 | 说明 |
+|---------|---------|------|
+| `FaultMgmt.CurrentAlarm.{i}.*` | Tier 4: alarm 模块 | 告警有独立生命周期（发生→确认→清除），不适合存 device_info |
+| 告警摘要（活跃数/最高级别） | device_info Tier 1 `alarm_severity` | 从 Inform `AlarmStatus` 参数或 alarm 模块聚合 |
+
+#### 7.3.8 同步状态查询
+
+| 组 | TR069 参数 | 值示例 | 建议 |
+|----|-----------|--------|------|
+| 19 | `ManagementServer.tfcsManagerPrimsrc` | 7 | 组合计算 `sync_status` |
+| 19 | `ManagementServer.tfcsSyncState` | DISP | 组合计算 `sync_status` |
+
+**sync_status 综合计算逻辑**：
+
+```
+tfcsSyncState + tfcsManagerPrimsrc + X_COM_GPS_Status + X_COM_BDS_Status + X_COM_1588_Status
+→ 综合判定：GPS同步 / 北斗同步 / 1588同步 / NTP同步 / 未同步 / 异常
+```
+
+#### 7.3.9 载波聚合与多小区
+
+**关键注释**（来自报文文档）：
+> "关于小区2，小区3的参数是否保存，这个是根据基站的载波模式处理的：CA/SC 只处理主小区，DC 处理小区1和小区2，TC 模式处理小区123"
+
+| 参数 | 值示例 | 建议存储 | 说明 |
+|------|--------|---------|------|
+| `FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells` | 1 | device_info 快查列 `num_of_cells` | 载波模式判断基础，列表需展示/过滤 |
+| `FAPService.2.FAPControl.LTE.*` (6 个参数) | — | device_parameters | 多实例参数，按前缀 `FAPService.2.%` 查询 |
+| `FAPService.3.FAPControl.LTE.*` (如有) | — | device_parameters | 多实例参数，按前缀 `FAPService.3.%` 查询 |
+
+**多小区参数展示方式**：设备详情页根据 `num_of_cells` 值决定展示哪些小区 Tab，每个 Tab 从 device_parameters 按 `FAPService.{n}.%` 前缀查询。不在 device_info 冗余存储。
+
+---
+
+### 7.4 device_info 表字段最终清单
+
+基于「device_info 是 device_parameters 的物化视图」原则，device_info 仅保留列表页必需的快查列。
+
+#### 现有列清单（保持不变）
+
+```sql
+-- 手动填写（5 列）
+device_name       VARCHAR(128),    -- 设备名称（用户自定义）
+address           VARCHAR(256),    -- 部署地址
+remark            TEXT,            -- 备注
+project_status    VARCHAR(20),     -- 工程状态
+height            DOUBLE PRECISION,-- 天线高度
+
+-- TR069 自动同步（12 列）
+eci               VARCHAR(32),     -- E-UTRAN Cell ID
+pci               INTEGER,         -- 物理小区标识
+cell_id           VARCHAR(32),     -- 小区 ID
+freq_point        INTEGER,         -- 频点
+bandwidth         VARCHAR(10),     -- 带宽
+transmit_power    INTEGER,         -- 发射功率
+plmn              VARCHAR(20),     -- PLMN 列表
+rf_status         VARCHAR(20),     -- 射频状态
+cell_status       VARCHAR(20),     -- 小区状态（三维综合判定）
+mme_status        VARCHAR(20),     -- MME 连接状态（计算值）
+sync_status       VARCHAR(20),     -- 同步状态（计算值）
+mac               VARCHAR(20),     -- MAC 地址
+hardware_version  VARCHAR(64),     -- 硬件版本
+
+-- 时间（3 列）
+first_online_time TIMESTAMPTZ,     -- 首次上线
+last_offline_time TIMESTAMPTZ,     -- 最后离线
+run_time          VARCHAR(64),     -- 累计运行时长
+
+-- 审计（4 列）
+creator           VARCHAR(64),     -- 创建人
+updater           VARCHAR(64),     -- 更新人
+created_at        TIMESTAMPTZ,     -- 创建时间
+updated_at        TIMESTAMPTZ,     -- 更新时间
+```
+
+#### 本次新增列（仅 4 列）
+
+| 新增列 | 类型 | 来源 | 理由 |
+|--------|------|------|------|
+| `num_of_cells` | INTEGER DEFAULT 1 | `CA.PARAMS.NumOfCells` | 载波模式判断基础（SC/CA/DC/TC），列表需展示/过滤 |
+| `gps_status` | VARCHAR(20) | `X_COM_GPS_Status` | GPS 状态是基站运维核心指标，列表需展示/过滤 |
+| `alarm_severity` | VARCHAR(20) | `X_RADISYS_COM_AlarmStatus` | 设备最高告警级别，列表红/橙/黄视觉指示 |
+| `license_status` | VARCHAR(20) | 从 License 参数计算 | 许可证整体状态（active/expiring/expired），列表过滤 |
+
+**不新增的字段及理由**：
+
+| 曾考虑的字段 | 不新增的理由 |
+|-------------|------------|
+| `mme_pool` JSONB | 冗余 device_parameters，丢失原始路径，详情页前缀查询即可 |
+| `antenna_info` JSONB | 天线参数仅详情页展示，不需列表过滤 |
+| `license_summary` JSONB | 42 个参数双写一致性风险，`license_status` 计算值已够列表用 |
+| `cell2_params` JSONB | 多实例参数，device_parameters 天然支持 `FAPService.2.%` 前缀查询 |
+| `satellite_status` JSONB | 参与 `sync_status` 计算即可，不需独立存储 |
+| `gps_satellite_count` | 仅诊断用，不需列表过滤 |
+| `indoor_outdoor` | CBRS 相关，非通用列表需求 |
+| `backup_version` | 仅详情页展示 |
+| `eth_speed` | 仅诊断用 |
+| `dn_prefix` | 仅详情页参考 |
+| `license_expire_days` | 可在 `license_status` 中体现（expiring = 30 天内），详细天数从 K-V 实时计算 |
+
+#### 迁移 SQL
+
+```sql
+-- migrations/000063_extend_device_info.up.sql
+ALTER TABLE device_info
+    ADD COLUMN num_of_cells     INTEGER DEFAULT 1,
+    ADD COLUMN gps_status       VARCHAR(20),
+    ADD COLUMN alarm_severity   VARCHAR(20),
+    ADD COLUMN license_status   VARCHAR(20);
+
+CREATE INDEX idx_device_info_gps_status ON device_info (gps_status);
+CREATE INDEX idx_device_info_alarm_severity ON device_info (alarm_severity);
+CREATE INDEX idx_device_info_license_status ON device_info (license_status);
+```
+
+**总计 device_info 列数**：5（手动）+ 12（现有自动）+ 4（本次新增）+ 3（时间）+ 4（审计）+ 1（PK）= **29 列**，精简可控。
+
+---
+
+### 7.5 参数同步机制增强
+
+#### 7.5.1 同步架构：device_parameters 写入 → 快查列计算
+
+所有 TR069 参数**首先写入 device_parameters**（Inform 自动 + ACS 查询），然后通过**计算逻辑**将少量快查字段同步到 device_info。
+
+```
+CPE → Inform → device_parameters (全量 K-V 写入)
+                    ↓
+              InfoSyncer.SyncQuickColumns()
+                    ↓
+              device_info (仅更新快查列的计算值)
+```
+
+#### 7.5.2 Inform 快查列同步增强
+
+当前 `InfoSyncer.SyncFromParameters()` 仅同步 Carrier 适配器映射中的参数。
+
+**建议增强**：新增通用快查列提取，不依赖 Carrier 映射：
+
+```go
+// 通用 Inform 参数 → device_info 快查列（所有运营商通用）
+var informDirectMapping = map[string]string{
+    "Device.DeviceInfo.X_COM_GPS_Status":                                  "gps_status",
+    "Device.DeviceInfo.X_COM_STATION_RUN_Time":                            "run_time",
+    "Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus":   "alarm_severity",
+}
+```
+
+#### 7.5.3 ACS 查询频率分级
+
+当前 ACS 在 Inform 后发起多组 GetParameterValues，结果写入 device_parameters。建议按查询频率分级：
+
+| 频率 | 触发时机 | 参数组 | 写入目标 |
+|------|---------|--------|---------|
+| **每次 Inform** | 心跳时 | GPS 状态、同步源/同步状态、RadioEnable | device_parameters → 快查列计算 |
+| **每日一次** | 定时任务 | License、MME 池、天线参数、ETH 速率 | device_parameters → 快查列计算 |
+| **首次/变更时** | Bootstrap / ValueChange | 模块类型、经纬度/高度、NumOfCells | device_parameters → 快查列 |
+
+#### 7.5.4 快查列计算逻辑
+
+快查列的值不是直接映射单个 TR069 参数，而是从 device_parameters 中的多个参数**计算**得出。
+
+**mme_status 计算**（从 device_parameters 中 MME 前缀查询）：
+
+```go
+func calcMMEStatus(params map[string]string) string {
+    activeCount := 0
+    for i := 1; i <= 16; i++ {
+        prefix := fmt.Sprintf("...MmePoolConfigParam.%d.", i)
+        if params[prefix+"MME1Status"] == "1" { activeCount++ }
+    }
+    switch {
+    case activeCount == 0: return "disconnected"
+    case activeCount < 2:  return "partial"
+    default:               return "connected"
+    }
+}
+```
+
+**license_status 计算**（从 device_parameters 中 License 前缀查询）：
+
+```go
+func calcLicenseStatus(params map[string]string) string {
+    hasActive, minRemain := false, math.MaxInt32
+    for i := 1; i <= 32; i++ {
+        prefix := fmt.Sprintf("...X_COM_LICENSE.Capacity.%d.", i)
+        if params[prefix+"State"] == "1" {
+            hasActive = true
+            remain, _ := strconv.Atoi(params[prefix+"RemainingPeriod"])
+            if remain < minRemain { minRemain = remain }
+        }
+    }
+    switch {
+    case !hasActive:      return "expired"
+    case minRemain <= 30: return "expiring"
+    default:              return "active"
+    }
+}
+```
+
+**cell_status 三维判定**（当前仅从单参数取值，应综合判定）：
+
+```
+FAP_adminstate = false                                          → "未激活"
+FAP_adminstate = true && OpState = false                        → "故障"
+FAP_adminstate = true && OpState = true && CellOpState = 0      → "退服"
+FAP_adminstate = true && OpState = true && CellOpState = 1      → "正常"
+```
+
+#### 7.5.5 设备详情页数据组装
+
+设备详情页不从 device_info 读取复合数据，而是从 device_parameters 按前缀查询后由 Service 层组装 DTO：
+
+| 详情页 Tab | 查询前缀 | 组装逻辑 |
+|-----------|---------|---------|
+| MME 连接 | `...MmePoolConfigParam.%` | 过滤 Status=1 或 IP 非零的条目 |
+| License | `...X_COM_LICENSE.%` | 按 Capacity.{i} 分组 |
+| 天线参数 | `AntennaInfo.%` | 拍平为 AntennaDetail DTO |
+| 小区 2/3 | `FAPService.2.%` / `FAPService.3.%` | 根据 num_of_cells 决定是否展示 |
+| GPS/同步 | `X_COM_GPS_%` / `X_COM_BDS_%` / `X_COM_1588_%` | 汇总为同步状态视图 |
+
+---
+
+### 7.6 对已有 Gap 项的影响
+
+| Gap 项 | 影响 |
+|--------|------|
+| **G03（参数同步）** | Carrier 适配器 `GetInfoParamMapping()` 需扩展新字段映射；新增通用 Inform 快查列计算 |
+| **G12（设备详情聚合）** | License/MME/天线数据从 device_parameters 按前缀查询，Service 层组装 DTO，不需 JSONB 中间层 |
+| **G02（列表过滤）** | DeviceFilter 需新增 gps_status、alarm_severity、license_status 过滤条件 |
+| **G05（列自定义）** | 可用列集合扩大：新增 gps_status、alarm_severity、license_status、num_of_cells |
+| **G04（导出）** | 导出快查列字段扩大；复合数据（MME/License）需从 device_parameters 查询后平铺 |
+
+---
+
+### 7.7 新增 Gap 项
+
+基于 TR069 报文分析，补充以下差距项：
+
+| # | 功能 | 优先级 | 复杂度 | 说明 |
+|---|------|--------|--------|------|
+| G28 | device_info 表扩展 — 新增 4 列 | **P1** | 低 | 迁移 000063：`num_of_cells`, `gps_status`, `alarm_severity`, `license_status` |
+| G29 | Inform 通用快查列同步 | **P1** | 低 | 不依赖 Carrier 适配器的通用 Inform 参数 → 快查列映射（GPS 状态、告警级别） |
+| G30 | mme_status 快查列计算逻辑 | **P1** | 中 | 从 device_parameters MME 前缀查询，统计有效 MME 数 → connected/partial/disconnected |
+| G31 | license_status 快查列计算逻辑 | **P1** | 中 | 从 device_parameters License 前缀查询，计算整体状态 → active/expiring/expired |
+| G32 | cell_status 三维判定逻辑 | **P1** | 低 | FAP_adminstate + OpState + CellOpState 综合判定，替代当前单参数取值 |
+| G33 | ACS 查询频率分级策略 | **P2** | 中 | 按 §7.5.3 分级：每次 Inform / 每日 / 首次变更，降低不必要的 RPC 开销 |
+| G34 | 设备详情页复合数据 DTO 组装 | **P2** | 中 | Service 层从 device_parameters 按前缀查询，组装 MME/License/天线/多小区 DTO |
+| G35 | 多小区参数处理（CA/DC/TC） | **P2** | 中 | 根据 num_of_cells 决定详情页展示哪些小区 Tab，从 FAPService.{n}.% 前缀查询 |
+| G36 | sync_status 综合计算 | **P2** | 中 | GPS + BDS + GLONASS + 1588 + tfcsSync 五源综合判定同步状态 |
+
+---
+
 ## 6. 与设计文档的差异说明
 
 | 设计文档内容 | 本方案处理 | 理由 |

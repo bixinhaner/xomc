@@ -30,6 +30,10 @@ var allowedSortColumnsWithInfo = map[string]string{
 	"cell_status":    "di.cell_status",
 	"bandwidth":      "di.bandwidth",
 	"transmit_power": "di.transmit_power",
+	"num_of_cells":   "di.num_of_cells",
+	"gps_status":     "di.gps_status",
+	"alarm_severity": "di.alarm_severity",
+	"license_status": "di.license_status",
 }
 
 // PgDeviceInfoRepository implements DeviceInfoRepository using PostgreSQL.
@@ -72,6 +76,7 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 			"device_id", "device_name", "address", "remark", "project_status", "height",
 			"eci", "pci", "cell_id", "freq_point", "bandwidth", "transmit_power", "plmn",
 			"rf_status", "cell_status", "mme_status", "sync_status", "kpi_status",
+			"num_of_cells", "gps_status", "alarm_severity", "license_status",
 			"mac", "hardware_version",
 			"first_online_time", "last_offline_time", "run_time",
 			"creator", "updater", "created_at", "updated_at",
@@ -80,6 +85,7 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 			info.DeviceID, info.DeviceName, info.Address, info.Remark, info.ProjectStatus, info.Height,
 			info.ECI, info.PCI, info.CellID, info.FreqPoint, info.Bandwidth, info.TransmitPower, info.PLMN,
 			info.RFStatus, info.CellStatus, info.MMEStatus, info.SyncStatus, info.KPIStatus,
+			info.NumOfCells, info.GPSStatus, info.AlarmSeverity, info.LicenseStatus,
 			info.MAC, info.HardwareVersion,
 			info.FirstOnlineTime, info.LastOfflineTime, info.RunTime,
 			info.Creator, info.Updater, info.CreatedAt, info.UpdatedAt,
@@ -205,6 +211,18 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"di.project_status": *filter.ProjectStatus})
 		countBuilder = countBuilder.Where(sq.Eq{"di.project_status": *filter.ProjectStatus})
 	}
+	if filter.GPSStatus != nil && *filter.GPSStatus != "" {
+		builder = builder.Where(sq.Eq{"di.gps_status": *filter.GPSStatus})
+		countBuilder = countBuilder.Where(sq.Eq{"di.gps_status": *filter.GPSStatus})
+	}
+	if filter.AlarmSeverity != nil && *filter.AlarmSeverity != "" {
+		builder = builder.Where(sq.Eq{"di.alarm_severity": *filter.AlarmSeverity})
+		countBuilder = countBuilder.Where(sq.Eq{"di.alarm_severity": *filter.AlarmSeverity})
+	}
+	if filter.LicenseStatus != nil && *filter.LicenseStatus != "" {
+		builder = builder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
+		countBuilder = countBuilder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
+	}
 
 	// Multi-field fuzzy search (G07)
 	if filter.Search != nil && *filter.Search != "" {
@@ -276,6 +294,7 @@ func deviceInfoColumns() []string {
 		"device_name", "address", "remark", "project_status", "height",
 		"eci", "pci", "cell_id", "freq_point", "bandwidth", "transmit_power", "plmn",
 		"rf_status", "cell_status", "mme_status", "sync_status", "kpi_status",
+		"num_of_cells", "gps_status", "alarm_severity", "license_status",
 		"mac", "hardware_version",
 		"first_online_time", "last_offline_time", "run_time",
 		"creator", "updater", "created_at", "updated_at",
@@ -297,6 +316,7 @@ func deviceWithInfoSelectColumns() []string {
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.mme_status", "di.sync_status", "di.kpi_status",
+		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_offline_time", "di.run_time",
 	}
@@ -309,6 +329,7 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.DeviceName, &info.Address, &info.Remark, &info.ProjectStatus, &info.Height,
 		&info.ECI, &info.PCI, &info.CellID, &info.FreqPoint, &info.Bandwidth, &info.TransmitPower, &info.PLMN,
 		&info.RFStatus, &info.CellStatus, &info.MMEStatus, &info.SyncStatus, &info.KPIStatus,
+		&info.NumOfCells, &info.GPSStatus, &info.AlarmSeverity, &info.LicenseStatus,
 		&info.MAC, &info.HardwareVersion,
 		&info.FirstOnlineTime, &info.LastOfflineTime, &info.RunTime,
 		&info.Creator, &info.Updater, &info.CreatedAt, &info.UpdatedAt,
@@ -343,6 +364,10 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diMMEStatus     *string
 		diSyncStatus    *string
 		diKPIStatus     *string
+		diNumOfCells    *int
+		diGPSStatus     *string
+		diAlarmSeverity *string
+		diLicenseStatus *string
 		diMAC           *string
 		diHWVersion     *string
 		diFirstOnline   *time.Time
@@ -363,6 +388,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,
 		&diECI, &diPCI, &diCellID, &diFreqPoint, &diBandwidth, &diTransmitPower, &diPLMN,
 		&diRFStatus, &diCellStatus, &diMMEStatus, &diSyncStatus, &diKPIStatus,
+		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
 		&diFirstOnline, &diLastOffline, &diRunTime,
 	)
@@ -403,6 +429,10 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.MMEStatus = diMMEStatus
 	d.SyncStatus = diSyncStatus
 	d.KPIStatus = diKPIStatus
+	d.NumOfCells = diNumOfCells
+	d.GPSStatus = diGPSStatus
+	d.AlarmSeverity = diAlarmSeverity
+	d.LicenseStatus = diLicenseStatus
 	d.MAC = diMAC
 	d.HardwareVersion = diHWVersion
 	d.FirstOnlineTime = diFirstOnline

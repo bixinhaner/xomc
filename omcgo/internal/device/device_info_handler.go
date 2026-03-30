@@ -25,6 +25,7 @@ func (h *DeviceInfoHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		devices.GET("/enums", h.GetEnums)
 		devices.GET("/:id/info", h.GetDeviceInfo)
+		devices.GET("/:id/detail", h.GetDeviceDetail)
 		devices.PUT("/:id/info", h.UpdateDeviceInfo)
 		devices.PUT("/:id/activate", h.ActivateDevice)
 		devices.PUT("/:id/deactivate", h.DeactivateDevice)
@@ -50,6 +51,28 @@ func (h *DeviceInfoHandler) GetDeviceInfo(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, info)
+}
+
+// GetDeviceDetail handles GET /api/v1/devices/:id/detail.
+// Returns a composite view aggregating device, device_info, and device_parameters data.
+func (h *DeviceInfoHandler) GetDeviceDetail(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	composite, err := h.service.GetDeviceDetailComposite(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if composite == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+
+	c.JSON(http.StatusOK, composite)
 }
 
 // UpdateDeviceInfo handles PUT /api/v1/devices/:id/info.
@@ -144,13 +167,13 @@ func (h *DeviceInfoHandler) GetEnums(c *gin.Context) {
 		},
 		"cell_status": {
 			{Value: "normal", Label: "正常"},
+			{Value: "inactive", Label: "未激活"},
 			{Value: "fault", Label: "故障"},
-			{Value: "unconfigured", Label: "未配置"},
 			{Value: "decommissioned", Label: "退服"},
 		},
 		"mme_status": {
-			{Value: "normal", Label: "正常"},
-			{Value: "error", Label: "异常"},
+			{Value: "connected", Label: "已连接"},
+			{Value: "partial", Label: "部分连接"},
 			{Value: "disconnected", Label: "未连接"},
 		},
 		"sync_status": {
@@ -164,6 +187,22 @@ func (h *DeviceInfoHandler) GetEnums(c *gin.Context) {
 			{Value: "delivered", Label: "已交付"},
 			{Value: "operating", Label: "运维中"},
 			{Value: "deactivated", Label: "停用"},
+		},
+		"gps_status": {
+			{Value: "normal", Label: "正常"},
+			{Value: "abnormal", Label: "异常"},
+			{Value: "no_signal", Label: "无信号"},
+		},
+		"alarm_severity": {
+			{Value: "Critical", Label: "紧急"},
+			{Value: "Major", Label: "重要"},
+			{Value: "Minor", Label: "次要"},
+			{Value: "Warning", Label: "告警"},
+		},
+		"license_status": {
+			{Value: "active", Label: "有效"},
+			{Value: "expiring", Label: "即将过期"},
+			{Value: "expired", Label: "已过期"},
 		},
 	}
 
