@@ -11,8 +11,11 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 // TransferBridge subscribes to AutonomousTransferComplete events from the ACS,
@@ -21,9 +24,7 @@ import (
 type TransferBridge struct {
 	deviceRepo  device.DeviceRepository
 	minioClient *minio.Client
-	pmBucket    string
-	mrBucket    string
-	logsBucket  string
+	buckets     appconfig.BucketConfig
 	httpClient  *http.Client
 	eventBus    event.EventBus
 	logger      *zap.Logger
@@ -33,16 +34,14 @@ type TransferBridge struct {
 func NewTransferBridge(
 	deviceRepo device.DeviceRepository,
 	minioClient *minio.Client,
-	pmBucket, mrBucket, logsBucket string,
+	buckets appconfig.BucketConfig,
 	eventBus event.EventBus,
 	logger *zap.Logger,
 ) *TransferBridge {
 	return &TransferBridge{
 		deviceRepo:  deviceRepo,
 		minioClient: minioClient,
-		pmBucket:    pmBucket,
-		mrBucket:    mrBucket,
-		logsBucket:  logsBucket,
+		buckets:     buckets,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -120,32 +119,16 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 		return nil
 	}
 
-	// Classify file type
-	fileCategory := classifyFileType(payload.FileType, payload.TargetFileName)
+	// Classify file type and determine bucket/path via storage package
+	ft := classifyFileType(payload.FileType, payload.TargetFileName)
+	bucket, category := storage.BucketAndCategory(ft, b.buckets)
 
-	// Determine bucket and object path
-	var bucket, objectPath string
 	fileName := payload.TargetFileName
 	if fileName == "" {
 		fileName = filepath.Base(payload.TransferURL)
 	}
-	now := time.Now()
-	datePrefix := now.Format("2006/01/02")
-
-	switch fileCategory {
-	case "pm":
-		bucket = b.pmBucket
-		objectPath = fmt.Sprintf("%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
-	case "mr":
-		bucket = b.mrBucket
-		objectPath = fmt.Sprintf("%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
-	case "datamodel":
-		bucket = b.logsBucket
-		objectPath = fmt.Sprintf("datamodel/%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
-	default:
-		bucket = b.logsBucket
-		objectPath = fmt.Sprintf("%s/%s/%s", datePrefix, payload.DeviceSN, fileName)
-	}
+	carrier := string(dev.Carrier)
+	objectPath := storage.ObjectPath(category, carrier, payload.DeviceSN, fileName)
 
 	// Download from transfer URL and store in MinIO
 	fileSize, err := b.downloadAndStore(ctx, payload.TransferURL, bucket, objectPath)
@@ -157,12 +140,12 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 		zap.String("bucket", bucket),
 		zap.String("path", objectPath),
 		zap.Int64("size", fileSize),
-		zap.String("category", fileCategory),
+		zap.String("file_type", string(ft)),
 	)
 
-	// Publish downstream event based on file category
-	switch fileCategory {
-	case "pm":
+	// Publish downstream event based on file type
+	switch ft {
+	case tr069.FileTypePM:
 		pmPayload := map[string]interface{}{
 			"minio_path": objectPath,
 			"device_id":  dev.ID.String(),
@@ -181,7 +164,7 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 			zap.String("device_sn", payload.DeviceSN),
 			zap.String("path", objectPath))
 
-	case "mr":
+	case tr069.FileTypeMR:
 		mrPayload := map[string]interface{}{
 			"minio_path": objectPath,
 			"bucket":     bucket,
@@ -202,7 +185,7 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 			zap.String("device_sn", payload.DeviceSN),
 			zap.String("path", objectPath))
 
-	case "datamodel":
+	case tr069.FileTypeDataModel:
 		dmPayload := map[string]interface{}{
 			"minio_bucket": bucket,
 			"minio_path":   objectPath,
@@ -235,30 +218,35 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 	return nil
 }
 
-// classifyFileType determines whether a file is PM, MR, DataModel, or Log based on
-// the TR-069 FileType code and the target file name.
-func classifyFileType(fileType, fileName string) string {
+// classifyFileType determines the TR069 FileType based on the raw file type code
+// and the target file name heuristics.
+func classifyFileType(fileType, fileName string) tr069.FileType {
 	ft := strings.ToUpper(strings.TrimSpace(fileType))
 	fn := strings.ToUpper(fileName)
 
-	// TR-069 FileType codes: "1"=Firmware, "2"=WebContent, "3"=VendorConfig/Log, "4"=PM, "5"=MR, "11"=ParameterModel
 	switch {
 	case ft == "11" || strings.Contains(ft, "PARAMETER MODEL"):
-		return "datamodel"
+		return tr069.FileTypeDataModel
 	case ft == "4" || strings.Contains(ft, "PM"):
-		return "pm"
+		return tr069.FileTypePM
 	case ft == "5" || strings.Contains(ft, "MR"):
-		return "mr"
+		return tr069.FileTypeMR
+	case ft == "1":
+		return tr069.FileTypeFirmware
+	case ft == "2":
+		return tr069.FileTypePatch
+	case ft == "9":
+		return tr069.FileTypePCAP
 	case strings.Contains(fn, "MRO") || strings.Contains(fn, "MRS") || strings.Contains(fn, "MRE"):
-		return "mr"
+		return tr069.FileTypeMR
 	case strings.Contains(fn, "PM") || strings.Contains(fn, "COUNTER"):
-		return "pm"
+		return tr069.FileTypePM
 	case strings.Contains(fn, "DATAMODEL") || strings.Contains(fn, "PARAMETERMODEL"):
-		return "datamodel"
+		return tr069.FileTypeDataModel
 	case ft == "3" || strings.Contains(ft, "LOG"):
-		return "log"
+		return tr069.FileTypeRunningLog
 	default:
-		return "log"
+		return tr069.FileTypeRunningLog
 	}
 }
 

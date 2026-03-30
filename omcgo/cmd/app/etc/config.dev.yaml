@@ -54,6 +54,7 @@ minio:
     config_backup: "config-backup"
     logs: "logs"
     reports: "reports"
+    exchange: "omc-exchange"
 
 conn_req:
   server_addr: "acs:7547"  # ACS external address for CPE UDP CR URL

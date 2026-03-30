@@ -12,6 +12,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
 )
 
@@ -115,8 +117,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Determine bucket and object path
-	bucket := h.bucketForFileType(fileType)
-	objectPath := h.objectPath(fileType, filename)
+	ft := normalizeFileType(fileType)
+	bucket, category := storage.BucketAndCategory(ft, h.buckets)
+	now := time.Now()
+	var objectPath string
+	if category != "" {
+		objectPath = fmt.Sprintf("%s/%s/%s", category, now.Format("2006/01/02"), filename)
+	} else {
+		objectPath = fmt.Sprintf("%s/%s", now.Format("2006/01/02"), filename)
+	}
 
 	// 6. Stream upload to MinIO
 	ctx := r.Context()
@@ -141,7 +150,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// 6.1. For parameter model uploads (FileType "11"), publish event for processing.
-	if h.isParameterModelUpload(fileType) && h.eventBus != nil {
+	if ft == tr069.FileTypeDataModel && h.eventBus != nil {
 		h.publishDataModelEvent(ctx, bucket, objectPath, filename, info.Size)
 	}
 
@@ -151,47 +160,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok","path":"%s","size":%d}`, objectPath, info.Size)
 }
 
-func (h *Handler) bucketForFileType(fileType string) string {
-	switch fileType {
+// normalizeFileType converts the fileType query parameter to a tr069.FileType.
+// Handles both numeric codes ("4") and text aliases ("PM").
+func normalizeFileType(raw string) tr069.FileType {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "1":
+		return tr069.FileTypeFirmware
+	case "2":
+		return tr069.FileTypePatch
+	case "3":
+		return tr069.FileTypeConfig
 	case "4", "PM":
-		return h.buckets.PMFiles
+		return tr069.FileTypePM
 	case "5", "MR":
-		return h.buckets.MRFiles
-	case "6", "Log", "LOG":
-		return h.buckets.Logs
+		return tr069.FileTypeMR
+	case "6", "LOG":
+		return tr069.FileTypeRunningLog
+	case "7":
+		return tr069.FileTypeSecurityLog
+	case "8":
+		return tr069.FileTypeFaultLog
+	case "9":
+		return tr069.FileTypePCAP
+	case "10":
+		return tr069.FileTypeWeb
 	case "11", "PARAMETER MODEL":
-		return h.buckets.Logs // Reuse logs bucket for datamodel files.
+		return tr069.FileTypeDataModel
 	default:
-		return h.buckets.PMFiles
-	}
-}
-
-// objectPath generates MinIO object path with organized directory structure.
-// Format: {fileType}/{YYYY}/{MM}/{DD}/{filename}
-// Example: pm/2026/03/20/pm_20260320.xml
-func (h *Handler) objectPath(fileType, filename string) string {
-	now := time.Now()
-	typeDir := h.typeDirectory(fileType)
-	return fmt.Sprintf("%s/%s/%s",
-		typeDir,
-		now.Format("2006/01/02"),
-		filename,
-	)
-}
-
-// typeDirectory maps file types to MinIO directory names
-func (h *Handler) typeDirectory(fileType string) string {
-	switch fileType {
-	case "4", "PM":
-		return "pm"
-	case "5", "MR":
-		return "mr"
-	case "6", "Log", "LOG":
-		return "logs"
-	case "11", "PARAMETER MODEL":
-		return "datamodel"
-	default:
-		return "uploads"
+		return tr069.FileTypeRunningLog
 	}
 }
 
@@ -209,12 +205,6 @@ func (h *Handler) DeleteSession(ctx context.Context, deviceSN, commandKey string
 // Used by Upload RPC to include in the SOAP message.
 func (h *Handler) UploadCredentials() (username, password string) {
 	return h.username, h.password
-}
-
-// isParameterModelUpload checks if the file type indicates a parameter model.
-func (h *Handler) isParameterModelUpload(fileType string) bool {
-	ft := strings.ToUpper(strings.TrimSpace(fileType))
-	return ft == "11" || ft == "PARAMETER MODEL"
 }
 
 // publishDataModelEvent publishes a datamodel.file.received event after a parameter model file is uploaded.

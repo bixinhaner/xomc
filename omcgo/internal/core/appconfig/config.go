@@ -288,6 +288,7 @@ type BucketConfig struct {
 	ConfigBackup string `mapstructure:"config_backup"`
 	Logs         string `mapstructure:"logs"`
 	Reports      string `mapstructure:"reports"`
+	Exchange     string `mapstructure:"exchange"`
 }
 
 // MetricsConfig holds Prometheus metrics server settings.

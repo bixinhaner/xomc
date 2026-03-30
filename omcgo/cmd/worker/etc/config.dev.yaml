@@ -44,6 +44,7 @@ minio:
     config_backup: "config-backup"
     logs: "logs"
     reports: "reports"
+    exchange: "omc-exchange"
 
 metrics:
   port: 9092

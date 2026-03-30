@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,72 +81,58 @@ func Test_TokenManager_Generate_DifferentTokensPerCall(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test Handler helper methods — bucketForFileType, typeDirectory, objectPath
+// Test normalizeFileType + storage.BucketAndCategory routing
 // ---------------------------------------------------------------------------
 
-func Test_Handler_bucketForFileType(t *testing.T) {
-	h := &Handler{
-		buckets: testBuckets(),
-	}
-
+func Test_normalizeFileType(t *testing.T) {
 	tests := []struct {
 		name     string
-		fileType string
-		expected string
+		raw      string
+		expected tr069.FileType
 	}{
-		{"PM numeric code", "4", "omc-pm-files"},
-		{"PM string code", "PM", "omc-pm-files"},
-		{"MR numeric code", "5", "omc-mr-files"},
-		{"MR string code", "MR", "omc-mr-files"},
-		{"Log numeric code", "6", "omc-logs"},
-		{"Log string code", "Log", "omc-logs"},
-		{"LOG uppercase", "LOG", "omc-logs"},
-		{"unknown defaults to PM", "99", "omc-pm-files"},
-		{"empty defaults to PM", "", "omc-pm-files"},
+		{"PM numeric", "4", tr069.FileTypePM},
+		{"PM string", "PM", tr069.FileTypePM},
+		{"MR numeric", "5", tr069.FileTypeMR},
+		{"MR string", "MR", tr069.FileTypeMR},
+		{"Log numeric", "6", tr069.FileTypeRunningLog},
+		{"LOG uppercase", "LOG", tr069.FileTypeRunningLog},
+		{"DataModel numeric", "11", tr069.FileTypeDataModel},
+		{"DataModel string", "PARAMETER MODEL", tr069.FileTypeDataModel},
+		{"Firmware", "1", tr069.FileTypeFirmware},
+		{"unknown defaults to log", "99", tr069.FileTypeRunningLog},
+		{"empty defaults to log", "", tr069.FileTypeRunningLog},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, h.bucketForFileType(tt.fileType))
+			assert.Equal(t, tt.expected, normalizeFileType(tt.raw))
 		})
 	}
 }
 
-func Test_Handler_typeDirectory(t *testing.T) {
-	h := &Handler{}
+func Test_BucketAndCategory_Routing(t *testing.T) {
+	buckets := testBuckets()
 
 	tests := []struct {
-		name     string
-		fileType string
-		expected string
+		name           string
+		fileType       string
+		expectedBucket string
 	}{
-		{"PM numeric", "4", "pm"},
-		{"PM string", "PM", "pm"},
-		{"MR numeric", "5", "mr"},
-		{"MR string", "MR", "mr"},
-		{"Log numeric", "6", "logs"},
-		{"Log string", "Log", "logs"},
-		{"LOG uppercase", "LOG", "logs"},
-		{"unknown defaults to uploads", "99", "uploads"},
-		{"empty defaults to uploads", "", "uploads"},
+		{"PM numeric", "4", buckets.PMFiles},
+		{"PM string", "PM", buckets.PMFiles},
+		{"MR numeric", "5", buckets.MRFiles},
+		{"MR string", "MR", buckets.MRFiles},
+		{"Log numeric", "6", buckets.Logs},
+		{"LOG uppercase", "LOG", buckets.Logs},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, h.typeDirectory(tt.fileType))
+			ft := normalizeFileType(tt.fileType)
+			bucket, _ := storage.BucketAndCategory(ft, buckets)
+			assert.Equal(t, tt.expectedBucket, bucket)
 		})
 	}
-}
-
-func Test_Handler_objectPath_Format(t *testing.T) {
-	h := &Handler{}
-	path := h.objectPath("PM", "pm_data.xml")
-
-	// Format: {typeDir}/{YYYY}/{MM}/{DD}/{filename}
-	assert.Contains(t, path, "pm/")
-	assert.Contains(t, path, "pm_data.xml")
-	// Verify date component is present (YYYY/MM/DD format)
-	assert.Regexp(t, `pm/\d{4}/\d{2}/\d{2}/pm_data.xml`, path)
 }
 
 // ---------------------------------------------------------------------------

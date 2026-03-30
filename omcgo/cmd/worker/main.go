@@ -107,7 +107,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	deviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	transferBridge := transfer.NewTransferBridge(
 		deviceRepo, w.MinIO,
-		cfg.MinIO.Buckets.PMFiles, cfg.MinIO.Buckets.MRFiles, cfg.MinIO.Buckets.Logs,
+		cfg.MinIO.Buckets,
 		w.EventBus, logger,
 	)
 	if err := transferBridge.Subscribe(w.EventBus); err != nil {

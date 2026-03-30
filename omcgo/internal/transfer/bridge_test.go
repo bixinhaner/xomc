@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
 )
 
@@ -136,8 +138,8 @@ func TestClassifyFileType_PM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		result := classifyFileType(tt.fileType, tt.fileName)
-		if result != "pm" {
-			t.Errorf("classifyFileType(%q, %q) = %q, want \"pm\"", tt.fileType, tt.fileName, result)
+		if result != tr069.FileTypePM {
+			t.Errorf("classifyFileType(%q, %q) = %q, want %q", tt.fileType, tt.fileName, result, tr069.FileTypePM)
 		}
 	}
 }
@@ -155,8 +157,8 @@ func TestClassifyFileType_MR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		result := classifyFileType(tt.fileType, tt.fileName)
-		if result != "mr" {
-			t.Errorf("classifyFileType(%q, %q) = %q, want \"mr\"", tt.fileType, tt.fileName, result)
+		if result != tr069.FileTypeMR {
+			t.Errorf("classifyFileType(%q, %q) = %q, want %q", tt.fileType, tt.fileName, result, tr069.FileTypeMR)
 		}
 	}
 }
@@ -172,8 +174,8 @@ func TestClassifyFileType_Log(t *testing.T) {
 	}
 	for _, tt := range tests {
 		result := classifyFileType(tt.fileType, tt.fileName)
-		if result != "log" {
-			t.Errorf("classifyFileType(%q, %q) = %q, want \"log\"", tt.fileType, tt.fileName, result)
+		if result != tr069.FileTypeRunningLog {
+			t.Errorf("classifyFileType(%q, %q) = %q, want %q", tt.fileType, tt.fileName, result, tr069.FileTypeRunningLog)
 		}
 	}
 }
@@ -183,7 +185,7 @@ func TestHandleATC_FaultSkipped(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo()
 
-	bridge := NewTransferBridge(repo, nil, "pm", "mr", "logs", bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
 
 	payload := map[string]interface{}{
 		"device_sn":       "TEST-SN-001",
@@ -213,7 +215,7 @@ func TestHandleATC_DeviceNotFound(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo() // empty
 
-	bridge := NewTransferBridge(repo, nil, "pm", "mr", "logs", bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
 
 	payload := map[string]interface{}{
 		"device_sn":       "UNKNOWN-SN",
@@ -234,7 +236,7 @@ func TestHandleATC_NoTransferURL(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo()
 
-	bridge := NewTransferBridge(repo, nil, "pm", "mr", "logs", bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
 
 	payload := map[string]interface{}{
 		"device_sn":       "TEST-SN-001",
@@ -281,7 +283,7 @@ func TestHandleATC_PMFilePublish(t *testing.T) {
 
 	// Test the event construction path by directly testing classifyFileType
 	// and the publish logic structure
-	if classifyFileType("4", "pm_data.xml") != "pm" {
+	if classifyFileType("4", "pm_data.xml") != tr069.FileTypePM {
 		t.Fatal("expected PM classification")
 	}
 
@@ -329,10 +331,10 @@ func TestHandleATC_MRFilePublish(t *testing.T) {
 	devID := uuid.New()
 
 	// Test MR classification
-	if classifyFileType("5", "MRO_eNB1234.xml") != "mr" {
+	if classifyFileType("5", "MRO_eNB1234.xml") != tr069.FileTypeMR {
 		t.Fatal("expected MR classification for file_type=5")
 	}
-	if classifyFileType("", "MRO_eNB1234.xml") != "mr" {
+	if classifyFileType("", "MRO_eNB1234.xml") != tr069.FileTypeMR {
 		t.Fatal("expected MR classification for MRO filename")
 	}
 
@@ -380,7 +382,7 @@ func TestSubscribe(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo()
 
-	bridge := NewTransferBridge(repo, nil, "pm", "mr", "logs", bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
 
 	if err := bridge.Subscribe(bus); err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -405,7 +407,7 @@ func TestDownloadAndStore_HTTPError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	bridge := NewTransferBridge(nil, nil, "pm", "mr", "logs", bus, logger)
+	bridge := NewTransferBridge(nil, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
 
 	_, err := bridge.downloadAndStore(context.Background(), ts.URL+"/file.xml", "test-bucket", "test/path.xml")
 	if err == nil {

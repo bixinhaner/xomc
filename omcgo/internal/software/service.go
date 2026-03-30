@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
 )
 
@@ -57,9 +58,8 @@ func NewSoftwareService(
 
 // UploadFirmware stores a firmware file to MinIO and creates a firmware version record.
 func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersion, file io.Reader, fileSize int64) error {
-	// Build MinIO path: firmware/{carrier}/{product_class}/{version}/firmware.bin
-	objectPath := fmt.Sprintf("firmware/%s/%s/%s/%s",
-		fw.Carrier, fw.ProductClass, fw.Version, fw.FileName)
+	// Build MinIO path: img/{carrier}/{product_class}/{version}/firmware.bin
+	objectPath := storage.FirmwarePath("img", string(fw.Carrier), fw.ProductClass, fw.Version, fw.FileName)
 
 	_, err := s.minioClient.PutObject(ctx, s.firmwareBkt, objectPath, file, fileSize, minio.PutObjectOptions{
 		ContentType: "application/octet-stream",

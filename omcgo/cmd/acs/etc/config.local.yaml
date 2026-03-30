@@ -75,6 +75,7 @@ minio:
     config_backup: "config-backup"
     logs: "logs"
     reports: "reports"
+    exchange: "omc-exchange"
 
 upload:
   base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址
