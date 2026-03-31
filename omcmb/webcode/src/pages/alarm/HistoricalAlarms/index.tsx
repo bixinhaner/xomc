@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Space, Tag, Typography, App } from 'antd';
+import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
 import {
   CheckOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   ExportOutlined,
   MinusCircleOutlined,
 } from '@ant-design/icons';
@@ -54,6 +55,41 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
+// 统计项组件
+function StatItem({
+  label,
+  value,
+  color,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  color?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: '8px 16px',
+        borderRadius: 6,
+        cursor: onClick ? 'pointer' : 'default',
+        background: active ? '#E6F4FF' : 'transparent',
+        transition: 'all 0.2s',
+        minWidth: 70,
+      }}
+    >
+      <Text type="secondary" style={{ fontSize: 12 }}>{label}</Text>
+      <Text strong style={{ fontSize: 20, color: color || '#1F1F1F', lineHeight: 1.2 }}>{value}</Text>
+    </div>
+  );
+}
+
 export default function HistoricalAlarms() {
   const t = useT();
   const { modal, message } = App.useApp();
@@ -65,6 +101,7 @@ export default function HistoricalAlarms() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [exportMode, setExportMode] = useState<'all' | 'selected'>('all');
 
   // 确认告警弹窗状态
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -148,6 +185,20 @@ export default function HistoricalAlarms() {
     }),
     [rawAlarms]
   );
+
+  // 实时统计（从查询结果计算）
+  const realStats = useMemo(() => {
+    const stats = { total, critical: 0, major: 0, minor: 0, warning: 0, cleared: 0, confirmed: 0 };
+    rawAlarms.forEach((alarm) => {
+      if (alarm.severity === 'critical') stats.critical++;
+      else if (alarm.severity === 'major') stats.major++;
+      else if (alarm.severity === 'minor') stats.minor++;
+      else if (alarm.severity === 'warning') stats.warning++;
+      if (alarm.dealState === '2' || alarm.dealState === '3') stats.cleared++;
+      if (alarm.dealState === '1' || alarm.dealState === '3') stats.confirmed++;
+    });
+    return stats;
+  }, [rawAlarms, total]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     const keyword = values.keyword as string;
@@ -436,40 +487,114 @@ export default function HistoricalAlarms() {
     <ListPageLayout
       title={t('nav.alarm.history')}
       extra={
-        <Button type="primary" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
-          {t('common.export')}
-        </Button>
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'all', label: '导出全部', icon: <DownloadOutlined /> },
+              { key: 'selected', label: `导出选中 (${selectedRowKeys.length})`, icon: <DownloadOutlined />, disabled: selectedRowKeys.length === 0 },
+            ],
+            onClick: ({ key }) => {
+              setExportMode(key as 'all' | 'selected');
+              setExportOpen(true);
+            },
+          }}
+        >
+          <Button icon={<ExportOutlined />}>
+            导出
+          </Button>
+        </Dropdown>
       }
     >
-      <FilterBar
-        filterId="historical-alarms"
-        fields={FILTER_FIELDS}
-        onSearch={handleSearch}
-        onReset={handleReset}
-        collapsedRows={1}
-      />
+      {/* 统计卡片 */}
+      <Card
+        size="small"
+        bordered
+        style={{ marginBottom: 12 }}
+        styles={{ body: { padding: '12px 16px' } }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <StatItem
+            label="总数"
+            value={realStats.total}
+          />
+          <StatItem
+            label="严重"
+            value={realStats.critical}
+            color="#E53935"
+          />
+          <StatItem
+            label="主要"
+            value={realStats.major}
+            color="#FB8C00"
+          />
+          <StatItem
+            label="次要"
+            value={realStats.minor}
+            color="#FDD835"
+          />
+          <StatItem
+            label="警告"
+            value={realStats.warning}
+            color="#42A5F5"
+          />
+          <StatItem
+            label="已清除"
+            value={realStats.cleared}
+            color="#67D972"
+          />
+          <StatItem
+            label="已确认"
+            value={realStats.confirmed}
+            color="#67D972"
+          />
+        </div>
+      </Card>
 
-      <DataTable<Alarm>
-        tableId="historical-alarms-table"
-        columns={columns}
-        dataSource={alarms}
-        loading={isLoading}
-        rowKey="id"
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-        total={total}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={(page, size) => {
-          setCurrentPage(page);
-          setPageSize(size);
-        }}
-        batchActions={batchActions}
-        onRefresh={() => void refetch()}
-        alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
-        defaultDensity="compact"
-      />
+      {/* 搜索卡片 */}
+      <Card
+        size="small"
+        bordered
+        style={{ marginBottom: 12 }}
+        styles={{ body: { padding: '12px 16px 0' } }}
+      >
+        <FilterBar
+          filterId="historical-alarms"
+          fields={FILTER_FIELDS}
+          onSearch={handleSearch}
+          onReset={handleReset}
+          collapsedRows={1}
+          noDefaultStyle
+        />
+      </Card>
+
+      {/* 列表卡片 */}
+      <Card
+        size="small"
+        bordered
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<Alarm>
+          tableId="historical-alarms-table"
+          columns={columns}
+          dataSource={alarms}
+          loading={isLoading}
+          rowKey="id"
+          selectable
+          selectedRowKeys={selectedRowKeys}
+          onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+          total={total}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={(page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          }}
+          batchActions={batchActions}
+          onRefresh={() => void refetch()}
+          alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
+          defaultDensity="compact"
+        />
+      </Card>
 
       <AlarmDetail
         alarm={detailAlarm}
