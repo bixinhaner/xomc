@@ -757,6 +757,7 @@ export default function CurrentAlarms() {
           onSearch={handleSearch}
           onReset={handleReset}
           collapsedRows={1}
+          noDefaultStyle
         />
       </Card>
 

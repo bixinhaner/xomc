@@ -34,6 +34,8 @@ export interface FilterBarProps {
   onReset: () => void;
   collapsedRows?: number;
   extra?: React.ReactNode;
+  /** 不应用默认的 wrapper 样式（padding、margin） */
+  noDefaultStyle?: boolean;
 }
 
 const COLS_PER_ROW = 6;
@@ -48,6 +50,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
   onReset,
   collapsedRows = 1,
   extra,
+  noDefaultStyle = false,
 }) => {
   const t = useT();
   const [form] = Form.useForm<Record<string, unknown>>();
@@ -161,7 +164,10 @@ const FilterBar: React.FC<FilterBarProps> = ({
   const actionSpan = COL_SPAN;
 
   return (
-    <div className={styles.filterBarWrapper}>
+    <div
+      className={styles.filterBarWrapper}
+      style={noDefaultStyle ? { padding: 0, margin: 0 } : undefined}
+    >
       <Form form={form} layout="vertical" size="small">
         <Row gutter={[12, 0]} align="bottom">
           {fieldsToShow.map((field) => (
