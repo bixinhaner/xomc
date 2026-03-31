@@ -8,6 +8,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/acs/download"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/acs/upload"
@@ -40,6 +41,8 @@ type ServerDeps struct {
 	Metrics                 *ACSMetrics
 	UploadHandler           *upload.Handler             // CPE file upload handler (supports query params and path-based token)
 	UploadConfig            *appconfig.UploadConfig     // upload server configuration for generating upload URLs
+	DownloadHandler         *download.Handler           // CPE file download handler (MinIO → CPE proxy)
+	DownloadConfig          *appconfig.DownloadConfig   // download server configuration for generating download URLs
 	ConnReqSender           ConnectionRequester         // post-session wake: send CR when queue not empty
 	PostSessionWakeCfg      appconfig.PostSessionWakeConfig // post-session wake configuration
 	RedisClient             redis.Cmdable               // Redis client for continuous wake counter
@@ -67,6 +70,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		requestIDPrefix:         deps.RequestIDPrefix,
 		enableTestTaskInjection: deps.EnableTestTaskInjection,
 		uploadConfig:            deps.UploadConfig,
+		downloadConfig:          deps.DownloadConfig,
 		maxRPCPerSession:        cfg.Session.MaxRPCPerSession,
 		connReqSender:           deps.ConnReqSender,
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
@@ -89,6 +93,13 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	// Auth: HTTP Basic Authentication with global credentials
 	if deps.UploadHandler != nil {
 		mux.Handle("/smallcell/FileUploadService", deps.UploadHandler)
+	}
+
+	// CPE file download handler (ACS -> MinIO -> CPE proxy)
+	// Endpoint: GET /smallcell/FileDownloadService/{bucket}/{objectPath...}
+	// Auth: HTTP Basic Authentication with global credentials
+	if deps.DownloadHandler != nil {
+		mux.Handle("/smallcell/FileDownloadService/", deps.DownloadHandler)
 	}
 
 	// Start background session reaper to clean up stale connSessions entries

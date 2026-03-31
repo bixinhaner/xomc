@@ -14,6 +14,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/acs/download"
+	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
@@ -91,6 +93,16 @@ func runACS(cmd *cobra.Command, args []string) error {
 		cfg.EnableTestTaskInjection,
 	)
 
+	// Override dispatcher with download config for MinIO path → HTTP URL translation.
+	if cfg.Download.BaseURL != "" {
+		deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{
+			DownloadBaseURL: cfg.Download.BaseURL,
+			DownloadPath:    cfg.Download.Path,
+			DownloadUser:    cfg.Download.Username,
+			DownloadPass:    cfg.Download.Password,
+		})
+	}
+
 	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
 	if inf.MinIO != nil {
 		tokenMgr := upload.NewTokenManager(cfg.Upload.TokenSecret, cfg.Upload.TokenTTL)
@@ -109,6 +121,17 @@ func runACS(cmd *cobra.Command, args []string) error {
 		deps.UploadConfig = &cfg.Upload
 		inf.Logger.Info("upload handler enabled",
 			zap.String("username", cfg.Upload.Username))
+
+		// Setup download handler for CPE file download (MinIO -> CPE proxy).
+		downloadHandler := download.NewHandler(
+			inf.MinIO,
+			cfg.Download.Username, cfg.Download.Password,
+			inf.Logger,
+		)
+		deps.DownloadHandler = downloadHandler
+		deps.DownloadConfig = &cfg.Download
+		inf.Logger.Info("download handler enabled",
+			zap.String("username", cfg.Download.Username))
 	}
 
 	// Setup STUN store and UDP sender (needed for both STUN server and post-session wake)

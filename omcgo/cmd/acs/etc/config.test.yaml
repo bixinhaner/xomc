@@ -67,6 +67,12 @@ upload:
   password: "test_upload_password"
   max_file_size: 104857600  # 100MB
 
+download:
+  base_url: "http://acs:7547"
+  path: "/smallcell/FileDownloadService"
+  username: "download_user"
+  password: "test_download_password"
+
 metrics:
   port: 9090
 

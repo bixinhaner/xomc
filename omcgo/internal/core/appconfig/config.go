@@ -22,6 +22,7 @@ type ACSConfig struct {
 	DB                      PostgresConfig     `mapstructure:"db"`
 	MinIO                   MinIOConfig        `mapstructure:"minio"`
 	Upload                  UploadConfig       `mapstructure:"upload"`
+	Download                DownloadConfig     `mapstructure:"download"`
 	Metrics                 MetricsConfig      `mapstructure:"metrics"`
 	Tracer                  TracerConfig       `mapstructure:"tracer"`
 	Log                     LogConfig          `mapstructure:"log"`
@@ -60,6 +61,15 @@ type UploadConfig struct {
 	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
+}
+
+// DownloadConfig holds file download server settings.
+// ACS serves files from MinIO to CPE devices through this endpoint.
+type DownloadConfig struct {
+	BaseURL  string `mapstructure:"base_url"`  // Download server base URL (gateway), e.g. http://localhost:8080
+	Path     string `mapstructure:"path"`      // Download path prefix, default /smallcell/FileDownloadService
+	Username string `mapstructure:"username"`  // HTTP Basic Auth username for CPE download
+	Password string `mapstructure:"password"`  // HTTP Basic Auth password for CPE download
 }
 
 // CORSConfig holds CORS middleware settings.

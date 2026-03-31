@@ -71,7 +71,8 @@ type Handler struct {
 	logger                  *zap.Logger
 	requestIDPrefix         string                  // 请求 ID 前缀，如 "acs"
 	enableTestTaskInjection bool                    // 启用随机测试任务注入（仅测试用）
-	uploadConfig            *appconfig.UploadConfig // 上传服务器配置，用于生成上传 URL
+	uploadConfig            *appconfig.UploadConfig   // 上传服务器配置，用于生成上传 URL
+	downloadConfig          *appconfig.DownloadConfig // 下载服务器配置，用于生成下载 URL
 	// maxRPCPerSession 限制每个 TR069 会话的 RPC 交互次数。
 	// 达到上限后优雅结束会话；剩余命令留在队列中，通过会话后续唤在后续会话中下发。
 	// 0 表示不限制。建议：≤15，避免触发 CPE 的单会话交互上限。

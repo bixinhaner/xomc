@@ -84,6 +84,12 @@ upload:
   password: ""
   max_file_size: 104857600            # 100MB
 
+download:
+  base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址
+  path: "/smallcell/FileDownloadService"
+  username: ""                        # 留空则跳过认证
+  password: ""
+
 metrics:
   port: 9090
 
