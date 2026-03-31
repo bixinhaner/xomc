@@ -644,10 +644,6 @@ export default function UpgradePlan() {
       void message.warning('该产品类型下没有设备');
       return;
     }
-    if (!upgradeFile) {
-      void message.warning('请选择回退文件');
-      return;
-    }
     if (executionMethod === 'scheduled' && !scheduledTime) {
       void message.warning('请选择定时执行时间');
       return;
@@ -1152,7 +1148,7 @@ export default function UpgradePlan() {
             <Button
               type="primary"
               onClick={handleSubmitUpgrade}
-              disabled={(!selectAllOfType && drawerDevices.length === 0) || !upgradeFile}
+              disabled={!selectAllOfType && drawerDevices.length === 0}
             >
               确认回退
             </Button>
