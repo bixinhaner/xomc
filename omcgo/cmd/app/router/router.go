@@ -90,6 +90,11 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, carrierRegistry, logger)
 	deviceService.SetInfoSyncer(infoSyncer)
 
+	// Device Registration module
+	regRepo := device.NewPgRegistrationRepository(pgPool)
+	regService := device.NewRegistrationService(regRepo, logger)
+	deviceService.SetRegistrationRepo(regRepo)
+
 	// BatchInformProcessor（可选，配置启用时生效）
 	var batchProcessor *device.BatchInformProcessor
 	if cfg.BatchProcessor.Enabled {
@@ -196,6 +201,9 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	topoNodeRepo := topology.NewPgTopoNodeRepository(pgPool)
 	topoEdgeRepo := topology.NewPgTopoEdgeRepository(pgPool)
 
+	// Wire group assigner into device service for pre-registration group assignment.
+	deviceService.SetGroupAssigner(groupRepo)
+
 	// Admin/RBAC module
 	userRepo := admin.NewPgUserRepository(pgPool)
 	roleRepo := admin.NewPgRoleRepository(pgPool)
@@ -210,6 +218,9 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	loginGuard := admin.NewLoginGuard(redisClient)
 	adminHandler.SetCaptchaService(captchaService)
 	adminHandler.SetLoginGuard(loginGuard)
+	adminHandler.SetRoleDeviceGroupRepo(roleRepo)
+	permService := admin.NewPermissionService(roleRepo, groupRepo, redisClient, logger)
+	adminHandler.SetPermissionService(permService)
 	apiKeyRepo := admin.NewPgAPIKeyRepository(pgPool)
 	apiKeySvc := admin.NewAPIKeyService(apiKeyRepo, userRepo, logger)
 	apiKeyHandler := admin.NewAPIKeyHandler(apiKeySvc)
@@ -302,11 +313,27 @@ func Setup(r *gin.Engine, deps *Deps) error {
 
 	// Device routes → resource "devices"
 	deviceHandler := device.NewHandler(deviceService)
+	deviceHandler.SetPermissionService(permService)
 	deviceHandler.RegisterRoutes(permGroup("devices"))
 
 	// Device info routes (extended info, enums, activate/deactivate) → resource "devices"
 	deviceInfoHandler := device.NewDeviceInfoHandler(deviceService)
 	deviceInfoHandler.RegisterRoutes(permGroup("devices"))
+
+	// Device registration routes → resource "devices"
+	regHandler := device.NewRegistrationHandler(regService)
+	regHandler.RegisterRoutes(permGroup("devices"))
+
+	// Column config routes → resource "devices"
+	columnConfigRepo := device.NewPgColumnConfigRepository(pgPool)
+	columnConfigHandler := device.NewColumnConfigHandler(columnConfigRepo)
+	columnConfigHandler.RegisterRoutes(permGroup("devices"))
+
+	// Device export routes → resource "devices"
+	exportService := device.NewExportService(deviceInfoRepo, logger)
+	exportHandler := device.NewExportHandler(exportService)
+	exportHandler.SetPermissionService(permService)
+	exportHandler.RegisterRoutes(permGroup("devices"))
 
 	// Parameter tree routes → resource "devices"
 	paramTreeHandler := device.NewParameterTreeHandler(deviceService, paramRepo, dmRegistry, logger)

@@ -4,13 +4,15 @@ import "fmt"
 
 // validUpgradeTransitions defines the allowed state transitions for upgrade tasks.
 var validUpgradeTransitions = map[UpgradeState][]UpgradeState{
-	UpgradePending:     {UpgradeDownloading, UpgradeFailed},
-	UpgradeDownloading: {UpgradeRebooting, UpgradeFailed},
-	UpgradeRebooting:   {UpgradeVerifying, UpgradeFailed},
-	UpgradeVerifying:   {UpgradeCompleted, UpgradeFailed},
+	UpgradePending:     {UpgradeDownloading, UpgradeFailed, UpgradeTerminated},
+	UpgradeDownloading: {UpgradeRebooting, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
+	UpgradeRebooting:   {UpgradeVerifying, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
+	UpgradeVerifying:   {UpgradeCompleted, UpgradeFailed, UpgradeTerminated},
+	UpgradeSuspended:   {UpgradeDownloading, UpgradeRebooting, UpgradeTerminated},
 	// Terminal states — no transitions allowed.
-	UpgradeCompleted: {},
-	UpgradeFailed:    {},
+	UpgradeCompleted:  {},
+	UpgradeFailed:     {},
+	UpgradeTerminated: {},
 }
 
 // ValidateUpgradeTransition checks whether a state transition is allowed.
@@ -31,7 +33,7 @@ func ValidateUpgradeTransition(current, target UpgradeState) error {
 
 // IsUpgradeTerminal returns true if the state is a terminal state.
 func IsUpgradeTerminal(state UpgradeState) bool {
-	return state == UpgradeCompleted || state == UpgradeFailed
+	return state == UpgradeCompleted || state == UpgradeFailed || state == UpgradeTerminated
 }
 
 // NextUpgradeState returns the expected next state in the happy path.

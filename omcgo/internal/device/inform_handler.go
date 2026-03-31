@@ -122,6 +122,9 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 	// for both new and existing devices.
 	h.service.PublishDeviceRegistered(ctx, device)
 
+	// Detect abnormal reboot: "1 BOOT" without "0 BOOTSTRAP"
+	h.detectAbnormalReboot(ctx, payload, device)
+
 	return nil
 }
 
@@ -204,6 +207,42 @@ func (h *InformHandler) resolveCarrier(oui string) model.CarrierCode {
 		}
 	}
 	return h.defaultCarrier
+}
+
+// detectAbnormalReboot checks whether the Inform events contain "1 BOOT"
+// without "0 BOOTSTRAP", which indicates an unexpected device reboot.
+func (h *InformHandler) detectAbnormalReboot(ctx context.Context, payload InformEventPayload, device *model.Device) {
+	hasBoot := false
+	hasBootstrap := false
+	for _, e := range payload.Events {
+		switch e {
+		case "1 BOOT":
+			hasBoot = true
+		case "0 BOOTSTRAP":
+			hasBootstrap = true
+		}
+	}
+
+	if hasBoot && !hasBootstrap {
+		h.logger.Warn("abnormal reboot detected",
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("device_id", device.ID.String()),
+			zap.Strings("events", payload.Events))
+
+		if h.service.eventBus != nil {
+			evtPayload := map[string]interface{}{
+				"device_id":     device.ID.String(),
+				"serial_number": device.SerialNumber,
+				"carrier":       string(device.Carrier),
+				"events":        payload.Events,
+			}
+			if evt, err := event.NewEvent(event.SubjectDeviceRebootAbnormal, evtPayload); err == nil {
+				if pubErr := h.service.eventBus.Publish(ctx, event.SubjectDeviceRebootAbnormal, evt); pubErr != nil {
+					h.logger.Warn("publish device.reboot.abnormal event", zap.Error(pubErr))
+				}
+			}
+		}
+	}
 }
 
 func payloadToInform(p InformEventPayload) *tr069.InformMessage {

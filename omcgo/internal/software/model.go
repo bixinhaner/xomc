@@ -17,6 +17,8 @@ const (
 	UpgradeVerifying   UpgradeState = "verifying"
 	UpgradeCompleted   UpgradeState = "completed"
 	UpgradeFailed      UpgradeState = "failed"
+	UpgradeSuspended   UpgradeState = "suspended"
+	UpgradeTerminated  UpgradeState = "terminated"
 )
 
 // FirmwareVersion represents a firmware image stored in MinIO.

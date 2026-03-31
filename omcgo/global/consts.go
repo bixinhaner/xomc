@@ -92,3 +92,26 @@ const (
 	ScopeOUI            DataModelScope = "oui"
 	ScopeCarrierDefault DataModelScope = "carrier_default"
 )
+
+// Default device group UUIDs (fixed, referenced in migration 000065).
+const (
+	DefaultLevel1GroupID = "00000000-0000-0000-0000-000000000001"
+	DefaultLevel2GroupID = "00000000-0000-0000-0000-000000000002"
+)
+
+// RegistrationStatus represents the state of a pre-registered device.
+type RegistrationStatus string
+
+const (
+	RegistrationPending RegistrationStatus = "pending"
+	RegistrationOnline  RegistrationStatus = "online"
+	RegistrationExpired RegistrationStatus = "expired"
+)
+
+// DeviceGroupStatus represents the state of a device group.
+type DeviceGroupStatus string
+
+const (
+	GroupStatusActive   DeviceGroupStatus = "active"
+	GroupStatusDisabled DeviceGroupStatus = "disabled"
+)

@@ -42,6 +42,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	upgrade.GET("/:id", h.GetUpgradeTask)
 	upgrade.POST("", h.TriggerUpgrade)
 	upgrade.POST("/batch", h.BatchUpgrade)
+	upgrade.PUT("/:id/suspend", h.SuspendUpgradeTask)
+	upgrade.PUT("/:id/resume", h.ResumeUpgradeTask)
+	upgrade.PUT("/:id/terminate", h.TerminateUpgradeTask)
+	upgrade.POST("/:id/rollback", h.RollbackUpgradeTask)
 }
 
 func (h *Handler) ListFirmware(c *gin.Context) {
@@ -179,4 +183,61 @@ func (h *Handler) BatchUpgrade(c *gin.Context) {
 		"tasks": tasks,
 		"count": len(tasks),
 	})
+}
+
+func (h *Handler) SuspendUpgradeTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.SuspendUpgrade(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "upgrade task suspended"})
+}
+
+func (h *Handler) ResumeUpgradeTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.ResumeUpgrade(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "upgrade task resumed"})
+}
+
+func (h *Handler) TerminateUpgradeTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.TerminateUpgrade(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "upgrade task terminated"})
+}
+
+func (h *Handler) RollbackUpgradeTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	task, err := h.service.RollbackUpgrade(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "rollback initiated", "task": task})
 }

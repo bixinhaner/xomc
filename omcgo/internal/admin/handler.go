@@ -38,11 +38,13 @@ type ipLimiterEntry struct {
 
 // Handler provides HTTP endpoints for admin operations.
 type Handler struct {
-	service      *AdminService
-	captcha      *CaptchaService
-	loginGuard   *LoginGuard
-	logger       *zap.Logger
-	loginLimiter sync.Map // map[string]*ipLimiterEntry
+	service       *AdminService
+	captcha       *CaptchaService
+	loginGuard    *LoginGuard
+	roleGroupRepo RoleDeviceGroupRepository
+	permService   *PermissionService
+	logger        *zap.Logger
+	loginLimiter  sync.Map // map[string]*ipLimiterEntry
 }
 
 // NewHandler creates a new admin Handler.
@@ -64,6 +66,16 @@ func (h *Handler) SetCaptchaService(cs *CaptchaService) {
 // SetLoginGuard sets the brute-force login guard.
 func (h *Handler) SetLoginGuard(lg *LoginGuard) {
 	h.loginGuard = lg
+}
+
+// SetRoleDeviceGroupRepo sets the role-device-group repository.
+func (h *Handler) SetRoleDeviceGroupRepo(repo RoleDeviceGroupRepository) {
+	h.roleGroupRepo = repo
+}
+
+// SetPermissionService sets the data permission service.
+func (h *Handler) SetPermissionService(ps *PermissionService) {
+	h.permService = ps
 }
 
 // getIPLimiter returns a rate.Limiter for the given IP, creating one if needed.
@@ -130,6 +142,8 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		roles.POST("", h.CreateRole)
 		roles.PUT("/:id", h.UpdateRole)
 		roles.DELETE("/:id", h.DeleteRole)
+		roles.GET("/:id/device-groups", h.GetRoleDeviceGroups)
+		roles.PUT("/:id/device-groups", h.SetRoleDeviceGroups)
 	}
 
 	rg.GET("/permissions", h.ListPermissions)
@@ -604,6 +618,64 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, perms)
+}
+
+// GetRoleDeviceGroups handles GET /roles/:id/device-groups.
+func (h *Handler) GetRoleDeviceGroups(c *gin.Context) {
+	if h.roleGroupRepo == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			errors.New("role device group service not configured"))
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	groupIDs, err := h.roleGroupRepo.GetGroupIDs(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"group_ids": groupIDs})
+}
+
+// SetRoleDeviceGroups handles PUT /roles/:id/device-groups.
+func (h *Handler) SetRoleDeviceGroups(c *gin.Context) {
+	if h.roleGroupRepo == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			errors.New("role device group service not configured"))
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req struct {
+		GroupIDs []uuid.UUID `json:"group_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.roleGroupRepo.SetGroupIDs(c.Request.Context(), id, req.GroupIDs); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	// Invalidate permission cache for this role.
+	if h.permService != nil {
+		h.permService.InvalidateRoleCache(c.Request.Context(), id)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "device groups updated"})
 }
 
 func (h *Handler) ListAuditLogs(c *gin.Context) {

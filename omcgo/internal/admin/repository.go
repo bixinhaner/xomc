@@ -63,6 +63,13 @@ type RoleRepository interface {
 	PermissionWriter
 }
 
+// RoleDeviceGroupRepository manages role–device-group associations.
+type RoleDeviceGroupRepository interface {
+	GetGroupIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	SetGroupIDs(ctx context.Context, roleID uuid.UUID, groupIDs []uuid.UUID) error
+	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+}
+
 // AuditRepository defines the persistence interface for audit logs.
 type AuditRepository interface {
 	Create(ctx context.Context, log *AuditLog) error

@@ -121,7 +121,7 @@ func (r *PgUpgradeTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID
 	if status == UpgradeDownloading {
 		builder = builder.Set("started_at", time.Now())
 	}
-	if status == UpgradeCompleted || status == UpgradeFailed {
+	if status == UpgradeCompleted || status == UpgradeFailed || status == UpgradeTerminated {
 		builder = builder.Set("completed_at", time.Now())
 	}
 
@@ -249,7 +249,7 @@ func (r *PgUpgradeTaskRepository) GetActiveByDeviceID(ctx context.Context, devic
 		From("upgrade_tasks").
 		Where(sq.And{
 			sq.Eq{"device_id": deviceID},
-			sq.NotEq{"status": []UpgradeState{UpgradeCompleted, UpgradeFailed}},
+			sq.NotEq{"status": []UpgradeState{UpgradeCompleted, UpgradeFailed, UpgradeTerminated}},
 		}).
 		OrderBy("created_at DESC").
 		Limit(1).

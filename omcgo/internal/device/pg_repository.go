@@ -96,6 +96,7 @@ func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 	query, args, err := psql.Select(deviceColumns()...).
 		From("devices").
 		Where(sq.Eq{"id": id}).
+		Where(notDeleted).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
@@ -107,6 +108,7 @@ func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (
 	query, args, err := psql.Select(deviceColumns()...).
 		From("devices").
 		Where(sq.Eq{"serial_number": sn}).
+		Where(notDeleted).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
@@ -167,17 +169,21 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 }
 
 func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, _ := psql.Delete("devices").Where(sq.Eq{"id": id}).ToSql()
+	query, args, _ := psql.Update("devices").
+		Set("deleted_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		Where(notDeleted).
+		ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("delete device: %w", err)
+		return fmt.Errorf("soft delete device: %w", err)
 	}
 	return nil
 }
 
 func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
-	builder := psql.Select(deviceColumns()...).From("devices")
-	countBuilder := psql.Select("COUNT(*)").From("devices")
+	builder := psql.Select(deviceColumns()...).From("devices").Where(notDeleted)
+	countBuilder := psql.Select("COUNT(*)").From("devices").Where(notDeleted)
 
 	if filter.Carrier != nil {
 		builder = builder.Where(sq.Eq{"carrier": *filter.Carrier})
@@ -284,7 +290,7 @@ func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at
 }
 
 func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
-	builder := psql.Select("status", "COUNT(*)").From("devices").GroupBy("status")
+	builder := psql.Select("status", "COUNT(*)").From("devices").Where(notDeleted).GroupBy("status")
 	if carrier != nil {
 		builder = builder.Where(sq.Eq{"carrier": *carrier})
 	}
@@ -311,6 +317,7 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 func (r *PgDeviceRepository) ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error) {
 	builder := psql.Select(deviceColumns()...).From("devices").
 		Where(sq.Eq{"status": model.DeviceActive}).
+		Where(notDeleted).
 		OrderBy("last_inform_at ASC NULLS FIRST", "id ASC").
 		Limit(uint64(limit))
 
@@ -363,9 +370,12 @@ func deviceColumns() []string {
 		"nat_detected", "udp_connection_request_address",
 		"last_inform_at", "last_inform_events",
 		"inform_interval", "site_name", "site_id", "latitude", "longitude",
-		"extension_data", "created_at", "updated_at",
+		"extension_data", "created_at", "updated_at", "deleted_at",
 	}
 }
+
+// notDeleted is the standard soft-delete filter applied to all read queries.
+var notDeleted = sq.Eq{"deleted_at": nil}
 
 func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	var d model.Device
@@ -379,7 +389,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &d.SiteName, &d.SiteID, &d.Latitude, &d.Longitude,
-		&extData, &d.CreatedAt, &d.UpdatedAt,
+		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -420,7 +430,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &d.SiteName, &d.SiteID, &d.Latitude, &d.Longitude,
-		&extData, &d.CreatedAt, &d.UpdatedAt,
+		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
 	)
 	if err != nil {
 		return nil, err

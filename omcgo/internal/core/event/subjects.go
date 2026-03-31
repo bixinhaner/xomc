@@ -12,6 +12,7 @@ const (
 	SubjectDeviceConnectionRequest          = "device.inform.connection_request"
 	SubjectDeviceConnectionLost             = "device.connection.lost"
 	SubjectDeviceRegistered                 = "device.registered"
+	SubjectDeviceRebootAbnormal             = "device.reboot.abnormal"
 )
 
 // Command events

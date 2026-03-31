@@ -1,24 +1,37 @@
 package device
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// VisibleGroupsResolver resolves which device groups a user can see.
+type VisibleGroupsResolver interface {
+	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID, carrier *model.CarrierCode) ([]uuid.UUID, error)
+}
+
 // Handler provides HTTP handlers for device management REST API.
 type Handler struct {
-	service *DeviceService
+	service     *DeviceService
+	permService VisibleGroupsResolver
 }
 
 // NewHandler creates a new device REST API handler.
 func NewHandler(service *DeviceService) *Handler {
 	return &Handler{service: service}
+}
+
+// SetPermissionService sets the data permission service for group-based filtering.
+func (h *Handler) SetPermissionService(ps VisibleGroupsResolver) {
+	h.permService = ps
 }
 
 // RegisterRoutes registers device routes on the given router group.
@@ -36,6 +49,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.PUT("/:id", h.UpdateDevice)
 		devices.DELETE("/:id", h.DeleteDevice)
 		devices.POST("/:id/reboot", h.RebootDevice)
+		devices.POST("/:id/param-sync", h.TriggerParamSync)
+		devices.PUT("/:id/rf-switch", h.SetRFSwitch)
 	}
 }
 
@@ -183,6 +198,32 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	}
 	if licenseStatus := c.Query("license_status"); licenseStatus != "" {
 		filter.LicenseStatus = &licenseStatus
+	}
+	if groupID := c.Query("group_id"); groupID != "" {
+		gid, err := uuid.Parse(groupID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.GroupID = &gid
+	}
+
+	// Inject data permission: restrict to user-visible groups.
+	if h.permService != nil {
+		userID, _ := c.Get(admin.CtxKeyUserID)
+		carrierVal, _ := c.Get(admin.CtxKeyCarrier)
+		if uid, ok := userID.(uuid.UUID); ok {
+			var carrier *model.CarrierCode
+			if cv, ok := carrierVal.(*model.CarrierCode); ok {
+				carrier = cv
+			}
+			visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, carrier)
+			if err != nil {
+				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+				return
+			}
+			filter.VisibleGroups = visibleGroups
+		}
 	}
 
 	result, err := h.service.ListDevicesWithInfo(c.Request.Context(), filter)
@@ -386,4 +427,44 @@ func (h *Handler) SearchDevices(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"items": devices})
+}
+
+// TriggerParamSync handles POST /api/v1/devices/:id/param-sync.
+func (h *Handler) TriggerParamSync(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.service.TriggerParamSync(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "parameter sync command queued"})
+}
+
+// SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.
+func (h *Handler) SetRFSwitch(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.SetRFSwitch(c.Request.Context(), id, req.Enabled); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "RF switch command queued"})
 }

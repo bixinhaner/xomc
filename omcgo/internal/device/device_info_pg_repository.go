@@ -163,10 +163,33 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	selectCols := deviceWithInfoSelectColumns()
 	builder := psql.Select(selectCols...).
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id")
+		LeftJoin("device_info di ON di.device_id = d.id").
+		Where(sq.Eq{"d.deleted_at": nil})
 	countBuilder := psql.Select("COUNT(*)").
 		From("devices d").
-		LeftJoin("device_info di ON di.device_id = d.id")
+		LeftJoin("device_info di ON di.device_id = d.id").
+		Where(sq.Eq{"d.deleted_at": nil})
+
+	// Data permission filter: VisibleGroups semantics:
+	//   nil          → superadmin, no filtering (see all devices)
+	//   []uuid.UUID{} → no permissions, return empty result
+	//   [id1, id2]   → filter to devices in these groups
+	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
+		// User has no group permissions — short-circuit to empty result.
+		builder = builder.Where("FALSE")
+		countBuilder = countBuilder.Where("FALSE")
+	} else if filter.GroupID != nil || len(filter.VisibleGroups) > 0 {
+		builder = builder.Join("device_group_members dgm ON dgm.device_id = d.id")
+		countBuilder = countBuilder.Join("device_group_members dgm ON dgm.device_id = d.id")
+		if filter.GroupID != nil {
+			builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+			countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		}
+		if len(filter.VisibleGroups) > 0 {
+			builder = builder.Where(sq.Eq{"dgm.group_id": filter.VisibleGroups})
+			countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": filter.VisibleGroups})
+		}
+	}
 
 	// Apply filters from devices table
 	if filter.Carrier != nil {

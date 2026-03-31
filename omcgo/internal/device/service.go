@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -17,11 +18,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// GroupAssigner assigns a device to a group.
+type GroupAssigner interface {
+	BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
+}
+
 // DeviceService provides business logic for device management.
 type DeviceService struct {
 	deviceRepo     DeviceRepository
 	paramRepo      DeviceParameterRepository
 	deviceInfoRepo DeviceInfoRepository
+	regRepo        RegistrationRepository
+	groupAssigner  GroupAssigner
 	infoSyncer     *InfoSyncer
 	heartbeat      *HeartbeatMonitor
 	eventBus       event.EventBus
@@ -96,6 +104,16 @@ func (s *DeviceService) SetInfoSyncer(syncer *InfoSyncer) {
 	s.infoSyncer = syncer
 }
 
+// SetRegistrationRepo sets the device registration repository for pre-registration lookup.
+func (s *DeviceService) SetRegistrationRepo(repo RegistrationRepository) {
+	s.regRepo = repo
+}
+
+// SetGroupAssigner sets the group assigner for assigning devices to groups.
+func (s *DeviceService) SetGroupAssigner(ga GroupAssigner) {
+	s.groupAssigner = ga
+}
+
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
 func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 	device, err := s.deviceRepo.GetByID(ctx, id)
@@ -136,6 +154,99 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 					zap.Error(err),
 				)
 			}
+		}()
+	}
+
+	return nil
+}
+
+// TriggerParamSync queues a GetParameterValues command to sync all parameters from the device.
+func (s *DeviceService) TriggerParamSync(ctx context.Context, deviceID uuid.UUID) error {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("get device for param sync: %w", err)
+	}
+	if device == nil {
+		return commonerrors.ErrNotFound
+	}
+	if s.cmdQueue == nil {
+		return fmt.Errorf("command queue not configured")
+	}
+
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"ParameterNames": []string{"Device."},
+	})
+	cmd := &cmdqueue.Command{
+		ID:     uuid.New().String(),
+		Method: "GetParameterValues",
+		Params: paramsJSON,
+	}
+	cmd.CommandKey = cmd.ID
+
+	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+		return fmt.Errorf("queue param sync command: %w", err)
+	}
+
+	s.logger.Info("param sync command queued",
+		zap.String("device_id", deviceID.String()),
+		zap.String("serial_number", device.SerialNumber))
+
+	// Wake the device.
+	if s.connReq != nil && device.ConnectionRequestURL != "" {
+		go func() {
+			s.connReq.Send(context.Background(), device.SerialNumber, device.ConnectionRequestURL)
+		}()
+	}
+
+	return nil
+}
+
+// SetRFSwitch queues a SetParameterValues command to enable/disable the device RF.
+// TODO(carrier): RF control path is currently hardcoded for LTE. When Carrier adapter
+// layer is completed, replace with carrier.GetRFControlPath(device.Technology) to
+// support both LTE (FAPControl.LTE.AdminState) and NR (FAPControl.NR.AdminState).
+func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, enabled bool) error {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("get device for RF switch: %w", err)
+	}
+	if device == nil {
+		return commonerrors.ErrNotFound
+	}
+	if s.cmdQueue == nil {
+		return fmt.Errorf("command queue not configured")
+	}
+
+	// RF switch value: "1" for enabled, "0" for disabled.
+	value := "0"
+	if enabled {
+		value = "1"
+	}
+
+	rfParamsJSON, _ := json.Marshal(map[string]interface{}{
+		"ParameterList": []map[string]string{
+			{"Name": "Device.Services.FAPService.1.FAPControl.LTE.AdminState", "Value": value},
+		},
+	})
+	cmd := &cmdqueue.Command{
+		ID:     uuid.New().String(),
+		Method: "SetParameterValues",
+		Params: rfParamsJSON,
+	}
+	cmd.CommandKey = cmd.ID
+
+	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+		return fmt.Errorf("queue RF switch command: %w", err)
+	}
+
+	s.logger.Info("RF switch command queued",
+		zap.String("device_id", deviceID.String()),
+		zap.Bool("enabled", enabled))
+
+	// Wake the device.
+	if s.connReq != nil && device.ConnectionRequestURL != "" {
+		go func() {
+			s.connReq.Send(context.Background(), device.SerialNumber, device.ConnectionRequestURL)
 		}()
 	}
 
@@ -305,6 +416,33 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		s.logger.Warn("create device_info for new device",
 			zap.String("device_id", device.ID.String()),
 			zap.Error(err))
+	}
+
+	// Check pre-registration: assign to specified group if found.
+	if s.regRepo != nil && s.groupAssigner != nil {
+		preReg, _ := s.regRepo.GetBySerialNumber(ctx, device.SerialNumber)
+		if preReg != nil && preReg.GroupID != nil {
+			if _, err := s.groupAssigner.BatchAddDevices(ctx, *preReg.GroupID, []uuid.UUID{device.ID}); err != nil {
+				s.logger.Warn("assign device to pre-registered group",
+					zap.String("device_id", device.ID.String()),
+					zap.String("group_id", preReg.GroupID.String()),
+					zap.Error(err))
+			} else {
+				s.logger.Info("device assigned to pre-registered group",
+					zap.String("device_id", device.ID.String()),
+					zap.String("group_id", preReg.GroupID.String()))
+			}
+			// Mark registration as online.
+			s.regRepo.UpdateStatus(ctx, preReg.ID, string(global.RegistrationOnline))
+		} else if preReg == nil {
+			// No pre-registration: assign to default L2 group.
+			defaultGroupID, _ := uuid.Parse(global.DefaultLevel2GroupID)
+			if _, err := s.groupAssigner.BatchAddDevices(ctx, defaultGroupID, []uuid.UUID{device.ID}); err != nil {
+				s.logger.Warn("assign device to default group",
+					zap.String("device_id", device.ID.String()),
+					zap.Error(err))
+			}
+		}
 	}
 
 	// Sync UDP address to STUN cache

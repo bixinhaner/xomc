@@ -18,7 +18,10 @@ type PgRoleRepository struct {
 	pool *pgxpool.Pool
 }
 
-var _ RoleRepository = (*PgRoleRepository)(nil)
+var (
+	_ RoleRepository            = (*PgRoleRepository)(nil)
+	_ RoleDeviceGroupRepository = (*PgRoleRepository)(nil)
+)
 
 // NewPgRoleRepository creates a new PgRoleRepository.
 func NewPgRoleRepository(pool *pgxpool.Pool) *PgRoleRepository {
@@ -333,6 +336,95 @@ func (r *PgRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid
 		return fmt.Errorf("remove all permissions: %w", err)
 	}
 	return nil
+}
+
+// --- RoleDeviceGroupRepository methods ---
+
+func (r *PgRoleRepository) GetGroupIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	query, args, err := psql.Select("group_id").
+		From("role_device_groups").
+		Where(sq.Eq{"role_id": roleID}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get group IDs SQL: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get role group IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *PgRoleRepository) SetGroupIDs(ctx context.Context, roleID uuid.UUID, groupIDs []uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Delete existing associations.
+	delQuery, delArgs, err := psql.Delete("role_device_groups").
+		Where(sq.Eq{"role_id": roleID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete role groups SQL: %w", err)
+	}
+	if _, err := tx.Exec(ctx, delQuery, delArgs...); err != nil {
+		return fmt.Errorf("delete role groups: %w", err)
+	}
+
+	// Insert new associations.
+	if len(groupIDs) > 0 {
+		builder := psql.Insert("role_device_groups").
+			Columns("role_id", "group_id")
+		for _, gid := range groupIDs {
+			builder = builder.Values(roleID, gid)
+		}
+		insQuery, insArgs, err := builder.ToSql()
+		if err != nil {
+			return fmt.Errorf("build insert role groups SQL: %w", err)
+		}
+		if _, err := tx.Exec(ctx, insQuery, insArgs...); err != nil {
+			return fmt.Errorf("insert role groups: %w", err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *PgRoleRepository) GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	const rawSQL = `
+		SELECT DISTINCT rdg.group_id
+		FROM user_roles ur
+		JOIN role_device_groups rdg ON rdg.role_id = ur.role_id
+		WHERE ur.user_id = $1`
+
+	rows, err := r.pool.Query(ctx, rawSQL, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user visible group IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan visible group ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error) {

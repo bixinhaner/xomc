@@ -12,6 +12,11 @@ type GroupReader interface {
 	ListRoots(ctx context.Context) ([]DeviceGroup, error)
 	ListChildren(ctx context.Context, parentID uuid.UUID) ([]DeviceGroup, error)
 	GetTree(ctx context.Context) ([]DeviceGroup, error)
+	GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error)
+	ExistsByParentAndName(ctx context.Context, parentID *uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
+	GetStats(ctx context.Context) (*GroupStats, error)
+	CountDevicesByGroup(ctx context.Context, groupID uuid.UUID) (int, error)
+	ListChildIDs(ctx context.Context, parentID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // GroupWriter provides write operations for device groups.
@@ -26,6 +31,10 @@ type GroupMembership interface {
 	AddDevice(ctx context.Context, groupID, deviceID uuid.UUID) error
 	RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error
 	ListDeviceIDs(ctx context.Context, groupID uuid.UUID) ([]uuid.UUID, error)
+	BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
+	BatchRemoveDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
+	MoveDevices(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
+	MoveGroupDevicesToDefault(ctx context.Context, groupIDs []uuid.UUID) (int64, error)
 }
 
 // DeviceGroupRepository defines the full persistence interface for device groups.

@@ -118,6 +118,43 @@ func (m *mockDeviceGroupRepo) ListDeviceIDs(_ context.Context, groupID uuid.UUID
 	return m.devices[groupID], nil
 }
 
+func (m *mockDeviceGroupRepo) GetTreeWithCounts(_ context.Context) ([]DeviceGroup, error) {
+	return m.GetTree(context.Background())
+}
+
+func (m *mockDeviceGroupRepo) ExistsByParentAndName(_ context.Context, _ *uuid.UUID, _ string, _ *uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (m *mockDeviceGroupRepo) GetStats(_ context.Context) (*GroupStats, error) {
+	return &GroupStats{}, nil
+}
+
+func (m *mockDeviceGroupRepo) CountDevicesByGroup(_ context.Context, groupID uuid.UUID) (int, error) {
+	return len(m.devices[groupID]), nil
+}
+
+func (m *mockDeviceGroupRepo) ListChildIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (m *mockDeviceGroupRepo) BatchAddDevices(_ context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	m.devices[groupID] = append(m.devices[groupID], deviceIDs...)
+	return int64(len(deviceIDs)), nil
+}
+
+func (m *mockDeviceGroupRepo) BatchRemoveDevices(_ context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockDeviceGroupRepo) MoveDevices(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockDeviceGroupRepo) MoveGroupDevicesToDefault(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
 // ---------------------------------------------------------------------------
 // Mock: SiteRepository
 // ---------------------------------------------------------------------------
@@ -304,7 +341,7 @@ func TestHandler_Create(t *testing.T) {
 	h, _, _, _, _ := newTestHandler()
 	router := setupRouter(h)
 
-	body := createGroupRequest{
+	body := CreateGroupRequest{
 		Name:    "New Group",
 		Carrier: "cmcc",
 	}
@@ -351,9 +388,9 @@ func TestHandler_Update(t *testing.T) {
 	groupID := uuid.New()
 	seedGroup(groupRepo, groupID, "Old Name", nil)
 
-	body := updateGroupRequest{
-		Name:    "Updated Name",
-		Carrier: "ctcc",
+	updatedName := "Updated Name"
+	body := UpdateGroupRequest{
+		Name: &updatedName,
 	}
 
 	w := httptest.NewRecorder()
@@ -367,7 +404,6 @@ func TestHandler_Update(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Name", resp.Name)
-	assert.Equal(t, model.CarrierCode("ctcc"), resp.Carrier)
 }
 
 func TestHandler_Delete(t *testing.T) {
@@ -396,7 +432,7 @@ func TestHandler_AddDevice(t *testing.T) {
 	seedGroup(groupRepo, groupID, "Group1", nil)
 	deviceID := uuid.New()
 
-	body := addDeviceRequest{DeviceID: deviceID.String()}
+	body := map[string]string{"device_id": deviceID.String()}
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID.String()+"/devices", bytes.NewReader(mustMarshal(t, body)))

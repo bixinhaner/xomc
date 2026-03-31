@@ -17,6 +17,10 @@ type DeviceFilter struct {
 	SN         *string // exact match on serial_number
 	Search     *string // fuzzy search across serial_number/site_name/manufacturer/device_name/address
 
+	// Group filters
+	GroupID       *uuid.UUID  // filter by specific device group
+	VisibleGroups []uuid.UUID // data permission: restrict to these groups (nil = no restriction)
+
 	// Extended filters (device_info / devices additional fields)
 	Manufacturer  *string // devices.manufacturer exact match
 	ProductClass  *string // devices.product_class exact match

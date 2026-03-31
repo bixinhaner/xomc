@@ -96,6 +96,42 @@ func (m *mockGroupRepo) ListDeviceIDs(ctx context.Context, groupID uuid.UUID) ([
 	return nil, nil
 }
 
+func (m *mockGroupRepo) GetTreeWithCounts(_ context.Context) ([]DeviceGroup, error) {
+	return m.GetTree(context.Background())
+}
+
+func (m *mockGroupRepo) ExistsByParentAndName(_ context.Context, _ *uuid.UUID, _ string, _ *uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (m *mockGroupRepo) GetStats(_ context.Context) (*GroupStats, error) {
+	return &GroupStats{}, nil
+}
+
+func (m *mockGroupRepo) CountDevicesByGroup(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockGroupRepo) ListChildIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (m *mockGroupRepo) BatchAddDevices(_ context.Context, _ uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
+	return int64(len(deviceIDs)), nil
+}
+
+func (m *mockGroupRepo) BatchRemoveDevices(_ context.Context, _ uuid.UUID, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockGroupRepo) MoveDevices(_ context.Context, _ []uuid.UUID, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockGroupRepo) MoveGroupDevicesToDefault(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
 // --- Helper ---
 
 func newTestGroupService(repo *mockGroupRepo) *DeviceGroupService {

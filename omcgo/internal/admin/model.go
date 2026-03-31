@@ -35,13 +35,14 @@ type User struct {
 
 // Role represents a named role with associated permissions.
 type Role struct {
-	ID          uuid.UUID    `json:"id"`
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	IsSystem    bool         `json:"is_system"`
-	Permissions []Permission `json:"permissions,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	ID             uuid.UUID    `json:"id"`
+	Name           string       `json:"name"`
+	Description    string       `json:"description"`
+	IsSystem       bool         `json:"is_system"`
+	Permissions    []Permission `json:"permissions,omitempty"`
+	DeviceGroupIDs []uuid.UUID  `json:"device_group_ids,omitempty"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
 }
 
 // Permission represents a resource-action pair bound to a role.

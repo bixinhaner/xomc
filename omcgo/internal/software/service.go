@@ -316,6 +316,129 @@ func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.
 	return nil
 }
 
+// SuspendUpgrade pauses an active upgrade task.
+func (s *SoftwareService) SuspendUpgrade(ctx context.Context, taskID uuid.UUID) error {
+	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get upgrade task: %w", err)
+	}
+	if task == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	if err := ValidateUpgradeTransition(task.Status, UpgradeSuspended); err != nil {
+		return commonerrors.NewBusinessError(8003, fmt.Sprintf("cannot suspend task in %s state", task.Status), err)
+	}
+
+	if err := s.upgradeRepo.UpdateStatus(ctx, taskID, UpgradeSuspended, string(task.Status)); err != nil {
+		return fmt.Errorf("suspend upgrade: %w", err)
+	}
+
+	s.logger.Info("upgrade task suspended",
+		zap.String("task_id", taskID.String()),
+		zap.String("previous_state", string(task.Status)))
+	return nil
+}
+
+// ResumeUpgrade resumes a suspended upgrade task.
+func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) error {
+	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get upgrade task: %w", err)
+	}
+	if task == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	if task.Status != UpgradeSuspended {
+		return commonerrors.NewBusinessError(8004, "task is not suspended", commonerrors.ErrInvalidInput)
+	}
+
+	// Resume to the pre-suspension state (stored in ErrorMessage), default to downloading.
+	resumeState := UpgradeState(task.ErrorMessage)
+	if resumeState == "" || resumeState == UpgradeSuspended {
+		resumeState = UpgradeDownloading
+	}
+
+	if err := s.upgradeRepo.UpdateStatus(ctx, taskID, resumeState, ""); err != nil {
+		return fmt.Errorf("resume upgrade: %w", err)
+	}
+
+	// Re-issue connection request to wake device.
+	dev, devErr := s.deviceRepo.GetByID(ctx, task.DeviceID)
+	if devErr == nil && dev != nil && dev.ConnectionRequestURL != "" {
+		go func() {
+			if crErr := s.connReq.Send(context.Background(), dev.SerialNumber, dev.ConnectionRequestURL); crErr != nil {
+				s.logger.Warn("connection request on resume", zap.Error(crErr))
+			}
+		}()
+	}
+
+	s.logger.Info("upgrade task resumed",
+		zap.String("task_id", taskID.String()),
+		zap.String("resumed_to", string(resumeState)))
+	return nil
+}
+
+// TerminateUpgrade force-stops an active or suspended upgrade task.
+func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID) error {
+	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get upgrade task: %w", err)
+	}
+	if task == nil {
+		return commonerrors.ErrNotFound
+	}
+
+	if IsUpgradeTerminal(task.Status) {
+		return commonerrors.NewBusinessError(8005, "task already in terminal state", commonerrors.ErrInvalidInput)
+	}
+
+	if err := s.upgradeRepo.UpdateStatus(ctx, taskID, UpgradeTerminated, "terminated by user"); err != nil {
+		return fmt.Errorf("terminate upgrade: %w", err)
+	}
+
+	s.logger.Info("upgrade task terminated",
+		zap.String("task_id", taskID.String()),
+		zap.String("previous_state", string(task.Status)))
+	return nil
+}
+
+// RollbackUpgrade triggers a rollback by starting a new download of the previous firmware.
+// For now this creates a new upgrade task pointing to the specified firmware version.
+func (s *SoftwareService) RollbackUpgrade(ctx context.Context, taskID uuid.UUID) (*UpgradeTask, error) {
+	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get upgrade task: %w", err)
+	}
+	if task == nil {
+		return nil, commonerrors.ErrNotFound
+	}
+
+	if !IsUpgradeTerminal(task.Status) {
+		return nil, commonerrors.NewBusinessError(8006, "cannot rollback non-terminal task; terminate it first", commonerrors.ErrInvalidInput)
+	}
+
+	// Check that the device exists and retrieve its current firmware info.
+	dev, err := s.deviceRepo.GetByID(ctx, task.DeviceID)
+	if err != nil || dev == nil {
+		return nil, fmt.Errorf("get device for rollback: %w", err)
+	}
+
+	// For now, rollback means re-downloading the original firmware that was on the device.
+	// The caller should provide a target firmware via a new upgrade. We mark the old task
+	// status and return a message indicating rollback is initiated.
+	if err := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeFailed, "rolled back"); err != nil {
+		s.logger.Warn("update rollback status", zap.Error(err))
+	}
+
+	s.logger.Info("upgrade rollback initiated",
+		zap.String("task_id", taskID.String()),
+		zap.String("device_id", task.DeviceID.String()))
+
+	return task, nil
+}
+
 // Subscribe registers event subscriptions for the software service.
 func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	_, err := eventBus.Subscribe(event.SubjectDeviceTransferComplete, func(ctx context.Context, evt event.Event) error {

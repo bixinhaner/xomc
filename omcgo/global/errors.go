@@ -11,6 +11,25 @@ const (
 	ErrCodeDeviceRebootFailed = 1005
 )
 
+// Device Group (1100-1199)
+const (
+	ErrCodeGroupNotFound       = 1101
+	ErrCodeGroupDuplicate      = 1102
+	ErrCodeGroupIsDefault      = 1103
+	ErrCodeGroupLevelInvalid   = 1104
+	ErrCodeGroupParentInvalid  = 1105
+	ErrCodeGroupDeviceOnlyL2   = 1106
+	ErrCodeGroupNameDuplicate  = 1107
+)
+
+// Device Registration (1200-1299)
+const (
+	ErrCodeRegistrationNotFound  = 1201
+	ErrCodeRegistrationDuplicate = 1202
+	ErrCodeRegistrationImportErr = 1203
+	ErrCodeRegistrationInvalidSN = 1204
+)
+
 // Data Model / Configuration (2000-2999)
 const (
 	ErrCodeDataModelNotFound     = 2001
