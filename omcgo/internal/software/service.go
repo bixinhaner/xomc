@@ -129,7 +129,7 @@ func (s *SoftwareService) StartUpgrade(ctx context.Context, deviceID, firmwareID
 	task.Status = UpgradeDownloading
 
 	// Push Download command to command queue
-	downloadURL := fmt.Sprintf("minio://%s/%s", s.firmwareBkt, fw.MinIOPath)
+	downloadURL := fmt.Sprintf("%s/%s", s.firmwareBkt, fw.MinIOPath)
 	paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
 		"url":       downloadURL,
 		"file_type": "1", // firmware
@@ -217,7 +217,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, deviceIDs []uuid.UUI
 			s.logger.Error("get firmware for batch upgrade", zap.Error(fwErr))
 		}
 			if fw != nil {
-				downloadURL := fmt.Sprintf("minio://%s/%s", s.firmwareBkt, fw.MinIOPath)
+				downloadURL := fmt.Sprintf("%s/%s", s.firmwareBkt, fw.MinIOPath)
 				batchParamsJSON, marshalErr := json.Marshal(map[string]interface{}{
 					"url":       downloadURL,
 					"file_type": "1",

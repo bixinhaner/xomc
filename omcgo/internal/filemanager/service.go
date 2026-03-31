@@ -130,7 +130,7 @@ func (s *FileService) DistributeFile(ctx context.Context, id uuid.UUID, deviceSN
 	}
 
 	taskID := uuid.New().String()
-	downloadURL := fmt.Sprintf("minio://%s/%s", s.bucket, mf.MinIOPath)
+	downloadURL := fmt.Sprintf("%s/%s", s.bucket, mf.MinIOPath)
 	tr069FileType := mapFileTypeToTR069(mf.FileType)
 
 	var succeeded, failed int

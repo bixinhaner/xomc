@@ -3,6 +3,7 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/pkg/soap"
@@ -18,10 +19,23 @@ type Dispatcher struct {
 	handlers map[string]RPCHandler
 }
 
+// DispatcherConfig holds optional configuration for the RPC dispatcher.
+type DispatcherConfig struct {
+	DownloadBaseURL string // Download server base URL, e.g. "http://localhost:8080"
+	DownloadPath    string // Download path prefix, e.g. "/smallcell/FileDownloadService"
+	DownloadUser    string // Download HTTP Basic Auth username
+	DownloadPass    string // Download HTTP Basic Auth password
+}
+
 // NewDispatcher creates a new RPC dispatcher with all standard handlers registered.
-func NewDispatcher() *Dispatcher {
+func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 	d := &Dispatcher{
 		handlers: make(map[string]RPCHandler),
+	}
+
+	var cfg DispatcherConfig
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
 	}
 
 	d.Register("GetParameterValues", &GetParameterValuesHandler{})
@@ -29,7 +43,12 @@ func NewDispatcher() *Dispatcher {
 	d.Register("GetParameterNames", &GetParameterNamesHandler{})
 	d.Register("AddObject", &AddObjectHandler{})
 	d.Register("DeleteObject", &DeleteObjectHandler{})
-	d.Register("Download", &DownloadHandler{})
+	d.Register("Download", &DownloadHandler{
+		DownloadBaseURL: cfg.DownloadBaseURL,
+		DownloadPath:    cfg.DownloadPath,
+		DownloadUser:    cfg.DownloadUser,
+		DownloadPass:    cfg.DownloadPass,
+	})
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
 	d.Register("FactoryReset", &FactoryResetHandler{})
@@ -148,7 +167,17 @@ func (h *DeleteObjectHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error
 	return soap.RenderResponse(soap.DeleteObjectTmpl, data)
 }
 
-type DownloadHandler struct{}
+// DownloadHandler handles Download RPC requests.
+// When DownloadBaseURL is set, it translates internal MinIO paths to HTTP URLs
+// that CPE can access through the gateway/ACS download endpoint.
+// Internal paths are plain "bucket/object/path" (no scheme), e.g. "firmware/v2.0.bin".
+// URLs with a scheme (http://, https://, ftp://) are passed through unchanged.
+type DownloadHandler struct {
+	DownloadBaseURL string // e.g. "http://localhost:8080"
+	DownloadPath    string // e.g. "/smallcell/FileDownloadService"
+	DownloadUser    string // HTTP Basic Auth credentials injected into download URL
+	DownloadPass    string
+}
 
 func (h *DownloadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 	var params soap.DownloadData
@@ -157,6 +186,22 @@ func (h *DownloadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 	}
 	params.ID = cmd.CWMPID
 	params.CommandKey = cmd.CommandKey
+
+	// Translate internal MinIO path to HTTP download endpoint URL.
+	// Plain path (no "://" scheme) is treated as MinIO bucket/object path:
+	//   firmware/v2.0.bin → {BaseURL}{Path}/firmware/v2.0.bin
+	// URLs with a scheme (http://, https://, ftp://) are passed through unchanged.
+	if h.DownloadBaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
+		params.URL = strings.TrimRight(h.DownloadBaseURL, "/") + h.DownloadPath + "/" + params.URL
+		// Inject download credentials if not already set
+		if params.Username == "" && h.DownloadUser != "" {
+			params.Username = h.DownloadUser
+		}
+		if params.Password == "" && h.DownloadPass != "" {
+			params.Password = h.DownloadPass
+		}
+	}
+
 	return soap.RenderResponse(soap.DownloadTmpl, params)
 }
 
