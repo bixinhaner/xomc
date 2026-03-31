@@ -37,6 +37,14 @@ const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
 };
 
+// 告警级别标签
+const SEVERITY_LABEL: Record<string, string> = {
+  critical: '严重',
+  major: '主要',
+  minor: '次要',
+  warning: '警告',
+};
+
 // 告警状态配置
 const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string }> = {
   '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E53935' },
@@ -53,6 +61,13 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
   '30003': 'alarm.eventType.device',
   '30004': 'alarm.eventType.environment',
   '30006': 'alarm.eventType.performance',
+};
+
+// 基站制式配置
+const NE_TYPE_CONFIG: Record<string, string> = {
+  'eNB': 'eNB',
+  'gNB': 'gNB',
+  'GSM': 'GSM',
 };
 
 // 自定义告警分组项
@@ -121,7 +136,7 @@ export default function CustomAlarmStats() {
     [groups, selectedGroupId]
   );
 
-  const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
+  const SEVERITY_LABEL_I18N: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
     major: t('alarm.severity.major'),
     minor: t('alarm.severity.minor'),
@@ -153,6 +168,24 @@ export default function CustomAlarmStats() {
         { label: t('alarm.eventType.processingError'), value: '30002' },
         { label: t('alarm.eventType.device'), value: '30003' },
         { label: t('alarm.eventType.environment'), value: '30004' },
+      ],
+    },
+    {
+      name: 'neType',
+      label: t('alarm.neType'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+      ],
+    },
+    {
+      name: 'unread',
+      label: t('alarm.readStatus'),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.readStatus.read'), value: '0' },
+        { label: t('alarm.readStatus.unread'), value: '1' },
       ],
     },
     {
@@ -284,6 +317,8 @@ export default function CustomAlarmStats() {
     setFilterParams({
       severity: values.severity as AlarmFilter['severity'],
       eventType: values.eventType as AlarmFilter['eventType'],
+      neType: values.neType as string,
+      unread: values.unread as '0' | '1',
       dealState: values.dealState as AlarmFilter['dealState'],
       alarmIdentifier: keyword,
       alarmName: keyword,
@@ -399,6 +434,7 @@ export default function CustomAlarmStats() {
     setDetailAlarm(null);
   }, []);
 
+  // 表格列 - 与活动告警保持一致，增加告警类型列
   const columns = useMemo((): DataTableColumn<Alarm>[] => [
     {
       key: 'alarmId',
@@ -443,10 +479,17 @@ export default function CustomAlarmStats() {
       ellipsis: true,
     },
     {
+      key: 'neType',
+      title: t('alarm.neType'),
+      dataIndex: 'neType',
+      width: 100,
+      render: (val: string) => NE_TYPE_CONFIG[val] || val || '-',
+    },
+    {
       key: 'equipInfo',
       title: t('alarm.equipInfo'),
       dataIndex: 'equipInfo',
-      width: 200,
+      width: 220,
       ellipsis: true,
     },
     {
@@ -456,6 +499,21 @@ export default function CustomAlarmStats() {
       width: 120,
       ellipsis: true,
       render: (val: EventType) => t(EVENT_TYPE_CONFIG[val] || 'common.unknown'),
+    },
+    {
+      key: 'alarmType',
+      title: '告警类型',
+      dataIndex: 'alarmType',
+      width: 100,
+      render: (_val, record) => {
+        // 根据分组类型或告警本身属性判断
+        const type = isHistorical ? 'historical' : 'active';
+        return (
+          <Tag color={type === 'active' ? 'red' : 'default'}>
+            {type === 'active' ? '活动告警' : '历史告警'}
+          </Tag>
+        );
+      },
     },
     {
       key: 'dealState',
@@ -476,12 +534,33 @@ export default function CustomAlarmStats() {
       render: (v) => (v ? new Date(String(v)).toLocaleString('zh-CN') : '-'),
     },
     {
+      key: 'updTime',
+      title: t('alarm.updTime'),
+      dataIndex: 'updTime',
+      width: 150,
+      render: (v) => (v ? new Date(String(v)).toLocaleString('zh-CN') : '-'),
+    },
+    {
+      key: 'specificProblem',
+      title: t('alarm.specificProblem'),
+      dataIndex: 'specificProblem',
+      width: 150,
+      ellipsis: true,
+    },
+    {
       key: 'alarmCount',
       title: t('alarm.alarmCount'),
       dataIndex: 'alarmCount',
       width: 80,
     },
-  ], [t, SEVERITY_LABEL, handleShowDetail]);
+    {
+      key: 'dealMemo',
+      title: t('alarm.dealMemo'),
+      dataIndex: 'dealMemo',
+      width: 100,
+      ellipsis: true,
+    },
+  ], [t, SEVERITY_LABEL, handleShowDetail, isHistorical]);
 
   const batchActions = useMemo((): BatchAction[] => {
     const actions: BatchAction[] = [];
@@ -582,8 +661,10 @@ export default function CustomAlarmStats() {
             const key = keys[0] as string | undefined;
             if (key) {
               setSelectedGroupId(key);
-              setCurrentPage(1);
+              // 切换分组时重置搜索条件和页码
               setFilterParams({});
+              setCurrentPage(1);
+              setSelectedRowKeys([]);
             }
           }}
           blockNode
@@ -648,11 +729,11 @@ export default function CustomAlarmStats() {
       {/* 搜索和列表卡片 */}
       <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
         <div style={{ padding: '12px 16px 0' }}>
-          <FilterBar filterId="custom-alarm-stats" fields={FILTER_FIELDS} onSearch={handleSearch} onReset={handleReset} collapsedRows={1} />
+          <FilterBar filterId={`custom-alarm-stats-${selectedGroupId}`} fields={FILTER_FIELDS} onSearch={handleSearch} onReset={handleReset} collapsedRows={1} />
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>
           <DataTable<Alarm>
-            tableId="custom-alarm-stats-table"
+            tableId={`custom-alarm-stats-table-${selectedGroupId}`}
             columns={columns}
             dataSource={alarms}
             loading={isLoading}
