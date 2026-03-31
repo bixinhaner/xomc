@@ -76,6 +76,9 @@ const QUICK_TIME_OPTIONS = [
 const QUICK_FILTER_OPTIONS = [
   { label: '全部', key: 'all' },
   { label: '严重', key: 'critical', severity: ['critical'] },
+  { label: '主要', key: 'major', severity: ['major'] },
+  { label: '次要', key: 'minor', severity: ['minor'] },
+  { label: '警告', key: 'warning', severity: ['warning'] },
   { label: '未确认', key: 'unacked', dealState: ['0'] },
   { label: '未读', key: 'unread', unread: '1' },
 ];
@@ -672,22 +675,15 @@ export default function CurrentAlarms() {
               {autoRefresh ? `${refreshInterval}秒` : '自动刷新'}
             </Button>
           </Dropdown>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'all', label: '导出全部', icon: <DownloadOutlined /> },
-                { key: 'selected', label: `导出选中 (${selectedRowKeys.length})`, icon: <DownloadOutlined />, disabled: selectedRowKeys.length === 0 },
-              ],
-              onClick: ({ key }) => {
-                setExportMode(key as 'all' | 'selected');
-                setExportOpen(true);
-              },
+          <Button
+            icon={<ExportOutlined />}
+            onClick={() => {
+              setExportMode('all');
+              setExportOpen(true);
             }}
           >
-            <Button icon={<ExportOutlined />}>
-              导出
-            </Button>
-          </Dropdown>
+            导出
+          </Button>
         </Space>
       }
     >
@@ -716,16 +712,22 @@ export default function CurrentAlarms() {
             label="主要"
             value={realStats.major}
             color="#FB8C00"
+            active={activeQuickFilter === 'major'}
+            onClick={() => handleQuickFilter('major')}
           />
           <StatItem
             label="次要"
             value={realStats.minor}
             color="#FDD835"
+            active={activeQuickFilter === 'minor'}
+            onClick={() => handleQuickFilter('minor')}
           />
           <StatItem
             label="警告"
             value={realStats.warning}
             color="#42A5F5"
+            active={activeQuickFilter === 'warning'}
+            onClick={() => handleQuickFilter('warning')}
           />
           <StatItem
             label="未确认"

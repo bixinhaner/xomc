@@ -103,6 +103,9 @@ export default function HistoricalAlarms() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportMode, setExportMode] = useState<'all' | 'selected'>('all');
 
+  // 快捷筛选状态
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
+
   // 确认告警弹窗状态
   const [ackModalOpen, setAckModalOpen] = useState(false);
   const [ackTargetIds, setAckTargetIds] = useState<string[]>([]);
@@ -217,6 +220,35 @@ export default function HistoricalAlarms() {
 
   const handleReset = useCallback(() => {
     setFilterParams({});
+    setCurrentPage(1);
+    setActiveQuickFilter('all');
+  }, []);
+
+  // 快捷筛选处理
+  const handleQuickFilter = useCallback((key: string) => {
+    setActiveQuickFilter(key);
+    if (key === 'all') {
+      setFilterParams((prev) => {
+        const { severity, ...rest } = prev as any;
+        return rest;
+      });
+    } else if (key === 'cleared') {
+      setFilterParams((prev) => ({
+        ...prev,
+        dealState: ['2', '3'] as any,
+      }));
+    } else if (key === 'confirmed') {
+      setFilterParams((prev) => ({
+        ...prev,
+        dealState: ['1', '3'] as any,
+      }));
+    } else {
+      // severity: critical, major, minor, warning
+      setFilterParams((prev) => ({
+        ...prev,
+        severity: [key] as AlarmFilter['severity'],
+      }));
+    }
     setCurrentPage(1);
   }, []);
 
@@ -487,22 +519,15 @@ export default function HistoricalAlarms() {
     <ListPageLayout
       title={t('nav.alarm.history')}
       extra={
-        <Dropdown
-          menu={{
-            items: [
-              { key: 'all', label: '导出全部', icon: <DownloadOutlined /> },
-              { key: 'selected', label: `导出选中 (${selectedRowKeys.length})`, icon: <DownloadOutlined />, disabled: selectedRowKeys.length === 0 },
-            ],
-            onClick: ({ key }) => {
-              setExportMode(key as 'all' | 'selected');
-              setExportOpen(true);
-            },
+        <Button
+          icon={<ExportOutlined />}
+          onClick={() => {
+            setExportMode('all');
+            setExportOpen(true);
           }}
         >
-          <Button icon={<ExportOutlined />}>
-            导出
-          </Button>
-        </Dropdown>
+          导出
+        </Button>
       }
     >
       {/* 统计卡片 */}
@@ -516,36 +541,50 @@ export default function HistoricalAlarms() {
           <StatItem
             label="总数"
             value={realStats.total}
+            active={activeQuickFilter === 'all'}
+            onClick={() => handleQuickFilter('all')}
           />
           <StatItem
             label="严重"
             value={realStats.critical}
             color="#E53935"
+            active={activeQuickFilter === 'critical'}
+            onClick={() => handleQuickFilter('critical')}
           />
           <StatItem
             label="主要"
             value={realStats.major}
             color="#FB8C00"
+            active={activeQuickFilter === 'major'}
+            onClick={() => handleQuickFilter('major')}
           />
           <StatItem
             label="次要"
             value={realStats.minor}
             color="#FDD835"
+            active={activeQuickFilter === 'minor'}
+            onClick={() => handleQuickFilter('minor')}
           />
           <StatItem
             label="警告"
             value={realStats.warning}
             color="#42A5F5"
+            active={activeQuickFilter === 'warning'}
+            onClick={() => handleQuickFilter('warning')}
           />
           <StatItem
             label="已清除"
             value={realStats.cleared}
             color="#67D972"
+            active={activeQuickFilter === 'cleared'}
+            onClick={() => handleQuickFilter('cleared')}
           />
           <StatItem
             label="已确认"
             value={realStats.confirmed}
             color="#67D972"
+            active={activeQuickFilter === 'confirmed'}
+            onClick={() => handleQuickFilter('confirmed')}
           />
         </div>
       </Card>
