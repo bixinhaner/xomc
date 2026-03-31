@@ -1,15 +1,17 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Form, Input, Modal, Space, Tag, Typography, App, Tree } from 'antd';
+import { Badge, Button, Col, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Statistic, Tag, Typography, App, Tree } from 'antd';
 import {
+  AlertOutlined,
   CheckOutlined,
   ClearOutlined,
+  ClockCircleOutlined,
   DeleteOutlined,
   EditOutlined,
+  EnvironmentOutlined,
   ExportOutlined,
   EyeOutlined,
-  FolderOutlined,
+  FilterOutlined,
   MinusCircleOutlined,
-  MoreOutlined,
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -28,7 +30,7 @@ import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 
 const { Text } = Typography;
 
-// 告警级别颜色 - 专业配色方案
+// 告警级别颜色
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   critical: { color: '#E53935', bgColor: '#FFEBEE' },
   major: { color: '#FB8C00', bgColor: '#FFF3E0' },
@@ -36,12 +38,12 @@ const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
 };
 
-// 告警状态配置 - 四种状态使用不同颜色区分
-const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string; icon: string }> = {
-  '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E53935', icon: 'unconfirmInactive' },
-  '1': { label: 'alarm.dealState.confirmedUncleared', color: '#FB8C00', icon: 'confirmInactive' },
-  '2': { label: 'alarm.dealState.unconfirmedCleared', color: '#42A5F5', icon: 'unconfirmActive' },
-  '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972', icon: 'confirmActive' },
+// 告警状态配置
+const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string }> = {
+  '0': { label: 'alarm.dealState.unconfirmedUncleared', color: '#E53935' },
+  '1': { label: 'alarm.dealState.confirmedUncleared', color: '#FB8C00' },
+  '2': { label: 'alarm.dealState.unconfirmedCleared', color: '#42A5F5' },
+  '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972' },
 };
 
 // 事件类型配置
@@ -61,19 +63,83 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
+// 筛选规则 - 匹配模式
+type MatchMode = 'contains' | 'startsWith' | 'endsWith' | 'equals';
+
+// 筛选规则项
+interface FilterRule {
+  field: 'equipInfo' | 'alarmName' | 'alarmIdentifier';  // 筛选字段
+  mode: MatchMode;                                        // 匹配模式
+  value: string;                                          // 匹配值
+}
+
 // 自定义告警分组项
 interface CustomAlarmGroup {
   id: string;
-  name: string;
+  name: string;                    // 分组名称，如"北京告警"、"上海告警"
   alarmType: 'active' | 'historical';
-  severity?: string[];
+  filterRules: FilterRule[];       // 筛选规则
+  severity?: string[];             // 告警级别过滤
   createdAt: string;
+  // 统计信息
+  stats?: {
+    total: number;
+    critical: number;
+    major: number;
+    minor: number;
+    warning: number;
+  };
 }
 
-// Mock 数据 - 自定义告警分组
+// Mock 数据 - 自定义告警分组（按地区示例）
 const DEFAULT_GROUPS: CustomAlarmGroup[] = [
-  { id: 'group-active', name: '活动告警', alarmType: 'active', createdAt: '2026-03-01' },
-  { id: 'group-historical', name: '历史告警', alarmType: 'historical', createdAt: '2026-03-01' },
+  {
+    id: 'group-beijing',
+    name: '北京告警',
+    alarmType: 'active',
+    filterRules: [{ field: 'equipInfo', mode: 'contains', value: '北京' }],
+    createdAt: '2026-03-01',
+    stats: { total: 128, critical: 12, major: 35, minor: 48, warning: 33 },
+  },
+  {
+    id: 'group-shanghai',
+    name: '上海告警',
+    alarmType: 'active',
+    filterRules: [{ field: 'equipInfo', mode: 'contains', value: '上海' }],
+    createdAt: '2026-03-01',
+    stats: { total: 256, critical: 24, major: 68, minor: 98, warning: 66 },
+  },
+  {
+    id: 'group-tianjin',
+    name: '天津告警',
+    alarmType: 'active',
+    filterRules: [{ field: 'equipInfo', mode: 'contains', value: '天津' }],
+    createdAt: '2026-03-01',
+    stats: { total: 64, critical: 6, major: 18, minor: 24, warning: 16 },
+  },
+  {
+    id: 'group-history',
+    name: '历史告警',
+    alarmType: 'historical',
+    filterRules: [],
+    createdAt: '2026-03-01',
+    stats: { total: 1024, critical: 89, major: 256, minor: 412, warning: 267 },
+  },
+];
+
+// 匹配模式选项
+const MATCH_MODE_OPTIONS = [
+  { label: '包含', value: 'contains' },
+  { label: '开头为', value: 'startsWith' },
+  { label: '结尾为', value: 'endsWith' },
+  { label: '等于', value: 'equals' },
+];
+
+// 筛选字段选项
+const FILTER_FIELD_OPTIONS = [
+  { label: '告警源/设备信息', value: 'equipInfo' },
+  { label: '告警名称', value: 'alarmName' },
+  { label: '告警标识', value: 'alarmIdentifier' },
 ];
 
 export default function CustomAlarmStats() {
@@ -90,29 +156,25 @@ export default function CustomAlarmStats() {
 
   // 左侧树状态
   const [groups, setGroups] = useState<CustomAlarmGroup[]>(DEFAULT_GROUPS);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('group-active');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('group-beijing');
   const [searchText, setSearchText] = useState('');
 
   // 添加分组弹窗状态
-  const [addGroupModalOpen, setAddGroupModalOpen] = useState(false);
-  const [addGroupForm] = Form.useForm<{ name: string; alarmType: 'active' | 'historical' }>();
+  const [addGroupDrawerOpen, setAddGroupDrawerOpen] = useState(false);
+  const [addGroupForm] = Form.useForm<Omit<CustomAlarmGroup, 'id' | 'createdAt' | 'stats'>>();
 
   // 编辑分组弹窗状态
-  const [editGroupModalOpen, setEditGroupModalOpen] = useState(false);
+  const [editGroupDrawerOpen, setEditGroupDrawerOpen] = useState(false);
   const [editGroupId, setEditGroupId] = useState<string | null>(null);
-  const [editGroupForm] = Form.useForm<{ name: string }>();
+  const [editGroupForm] = Form.useForm<Partial<CustomAlarmGroup>>();
 
-  // 确认告警弹窗状态
+  // 确认/清除/删除弹窗状态
   const [ackModalOpen, setAckModalOpen] = useState(false);
   const [ackTargetIds, setAckTargetIds] = useState<string[]>([]);
   const [ackLoading, setAckLoading] = useState(false);
-
-  // 清除告警弹窗状态
   const [clearModalOpen, setClearModalOpen] = useState(false);
   const [clearTargetIds, setClearTargetIds] = useState<string[]>([]);
   const [clearLoading, setClearLoading] = useState(false);
-
-  // 删除告警弹窗状态
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -158,24 +220,6 @@ export default function CustomAlarmStats() {
       ],
     },
     {
-      name: 'neType',
-      label: t('alarm.neType'),
-      type: 'select',
-      options: [
-        { label: t('common.all'), value: '' },
-      ],
-    },
-    {
-      name: 'unread',
-      label: t('alarm.readStatus'),
-      type: 'select',
-      options: [
-        { label: t('common.all'), value: '' },
-        { label: t('alarm.readStatus.read'), value: '0' },
-        { label: t('alarm.readStatus.unread'), value: '1' },
-      ],
-    },
-    {
       name: 'dealState',
       label: t('alarm.dealState'),
       type: 'select',
@@ -187,15 +231,31 @@ export default function CustomAlarmStats() {
     },
   ], [t]);
 
-  // 查询参数
-  const queryParams = useMemo(
-    () => ({
+  // 查询参数 - 合并分组的筛选规则
+  const queryParams = useMemo(() => {
+    const baseParams: Record<string, unknown> = {
       ...filterParams,
       page: currentPage,
       pageSize,
-    }),
-    [filterParams, currentPage, pageSize]
-  );
+    };
+
+    // 应用分组的筛选规则
+    if (selectedGroup?.filterRules && selectedGroup.filterRules.length > 0) {
+      selectedGroup.filterRules.forEach((rule) => {
+        if (rule.value.trim()) {
+          // 简化处理：所有匹配模式都转为包含查询
+          baseParams[rule.field] = rule.value;
+        }
+      });
+    }
+
+    // 应用告警级别过滤
+    if (selectedGroup?.severity && selectedGroup.severity.length > 0) {
+      baseParams.severity = selectedGroup.severity;
+    }
+
+    return baseParams;
+  }, [filterParams, currentPage, pageSize, selectedGroup]);
 
   // 根据分组类型使用不同的 hook
   const isHistorical = selectedGroup?.alarmType === 'historical';
@@ -225,7 +285,7 @@ export default function CustomAlarmStats() {
     [rawAlarms]
   );
 
-  // 过滤分组
+  // 过滤分组列表
   const filteredGroups = useMemo(() => {
     if (!searchText.trim()) return groups;
     return groups.filter((g) =>
@@ -241,10 +301,12 @@ export default function CustomAlarmStats() {
         id: `group-${Date.now()}`,
         name: values.name,
         alarmType: values.alarmType,
+        filterRules: values.filterRules || [],
+        severity: values.severity,
         createdAt: new Date().toISOString().split('T')[0],
       };
       setGroups((prev) => [...prev, newGroup]);
-      setAddGroupModalOpen(false);
+      setAddGroupDrawerOpen(false);
       addGroupForm.resetFields();
       message.success(t('common.success'));
     } catch {
@@ -257,8 +319,13 @@ export default function CustomAlarmStats() {
     const group = groups.find((g) => g.id === groupId);
     if (group) {
       setEditGroupId(groupId);
-      editGroupForm.setFieldsValue({ name: group.name });
-      setEditGroupModalOpen(true);
+      editGroupForm.setFieldsValue({
+        name: group.name,
+        alarmType: group.alarmType,
+        filterRules: group.filterRules.length > 0 ? group.filterRules : [undefined],
+        severity: group.severity,
+      });
+      setEditGroupDrawerOpen(true);
     }
   }, [groups, editGroupForm]);
 
@@ -266,9 +333,15 @@ export default function CustomAlarmStats() {
     try {
       const values = await editGroupForm.validateFields();
       setGroups((prev) =>
-        prev.map((g) => (g.id === editGroupId ? { ...g, name: values.name } : g))
+        prev.map((g) => (g.id === editGroupId ? {
+          ...g,
+          name: values.name || g.name,
+          alarmType: values.alarmType || g.alarmType,
+          filterRules: values.filterRules || g.filterRules,
+          severity: values.severity,
+        } : g))
       );
-      setEditGroupModalOpen(false);
+      setEditGroupDrawerOpen(false);
       setEditGroupId(null);
       editGroupForm.resetFields();
       message.success(t('common.success'));
@@ -280,19 +353,19 @@ export default function CustomAlarmStats() {
   // 删除分组
   const handleDeleteGroup = useCallback((groupId: string) => {
     const group = groups.find((g) => g.id === groupId);
-    if (group && groups.length <= 2) {
-      message.warning('至少保留两个分组');
+    if (groups.length <= 1) {
+      message.warning('至少保留一个分组');
       return;
     }
     modal.confirm({
       title: t('common.confirmDelete'),
       content: `确定要删除分组「${group?.name}」吗？`,
-      okText: t('common.confirmDelete'),
+      okText: t('common.confirm'),
       okType: 'danger',
       onOk: () => {
         setGroups((prev) => prev.filter((g) => g.id !== groupId));
         if (selectedGroupId === groupId) {
-          setSelectedGroupId(groups[0]?.id || '');
+          setSelectedGroupId(groups.find((g) => g.id !== groupId)?.id || '');
         }
         message.success(t('common.deleteSuccess'));
       },
@@ -304,8 +377,6 @@ export default function CustomAlarmStats() {
     setFilterParams({
       severity: values.severity as AlarmFilter['severity'],
       eventType: values.eventType as AlarmFilter['eventType'],
-      neType: values.neType as string,
-      unread: values.unread as '0' | '1',
       dealState: values.dealState as AlarmFilter['dealState'],
       alarmIdentifier: keyword,
       alarmName: keyword,
@@ -440,7 +511,7 @@ export default function CustomAlarmStats() {
       key: 'severity',
       title: t('alarm.severity'),
       dataIndex: 'severity',
-      width: 100,
+      width: 80,
       render: (_val, record) => {
         const config = SEVERITY_CONFIG[record.severity] || SEVERITY_CONFIG.warning;
         return (
@@ -465,24 +536,17 @@ export default function CustomAlarmStats() {
       ellipsis: true,
     },
     {
-      key: 'neType',
-      title: t('alarm.neType'),
-      dataIndex: 'neType',
-      width: 120,
-      render: (val: string) => NE_TYPE_CONFIG[val] || val || '-',
-    },
-    {
       key: 'equipInfo',
       title: t('alarm.equipInfo'),
       dataIndex: 'equipInfo',
-      width: 250,
+      width: 200,
       ellipsis: true,
     },
     {
       key: 'eventType',
       title: t('alarm.eventType'),
       dataIndex: 'eventType',
-      width: 160,
+      width: 120,
       ellipsis: true,
       render: (val: EventType) => t(EVENT_TYPE_CONFIG[val] || 'common.unknown'),
     },
@@ -490,7 +554,7 @@ export default function CustomAlarmStats() {
       key: 'dealState',
       title: t('alarm.dealState'),
       dataIndex: 'dealState',
-      width: 190,
+      width: 150,
       ellipsis: true,
       render: (val: DealState) => {
         const config = DEAL_STATE_CONFIG[val];
@@ -505,31 +569,10 @@ export default function CustomAlarmStats() {
       render: (v) => (v ? new Date(String(v)).toLocaleString('zh-CN') : '-'),
     },
     {
-      key: 'updTime',
-      title: t('alarm.updTime'),
-      dataIndex: 'updTime',
-      width: 150,
-      render: (v) => (v ? new Date(String(v)).toLocaleString('zh-CN') : '-'),
-    },
-    {
-      key: 'specificProblem',
-      title: t('alarm.specificProblem'),
-      dataIndex: 'specificProblem',
-      width: 150,
-      ellipsis: true,
-    },
-    {
       key: 'alarmCount',
       title: t('alarm.alarmCount'),
       dataIndex: 'alarmCount',
-      width: 100,
-    },
-    {
-      key: 'dealMemo',
-      title: t('alarm.dealMemo'),
-      dataIndex: 'dealMemo',
-      width: 100,
-      ellipsis: true,
+      width: 80,
     },
   ], [t, SEVERITY_LABEL, handleShowDetail]);
 
@@ -547,7 +590,10 @@ export default function CustomAlarmStats() {
     return actions;
   }, [isHistorical, handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, handleDelete, t]);
 
-  // 左侧树面板 - 只显示一级节点
+  // 计算统计信息
+  const groupStats = selectedGroup?.stats || { total, critical: 0, major: 0, minor: 0, warning: 0 };
+
+  // 左侧树面板
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
@@ -560,15 +606,24 @@ export default function CustomAlarmStats() {
         }}
       >
         <Text strong style={{ fontSize: 14 }}>
-          {t('nav.alarm.customAlarm')}
+          自定义告警分组
         </Text>
-        <Button type="text" size="small" icon={<PlusOutlined />} onClick={() => { addGroupForm.resetFields(); setAddGroupModalOpen(true); }}>
-          {t('common.add')}
+        <Button
+          type="text"
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={() => {
+            addGroupForm.resetFields();
+            addGroupForm.setFieldsValue({ alarmType: 'active', filterRules: [{}] });
+            setAddGroupDrawerOpen(true);
+          }}
+        >
+          添加
         </Button>
       </div>
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
         <Input
-          placeholder={t('common.search')}
+          placeholder="搜索分组"
           prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
@@ -578,55 +633,70 @@ export default function CustomAlarmStats() {
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
         <Tree
-          treeData={filteredGroups.map((group) => ({
-            key: group.id,
-            title: (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  width: '100%',
-                  padding: '2px 0',
-                }}
-              >
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <FolderOutlined style={{ marginRight: 6, color: '#FA8C16' }} />
-                  {group.name}
-                </span>
-                <Space size={0}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handleEditGroup(group.id); }}
-                    style={{ flexShrink: 0, opacity: 0.6 }}
-                  />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
-                    style={{ flexShrink: 0, opacity: 0.6 }}
-                    danger
-                  />
-                </Space>
-              </div>
-            ),
-            isLeaf: true,
-          }))}
+          treeData={filteredGroups.map((group) => {
+            const stats = group.stats;
+            return {
+              key: group.id,
+              title: (
+                <div
+                  className="alarm-group-node"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    padding: '2px 0',
+                  }}
+                >
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
+                    <EnvironmentOutlined style={{ marginRight: 6, color: '#1890ff' }} />
+                    <span>{group.name}</span>
+                  </span>
+                  {stats && stats.total > 0 && (
+                    <Badge
+                      count={stats.total}
+                      size="small"
+                      style={{ marginRight: 8, minWidth: 20 }}
+                    />
+                  )}
+                  <Space size={0} className="node-actions" style={{ opacity: 0, transition: 'opacity 0.2s' }}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={(e) => { e.stopPropagation(); handleEditGroup(group.id); }}
+                      style={{ flexShrink: 0, padding: '0 4px' }}
+                    />
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
+                      style={{ flexShrink: 0, padding: '0 4px' }}
+                      danger
+                    />
+                  </Space>
+                </div>
+              ),
+              isLeaf: true,
+            };
+          })}
           selectedKeys={[selectedGroupId]}
           onSelect={(keys) => {
             const key = keys[0] as string | undefined;
             if (key) {
               setSelectedGroupId(key);
               setCurrentPage(1);
+              setFilterParams({}); // 切换分组时重置筛选
             }
           }}
           blockNode
           style={{ fontSize: 13 }}
         />
       </div>
+      <style>{`
+        .alarm-group-node:hover .node-actions { opacity: 1 !important; }
+      `}</style>
     </div>
   );
 
@@ -643,12 +713,44 @@ export default function CustomAlarmStats() {
         }}
       >
         <Text strong style={{ fontSize: 14 }}>
-          {selectedGroup?.name || t('nav.alarm.customAlarm')}
+          {selectedGroup?.name || '自定义告警'}
         </Text>
-        <Button type="primary" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
-          {t('common.export')}
-        </Button>
+        <Space>
+          <Button icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
+            导出
+          </Button>
+        </Space>
       </div>
+
+      {/* 统计卡片 */}
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+        <Row gutter={16}>
+          <Col span={4}>
+            <Statistic title="总数" value={groupStats.total} />
+          </Col>
+          <Col span={4}>
+            <Statistic title="严重" value={groupStats.critical} valueStyle={{ color: '#E53935', fontSize: 18 }} />
+          </Col>
+          <Col span={4}>
+            <Statistic title="主要" value={groupStats.major} valueStyle={{ color: '#FB8C00', fontSize: 18 }} />
+          </Col>
+          <Col span={4}>
+            <Statistic title="次要" value={groupStats.minor} valueStyle={{ color: '#FDD835', fontSize: 18 }} />
+          </Col>
+          <Col span={4}>
+            <Statistic title="警告" value={groupStats.warning} valueStyle={{ color: '#42A5F5', fontSize: 18 }} />
+          </Col>
+          <Col span={4}>
+            <Statistic
+              title="类型"
+              value={isHistorical ? '历史' : '活动'}
+              prefix={isHistorical ? <ClockCircleOutlined /> : <AlertOutlined />}
+              valueStyle={{ fontSize: 16 }}
+            />
+          </Col>
+        </Row>
+      </div>
+
       <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
         <FilterBar filterId="custom-alarm-stats" fields={FILTER_FIELDS} onSearch={handleSearch} onReset={handleReset} collapsedRows={1} />
         <DataTable<Alarm>
@@ -670,6 +772,52 @@ export default function CustomAlarmStats() {
         />
       </div>
     </div>
+  );
+
+  // 渲染筛选规则表单项
+  const renderFilterRulesFormItems = (form: typeof addGroupForm) => (
+    <Form.List name="filterRules">
+      {(fields, { add, remove }) => (
+        <div>
+          <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              <FilterOutlined style={{ marginRight: 4 }} />
+              筛选规则
+            </Text>
+            <Button type="dashed" size="small" onClick={() => add({ field: 'equipInfo', mode: 'contains', value: '' })} icon={<PlusOutlined />}>
+              添加规则
+            </Button>
+          </div>
+          {fields.map(({ key, name, ...restField }) => (
+            <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
+              <Col span={7}>
+                <Form.Item {...restField} name={[name, 'field']} noStyle>
+                  <Select size="small" options={FILTER_FIELD_OPTIONS} placeholder="字段" />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item {...restField} name={[name, 'mode']} noStyle>
+                  <Select size="small" options={MATCH_MODE_OPTIONS} placeholder="匹配" />
+                </Form.Item>
+              </Col>
+              <Col span={9}>
+                <Form.Item {...restField} name={[name, 'value']} noStyle>
+                  <Input size="small" placeholder="值" />
+                </Form.Item>
+              </Col>
+              <Col span={2}>
+                <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
+              </Col>
+            </Row>
+          ))}
+          {fields.length === 0 && (
+            <Text type="secondary" style={{ fontSize: 12, color: '#999' }}>
+              暂无筛选规则，将显示所有告警
+            </Text>
+          )}
+        </div>
+      )}
+    </Form.List>
   );
 
   return (
@@ -714,53 +862,79 @@ export default function CustomAlarmStats() {
         <Text>{t('common.deleteConfirmMsg', { count: deleteTargetIds.length })}</Text>
       </Modal>
 
-      {/* 添加分组弹窗 */}
-      <Modal
-        open={addGroupModalOpen}
-        title="添加自定义告警"
-        onCancel={() => setAddGroupModalOpen(false)}
-        onOk={handleAddGroup}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
+      {/* 添加分组抽屉 */}
+      <Drawer
+        title="添加自定义告警分组"
+        open={addGroupDrawerOpen}
+        onClose={() => setAddGroupDrawerOpen(false)}
+        width={480}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setAddGroupDrawerOpen(false)}>取消</Button>
+              <Button type="primary" onClick={handleAddGroup}>确定</Button>
+            </Space>
+          </div>
+        }
       >
         <Form form={addGroupForm} layout="vertical" size="small">
           <Form.Item name="name" label="分组名称" rules={[{ required: true, message: '请输入分组名称' }]}>
-            <Input placeholder="请输入分组名称" maxLength={50} showCount />
+            <Input placeholder="如：北京告警、上海告警" maxLength={50} showCount />
           </Form.Item>
           <Form.Item name="alarmType" label="告警类型" rules={[{ required: true }]} initialValue="active">
-            <Input.Group compact>
-              <Button
-                type={addGroupForm.getFieldValue('alarmType') === 'active' ? 'primary' : 'default'}
-                onClick={() => addGroupForm.setFieldsValue({ alarmType: 'active' })}
-              >
-                活动告警
-              </Button>
-              <Button
-                type={addGroupForm.getFieldValue('alarmType') === 'historical' ? 'primary' : 'default'}
-                onClick={() => addGroupForm.setFieldsValue({ alarmType: 'historical' })}
-              >
-                历史告警
-              </Button>
-            </Input.Group>
+            <Radio.Group>
+              <Radio value="active">活动告警</Radio>
+              <Radio value="historical">历史告警</Radio>
+            </Radio.Group>
           </Form.Item>
+          <Form.Item name="severity" label="告警级别">
+            <Select mode="multiple" placeholder="选择告警级别（可多选）" allowClear>
+              <Select.Option value="critical">严重</Select.Option>
+              <Select.Option value="major">主要</Select.Option>
+              <Select.Option value="minor">次要</Select.Option>
+              <Select.Option value="warning">警告</Select.Option>
+            </Select>
+          </Form.Item>
+          {renderFilterRulesFormItems(addGroupForm)}
         </Form>
-      </Modal>
+      </Drawer>
 
-      {/* 编辑分组弹窗 */}
-      <Modal
-        open={editGroupModalOpen}
-        title="编辑自定义告警"
-        onCancel={() => { setEditGroupModalOpen(false); setEditGroupId(null); }}
-        onOk={handleSaveEditGroup}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
+      {/* 编辑分组抽屉 */}
+      <Drawer
+        title="编辑自定义告警分组"
+        open={editGroupDrawerOpen}
+        onClose={() => { setEditGroupDrawerOpen(false); setEditGroupId(null); }}
+        width={480}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setEditGroupDrawerOpen(false)}>取消</Button>
+              <Button type="primary" onClick={handleSaveEditGroup}>确定</Button>
+            </Space>
+          </div>
+        }
       >
         <Form form={editGroupForm} layout="vertical" size="small">
           <Form.Item name="name" label="分组名称" rules={[{ required: true, message: '请输入分组名称' }]}>
-            <Input placeholder="请输入分组名称" maxLength={50} showCount />
+            <Input placeholder="如：北京告警、上海告警" maxLength={50} showCount />
           </Form.Item>
+          <Form.Item name="alarmType" label="告警类型" rules={[{ required: true }]}>
+            <Radio.Group>
+              <Radio value="active">活动告警</Radio>
+              <Radio value="historical">历史告警</Radio>
+            </Radio.Group>
+          </Form.Item>
+          <Form.Item name="severity" label="告警级别">
+            <Select mode="multiple" placeholder="选择告警级别（可多选）" allowClear>
+              <Select.Option value="critical">严重</Select.Option>
+              <Select.Option value="major">主要</Select.Option>
+              <Select.Option value="minor">次要</Select.Option>
+              <Select.Option value="warning">警告</Select.Option>
+            </Select>
+          </Form.Item>
+          {renderFilterRulesFormItems(editGroupForm)}
         </Form>
-      </Modal>
+      </Drawer>
     </>
   );
 }
