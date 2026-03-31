@@ -88,18 +88,6 @@ const AUTO_REFRESH_INTERVALS = [
   { label: '5分钟', value: 300 },
 ];
 
-// 筛选模板存储 key
-const FILTER_TEMPLATES_KEY = 'active-alarm-filter-templates';
-const LAST_FILTER_KEY = 'active-alarm-last-filter';
-
-// 筛选模板
-interface FilterTemplate {
-  id: string;
-  name: string;
-  params: AlarmFilter;
-  createdAt: string;
-}
-
 // 快捷时间转日期范围
 function quickTimeToRange(value: string): [string, string] | undefined {
   const now = dayjs();
@@ -184,11 +172,6 @@ export default function CurrentAlarms() {
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
   const [activeQuickTime, setActiveQuickTime] = useState<string | undefined>(undefined);
 
-  // 筛选模板状态
-  const [filterTemplates, setFilterTemplates] = useState<FilterTemplate[]>([]);
-  const [saveTemplateModalOpen, setSaveTemplateModalOpen] = useState(false);
-  const [templateForm] = Form.useForm<{ name: string }>();
-
   // 自动刷新状态
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
@@ -255,6 +238,19 @@ export default function CurrentAlarms() {
         { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
+    {
+      name: 'quickTime',
+      label: '快捷时间',
+      type: 'select',
+      options: [
+        { label: '今日', value: 'today' },
+        { label: '昨日', value: 'yesterday' },
+        { label: '本周', value: 'thisWeek' },
+        { label: '本月', value: 'thisMonth' },
+        { label: '最近7天', value: 'last7days' },
+        { label: '最近30天', value: 'last30days' },
+      ],
+    },
   ], [t]);
 
   const queryParams = useMemo(
@@ -268,40 +264,6 @@ export default function CurrentAlarms() {
 
   const rawAlarms: Alarm[] = data?.items ?? [];
   const total = data?.total ?? 0;
-
-  // 加载筛选模板
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(FILTER_TEMPLATES_KEY);
-      if (saved) {
-        setFilterTemplates(JSON.parse(saved));
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // 加载上次筛选条件
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(LAST_FILTER_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setFilterParams(parsed);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // 保存筛选条件
-  useEffect(() => {
-    try {
-      localStorage.setItem(LAST_FILTER_KEY, JSON.stringify(filterParams));
-    } catch {
-      // ignore
-    }
-  }, [filterParams]);
 
   // 自动刷新
   useEffect(() => {
@@ -398,39 +360,6 @@ export default function CurrentAlarms() {
     }
     setCurrentPage(1);
   }, []);
-
-  // 保存筛选模板
-  const handleSaveTemplate = useCallback(() => {
-    templateForm.validateFields().then((values) => {
-      const newTemplate: FilterTemplate = {
-        id: `template-${Date.now()}`,
-        name: values.name,
-        params: filterParams,
-        createdAt: new Date().toISOString(),
-      };
-      const updatedTemplates = [...filterTemplates, newTemplate];
-      setFilterTemplates(updatedTemplates);
-      localStorage.setItem(FILTER_TEMPLATES_KEY, JSON.stringify(updatedTemplates));
-      setSaveTemplateModalOpen(false);
-      templateForm.resetFields();
-      message.success('筛选模板保存成功');
-    });
-  }, [filterParams, filterTemplates, templateForm, message]);
-
-  // 应用筛选模板
-  const handleApplyTemplate = useCallback((template: FilterTemplate) => {
-    setFilterParams(template.params);
-    setCurrentPage(1);
-    message.success(`已应用模板：${template.name}`);
-  }, [message]);
-
-  // 删除筛选模板
-  const handleDeleteTemplate = useCallback((id: string) => {
-    const updatedTemplates = filterTemplates.filter((t) => t.id !== id);
-    setFilterTemplates(updatedTemplates);
-    localStorage.setItem(FILTER_TEMPLATES_KEY, JSON.stringify(updatedTemplates));
-    message.success('模板已删除');
-  }, [filterTemplates, message]);
 
   const handleAcknowledge = useCallback(
     (ids: string[]) => {
@@ -712,28 +641,24 @@ export default function CurrentAlarms() {
     [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead]
   );
 
-  // 更多操作菜单
-  const moreMenuItems = useMemo(() => [
+  // 自动刷新下拉菜单
+  const autoRefreshMenuItems = useMemo(() => [
     {
-      key: 'auto-refresh',
-      label: autoRefresh ? `自动刷新 (${refreshInterval}秒)` : '开启自动刷新',
+      key: 'toggle',
+      label: autoRefresh ? '关闭自动刷新' : '开启自动刷新',
       icon: <SyncOutlined spin={autoRefresh} />,
     },
     ...(autoRefresh ? AUTO_REFRESH_INTERVALS.map((opt) => ({
       key: `interval-${opt.value}`,
-      label: `  ↳ ${opt.label}`,
+      label: opt.label,
     })) : []),
-    { type: 'divider' as const },
-    { key: 'save-template', label: '保存筛选模板', icon: <SaveOutlined /> },
-  ], [autoRefresh, refreshInterval]);
+  ], [autoRefresh]);
 
-  const handleMoreMenuClick = useCallback(({ key }: { key: string }) => {
-    if (key === 'auto-refresh') {
+  const handleAutoRefreshMenuClick = useCallback(({ key }: { key: string }) => {
+    if (key === 'toggle') {
       setAutoRefresh(!autoRefresh);
     } else if (key.startsWith('interval-')) {
       setRefreshInterval(parseInt(key.replace('interval-', ''), 10));
-    } else if (key === 'save-template') {
-      setSaveTemplateModalOpen(true);
     }
   }, [autoRefresh]);
 
@@ -742,6 +667,11 @@ export default function CurrentAlarms() {
       title={t('nav.alarm.current')}
       extra={
         <Space>
+          <Dropdown menu={{ items: autoRefreshMenuItems, onClick: handleAutoRefreshMenuClick }}>
+            <Button icon={<SyncOutlined spin={autoRefresh} />} type={autoRefresh ? 'primary' : 'default'}>
+              {autoRefresh ? `${refreshInterval}秒` : '自动刷新'}
+            </Button>
+          </Dropdown>
           <Dropdown
             menu={{
               items: [
@@ -754,12 +684,9 @@ export default function CurrentAlarms() {
               },
             }}
           >
-            <Button type="primary" icon={<ExportOutlined />}>
+            <Button icon={<ExportOutlined />}>
               导出
             </Button>
-          </Dropdown>
-          <Dropdown menu={{ items: moreMenuItems, onClick: handleMoreMenuClick }}>
-            <Button icon={<MoreOutlined />} />
           </Dropdown>
         </Space>
       }
@@ -767,16 +694,9 @@ export default function CurrentAlarms() {
       {/* 统计卡片 */}
       <Card
         size="small"
-        title="告警统计"
         bordered
         style={{ marginBottom: 12 }}
         styles={{ body: { padding: '12px 16px' } }}
-        extra={autoRefresh ? (
-          <Tag color="processing" style={{ margin: 0 }}>
-            <SyncOutlined spin style={{ marginRight: 4 }} />
-            自动刷新 {refreshInterval}秒
-          </Tag>
-        ) : null}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <StatItem
@@ -827,67 +747,10 @@ export default function CurrentAlarms() {
       {/* 搜索卡片 */}
       <Card
         size="small"
-        title="筛选条件"
         bordered
         style={{ marginBottom: 12 }}
         styles={{ body: { padding: '12px 16px 0' } }}
       >
-        {/* 快捷操作栏 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          {/* 快捷时间 */}
-          <Select
-            size="small"
-            placeholder="快捷时间"
-            value={activeQuickTime}
-            onChange={handleQuickTime}
-            allowClear
-            style={{ width: 110 }}
-            options={QUICK_TIME_OPTIONS.map((opt) => ({
-              label: opt.label,
-              value: opt.value,
-            }))}
-          />
-
-          {/* 筛选模板 */}
-          {filterTemplates.length > 0 && (
-            <Dropdown
-              menu={{
-                items: filterTemplates.map((tpl) => ({
-                  key: tpl.id,
-                  label: (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 8 }}>
-                      <span>{tpl.name}</span>
-                      <Button
-                        type="text"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(tpl.id); }}
-                        style={{ padding: '0 4px', height: 20 }}
-                      />
-                    </div>
-                  ),
-                })),
-                onClick: ({ key }) => {
-                  const template = filterTemplates.find((tpl) => tpl.id === key);
-                  if (template) handleApplyTemplate(template);
-                },
-              }}
-            >
-              <Button size="small" icon={<FilterOutlined />}>
-                模板
-              </Button>
-            </Dropdown>
-          )}
-
-          {/* 保存筛选模板 */}
-          <Tooltip title="保存当前筛选条件为模板">
-            <Button size="small" icon={<SaveOutlined />} onClick={() => setSaveTemplateModalOpen(true)}>
-              保存
-            </Button>
-          </Tooltip>
-        </div>
-
         <FilterBar
           filterId="current-alarms"
           fields={FILTER_FIELDS}
@@ -900,7 +763,6 @@ export default function CurrentAlarms() {
       {/* 列表卡片 */}
       <Card
         size="small"
-        title="告警列表"
         bordered
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
@@ -959,22 +821,6 @@ export default function CurrentAlarms() {
         onCancel={() => setClearModalOpen(false)}
         loading={clearLoading}
       />
-
-      {/* 保存筛选模板弹窗 */}
-      <Modal
-        open={saveTemplateModalOpen}
-        title="保存筛选模板"
-        onCancel={() => setSaveTemplateModalOpen(false)}
-        onOk={handleSaveTemplate}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
-      >
-        <Form form={templateForm} layout="vertical" size="small">
-          <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
-            <Input placeholder="如：严重未确认告警" maxLength={30} autoFocus />
-          </Form.Item>
-        </Form>
-      </Modal>
     </ListPageLayout>
   );
 }
