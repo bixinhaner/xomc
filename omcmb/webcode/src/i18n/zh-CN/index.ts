@@ -223,10 +223,14 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Software
   // -------------------------------------------------------------------------
-  'nav.software.version':      '版本查询',
-  'nav.software.upgradePlan':  '升级计划',
-  'nav.software.activation':   '激活计划',
-  'nav.software.firmware':     '固件上传',
+  'nav.software.version':         '版本查询',
+  'nav.software.upgradePlan':     '升级计划',
+  'nav.software.activation':      '激活计划',
+  'nav.software.firmware':        '固件上传',
+  'nav.software.versionUpgrade':  '版本升级',
+  'nav.software.versionRollback': '版本回退',
+  'nav.software.upgradeFile':     '升级文件',
+  'nav.software.rollback':        '版本回退',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: File

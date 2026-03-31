@@ -223,10 +223,14 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Software
   // -------------------------------------------------------------------------
-  'nav.software.version':      'Version Query',
-  'nav.software.upgradePlan':  'Upgrade Plan',
-  'nav.software.activation':   'Activation Plan',
-  'nav.software.firmware':     'Firmware Upload',
+  'nav.software.version':         'Version Query',
+  'nav.software.upgradePlan':     'Upgrade Plan',
+  'nav.software.activation':      'Activation Plan',
+  'nav.software.firmware':        'Firmware Upload',
+  'nav.software.versionUpgrade':  'Version Upgrade',
+  'nav.software.versionRollback': 'Version Rollback',
+  'nav.software.upgradeFile':     'Upgrade File',
+  'nav.software.rollback':        'Version Rollback',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: File

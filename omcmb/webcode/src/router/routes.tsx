@@ -87,6 +87,7 @@ const VersionQuery       = React.lazy(() => import('@/pages/software/VersionQuer
 const UpgradePlan        = React.lazy(() => import('@/pages/software/UpgradePlan'));
 const ActivationPlan     = React.lazy(() => import('@/pages/software/ActivationPlan'));
 const FirmwareUpload     = React.lazy(() => import('@/pages/software/FirmwareUpload'));
+const VersionRollback    = React.lazy(() => import('@/pages/software/VersionRollback'));
 
 // File Management
 const ConfigRetrieval    = React.lazy(() => import('@/pages/file/ConfigRetrieval'));
@@ -253,6 +254,7 @@ export const routes: RouteObject[] = [
       { path: 'software/upgrade-plan',  element: withSuspense(UpgradePlan) },
       { path: 'software/activation',    element: withSuspense(ActivationPlan) },
       { path: 'software/firmware',      element: withSuspense(FirmwareUpload) },
+      { path: 'software/rollback',      element: withSuspense(VersionRollback) },
 
       // File Management
       { path: 'file/config-retrieval',    element: withSuspense(ConfigRetrieval) },

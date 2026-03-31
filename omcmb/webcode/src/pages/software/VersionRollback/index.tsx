@@ -85,7 +85,7 @@ const UPGRADE_RESULT_MAP: Record<UpgradeResult, { color: string; text: string }>
   success: { color: 'success', text: '成功' },
   failed: { color: 'error', text: '失败' },
   partial: { color: 'warning', text: '部分成功' },
-  running: { color: 'processing', text: '升级中' },
+  running: { color: 'processing', text: '回退中' },
   pending: { color: 'default', text: '等待中' },
 };
 
@@ -375,46 +375,6 @@ export default function UpgradePlan() {
       ],
     },
     {
-      name: 'sourceVersion',
-      label: '初始版本',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: 'V1.1.5', value: 'V1.1.5' },
-        { label: 'V1.2.0', value: 'V1.2.0' },
-        { label: 'V2.0.0', value: 'V2.0.0' },
-      ],
-    },
-    {
-      name: 'targetVersion',
-      label: '升级版本',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: 'V1.3.0', value: 'V1.3.0' },
-        { label: 'V2.1.0', value: 'V2.1.0' },
-      ],
-    },
-    {
-      name: 'deviceGroup',
-      label: '设备组',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: '北京移动', value: '北京移动' },
-        { label: '上海移动', value: '上海移动' },
-        { label: '广东移动', value: '广东移动' },
-        { label: '浙江移动', value: '浙江移动' },
-        { label: '江苏移动', value: '江苏移动' },
-        { label: '四川移动', value: '四川移动' },
-        { label: '湖北移动', value: '湖北移动' },
-        { label: '陕西移动', value: '陕西移动' },
-      ],
-    },
-    {
       name: 'upgradeType',
       label: '升级类型',
       type: 'select',
@@ -436,7 +396,7 @@ export default function UpgradePlan() {
         { label: '成功', value: 'success' },
         { label: '失败', value: 'failed' },
         { label: '部分成功', value: 'partial' },
-        { label: '升级中', value: 'running' },
+        { label: '回退中', value: 'running' },
         { label: '等待中', value: 'pending' },
       ],
     },
@@ -849,21 +809,10 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'targetVersion', title: '升级版本', dataIndex: 'targetVersion', width: 100 },
-    {
-      key: 'upgradeType',
-      title: '升级类型',
-      dataIndex: 'upgradeType',
-      width: 100,
-      render: (val: UpgradeType) => {
-        const cfg = UPGRADE_TYPE_MAP[val] ?? { color: 'default', text: val };
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
-      },
-    },
     { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
     {
       key: 'progress',
-      title: '升级进度',
+      title: '回退进度',
       dataIndex: 'progress',
       width: 120,
       render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
@@ -905,32 +854,13 @@ export default function UpgradePlan() {
       },
     },
     { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-    { key: 'deviceGroup', title: '设备组', dataIndex: 'deviceGroup', width: 100 },
-    { key: 'sourceVersion', title: '初始版本', dataIndex: 'sourceVersion', width: 100 },
-    { key: 'targetVersion', title: '升级版本', dataIndex: 'targetVersion', width: 100 },
-    {
-      key: 'upgradeType',
-      title: '升级类型',
-      dataIndex: 'upgradeType',
-      width: 100,
-      render: (val: UpgradeType) => {
-        const cfg = UPGRADE_TYPE_MAP[val] ?? { color: 'default', text: val };
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
-      },
-    },
+    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', width: 150, ellipsis: true },
+    { key: 'taskName', title: '任务名称', dataIndex: 'taskName', width: 150, ellipsis: true },
+    { key: 'targetVersion', title: '原始版本', dataIndex: 'targetVersion', width: 100 },
     { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
     {
-      key: 'keepConfig',
-      title: '保留配置',
-      dataIndex: 'keepConfig',
-      width: 90,
-      align: 'center',
-      render: (val: boolean) => <Checkbox checked={val} />,
-    },
-    {
       key: 'progress',
-      title: '升级进度',
+      title: '回退进度',
       dataIndex: 'progress',
       width: 120,
       render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
@@ -965,7 +895,7 @@ export default function UpgradePlan() {
   ), []);
 
   return (
-    <ListPageLayout title={t('nav.software.versionUpgrade')} extra={headerExtra}>
+    <ListPageLayout title={t('nav.software.versionRollback')} extra={headerExtra}>
       {/* 覆盖 FilterBar 样式 */}
       <style>{`
         .upgrade-plan-filter-wrapper [class*="_filterBarWrapper_"] {
