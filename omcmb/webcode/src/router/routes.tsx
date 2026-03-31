@@ -36,6 +36,7 @@ const AlarmStatistics    = React.lazy(() => import('@/pages/alarm/AlarmStatistic
 const AlarmRules         = React.lazy(() => import('@/pages/alarm/AlarmRules'));
 const AlarmLibrary       = React.lazy(() => import('@/pages/alarm/AlarmSupportLibrary'));
 const AlarmSync          = React.lazy(() => import('@/pages/alarm/AlarmSync'));
+const CustomAlarmStats   = React.lazy(() => import('@/pages/alarm/CustomAlarmStats'));
 
 // Configuration Management
 const ParamSync          = React.lazy(() => import('@/pages/config/ParamSync'));
@@ -203,6 +204,7 @@ export const routes: RouteObject[] = [
       { path: 'alarm/rules',      element: withSuspense(AlarmRules) },
       { path: 'alarm/library',    element: withSuspense(AlarmLibrary) },
       { path: 'alarm/sync',       element: withSuspense(AlarmSync) },
+      { path: 'alarm/custom-stats', element: withSuspense(CustomAlarmStats) },
 
       // Configuration Management
       { path: 'config/param-sync',       element: withSuspense(ParamSync) },
