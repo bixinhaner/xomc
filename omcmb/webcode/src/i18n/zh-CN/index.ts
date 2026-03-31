@@ -162,7 +162,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Alarm
   // -------------------------------------------------------------------------
-  'nav.alarm.current':    '当前告警',
+  'nav.alarm.current':    '活动告警',
   'nav.alarm.history':    '历史告警',
   'nav.alarm.statistics': '告警统计',
   'nav.alarm.rules':      '告警规则',
