@@ -10,7 +10,6 @@ import {
   FilterOutlined,
   MinusCircleOutlined,
   MoreOutlined,
-  ReloadOutlined,
   SaveOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
@@ -715,8 +714,6 @@ export default function CurrentAlarms() {
 
   // 更多操作菜单
   const moreMenuItems = useMemo(() => [
-    { key: 'refresh', label: '立即刷新', icon: <ReloadOutlined /> },
-    { type: 'divider' as const },
     {
       key: 'auto-refresh',
       label: autoRefresh ? `自动刷新 (${refreshInterval}秒)` : '开启自动刷新',
@@ -731,16 +728,14 @@ export default function CurrentAlarms() {
   ], [autoRefresh, refreshInterval]);
 
   const handleMoreMenuClick = useCallback(({ key }: { key: string }) => {
-    if (key === 'refresh') {
-      void refetch();
-    } else if (key === 'auto-refresh') {
+    if (key === 'auto-refresh') {
       setAutoRefresh(!autoRefresh);
     } else if (key.startsWith('interval-')) {
       setRefreshInterval(parseInt(key.replace('interval-', ''), 10));
     } else if (key === 'save-template') {
       setSaveTemplateModalOpen(true);
     }
-  }, [refetch, autoRefresh]);
+  }, [autoRefresh]);
 
   return (
     <ListPageLayout
@@ -769,19 +764,9 @@ export default function CurrentAlarms() {
         </Space>
       }
     >
-      {/* 统计 + 快捷操作栏 - 合并为一行 */}
-      <Card
-        size="small"
-        styles={{
-          body: {
-            padding: '8px 12px',
-            marginBottom: 12,
-            background: 'linear-gradient(135deg, #FAFAFA 0%, #F5F5F5 100%)',
-          },
-        }}
-      >
+      {/* 统计卡片 */}
+      <Card size="small" styles={{ body: { padding: '12px 16px', marginBottom: 12 } }}>
         <Row gutter={0} align="middle">
-          {/* 左侧：统计 */}
           <Col flex="auto">
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <StatItem
@@ -828,97 +813,109 @@ export default function CurrentAlarms() {
               />
             </div>
           </Col>
-
-          {/* 右侧：快捷操作 */}
-          <Col flex="none">
-            <Space size={4}>
-              {/* 快捷时间 */}
-              <Select
-                size="small"
-                placeholder="时间"
-                value={activeQuickTime}
-                onChange={handleQuickTime}
-                allowClear
-                style={{ width: 100 }}
-                options={QUICK_TIME_OPTIONS.map((opt) => ({
-                  label: opt.label,
-                  value: opt.value,
-                }))}
-              />
-
-              {/* 筛选模板 */}
-              {filterTemplates.length > 0 && (
-                <Dropdown
-                  menu={{
-                    items: filterTemplates.map((tpl) => ({
-                      key: tpl.id,
-                      label: (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 8 }}>
-                          <span>{tpl.name}</span>
-                          <Button
-                            type="text"
-                            size="small"
-                            danger
-                            icon={<DeleteOutlined />}
-                            onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(tpl.id); }}
-                            style={{ padding: '0 4px', height: 20 }}
-                          />
-                        </div>
-                      ),
-                    })),
-                    onClick: ({ key }) => {
-                      const template = filterTemplates.find((tpl) => tpl.id === key);
-                      if (template) handleApplyTemplate(template);
-                    },
-                  }}
-                >
-                  <Button size="small" icon={<FilterOutlined />}>
-                    模板
-                  </Button>
-                </Dropdown>
-              )}
-
-              {/* 自动刷新状态指示 */}
-              {autoRefresh && (
-                <Tag color="processing" style={{ margin: 0 }}>
-                  <SyncOutlined spin style={{ marginRight: 4 }} />
-                  {refreshInterval}秒
-                </Tag>
-              )}
-            </Space>
-          </Col>
+          {/* 自动刷新状态指示 */}
+          {autoRefresh && (
+            <Col flex="none">
+              <Tag color="processing" style={{ margin: 0 }}>
+                <SyncOutlined spin style={{ marginRight: 4 }} />
+                {refreshInterval}秒
+              </Tag>
+            </Col>
+          )}
         </Row>
       </Card>
 
-      <FilterBar
-        filterId="current-alarms"
-        fields={FILTER_FIELDS}
-        onSearch={handleSearch}
-        onReset={handleReset}
-        collapsedRows={1}
-      />
+      {/* 搜索卡片 */}
+      <Card size="small" styles={{ body: { padding: '12px 16px 0', marginBottom: 12 } }}>
+        {/* 快捷操作栏 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          {/* 快捷时间 */}
+          <Select
+            size="small"
+            placeholder="快捷时间"
+            value={activeQuickTime}
+            onChange={handleQuickTime}
+            allowClear
+            style={{ width: 110 }}
+            options={QUICK_TIME_OPTIONS.map((opt) => ({
+              label: opt.label,
+              value: opt.value,
+            }))}
+          />
 
-      <DataTable<Alarm>
-        tableId="current-alarms-table"
-        columns={columns}
-        dataSource={alarms}
-        loading={isLoading}
-        rowKey="id"
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-        total={total}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={(page, size) => {
-          setCurrentPage(page);
-          setPageSize(size);
-        }}
-        batchActions={batchActions}
-        onRefresh={() => void refetch()}
-        alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
-        defaultDensity="compact"
-      />
+          {/* 筛选模板 */}
+          {filterTemplates.length > 0 && (
+            <Dropdown
+              menu={{
+                items: filterTemplates.map((tpl) => ({
+                  key: tpl.id,
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 8 }}>
+                      <span>{tpl.name}</span>
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(tpl.id); }}
+                        style={{ padding: '0 4px', height: 20 }}
+                      />
+                    </div>
+                  ),
+                })),
+                onClick: ({ key }) => {
+                  const template = filterTemplates.find((tpl) => tpl.id === key);
+                  if (template) handleApplyTemplate(template);
+                },
+              }}
+            >
+              <Button size="small" icon={<FilterOutlined />}>
+                模板
+              </Button>
+            </Dropdown>
+          )}
+
+          {/* 保存筛选模板 */}
+          <Tooltip title="保存当前筛选条件为模板">
+            <Button size="small" icon={<SaveOutlined />} onClick={() => setSaveTemplateModalOpen(true)}>
+              保存
+            </Button>
+          </Tooltip>
+        </div>
+
+        <FilterBar
+          filterId="current-alarms"
+          fields={FILTER_FIELDS}
+          onSearch={handleSearch}
+          onReset={handleReset}
+          collapsedRows={1}
+        />
+      </Card>
+
+      {/* 列表卡片 */}
+      <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
+        <DataTable<Alarm>
+          tableId="current-alarms-table"
+          columns={columns}
+          dataSource={alarms}
+          loading={isLoading}
+          rowKey="id"
+          selectable
+          selectedRowKeys={selectedRowKeys}
+          onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+          total={total}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={(page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          }}
+          batchActions={batchActions}
+          onRefresh={() => void refetch()}
+          alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
+          defaultDensity="compact"
+        />
+      </Card>
 
       <AlarmDetail
         alarm={detailAlarm}
