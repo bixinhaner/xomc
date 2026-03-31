@@ -1,4 +1,4 @@
-.PHONY: build build-acs build-app build-worker build-migrate build-omcctl \
+.PHONY: build build-acs build-app build-worker build-migrate build-omcctl build-rpctool \
        test test-race test-coverage test-integration test-integration-up test-integration-down \
        test-cover cover-report cover-summary cover-check \
        lint vet generate \
@@ -21,6 +21,9 @@ build-migrate:
 
 build-omcctl:
 	go build -o bin/omcctl ./cmd/omcctl
+
+build-rpctool:
+	go build -o bin/rpctool ./scripts/rpctool
 
 # Test
 test:
