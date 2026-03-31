@@ -101,6 +101,15 @@ func (m *fakeDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 func (m *fakeDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return nil, nil
 }
+func (m *fakeDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, error) {
+	return &GeoStats{}, nil
+}
+func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 

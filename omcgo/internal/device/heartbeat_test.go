@@ -92,6 +92,15 @@ func (m *hbMockDeviceRepo) ListActiveByLastInform(ctx context.Context, cursorTim
 	}
 	return []model.Device{}, nil
 }
+func (m *hbMockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *hbMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, error) {
+	return &GeoStats{}, nil
+}
+func (m *hbMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

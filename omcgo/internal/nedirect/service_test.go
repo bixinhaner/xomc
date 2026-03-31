@@ -164,6 +164,15 @@ func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return nil, nil
 }
+func (m *mockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
+	return &device.GeoStats{}, nil
+}
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
+	return nil, nil
+}
 
 type mockParamRepo struct {
 	params map[uuid.UUID][]model.DeviceParameter

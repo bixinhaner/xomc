@@ -74,6 +74,15 @@ func (m *execDeviceRepo) CountByStatus(_ context.Context, _ *model.CarrierCode) 
 func (m *execDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return nil, nil
 }
+func (m *execDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *execDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
+	return &device.GeoStats{}, nil
+}
+func (m *execDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
+	return nil, nil
+}
 
 type execCmdQueue struct {
 	pushed []struct {

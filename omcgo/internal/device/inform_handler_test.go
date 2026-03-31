@@ -88,6 +88,15 @@ func (m *infMockDeviceRepo) CountByStatus(ctx context.Context, c *model.CarrierC
 func (m *infMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return nil, nil
 }
+func (m *infMockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *infMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, error) {
+	return &GeoStats{}, nil
+}
+func (m *infMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
+	return nil, nil
+}
 
 type infMockParamRepo struct {
 	batchUpsertFn func(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error

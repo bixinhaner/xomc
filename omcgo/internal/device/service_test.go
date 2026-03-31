@@ -97,6 +97,15 @@ func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.Carri
 func (m *mockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return []model.Device{}, nil
 }
+func (m *mockDeviceRepo) ListGeo(_ context.Context, _ GeoDeviceFilter) ([]GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, error) {
+	return &GeoStats{}, nil
+}
+func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Mock: DeviceParameterRepository

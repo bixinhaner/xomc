@@ -114,6 +114,15 @@ func (m *svcMockDeviceRepo) CountByStatus(_ context.Context, _ *model.CarrierCod
 func (m *svcMockDeviceRepo) ListActiveByLastInform(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
 	return nil, nil
 }
+func (m *svcMockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([]device.GeoDevice, int64, error) {
+	return nil, 0, nil
+}
+func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
+	return &device.GeoStats{}, nil
+}
+func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
+	return nil, nil
+}
 
 type svcMockCmdQueue struct {
 	pushFn func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error
