@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Space, Tag, Typography, App, Tree, Input } from 'antd';
+import { Badge, Button, Modal, Space, Tag, Typography, App, Tree, Input } from 'antd';
 import {
   CheckOutlined,
   ClearOutlined,
+  DeleteOutlined,
   ExportOutlined,
   EyeOutlined,
   FolderOutlined,
@@ -14,7 +15,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
+import { useCurrentAlarms, useHistoricalAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
@@ -57,13 +58,22 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
-// 一级节点数据（自定义告警分组）
-const ALARM_GROUPS = [
-  { id: 'all', name: 'common.all', icon: 'FolderOutlined' },
-  { id: 'critical', name: 'alarm.severity.critical', icon: 'FolderOutlined' },
-  { id: 'major', name: 'alarm.severity.major', icon: 'FolderOutlined' },
-  { id: 'minor', name: 'alarm.severity.minor', icon: 'FolderOutlined' },
-  { id: 'warning', name: 'alarm.severity.warning', icon: 'FolderOutlined' },
+// 告警类型分组
+type AlarmType = 'active' | 'historical';
+
+// 一级节点数据（告警类型 + 严重级别分组）
+const ALARM_TYPE_GROUPS: { id: AlarmType; name: string; icon: typeof FolderOutlined }[] = [
+  { id: 'active', name: 'alarm.type.active', icon: FolderOutlined },
+  { id: 'historical', name: 'alarm.type.historical', icon: FolderOutlined },
+];
+
+// 严重级别分组
+const SEVERITY_GROUPS = [
+  { id: 'all', name: 'common.all' },
+  { id: 'critical', name: 'alarm.severity.critical' },
+  { id: 'major', name: 'alarm.severity.major' },
+  { id: 'minor', name: 'alarm.severity.minor' },
+  { id: 'warning', name: 'alarm.severity.warning' },
 ];
 
 export default function CustomAlarmStats() {
@@ -79,7 +89,8 @@ export default function CustomAlarmStats() {
   const [exportLoading, setExportLoading] = useState(false);
 
   // 左侧树状态
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
+  const [selectedAlarmType, setSelectedAlarmType] = useState<AlarmType>('active');
+  const [selectedSeverityId, setSelectedSeverityId] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
 
   // 确认告警弹窗状态
@@ -91,6 +102,11 @@ export default function CustomAlarmStats() {
   const [clearModalOpen, setClearModalOpen] = useState(false);
   const [clearTargetIds, setClearTargetIds] = useState<string[]>([]);
   const [clearLoading, setClearLoading] = useState(false);
+
+  // 删除告警弹窗状态
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -165,15 +181,28 @@ export default function CustomAlarmStats() {
         pageSize,
       };
       // 根据选中的分组设置 severity 过滤
-      if (selectedGroupId !== 'all') {
-        params.severity = [selectedGroupId] as AlarmFilter['severity'];
+      if (selectedSeverityId !== 'all') {
+        params.severity = [selectedSeverityId] as AlarmFilter['severity'];
       }
       return params;
     },
-    [filterParams, currentPage, pageSize, selectedGroupId]
+    [filterParams, currentPage, pageSize, selectedSeverityId]
   );
 
-  const { data, isLoading, refetch } = useCurrentAlarms(queryParams);
+  // 根据告警类型使用不同的 hook
+  const currentAlarmsQuery = useCurrentAlarms(selectedAlarmType === 'active' ? queryParams : {} as Parameters<typeof useCurrentAlarms>[0]);
+  const historicalAlarmsQuery = useHistoricalAlarms(selectedAlarmType === 'historical' ? queryParams : {} as Parameters<typeof useHistoricalAlarms>[0]);
+
+  const activeQuery = selectedAlarmType === 'active' ? currentAlarmsQuery : null;
+  const historicalQuery = selectedAlarmType === 'historical' ? historicalAlarmsQuery : null;
+
+  const { data: activeData, isLoading: isActiveLoading, refetch: refetchActive } = activeQuery || { data: undefined, isLoading: false, refetch: () => Promise.resolve() };
+  const { data: historicalData, isLoading: isHistoricalLoading, refetch: refetchHistorical } = historicalQuery || { data: undefined, isLoading: false, refetch: () => Promise.resolve() };
+
+  const isLoading = selectedAlarmType === 'active' ? isActiveLoading : isHistoricalLoading;
+  const data = selectedAlarmType === 'active' ? activeData : historicalData;
+  const refetch = selectedAlarmType === 'active' ? refetchActive : refetchHistorical;
+
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
 
@@ -225,7 +254,7 @@ export default function CustomAlarmStats() {
         await acknowledgeAlarms.mutateAsync({ ids: ackTargetIds, note });
         setSelectedRowKeys([]);
         setAckModalOpen(false);
-        refetch();
+        void refetch();
         message.success(t('common.ackSuccess'));
       } catch {
         message.error(t('common.ackFailed'));
@@ -245,7 +274,7 @@ export default function CustomAlarmStats() {
         onOk: async () => {
           try {
             setSelectedRowKeys([]);
-            refetch();
+            void refetch();
             message.success(t('common.unackSuccess'));
           } catch {
             message.error(t('common.unackFailed'));
@@ -253,7 +282,7 @@ export default function CustomAlarmStats() {
         },
       });
     },
-    [refetch, t]
+    [refetch, t, modal, message]
   );
 
   const handleClear = useCallback(
@@ -271,7 +300,7 @@ export default function CustomAlarmStats() {
         await clearAlarms.mutateAsync({ ids: clearTargetIds, note });
         setSelectedRowKeys([]);
         setClearModalOpen(false);
-        refetch();
+        void refetch();
         message.success(t('common.clearSuccess'));
       } catch {
         message.error(t('common.clearFailed'));
@@ -282,14 +311,41 @@ export default function CustomAlarmStats() {
     [clearAlarms, clearTargetIds, refetch, t, message]
   );
 
+  // 删除告警
+  const handleDelete = useCallback(
+    (ids: string[]) => {
+      setDeleteTargetIds(ids);
+      setDeleteModalOpen(true);
+    },
+    []
+  );
+
+  const handleDeleteConfirm = useCallback(
+    async () => {
+      setDeleteLoading(true);
+      try {
+        // TODO: 调用删除告警 API
+        console.log('删除告警:', deleteTargetIds);
+        setSelectedRowKeys([]);
+        setDeleteModalOpen(false);
+        void refetch();
+        message.success(t('common.deleteSuccess'));
+      } catch {
+        message.error(t('common.deleteFailed'));
+      } finally {
+        setDeleteLoading(false);
+      }
+    },
+    [deleteTargetIds, refetch, t, message]
+  );
 
   const handleMarkRead = useCallback(
     (ids: string[]) => {
       setSelectedRowKeys([]);
-      refetch();
+      void refetch();
       message.success(t('common.markReadSuccess'));
     },
-    [refetch, t]
+    [refetch, t, message]
   );
 
   // 导出告警
@@ -458,38 +514,86 @@ export default function CustomAlarmStats() {
     [t, SEVERITY_LABEL, handleShowDetail]
   );
 
+  // 批量操作 - 活动告警和历史告警有不同的操作
   const batchActions = useMemo(
-    (): BatchAction[] => [
-      {
-        key: 'batch-ack',
-        label: t('alarm.acknowledge'),
-        icon: <CheckOutlined />,
-        onClick: (keys) => handleAcknowledge(keys as string[]),
-      },
-      {
-        key: 'batch-unack',
-        label: t('alarm.unacknowledge'),
-        icon: <MinusCircleOutlined />,
-        onClick: (keys) => handleUnacknowledge(keys as string[]),
-      },
-      {
-        key: 'batch-clear',
-        label: t('alarm.clear'),
-        icon: <ClearOutlined />,
+    (): BatchAction[] => {
+      const actions: BatchAction[] = [];
+
+      // 活动告警操作
+      if (selectedAlarmType === 'active') {
+        actions.push(
+          {
+            key: 'batch-ack',
+            label: t('alarm.acknowledge'),
+            icon: <CheckOutlined />,
+            onClick: (keys) => handleAcknowledge(keys as string[]),
+          },
+          {
+            key: 'batch-unack',
+            label: t('alarm.unacknowledge'),
+            icon: <MinusCircleOutlined />,
+            onClick: (keys) => handleUnacknowledge(keys as string[]),
+          },
+          {
+            key: 'batch-clear',
+            label: t('alarm.clear'),
+            icon: <ClearOutlined />,
+            danger: true,
+            onClick: (keys) => handleClear(keys as string[]),
+          },
+          {
+            key: 'batch-read',
+            label: t('alarm.markRead'),
+            icon: <EyeOutlined />,
+            onClick: (keys) => handleMarkRead(keys as string[]),
+          }
+        );
+      }
+
+      // 删除操作 - 活动告警和历史告警都有
+      actions.push({
+        key: 'batch-delete',
+        label: t('common.delete'),
+        icon: <DeleteOutlined />,
         danger: true,
-        onClick: (keys) => handleClear(keys as string[]),
-      },
-      {
-        key: 'batch-read',
-        label: t('alarm.markRead'),
-        icon: <EyeOutlined />,
-        onClick: (keys) => handleMarkRead(keys as string[]),
-      },
-    ],
-    [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead]
+        onClick: (keys) => handleDelete(keys as string[]),
+      });
+
+      return actions;
+    },
+    [selectedAlarmType, handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, handleDelete, t]
   );
 
-  // 左侧树面板 - 只显示一级节点
+  // 构建树形数据
+  const treeData = useMemo(() => {
+    return ALARM_TYPE_GROUPS.map((typeGroup) => ({
+      key: typeGroup.id,
+      title: (
+        <span>
+          <FolderOutlined style={{ marginRight: 6, color: '#1890FF' }} />
+          {t(typeGroup.name)}
+        </span>
+      ),
+      children: SEVERITY_GROUPS.map((severityGroup) => ({
+        key: `${typeGroup.id}-${severityGroup.id}`,
+        title: (
+          <span>
+            <FolderOutlined style={{ marginRight: 6, color: '#FA8C16' }} />
+            {t(severityGroup.name)}
+            <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+              ({severityGroup.id === 'all' ? total : alarms.filter((a) => a.severity === severityGroup.id).length})
+            </Text>
+          </span>
+        ),
+        isLeaf: true,
+      })),
+    }));
+  }, [t, total, alarms]);
+
+  // 当前选中的完整 key
+  const selectedTreeKey = `${selectedAlarmType}-${selectedSeverityId}`;
+
+  // 左侧树面板
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
@@ -517,26 +621,33 @@ export default function CustomAlarmStats() {
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
         <Tree
-          treeData={ALARM_GROUPS.filter((g) =>
-            searchText ? t(g.name).toLowerCase().includes(searchText.toLowerCase()) : true
-          ).map((group) => ({
-            key: group.id,
-            title: (
-              <span>
-                <FolderOutlined style={{ marginRight: 6, color: '#FA8C16' }} />
-                {t(group.name)}
-                <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-                  ({group.id === 'all' ? total : alarms.filter((a) => a.severity === group.id).length})
-                </Text>
-              </span>
-            ),
-            isLeaf: true,
-          }))}
-          selectedKeys={[selectedGroupId]}
+          treeData={treeData.filter((node) =>
+            searchText
+              ? t(ALARM_TYPE_GROUPS.find((g) => g.id === node.key)?.name || '').toLowerCase().includes(searchText.toLowerCase()) ||
+                node.children?.some((child) => {
+                  const severityId = (child.key as string).split('-')[1];
+                  return t(SEVERITY_GROUPS.find((g) => g.id === severityId)?.name || '').toLowerCase().includes(searchText.toLowerCase());
+                })
+              : true
+          )}
+          selectedKeys={[selectedTreeKey]}
+          expandedKeys={[selectedAlarmType]}
+          onExpand={(keys) => {
+            // 保持展开状态
+          }}
           onSelect={(keys) => {
             const key = keys[0] as string | undefined;
             if (key) {
-              setSelectedGroupId(key);
+              if (key.includes('-')) {
+                // 子节点格式: "active-all", "historical-critical" 等
+                const [alarmType, severityId] = key.split('-');
+                setSelectedAlarmType(alarmType as AlarmType);
+                setSelectedSeverityId(severityId);
+              } else {
+                // 父节点格式: "active", "historical"
+                setSelectedAlarmType(key as AlarmType);
+                setSelectedSeverityId('all');
+              }
               setCurrentPage(1);
             }
           }}
@@ -547,7 +658,16 @@ export default function CustomAlarmStats() {
     </div>
   );
 
-  // 右侧面板 - 当前告警内容
+  // 获取当前选中分组的显示名称
+  const getCurrentTitle = useCallback(() => {
+    const typeName = t(ALARM_TYPE_GROUPS.find((g) => g.id === selectedAlarmType)?.name || '');
+    const severityName = selectedSeverityId === 'all'
+      ? ''
+      : ` - ${t(SEVERITY_GROUPS.find((g) => g.id === selectedSeverityId)?.name || '')}`;
+    return `${typeName}${severityName}`;
+  }, [selectedAlarmType, selectedSeverityId, t]);
+
+  // 右侧面板
   const rightPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
@@ -560,9 +680,7 @@ export default function CustomAlarmStats() {
         }}
       >
         <Text strong style={{ fontSize: 14 }}>
-          {ALARM_GROUPS.find((g) => g.id === selectedGroupId)
-            ? t(ALARM_GROUPS.find((g) => g.id === selectedGroupId)!.name)
-            : t('nav.alarm.current')}
+          {getCurrentTitle()}
         </Text>
         <Button type="primary" icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
           {t('common.export')}
@@ -639,6 +757,19 @@ export default function CustomAlarmStats() {
         onCancel={() => setClearModalOpen(false)}
         loading={clearLoading}
       />
+
+      {/* 删除告警确认弹窗 */}
+      <Modal
+        open={deleteModalOpen}
+        title={t('common.delete')}
+        onCancel={() => setDeleteModalOpen(false)}
+        onOk={handleDeleteConfirm}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        okButtonProps={{ danger: true, loading: deleteLoading }}
+      >
+        <Text>{t('common.deleteConfirmMsg', { count: deleteTargetIds.length })}</Text>
+      </Modal>
     </>
   );
 }
