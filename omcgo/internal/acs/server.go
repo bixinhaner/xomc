@@ -44,6 +44,8 @@ type ServerDeps struct {
 	PostSessionWakeCfg      appconfig.PostSessionWakeConfig // post-session wake configuration
 	RedisClient             redis.Cmdable               // Redis client for continuous wake counter
 	StunStore               *stun.Store                 // STUN address cache (shared with STUN server)
+	ProtocolLogger          *zap.Logger                 // dedicated logger for protocol XML (nil = disabled)
+	MaxBodySize             int                         // XML truncation threshold for protocol log (0 = no truncation)
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -70,6 +72,8 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
 		redisClient:             deps.RedisClient,
 		stunStore:               deps.StunStore,
+		protocolLogger:          deps.ProtocolLogger,
+		maxBodySize:             deps.MaxBodySize,
 	}
 
 	mux := http.NewServeMux()

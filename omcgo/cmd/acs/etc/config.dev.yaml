@@ -106,6 +106,18 @@ log:
     compress: true # 压缩旧文件
     local_time: true # 使用本地时间
 
+protocol_log:
+  enabled: true
+  file_path: "/run/logs/acs/protocol.log"
+  max_body_size: 0     # XML 截断阈值 bytes，0=不截断
+  rotation:
+    enabled: true
+    max_size_mb: 50    # 协议日志文件较大
+    max_age_days: 7
+    max_backups: 5
+    compress: true
+    local_time: true
+
 request_id_prefix: "acs"
 
 # 测试功能：启用随机 RPC 任务注入

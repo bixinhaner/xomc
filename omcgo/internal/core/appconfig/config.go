@@ -25,6 +25,7 @@ type ACSConfig struct {
 	Metrics                 MetricsConfig      `mapstructure:"metrics"`
 	Tracer                  TracerConfig       `mapstructure:"tracer"`
 	Log                     LogConfig          `mapstructure:"log"`
+	ProtocolLog             ProtocolLogConfig  `mapstructure:"protocol_log"`               // ACS 协议交互日志（独立文件记录原始 XML）
 	RequestIDPrefix         string             `mapstructure:"request_id_prefix"`          // 请求 ID 前缀，如 "acs"
 	EnableTestTaskInjection bool               `mapstructure:"enable_test_task_injection"` // 启用随机测试任务注入（仅用于测试）
 }
@@ -320,6 +321,16 @@ type RotationConfig struct {
 	Compress        bool          `mapstructure:"compress"`         // compress rotated files
 	LocalTime       bool          `mapstructure:"local_time"`       // use local time for rotation
 	RotateInterval  time.Duration `mapstructure:"rotate_interval"`  // time-based rotation interval (e.g., "5m" for 5 minutes)
+}
+
+// ProtocolLogConfig holds settings for ACS protocol interaction logging.
+// When enabled, a dedicated log file records the complete raw SOAP/XML
+// for every ACS-CPE HTTP request/response exchange.
+type ProtocolLogConfig struct {
+	Enabled     bool           `mapstructure:"enabled"`      // 总开关
+	FilePath    string         `mapstructure:"file_path"`    // 日志文件路径，如 /run/logs/acs/protocol.log
+	MaxBodySize int            `mapstructure:"max_body_size"` // XML 截断阈值 bytes，0=不截断
+	Rotation    RotationConfig `mapstructure:"rotation"`     // 轮转配置（复用 RotationConfig）
 }
 
 // Load reads a configuration file and unmarshals it into the target struct.

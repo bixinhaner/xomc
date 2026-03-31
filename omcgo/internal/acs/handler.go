@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
+	"github.com/omcgo/omcgo/internal/acs/rpclog"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
@@ -81,6 +82,10 @@ type Handler struct {
 	redisClient        redis.Cmdable // 用于连续唤醒计数器
 	stunStore          *stun.Store   // 缓存 Inform 中的设备 STUN 地址
 	connReqURLCache    sync.Map      // deviceSN → ConnectionRequestURL（来自 Inform）
+	// protocolLogger 独立的协议交互日志器，记录完整的原始 XML 请求/响应到专用文件。
+	// nil 表示协议日志关闭。
+	protocolLogger *zap.Logger
+	maxBodySize    int // 协议日志 XML 截断阈值（0=不截断）
 	// connSessions 映射 HTTP RemoteAddr → connSessionEntry，用于连接级会话追踪。
 	// 条目在会话完成时或由后台清理器清除。
 	connSessions sync.Map
@@ -209,6 +214,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	// 协议日志：用 ResponseCapturer 包装 ResponseWriter，捕获响应字节
+	if h.protocolLogger != nil {
+		capturer := rpclog.NewResponseCapturer(w)
+		w = capturer
+		logEntry := &rpclog.LogEntry{StartTime: time.Now()}
+		ctx = rpclog.WithEntry(ctx, logEntry)
+		r = r.WithContext(ctx)
+
+		defer func() {
+			reqXML := string(body)
+			respXML := string(capturer.Body())
+			if h.maxBodySize > 0 {
+				if len(reqXML) > h.maxBodySize {
+					reqXML = reqXML[:h.maxBodySize] + "...(truncated)"
+				}
+				if len(respXML) > h.maxBodySize {
+					respXML = respXML[:h.maxBodySize] + "...(truncated)"
+				}
+			}
+			h.protocolLogger.Info("rpc",
+				zap.String("session_id", logEntry.SessionID),
+				zap.String("device_sn", logEntry.DeviceSN),
+				zap.Int("sequence", logEntry.Sequence),
+				zap.String("method", logEntry.Method),
+				zap.String("task_id", logEntry.TaskID),
+				zap.String("cwmp_id", logEntry.CwmpID),
+				zap.Int("http_status", capturer.StatusCode()),
+				zap.Int("duration_ms", int(time.Since(logEntry.StartTime).Milliseconds())),
+				zap.String("request_xml", reqXML),
+				zap.String("response_xml", respXML),
+			)
+		}()
+	}
 
 	// 记录请求信息（Info 级别，生产环境可见）
 	log.Info("ACS received request",
@@ -400,6 +439,15 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		CreatedAt: time.Now(),
 	})
 
+	// 协议日志元数据
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.SessionID = sessionID
+		entry.DeviceSN = deviceSN
+		entry.Method = "Inform"
+		entry.CwmpID = cwmpID
+		entry.Sequence = 0
+	}
+
 	// 为该设备注入随机测试任务（测试功能）
 	// 跳过 TransferComplete/AutonomousTransferComplete 会话 ——
 	// 这些会话有特定用途，不应被测试任务污染。
@@ -472,6 +520,14 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		zap.Bool("command_queue_available", h.commandQueue != nil),
 	)
 
+	// 协议日志元数据
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.SessionID = sessionID
+		entry.DeviceSN = deviceSN
+		entry.Sequence = session.RPCCount
+		entry.Method = "Empty"
+	}
+
 	// 状态转换：InformReceived → Processing
 	if session.State == StateInformReceived {
 		session.State = StateProcessing
@@ -536,6 +592,11 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 					zap.String("task_id", taskItem.ID),
 					zap.String("cwmp_id", cwmpID),
 				)
+				if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+					entry.Method = taskItem.Method
+					entry.TaskID = taskItem.ID
+					entry.CwmpID = cwmpID
+				}
 				// 在响应中设置 Session Cookie
 				h.setSessionCookie(w, sessionID)
 				h.sendSOAPResponse(w, respData, log)
@@ -572,6 +633,10 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				zap.String("method", cmd.Method),
 				zap.String("xml", string(respData)),
 			)
+			if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+				entry.Method = cmd.Method
+				entry.CwmpID = session.CWMPId
+			}
 			// 在响应中设置 Session Cookie
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
@@ -625,6 +690,15 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	deviceSN := session.DeviceSN
+
+	// 协议日志元数据
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.SessionID = sessionID
+		entry.DeviceSN = deviceSN
+		entry.Method = string(method)
+		entry.CwmpID = cwmpID
+		entry.Sequence = session.RPCCount
+	}
 
 	// 记录 RPC 耗时（近似值：自上次状态更新以来的时间）。
 	rpcDuration := time.Since(session.UpdatedAt).Seconds()
@@ -948,6 +1022,15 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		return
 	}
 
+	// 协议日志元数据
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.SessionID = sessionID
+		entry.DeviceSN = session.DeviceSN
+		entry.Method = "SOAPFault"
+		entry.CwmpID = cwmpID
+		entry.Sequence = session.RPCCount
+	}
+
 	// 如果任务服务可用，标记任务失败
 	if h.taskService != nil && cwmpID != "" {
 		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
@@ -1034,6 +1117,14 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		zap.String("device_sn", deviceSN),
 		zap.String("command_key", tc.CommandKey))
 
+	// 协议日志元数据
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.SessionID = sessionID
+		entry.DeviceSN = deviceSN
+		entry.Method = "TransferComplete"
+		entry.CwmpID = cwmpID
+	}
+
 	// 发布事件
 	evt, _ := event.NewEvent(event.SubjectDeviceTransferComplete, tc)
 	h.eventBus.Publish(r.Context(), event.SubjectDeviceTransferComplete, evt)
@@ -1087,6 +1178,14 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 		zap.String("transfer_url", atc.TransferURL),
 		zap.Bool("is_download", atc.IsDownload),
 	)
+
+	// 协议日志元数据
+	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
+		entry.SessionID = sessionID
+		entry.DeviceSN = deviceSN
+		entry.Method = "AutonomousTransferComplete"
+		entry.CwmpID = cwmpID
+	}
 
 	// 发布事件
 	payload := map[string]interface{}{

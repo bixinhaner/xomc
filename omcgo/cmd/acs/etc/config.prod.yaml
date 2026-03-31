@@ -104,6 +104,18 @@ log:
     compress: true
     local_time: true
 
+protocol_log:
+  enabled: false
+  file_path: "/run/logs/acs/protocol.log"
+  max_body_size: 0
+  rotation:
+    enabled: true
+    max_size_mb: 50
+    max_age_days: 7
+    max_backups: 10
+    compress: true
+    local_time: true
+
 request_id_prefix: "acs"
 
 enable_test_task_injection: false

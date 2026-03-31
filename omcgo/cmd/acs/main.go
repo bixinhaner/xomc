@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
@@ -17,6 +20,7 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func main() {
@@ -135,6 +139,20 @@ func runACS(cmd *cobra.Command, args []string) error {
 			zap.Int("max_continuous", cfg.PostSessionWake.MaxContinuous))
 	}
 
+	// 协议交互日志：独立的 zap logger 写入专用文件，记录完整 XML
+	if cfg.ProtocolLog.Enabled && cfg.ProtocolLog.FilePath != "" {
+		protocolLogger, err := newProtocolLogger(cfg.ProtocolLog)
+		if err != nil {
+			inf.Logger.Error("failed to create protocol logger", zap.Error(err))
+		} else {
+			deps.ProtocolLogger = protocolLogger
+			deps.MaxBodySize = cfg.ProtocolLog.MaxBodySize
+			inf.Logger.Info("protocol logging enabled",
+				zap.String("file_path", cfg.ProtocolLog.FilePath),
+				zap.Int("max_body_size", cfg.ProtocolLog.MaxBodySize))
+		}
+	}
+
 	acsServer := acs.NewACSServer(cfg, deps)
 	inf.GS.Register("acs-http", 1, func(ctx context.Context) error { return acsServer.Shutdown(ctx) })
 
@@ -180,6 +198,57 @@ type acsConnReqSender struct {
 
 func (s *acsConnReqSender) Send(ctx context.Context, deviceSN, httpURL string) error {
 	return s.dispatcher.Send(ctx, deviceSN, httpURL, "", s.isENB)
+}
+
+// newProtocolLogger creates a dedicated zap logger for ACS protocol interaction logging.
+// It writes structured JSON to a separate file with its own rotation settings.
+func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
+	dir := filepath.Dir(cfg.FilePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("create protocol log directory %s: %w", dir, err)
+	}
+
+	var writer io.Writer
+	if cfg.Rotation.Enabled {
+		maxSize := cfg.Rotation.MaxSizeMB
+		if maxSize <= 0 {
+			maxSize = 50
+		}
+		maxAge := cfg.Rotation.MaxAgeDays
+		if maxAge <= 0 {
+			maxAge = 7
+		}
+		maxBackups := cfg.Rotation.MaxBackups
+		if maxBackups <= 0 {
+			maxBackups = 5
+		}
+		writer = &lumberjack.Logger{
+			Filename:   cfg.FilePath,
+			MaxSize:    maxSize,
+			MaxAge:     maxAge,
+			MaxBackups: maxBackups,
+			Compress:   cfg.Rotation.Compress,
+			LocalTime:  cfg.Rotation.LocalTime,
+		}
+	} else {
+		f, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("open protocol log file %s: %w", cfg.FilePath, err)
+		}
+		writer = f
+	}
+
+	encoderCfg := zap.NewProductionEncoderConfig()
+	encoderCfg.TimeKey = "timestamp"
+	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderCfg),
+		zapcore.AddSync(writer),
+		zap.InfoLevel,
+	)
+
+	return zap.New(core), nil
 }
 
 // parseStringSlice parses a comma-separated string into a slice.
