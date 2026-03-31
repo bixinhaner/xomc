@@ -87,53 +87,29 @@ export OMCGO_REDIS_ADDR="redis-prod:6379"
 
 ### upload — 文件上传 (CPE → ACS)
 
-让基站将指定类型的文件上传到给定 URL。用于采集基站日志、配置备份、性能数据等。
+让基站将指定类型的文件上传到 ACS。`--url` 可选，省略时自动从配置文件构建完整上传地址。
 
 ```bash
-# 采集运行日志
-rpctool upload log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+# 最简形式 — URL 从配置自动构建（推荐）
+rpctool upload config-11 --sn DEVICE001
+rpctool upload pm --sn DEVICE001
+rpctool upload log --sn DEVICE001
+rpctool upload mr --sn DEVICE001
 
-# 采集配置文件
-rpctool upload config --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 采集 PM 性能文件
-rpctool upload pm --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 采集 MR 测量报告
-rpctool upload mr --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+# 指定网关地址（仅 host:port，路径和参数自动补全）
+rpctool upload pm --sn DEVICE001 --url http://192.168.1.100:8080
 
 # 采集抓包文件
-rpctool upload pcap --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+rpctool upload pcap --sn DEVICE001
 
-# 采集安全日志
-rpctool upload security-log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 采集故障日志
-rpctool upload fault-log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 上传 OUI 配置文件（导出完整配置 XML）
-rpctool upload oui-config --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 上传 OUI 配置文件（指定非默认 OUI）
-rpctool upload oui-config --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService --oui ABC123
-
-# 上传数据模型文件
-rpctool upload datamodel --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 上传 11 号配置文件
-rpctool upload config-11 --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 上传 SSL 证书
-rpctool upload ssl-cert --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
-
-# 使用数字代码指定文件类型
-rpctool upload --sn DEVICE001 -t 4 --url http://localhost:8080/smallcell/FileUploadService
-
-# 直接传入完整的 FileType 字符串
-rpctool upload --sn DEVICE001 -t "1 Vendor Configuration File" --url http://localhost:8080/smallcell/FileUploadService
+# 上传 OUI 配置文件
+rpctool upload oui-config --sn DEVICE001 --oui 48BF74
 
 # 延迟 60 秒后执行
-rpctool upload pm --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService --delay 60
+rpctool upload pm --sn DEVICE001 --delay 60
+
+# 仅预览，不写入数据库
+rpctool upload config-11 --sn DEVICE001 --dry-run
 ```
 
 **Upload 专属参数:**
@@ -141,7 +117,7 @@ rpctool upload pm --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploa
 | 参数 | 说明 |
 |------|------|
 | `--file-type` / `-t` | 文件类型（别名、数字代码或完整 FileType 字符串） |
-| `--url` / `-u` | 上传目标 URL（必填） |
+| `--url` / `-u` | 上传地址（可选，省略则从配置自动构建；可仅指定 host:port） |
 | `--username` | HTTP 认证用户名 |
 | `--password` | HTTP 认证密码 |
 | `--delay` | 延迟执行秒数 |

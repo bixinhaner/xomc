@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/task"
 )
@@ -71,6 +72,47 @@ var uploadFileTypeCodeMap = map[string]string{
 	"5":  "5 Vendor MR File",
 	"9":  "9 Vendor PCAP",
 	"11": "11 OUI Parameter Model",
+}
+
+// uploadQueryParam maps rpctool aliases to the short fileType code
+// used in the upload URL query parameter: ?fileType=<code>
+// This code is parsed by the upload handler's normalizeFileType() to determine
+// which MinIO bucket to store the uploaded file in.
+var uploadQueryParam = map[string]string{
+	"config":       "1",
+	"log":          "LOG",
+	"running-log":  "LOG",
+	"log-ext":      "LOG",
+	"security-log": "7",
+	"fault-log":    "8",
+	"pm":           "PM",
+	"mr":           "MR",
+	"pcap":         "9",
+	"oui-config":   "10",
+	"datamodel":    "11",
+	"config-11":    "11",
+	"ssl-cert":     "1",
+}
+
+// buildUploadURL constructs the full upload URL from base URL, path, fileType and device SN.
+// baseURL: e.g. "http://localhost:8080"
+// path: e.g. "/smallcell/FileUploadService"
+// alias: rpctool file type alias (e.g. "pm", "config-11")
+// deviceSN: device serial number for filename generation
+func buildUploadURL(baseURL, path, alias, deviceSN string) string {
+	// Determine query param code
+	code := uploadQueryParam[alias]
+	if code == "" {
+		// Fallback: extract leading digits from the resolved FileType
+		code = alias
+	}
+
+	// Generate filename: {sn}_{timestamp}.dat
+	timestamp := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("%s_%s.dat", deviceSN, timestamp)
+
+	return fmt.Sprintf("%s%s?fileType=%s&filename=%s",
+		strings.TrimRight(baseURL, "/"), path, code, filename)
 }
 
 // downloadFileTypeMap maps aliases to TR-069 Download FileType strings.

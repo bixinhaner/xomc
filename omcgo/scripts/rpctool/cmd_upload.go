@@ -42,38 +42,29 @@ func newUploadCmd() *cobra.Command {
 
 也可直接传入完整的 FileType 字符串（含空格），如:
   rpctool upload --file-type "1 Vendor Configuration File" --sn DEVICE001 --url ...`,
-		Example: `  # 让设备上传运行日志
-  rpctool upload log --sn DEVICE001 --url http://acs:7547/upload
+		Example: `  # 最简形式 — URL 自动从配置文件构建（推荐）
+  rpctool upload config-11 --sn DEVICE001
 
-  # 让设备上传配置文件
-  rpctool upload config --sn DEVICE001 --url http://acs:7547/upload
+  # 指定网关地址（仅 host:port，路径和参数自动补全）
+  rpctool upload pm --sn DEVICE001 --url http://192.168.1.100:8080
 
   # 采集 PM 性能数据
-  rpctool upload pm --sn DEVICE001 --url http://acs:7547/upload
+  rpctool upload pm --sn DEVICE001
 
   # 采集 MR 测量报告
-  rpctool upload mr --sn DEVICE001 --url http://acs:7547/upload
+  rpctool upload mr --sn DEVICE001
+
+  # 让设备上传运行日志
+  rpctool upload log --sn DEVICE001
 
   # 设备抓包
-  rpctool upload pcap --sn DEVICE001 --url http://acs:7547/upload
+  rpctool upload pcap --sn DEVICE001
 
-  # 上传 OUI 配置文件（导出完整配置 XML）
-  rpctool upload oui-config --sn DEVICE001 --url http://acs:7547/upload --oui 48BF74
-
-  # 上传安全日志
-  rpctool upload security-log --sn DEVICE001 --url http://acs:7547/upload
-
-  # 上传故障日志
-  rpctool upload fault-log --sn DEVICE001 --url http://acs:7547/upload
-
-  # 上传 SSL 证书
-  rpctool upload ssl-cert --sn DEVICE001 --url http://acs:7547/upload
-
-  # 上传数据模型文件
-  rpctool upload datamodel --sn DEVICE001 --url http://acs:7547/upload
+  # 上传 OUI 配置文件
+  rpctool upload oui-config --sn DEVICE001 --oui 48BF74
 
   # 仅预览，不写入数据库
-  rpctool upload log --sn DEVICE001 --url http://acs:7547/upload --dry-run`,
+  rpctool upload log --sn DEVICE001 --dry-run`,
 		Args:    cobra.MaximumNArgs(1),
 		PreRunE: requireSNAndInfra,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -96,25 +87,49 @@ func newUploadCmd() *cobra.Command {
 				}
 			}
 
-			if url == "" {
-				return fmt.Errorf("必须指定 --url (文件上传目标地址)")
+			// 构建上传 URL：
+			// 1. --url 未指定 → 从配置文件 upload.base_url + upload.path 自动构建
+			// 2. --url 仅 host:port（如 http://host:port）→ 用提供的 host + 配置 path 构建
+			// 3. --url 完整路径 → 直接使用（向后兼容）
+			actualURL := url
+			actualUser := username
+			actualPass := password
+			alias := ft // 原始别名，用于查找 query param
+
+			if actualURL == "" || !strings.Contains(actualURL, "/smallcell/") {
+				// 需要自动构建 URL
+				baseURL := actualURL
+				if baseURL == "" {
+					baseURL = acsCfg.Upload.BaseURL
+				}
+				if baseURL == "" {
+					return fmt.Errorf("必须指定 --url 或在配置文件中设置 upload.base_url")
+				}
+				actualURL = buildUploadURL(baseURL, acsCfg.Upload.Path, alias, deviceSN)
+				// 从配置注入凭据（命令行参数优先）
+				if actualUser == "" {
+					actualUser = acsCfg.Upload.Username
+				}
+				if actualPass == "" {
+					actualPass = acsCfg.Upload.Password
+				}
 			}
 
 			params := map[string]interface{}{
 				"file_type":     resolvedFT,
-				"url":           url,
-				"username":      username,
-				"password":      password,
+				"url":           actualURL,
+				"username":      actualUser,
+				"password":      actualPass,
 				"delay_seconds": delay,
 			}
 
 			return createAndPrint(context.Background(), deviceSN, "Upload", params,
-				fmt.Sprintf("Upload %s to %s", resolvedFT, url))
+				fmt.Sprintf("Upload %s to %s", resolvedFT, actualURL))
 		},
 	}
 
 	cmd.Flags().StringVarP(&fileType, "file-type", "t", "", "文件类型 (别名、数字代码或完整 FileType 字符串)")
-	cmd.Flags().StringVarP(&url, "url", "u", "", "文件上传目标 URL (必填)")
+	cmd.Flags().StringVarP(&url, "url", "u", "", "上传地址 (可选，省略则从配置自动构建；可仅指定 host:port)")
 	cmd.Flags().StringVar(&username, "username", "", "HTTP 认证用户名")
 	cmd.Flags().StringVar(&password, "password", "", "HTTP 认证密码")
 	cmd.Flags().IntVar(&delay, "delay", 0, "延迟执行秒数")

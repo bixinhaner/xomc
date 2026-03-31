@@ -77,18 +77,25 @@ ACS 引擎会从队列中取出任务并发送给设备执行。
 	}
 }
 
-// initInfra loads config and initializes Redis + PostgreSQL + TaskService.
-func initInfra() error {
+// loadConfig loads ACS config file and applies CLI overrides.
+// Called by both dry-run (config only) and full init (config + connections).
+func loadConfig() error {
 	if err := appconfig.Load(cfgPath, &acsCfg); err != nil {
 		return fmt.Errorf("加载配置文件 %s: %w", cfgPath, err)
 	}
-
-	// 命令行参数覆盖配置文件中的连接地址
 	if redisAddr != "" {
 		acsCfg.Redis.Addrs = []string{redisAddr}
 	}
 	if dbDSN != "" {
 		acsCfg.DB.DSN = dbDSN
+	}
+	return nil
+}
+
+// initInfra loads config and initializes Redis + PostgreSQL + TaskService.
+func initInfra() error {
+	if err := loadConfig(); err != nil {
+		return err
 	}
 
 	ctx := context.Background()
@@ -124,12 +131,13 @@ func requireSN(cmd *cobra.Command, args []string) error {
 }
 
 // requireSNAndInfra validates --sn and initializes infrastructure (unless dry-run).
+// Dry-run mode still loads config (for URL construction) but skips DB/Redis connections.
 func requireSNAndInfra(cmd *cobra.Command, args []string) error {
 	if err := requireSN(cmd, args); err != nil {
 		return err
 	}
 	if dryRun {
-		return nil
+		return loadConfig()
 	}
 	return initInfra()
 }
