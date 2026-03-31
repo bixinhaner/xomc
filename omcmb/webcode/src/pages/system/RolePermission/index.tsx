@@ -1086,8 +1086,8 @@ export default function RoleManagement() {
               showCount
             />
           </Form.Item>
-          {renderDeviceGroupTree(false)}
           {renderPermissionConfig(false)}
+          {renderDeviceGroupTree(false)}
         </Form>
       </Drawer>
 
@@ -1130,8 +1130,8 @@ export default function RoleManagement() {
               showCount
             />
           </Form.Item>
-          {renderDeviceGroupTree(false)}
           {renderPermissionConfig(false)}
+          {renderDeviceGroupTree(false)}
         </Form>
       </Drawer>
 
@@ -1161,6 +1161,7 @@ export default function RoleManagement() {
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} readOnly />
           </Form.Item>
+          {renderPermissionConfig(true)}
           {renderDeviceGroupTree(true)}
           <Form.Item label={t('role.userCount')}>
             <span>{selectedRole?.userCount ?? 0}</span>
@@ -1177,7 +1178,6 @@ export default function RoleManagement() {
           <Form.Item label="更新时间">
             <span>{selectedRole?.updateTime ? new Date(selectedRole.updateTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
-          {renderPermissionConfig(true)}
         </Form>
       </Drawer>
     </ListPageLayout>

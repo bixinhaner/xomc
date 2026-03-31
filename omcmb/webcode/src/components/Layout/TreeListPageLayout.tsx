@@ -121,9 +121,6 @@ export default function TreeListPageLayout({
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          background: token.colorBgContainer,
-          borderRadius: 6,
-          border: `1px solid ${token.colorBorderSecondary}`,
         }}
       >
         {children}

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Col, Dropdown, Form, Input, Menu, Modal, Radio, Row, Select, Space, Statistic, Tag, Typography, App, Tree, message, Tooltip } from 'antd';
+import { Badge, Button, Card, Checkbox, Col, Divider, Drawer, Dropdown, Form, Input, Menu, Modal, Pagination, Radio, Row, Select, Space, Statistic, Switch, Table, Tag, Typography, App, Tree, message, Tooltip } from 'antd';
 import {
   AlertOutlined,
+  BellOutlined,
   CalendarOutlined,
   CheckOutlined,
   ClearOutlined,
@@ -36,6 +37,41 @@ import ExportModal, { type ExportParams } from '../CurrentAlarms/ExportModal';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 
 const { Text } = Typography;
+
+// 统计项组件
+function StatItem({
+  label,
+  value,
+  color,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  color?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: '8px 16px',
+        borderRadius: 6,
+        cursor: onClick ? 'pointer' : 'default',
+        background: active ? '#E6F4FF' : 'transparent',
+        transition: 'all 0.2s',
+        minWidth: 70,
+      }}
+    >
+      <Text type="secondary" style={{ fontSize: 12 }}>{label}</Text>
+      <Text strong style={{ fontSize: 20, color: color || '#1F1F1F', lineHeight: 1.2 }}>{value}</Text>
+    </div>
+  );
+}
 
 // 告警级别颜色
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
@@ -91,7 +127,10 @@ const QUICK_TIME_OPTIONS = [
 // 快捷筛选选项
 const QUICK_FILTER_OPTIONS = [
   { label: '全部', key: 'all' },
-  { label: '严重告警', key: 'critical', severity: ['critical'] },
+  { label: '严重', key: 'critical', severity: ['critical'] },
+  { label: '主要', key: 'major', severity: ['major'] },
+  { label: '次要', key: 'minor', severity: ['minor'] },
+  { label: '警告', key: 'warning', severity: ['warning'] },
   { label: '未确认', key: 'unacked', dealState: ['0'] },
   { label: '未读', key: 'unread', unread: '1' },
 ];
@@ -104,7 +143,11 @@ const LAST_FILTER_KEY = 'custom-alarm-last-filter';
 interface CustomAlarmGroup {
   id: string;
   name: string;
+  description?: string;
   alarmType: 'active' | 'historical';
+  alarmIds?: string[];
+  deviceIds?: string[];
+  enableNotification?: boolean;
   createdAt: string;
   stats?: {
     total: number;
@@ -208,9 +251,37 @@ export default function CustomAlarmStats() {
   const [saveTemplateModalOpen, setSaveTemplateModalOpen] = useState(false);
   const [templateForm] = Form.useForm<{ name: string }>();
 
-  // 添加分组弹窗状态
-  const [addGroupModalOpen, setAddGroupModalOpen] = useState(false);
-  const [addGroupForm] = Form.useForm<{ name: string }>();
+  // 添加分组抽屉状态
+  const [addGroupDrawerOpen, setAddGroupDrawerOpen] = useState(false);
+  const [addGroupForm] = Form.useForm<{
+    name: string;
+    description: string;
+    alarmSources: string[];
+    deviceIds: string[];
+    enableNotification: boolean;
+  }>();
+  // 告警源设备列表（Mock数据）
+  const [availableDevices, setAvailableDevices] = useState<{ id: string; name: string; neType: string }[]>([]);
+  const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+  // 全选网元类型状态
+  const [selectAllENB, setSelectAllENB] = useState(false);
+  const [selectAllGNB, setSelectAllGNB] = useState(false);
+  const [selectAllGSM, setSelectAllGSM] = useState(false);
+  // 添加设备弹窗状态
+  const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
+  const [selectedNewDevices, setSelectedNewDevices] = useState<string[]>([]);
+  const [addDeviceKeyword, setAddDeviceKeyword] = useState('');
+  const [addDeviceCurrentPage, setAddDeviceCurrentPage] = useState(1);
+  const [addDevicePageSize, setAddDevicePageSize] = useState(10);
+
+  // 已选告警状态
+  const [availableAlarms, setAvailableAlarms] = useState<{ id: string; alarmIdentifier: string; alarmSource: string; possibleCause: string }[]>([]);
+  const [selectedAlarms, setSelectedAlarms] = useState<string[]>([]);
+  const [addAlarmModalVisible, setAddAlarmModalVisible] = useState(false);
+  const [selectedNewAlarms, setSelectedNewAlarms] = useState<string[]>([]);
+  const [addAlarmKeyword, setAddAlarmKeyword] = useState('');
+  const [addAlarmCurrentPage, setAddAlarmCurrentPage] = useState(1);
+  const [addAlarmPageSize, setAddAlarmPageSize] = useState(10);
 
   // 编辑分组弹窗状态
   const [editGroupModalOpen, setEditGroupModalOpen] = useState(false);
@@ -230,6 +301,47 @@ export default function CustomAlarmStats() {
 
   // 趋势图数据
   const trendData = useMemo(() => generateTrendData(), []);
+
+  // 可添加的设备列表（不在已选列表中的设备，且根据关键字过滤）
+  const filteredAvailableDevices = useMemo(() => {
+    const existingIds = new Set(selectedDevices);
+    let available = availableDevices.filter((d) => !existingIds.has(d.id));
+    if (addDeviceKeyword.trim()) {
+      const keyword = addDeviceKeyword.toLowerCase();
+      available = available.filter(
+        (d) => d.name.toLowerCase().includes(keyword) || d.neType.toLowerCase().includes(keyword)
+      );
+    }
+    return available;
+  }, [availableDevices, selectedDevices, addDeviceKeyword]);
+
+  // 分页后的设备列表
+  const paginatedDevices = useMemo(() => {
+    const start = (addDeviceCurrentPage - 1) * addDevicePageSize;
+    return filteredAvailableDevices.slice(start, start + addDevicePageSize);
+  }, [filteredAvailableDevices, addDeviceCurrentPage, addDevicePageSize]);
+
+  // 可添加的告警列表（不在已选列表中的告警，且根据关键字过滤）
+  const filteredAvailableAlarms = useMemo(() => {
+    const existingIds = new Set(selectedAlarms);
+    let available = availableAlarms.filter((a) => !existingIds.has(a.id));
+    if (addAlarmKeyword.trim()) {
+      const keyword = addAlarmKeyword.toLowerCase();
+      available = available.filter(
+        (a) =>
+          a.alarmIdentifier.toLowerCase().includes(keyword) ||
+          a.alarmSource.toLowerCase().includes(keyword) ||
+          a.possibleCause.toLowerCase().includes(keyword)
+      );
+    }
+    return available;
+  }, [availableAlarms, selectedAlarms, addAlarmKeyword]);
+
+  // 分页后的告警列表
+  const paginatedAlarms = useMemo(() => {
+    const start = (addAlarmCurrentPage - 1) * addAlarmPageSize;
+    return filteredAvailableAlarms.slice(start, start + addAlarmPageSize);
+  }, [filteredAvailableAlarms, addAlarmCurrentPage, addAlarmPageSize]);
 
   // 加载筛选模板
   useEffect(() => {
@@ -477,17 +589,95 @@ export default function CustomAlarmStats() {
       const newGroup: CustomAlarmGroup = {
         id: `group-${Date.now()}`,
         name: values.name,
-        alarmType: 'active',
+        description: values.description,
+        alarmType: values.alarmType || 'active',
         createdAt: new Date().toISOString().split('T')[0],
+        alarmIds: selectedAlarms,
+        deviceIds: selectedDevices,
+        enableNotification: values.enableNotification ?? false,
       };
       setGroups((prev) => [...prev, newGroup]);
-      setAddGroupModalOpen(false);
+      setAddGroupDrawerOpen(false);
       addGroupForm.resetFields();
+      setSelectedDevices([]);
+      setSelectedAlarms([]);
+      setSelectAllENB(false);
+      setSelectAllGNB(false);
+      setSelectAllGSM(false);
       message.success(t('common.success'));
     } catch {
       // validation error
     }
-  }, [addGroupForm, message, t]);
+  }, [addGroupForm, selectedDevices, selectedAlarms, message, t]);
+
+  // 打开添加分组抽屉
+  const handleOpenAddGroupDrawer = useCallback(() => {
+    addGroupForm.resetFields();
+    setSelectedDevices([]);
+    setSelectedAlarms([]);
+    // 模拟加载可用设备列表
+    const mockDevices = [
+      { id: 'dev-001', name: '北京基站-1', neType: 'eNB' },
+      { id: 'dev-002', name: '北京基站-2', neType: 'eNB' },
+      { id: 'dev-003', name: '上海基站-1', neType: 'gNB' },
+      { id: 'dev-004', name: '上海基站-2', neType: 'gNB' },
+      { id: 'dev-005', name: '广州基站-1', neType: 'GSM' },
+      { id: 'dev-006', name: '广州基站-2', neType: 'GSM' },
+      { id: 'dev-007', name: '深圳基站-1', neType: 'eNB' },
+      { id: 'dev-008', name: '深圳基站-2', neType: 'gNB' },
+      { id: 'dev-009', name: '成都基站-1', neType: 'eNB' },
+      { id: 'dev-010', name: '成都基站-2', neType: 'gNB' },
+      { id: 'dev-011', name: '杭州基站-1', neType: 'eNB' },
+      { id: 'dev-012', name: '杭州基站-2', neType: 'gNB' },
+      { id: 'dev-013', name: '南京基站-1', neType: 'GSM' },
+      { id: 'dev-014', name: '南京基站-2', neType: 'eNB' },
+      { id: 'dev-015', name: '武汉基站-1', neType: 'gNB' },
+    ];
+    setAvailableDevices(mockDevices);
+    // 模拟加载可用告警列表
+    const mockAlarms = [
+      { id: 'alarm-001', alarmIdentifier: 'ALM-001', alarmSource: 'eNB', possibleCause: '射频单元功率异常' },
+      { id: 'alarm-002', alarmIdentifier: 'ALM-002', alarmSource: 'eNB', possibleCause: '光模块信号丢失' },
+      { id: 'alarm-003', alarmIdentifier: 'ALM-003', alarmSource: 'gNB', possibleCause: '时钟同步失败' },
+      { id: 'alarm-004', alarmIdentifier: 'ALM-004', alarmSource: 'gNB', possibleCause: 'CPU利用率过高' },
+      { id: 'alarm-005', alarmIdentifier: 'ALM-005', alarmSource: 'GSM', possibleCause: '传输链路故障' },
+      { id: 'alarm-006', alarmIdentifier: 'ALM-006', alarmSource: 'GSM', possibleCause: '基站温度过高' },
+      { id: 'alarm-007', alarmIdentifier: 'ALM-007', alarmSource: 'eNB', possibleCause: 'S1接口连接中断' },
+      { id: 'alarm-008', alarmIdentifier: 'ALM-008', alarmSource: 'gNB', possibleCause: '电源模块故障' },
+      { id: 'alarm-009', alarmIdentifier: 'ALM-009', alarmSource: 'eNB', possibleCause: '风扇转速异常' },
+      { id: 'alarm-010', alarmIdentifier: 'ALM-010', alarmSource: 'gNB', possibleCause: '存储空间不足' },
+      { id: 'alarm-011', alarmIdentifier: 'ALM-011', alarmSource: 'GSM', possibleCause: '驻波比告警' },
+      { id: 'alarm-012', alarmIdentifier: 'ALM-012', alarmSource: 'eNB', possibleCause: 'X2接口连接中断' },
+      { id: 'alarm-013', alarmIdentifier: 'ALM-013', alarmSource: 'gNB', possibleCause: 'F1接口异常' },
+      { id: 'alarm-014', alarmIdentifier: 'ALM-014', alarmSource: 'GSM', possibleCause: 'Abis接口故障' },
+      { id: 'alarm-015', alarmIdentifier: 'ALM-015', alarmSource: 'eNB', possibleCause: 'GPS信号丢失' },
+    ];
+    setAvailableAlarms(mockAlarms);
+    setAddGroupDrawerOpen(true);
+  }, [addGroupForm]);
+
+
+  // 告警源变化时重新加载设备列表
+  const handleAlarmSourceChange = useCallback((checkedValues: string[]) => {
+    // 根据选中的告警源过滤设备
+    const filtered = availableDevices.filter(d => checkedValues.includes(d.neType));
+    // 如果当前选中的设备不在过滤列表中，则移除
+    setSelectedDevices(prev => prev.filter(id => filtered.some(d => d.id === id)));
+  }, [availableDevices]);
+
+  // 全选设备
+  const handleSelectAllDevices = useCallback(() => {
+    const filteredBySource = availableDevices.filter(d => {
+      const sources = addGroupForm.getFieldValue('alarmSources') || [];
+      return sources.length === 0 || sources.includes(d.neType);
+    });
+    setSelectedDevices(filteredBySource.map(d => d.id));
+  }, [availableDevices, addGroupForm]);
+
+  // 清空选中设备
+  const handleClearDevices = useCallback(() => {
+    setSelectedDevices([]);
+  }, []);
 
   // 编辑分组
   const handleEditGroup = useCallback((groupId: string) => {
@@ -820,10 +1010,7 @@ export default function CustomAlarmStats() {
           type="text"
           size="small"
           icon={<PlusOutlined />}
-          onClick={() => {
-            addGroupForm.resetFields();
-            setAddGroupModalOpen(true);
-          }}
+          onClick={handleOpenAddGroupDrawer}
         >
           添加
         </Button>
@@ -902,67 +1089,79 @@ export default function CustomAlarmStats() {
 
   // 右侧面板
   const rightPanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f5f5', padding: 12, gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12 }}>
       {/* 标题卡片 */}
-      <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
-            <EnvironmentOutlined style={{ color: '#1890ff' }} />
-            <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || '自定义告警'}</Text>
-            <Tag color={isHistorical ? 'default' : 'red'}>
-              {isHistorical ? <><ClockCircleOutlined /> 历史</> : <><AlertOutlined /> 活动</>}
-            </Tag>
-          </Space>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
-              刷新
-            </Button>
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'all', label: '导出全部', icon: <DownloadOutlined /> },
-                  { key: 'selected', label: `导出选中 (${selectedRowKeys.length})`, icon: <DownloadOutlined />, disabled: selectedRowKeys.length === 0 },
-                ],
-                onClick: ({ key }) => {
-                  setExportMode(key as 'all' | 'selected');
-                  setExportOpen(true);
-                },
-              }}
-            >
-              <Button icon={<ExportOutlined />}>
-                导出
-              </Button>
-            </Dropdown>
-          </Space>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0' }}>
+        <Space>
+          <EnvironmentOutlined style={{ color: '#1890ff' }} />
+          <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || '自定义告警'}</Text>
+          <Tag color={isHistorical ? 'default' : 'red'}>
+            {isHistorical ? <><ClockCircleOutlined /> 历史</> : <><AlertOutlined /> 活动</>}
+          </Tag>
+        </Space>
+        <Space>
+          <Button icon={<ExportOutlined />} onClick={() => { setExportMode('all'); setExportOpen(true); }}>
+            导出
+          </Button>
+        </Space>
+      </div>
+
+      {/* 统计卡片 - 使用 StatItem 组件 */}
+      <Card size="small" bordered styles={{ body: { padding: '12px 16px' } }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <StatItem
+            label="总数"
+            value={realStats.total}
+            active={activeQuickFilter === 'all'}
+            onClick={() => handleQuickFilter('all')}
+          />
+          <StatItem
+            label="严重"
+            value={realStats.critical}
+            color="#E53935"
+            active={activeQuickFilter === 'critical'}
+            onClick={() => handleQuickFilter('critical')}
+          />
+          <StatItem
+            label="主要"
+            value={realStats.major}
+            color="#FB8C00"
+            active={activeQuickFilter === 'major'}
+            onClick={() => handleQuickFilter('major')}
+          />
+          <StatItem
+            label="次要"
+            value={realStats.minor}
+            color="#FDD835"
+            active={activeQuickFilter === 'minor'}
+            onClick={() => handleQuickFilter('minor')}
+          />
+          <StatItem
+            label="警告"
+            value={realStats.warning}
+            color="#42A5F5"
+            active={activeQuickFilter === 'warning'}
+            onClick={() => handleQuickFilter('warning')}
+          />
+          <StatItem
+            label="未确认"
+            value={realStats.unacked}
+            color="#E53935"
+            active={activeQuickFilter === 'unacked'}
+            onClick={() => handleQuickFilter('unacked')}
+          />
+          <StatItem
+            label="未读"
+            value={rawAlarms.filter(a => a.unread === '1').length}
+            color="#722ED1"
+            active={activeQuickFilter === 'unread'}
+            onClick={() => handleQuickFilter('unread')}
+          />
         </div>
       </Card>
 
-      {/* 统计卡片 - 使用实时计算的数据 */}
-      <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
-        <Row gutter={24}>
-          <Col span={4}>
-            <Statistic title="总数" value={realStats.total} valueStyle={{ fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="严重" value={realStats.critical} valueStyle={{ color: '#E53935', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="主要" value={realStats.major} valueStyle={{ color: '#FB8C00', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="次要" value={realStats.minor} valueStyle={{ color: '#FDD835', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="警告" value={realStats.warning} valueStyle={{ color: '#42A5F5', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="未确认" value={realStats.unacked} valueStyle={{ color: '#E53935', fontSize: 20 }} />
-          </Col>
-        </Row>
-      </Card>
-
       {/* 趋势图卡片 */}
-      <Card size="small" title="告警趋势（近7天）" styles={{ body: { padding: '12px 16px' } }}>
+      <Card size="small" bordered title="告警趋势（近7天）" styles={{ body: { padding: '12px 16px' } }}>
         <LineChart
           xData={trendData.dates}
           series={trendData.series}
@@ -971,106 +1170,37 @@ export default function CustomAlarmStats() {
         />
       </Card>
 
-      {/* 搜索和列表卡片 */}
-      <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
-          {/* 快捷筛选按钮 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-            {/* 快捷类型筛选 */}
-            <Space.Compact size="small">
-              {QUICK_FILTER_OPTIONS.map((opt) => (
-                <Button
-                  key={opt.key}
-                  type={activeQuickFilter === opt.key ? 'primary' : 'default'}
-                  onClick={() => handleQuickFilter(opt.key)}
-                >
-                  {opt.label}
-                </Button>
-              ))}
-            </Space.Compact>
+      {/* 搜索卡片 */}
+      <Card size="small" bordered styles={{ body: { padding: '0 16px' } }}>
+        <FilterBar
+          filterId={`custom-alarm-stats-${selectedGroupId}`}
+          fields={FILTER_FIELDS}
+          onSearch={handleSearch}
+          onReset={handleReset}
+          collapsedRows={1}
+          noDefaultStyle
+        />
+      </Card>
 
-            <div style={{ flex: 1 }} />
-
-            {/* 快捷时间选择 */}
-            <Select
-              size="small"
-              placeholder="快捷时间"
-              value={activeQuickTime}
-              onChange={handleQuickTime}
-              allowClear
-              style={{ width: 120 }}
-              suffixIcon={<CalendarOutlined />}
-            >
-              {QUICK_TIME_OPTIONS.map((opt) => (
-                <Select.Option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </Select.Option>
-              ))}
-            </Select>
-
-            {/* 筛选模板 */}
-            {filterTemplates.length > 0 && (
-              <Dropdown
-                menu={{
-                  items: [
-                    { type: 'group', label: '应用筛选模板', key: 'template-group' },
-                    ...filterTemplates.map((t) => ({
-                      key: t.id,
-                      label: (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{t.name}</span>
-                          <Button
-                            type="text"
-                            size="small"
-                            danger
-                            icon={<DeleteOutlined />}
-                            onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
-                          />
-                        </div>
-                      ),
-                    })),
-                  ],
-                  onClick: ({ key }) => {
-                    const template = filterTemplates.find((t) => t.id === key);
-                    if (template) handleApplyTemplate(template);
-                  },
-                }}
-              >
-                <Button size="small" icon={<FilterOutlined />}>
-                  模板
-                </Button>
-              </Dropdown>
-            )}
-
-            {/* 保存筛选模板 */}
-            <Tooltip title="保存当前筛选条件为模板">
-              <Button size="small" icon={<SaveOutlined />} onClick={() => setSaveTemplateModalOpen(true)}>
-                保存
-              </Button>
-            </Tooltip>
-          </div>
-
-          <FilterBar filterId={`custom-alarm-stats-${selectedGroupId}`} fields={FILTER_FIELDS} onSearch={handleSearch} onReset={handleReset} collapsedRows={1} />
-        </div>
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <DataTable<Alarm>
-            tableId={`custom-alarm-stats-table-${selectedGroupId}`}
-            columns={columns}
-            dataSource={alarms}
-            loading={isLoading}
-            rowKey="id"
-            selectable
-            selectedRowKeys={selectedRowKeys}
-            onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-            total={total}
-            pageSize={pageSize}
-            currentPage={currentPage}
-            onPageChange={(page, size) => { setCurrentPage(page); setPageSize(size); }}
-            batchActions={batchActions}
-            onRefresh={() => void refetch()}
-            defaultDensity="compact"
-          />
-        </div>
+      {/* 列表卡片 */}
+      <Card size="small" bordered styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
+        <DataTable<Alarm>
+          tableId={`custom-alarm-stats-table-${selectedGroupId}`}
+          columns={columns}
+          dataSource={alarms}
+          loading={isLoading}
+          rowKey="id"
+          selectable
+          selectedRowKeys={selectedRowKeys}
+          onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+          total={total}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={(page, size) => { setCurrentPage(page); setPageSize(size); }}
+          batchActions={batchActions}
+          onRefresh={() => void refetch()}
+          defaultDensity="compact"
+        />
       </Card>
     </div>
   );
@@ -1117,20 +1247,486 @@ export default function CustomAlarmStats() {
         <Text>{t('common.deleteConfirmMsg', { count: deleteTargetIds.length })}</Text>
       </Modal>
 
-      {/* 添加分组弹窗 */}
-      <Modal
-        open={addGroupModalOpen}
+      {/* 添加分组抽屉 */}
+      <Drawer
+        open={addGroupDrawerOpen}
         title="添加自定义告警分组"
-        onCancel={() => setAddGroupModalOpen(false)}
-        onOk={handleAddGroup}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
+        placement="right"
+        width={520}
+        onClose={() => setAddGroupDrawerOpen(false)}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setAddGroupDrawerOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={handleAddGroup}>{t('common.confirm')}</Button>
+          </div>
+        }
       >
         <Form form={addGroupForm} layout="vertical" size="small">
-          <Form.Item name="name" label="分组名称" rules={[{ required: true, message: '请输入分组名称' }]}>
-            <Input placeholder="请输入分组名称，如：北京告警" maxLength={50} showCount autoFocus />
+          {/* 模版名称 */}
+          <Form.Item
+            name="name"
+            label="模版名称"
+            rules={[
+              { required: true, message: '请输入模版名称' },
+              { min: 1, max: 50, message: '模版名称长度为1-50个字符' },
+              {
+                validator: (_, value) => {
+                  if (value && groups.some(g => g.name === value)) {
+                    return Promise.reject(new Error('模版名称已存在，请使用其他名称'));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <Input placeholder="请输入模版名称" maxLength={50} showCount />
+          </Form.Item>
+
+          {/* 描述 */}
+          <Form.Item name="description" label="描述">
+            <Input.TextArea placeholder="请输入描述信息" rows={3} maxLength={200} showCount />
+          </Form.Item>
+
+          <Divider />
+
+          {/* 告警源 - 全选复选框 */}
+          <Form.Item label="告警源">
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Checkbox
+                checked={selectAllENB}
+                onChange={(e) => {
+                  setSelectAllENB(e.target.checked);
+                  if (e.target.checked) {
+                    // 选中eNB全部设备
+                    const enbDevices = availableDevices.filter(d => d.neType === 'eNB').map(d => d.id);
+                    setSelectedDevices(prev => [...new Set([...prev, ...enbDevices])]);
+                  } else {
+                    // 取消选中eNB全部设备
+                    setSelectedDevices(prev => prev.filter(id => {
+                      const device = availableDevices.find(d => d.id === id);
+                      return device?.neType !== 'eNB';
+                    }));
+                  }
+                }}
+              >
+                eNB 的全部设备
+                <Tag color="blue" style={{ marginLeft: 8 }}>
+                  {availableDevices.filter(d => d.neType === 'eNB').length} 台
+                </Tag>
+              </Checkbox>
+              <Checkbox
+                checked={selectAllGNB}
+                onChange={(e) => {
+                  setSelectAllGNB(e.target.checked);
+                  if (e.target.checked) {
+                    const gnbDevices = availableDevices.filter(d => d.neType === 'gNB').map(d => d.id);
+                    setSelectedDevices(prev => [...new Set([...prev, ...gnbDevices])]);
+                  } else {
+                    setSelectedDevices(prev => prev.filter(id => {
+                      const device = availableDevices.find(d => d.id === id);
+                      return device?.neType !== 'gNB';
+                    }));
+                  }
+                }}
+              >
+                gNB 的全部设备
+                <Tag color="blue" style={{ marginLeft: 8 }}>
+                  {availableDevices.filter(d => d.neType === 'gNB').length} 台
+                </Tag>
+              </Checkbox>
+              <Checkbox
+                checked={selectAllGSM}
+                onChange={(e) => {
+                  setSelectAllGSM(e.target.checked);
+                  if (e.target.checked) {
+                    const gsmDevices = availableDevices.filter(d => d.neType === 'GSM').map(d => d.id);
+                    setSelectedDevices(prev => [...new Set([...prev, ...gsmDevices])]);
+                  } else {
+                    setSelectedDevices(prev => prev.filter(id => {
+                      const device = availableDevices.find(d => d.id === id);
+                      return device?.neType !== 'GSM';
+                    }));
+                  }
+                }}
+              >
+                GSM 的全部设备
+                <Tag color="blue" style={{ marginLeft: 8 }}>
+                  {availableDevices.filter(d => d.neType === 'GSM').length} 台
+                </Tag>
+              </Checkbox>
+            </Space>
+          </Form.Item>
+
+          <Divider />
+
+          {/* 已选设备 */}
+          <Form.Item label={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <span>
+                已选设备
+                <Tag color="blue" style={{ marginLeft: 8 }}>{selectedDevices.length} 台</Tag>
+              </span>
+              <Space size={8}>
+                <Button
+                  size="small"
+                  icon={<ClearOutlined />}
+                  disabled={selectedDevices.length === 0}
+                  onClick={() => {
+                    setSelectedDevices([]);
+                    setSelectAllENB(false);
+                    setSelectAllGNB(false);
+                    setSelectAllGSM(false);
+                  }}
+                >
+                  清空
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setAddDeviceModalVisible(true)}
+                >
+                  添加设备
+                </Button>
+              </Space>
+            </div>
+          }>
+            {selectedDevices.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#999', border: '1px dashed #d9d9d9', borderRadius: 6 }}>
+                请选择告警源或添加设备
+              </div>
+            ) : (
+              <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, maxHeight: 300, overflow: 'auto' }}>
+                <Table
+                  size="small"
+                  dataSource={availableDevices.filter(d => selectedDevices.includes(d.id))}
+                  rowKey="id"
+                  pagination={false}
+                  columns={[
+                    { title: '设备名称', dataIndex: 'name', ellipsis: true },
+                    { title: '网元类型', dataIndex: 'neType', width: 80, render: (val) => <Tag>{val}</Tag> },
+                    {
+                      title: '',
+                      width: 40,
+                      render: (_: unknown, record: { id: string; name: string; neType: string }) => (
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => {
+                            setSelectedDevices(prev => prev.filter(id => id !== record.id));
+                            // 同时更新全选状态
+                            const enbCount = availableDevices.filter(d => d.neType === 'eNB').length;
+                            const gnbCount = availableDevices.filter(d => d.neType === 'gNB').length;
+                            const gsmCount = availableDevices.filter(d => d.neType === 'GSM').length;
+                            const selectedEnbCount = selectedDevices.filter(id => {
+                              const d = availableDevices.find(dev => dev.id === id);
+                              return d?.neType === 'eNB';
+                            }).length - (record.neType === 'eNB' ? 1 : 0);
+                            const selectedGnbCount = selectedDevices.filter(id => {
+                              const d = availableDevices.find(dev => dev.id === id);
+                              return d?.neType === 'gNB';
+                            }).length - (record.neType === 'gNB' ? 1 : 0);
+                            const selectedGsmCount = selectedDevices.filter(id => {
+                              const d = availableDevices.find(dev => dev.id === id);
+                              return d?.neType === 'GSM';
+                            }).length - (record.neType === 'GSM' ? 1 : 0);
+                            setSelectAllENB(selectedEnbCount === enbCount && enbCount > 0);
+                            setSelectAllGNB(selectedGnbCount === gnbCount && gnbCount > 0);
+                            setSelectAllGSM(selectedGsmCount === gsmCount && gsmCount > 0);
+                          }}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            )}
+          </Form.Item>
+
+          <Divider />
+
+          {/* 已选告警 */}
+          <Form.Item label={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <span>
+                已选告警
+                <Tag color="orange" style={{ marginLeft: 8 }}>{selectedAlarms.length} 条</Tag>
+              </span>
+              <Space size={8}>
+                <Button
+                  size="small"
+                  icon={<ClearOutlined />}
+                  disabled={selectedAlarms.length === 0}
+                  onClick={() => setSelectedAlarms([])}
+                >
+                  清空
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setAddAlarmModalVisible(true)}
+                >
+                  添加告警
+                </Button>
+              </Space>
+            </div>
+          }>
+            {selectedAlarms.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#999', border: '1px dashed #d9d9d9', borderRadius: 6 }}>
+                暂无选中的告警
+              </div>
+            ) : (
+              <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, maxHeight: 200, overflow: 'auto' }}>
+                <Table
+                  size="small"
+                  dataSource={availableAlarms.filter(a => selectedAlarms.includes(a.id))}
+                  rowKey="id"
+                  pagination={false}
+                  columns={[
+                    { title: '告警标识', dataIndex: 'alarmIdentifier', ellipsis: true },
+                    { title: '告警源', dataIndex: 'alarmSource', width: 80, render: (val) => <Tag>{val}</Tag> },
+                    { title: '可能原因', dataIndex: 'possibleCause', ellipsis: true },
+                    {
+                      title: '',
+                      width: 40,
+                      render: (_: unknown, record: { id: string }) => (
+                        <Button
+                          type="text"
+          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => {
+            setSelectedAlarms(prev => prev.filter(id => id !== record.id));
+          }}
+                        />
+                      ),
+                    }
+                  ]}
+                />
+              </div>
+            )}
           </Form.Item>
         </Form>
+      </Drawer>
+
+      {/* 添加设备弹窗 */}
+      <Modal
+        open={addDeviceModalVisible}
+        title="添加设备"
+        onCancel={() => {
+          setAddDeviceModalVisible(false);
+          setSelectedNewDevices([]);
+          setAddDeviceKeyword('');
+          setAddDeviceCurrentPage(1);
+        }}
+        onOk={() => {
+          setSelectedDevices(prev => [...new Set([...prev, ...selectedNewDevices])]);
+          // 更新全选状态
+          const allIds = [...new Set([...selectedDevices, ...selectedNewDevices])];
+          const enbCount = availableDevices.filter(d => d.neType === 'eNB').length;
+          const gnbCount = availableDevices.filter(d => d.neType === 'gNB').length;
+          const gsmCount = availableDevices.filter(d => d.neType === 'GSM').length;
+          const selectedEnbCount = allIds.filter(id => {
+            const d = availableDevices.find(dev => dev.id === id);
+            return d?.neType === 'eNB';
+          }).length;
+          const selectedGnbCount = allIds.filter(id => {
+            const d = availableDevices.find(dev => dev.id === id);
+            return d?.neType === 'gNB';
+          }).length;
+          const selectedGsmCount = allIds.filter(id => {
+            const d = availableDevices.find(dev => dev.id === id);
+            return d?.neType === 'GSM';
+          }).length;
+          setSelectAllENB(selectedEnbCount === enbCount && enbCount > 0);
+          setSelectAllGNB(selectedGnbCount === gnbCount && gnbCount > 0);
+          setSelectAllGSM(selectedGsmCount === gsmCount && gsmCount > 0);
+          setAddDeviceModalVisible(false);
+          setSelectedNewDevices([]);
+          setAddDeviceKeyword('');
+          setAddDeviceCurrentPage(1);
+        }}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={600}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Input
+            placeholder="搜索设备名称"
+            prefix={<SearchOutlined />}
+            value={addDeviceKeyword}
+            onChange={(e) => {
+              setAddDeviceKeyword(e.target.value);
+              setAddDeviceCurrentPage(1);
+            }}
+            allowClear
+          />
+        </div>
+        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Checkbox
+            checked={selectedNewDevices.length === filteredAvailableDevices.length && filteredAvailableDevices.length > 0}
+            indeterminate={selectedNewDevices.length > 0 && selectedNewDevices.length < filteredAvailableDevices.length}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setSelectedNewDevices(filteredAvailableDevices.map(d => d.id));
+              } else {
+                setSelectedNewDevices([]);
+              }
+            }}
+          >
+            全选（{filteredAvailableDevices.length} 个可选设备）
+          </Checkbox>
+          <span style={{ color: '#666', fontSize: 12 }}>
+            已选 {selectedNewDevices.length} 个
+          </span>
+        </div>
+        <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
+          {filteredAvailableDevices.length === 0 ? (
+            <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
+              暂无可添加的设备
+            </div>
+          ) : (
+            paginatedDevices.map(device => (
+              <div
+                key={device.id}
+                onClick={() => {
+                  setSelectedNewDevices(prev =>
+                    prev.includes(device.id)
+                      ? prev.filter(id => id !== device.id)
+                      : [...prev, device.id]
+                  );
+                }}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  background: selectedNewDevices.includes(device.id) ? '#e6f4ff' : 'transparent',
+                  borderBottom: '1px solid #f0f0f0',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <Checkbox
+                  checked={selectedNewDevices.includes(device.id)}
+                  onChange={() => {}}
+                  style={{ marginRight: 8 }}
+                />
+                <span style={{ flex: 1 }}>{device.name}</span>
+                <Tag>{device.neType}</Tag>
+              </div>
+            ))
+          )}
+        </div>
+        {filteredAvailableDevices.length > addDevicePageSize && (
+          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+            <Pagination
+              size="small"
+              current={addDeviceCurrentPage}
+              pageSize={addDevicePageSize}
+              total={filteredAvailableDevices.length}
+              onChange={(page, pageSize) => {
+                setAddDeviceCurrentPage(page);
+                setAddDevicePageSize(pageSize);
+              }}
+              showSizeChanger
+              showTotal={(total) => `共 ${total} 个`}
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* 添加告警弹窗 */}
+      <Modal
+        open={addAlarmModalVisible}
+        title="添加告警"
+        onCancel={() => {
+          setAddAlarmModalVisible(false);
+          setSelectedNewAlarms([]);
+          setAddAlarmKeyword('');
+          setAddAlarmCurrentPage(1);
+        }}
+        onOk={() => {
+          setSelectedAlarms(prev => [...new Set([...prev, ...selectedNewAlarms])]);
+          setAddAlarmModalVisible(false);
+          setSelectedNewAlarms([]);
+          setAddAlarmKeyword('');
+          setAddAlarmCurrentPage(1);
+        }}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={700}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Input
+            placeholder="搜索告警标识、告警源或可能原因"
+            prefix={<SearchOutlined />}
+            value={addAlarmKeyword}
+            onChange={(e) => {
+              setAddAlarmKeyword(e.target.value);
+              setAddAlarmCurrentPage(1);
+            }}
+            allowClear
+          />
+        </div>
+        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Checkbox
+            checked={selectedNewAlarms.length === filteredAvailableAlarms.length && filteredAvailableAlarms.length > 0}
+            indeterminate={selectedNewAlarms.length > 0 && selectedNewAlarms.length < filteredAvailableAlarms.length}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setSelectedNewAlarms(filteredAvailableAlarms.map(a => a.id));
+              } else {
+                setSelectedNewAlarms([]);
+              }
+            }}
+          >
+            全选（{filteredAvailableAlarms.length} 个可选告警）
+          </Checkbox>
+          <span style={{ color: '#666', fontSize: 12 }}>
+            已选 {selectedNewAlarms.length} 个
+          </span>
+        </div>
+        <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
+          {filteredAvailableAlarms.length === 0 ? (
+            <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
+              暂无可添加的告警
+            </div>
+          ) : (
+            <Table
+              size="small"
+              dataSource={paginatedAlarms}
+              rowKey="id"
+              pagination={false}
+              rowSelection={{
+                selectedRowKeys: selectedNewAlarms,
+                onChange: (keys) => setSelectedNewAlarms(keys as string[]),
+              }}
+              columns={[
+                { title: '告警标识', dataIndex: 'alarmIdentifier', ellipsis: true },
+                { title: '告警源', dataIndex: 'alarmSource', width: 80, render: (val) => <Tag>{val}</Tag> },
+                { title: '可能原因', dataIndex: 'possibleCause', ellipsis: true },
+              ]}
+            />
+          )}
+        </div>
+        {filteredAvailableAlarms.length > addAlarmPageSize && (
+          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+            <Pagination
+              size="small"
+              current={addAlarmCurrentPage}
+              pageSize={addAlarmPageSize}
+              total={filteredAvailableAlarms.length}
+              onChange={(page, pageSize) => {
+                setAddAlarmCurrentPage(page);
+                setAddAlarmPageSize(pageSize);
+              }}
+              showSizeChanger
+              showTotal={(total) => `共 ${total} 条`}
+            />
+          </div>
+        )}
       </Modal>
 
       {/* 编辑分组弹窗 */}

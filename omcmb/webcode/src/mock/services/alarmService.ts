@@ -55,7 +55,30 @@ let alarmRules: import('@/types/alarm').AlarmRule[] = [
 
 function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
   let result = [...items];
-  if (filter.severity) result = result.filter((a) => a.severity === filter.severity);
+
+  // severity 支持单值和数组
+  if (filter.severity) {
+    const severities = Array.isArray(filter.severity) ? filter.severity : [filter.severity];
+    result = result.filter((a) => severities.includes(a.severity));
+  }
+
+  // dealState 支持单值和数组
+  if (filter.dealState) {
+    const states = Array.isArray(filter.dealState) ? filter.dealState : [filter.dealState];
+    result = result.filter((a) => states.includes(a.dealState));
+  }
+
+  // eventType 支持单值和数组
+  if (filter.eventType) {
+    const types = Array.isArray(filter.eventType) ? filter.eventType : [filter.eventType];
+    result = result.filter((a) => types.includes(a.eventType));
+  }
+
+  // unread 阅读状态
+  if (filter.unread) {
+    result = result.filter((a) => a.unread === filter.unread);
+  }
+
   if (filter.ackStatus) result = result.filter((a) => a.ackStatus === filter.ackStatus);
   if (filter.deviceSn) result = result.filter((a) => a.deviceSn.includes(filter.deviceSn!));
   if (filter.alarmCode) result = result.filter((a) => a.alarmCode.includes(filter.alarmCode!));

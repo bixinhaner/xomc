@@ -166,7 +166,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
   return (
     <div
       className={styles.filterBarWrapper}
-      style={noDefaultStyle ? { padding: 0, margin: 0 } : undefined}
+      style={noDefaultStyle ? { padding: 0, margin: 0, marginBottom: 0 } : undefined}
     >
       <Form form={form} layout="vertical" size="small">
         <Row gutter={[12, 0]} align="bottom">
