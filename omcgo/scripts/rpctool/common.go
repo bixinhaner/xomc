@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/omcgo/omcgo/internal/task"
 )
@@ -12,34 +13,53 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 // TR-069 FileType 映射
 //
-// 根据 TR-069 Amendment 6 (cwmp-1-4) 规范：
+// 根据 TR-069 Amendment 6 (cwmp-1-4) 规范和 LMT API 指南：
 //
 // Upload (CPE→ACS):
-//   "1 Vendor Configuration File"    — 配置文件
-//   "2 Vendor Log File"              — 日志文件
-//   其他为厂商/运营商私有扩展
+//   标准:
+//     "1 Vendor Configuration File"    — 配置文件
+//     "2 Vendor Log File"              — 日志文件
+//   扩展:
+//     "4 Vendor Log File"              — 日志文件（扩展编号）
+//     "4 Vendor PM File"               — 性能管理文件（运营商扩展）
+//     "5 Vendor MR File"               — 测量报告（运营商扩展）
+//     "9 Vendor PCAP"                  — 抓包文件
+//     "10 <OUI> Configuration File"    — 厂商特定配置文件
+//     "11 OUI Parameter Model"         — 数据模型文件
+//     "Tr069 Ssl Cert File"            — TR069 SSL 证书
 //
 // Download (ACS→CPE):
-//   "1 Firmware Upgrade Image"       — 固件升级
-//   "2 Web Content"                  — Web 内容
-//   "3 Vendor Configuration File"    — 配置文件
-//   其他为厂商/运营商私有扩展
+//   标准:
+//     "1 Firmware Upgrade Image"       — 固件升级
+//     "2 Web Content"                  — Web 内容
+//     "3 Vendor Configuration File"    — 配置文件
+//   扩展:
+//     "10 <OUI> Configuration File"    — 厂商特定配置文件（自动解析导入参数）
+//     "101 Script File"                — 脚本文件
+//     "103 Base Station Startup File"  — 基站启动文件
+//     "License File"                   — License 文件
+//     "Tr069 Ssl Cert File"            — TR069 SSL 证书
 // ─────────────────────────────────────────────────────────────────────────────
+
+// defaultOUI is the Baicells OUI used for OUI-specific file types.
+const defaultOUI = "48BF74"
 
 // uploadFileTypeMap maps aliases to TR-069 Upload FileType strings.
 var uploadFileTypeMap = map[string]string{
 	// TR-069 标准类型
-	"config":  "1 Vendor Configuration File",
-	"log":     "2 Vendor Log File",
+	"config": "1 Vendor Configuration File",
+	"log":    "2 Vendor Log File",
 
-	// 运营商扩展类型（中国运营商规范）
+	// 运营商/厂商扩展类型
 	"running-log":  "2 Vendor Log File",
-	"security-log": "2 Vendor Security Log",
-	"fault-log":    "2 Vendor Fault Log",
-	"pm":           "4 Vendor PM File",
-	"mr":           "5 Vendor MR File",
-	"pcap":         "9 Vendor PCAP",
-	"datamodel":    "11 OUI Parameter Model",
+	"log-ext":      "4 Vendor Log File",       // 日志文件（扩展编号）
+	"security-log": "2 Vendor Security Log",    // 安全日志
+	"fault-log":    "2 Vendor Fault Log",       // 故障日志
+	"pm":           "4 Vendor PM File",         // 性能管理文件
+	"mr":           "5 Vendor MR File",         // 测量报告
+	"pcap":         "9 Vendor PCAP",            // 抓包文件
+	"datamodel":    "11 OUI Parameter Model",   // 数据模型文件
+	"ssl-cert":     "Tr069 Ssl Cert File",      // TR069 SSL 证书
 }
 
 // uploadFileTypeCodeMap maps numeric codes to Upload FileType strings.
@@ -59,19 +79,37 @@ var downloadFileTypeMap = map[string]string{
 	"web":      "2 Web Content",
 	"config":   "3 Vendor Configuration File",
 
-	// 运营商扩展类型
-	"patch": "2 Vendor Patch File",
+	// 厂商/运营商扩展类型
+	"script":   "101 Script File",
+	"startup":  "103 Base Station Startup File",
+	"license":  "License File",
+	"ssl-cert": "Tr069 Ssl Cert File",
 }
 
 // downloadFileTypeCodeMap maps numeric codes to Download FileType strings.
 var downloadFileTypeCodeMap = map[string]string{
-	"1": "1 Firmware Upgrade Image",
-	"2": "2 Web Content",
-	"3": "3 Vendor Configuration File",
+	"1":   "1 Firmware Upgrade Image",
+	"2":   "2 Web Content",
+	"3":   "3 Vendor Configuration File",
+	"101": "101 Script File",
+	"103": "103 Base Station Startup File",
 }
 
 // resolveUploadFileType converts an alias or numeric code to a TR-069 Upload FileType string.
+// Special cases:
+//   - "oui-config" or "10" returns "10 <OUI> Configuration File" (OUI filled by caller)
+//   - If input contains spaces, it is treated as a raw FileType string (passthrough)
 func resolveUploadFileType(input string) (string, error) {
+	// Raw passthrough: if input looks like a full FileType string (contains spaces), use as-is
+	if strings.Contains(input, " ") {
+		return input, nil
+	}
+
+	// Special: oui-config handled by caller (needs --oui flag)
+	if input == "oui-config" || input == "10" {
+		return "", fmt.Errorf("__OUI_CONFIG__")
+	}
+
 	if _, err := strconv.Atoi(input); err == nil {
 		if ft, ok := uploadFileTypeCodeMap[input]; ok {
 			return ft, nil
@@ -81,21 +119,42 @@ func resolveUploadFileType(input string) (string, error) {
 	if ft, ok := uploadFileTypeMap[input]; ok {
 		return ft, nil
 	}
-	return "", fmt.Errorf("未知 Upload 文件类型: %q\n可用别名: config, log, running-log, security-log, fault-log, pm, mr, pcap, datamodel", input)
+	return "", fmt.Errorf("未知 Upload 文件类型: %q\n可用别名: config, log, log-ext, running-log, security-log, fault-log, pm, mr, pcap, datamodel, oui-config, ssl-cert", input)
 }
 
 // resolveDownloadFileType converts an alias or numeric code to a TR-069 Download FileType string.
+// Special cases:
+//   - "oui-config" or "10" returns "10 <OUI> Configuration File" (OUI filled by caller)
+//   - If input contains spaces, it is treated as a raw FileType string (passthrough)
 func resolveDownloadFileType(input string) (string, error) {
+	// Raw passthrough: if input looks like a full FileType string (contains spaces), use as-is
+	if strings.Contains(input, " ") {
+		return input, nil
+	}
+
+	// Special: oui-config handled by caller (needs --oui flag)
+	if input == "oui-config" || input == "10" {
+		return "", fmt.Errorf("__OUI_CONFIG__")
+	}
+
 	if _, err := strconv.Atoi(input); err == nil {
 		if ft, ok := downloadFileTypeCodeMap[input]; ok {
 			return ft, nil
 		}
-		return "", fmt.Errorf("未知 Download 文件类型代码: %s\n可用代码: 1(固件), 2(Web), 3(配置)", input)
+		return "", fmt.Errorf("未知 Download 文件类型代码: %s\n可用代码: 1(固件), 2(Web), 3(配置), 101(脚本), 103(启动文件)", input)
 	}
 	if ft, ok := downloadFileTypeMap[input]; ok {
 		return ft, nil
 	}
-	return "", fmt.Errorf("未知 Download 文件类型: %q\n可用别名: firmware, web, config, patch", input)
+	return "", fmt.Errorf("未知 Download 文件类型: %q\n可用别名: firmware, web, config, script, startup, license, ssl-cert, oui-config", input)
+}
+
+// resolveOUIConfigFileType returns the OUI-specific configuration file type string.
+func resolveOUIConfigFileType(oui string) string {
+	if oui == "" {
+		oui = defaultOUI
+	}
+	return fmt.Sprintf("10 %s Configuration File", oui)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

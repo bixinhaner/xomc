@@ -50,14 +50,14 @@ rpctool 加载 ACS 配置文件获取 Redis 和 PostgreSQL 连接信息，默认
 
 ```bash
 # 使用默认配置（开发环境）
-rpctool upload log --sn DEVICE001 --url http://acs:7547/upload
+rpctool upload log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
 # 指定其他环境配置
-rpctool upload log --sn DEVICE001 --url http://acs:7547/upload \
+rpctool upload log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService \
   --config cmd/acs/etc/config.prod.yaml
 
 # Dry-run 模式不需要 Redis/DB 连接
-rpctool upload log --sn DEVICE001 --url http://acs:7547/upload --dry-run
+rpctool upload log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService --dry-run
 ```
 
 支持通过环境变量覆盖配置（`OMCGO_` 前缀），例如：
@@ -85,99 +85,193 @@ export OMCGO_REDIS_ADDR="redis-prod:6379"
 
 ## 子命令
 
-### upload — 文件上传
+### upload — 文件上传 (CPE → ACS)
 
 让基站将指定类型的文件上传到给定 URL。用于采集基站日志、配置备份、性能数据等。
 
 ```bash
 # 采集运行日志
-rpctool upload log --sn DEVICE001 --url http://acs:7547/upload
+rpctool upload log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
 # 采集配置文件
-rpctool upload config --sn DEVICE001 --url http://acs:7547/upload
+rpctool upload config --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
 # 采集 PM 性能文件
-rpctool upload pm --sn DEVICE001 --url http://acs:7547/upload
+rpctool upload pm --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
-# 采集故障日志
-rpctool upload fault-log --sn DEVICE001 --url http://acs:7547/upload
+# 采集 MR 测量报告
+rpctool upload mr --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
 # 采集抓包文件
-rpctool upload pcap --sn DEVICE001 --url http://acs:7547/upload
+rpctool upload pcap --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+
+# 采集安全日志
+rpctool upload security-log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+
+# 采集故障日志
+rpctool upload fault-log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+
+# 上传 OUI 配置文件（导出完整配置 XML）
+rpctool upload oui-config --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+
+# 上传 OUI 配置文件（指定非默认 OUI）
+rpctool upload oui-config --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService --oui ABC123
+
+# 上传数据模型文件
+rpctool upload datamodel --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+
+# 上传 SSL 证书
+rpctool upload ssl-cert --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
 # 使用数字代码指定文件类型
-rpctool upload --sn DEVICE001 -t 4 --url http://acs:7547/upload
+rpctool upload --sn DEVICE001 -t 4 --url http://localhost:8080/smallcell/FileUploadService
+
+# 直接传入完整的 FileType 字符串
+rpctool upload --sn DEVICE001 -t "1 Vendor Configuration File" --url http://localhost:8080/smallcell/FileUploadService
 
 # 延迟 60 秒后执行
-rpctool upload pm --sn DEVICE001 --url http://acs:7547/upload --delay 60
+rpctool upload pm --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService --delay 60
 ```
 
 **Upload 专属参数:**
 
 | 参数 | 说明 |
 |------|------|
-| `--file-type` / `-t` | 文件类型（别名或数字代码） |
+| `--file-type` / `-t` | 文件类型（别名、数字代码或完整 FileType 字符串） |
 | `--url` / `-u` | 上传目标 URL（必填） |
 | `--username` | HTTP 认证用户名 |
 | `--password` | HTTP 认证密码 |
 | `--delay` | 延迟执行秒数 |
+| `--oui` | OUI 标识，仅 `oui-config` 类型使用（默认 48BF74） |
 
-**Upload 文件类型对照表 (TR-069 Upload: CPE → ACS):**
+#### Upload 文件类型完整对照表 (TR-069 Upload: CPE → ACS)
 
-| 别名 | 代码 | TR-069 FileType | 说明 |
-|------|------|----------------|------|
-| `config` | 1 | 1 Vendor Configuration File | 配置文件 |
-| `log` / `running-log` | 2 | 2 Vendor Log File | 运行日志 |
-| `security-log` | — | 2 Vendor Security Log | 安全日志（扩展） |
-| `fault-log` | — | 2 Vendor Fault Log | 故障日志（扩展） |
-| `pm` | 4 | 4 Vendor PM File | 性能管理文件 |
-| `mr` | 5 | 5 Vendor MR File | 测量报告文件 |
-| `pcap` | 9 | 9 Vendor PCAP | 抓包文件 |
-| `datamodel` | 11 | 11 OUI Parameter Model | 数据模型文件 |
+| 别名 | 代码 | TR-069 FileType | 说明 | 使用场景 |
+|------|------|----------------|------|---------|
+| `config` | 1 | `1 Vendor Configuration File` | 厂商配置文件 | 配置备份、导出当���配置快照 |
+| `log` | 2 | `2 Vendor Log File` | 运行日志 | 日志采集、故障排查 |
+| `running-log` | 2 | `2 Vendor Log File` | 运行日志（别名） | 同 `log` |
+| `log-ext` | — | `4 Vendor Log File` | 日志文件（扩展编号） | 部分设备使用此编号上传日志 |
+| `security-log` | — | `2 Vendor Security Log` | 安全日志 | 安全审计、入侵检测日志 |
+| `fault-log` | — | `2 Vendor Fault Log` | 故障日志 | 硬件/软件故障日志 |
+| `pm` | 4 | `4 Vendor PM File` | 性能管理文件 | PM 计数器采集（3GPP 32.435 格式） |
+| `mr` | 5 | `5 Vendor MR File` | 测量报告 | MRO/MRS/MRE 测量数据 |
+| `pcap` | 9 | `9 Vendor PCAP` | 抓包文件 | 网络协议分析、信令抓包 |
+| `oui-config` | 10 | `10 <OUI> Configuration File` | OUI 配置文件 | 完整配置导出 XML（需 --oui） |
+| `datamodel` | 11 | `11 OUI Parameter Model` | 数据模型文件 | 设备参数模型定义导出 |
+| `ssl-cert` | — | `Tr069 Ssl Cert File` | TR069 SSL 证书 | 上传 `data/tr069_ca.crt` |
 
-> **TR-069 标准说明**: Upload 操作中，配置文件的 FileType 为 `"1 Vendor Configuration File"`（不是 "11 Configuration File"），日志文件为 `"2 Vendor Log File"`。编号 4 及以上为运营商私有扩展。
+> **注意**:
+> - 代码 4 在运营商扩展中有两种用途：`4 Vendor PM File`（性能数据）和 `4 Vendor Log File`（日志扩展）。别名 `pm` 映射到前者，`log-ext` 映射到后者。
+> - `oui-config` 类型的 FileType 包含 OUI 标识，默认为 `48BF74`（Baicells），可通过 `--oui` 指定。
+> - 可直接传入完整 FileType 字符串（含空格），绕过别名映射。
 
 ---
 
-### download — 文件下载
+### download — 文件下载 (ACS → CPE)
 
-让基站从指定 URL 下载文件（固件升级、配置下发等）。
+让基站从指定 URL 下载文件（固件升级、配置下发、脚本执行等）。
 
 ```bash
-# 固件升级
+# 固件升级（默认保配置）
 rpctool download firmware --sn DEVICE001 \
-  --url http://minio:9000/firmware/v2.0.bin --file-size 10485760
+  --url firmware/v2.0.bin --file-size 52428800
 
-# 下载配置文件
+# 固件升级（不保配置，升级后恢复出厂设置）
+rpctool download firmware --sn DEVICE001 \
+  --url firmware/v2.0.bin --file-size 52428800 --raw-mode 1
+
+# 下载厂商配置文件
 rpctool download config --sn DEVICE001 \
-  --url http://minio:9000/configs/device.xml
+  --url config-backup/device.xml
+
+# 下载 OUI 配置文件（自动解析并批量导入参数）
+rpctool download oui-config --sn DEVICE001 \
+  --url config-backup/oui_config.xml
+
+# 下载 OUI 配置文件（指定非默认 OUI）
+rpctool download oui-config --sn DEVICE001 \
+  --url config-backup/oui_config.xml --oui ABC123
+
+# 下载脚本文件
+rpctool download script --sn DEVICE001 \
+  --url omc-exchange/scripts/init.sh
+
+# 下载基站启动文件
+rpctool download startup --sn DEVICE001 \
+  --url omc-exchange/startup/config.bin
+
+# 下载 License 文件
+rpctool download license --sn DEVICE001 \
+  --url omc-exchange/license/device.lic
+
+# 下载 SSL 证书
+rpctool download ssl-cert --sn DEVICE001 \
+  --url omc-exchange/certs/tr069_ca.crt
 
 # 下载 Web 内容
 rpctool download web --sn DEVICE001 \
-  --url http://minio:9000/web/portal.zip
+  --url omc-exchange/web/portal.zip
+
+# 带认证的下载
+rpctool download firmware --sn DEVICE001 \
+  --url firmware/v2.0.bin --file-size 52428800 \
+  --username admin --password secret
+
+# 延迟 60 秒后执行下载
+rpctool download firmware --sn DEVICE001 \
+  --url firmware/v2.0.bin --file-size 52428800 --delay 60
 ```
 
 **Download 专属参数:**
 
 | 参数 | 说明 |
 |------|------|
-| `--file-type` / `-t` | 文件类型 |
-| `--url` / `-u` | 下载地址（必填） |
-| `--username` | HTTP 认证用户名 |
-| `--password` | HTTP 认证密码 |
-| `--file-size` | 文件大小（字节） |
-| `--target` | 目标文件名 |
+| `--file-type` / `-t` | 文件类型（别名、数字代码或完整 FileType 字符串） |
+| `--url` / `-u` | 下载地址（必填），MinIO 路径（如 `firmware/v2.0.bin`）或完整 URL（http/https/ftp） |
+| `--username` | HTTP/FTP 认证用户名 |
+| `--password` | HTTP/FTP 认证密码 |
+| `--file-size` | 文件大小（字节），用于空间检查和进度计算 |
+| `--target` | 目标文件名（不含路径，留空从 URL 提取） |
 | `--delay` | 延迟执行秒数 |
+| `--oui` | OUI 标识，仅 `oui-config` 类型使用（默认 48BF74） |
+| `--raw-mode` | 升级模式: 0=保配置(默认), 1=不保配置(恢复出厂) |
 
-**Download 文件类型对照表 (TR-069 Download: ACS → CPE):**
+#### Download 文件类型完整对照表 (TR-069 Download: ACS → CPE)
 
-| 别名 | 代码 | TR-069 FileType | 说明 |
-|------|------|----------------|------|
-| `firmware` | 1 | 1 Firmware Upgrade Image | 固件升级 |
-| `web` | 2 | 2 Web Content | Web 内容 |
-| `config` | 3 | 3 Vendor Configuration File | 配置文件 |
+| 别名 | 代码 | TR-069 FileType | 说明 | 使用场景 |
+|------|------|----------------|------|---------|
+| `firmware` | 1 | `1 Firmware Upgrade Image` | 固件升级镜像 | 系统升级（自动重启） |
+| `web` | 2 | `2 Web Content` | Web 内容 | 设备 Web 管理界面更新 |
+| `config` | 3 | `3 Vendor Configuration File` | 厂商配置文件 | 配置导入 |
+| `oui-config` | 10 | `10 <OUI> Configuration File` | OUI 配置文件 | 自动解析并批量导入参数（需 --oui） |
+| `script` | 101 | `101 Script File` | 脚本文件 | 在设备上执行脚本 |
+| `startup` | 103 | `103 Base Station Startup File` | 基站启动文件 | 基站启动配置 |
+| `license` | — | `License File` | License 文件 | 签名验证后保存到 config/ |
+| `ssl-cert` | — | `Tr069 Ssl Cert File` | TR069 SSL 证书 | 保存到运行时目录 data/ |
 
-> **注意**: Download 中的配置文件 FileType 为 `"3 Vendor Configuration File"`（代码 3），与 Upload 中的 `"1 Vendor Configuration File"`（代码 1）不同。
+> **注意**:
+> - **推荐使用 MinIO 路径**（如 `firmware/v2.0.bin`）。ACS 引擎会自动将 `bucket/path` 翻译为 CPE 可访问的 HTTP 下载地址（通过网关代理到 ACS 下载端点），并自动注入认证凭据。带 `://` 的完整 URL 则直接传递给 CPE。
+> - Download 中的配置文件 FileType 为 `"3 Vendor Configuration File"`（代码 3），与 Upload 中的 `"1 Vendor Configuration File"`（代码 1）不同。
+> - `--raw-mode 1` 仅在固件升级（`firmware`）时有意义，升级后会清除所有配置并恢复出厂设置。
+> - `oui-config`（FileType 10）下载配置文件后，设备会自动解析 XML 并批量导入 MIB 参数和 TR-069 参数。
+> - `license` 和 `ssl-cert` 类型没有数字代码，使用完整字符串作为 FileType。
+> - 可直接传入完整 FileType 字符串（含空格），绕过别名映射。
+
+#### RawMode 说明 (固件升级专用)
+
+| 值 | 说明 | 升级后配置处理 |
+|---|------|----------------|
+| `0` (默认) | 保配置升级 | 升级后保留原有配置文件 |
+| `1` | 不保配置升级 | 升级后恢复出厂配置，不保留原有配置 |
+
+```bash
+# 保配置升级（默认，等同 --raw-mode 0）
+rpctool download firmware --sn DEVICE001 --url firmware/v2.0.bin --file-size 52428800
+
+# 不保配置升级（警告：升级后所有配置将丢失！）
+rpctool download firmware --sn DEVICE001 --url firmware/v2.0.bin --file-size 52428800 --raw-mode 1
+```
 
 ---
 
@@ -277,7 +371,7 @@ rpctool queue list --sn DEVICE001
 # 查看队首任务
 rpctool queue peek --sn DEVICE001
 
-# 查看队列长度
+# 查看队���长度
 rpctool queue len --sn DEVICE001
 
 # 清空队列（需 --force 确认）
@@ -332,25 +426,45 @@ for sn in DEVICE001 DEVICE002 DEVICE003; do
 done
 ```
 
-### 场景 3: 固件升级测试
+### 场景 3: 固件升级
 
 ```bash
-# 创建固件下载任务（高优先级）
+# 保配置升级（默认）
 rpctool download firmware --sn DEVICE001 \
-  --url http://minio:9000/firmware/SmallCell-LTE-v3.0.bin \
+  --url firmware/SmallCell-LTE-v3.0.bin \
   --file-size 52428800 \
   --priority 1
+
+# 不保配置升级（升级后恢复出厂设置）
+rpctool download firmware --sn DEVICE001 \
+  --url firmware/SmallCell-LTE-v3.0.bin \
+  --file-size 52428800 \
+  --priority 1 \
+  --raw-mode 1
 
 # 查看任务状态
 rpctool queue history --sn DEVICE001
 ```
 
-### 场景 4: Dry-Run 预览
+### 场景 4: OUI 配置导入
+
+```bash
+# 下载 OUI 配置文件到设备（设备自动解析并导入参数）
+rpctool download oui-config --sn DEVICE001 \
+  --url config-backup/site_config.xml \
+  --file-size 8192
+
+# 从设备导出 OUI 配置文件
+rpctool upload oui-config --sn DEVICE001 \
+  --url http://localhost:8080/smallcell/FileUploadService
+```
+
+### 场景 5: Dry-Run 预览
 
 不确定命令格式时，使用 `--dry-run` 预览（不需要 Redis/DB 连接）：
 
 ```bash
-rpctool upload log --sn DEVICE001 --url http://acs:7547/upload --dry-run
+rpctool upload log --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService --dry-run
 ```
 
 输出示例：
@@ -366,7 +480,7 @@ rpctool upload log --sn DEVICE001 --url http://acs:7547/upload --dry-run
   "id": "a1b2c3d4-...",
   "device_sn": "DEVICE001",
   "method": "Upload",
-  "params": {"file_type": "2 Vendor Log File", "url": "http://acs:7547/upload", ...},
+  "params": {"file_type": "2 Vendor Log File", "url": "http://localhost:8080/smallcell/FileUploadService", ...},
   "status": "pending",
   ...
 }
@@ -398,3 +512,4 @@ CPE                         ACS                      Redis + PostgreSQL
 - `--priority 1` 为最高优先级，适用于紧急操作（如重启）
 - 使用 `--ttl` 设置过期时间，避免过期任务在设备重连后被执行
 - 任务完整生命周期记录在 `device_tasks` 表中，可通过 `queue history` 查询
+- `--raw-mode 1` 仅在固件升级时使用，会清除所有配置，请谨慎操作
