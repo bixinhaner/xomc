@@ -1,24 +1,32 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Card, Col, Form, Input, Modal, Row, Space, Statistic, Tag, Typography, App, Tree } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, Button, Card, Col, Dropdown, Form, Input, Menu, Modal, Radio, Row, Select, Space, Statistic, Tag, Typography, App, Tree, message, Tooltip } from 'antd';
 import {
   AlertOutlined,
+  CalendarOutlined,
   CheckOutlined,
   ClearOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   EnvironmentOutlined,
   ExportOutlined,
   EyeOutlined,
+  FilterOutlined,
   MinusCircleOutlined,
   PlusOutlined,
+  ReloadOutlined,
+  SaveOutlined,
   SearchOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
+import LineChart from '@/components/Charts/LineChart';
 import { useCurrentAlarms, useHistoricalAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
@@ -70,6 +78,28 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
+// 快捷时间选项
+const QUICK_TIME_OPTIONS = [
+  { label: '今日', value: 'today' },
+  { label: '昨日', value: 'yesterday' },
+  { label: '本周', value: 'thisWeek' },
+  { label: '本月', value: 'thisMonth' },
+  { label: '最近7天', value: 'last7days' },
+  { label: '最近30天', value: 'last30days' },
+];
+
+// 快捷筛选选项
+const QUICK_FILTER_OPTIONS = [
+  { label: '全部', key: 'all' },
+  { label: '严重告警', key: 'critical', severity: ['critical'] },
+  { label: '未确认', key: 'unacked', dealState: ['0'] },
+  { label: '未读', key: 'unread', unread: '1' },
+];
+
+// 筛选模板存储 key
+const FILTER_TEMPLATES_KEY = 'custom-alarm-filter-templates';
+const LAST_FILTER_KEY = 'custom-alarm-last-filter';
+
 // 自定义告警分组项
 interface CustomAlarmGroup {
   id: string;
@@ -85,6 +115,14 @@ interface CustomAlarmGroup {
   };
 }
 
+// 筛选模板
+interface FilterTemplate {
+  id: string;
+  name: string;
+  params: AlarmFilter;
+  createdAt: string;
+}
+
 // Mock 数据 - 自定义告警分组
 const DEFAULT_GROUPS: CustomAlarmGroup[] = [
   { id: 'group-beijing', name: '北京告警', alarmType: 'active', createdAt: '2026-03-01', stats: { total: 128, critical: 12, major: 35, minor: 48, warning: 33 } },
@@ -92,6 +130,56 @@ const DEFAULT_GROUPS: CustomAlarmGroup[] = [
   { id: 'group-tianjin', name: '天津告警', alarmType: 'active', createdAt: '2026-03-01', stats: { total: 64, critical: 6, major: 18, minor: 24, warning: 16 } },
   { id: 'group-guangzhou', name: '广州告警', alarmType: 'active', createdAt: '2026-03-01', stats: { total: 192, critical: 18, major: 52, minor: 72, warning: 50 } },
 ];
+
+// 生成趋势图数据
+function generateTrendData(): { dates: string[]; series: { name: string; data: number[]; color?: string }[] } {
+  const dates: string[] = [];
+  const criticalData: number[] = [];
+  const majorData: number[] = [];
+  const minorData: number[] = [];
+  const warningData: number[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const date = dayjs().subtract(i, 'day');
+    dates.push(date.format('MM-DD'));
+    criticalData.push(Math.floor(Math.random() * 20) + 5);
+    majorData.push(Math.floor(Math.random() * 40) + 15);
+    minorData.push(Math.floor(Math.random() * 60) + 20);
+    warningData.push(Math.floor(Math.random() * 50) + 10);
+  }
+
+  return {
+    dates,
+    series: [
+      { name: '严重', data: criticalData, color: '#E53935' },
+      { name: '主要', data: majorData, color: '#FB8C00' },
+      { name: '次要', data: minorData, color: '#FDD835' },
+      { name: '警告', data: warningData, color: '#42A5F5' },
+    ],
+  };
+}
+
+// 快捷时间转日期范围
+function quickTimeToRange(value: string): [string, string] | undefined {
+  const now = dayjs();
+  switch (value) {
+    case 'today':
+      return [now.startOf('day').toISOString(), now.endOf('day').toISOString()];
+    case 'yesterday':
+      const yesterday = now.subtract(1, 'day');
+      return [yesterday.startOf('day').toISOString(), yesterday.endOf('day').toISOString()];
+    case 'thisWeek':
+      return [now.startOf('week').toISOString(), now.endOf('week').toISOString()];
+    case 'thisMonth':
+      return [now.startOf('month').toISOString(), now.endOf('month').toISOString()];
+    case 'last7days':
+      return [now.subtract(7, 'day').startOf('day').toISOString(), now.endOf('day').toISOString()];
+    case 'last30days':
+      return [now.subtract(30, 'day').startOf('day').toISOString(), now.endOf('day').toISOString()];
+    default:
+      return undefined;
+  }
+}
 
 export default function CustomAlarmStats() {
   const t = useT();
@@ -104,11 +192,21 @@ export default function CustomAlarmStats() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [exportMode, setExportMode] = useState<'all' | 'selected'>('all');
 
   // 左侧树状态
   const [groups, setGroups] = useState<CustomAlarmGroup[]>(DEFAULT_GROUPS);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('group-beijing');
   const [searchText, setSearchText] = useState('');
+
+  // 快捷筛选状态
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
+  const [activeQuickTime, setActiveQuickTime] = useState<string | undefined>(undefined);
+
+  // 筛选模板状态
+  const [filterTemplates, setFilterTemplates] = useState<FilterTemplate[]>([]);
+  const [saveTemplateModalOpen, setSaveTemplateModalOpen] = useState(false);
+  const [templateForm] = Form.useForm<{ name: string }>();
 
   // 添加分组弹窗状态
   const [addGroupModalOpen, setAddGroupModalOpen] = useState(false);
@@ -130,18 +228,48 @@ export default function CustomAlarmStats() {
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // 趋势图数据
+  const trendData = useMemo(() => generateTrendData(), []);
+
+  // 加载筛选模板
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(FILTER_TEMPLATES_KEY);
+      if (saved) {
+        setFilterTemplates(JSON.parse(saved));
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // 加载上次筛选条件
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LAST_FILTER_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setFilterParams(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // 保存筛选条件
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_FILTER_KEY, JSON.stringify(filterParams));
+    } catch {
+      // ignore
+    }
+  }, [filterParams]);
+
   // 当前选中的分组
   const selectedGroup = useMemo(
     () => groups.find((g) => g.id === selectedGroupId),
     [groups, selectedGroupId]
   );
-
-  const SEVERITY_LABEL_I18N: Record<string, string> = useMemo(() => ({
-    critical: t('alarm.severity.critical'),
-    major: t('alarm.severity.major'),
-    minor: t('alarm.severity.minor'),
-    warning: t('alarm.severity.warning'),
-  }), [t]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholderNew') },
@@ -203,7 +331,6 @@ export default function CustomAlarmStats() {
   // 根据分组名称提取地区关键词，用于过滤告警
   const groupRegion = useMemo(() => {
     if (!selectedGroup?.name) return '';
-    // 从分组名称中提取地区关键词，如 "北京告警" → "北京"
     const match = selectedGroup.name.match(/^(.+?)告警$/);
     return match ? match[1] : '';
   }, [selectedGroup?.name]);
@@ -214,9 +341,7 @@ export default function CustomAlarmStats() {
       ...filterParams,
       page: currentPage,
       pageSize,
-      // 分组标识，用于区分不同分组的数据
       groupId: selectedGroupId,
-      // 地区过滤：按 equipInfo 中包含的地区关键词过滤
       ...(groupRegion && !filterParams.equipInfo ? { equipInfo: groupRegion } : {}),
     }),
     [filterParams, currentPage, pageSize, selectedGroupId, groupRegion]
@@ -250,6 +375,19 @@ export default function CustomAlarmStats() {
     [rawAlarms]
   );
 
+  // 实时统计（从查询结果计算）
+  const realStats = useMemo(() => {
+    const stats = { total, critical: 0, major: 0, minor: 0, warning: 0, unacked: 0 };
+    rawAlarms.forEach((alarm) => {
+      if (alarm.severity === 'critical') stats.critical++;
+      else if (alarm.severity === 'major') stats.major++;
+      else if (alarm.severity === 'minor') stats.minor++;
+      else if (alarm.severity === 'warning') stats.warning++;
+      if (alarm.dealState === '0') stats.unacked++;
+    });
+    return stats;
+  }, [rawAlarms, total]);
+
   // 过滤分组列表
   const filteredGroups = useMemo(() => {
     if (!searchText.trim()) return groups;
@@ -257,6 +395,80 @@ export default function CustomAlarmStats() {
       g.name.toLowerCase().includes(searchText.toLowerCase())
     );
   }, [groups, searchText]);
+
+  // 快捷筛选处理
+  const handleQuickFilter = useCallback((key: string) => {
+    setActiveQuickFilter(key);
+    const option = QUICK_FILTER_OPTIONS.find((o) => o.key === key);
+    if (option && option.key !== 'all') {
+      setFilterParams((prev) => ({
+        ...prev,
+        severity: option.severity as AlarmFilter['severity'],
+        dealState: option.dealState as AlarmFilter['dealState'],
+        unread: option.unread as '0' | '1',
+      }));
+    } else {
+      setFilterParams((prev) => {
+        const { severity, dealState, unread, ...rest } = prev as any;
+        return rest;
+      });
+    }
+    setCurrentPage(1);
+  }, []);
+
+  // 快捷时间处理
+  const handleQuickTime = useCallback((value: string) => {
+    setActiveQuickTime(value);
+    const range = quickTimeToRange(value);
+    if (range) {
+      setFilterParams((prev) => ({
+        ...prev,
+        timeRange: range,
+      }));
+    } else {
+      setFilterParams((prev) => {
+        const { timeRange, ...rest } = prev as any;
+        return rest;
+      });
+    }
+    setCurrentPage(1);
+  }, []);
+
+  // 保存筛选模板
+  const handleSaveTemplate = useCallback(async () => {
+    try {
+      const values = await templateForm.validateFields();
+      const newTemplate: FilterTemplate = {
+        id: `template-${Date.now()}`,
+        name: values.name,
+        params: filterParams,
+        createdAt: new Date().toISOString(),
+      };
+      const updated = [...filterTemplates, newTemplate];
+      setFilterTemplates(updated);
+      localStorage.setItem(FILTER_TEMPLATES_KEY, JSON.stringify(updated));
+      setSaveTemplateModalOpen(false);
+      templateForm.resetFields();
+      message.success('模板保存成功');
+    } catch {
+      // validation error
+    }
+  }, [filterParams, filterTemplates, templateForm, message]);
+
+  // 应用筛选模板
+  const handleApplyTemplate = useCallback((template: FilterTemplate) => {
+    setFilterParams(template.params);
+    setCurrentPage(1);
+    message.success(`已应用模板「${template.name}」`);
+  }, [message]);
+
+  // 删除筛选模板
+  const handleDeleteTemplate = useCallback((templateId: string) => {
+    const updated = filterTemplates.filter((t) => t.id !== templateId);
+    setFilterTemplates(updated);
+    localStorage.setItem(FILTER_TEMPLATES_KEY, JSON.stringify(updated));
+    message.success('模板已删除');
+  }, [filterTemplates, message]);
 
   // 添加分组
   const handleAddGroup = useCallback(async () => {
@@ -326,7 +538,8 @@ export default function CustomAlarmStats() {
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     const keyword = values.keyword as string;
-    setFilterParams({
+    setFilterParams((prev) => ({
+      ...prev,
       severity: values.severity as AlarmFilter['severity'],
       eventType: values.eventType as AlarmFilter['eventType'],
       neType: values.neType as string,
@@ -335,13 +548,15 @@ export default function CustomAlarmStats() {
       alarmIdentifier: keyword,
       alarmName: keyword,
       equipInfo: keyword,
-    });
+    }));
     setCurrentPage(1);
   }, []);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
+    setActiveQuickFilter('all');
+    setActiveQuickTime(undefined);
   }, []);
 
   const handleAcknowledge = useCallback((ids: string[]) => {
@@ -423,10 +638,12 @@ export default function CustomAlarmStats() {
     message.success(t('common.markReadSuccess'));
   }, [refetch, t, message]);
 
+  // 导出处理 - 支持导出选中数据
   const handleExport = useCallback(async (params: ExportParams) => {
     setExportLoading(true);
     try {
-      console.log('Export params:', params);
+      const exportData = exportMode === 'selected' ? selectedRowKeys : undefined;
+      console.log('Export params:', { ...params, mode: exportMode, selectedIds: exportData });
       void message.info(t('common.exportInProgress'));
       setExportOpen(false);
     } catch {
@@ -434,7 +651,7 @@ export default function CustomAlarmStats() {
     } finally {
       setExportLoading(false);
     }
-  }, [message, t]);
+  }, [exportMode, selectedRowKeys, message, t]);
 
   const handleShowDetail = useCallback((alarm: Alarm) => {
     setDetailAlarm(alarm);
@@ -446,7 +663,7 @@ export default function CustomAlarmStats() {
     setDetailAlarm(null);
   }, []);
 
-  // 表格列 - 与活动告警保持一致，增加告警类型列
+  // 表格列
   const columns = useMemo((): DataTableColumn<Alarm>[] => [
     {
       key: 'alarmId',
@@ -517,15 +734,11 @@ export default function CustomAlarmStats() {
       title: '告警类型',
       dataIndex: 'alarmType',
       width: 100,
-      render: (_val, record) => {
-        // 根据分组类型或告警本身属性判断
-        const type = isHistorical ? 'historical' : 'active';
-        return (
-          <Tag color={type === 'active' ? 'red' : 'default'}>
-            {type === 'active' ? '活动告警' : '历史告警'}
-          </Tag>
-        );
-      },
+      render: () => (
+        <Tag color={isHistorical ? 'default' : 'red'}>
+          {isHistorical ? '历史告警' : '活动告警'}
+        </Tag>
+      ),
     },
     {
       key: 'dealState',
@@ -572,7 +785,7 @@ export default function CustomAlarmStats() {
       width: 100,
       ellipsis: true,
     },
-  ], [t, SEVERITY_LABEL, handleShowDetail, isHistorical]);
+  ], [t, handleShowDetail, isHistorical]);
 
   const batchActions = useMemo((): BatchAction[] => {
     const actions: BatchAction[] = [];
@@ -587,9 +800,6 @@ export default function CustomAlarmStats() {
     actions.push({ key: 'batch-delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: (keys) => handleDelete(keys as string[]) });
     return actions;
   }, [isHistorical, handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, handleDelete, t]);
-
-  // 计算统计信息
-  const groupStats = selectedGroup?.stats || { total, critical: 0, major: 0, minor: 0, warning: 0 };
 
   // 左侧树面板
   const treePanel = (
@@ -673,10 +883,11 @@ export default function CustomAlarmStats() {
             const key = keys[0] as string | undefined;
             if (key) {
               setSelectedGroupId(key);
-              // 切换分组时重置搜索条件和页码
               setFilterParams({});
               setCurrentPage(1);
               setSelectedRowKeys([]);
+              setActiveQuickFilter('all');
+              setActiveQuickTime(undefined);
             }
           }}
           blockNode
@@ -689,7 +900,7 @@ export default function CustomAlarmStats() {
     </div>
   );
 
-  // 右侧面板 - 使用 Card 分区
+  // 右侧面板
   const rightPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f5f5', padding: 12, gap: 12 }}>
       {/* 标题卡片 */}
@@ -703,44 +914,142 @@ export default function CustomAlarmStats() {
             </Tag>
           </Space>
           <Space>
-            <Button icon={<ExportOutlined />} onClick={() => setExportOpen(true)}>
-              导出
+            <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
+              刷新
             </Button>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'all', label: '导出全部', icon: <DownloadOutlined /> },
+                  { key: 'selected', label: `导出选中 (${selectedRowKeys.length})`, icon: <DownloadOutlined />, disabled: selectedRowKeys.length === 0 },
+                ],
+                onClick: ({ key }) => {
+                  setExportMode(key as 'all' | 'selected');
+                  setExportOpen(true);
+                },
+              }}
+            >
+              <Button icon={<ExportOutlined />}>
+                导出
+              </Button>
+            </Dropdown>
           </Space>
         </div>
       </Card>
 
-      {/* 统计卡片 */}
+      {/* 统计卡片 - 使用实时计算的数据 */}
       <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
         <Row gutter={24}>
           <Col span={4}>
-            <Statistic title="总数" value={groupStats.total} valueStyle={{ fontSize: 20 }} />
+            <Statistic title="总数" value={realStats.total} valueStyle={{ fontSize: 20 }} />
           </Col>
           <Col span={4}>
-            <Statistic title="严重" value={groupStats.critical} valueStyle={{ color: '#E53935', fontSize: 20 }} />
+            <Statistic title="严重" value={realStats.critical} valueStyle={{ color: '#E53935', fontSize: 20 }} />
           </Col>
           <Col span={4}>
-            <Statistic title="主要" value={groupStats.major} valueStyle={{ color: '#FB8C00', fontSize: 20 }} />
+            <Statistic title="主要" value={realStats.major} valueStyle={{ color: '#FB8C00', fontSize: 20 }} />
           </Col>
           <Col span={4}>
-            <Statistic title="次要" value={groupStats.minor} valueStyle={{ color: '#FDD835', fontSize: 20 }} />
+            <Statistic title="次要" value={realStats.minor} valueStyle={{ color: '#FDD835', fontSize: 20 }} />
           </Col>
           <Col span={4}>
-            <Statistic title="警告" value={groupStats.warning} valueStyle={{ color: '#42A5F5', fontSize: 20 }} />
+            <Statistic title="警告" value={realStats.warning} valueStyle={{ color: '#42A5F5', fontSize: 20 }} />
           </Col>
           <Col span={4}>
-            <Statistic
-              title="未确认"
-              value={Math.floor(groupStats.total * 0.3)}
-              valueStyle={{ color: '#E53935', fontSize: 20 }}
-            />
+            <Statistic title="未确认" value={realStats.unacked} valueStyle={{ color: '#E53935', fontSize: 20 }} />
           </Col>
         </Row>
       </Card>
 
+      {/* 趋势图卡片 */}
+      <Card size="small" title="告警趋势（近7天）" styles={{ body: { padding: '12px 16px' } }}>
+        <LineChart
+          xData={trendData.dates}
+          series={trendData.series}
+          height={160}
+          smooth
+        />
+      </Card>
+
       {/* 搜索和列表卡片 */}
       <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
-        <div style={{ padding: '12px 16px 0' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+          {/* 快捷筛选按钮 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            {/* 快捷类型筛选 */}
+            <Space.Compact size="small">
+              {QUICK_FILTER_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.key}
+                  type={activeQuickFilter === opt.key ? 'primary' : 'default'}
+                  onClick={() => handleQuickFilter(opt.key)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </Space.Compact>
+
+            <div style={{ flex: 1 }} />
+
+            {/* 快捷时间选择 */}
+            <Select
+              size="small"
+              placeholder="快捷时间"
+              value={activeQuickTime}
+              onChange={handleQuickTime}
+              allowClear
+              style={{ width: 120 }}
+              suffixIcon={<CalendarOutlined />}
+            >
+              {QUICK_TIME_OPTIONS.map((opt) => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </Select.Option>
+              ))}
+            </Select>
+
+            {/* 筛选模板 */}
+            {filterTemplates.length > 0 && (
+              <Dropdown
+                menu={{
+                  items: [
+                    { type: 'group', label: '应用筛选模板', key: 'template-group' },
+                    ...filterTemplates.map((t) => ({
+                      key: t.id,
+                      label: (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>{t.name}</span>
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(t.id); }}
+                          />
+                        </div>
+                      ),
+                    })),
+                  ],
+                  onClick: ({ key }) => {
+                    const template = filterTemplates.find((t) => t.id === key);
+                    if (template) handleApplyTemplate(template);
+                  },
+                }}
+              >
+                <Button size="small" icon={<FilterOutlined />}>
+                  模板
+                </Button>
+              </Dropdown>
+            )}
+
+            {/* 保存筛选模板 */}
+            <Tooltip title="保存当前筛选条件为模板">
+              <Button size="small" icon={<SaveOutlined />} onClick={() => setSaveTemplateModalOpen(true)}>
+                保存
+              </Button>
+            </Tooltip>
+          </div>
+
           <FilterBar filterId={`custom-alarm-stats-${selectedGroupId}`} fields={FILTER_FIELDS} onSearch={handleSearch} onReset={handleReset} collapsedRows={1} />
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -808,7 +1117,7 @@ export default function CustomAlarmStats() {
         <Text>{t('common.deleteConfirmMsg', { count: deleteTargetIds.length })}</Text>
       </Modal>
 
-      {/* 添加分组弹窗 - 只显示分组名称 */}
+      {/* 添加分组弹窗 */}
       <Modal
         open={addGroupModalOpen}
         title="添加自定义告警分组"
@@ -824,7 +1133,7 @@ export default function CustomAlarmStats() {
         </Form>
       </Modal>
 
-      {/* 编辑分组弹窗 - 只显示分组名称 */}
+      {/* 编辑分组弹窗 */}
       <Modal
         open={editGroupModalOpen}
         title="编辑自定义告警分组"
@@ -836,6 +1145,22 @@ export default function CustomAlarmStats() {
         <Form form={editGroupForm} layout="vertical" size="small">
           <Form.Item name="name" label="分组名称" rules={[{ required: true, message: '请输入分组名称' }]}>
             <Input placeholder="请输入分组名称" maxLength={50} showCount autoFocus />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 保存筛选模板弹窗 */}
+      <Modal
+        open={saveTemplateModalOpen}
+        title="保存筛选模板"
+        onCancel={() => setSaveTemplateModalOpen(false)}
+        onOk={handleSaveTemplate}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+      >
+        <Form form={templateForm} layout="vertical" size="small">
+          <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
+            <Input placeholder="如：严重未确认告警" maxLength={30} autoFocus />
           </Form.Item>
         </Form>
       </Modal>
