@@ -1209,21 +1209,6 @@ export default function UpgradePlan() {
             </Checkbox>
           </Form.Item>
 
-          {/* 回退类型 */}
-          <Form.Item label="回退类型" required>
-            <Radio.Group
-              value={upgradeCategory}
-              onChange={(e) => {
-                setUpgradeCategory(e.target.value);
-                setUpgradeFile(undefined);
-              }}
-            >
-              <Radio value="software">软件回退</Radio>
-              <Radio value="patch">PATCH回退</Radio>
-              <Radio value="fpga">FPGA回退</Radio>
-            </Radio.Group>
-          </Form.Item>
-
           {/* 已选回退设备 */}
           <Form.Item label={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
@@ -1297,29 +1282,6 @@ export default function UpgradePlan() {
 
           <Divider />
 
-          {/* 回退文件 */}
-          <Form.Item label="回退文件" required>
-            <Select
-              value={upgradeFile}
-              onChange={setUpgradeFile}
-              placeholder="请选择回退文件"
-              style={{ width: '100%' }}
-              options={filteredFiles.map((f) => ({ label: f.label, value: f.value }))}
-            />
-          </Form.Item>
-
-          {/* 是否保留配置 */}
-          <Form.Item>
-            <Checkbox
-              checked={drawerKeepConfig}
-              onChange={(e) => setDrawerKeepConfig(e.target.checked)}
-            >
-              保留配置
-            </Checkbox>
-          </Form.Item>
-
-          <Divider />
-
           {/* 执行方式 */}
           <Form.Item label="执行方式" required>
             <Radio.Group value={executionMethod} onChange={(e) => setExecutionMethod(e.target.value)}>
@@ -1343,31 +1305,6 @@ export default function UpgradePlan() {
               />
             </Form.Item>
           )}
-
-          <Divider />
-
-          {/* 任务配置 */}
-          <Form.Item label="任务配置">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Checkbox
-                checked={retryOffline}
-                onChange={(e) => setRetryOffline(e.target.checked)}
-              >
-                离线设备等上线后重试
-              </Checkbox>
-              <Space>
-                <span>每次批量执行设备数：</span>
-                <InputNumber
-                  min={1}
-                  max={100}
-                  value={batchSize}
-                  onChange={(val) => setBatchSize(val ?? 20)}
-                  style={{ width: 80 }}
-                />
-                <span>台</span>
-              </Space>
-            </Space>
-          </Form.Item>
         </Form>
       </Drawer>
 
