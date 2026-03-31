@@ -336,3 +336,104 @@ export function isPointInBounds(
 ): boolean {
   return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat;
 }
+
+/**
+ * Spiderfy 配置
+ */
+export const SPIDERFY_CONFIG = {
+  /** 展开半径（像素） */
+  radius: 60,
+  /** 连线宽度 */
+  lineWidth: 2,
+  /** 连线颜色 */
+  lineColor: 'rgba(24, 144, 255, 0.6)',
+  /** 展开点半径 */
+  pointRadius: 10,
+  /** 展开动画时长（ms） */
+  animationDuration: 300,
+};
+
+/**
+ * 创建 Spiderfy 连线样式
+ */
+export function createSpiderfyLineStyle(): Style {
+  return new Style({
+    stroke: new Stroke({
+      color: SPIDERFY_CONFIG.lineColor,
+      width: SPIDERFY_CONFIG.lineWidth,
+    }),
+  });
+}
+
+/**
+ * 创建 Spiderfy 展开点样式
+ */
+export function createSpiderfyPointStyle(device: MapDevice, index: number, total: number): Style {
+  const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
+
+  return new Style({
+    image: new Circle({
+      radius: SPIDERFY_CONFIG.pointRadius,
+      fill: new Fill({ color: config.color }),
+      stroke: new Stroke({
+        color: COLORS.white,
+        width: 2,
+      }),
+    }),
+    text: new Text({
+      text: String(index + 1),
+      fill: new Fill({ color: COLORS.white }),
+      font: 'bold 10px sans-serif',
+      textAlign: 'center',
+      textBaseline: 'middle',
+    }),
+  });
+}
+
+/**
+ * 创建 Spiderfy 展开点悬停样式
+ */
+export function createSpiderfyPointHoverStyle(device: MapDevice, index: number, total: number): Style {
+  const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
+
+  return new Style({
+    image: new Circle({
+      radius: SPIDERFY_CONFIG.pointRadius * 1.3, // 悬停时放大 1.3 倍
+      fill: new Fill({ color: config.color }),
+      stroke: new Stroke({
+        color: COLORS.primary, // 使用主题色边框
+        width: 3,
+      }),
+    }),
+    text: new Text({
+      text: String(index + 1),
+      fill: new Fill({ color: COLORS.white }),
+      font: 'bold 11px sans-serif', // 字体稍微增大
+      textAlign: 'center',
+      textBaseline: 'middle',
+    }),
+  });
+}
+
+/**
+ * 创建 Spiderfy 中心点样式
+ */
+export function createSpiderfyCenterStyle(count: number): Style {
+  return new Style({
+    image: new Circle({
+      radius: 8,
+      fill: new Fill({ color: COLORS.primary }),
+      stroke: new Stroke({
+        color: COLORS.white,
+        width: 2,
+      }),
+    }),
+    text: new Text({
+      text: String(count),
+      fill: new Fill({ color: COLORS.white }),
+      font: 'bold 10px sans-serif',
+      textAlign: 'center',
+      textBaseline: 'middle',
+    }),
+  });
+}

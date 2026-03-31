@@ -8,6 +8,7 @@ import type { DeviceStatus } from '@/types/map';
 /**
  * 设备状态配置
  * 根据 UI 设计图: GISMap_UI_Design_Markers.svg
+ * 三种状态：在线激活(绿色)、在线未激活(黄色)、离线(红色)
  */
 export const DEVICE_STATUS_CONFIG: Record<
   DeviceStatus,
@@ -21,14 +22,23 @@ export const DEVICE_STATUS_CONFIG: Record<
     i18nKey: string;
   }
 > = {
-  online: {
+  onlineActive: {
     color: '#52C41A',
     gradientStart: '#73D13D',
     gradientEnd: '#52C41A',
     bgColor: '#F6FFED',
     borderColor: '#B7EB8F',
-    text: '在线',
-    i18nKey: 'status.online',
+    text: '在线激活',
+    i18nKey: 'status.onlineActive',
+  },
+  onlineInactive: {
+    color: '#FAAD14',
+    gradientStart: '#FFC53D',
+    gradientEnd: '#FAAD14',
+    bgColor: '#FFFBE6',
+    borderColor: '#FFE58F',
+    text: '在线未激活',
+    i18nKey: 'status.onlineInactive',
   },
   offline: {
     color: '#b60808',
@@ -161,7 +171,7 @@ export const ANIMATION_CONFIG = {
   /** 飞行动画时间 (ms) */
   flyDuration: 1000,
   /** 高亮缩放级别 */
-  highlightZoom: 14,
+  highlightZoom: 15,
   /** 最大放大程度（用于搜索定位） */
   maxHighlightZoom: 18,
 };

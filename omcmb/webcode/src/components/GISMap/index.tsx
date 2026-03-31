@@ -37,6 +37,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   height = '100%',
   defaultCenter = MAP_CONFIG.defaultCenter,
   defaultZoom = MAP_CONFIG.defaultZoom,
+  tileUrl,
   onDeviceClick,
   onViewportChange,
   showStats = true,
@@ -63,9 +64,11 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     updateSize,
     getZoom,
     fitBounds,
+    highlightAndSpiderfyIfNeeded,
   } = useOLMap({
     center: defaultCenter,
     zoom: defaultZoom,
+    tileUrl,
     onDeviceClick: (device) => {
       onDeviceClick?.(device);
     },
@@ -81,11 +84,14 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       setViewport(vp);
       onViewportChange?.(vp);
     },
+    onMapClick: () => {
+      onMapClick?.();
+    },
   });
 
   // 更新设备数据
   useEffect(() => {
-    if (isReady && devices.length > 0) {
+    if (isReady) {
       updateDevices(devices);
     }
   }, [isReady, devices, updateDevices]);
@@ -128,9 +134,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
   // 高亮设备（用于搜索定位）
   const highlightAndFlyTo = useCallback((device: MapDevice) => {
-    highlightDevice(device.id);
-    // 使用最大放大程度（18级）
-    flyTo(device.lng, device.lat, ANIMATION_CONFIG.maxHighlightZoom || 18);
+    // 使用新函数：自动展开聚合并显示脉冲效果
+    highlightAndSpiderfyIfNeeded(device);
     setHighlightedId(device.id);
 
     // 5秒后取消高亮（延长时间以便用户查看）
@@ -138,7 +143,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       clearHighlight();
       setHighlightedId(null);
     }, 5000);
-  }, [highlightDevice, flyTo, clearHighlight]);
+  }, [highlightAndSpiderfyIfNeeded, clearHighlight]);
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({

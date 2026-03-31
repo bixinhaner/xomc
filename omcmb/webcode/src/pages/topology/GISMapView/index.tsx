@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Checkbox, Spin, Empty, message } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
-import GISMap from '@/components/GISMap';
+import GISMap, { MAP_CONFIG } from '@/components/GISMap';
 import type { MapDevice, DeviceGroupNode, MapBounds, DeviceGeo, DeviceSearchResult } from '@/types/map';
 import type { Domain } from '@/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -169,12 +169,19 @@ export default function GISMapView() {
     }
   }, []);
 
-  // 搜索结果更新
+  // 搜索结果更新（根据状态过滤）
   useEffect(() => {
     if (searchResults) {
-      setDeviceSearchResults(searchResults);
+      // 根据状态筛选过滤搜索结果
+      const filtered = searchResults.filter((device) => {
+        if (device.status === 'onlineActive' && !statusFilter.onlineActive) return false;
+        if (device.status === 'onlineInactive' && !statusFilter.onlineInactive) return false;
+        if (device.status === 'offline' && !statusFilter.offline) return false;
+        return true;
+      });
+      setDeviceSearchResults(filtered);
     }
-  }, [searchResults]);
+  }, [searchResults, statusFilter]);
 
   // ========== 设备组树处理 ==========
 
@@ -448,7 +455,7 @@ export default function GISMapView() {
     background: '#FFF',
     borderRadius: 12,
     boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-    border: `2px solid ${token.colorPrimary}`,
+    border: '2px solid rgb(217, 217, 217)',
     overflow: 'hidden',
   };
 
@@ -461,9 +468,24 @@ export default function GISMapView() {
   };
 
   const searchResultsStyle: React.CSSProperties = {
-    maxHeight: 220,
-    overflow: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    maxHeight: 280,
     borderTop: '1px solid #E8E8E8',
+  };
+
+  const searchResultsListStyle: React.CSSProperties = {
+    flex: 1,
+    overflow: 'auto',
+    maxHeight: 240,
+  };
+
+  const searchResultsFooterStyle: React.CSSProperties = {
+    padding: '10px 16px',
+    borderTop: '1px solid #F0F0F0',
+    textAlign: 'center',
+    background: '#FAFAFA',
+    flexShrink: 0,
   };
 
   const searchResultItemStyle = (isHighlighted: boolean): React.CSSProperties => ({
@@ -713,8 +735,13 @@ export default function GISMapView() {
             defaultZoom={6}
             showStats={false}
             showControls={false}
+            tileUrl={MAP_CONFIG.osmTileUrl}
             onDeviceClick={(device) => {
               console.log('Device clicked:', device);
+            }}
+            onMapClick={() => {
+              // 点击地图时收起搜索结果面板
+              setDeviceSearchExpanded(false);
             }}
           />
         )}
@@ -819,68 +846,81 @@ export default function GISMapView() {
                   </div>
                 ) : (
                   <>
-                    {deviceSearchResults.map((result, index) => {
-                      const isOnline = result.status === 'online';
-                      return (
-                        <div
-                          key={result.id}
-                          style={searchResultItemStyle(index === 0)}
-                          onClick={() => {
-                            setDeviceSearchExpanded(false);
-                            const mapDevice: MapDevice = {
-                              id: result.id,
-                              lat: result.latitude,
-                              lng: result.longitude,
-                              name: result.name,
-                              status: result.status,
-                              sn: result.sn,
-                              groupName: result.groupName,
-                            };
-                            mapRef.current?.highlightAndFlyTo(mapDevice);
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div
-                              style={{
-                                width: 12,
-                                height: 12,
-                                borderRadius: '50%',
-                                background: isOnline
-                                  ? 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)'
-                                  : '#b60808',
-                              }}
-                            />
-                            <span style={{ fontSize: 13, fontWeight: 500, color: '#262626' }}>
-                              {result.name}
-                            </span>
-                          </div>
+                    {/* 可滚动的结果列表 */}
+                    <div style={searchResultsListStyle}>
+                      {deviceSearchResults.map((result, index) => {
+                        // onlineActive 和 onlineInactive 都算在线
+                        const isOnline = result.status === 'onlineActive' || result.status === 'onlineInactive';
+                        // 状态颜色：在线激活=绿色，在线未激活=黄色，离线=红色
+                        const statusColor = result.status === 'onlineActive'
+                          ? 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)'
+                          : result.status === 'onlineInactive'
+                            ? 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)'
+                            : '#b60808';
+                        const statusText = result.status === 'onlineActive'
+                          ? '🟢 在线激活'
+                          : result.status === 'onlineInactive'
+                            ? '🟡 在线未激活'
+                            : '🔴 离线';
+                        const statusTextColor = result.status === 'onlineActive'
+                          ? '#52C41A'
+                          : result.status === 'onlineInactive'
+                            ? '#FAAD14'
+                            : '#b60808';
+                        return (
                           <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              marginTop: 4,
-                              paddingLeft: 20,
+                            key={result.id}
+                            style={searchResultItemStyle(index === 0)}
+                            onClick={() => {
+                              setDeviceSearchExpanded(false);
+                              const mapDevice: MapDevice = {
+                                id: result.id,
+                                lat: result.latitude,
+                                lng: result.longitude,
+                                name: result.name,
+                                status: result.status,
+                                sn: result.sn,
+                                groupName: result.groupName,
+                              };
+                              mapRef.current?.highlightAndFlyTo(mapDevice);
                             }}
                           >
-                            <span style={{ fontSize: 11, color: '#8C8C8C' }}>
-                              SN: {result.sn}
-                            </span>
-                            <span style={{ fontSize: 11, color: isOnline ? '#52C41A' : '#b60808' }}>
-                              {isOnline ? '🟢 在线' : '🔴 离线'}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div
+                                style={{
+                                  width: 12,
+                                  height: 12,
+                                  borderRadius: '50%',
+                                  background: statusColor,
+                                }}
+                              />
+                              <span style={{ fontSize: 13, fontWeight: 500, color: '#262626' }}>
+                                {result.name}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginTop: 4,
+                                paddingLeft: 20,
+                              }}
+                            >
+                              <span style={{ fontSize: 11, color: '#8C8C8C' }}>
+                                SN: {result.sn}
+                              </span>
+                              <span style={{ fontSize: 11, color: statusTextColor }}>
+                                {statusText}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
 
-                    <div
-                      style={{
-                        padding: '10px 16px',
-                        borderTop: '1px solid #F0F0F0',
-                        textAlign: 'center',
-                      }}
-                    >
+                    {/* 固定在底部的结果统计 */}
+                    <div style={searchResultsFooterStyle}>
                       <span style={{ fontSize: 11, color: '#8C8C8C' }}>
                         共找到 {deviceSearchResults.length} 个结果
                       </span>

@@ -15,6 +15,7 @@ import type {
   BackendMapStats,
   BackendSearchResult,
 } from '@/types/map';
+import { toDisplayStatus } from '@/types/map';
 
 // Backend device group model
 interface BackendDeviceGroup {
@@ -334,7 +335,7 @@ function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
     sn: bd.sn,
     longitude: bd.longitude,
     latitude: bd.latitude,
-    status: bd.status as DeviceStatus,
+    status: toDisplayStatus(bd.status),
     type: bd.type as DeviceType | undefined,
     groupId: bd.group_id,
     groupName: bd.group_name,
@@ -376,7 +377,7 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     id: bs.id,
     name: bs.name,
     sn: bs.sn,
-    status: bs.status as DeviceStatus,
+    status: toDisplayStatus(bs.status),
     longitude: bs.longitude,
     latitude: bs.latitude,
     groupName: bs.group_name,

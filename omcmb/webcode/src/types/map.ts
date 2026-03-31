@@ -265,8 +265,12 @@ export interface GISMapProps {
   defaultCenter?: [number, number];
   /** 默认缩放级别 */
   defaultZoom?: number;
+  /** 瓦片服务地址（如 OSM 瓦片 URL） */
+  tileUrl?: string;
   /** 设备点击回调 */
   onDeviceClick?: (device: MapDevice) => void;
+  /** 地图点击回调（点击任意位置时触发，包括设备和空白区域） */
+  onMapClick?: () => void;
   /** 视图变化回调 */
   onViewportChange?: (viewport: MapViewport) => void;
   /** 是否显示统计面板 */

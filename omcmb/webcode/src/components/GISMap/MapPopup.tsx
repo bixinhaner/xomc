@@ -43,7 +43,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
   if (!visible || !device) return null;
 
   const statusConfig = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
-  const hasAlarm = device.status === 'online' && device.alarmCount && device.alarmCount > 0;
+  const hasAlarm = device.status !== 'offline' && device.alarmCount && device.alarmCount > 0;
 
   // 卡片容器样式
   const containerStyle: React.CSSProperties = {
@@ -161,14 +161,14 @@ const MapPopup: React.FC<MapPopupProps> = ({
               width: 12,
               height: 12,
               borderRadius: '50%',
-              background: device.status === 'online'
+              background: device.status !== 'offline'
                 ? `linear-gradient(180deg, ${statusConfig.gradientStart} 0%, ${statusConfig.gradientEnd} 100%)`
                 : statusConfig.color,
             }}
           />
           {/* 状态文字 */}
           <span style={{ fontSize: 12, color: statusConfig.color }}>
-            {device.status === 'online' ? '在线' : '离线'}
+            {device.status === 'onlineActive' ? '在线激活' : device.status === 'onlineInactive' ? '在线未激活' : '离线'}
           </span>
 
           {/* 分隔符 */}
