@@ -120,6 +120,9 @@ rpctool upload oui-config --sn DEVICE001 --url http://localhost:8080/smallcell/F
 # 上传数据模型文件
 rpctool upload datamodel --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
+# 上传 11 号配置文件
+rpctool upload config-11 --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
+
 # 上传 SSL 证书
 rpctool upload ssl-cert --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploadService
 
@@ -159,9 +162,11 @@ rpctool upload pm --sn DEVICE001 --url http://localhost:8080/smallcell/FileUploa
 | `pcap` | 9 | `9 Vendor PCAP` | 抓包文件 | 网络协议分析、信令抓包 |
 | `oui-config` | 10 | `10 <OUI> Configuration File` | OUI 配置文件 | 完整配置导出 XML（需 --oui） |
 | `datamodel` | 11 | `11 OUI Parameter Model` | 数据模型文件 | 设备参数模型定义导出 |
+| `config-11` | 11 | `11 Configuration File` | 11 号配置文件 | 设备配置文件上传（区别于代码 1 的标准配置） |
 | `ssl-cert` | — | `Tr069 Ssl Cert File` | TR069 SSL 证书 | 上传 `data/tr069_ca.crt` |
 
 > **注意**:
+> - 代码 11 在上传中有两种用途：`11 OUI Parameter Model`（数据模型）和 `11 Configuration File`（配置文件）。别名 `datamodel` 映射到前者，`config-11` 映射到后者。
 > - 代码 4 在运营商扩展中有两种用途：`4 Vendor PM File`（性能数据）和 `4 Vendor Log File`（日志扩展）。别名 `pm` 映射到前者，`log-ext` 映射到后者。
 > - `oui-config` 类型的 FileType 包含 OUI 标识，默认为 `48BF74`（Baicells），可通过 `--oui` 指定。
 > - 可直接传入完整 FileType 字符串（含空格），绕过别名映射。

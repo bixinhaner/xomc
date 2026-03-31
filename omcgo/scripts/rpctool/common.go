@@ -59,6 +59,7 @@ var uploadFileTypeMap = map[string]string{
 	"mr":           "5 Vendor MR File",         // 测量报告
 	"pcap":         "9 Vendor PCAP",            // 抓包文件
 	"datamodel":    "11 OUI Parameter Model",   // 数据模型文件
+	"config-11":    "11 Configuration File",    // 11 号配置文件
 	"ssl-cert":     "Tr069 Ssl Cert File",      // TR069 SSL 证书
 }
 
@@ -80,10 +81,10 @@ var downloadFileTypeMap = map[string]string{
 	"config":   "3 Vendor Configuration File",
 
 	// 厂商/运营商扩展类型
-	"script":   "101 Script File",
-	"startup":  "103 Base Station Startup File",
-	"license":  "License File",
-	"ssl-cert": "Tr069 Ssl Cert File",
+	"script":  "101 Script File",
+	"startup":   "103 Base Station Startup File",
+	"license":   "License File",
+	"ssl-cert":  "Tr069 Ssl Cert File",
 }
 
 // downloadFileTypeCodeMap maps numeric codes to Download FileType strings.

@@ -24,6 +24,8 @@ var (
 	source     string
 	creator    string
 	desc       string
+	redisAddr  string // 命令行覆盖 Redis 地址
+	dbDSN      string // 命令行覆盖 PostgreSQL DSN
 
 	redisClient redis.UniversalClient
 	pgPool      *pgxpool.Pool
@@ -41,11 +43,14 @@ func main() {
 当 CPE 设备下次连接 ACS 时（通过周期性 Inform 或 Connection Request），
 ACS 引擎会从队列中取出任务并发送给设备执行。
 
-配置文件默认加载 cmd/acs/etc/config.dev.yaml（与 ACS 引擎共享连接配置）。`,
+配置文件默认加载 cmd/acs/etc/config.local.yaml（本地开发环境，Redis/DB 连接 localhost）。
+也可通过 --redis 和 --db 参数直接覆盖连接地址，无需修改配置文件。`,
 		SilenceUsage: true,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&cfgPath, "config", "cmd/acs/etc/config.dev.yaml", "配置文件路径 (ACS 配置)")
+	rootCmd.PersistentFlags().StringVar(&cfgPath, "config", "cmd/acs/etc/config.local.yaml", "配置文件路径 (ACS 配置)")
+	rootCmd.PersistentFlags().StringVar(&redisAddr, "redis", "", "Redis 地址 (覆盖配置文件，如 localhost:6379)")
+	rootCmd.PersistentFlags().StringVar(&dbDSN, "db", "", "PostgreSQL DSN (覆盖配置文件)")
 	rootCmd.PersistentFlags().StringVar(&deviceSN, "sn", "", "设备序列号 (必���)")
 	rootCmd.PersistentFlags().IntVar(&priority, "priority", 10, "任务优先级 (数值越小优先级越高)")
 	rootCmd.PersistentFlags().IntVar(&ttlSeconds, "ttl", 0, "任务过期时间(秒)，0 表示不过期")
@@ -76,6 +81,14 @@ ACS 引擎会从队列中取出任务并发送给设备执行。
 func initInfra() error {
 	if err := appconfig.Load(cfgPath, &acsCfg); err != nil {
 		return fmt.Errorf("加载配置文件 %s: %w", cfgPath, err)
+	}
+
+	// 命令行参数覆盖配置文件中的连接地址
+	if redisAddr != "" {
+		acsCfg.Redis.Addrs = []string{redisAddr}
+	}
+	if dbDSN != "" {
+		acsCfg.DB.DSN = dbDSN
 	}
 
 	ctx := context.Background()
