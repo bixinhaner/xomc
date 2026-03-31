@@ -58,8 +58,12 @@ export const CLUSTER_CONFIG = {
   baseRadius: 16,
   /** 半径计算系数 */
   radiusFactor: 10,
-  /** 聚合距离 (px) */
+  /** 聚合距离 (px) - 低缩放级别时使用 */
   distance: 40,
+  /** 高缩放级别时的聚合距离 (px) - 更小的值让设备更容易分散 */
+  highZoomDistance: 10,
+  /** 禁用聚合的缩放阈值 - 超过此级别完全禁用聚合 */
+  disableClusterZoom: 15,
   /** 小型聚合阈值 (10-49) */
   smallThreshold: 10,
   /** 中型聚合阈值 (50-99) */

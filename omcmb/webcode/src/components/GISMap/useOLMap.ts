@@ -44,6 +44,8 @@ interface UseOLMapOptions {
   onViewportChange?: (viewport: MapViewport) => void;
   /** 聚合点击回调 */
   onClusterClick?: (devices: MapDevice[]) => void;
+  /** 缩放级别变化回调 */
+  onZoomChange?: (zoom: number) => void;
 }
 
 interface UseOLMapReturn {
@@ -86,6 +88,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     onDeviceHover,
     onViewportChange,
     onClusterClick,
+    onZoomChange,
   } = options;
 
   const mapRef = useRef<HTMLDivElement>(null);
@@ -102,6 +105,28 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const rippleWavesRef = useRef<{ radius: number; opacity: number }[]>([]);
 
   const [isReady, setIsReady] = useState(false);
+
+  // 根据缩放级别动态调整聚合距离
+  const updateClusterDistance = useCallback((zoom: number) => {
+    if (!clusterSourceRef.current) return;
+
+    let newDistance: number;
+    if (zoom >= CLUSTER_CONFIG.disableClusterZoom) {
+      // 高缩放级别：禁用聚合（distance = 0 表示不聚合）
+      newDistance = 0;
+    } else if (zoom >= 12) {
+      // 中等缩放级别：使用较小的聚合距离
+      newDistance = CLUSTER_CONFIG.highZoomDistance;
+    } else {
+      // 低缩放级别：使用正常聚合距离
+      newDistance = clusterDistance;
+    }
+
+    // 只有距离变化时才更新，避免不必要的重绘
+    if (clusterSourceRef.current.getDistance() !== newDistance) {
+      clusterSourceRef.current.setDistance(newDistance);
+    }
+  }, [clusterDistance]);
 
   // 初始化地图
   useEffect(() => {
@@ -165,6 +190,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         onDeviceHover,
         onViewportChange,
         onClusterClick,
+        onZoomChange: (zoom) => updateClusterDistance(zoom),
       },
       deviceLayerRef.current
     );
@@ -395,10 +421,11 @@ function bindMapEvents(
     onDeviceHover?: (device: MapDevice | null, pixel?: { x: number; y: number }) => void;
     onViewportChange?: (viewport: MapViewport) => void;
     onClusterClick?: (devices: MapDevice[]) => void;
+    onZoomChange?: (zoom: number) => void;
   },
   deviceLayer: VectorLayer<VectorSource>
 ): void {
-  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick } = callbacks;
+  const { onDeviceClick, onDeviceHover, onViewportChange, onClusterClick, onZoomChange } = callbacks;
 
   // 点击事件
   map.on('click', (evt) => {
@@ -487,11 +514,21 @@ function bindMapEvents(
 
   // 视图变化事件（带防抖）
   let moveEndTimeout: ReturnType<typeof setTimeout>;
+  let lastZoom = map.getView().getZoom() ?? 0;
+
   map.on('moveend', () => {
     clearTimeout(moveEndTimeout);
     moveEndTimeout = setTimeout(() => {
+      const view = map.getView();
+      const currentZoom = view.getZoom() ?? 0;
+
+      // 缩放级别变化时通知（用于动态调整聚合距离）
+      if (currentZoom !== lastZoom) {
+        lastZoom = currentZoom;
+        onZoomChange?.(currentZoom);
+      }
+
       if (onViewportChange) {
-        const view = map.getView();
         const center = toLonLat(view.getCenter()!);
         const extent = view.calculateExtent(map.getSize());
         const bottomLeft = toLonLat([extent[0], extent[1]]);
@@ -500,7 +537,7 @@ function bindMapEvents(
         onViewportChange({
           centerLng: center[0],
           centerLat: center[1],
-          zoom: view.getZoom()!,
+          zoom: currentZoom,
           bounds: {
             minLng: bottomLeft[0],
             maxLng: topRight[0],
