@@ -317,11 +317,24 @@ func (h *Handler) ListGeo(c *gin.Context) {
 	}
 
 	// Parse status (comma-separated)
+	// Frontend sends: onlineActive, onlineInactive, offline
+	// Backend expects: active, registered, provisioning, offline, maintenance, discovered, decommissioned
 	if statusStr := c.Query("status"); statusStr != "" {
 		statusList := strings.Split(statusStr, ",")
-		filter.Status = make([]model.DeviceStatus, 0, len(statusList))
+		filter.Status = make([]model.DeviceStatus, 0)
 		for _, s := range statusList {
-			filter.Status = append(filter.Status, model.DeviceStatus(s))
+			// Map frontend status values to backend database status values
+			switch s {
+			case "onlineActive":
+				filter.Status = append(filter.Status, model.DeviceActive)
+			case "onlineInactive":
+				filter.Status = append(filter.Status, model.DeviceRegistered, model.DeviceProvisioning)
+			case "offline":
+				filter.Status = append(filter.Status, model.DeviceOffline, model.DeviceMaintenance, model.DeviceDiscovered, model.DeviceDecommissioned)
+			default:
+				// Pass through any other status values for backward compatibility
+				filter.Status = append(filter.Status, model.DeviceStatus(s))
+			}
 		}
 	}
 
@@ -383,12 +396,22 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 		return
 	}
 
-	// Convert status count to frontend expected format (online/offline)
+	// Convert status count to frontend expected format (onlineActive/onlineInactive/offline)
+	// onlineActive: active - 在线激活
+	// onlineInactive: registered + provisioning - 在线未激活
+	// offline: offline + maintenance + discovered + decommissioned - 离线
+	onlineInactive := stats.StatusCount[model.DeviceRegistered] + stats.StatusCount[model.DeviceProvisioning]
+	offline := stats.StatusCount[model.DeviceOffline] +
+		stats.StatusCount[model.DeviceMaintenance] +
+		stats.StatusCount[model.DeviceDiscovered] +
+		stats.StatusCount[model.DeviceDecommissioned]
+
 	result := gin.H{
 		"total": stats.Total,
 		"status_count": gin.H{
-			"online":  stats.StatusCount[model.DeviceActive],
-			"offline": stats.StatusCount[model.DeviceOffline],
+			"onlineActive":   stats.StatusCount[model.DeviceActive],
+			"onlineInactive": onlineInactive,
+			"offline":        offline,
 		},
 	}
 
