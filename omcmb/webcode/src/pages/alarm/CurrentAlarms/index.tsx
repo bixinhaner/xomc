@@ -765,68 +765,73 @@ export default function CurrentAlarms() {
       }
     >
       {/* 统计卡片 */}
-      <Card size="small" styles={{ body: { padding: '12px 16px', marginBottom: 12 } }}>
-        <Row gutter={0} align="middle">
-          <Col flex="auto">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <StatItem
-                label="总数"
-                value={realStats.total}
-                active={activeQuickFilter === 'all'}
-                onClick={() => handleQuickFilter('all')}
-              />
-              <StatItem
-                label="严重"
-                value={realStats.critical}
-                color="#E53935"
-                active={activeQuickFilter === 'critical'}
-                onClick={() => handleQuickFilter('critical')}
-              />
-              <StatItem
-                label="主要"
-                value={realStats.major}
-                color="#FB8C00"
-              />
-              <StatItem
-                label="次要"
-                value={realStats.minor}
-                color="#FDD835"
-              />
-              <StatItem
-                label="警告"
-                value={realStats.warning}
-                color="#42A5F5"
-              />
-              <StatItem
-                label="未确认"
-                value={realStats.unacked}
-                color="#E53935"
-                active={activeQuickFilter === 'unacked'}
-                onClick={() => handleQuickFilter('unacked')}
-              />
-              <StatItem
-                label="未读"
-                value={rawAlarms.filter(a => a.unread === '1').length}
-                color="#722ED1"
-                active={activeQuickFilter === 'unread'}
-                onClick={() => handleQuickFilter('unread')}
-              />
-            </div>
-          </Col>
-          {/* 自动刷新状态指示 */}
-          {autoRefresh && (
-            <Col flex="none">
-              <Tag color="processing" style={{ margin: 0 }}>
-                <SyncOutlined spin style={{ marginRight: 4 }} />
-                {refreshInterval}秒
-              </Tag>
-            </Col>
-          )}
-        </Row>
+      <Card
+        size="small"
+        title="告警统计"
+        bordered
+        style={{ marginBottom: 12 }}
+        styles={{ body: { padding: '12px 16px' } }}
+        extra={autoRefresh ? (
+          <Tag color="processing" style={{ margin: 0 }}>
+            <SyncOutlined spin style={{ marginRight: 4 }} />
+            自动刷新 {refreshInterval}秒
+          </Tag>
+        ) : null}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <StatItem
+            label="总数"
+            value={realStats.total}
+            active={activeQuickFilter === 'all'}
+            onClick={() => handleQuickFilter('all')}
+          />
+          <StatItem
+            label="严重"
+            value={realStats.critical}
+            color="#E53935"
+            active={activeQuickFilter === 'critical'}
+            onClick={() => handleQuickFilter('critical')}
+          />
+          <StatItem
+            label="主要"
+            value={realStats.major}
+            color="#FB8C00"
+          />
+          <StatItem
+            label="次要"
+            value={realStats.minor}
+            color="#FDD835"
+          />
+          <StatItem
+            label="警告"
+            value={realStats.warning}
+            color="#42A5F5"
+          />
+          <StatItem
+            label="未确认"
+            value={realStats.unacked}
+            color="#E53935"
+            active={activeQuickFilter === 'unacked'}
+            onClick={() => handleQuickFilter('unacked')}
+          />
+          <StatItem
+            label="未读"
+            value={rawAlarms.filter(a => a.unread === '1').length}
+            color="#722ED1"
+            active={activeQuickFilter === 'unread'}
+            onClick={() => handleQuickFilter('unread')}
+          />
+        </div>
       </Card>
 
       {/* 搜索卡片 */}
-      <Card size="small" styles={{ body: { padding: '12px 16px 0', marginBottom: 12 } }}>
+      <Card
+        size="small"
+        title="筛选条件"
+        bordered
+        style={{ marginBottom: 12 }}
+        styles={{ body: { padding: '12px 16px 0' } }}
+      >
         {/* 快捷操作栏 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           {/* 快捷时间 */}
@@ -893,7 +898,12 @@ export default function CurrentAlarms() {
       </Card>
 
       {/* 列表卡片 */}
-      <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
+      <Card
+        size="small"
+        title="告警列表"
+        bordered
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
         <DataTable<Alarm>
           tableId="current-alarms-table"
           columns={columns}
