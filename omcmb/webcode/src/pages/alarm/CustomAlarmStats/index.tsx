@@ -200,14 +200,26 @@ export default function CustomAlarmStats() {
     },
   ], [t]);
 
-  // 查询参数
+  // 根据分组名称提取地区关键词，用于过滤告警
+  const groupRegion = useMemo(() => {
+    if (!selectedGroup?.name) return '';
+    // 从分组名称中提取地区关键词，如 "北京告警" → "北京"
+    const match = selectedGroup.name.match(/^(.+?)告警$/);
+    return match ? match[1] : '';
+  }, [selectedGroup?.name]);
+
+  // 查询参数 - 包含分组ID和地区过滤，切换分组时触发重新查询
   const queryParams = useMemo(
     () => ({
       ...filterParams,
       page: currentPage,
       pageSize,
+      // 分组标识，用于区分不同分组的数据
+      groupId: selectedGroupId,
+      // 地区过滤：按 equipInfo 中包含的地区关键词过滤
+      ...(groupRegion && !filterParams.equipInfo ? { equipInfo: groupRegion } : {}),
     }),
-    [filterParams, currentPage, pageSize]
+    [filterParams, currentPage, pageSize, selectedGroupId, groupRegion]
   );
 
   // 根据分组类型使用不同的 hook
