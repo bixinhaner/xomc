@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Col, Dropdown, Form, Input, Menu, Modal, Radio, Row, Select, Space, Statistic, Tag, Tooltip, Typography, App } from 'antd';
+import { Badge, Button, Card, Col, Dropdown, Form, Input, Modal, Row, Select, Space, Tag, Tooltip, Typography, App } from 'antd';
 import {
   CheckOutlined,
   ClearOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   ExportOutlined,
   EyeOutlined,
   FilterOutlined,
   MinusCircleOutlined,
+  MoreOutlined,
   ReloadOutlined,
   SaveOutlined,
   SyncOutlined,
@@ -74,7 +76,7 @@ const QUICK_TIME_OPTIONS = [
 // 快捷筛选选项
 const QUICK_FILTER_OPTIONS = [
   { label: '全部', key: 'all' },
-  { label: '严重告警', key: 'critical', severity: ['critical'] },
+  { label: '严重', key: 'critical', severity: ['critical'] },
   { label: '未确认', key: 'unacked', dealState: ['0'] },
   { label: '未读', key: 'unread', unread: '1' },
 ];
@@ -119,6 +121,41 @@ function quickTimeToRange(value: string): [string, string] | undefined {
     default:
       return undefined;
   }
+}
+
+// 统计项组件
+function StatItem({
+  label,
+  value,
+  color,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  color?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: '8px 16px',
+        borderRadius: 6,
+        cursor: onClick ? 'pointer' : 'default',
+        background: active ? '#E6F4FF' : 'transparent',
+        transition: 'all 0.2s',
+        minWidth: 70,
+      }}
+    >
+      <Text type="secondary" style={{ fontSize: 12 }}>{label}</Text>
+      <Text strong style={{ fontSize: 20, color: color || '#1F1F1F', lineHeight: 1.2 }}>{value}</Text>
+    </div>
+  );
 }
 
 export default function CurrentAlarms() {
@@ -676,34 +713,40 @@ export default function CurrentAlarms() {
     [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead]
   );
 
+  // 更多操作菜单
+  const moreMenuItems = useMemo(() => [
+    { key: 'refresh', label: '立即刷新', icon: <ReloadOutlined /> },
+    { type: 'divider' as const },
+    {
+      key: 'auto-refresh',
+      label: autoRefresh ? `自动刷新 (${refreshInterval}秒)` : '开启自动刷新',
+      icon: <SyncOutlined spin={autoRefresh} />,
+    },
+    ...(autoRefresh ? AUTO_REFRESH_INTERVALS.map((opt) => ({
+      key: `interval-${opt.value}`,
+      label: `  ↳ ${opt.label}`,
+    })) : []),
+    { type: 'divider' as const },
+    { key: 'save-template', label: '保存筛选模板', icon: <SaveOutlined /> },
+  ], [autoRefresh, refreshInterval]);
+
+  const handleMoreMenuClick = useCallback(({ key }: { key: string }) => {
+    if (key === 'refresh') {
+      void refetch();
+    } else if (key === 'auto-refresh') {
+      setAutoRefresh(!autoRefresh);
+    } else if (key.startsWith('interval-')) {
+      setRefreshInterval(parseInt(key.replace('interval-', ''), 10));
+    } else if (key === 'save-template') {
+      setSaveTemplateModalOpen(true);
+    }
+  }, [refetch, autoRefresh]);
+
   return (
     <ListPageLayout
       title={t('nav.alarm.current')}
       extra={
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
-            刷新
-          </Button>
-          <Space.Compact>
-            <Button
-              type={autoRefresh ? 'primary' : 'default'}
-              icon={<SyncOutlined spin={autoRefresh} />}
-              onClick={() => setAutoRefresh(!autoRefresh)}
-            >
-              自动刷新
-            </Button>
-            {autoRefresh && (
-              <Select
-                value={refreshInterval}
-                onChange={setRefreshInterval}
-                style={{ width: 90 }}
-                options={AUTO_REFRESH_INTERVALS.map((opt) => ({
-                  label: opt.label,
-                  value: opt.value,
-                }))}
-              />
-            )}
-          </Space.Compact>
           <Dropdown
             menu={{
               items: [
@@ -720,108 +763,131 @@ export default function CurrentAlarms() {
               导出
             </Button>
           </Dropdown>
+          <Dropdown menu={{ items: moreMenuItems, onClick: handleMoreMenuClick }}>
+            <Button icon={<MoreOutlined />} />
+          </Dropdown>
         </Space>
       }
     >
-      {/* 统计卡片 */}
-      <Card size="small" styles={{ body: { padding: '12px 16px', marginBottom: 12 } }}>
-        <Row gutter={24}>
-          <Col span={4}>
-            <Statistic title="总数" value={realStats.total} valueStyle={{ fontSize: 20 }} />
+      {/* 统计 + 快捷操作栏 - 合并为一行 */}
+      <Card
+        size="small"
+        styles={{
+          body: {
+            padding: '8px 12px',
+            marginBottom: 12,
+            background: 'linear-gradient(135deg, #FAFAFA 0%, #F5F5F5 100%)',
+          },
+        }}
+      >
+        <Row gutter={0} align="middle">
+          {/* 左侧：统计 */}
+          <Col flex="auto">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <StatItem
+                label="总数"
+                value={realStats.total}
+                active={activeQuickFilter === 'all'}
+                onClick={() => handleQuickFilter('all')}
+              />
+              <StatItem
+                label="严重"
+                value={realStats.critical}
+                color="#E53935"
+                active={activeQuickFilter === 'critical'}
+                onClick={() => handleQuickFilter('critical')}
+              />
+              <StatItem
+                label="主要"
+                value={realStats.major}
+                color="#FB8C00"
+              />
+              <StatItem
+                label="次要"
+                value={realStats.minor}
+                color="#FDD835"
+              />
+              <StatItem
+                label="警告"
+                value={realStats.warning}
+                color="#42A5F5"
+              />
+              <StatItem
+                label="未确认"
+                value={realStats.unacked}
+                color="#E53935"
+                active={activeQuickFilter === 'unacked'}
+                onClick={() => handleQuickFilter('unacked')}
+              />
+              <StatItem
+                label="未读"
+                value={rawAlarms.filter(a => a.unread === '1').length}
+                color="#722ED1"
+                active={activeQuickFilter === 'unread'}
+                onClick={() => handleQuickFilter('unread')}
+              />
+            </div>
           </Col>
-          <Col span={4}>
-            <Statistic title="严重" value={realStats.critical} valueStyle={{ color: '#E53935', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="主要" value={realStats.major} valueStyle={{ color: '#FB8C00', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="次要" value={realStats.minor} valueStyle={{ color: '#FDD835', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="警告" value={realStats.warning} valueStyle={{ color: '#42A5F5', fontSize: 20 }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="未确认" value={realStats.unacked} valueStyle={{ color: '#E53935', fontSize: 20 }} />
+
+          {/* 右侧：快捷操作 */}
+          <Col flex="none">
+            <Space size={4}>
+              {/* 快捷时间 */}
+              <Select
+                size="small"
+                placeholder="时间"
+                value={activeQuickTime}
+                onChange={handleQuickTime}
+                allowClear
+                style={{ width: 100 }}
+                options={QUICK_TIME_OPTIONS.map((opt) => ({
+                  label: opt.label,
+                  value: opt.value,
+                }))}
+              />
+
+              {/* 筛选模板 */}
+              {filterTemplates.length > 0 && (
+                <Dropdown
+                  menu={{
+                    items: filterTemplates.map((tpl) => ({
+                      key: tpl.id,
+                      label: (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 8 }}>
+                          <span>{tpl.name}</span>
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(tpl.id); }}
+                            style={{ padding: '0 4px', height: 20 }}
+                          />
+                        </div>
+                      ),
+                    })),
+                    onClick: ({ key }) => {
+                      const template = filterTemplates.find((tpl) => tpl.id === key);
+                      if (template) handleApplyTemplate(template);
+                    },
+                  }}
+                >
+                  <Button size="small" icon={<FilterOutlined />}>
+                    模板
+                  </Button>
+                </Dropdown>
+              )}
+
+              {/* 自动刷新状态指示 */}
+              {autoRefresh && (
+                <Tag color="processing" style={{ margin: 0 }}>
+                  <SyncOutlined spin style={{ marginRight: 4 }} />
+                  {refreshInterval}秒
+                </Tag>
+              )}
+            </Space>
           </Col>
         </Row>
-      </Card>
-
-      {/* 快捷操作栏 */}
-      <Card size="small" styles={{ body: { padding: '12px 16px', marginBottom: 12 } }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {/* 快捷类型筛选 */}
-          <Space.Compact size="small">
-            {QUICK_FILTER_OPTIONS.map((opt) => (
-              <Button
-                key={opt.key}
-                type={activeQuickFilter === opt.key ? 'primary' : 'default'}
-                onClick={() => handleQuickFilter(opt.key)}
-              >
-                {opt.label}
-              </Button>
-            ))}
-          </Space.Compact>
-
-          <div style={{ flex: 1 }} />
-
-          {/* 快捷时间选择 */}
-          <Select
-            size="small"
-            placeholder="快捷时间"
-            value={activeQuickTime}
-            onChange={handleQuickTime}
-            allowClear
-            style={{ width: 120 }}
-          >
-            {QUICK_TIME_OPTIONS.map((opt) => (
-              <Select.Option key={opt.value} value={opt.value}>
-                {opt.label}
-              </Select.Option>
-            ))}
-          </Select>
-
-          {/* 筛选模板 */}
-          {filterTemplates.length > 0 && (
-            <Dropdown
-              menu={{
-                items: [
-                  { type: 'group', label: '应用筛选模板', key: 'template-group' },
-                  ...filterTemplates.map((tpl) => ({
-                    key: tpl.id,
-                    label: (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>{tpl.name}</span>
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<ClearOutlined />}
-                          onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(tpl.id); }}
-                        />
-                      </div>
-                    ),
-                  })),
-                ],
-                onClick: ({ key }) => {
-                  const template = filterTemplates.find((tpl) => tpl.id === key);
-                  if (template) handleApplyTemplate(template);
-                },
-              }}
-            >
-              <Button size="small" icon={<FilterOutlined />}>
-                模板
-              </Button>
-            </Dropdown>
-          )}
-
-          {/* 保存筛选模板 */}
-          <Tooltip title="保存当前筛选条件为模板">
-            <Button size="small" icon={<SaveOutlined />} onClick={() => setSaveTemplateModalOpen(true)}>
-              保存
-            </Button>
-          </Tooltip>
-        </div>
       </Card>
 
       <FilterBar
