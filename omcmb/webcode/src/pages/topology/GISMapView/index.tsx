@@ -62,12 +62,14 @@ export default function GISMapView() {
   // 展开的设备组 ID 列表
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
 
-  // 状态筛选：在线/离线
+  // 状态筛选：在线激活/在线未激活/离线
   const [statusFilter, setStatusFilter] = useState<{
-    online: boolean;
+    onlineActive: boolean;
+    onlineInactive: boolean;
     offline: boolean;
   }>({
-    online: true,
+    onlineActive: true,
+    onlineInactive: true,
     offline: true,
   });
 
@@ -88,16 +90,17 @@ export default function GISMapView() {
 
   // 获取设备地理数据
   const filterParams = useMemo(() => {
-    const statusList: ('online' | 'offline')[] = [
-      ...(statusFilter.online ? ['online' as const] : []),
+    const statusList: ('onlineActive' | 'onlineInactive' | 'offline')[] = [
+      ...(statusFilter.onlineActive ? ['onlineActive' as const] : []),
+      ...(statusFilter.onlineInactive ? ['onlineInactive' as const] : []),
       ...(statusFilter.offline ? ['offline' as const] : []),
     ];
     return {
       groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
-      // 如果两个状态都被选中（默认情况），不传 status 参数让后端返回全部
-      // 如果只有一个被选中，传对应的状态
+      // 如果三个状态都被选中（默认情况），不传 status 参数让后端返回全部
+      // 如果部分被选中，传对应的状态
       // 如果都没选中，传空数组表示不查询任何设备
-      status: statusList.length === 2 ? undefined : statusList,
+      status: statusList.length === 3 ? undefined : statusList,
       enabled: true,
       pageSize: 10000, // 获取大量数据
     };
@@ -138,14 +141,16 @@ export default function GISMapView() {
     if (!mapStatsData) {
       return {
         total: 0,
-        online: 0,
+        onlineActive: 0,
+        onlineInactive: 0,
         offline: 0,
         center: undefined,
       };
     }
     return {
       total: mapStatsData.total,
-      online: mapStatsData.statusCount?.online ?? 0,
+      onlineActive: mapStatsData.statusCount?.onlineActive ?? 0,
+      onlineInactive: mapStatsData.statusCount?.onlineInactive ?? 0,
       offline: mapStatsData.statusCount?.offline ?? 0,
       center: mapStatsData.center,
     };
@@ -544,11 +549,11 @@ export default function GISMapView() {
         {/* 设备状态筛选 */}
         <div style={sectionTitleStyle}>设备状态</div>
         <div style={{ padding: '0 20px' }}>
-          {/* 在线 */}
+          {/* 在线激活 */}
           <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
             <Checkbox
-              checked={statusFilter.online}
-              onChange={(e) => setStatusFilter((prev) => ({ ...prev, online: e.target.checked }))}
+              checked={statusFilter.onlineActive}
+              onChange={(e) => setStatusFilter((prev) => ({ ...prev, onlineActive: e.target.checked }))}
             />
             <div
               style={{
@@ -559,9 +564,30 @@ export default function GISMapView() {
                 margin: '0 8px 0 12px',
               }}
             />
-            <span style={{ fontSize: 14, color: '#262626' }}>在线</span>
-            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#8C8C8C' }}>
-              {stats.online.toLocaleString()}
+            <span style={{ fontSize: 14, color: '#262626' }}>在线激活</span>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#52C41A' }}>
+              {stats.onlineActive.toLocaleString()}
+            </span>
+          </div>
+
+          {/* 在线未激活 */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
+            <Checkbox
+              checked={statusFilter.onlineInactive}
+              onChange={(e) => setStatusFilter((prev) => ({ ...prev, onlineInactive: e.target.checked }))}
+            />
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
+                margin: '0 8px 0 12px',
+              }}
+            />
+            <span style={{ fontSize: 14, color: '#262626' }}>在线未激活</span>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
+              {stats.onlineInactive.toLocaleString()}
             </span>
           </div>
 
@@ -605,7 +631,20 @@ export default function GISMapView() {
                   boxShadow: '0 0 0 1px #E8E8E8',
                 }}
               />
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>在线设备</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>在线激活</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
+                  border: '2px solid #FFF',
+                  boxShadow: '0 0 0 1px #E8E8E8',
+                }}
+              />
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>在线未激活</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div
@@ -902,14 +941,39 @@ export default function GISMapView() {
                   width: 12,
                   height: 12,
                   borderRadius: '50%',
-                  background: '#52C41A',
+                  background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
                   marginRight: 8,
                 }}
               />
-              <span style={{ fontSize: 12, color: '#595959' }}>在线</span>
+              <span style={{ fontSize: 12, color: '#595959' }}>在线激活</span>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#52C41A' }}>
-              {stats.online.toLocaleString()}
+              {stats.onlineActive.toLocaleString()}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
+                  marginRight: 8,
+                }}
+              />
+              <span style={{ fontSize: 12, color: '#595959' }}>在线未激活</span>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#FAAD14' }}>
+              {stats.onlineInactive.toLocaleString()}
             </span>
           </div>
 

@@ -4,9 +4,39 @@
  */
 
 /**
- * 设备状态枚举
+ * 设备状态枚举（地图显示用）
+ * - onlineActive: 在线激活
+ * - onlineInactive: 在线未激活（已注册/配置中）
+ * - offline: 离线
  */
-export type DeviceStatus = 'online' | 'offline';
+export type DeviceStatus = 'onlineActive' | 'onlineInactive' | 'offline';
+
+/**
+ * 原始设备状态（后端数据库中的状态）
+ */
+export type RawDeviceStatus =
+  | 'discovered'
+  | 'registered'
+  | 'provisioning'
+  | 'active'
+  | 'maintenance'
+  | 'offline'
+  | 'decommissioned';
+
+/**
+ * 将原始状态转换为显示状态
+ */
+export function toDisplayStatus(status: RawDeviceStatus): DeviceStatus {
+  switch (status) {
+    case 'active':
+      return 'onlineActive';
+    case 'registered':
+    case 'provisioning':
+      return 'onlineInactive';
+    default:
+      return 'offline';
+  }
+}
 
 /**
  * 设备类型枚举
@@ -142,7 +172,11 @@ export interface MapStats {
   /** 总设备数 */
   total: number;
   /** 各状态数量 */
-  statusCount: Record<DeviceStatus, number>;
+  statusCount: {
+    onlineActive: number;
+    onlineInactive: number;
+    offline: number;
+  };
   /** 总告警数 */
   alarmCount: number;
   /** 各类型数量 */
@@ -357,7 +391,11 @@ export interface BackendDeviceCluster {
  */
 export interface BackendMapStats {
   total: number;
-  status_count: Record<string, number>;
+  status_count: {
+    online_active: number;
+    online_inactive: number;
+    offline: number;
+  };
   alarm_count: number;
   type_count?: Record<string, number>;
   viewport_count?: number;
