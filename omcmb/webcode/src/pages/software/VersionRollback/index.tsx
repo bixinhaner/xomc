@@ -73,11 +73,11 @@ interface UpgradePlanRow extends Record<string, unknown> {
   status: TaskStatus; // 任务状态：1-等待, 2-进行中, 3-暂停, 4-已结束, 5-终止中, 6-暂停中
 }
 
-// 升级类型映射
+// 回退类型映射
 const UPGRADE_TYPE_MAP: Record<UpgradeType, { color: string; text: string }> = {
-  immediate: { color: 'green', text: '立即升级' },
-  scheduled: { color: 'blue', text: '定时升级' },
-  manual: { color: 'orange', text: '手动升级' },
+  immediate: { color: 'green', text: '立即回退' },
+  scheduled: { color: 'blue', text: '定时回退' },
+  manual: { color: 'orange', text: '手动回退' },
 };
 
 // 升级结果映射
@@ -268,15 +268,15 @@ export default function UpgradePlan() {
     setBatchInputVisible(true);
   };
 
-  // 重新执行升级 - 打开确认弹窗
+  // 重新执行回退 - 打开确认弹窗
   const handleRetry = (record: UpgradePlanRow) => {
     setRetryRecord(record);
   };
 
-  // 确认重新执行升级
+  // 确认重新执行回退
   const handleRetryConfirm = () => {
     if (retryRecord) {
-      void message.success(`已重新发起 ${retryRecord.deviceSn} 的升级任务`);
+      void message.success(`已重新发起 ${retryRecord.deviceSn} 的回退任务`);
       setRetryRecord(null);
     }
   };
@@ -319,7 +319,7 @@ export default function UpgradePlan() {
     }
 
     // 生成 CSV 内容
-    const headers = ['基站编码', '基站名称', '设备组', '初始版本', '升级版本', '升级类型', '产品类型', '保留配置', '升级进度', '结果', '失败原因', '操作人', '操作时间', '开始时间', '结束时间'];
+    const headers = ['基站编码', '基站名称', '设备组', '初始版本', '回退版本', '回退类型', '产品类型', '保留配置', '回退进度', '结果', '失败原因', '操作人', '操作时间', '开始时间', '结束时间'];
     const rows = dataToExport.map((row) => [
       row.deviceSn,
       row.deviceName,
@@ -343,7 +343,7 @@ export default function UpgradePlan() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `升级计划_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `版本回退_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
 
@@ -376,14 +376,14 @@ export default function UpgradePlan() {
     },
     {
       name: 'upgradeType',
-      label: '升级类型',
+      label: '回退类型',
       type: 'select',
       placeholder: '请选择',
       options: [
         { label: '全部', value: 'all' },
-        { label: '立即升级', value: 'immediate' },
-        { label: '定时升级', value: 'scheduled' },
-        { label: '手动升级', value: 'manual' },
+        { label: '立即回退', value: 'immediate' },
+        { label: '定时回退', value: 'scheduled' },
+        { label: '手动回退', value: 'manual' },
       ],
     },
     {
@@ -628,7 +628,7 @@ export default function UpgradePlan() {
     void message.success(`已添加 ${newDevices.length} 台设备`);
   };
 
-  // 提交批量升级
+  // 提交批量回退
   const handleSubmitUpgrade = () => {
     // 验证任务名称
     if (!taskName.trim()) {
@@ -637,7 +637,7 @@ export default function UpgradePlan() {
     }
     // 验证设备选择
     if (!selectAllOfType && drawerDevices.length === 0) {
-      void message.warning('请选择要升级的设备或勾选"升级该产品类型的全部设备"');
+      void message.warning('请选择要回退的设备或勾选"回退该产品类型的全部设备"');
       return;
     }
     if (selectAllOfType && allDevicesCountOfType === 0) {
@@ -645,7 +645,7 @@ export default function UpgradePlan() {
       return;
     }
     if (!upgradeFile) {
-      void message.warning('请选择升级文件');
+      void message.warning('请选择回退文件');
       return;
     }
     if (executionMethod === 'scheduled' && !scheduledTime) {
@@ -653,7 +653,7 @@ export default function UpgradePlan() {
       return;
     }
 
-    // 提交升级任务
+    // 提交回退任务
     const execMethodText = executionMethod === 'immediate' ? '立即执行' :
                           executionMethod === 'suspend' ? '挂起' : `定时执行 (${scheduledTime?.format('YYYY-MM-DD HH:mm')})`;
     const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
@@ -661,7 +661,7 @@ export default function UpgradePlan() {
       ? `产品类型「${drawerProductType}」全部 ${deviceCount} 台设备`
       : `${deviceCount} 台设备`;
 
-    void message.success(`已创建批量升级任务「${taskName}」：${deviceInfo}，${execMethodText}`);
+    void message.success(`已创建批量回退任务「${taskName}」：${deviceInfo}，${execMethodText}`);
 
     // 关闭抽屉并清空选择
     setUpgradeDrawerVisible(false);
@@ -886,7 +886,7 @@ export default function UpgradePlan() {
   const headerExtra = useMemo(() => (
     <Space>
       <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleOpenUpgradeDrawer}>
-        升级
+        回退
       </Button>
       <Button icon={<DownloadOutlined />} onClick={handleOpenExport}>
         导出
@@ -1042,7 +1042,7 @@ export default function UpgradePlan() {
 
       {/* 导出弹窗 */}
       <Modal
-        title="导出升级计划"
+        title="导出版本回退"
         open={exportVisible}
         onCancel={() => setExportVisible(false)}
         onOk={handleExport}
@@ -1098,7 +1098,7 @@ export default function UpgradePlan() {
           message={
             <div>
               <p style={{ marginBottom: 8 }}>
-                确定要重新执行以下设备的升级任务吗？
+                确定要重新执行以下设备的回退任务吗？
               </p>
               <p style={{ marginBottom: 0 }}>
                 <strong>基站编码：</strong>{retryRecord?.deviceSn}<br />
@@ -1127,21 +1127,21 @@ export default function UpgradePlan() {
           message={
             <div>
               <p style={{ marginBottom: 8 }}>
-                确定要删除以下升级任务吗？此操作不可恢复。
+                确定要删除以下回退任务吗？此操作不可恢复。
               </p>
               <p style={{ marginBottom: 0 }}>
                 <strong>任务名称：</strong>{deleteTaskRecord?.deviceName}<br />
                 <strong>操作人：</strong>{deleteTaskRecord?.operator}<br />
-                <strong>升级版本：</strong>{deleteTaskRecord?.targetVersion}
+                <strong>回退版本：</strong>{deleteTaskRecord?.targetVersion}
               </p>
             </div>
           }
         />
       </Modal>
 
-      {/* 批量升级抽屉 */}
+      {/* 批量回退抽屉 */}
       <Drawer
-        title="批量升级"
+        title="批量回退"
         placement="right"
         width={600}
         open={upgradeDrawerVisible}
@@ -1154,7 +1154,7 @@ export default function UpgradePlan() {
               onClick={handleSubmitUpgrade}
               disabled={(!selectAllOfType && drawerDevices.length === 0) || !upgradeFile}
             >
-              确认升级
+              确认回退
             </Button>
           </Space>
         }
@@ -1202,15 +1202,15 @@ export default function UpgradePlan() {
               onChange={(e) => setSelectAllOfType(e.target.checked)}
               disabled={!drawerProductType}
             >
-              升级该产品类型的全部设备
+              回退该产品类型的全部设备
               {drawerProductType && (
                 <Tag color="blue" style={{ marginLeft: 8 }}>共 {allDevicesCountOfType} 台</Tag>
               )}
             </Checkbox>
           </Form.Item>
 
-          {/* 升级类型 */}
-          <Form.Item label="升级类型" required>
+          {/* 回退类型 */}
+          <Form.Item label="回退类型" required>
             <Radio.Group
               value={upgradeCategory}
               onChange={(e) => {
@@ -1218,17 +1218,17 @@ export default function UpgradePlan() {
                 setUpgradeFile(undefined);
               }}
             >
-              <Radio value="software">软件升级</Radio>
-              <Radio value="patch">PATCH升级</Radio>
-              <Radio value="fpga">FPGA升级</Radio>
+              <Radio value="software">软件回退</Radio>
+              <Radio value="patch">PATCH回退</Radio>
+              <Radio value="fpga">FPGA回退</Radio>
             </Radio.Group>
           </Form.Item>
 
-          {/* 已选升级设备 */}
+          {/* 已选回退设备 */}
           <Form.Item label={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <span>
-                已选升级设备
+                已选回退设备
                 {' '}
                 <Tag color="blue">{selectAllOfType ? allDevicesCountOfType : drawerDevices.length} 台</Tag>
               </span>
@@ -1249,7 +1249,7 @@ export default function UpgradePlan() {
                 type="info"
                 showIcon
                 message={`已选择产品类型「${drawerProductType}」的全部设备，共 ${allDevicesCountOfType} 台`}
-                description="执行时将自动查询该产品类型的所有设备进行升级"
+                description="执行时将自动查询该产品类型的所有设备进行回退"
               />
             ) : (
               <>
@@ -1297,12 +1297,12 @@ export default function UpgradePlan() {
 
           <Divider />
 
-          {/* 升级文件 */}
-          <Form.Item label="升级文件" required>
+          {/* 回退文件 */}
+          <Form.Item label="回退文件" required>
             <Select
               value={upgradeFile}
               onChange={setUpgradeFile}
-              placeholder="请选择升级文件"
+              placeholder="请选择回退文件"
               style={{ width: '100%' }}
               options={filteredFiles.map((f) => ({ label: f.label, value: f.value }))}
             />
@@ -1405,7 +1405,7 @@ export default function UpgradePlan() {
               <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
                 <Descriptions.Item label="任务名称" span={2}>{taskName}</Descriptions.Item>
                 <Descriptions.Item label="产品类型">{taskDetailRecord.productType}</Descriptions.Item>
-                <Descriptions.Item label="升级类型">
+                <Descriptions.Item label="回退类型">
                   <Tag color={UPGRADE_TYPE_MAP[taskDetailRecord.upgradeType]?.color}>
                     {UPGRADE_TYPE_MAP[taskDetailRecord.upgradeType]?.text || taskDetailRecord.upgradeType}
                   </Tag>
@@ -1441,7 +1441,7 @@ export default function UpgradePlan() {
                         <span>{resultStats.failed} 台</span>
                       </div>
                       <div>
-                        <Tag color="processing">升级中</Tag>
+                        <Tag color="processing">回退中</Tag>
                         <span>{resultStats.running} 台</span>
                       </div>
                       <div>
