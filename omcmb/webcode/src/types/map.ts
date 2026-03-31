@@ -392,8 +392,8 @@ export interface BackendDeviceCluster {
 export interface BackendMapStats {
   total: number;
   status_count: {
-    online_active: number;
-    online_inactive: number;
+    onlineActive: number;
+    onlineInactive: number;
     offline: number;
   };
   alarm_count: number;
