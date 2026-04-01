@@ -267,10 +267,14 @@ export default function CustomAlarmStats() {
   const [selectAllGSM, setSelectAllGSM] = useState(false);
   // 添加设备弹窗状态
   const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
+  const [addDeviceMode, setAddDeviceMode] = useState<'device' | 'deviceGroup'>('device');
   const [selectedNewDevices, setSelectedNewDevices] = useState<string[]>([]);
+  const [selectedNewDeviceGroups, setSelectedNewDeviceGroups] = useState<string[]>([]);
   const [addDeviceKeyword, setAddDeviceKeyword] = useState('');
   const [addDeviceCurrentPage, setAddDeviceCurrentPage] = useState(1);
   const [addDevicePageSize, setAddDevicePageSize] = useState(10);
+  // 设备组数据
+  const [availableDeviceGroups, setAvailableDeviceGroups] = useState<{ id: string; name: string; deviceIds: string[] }[]>([]);
 
   // 已选告警状态
   const [availableAlarms, setAvailableAlarms] = useState<{ id: string; alarmIdentifier: string; alarmSource: string; possibleCause: string }[]>([]);
@@ -313,6 +317,22 @@ export default function CustomAlarmStats() {
     const start = (addDeviceCurrentPage - 1) * addDevicePageSize;
     return filteredAvailableDevices.slice(start, start + addDevicePageSize);
   }, [filteredAvailableDevices, addDeviceCurrentPage, addDevicePageSize]);
+
+  // 可添加的设备组列表（根据关键字过滤）
+  const filteredAvailableDeviceGroups = useMemo(() => {
+    let available = availableDeviceGroups;
+    if (addDeviceKeyword.trim()) {
+      const keyword = addDeviceKeyword.toLowerCase();
+      available = available.filter((g) => g.name.toLowerCase().includes(keyword));
+    }
+    return available;
+  }, [availableDeviceGroups, addDeviceKeyword]);
+
+  // 分页后的设备组列表
+  const paginatedDeviceGroups = useMemo(() => {
+    const start = (addDeviceCurrentPage - 1) * addDevicePageSize;
+    return filteredAvailableDeviceGroups.slice(start, start + addDevicePageSize);
+  }, [filteredAvailableDeviceGroups, addDeviceCurrentPage, addDevicePageSize]);
 
   // 可添加的告警列表（不在已选列表中的告警，且根据关键字过滤）
   const filteredAvailableAlarms = useMemo(() => {
@@ -687,6 +707,28 @@ export default function CustomAlarmStats() {
   // 清空选中设备
   const handleClearDevices = useCallback(() => {
     setSelectedDevices([]);
+  }, []);
+
+  // 打开添加设备弹窗
+  const handleOpenAddDeviceModal = useCallback(() => {
+    setAddDeviceMode('device');
+    setSelectedNewDevices([]);
+    setSelectedNewDeviceGroups([]);
+    setAddDeviceKeyword('');
+    setAddDeviceCurrentPage(1);
+    // 加载设备组数据（包含实际的设备ID列表）
+    const mockDeviceGroups = [
+      { id: 'group-001', name: '北京地区基站', deviceIds: ['dev-001', 'dev-002', 'dev-007', 'dev-009', 'dev-011', 'dev-014'] },
+      { id: 'group-002', name: '上海地区基站', deviceIds: ['dev-003', 'dev-004', 'dev-008', 'dev-010', 'dev-012'] },
+      { id: 'group-003', name: '广州地区基站', deviceIds: ['dev-005', 'dev-006', 'dev-013'] },
+      { id: 'group-004', name: '深圳地区基站', deviceIds: ['dev-007', 'dev-008', 'dev-015'] },
+      { id: 'group-005', name: '成都地区基站', deviceIds: ['dev-009', 'dev-010'] },
+      { id: 'group-006', name: '杭州地区基站', deviceIds: ['dev-011', 'dev-012'] },
+      { id: 'group-007', name: '南京地区基站', deviceIds: ['dev-013', 'dev-014'] },
+      { id: 'group-008', name: '武汉地区基站', deviceIds: ['dev-015'] },
+    ];
+    setAvailableDeviceGroups(mockDeviceGroups);
+    setAddDeviceModalVisible(true);
   }, []);
 
   // 编辑分组 - 打开抽屉并预填数据
@@ -1449,7 +1491,7 @@ export default function CustomAlarmStats() {
                   size="small"
                   type="primary"
                   icon={<PlusOutlined />}
-                  onClick={() => setAddDeviceModalVisible(true)}
+                  onClick={handleOpenAddDeviceModal}
                 >
                   添加设备
                 </Button>
@@ -1584,43 +1626,75 @@ export default function CustomAlarmStats() {
         onCancel={() => {
           setAddDeviceModalVisible(false);
           setSelectedNewDevices([]);
+          setSelectedNewDeviceGroups([]);
           setAddDeviceKeyword('');
           setAddDeviceCurrentPage(1);
+          setAddDeviceMode('device');
         }}
         onOk={() => {
-          setSelectedDevices(prev => [...new Set([...prev, ...selectedNewDevices])]);
-          // 更新全选状态
-          const allIds = [...new Set([...selectedDevices, ...selectedNewDevices])];
-          const enbCount = availableDevices.filter(d => d.neType === 'eNB').length;
-          const gnbCount = availableDevices.filter(d => d.neType === 'gNB').length;
-          const gsmCount = availableDevices.filter(d => d.neType === 'GSM').length;
-          const selectedEnbCount = allIds.filter(id => {
-            const d = availableDevices.find(dev => dev.id === id);
-            return d?.neType === 'eNB';
-          }).length;
-          const selectedGnbCount = allIds.filter(id => {
-            const d = availableDevices.find(dev => dev.id === id);
-            return d?.neType === 'gNB';
-          }).length;
-          const selectedGsmCount = allIds.filter(id => {
-            const d = availableDevices.find(dev => dev.id === id);
-            return d?.neType === 'GSM';
-          }).length;
-          setSelectAllENB(selectedEnbCount === enbCount && enbCount > 0);
-          setSelectAllGNB(selectedGnbCount === gnbCount && gnbCount > 0);
-          setSelectAllGSM(selectedGsmCount === gsmCount && gsmCount > 0);
+          if (addDeviceMode === 'device') {
+            setSelectedDevices(prev => [...new Set([...prev, ...selectedNewDevices])]);
+            // 更新全选状态
+            const allIds = [...new Set([...selectedDevices, ...selectedNewDevices])];
+            const enbCount = availableDevices.filter(d => d.neType === 'eNB').length;
+            const gnbCount = availableDevices.filter(d => d.neType === 'gNB').length;
+            const gsmCount = availableDevices.filter(d => d.neType === 'GSM').length;
+            const selectedEnbCount = allIds.filter(id => {
+              const d = availableDevices.find(dev => dev.id === id);
+              return d?.neType === 'eNB';
+            }).length;
+            const selectedGnbCount = allIds.filter(id => {
+              const d = availableDevices.find(dev => dev.id === id);
+              return d?.neType === 'gNB';
+            }).length;
+            const selectedGsmCount = allIds.filter(id => {
+              const d = availableDevices.find(dev => dev.id === id);
+              return d?.neType === 'GSM';
+            }).length;
+            setSelectAllENB(selectedEnbCount === enbCount && enbCount > 0);
+            setSelectAllGNB(selectedGnbCount === gnbCount && gnbCount > 0);
+            setSelectAllGSM(selectedGsmCount === gsmCount && gsmCount > 0);
+          } else {
+            // 按设备组添加：将设备组下的所有设备添加到已选设备
+            const deviceIdsFromGroups = availableDeviceGroups
+              .filter(g => selectedNewDeviceGroups.includes(g.id))
+              .flatMap(g => g.deviceIds);
+            setSelectedDevices(prev => [...new Set([...prev, ...deviceIdsFromGroups])]);
+          }
           setAddDeviceModalVisible(false);
           setSelectedNewDevices([]);
+          setSelectedNewDeviceGroups([]);
           setAddDeviceKeyword('');
           setAddDeviceCurrentPage(1);
+          setAddDeviceMode('device');
         }}
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
-        width={600}
+        width={700}
       >
+        {/* 模式切换 */}
+        <div style={{ marginBottom: 16 }}>
+          <Radio.Group
+            value={addDeviceMode}
+            onChange={(e) => {
+              setAddDeviceMode(e.target.value);
+              setSelectedNewDevices([]);
+              setSelectedNewDeviceGroups([]);
+              setAddDeviceKeyword('');
+              setAddDeviceCurrentPage(1);
+            }}
+            optionType="button"
+            buttonStyle="solid"
+          >
+            <Radio.Button value="device">按照设备添加</Radio.Button>
+            <Radio.Button value="deviceGroup">按照设备组添加</Radio.Button>
+          </Radio.Group>
+        </div>
+
+        {/* 搜索框 */}
         <div style={{ marginBottom: 12 }}>
           <Input
-            placeholder="搜索设备名称"
+            placeholder={addDeviceMode === 'device' ? '搜索设备名称' : '搜索设备组名称'}
             prefix={<SearchOutlined />}
             value={addDeviceKeyword}
             onChange={(e) => {
@@ -1630,75 +1704,184 @@ export default function CustomAlarmStats() {
             allowClear
           />
         </div>
-        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Checkbox
-            checked={selectedNewDevices.length === filteredAvailableDevices.length && filteredAvailableDevices.length > 0}
-            indeterminate={selectedNewDevices.length > 0 && selectedNewDevices.length < filteredAvailableDevices.length}
-            onChange={(e) => {
-              if (e.target.checked) {
-                setSelectedNewDevices(filteredAvailableDevices.map(d => d.id));
-              } else {
-                setSelectedNewDevices([]);
-              }
-            }}
-          >
-            全选（{filteredAvailableDevices.length} 个可选设备）
-          </Checkbox>
-          <span style={{ color: '#666', fontSize: 12 }}>
-            已选 {selectedNewDevices.length} 个
-          </span>
-        </div>
-        <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
-          {filteredAvailableDevices.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
-              暂无可添加的设备
-            </div>
-          ) : (
-            paginatedDevices.map(device => (
-              <div
-                key={device.id}
-                onClick={() => {
-                  setSelectedNewDevices(prev =>
-                    prev.includes(device.id)
-                      ? prev.filter(id => id !== device.id)
-                      : [...prev, device.id]
-                  );
-                }}
-                style={{
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  background: selectedNewDevices.includes(device.id) ? '#e6f4ff' : 'transparent',
-                  borderBottom: '1px solid #f0f0f0',
-                  display: 'flex',
-                  alignItems: 'center',
+
+        {addDeviceMode === 'device' ? (
+          <>
+            {/* 设备列表 */}
+            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Checkbox
+                checked={selectedNewDevices.length === filteredAvailableDevices.length && filteredAvailableDevices.length > 0}
+                indeterminate={selectedNewDevices.length > 0 && selectedNewDevices.length < filteredAvailableDevices.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedNewDevices(filteredAvailableDevices.map(d => d.id));
+                  } else {
+                    setSelectedNewDevices([]);
+                  }
                 }}
               >
-                <Checkbox
-                  checked={selectedNewDevices.includes(device.id)}
-                  onChange={() => {}}
-                  style={{ marginRight: 8 }}
+                全选（{filteredAvailableDevices.length} 个可选设备）
+              </Checkbox>
+              <span style={{ color: '#666', fontSize: 12 }}>
+                已选 {selectedNewDevices.length} 个
+              </span>
+            </div>
+            <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
+              {filteredAvailableDevices.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
+                  暂无可添加的设备
+                </div>
+              ) : (
+                <>
+                  {/* 表头 */}
+                  <div style={{ display: 'flex', padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', fontWeight: 500, fontSize: 12 }}>
+                    <div style={{ width: 40 }}></div>
+                    <div style={{ flex: 1 }}>设备编码</div>
+                    <div style={{ flex: 1 }}>设备名称</div>
+                    <div style={{ width: 80, textAlign: 'center' }}>基站制式</div>
+                  </div>
+                  {/* 表体 */}
+                  {paginatedDevices.map(device => (
+                    <div
+                      key={device.id}
+                      onClick={() => {
+                        setSelectedNewDevices(prev =>
+                          prev.includes(device.id)
+                            ? prev.filter(id => id !== device.id)
+                            : [...prev, device.id]
+                        );
+                      }}
+                      style={{
+                        display: 'flex',
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        background: selectedNewDevices.includes(device.id) ? '#e6f4ff' : 'transparent',
+                        borderBottom: '1px solid #f0f0f0',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <div style={{ width: 40 }}>
+                        <Checkbox
+                          checked={selectedNewDevices.includes(device.id)}
+                          onChange={() => {}}
+                        />
+                      </div>
+                      <div style={{ flex: 1, fontSize: 12 }}>{device.id}</div>
+                      <div style={{ flex: 1 }}>{device.name}</div>
+                      <div style={{ width: 80, textAlign: 'center' }}>
+                        <Tag>{device.neType}</Tag>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+            {filteredAvailableDevices.length > addDevicePageSize && (
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                <Pagination
+                  size="small"
+                  current={addDeviceCurrentPage}
+                  pageSize={addDevicePageSize}
+                  total={filteredAvailableDevices.length}
+                  onChange={(page, pageSize) => {
+                    setAddDeviceCurrentPage(page);
+                    setAddDevicePageSize(pageSize);
+                  }}
+                  showSizeChanger
+                  showTotal={(total) => `共 ${total} 个`}
                 />
-                <span style={{ flex: 1 }}>{device.name}</span>
-                <Tag>{device.neType}</Tag>
               </div>
-            ))
-          )}
-        </div>
-        {filteredAvailableDevices.length > addDevicePageSize && (
-          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-            <Pagination
-              size="small"
-              current={addDeviceCurrentPage}
-              pageSize={addDevicePageSize}
-              total={filteredAvailableDevices.length}
-              onChange={(page, pageSize) => {
-                setAddDeviceCurrentPage(page);
-                setAddDevicePageSize(pageSize);
-              }}
-              showSizeChanger
-              showTotal={(total) => `共 ${total} 个`}
-            />
-          </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* 设备组列表 */}
+            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Checkbox
+                checked={selectedNewDeviceGroups.length === filteredAvailableDeviceGroups.length && filteredAvailableDeviceGroups.length > 0}
+                indeterminate={selectedNewDeviceGroups.length > 0 && selectedNewDeviceGroups.length < filteredAvailableDeviceGroups.length}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedNewDeviceGroups(filteredAvailableDeviceGroups.map(g => g.id));
+                  } else {
+                    setSelectedNewDeviceGroups([]);
+                  }
+                }}
+              >
+                全选（{filteredAvailableDeviceGroups.length} 个可选设备组）
+              </Checkbox>
+              <span style={{ color: '#666', fontSize: 12 }}>
+                已选 {selectedNewDeviceGroups.length} 个
+              </span>
+            </div>
+            <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
+              {filteredAvailableDeviceGroups.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
+                  暂无可添加的设备组
+                </div>
+              ) : (
+                <>
+                  {/* 表头 */}
+                  <div style={{ display: 'flex', padding: '8px 12px', background: '#fafafa', borderBottom: '1px solid #f0f0f0', fontWeight: 500, fontSize: 12 }}>
+                    <div style={{ width: 40 }}></div>
+                    <div style={{ flex: 1 }}>设备组名称</div>
+                    <div style={{ width: 100, textAlign: 'center' }}>设备数量</div>
+                  </div>
+                  {/* 表体 */}
+                  {paginatedDeviceGroups.map(group => (
+                    <div
+                      key={group.id}
+                      onClick={() => {
+                        setSelectedNewDeviceGroups(prev =>
+                          prev.includes(group.id)
+                            ? prev.filter(id => id !== group.id)
+                            : [...prev, group.id]
+                        );
+                      }}
+                      style={{
+                        display: 'flex',
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        background: selectedNewDeviceGroups.includes(group.id) ? '#e6f4ff' : 'transparent',
+                        borderBottom: '1px solid #f0f0f0',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <div style={{ width: 40 }}>
+                        <Checkbox
+                          checked={selectedNewDeviceGroups.includes(group.id)}
+                          onChange={() => {}}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <FolderOutlined style={{ marginRight: 8, color: '#FA8C16' }} />
+                        {group.name}
+                      </div>
+                      <div style={{ width: 100, textAlign: 'center' }}>
+                        <Text type="secondary">{group.deviceIds.length} 个</Text>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+            {filteredAvailableDeviceGroups.length > addDevicePageSize && (
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                <Pagination
+                  size="small"
+                  current={addDeviceCurrentPage}
+                  pageSize={addDevicePageSize}
+                  total={filteredAvailableDeviceGroups.length}
+                  onChange={(page, pageSize) => {
+                    setAddDeviceCurrentPage(page);
+                    setAddDevicePageSize(pageSize);
+                  }}
+                  showSizeChanger
+                  showTotal={(total) => `共 ${total} 个`}
+                />
+              </div>
+            )}
+          </>
         )}
       </Modal>
 
