@@ -191,10 +191,9 @@ const PERMISSION_MODULES: PermissionModule[] = [
 
 // 基站制式选项
 const NETWORK_TYPE_OPTIONS = [
-  { label: '全部', value: '' },
-  { label: 'LTE (4G)', value: 'LTE' },
-  { label: '5G NR', value: '5G' },
-  { label: 'GSM (2G)', value: 'GSM' },
+  { label: 'eNB', value: 'eNB' },
+  { label: 'gNB', value: 'gNB' },
+  { label: 'GSM', value: 'GSM' },
 ];
 
 // 产品类型选项
