@@ -97,6 +97,25 @@ var uploadQueryParam = map[string]string{
 	"ssl-cert":     "SSL", // SSL 证书（需服务端 normalizeFileType 支持）
 }
 
+// uploadFileSuffix maps rpctool aliases to the standard file suffix for uploaded files.
+// Based on TR-069 Amendment 6 and Baicells device conventions.
+var uploadFileSuffix = map[string]string{
+	// XML/gzip compressed: config, PM, MR, datamodel
+	"config":       ".xml.gz", // 1 Vendor Configuration File
+	"log":          ".log.gz", // 2 Vendor Log File
+	"running-log":  ".log.gz", // 2 Vendor Log File
+	"log-ext":      ".log.gz", // 4 Vendor Log File
+	"security-log": ".log.gz", // 2 Vendor Security Log
+	"fault-log":    ".log.gz", // 2 Vendor Fault Log
+	"pm":           ".xml.gz", // 4 Vendor PM File  (3GPP PM XML)
+	"mr":           ".xml.gz", // 5 Vendor MR File
+	"pcap":         ".pcap",   // 9 Vendor PCAP
+	"oui-config":   ".xml.gz", // 10 <OUI> Configuration File
+	"datamodel":    ".xml.gz", // 11 OUI Parameter Model
+	"config-11":    ".xml.gz", // 11 Configuration File
+	"ssl-cert":     ".pem",    // Tr069 Ssl Cert File
+}
+
 // buildUploadURL constructs the full upload URL from base URL, path, fileType and device SN.
 // baseURL: e.g. "http://localhost:8080"
 // path: e.g. "/smallcell/FileUploadService"
@@ -106,13 +125,19 @@ func buildUploadURL(baseURL, path, alias, deviceSN string) string {
 	// Determine query param code
 	code := uploadQueryParam[alias]
 	if code == "" {
-		// Fallback: extract leading digits from the resolved FileType
+		// Fallback: use alias directly
 		code = alias
 	}
 
-	// Generate filename: {sn}_{timestamp}.dat
+	// Determine file suffix based on alias; default to .bin for unknown types
+	suffix := uploadFileSuffix[alias]
+	if suffix == "" {
+		suffix = ".bin"
+	}
+
+	// Generate filename: {sn}_{timestamp}{suffix}
 	timestamp := time.Now().Format("20060102_150405")
-	filename := fmt.Sprintf("%s_%s.xml.gz", deviceSN, timestamp)
+	filename := fmt.Sprintf("%s_%s%s", deviceSN, timestamp, suffix)
 
 	return fmt.Sprintf("%s%s?fileType=%s&filename=%s",
 		strings.TrimRight(baseURL, "/"), path, code, filename)
