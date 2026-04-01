@@ -244,18 +244,6 @@ const MOCK_MENUS: MenuItem[] = [
   },
 ];
 
-// 获取所有菜单ID（用于展开全部）
-const getAllMenuIds = (menus: MenuItem[]): string[] => {
-  const ids: string[] = [];
-  menus.forEach((menu) => {
-    if (menu.children && menu.children.length > 0) {
-      ids.push(menu.id);
-      ids.push(...getAllMenuIds(menu.children));
-    }
-  });
-  return ids;
-};
-
 export default function MenuManagement() {
   const t = useT();
   const { modal, message } = App.useApp();
@@ -297,16 +285,6 @@ export default function MenuManagement() {
       }
       return newSet;
     });
-  }, []);
-
-  // 展开全部
-  const expandAll = useCallback(() => {
-    setExpandedKeys(new Set(getAllMenuIds(menus)));
-  }, [menus]);
-
-  // 收起全部
-  const collapseAll = useCallback(() => {
-    setExpandedKeys(new Set());
   }, []);
 
   // 处理删除
@@ -464,34 +442,29 @@ export default function MenuManagement() {
       dataIndex: 'id',
       width: 120,
       fixed: 'left',
-      render: (_, record) => {
-        const canDelete = record.type === 'button' || !record.hasChildren;
-        return (
-          <Space size={4}>
-            <Button
-              size="small"
-              type="link"
-              icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
-              style={{ padding: '0 4px' }}
-            >
-              编辑
-            </Button>
-            {canDelete && (
-              <Button
-                size="small"
-                type="link"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleDelete(record)}
-                style={{ padding: '0 4px' }}
-              >
-                删除
-              </Button>
-            )}
-          </Space>
-        );
-      },
+      render: (_, record) => (
+        <Space size={4}>
+          <Button
+            size="small"
+            type="link"
+            icon={<EditOutlined />}
+            onClick={() => handleEdit(record)}
+            style={{ padding: '0 4px' }}
+          >
+            编辑
+          </Button>
+          <Button
+            size="small"
+            type="link"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record)}
+            style={{ padding: '0 4px' }}
+          >
+            删除
+          </Button>
+        </Space>
+      ),
     },
     {
       key: 'name',
@@ -517,7 +490,6 @@ export default function MenuManagement() {
                   display: 'inline-flex',
                   alignItems: 'center',
                   color: 'var(--color-text-secondary)',
-                  transition: 'transform 0.2s',
                 }}
               >
                 {isExpanded ? <DownOutlined /> : <RightOutlined />}
@@ -624,15 +596,7 @@ export default function MenuManagement() {
   ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown, getSiblingIds]);
 
   return (
-    <ListPageLayout
-      title="菜单管理"
-      extra={
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button onClick={expandAll}>展开全部</Button>
-          <Button onClick={collapseAll}>收起全部</Button>
-        </div>
-      }
-    >
+    <ListPageLayout title="菜单管理">
       <DataTable
         tableId="menu-management-list"
         columns={columns}
