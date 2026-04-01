@@ -368,6 +368,9 @@ export const deviceApi = {
       parent_id: string | null;
       device_count: number;
       description: string;
+      built_in: number;
+      network_type?: string;
+      product_type?: string;
     }>>('/groups');
     return (data.items || []).map((g) => ({
       id: g.id,
@@ -375,6 +378,9 @@ export const deviceApi = {
       parentId: g.parent_id,
       deviceCount: g.device_count,
       description: g.description,
+      builtIn: g.built_in,
+      networkType: g.network_type,
+      productType: g.product_type,
     }));
   },
 

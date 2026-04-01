@@ -33,7 +33,7 @@ const generateAllPermissions = (): string[] => {
     { key: 'software', children: ['version', 'upgradePlan', 'activation', 'firmware'] },
     { key: 'file', children: ['configRetrieval', 'configDistribution', 'logRetrieval', 'perfRetrieval', 'mrRetrieval', 'userFiles', 'deviceFiles'] },
     { key: 'log', children: ['device', 'exception', 'event', 'operation', 'system', 'config'] },
-    { key: 'system', children: ['deviceClass', 'users', 'groups', 'roles', 'operationLog', 'config', 'dataDict', 'notifications'] },
+    { key: 'system', children: ['deviceClass', 'users', 'groups', 'roles', 'operationLog', 'config', 'dataDict', 'menus'] },
     { key: 'report', children: ['lteStandard', 'station', 'historicalKpi', 'pollStats'] },
     { key: 'ops', children: ['templates', 'commands', 'tasks', 'networkDiagnosis', 'downloads'] },
   ];
@@ -56,7 +56,7 @@ const generateReadPermissions = (moduleKeys: string[]): string[] => {
     { key: 'software', children: ['version', 'upgradePlan', 'activation', 'firmware'] },
     { key: 'file', children: ['configRetrieval', 'configDistribution', 'logRetrieval', 'perfRetrieval', 'mrRetrieval', 'userFiles', 'deviceFiles'] },
     { key: 'log', children: ['device', 'exception', 'event', 'operation', 'system', 'config'] },
-    { key: 'system', children: ['deviceClass', 'users', 'groups', 'roles', 'operationLog', 'config', 'dataDict', 'notifications'] },
+    { key: 'system', children: ['deviceClass', 'users', 'groups', 'roles', 'operationLog', 'config', 'dataDict', 'menus'] },
     { key: 'report', children: ['lteStandard', 'station', 'historicalKpi', 'pollStats'] },
     { key: 'ops', children: ['templates', 'commands', 'tasks', 'networkDiagnosis', 'downloads'] },
   ];

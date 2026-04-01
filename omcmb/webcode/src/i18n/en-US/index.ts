@@ -260,10 +260,10 @@ const messages: Record<string, string> = {
   'nav.system.users':         'User Management',
   'nav.system.groups':        'Group Management',
   'nav.system.roles':         'Role',
+  'nav.system.menus':         'Menu Management',
   'nav.system.operationLog':  'Operation Log',
   'nav.system.config':        'System Config',
   'nav.system.dataDict':      'Data Dictionary',
-  'nav.system.notifications': 'Notification Settings',
   'nav.system.dashboard':     'System Dashboard',
 
   // -------------------------------------------------------------------------

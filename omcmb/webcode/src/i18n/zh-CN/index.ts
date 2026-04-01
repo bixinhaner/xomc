@@ -260,10 +260,10 @@ const messages: Record<string, string> = {
   'nav.system.users':         '用户管理',
   'nav.system.groups':        '用户组管理',
   'nav.system.roles':         '角色',
+  'nav.system.menus':         '菜单管理',
   'nav.system.operationLog':  '操作日志',
   'nav.system.config':        '系统配置',
   'nav.system.uiCustom':      'UI定制化',
-  'nav.system.notifications': '通知设置',
   'nav.system.dashboard':     '系统仪表板',
 
   // -------------------------------------------------------------------------

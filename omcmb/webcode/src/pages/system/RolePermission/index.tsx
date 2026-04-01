@@ -18,6 +18,8 @@ import {
   Divider,
   Row,
   Col,
+  Spin,
+  Empty,
 } from 'antd';
 import type { TreeDataNode, MenuProps, TreeProps } from 'antd';
 import {
@@ -160,10 +162,10 @@ const PERMISSION_MODULES: PermissionModule[] = [
       { key: 'users', titleKey: 'nav.system.users' },
       { key: 'groups', titleKey: 'nav.system.groups' },
       { key: 'roles', titleKey: 'nav.system.roles' },
+      { key: 'menus', titleKey: 'nav.system.menus' },
       { key: 'operationLog', titleKey: 'nav.system.operationLog' },
       { key: 'config', titleKey: 'nav.system.config' },
       { key: 'dataDict', titleKey: 'nav.system.dataDict' },
-      { key: 'notifications', titleKey: 'nav.system.notifications' },
     ],
   },
   {
@@ -297,7 +299,7 @@ export default function RoleManagement() {
     pageSize,
   });
 
-  const { data: allDeviceGroups } = useAllDeviceGroups();
+  const { data: allDeviceGroups, isLoading: isLoadingDeviceGroups } = useAllDeviceGroups();
 
   // 设备组树形数据（一级+二级节点，支持筛选）
   const deviceGroupTreeData = useMemo(
@@ -924,16 +926,24 @@ export default function RoleManagement() {
             </div>
             {/* 树形选择区域 */}
             <div style={{ padding: 8, maxHeight: 280, overflow: 'auto' }}>
-              <Tree
-                checkable
-                checkedKeys={selectedDeviceGroupIds}
-                treeData={deviceGroupTreeData}
-                defaultExpandAll
-                onCheck={(checked) => {
-                  setSelectedDeviceGroupIds(checked as string[]);
-                }}
-                selectable={false}
-              />
+              {isLoadingDeviceGroups ? (
+                <div style={{ textAlign: 'center', padding: 24 }}>
+                  <Spin />
+                </div>
+              ) : deviceGroupTreeData.length === 0 ? (
+                <Empty description="暂无设备组数据" />
+              ) : (
+                <Tree
+                  checkable
+                  checkedKeys={selectedDeviceGroupIds}
+                  treeData={deviceGroupTreeData}
+                  defaultExpandAll
+                  onCheck={(checked) => {
+                    setSelectedDeviceGroupIds(checked as string[]);
+                  }}
+                  selectable={false}
+                />
+              )}
             </div>
           </div>
         )}

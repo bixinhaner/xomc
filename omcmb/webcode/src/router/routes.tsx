@@ -115,7 +115,7 @@ const RolePermission     = React.lazy(() => import('@/pages/system/RolePermissio
 const SysOperationLog    = React.lazy(() => import('@/pages/system/OperationLog'));
 const SystemConfig       = React.lazy(() => import('@/pages/system/SystemConfig'));
 const UICustomization    = React.lazy(() => import('@/pages/system/UICustomization'));
-const NotificationSettings = React.lazy(() => import('@/pages/system/NotificationSettings'));
+const MenuManagement     = React.lazy(() => import('@/pages/system/MenuManagement'));
 const SystemDashboard    = React.lazy(() => import('@/pages/system/SystemDashboard'));
 
 // Report Management
@@ -283,7 +283,7 @@ export const routes: RouteObject[] = [
       { path: 'system/operation-log',  element: withSuspense(SysOperationLog) },
       { path: 'system/config',         element: withSuspense(SystemConfig) },
       { path: 'system/ui-custom',      element: withSuspense(UICustomization) },
-      { path: 'system/notifications',  element: withSuspense(NotificationSettings) },
+      { path: 'system/menus',          element: withSuspense(MenuManagement) },
       { path: 'system/dashboard',      element: withSuspense(SystemDashboard) },
 
       // Report Management
