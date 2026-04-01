@@ -8,16 +8,15 @@ import {
   Input,
   InputNumber,
   Select,
-  Space,
   Dropdown,
-  Switch,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   MoreOutlined,
+  RightOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -176,16 +175,16 @@ const MOCK_MENUS: MenuItem[] = [
   },
 ];
 
-// 将树形数据扁平化为表格数据
-const flattenMenus = (menus: MenuItem[], level = 0): (MenuItem & { level: number })[] => {
-  const result: (MenuItem & { level: number })[] = [];
+// 获取所有菜单ID（用于展开全部）
+const getAllMenuIds = (menus: MenuItem[]): string[] => {
+  const ids: string[] = [];
   menus.forEach((menu) => {
-    result.push({ ...menu, level });
     if (menu.children && menu.children.length > 0) {
-      result.push(...flattenMenus(menu.children, level + 1));
+      ids.push(menu.id);
+      ids.push(...getAllMenuIds(menu.children));
     }
   });
-  return result;
+  return ids;
 };
 
 export default function MenuManagement() {
@@ -196,9 +195,51 @@ export default function MenuManagement() {
   const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
   const [form] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  // 展开/收起状态
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
-  // 扁平化后的菜单数据
-  const flatMenus = useMemo(() => flattenMenus(menus), [menus]);
+  // 根据展开状态扁平化菜单数据
+  const flatMenus = useMemo(() => {
+    const result: (MenuItem & { level: number; hasChildren: boolean })[] = [];
+
+    const flatten = (items: MenuItem[], level: number) => {
+      items.forEach((item) => {
+        const hasChildren = item.children && item.children.length > 0;
+        result.push({ ...item, level, hasChildren: hasChildren || false });
+
+        // 只有展开时才显示子菜单
+        if (hasChildren && expandedKeys.has(item.id)) {
+          flatten(item.children!, level + 1);
+        }
+      });
+    };
+
+    flatten(menus, 0);
+    return result;
+  }, [menus, expandedKeys]);
+
+  // 切换展开/收起
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedKeys((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // 展开全部
+  const expandAll = useCallback(() => {
+    setExpandedKeys(new Set(getAllMenuIds(menus)));
+  }, [menus]);
+
+  // 收起全部
+  const collapseAll = useCallback(() => {
+    setExpandedKeys(new Set());
+  }, []);
 
   // 处理删除
   const handleDelete = useCallback((menu: MenuItem) => {
@@ -271,7 +312,7 @@ export default function MenuManagement() {
   }, [form, selectedMenu, message, t]);
 
   // 表格列定义
-  const columns: DataTableColumn<MenuItem & { level: number }>[] = useMemo(() => [
+  const columns: DataTableColumn<MenuItem & { level: number; hasChildren: boolean }>[] = useMemo(() => [
     {
       key: 'actions',
       title: t('table.operation'),
@@ -288,7 +329,7 @@ export default function MenuManagement() {
           },
         ];
         // 按钮类型不能有子菜单，所以可以删除
-        if (record.type === 'button' || !record.children || record.children.length === 0) {
+        if (record.type === 'button' || !record.hasChildren) {
           items.push({
             key: 'delete',
             label: t('common.delete'),
@@ -299,7 +340,7 @@ export default function MenuManagement() {
         }
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
+            <Button size="small" type="text" icon={<MoreOutlined />} />
           </Dropdown>
         );
       },
@@ -308,13 +349,35 @@ export default function MenuManagement() {
       key: 'name',
       title: '菜单名称',
       dataIndex: 'name',
-      width: 200,
+      width: 240,
       render: (val, record) => {
         const indent = record.level * 24;
+        const isExpanded = expandedKeys.has(record.id);
+
         return (
-          <span style={{ paddingLeft: indent }}>
-            {record.level > 0 && '└ '}
-            {String(val)}
+          <span style={{ paddingLeft: indent, display: 'flex', alignItems: 'center' }}>
+            {/* 展开/收起箭头 */}
+            {record.hasChildren ? (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpand(record.id);
+                }}
+                style={{
+                  cursor: 'pointer',
+                  marginRight: 4,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  color: 'var(--color-text-secondary)',
+                  transition: 'transform 0.2s',
+                }}
+              >
+                {isExpanded ? <DownOutlined /> : <RightOutlined />}
+              </span>
+            ) : (
+              <span style={{ width: 16, marginRight: 4 }} />
+            )}
+            <span>{String(val)}</span>
           </span>
         );
       },
@@ -368,10 +431,18 @@ export default function MenuManagement() {
         </Tag>
       ),
     },
-  ], [t, handleEdit, handleDelete]);
+  ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand]);
 
   return (
-    <ListPageLayout title="菜单管理">
+    <ListPageLayout
+      title="菜单管理"
+      extra={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button onClick={expandAll}>展开全部</Button>
+          <Button onClick={collapseAll}>收起全部</Button>
+        </div>
+      }
+    >
       <DataTable
         tableId="menu-management-list"
         columns={columns}
