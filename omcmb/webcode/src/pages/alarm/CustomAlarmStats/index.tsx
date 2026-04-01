@@ -975,8 +975,8 @@ export default function CustomAlarmStats() {
       dataIndex: 'alarmType',
       width: 100,
       render: () => (
-        <Tag color={isHistorical ? 'default' : 'red'}>
-          {isHistorical ? '历史告警' : '活动告警'}
+        <Tag color="red">
+          活动告警
         </Tag>
       ),
     },
@@ -1025,21 +1025,19 @@ export default function CustomAlarmStats() {
       width: 100,
       ellipsis: true,
     },
-  ], [t, handleShowDetail, isHistorical]);
+  ], [t, handleShowDetail]);
 
   const batchActions = useMemo((): BatchAction[] => {
     const actions: BatchAction[] = [];
-    if (!isHistorical) {
-      actions.push(
-        { key: 'batch-ack', label: t('alarm.acknowledge'), icon: <CheckOutlined />, onClick: (keys) => handleAcknowledge(keys as string[]) },
-        { key: 'batch-unack', label: t('alarm.unacknowledge'), icon: <MinusCircleOutlined />, onClick: (keys) => handleUnacknowledge(keys as string[]) },
-        { key: 'batch-clear', label: t('alarm.clear'), icon: <ClearOutlined />, danger: true, onClick: (keys) => handleClear(keys as string[]) },
-        { key: 'batch-read', label: t('alarm.markRead'), icon: <EyeOutlined />, onClick: (keys) => handleMarkRead(keys as string[]) }
-      );
-    }
+    actions.push(
+      { key: 'batch-ack', label: t('alarm.acknowledge'), icon: <CheckOutlined />, onClick: (keys) => handleAcknowledge(keys as string[]) },
+      { key: 'batch-unack', label: t('alarm.unacknowledge'), icon: <MinusCircleOutlined />, onClick: (keys) => handleUnacknowledge(keys as string[]) },
+      { key: 'batch-clear', label: t('alarm.clear'), icon: <ClearOutlined />, danger: true, onClick: (keys) => handleClear(keys as string[]) },
+      { key: 'batch-read', label: t('alarm.markRead'), icon: <EyeOutlined />, onClick: (keys) => handleMarkRead(keys as string[]) }
+    );
     actions.push({ key: 'batch-delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: (keys) => handleDelete(keys as string[]) });
     return actions;
-  }, [isHistorical, handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, handleDelete, t]);
+  }, [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, handleDelete, t]);
 
   // 左侧树面板
   const treePanel = (
