@@ -380,17 +380,6 @@ export default function CustomAlarmStats() {
     { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholderNew') },
     { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
     {
-      name: 'severity',
-      label: t('alarm.severity'),
-      type: 'multi-select',
-      options: [
-        { label: t('alarm.severity.critical'), value: 'critical' },
-        { label: t('alarm.severity.major'), value: 'major' },
-        { label: t('alarm.severity.minor'), value: 'minor' },
-        { label: t('alarm.severity.warning'), value: 'warning' },
-      ],
-    },
-    {
       name: 'eventType',
       label: t('alarm.eventType'),
       type: 'select',
@@ -452,17 +441,21 @@ export default function CustomAlarmStats() {
     [filterParams, currentPage, pageSize, selectedGroupId, groupRegion]
   );
 
-  // 根据分组类型使用不同的 hook
-  const isHistorical = selectedGroup?.alarmType === 'historical';
-  const currentAlarmsQuery = useCurrentAlarms(!isHistorical ? queryParams : ({} as Parameters<typeof useCurrentAlarms>[0]));
-  const historicalAlarmsQuery = useHistoricalAlarms(isHistorical ? queryParams : ({} as Parameters<typeof useHistoricalAlarms>[0]));
+  // 同时获取活动告警和历史告警
+  const currentAlarmsQuery = useCurrentAlarms(queryParams);
+  const historicalAlarmsQuery = useHistoricalAlarms(queryParams);
 
-  const activeResult = !isHistorical ? currentAlarmsQuery : { data: undefined, isLoading: false, refetch: () => Promise.resolve() };
-  const historicalResult = isHistorical ? historicalAlarmsQuery : { data: undefined, isLoading: false, refetch: () => Promise.resolve() };
+  const isLoading = currentAlarmsQuery.isLoading || historicalAlarmsQuery.isLoading;
+  const data = currentAlarmsQuery.data;
+  const refetch = currentAlarmsQuery.refetch;
 
-  const isLoading = activeResult.isLoading || historicalResult.isLoading;
-  const data = !isHistorical ? activeResult.data : historicalResult.data;
-  const refetch = !isHistorical ? activeResult.refetch : historicalResult.refetch;
+  // 活动告警数据
+  const activeAlarms: Alarm[] = currentAlarmsQuery.data?.items ?? [];
+  const activeTotal = currentAlarmsQuery.data?.total ?? 0;
+
+  // 历史告警数据
+  const historicalAlarms: Alarm[] = historicalAlarmsQuery.data?.items ?? [];
+  const historicalTotal = historicalAlarmsQuery.data?.total ?? 0;
 
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
@@ -1156,9 +1149,6 @@ export default function CustomAlarmStats() {
         <Space>
           <FolderOutlined style={{ color: '#fa8c16' }} />
           <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || '自定义告警'}</Text>
-          <Tag color={isHistorical ? 'default' : 'red'}>
-            {isHistorical ? <><ClockCircleOutlined /> 历史</> : <><AlertOutlined /> 活动</>}
-          </Tag>
         </Space>
         <Space>
           <Button icon={<ExportOutlined />} onClick={handleExport}>
@@ -1171,10 +1161,18 @@ export default function CustomAlarmStats() {
       <Card size="small" bordered styles={{ body: { padding: '12px 16px' } }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <StatItem
-            label="总数"
-            value={realStats.total}
-            active={activeQuickFilter === 'all'}
-            onClick={() => handleQuickFilter('all')}
+            label="活动告警"
+            value={activeTotal}
+            color="#E53935"
+            active={activeQuickFilter === 'active'}
+            onClick={() => handleQuickFilter('active')}
+          />
+          <StatItem
+            label="历史告警"
+            value={historicalTotal}
+            color="#1890ff"
+            active={activeQuickFilter === 'historical'}
+            onClick={() => handleQuickFilter('historical')}
           />
           <StatItem
             label="严重"
