@@ -84,7 +84,7 @@ type svcMockDeviceRepo struct {
 	getBySerialNumberFn func(ctx context.Context, sn string) (*model.Device, error)
 }
 
-func (m *svcMockDeviceRepo) Create(_ context.Context, _ *model.Device) error  { return nil }
+func (m *svcMockDeviceRepo) Create(_ context.Context, _ *model.Device) error { return nil }
 func (m *svcMockDeviceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error) {
 	if m.getByIDFn != nil {
 		return m.getByIDFn(ctx, id)
@@ -97,8 +97,8 @@ func (m *svcMockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*
 	}
 	return nil, commonerrors.ErrNotFound
 }
-func (m *svcMockDeviceRepo) Update(_ context.Context, _ *model.Device) error  { return nil }
-func (m *svcMockDeviceRepo) Delete(_ context.Context, _ uuid.UUID) error      { return nil }
+func (m *svcMockDeviceRepo) Update(_ context.Context, _ *model.Device) error { return nil }
+func (m *svcMockDeviceRepo) Delete(_ context.Context, _ uuid.UUID) error     { return nil }
 func (m *svcMockDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*model.ListResponse[model.Device], error) {
 	return &model.ListResponse[model.Device]{Items: []model.Device{}}, nil
 }
@@ -122,6 +122,9 @@ func (m *svcMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.
 }
 func (m *svcMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
+}
+func (m *svcMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 type svcMockCmdQueue struct {

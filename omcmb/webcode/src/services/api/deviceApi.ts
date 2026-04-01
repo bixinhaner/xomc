@@ -113,6 +113,13 @@ interface BackendDevice {
   ssl_cert_validity?: string;
 }
 
+export interface BatchOperationResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors?: Array<{ id: string; message: string }>;
+}
+
 interface BackendListResponse<T> {
   items: T[];
   total: number;
@@ -355,10 +362,14 @@ export const deviceApi = {
     return mapBackendDevice(updated);
   },
 
-  async delete(ids: string[]): Promise<void> {
-    for (const id of ids) {
-      await http.delete(`/devices/${id}`);
-    }
+  async delete(ids: string[]): Promise<BatchOperationResult> {
+    const { data } = await http.delete<BatchOperationResult>('/devices/batch', { data: { ids } });
+    return data;
+  },
+
+  async batchReboot(ids: string[]): Promise<BatchOperationResult> {
+    const { data } = await http.post<BatchOperationResult>('/devices/batch-reboot', { ids });
+    return data;
   },
 
   async getGroups(): Promise<DeviceGroup[]> {

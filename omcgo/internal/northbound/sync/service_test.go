@@ -22,7 +22,7 @@ type mockDeviceRepo struct {
 	devices []model.Device
 }
 
-func (m *mockDeviceRepo) Create(ctx context.Context, d *model.Device) error   { return nil }
+func (m *mockDeviceRepo) Create(ctx context.Context, d *model.Device) error { return nil }
 func (m *mockDeviceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error) {
 	return nil, nil
 }
@@ -55,12 +55,15 @@ func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.Geo
 func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
 }
+func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 type mockAlarmStore struct {
 	alarms []model.Alarm
 }
 
-func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error   { return nil }
+func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error { return nil }
 func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
 	return nil, nil
 }

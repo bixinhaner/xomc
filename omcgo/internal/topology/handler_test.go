@@ -249,9 +249,9 @@ func (m *mockTopoEdgeRepo) ListAll(_ context.Context) ([]TopoEdge, error) {
 // ---------------------------------------------------------------------------
 
 var (
-	errGroupNotFound   = fmt.Errorf("group not found")
+	errGroupNotFound    = fmt.Errorf("group not found")
 	errDeviceNotInGroup = fmt.Errorf("device not in group")
-	errSiteNotFound    = fmt.Errorf("site not found")
+	errSiteNotFound     = fmt.Errorf("site not found")
 )
 
 // ---------------------------------------------------------------------------
@@ -271,7 +271,7 @@ func newTestHandler() (*Handler, *mockDeviceGroupRepo, *mockSiteRepo, *mockTopoN
 	nodeRepo := newMockTopoNodeRepo()
 	edgeRepo := newMockTopoEdgeRepo()
 	logger := zap.NewNop()
-	service := NewDeviceGroupService(groupRepo, logger)
+	service := NewDeviceGroupService(groupRepo, nil, logger)
 	h := NewHandler(groupRepo, service, siteRepo, nodeRepo, edgeRepo)
 	return h, groupRepo, siteRepo, nodeRepo, edgeRepo
 }

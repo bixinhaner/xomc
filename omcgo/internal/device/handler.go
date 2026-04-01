@@ -43,6 +43,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.GET("/geo", h.ListGeo)           // Map device geo data
 		devices.GET("/geo/stats", h.GetGeoStats) // Map device statistics
 		devices.GET("/search", h.SearchDevices)  // Search devices for map
+		// Batch routes must be registered before /:id to avoid path conflicts
+		devices.DELETE("/batch", h.BatchDeleteDevices)
+		devices.POST("/batch-reboot", h.BatchRebootDevices)
 		devices.GET("/:id", h.GetDevice)
 		devices.GET("/:id/parameters", h.GetDeviceParameters)
 		devices.POST("", h.CreateDevice)
@@ -56,26 +59,26 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 // CreateDeviceRequest defines the request body for creating a device.
 type CreateDeviceRequest struct {
-	SerialNumber string           `json:"serial_number" binding:"required"`
-	OUI          string           `json:"oui" binding:"required"`
-	ProductClass string           `json:"product_class"`
-	Manufacturer string           `json:"manufacturer"`
-	ModelName    string           `json:"model_name"`
+	SerialNumber string            `json:"serial_number" binding:"required"`
+	OUI          string            `json:"oui" binding:"required"`
+	ProductClass string            `json:"product_class"`
+	Manufacturer string            `json:"manufacturer"`
+	ModelName    string            `json:"model_name"`
 	Carrier      model.CarrierCode `json:"carrier" binding:"required"`
 	Technology   model.Technology  `json:"technology" binding:"required"`
-	SiteName     string           `json:"site_name"`
-	SiteID       string           `json:"site_id"`
-	Latitude     float64          `json:"latitude"`
-	Longitude    float64          `json:"longitude"`
+	SiteName     string            `json:"site_name"`
+	SiteID       string            `json:"site_id"`
+	Latitude     float64           `json:"latitude"`
+	Longitude    float64           `json:"longitude"`
 }
 
 // UpdateDeviceRequest defines the request body for updating a device.
 type UpdateDeviceRequest struct {
-	SiteName  *string            `json:"site_name"`
-	SiteID    *string            `json:"site_id"`
-	ModelName *string            `json:"model_name"`
-	Latitude  *float64           `json:"latitude"`
-	Longitude *float64           `json:"longitude"`
+	SiteName  *string             `json:"site_name"`
+	SiteID    *string             `json:"site_id"`
+	ModelName *string             `json:"model_name"`
+	Latitude  *float64            `json:"latitude"`
+	Longitude *float64            `json:"longitude"`
 	Status    *model.DeviceStatus `json:"status"`
 }
 
@@ -490,4 +493,48 @@ func (h *Handler) SetRFSwitch(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "RF switch command queued"})
+}
+
+// BatchDeleteDevices handles DELETE /api/v1/devices/batch.
+// Accepts a JSON body with a list of device IDs and soft-deletes all of them.
+func (h *Handler) BatchDeleteDevices(c *gin.Context) {
+	var req BatchIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if len(req.IDs) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 100"})
+		return
+	}
+
+	result := h.service.BatchDeleteDevices(c.Request.Context(), req.IDs)
+	c.JSON(http.StatusOK, result)
+}
+
+// BatchRebootDevices handles POST /api/v1/devices/batch-reboot.
+// Accepts a JSON body with a list of device IDs and queues a Reboot command for each.
+func (h *Handler) BatchRebootDevices(c *gin.Context) {
+	var req BatchIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if len(req.IDs) > 50 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 50"})
+		return
+	}
+
+	result := h.service.BatchRebootDevices(c.Request.Context(), req.IDs)
+	c.JSON(http.StatusAccepted, result)
 }

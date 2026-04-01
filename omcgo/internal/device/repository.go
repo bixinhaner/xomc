@@ -54,17 +54,17 @@ type GeoBounds struct {
 
 // GeoDevice represents device data for map display.
 type GeoDevice struct {
-	ID           uuid.UUID         `json:"id"`
-	SerialNumber string            `json:"sn"`
-	Name         string            `json:"name"`
+	ID           uuid.UUID          `json:"id"`
+	SerialNumber string             `json:"sn"`
+	Name         string             `json:"name"`
 	Status       model.DeviceStatus `json:"status"`
-	Latitude     float64           `json:"latitude"`
-	Longitude    float64           `json:"longitude"`
-	GroupID      *uuid.UUID        `json:"group_id,omitempty"`
-	GroupName    string            `json:"group_name,omitempty"`
-	Address      string            `json:"address,omitempty"`
-	AlarmCount   int               `json:"alarm_count"`
-	Type         string            `json:"type,omitempty"`
+	Latitude     float64            `json:"latitude"`
+	Longitude    float64            `json:"longitude"`
+	GroupID      *uuid.UUID         `json:"group_id,omitempty"`
+	GroupName    string             `json:"group_name,omitempty"`
+	Address      string             `json:"address,omitempty"`
+	AlarmCount   int                `json:"alarm_count"`
+	Type         string             `json:"type,omitempty"`
 }
 
 // GeoStats represents device statistics for map display.
@@ -106,6 +106,9 @@ type DeviceWriter interface {
 	Create(ctx context.Context, device *model.Device) error
 	Update(ctx context.Context, device *model.Device) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	// BatchDelete soft-deletes multiple devices and removes their group memberships
+	// and device_info records within a transaction. Returns the number of deleted devices.
+	BatchDelete(ctx context.Context, ids []uuid.UUID) (int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
 	UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error
 }

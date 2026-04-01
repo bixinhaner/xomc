@@ -20,16 +20,16 @@ import (
 // ---------------------------------------------------------------------------
 
 type hbMockDeviceRepo struct {
-	createFn                  func(ctx context.Context, device *model.Device) error
-	getByIDFn                 func(ctx context.Context, id uuid.UUID) (*model.Device, error)
-	getBySerialNumberFn       func(ctx context.Context, sn string) (*model.Device, error)
-	updateFn                  func(ctx context.Context, device *model.Device) error
-	deleteFn                  func(ctx context.Context, id uuid.UUID) error
-	listFn                    func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
-	updateStatusFn            func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
-	updateLastInformFn        func(ctx context.Context, sn string, at time.Time, events []string) error
-	countByStatusFn           func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
-	listActiveByLastInformFn  func(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error)
+	createFn                 func(ctx context.Context, device *model.Device) error
+	getByIDFn                func(ctx context.Context, id uuid.UUID) (*model.Device, error)
+	getBySerialNumberFn      func(ctx context.Context, sn string) (*model.Device, error)
+	updateFn                 func(ctx context.Context, device *model.Device) error
+	deleteFn                 func(ctx context.Context, id uuid.UUID) error
+	listFn                   func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
+	updateStatusFn           func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
+	updateLastInformFn       func(ctx context.Context, sn string, at time.Time, events []string) error
+	countByStatusFn          func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
+	listActiveByLastInformFn func(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error)
 }
 
 func (m *hbMockDeviceRepo) Create(ctx context.Context, d *model.Device) error {
@@ -61,6 +61,10 @@ func (m *hbMockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 		return m.deleteFn(ctx, id)
 	}
 	return nil
+}
+
+func (m *hbMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 func (m *hbMockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
 	if m.listFn != nil {

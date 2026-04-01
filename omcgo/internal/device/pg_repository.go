@@ -181,6 +181,55 @@ func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// BatchDelete soft-deletes multiple devices and removes related device_group_members
+// and device_info records within a single transaction.
+// Returns the number of devices actually soft-deleted.
+func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Remove group memberships
+	_, err = tx.Exec(ctx,
+		`DELETE FROM device_group_members WHERE device_id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete device_group_members: %w", err)
+	}
+
+	// Remove device_info records
+	_, err = tx.Exec(ctx,
+		`DELETE FROM device_info WHERE device_id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete device_info: %w", err)
+	}
+
+	// Soft-delete devices
+	now := time.Now()
+	tag, err := tx.Exec(ctx,
+		`UPDATE devices SET deleted_at = $1 WHERE id = ANY($2) AND deleted_at IS NULL`,
+		now, ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("soft delete devices: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit batch delete: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
+}
+
 func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
 	builder := psql.Select(deviceColumns()...).From("devices").Where(notDeleted)
 	countBuilder := psql.Select("COUNT(*)").From("devices").Where(notDeleted)

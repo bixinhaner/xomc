@@ -135,7 +135,7 @@ func (m *mockGroupRepo) MoveGroupDevicesToDefault(_ context.Context, _ []uuid.UU
 // --- Helper ---
 
 func newTestGroupService(repo *mockGroupRepo) *DeviceGroupService {
-	return NewDeviceGroupService(repo, zap.NewNop())
+	return NewDeviceGroupService(repo, nil, zap.NewNop())
 }
 
 func ptrUUID(id uuid.UUID) *uuid.UUID {

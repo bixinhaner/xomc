@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
-	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,14 +26,14 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockTaskRepo struct {
-	CreateFn       func(ctx context.Context, task *ProvisioningTask) error
-	GetByIDFn      func(ctx context.Context, id uuid.UUID) (*ProvisioningTask, error)
+	CreateFn        func(ctx context.Context, task *ProvisioningTask) error
+	GetByIDFn       func(ctx context.Context, id uuid.UUID) (*ProvisioningTask, error)
 	GetByDeviceIDFn func(ctx context.Context, deviceID uuid.UUID) (*ProvisioningTask, error)
-	UpdateFn       func(ctx context.Context, task *ProvisioningTask) error
-	UpdateStatusFn func(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
-	ListFn         func(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
+	UpdateFn        func(ctx context.Context, task *ProvisioningTask) error
+	UpdateStatusFn  func(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
+	ListFn          func(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
 	CountByStatusFn func(ctx context.Context) (map[ProvisioningState]int64, error)
-	FailStaleFn    func(ctx context.Context, maxAge time.Duration) (int64, error)
+	FailStaleFn     func(ctx context.Context, maxAge time.Duration) (int64, error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *ProvisioningTask) error {
@@ -325,6 +325,9 @@ func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.Geo
 func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
 }
+func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 // ---------------------------------------------------------------------------
 // Tests: HandleRPCResult
@@ -470,8 +473,8 @@ func TestHandleRPCResult_StepFailureExhaustsRetries(t *testing.T) {
 			Status:      StateVerifying,
 			CurrentStep: 1,
 			TotalSteps:  3,
-			RetryCount:  2,  // already retried twice
-			MaxRetries:  3,  // max is 3 => next failure exhausts retries
+			RetryCount:  2, // already retried twice
+			MaxRetries:  3, // max is 3 => next failure exhausts retries
 		}, nil
 	}
 
@@ -766,22 +769,22 @@ func TestNewProvisioningTask(t *testing.T) {
 // fullEngineHarness builds an engine with real-enough collaborators for a
 // full HandleBootstrap success path. We use concrete mock repos all the way.
 type fullEngineHarness struct {
-	engine      *ProvisioningEngine
-	taskRepo    *mockTaskRepo
-	devRepo     *mockDeviceRepo
-	tmplRepo    *mockTemplateRepo
-	cmdQueue    *mockCommandQueue
-	eventBus    *mockEventBus
+	engine   *ProvisioningEngine
+	taskRepo *mockTaskRepo
+	devRepo  *mockDeviceRepo
+	tmplRepo *mockTemplateRepo
+	cmdQueue *mockCommandQueue
+	eventBus *mockEventBus
 }
 
 type mockTemplateRepo struct {
-	CreateFn          func(ctx context.Context, t *template.ConfigTemplate) error
-	GetByIDFn         func(ctx context.Context, id uuid.UUID) (*template.ConfigTemplate, error)
-	UpdateFn          func(ctx context.Context, t *template.ConfigTemplate) error
-	DeleteFn          func(ctx context.Context, id uuid.UUID) error
-	ListFn            func(ctx context.Context, filter template.ConfigTemplateFilter) (*model.ListResponse[template.ConfigTemplate], error)
+	CreateFn            func(ctx context.Context, t *template.ConfigTemplate) error
+	GetByIDFn           func(ctx context.Context, id uuid.UUID) (*template.ConfigTemplate, error)
+	UpdateFn            func(ctx context.Context, t *template.ConfigTemplate) error
+	DeleteFn            func(ctx context.Context, id uuid.UUID) error
+	ListFn              func(ctx context.Context, filter template.ConfigTemplateFilter) (*model.ListResponse[template.ConfigTemplate], error)
 	FindByCarrierTechFn func(ctx context.Context, carrier model.CarrierCode, tech model.Technology, templateType template.TemplateType) ([]template.ConfigTemplate, error)
-	FindBestMatchFn   func(ctx context.Context, carrier model.CarrierCode, tech model.Technology, productClass string, tmplType template.TemplateType) (*template.ConfigTemplate, error)
+	FindBestMatchFn     func(ctx context.Context, carrier model.CarrierCode, tech model.Technology, productClass string, tmplType template.TemplateType) (*template.ConfigTemplate, error)
 }
 
 func (m *mockTemplateRepo) Create(ctx context.Context, t *template.ConfigTemplate) error {

@@ -10,39 +10,39 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
-	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
-	"github.com/omcgo/omcgo/internal/core/middleware"
-	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
+	"github.com/omcgo/omcgo/internal/core/components"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/middleware"
+	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/dashboard"
+	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/filemanager"
 	"github.com/omcgo/omcgo/internal/interop"
 	"github.com/omcgo/omcgo/internal/interop/cases"
+	"github.com/omcgo/omcgo/internal/license"
+	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/mr"
 	"github.com/omcgo/omcgo/internal/nedirect"
 	"github.com/omcgo/omcgo/internal/northbound"
 	"github.com/omcgo/omcgo/internal/northbound/push"
 	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
-	"github.com/omcgo/omcgo/internal/admin"
-	"github.com/omcgo/omcgo/internal/backup"
-	"github.com/omcgo/omcgo/internal/dashboard"
-	"github.com/omcgo/omcgo/internal/device"
-	"github.com/omcgo/omcgo/internal/filemanager"
-	"github.com/omcgo/omcgo/internal/license"
-	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/ops"
-	"github.com/omcgo/omcgo/internal/report"
-	"github.com/omcgo/omcgo/internal/software"
-	"github.com/omcgo/omcgo/internal/syslog"
-	"github.com/omcgo/omcgo/internal/topology"
-	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/provision"
+	"github.com/omcgo/omcgo/internal/report"
+	"github.com/omcgo/omcgo/internal/software"
+	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/topology"
 )
 
 // Setup creates all repository/service/handler instances and registers routes.
@@ -196,7 +196,7 @@ func Setup(r *gin.Engine, deps *Deps) error {
 
 	// Topology module
 	groupRepo := topology.NewPgDeviceGroupRepository(pgPool)
-	groupService := topology.NewDeviceGroupService(groupRepo, logger)
+	groupService := topology.NewDeviceGroupService(groupRepo, pgPool, logger)
 	siteRepo := topology.NewPgSiteRepository(pgPool)
 	topoNodeRepo := topology.NewPgTopoNodeRepository(pgPool)
 	topoEdgeRepo := topology.NewPgTopoEdgeRepository(pgPool)

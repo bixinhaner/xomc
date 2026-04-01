@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -82,6 +82,9 @@ func (m *execDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.Geo
 }
 func (m *execDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
+}
+func (m *execDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 type execCmdQueue struct {

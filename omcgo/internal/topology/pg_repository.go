@@ -9,11 +9,12 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/global"
 )
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
@@ -392,35 +393,36 @@ func (r *PgDeviceGroupRepository) ListDeviceIDs(ctx context.Context, groupID uui
 	return ids, rows.Err()
 }
 
-// BatchAddDevices adds multiple devices to a group via UPSERT.
+// BatchAddDevices adds multiple devices to a group via a single multi-row UPSERT.
 func (r *PgDeviceGroupRepository) BatchAddDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error) {
 	if len(deviceIDs) == 0 {
 		return 0, nil
 	}
 
 	now := time.Now()
-	var totalAffected int64
-	batch := &pgx.Batch{}
-	const rawSQL = `
-		INSERT INTO device_group_members (group_id, device_id, added_at)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (device_id) DO UPDATE SET group_id = EXCLUDED.group_id, added_at = EXCLUDED.added_at`
+	// Build: INSERT INTO device_group_members (group_id, device_id, added_at)
+	// VALUES ($1,$2,$3),($1,$4,$3),... ON CONFLICT ... DO UPDATE ...
+	// $1=groupID, $2=now (shared), remaining args are device IDs.
+	// Layout: args[0]=groupID, args[1]=now, args[2..]=deviceIDs
+	args := make([]interface{}, 0, 2+len(deviceIDs))
+	args = append(args, groupID, now)
 
-	for _, did := range deviceIDs {
-		batch.Queue(rawSQL, groupID, did, now)
+	valueParts := make([]string, 0, len(deviceIDs))
+	for i, did := range deviceIDs {
+		placeholder := fmt.Sprintf("($1, $%d, $2)", i+3)
+		valueParts = append(valueParts, placeholder)
+		args = append(args, did)
 	}
 
-	br := r.pool.SendBatch(ctx, batch)
-	defer br.Close()
+	rawSQL := "INSERT INTO device_group_members (group_id, device_id, added_at) VALUES " +
+		joinStrings(valueParts, ", ") +
+		" ON CONFLICT (device_id) DO UPDATE SET group_id = EXCLUDED.group_id, added_at = EXCLUDED.added_at"
 
-	for range deviceIDs {
-		tag, err := br.Exec()
-		if err != nil {
-			return totalAffected, fmt.Errorf("batch add device: %w", err)
-		}
-		totalAffected += tag.RowsAffected()
+	tag, err := r.pool.Exec(ctx, rawSQL, args...)
+	if err != nil {
+		return 0, fmt.Errorf("batch add devices: %w", err)
 	}
-	return totalAffected, nil
+	return tag.RowsAffected(), nil
 }
 
 // BatchRemoveDevices removes multiple devices from a specific group.
@@ -453,6 +455,11 @@ func (r *PgDeviceGroupRepository) MoveDevices(ctx context.Context, deviceIDs []u
 
 // MoveGroupDevicesToDefault moves all devices from the given groups to the default L2 group.
 func (r *PgDeviceGroupRepository) MoveGroupDevicesToDefault(ctx context.Context, groupIDs []uuid.UUID) (int64, error) {
+	return moveGroupDevicesToDefaultTx(ctx, r.pool, groupIDs)
+}
+
+// moveGroupDevicesToDefaultTx executes MoveGroupDevicesToDefault on a generic executor (pool or tx).
+func moveGroupDevicesToDefaultTx(ctx context.Context, ex pgxExecutor, groupIDs []uuid.UUID) (int64, error) {
 	if len(groupIDs) == 0 {
 		return 0, nil
 	}
@@ -463,11 +470,116 @@ func (r *PgDeviceGroupRepository) MoveGroupDevicesToDefault(ctx context.Context,
 		SET group_id = $1, added_at = NOW()
 		WHERE group_id = ANY($2)`
 
-	tag, err := r.pool.Exec(ctx, rawSQL, defaultGroupID, groupIDs)
+	tag, err := ex.Exec(ctx, rawSQL, defaultGroupID, groupIDs)
 	if err != nil {
 		return 0, fmt.Errorf("move devices to default group: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// deleteGroupTx deletes a group row on a generic executor (pool or tx).
+func deleteGroupTx(ctx context.Context, ex pgxExecutor, id uuid.UUID) error {
+	query, args, err := psql.Delete("device_groups").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete group SQL: %w", err)
+	}
+
+	tag, err := ex.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete device group: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("delete group %s: %w", id, commonerrors.ErrNotFound)
+	}
+	return nil
+}
+
+// listChildIDsTx returns direct child IDs on a generic executor (pool or tx).
+func listChildIDsTx(ctx context.Context, ex pgxQuerier, parentID uuid.UUID) ([]uuid.UUID, error) {
+	query, args, err := psql.Select("id").
+		From("device_groups").
+		Where(sq.Eq{"parent_id": parentID}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list child IDs SQL: %w", err)
+	}
+
+	rows, err := ex.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list child IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan child ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// BatchSort updates sort_order for multiple groups in a single CASE WHEN SQL.
+func (r *PgDeviceGroupRepository) BatchSort(ctx context.Context, items []BatchSortItem) (int64, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	// Build: UPDATE device_groups SET sort_order = CASE WHEN id=$1 THEN $2 WHEN id=$3 THEN $4 ... END WHERE id IN ($1,$3,...)
+	args := make([]interface{}, 0, len(items)*2)
+	caseParts := make([]string, 0, len(items))
+	inParts := make([]string, 0, len(items))
+
+	for i, item := range items {
+		idxID := i*2 + 1
+		idxVal := i*2 + 2
+		caseParts = append(caseParts, fmt.Sprintf("WHEN id = $%d THEN $%d", idxID, idxVal))
+		inParts = append(inParts, fmt.Sprintf("$%d", idxID))
+		args = append(args, item.ID, item.SortOrder)
+	}
+
+	rawSQL := "UPDATE device_groups SET sort_order = CASE " +
+		joinStrings(caseParts, " ") +
+		" END WHERE id IN (" + joinStrings(inParts, ", ") + ")"
+
+	tag, err := r.pool.Exec(ctx, rawSQL, args...)
+	if err != nil {
+		return 0, fmt.Errorf("batch sort groups: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// pgxExecutor abstracts pgxpool.Pool and pgx.Tx for Exec/Query operations.
+type pgxExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// pgxQuerier abstracts pgxpool.Pool and pgx.Tx for Query operations.
+type pgxQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// joinStrings joins a slice of strings with sep (avoids importing strings package).
+func joinStrings(ss []string, sep string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	result := ss[0]
+	for _, s := range ss[1:] {
+		result += sep + s
+	}
+	return result
+}
+
+// BatchSortItem holds an ID and its new sort_order for batch updates.
+type BatchSortItem struct {
+	ID        uuid.UUID
+	SortOrder int
 }
 
 // --- Helpers ---

@@ -61,6 +61,10 @@ func (m *infMockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+func (m *infMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
 func (m *infMockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
 	if m.listFn != nil {
 		return m.listFn(ctx, filter)
@@ -165,20 +169,22 @@ type infMockCarrier struct {
 	ouiProducts  map[model.Technology][]carrier.OUIProductClassInfo
 }
 
-func (c *infMockCarrier) Code() model.CarrierCode                  { return c.code }
-func (c *infMockCarrier) Name() string                             { return string(c.code) }
-func (c *infMockCarrier) SupportedTechnologies() []model.Technology { return c.technologies }
+func (c *infMockCarrier) Code() model.CarrierCode                              { return c.code }
+func (c *infMockCarrier) Name() string                                         { return string(c.code) }
+func (c *infMockCarrier) SupportedTechnologies() []model.Technology            { return c.technologies }
 func (c *infMockCarrier) DefaultDataModelVersions(_ model.Technology) []string { return nil }
 func (c *infMockCarrier) KnownOUIProductClasses(tech model.Technology) []carrier.OUIProductClassInfo {
 	return c.ouiProducts[tech]
 }
-func (c *infMockCarrier) MapParameterToUnified(_ string) string                        { return "" }
-func (c *infMockCarrier) MapUnifiedToParameter(_ string) string                        { return "" }
-func (c *infMockCarrier) ProvisioningTemplates(_ model.Technology) []*carrier.ProvisionTemplate { return nil }
-func (c *infMockCarrier) KPIDefinitions(_ model.Technology) []*carrier.KPIDefinition   { return nil }
-func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity            { return 0 }
-func (c *infMockCarrier) ValidateParameter(_ string, _ string) error                   { return nil }
-func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string      { return nil }
+func (c *infMockCarrier) MapParameterToUnified(_ string) string { return "" }
+func (c *infMockCarrier) MapUnifiedToParameter(_ string) string { return "" }
+func (c *infMockCarrier) ProvisioningTemplates(_ model.Technology) []*carrier.ProvisionTemplate {
+	return nil
+}
+func (c *infMockCarrier) KPIDefinitions(_ model.Technology) []*carrier.KPIDefinition { return nil }
+func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity          { return 0 }
+func (c *infMockCarrier) ValidateParameter(_ string, _ string) error                 { return nil }
+func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string   { return nil }
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/alarm"
-	"github.com/omcgo/omcgo/internal/core/event"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 )
@@ -147,8 +147,8 @@ func (m *mockDeviceRepo) GetBySerialNumber(ctx context.Context, sn string) (*mod
 	}
 	return d, nil
 }
-func (m *mockDeviceRepo) Update(ctx context.Context, d *model.Device) error   { return nil }
-func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error      { return nil }
+func (m *mockDeviceRepo) Update(ctx context.Context, d *model.Device) error { return nil }
+func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error    { return nil }
 func (m *mockDeviceRepo) List(ctx context.Context, filter device.DeviceFilter) (*model.ListResponse[model.Device], error) {
 	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
 }
@@ -169,6 +169,9 @@ func (m *mockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([
 }
 func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
+}
+func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
@@ -220,7 +223,7 @@ func (m *mockParamRepo) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID,
 
 type mockAlarmStore struct{}
 
-func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error   { return nil }
+func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error { return nil }
 func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
 	return nil, nil
 }

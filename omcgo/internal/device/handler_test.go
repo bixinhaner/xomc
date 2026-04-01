@@ -69,6 +69,18 @@ func (m *fakeDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (m *fakeDeviceRepo) BatchDelete(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	var deleted int64
+	for _, id := range ids {
+		if d, ok := m.devices[id]; ok {
+			delete(m.bySN, d.SerialNumber)
+			delete(m.devices, id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 func (m *fakeDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
 	items := make([]model.Device, 0, len(m.devices))
 	for _, d := range m.devices {

@@ -75,6 +75,9 @@ func (m *mockDeviceRepo) ListGeo(_ context.Context, _ device.GeoDeviceFilter) ([
 func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.GeoStats, error) {
 	return &device.GeoStats{}, nil
 }
+func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
 func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
 }

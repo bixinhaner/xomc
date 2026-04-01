@@ -209,9 +209,7 @@ func (c *Client) doDigestRequest(ctx context.Context, url, wwwAuth string) error
 func parseDigestChallenge(header string) map[string]string {
 	params := make(map[string]string)
 	// Strip "Digest " prefix
-	if strings.HasPrefix(header, "Digest ") {
-		header = header[7:]
-	}
+	header = strings.TrimPrefix(header, "Digest ")
 
 	// Split by comma and parse key="value" pairs
 	for _, part := range strings.Split(header, ",") {

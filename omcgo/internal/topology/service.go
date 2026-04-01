@@ -5,21 +5,23 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/global"
 	"go.uber.org/zap"
 )
 
 // DeviceGroupService provides business logic for device group management.
 type DeviceGroupService struct {
 	repo   DeviceGroupRepository
+	pool   *pgxpool.Pool
 	logger *zap.Logger
 }
 
 // NewDeviceGroupService creates a new DeviceGroupService.
-func NewDeviceGroupService(repo DeviceGroupRepository, logger *zap.Logger) *DeviceGroupService {
-	return &DeviceGroupService{repo: repo, logger: logger}
+func NewDeviceGroupService(repo DeviceGroupRepository, pool *pgxpool.Pool, logger *zap.Logger) *DeviceGroupService {
+	return &DeviceGroupService{repo: repo, pool: pool, logger: logger}
 }
 
 // GetTree returns the full group tree with children nested under parents.
@@ -177,6 +179,7 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 }
 
 // DeleteGroup deletes a group, moving its devices to the default L2 group.
+// All steps run inside a single transaction when a pool is available.
 func (s *DeviceGroupService) DeleteGroup(ctx context.Context, id uuid.UUID) error {
 	group, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -187,9 +190,8 @@ func (s *DeviceGroupService) DeleteGroup(ctx context.Context, id uuid.UUID) erro
 		return commonerrors.NewBusinessError(global.ErrCodeGroupIsDefault, "cannot delete default group", nil)
 	}
 
+	// Collect IDs to delete (parent + all children for L1).
 	groupIDs := []uuid.UUID{id}
-
-	// If L1 group, collect all child IDs too.
 	if group.Level == 1 {
 		childIDs, err := s.repo.ListChildIDs(ctx, id)
 		if err != nil {
@@ -198,22 +200,62 @@ func (s *DeviceGroupService) DeleteGroup(ctx context.Context, id uuid.UUID) erro
 		groupIDs = append(groupIDs, childIDs...)
 	}
 
-	// Move all devices in these groups to default L2.
+	// When pool is available (production), use a transaction.
+	if s.pool != nil {
+		return s.deleteGroupTx(ctx, id, group, groupIDs)
+	}
+
+	// Fallback (e.g. unit tests with mock repo): non-transactional path.
 	if _, err := s.repo.MoveGroupDevicesToDefault(ctx, groupIDs); err != nil {
 		return fmt.Errorf("move devices to default: %w", err)
 	}
-
-	// Delete children first (for L1), then parent.
 	if group.Level == 1 {
 		childIDs, _ := s.repo.ListChildIDs(ctx, id)
 		for _, cid := range childIDs {
-			if err := s.repo.Delete(ctx, cid); err != nil {
-				s.logger.Warn("failed to delete child group", zap.String("child_id", cid.String()), zap.Error(err))
+			if delErr := s.repo.Delete(ctx, cid); delErr != nil {
+				s.logger.Warn("failed to delete child group", zap.String("child_id", cid.String()), zap.Error(delErr))
+			}
+		}
+	}
+	return s.repo.Delete(ctx, id)
+}
+
+// deleteGroupTx performs the delete group operation inside a pgx transaction.
+func (s *DeviceGroupService) deleteGroupTx(ctx context.Context, id uuid.UUID, group *DeviceGroup, groupIDs []uuid.UUID) (err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin delete group transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Step 1: Move all devices from these groups to the default group.
+	if _, err = moveGroupDevicesToDefaultTx(ctx, tx, groupIDs); err != nil {
+		return fmt.Errorf("move devices to default: %w", err)
+	}
+
+	// Step 2: Delete children first (for L1 groups).
+	if group.Level == 1 {
+		childIDs, _ := listChildIDsTx(ctx, tx, id)
+		for _, cid := range childIDs {
+			if delErr := deleteGroupTx(ctx, tx, cid); delErr != nil {
+				s.logger.Warn("failed to delete child group", zap.String("child_id", cid.String()), zap.Error(delErr))
 			}
 		}
 	}
 
-	return s.repo.Delete(ctx, id)
+	// Step 3: Delete the parent (or L2) group itself.
+	if err = deleteGroupTx(ctx, tx, id); err != nil {
+		return fmt.Errorf("delete group: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete group transaction: %w", err)
+	}
+	return nil
 }
 
 // CheckDelete returns the impact of deleting a group.
@@ -286,21 +328,44 @@ func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesReq
 	return s.repo.MoveDevices(ctx, deviceIDs, targetID)
 }
 
-// BatchSort updates sort orders for multiple groups.
+// BatchSort updates sort orders for multiple groups using a single CASE WHEN SQL.
 func (s *DeviceGroupService) BatchSort(ctx context.Context, items []SortItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	repo, ok := s.repo.(*PgDeviceGroupRepository)
+	if !ok {
+		// Fallback for non-PG implementations (e.g. tests with mock repos).
+		for _, item := range items {
+			id, err := uuid.Parse(item.ID)
+			if err != nil {
+				continue
+			}
+			group, err := s.repo.GetByID(ctx, id)
+			if err != nil {
+				continue
+			}
+			group.SortOrder = item.SortOrder
+			if err := s.repo.Update(ctx, group); err != nil {
+				s.logger.Warn("batch sort update failed", zap.String("group_id", id.String()), zap.Error(err))
+			}
+		}
+		return nil
+	}
+
+	batchItems := make([]BatchSortItem, 0, len(items))
 	for _, item := range items {
 		id, err := uuid.Parse(item.ID)
 		if err != nil {
+			s.logger.Warn("batch sort: invalid group_id", zap.String("id", item.ID), zap.Error(err))
 			continue
 		}
-		group, err := s.repo.GetByID(ctx, id)
-		if err != nil {
-			continue
-		}
-		group.SortOrder = item.SortOrder
-		if err := s.repo.Update(ctx, group); err != nil {
-			s.logger.Warn("batch sort update failed", zap.String("group_id", id.String()), zap.Error(err))
-		}
+		batchItems = append(batchItems, BatchSortItem{ID: id, SortOrder: item.SortOrder})
+	}
+
+	if _, err := repo.BatchSort(ctx, batchItems); err != nil {
+		return fmt.Errorf("batch sort groups: %w", err)
 	}
 	return nil
 }

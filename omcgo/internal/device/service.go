@@ -941,6 +941,67 @@ func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 	return s.deviceRepo.Delete(ctx, id)
 }
 
+// BatchDeleteDevices deletes multiple devices by their IDs.
+// Returns a BatchOperationResult summarising successes and failures.
+func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID) BatchOperationResult {
+	result := BatchOperationResult{Total: len(ids)}
+
+	deleted, err := s.deviceRepo.BatchDelete(ctx, ids)
+	if err != nil {
+		s.logger.Error("batch delete devices failed",
+			zap.Int("total", len(ids)),
+			zap.Error(err),
+		)
+		// All items failed
+		result.Failed = len(ids)
+		for _, id := range ids {
+			result.Errors = append(result.Errors, BatchItemError{
+				ID:      id.String(),
+				Message: err.Error(),
+			})
+		}
+		return result
+	}
+
+	result.Succeeded = int(deleted)
+	result.Failed = len(ids) - int(deleted)
+
+	s.logger.Info("batch delete devices",
+		zap.Int("total", len(ids)),
+		zap.Int64("deleted", deleted),
+	)
+	return result
+}
+
+// BatchRebootDevices queues a Reboot command for each device in the list.
+// Returns a BatchOperationResult summarising successes and failures.
+func (s *DeviceService) BatchRebootDevices(ctx context.Context, ids []uuid.UUID) BatchOperationResult {
+	result := BatchOperationResult{Total: len(ids)}
+
+	for _, id := range ids {
+		if err := s.RebootDevice(ctx, id); err != nil {
+			s.logger.Warn("batch reboot: reboot device failed",
+				zap.String("device_id", id.String()),
+				zap.Error(err),
+			)
+			result.Failed++
+			result.Errors = append(result.Errors, BatchItemError{
+				ID:      id.String(),
+				Message: err.Error(),
+			})
+		} else {
+			result.Succeeded++
+		}
+	}
+
+	s.logger.Info("batch reboot devices",
+		zap.Int("total", len(ids)),
+		zap.Int("succeeded", result.Succeeded),
+		zap.Int("failed", result.Failed),
+	)
+	return result
+}
+
 // ListGeo returns devices with geographic coordinates for map display.
 func (s *DeviceService) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	return s.deviceRepo.ListGeo(ctx, filter)

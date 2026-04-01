@@ -66,6 +66,10 @@ func (m *mockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
 	if m.listFn != nil {
 		return m.listFn(ctx, filter)
@@ -112,10 +116,10 @@ func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]Ge
 // ---------------------------------------------------------------------------
 
 type mockParamRepo struct {
-	batchUpsertFn  func(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error
-	getByDeviceFn  func(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error)
-	getByPathFn    func(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error)
-	deleteByDevFn  func(ctx context.Context, deviceID uuid.UUID) error
+	batchUpsertFn func(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error
+	getByDeviceFn func(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error)
+	getByPathFn   func(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error)
+	deleteByDevFn func(ctx context.Context, deviceID uuid.UUID) error
 }
 
 func (m *mockParamRepo) BatchUpsert(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error {
