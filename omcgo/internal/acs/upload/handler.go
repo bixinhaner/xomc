@@ -186,6 +186,8 @@ func normalizeFileType(raw string) tr069.FileType {
 		return tr069.FileTypeWeb
 	case "11", "PARAMETER MODEL":
 		return tr069.FileTypeDataModel
+	case "SSL":
+		return tr069.FileTypeSSLCert
 	default:
 		return tr069.FileTypeRunningLog
 	}

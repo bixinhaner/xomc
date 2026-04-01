@@ -33,6 +33,8 @@ func BucketAndCategory(ft tr069.FileType, buckets appconfig.BucketConfig) (bucke
 		return buckets.Firmware, "web"
 	case tr069.FileTypeDataModel:
 		return buckets.Exchange, "datamodel"
+	case tr069.FileTypeSSLCert:
+		return buckets.ConfigBackup, "ssl-cert"
 	default:
 		return buckets.Logs, "unknown"
 	}

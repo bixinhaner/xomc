@@ -53,15 +53,15 @@ var uploadFileTypeMap = map[string]string{
 
 	// 运营商/厂商扩展类型
 	"running-log":  "2 Vendor Log File",
-	"log-ext":      "4 Vendor Log File",       // 日志文件（扩展编号）
-	"security-log": "2 Vendor Security Log",    // 安全日志
-	"fault-log":    "2 Vendor Fault Log",       // 故障日志
-	"pm":           "4 Vendor PM File",         // 性能管理文件
-	"mr":           "5 Vendor MR File",         // 测量报告
-	"pcap":         "9 Vendor PCAP",            // 抓包文件
-	"datamodel":    "11 OUI Parameter Model",   // 数据模型文件
-	"config-11":    "11 Configuration File",    // 11 号配置文件
-	"ssl-cert":     "Tr069 Ssl Cert File",      // TR069 SSL 证书
+	"log-ext":      "4 Vendor Log File",      // 日志文件（扩展编号）
+	"security-log": "2 Vendor Security Log",  // 安全日志
+	"fault-log":    "2 Vendor Fault Log",     // 故障日志
+	"pm":           "4 Vendor PM File",       // 性能管理文件
+	"mr":           "5 Vendor MR File",       // 测量报告
+	"pcap":         "9 Vendor PCAP",          // 抓包文件
+	"datamodel":    "11 OUI Parameter Model", // 数据模型文件
+	"config-11":    "11 Configuration File",  // 11 号配置文件
+	"ssl-cert":     "Tr069 Ssl Cert File",    // TR069 SSL 证书
 }
 
 // uploadFileTypeCodeMap maps numeric codes to Upload FileType strings.
@@ -71,7 +71,7 @@ var uploadFileTypeCodeMap = map[string]string{
 	"4":  "4 Vendor PM File",
 	"5":  "5 Vendor MR File",
 	"9":  "9 Vendor PCAP",
-	"11": "11 OUI Parameter Model",
+	"11": "11 Configuration File",
 }
 
 // uploadQueryParam maps rpctool aliases to the short fileType code
@@ -79,19 +79,22 @@ var uploadFileTypeCodeMap = map[string]string{
 // This code is parsed by the upload handler's normalizeFileType() to determine
 // which MinIO bucket to store the uploaded file in.
 var uploadQueryParam = map[string]string{
-	"config":       "1",
-	"log":          "LOG",
-	"running-log":  "LOG",
-	"log-ext":      "LOG",
-	"security-log": "7",
-	"fault-log":    "8",
-	"pm":           "PM",
-	"mr":           "MR",
-	"pcap":         "9",
-	"oui-config":   "10",
-	"datamodel":    "11",
-	"config-11":    "11",
-	"ssl-cert":     "1",
+	// normalizeFileType() 使用 Download 编号体系：
+	// 1=Firmware, 2=Patch, 3=Config, 4=PM, 5=MR, 6=LOG, 7=SecurityLog,
+	// 8=FaultLog, 9=PCAP, 10=Web, 11=DataModel
+	"config":       "3",   // FileTypeConfig
+	"log":          "LOG", // FileTypeRunningLog
+	"running-log":  "LOG", // FileTypeRunningLog
+	"log-ext":      "LOG", // FileTypeRunningLog
+	"security-log": "7",   // FileTypeSecurityLog
+	"fault-log":    "8",   // FileTypeFaultLog
+	"pm":           "PM",  // FileTypePM
+	"mr":           "MR",  // FileTypeMR
+	"pcap":         "9",   // FileTypePCAP
+	"oui-config":   "10",  // FileTypeWeb
+	"datamodel":    "11",  // FileTypeDataModel
+	"config-11":    "11",  // FileTypeDataModel
+	"ssl-cert":     "SSL", // SSL 证书（需服务端 normalizeFileType 支持）
 }
 
 // buildUploadURL constructs the full upload URL from base URL, path, fileType and device SN.
@@ -109,7 +112,7 @@ func buildUploadURL(baseURL, path, alias, deviceSN string) string {
 
 	// Generate filename: {sn}_{timestamp}.dat
 	timestamp := time.Now().Format("20060102_150405")
-	filename := fmt.Sprintf("%s_%s.dat", deviceSN, timestamp)
+	filename := fmt.Sprintf("%s_%s.xml.gz", deviceSN, timestamp)
 
 	return fmt.Sprintf("%s%s?fileType=%s&filename=%s",
 		strings.TrimRight(baseURL, "/"), path, code, filename)
@@ -123,10 +126,10 @@ var downloadFileTypeMap = map[string]string{
 	"config":   "3 Vendor Configuration File",
 
 	// 厂商/运营商扩展类型
-	"script":  "101 Script File",
-	"startup":   "103 Base Station Startup File",
-	"license":   "License File",
-	"ssl-cert":  "Tr069 Ssl Cert File",
+	"script":   "101 Script File",
+	"startup":  "103 Base Station Startup File",
+	"license":  "License File",
+	"ssl-cert": "Tr069 Ssl Cert File",
 }
 
 // downloadFileTypeCodeMap maps numeric codes to Download FileType strings.
