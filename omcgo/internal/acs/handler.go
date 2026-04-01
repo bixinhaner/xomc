@@ -50,7 +50,7 @@ type connSessionEntry struct {
 
 // deviceSessionEntry 跟踪设备的活跃会话。
 // 用于检测和清理孤儿会话：当新 Inform 到达但前一个会话尚未完成时
-//（如 CPE 未响应 RPC、会话中途重启、或周期上报定时器触发），清理旧会话。
+// （如 CPE 未响应 RPC、会话中途重启、或周期上报定时器触发），清理旧会话。
 type deviceSessionEntry struct {
 	SessionID string
 	DeviceSN  string
@@ -69,8 +69,8 @@ type Handler struct {
 	admission               *AdmissionController
 	metrics                 *ACSMetrics
 	logger                  *zap.Logger
-	requestIDPrefix         string                  // 请求 ID 前缀，如 "acs"
-	enableTestTaskInjection bool                    // 启用随机测试任务注入（仅测试用）
+	requestIDPrefix         string                    // 请求 ID 前缀，如 "acs"
+	enableTestTaskInjection bool                      // 启用随机测试任务注入（仅测试用）
 	uploadConfig            *appconfig.UploadConfig   // 上传服务器配置，用于生成上传 URL
 	downloadConfig          *appconfig.DownloadConfig // 下载服务器配置，用于生成下载 URL
 	// maxRPCPerSession 限制每个 TR069 会话的 RPC 交互次数。
@@ -1150,7 +1150,7 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 }
 
 // handleAutonomousTransferComplete 处理 CPE 设备发送的 AutonomousTransferComplete 消息
-//（如 PM/MR 文件上传完成）。
+// （如 PM/MR 文件上传完成）。
 func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
 	// 记录完整的请求 XML
 	log.Debug("ACS received AutonomousTransferComplete request",
@@ -1569,14 +1569,14 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 
 	// 获取基础 URL，如需要则将 localhost 替换为请求的 host
 	baseURL := h.uploadConfig.BaseURL
-	if isLocalhost(baseURL) {
-		// 使用请求的 host 替代 localhost
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		baseURL = fmt.Sprintf("%s://%s", scheme, r.Host)
-	}
+	// if isLocalhost(baseURL) {
+	// 	// 使用请求的 host 替代 localhost
+	// 	scheme := "http"
+	// 	if r.TLS != nil {
+	// 		scheme = "https"
+	// 	}
+	// 	baseURL = fmt.Sprintf("%s://%s", scheme, r.Host)
+	// }
 
 	// 构建上传 URL
 	uploadURL := fmt.Sprintf("%s%s?fileType=PM&filename=%s",
