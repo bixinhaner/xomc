@@ -191,6 +191,7 @@ const PERMISSION_MODULES: PermissionModule[] = [
 
 // 基站制式选项
 const NETWORK_TYPE_OPTIONS = [
+  { label: '全部', value: '' },
   { label: 'eNB', value: 'eNB' },
   { label: 'gNB', value: 'gNB' },
   { label: 'GSM', value: 'GSM' },
