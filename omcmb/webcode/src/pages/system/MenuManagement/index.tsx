@@ -19,6 +19,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import styles from './index.module.css';
 
 // 菜单类型
 type MenuType = 'menu' | 'directory' | 'button';
@@ -355,58 +356,38 @@ export default function MenuManagement() {
     });
   }, [form, selectedMenu, message, t]);
 
-  // 上移排序
-  const handleMoveUp = useCallback((record: MenuItem & { level: number }) => {
-    // 在同一层级内上移
-    const moveUpInList = (items: MenuItem[], id: string): MenuItem[] => {
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].id === id && i > 0) {
-          // 交换位置
-          [items[i - 1], items[i]] = [items[i], items[i - 1]];
-          // 交换排序值
-          const tempSort = items[i - 1].sort;
-          items[i - 1].sort = items[i].sort;
-          items[i].sort = tempSort;
-          return [...items];
-        }
-      }
-      // 递归处理子菜单
+  // 排序值+1
+  const handleMoveDown = useCallback((record: MenuItem & { level: number }) => {
+    const updateSort = (items: MenuItem[], id: string): MenuItem[] => {
       return items.map((item) => {
+        if (item.id === id) {
+          return { ...item, sort: (item.sort || 0) + 1 };
+        }
         if (item.children) {
-          return { ...item, children: moveUpInList([...item.children], id) };
+          return { ...item, children: updateSort(item.children, id) };
         }
         return item;
       });
     };
 
-    setMenus((prev) => moveUpInList([...prev], record.id));
+    setMenus((prev) => updateSort(prev, record.id));
   }, []);
 
-  // 下移排序
-  const handleMoveDown = useCallback((record: MenuItem & { level: number }) => {
-    // 在同一层级内下移
-    const moveDownInList = (items: MenuItem[], id: string): MenuItem[] => {
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].id === id && i < items.length - 1) {
-          // 交换位置
-          [items[i], items[i + 1]] = [items[i + 1], items[i]];
-          // 交换排序值
-          const tempSort = items[i + 1].sort;
-          items[i + 1].sort = items[i].sort;
-          items[i].sort = tempSort;
-          return [...items];
-        }
-      }
-      // 递归处理子菜单
+  // 排序值-1
+  const handleMoveUp = useCallback((record: MenuItem & { level: number }) => {
+    const updateSort = (items: MenuItem[], id: string): MenuItem[] => {
       return items.map((item) => {
+        if (item.id === id) {
+          return { ...item, sort: Math.max(1, (item.sort || 1) - 1) };
+        }
         if (item.children) {
-          return { ...item, children: moveDownInList([...item.children], id) };
+          return { ...item, children: updateSort(item.children, id) };
         }
         return item;
       });
     };
 
-    setMenus((prev) => moveDownInList([...prev], record.id));
+    setMenus((prev) => updateSort(prev, record.id));
   }, []);
 
   // 获取同级菜单列表（用于判断是否可以上移/下移）
@@ -517,19 +498,15 @@ export default function MenuManagement() {
       key: 'sort',
       title: '排序',
       dataIndex: 'sort',
-      width: 100,
+      width: 120,
       render: (val, record) => {
-        const siblingIds = getSiblingIds(record.id);
-        const currentIndex = siblingIds.indexOf(record.id);
-        const canMoveUp = currentIndex > 0;
-        const canMoveDown = currentIndex < siblingIds.length - 1;
-
+        // 所有类型都可以点击排序箭头
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span
               style={{
                 display: 'inline-block',
-                width: 32,
+                width: 48,
                 height: 24,
                 lineHeight: '24px',
                 textAlign: 'center',
@@ -546,7 +523,6 @@ export default function MenuManagement() {
                 type="text"
                 icon={<UpOutlined />}
                 onClick={() => handleMoveUp(record)}
-                disabled={!canMoveUp}
                 style={{ height: 14, padding: 0, fontSize: 10 }}
               />
               <Button
@@ -554,7 +530,6 @@ export default function MenuManagement() {
                 type="text"
                 icon={<DownOutlined />}
                 onClick={() => handleMoveDown(record)}
-                disabled={!canMoveDown}
                 style={{ height: 14, padding: 0, fontSize: 10 }}
               />
             </div>
@@ -593,13 +568,15 @@ export default function MenuManagement() {
 
   return (
     <ListPageLayout title="菜单管理">
-      <DataTable
-        tableId="menu-management-list"
-        columns={columns}
-        dataSource={flatMenus}
-        rowKey="id"
-        scroll={{ x: 1000 }}
-      />
+      <div className={styles.menuTable}>
+        <DataTable
+          tableId="menu-management-list"
+          columns={columns}
+          dataSource={flatMenus}
+          rowKey="id"
+          scroll={{ x: 1000 }}
+        />
+      </div>
 
       {/* Edit Drawer */}
       <Drawer

@@ -1,0 +1,9 @@
+/* 隐藏 Ant Design 默认的展开/收起图标 */
+.menuTable :global(.ant-table-row-expand-icon) {
+  display: none !important;
+}
+
+/* 隐藏展开图标的占位空间 */
+.menuTable :global(.ant-table-row-expand-icon-cell) {
+  display: none !important;
+}
