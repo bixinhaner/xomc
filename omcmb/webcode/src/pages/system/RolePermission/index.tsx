@@ -668,20 +668,36 @@ export default function RoleManagement() {
       }
     };
 
+    // 获取当前选中的叶子节点数量（用于全选状态计算）
+    const checkedLeafCount = checkedPermissionKeys.filter((k) =>
+      allPermissionLeafKeys.includes(k as string)
+    ).length;
+
     // 是否全选
-    const isAllSelected = checkedPermissionKeys.length === allPermissionLeafKeys.length && allPermissionLeafKeys.length > 0;
+    const isAllSelected = checkedLeafCount === allPermissionLeafKeys.length && allPermissionLeafKeys.length > 0;
     // 是否部分选中
-    const isIndeterminate = checkedPermissionKeys.length > 0 && checkedPermissionKeys.length < allPermissionLeafKeys.length;
+    const isIndeterminate = checkedLeafCount > 0 && checkedLeafCount < allPermissionLeafKeys.length;
 
     // 处理树节点选中
     const handleCheck: TreeProps['onCheck'] = (checked) => {
-      setCheckedPermissionKeys(checked as React.Key[]);
+      // 当 checkStrictly 为 true 时，checked 是 { checked: [], halfChecked: [] } 对象
+      // 当 checkStrictly 为 false 时，checked 是数组
+      if (Array.isArray(checked)) {
+        setCheckedPermissionKeys(checked);
+      } else {
+        setCheckedPermissionKeys(checked.checked);
+      }
     };
 
     // 处理展开/折叠
     const handleExpand: TreeProps['onExpand'] = (expanded) => {
       setExpandedPermissionKeys(expanded as React.Key[]);
     };
+
+    // checkedKeys 格式：当 checkStrictly 为 true 时需要传对象，否则传数组
+    const treeCheckedKeys = permissionCheckStrictly
+      ? { checked: checkedPermissionKeys, halfChecked: [] }
+      : checkedPermissionKeys;
 
     return (
       <Form.Item label={t('role.menuPermission')} required={!readOnly}>
@@ -723,7 +739,7 @@ export default function RoleManagement() {
               <Tree
                 treeData={permissionTreeData}
                 expandedKeys={expandedPermissionKeys}
-                checkedKeys={checkedPermissionKeys}
+                checkedKeys={treeCheckedKeys}
                 selectable={false}
                 checkable
                 disabled
@@ -733,7 +749,7 @@ export default function RoleManagement() {
               <Tree
                 treeData={permissionTreeData}
                 expandedKeys={expandedPermissionKeys}
-                checkedKeys={checkedPermissionKeys}
+                checkedKeys={treeCheckedKeys}
                 selectable={false}
                 checkable
                 checkStrictly={permissionCheckStrictly}
