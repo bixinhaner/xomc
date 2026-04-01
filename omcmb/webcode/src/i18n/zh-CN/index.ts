@@ -837,6 +837,12 @@ const messages: Record<string, string> = {
   'role.readWrite':           '读写',
   'role.selectAllRead':       '全选只读',
   'role.selectAllWrite':      '全选读写',
+  // 操作权限
+  'role.operation.query':     '查询',
+  'role.operation.add':       '新增',
+  'role.operation.edit':      '修改',
+  'role.operation.delete':    '删除',
+  'role.operation.export':    '导出',
   'role.roleNamePlaceholder': '请输入角色名称',
   'role.descriptionPlaceholder': '请输入描述',
   'role.descriptionMaxLength': '描述最大500个字符',

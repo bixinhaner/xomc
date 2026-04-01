@@ -45,10 +45,17 @@ import type { Role } from '@/types/system';
 import type { DeviceGroup } from '@/types/device';
 import { useT } from '@/hooks/useT';
 
-// 权限子菜单项定义
+// 操作权限类型
+interface OperationItem {
+  key: string;
+  titleKey: string;
+}
+
+// 权限子菜单项定义（二级菜单 + 三级操作）
 interface PermissionSubItem {
   key: string;
   titleKey: string;
+  operations?: OperationItem[]; // 三级操作权限
 }
 
 // 权限模块定义（一级菜单 + 二级菜单）
@@ -57,6 +64,15 @@ interface PermissionModule {
   titleKey: string;
   children: PermissionSubItem[];
 }
+
+// 默认的操作权限（查询、新增、修改、删除、导出）
+const DEFAULT_OPERATIONS: OperationItem[] = [
+  { key: 'query', titleKey: 'role.operation.query' },
+  { key: 'add', titleKey: 'role.operation.add' },
+  { key: 'edit', titleKey: 'role.operation.edit' },
+  { key: 'delete', titleKey: 'role.operation.delete' },
+  { key: 'export', titleKey: 'role.operation.export' },
+];
 
 // 完整的权限模块结构（一级 + 二级菜单）
 const PERMISSION_MODULES: PermissionModule[] = [
@@ -328,8 +344,22 @@ export default function RoleManagement() {
     [data?.items]
   );
 
-  // 获取所有权限项的 key（格式：module.subItem）- 仅叶子节点
+  // 获取所有权限项的 key（格式：module.subItem.operation）- 仅叶子节点（三级操作）
   const allPermissionLeafKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const module of PERMISSION_MODULES) {
+      for (const child of module.children) {
+        const operations = child.operations || DEFAULT_OPERATIONS;
+        for (const op of operations) {
+          keys.push(`${module.key}.${child.key}.${op.key}`);
+        }
+      }
+    }
+    return keys;
+  }, []);
+
+  // 获取所有二级菜单的 key（用于展开）
+  const allSecondLevelKeys = useMemo(() => {
     const keys: string[] = [];
     for (const module of PERMISSION_MODULES) {
       for (const child of module.children) {
@@ -344,7 +374,7 @@ export default function RoleManagement() {
     return PERMISSION_MODULES.map((m) => m.key);
   }, []);
 
-  // 构建菜单权限树形数据
+  // 构建菜单权限树形数据（三级结构）
   const permissionTreeData = useMemo((): TreeDataNode[] => {
     return PERMISSION_MODULES.map((module) => ({
       key: module.key,
@@ -352,7 +382,11 @@ export default function RoleManagement() {
       children: module.children.map((child) => ({
         key: `${module.key}.${child.key}`,
         title: t(child.titleKey),
-        isLeaf: true,
+        children: (child.operations || DEFAULT_OPERATIONS).map((op) => ({
+          key: `${module.key}.${child.key}.${op.key}`,
+          title: t(op.titleKey),
+          isLeaf: true,
+        })),
       })),
     }));
   }, [t]);
@@ -650,22 +684,31 @@ export default function RoleManagement() {
 
   // 渲染菜单权限配置（树形结构 - 按图片样式）
   const renderPermissionConfig = (readOnly = false) => {
-    // 展开/折叠所有
-    const handleToggleExpand = () => {
-      if (expandedPermissionKeys.length === allModuleKeys.length) {
-        setExpandedPermissionKeys([]);
+    // 是否全部展开（一级 + 二级都要展开）
+    const isAllExpanded = expandedPermissionKeys.length >= allModuleKeys.length + allSecondLevelKeys.length;
+
+    // 展开/折叠所有（复选框）
+    const handleExpandChange = (checked: boolean) => {
+      if (checked) {
+        // 展开所有一级和二级节点
+        setExpandedPermissionKeys([...allModuleKeys, ...allSecondLevelKeys]);
       } else {
-        setExpandedPermissionKeys(allModuleKeys);
+        setExpandedPermissionKeys([]);
       }
     };
 
-    // 全选/全不选
-    const handleSelectAll = (checked: boolean) => {
+    // 全选/全不选（复选框）
+    const handleSelectAllChange = (checked: boolean) => {
       if (checked) {
         setCheckedPermissionKeys(allPermissionLeafKeys);
       } else {
         setCheckedPermissionKeys([]);
       }
+    };
+
+    // 父子联动（复选框）- 勾选表示联动，不勾选表示不联动
+    const handleLinkageChange = (checked: boolean) => {
+      setPermissionCheckStrictly(!checked); // checkStrictly=false 表示联动
     };
 
     // 获取当前选中的叶子节点数量（用于全选状态计算）
@@ -714,20 +757,24 @@ export default function RoleManagement() {
               flexWrap: 'wrap',
             }}
           >
-            <Button size="small" onClick={handleToggleExpand} disabled={readOnly}>
-              {expandedPermissionKeys.length === allModuleKeys.length ? '折叠' : '展开'}
-            </Button>
+            <Checkbox
+              checked={isAllExpanded}
+              onChange={(e) => handleExpandChange(e.target.checked)}
+              disabled={readOnly}
+            >
+              展开/折叠
+            </Checkbox>
             <Checkbox
               checked={isAllSelected}
               indeterminate={isIndeterminate}
-              onChange={(e) => handleSelectAll(e.target.checked)}
+              onChange={(e) => handleSelectAllChange(e.target.checked)}
               disabled={readOnly}
             >
-              全选
+              全选/全不选
             </Checkbox>
             <Checkbox
               checked={!permissionCheckStrictly}
-              onChange={(e) => setPermissionCheckStrictly(!e.target.checked)}
+              onChange={(e) => handleLinkageChange(e.target.checked)}
               disabled={readOnly}
             >
               父子联动

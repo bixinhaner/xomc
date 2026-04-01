@@ -835,6 +835,12 @@ const messages: Record<string, string> = {
   'role.readWrite':           'Read Write',
   'role.selectAllRead':       'Select All Read',
   'role.selectAllWrite':      'Select All Write',
+  // Operation permissions
+  'role.operation.query':     'Query',
+  'role.operation.add':       'Add',
+  'role.operation.edit':      'Edit',
+  'role.operation.delete':    'Delete',
+  'role.operation.export':    'Export',
 
   // -------------------------------------------------------------------------
   // Log management
