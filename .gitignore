@@ -3,6 +3,9 @@
 Thumbs.db
 .idea/
 
+# Editor
+.vscode/
+
 # Build artifacts
 omcgo/bin/
 omcgo/app
