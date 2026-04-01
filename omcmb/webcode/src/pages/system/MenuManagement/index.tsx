@@ -15,6 +15,7 @@ import {
   DeleteOutlined,
   UpOutlined,
   DownOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
