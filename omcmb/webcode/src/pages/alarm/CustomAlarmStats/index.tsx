@@ -33,7 +33,6 @@ import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
 import AlarmDetail from '../AlarmDetail';
-import ExportModal, { type ExportParams } from '../CurrentAlarms/ExportModal';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
 
 const { Text } = Typography;
@@ -233,9 +232,6 @@ export default function CustomAlarmStats() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [exportMode, setExportMode] = useState<'all' | 'selected'>('all');
 
   // 左侧树状态
   const [groups, setGroups] = useState<CustomAlarmGroup[]>(DEFAULT_GROUPS);
@@ -828,20 +824,15 @@ export default function CustomAlarmStats() {
     message.success(t('common.markReadSuccess'));
   }, [refetch, t, message]);
 
-  // 导出处理 - 支持导出选中数据
-  const handleExport = useCallback(async (params: ExportParams) => {
-    setExportLoading(true);
+  // 导出处理 - 直接导出当前分组数据
+  const handleExport = useCallback(() => {
     try {
-      const exportData = exportMode === 'selected' ? selectedRowKeys : undefined;
-      console.log('Export params:', { ...params, mode: exportMode, selectedIds: exportData });
+      console.log('Export data for group:', selectedGroupId);
       void message.info(t('common.exportInProgress'));
-      setExportOpen(false);
     } catch {
       message.error(t('common.exportFailed'));
-    } finally {
-      setExportLoading(false);
     }
-  }, [exportMode, selectedRowKeys, message, t]);
+  }, [selectedGroupId, message, t]);
 
   const handleShowDetail = useCallback((alarm: Alarm) => {
     setDetailAlarm(alarm);
@@ -1100,7 +1091,7 @@ export default function CustomAlarmStats() {
           </Tag>
         </Space>
         <Space>
-          <Button icon={<ExportOutlined />} onClick={() => { setExportMode('all'); setExportOpen(true); }}>
+          <Button icon={<ExportOutlined />} onClick={handleExport}>
             导出
           </Button>
         </Space>
@@ -1212,8 +1203,6 @@ export default function CustomAlarmStats() {
       </TreeListPageLayout>
 
       <AlarmDetail alarm={detailAlarm} open={detailOpen} onClose={handleCloseDetail} />
-
-      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} onConfirm={handleExport} confirmLoading={exportLoading} />
 
       <ConfirmWithNoteModal
         open={ackModalOpen}
