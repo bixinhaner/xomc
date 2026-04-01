@@ -8,14 +8,12 @@ import {
   Input,
   InputNumber,
   Select,
-  Dropdown,
+  Space,
 } from 'antd';
-import type { MenuProps } from 'antd';
 import {
   EditOutlined,
   DeleteOutlined,
-  MoreOutlined,
-  RightOutlined,
+  UpOutlined,
   DownOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -380,37 +378,117 @@ export default function MenuManagement() {
     });
   }, [form, selectedMenu, message, t]);
 
+  // 上移排序
+  const handleMoveUp = useCallback((record: MenuItem & { level: number }) => {
+    // 在同一层级内上移
+    const moveUpInList = (items: MenuItem[], id: string): MenuItem[] => {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === id && i > 0) {
+          // 交换位置
+          [items[i - 1], items[i]] = [items[i], items[i - 1]];
+          // 交换排序值
+          const tempSort = items[i - 1].sort;
+          items[i - 1].sort = items[i].sort;
+          items[i].sort = tempSort;
+          return [...items];
+        }
+      }
+      // 递归处理子菜单
+      return items.map((item) => {
+        if (item.children) {
+          return { ...item, children: moveUpInList([...item.children], id) };
+        }
+        return item;
+      });
+    };
+
+    setMenus((prev) => moveUpInList([...prev], record.id));
+  }, []);
+
+  // 下移排序
+  const handleMoveDown = useCallback((record: MenuItem & { level: number }) => {
+    // 在同一层级内下移
+    const moveDownInList = (items: MenuItem[], id: string): MenuItem[] => {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === id && i < items.length - 1) {
+          // 交换位置
+          [items[i], items[i + 1]] = [items[i + 1], items[i]];
+          // 交换排序值
+          const tempSort = items[i + 1].sort;
+          items[i + 1].sort = items[i].sort;
+          items[i].sort = tempSort;
+          return [...items];
+        }
+      }
+      // 递归处理子菜单
+      return items.map((item) => {
+        if (item.children) {
+          return { ...item, children: moveDownInList([...item.children], id) };
+        }
+        return item;
+      });
+    };
+
+    setMenus((prev) => moveDownInList([...prev], record.id));
+  }, []);
+
+  // 获取同级菜单列表（用于判断是否可以上移/下移）
+  const getSiblingIds = useCallback((targetId: string): string[] => {
+    const findSiblings = (items: MenuItem[], parentId: string | null): string[] => {
+      for (const item of items) {
+        if (item.id === targetId) {
+          // 找到了，返回同级ID列表
+          if (parentId === null) {
+            return items.map((i) => i.id);
+          } else {
+            const parent = items.find((i) => i.id === parentId);
+            return parent?.children?.map((i) => i.id) || [];
+          }
+        }
+        if (item.children) {
+          const result = findSiblings(item.children, item.id);
+          if (result.length > 0) return result;
+        }
+      }
+      return [];
+    };
+    return findSiblings(menus, null);
+  }, [menus]);
+
   // 表格列定义
   const columns: DataTableColumn<MenuItem & { level: number; hasChildren: boolean }>[] = useMemo(() => [
     {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 100,
+      width: 120,
       fixed: 'left',
       render: (_, record) => {
-        const items: MenuProps['items'] = [
-          {
-            key: 'edit',
-            label: t('common.edit'),
-            icon: <EditOutlined />,
-            onClick: () => handleEdit(record),
-          },
-        ];
-        // 按钮类型不能有子菜单，所以可以删除
-        if (record.type === 'button' || !record.hasChildren) {
-          items.push({
-            key: 'delete',
-            label: t('common.delete'),
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: () => handleDelete(record),
-          });
-        }
+        const canDelete = record.type === 'button' || !record.hasChildren;
         return (
-          <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" type="text" icon={<MoreOutlined />} />
-          </Dropdown>
+          <Space size={4}>
+            <Button
+              size="small"
+              type="link"
+              icon={<EditOutlined />}
+              onClick={() => handleEdit(record)}
+              style={{ padding: '0 4px' }}
+            >
+              编辑
+            </Button>
+            {canDelete && (
+              <Button
+                size="small"
+                type="link"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleDelete(record)}
+                style={{ padding: '0 4px' }}
+              >
+                删除
+              </Button>
+            )}
+          </Space>
         );
       },
     },
@@ -470,8 +548,50 @@ export default function MenuManagement() {
       key: 'sort',
       title: '排序',
       dataIndex: 'sort',
-      width: 80,
-      render: (val) => <span>{val}</span>,
+      width: 100,
+      render: (val, record) => {
+        const siblingIds = getSiblingIds(record.id);
+        const currentIndex = siblingIds.indexOf(record.id);
+        const canMoveUp = currentIndex > 0;
+        const canMoveDown = currentIndex < siblingIds.length - 1;
+
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span
+              style={{
+                display: 'inline-block',
+                width: 32,
+                height: 24,
+                lineHeight: '24px',
+                textAlign: 'center',
+                border: '1px solid var(--color-border)',
+                borderRadius: 4,
+                fontSize: 12,
+              }}
+            >
+              {val}
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              <Button
+                size="small"
+                type="text"
+                icon={<UpOutlined />}
+                onClick={() => handleMoveUp(record)}
+                disabled={!canMoveUp}
+                style={{ height: 14, padding: 0, fontSize: 10 }}
+              />
+              <Button
+                size="small"
+                type="text"
+                icon={<DownOutlined />}
+                onClick={() => handleMoveDown(record)}
+                disabled={!canMoveDown}
+                style={{ height: 14, padding: 0, fontSize: 10 }}
+              />
+            </div>
+          </div>
+        );
+      },
     },
     {
       key: 'permissionKey',
@@ -500,7 +620,7 @@ export default function MenuManagement() {
         </Tag>
       ),
     },
-  ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand]);
+  ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown, getSiblingIds]);
 
   return (
     <ListPageLayout
