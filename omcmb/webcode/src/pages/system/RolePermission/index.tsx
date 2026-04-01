@@ -67,13 +67,14 @@ interface PermissionModule {
   children: PermissionSubItem[];
 }
 
-// 默认的操作权限（查询、新增、修改、删除、导出）
+// 默认的操作权限（查询、新增、修改、删除、导出、批量）
 const DEFAULT_OPERATIONS: OperationItem[] = [
   { key: 'query', titleKey: 'role.operation.query' },
   { key: 'add', titleKey: 'role.operation.add' },
   { key: 'edit', titleKey: 'role.operation.edit' },
   { key: 'delete', titleKey: 'role.operation.delete' },
   { key: 'export', titleKey: 'role.operation.export' },
+  { key: 'batch', titleKey: 'role.operation.batch' },
 ];
 
 // 完整的权限模块结构（一级 + 二级菜单）
@@ -237,21 +238,7 @@ const buildDeviceGroupTreeData = (
         .filter((child) => child.parentId === root.id)
         .map((child) => ({
           key: child.id,
-          title: (
-            <span>
-              {child.name}
-              {child.networkType && (
-                <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>
-                  {child.networkType}
-                </Tag>
-              )}
-              {child.productType && (
-                <Tag color="green" style={{ marginLeft: 4, fontSize: 10 }}>
-                  {child.productType}
-                </Tag>
-              )}
-            </span>
-          ),
+          title: child.name,
         }));
 
       // 如果没有子节点且不是自定义组，则不显示
@@ -515,7 +502,6 @@ export default function RoleManagement() {
       createRole.mutate(
         {
           roleName: vals.roleName as string,
-          batchOperation: vals.batchOperation ? 1 : 0,
           description: (vals.description as string) ?? '',
           permissions: permissionsToArray(checkedPermissionKeys),
           deviceGroupIds: selectedDeviceGroupIds,
@@ -557,7 +543,6 @@ export default function RoleManagement() {
           id: selectedRole.id,
           data: {
             roleName: vals.roleName as string,
-            batchOperation: vals.batchOperation ? 1 : 0,
             description: vals.description as string,
             permissions: permissionsToArray(checkedPermissionKeys),
             deviceGroupIds: selectedDeviceGroupIds,
@@ -603,7 +588,6 @@ export default function RoleManagement() {
                     setSelectedRole(role);
                     form.setFieldsValue({
                       roleName: role.roleName,
-                      batchOperation: role.batchOperation === 1,
                       description: role.description,
                     });
                     setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
@@ -621,7 +605,6 @@ export default function RoleManagement() {
                     setSelectedRole(role);
                     form.setFieldsValue({
                       roleName: role.roleName,
-                      batchOperation: role.batchOperation === 1,
                       description: role.description,
                     });
                     setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
@@ -662,41 +645,19 @@ export default function RoleManagement() {
         );
       },
     },
-    {
-      key: 'dataPermission',
-      title: '数据权限',
-      dataIndex: 'deviceGroupIds',
-      width: 100,
-      render: (val) => {
-        const ids = val as string[];
-        const count = ids?.length || 0;
-        return <Tag color={count > 0 ? 'blue' : 'default'}>{count} 个设备组</Tag>;
-      },
-    },
-    {
-      key: 'batchOperation',
-      title: '批量操作权限',
-      dataIndex: 'batchOperation',
-      width: 110,
-      render: (val) => (
-        <Tag color={val === 1 ? 'green' : 'default'}>
-          {val === 1 ? '批量操作' : '单一操作'}
-        </Tag>
-      ),
-    },
-    { key: 'description', title: '角色描述', dataIndex: 'description', width: 150, ellipsis: true, render: (v) => v || '-' },
-    { key: 'createUser', title: '创建人', dataIndex: 'createUser', width: 100, render: (v) => v || '-' },
+    { key: 'description', title: t('role.roleDescription'), dataIndex: 'description', width: 150, ellipsis: true, render: (v) => v || '-' },
+    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v) => v || '-' },
     {
       key: 'createTime',
-      title: '创建时间',
+      title: t('role.createTime'),
       dataIndex: 'createTime',
       width: 160,
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
     },
-    { key: 'updateUser', title: '更新人', dataIndex: 'updateUser', width: 100, render: (v) => v || '-' },
+    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v) => v || '-' },
     {
       key: 'updateTime',
-      title: '更新时间',
+      title: t('role.updateTime'),
       dataIndex: 'updateTime',
       width: 160,
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
@@ -764,7 +725,12 @@ export default function RoleManagement() {
       : checkedPermissionKeys;
 
     return (
-      <Form.Item label={t('role.menuPermission')} required={!readOnly}>
+      <Form.Item
+        label={t('role.menuPermission')}
+        required={!readOnly}
+        help={!readOnly && !hasAnyPermission ? t('role.pleaseSelectPermission') : undefined}
+        validateStatus={!readOnly && !hasAnyPermission ? 'warning' : undefined}
+      >
         <div style={{ border: '1px solid var(--color-border)', borderRadius: 6 }}>
           {/* 顶部操作按钮区域 */}
           <div
@@ -783,7 +749,7 @@ export default function RoleManagement() {
               onChange={(e) => handleExpandChange(e.target.checked)}
               disabled={readOnly}
             >
-              展开/折叠
+              {t('role.expandCollapse')}
             </Checkbox>
             <Checkbox
               checked={isAllSelected}
@@ -791,14 +757,14 @@ export default function RoleManagement() {
               onChange={(e) => handleSelectAllChange(e.target.checked)}
               disabled={readOnly}
             >
-              全选/全不选
+              {t('role.selectAllOrNone')}
             </Checkbox>
             <Checkbox
               checked={!permissionCheckStrictly}
               onChange={(e) => handleLinkageChange(e.target.checked)}
               disabled={readOnly}
             >
-              父子联动
+              {t('role.parentChildLinkage')}
             </Checkbox>
           </div>
           {/* 树形选择区域 */}
@@ -898,14 +864,14 @@ export default function RoleManagement() {
                 flexWrap: 'wrap',
               }}
             >
-              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>筛选：</span>
+              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.filter')}</span>
               <Select
                 size="small"
                 style={{ width: 120 }}
                 value={deviceGroupNetworkType}
                 onChange={(val) => setDeviceGroupNetworkType(val)}
                 options={NETWORK_TYPE_OPTIONS}
-                placeholder="基站制式"
+                placeholder={t('role.baseStationType')}
               />
               <Select
                 size="small"
@@ -913,7 +879,7 @@ export default function RoleManagement() {
                 value={deviceGroupProductType}
                 onChange={(val) => setDeviceGroupProductType(val)}
                 options={PRODUCT_TYPE_OPTIONS}
-                placeholder="产品类型"
+                placeholder={t('role.productType')}
               />
               <Divider type="vertical" style={{ height: 20, margin: 0 }} />
               <Checkbox
@@ -921,7 +887,7 @@ export default function RoleManagement() {
                 indeterminate={isIndeterminate}
                 onChange={(e) => handleSelectAll(e.target.checked)}
               >
-                全选
+                {t('role.selectAll')}
               </Checkbox>
             </div>
             {/* 树形选择区域 */}
@@ -931,7 +897,7 @@ export default function RoleManagement() {
                   <Spin />
                 </div>
               ) : deviceGroupTreeData.length === 0 ? (
-                <Empty description="暂无设备组数据" />
+                <Empty description={t('role.noDeviceGroupData')} />
               ) : (
                 <Tree
                   checkable
@@ -1043,14 +1009,6 @@ export default function RoleManagement() {
           >
             <Input placeholder={t('role.roleNamePlaceholder')} maxLength={200} showCount />
           </Form.Item>
-          <Form.Item
-            name="batchOperation"
-            label={t('role.batchOperation')}
-            valuePropName="checked"
-            initialValue={false}
-          >
-            <Switch checkedChildren={t('common.yes')} unCheckedChildren={t('common.no')} />
-          </Form.Item>
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea
               rows={2}
@@ -1088,13 +1046,6 @@ export default function RoleManagement() {
           >
             <Input readOnly style={{ color: 'var(--color-text-secondary)' }} />
           </Form.Item>
-          <Form.Item
-            name="batchOperation"
-            label={t('role.batchOperation')}
-            valuePropName="checked"
-          >
-            <Switch checkedChildren={t('common.yes')} unCheckedChildren={t('common.no')} />
-          </Form.Item>
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea
               rows={2}
@@ -1126,11 +1077,6 @@ export default function RoleManagement() {
           <Form.Item name="roleName" label={t('role.roleName')}>
             <Input readOnly />
           </Form.Item>
-          <Form.Item label={t('role.batchOperation')}>
-            <Tag color={selectedRole?.batchOperation === 1 ? 'green' : 'default'}>
-              {selectedRole?.batchOperation === 1 ? t('common.yes') : t('common.no')}
-            </Tag>
-          </Form.Item>
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} readOnly />
           </Form.Item>
@@ -1139,16 +1085,16 @@ export default function RoleManagement() {
           <Form.Item label={t('role.userCount')}>
             <span>{selectedRole?.userCount ?? 0}</span>
           </Form.Item>
-          <Form.Item label="创建人">
+          <Form.Item label={t('role.createUser')}>
             <span>{selectedRole?.createUser ?? '-'}</span>
           </Form.Item>
-          <Form.Item label="创建时间">
+          <Form.Item label={t('role.createTime')}>
             <span>{selectedRole?.createTime ? new Date(selectedRole.createTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
-          <Form.Item label="更新人">
+          <Form.Item label={t('role.updateUser')}>
             <span>{selectedRole?.updateUser ?? '-'}</span>
           </Form.Item>
-          <Form.Item label="更新时间">
+          <Form.Item label={t('role.updateTime')}>
             <span>{selectedRole?.updateTime ? new Date(selectedRole.updateTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
         </Form>
