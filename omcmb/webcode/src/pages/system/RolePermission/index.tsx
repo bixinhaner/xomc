@@ -374,6 +374,25 @@ export default function RoleManagement() {
     return PERMISSION_MODULES.map((m) => m.key);
   }, []);
 
+  // 获取所有节点的 key（一级 + 二级 + 三级）- 用于全选
+  const allPermissionKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const module of PERMISSION_MODULES) {
+      // 一级节点
+      keys.push(module.key);
+      for (const child of module.children) {
+        // 二级节点
+        keys.push(`${module.key}.${child.key}`);
+        // 三级节点（操作）
+        const operations = child.operations || DEFAULT_OPERATIONS;
+        for (const op of operations) {
+          keys.push(`${module.key}.${child.key}.${op.key}`);
+        }
+      }
+    }
+    return keys;
+  }, []);
+
   // 构建菜单权限树形数据（三级结构）
   const permissionTreeData = useMemo((): TreeDataNode[] => {
     return PERMISSION_MODULES.map((module) => ({
@@ -697,10 +716,10 @@ export default function RoleManagement() {
       }
     };
 
-    // 全选/全不选（复选框）
+    // 全选/全不选（复选框）- 控制所有节点
     const handleSelectAllChange = (checked: boolean) => {
       if (checked) {
-        setCheckedPermissionKeys(allPermissionLeafKeys);
+        setCheckedPermissionKeys(allPermissionKeys);
       } else {
         setCheckedPermissionKeys([]);
       }
@@ -711,15 +730,15 @@ export default function RoleManagement() {
       setPermissionCheckStrictly(!checked); // checkStrictly=false 表示联动
     };
 
-    // 获取当前选中的叶子节点数量（用于全选状态计算）
-    const checkedLeafCount = checkedPermissionKeys.filter((k) =>
-      allPermissionLeafKeys.includes(k as string)
+    // 获取当前选中的节点数量（用于全选状态计算）- 统计所有节点
+    const checkedCount = checkedPermissionKeys.filter((k) =>
+      allPermissionKeys.includes(k as string)
     ).length;
 
     // 是否全选
-    const isAllSelected = checkedLeafCount === allPermissionLeafKeys.length && allPermissionLeafKeys.length > 0;
+    const isAllSelected = checkedCount === allPermissionKeys.length && allPermissionKeys.length > 0;
     // 是否部分选中
-    const isIndeterminate = checkedLeafCount > 0 && checkedLeafCount < allPermissionLeafKeys.length;
+    const isIndeterminate = checkedCount > 0 && checkedCount < allPermissionKeys.length;
 
     // 处理树节点选中
     const handleCheck: TreeProps['onCheck'] = (checked) => {
