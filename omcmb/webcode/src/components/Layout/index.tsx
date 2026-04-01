@@ -80,7 +80,7 @@ export default function AppShell() {
         <main className={styles.content} style={{ position: 'relative' }}>
           {effects3D && <ParticleCanvas />}
           {effects3D && <DynamicLightSource />}
-          <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ position: 'relative', zIndex: 1, height: '100%' }}>
             <Outlet />
           </div>
         </main>

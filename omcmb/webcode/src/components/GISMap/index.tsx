@@ -40,6 +40,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   tileUrl,
   onDeviceClick,
   onViewportChange,
+  onMapClick,
   showStats = true,
   showControls = true,
   className,

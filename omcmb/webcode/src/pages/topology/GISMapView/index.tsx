@@ -61,6 +61,8 @@ export default function GISMapView() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   // 展开的设备组 ID 列表
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
+  // 是否已完成初始化（用于控制 API 请求时机）
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // 状态筛选：在线激活/在线未激活/离线
   const [statusFilter, setStatusFilter] = useState<{
@@ -88,6 +90,30 @@ export default function GISMapView() {
   // 获取设备组树
   const { data: domainTree, isLoading: isLoadingTree } = useDomainTree();
 
+  // ========== 数据转换 ==========
+
+  // 设备组树（转换格式）- 必须在 allGroupIds 之前定义
+  const groupTree: DeviceGroupNode[] = useMemo(() => {
+    if (!domainTree?.length) return [];
+    return domainTree.map(domainToGroupNode);
+  }, [domainTree]);
+
+  // 获取所有子节点 ID - 必须在 allGroupIds 之前定义
+  const getAllDescendantIds = useCallback((node: DeviceGroupNode): string[] => {
+    const ids = [node.id];
+    if (node.children) {
+      node.children.forEach((child) => {
+        ids.push(...getAllDescendantIds(child));
+      });
+    }
+    return ids;
+  }, []);
+
+  // 计算所有组的 ID 集合（用于判断是否选中了"全部"）
+  const allGroupIds = useMemo(() => {
+    return new Set(groupTree.flatMap((node) => getAllDescendantIds(node)));
+  }, [groupTree, getAllDescendantIds]);
+
   // 获取设备地理数据
   const filterParams = useMemo(() => {
     const statusList: ('onlineActive' | 'onlineInactive' | 'offline')[] = [
@@ -95,16 +121,32 @@ export default function GISMapView() {
       ...(statusFilter.onlineInactive ? ['onlineInactive' as const] : []),
       ...(statusFilter.offline ? ['offline' as const] : []),
     ];
+
+    // 判断是否选中了所有组
+    // 简化逻辑：只要选中的数量等于所有组的数量，就认为选中了所有组
+    // 传 undefined 让后端返回所有设备（包括未分组的）
+    const isAllSelected = selectedGroupIds.length > 0 &&
+      selectedGroupIds.length === allGroupIds.size;
+
+    // Debug: 输出选中状态判断
+    console.log('[GISMapView] isAllSelected:', isAllSelected,
+      '| selectedGroupIds.length:', selectedGroupIds.length,
+      '| allGroupIds.size:', allGroupIds.size,
+      '| groupIds will be:', isAllSelected ? 'undefined (all devices)' : selectedGroupIds);
+
     return {
-      groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
+      // 选中所有组时传 undefined（返回所有设备，包括未分组的）
+      // 只选中部分组时传具体的 groupIds
+      groupIds: isAllSelected ? undefined : (selectedGroupIds.length > 0 ? selectedGroupIds : undefined),
       // 如果三个状态都被选中（默认情况），不传 status 参数让后端返回全部
       // 如果部分被选中，传对应的状态
       // 如果都没选中，传空数组表示不查询任何设备
       status: statusList.length === 3 ? undefined : statusList,
-      enabled: true,
+      // 只有初始化完成后才启用请求，避免在 selectedGroupIds 为空时发送请求
+      enabled: isInitialized,
       pageSize: 10000, // 获取大量数据
     };
-  }, [selectedGroupIds, statusFilter]);
+  }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds]);
 
   const { data: devicesGeoData, isLoading: isLoadingDevices } = useMapDevicesGeo(filterParams);
 
@@ -123,12 +165,6 @@ export default function GISMapView() {
   const { data: searchResults, isLoading: isSearching } = useMapDeviceSearch(deviceSearchValue);
 
   // ========== 数据转换 ==========
-
-  // 设备组树（转换格式）
-  const groupTree: DeviceGroupNode[] = useMemo(() => {
-    if (!domainTree?.length) return [];
-    return domainTree.map(domainToGroupNode);
-  }, [domainTree]);
 
   // 设备列表（转换为 MapDevice 格式）
   const mapDevices: MapDevice[] = useMemo(() => {
@@ -184,17 +220,6 @@ export default function GISMapView() {
   }, [searchResults, statusFilter]);
 
   // ========== 设备组树处理 ==========
-
-  // 获取所有子节点 ID
-  const getAllDescendantIds = useCallback((node: DeviceGroupNode): string[] => {
-    const ids = [node.id];
-    if (node.children) {
-      node.children.forEach((child) => {
-        ids.push(...getAllDescendantIds(child));
-      });
-    }
-    return ids;
-  }, []);
 
   // 过滤设备组树（根据搜索值）
   const filteredGroupTree = useMemo(() => {
@@ -258,15 +283,19 @@ export default function GISMapView() {
     }
   }, [groupSearchValue, filteredGroupTree]);
 
-  // 初始化：选中并展开根节点
+  // 初始化：选中并展开所有节点（包括子节点）
   useEffect(() => {
     if (groupTree.length > 0 && selectedGroupIds.length === 0) {
-      // 默认选中所有根节点
+      // 默认选中所有节点（包括子节点）
+      const allIds = groupTree.flatMap((node) => getAllDescendantIds(node));
+      setSelectedGroupIds(allIds);
+      // 默认展开根节点
       const rootIds = groupTree.map((node) => node.id);
-      setSelectedGroupIds(rootIds);
       setExpandedGroupIds(rootIds);
+      // 标记初始化完成，允许 API 请求
+      setIsInitialized(true);
     }
-  }, [groupTree]);
+  }, [groupTree, getAllDescendantIds, selectedGroupIds.length]);
 
   // 渲染设备组树节点
   const renderGroupNode = (node: DeviceGroupNode, depth: number = 0): React.ReactNode => {
@@ -735,7 +764,7 @@ export default function GISMapView() {
             defaultZoom={6}
             showStats={false}
             showControls={false}
-            tileUrl={MAP_CONFIG.osmTileUrl}
+            tileUrl={MAP_CONFIG.tileUrl}
             onDeviceClick={(device) => {
               console.log('Device clicked:', device);
             }}

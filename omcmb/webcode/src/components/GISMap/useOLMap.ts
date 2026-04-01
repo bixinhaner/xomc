@@ -185,7 +185,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       const tileSource = new XYZ({ url: tileUrl });
       const tileLayer = new TileLayer({
         source: tileSource,
-        opacity: 0.6, // 半透明，让格条纹理背景显示出来
+        opacity: 1.0, // 完全不透明，覆盖 CSS 网格背景
       });
       layers.push(tileLayer);
     }

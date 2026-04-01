@@ -141,10 +141,20 @@ export const MAP_CONFIG = {
   maxZoom: 18,
   /** 聚合显示阈值 (zoom < 12 显示聚合) */
   clusterZoomThreshold: 12,
-  /** OpenStreetMap 瓦片地址 */
+  /** OpenStreetMap 在线瓦片地址 */
   osmTileUrl: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  /** 离线瓦片地址 (通过环境变量配置) */
-  offlineTileUrl: import.meta.env.VITE_MAP_TILE_URL,
+  /**
+   * 瓦片服务地址（智能选择）
+   * 优先级：环境变量 VITE_MAP_TILE_URL > 在线 OSM
+   *
+   * 配置方式：
+   * - 在 .env.development 或 .env.production 中设置：
+   *   VITE_MAP_TILE_URL=http://192.168.20.31:8050/{z}/{x}/{y}.png
+   * - 不设置则使用在线 OSM 瓦片
+   */
+  get tileUrl() {
+    return import.meta.env.VITE_MAP_TILE_URL || this.osmTileUrl;
+  },
   /** 视图变化防抖时间 (ms) */
   viewportDebounce: 300,
   /** 搜索防抖时间 (ms) */

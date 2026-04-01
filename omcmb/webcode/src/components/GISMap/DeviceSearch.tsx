@@ -183,7 +183,7 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
               style={{
                 width: 12,
                 height: 12,
-                border: `2px solid ${token.colorPrimary}`,
+                border: `1px solid ${token.colorPrimary}`,
                 borderRadius: '50%',
               }}
             />
