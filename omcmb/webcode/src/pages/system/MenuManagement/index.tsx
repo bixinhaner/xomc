@@ -55,6 +55,16 @@ const MENU_STATUS_OPTIONS = [
   { label: '停用', value: 'disabled' },
 ];
 
+// 默认的操作按钮（三级节点）
+const DEFAULT_OPERATIONS = [
+  { key: 'query', name: '查询' },
+  { key: 'add', name: '添加' },
+  { key: 'edit', name: '修改' },
+  { key: 'delete', name: '删除' },
+  { key: 'export', name: '导出' },
+  { key: 'import', name: '导入' },
+];
+
 // Mock数据 - 菜单列表
 const MOCK_MENUS: MenuItem[] = [
   {
@@ -76,6 +86,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/device/list',
         status: 'normal',
         parentId: '1',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `1-1-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `device:list:${op.key}`,
+          componentPath: '',
+          status: 'normal' as MenuStatus,
+          parentId: '1-1',
+        })),
       },
       {
         id: '1-2',
@@ -86,16 +106,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/device/group',
         status: 'normal',
         parentId: '1',
-      },
-      {
-        id: '1-3',
-        name: '新增设备',
-        type: 'button',
-        sort: 3,
-        permissionKey: 'device:add',
-        componentPath: '',
-        status: 'normal',
-        parentId: '1',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `1-2-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `device:group:${op.key}`,
+          componentPath: '',
+          status: 'normal' as MenuStatus,
+          parentId: '1-2',
+        })),
       },
     ],
   },
@@ -118,6 +138,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/alarm/current',
         status: 'normal',
         parentId: '2',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `2-1-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `alarm:current:${op.key}`,
+          componentPath: '',
+          status: 'normal' as MenuStatus,
+          parentId: '2-1',
+        })),
       },
       {
         id: '2-2',
@@ -128,6 +158,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/alarm/history',
         status: 'disabled',
         parentId: '2',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `2-2-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `alarm:history:${op.key}`,
+          componentPath: '',
+          status: 'disabled' as MenuStatus,
+          parentId: '2-2',
+        })),
       },
     ],
   },
@@ -150,6 +190,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/system/users',
         status: 'normal',
         parentId: '3',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `3-1-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `system:users:${op.key}`,
+          componentPath: '',
+          status: 'normal' as MenuStatus,
+          parentId: '3-1',
+        })),
       },
       {
         id: '3-2',
@@ -160,6 +210,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/system/roles',
         status: 'normal',
         parentId: '3',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `3-2-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `system:roles:${op.key}`,
+          componentPath: '',
+          status: 'normal' as MenuStatus,
+          parentId: '3-2',
+        })),
       },
       {
         id: '3-3',
@@ -170,6 +230,16 @@ const MOCK_MENUS: MenuItem[] = [
         componentPath: '/system/menus',
         status: 'normal',
         parentId: '3',
+        children: DEFAULT_OPERATIONS.map((op, idx) => ({
+          id: `3-3-${op.key}`,
+          name: op.name,
+          type: 'button' as MenuType,
+          sort: idx + 1,
+          permissionKey: `system:menus:${op.key}`,
+          componentPath: '',
+          status: 'normal' as MenuStatus,
+          parentId: '3-3',
+        })),
       },
     ],
   },
@@ -194,7 +264,6 @@ export default function MenuManagement() {
   const [editVisible, setEditVisible] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
   const [form] = Form.useForm();
-  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   // 展开/收起状态
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
@@ -317,7 +386,7 @@ export default function MenuManagement() {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 120,
+      width: 100,
       fixed: 'left',
       render: (_, record) => {
         const items: MenuProps['items'] = [
@@ -349,7 +418,7 @@ export default function MenuManagement() {
       key: 'name',
       title: '菜单名称',
       dataIndex: 'name',
-      width: 240,
+      width: 260,
       render: (val, record) => {
         const indent = record.level * 24;
         const isExpanded = expandedKeys.has(record.id);
@@ -408,7 +477,7 @@ export default function MenuManagement() {
       key: 'permissionKey',
       title: '权限标识',
       dataIndex: 'permissionKey',
-      width: 180,
+      width: 200,
       ellipsis: true,
       render: (val) => <code style={{ fontSize: 12 }}>{val || '-'}</code>,
     },
@@ -449,9 +518,6 @@ export default function MenuManagement() {
         dataSource={flatMenus}
         rowKey="id"
         scroll={{ x: 1000 }}
-        selectable
-        selectedRowKeys={selectedKeys}
-        onSelectionChange={(keys) => setSelectedKeys(keys)}
       />
 
       {/* Edit Drawer */}
