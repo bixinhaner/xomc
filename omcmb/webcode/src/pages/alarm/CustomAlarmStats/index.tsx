@@ -249,6 +249,8 @@ export default function CustomAlarmStats() {
 
   // 添加分组抽屉状态
   const [addGroupDrawerOpen, setAddGroupDrawerOpen] = useState(false);
+  const [isEditingGroup, setIsEditingGroup] = useState(false);
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
   const [addGroupForm] = Form.useForm<{
     name: string;
     description: string;
@@ -278,11 +280,6 @@ export default function CustomAlarmStats() {
   const [addAlarmKeyword, setAddAlarmKeyword] = useState('');
   const [addAlarmCurrentPage, setAddAlarmCurrentPage] = useState(1);
   const [addAlarmPageSize, setAddAlarmPageSize] = useState(10);
-
-  // 编辑分组弹窗状态
-  const [editGroupModalOpen, setEditGroupModalOpen] = useState(false);
-  const [editGroupId, setEditGroupId] = useState<string | null>(null);
-  const [editGroupForm] = Form.useForm<{ name: string }>();
 
   // 确认/清除/删除弹窗状态
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -578,22 +575,41 @@ export default function CustomAlarmStats() {
     message.success('模板已删除');
   }, [filterTemplates, message]);
 
-  // 添加分组
+  // 添加/编辑分组
   const handleAddGroup = useCallback(async () => {
     try {
       const values = await addGroupForm.validateFields();
-      const newGroup: CustomAlarmGroup = {
-        id: `group-${Date.now()}`,
-        name: values.name,
-        description: values.description,
-        alarmType: values.alarmType || 'active',
-        createdAt: new Date().toISOString().split('T')[0],
-        alarmIds: selectedAlarms,
-        deviceIds: selectedDevices,
-        enableNotification: values.enableNotification ?? false,
-      };
-      setGroups((prev) => [...prev, newGroup]);
+
+      if (isEditingGroup && editGroupId) {
+        // 编辑模式
+        setGroups((prev) =>
+          prev.map((g) => (g.id === editGroupId ? {
+            ...g,
+            name: values.name,
+            description: values.description,
+            alarmIds: selectedAlarms,
+            deviceIds: selectedDevices,
+            enableNotification: values.enableNotification ?? false,
+          } : g))
+        );
+      } else {
+        // 新增模式
+        const newGroup: CustomAlarmGroup = {
+          id: `group-${Date.now()}`,
+          name: values.name,
+          description: values.description,
+          alarmType: values.alarmType || 'active',
+          createdAt: new Date().toISOString().split('T')[0],
+          alarmIds: selectedAlarms,
+          deviceIds: selectedDevices,
+          enableNotification: values.enableNotification ?? false,
+        };
+        setGroups((prev) => [...prev, newGroup]);
+      }
+
       setAddGroupDrawerOpen(false);
+      setIsEditingGroup(false);
+      setEditGroupId(null);
       addGroupForm.resetFields();
       setSelectedDevices([]);
       setSelectedAlarms([]);
@@ -604,13 +620,18 @@ export default function CustomAlarmStats() {
     } catch {
       // validation error
     }
-  }, [addGroupForm, selectedDevices, selectedAlarms, message, t]);
+  }, [addGroupForm, selectedDevices, selectedAlarms, isEditingGroup, editGroupId, message, t]);
 
   // 打开添加分组抽屉
   const handleOpenAddGroupDrawer = useCallback(() => {
+    setIsEditingGroup(false);
+    setEditGroupId(null);
     addGroupForm.resetFields();
     setSelectedDevices([]);
     setSelectedAlarms([]);
+    setSelectAllENB(false);
+    setSelectAllGNB(false);
+    setSelectAllGSM(false);
     // 模拟加载可用设备列表
     const mockDevices = [
       { id: 'dev-001', name: '北京基站-1', neType: 'eNB' },
@@ -675,30 +696,75 @@ export default function CustomAlarmStats() {
     setSelectedDevices([]);
   }, []);
 
-  // 编辑分组
+  // 编辑分组 - 打开抽屉并预填数据
   const handleEditGroup = useCallback((groupId: string) => {
     const group = groups.find((g) => g.id === groupId);
-    if (group) {
-      setEditGroupId(groupId);
-      editGroupForm.setFieldsValue({ name: group.name });
-      setEditGroupModalOpen(true);
-    }
-  }, [groups, editGroupForm]);
+    if (!group) return;
 
-  const handleSaveEditGroup = useCallback(async () => {
-    try {
-      const values = await editGroupForm.validateFields();
-      setGroups((prev) =>
-        prev.map((g) => (g.id === editGroupId ? { ...g, name: values.name } : g))
-      );
-      setEditGroupModalOpen(false);
-      setEditGroupId(null);
-      editGroupForm.resetFields();
-      message.success(t('common.success'));
-    } catch {
-      // validation error
-    }
-  }, [editGroupId, editGroupForm, message, t]);
+    setIsEditingGroup(true);
+    setEditGroupId(groupId);
+
+    // 加载可用设备列表
+    const mockDevices = [
+      { id: 'dev-001', name: '北京基站-1', neType: 'eNB' },
+      { id: 'dev-002', name: '北京基站-2', neType: 'eNB' },
+      { id: 'dev-003', name: '上海基站-1', neType: 'gNB' },
+      { id: 'dev-004', name: '上海基站-2', neType: 'gNB' },
+      { id: 'dev-005', name: '广州基站-1', neType: 'GSM' },
+      { id: 'dev-006', name: '广州基站-2', neType: 'GSM' },
+      { id: 'dev-007', name: '深圳基站-1', neType: 'eNB' },
+      { id: 'dev-008', name: '深圳基站-2', neType: 'gNB' },
+      { id: 'dev-009', name: '成都基站-1', neType: 'eNB' },
+      { id: 'dev-010', name: '成都基站-2', neType: 'gNB' },
+      { id: 'dev-011', name: '杭州基站-1', neType: 'eNB' },
+      { id: 'dev-012', name: '杭州基站-2', neType: 'gNB' },
+      { id: 'dev-013', name: '南京基站-1', neType: 'GSM' },
+      { id: 'dev-014', name: '南京基站-2', neType: 'eNB' },
+      { id: 'dev-015', name: '武汉基站-1', neType: 'gNB' },
+    ];
+    setAvailableDevices(mockDevices);
+
+    // 加载可用告警列表
+    const mockAlarms = [
+      { id: 'alarm-001', alarmIdentifier: 'ALM-001', alarmSource: 'eNB', possibleCause: '射频单元功率异常' },
+      { id: 'alarm-002', alarmIdentifier: 'ALM-002', alarmSource: 'eNB', possibleCause: '光模块信号丢失' },
+      { id: 'alarm-003', alarmIdentifier: 'ALM-003', alarmSource: 'gNB', possibleCause: '时钟同步失败' },
+      { id: 'alarm-004', alarmIdentifier: 'ALM-004', alarmSource: 'gNB', possibleCause: 'CPU利用率过高' },
+      { id: 'alarm-005', alarmIdentifier: 'ALM-005', alarmSource: 'GSM', possibleCause: '传输链路故障' },
+      { id: 'alarm-006', alarmIdentifier: 'ALM-006', alarmSource: 'GSM', possibleCause: '基站温度过高' },
+      { id: 'alarm-007', alarmIdentifier: 'ALM-007', alarmSource: 'eNB', possibleCause: 'S1接口连接中断' },
+      { id: 'alarm-008', alarmIdentifier: 'ALM-008', alarmSource: 'gNB', possibleCause: '电源模块故障' },
+      { id: 'alarm-009', alarmIdentifier: 'ALM-009', alarmSource: 'eNB', possibleCause: '风扇转速异常' },
+      { id: 'alarm-010', alarmIdentifier: 'ALM-010', alarmSource: 'gNB', possibleCause: '存储空间不足' },
+      { id: 'alarm-011', alarmIdentifier: 'ALM-011', alarmSource: 'GSM', possibleCause: '驻波比告警' },
+      { id: 'alarm-012', alarmIdentifier: 'ALM-012', alarmSource: 'eNB', possibleCause: 'X2接口连接中断' },
+      { id: 'alarm-013', alarmIdentifier: 'ALM-013', alarmSource: 'gNB', possibleCause: 'F1接口异常' },
+      { id: 'alarm-014', alarmIdentifier: 'ALM-014', alarmSource: 'GSM', possibleCause: 'Abis接口故障' },
+      { id: 'alarm-015', alarmIdentifier: 'ALM-015', alarmSource: 'eNB', possibleCause: 'GPS信号丢失' },
+    ];
+    setAvailableAlarms(mockAlarms);
+
+    // 设置表单值
+    addGroupForm.setFieldsValue({
+      name: group.name,
+      description: group.description || '',
+    });
+
+    // 设置已选设备和告警
+    setSelectedDevices(group.deviceIds || []);
+    setSelectedAlarms(group.alarmIds || []);
+
+    // 更新全选状态
+    const enbDevices = mockDevices.filter(d => d.neType === 'eNB').map(d => d.id);
+    const gnbDevices = mockDevices.filter(d => d.neType === 'gNB').map(d => d.id);
+    const gsmDevices = mockDevices.filter(d => d.neType === 'GSM').map(d => d.id);
+    const groupDeviceIds = group.deviceIds || [];
+    setSelectAllENB(enbDevices.every(id => groupDeviceIds.includes(id)));
+    setSelectAllGNB(gnbDevices.every(id => groupDeviceIds.includes(id)));
+    setSelectAllGSM(gsmDevices.every(id => groupDeviceIds.includes(id)));
+
+    setAddGroupDrawerOpen(true);
+  }, [groups, addGroupForm]);
 
   // 删除分组
   const handleDeleteGroup = useCallback((groupId: string) => {
@@ -1039,14 +1105,6 @@ export default function CustomAlarmStats() {
                   <Button
                     type="text"
                     size="small"
-                    icon={<EyeOutlined />}
-                    onClick={(e) => { e.stopPropagation(); setSelectedGroupId(group.id); }}
-                    style={{ flexShrink: 0, padding: '0 4px' }}
-                    title="查看"
-                  />
-                  <Button
-                    type="text"
-                    size="small"
                     icon={<EditOutlined />}
                     onClick={(e) => { e.stopPropagation(); handleEditGroup(group.id); }}
                     style={{ flexShrink: 0, padding: '0 4px' }}
@@ -1248,10 +1306,10 @@ export default function CustomAlarmStats() {
         <Text>{t('common.deleteConfirmMsg', { count: deleteTargetIds.length })}</Text>
       </Modal>
 
-      {/* 添加分组抽屉 */}
+      {/* 添加/编辑分组抽屉 */}
       <Drawer
         open={addGroupDrawerOpen}
-        title="添加自定义告警分组"
+        title={isEditingGroup ? '编辑自定义告警分组' : '添加自定义告警分组'}
         placement="right"
         width={520}
         onClose={() => setAddGroupDrawerOpen(false)}
@@ -1272,7 +1330,11 @@ export default function CustomAlarmStats() {
               { min: 1, max: 50, message: '模版名称长度为1-50个字符' },
               {
                 validator: (_, value) => {
-                  if (value && groups.some(g => g.name === value)) {
+                  // 编辑时排除当前分组
+                  const otherGroups = isEditingGroup
+                    ? groups.filter(g => g.id !== editGroupId)
+                    : groups;
+                  if (value && otherGroups.some(g => g.name === value)) {
                     return Promise.reject(new Error('模版名称已存在，请使用其他名称'));
                   }
                   return Promise.resolve();
@@ -1728,22 +1790,6 @@ export default function CustomAlarmStats() {
             />
           </div>
         )}
-      </Modal>
-
-      {/* 编辑分组弹窗 */}
-      <Modal
-        open={editGroupModalOpen}
-        title="编辑自定义告警分组"
-        onCancel={() => { setEditGroupModalOpen(false); setEditGroupId(null); }}
-        onOk={handleSaveEditGroup}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
-      >
-        <Form form={editGroupForm} layout="vertical" size="small">
-          <Form.Item name="name" label="分组名称" rules={[{ required: true, message: '请输入分组名称' }]}>
-            <Input placeholder="请输入分组名称" maxLength={50} showCount autoFocus />
-          </Form.Item>
-        </Form>
       </Modal>
 
       {/* 保存筛选模板弹窗 */}
