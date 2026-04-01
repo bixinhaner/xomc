@@ -11,8 +11,6 @@ import {
   Space,
 } from 'antd';
 import {
-  EditOutlined,
-  DeleteOutlined,
   UpOutlined,
   DownOutlined,
   RightOutlined,
@@ -447,7 +445,6 @@ export default function MenuManagement() {
           <Button
             size="small"
             type="link"
-            icon={<EditOutlined />}
             onClick={() => handleEdit(record)}
             style={{ padding: '0 4px' }}
           >
@@ -457,7 +454,6 @@ export default function MenuManagement() {
             size="small"
             type="link"
             danger
-            icon={<DeleteOutlined />}
             onClick={() => handleDelete(record)}
             style={{ padding: '0 4px' }}
           >
