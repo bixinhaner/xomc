@@ -10,10 +10,10 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
-  EnvironmentOutlined,
   ExportOutlined,
   EyeOutlined,
   FilterOutlined,
+  FolderOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -1016,7 +1016,7 @@ export default function CustomAlarmStats() {
           size="small"
         />
       </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
+      <div className="custom-alarm-tree" style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
         <Tree
           treeData={filteredGroups.map((group) => ({
             key: group.id,
@@ -1032,16 +1032,25 @@ export default function CustomAlarmStats() {
                 }}
               >
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
-                  <EnvironmentOutlined style={{ marginRight: 6, color: '#1890ff' }} />
+                  <FolderOutlined style={{ marginRight: 6, color: '#fa8c16' }} />
                   <span>{group.name}</span>
                 </span>
                 <Space size={0} className="node-actions" style={{ opacity: 0, transition: 'opacity 0.2s' }}>
                   <Button
                     type="text"
                     size="small"
+                    icon={<EyeOutlined />}
+                    onClick={(e) => { e.stopPropagation(); setSelectedGroupId(group.id); }}
+                    style={{ flexShrink: 0, padding: '0 4px' }}
+                    title="查看"
+                  />
+                  <Button
+                    type="text"
+                    size="small"
                     icon={<EditOutlined />}
                     onClick={(e) => { e.stopPropagation(); handleEditGroup(group.id); }}
                     style={{ flexShrink: 0, padding: '0 4px' }}
+                    title="编辑"
                   />
                   <Button
                     type="text"
@@ -1050,6 +1059,7 @@ export default function CustomAlarmStats() {
                     onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
                     style={{ flexShrink: 0, padding: '0 4px' }}
                     danger
+                    title="删除"
                   />
                 </Space>
               </div>
@@ -1069,11 +1079,13 @@ export default function CustomAlarmStats() {
             }
           }}
           blockNode
+          showLine={{ showLeafIcon: false }}
           style={{ fontSize: 13 }}
         />
       </div>
       <style>{`
         .alarm-group-node:hover .node-actions { opacity: 1 !important; }
+        .custom-alarm-tree .ant-tree-switcher-noop { display: none; }
       `}</style>
     </div>
   );
