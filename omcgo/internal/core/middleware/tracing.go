@@ -14,11 +14,11 @@ import (
 
 const tracerName = "github.com/omcgo/omcgo/middleware"
 
-// Tracing returns a Gin middleware that creates OpenTelemetry spans for HTTP requests.
-// When tracing is disabled (no-op TracerProvider), this middleware has zero overhead.
-//
-// Span naming: "HTTP {method} {route}" (e.g., "HTTP GET /api/v1/devices")
-// Attributes: http.method, http.url, http.route, http.status_code, http.scheme
+// Tracing 返回一个 Gin 中间件，为每个 HTTP 请求创建 OpenTelemetry Span。
+// Span 名称格式为 "HTTP {method} {route}"，自动从请求头提取父 Span 上下文，
+// 并将 Span 传播到下游 Handler。
+// 当 tracing 禁用时（no-op TracerProvider）造成全零开销。
+// 使用场景：App/ACS 服务的全局中间件，建议在 RequestID 中间件之后、路由组之前注册。
 func Tracing(serviceName string) gin.HandlerFunc {
 	tracer := otel.Tracer(tracerName)
 	propagator := otel.GetTextMapPropagator()

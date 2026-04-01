@@ -1,6 +1,7 @@
 package model
 
-// ListRequest contains pagination and sorting parameters.
+// ListRequest 封装分页和排序参数，由 Gin 自动绑定自 URL Query String。
+// 使用场景：所有列表类接口的请求结构体嵌入此字段，如 DeviceListRequest{ ListRequest ... }。
 type ListRequest struct {
 	Page     int    `form:"page" binding:"min=1"`
 	PageSize int    `form:"page_size" binding:"min=1,max=100"`
@@ -32,7 +33,8 @@ func (r *ListRequest) Limit() int {
 	return r.PageSize
 }
 
-// ListResponse is a generic paginated response.
+// ListResponse 是分页列表接口的通用返回体。
+// 使用范例：
 type ListResponse[T any] struct {
 	Items      []T   `json:"items"`
 	Total      int64 `json:"total"`
@@ -41,7 +43,9 @@ type ListResponse[T any] struct {
 	TotalPages int   `json:"total_pages"`
 }
 
-// NewListResponse creates a ListResponse computing TotalPages.
+// NewListResponse 创建分页列表响应并自动计算总页数。
+// 使用场景：所有列表 Handler 的最后一行，封装查询结果并返回给前端。
+// total 为 DB 查询返回的总记录数，items 为当前页数据，不要传入 nil。
 func NewListResponse[T any](items []T, total int64, page, pageSize int) *ListResponse[T] {
 	totalPages := int(total) / pageSize
 	if int(total)%pageSize > 0 {

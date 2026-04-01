@@ -16,8 +16,10 @@ type ShutdownHook struct {
 	Fn       func(ctx context.Context) error
 }
 
-// GracefulShutdown orchestrates shutdown of all registered components
-// in priority order.
+// GracefulShutdown 统一管理服务关机顺序。
+// 各组件在初始化时调用 Register 注册关机回调，指定优先级。
+// 收到 SIGINT/SIGTERM 时按优先级从小到大依次执行（即：先关 HTTP，后关 DB）。
+// 内置超时为 30 秒，超时后强制终止。
 type GracefulShutdown struct {
 	timeout time.Duration
 	hooks   []ShutdownHook

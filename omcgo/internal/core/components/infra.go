@@ -26,8 +26,9 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 )
 
-// Infra holds all infrastructure connections initialized during startup.
-// Each cmd entry point selects which components to initialize.
+// Infra 持有服务启动期间初始化的所有基础设施连接。
+// 各微服务入口（cmd/acs、cmd/app、cmd/worker）选择性调用 Connect* 方法按需初始化组件。
+// 它同时整合了健康检查、优雅关机、Prometheus 指标和 /healthz 接口，是服务启动的唯一入口。
 type Infra struct {
 	Logger     *zap.Logger
 	GS         *GracefulShutdown
@@ -81,7 +82,8 @@ func (inf *Infra) InitTracer(ctx context.Context, cfg appconfig.TracerConfig, se
 	return nil
 }
 
-// ConnectPostgres initializes a PostgreSQL connection pool.
+// ConnectPostgres 初始化 PostgreSQL 连接池，并注册健康检查和优雅关机回调。
+// 供主库（devices/alarms 等）使用，结果存入 Infra.PgPool。
 func (inf *Infra) ConnectPostgres(ctx context.Context, cfg appconfig.PostgresConfig) error {
 	pool, err := postgres.NewPostgresPool(ctx, cfg, inf.Logger)
 	if err != nil {
@@ -95,7 +97,8 @@ func (inf *Infra) ConnectPostgres(ctx context.Context, cfg appconfig.PostgresCon
 	return nil
 }
 
-// ConnectTimescale initializes a TimescaleDB connection pool.
+// ConnectTimescale 初始化 TimescaleDB 连接池，并注册健康检查和优雅关机回调。
+// 供 PM/KPI 超表使用，结果存入 Infra.TsPool。
 func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresConfig) error {
 	pool, err := postgres.NewTimescalePool(ctx, cfg, inf.Logger)
 	if err != nil {
@@ -109,7 +112,8 @@ func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresCo
 	return nil
 }
 
-// ConnectRedis initializes a Redis client.
+// ConnectRedis 初始化 Redis 客户端，并注册健康检查和优雅关机回调。
+// 结果存入 Infra.Redis，封装为 redis.UniversalClient，支持单机和集群模式。
 func (inf *Infra) ConnectRedis(cfg appconfig.RedisConfig) error {
 	client, err := rediscomp.NewRedisClient(cfg)
 	if err != nil {
@@ -123,7 +127,8 @@ func (inf *Infra) ConnectRedis(cfg appconfig.RedisConfig) error {
 	return nil
 }
 
-// ConnectNATS initializes a NATS client and ensures streams exist.
+// ConnectNATS 初始化 NATS JetStream 客户端，并确保流存在。
+// 结果存入 Infra.NATS，后续可调用 CreateEventBus 创建事件总线。
 func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) error {
 	client, err := natscomp.NewNATSClient(cfg, inf.Logger)
 	if err != nil {
@@ -138,7 +143,8 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 	return nil
 }
 
-// ConnectMinIO initializes a MinIO client and ensures buckets exist.
+// ConnectMinIO 初始化 MinIO 客户端，并确保配置的 Bucket 存在（不存在自动创建）。
+// 结果存入 Infra.MinIO，不注册优雅关机（MinIO 客户端无状态）。
 func (inf *Infra) ConnectMinIO(ctx context.Context, cfg appconfig.MinIOConfig) error {
 	client, err := miniocomp.NewMinIOClient(cfg)
 	if err != nil {
@@ -152,7 +158,8 @@ func (inf *Infra) ConnectMinIO(ctx context.Context, cfg appconfig.MinIOConfig) e
 	return nil
 }
 
-// CreateEventBus creates a NATS-backed EventBus and registers it for graceful shutdown.
+// CreateEventBus 创建基于 NATS JetStream 的 EventBus，并注册优雅关机回调。
+// 必须在 ConnectNATS 之后调用，结果存入 Infra.EventBus。
 func (inf *Infra) CreateEventBus() {
 	inf.EventBus = event.NewNATSEventBus(inf.NATS.Conn, inf.NATS.JS, inf.Logger)
 	inf.GS.Register("eventbus", 2, func(ctx context.Context) error { return inf.EventBus.Close() })
@@ -160,8 +167,9 @@ func (inf *Infra) CreateEventBus() {
 
 // --- server lifecycle ---
 
-// ListenAndServe starts the HTTP server and metrics server,
-// then blocks until a signal is received and performs graceful shutdown.
+// ListenAndServe 启动 HTTP 服务器和 Prometheus 指标服务器，
+// 阻塞直到收到 SIGINT/SIGTERM 信号，然后依优先级逐步优雅关机。
+// 适用于 App/ACS 等需要外露 HTTP 端口的服务。
 func (inf *Infra) ListenAndServe(handler http.Handler, addr string) error {
 	inf.startMetrics()
 
@@ -185,8 +193,8 @@ func (inf *Infra) ListenAndServe(handler http.Handler, addr string) error {
 	return inf.waitForShutdown(errCh)
 }
 
-// WaitAndShutdown starts the metrics server, then blocks until a signal is received
-// or an error arrives on errCh. Pass nil if there is no error channel to monitor.
+// WaitAndShutdown 启动指标服务器，然后阻塞直到收到信号或 errCh 发送错误。
+// 适用于 Worker 等无 HTTP 服务器的后台进程，errCh 为 nil 时仅等信号。
 func (inf *Infra) WaitAndShutdown(errCh <-chan error) error {
 	inf.startMetrics()
 	return inf.waitForShutdown(errCh)

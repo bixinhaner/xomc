@@ -1,3 +1,10 @@
+// Package errors 定义业务错误类型、哨兵错误变量和 HTTP 状态码映射。
+// 主要类型：
+//   - BusinessError：带数字编码的领域错误，用于 API 响应
+//   - ErrorResponse：返回给客户端的 JSON 错误结构
+//   - AbortWithError：写入 JSON 错误响应并中止 Gin 处理链
+//
+// 错误码分段见 codes.go。
 package errors
 
 import (

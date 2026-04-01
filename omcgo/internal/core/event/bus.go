@@ -1,8 +1,12 @@
+// Package event 已在 types.go 中声明包注释。
 package event
 
 import "context"
 
-// EventBus defines the interface for publishing and subscribing to events.
+// EventBus 定义事件发布和订阅的抽象接口。
+// 生产环境使用 NATSEventBus，单元测试使用 ChannelEventBus。
+// Subscribe 让每个订阅者独立收到所有事件；
+// QueueSubscribe 在同一队列组内负载均衡，用于多实例水平扩展。
 type EventBus interface {
 	// Publish sends an event to all subscribers of the given subject.
 	Publish(ctx context.Context, subject string, event Event) error

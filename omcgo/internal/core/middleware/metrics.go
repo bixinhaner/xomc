@@ -8,9 +8,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// PrometheusMetrics returns a Gin middleware that records request metrics.
-// If a custom registerer is provided, metrics are registered there;
-// otherwise they use the default prometheus registry.
+// PrometheusMetrics 返回一个 Gin 中间件，自动统计每个接口的请求次数和延迟分布。
+// 指标名称：http_requests_total 和 http_request_duration_seconds，标签为 method/path/status。
+// 使用场景：全局中间件，自动为所有路由采集 Prometheus 指标，由 /metrics 端口暴露。
+// registerer 为空时使用默认 prometheus.DefaultRegisterer，
+// 传入自定义 Registry 则将指标隔离到单独 Registry（推荐）。
 func PrometheusMetrics(registerers ...prometheus.Registerer) gin.HandlerFunc {
 	var reg prometheus.Registerer
 	if len(registerers) > 0 && registerers[0] != nil {

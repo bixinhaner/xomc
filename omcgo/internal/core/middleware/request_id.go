@@ -18,18 +18,19 @@ const (
 	DefaultRequestIDPrefix = "req"
 )
 
-// RequestIDConfig holds configuration for the RequestID middleware.
+// RequestIDConfig 配置 RequestID 中间件的请求 ID 前缀。
+// Prefix 用于区分不同服务的请求来源，建议按服务设置：
+// app 服务用 "app"，acs 服务用 "acs"，worker 服务用 "worker"。
 type RequestIDConfig struct {
 	// Prefix is the prefix for generated request IDs (e.g., "app", "acs", "worker")
 	Prefix string
 }
 
-// RequestID is a Gin middleware that generates or propagates a request ID.
-// It follows these rules:
-// 1. If X-Request-ID header exists, use it (supports distributed tracing)
-// 2. Otherwise, generate a new unique request ID
-// 3. Store request ID in context for logger access
-// 4. Set request ID in response header for client correlation
+// RequestID 返回一个 Gin 中间件，自动生成或传播请求 ID。
+// 处理逐序：如存在 X-Request-ID 头就复用（支持分布式跟踪），
+// 否则生成新 ID （格式: {prefix}-{timestamp}-{random}）并写入响应头。
+// Request ID 同时存入 Go context 和 Gin context，下游日志和错误响应均可读取。
+// 使用场景：全局第二个中间件（在 Recovery 之后），尽早注入用于全链路日志关联。
 func RequestID() gin.HandlerFunc {
 	return RequestIDWithConfig(RequestIDConfig{Prefix: DefaultRequestIDPrefix})
 }

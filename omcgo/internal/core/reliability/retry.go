@@ -1,3 +1,4 @@
+// Package reliability 已在 circuit_breaker.go 中声明包注释。
 package reliability
 
 import (
@@ -7,7 +8,10 @@ import (
 	"time"
 )
 
-// RetryConfig defines the configuration for retry behavior.
+// RetryConfig 定义指数退退重试的参数。
+// MaxAttempts：最大尝试次数（包括第一次）。
+// BaseDelay：第一次重试前的基础延迟，每次指数翻倍：1s, 2s, 4s, 8s...
+// MaxDelay：重试间隔上限，防止回退时间过长。
 type RetryConfig struct {
 	MaxAttempts int           // Maximum number of attempts (including the first).
 	BaseDelay   time.Duration // Base delay before the first retry.
@@ -26,8 +30,11 @@ func DefaultRetryConfig() RetryConfig {
 // RetryableFunc is a function that can be retried.
 type RetryableFunc func(ctx context.Context) error
 
-// Retry executes fn with exponential backoff according to cfg.
-// It returns nil on success or the last error after all attempts are exhausted.
+// Retry 以指数退退策略执行 fn，成功则返回 nil，
+// 所有尝试耗尽后返回最后一次错误。
+// 使用场景：调用不稳定的外部服务（如 NATS Publish、MinIO、CPE Connection Request），
+// 配合 context.WithTimeout 设置整体重试最大时间窗口。
+// 注意：重试不适用于业务性错误（如参数校验失败），fn 应自行判断进行错误分类。
 func Retry(ctx context.Context, cfg RetryConfig, fn RetryableFunc) error {
 	if cfg.MaxAttempts < 1 {
 		cfg.MaxAttempts = 1

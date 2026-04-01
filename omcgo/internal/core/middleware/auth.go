@@ -1,3 +1,7 @@
+// Package middleware 提供 Gin HTTP 中间件合集。
+// 包含：认证、CORS、请求日志、Prometheus 指标、Panic 恢复、
+// Request ID 传播、安全响应头和 OpenTelemetry 干源。
+// 各中间件均实现 gin.HandlerFunc，由服务路由层按需组合使用。
 package middleware
 
 import (
@@ -7,9 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware returns a Gin middleware that validates JWT tokens.
-// This is a placeholder implementation for Phase 1; full JWT validation
-// is implemented in Phase 4 (Sprint 4.1 RBAC).
+// AuthMiddleware 返回一个 Gin 中间件，验证 HTTP 请求中的 JWT Bearer Token。
+// 要求 Authorization 头格式为 "Bearer <token>"，验证失败时返回 401。
+// 使用场景：App 服务的需要登录的 REST API 路由组，登录/健康检查接口跳过此中间件。
+// 注意：Phase 1 仅验证 Token 非空，Phase 4 完整实现 JWT 签名验证。
 func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")

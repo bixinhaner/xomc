@@ -6,7 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Alarm represents an alarm event from a managed device.
+// Alarm 表示被管设备上报的一条告警。
+// 对应数据库 alarms 表，由 alarm.AlarmEngine 写入。
+// 告警生命周期：活跃 → 确认 → 清除，对应 AlarmStatus。
 type Alarm struct {
 	ID             uuid.UUID         `json:"id" db:"id"`
 	DeviceID       uuid.UUID         `json:"device_id" db:"device_id"`

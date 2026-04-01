@@ -1,3 +1,6 @@
+// Package reliability 提供分布式系统常用的可靠性模式：
+// - CircuitBreaker：熟断器，防止连锁故障，用于调用下游不稳定服务（如 OSS 推送、Connection Request）
+// - Retry：指数退退重试，用于短暂故障自恢复（如 DB 连接重试、NATS 发布重试）
 package reliability
 
 import (
@@ -35,7 +38,9 @@ func (s CircuitState) String() string {
 // ErrCircuitOpen is returned when the circuit breaker is in the open state.
 var ErrCircuitOpen = errors.New("circuit breaker is open")
 
-// CircuitBreakerConfig defines the configuration for a CircuitBreaker.
+// CircuitBreakerConfig 定义熟断器的运行参数。
+// FailureThreshold：连续失败多少次转为 Open 状态（默认 5）。
+// ResetTimeout： Open 状态持续多久后转为 HalfOpen 尝试恢复（默认 30s）。
 type CircuitBreakerConfig struct {
 	FailureThreshold int           // Number of consecutive failures before opening the circuit.
 	ResetTimeout     time.Duration // Time to wait before transitioning from open to half-open.
@@ -49,8 +54,13 @@ func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 	}
 }
 
-// CircuitBreaker implements the circuit breaker pattern with three states:
-// closed (normal operation), open (fail-fast), and half-open (probe).
+// CircuitBreaker 实现熟断器模式，具有三个状态：
+// - Closed（关闭）：正常放行请求
+// - Open（断开）：连续失败超过阈值后，快速失败不进入下游
+// - HalfOpen（半开）：等待 ResetTimeout 后放行一次探测请求
+//
+// 使用场景：封装对外调用（OSS HTTP 推送、CPE Connection Request），
+// 防止下游服务长时集中超时导致线程串联庄。
 type CircuitBreaker struct {
 	mu               sync.Mutex
 	state            CircuitState

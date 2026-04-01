@@ -1,4 +1,6 @@
-// Package context provides context utilities for request-scoped values.
+// Package context 提供请求级 context 注入工具函数。
+// 目前只包含 Request ID 的存取，由 middleware/request_id.go 注入，
+// 领域层通过 GetRequestID(ctx) 读取用于日志和错误响应。
 package context
 
 import "context"

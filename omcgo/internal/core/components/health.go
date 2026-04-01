@@ -1,3 +1,5 @@
+// Package components 提供微服务基础设施组件的初始化、健康检查和优雅关机能力。
+// 包括：Infra（统一入口）、HealthChecker、GracefulShutdown、SystemInfoHandler、TracerProvider。
 package components
 
 import (
@@ -7,7 +9,8 @@ import (
 	"time"
 )
 
-// ComponentHealth represents the health status of a single component.
+// ComponentHealth 表示单个组件的健康检查结果。
+// Status 取値："healthy"、"unhealthy"、"degraded"。
 type ComponentHealth struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"` // healthy, unhealthy, degraded
@@ -20,7 +23,9 @@ type healthCheck struct {
 	fn   func(ctx context.Context) error
 }
 
-// HealthChecker aggregates health checks from multiple components.
+// HealthChecker 汇聚多个组件的健康检查。
+// 每个组件在初始化后调用 Register 注册自己的检查函数。
+// 检查结果返回给 /healthz 接口，由 Kubernetes liveness/readiness probe 调用。
 type HealthChecker struct {
 	mu     sync.RWMutex
 	checks []healthCheck

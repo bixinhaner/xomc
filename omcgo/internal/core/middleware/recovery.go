@@ -8,8 +8,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// Recovery returns a Gin middleware that recovers from panics,
-// logs the stack trace, and returns a 500 response.
+// Recovery 返回一个 Gin 中间件，捕获 Handler 内的 panic，
+// 记录堆栈跟踪和请求信息至日志，并返回 500 Internal Server Error。
+// 使用场景：全局第一个中间件，尽早注册以捕获所有 Handler 的意外 panic，
+// 防止单个请求 panic 导致整个服务崩溃。
 func Recovery(logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {

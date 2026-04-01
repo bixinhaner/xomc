@@ -1,10 +1,15 @@
+// Package carrier 定义运营商适配器接口及公共类型。
+// 系统中所有与运营商差异相关的行为（参数映射、KPI 公式、开站模板等）
+// 均通过此包的 Carrier 接口来隔离，禁止在业务代码中写 "if carrier == cmcc"。
+//
+// 目前已注册的适配器：cmcc、ctcc、cucc（位于 cmcc/ctcc/cucc 子包）。
 package carrier
 
 import "github.com/omcgo/omcgo/internal/core/model"
 
-// Carrier defines the interface for carrier-specific behavior.
-// All carrier differences must be implemented through this interface.
-// Hard-coding like "if carrier == cmcc" is prohibited.
+// Carrier 定义运营商适配器接口。
+// 所有运营商差异行为必须通过实现此接口来完成，禁止硬编码 "if carrier == cmcc"。
+// 实现类位于 cmcc/ctcc/cucc 子包，通过 CarrierRegistry 统一注册和查找。
 type Carrier interface {
 	// Code returns the carrier code.
 	Code() model.CarrierCode

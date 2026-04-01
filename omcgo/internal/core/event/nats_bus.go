@@ -1,3 +1,4 @@
+// Package event 已在 types.go 中声明包注释。
 package event
 
 import (
@@ -13,7 +14,10 @@ import (
 
 const maxDeliveries = 5
 
-// NATSEventBus implements EventBus using NATS JetStream.
+// NATSEventBus 是基于 NATS JetStream 的生产级事件总线实现。
+// 每个事件通过 JetStream 持久化存储，支持 At-Least-Once 交付语义。
+// QueueSubscribe 使用 Durable Consumer，各实例彺负载均衡，适用于多实例水平扩展。
+// 事件处理失败后指数退退重新投递（最多 5 次），超出后终止该消息防止无限重试。
 type NATSEventBus struct {
 	conn   *nats.Conn
 	js     nats.JetStreamContext

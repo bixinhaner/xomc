@@ -1,3 +1,5 @@
+// Package carrier 已在 carrier.go 中声明包注释。
+
 package carrier
 
 import (
@@ -7,7 +9,9 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
-// CarrierRegistry manages carrier adapter registration and lookup.
+// CarrierRegistry 管理运营商适配器的注册和查找。
+// 各微服务在启动时初始化一个全局 Registry，并依次注册 cmcc/ctcc/cucc 适配器。
+// 运行时不允许修改，所有读操作并发安全。
 type CarrierRegistry struct {
 	carriers map[model.CarrierCode]Carrier
 	mu       sync.RWMutex

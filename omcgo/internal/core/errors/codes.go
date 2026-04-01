@@ -1,3 +1,6 @@
+// Package errors 已在 errors.go 中声明包注释。
+// 此文件将 global 包中的错误码常量按领域分组再导出。
+// 内部代码优先导入此包的常量，不直接引用 global。
 package errors
 
 import "github.com/omcgo/omcgo/global"
@@ -41,9 +44,9 @@ const (
 
 // Alarm Management (5000-5999)
 const (
-	ErrCodeAlarmNotFound      = global.ErrCodeAlarmNotFound
-	ErrCodeAlarmAlreadyAcked  = global.ErrCodeAlarmAlreadyAcked
-	ErrCodeAlarmRuleNotFound  = global.ErrCodeAlarmRuleNotFound
+	ErrCodeAlarmNotFound       = global.ErrCodeAlarmNotFound
+	ErrCodeAlarmAlreadyAcked   = global.ErrCodeAlarmAlreadyAcked
+	ErrCodeAlarmRuleNotFound   = global.ErrCodeAlarmRuleNotFound
 	ErrCodeAlarmAlreadyCleared = global.ErrCodeAlarmAlreadyCleared
 )
 

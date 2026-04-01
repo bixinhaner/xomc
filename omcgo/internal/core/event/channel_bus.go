@@ -1,3 +1,4 @@
+// Package event 已在 types.go 中声明包注释。
 package event
 
 import (
@@ -9,7 +10,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// ChannelEventBus is an in-process EventBus implementation using Go channels.
+// ChannelEventBus 是基于 Go Channel 的内存事件总线，仅适用于单进程内。
+// 生产环境使用 NATSEventBus；单元测试和开发自测时使用此实现，不依赖 NATS。
+// 支持 NATS 风格的主题通配符（* 匹配单级，> 匹配多级）。
+// QueueSubscribe 在同一队列组内负载均衡事件，Subscribe 给每个订阅者独立分发。
 type ChannelEventBus struct {
 	subscribers map[string][]*channelSubscription
 	mu          sync.RWMutex
@@ -192,7 +196,8 @@ func matchSubject(pattern, subject string) bool {
 	return len(patternParts) == len(subjectParts)
 }
 
-// ErrBusClosed is returned when operating on a closed event bus.
+// ErrBusClosed 在对已关闭的 EventBus 进行操作时返回。
+// 如 Publish 或 Subscribe 调用在 Close 之后进入时会返回此错误。
 var ErrBusClosed = &busClosedError{}
 
 type busClosedError struct{}

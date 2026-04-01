@@ -1,3 +1,9 @@
+// Package event 提供事件驱动架构的核心抽象。
+// 包括事件封装类型、EventBus 接口和两种实现：
+//   - ChannelEventBus：单进程内内存通道，用于测试
+//   - NATSEventBus：基于 NATS JetStream 的跨服务广播，用于生产
+//
+// 事件主题常量定义在 subjects.go。
 package event
 
 import (
@@ -8,7 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Event is the standard event envelope.
+// Event 是所有事件的标准封装。
+// Payload 为 JSON 序列化的事件载荷，封装前后可通过 NewEvent 和 DecodePayload 操作。
+// Metadata 可附加平台信息（如 trace_id、来源服务）。
 type Event struct {
 	ID        string            `json:"id"`
 	Subject   string            `json:"subject"`

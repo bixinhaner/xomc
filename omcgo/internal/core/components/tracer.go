@@ -13,8 +13,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
-// NewTracerProvider initializes an OpenTelemetry TracerProvider.
-// If tracing is disabled, it returns a no-op provider.
+// NewTracerProvider 初始化 OpenTelemetry TracerProvider。
+// 当 tracing 关闭时返回 no-op Provider，不向任何端点上报，全零开销。
+// 开启时向 cfg.Endpoint（OTLP gRPC，如 Jaeger/Tempo）导出 Span。
+// 由 Infra.InitTracer 调用并自动注册优雅关机回调。
 func NewTracerProvider(ctx context.Context, cfg appconfig.TracerConfig, serviceName string) (*sdktrace.TracerProvider, error) {
 	// Always set up W3C TraceContext propagation so spans can be correlated
 	// across services even when tracing is first disabled then enabled.

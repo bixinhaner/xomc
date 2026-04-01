@@ -17,7 +17,8 @@ var (
 	buildDate = "unknown"
 )
 
-// SystemInfo represents the runtime system information returned by the API.
+// SystemInfo 表示 GET /api/v1/system/info 接口返回的运行时信息。
+// 用于管理单页明小板展示服务基本状态，不需要登录。
 type SystemInfo struct {
 	Version     string  `json:"version"`
 	BuildDate   string  `json:"build_date"`
@@ -27,7 +28,9 @@ type SystemInfo struct {
 	CacheStatus string  `json:"cache_status"`
 }
 
-// SystemInfoHandler provides the GET /system/info endpoint.
+// SystemInfoHandler 提供 GET /api/v1/system/info 接口。
+// 返回服务版本、运行时长、DB 和 Redis 连接状态，不需要认证，与 /healthz 互补。
+// DBStatus/CacheStatus 返回 "normal" 或 "error"，3 秒超时自动展示 error。
 type SystemInfoHandler struct {
 	pgPool      *pgxpool.Pool
 	redisClient redis.UniversalClient

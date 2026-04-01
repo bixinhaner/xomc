@@ -5,10 +5,19 @@ import (
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
-// BucketAndCategory returns the target MinIO bucket name and category
-// subdirectory for a given TR069 FileType.
-// The category is used as the first path segment within the bucket.
-// An empty category means files are stored directly under carrier/date.
+// BucketAndCategory 根据 TR-069 文件类型返回目标 MinIO Bucket 名称和分类子目录。
+// category 为空时，文件直接以 {carrier}/{date}/{sn}/{filename} 格式存储到 Bucket 根目录。
+// 使用场景： ACS Upload Handler 收到文件后，由此函数确定文件应存到哪个 Bucket，
+// 再结合 ObjectPath 或 FirmwarePath 生成完整 MinIO 对象路径。
+//
+// 路由映射表：
+//
+//	Firmware  → firmware bucket,  img/patch 子目录
+//	Config    → config_backup bucket, backup/
+//	PM/MR     → pm_files/mr_files bucket（直接入根）
+//	Logs      → logs bucket, running/security/fault/pcap/
+//	DataModel → exchange bucket, datamodel/
+//	SSLCert   → config_backup bucket, ssl-cert/
 func BucketAndCategory(ft tr069.FileType, buckets appconfig.BucketConfig) (bucket, category string) {
 	switch ft {
 	case tr069.FileTypeFirmware:

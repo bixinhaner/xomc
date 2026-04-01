@@ -1,3 +1,6 @@
+// Package storage 提供 MinIO 对象存储路径构建和文件路由工具。
+// path.go：根据文件类型生成标准化对象路径
+// router.go：根据 TR-069 文件类型路由到对应的 Bucket 和分类目录
 package storage
 
 import (
@@ -5,9 +8,10 @@ import (
 	"time"
 )
 
-// ObjectPath builds a MinIO object path for device-originated files.
-// Format: {category}/{carrier}/{YYYY}/{MM}/{DD}/{deviceSN}/{filename}
-// Example: running/cmcc/2026/03/30/BCI-SN-00001/task123_20260330150000.log
+// ObjectPath 为设备上传的文件构建标准对象路径，格式：
+// {category}/{carrier}/{YYYY}/{MM}/{DD}/{deviceSN}/{filename}
+// 其中 category 为空时直接用 {carrier}/date/sn/filename。
+// 使用场景：配置备份、日志、PM/MR 文件入库前生成 MinIO key。
 func ObjectPath(category, carrier, deviceSN, filename string) string {
 	now := time.Now()
 	if category == "" {
@@ -27,7 +31,8 @@ func ObjectPath(category, carrier, deviceSN, filename string) string {
 	)
 }
 
-// ObjectPathAt builds a MinIO object path with an explicit timestamp.
+// ObjectPathAt 与 ObjectPath 相同，但接受显式时间戳展代内部 time.Now()。
+// 适用于需要以历史时间容纳文件的场景（如重进厅历史文件）。
 func ObjectPathAt(category, carrier, deviceSN, filename string, t time.Time) string {
 	if category == "" {
 		return fmt.Sprintf("%s/%s/%s/%s",
@@ -46,9 +51,9 @@ func ObjectPathAt(category, carrier, deviceSN, filename string, t time.Time) str
 	)
 }
 
-// FirmwarePath builds a MinIO object path for firmware-related files.
-// Format: {category}/{carrier}/{productClass}/{version}/{filename}
-// Example: img/cmcc/Nova436Q/V100R001C00B060/firmware.bin
+// FirmwarePath 为固件文件构建对象路径，格式：
+// {category}/{carrier}/{productClass}/{version}/{filename}
+// 使用场景：固件/补丁 入库 MinIO 时生成 key，按产品型号和版本分目录管理。
 func FirmwarePath(category, carrier, productClass, version, filename string) string {
 	return fmt.Sprintf("%s/%s/%s/%s/%s",
 		category,
@@ -59,9 +64,9 @@ func FirmwarePath(category, carrier, productClass, version, filename string) str
 	)
 }
 
-// ExchangePath builds a MinIO object path for data exchange files (import/export).
-// Format: {category}/{YYYY}/{MM}/{DD}/{userID}/{filename}
-// Example: import/2026/03/30/user_001/devices.xlsx
+// ExchangePath 为数据交换文件构建对象路径，格式：
+// {category}/{YYYY}/{MM}/{DD}/{userID}/{filename}
+// 使用场景：设备导入/导出任务中临时文件入库 MinIO Exchange Bucket。
 func ExchangePath(category, userID, filename string) string {
 	now := time.Now()
 	return fmt.Sprintf("%s/%s/%s/%s",
@@ -72,8 +77,10 @@ func ExchangePath(category, userID, filename string) string {
 	)
 }
 
-// DataModelPath builds a MinIO object path for data model XML files.
-// Format: datamodel/{carrier}/{oui}/{productClass}/{deviceSN}_{timestamp}.xml
+// DataModelPath 为数据模型 XML 文件构建对象路径，格式：
+// datamodel/{carrier}/{oui}/{productClass}/{deviceSN}_{timestamp}.xml
+// 使用场景： ACS 收到 FileType=11 上传后，将 CPE 上传的参数模型 XML
+// 存入 Exchange Bucket 的 datamodel/ 目录，后绪App 服务经 NATS 事件处理。
 func DataModelPath(carrier, oui, productClass, deviceSN string) string {
 	ts := time.Now().Format("20060102150405")
 	return fmt.Sprintf("datamodel/%s/%s/%s/%s_%s.xml",
@@ -85,7 +92,7 @@ func DataModelPath(carrier, oui, productClass, deviceSN string) string {
 	)
 }
 
-// DatePrefix returns the current date as a path prefix: YYYY/MM/DD
+// DatePrefix 返回当前日期字符串作为路径前缀 YYYY/MM/DD，用于构建时序目录结构。
 func DatePrefix() string {
 	return time.Now().Format("2006/01/02")
 }
