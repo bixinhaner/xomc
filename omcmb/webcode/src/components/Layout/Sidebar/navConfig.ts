@@ -148,20 +148,20 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'sw-rollback', label: 'nav.software.versionRollback', path: '/software/rollback' },
     ],
   },
-  {
-    key: 'file',
-    label: 'nav.file',
-    iconName: 'FolderOutlined',
-    children: [
-      { key: 'file-config-search',  label: 'nav.file.configRetrieval',    path: '/file/config-retrieval' },
-      { key: 'file-config-dist',    label: 'nav.file.configDistribution', path: '/file/config-distribution' },
-      { key: 'file-log-search',     label: 'nav.file.logRetrieval',       path: '/file/log-retrieval' },
-      { key: 'file-perf-search',    label: 'nav.file.perfRetrieval',      path: '/file/perf-retrieval' },
-      { key: 'file-mr-search',      label: 'nav.file.mrRetrieval',        path: '/file/mr-retrieval' },
-      { key: 'file-user',           label: 'nav.file.userFiles',          path: '/file/user-files' },
-      { key: 'file-device',         label: 'nav.file.deviceFiles',        path: '/file/device-files' },
-    ],
-  },
+  // {
+  //   key: 'file',
+  //   label: 'nav.file',
+  //   iconName: 'FolderOutlined',
+  //   children: [
+  //     { key: 'file-config-search',  label: 'nav.file.configRetrieval',    path: '/file/config-retrieval' },
+  //     { key: 'file-config-dist',    label: 'nav.file.configDistribution', path: '/file/config-distribution' },
+  //     { key: 'file-log-search',     label: 'nav.file.logRetrieval',       path: '/file/log-retrieval' },
+  //     { key: 'file-perf-search',    label: 'nav.file.perfRetrieval',      path: '/file/perf-retrieval' },
+  //     { key: 'file-mr-search',      label: 'nav.file.mrRetrieval',        path: '/file/mr-retrieval' },
+  //     { key: 'file-user',           label: 'nav.file.userFiles',          path: '/file/user-files' },
+  //     { key: 'file-device',         label: 'nav.file.deviceFiles',        path: '/file/device-files' },
+  //   ],
+  // },  // 隐藏文件管理菜单
   {
     key: 'log',
     label: 'nav.log',
@@ -242,68 +242,68 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'ops-download',   label: 'nav.ops.downloads',        path: '/ops/downloads' },
     ],
   },
-  {
-    key: 'egw',
-    label: 'nav.egw',
-    iconName: 'GatewayOutlined',
-    children: [
-      { key: 'egw-monitor',       label: 'nav.egw.monitor',       path: '/egw/monitor' },
-      { key: 'egw-maintenance',   label: 'nav.egw.maintenance',   path: '/egw/maintenance' },
-      { key: 'egw-registration',  label: 'nav.egw.registration',  path: '/egw/registration' },
-      { key: 'egw-upgrade',       label: 'nav.egw.upgrade',       path: '/egw/upgrade' },
-    ],
-  },
-  {
-    key: 'newegw',
-    label: 'nav.newegw',
-    iconName: 'DeploymentUnitOutlined',
-    children: [
-      { key: 'newegw-monitor',       label: 'nav.newegw.monitor',       path: '/newegw/monitor' },
-      { key: 'newegw-topology',      label: 'nav.newegw.topology',      path: '/newegw/topology' },
-      { key: 'newegw-maintenance',   label: 'nav.newegw.maintenance',   path: '/newegw/maintenance' },
-      { key: 'newegw-registration',  label: 'nav.newegw.registration',  path: '/newegw/registration' },
-      { key: 'newegw-upgrade',       label: 'nav.newegw.upgrade',       path: '/newegw/upgrade' },
-      { key: 'newegw-access',        label: 'nav.newegw.accessControl', path: '/newegw/access-control' },
-    ],
-  },
-  {
-    key: 'sas',
-    label: 'nav.sas',
-    iconName: 'WifiOutlined',
-    children: [
-      { key: 'sas-cpi',        label: 'nav.sas.cpiConfig',   path: '/sas/cpi-config' },
-      { key: 'sas-properties', label: 'nav.sas.properties',   path: '/sas/properties' },
-      { key: 'sas-monitoring', label: 'nav.sas.monitoring',   path: '/sas/monitoring' },
-    ],
-  },
-  {
-    key: 'ups',
-    label: 'nav.ups',
-    iconName: 'ThunderboltOutlined',
-    children: [
-      { key: 'ups-monitor',       label: 'nav.ups.monitor',       path: '/ups/monitor' },
-      { key: 'ups-registration',  label: 'nav.ups.registration',  path: '/ups/registration' },
-      { key: 'ups-upgrade',       label: 'nav.ups.upgrade',       path: '/ups/upgrade' },
-    ],
-  },
-  {
-    key: 'dhcp',
-    label: 'nav.dhcp',
-    iconName: 'ApartmentOutlined',
-    children: [
-      { key: 'dhcp-config',  label: 'nav.dhcp.serverConfig', path: '/dhcp/server-config' },
-      { key: 'dhcp-clients', label: 'nav.dhcp.clientList',   path: '/dhcp/client-list' },
-      { key: 'dhcp-service', label: 'nav.dhcp.service',      path: '/dhcp/service' },
-    ],
-  },
-  {
-    key: 'cau',
-    label: 'nav.cau',
-    iconName: 'CloudServerOutlined',
-    children: [
-      { key: 'cau-upgrade', label: 'nav.cau.upgrade', path: '/cau/upgrade' },
-    ],
-  },
+  // {
+  //   key: 'egw',
+  //   label: 'nav.egw',
+  //   iconName: 'GatewayOutlined',
+  //   children: [
+  //     { key: 'egw-monitor',       label: 'nav.egw.monitor',       path: '/egw/monitor' },
+  //     { key: 'egw-maintenance',   label: 'nav.egw.maintenance',   path: '/egw/maintenance' },
+  //     { key: 'egw-registration',  label: 'nav.egw.registration',  path: '/egw/registration' },
+  //     { key: 'egw-upgrade',       label: 'nav.egw.upgrade',       path: '/egw/upgrade' },
+  //   ],
+  // },  // 隐藏网关管理菜单
+  // {
+  //   key: 'newegw',
+  //   label: 'nav.newegw',
+  //   iconName: 'DeploymentUnitOutlined',
+  //   children: [
+  //     { key: 'newegw-monitor',       label: 'nav.newegw.monitor',       path: '/newegw/monitor' },
+  //     { key: 'newegw-topology',      label: 'nav.newegw.topology',      path: '/newegw/topology' },
+  //     { key: 'newegw-maintenance',   label: 'nav.newegw.maintenance',   path: '/newegw/maintenance' },
+  //     { key: 'newegw-registration',  label: 'nav.newegw.registration',  path: '/newegw/registration' },
+  //     { key: 'newegw-upgrade',       label: 'nav.newegw.upgrade',       path: '/newegw/upgrade' },
+  //     { key: 'newegw-access',        label: 'nav.newegw.accessControl', path: '/newegw/access-control' },
+  //   ],
+  // },  // 隐藏新型网关菜单
+  // {
+  //   key: 'sas',
+  //   label: 'nav.sas',
+  //   iconName: 'WifiOutlined',
+  //   children: [
+  //     { key: 'sas-cpi',        label: 'nav.sas.cpiConfig',   path: '/sas/cpi-config' },
+  //     { key: 'sas-properties', label: 'nav.sas.properties',   path: '/sas/properties' },
+  //     { key: 'sas-monitoring', label: 'nav.sas.monitoring',   path: '/sas/monitoring' },
+  //   ],
+  // },  // 隐藏频谱管理菜单
+  // {
+  //   key: 'ups',
+  //   label: 'nav.ups',
+  //   iconName: 'ThunderboltOutlined',
+  //   children: [
+  //     { key: 'ups-monitor',       label: 'nav.ups.monitor',       path: '/ups/monitor' },
+  //     { key: 'ups-registration',  label: 'nav.ups.registration',  path: '/ups/registration' },
+  //     { key: 'ups-upgrade',       label: 'nav.ups.upgrade',       path: '/ups/upgrade' },
+  //   ],
+  // },  // 隐藏电源管理菜单
+  // {
+  //   key: 'dhcp',
+  //   label: 'nav.dhcp',
+  //   iconName: 'ApartmentOutlined',
+  //   children: [
+  //     { key: 'dhcp-config',  label: 'nav.dhcp.serverConfig', path: '/dhcp/server-config' },
+  //     { key: 'dhcp-clients', label: 'nav.dhcp.clientList',   path: '/dhcp/client-list' },
+  //     { key: 'dhcp-service', label: 'nav.dhcp.service',      path: '/dhcp/service' },
+  //   ],
+  // },  // 隐藏DHCP管理菜单
+  // {
+  //   key: 'cau',
+  //   label: 'nav.cau',
+  //   iconName: 'CloudServerOutlined',
+  //   children: [
+  //     { key: 'cau-upgrade', label: 'nav.cau.upgrade', path: '/cau/upgrade' },
+  //   ],
+  // },  // 隐藏CAU管理菜单
   {
     key: 'strategy',
     label: 'nav.strategy',
