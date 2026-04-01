@@ -1096,7 +1096,7 @@ export default function CustomAlarmStats() {
       {/* 标题卡片 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0' }}>
         <Space>
-          <EnvironmentOutlined style={{ color: '#1890ff' }} />
+          <FolderOutlined style={{ color: '#fa8c16' }} />
           <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || '自定义告警'}</Text>
           <Tag color={isHistorical ? 'default' : 'red'}>
             {isHistorical ? <><ClockCircleOutlined /> 历史</> : <><AlertOutlined /> 活动</>}
