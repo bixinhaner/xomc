@@ -1,7 +1,7 @@
 server:
   host: "0.0.0.0"
-  port: 7547
-  tls_port: 7548
+  port: 7557
+  tls_port: 7558
   tls:
     enabled: false
     cert_file: ""
@@ -76,14 +76,14 @@ minio:
     exchange: "omc-exchange"
 
 upload:
-  base_url: "http://acs:7547"
+  base_url: "http://acs:7557"
   path: "/smallcell/FileUploadService"
   username: "upload_user"
   password: "secure_upload_password_123"
   max_file_size: 104857600
 
 download:
-  base_url: "http://acs:7547"
+  base_url: "http://acs:7557"
   path: "/smallcell/FileDownloadService"
   username: "download_user"
   password: "secure_download_password_123"

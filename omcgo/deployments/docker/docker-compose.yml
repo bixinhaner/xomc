@@ -109,7 +109,7 @@ services:
       dockerfile: deployments/docker/Dockerfile.acs
     ports:
       - "9090:9090"
-      - "7547:7547"
+      - "7557:7557"
     environment:
       OMCGO_ENV: "${OMCGO_ENV:-dev}"
     volumes:

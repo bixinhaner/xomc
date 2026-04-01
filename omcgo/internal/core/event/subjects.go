@@ -1,112 +1,300 @@
 package event
 
 // Device events
+//
+// 这类事件由 ACS Handler 在处理 CPE TR-069 Inform 报文时发布。
 const (
-	SubjectDeviceBootstrap                  = "device.inform.bootstrap"
-	SubjectDevicePeriodic                   = "device.inform.periodic"
-	SubjectDeviceValueChange                = "device.inform.value_change"
-	SubjectDeviceAlarm                      = "device.inform.alarm"
-	SubjectDeviceTransferComplete           = "device.inform.transfer_complete"
+	// SubjectDeviceBootstrap 是设备首次入网或出厂重置结束时发布。
+	// Inform 事件码包含 "0 BOOTSTRAP"。
+	// 发布者：acs/handler.go，订阅者：device.InformHandler（设备注册）、provision.Engine（自动开站入口）
+	SubjectDeviceBootstrap = "device.inform.bootstrap"
+
+	// SubjectDevicePeriodic 是设备周期性心跳 Inform 时发布。
+	// Inform 事件码包含 "2 PERIODIC"。
+	// 发布者：acs/handler.go，订阅者：device.InformHandler（更新心跳时间、在线状态）
+	SubjectDevicePeriodic = "device.inform.periodic"
+
+	// SubjectDeviceValueChange 是设备参数发生变化时发布。
+	// Inform 事件码包含 "4 VALUE CHANGE"。
+	// 发布者：acs/handler.go，订阅者：device.InformHandler（同心跳处理逻辑）
+	SubjectDeviceValueChange = "device.inform.value_change"
+
+	// SubjectDeviceAlarm 是设备上报告警信息时发布。
+	// Inform 事件码包含 "M AlarmInfo" 类型。
+	// 发布者：acs/handler.go，订阅者：alarm.AlarmReceiver（告警活动展示、历史入库）
+	SubjectDeviceAlarm = "device.inform.alarm"
+
+	// SubjectDeviceTransferComplete 是 CPE 主动上报 TransferComplete SOAP 报文时发布。
+	// 这是 ACS 主动发起 Upload/Download RPC 后的异步确认。
+	// 发布者：acs/handler.go handleTransferComplete，订阅者：software.Service（固件升级完成确认）
+	SubjectDeviceTransferComplete = "device.inform.transfer_complete"
+
+	// SubjectDeviceAutonomousTransferComplete 是 CPE 自主发起文件传输并上报 AutonomousTransferComplete 时发布。
+	// 典型场景：CPE 定时自动上传 PM/MR 文件。
+	// 发布者：acs/handler.go handleAutonomousTransferComplete，订阅者：transfer.Bridge（下载并分类到 MinIO）
 	SubjectDeviceAutonomousTransferComplete = "device.inform.autonomous_transfer_complete"
-	SubjectDeviceRebootComplete             = "device.inform.reboot_complete"
-	SubjectDeviceConnectionRequest          = "device.inform.connection_request"
-	SubjectDeviceConnectionLost             = "device.connection.lost"
-	SubjectDeviceRegistered                 = "device.registered"
-	SubjectDeviceRebootAbnormal             = "device.reboot.abnormal"
+
+	// SubjectDeviceRebootComplete 是设备重启完成后再次接入时发布。
+	// Inform 事件码包含 "1 BOOT"。
+	// 发布者：acs/handler.go，订阅者：暂无（可用于重启结果追踪）
+	SubjectDeviceRebootComplete = "device.inform.reboot_complete"
+
+	// SubjectDeviceConnectionRequest 是收到设备发起的 ConnectionRequest Inform 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectDeviceConnectionRequest = "device.inform.connection_request"
+
+	// SubjectDeviceConnectionLost 是设备连接超时或主动断线时发布。
+	// 发布者：device.HeartbeatMonitor，订阅者：暂无（可用于天致告警联动）
+	SubjectDeviceConnectionLost = "device.connection.lost"
+
+	// SubjectDeviceRegistered 是新设备首次入库（写入 devices 表）后发布。
+	// 发布者：device.Service.RegisterDevice，订阅者：provision.Engine（触发自动开站流程）
+	SubjectDeviceRegistered = "device.registered"
+
+	// SubjectDeviceRebootAbnormal 是检测到设备异常重启（上一次入网不是正常关机）时发布。
+	// 发布者：device.InformHandler（处理 Bootstrap Inform 时判断），订阅者：暂无（可用于异常重启日志入库）
+	SubjectDeviceRebootAbnormal = "device.reboot.abnormal"
 )
 
 // Command events
+//
+// 这类事件为【主动下发】类 RPC 命令的请求触发，目前实际代码中尚未见到明确的订阅者，预留供展层扩展使用。
 const (
-	SubjectCommandGetParams  = "command.get_parameters"
-	SubjectCommandSetParams  = "command.set_parameters"
-	SubjectCommandDownload   = "command.download"
-	SubjectCommandUpload     = "command.upload"
-	SubjectCommandReboot     = "command.reboot"
-	SubjectCommandReset      = "command.factory_reset"
+	// SubjectCommandGetParams 主动下发 GetParameterValues RPC 时使用（暂未使用）
+	SubjectCommandGetParams = "command.get_parameters"
+	// SubjectCommandSetParams 主动下发 SetParameterValues RPC 时使用（暂未使用）
+	SubjectCommandSetParams = "command.set_parameters"
+	// SubjectCommandDownload 主动下发 Download RPC（暂未使用）
+	SubjectCommandDownload = "command.download"
+	// SubjectCommandUpload 主动下发 Upload RPC（暂未使用）
+	SubjectCommandUpload = "command.upload"
+	// SubjectCommandReboot 主动下发 Reboot RPC（暂未使用）
+	SubjectCommandReboot = "command.reboot"
+	// SubjectCommandReset 主动下发 FactoryReset RPC（暂未使用）
+	SubjectCommandReset = "command.factory_reset"
 )
 
 // PM events
+//
+// PM 数据文件的采集与解析流转事件。
 const (
+	// SubjectPMFileReceived 是 PM 文件入库到 MinIO 后发布。
+	// 发布者：transfer.Bridge（收到 AutonomousTransferComplete 后下载文件）。
+	// 订阅者：pm.Collector（解析 XML、入库计数器、计算 KPI）
 	SubjectPMFileReceived = "pm.file.received"
-	SubjectPMFileParsed   = "pm.file.parsed"
+
+	// SubjectPMFileParsed 是 PM XML 解析完成后发布。
+	// 发布者：pm.Collector，订阅者：暂无（可用于选择性后续处理）
+	SubjectPMFileParsed = "pm.file.parsed"
 )
 
 // MR events
+//
+// 测量报告（Measurement Report）文件的采集与解析流转事件。
 const (
+	// SubjectMRFileReceived 是 MR 文件入库到 MinIO 后发布。
+	// 发布者：transfer.Bridge，订阅者：mr.Collector（解析并入库）
 	SubjectMRFileReceived = "mr.file.received"
-	SubjectMRFileParsed   = "mr.file.parsed"
+
+	// SubjectMRFileParsed 是 MR XML 解析完成后发布。
+	// 发布者：mr.Collector，订阅者：暂无
+	SubjectMRFileParsed = "mr.file.parsed"
 )
 
 // Alarm events
+//
+// 告警生命周期事件，由告警引擎发布。
 const (
-	SubjectAlarmRaised       = "alarm.raised"
-	SubjectAlarmCleared      = "alarm.cleared"
+	// SubjectAlarmRaised 是新告警产生时发布。
+	// 发布者：alarm.AlarmEngine，订阅者：北向接口模块（告警推送）
+	SubjectAlarmRaised = "alarm.raised"
+
+	// SubjectAlarmCleared 是告警恢复（清除）时发布。
+	// 发布者：alarm.AlarmEngine，订阅者：北向接口模块
+	SubjectAlarmCleared = "alarm.cleared"
+
+	// SubjectAlarmAcknowledged 是告警被确认时发布。
+	// 发布者：alarm.AlarmEngine，订阅者：暂无
 	SubjectAlarmAcknowledged = "alarm.acknowledged"
 )
 
 // Provisioning events
+//
+// 自动开站引擎的任务生命周期事件。
 const (
-	SubjectProvisionStarted   = "provision.started"
+	// SubjectProvisionStarted 是开站任务启动时发布。
+	// 发布者：provision.Engine，订阅者：暂无（可用于任务状态追踪）
+	SubjectProvisionStarted = "provision.started"
+
+	// SubjectProvisionCompleted 是开站任务全部步骤成功完成时发布。
+	// 发布者：provision.Engine，订阅者：暂无
 	SubjectProvisionCompleted = "provision.completed"
-	SubjectProvisionFailed    = "provision.failed"
-	SubjectProvisionStepDone  = "provision.step.done"
+
+	// SubjectProvisionFailed 是开站任务失败时发布。
+	// 发布者：provision.Engine，订阅者：暂无
+	SubjectProvisionFailed = "provision.failed"
+
+	// SubjectProvisionStepDone 是开站单个步骤执行完成时发布。
+	// 发布者：provision.Engine，订阅者：provision.Engine 自身（驱动下一步骤）
+	SubjectProvisionStepDone = "provision.step.done"
 )
 
 // DataModel events
+//
+// 参数模型（XML 数据模型）上传与处理流转事件。
 const (
+	// SubjectDataModelUploadRequested 是系统开始为设备下发 Upload RPC （FileType=11）时发布。
+	// 发布者：provision.ModelUploadService，订阅者：暂无
 	SubjectDataModelUploadRequested = "datamodel.upload.requested"
+
+	// SubjectDataModelUploadCompleted 是 Upload RPC 块成功收到设备响应时发布。
+	// 发布者：provision.ModelUploadService，订阅者：暂无
 	SubjectDataModelUploadCompleted = "datamodel.upload.completed"
-	SubjectDataModelUploadFailed    = "datamodel.upload.failed"
-	SubjectDataModelFileReceived    = "datamodel.file.received"
+
+	// SubjectDataModelUploadFailed 是 Upload RPC 失败时发布。
+	// 发布者：provision.ModelUploadService，订阅者：暂无
+	SubjectDataModelUploadFailed = "datamodel.upload.failed"
+
+	// SubjectDataModelFileReceived 是 CPE 实际上传的 XML 文件应用到 MinIO 后发布。
+	// 发布者：acs/upload/handler.go publishDataModelEvent（FileType=11 上传完成）。
+	// 订阅者：provision.Engine（对应服务：cmd/app）—下载 XML、解析、写入 data_model_definitions 表
+	SubjectDataModelFileReceived = "datamodel.file.received"
 )
 
 // Command response events
+//
+// 这类事件由 ACS Handler 在收到 CPE RPC 响应时发布，主要用于参数同步和开站引擎的状态追踪。
 const (
-	SubjectCommandGetParamsResponse      = "command.get_parameters.response"
-	SubjectCommandSetParamsResponse      = "command.set_parameters.response"
-	SubjectCommandDownloadResponse       = "command.download.response"
-	SubjectCommandUploadResponse         = "command.upload.response"
-	SubjectCommandGetNamesResponse       = "command.get_names.response"
-	SubjectCommandAddObjectResponse      = "command.add_object.response"
-	SubjectCommandDeleteObjectResponse   = "command.delete_object.response"
-	SubjectCommandRebootResponse         = "command.reboot.response"
-	SubjectCommandFactoryResetResponse   = "command.factory_reset.response"
-	SubjectCommandGetAttrsResponse       = "command.get_attrs.response"
-	SubjectCommandSetAttrsResponse       = "command.set_attrs.response"
+	// SubjectCommandGetParamsResponse 是收到 GetParameterValuesResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：provision.Engine（"provision-gpv" 队列，处理参数同步）
+	SubjectCommandGetParamsResponse = "command.get_parameters.response"
+
+	// SubjectCommandSetParamsResponse 是收到 SetParameterValuesResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandSetParamsResponse = "command.set_parameters.response"
+
+	// SubjectCommandDownloadResponse 是收到 DownloadResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandDownloadResponse = "command.download.response"
+
+	// SubjectCommandUploadResponse 是收到 UploadResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandUploadResponse = "command.upload.response"
+
+	// SubjectCommandGetNamesResponse 是收到 GetParameterNamesResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：provision.Engine（"provision-gpn" 队列，处理参数路径发现）
+	SubjectCommandGetNamesResponse = "command.get_names.response"
+
+	// SubjectCommandAddObjectResponse 是收到 AddObjectResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandAddObjectResponse = "command.add_object.response"
+
+	// SubjectCommandDeleteObjectResponse 是收到 DeleteObjectResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandDeleteObjectResponse = "command.delete_object.response"
+
+	// SubjectCommandRebootResponse 是收到 RebootResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandRebootResponse = "command.reboot.response"
+
+	// SubjectCommandFactoryResetResponse 是收到 FactoryResetResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandFactoryResetResponse = "command.factory_reset.response"
+
+	// SubjectCommandGetAttrsResponse 是收到 GetParameterAttributesResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandGetAttrsResponse = "command.get_attrs.response"
+
+	// SubjectCommandSetAttrsResponse 是收到 SetParameterAttributesResponse 时发布。
+	// 发布者：acs/handler.go，订阅者：暂无
+	SubjectCommandSetAttrsResponse = "command.set_attrs.response"
 )
 
 // Software/Firmware events
+//
+// 固件升级生命周期事件。
 const (
+	// SubjectFirmwareUploaded 是固件文件上传到 MinIO 后发布。
+	// 发布者：software.Service，订阅者：暂无
 	SubjectFirmwareUploaded = "firmware.uploaded"
-	SubjectUpgradeStarted   = "upgrade.started"
+
+	// SubjectUpgradeStarted 是升级任务开始（已对设备下发 Download RPC）时发布。
+	// 发布者：software.Service，订阅者：暂无
+	SubjectUpgradeStarted = "upgrade.started"
+
+	// SubjectUpgradeCompleted 是设备上报 TransferComplete 且升级成功后发布。
+	// 发布者：software.Service（订阅 SubjectDeviceTransferComplete 后处理），订阅者：暂无
 	SubjectUpgradeCompleted = "upgrade.completed"
-	SubjectUpgradeFailed    = "upgrade.failed"
+
+	// SubjectUpgradeFailed 是升级失败（TransferComplete 含 fault 或超时）时发布。
+	// 发布者：software.Service，订阅者：暂无
+	SubjectUpgradeFailed = "upgrade.failed"
 )
 
 // Backup events
+//
+// 设备配置备份任务事件。
 const (
+	// SubjectBackupTaskCreated 是用户创建备份任务后发布。
+	// 发布者：backup.Service，订阅者：backup.Executor（下发 Upload RPC 获取配置文件）
 	SubjectBackupTaskCreated = "backup.task.created"
-	SubjectBackupTaskDone    = "backup.task.done"
+
+	// SubjectBackupTaskDone 是备份文件已上传到 MinIO 并完成入库后发布。
+	// 发布者：backup.Executor，订阅者：暂无
+	SubjectBackupTaskDone = "backup.task.done"
 )
 
 // Report events
+//
+// 报表生成任务事件。
 const (
+	// SubjectReportGenerateRequested 是用户触发报表生成时发布。
+	// 发布者：report.Service，订阅者：report.Generator（异步执行报表生成并写入 MinIO）
 	SubjectReportGenerateRequested = "report.generate.requested"
-	SubjectReportGenerateDone      = "report.generate.done"
+
+	// SubjectReportGenerateDone 是报表文件生成完成时发布。
+	// 发布者：report.Generator，订阅者：暂无
+	SubjectReportGenerateDone = "report.generate.done"
 )
 
 // Northbound/OSS events
+//
+// 北向接口模块对外推送事件，用于与上层管理系统对接。
 const (
-	SubjectOSSAlarmForward   = "oss.alarm.forward"
-	SubjectOSSPMExport       = "oss.pm.export"
+	// SubjectOSSAlarmForward 是告警需向北向系统推送时发布。
+	// 发布者：alarm.Engine，订阅者：北向模块 Push Engine
+	SubjectOSSAlarmForward = "oss.alarm.forward"
+
+	// SubjectOSSPMExport 是 PM 数据需对外导出时发布。
+	// 发布者：pm.Collector，订阅者：北向模块 Push Engine
+	SubjectOSSPMExport = "oss.pm.export"
+
+	// SubjectOSSConfigSnapshot 是配置快照需对外同步时发布。
+	// 发布者：provision.Engine，订阅者：北向模块 Sync Service
 	SubjectOSSConfigSnapshot = "oss.config.snapshot"
 )
 
 // NE Direct events
+//
+// 网元直连（NE Direct）模块的会话与命令事件。
 const (
-	SubjectNEDirectRegister   = "nedirect.register"
-	SubjectNEDirectFault      = "nedirect.fault"
-	SubjectNEDirectConnect    = "nedirect.session.connect"
+	// SubjectNEDirectRegister 是设备初次连接网元直连服务时发布。
+	// 发布者：nedirect.Service，订阅者：暂无
+	SubjectNEDirectRegister = "nedirect.register"
+
+	// SubjectNEDirectFault 是直连会话发生错误时发布。
+	// 发布者：nedirect.Service，订阅者：暂无
+	SubjectNEDirectFault = "nedirect.fault"
+
+	// SubjectNEDirectConnect 是直连 WebSocket 会话建立时发布。
+	// 发布者：nedirect.Service，订阅者：暂无
+	SubjectNEDirectConnect = "nedirect.session.connect"
+
+	// SubjectNEDirectDisconnect 是直连 WebSocket 会话断开时发布。
+	// 发布者：nedirect.Service，订阅者：暂无
 	SubjectNEDirectDisconnect = "nedirect.session.disconnect"
-	SubjectNEDirectCommand    = "nedirect.command.sent"
+
+	// SubjectNEDirectCommand 是通过直连通道发送 MML 命令时发布。
+	// 发布者：nedirect.Service，订阅者：暂无
+	SubjectNEDirectCommand = "nedirect.command.sent"
 )

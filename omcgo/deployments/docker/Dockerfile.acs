@@ -32,6 +32,6 @@ RUN chmod +x /entrypoint.sh
 ENV TZ=Asia/Shanghai
 ENV OMCGO_SERVICE=acs
 
-EXPOSE 7547 7548 9090
+EXPOSE 7557 7558 9090
 
 ENTRYPOINT ["/entrypoint.sh"]
