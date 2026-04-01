@@ -196,17 +196,17 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'sys-db-monitor',  label: 'nav.system.dbMonitor',      path: '/system/db-monitor' },
     ],
   },
-  {
-    key: 'report',
-    label: 'nav.report',
-    iconName: 'BarChartOutlined',
-    children: [
-      { key: 'report-lte-std',  label: 'nav.report.lteStandard',   path: '/report/lte-standard' },
-      { key: 'report-bs',       label: 'nav.report.station',       path: '/report/station' },
-      { key: 'report-hist-kpi', label: 'nav.report.historicalKpi', path: '/report/historical-kpi' },
-      { key: 'report-poll',     label: 'nav.report.pollStats',     path: '/report/poll-stats' },
-    ],
-  },
+  // {
+  //   key: 'report',
+  //   label: 'nav.report',
+  //   iconName: 'BarChartOutlined',
+  //   children: [
+  //     { key: 'report-lte-std',  label: 'nav.report.lteStandard',   path: '/report/lte-standard' },
+  //     { key: 'report-bs',       label: 'nav.report.station',       path: '/report/station' },
+  //     { key: 'report-hist-kpi', label: 'nav.report.historicalKpi', path: '/report/historical-kpi' },
+  //     { key: 'report-poll',     label: 'nav.report.pollStats',     path: '/report/poll-stats' },
+  //   ],
+  // },  // 隐藏报表管理菜单
   {
     key: 'mr',
     label: 'nav.mr',
@@ -230,18 +230,18 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'license-log',   label: 'nav.license.logs',        path: '/license/logs' },
     ],
   },
-  {
-    key: 'ops',
-    label: 'nav.ops',
-    iconName: 'AppstoreOutlined',
-    children: [
-      { key: 'ops-template',   label: 'nav.ops.templates',        path: '/ops/templates' },
-      { key: 'ops-cmd',        label: 'nav.ops.commands',         path: '/ops/commands' },
-      { key: 'ops-task',       label: 'nav.ops.tasks',            path: '/ops/tasks' },
-      { key: 'ops-diagnose',   label: 'nav.ops.networkDiagnosis', path: '/ops/network-diagnosis' },
-      { key: 'ops-download',   label: 'nav.ops.downloads',        path: '/ops/downloads' },
-    ],
-  },
+  // {
+  //   key: 'ops',
+  //   label: 'nav.ops',
+  //   iconName: 'AppstoreOutlined',
+  //   children: [
+  //     { key: 'ops-template',   label: 'nav.ops.templates',        path: '/ops/templates' },
+  //     { key: 'ops-cmd',        label: 'nav.ops.commands',         path: '/ops/commands' },
+  //     { key: 'ops-task',       label: 'nav.ops.tasks',            path: '/ops/tasks' },
+  //     { key: 'ops-diagnose',   label: 'nav.ops.networkDiagnosis', path: '/ops/network-diagnosis' },
+  //     { key: 'ops-download',   label: 'nav.ops.downloads',        path: '/ops/downloads' },
+  //   ],
+  // },  // 隐藏运维管理菜单
   // {
   //   key: 'egw',
   //   label: 'nav.egw',
@@ -304,23 +304,23 @@ export const NAV_CONFIG: NavConfig = [
   //     { key: 'cau-upgrade', label: 'nav.cau.upgrade', path: '/cau/upgrade' },
   //   ],
   // },  // 隐藏CAU管理菜单
-  {
-    key: 'strategy',
-    label: 'nav.strategy',
-    iconName: 'AimOutlined',
-    children: [
-      { key: 'strategy-list',      label: 'nav.strategy.list',      path: '/strategy/list' },
-      { key: 'strategy-execution', label: 'nav.strategy.execution', path: '/strategy/execution' },
-      { key: 'strategy-import',    label: 'nav.strategy.import',    path: '/strategy/import' },
-    ],
-  },
-  {
-    key: 'advance',
-    label: 'nav.advance',
-    iconName: 'ExperimentOutlined',
-    children: [
-      { key: 'advance-anr',         label: 'nav.advance.anr',         path: '/advance/anr' },
-      { key: 'advance-pci-conflict', label: 'nav.advance.pciConflict', path: '/advance/pci-conflict' },
-    ],
-  },
+  // {
+  //   key: 'strategy',
+  //   label: 'nav.strategy',
+  //   iconName: 'AimOutlined',
+  //   children: [
+  //     { key: 'strategy-list',      label: 'nav.strategy.list',      path: '/strategy/list' },
+  //     { key: 'strategy-execution', label: 'nav.strategy.execution', path: '/strategy/execution' },
+  //     { key: 'strategy-import',    label: 'nav.strategy.import',    path: '/strategy/import' },
+  //   ],
+  // },  // 隐藏策略管理菜单
+  // {
+  //   key: 'advance',
+  //   label: 'nav.advance',
+  //   iconName: 'ExperimentOutlined',
+  //   children: [
+  //     { key: 'advance-anr',         label: 'nav.advance.anr',         path: '/advance/anr' },
+  //     { key: 'advance-pci-conflict', label: 'nav.advance.pciConflict', path: '/advance/pci-conflict' },
+  //   ],
+  // },  // 隐藏高级功能菜单
 ];
