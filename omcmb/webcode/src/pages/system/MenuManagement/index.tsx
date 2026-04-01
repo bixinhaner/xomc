@@ -22,6 +22,8 @@ import {
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import FilterBar from '@/components/FilterBar';
+import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
 import styles from './index.module.css';
 
@@ -292,6 +294,14 @@ export default function MenuManagement() {
   const [addForm] = Form.useForm();
   // 展开/收起状态
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  // 搜索过滤状态
+  const [filters, setFilters] = useState<Record<string, string>>({});
+
+  // 搜索字段配置
+  const filterFields: FilterField[] = useMemo(() => [
+    { name: 'name', label: '菜单名称', type: 'input', placeholder: '请输入菜单名称' },
+    { name: 'status', label: '状态', type: 'select', placeholder: '请选择状态', options: MENU_STATUS_OPTIONS },
+  ], []);
 
   // 根据展开状态扁平化菜单数据
   const flatMenus = useMemo(() => {
@@ -312,6 +322,25 @@ export default function MenuManagement() {
     flatten(menus, 0);
     return result;
   }, [menus, expandedKeys]);
+
+  // 根据搜索条件过滤菜单
+  const filteredMenus = useMemo(() => {
+    if (!filters.name && !filters.status) {
+      return flatMenus;
+    }
+
+    return flatMenus.filter((item) => {
+      // 菜单名称过滤
+      if (filters.name && !item.name.toLowerCase().includes(filters.name.toLowerCase())) {
+        return false;
+      }
+      // 状态过滤
+      if (filters.status && item.status !== filters.status) {
+        return false;
+      }
+      return true;
+    });
+  }, [flatMenus, filters]);
 
   // 切换展开/收起
   const toggleExpand = useCallback((id: string) => {
@@ -618,40 +647,26 @@ export default function MenuManagement() {
       dataIndex: 'sort',
       width: 120,
       render: (val, record) => {
-        // 所有类型都可以点击排序箭头
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span
-              style={{
-                display: 'inline-block',
-                width: 48,
-                height: 24,
-                lineHeight: '24px',
-                textAlign: 'center',
-                border: '1px solid var(--color-border)',
-                borderRadius: 4,
-                fontSize: 12,
-              }}
-            >
-              {val}
-            </span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-              <Button
-                size="small"
-                type="text"
-                icon={<UpOutlined />}
-                onClick={() => handleMoveUp(record)}
-                style={{ height: 14, padding: 0, fontSize: 10 }}
-              />
-              <Button
-                size="small"
-                type="text"
-                icon={<DownOutlined />}
-                onClick={() => handleMoveDown(record)}
-                style={{ height: 14, padding: 0, fontSize: 10 }}
-              />
-            </div>
-          </div>
+          <InputNumber
+            min={1}
+            max={999}
+            value={val}
+            size="small"
+            className={styles.sortInput}
+            style={{ width: 80 }}
+            controls={{
+              upIcon: <UpOutlined style={{ fontSize: 10 }} />,
+              downIcon: <DownOutlined style={{ fontSize: 10 }} />,
+            }}
+            onStep={(value, info) => {
+              if (info.type === 'up') {
+                handleMoveUp(record);
+              } else {
+                handleMoveDown(record);
+              }
+            }}
+          />
         );
       },
     },
@@ -693,11 +708,17 @@ export default function MenuManagement() {
         </Button>
       }
     >
+      <FilterBar
+        filterId="menu-management-filter"
+        fields={filterFields}
+        onSearch={(vals) => setFilters(vals)}
+        onReset={() => setFilters({})}
+      />
       <div className={styles.menuTable}>
         <DataTable
           tableId="menu-management-list"
           columns={columns}
-          dataSource={flatMenus}
+          dataSource={filteredMenus}
           rowKey="id"
           scroll={{ x: 1000 }}
         />
@@ -986,6 +1007,17 @@ export default function MenuManagement() {
                       <Radio.Group>
                         <Radio value="normal">正常</Radio>
                         <Radio value="disabled">停用</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="apiPermission"
+                      label="API权限"
+                      rules={[{ required: true, message: '请选择API权限' }]}
+                      initialValue="none"
+                    >
+                      <Radio.Group>
+                        <Radio value="required">需要</Radio>
+                        <Radio value="none">无需</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>

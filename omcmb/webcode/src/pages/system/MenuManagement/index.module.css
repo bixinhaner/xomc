@@ -7,3 +7,14 @@
 .menuTable :global(.ant-table-row-expand-icon-cell) {
   display: none !important;
 }
+
+/* 排序 InputNumber 始终显示上下箭头 */
+.sortInput :global(.ant-input-number-handler-wrap) {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.sortInput :global(.ant-input-number-handler) {
+  display: block !important;
+}
