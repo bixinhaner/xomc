@@ -294,23 +294,59 @@ export default function DeviceListPanel({
         </div>
       </div>
 
-      <DataTable<Device>
-        tableId="device-grouping-table"
-        columns={columns}
-        dataSource={devices}
-        loading={loading}
-        rowKey="id"
-        selectable
-        selectedRowKeys={selectedDeviceIds}
-        onSelectionChange={onSelectionChange}
-        batchActions={batchActions}
-        total={total}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={onPageChange}
-        onRefresh={onRefresh}
-        defaultDensity="compact"
-      />
+      <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <DataTable<Device>
+          tableId="device-grouping-table"
+          columns={columns}
+          dataSource={devices}
+          loading={loading}
+          rowKey="id"
+          selectable
+          selectedRowKeys={selectedDeviceIds}
+          onSelectionChange={onSelectionChange}
+          batchActions={batchActions}
+          total={total}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={onPageChange}
+          onRefresh={onRefresh}
+          defaultDensity="compact"
+        />
+      </div>
+      <style>{`
+        .device-list-table-wrapper {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .device-list-table-wrapper > div[class*="dataTableWrapper"] {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .device-list-table-wrapper > div[class*="dataTableWrapper"] > div[class*="tableContainer"] {
+          flex: 1;
+          min-height: 0;
+          overflow: auto;
+        }
+        .device-list-table-wrapper .ant-table-wrapper {
+          height: 100%;
+        }
+        .device-list-table-wrapper .ant-table-wrapper .ant-table {
+          height: 100%;
+        }
+        .device-list-table-wrapper .ant-table-wrapper .ant-table-container {
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+        .device-list-table-wrapper .ant-table-wrapper .ant-table-body {
+          flex: 1;
+          overflow: auto !important;
+        }
+      `}</style>
 
       {/* 批量导入弹窗 */}
       <Modal

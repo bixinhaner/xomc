@@ -1288,7 +1288,12 @@ export default function CustomAlarmStats() {
       </Card>
 
       {/* 列表卡片 */}
-      <Card size="small" bordered styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}>
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
         <DataTable<Alarm>
           tableId={`custom-alarm-stats-table-${selectedGroupId}`}
           columns={columns}
