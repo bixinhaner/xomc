@@ -1159,6 +1159,12 @@ export default function CustomAlarmStats() {
       <Card size="small" bordered styles={{ body: { padding: '12px 16px' } }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <StatItem
+            label="总数"
+            value={total}
+            active={activeQuickFilter === 'all'}
+            onClick={() => handleQuickFilter('all')}
+          />
+          <StatItem
             label="活动告警"
             value={activeTotal}
             color="#E53935"
