@@ -674,7 +674,9 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string)
 	}
 
 	// Query 1: Get status counts
-	statusBuilder := psql.Select("d.status", "COUNT(*) as cnt").
+	// Use COUNT(DISTINCT d.id) to avoid counting devices multiple times
+	// when they belong to multiple groups due to LEFT JOIN
+	statusBuilder := psql.Select("d.status", "COUNT(DISTINCT d.id) as cnt").
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
