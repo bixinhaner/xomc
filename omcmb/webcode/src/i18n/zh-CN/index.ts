@@ -3,6 +3,7 @@ const messages: Record<string, string> = {
   // Common actions
   // -------------------------------------------------------------------------
   'common.search':         '搜索',
+  'common.query':          '查询',
   'common.reset':          '重置',
   'common.add':            '新增',
   'common.edit':           '编辑',

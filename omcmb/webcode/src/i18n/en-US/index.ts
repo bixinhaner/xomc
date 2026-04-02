@@ -3,6 +3,7 @@ const messages: Record<string, string> = {
   // Common actions
   // -------------------------------------------------------------------------
   'common.search':         'Search',
+  'common.query':          'Query',
   'common.reset':          'Reset',
   'common.add':            'Add',
   'common.edit':           'Edit',
