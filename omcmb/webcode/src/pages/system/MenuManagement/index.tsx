@@ -369,6 +369,13 @@ export default function MenuManagement() {
       permissionKey: menu.permissionKey,
       componentPath: menu.componentPath,
       status: menu.status,
+      // 新增字段
+      showIcon: !!menu.icon,
+      isExternal: menu.isExternal || 'no',
+      routePath: menu.routePath,
+      routeParams: menu.routeParams,
+      showStatus: menu.showStatus || 'show',
+      apiPermission: menu.apiPermission || 'none',
     });
     setEditVisible(true);
   }, [form]);
@@ -390,6 +397,13 @@ export default function MenuManagement() {
               permissionKey: vals.permissionKey,
               componentPath: vals.componentPath,
               status: vals.status,
+              // 新增字段
+              icon: vals.showIcon ? 'menu-icon' : undefined,
+              isExternal: vals.isExternal,
+              routePath: vals.routePath,
+              routeParams: vals.routeParams,
+              showStatus: vals.showStatus,
+              apiPermission: vals.apiPermission,
             };
           }
           if (item.children) {
@@ -726,32 +740,204 @@ export default function MenuManagement() {
           >
             <Select options={MENU_TYPE_OPTIONS} disabled />
           </Form.Item>
-          <Form.Item
-            name="sort"
-            label="排序"
-            rules={[{ required: true, message: '请输入排序' }]}
-          >
-            <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入排序" />
-          </Form.Item>
-          <Form.Item
-            name="permissionKey"
-            label="权限标识"
-            rules={[{ required: true, message: '请输入权限标识' }]}
-          >
-            <Input placeholder="请输入权限标识，如：system:menus" maxLength={100} />
-          </Form.Item>
-          <Form.Item
-            name="componentPath"
-            label="组件路径"
-          >
-            <Input placeholder="请输入组件路径，如：/system/menus" maxLength={200} />
-          </Form.Item>
-          <Form.Item
-            name="status"
-            label="状态"
-            rules={[{ required: true, message: '请选择状态' }]}
-          >
-            <Select options={MENU_STATUS_OPTIONS} />
+
+          {/* 根据类型动态显示字段 - 与添加页面保持一致 */}
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.type !== cur.type}>
+            {({ getFieldValue }) => {
+              const type = getFieldValue('type');
+
+              // 目录类型字段
+              if (type === 'directory') {
+                return (
+                  <>
+                    <Form.Item
+                      name="sort"
+                      label="显示排序"
+                      rules={[{ required: true, message: '请输入显示排序' }]}
+                    >
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                    </Form.Item>
+                    <Form.Item
+                      name="showIcon"
+                      label="菜单图标"
+                      valuePropName="checked"
+                    >
+                      <Checkbox>显示菜单图标</Checkbox>
+                    </Form.Item>
+                    <Form.Item
+                      name="isExternal"
+                      label="是否外链"
+                      rules={[{ required: true, message: '请选择是否外链' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="yes">是</Radio>
+                        <Radio value="no">否</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="routePath"
+                      label="路由地址"
+                      rules={[{ required: true, message: '请输入路由地址' }]}
+                    >
+                      <Input placeholder="请输入路由地址" maxLength={200} />
+                    </Form.Item>
+                    <Form.Item
+                      name="showStatus"
+                      label="显示状态"
+                      rules={[{ required: true, message: '请选择显示状态' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="show">显示</Radio>
+                        <Radio value="hide">隐藏</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="status"
+                      label="菜单状态"
+                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="normal">正常</Radio>
+                        <Radio value="disabled">停用</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="apiPermission"
+                      label="API权限"
+                      rules={[{ required: true, message: '请选择API权限' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="required">需要</Radio>
+                        <Radio value="none">无需</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                  </>
+                );
+              }
+
+              // 菜单类型字段
+              if (type === 'menu') {
+                return (
+                  <>
+                    <Form.Item
+                      name="sort"
+                      label="显示排序"
+                      rules={[{ required: true, message: '请输入显示排序' }]}
+                    >
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                    </Form.Item>
+                    <Form.Item
+                      name="isExternal"
+                      label="是否外链"
+                      rules={[{ required: true, message: '请选择是否外链' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="yes">是</Radio>
+                        <Radio value="no">否</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="routePath"
+                      label="路由地址"
+                      rules={[{ required: true, message: '请输入路由地址' }]}
+                    >
+                      <Input placeholder="请输入路由地址" maxLength={200} />
+                    </Form.Item>
+                    <Form.Item
+                      name="componentPath"
+                      label="组件路径"
+                    >
+                      <Input placeholder="请输入组件路径" maxLength={200} />
+                    </Form.Item>
+                    <Form.Item
+                      name="permissionKey"
+                      label="权限字符"
+                    >
+                      <Input placeholder="请输入权限字符" maxLength={100} />
+                    </Form.Item>
+                    <Form.Item
+                      name="routeParams"
+                      label="路由参数"
+                    >
+                      <Input placeholder="请输入路由参数" maxLength={200} />
+                    </Form.Item>
+                    <Form.Item
+                      name="showStatus"
+                      label="显示状态"
+                      rules={[{ required: true, message: '请选择显示状态' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="show">显示</Radio>
+                        <Radio value="hide">隐藏</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="status"
+                      label="菜单状态"
+                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="normal">正常</Radio>
+                        <Radio value="disabled">停用</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="apiPermission"
+                      label="API权限"
+                      rules={[{ required: true, message: '请选择API权限' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="required">需要</Radio>
+                        <Radio value="none">无需</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                  </>
+                );
+              }
+
+              // 按钮类型字段
+              if (type === 'button') {
+                return (
+                  <>
+                    <Form.Item
+                      name="sort"
+                      label="显示排序"
+                      rules={[{ required: true, message: '请输入显示排序' }]}
+                    >
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                    </Form.Item>
+                    <Form.Item
+                      name="permissionKey"
+                      label="权限字符"
+                    >
+                      <Input placeholder="请输入权限字符" maxLength={100} />
+                    </Form.Item>
+                    <Form.Item
+                      name="status"
+                      label="菜单状态"
+                      rules={[{ required: true, message: '请选择菜单状态' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="normal">正常</Radio>
+                        <Radio value="disabled">停用</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                      name="apiPermission"
+                      label="API权限"
+                      rules={[{ required: true, message: '请选择API权限' }]}
+                    >
+                      <Radio.Group>
+                        <Radio value="required">需要</Radio>
+                        <Radio value="none">无需</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                  </>
+                );
+              }
+
+              return null;
+            }}
           </Form.Item>
         </Form>
       </Drawer>
