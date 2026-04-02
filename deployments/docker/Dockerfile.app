@@ -6,10 +6,10 @@ ENV GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
+COPY omcgo/go.mod omcgo/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY omcgo/ .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate

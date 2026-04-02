@@ -60,10 +60,10 @@ test-integration:
 	bash scripts/integration_test.sh
 
 test-integration-up:
-	docker compose -f deployments/docker/docker-compose.test.yml up -d --wait
+	docker compose -f ../deployments/docker/docker-compose.test.yml up -d --wait
 
 test-integration-down:
-	docker compose -f deployments/docker/docker-compose.test.yml down -v
+	docker compose -f ../deployments/docker/docker-compose.test.yml down -v
 
 # Quality
 lint:
@@ -92,15 +92,15 @@ migrate-create:
 
 # Docker
 docker-build:
-	docker build -f deployments/docker/Dockerfile.acs -t omcgo-acs:latest .
-	docker build -f deployments/docker/Dockerfile.app -t omcgo-app:latest .
-	docker build -f deployments/docker/Dockerfile.worker -t omcgo-worker:latest .
+	docker build -f ../deployments/docker/Dockerfile.acs -t omcgo-acs:latest .
+	docker build -f ../deployments/docker/Dockerfile.app -t omcgo-app:latest .
+	docker build -f ../deployments/docker/Dockerfile.worker -t omcgo-worker:latest .
 
 docker-up:
-	docker-compose -f deployments/docker/docker-compose.yml up -d
+	docker-compose -f ../deployments/docker/docker-compose.yml up -d
 
 docker-down:
-	docker-compose -f deployments/docker/docker-compose.yml down
+	docker-compose -f ../deployments/docker/docker-compose.yml down
 
 # Clean
 clean:

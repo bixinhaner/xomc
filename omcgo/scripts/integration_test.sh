@@ -24,7 +24,7 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-COMPOSE_FILE="deployments/docker/docker-compose.test.yml"
+COMPOSE_FILE="../deployments/docker/docker-compose.test.yml"
 COMPOSE_PROJECT="omcgo-test"
 
 DB_DSN="postgres://omcgo_test:omcgo_test@localhost:5433/omcgo_test?sslmode=disable"
@@ -58,12 +58,12 @@ err() {
 
 # Change to omcgo/ root if not already there
 cd_to_project_root() {
-    if [[ -f "go.mod" && -d "deployments" ]]; then
+    if [[ -f "go.mod" && -d "../deployments" ]]; then
         return 0
     fi
     # Try common locations
     for dir in "." "omcgo" "../omcgo"; do
-        if [[ -f "$dir/go.mod" && -d "$dir/deployments" ]]; then
+        if [[ -f "$dir/go.mod" && -d "${dir}/../deployments" ]]; then
             cd "$dir"
             return 0
         fi
