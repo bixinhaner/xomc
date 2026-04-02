@@ -1265,16 +1265,6 @@ export default function CustomAlarmStats() {
         </div>
       </Card>
 
-      {/* 趋势图卡片 */}
-      <Card size="small" bordered title="告警趋势（近7天）" styles={{ body: { padding: '12px 16px' } }}>
-        <LineChart
-          xData={trendData.dates}
-          series={trendData.series}
-          height={160}
-          smooth
-        />
-      </Card>
-
       {/* 搜索卡片 */}
       <Card size="small" bordered styles={{ body: { padding: '0 16px' } }}>
         <FilterBar
@@ -1310,6 +1300,7 @@ export default function CustomAlarmStats() {
           batchActions={batchActions}
           onRefresh={() => void refetch()}
           defaultDensity="compact"
+          scroll={{ x: true, y: 'calc(100% - 56px)' }}
         />
       </Card>
     </div>

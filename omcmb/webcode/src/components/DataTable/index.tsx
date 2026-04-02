@@ -299,7 +299,7 @@ function DataTable<T>(
             showQuickJumper
             showTotal={(total) => t('table.totalItems', { total })}
             pageSizeOptions={['10', '20', '50', '100']}
-            onChange={onPageChange}
+            onChange={onPageChange ?? (() => {})}
           />
         </div>
       )}
