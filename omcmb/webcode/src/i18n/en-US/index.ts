@@ -1732,6 +1732,7 @@ const messages: Record<string, string> = {
   // Device specific
   // -------------------------------------------------------------------------
   'device.name':             'Device Name',
+  'device.group':            'Device Group',
   'device.sn':               'Device SN',
   'device.code':             'Device Code',
   'device.region':           'Region',

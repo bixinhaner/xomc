@@ -1750,6 +1750,7 @@ const messages: Record<string, string> = {
   // Device specific
   // -------------------------------------------------------------------------
   'device.name':             '设备名称',
+  'device.group':            '设备组',
   'device.sn':               '设备SN',
   'device.code':             '设备编码',
   'device.region':           '区域',
