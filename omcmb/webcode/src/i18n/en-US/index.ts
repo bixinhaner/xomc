@@ -1115,6 +1115,17 @@ const messages: Record<string, string> = {
   'perf.query.creator': 'Creator',
   'perf.query.exportKpi': 'Export KPI',
 
+  // Time granularity options
+  'perf.query.granularity15min': '15 Min',
+  'perf.query.granularity60min': '60 Min',
+  'perf.query.granularity24hour': '24 Hour',
+  'perf.query.granularityWeek': 'Week',
+  'perf.query.granularityMonth': 'Month',
+
+  // Export format options
+  'perf.query.exportExcel': 'Excel (.xlsx)',
+  'perf.query.exportCsv': 'CSV (.csv)',
+
   // KPI indicator names
   'kpi.rrcSetupSuccessRate':   'RRC Setup Success Rate',
   'kpi.erabSetupSuccessRate':  'E-RAB Setup Success Rate',

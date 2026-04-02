@@ -1133,6 +1133,17 @@ const messages: Record<string, string> = {
   'perf.query.creator': '创建者',
   'perf.query.exportKpi': '导出指标',
 
+  // Time granularity options
+  'perf.query.granularity15min': '15分钟',
+  'perf.query.granularity60min': '60分钟',
+  'perf.query.granularity24hour': '24小时',
+  'perf.query.granularityWeek': '周',
+  'perf.query.granularityMonth': '月',
+
+  // Export format options
+  'perf.query.exportExcel': 'Excel (.xlsx)',
+  'perf.query.exportCsv': 'CSV (.csv)',
+
   // KPI indicator names
   'kpi.rrcSetupSuccessRate':   'RRC建立成功率',
   'kpi.erabSetupSuccessRate':  'E-RAB建立成功率',

@@ -57,15 +57,6 @@ const MOCK_KPI_DATA = [
   { key: '3', serialNumber: 'GNB00001', hostName: '北京5G基站01', enodeId: '200001', cellId: '1', eci: '200001001', groupName: '北京5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.5%', ERAB_SR: '99.1%', DL_THP: '856.2', UL_THP: '125.3' },
 ];
 
-// Time granularity options
-const GRANULARITY_OPTIONS = [
-  { label: '15Min', value: '15' },
-  { label: '60Min', value: '60' },
-  { label: '24Hour', value: '1440' },
-  { label: 'Week', value: '10080' },
-  { label: 'Month', value: '43200' },
-];
-
 interface TemplateItem {
   id: string;
   name: string;
@@ -103,6 +94,15 @@ export default function KPIQuery() {
 
   // All templates combined
   const allTemplates = useMemo(() => [...PUBLIC_TEMPLATES, ...PRIVATE_TEMPLATES], []);
+
+  // Time granularity options with i18n
+  const granularityOptions = useMemo(() => [
+    { label: t('perf.query.granularity15min'), value: '15' },
+    { label: t('perf.query.granularity60min'), value: '60' },
+    { label: t('perf.query.granularity24hour'), value: '1440' },
+    { label: t('perf.query.granularityWeek'), value: '10080' },
+    { label: t('perf.query.granularityMonth'), value: '43200' },
+  ], [t]);
 
   // Get template menu items - all templates have the same menu items
   const getTemplateMenuItems = useCallback((template: TemplateItem): MenuProps['items'] => {
@@ -555,7 +555,7 @@ export default function KPIQuery() {
               <Select
                 value={granularity}
                 onChange={setGranularity}
-                options={GRANULARITY_OPTIONS}
+                options={granularityOptions}
                 style={{ width: 100 }}
                 size="small"
               />
@@ -578,8 +578,8 @@ export default function KPIQuery() {
               <Dropdown
                 menu={{
                   items: [
-                    { key: 'excel', label: 'Excel (.xlsx)', onClick: () => handleExport('excel') },
-                    { key: 'csv', label: 'CSV (.csv)', onClick: () => handleExport('csv') },
+                    { key: 'excel', label: t('perf.query.exportExcel'), onClick: () => handleExport('excel') },
+                    { key: 'csv', label: t('perf.query.exportCsv'), onClick: () => handleExport('csv') },
                   ],
                 }}
               >
@@ -750,7 +750,7 @@ export default function KPIQuery() {
             <Switch />
           </Form.Item>
           <Form.Item label={t('perf.query.reportPeriod')} name="reportPeriod">
-            <Select mode="multiple" placeholder={t('common.pleaseSelect')} options={GRANULARITY_OPTIONS} />
+            <Select mode="multiple" placeholder={t('common.pleaseSelect')} options={granularityOptions} />
           </Form.Item>
           <Form.Item label={t('perf.query.reportTime')} name="reportTime">
             <TimePicker format="HH:mm" style={{ width: '100%' }} />
