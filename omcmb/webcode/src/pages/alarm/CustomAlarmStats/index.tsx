@@ -1177,6 +1177,19 @@ export default function CustomAlarmStats() {
       <style>{`
         .alarm-group-node:hover .node-actions { opacity: 1 !important; }
         .custom-alarm-tree .ant-tree-switcher-noop { display: none; }
+        /* 列表卡片滚动条样式 - 页面特定，只滚动表格内容 */
+        .custom-alarm-list-card .ant-card-body > div {
+          position: absolute;
+          inset: 0;
+        }
+        .custom-alarm-list-card .omc-data-table {
+          overflow: hidden;
+        }
+        .custom-alarm-list-card .ant-table-body {
+          overflow-y: auto !important;
+          /* 减小减去的值，让表格区域更大 */
+          max-height: calc(100vh - 360px) !important;
+        }
       `}</style>
     </div>
   );
@@ -1281,8 +1294,9 @@ export default function CustomAlarmStats() {
       <Card
         size="small"
         bordered
+        className="custom-alarm-list-card"
         style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
-        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', position: 'relative' } }}
       >
         <DataTable<Alarm>
           tableId={`custom-alarm-stats-table-${selectedGroupId}`}
