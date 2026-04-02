@@ -430,25 +430,49 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	var d model.Device
 	var extData, eventsData []byte
 	var ipAddr, udpAddr *string
+	// nullable string columns from devices table
+	var productClass, manufacturer, modelName *string
+	var firmwareVersion, connReqURL, siteName, siteID *string
 
 	err := row.Scan(
-		&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer, &d.ModelName,
-		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &d.FirmwareVersion,
-		&ipAddr, &d.ConnectionRequestURL,
+		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
+		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
-		&d.InformInterval, &d.SiteName, &d.SiteID, &d.Latitude, &d.Longitude,
+		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	if productClass != nil {
+		d.ProductClass = *productClass
+	}
+	if manufacturer != nil {
+		d.Manufacturer = *manufacturer
+	}
+	if modelName != nil {
+		d.ModelName = *modelName
+	}
+	if firmwareVersion != nil {
+		d.FirmwareVersion = *firmwareVersion
+	}
 	if ipAddr != nil {
 		d.IPAddress = *ipAddr
 	}
+	if connReqURL != nil {
+		d.ConnectionRequestURL = *connReqURL
+	}
 	if udpAddr != nil {
 		d.UDPConnectionRequestAddress = *udpAddr
+	}
+	if siteName != nil {
+		d.SiteName = *siteName
+	}
+	if siteID != nil {
+		d.SiteID = *siteID
 	}
 	if len(extData) > 0 {
 		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
@@ -471,25 +495,49 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	var d model.Device
 	var extData, eventsData []byte
 	var ipAddr, udpAddr *string
+	// nullable string columns from devices table
+	var productClass, manufacturer, modelName *string
+	var firmwareVersion, connReqURL, siteName, siteID *string
 
 	err := rows.Scan(
-		&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer, &d.ModelName,
-		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &d.FirmwareVersion,
-		&ipAddr, &d.ConnectionRequestURL,
+		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
+		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
-		&d.InformInterval, &d.SiteName, &d.SiteID, &d.Latitude, &d.Longitude,
+		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	if productClass != nil {
+		d.ProductClass = *productClass
+	}
+	if manufacturer != nil {
+		d.Manufacturer = *manufacturer
+	}
+	if modelName != nil {
+		d.ModelName = *modelName
+	}
+	if firmwareVersion != nil {
+		d.FirmwareVersion = *firmwareVersion
+	}
 	if ipAddr != nil {
 		d.IPAddress = *ipAddr
 	}
+	if connReqURL != nil {
+		d.ConnectionRequestURL = *connReqURL
+	}
 	if udpAddr != nil {
 		d.UDPConnectionRequestAddress = *udpAddr
+	}
+	if siteName != nil {
+		d.SiteName = *siteName
+	}
+	if siteID != nil {
+		d.SiteID = *siteID
 	}
 	if len(extData) > 0 {
 		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
