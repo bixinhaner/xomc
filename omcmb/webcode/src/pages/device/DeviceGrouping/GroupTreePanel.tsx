@@ -39,7 +39,7 @@ function buildTreeData(
   function buildNode(group: GroupItem, isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
     const isLevel1 = group.parentId === null;
-    const isDefaultGroup = group.id === 'grp-default';
+    const isDefaultGroup = group.builtIn === 1;
 
     let menuItems: MenuProps['items'];
     if (isRootLevel && isDefaultGroup) {
@@ -174,8 +174,8 @@ export default function GroupTreePanel({
   onAddGroup,
   t,
 }: GroupTreePanelProps) {
-  // 默认展开根节点和"默认设备组"
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(['__all__', 'grp-default']);
+  // 默认展开 __all__ 和所有 L1 root groups
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => ['__all__', ...groups.filter((g) => g.parentId === null).map((g) => g.id)]);
 
   const filteredTreeData = useMemo(
     () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t),

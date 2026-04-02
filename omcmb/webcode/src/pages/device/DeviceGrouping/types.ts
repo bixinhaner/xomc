@@ -12,6 +12,8 @@ export interface GroupItem {
   parentId: string | null;
   deviceCount: number;
   description: string;
+  /** 是否为内置设备组：1=内置, 0=自定义 */
+  builtIn: number;
 }
 
 // Filter condition options helper

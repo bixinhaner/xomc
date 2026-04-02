@@ -297,8 +297,19 @@ export const deviceApi = {
     if (params.sn) query.sn = params.sn;
     if (params.vendor) query.oui = params.vendor;
     if (params.networkType) query.technology = params.networkType;
-    if (params.connStatus) query.status = params.connStatus;
+    // connStatus: 前端值 '1'(在线)→'active', '0'(离线)→'offline', '2'(同步失败)→'offline', '3'(同步中)→'active'
+    if (params.connStatus) {
+      const connStatusMap: Record<string, string> = {
+        '1': 'active',
+        '0': 'offline',
+        '2': 'offline',  // 同步失败视为离线
+        '3': 'active',   // 同步中视为在线
+      };
+      query.status = connStatusMap[params.connStatus] ?? params.connStatus;
+    }
     if (params.opState) query.op_state = params.opState;
+    // productModel → product_class
+    if (params.productModel) query.product_class = params.productModel;
 
     const { data } = await http.get<BackendListResponse<BackendDevice>>('/devices', {
       params: query,
@@ -375,26 +386,62 @@ export const deviceApi = {
   },
 
   async getGroups(): Promise<DeviceGroup[]> {
-    const { data } = await http.get<BackendListResponse<{
+    // Backend GET /device-groups/tree returns nested tree with device counts.
+    // We flatten it to a flat list so the frontend tree builder works.
+    interface BackendGroupItem {
       id: string;
       name: string;
       parent_id: string | null;
       device_count: number;
       description: string;
-      built_in: number;
-      network_type?: string;
-      product_type?: string;
-    }>>('/groups');
-    return (data.items || []).map((g) => ({
-      id: g.id,
-      name: g.name,
-      parentId: g.parent_id,
-      deviceCount: g.device_count,
-      description: g.description,
-      builtIn: g.built_in,
-      networkType: g.network_type,
-      productType: g.product_type,
-    }));
+      remark: string;
+      is_default: boolean;
+      level: number;
+      children?: BackendGroupItem[];
+    }
+    interface TreeResponse {
+      items: BackendGroupItem[];
+      stats?: { total_groups: number; grouped_devices: number; ungrouped_devices: number };
+    }
+    const { data } = await http.get<TreeResponse>('/device-groups/tree');
+    const flat: DeviceGroup[] = [];
+    function walk(items: BackendGroupItem[]) {
+      for (const g of items) {
+        flat.push({
+          id: g.id,
+          name: g.name,
+          parentId: g.parent_id,
+          deviceCount: g.device_count ?? 0,
+          description: g.remark || g.description || '',
+          builtIn: g.is_default ? 1 : 0,
+        });
+        if (g.children?.length) walk(g.children);
+      }
+    }
+    walk(data.items || []);
+    return flat;
+  },
+
+  async createGroup(data: { name: string; parent_id?: string; remark?: string }): Promise<DeviceGroup> {
+    const { data: created } = await http.post<DeviceGroup>('/device-groups', data);
+    return created;
+  },
+
+  async updateGroup(id: string, data: { name?: string; remark?: string }): Promise<DeviceGroup> {
+    const { data: updated } = await http.put<DeviceGroup>(`/device-groups/${id}`, data);
+    return updated;
+  },
+
+  async deleteGroup(id: string): Promise<void> {
+    await http.delete(`/device-groups/${id}`);
+  },
+
+  async moveDevices(params: { device_ids: string[]; target_group_id: string }): Promise<void> {
+    await http.post('/device-groups/move-devices', params);
+  },
+
+  async addDevicesToGroup(groupId: string, deviceIds: string[]): Promise<void> {
+    await http.post(`/device-groups/${groupId}/devices`, { device_ids: deviceIds });
   },
 
   async getStats(): Promise<DeviceStats> {

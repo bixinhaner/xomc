@@ -8,7 +8,7 @@ import {
 import type { UploadFile } from 'antd';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import type { BatchAction } from '@/components/DataTable';
-import { useDeviceGroups, useDeviceList } from '@/hooks/api/useDevices';
+import { useDeviceGroups, useDeviceList, useCreateGroup, useUpdateGroup, useDeleteGroup, useMoveDevices, useAddDevicesToGroup, useDeleteDevices, useBatchRebootDevices, useUpdateDevice } from '@/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device, EngStatus } from '@/types/device';
 import type { NameFilterItem } from './types';
@@ -31,9 +31,19 @@ export default function DeviceGrouping() {
   const [pageSize, setPageSize] = useState(20);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
 
+  const createGroupMutation = useCreateGroup();
+  const updateGroupMutation = useUpdateGroup();
+  const deleteGroupMutation = useDeleteGroup();
+  const moveDevicesMutation = useMoveDevices();
+  const addDevicesToGroupMutation = useAddDevicesToGroup();
+  const deleteDevicesMutation = useDeleteDevices();
+  const batchRebootMutation = useBatchRebootDevices();
+  const updateDeviceMutation = useUpdateDevice();
+
   // --- Group dialog state ---
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [addForm] = Form.useForm<{ name: string; description: string }>();
   const [editForm] = Form.useForm<{ name: string; description: string }>();
 
@@ -99,12 +109,15 @@ export default function DeviceGrouping() {
     [groups, selectedGroupId]
   );
 
-  // Default select first level-2 node under default group
+  // Default select first level-2 node under the first root group
   useEffect(() => {
     if (groups.length > 0 && !selectedGroupId) {
-      const firstLevel2Node = groups.find((g) => g.parentId === 'grp-default');
-      if (firstLevel2Node) {
-        setSelectedGroupId(firstLevel2Node.id);
+      const firstRoot = groups.find((g) => g.parentId === null);
+      if (firstRoot) {
+        const firstChild = groups.find((g) => g.parentId === firstRoot.id);
+        if (firstChild) {
+          setSelectedGroupId(firstChild.id);
+        }
       }
     }
   }, [groups, selectedGroupId]);
@@ -162,6 +175,7 @@ export default function DeviceGrouping() {
       } else if (cmd === 'edit-level1') {
         const grp = groups.find((g) => g.id === groupId);
         if (grp) {
+          setEditingGroupId(groupId);
           editForm.setFieldsValue({ name: grp.name, description: grp.description });
           setEditModalOpen(true);
         }
@@ -174,7 +188,8 @@ export default function DeviceGrouping() {
           setEditLevel2NameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
           setEditLevel2DrawerOpen(true);
         }
-      } else if (cmd === 'delete-level1') {
+      } else if (cmd === 'delete-level1' || cmd === 'delete-level2') {
+        const isLevel1 = cmd === 'delete-level1';
         modal.confirm({
           title: t('common.confirmDelete'),
           width: 480,
@@ -182,55 +197,52 @@ export default function DeviceGrouping() {
             <div>
               <div>{t('common.deleteConfirmMsg')}</div>
               <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
-                {t('device.deleteLevel1Desc')}
+                {isLevel1 ? t('device.deleteLevel1Desc') : t('device.deleteLevel2Desc')}
               </div>
             </div>
           ),
           okText: t('common.confirmDelete'),
           okType: 'danger',
           onOk: async () => {
-            await refetchGroups();
-            void message.success(t('common.deleteSuccess'));
-          },
-        });
-      } else if (cmd === 'delete-level2') {
-        modal.confirm({
-          title: t('common.confirmDelete'),
-          width: 480,
-          content: (
-            <div>
-              <div>{t('common.deleteConfirmMsg')}</div>
-              <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>
-                {t('device.deleteLevel2Desc')}
-              </div>
-            </div>
-          ),
-          okText: t('common.confirmDelete'),
-          okType: 'danger',
-          onOk: async () => {
-            await refetchGroups();
-            void message.success(t('common.deleteSuccess'));
+            try {
+              await deleteGroupMutation.mutateAsync(groupId);
+              if (selectedGroupId === groupId) {
+                setSelectedGroupId(null);
+              }
+              void message.success(t('common.deleteSuccess'));
+            } catch {
+              void message.error(t('common.operationFailed'));
+            }
           },
         });
       }
     },
-    [groups, addChildForm, addDeviceForm, editForm, editLevel2Form, refetchGroups, t, modal, message]
+    [groups, addChildForm, addDeviceForm, editForm, editLevel2Form, deleteGroupMutation, selectedGroupId, t, modal, message]
   );
 
   // --- Group handlers ---
   const handleAddGroup = useCallback(async () => {
-    const values = await addForm.validateFields();
-    message.success(`${values.name}`);
-    setAddModalOpen(false);
-    await refetchGroups();
-  }, [addForm, refetchGroups, message]);
+    try {
+      const values = await addForm.validateFields();
+      await createGroupMutation.mutateAsync({ name: values.name, remark: values.description });
+      void message.success(t('common.success'));
+      setAddModalOpen(false);
+    } catch {
+      // validation or API error
+    }
+  }, [addForm, createGroupMutation, message, t]);
 
   const handleEditGroup = useCallback(async () => {
-    const values = await editForm.validateFields();
-    message.success(`${values.name}`);
-    setEditModalOpen(false);
-    await refetchGroups();
-  }, [editForm, refetchGroups, message]);
+    try {
+      if (!editingGroupId) return;
+      const values = await editForm.validateFields();
+      await updateGroupMutation.mutateAsync({ id: editingGroupId, data: { name: values.name, remark: values.description } });
+      void message.success(t('common.success'));
+      setEditModalOpen(false);
+    } catch {
+      // validation or API error
+    }
+  }, [editForm, editingGroupId, updateGroupMutation, message, t]);
 
   // --- Add child group filter handlers ---
   const handleAddFilter = useCallback(() => {
@@ -269,58 +281,32 @@ export default function DeviceGrouping() {
   const handleSaveChildGroup = useCallback(async () => {
     try {
       const values = await addChildForm.validateFields();
-      let operators = '';
-      let validNameFilters: NameFilterItem[] = [];
-      let validTacRag = '';
-
-      if (values.matchingMode === 'deviceName') {
-        validNameFilters = nameFilters.filter((f) => f.value?.trim());
-        if (validNameFilters.length > 0) {
-          operators = generateOperators({ matchingMode: 'deviceName', nameRuleList: validNameFilters }, t);
-        }
-      } else if (values.matchingMode === 'tac' || values.matchingMode === 'lac') {
-        if (values.tacRag?.trim()) {
-          validTacRag = values.tacRag.trim();
-          operators = generateOperators({ matchingMode: values.matchingMode, tacRag: validTacRag }, t);
-        }
-      }
-
-      console.log('创建子分组:', {
-        parentGroupId,
+      await createGroupMutation.mutateAsync({
         name: values.name,
-        matchingMode: values.matchingMode,
-        nameFilters: validNameFilters,
-        tacRag: validTacRag,
-        operators,
-        hasRule: operators.length > 0,
+        parent_id: parentGroupId ?? undefined,
+        remark: '',
       });
-
       void message.success(t('common.success'));
       setAddChildDrawerOpen(false);
-      await refetchGroups();
     } catch {
-      // validation error
+      // validation or API error
     }
-  }, [addChildForm, nameFilters, parentGroupId, refetchGroups, message, t]);
+  }, [addChildForm, parentGroupId, createGroupMutation, message, t]);
 
   // --- Edit level-2 handler ---
   const handleSaveEditLevel2 = useCallback(async () => {
     try {
       const values = await editLevel2Form.validateFields();
-      console.log('更新二级分组:', {
-        groupId: editLevel2GroupId,
-        name: values.name,
-        matchingMode: values.matchingMode,
-        tacRag: values.tacRag,
-        nameFilters: editLevel2NameFilters,
+      await updateGroupMutation.mutateAsync({
+        id: editLevel2GroupId!,
+        data: { name: values.name },
       });
       void message.success(t('common.success'));
       setEditLevel2DrawerOpen(false);
-      await refetchGroups();
     } catch {
-      // validation error
+      // validation or API error
     }
-  }, [editLevel2Form, editLevel2GroupId, editLevel2NameFilters, refetchGroups, message, t]);
+  }, [editLevel2Form, editLevel2GroupId, updateGroupMutation, message, t]);
 
   // --- Device handlers ---
   const handleEditDevice = useCallback((device: Device) => {
@@ -336,22 +322,46 @@ export default function DeviceGrouping() {
   }, [editDeviceForm]);
 
   const handleSaveDevice = useCallback(async () => {
-    await editDeviceForm.validateFields();
-    message.success(t('common.operationSuccess'));
-    setEditDeviceModalOpen(false);
-    await refetch();
-  }, [editDeviceForm, message, t, refetch]);
+    try {
+      const values = await editDeviceForm.validateFields();
+      if (editingDevice) {
+        await updateDeviceMutation.mutateAsync({
+          id: editingDevice.id,
+          data: {
+            engStatus: values.engStatus,
+            longitude: values.longitude,
+            latitude: values.latitude,
+            gpsHeight: values.gpsHeight,
+            remark: values.remark,
+          },
+        });
+      }
+      void message.success(t('common.operationSuccess'));
+      setEditDeviceModalOpen(false);
+      await refetch();
+    } catch {
+      // validation or API error
+    }
+  }, [editDeviceForm, editingDevice, updateDeviceMutation, message, t, refetch]);
 
   const handleMoveToGroup = useCallback(async () => {
     if (!targetGroupId) {
       message.warning(t('device.batch.selectGroup'));
       return;
     }
-    message.success(t('common.success'));
-    setMoveToGroupModalOpen(false);
-    setSelectedDeviceIds([]);
-    await refetch();
-  }, [targetGroupId, message, t, refetch]);
+    try {
+      await moveDevicesMutation.mutateAsync({
+        device_ids: selectedDeviceIds as string[],
+        target_group_id: targetGroupId,
+      });
+      void message.success(t('common.success'));
+      setMoveToGroupModalOpen(false);
+      setSelectedDeviceIds([]);
+      await refetch();
+    } catch {
+      void message.error(t('common.operationFailed'));
+    }
+  }, [targetGroupId, selectedDeviceIds, moveDevicesMutation, message, t, refetch]);
 
   const handleSaveDevices = useCallback(async () => {
     try {
@@ -366,14 +376,21 @@ export default function DeviceGrouping() {
         void message.error(t('device.snListRequired'));
         return;
       }
-      console.log('手动添加设备到分组:', { groupId: addDeviceGroupId, snList: snArray });
+      if (!addDeviceGroupId) return;
+      // TODO: SNs should be resolved to device IDs via backend lookup before sending.
+      // For now, pass SNs as device_ids — backend may accept SN resolution in the future.
+      // Frontend should ideally call a device search API to resolve SNs → UUIDs first.
+      await addDevicesToGroupMutation.mutateAsync({
+        groupId: addDeviceGroupId,
+        deviceIds: snArray,
+      });
       void message.success(t('device.addDeviceSuccess', { count: snArray.length }));
       setAddDeviceDrawerOpen(false);
       await refetch();
     } catch {
-      // validation error
+      // validation or API error
     }
-  }, [addDeviceForm, addDeviceGroupId, refetch, message, t]);
+  }, [addDeviceForm, addDeviceGroupId, addDevicesToGroupMutation, refetch, message, t]);
 
   const handleExport = useCallback(() => {
     // TODO: 调用 CSV 导出 API
@@ -385,7 +402,6 @@ export default function DeviceGrouping() {
       void message.error(t('device.fileRequired'));
       return;
     }
-    console.log('批量导入设备:', { file: fileList[0] });
     void message.success(t('device.importSuccess'));
     await refetch();
   }, [message, t, refetch]);
@@ -436,7 +452,12 @@ export default function DeviceGrouping() {
           okText: t('common.confirm'),
           okType: 'danger',
           onOk: async () => {
-            message.success(t('common.success'));
+            try {
+              await batchRebootMutation.mutateAsync(selectedKeys as string[]);
+              void message.success(t('common.success'));
+            } catch {
+              void message.error(t('common.operationFailed'));
+            }
             setSelectedDeviceIds([]);
             await refetch();
           },
@@ -463,14 +484,19 @@ export default function DeviceGrouping() {
           okText: t('common.confirmDelete'),
           okType: 'danger',
           onOk: async () => {
-            message.success(t('common.deleteSuccess'));
+            try {
+              await deleteDevicesMutation.mutateAsync(selectedKeys as string[]);
+              void message.success(t('common.deleteSuccess'));
+            } catch {
+              void message.error(t('common.operationFailed'));
+            }
             setSelectedDeviceIds([]);
             await refetch();
           },
         });
       },
     },
-  ], [t, modal, message, refetch]);
+  ], [t, modal, message, refetch, deleteDevicesMutation, batchRebootMutation]);
 
   // --- Tree panel ---
   const treePanel = (

@@ -165,6 +165,8 @@ export interface DeviceFilter {
   groupId?: string;
   /** 激活状态：'1'=激活，'0'=未激活 */
   opState?: string;
+  /** 产品型号（如 PM-B4860, QAFA 等），对应后端 product_class */
+  productModel?: string;
 }
 
 /** 设备统计数据 — 按状态分类的设备数量 */

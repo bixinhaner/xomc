@@ -38,6 +38,61 @@ export function useDeviceGroups() {
   });
 }
 
+export function useCreateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; parent_id?: string; remark?: string }) =>
+      api.createGroup(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+    },
+  });
+}
+
+export function useUpdateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; remark?: string } }) =>
+      api.updateGroup(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteGroup(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+    },
+  });
+}
+
+export function useMoveDevices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { device_ids: string[]; target_group_id: string }) =>
+      api.moveDevices(params),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
+  });
+}
+
+export function useAddDevicesToGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, deviceIds }: { groupId: string; deviceIds: string[] }) =>
+      api.addDevicesToGroup(groupId, deviceIds),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+    },
+  });
+}
+
 export function useCreateDevice() {
   const queryClient = useQueryClient();
   return useMutation({
