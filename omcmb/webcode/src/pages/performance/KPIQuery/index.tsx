@@ -348,6 +348,7 @@ export default function KPIQuery() {
   const columns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => [
     { key: 'serialNumber', title: t('perf.query.serialNumber'), dataIndex: 'serialNumber', width: 160, fixed: 'left', mono: true },
     { key: 'hostName', title: t('perf.query.hostName'), dataIndex: 'hostName', width: 180, fixed: 'left' },
+    { key: 'subStationName', title: t('perf.query.subStationName'), dataIndex: 'subStationName', width: 180 },
     { key: 'enodeId', title: t('perf.query.enodeId'), dataIndex: 'enodeId', width: 120, mono: true },
     { key: 'cellId', title: t('perf.query.cellId'), dataIndex: 'cellId', width: 100 },
     { key: 'eci', title: t('perf.query.eci'), dataIndex: 'eci', width: 140, mono: true },

@@ -1079,6 +1079,7 @@ const messages: Record<string, string> = {
   'perf.query.chartView': 'Chart View',
   'perf.query.serialNumber': 'Serial Number',
   'perf.query.hostName': 'Host Name',
+  'perf.query.subStationName': 'Station Name',
   'perf.query.enodeId': 'eNodeB ID',
   'perf.query.cellId': 'Cell ID',
   'perf.query.eci': 'ECI',

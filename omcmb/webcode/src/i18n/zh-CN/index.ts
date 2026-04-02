@@ -1088,6 +1088,7 @@ const messages: Record<string, string> = {
   'perf.query.chartView': '图表视图',
   'perf.query.serialNumber': '小站编码',
   'perf.query.hostName': '名称',
+  'perf.query.subStationName': '站址名称',
   'perf.query.enodeId': 'eNodeBID',
   'perf.query.cellId': '小区ID',
   'perf.query.eci': 'ECI',
