@@ -57,7 +57,7 @@ const InteropTesting     = React.lazy(() => import('@/pages/config/InteropTestin
 // Performance Management
 const KPIStandard        = React.lazy(() => import('@/pages/performance/KPIStandardReport'));
 const KPIStation         = React.lazy(() => import('@/pages/performance/KPIStationReport'));
-const ExtractionWizard   = React.lazy(() => import('@/pages/performance/ExtractionWizard'));
+const KPIQuery            = React.lazy(() => import('@/pages/performance/KPIQuery'));
 const PerformanceCharts  = React.lazy(() => import('@/pages/performance/PerformanceCharts'));
 const ThresholdConfig    = React.lazy(() => import('@/pages/performance/ThresholdConfig'));
 const PerformanceFiles   = React.lazy(() => import('@/pages/performance/PerformanceFiles'));
@@ -225,7 +225,7 @@ export const routes: RouteObject[] = [
       // Performance Management
       { path: 'performance/kpi-standard',  element: withSuspense(KPIStandard) },
       { path: 'performance/kpi-station',   element: withSuspense(KPIStation) },
-      { path: 'performance/extraction',    element: withSuspense(ExtractionWizard) },
+      { path: 'performance/query',         element: withSuspense(KPIQuery) },
       { path: 'performance/charts',        element: withSuspense(PerformanceCharts) },
       { path: 'performance/threshold',     element: withSuspense(ThresholdConfig) },
       { path: 'performance/files',         element: withSuspense(PerformanceFiles) },

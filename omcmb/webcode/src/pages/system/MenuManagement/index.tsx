@@ -74,24 +74,6 @@ const MENU_STATUS_OPTIONS = [
   { label: '停用', value: 'disabled' },
 ];
 
-// 显示状态选项
-const SHOW_STATUS_OPTIONS = [
-  { label: '显示', value: 'show' },
-  { label: '隐藏', value: 'hide' },
-];
-
-// 是否外链选项
-const IS_EXTERNAL_OPTIONS = [
-  { label: '是', value: 'yes' },
-  { label: '否', value: 'no' },
-];
-
-// API权限选项
-const API_PERMISSION_OPTIONS = [
-  { label: '需要', value: 'required' },
-  { label: '无需', value: 'none' },
-];
-
 // 默认的操作按钮（三级节点）
 const DEFAULT_OPERATIONS = [
   { key: 'query', name: '查询' },
@@ -537,29 +519,6 @@ export default function MenuManagement() {
     setMenus((prev) => updateSort(prev, record.id));
   }, []);
 
-  // 获取同级菜单列表（用于判断是否可以上移/下移）
-  const getSiblingIds = useCallback((targetId: string): string[] => {
-    const findSiblings = (items: MenuItem[], parentId: string | null): string[] => {
-      for (const item of items) {
-        if (item.id === targetId) {
-          // 找到了，返回同级ID列表
-          if (parentId === null) {
-            return items.map((i) => i.id);
-          } else {
-            const parent = items.find((i) => i.id === parentId);
-            return parent?.children?.map((i) => i.id) || [];
-          }
-        }
-        if (item.children) {
-          const result = findSiblings(item.children, item.id);
-          if (result.length > 0) return result;
-        }
-      }
-      return [];
-    };
-    return findSiblings(menus, null);
-  }, [menus]);
-
   // 表格列定义
   const columns: DataTableColumn<MenuItem & { level: number; hasChildren: boolean }>[] = useMemo(() => [
     {
@@ -697,7 +656,7 @@ export default function MenuManagement() {
         </Tag>
       ),
     },
-  ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown, getSiblingIds]);
+  ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown]);
 
   return (
     <ListPageLayout

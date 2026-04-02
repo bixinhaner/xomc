@@ -51,7 +51,7 @@ export const NAV_CONFIG: NavConfig = [
     children: [
       { key: 'alarm-current',      label: 'nav.alarm.current',        path: '/alarm/current' },
       { key: 'alarm-history',      label: 'nav.alarm.history',        path: '/alarm/history' },
-      { key: 'alarm-stats',        label: 'nav.alarm.statistics',     path: '/alarm/statistics' },
+      // { key: 'alarm-stats',        label: 'nav.alarm.statistics',     path: '/alarm/statistics' },  // 隐藏告警统计
       { key: 'alarm-rule',         label: 'nav.alarm.rules',          path: '/alarm/rules' },
       { key: 'alarm-knowledge',    label: 'nav.alarm.library',        path: '/alarm/library' },
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
@@ -91,7 +91,7 @@ export const NAV_CONFIG: NavConfig = [
     children: [
       { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
       { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
-      { key: 'perf-extract',    label: 'nav.performance.extraction',   path: '/performance/extraction' },
+      { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },
       { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },
       { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },
       { key: 'perf-file',       label: 'nav.performance.files',        path: '/performance/files' },
