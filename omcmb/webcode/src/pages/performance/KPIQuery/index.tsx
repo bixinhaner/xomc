@@ -19,9 +19,6 @@ import {
   UserOutlined,
   InfoCircleOutlined,
   ExportOutlined,
-  FolderOutlined,
-  FolderOpenOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
@@ -345,7 +342,7 @@ export default function KPIQuery() {
         </Dropdown>
       </div>
     </List.Item>
-  ), [selectedTemplateId, token, t, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
+  ), [selectedTemplateId, token, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
 
   // Table columns
   const columns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => [
@@ -358,10 +355,10 @@ export default function KPIQuery() {
     { key: 'timeLevel', title: t('perf.query.timeLevel'), dataIndex: 'timeLevel', width: 100 },
     { key: 'startTime', title: t('perf.query.startTime'), dataIndex: 'startTime', width: 160 },
     { key: 'endTime', title: t('perf.query.endTime'), dataIndex: 'endTime', width: 160 },
-    { key: 'RRC_SR', title: 'RRC建立成功率(%)', dataIndex: 'RRC_SR', width: 140 },
-    { key: 'ERAB_SR', title: 'ERAB建立成功率(%)', dataIndex: 'ERAB_SR', width: 150 },
-    { key: 'DL_THP', title: '下行吞吐量(Mbps)', dataIndex: 'DL_THP', width: 140 },
-    { key: 'UL_THP', title: '上行吞吐量(Mbps)', dataIndex: 'UL_THP', width: 140 },
+    { key: 'RRC_SR', title: `${t('kpi.rrcSetupSuccessRate')}(%)`, dataIndex: 'RRC_SR', width: 140 },
+    { key: 'ERAB_SR', title: `${t('kpi.erabSetupSuccessRate')}(%)`, dataIndex: 'ERAB_SR', width: 150 },
+    { key: 'DL_THP', title: `${t('kpi.dlThroughput')}(Mbps)`, dataIndex: 'DL_THP', width: 140 },
+    { key: 'UL_THP', title: `${t('kpi.ulThroughput')}(Mbps)`, dataIndex: 'UL_THP', width: 140 },
   ], [t]);
 
   // Left panel with tabs
@@ -634,9 +631,9 @@ export default function KPIQuery() {
                   mode="multiple"
                   size="small"
                   options={[
-                    { value: 'RRC_SR', label: 'RRC建立成功率' },
-                    { value: 'ERAB_SR', label: 'ERAB建立成功率' },
-                    { value: 'DL_THP', label: '下行吞吐量' },
+                    { value: 'RRC_SR', label: t('kpi.rrcSetupSuccessRate') },
+                    { value: 'ERAB_SR', label: t('kpi.erabSetupSuccessRate') },
+                    { value: 'DL_THP', label: t('kpi.dlThroughput') },
                   ]}
                 />
                 <Button type="primary" size="small">{t('common.query')}</Button>
@@ -644,8 +641,8 @@ export default function KPIQuery() {
               <div style={{ flex: 1, minHeight: 0 }}>
                 <LineChart
                   series={[
-                    { name: 'RRC建立成功率', data: [99.2, 99.5, 98.8, 99.1, 99.3, 99.0, 98.9] },
-                    { name: 'ERAB建立成功率', data: [98.5, 98.8, 98.2, 98.6, 98.9, 98.4, 98.7] },
+                    { name: t('kpi.rrcSetupSuccessRate'), data: [99.2, 99.5, 98.8, 99.1, 99.3, 99.0, 98.9] },
+                    { name: t('kpi.erabSetupSuccessRate'), data: [98.5, 98.8, 98.2, 98.6, 98.9, 98.4, 98.7] },
                   ]}
                   xData={['10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30']}
                   height={400}
@@ -666,7 +663,7 @@ export default function KPIQuery() {
       closable: openTabs.length > 1,
       children: renderRightPanel(tabId),
     }));
-  }, [openTabs, getTemplateName, viewMode, loading, deviceType, deviceSearch, granularity, dateRange, token, columns, t]);
+  }, [openTabs, getTemplateName, renderRightPanel]);
 
   return (
     <>

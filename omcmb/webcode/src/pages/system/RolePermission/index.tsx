@@ -6,30 +6,22 @@ import {
   Drawer,
   Form,
   Input,
-  Switch,
   Dropdown,
   Tree,
-  Card,
-  Radio,
   Space,
-  Menu,
   Select,
   Checkbox,
   Divider,
-  Row,
-  Col,
   Spin,
   Empty,
 } from 'antd';
-import type { TreeDataNode, MenuProps, TreeProps } from 'antd';
+import type { TreeDataNode, TreeProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   EyeOutlined,
   MoreOutlined,
-  DownOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -592,7 +584,7 @@ export default function RoleManagement() {
                     });
                     setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
                     setExpandedPermissionKeys(allModuleKeys);
-                    setSelectedDeviceGroupIds((role as Role & { deviceGroupIds?: string[] }).deviceGroupIds || []);
+                    setSelectedDeviceGroupIds(role.deviceGroupIds || []);
                     setViewVisible(true);
                   },
                 },
@@ -609,7 +601,7 @@ export default function RoleManagement() {
                     });
                     setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
                     setExpandedPermissionKeys(allModuleKeys);
-                    setSelectedDeviceGroupIds((role as Role & { deviceGroupIds?: string[] }).deviceGroupIds || []);
+                    setSelectedDeviceGroupIds(role.deviceGroupIds || []);
                     setEditVisible(true);
                   },
                 },
@@ -662,7 +654,7 @@ export default function RoleManagement() {
       width: 160,
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
     },
-  ], [t, form, isBuiltIn, handleDelete]);
+  ], [t, form, isBuiltIn, handleDelete, allModuleKeys, arrayToCheckedKeys]);
 
   // 渲染菜单权限配置（树形结构 - 按图片样式）
   const renderPermissionConfig = (readOnly = false) => {
