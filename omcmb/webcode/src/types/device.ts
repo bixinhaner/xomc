@@ -151,6 +151,8 @@ export interface DeviceGroup {
 
 export interface DeviceFilter {
   name?: string;
+  /** 通用搜索文本（覆盖 SN/名称/IP/MAC 等） */
+  searchText?: string;
   sn?: string;
   vendor?: string;
   productType?: string;
@@ -161,6 +163,8 @@ export interface DeviceFilter {
   subnet?: string;
   engStatus?: EngStatus;
   groupId?: string;
+  /** 激活状态：'1'=激活，'0'=未激活 */
+  opState?: string;
 }
 
 /** 设备统计数据 — 按状态分类的设备数量 */

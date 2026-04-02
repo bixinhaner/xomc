@@ -293,10 +293,12 @@ export const deviceApi = {
     };
 
     if (params.name) query.search = params.name;
+    if (params.searchText) query.search = params.searchText;
     if (params.sn) query.sn = params.sn;
     if (params.vendor) query.oui = params.vendor;
     if (params.networkType) query.technology = params.networkType;
     if (params.connStatus) query.status = params.connStatus;
+    if (params.opState) query.op_state = params.opState;
 
     const { data } = await http.get<BackendListResponse<BackendDevice>>('/devices', {
       params: query,

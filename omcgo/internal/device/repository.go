@@ -30,6 +30,7 @@ type DeviceFilter struct {
 	GPSStatus     *string // device_info.gps_status exact match
 	AlarmSeverity *string // device_info.alarm_severity exact match
 	LicenseStatus *string // device_info.license_status exact match
+	OpState       *string // "1" = active (status='active'), "0" = not active (status!='active')
 
 	model.ListRequest
 }

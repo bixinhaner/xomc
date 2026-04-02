@@ -202,6 +202,9 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if licenseStatus := c.Query("license_status"); licenseStatus != "" {
 		filter.LicenseStatus = &licenseStatus
 	}
+	if opState := c.Query("op_state"); opState != "" {
+		filter.OpState = &opState
+	}
 	if groupID := c.Query("group_id"); groupID != "" {
 		gid, err := uuid.Parse(groupID)
 		if err != nil {

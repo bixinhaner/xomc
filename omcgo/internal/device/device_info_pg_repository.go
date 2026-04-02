@@ -246,6 +246,17 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
 		countBuilder = countBuilder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
 	}
+	if filter.OpState != nil {
+		if *filter.OpState == "1" {
+			// 激活：status = 'active'
+			builder = builder.Where(sq.Eq{"d.status": "active"})
+			countBuilder = countBuilder.Where(sq.Eq{"d.status": "active"})
+		} else if *filter.OpState == "0" {
+			// 未激活：status != 'active'
+			builder = builder.Where(sq.NotEq{"d.status": "active"})
+			countBuilder = countBuilder.Where(sq.NotEq{"d.status": "active"})
+		}
+	}
 
 	// Multi-field fuzzy search (G07)
 	if filter.Search != nil && *filter.Search != "" {
