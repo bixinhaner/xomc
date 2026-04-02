@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Tabs, Button, Space, DatePicker, Select, Input, Radio, Typography, Dropdown, Modal, Form, message, Switch, InputNumber, TimePicker, List, Spin, Segmented, Collapse } from 'antd';
+import { Tabs, Button, Space, DatePicker, Select, Input, Radio, Typography, Dropdown, Modal, Form, Switch, InputNumber, TimePicker, List, Spin, Segmented, Collapse, Card, Tag, Tooltip, Divider, App } from 'antd';
 import {
   PlusOutlined,
   SearchOutlined,
@@ -19,9 +19,13 @@ import {
   UserOutlined,
   InfoCircleOutlined,
   ExportOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
+
+// Simple ID generator
+const generateId = () => `chart-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -50,12 +54,93 @@ const PRIVATE_TEMPLATES: TemplateItem[] = [
   { id: 'tpl-11', name: '容量规划', isDefault: false, reportSwitch: '0', isPublic: '0', isOneSelf: '0', creator: 'lisi', isAdmin: '0' },
 ];
 
-// Mock KPI data
-const MOCK_KPI_DATA = [
-  { key: '1', serialNumber: 'ENB00001', hostName: '北京朝阳基站01', enodeId: '100001', cellId: '1', eci: '100001001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.2%', ERAB_SR: '98.5%', DL_THP: '145.6', UL_THP: '32.1' },
-  { key: '2', serialNumber: 'ENB00002', hostName: '北京海淀基站01', enodeId: '100002', cellId: '1', eci: '100002001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.9%', ERAB_SR: '97.8%', DL_THP: '132.1', UL_THP: '28.5' },
-  { key: '3', serialNumber: 'GNB00001', hostName: '北京5G基站01', enodeId: '200001', cellId: '1', eci: '200001001', groupName: '北京5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.5%', ERAB_SR: '99.1%', DL_THP: '856.2', UL_THP: '125.3' },
-];
+// Mock KPI data for each template - Device query data
+const TEMPLATE_DEVICE_DATA: Record<string, Record<string, unknown>[]> = {
+  'tpl-1': [ // eNB基础KPI
+    { key: '1', serialNumber: 'ENB00001', hostName: '北京朝阳基站01', subStationName: '朝阳站址001', enodeId: '100001', cellId: '1', eci: '100001001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.2%', ERAB_SR: '98.5%', DL_THP: '145.6', UL_THP: '32.1' },
+    { key: '2', serialNumber: 'ENB00002', hostName: '北京海淀基站01', subStationName: '海淀站址001', enodeId: '100002', cellId: '1', eci: '100002001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.9%', ERAB_SR: '97.8%', DL_THP: '132.1', UL_THP: '28.5' },
+  ],
+  'tpl-2': [ // gNB性能指标
+    { key: '1', serialNumber: 'GNB00001', hostName: '北京5G基站01', subStationName: '5G站址001', enodeId: '200001', cellId: '1', eci: '200001001', groupName: '北京5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.5%', ERAB_SR: '99.1%', DL_THP: '856.2', UL_THP: '125.3' },
+    { key: '2', serialNumber: 'GNB00002', hostName: '上海5G基站01', subStationName: '5G站址002', enodeId: '200002', cellId: '1', eci: '200002001', groupName: '上海5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.3%', ERAB_SR: '98.8%', DL_THP: '923.5', UL_THP: '132.1' },
+  ],
+  'tpl-3': [ // 小区吞吐量
+    { key: '1', serialNumber: 'ENB00101', hostName: '广州天河基站01', subStationName: '天河站址001', enodeId: '300101', cellId: '1', eci: '300101001', groupName: '广州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', DL_THP: '256.8', UL_THP: '45.2' },
+    { key: '2', serialNumber: 'ENB00102', hostName: '广州越秀基站01', subStationName: '越秀站址001', enodeId: '300102', cellId: '1', eci: '300102001', groupName: '广州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', DL_THP: '312.5', UL_THP: '52.8' },
+  ],
+  'tpl-4': [ // 我的eNB模板
+    { key: '1', serialNumber: 'ENB00201', hostName: '深圳南山基站01', subStationName: '南山站址001', enodeId: '400201', cellId: '1', eci: '400201001', groupName: '深圳区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.5%', ERAB_SR: '97.2%' },
+  ],
+  'tpl-5': [ // 测试模板
+    { key: '1', serialNumber: 'TEST001', hostName: '测试设备01', subStationName: '测试站址', enodeId: '999001', cellId: '1', eci: '999001001', groupName: '测试组', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '100%', ERAB_SR: '100%', DL_THP: '999.9', UL_THP: '99.9' },
+  ],
+  'tpl-6': [ // 切换成功率分析
+    { key: '1', serialNumber: 'ENB00301', hostName: '杭州西湖基站01', subStationName: '西湖站址001', enodeId: '500301', cellId: '1', eci: '500301001', groupName: '杭州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', HO_SR: '98.5%', HO_SUCCESS: '1250', HO_FAIL: '18' },
+    { key: '2', serialNumber: 'ENB00302', hostName: '杭州滨江基站01', subStationName: '滨江站址001', enodeId: '500302', cellId: '1', eci: '500302001', groupName: '杭州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', HO_SR: '97.8%', HO_SUCCESS: '980', HO_FAIL: '22' },
+  ],
+  'tpl-7': [ // 用户数统计
+    { key: '1', serialNumber: 'ENB00401', hostName: '成都武侯基站01', subStationName: '武侯站址001', enodeId: '600401', cellId: '1', eci: '600401001', groupName: '成都区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', ACTIVE_USER: '1250', IDLE_USER: '320', MAX_USER: '1500' },
+    { key: '2', serialNumber: 'ENB00402', hostName: '成都锦江基站01', subStationName: '锦江站址001', enodeId: '600402', cellId: '1', eci: '600402001', groupName: '成都区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', ACTIVE_USER: '980', IDLE_USER: '280', MAX_USER: '1200' },
+  ],
+  'tpl-8': [ // 自定义报表
+    { key: '1', serialNumber: 'ENB00501', hostName: '武汉洪山基站01', subStationName: '洪山站址001', enodeId: '700501', cellId: '1', eci: '700501001', groupName: '武汉区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.0%', ERAB_SR: '98.5%', DL_THP: '180.5', UL_THP: '35.2' },
+  ],
+  'tpl-9': [ // 性能监控模板
+    { key: '1', serialNumber: 'ENB00601', hostName: '南京鼓楼基站01', subStationName: '鼓楼站址001', enodeId: '800601', cellId: '1', eci: '800601001', groupName: '南京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', CPU_USAGE: '45%', MEM_USAGE: '62%', DISK_USAGE: '38%' },
+    { key: '2', serialNumber: 'ENB00602', hostName: '南京玄武基站01', subStationName: '玄武站址001', enodeId: '800602', cellId: '1', eci: '800602001', groupName: '南京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', CPU_USAGE: '52%', MEM_USAGE: '58%', DISK_USAGE: '42%' },
+  ],
+  'tpl-10': [ // 告警分析
+    { key: '1', serialNumber: 'ENB00701', hostName: '西安雁塔基站01', subStationName: '雁塔站址001', enodeId: '900701', cellId: '1', eci: '900701001', groupName: '西安区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', ALARM_COUNT: '5', CRITICAL: '1', MAJOR: '2', MINOR: '2' },
+  ],
+  'tpl-11': [ // 容量规划
+    { key: '1', serialNumber: 'ENB00801', hostName: '重庆渝北基站01', subStationName: '渝北站址001', enodeId: '1000801', cellId: '1', eci: '1000801001', groupName: '重庆区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', PRB_USAGE: '68%', CPU_LOAD: '55%', CAPACITY_WARN: '正常' },
+    { key: '2', serialNumber: 'ENB00802', hostName: '重庆江北基站01', subStationName: '江北站址001', enodeId: '1000802', cellId: '1', eci: '1000802001', groupName: '重庆区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', PRB_USAGE: '85%', CPU_LOAD: '72%', CAPACITY_WARN: '预警' },
+  ],
+};
+
+// Mock KPI data for each template - Device group query data
+const TEMPLATE_GROUP_DATA: Record<string, Record<string, unknown>[]> = {
+  'tpl-1': [ // eNB基础KPI
+    { key: '1', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '99.1%', avgErabSr: '98.2%', avgDlThp: '138.9', avgUlThp: '30.3' },
+    { key: '2', groupName: '上海区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '98.8%', avgErabSr: '97.9%', avgDlThp: '125.6', avgUlThp: '27.8' },
+  ],
+  'tpl-2': [ // gNB性能指标
+    { key: '1', groupName: '北京5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '99.5%', avgErabSr: '99.1%', avgDlThp: '856.2', avgUlThp: '125.3' },
+    { key: '2', groupName: '上海5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '99.3%', avgErabSr: '98.8%', avgDlThp: '923.5', avgUlThp: '132.1' },
+  ],
+  'tpl-3': [ // 小区吞吐量
+    { key: '1', groupName: '广州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgDlThp: '284.7', avgUlThp: '49.0' },
+    { key: '2', groupName: '深圳区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgDlThp: '310.2', avgUlThp: '55.6' },
+  ],
+  'tpl-4': [ // 我的eNB模板
+    { key: '1', groupName: '深圳区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '98.5%', avgErabSr: '97.2%' },
+  ],
+  'tpl-5': [ // 测试模板
+    { key: '1', groupName: '测试组', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '100%', avgErabSr: '100%', avgDlThp: '999.9', avgUlThp: '99.9' },
+  ],
+  'tpl-6': [ // 切换成功率分析
+    { key: '1', groupName: '杭州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgHoSr: '98.2%', totalHoSuccess: '2230', totalHoFail: '40' },
+  ],
+  'tpl-7': [ // 用户数统计
+    { key: '1', groupName: '成都区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgActiveUser: '1115', avgIdleUser: '300', totalMaxUser: '2700' },
+  ],
+  'tpl-8': [ // 自定义报表
+    { key: '1', groupName: '武汉区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgRrcSr: '99.0%', avgErabSr: '98.5%', avgDlThp: '180.5', avgUlThp: '35.2' },
+  ],
+  'tpl-9': [ // 性能监控模板
+    { key: '1', groupName: '南京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgCpuUsage: '48.5%', avgMemUsage: '60%', avgDiskUsage: '40%' },
+  ],
+  'tpl-10': [ // 告警分析
+    { key: '1', groupName: '西安区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', totalAlarmCount: '5', totalCritical: '1', totalMajor: '2', totalMinor: '2' },
+  ],
+  'tpl-11': [ // 容量规划
+    { key: '1', groupName: '重庆区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', avgPrbUsage: '76.5%', avgCpuLoad: '63.5%', capacityWarnCount: '1' },
+  ],
+};
+
+// Default empty data for templates without specific data
+const DEFAULT_DEVICE_DATA: Record<string, unknown>[] = [];
+const DEFAULT_GROUP_DATA: Record<string, unknown>[] = [];
 
 interface TemplateItem {
   id: string;
@@ -68,9 +153,91 @@ interface TemplateItem {
   creator?: string;
 }
 
+// Time range type for chart display
+type TimeRangeType = 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth';
+
+// Chart configuration interface
+interface ChartConfig {
+  id: string;
+  name: string;
+  devices: string[]; // Max 5 devices
+  kpis: string[]; // Max 3 KPIs
+  timeRange: TimeRangeType; // Time range for chart display
+  createdAt: number;
+}
+
+// Available devices for selection
+const AVAILABLE_DEVICES = [
+  { value: 'ENB00001', label: '北京朝阳基站01' },
+  { value: 'ENB00002', label: '北京海淀基站01' },
+  { value: 'GNB00001', label: '北京5G基站01' },
+  { value: 'GNB00002', label: '上海5G基站01' },
+  { value: 'ENB00101', label: '广州天河基站01' },
+  { value: 'ENB00102', label: '广州越秀基站01' },
+  { value: 'ENB00201', label: '深圳南山基站01' },
+  { value: 'ENB00301', label: '杭州西湖基站01' },
+  { value: 'ENB00302', label: '杭州滨江基站01' },
+  { value: 'ENB00401', label: '成都武侯基站01' },
+];
+
+// Available KPIs for selection
+const AVAILABLE_KPIS = [
+  { value: 'RRC_SR', label: 'RRC建立成功率' },
+  { value: 'ERAB_SR', label: 'ERAB建立成功率' },
+  { value: 'DL_THP', label: '下行吞吐量' },
+  { value: 'UL_THP', label: '上行吞吐量' },
+  { value: 'HO_SR', label: '切换成功率' },
+  { value: 'ACTIVE_USER', label: '活跃用户数' },
+];
+
+// Generate mock chart data for a device and KPI
+// Time range configuration mapping
+const TIME_RANGE_CONFIG: Record<TimeRangeType, {
+  startUnit: dayjs.ManipulateType;
+  startAmount: number;
+  endUnit: dayjs.ManipulateType;
+  endAmount: number;
+  interval: number;
+  intervalUnit: dayjs.ManipulateType;
+  format: string;
+}> = {
+  today: { startUnit: 'day', startAmount: 0, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'hour', format: 'HH:mm' },
+  yesterday: { startUnit: 'day', startAmount: 1, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'hour', format: 'HH:mm' },
+  thisWeek: { startUnit: 'day', startAmount: 6, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
+  lastWeek: { startUnit: 'day', startAmount: 13, endUnit: 'day', endAmount: 7, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
+  thisMonth: { startUnit: 'day', startAmount: 29, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
+  lastMonth: { startUnit: 'day', startAmount: 59, endUnit: 'day', endAmount: 30, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
+};
+
+// Generate mock chart data for a device and KPI
+const generateMockChartData = (device: string, kpi: string, timeRange: TimeRangeType = 'today') => {
+  const data: number[] = [];
+  const xData: string[] = [];
+
+  const config = TIME_RANGE_CONFIG[timeRange];
+  const now = dayjs();
+
+  // Calculate start and end times based on the selected range
+  let start = now.startOf('day').subtract(config.startAmount, config.startUnit);
+  const end = now.startOf('day').subtract(config.endAmount, config.endUnit).add(1, 'day').subtract(1, 'millisecond');
+
+  // Use device and kpi to generate consistent base value
+  const seed = device.charCodeAt(0) + kpi.charCodeAt(0);
+  const baseValue = (seed % 50) + 50; // 50-100 base
+
+  while (start.isBefore(end)) {
+    xData.push(start.format(config.format));
+    data.push(Number((baseValue + Math.random() * 10 - 5).toFixed(1)));
+    start = start.add(config.interval, config.intervalUnit);
+  }
+
+  return { data, xData };
+};
+
 export default function KPIQuery() {
   const t = useT();
   const token = useThemeToken();
+  const { modal, message } = App.useApp();
   const [searchText, setSearchText] = useState('');
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('tpl-1');
@@ -92,6 +259,13 @@ export default function KPIQuery() {
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
   const [reportForm] = Form.useForm();
 
+  // Chart management state
+  const [charts, setCharts] = useState<ChartConfig[]>([]);
+  const [chartConfigModalOpen, setChartConfigModalOpen] = useState(false);
+  const [editingChart, setEditingChart] = useState<ChartConfig | null>(null);
+  const [chartForm] = Form.useForm();
+  const [chartSaving, setChartSaving] = useState(false);
+
   // All templates combined
   const allTemplates = useMemo(() => [...PUBLIC_TEMPLATES, ...PRIVATE_TEMPLATES], []);
 
@@ -103,6 +277,107 @@ export default function KPIQuery() {
     { label: t('perf.query.granularityWeek'), value: '10080' },
     { label: t('perf.query.granularityMonth'), value: '43200' },
   ], [t]);
+
+  // Chart management functions
+  const handleAddChart = useCallback(() => {
+    setEditingChart(null);
+    chartForm.resetFields();
+    // Use setTimeout to ensure form is ready after reset
+    setTimeout(() => {
+      chartForm.setFieldsValue({
+        name: t('perf.query.chartName', { index: charts.length + 1 }),
+        devices: [],
+        kpis: [],
+      });
+    }, 0);
+    setChartConfigModalOpen(true);
+  }, [chartForm, charts.length, t]);
+
+  const handleEditChart = useCallback((chart: ChartConfig) => {
+    setEditingChart(chart);
+    chartForm.setFieldsValue({
+      name: chart.name,
+      devices: chart.devices,
+      kpis: chart.kpis,
+    });
+    setChartConfigModalOpen(true);
+  }, [chartForm]);
+
+  const handleDeleteChart = useCallback((chartId: string) => {
+    modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('perf.query.deleteChartConfirm'),
+      okType: 'danger',
+      onOk: () => {
+        setCharts(prev => prev.filter(c => c.id !== chartId));
+        void message.success(t('common.deleteSuccess'));
+      },
+    });
+  }, [t, modal, message]);
+
+  // Update chart time range
+  const handleUpdateTimeRange = useCallback((chartId: string, timeRange: TimeRangeType) => {
+    setCharts(prev => prev.map(c =>
+      c.id === chartId
+        ? { ...c, timeRange }
+        : c
+    ));
+  }, []);
+
+  const handleSaveChart = useCallback(async () => {
+    setChartSaving(true);
+    try {
+      const values = await chartForm.validateFields();
+
+      if (editingChart) {
+        // Update existing chart
+        setCharts(prev => prev.map(c =>
+          c.id === editingChart.id
+            ? { ...c, name: values.name, devices: values.devices || [], kpis: values.kpis || [], timeRange: c.timeRange || 'today' }
+            : c
+        ));
+        void message.success(t('common.updateSuccess'));
+      } else {
+        // Add new chart
+        const newChart: ChartConfig = {
+          id: generateId(),
+          name: values.name,
+          devices: values.devices || [],
+          kpis: values.kpis || [],
+          timeRange: 'today',
+          createdAt: Date.now(),
+        };
+        setCharts(prev => [...prev, newChart]);
+        void message.success(t('common.addSuccess'));
+      }
+      setChartConfigModalOpen(false);
+    } catch (errorInfo) {
+      console.log('Validation failed:', errorInfo);
+    } finally {
+      setChartSaving(false);
+    }
+  }, [chartForm, editingChart, t, message]);
+
+  // Generate chart series data based on configuration
+  const generateChartSeries = useCallback((chart: ChartConfig) => {
+    const series: { name: string; data: number[] }[] = [];
+
+    chart.devices.forEach((device) => {
+      const deviceLabel = AVAILABLE_DEVICES.find(d => d.value === device)?.label || device;
+
+      chart.kpis.forEach((kpi) => {
+        const kpiLabel = AVAILABLE_KPIS.find(k => k.value === kpi)?.label || kpi;
+        const mockData = generateMockChartData(device, kpi, chart.timeRange || 'today');
+
+        series.push({
+          name: `${deviceLabel} - ${kpiLabel}`,
+          data: mockData.data,
+        });
+      });
+    });
+
+    return series;
+  }, []);
 
   // Get template menu items - all templates have the same menu items
   const getTemplateMenuItems = useCallback((template: TemplateItem): MenuProps['items'] => {
@@ -178,7 +453,7 @@ export default function KPIQuery() {
     switch (key) {
       case 'detail':
         // TODO: Show template detail modal
-        Modal.info({
+        modal.info({
           title: t('perf.query.templateDetail'),
           content: (
             <div>
@@ -198,7 +473,7 @@ export default function KPIQuery() {
         void message.success(t('common.success'));
         break;
       case 'setDefault':
-        Modal.confirm({
+        modal.confirm({
           title: t('perf.query.setAsDefault'),
           content: t('perf.query.setAsDefaultConfirm', { name: template.name }),
           onOk: () => void message.success(t('common.success')),
@@ -211,7 +486,7 @@ export default function KPIQuery() {
         setReportDrawerOpen(true);
         break;
       case 'delete':
-        Modal.confirm({
+        modal.confirm({
           title: t('common.confirmDelete'),
           content: t('common.deleteConfirmMsg'),
           okType: 'danger',
@@ -219,7 +494,7 @@ export default function KPIQuery() {
         });
         break;
     }
-  }, [templateForm, t]);
+  }, [templateForm, t, modal, message]);
 
   // Filter templates by search text
   const filteredPublicTemplates = useMemo(() => {
@@ -278,12 +553,12 @@ export default function KPIQuery() {
       setLoading(false);
       void message.success(t('common.success'));
     }, 1000);
-  }, [t]);
+  }, [t, message]);
 
   // Handle export
   const handleExport = useCallback((format: 'excel' | 'csv') => {
     void message.success(`${format.toUpperCase()} ${t('common.exportInProgress')}`);
-  }, [t]);
+  }, [t, message]);
 
   // Get template name by id
   const getTemplateName = useCallback((id: string): string => {
@@ -344,23 +619,55 @@ export default function KPIQuery() {
     </List.Item>
   ), [selectedTemplateId, token, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
 
-  // Table columns
-  const columns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => [
-    { key: 'serialNumber', title: t('perf.query.serialNumber'), dataIndex: 'serialNumber', width: 160, fixed: 'left', mono: true },
-    { key: 'hostName', title: t('perf.query.hostName'), dataIndex: 'hostName', width: 180, fixed: 'left' },
-    { key: 'subStationName', title: t('perf.query.subStationName'), dataIndex: 'subStationName', width: 180 },
-    { key: 'enodeId', title: t('perf.query.enodeId'), dataIndex: 'enodeId', width: 120, mono: true },
-    { key: 'cellId', title: t('perf.query.cellId'), dataIndex: 'cellId', width: 100 },
-    { key: 'eci', title: t('perf.query.eci'), dataIndex: 'eci', width: 140, mono: true },
-    { key: 'groupName', title: t('perf.query.groupName'), dataIndex: 'groupName', width: 160 },
-    { key: 'timeLevel', title: t('perf.query.timeLevel'), dataIndex: 'timeLevel', width: 100 },
-    { key: 'startTime', title: t('perf.query.startTime'), dataIndex: 'startTime', width: 160 },
-    { key: 'endTime', title: t('perf.query.endTime'), dataIndex: 'endTime', width: 160 },
-    { key: 'RRC_SR', title: `${t('kpi.rrcSetupSuccessRate')}(%)`, dataIndex: 'RRC_SR', width: 140 },
-    { key: 'ERAB_SR', title: `${t('kpi.erabSetupSuccessRate')}(%)`, dataIndex: 'ERAB_SR', width: 150 },
-    { key: 'DL_THP', title: `${t('kpi.dlThroughput')}(Mbps)`, dataIndex: 'DL_THP', width: 140 },
-    { key: 'UL_THP', title: `${t('kpi.ulThroughput')}(Mbps)`, dataIndex: 'UL_THP', width: 140 },
-  ], [t]);
+  // Table columns - dynamic based on query object type (device or device group)
+  const columns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => {
+    // Base columns shared by both device and device group
+    const baseColumns: DataTableColumn<Record<string, unknown>>[] = [
+      { key: 'groupName', title: t('perf.query.groupName'), dataIndex: 'groupName', width: 160, fixed: 'left' },
+      { key: 'timeLevel', title: t('perf.query.timeLevel'), dataIndex: 'timeLevel', width: 100 },
+      { key: 'startTime', title: t('perf.query.startTime'), dataIndex: 'startTime', width: 160 },
+      { key: 'endTime', title: t('perf.query.endTime'), dataIndex: 'endTime', width: 160 },
+    ];
+
+    // Device query columns (deviceType = '2')
+    if (deviceType === '2') {
+      return [
+        { key: 'serialNumber', title: t('perf.query.serialNumber'), dataIndex: 'serialNumber', width: 160, fixed: 'left', mono: true },
+        { key: 'hostName', title: t('perf.query.hostName'), dataIndex: 'hostName', width: 180, fixed: 'left' },
+        { key: 'subStationName', title: t('perf.query.subStationName'), dataIndex: 'subStationName', width: 180 },
+        { key: 'enodeId', title: t('perf.query.enodeId'), dataIndex: 'enodeId', width: 120, mono: true },
+        { key: 'cellId', title: t('perf.query.cellId'), dataIndex: 'cellId', width: 100 },
+        { key: 'eci', title: t('perf.query.eci'), dataIndex: 'eci', width: 140, mono: true },
+        { key: 'groupName', title: t('perf.query.groupName'), dataIndex: 'groupName', width: 160 },
+        { key: 'timeLevel', title: t('perf.query.timeLevel'), dataIndex: 'timeLevel', width: 100 },
+        { key: 'startTime', title: t('perf.query.startTime'), dataIndex: 'startTime', width: 160 },
+        { key: 'endTime', title: t('perf.query.endTime'), dataIndex: 'endTime', width: 160 },
+        { key: 'RRC_SR', title: `${t('kpi.rrcSetupSuccessRate')}(%)`, dataIndex: 'RRC_SR', width: 140 },
+        { key: 'ERAB_SR', title: `${t('kpi.erabSetupSuccessRate')}(%)`, dataIndex: 'ERAB_SR', width: 150 },
+        { key: 'DL_THP', title: `${t('kpi.dlThroughput')}(Mbps)`, dataIndex: 'DL_THP', width: 140 },
+        { key: 'UL_THP', title: `${t('kpi.ulThroughput')}(Mbps)`, dataIndex: 'UL_THP', width: 140 },
+      ];
+    }
+
+    // Device group query columns (deviceType = '1')
+    return [
+      ...baseColumns,
+      { key: 'avgRrcSr', title: `${t('kpi.rrcSetupSuccessRate')}(%)`, dataIndex: 'avgRrcSr', width: 140 },
+      { key: 'avgErabSr', title: `${t('kpi.erabSetupSuccessRate')}(%)`, dataIndex: 'avgErabSr', width: 150 },
+      { key: 'avgDlThp', title: `${t('kpi.dlThroughput')}(Mbps)`, dataIndex: 'avgDlThp', width: 140 },
+      { key: 'avgUlThp', title: `${t('kpi.ulThroughput')}(Mbps)`, dataIndex: 'avgUlThp', width: 140 },
+    ];
+  }, [t, deviceType]);
+
+  // Get mock data based on selected template and query object type
+  const mockData = useMemo(() => {
+    if (!selectedTemplateId) return deviceType === '2' ? DEFAULT_DEVICE_DATA : DEFAULT_GROUP_DATA;
+
+    if (deviceType === '2') {
+      return TEMPLATE_DEVICE_DATA[selectedTemplateId] || DEFAULT_DEVICE_DATA;
+    }
+    return TEMPLATE_GROUP_DATA[selectedTemplateId] || DEFAULT_GROUP_DATA;
+  }, [selectedTemplateId, deviceType]);
 
   // Left panel with tabs
   const leftPanel = (
@@ -525,7 +832,7 @@ export default function KPIQuery() {
   // Right content panel
   const renderRightPanel = (tabId: string) => {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* Query conditions */}
         <div
           style={{
@@ -600,54 +907,124 @@ export default function KPIQuery() {
         </div>
 
         {/* Result area */}
-        <div style={{ flex: 1, overflow: 'hidden', padding: 16 }}>
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {viewMode === 'table' ? (
-            <Spin spinning={loading}>
-              <DataTable
-                tableId={`kpi-query-${tabId}`}
-                columns={columns}
-                dataSource={MOCK_KPI_DATA}
-                rowKey="key"
-                scroll={{ x: 1800, y: 'calc(100% - 56px)' }}
-                showPagination
-                pageSize={20}
-              />
-            </Spin>
+            <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
+              <Spin spinning={loading}>
+                <DataTable
+                  tableId={`kpi-query-${tabId}`}
+                  columns={columns}
+                  dataSource={mockData}
+                  rowKey="key"
+                  scroll={{ x: true, y: 'calc(100% - 56px)' }}
+                  showPagination
+                  pageSize={20}
+                />
+              </Spin>
+            </div>
           ) : (
-            <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
-                <Select
-                  placeholder={t('perf.query.selectDevice')}
-                  style={{ width: 200 }}
-                  size="small"
-                  options={[
-                    { value: 'ENB00001', label: '北京朝阳基站01' },
-                    { value: 'ENB00002', label: '北京海淀基站01' },
-                    { value: 'GNB00001', label: '北京5G基站01' },
-                  ]}
-                />
-                <Select
-                  placeholder={t('perf.query.selectKpi')}
-                  style={{ width: 200 }}
-                  mode="multiple"
-                  size="small"
-                  options={[
-                    { value: 'RRC_SR', label: t('kpi.rrcSetupSuccessRate') },
-                    { value: 'ERAB_SR', label: t('kpi.erabSetupSuccessRate') },
-                    { value: 'DL_THP', label: t('kpi.dlThroughput') },
-                  ]}
-                />
-                <Button type="primary" size="small">{t('common.query')}</Button>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              {/* Chart toolbar - fixed at top */}
+              <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+                <Text type="secondary">{t('perf.query.chartTip')}</Text>
+                <Button type="primary" icon={<PlusOutlined />} onClick={handleAddChart} size="small">
+                  {t('perf.query.addChart')}
+                </Button>
               </div>
-              <div style={{ flex: 1, minHeight: 0 }}>
-                <LineChart
-                  series={[
-                    { name: t('kpi.rrcSetupSuccessRate'), data: [99.2, 99.5, 98.8, 99.1, 99.3, 99.0, 98.9] },
-                    { name: t('kpi.erabSetupSuccessRate'), data: [98.5, 98.8, 98.2, 98.6, 98.9, 98.4, 98.7] },
-                  ]}
-                  xData={['10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30']}
-                  height={400}
-                />
+
+              {/* Charts grid - scrollable */}
+              <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+                {charts.length === 0 ? (
+                  <div style={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: token.colorTextSecondary,
+                  }}>
+                    <LineChartOutlined style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }} />
+                    <div>{t('perf.query.noChart')}</div>
+                    <Button type="link" onClick={handleAddChart}>{t('perf.query.addFirstChart')}</Button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {charts.map((chart) => (
+                      <Card
+                        key={chart.id}
+                        size="small"
+                        title={
+                          <Space>
+                            <LineChartOutlined />
+                            <span>{chart.name}</span>
+                            <Tag color="blue">{t('perf.query.deviceCount', { count: chart.devices.length })}</Tag>
+                            <Tag color="green">{t('perf.query.kpiCount', { count: chart.kpis.length })}</Tag>
+                          </Space>
+                        }
+                        extra={
+                          <Space size="small">
+                            <Select
+                              size="small"
+                              style={{ width: 90 }}
+                              value={chart.timeRange || 'today'}
+                              onChange={(value) => handleUpdateTimeRange(chart.id, value)}
+                              options={[
+                                { label: t('perf.query.timeRangeToday'), value: 'today' },
+                                { label: t('perf.query.timeRangeYesterday'), value: 'yesterday' },
+                                { label: t('perf.query.timeRangeThisWeek'), value: 'thisWeek' },
+                                { label: t('perf.query.timeRangeLastWeek'), value: 'lastWeek' },
+                                { label: t('perf.query.timeRangeThisMonth'), value: 'thisMonth' },
+                                { label: t('perf.query.timeRangeLastMonth'), value: 'lastMonth' },
+                              ]}
+                            />
+                            <Tooltip title={t('common.edit')}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<EditOutlined />}
+                                onClick={() => handleEditChart(chart)}
+                              />
+                            </Tooltip>
+                            <Tooltip title={t('common.delete')}>
+                              <Button
+                                type="text"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => handleDeleteChart(chart.id)}
+                              />
+                            </Tooltip>
+                          </Space>
+                        }
+                        styles={{ body: { padding: '12px 16px 16px' } }}
+                      >
+                        <div style={{ marginBottom: 12 }}>
+                          <Space wrap size={[4, 8]}>
+                            {chart.devices.map(device => (
+                              <Tag key={device} color="processing" style={{ margin: 0 }}>
+                                {AVAILABLE_DEVICES.find(d => d.value === device)?.label || device}
+                              </Tag>
+                            ))}
+                            <Divider type="vertical" style={{ height: 20, margin: '0 4px' }} />
+                            {chart.kpis.map(kpi => (
+                              <Tag key={kpi} color="success" style={{ margin: 0 }}>
+                                {AVAILABLE_KPIS.find(k => k.value === kpi)?.label || kpi}
+                              </Tag>
+                            ))}
+                          </Space>
+                        </div>
+                        <div style={{ height: 350 }}>
+                          <LineChart
+                            series={generateChartSeries(chart)}
+                            xData={generateMockChartData(chart.devices[0], chart.kpis[0]).xData}
+                            height={350}
+                            showLegend={true}
+                          />
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -681,7 +1058,8 @@ export default function KPIQuery() {
                 }
               }}
               items={tabItems}
-              style={{ height: '100%' }}
+              className="mml-console-tabs"
+              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
               tabBarStyle={{ margin: 0, padding: '0 16px', background: token.colorBgContainer }}
             />
           ) : (
@@ -785,6 +1163,71 @@ export default function KPIQuery() {
           </Form.Item>
           <Form.Item label={t('perf.query.ftpPassword')} name="ftpPassword">
             <Input.Password placeholder="******" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Chart configuration modal */}
+      <Modal
+        title={editingChart ? t('perf.query.editChart') : t('perf.query.addChart')}
+        open={chartConfigModalOpen}
+        onCancel={() => setChartConfigModalOpen(false)}
+        onOk={handleSaveChart}
+        confirmLoading={chartSaving}
+        width={800}
+        destroyOnHidden
+      >
+        <Form form={chartForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            name="name"
+            label={t('perf.query.chartName')}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
+          >
+            <Input placeholder={t('perf.query.chartNamePlaceholder')} />
+          </Form.Item>
+
+          <Form.Item
+            name="devices"
+            label={t('perf.query.selectDevices')}
+            rules={[
+              { required: true, message: t('common.pleaseSelect') },
+              {
+                validator: (_, value) =>
+                  value && value.length > 5
+                    ? Promise.reject(t('perf.query.maxDevices'))
+                    : Promise.resolve(),
+              },
+            ]}
+            extra={t('perf.query.devicesExtra')}
+          >
+            <Select
+              mode="multiple"
+              placeholder={t('perf.query.selectDevicesPlaceholder')}
+              options={AVAILABLE_DEVICES}
+              maxTagCount={5}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="kpis"
+            label={t('perf.query.selectKpis')}
+            rules={[
+              { required: true, message: t('common.pleaseSelect') },
+              {
+                validator: (_, value) =>
+                  value && value.length > 3
+                    ? Promise.reject(t('perf.query.maxKpis'))
+                    : Promise.resolve(),
+              },
+            ]}
+            extra={t('perf.query.kpisExtra')}
+          >
+            <Select
+              mode="multiple"
+              placeholder={t('perf.query.selectKpisPlaceholder')}
+              options={AVAILABLE_KPIS}
+              maxTagCount={3}
+            />
           </Form.Item>
         </Form>
       </Modal>
