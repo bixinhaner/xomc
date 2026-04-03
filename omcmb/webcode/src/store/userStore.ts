@@ -113,8 +113,12 @@ export const useUserStore = create<UserState>()(
     {
       name: 'omc-user-store',
       storage: createJSONStorage(() => localStorage),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
+      onRehydrateStorage: () => {
+        // Use the store's set function directly to ensure hasHydrated is always set
+        // even when state is undefined (no localStorage data)
+        return () => {
+          useUserStore.getState().setHasHydrated(true);
+        };
       },
       partialize: (state) => ({
         currentUser: state.currentUser,
