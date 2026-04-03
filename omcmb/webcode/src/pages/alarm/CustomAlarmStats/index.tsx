@@ -1315,6 +1315,8 @@ export default function CustomAlarmStats() {
           onRefresh={() => void refetch()}
           defaultDensity="compact"
           scroll={{ x: true, y: 'calc(100% - 56px)' }}
+          showRowNumber
+          rowNumberTitle={t('table.rowNumber')}
         />
       </Card>
     </div>
