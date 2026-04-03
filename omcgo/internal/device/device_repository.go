@@ -348,32 +348,66 @@ func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID) (
 }
 
 func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
-	builder := psql.Select(deviceColumns()...).From("devices").Where(notDeleted)
-	countBuilder := psql.Select("COUNT(*)").From("devices").Where(notDeleted)
+	builder := psql.Select(deviceColumns()...).From("devices d").Where(notDeleted)
+	countBuilder := psql.Select("COUNT(*)").From("devices d").Where(notDeleted)
+
+	// GroupID filter - requires JOIN with device_group_members
+	if filter.GroupID != nil {
+		builder = builder.
+			Join("device_group_members dgm ON d.id = dgm.device_id").
+			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		countBuilder = countBuilder.
+			Join("device_group_members dgm ON d.id = dgm.device_id").
+			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+	}
+
+	// VisibleGroups filter - data permission restriction
+	if len(filter.VisibleGroups) > 0 {
+		if filter.GroupID == nil {
+			// Only add JOIN if not already added by GroupID
+			builder = builder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
+			countBuilder = countBuilder.Join("device_group_members dgm2 ON d.id = dgm2.device_id")
+		}
+		// Use separate alias if JOIN already exists
+		joinAlias := "dgm"
+		if filter.GroupID != nil {
+			// Already joined with dgm, need subquery or additional condition
+			// For simplicity, we use EXISTS subquery for visible groups check
+			builder = builder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
+				From("device_group_members dgm_vis").
+				Where(sq.Eq{"dgm_vis.group_id": filter.VisibleGroups})})
+			countBuilder = countBuilder.Where(sq.Eq{"d.id": sq.Select("dgm_vis.device_id").
+				From("device_group_members dgm_vis").
+				Where(sq.Eq{"dgm_vis.group_id": filter.VisibleGroups})})
+		} else {
+			builder = builder.Where(sq.Eq{joinAlias + ".group_id": filter.VisibleGroups})
+			countBuilder = countBuilder.Where(sq.Eq{joinAlias + ".group_id": filter.VisibleGroups})
+		}
+	}
 
 	if filter.Carrier != nil {
-		builder = builder.Where(sq.Eq{"carrier": *filter.Carrier})
-		countBuilder = countBuilder.Where(sq.Eq{"carrier": *filter.Carrier})
+		builder = builder.Where(sq.Eq{"d.carrier": *filter.Carrier})
+		countBuilder = countBuilder.Where(sq.Eq{"d.carrier": *filter.Carrier})
 	}
 	if filter.Technology != nil {
-		builder = builder.Where(sq.Eq{"technology": *filter.Technology})
-		countBuilder = countBuilder.Where(sq.Eq{"technology": *filter.Technology})
+		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
+		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
 	}
 	if filter.Status != nil {
-		builder = builder.Where(sq.Eq{"status": *filter.Status})
-		countBuilder = countBuilder.Where(sq.Eq{"status": *filter.Status})
+		builder = builder.Where(sq.Eq{"d.status": *filter.Status})
+		countBuilder = countBuilder.Where(sq.Eq{"d.status": *filter.Status})
 	}
 	if filter.OUI != nil {
-		builder = builder.Where(sq.Eq{"oui": *filter.OUI})
-		countBuilder = countBuilder.Where(sq.Eq{"oui": *filter.OUI})
+		builder = builder.Where(sq.Eq{"d.oui": *filter.OUI})
+		countBuilder = countBuilder.Where(sq.Eq{"d.oui": *filter.OUI})
 	}
 	if filter.SN != nil && *filter.SN != "" {
-		builder = builder.Where(sq.Eq{"serial_number": *filter.SN})
-		countBuilder = countBuilder.Where(sq.Eq{"serial_number": *filter.SN})
+		builder = builder.Where(sq.Eq{"d.serial_number": *filter.SN})
+		countBuilder = countBuilder.Where(sq.Eq{"d.serial_number": *filter.SN})
 	}
 	if filter.Search != nil && *filter.Search != "" {
 		like := "%" + *filter.Search + "%"
-		cond := sq.Or{sq.ILike{"serial_number": like}, sq.ILike{"site_name": like}}
+		cond := sq.Or{sq.ILike{"d.serial_number": like}, sq.ILike{"d.site_name": like}}
 		builder = builder.Where(cond)
 		countBuilder = countBuilder.Where(cond)
 	}
@@ -530,18 +564,18 @@ func (r *PgDeviceRepository) scanDevice(ctx context.Context, query string, args 
 
 func deviceColumns() []string {
 	return []string{
-		"id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
-		"carrier", "technology", "data_model_id", "status", "firmware_version",
-		"host(ip_address) as ip_address", "connection_request_url",
-		"nat_detected", "udp_connection_request_address",
-		"last_inform_at", "last_inform_events",
-		"inform_interval", "site_name", "site_id", "latitude", "longitude",
-		"extension_data", "created_at", "updated_at", "deleted_at",
+		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
+		"d.carrier", "d.technology", "d.data_model_id", "d.status", "d.firmware_version",
+		"host(d.ip_address) as ip_address", "d.connection_request_url",
+		"d.nat_detected", "d.udp_connection_request_address",
+		"d.last_inform_at", "d.last_inform_events",
+		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at",
 	}
 }
 
 // notDeleted is the standard soft-delete filter applied to all read queries.
-var notDeleted = sq.Eq{"deleted_at": nil}
+var notDeleted = sq.Eq{"d.deleted_at": nil}
 
 func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	var d model.Device
