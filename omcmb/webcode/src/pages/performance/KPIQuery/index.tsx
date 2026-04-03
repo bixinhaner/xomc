@@ -59,6 +59,19 @@ const TEMPLATE_DEVICE_DATA: Record<string, Record<string, unknown>[]> = {
   'tpl-1': [ // eNB基础KPI
     { key: '1', serialNumber: 'ENB00001', hostName: '北京朝阳基站01', subStationName: '朝阳站址001', enodeId: '100001', cellId: '1', eci: '100001001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.2%', ERAB_SR: '98.5%', DL_THP: '145.6', UL_THP: '32.1' },
     { key: '2', serialNumber: 'ENB00002', hostName: '北京海淀基站01', subStationName: '海淀站址001', enodeId: '100002', cellId: '1', eci: '100002001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.9%', ERAB_SR: '97.8%', DL_THP: '132.1', UL_THP: '28.5' },
+    { key: '3', serialNumber: 'ENB00003', hostName: '北京东城基站01', subStationName: '东城站址001', enodeId: '100003', cellId: '1', eci: '100003001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.5%', ERAB_SR: '98.9%', DL_THP: '156.3', UL_THP: '35.7' },
+    { key: '4', serialNumber: 'ENB00004', hostName: '北京西城基站01', subStationName: '西城站址001', enodeId: '100004', cellId: '1', eci: '100004001', groupName: '北京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.7%', ERAB_SR: '97.5%', DL_THP: '128.9', UL_THP: '26.4' },
+    { key: '5', serialNumber: 'ENB00005', hostName: '上海浦东基站01', subStationName: '浦东站址001', enodeId: '200001', cellId: '1', eci: '200001001', groupName: '上海区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.1%', ERAB_SR: '98.3%', DL_THP: '142.5', UL_THP: '31.2' },
+    { key: '6', serialNumber: 'ENB00006', hostName: '上海徐汇基站01', subStationName: '徐汇站址001', enodeId: '200002', cellId: '1', eci: '200002001', groupName: '上海区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.6%', ERAB_SR: '97.2%', DL_THP: '125.8', UL_THP: '25.6' },
+    { key: '7', serialNumber: 'ENB00007', hostName: '上海静安基站01', subStationName: '静安站址001', enodeId: '200003', cellId: '1', eci: '200003001', groupName: '上海区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.3%', ERAB_SR: '98.7%', DL_THP: '148.2', UL_THP: '33.9' },
+    { key: '8', serialNumber: 'ENB00008', hostName: '广州天河基站01', subStationName: '天河站址001', enodeId: '300001', cellId: '1', eci: '300001001', groupName: '广州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.4%', ERAB_SR: '97.1%', DL_THP: '118.6', UL_THP: '24.3' },
+    { key: '9', serialNumber: 'ENB00009', hostName: '广州越秀基站01', subStationName: '越秀站址001', enodeId: '300002', cellId: '1', eci: '300002001', groupName: '广州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.0%', ERAB_SR: '98.2%', DL_THP: '135.4', UL_THP: '29.8' },
+    { key: '10', serialNumber: 'ENB00010', hostName: '深圳南山基站01', subStationName: '南山站址001', enodeId: '400001', cellId: '1', eci: '400001001', groupName: '深圳区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.8%', ERAB_SR: '97.6%', DL_THP: '129.7', UL_THP: '27.5' },
+    { key: '11', serialNumber: 'ENB00011', hostName: '深圳福田基站01', subStationName: '福田站址001', enodeId: '400002', cellId: '1', eci: '400002001', groupName: '深圳区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.4%', ERAB_SR: '98.8%', DL_THP: '152.1', UL_THP: '34.6' },
+    { key: '12', serialNumber: 'ENB00012', hostName: '杭州西湖基站01', subStationName: '西湖站址001', enodeId: '500001', cellId: '1', eci: '500001001', groupName: '杭州区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.2%', ERAB_SR: '96.9%', DL_THP: '115.3', UL_THP: '23.1' },
+    { key: '13', serialNumber: 'ENB00013', hostName: '成都武侯基站01', subStationName: '武侯站址001', enodeId: '600001', cellId: '1', eci: '600001001', groupName: '成都区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.1%', ERAB_SR: '98.4%', DL_THP: '141.8', UL_THP: '30.9' },
+    { key: '14', serialNumber: 'ENB00014', hostName: '武汉洪山基站01', subStationName: '洪山站址001', enodeId: '700001', cellId: '1', eci: '700001001', groupName: '武汉区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '98.5%', ERAB_SR: '97.3%', DL_THP: '126.7', UL_THP: '26.2' },
+    { key: '15', serialNumber: 'ENB00015', hostName: '南京鼓楼基站01', subStationName: '鼓楼站址001', enodeId: '800001', cellId: '1', eci: '800001001', groupName: '南京区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.3%', ERAB_SR: '98.6%', DL_THP: '147.5', UL_THP: '33.2' },
   ],
   'tpl-2': [ // gNB性能指标
     { key: '1', serialNumber: 'GNB00001', hostName: '北京5G基站01', subStationName: '5G站址001', enodeId: '200001', cellId: '1', eci: '200001001', groupName: '北京5G区域', timeLevel: '15Min', startTime: '2026-04-01 10:00', endTime: '2026-04-01 10:15', RRC_SR: '99.5%', ERAB_SR: '99.1%', DL_THP: '856.2', UL_THP: '125.3' },
@@ -249,6 +262,10 @@ export default function KPIQuery() {
   const [deviceType, setDeviceType] = useState<'1' | '2'>('2');
   const [deviceSearch, setDeviceSearch] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(30);
 
   // Template dialog state
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -560,6 +577,12 @@ export default function KPIQuery() {
     void message.success(`${format.toUpperCase()} ${t('common.exportInProgress')}`);
   }, [t, message]);
 
+  // Handle pagination change
+  const handlePageChange = useCallback((page: number, size: number) => {
+    setCurrentPage(page);
+    setPageSize(size);
+  }, []);
+
   // Get template name by id
   const getTemplateName = useCallback((id: string): string => {
     const found = allTemplates.find((t) => t.id === id);
@@ -668,6 +691,13 @@ export default function KPIQuery() {
     }
     return TEMPLATE_GROUP_DATA[selectedTemplateId] || DEFAULT_GROUP_DATA;
   }, [selectedTemplateId, deviceType]);
+
+  // Paginated data based on current page and page size
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    const end = start + pageSize;
+    return mockData.slice(start, end);
+  }, [mockData, currentPage, pageSize]);
 
   // Left panel with tabs
   const leftPanel = (
@@ -909,16 +939,43 @@ export default function KPIQuery() {
         {/* Result area */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {viewMode === 'table' ? (
-            <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
-              <Spin spinning={loading}>
+            <div className="kpi-query-table-wrapper" style={{ flex: 1, padding: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <style>{`
+                .kpi-query-table-wrapper .ant-table-thead > tr > th,
+                .kpi-query-table-wrapper .ant-table-tbody > tr > td {
+                  white-space: nowrap !important;
+                }
+                .kpi-query-table-wrapper .ant-spin-nested-loading,
+                .kpi-query-table-wrapper .ant-spin-container {
+                  height: 100%;
+                }
+                .kpi-query-table-wrapper [class*="dataTableWrapper"] {
+                  height: 100%;
+                }
+                .kpi-query-table-wrapper [class*="tableContainer"] {
+                  flex: 1;
+                  min-height: 0;
+                  overflow: auto;
+                }
+                .kpi-query-table-wrapper [class*="paginationWrapper"] {
+                  flex-shrink: 0;
+                }
+              `}</style>
+              <Spin spinning={loading} style={{ height: '100%' }}>
                 <DataTable
                   tableId={`kpi-query-${tabId}`}
                   columns={columns}
-                  dataSource={mockData}
+                  dataSource={paginatedData}
                   rowKey="key"
-                  scroll={{ x: true, y: 'calc(100% - 56px)' }}
+                  scroll={{ x: 'max-content', y: 'calc(100vh - 430px)' }}
+                  selectable
+                  showRowNumber
+                  rowNumberTitle={t('table.rowNumber')}
                   showPagination
-                  pageSize={20}
+                  currentPage={currentPage}
+                  pageSize={pageSize}
+                  total={mockData.length}
+                  onPageChange={handlePageChange}
                 />
               </Spin>
             </div>
