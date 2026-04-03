@@ -243,7 +243,9 @@ export default function GroupTreePanel({
             const key = keys[0] as string | undefined;
             if (!key) return;
             const clickedGroup = groups.find((g) => g.id === key);
-            if (clickedGroup && !clickedGroup.parentId) {
+            // 只有 L2 分组（有 parentId）才能被选择，L1 的 selectable=false 不会触发此回调
+            // 但为了安全起见，仍然检查 clickedGroup 存在
+            if (clickedGroup) {
               onSelect(key);
             }
           }}
