@@ -112,7 +112,8 @@ export default function DeviceGrouping() {
   // Default select first level-2 node under the first root group
   useEffect(() => {
     if (groups.length > 0 && !selectedGroupId) {
-      const firstRoot = groups.find((g) => g.parentId === null);
+      // 兼容 null 和 undefined（后端 omitempty 导致根分组没有 parent_id 字段）
+      const firstRoot = groups.find((g) => !g.parentId);
       if (firstRoot) {
         const firstChild = groups.find((g) => g.parentId === firstRoot.id);
         if (firstChild) {
@@ -224,7 +225,11 @@ export default function DeviceGrouping() {
   const handleAddGroup = useCallback(async () => {
     try {
       const values = await addForm.validateFields();
-      await createGroupMutation.mutateAsync({ name: values.name, remark: values.description });
+      // 支持选择父级分组，      await createGroupMutation.mutateAsync({
+        name: values.name,
+        parent_id: values.parentId || undefined,
+        remark: values.description,
+      });
       void message.success(t('common.success'));
       setAddModalOpen(false);
     } catch {

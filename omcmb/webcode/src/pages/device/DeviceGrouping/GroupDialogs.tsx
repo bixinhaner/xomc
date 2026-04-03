@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import { Button, Drawer, Form, Input, Modal, Radio, Select, Typography } from 'antd';
+import { Button, Drawer, Form, Input, Modal, Radio, Select, TreeSelect, Typography } from 'antd';
 import { CloseCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import type { FormInstance } from 'antd';
-import type { NameFilterItem } from './types';
+import type { NameFilterItem, GroupItem } from './types';
 import {
   generateId,
   generateOperators,
@@ -15,7 +15,8 @@ const { Text } = Typography;
 export interface GroupDialogsProps {
   // Add Level-1 Group Modal
   addModalOpen: boolean;
-  addForm: FormInstance<{ name: string; description: string }>;
+  addForm: FormInstance<{ name: string; parentId?: string; description: string }>;
+  groups: GroupItem[];
   onAddModalOk: () => void;
   onAddModalCancel: () => void;
 
@@ -52,6 +53,7 @@ export interface GroupDialogsProps {
 export default function GroupDialogs({
   addModalOpen,
   addForm,
+  groups,
   onAddModalOk,
   onAddModalCancel,
   editModalOpen,
@@ -85,6 +87,17 @@ export default function GroupDialogs({
     return '';
   }, [matchingMode, nameFilters, t]);
 
+  // 构建父级分组选择器的树形数据（仅显示 L1 根分组）
+  const parentGroupTreeData = useMemo(() => {
+    // 只显示根分组（parentId 为 null 或 undefined）
+    const rootGroups = groups.filter((g) => !g.parentId);
+    return rootGroups.map((g) => ({
+        value: g.id,
+        title: g.name,
+        key: g.id,
+      }));
+  }, [groups]);
+
   return (
     <>
       {/* Add Group Modal */}
@@ -102,6 +115,16 @@ export default function GroupDialogs({
             rules={[{ required: true, message: t('common.placeholder') }]}
           >
             <Input placeholder={t('common.placeholder')} />
+          </Form.Item>
+          <Form.Item name="parentId" label={t('device.parentGroup')} tooltip={t('device.parentGroupTooltip')}>
+            <TreeSelect
+              treeData={parentGroupTreeData}
+              placeholder={t('device.selectParentGroup')}
+              allowClear
+              showSearch
+              treeNodeFilterProp="title"
+              treeDefaultExpandAll
+            />
           </Form.Item>
           <Form.Item name="description" label={t('table.description')}>
             <Input.TextArea rows={3} placeholder={t('common.placeholder')} />

@@ -34,11 +34,13 @@ function buildTreeData(
   onContextMenu: (groupId: string) => void,
   t: (id: string, values?: Record<string, unknown>) => string
 ): DataNode[] {
-  const rootGroups = groups.filter((g) => g.parentId === null);
+  // 兼容 null 和 undefined（后端 omitempty 导致根分组没有 parent_id 字段）
+  const rootGroups = groups.filter((g) => !g.parentId);
 
   function buildNode(group: GroupItem, isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
-    const isLevel1 = group.parentId === null;
+    // 兼容 null 和 undefined
+    const isLevel1 = !group.parentId;
     const isDefaultGroup = group.builtIn === 1;
 
     let menuItems: MenuProps['items'];
@@ -175,7 +177,8 @@ export default function GroupTreePanel({
   t,
 }: GroupTreePanelProps) {
   // 默认展开 __all__ 和所有 L1 root groups
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => ['__all__', ...groups.filter((g) => g.parentId === null).map((g) => g.id)]);
+  // 兼容 null 和 undefined（后端 omitempty 导致根分组没有 parent_id 字段）
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => ['__all__', ...groups.filter((g) => !g.parentId).map((g) => g.id)]);
 
   const filteredTreeData = useMemo(
     () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t),
