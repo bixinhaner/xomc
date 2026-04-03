@@ -160,3 +160,9 @@ export function useDeleteObject() {
     },
   });
 }
+
+export function useSyncConfigFile() {
+  return useMutation({
+    mutationFn: (deviceId: string) => api.syncConfigFile(deviceId),
+  });
+}

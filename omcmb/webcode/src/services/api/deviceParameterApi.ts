@@ -385,4 +385,12 @@ export const deviceParameterApi = {
       object_path: objectPath,
     });
   },
+
+  // 同步配置文件 - 创建 filetype=11 的 Upload RPC 任务
+  async syncConfigFile(deviceId: string): Promise<{ message: string; command_id: string; file_type: string }> {
+    const { data } = await http.post<{ message: string; command_id: string; file_type: string }>(
+      `/devices/${deviceId}/config-file/sync`
+    );
+    return data;
+  },
 };
