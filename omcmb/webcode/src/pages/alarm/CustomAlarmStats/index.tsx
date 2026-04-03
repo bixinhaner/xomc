@@ -1187,8 +1187,7 @@ export default function CustomAlarmStats() {
         }
         .custom-alarm-list-card .ant-table-body {
           overflow-y: auto !important;
-          /* 减小减去的值，让表格区域更大 */
-          max-height: calc(100vh - 360px) !important;
+          max-height: calc(100vh - 520px) !important;
         }
       `}</style>
     </div>
