@@ -312,6 +312,8 @@ export default function DeviceListPanel({
           onRefresh={onRefresh}
           defaultDensity="compact"
           scroll={{ x: true, y: 'calc(100% - 56px)' }}
+          showRowNumber
+          rowNumberTitle={t('table.rowNumber')}
         />
       </div>
       <style>{`
