@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Tabs, Button, Space, DatePicker, Select, Input, Radio, Typography, Dropdown, Modal, Form, Switch, InputNumber, TimePicker, List, Spin, Segmented, Collapse, Card, Tag, Tooltip, Divider, App } from 'antd';
+import { Tabs, Button, Space, DatePicker, Select, Input, Radio, Typography, Dropdown, Modal, Form, Switch, InputNumber, TimePicker, List, Spin, Segmented, Collapse, Card, Tag, Tooltip, Divider, App, Drawer } from 'antd';
 import {
   PlusOutlined,
   SearchOutlined,
@@ -985,8 +985,7 @@ export default function KPIQuery() {
                   columns={columns}
                   dataSource={paginatedData}
                   rowKey="key"
-                  scroll={{ x: 'max-content', y: 'calc(100vh - 430px)' }}
-                  selectable
+                  scroll={{ x: 'max-content', y: 'calc(100vh - 500px)' }}
                   showRowNumber
                   rowNumberTitle={t('table.rowNumber')}
                   showPagination
@@ -1186,60 +1185,127 @@ export default function KPIQuery() {
       />
 
       {/* Report config drawer */}
-      <Modal
+      <Drawer
         title={t('perf.query.reportConfig')}
         open={reportDrawerOpen}
-        onCancel={() => setReportDrawerOpen(false)}
-        onOk={() => {
-          reportForm.validateFields().then(() => {
-            void message.success(t('common.success'));
-            setReportDrawerOpen(false);
-          }).catch(() => {});
-        }}
-        width={600}
+        onClose={() => setReportDrawerOpen(false)}
+        width={480}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setReportDrawerOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={() => {
+              reportForm.validateFields().then(() => {
+                void message.success(t('common.success'));
+                setReportDrawerOpen(false);
+              }).catch(() => {});
+            }}>{t('common.confirm')}</Button>
+          </div>
+        }
       >
-        <Form form={reportForm} layout="vertical" style={{ marginTop: 16 }}>
+        <Form form={reportForm} layout="vertical">
           <Form.Item label={t('perf.query.enableReport')} name="reportStatus" valuePropName="checked" initialValue={false}>
             <Switch />
           </Form.Item>
-          <Form.Item label={t('perf.query.reportPeriod')} name="reportPeriod">
-            <Select mode="multiple" placeholder={t('common.pleaseSelect')} options={granularityOptions} />
-          </Form.Item>
-          <Form.Item label={t('perf.query.reportTime')} name="reportTime">
-            <TimePicker format="HH:mm" style={{ width: '100%' }} />
+          <Form.Item shouldUpdate={(prev, cur) => prev.reportStatus !== cur.reportStatus} noStyle>
+            {({ getFieldValue }) => {
+              const reportEnabled = getFieldValue('reportStatus');
+              return (
+                <>
+                  <Form.Item
+                    label={t('perf.query.reportPeriod')}
+                    name="reportPeriod"
+                    rules={reportEnabled ? [{ required: true, message: t('common.pleaseSelect') }] : []}
+                  >
+                    <Select mode="multiple" placeholder={t('common.pleaseSelect')} options={granularityOptions} />
+                  </Form.Item>
+                  <Form.Item
+                    label={t('perf.query.reportTime')}
+                    name="reportTime"
+                    rules={reportEnabled ? [{ required: true, message: t('common.pleaseSelect') }] : []}
+                  >
+                    <TimePicker format="HH:mm" style={{ width: '100%' }} />
+                  </Form.Item>
+                </>
+              );
+            }}
           </Form.Item>
           <Form.Item label={t('perf.query.enableEmail')} name="mailStatus" valuePropName="checked" initialValue={false}>
             <Switch />
           </Form.Item>
-          <Form.Item label={t('perf.query.emailAddress')} name="mailAddress">
-            <Input placeholder={t('perf.query.emailPlaceholder')} />
+          <Form.Item shouldUpdate={(prev, cur) => prev.mailStatus !== cur.mailStatus} noStyle>
+            {({ getFieldValue }) => {
+              if (!getFieldValue('mailStatus')) return null;
+              return (
+                <Form.Item
+                  label={t('perf.query.emailAddress')}
+                  name="mailAddress"
+                  rules={[{ required: true, message: t('common.pleaseInput') }]}
+                >
+                  <Input placeholder={t('perf.query.emailPlaceholder')} />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
           <Form.Item label={t('perf.query.enableFtp')} name="ftpSwitch" valuePropName="checked" initialValue={false}>
             <Switch />
           </Form.Item>
-          <Form.Item label={t('perf.query.ftpProtocol')} name="ftpProtocol">
-            <Radio.Group>
-              <Radio value="sftp">SFTP</Radio>
-              <Radio value="ftp">FTP</Radio>
-            </Radio.Group>
-          </Form.Item>
-          <Form.Item label={t('perf.query.ftpPath')} name="ftpPath">
-            <Input placeholder="/data/reports" />
-          </Form.Item>
-          <Form.Item label={t('perf.query.ftpIp')} name="ftpIp">
-            <Input placeholder="192.168.1.100" />
-          </Form.Item>
-          <Form.Item label={t('perf.query.ftpPort')} name="ftpPort">
-            <InputNumber min={1} max={65535} placeholder="22" style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label={t('perf.query.ftpUser')} name="ftpUser">
-            <Input placeholder="admin" />
-          </Form.Item>
-          <Form.Item label={t('perf.query.ftpPassword')} name="ftpPassword">
-            <Input.Password placeholder="******" />
+          <Form.Item shouldUpdate={(prev, cur) => prev.ftpSwitch !== cur.ftpSwitch} noStyle>
+            {({ getFieldValue }) => {
+              if (!getFieldValue('ftpSwitch')) return null;
+              return (
+                <>
+                  <Form.Item
+                    label={t('perf.query.ftpProtocol')}
+                    name="ftpProtocol"
+                    rules={[{ required: true, message: t('common.pleaseSelect') }]}
+                  >
+                    <Radio.Group>
+                      <Radio value="sftp">SFTP</Radio>
+                      <Radio value="ftp">FTP</Radio>
+                    </Radio.Group>
+                  </Form.Item>
+                  <Form.Item
+                    label={t('perf.query.ftpPath')}
+                    name="ftpPath"
+                    rules={[{ required: true, message: t('common.pleaseInput') }]}
+                  >
+                    <Input placeholder="/data/reports" />
+                  </Form.Item>
+                  <Form.Item
+                    label={t('perf.query.ftpIp')}
+                    name="ftpIp"
+                    rules={[{ required: true, message: t('common.pleaseInput') }]}
+                  >
+                    <Input placeholder="192.168.1.100" />
+                  </Form.Item>
+                  <Form.Item
+                    label={t('perf.query.ftpPort')}
+                    name="ftpPort"
+                    rules={[{ required: true, message: t('common.pleaseInput') }]}
+                  >
+                    <InputNumber min={1} max={65535} placeholder="22" style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item
+                    label={t('perf.query.ftpUser')}
+                    name="ftpUser"
+                    rules={[{ required: true, message: t('common.pleaseInput') }]}
+                  >
+                    <Input placeholder="admin" />
+                  </Form.Item>
+                  <Form.Item
+                    label={t('perf.query.ftpPassword')}
+                    name="ftpPassword"
+                    rules={[{ required: true, message: t('common.pleaseInput') }]}
+                  >
+                    <Input.Password placeholder="******" />
+                  </Form.Item>
+                </>
+              );
+            }}
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
       {/* Chart configuration modal */}
       <Modal
