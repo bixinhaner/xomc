@@ -67,6 +67,9 @@ const messages: Record<string, string> = {
   'common.downloadInProgress': '正在下载...',
   'common.selectAll':      '全选',
   'common.unselectAll':    '取消全选',
+  'common.refreshSuccess': '刷新成功',
+  'common.totalItems':     '共 {count} 条',
+  'common.operation':      '操作',
 
   // -------------------------------------------------------------------------
   // Table headers
@@ -1293,6 +1296,36 @@ const messages: Record<string, string> = {
   'perf.query.timeRangeLastWeek': '上周',
   'perf.query.timeRangeThisMonth': '本月',
   'perf.query.timeRangeLastMonth': '上月',
+
+  // Export drawer
+  'perf.export.title': '导出',
+  'perf.export.manualGenerate': '生成报表',
+  'perf.export.timedReport': '定时报表',
+  'perf.export.currentTemplate': '当前查询模板',
+  'perf.export.queryPeriod': '查询粒度',
+  'perf.export.generate': '生成',
+  'perf.export.generateSuccess': '报表生成任务已建立',
+  'perf.export.fileName': '文件名',
+  'perf.export.progress': '进度',
+  'perf.export.status': '状态',
+  'perf.export.createTime': '创建时间',
+  'perf.export.statusWaiting': '等待',
+  'perf.export.statusProcessing': '进行中',
+  'perf.export.statusCompleted': '完成',
+  'perf.export.statusFailed': '失败',
+  'perf.export.searchPlaceholder': '搜索文件名',
+  'perf.export.selectedCount': '已选择 {count} 个',
+  'perf.export.terminate': '终止',
+  'perf.export.terminateConfirm': '确认终止任务',
+  'perf.export.terminateConfirmMsg': '确定要终止该报表生成任务吗？',
+  'perf.export.downloadStart': '开始下载 {name}',
+  'perf.export.deleteConfirmMsg': '确定要删除该文件吗？',
+  'perf.export.batchDeleteConfirm': '确认批量删除',
+  'perf.export.batchDeleteConfirmMsg': '确定要删除选中的 {count} 个文件吗？',
+  'perf.export.selectAtLeastOne': '请至少选择一个文件',
+  'perf.export.fileSize': '文件大小',
+  'perf.export.terminateConfirm': '确认终止任务',
+  'perf.export.terminateConfirmMsg': '确定要终止该报表生成任务吗？',
 
   // KPI indicator names
   'kpi.rrcSetupSuccessRate':   'RRC建立成功率',

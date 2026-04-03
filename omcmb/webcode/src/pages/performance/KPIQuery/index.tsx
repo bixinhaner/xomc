@@ -33,6 +33,7 @@ import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import TemplateDrawer from './components/TemplateDrawer';
+import ExportDrawer from './components/ExportDrawer';
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -278,6 +279,9 @@ export default function KPIQuery() {
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
   const [reportForm] = Form.useForm();
 
+  // Export drawer state
+  const [exportDrawerOpen, setExportDrawerOpen] = useState(false);
+
   // Chart management state
   const [charts, setCharts] = useState<ChartConfig[]>([]);
   const [chartConfigModalOpen, setChartConfigModalOpen] = useState(false);
@@ -494,7 +498,7 @@ export default function KPIQuery() {
         });
         break;
       case 'exportKpi':
-        void message.success(t('common.exportInProgress'));
+        setExportDrawerOpen(true);
         break;
       case 'report':
         setReportDrawerOpen(true);
@@ -567,11 +571,6 @@ export default function KPIQuery() {
       setLoading(false);
       void message.success(t('common.success'));
     }, 1000);
-  }, [t, message]);
-
-  // Handle export
-  const handleExport = useCallback((format: 'excel' | 'csv') => {
-    void message.success(`${format.toUpperCase()} ${t('common.exportInProgress')}`);
   }, [t, message]);
 
   // Handle pagination change
@@ -930,16 +929,13 @@ export default function KPIQuery() {
                 <Button type="primary" onClick={handleQuery} loading={loading} size="small">
                   {t('common.query')}
                 </Button>
-                <Dropdown
-                  menu={{
-                    items: [
-                      { key: 'excel', label: t('perf.query.exportExcel'), onClick: () => handleExport('excel') },
-                      { key: 'csv', label: t('perf.query.exportCsv'), onClick: () => handleExport('csv') },
-                    ],
-                  }}
+                <Button
+                  icon={<DownloadOutlined />}
+                  size="small"
+                  onClick={() => setExportDrawerOpen(true)}
                 >
-                  <Button icon={<DownloadOutlined />} size="small">{t('common.export')}</Button>
-                </Dropdown>
+                  {t('common.export')}
+                </Button>
               </Space>
             </div>
           </div>
@@ -1108,11 +1104,11 @@ export default function KPIQuery() {
   }, [
     token, t, deviceType, setDeviceType, deviceSearch,
     granularity, setGranularity, granularityOptions, dateRange, setDateRange,
-    handleQuery, loading, handleExport, getTemplateName,
+    handleQuery, loading, getTemplateName,
     viewMode, setViewMode, columns, paginatedData, currentPage, pageSize,
     mockData.length, handlePageChange, charts, handleAddChart,
     handleUpdateTimeRange, handleEditChart, handleDeleteChart,
-    generateChartSeries,
+    generateChartSeries, setExportDrawerOpen,
   ]);
 
   // Tab items
@@ -1371,6 +1367,14 @@ export default function KPIQuery() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Export drawer */}
+      <ExportDrawer
+        open={exportDrawerOpen}
+        onClose={() => setExportDrawerOpen(false)}
+        templateName={getTemplateName(activeTab)}
+        reportPeriod={granularity}
+      />
     </>
   );
 }

@@ -67,6 +67,9 @@ const messages: Record<string, string> = {
   'common.downloadInProgress': 'Downloading...',
   'common.selectAll':      'Select All',
   'common.unselectAll':    'Unselect All',
+  'common.refreshSuccess': 'Refreshed successfully',
+  'common.totalItems':     '{count} items in total',
+  'common.operation':      'Actions',
 
   // -------------------------------------------------------------------------
   // Table headers
@@ -1288,6 +1291,34 @@ const messages: Record<string, string> = {
   'perf.query.timeRangeLastWeek': 'Last Week',
   'perf.query.timeRangeThisMonth': 'This Month',
   'perf.query.timeRangeLastMonth': 'Last Month',
+
+  // Export drawer
+  'perf.export.title': 'Export',
+  'perf.export.manualGenerate': 'Generate Report',
+  'perf.export.timedReport': 'Scheduled Report',
+  'perf.export.currentTemplate': 'Current Template',
+  'perf.export.queryPeriod': 'Query Granularity',
+  'perf.export.generate': 'Generate',
+  'perf.export.generateSuccess': 'Report generation task has been created',
+  'perf.export.fileName': 'File Name',
+  'perf.export.progress': 'Progress',
+  'perf.export.status': 'Status',
+  'perf.export.createTime': 'Create Time',
+  'perf.export.statusWaiting': 'Waiting',
+  'perf.export.statusProcessing': 'Processing',
+  'perf.export.statusCompleted': 'Completed',
+  'perf.export.statusFailed': 'Failed',
+  'perf.export.searchPlaceholder': 'Search file name',
+  'perf.export.selectedCount': '{count} selected',
+  'perf.export.terminate': 'Terminate',
+  'perf.export.terminateConfirm': 'Confirm Terminate',
+  'perf.export.terminateConfirmMsg': 'Are you sure you want to terminate this report generation task?',
+  'perf.export.downloadStart': 'Starting download {name}',
+  'perf.export.deleteConfirmMsg': 'Are you sure you want to delete this file?',
+  'perf.export.batchDeleteConfirm': 'Confirm Batch Delete',
+  'perf.export.batchDeleteConfirmMsg': 'Are you sure you want to delete {count} selected files?',
+  'perf.export.selectAtLeastOne': 'Please select at least one file',
+  'perf.export.fileSize': 'File Size',
 
   // KPI indicator names
   'kpi.rrcSetupSuccessRate':   'RRC Setup Success Rate',
