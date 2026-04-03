@@ -36,6 +36,8 @@ export interface FilterBarProps {
   extra?: React.ReactNode;
   /** 不应用默认的 wrapper 样式（padding、margin） */
   noDefaultStyle?: boolean;
+  /** 初始值（优先级高于 sessionStorage） */
+  initialValues?: Record<string, unknown>;
 }
 
 const COLS_PER_ROW = 6;
@@ -51,14 +53,21 @@ const FilterBar: React.FC<FilterBarProps> = ({
   collapsedRows = 1,
   extra,
   noDefaultStyle = false,
+  initialValues,
 }) => {
   const t = useT();
   const [form] = Form.useForm<Record<string, unknown>>();
   const [expanded, setExpanded] = useState(false);
   const storageKey = `${SESSION_PREFIX}${filterId}`;
 
-  // Restore from sessionStorage on mount
+  // Restore from initialValues (priority) or sessionStorage on mount
   useEffect(() => {
+    // 优先使用 initialValues（来自 URL 参数）
+    if (initialValues && Object.keys(initialValues).length > 0) {
+      form.setFieldsValue(initialValues);
+      return;
+    }
+    // 否则从 sessionStorage 恢复
     try {
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
@@ -68,7 +77,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
     } catch {
       // ignore
     }
-  }, [form, storageKey]);
+  }, [form, storageKey, initialValues]);
 
   const handleSearch = useCallback(() => {
     const values = form.getFieldsValue() as Record<string, unknown>;

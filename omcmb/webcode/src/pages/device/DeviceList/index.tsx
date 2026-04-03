@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { App, Button, Drawer, Dropdown, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -40,10 +40,32 @@ const SEVERITY_COLOR: Record<string, string> = {
 export default function DeviceList() {
   const t = useT();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { message, modal } = App.useApp();
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
+
+  // 从 URL 恢复搜索条件和分页
+  const [currentPage, setCurrentPage] = useState(() => {
+    const page = searchParams.get('page');
+    return page ? parseInt(page, 10) : 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const size = searchParams.get('pageSize');
+    return size ? parseInt(size, 10) : 20;
+  });
+  const [filterParams, setFilterParams] = useState<Record<string, unknown>>(() => {
+    const params: Record<string, unknown> = {};
+    searchParams.forEach((value, key) => {
+      if (key !== 'page' && key !== 'pageSize') {
+        // 处理数组参数（逗号分隔）
+        if (value.includes(',')) {
+          params[key] = value.split(',');
+        } else {
+          params[key] = value;
+        }
+      }
+    });
+    return params;
+  });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   // 本地任务面板状态
@@ -258,12 +280,28 @@ export default function DeviceList() {
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams(values);
     setCurrentPage(1);
-  }, []);
+    // 同步到 URL
+    const newParams = new URLSearchParams();
+    Object.entries(values).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        if (Array.isArray(value)) {
+          if (value.length > 0) {
+            newParams.set(key, value.join(','));
+          }
+        } else {
+          newParams.set(key, String(value));
+        }
+      }
+    });
+    setSearchParams(newParams);
+  }, [setSearchParams]);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
-  }, []);
+    // 清空 URL 参数
+    setSearchParams(new URLSearchParams());
+  }, [setSearchParams]);
 
   // 批量操作通用确认弹窗
   const handleBatchAction = useCallback(
@@ -1057,6 +1095,7 @@ export default function DeviceList() {
             onSearch={handleSearch}
             onReset={handleReset}
             collapsedRows={1}
+            initialValues={filterParams}
           />
 
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
