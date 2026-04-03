@@ -243,7 +243,7 @@ export default function GroupTreePanel({
             const key = keys[0] as string | undefined;
             if (!key) return;
             const clickedGroup = groups.find((g) => g.id === key);
-            if (clickedGroup && clickedGroup.parentId !== null) {
+            if (clickedGroup && !clickedGroup.parentId) {
               onSelect(key);
             }
           }}
