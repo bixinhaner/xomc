@@ -155,18 +155,13 @@ export default function DeviceGrouping() {
   }, [groups]);
 
   const targetGroupOptions = useMemo(() => {
-    return groups
-      // 只显示 L2 分组（有 parentId 的分组）
-      // 注意：后端 omitempty 导致 L1 分组的 parentId 是 undefined 而不是 null
-      // 所以不能用 g.parentId !== null，因为 undefined !== null 为 true
-      .filter((g) => g.parentId != null)
-      .map((g) => {
-        const parentName = getParentName(g.parentId);
-        return {
-          label: parentName ? `${parentName} / ${g.name}` : g.name,
-          value: g.id,
-        };
-      });
+    return groups.map((g) => {
+      const parentName = getParentName(g.parentId ?? null);
+      return {
+        label: parentName ? `${parentName} / ${g.name}` : g.name,
+        value: g.id,
+      };
+    });
   }, [groups, getParentName]);
 
   // --- Tree context menu handler ---
