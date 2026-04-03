@@ -124,7 +124,9 @@ function buildTreeData(
 
     return {
       key: group.id,
-      selectable: !isLevel1,
+      // L1 分组：如果没有子分组，则可以选择；如果有子分组，则不可选择（引导用户选择子分组）
+      // L2 分组：始终可以选择
+      selectable: isLevel1 ? children.length === 0 : true,
       title: (
         <div
           style={{
@@ -243,8 +245,7 @@ export default function GroupTreePanel({
             const key = keys[0] as string | undefined;
             if (!key) return;
             const clickedGroup = groups.find((g) => g.id === key);
-            // 只有 L2 分组（有 parentId）才能被选择，L1 的 selectable=false 不会触发此回调
-            // 但为了安全起见，仍然检查 clickedGroup 存在
+            // L2 分组（有 parentId）或没有子分组的 L1 分组可以被选择
             if (clickedGroup) {
               onSelect(key);
             }
