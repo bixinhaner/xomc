@@ -38,6 +38,7 @@ type RoleAssigner interface {
 	AssignRole(ctx context.Context, userID, roleID uuid.UUID) error
 	RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error
 	GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	GetUserRolesBatch(ctx context.Context, userIds []uuid.UUID) (map[uuid.UUID][]Role, error)
 }
 
 // PermissionChecker provides permission query capabilities.
@@ -61,6 +62,8 @@ type RoleRepository interface {
 	RoleAssigner
 	PermissionChecker
 	PermissionWriter
+	// ListWithPagination returns roles with pagination support.
+	ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error)
 }
 
 // RoleDeviceGroupRepository manages role–device-group associations.
@@ -68,6 +71,21 @@ type RoleDeviceGroupRepository interface {
 	GetGroupIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	SetGroupIDs(ctx context.Context, roleID uuid.UUID, groupIDs []uuid.UUID) error
 	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// MenuRepository defines the persistence interface for menus.
+type MenuRepository interface {
+	Create(ctx context.Context, menu *Menu, operatorID uuid.UUID) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Menu, error)
+	GetByPermissionKey(ctx context.Context, key string) (*Menu, error)
+	List(ctx context.Context, filter MenuFilter) (*model.ListResponse[Menu], error)
+	Update(ctx context.Context, id uuid.UUID, req *UpdateMenuRequest, operatorID uuid.UUID) error
+	Delete(ctx context.Context, ids []uuid.UUID) error
+	GetTree(ctx context.Context, status *MenuStatus) ([]Menu, error)
+	GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
+	GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error)
+	SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
+	GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // AuditRepository defines the persistence interface for audit logs.

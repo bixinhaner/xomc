@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // PgRoleRepository implements RoleRepository using PostgreSQL.
@@ -177,6 +178,59 @@ func (r *PgRoleRepository) List(ctx context.Context) ([]Role, error) {
 		roles = append(roles, role)
 	}
 	return roles, nil
+}
+
+func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
+	// Count query
+	countQuery, countArgs, err := psql.Select("COUNT(*)").
+		From("roles").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count roles SQL: %w", err)
+	}
+
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count roles: %w", err)
+	}
+
+	// Build filter conditions
+	where := sq.And{}
+	if filter.Name != nil && *filter.Name != "" {
+		where = append(where, sq.Expr("name ILIKE ?", "%"+*filter.Name+"%"))
+	}
+
+	offset := filter.Offset()
+	limit := filter.Limit()
+
+	// Data query
+	query, args, err := psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+		From("roles").
+		Where(where).
+		OrderBy("name ASC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list roles SQL: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	defer rows.Close()
+
+	var items []Role
+	for rows.Next() {
+		var role Role
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.IsSystem, &role.CreatedAt, &role.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan role: %w", err)
+		}
+		items = append(items, role)
+	}
+
+	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
 
 func (r *PgRoleRepository) AssignRole(ctx context.Context, userID, roleID uuid.UUID) error {
@@ -446,4 +500,44 @@ func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID
 		return false, fmt.Errorf("check permission: %w", err)
 	}
 	return count > 0, nil
+}
+
+// GetUserRolesBatch 批量获取多个用户的角色
+func (r *PgRoleRepository) GetUserRolesBatch(ctx context.Context, userIds []uuid.UUID) (map[uuid.UUID][]Role, error) {
+	if len(userIds) == 0 {
+		return make(map[uuid.UUID][]Role), nil
+	}
+
+	query, args, err := psql.Select("ur.user_id", "r.id", "r.name", "r.description", "r.is_system", "r.created_at", "r.updated_at").
+		From("user_roles ur").
+		Join("roles r ON ur.role_id = r.id").
+		Where(sq.Eq{"ur.user_id": userIds}).
+		OrderBy("r.name ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get user roles batch SQL: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get user roles batch: %w", err)
+	}
+	defer rows.Close()
+
+	// 初始化 map，确保没有角色的用户也会返回空数组
+	result := make(map[uuid.UUID][]Role, len(userIds))
+	for _, uid := range userIds {
+		result[uid] = []Role{}
+	}
+
+	for rows.Next() {
+		var userID uuid.UUID
+		var role Role
+		if err := rows.Scan(&userID, &role.ID, &role.Name, &role.Description, &role.IsSystem, &role.CreatedAt, &role.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan user role: %w", err)
+		}
+		result[userID] = append(result[userID], role)
+	}
+
+	return result, rows.Err()
 }

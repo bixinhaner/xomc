@@ -25,6 +25,7 @@ var (
 type AdminService struct {
 	userRepo  UserRepository
 	roleRepo  RoleRepository
+	menuRepo  MenuRepository
 	auditRepo AuditRepository
 	jwt       *JWTService
 	logger    *zap.Logger
@@ -34,6 +35,7 @@ type AdminService struct {
 func NewAdminService(
 	userRepo UserRepository,
 	roleRepo RoleRepository,
+	menuRepo MenuRepository,
 	auditRepo AuditRepository,
 	jwtService *JWTService,
 	logger *zap.Logger,
@@ -41,6 +43,7 @@ func NewAdminService(
 	return &AdminService{
 		userRepo:  userRepo,
 		roleRepo:  roleRepo,
+		menuRepo:  menuRepo,
 		auditRepo: auditRepo,
 		jwt:       jwtService,
 		logger:    logger.Named("admin"),
@@ -198,9 +201,33 @@ func (s *AdminService) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return s.userRepo.Delete(ctx, id)
 }
 
-// ListUsers returns a filtered, paginated list of users.
+// ListUsers returns a filtered, paginated list of users with roles loaded.
 func (s *AdminService) ListUsers(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error) {
-	return s.userRepo.List(ctx, filter)
+	result, err := s.userRepo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// 批量加载所有用户的角色
+	if len(result.Items) > 0 {
+		userIds := make([]uuid.UUID, len(result.Items))
+		for i, user := range result.Items {
+			userIds[i] = user.ID
+		}
+
+		rolesMap, err := s.roleRepo.GetUserRolesBatch(ctx, userIds)
+		if err != nil {
+			s.logger.Warn("failed to load roles for users", zap.Error(err))
+			// 即使角色加载失败，仍然返回用户列表
+		} else {
+			// 填充角色数据
+			for i := range result.Items {
+				result.Items[i].Roles = rolesMap[result.Items[i].ID]
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // GetUser returns a user by ID with roles loaded.
@@ -239,9 +266,14 @@ func (s *AdminService) CheckPermission(ctx context.Context, userID uuid.UUID, re
 	return s.roleRepo.CheckPermission(ctx, userID, resource, action)
 }
 
-// ListRoles returns all roles.
+// ListRoles returns all roles (legacy, for backward compatibility).
 func (s *AdminService) ListRoles(ctx context.Context) ([]Role, error) {
 	return s.roleRepo.List(ctx)
+}
+
+// ListRolesPaginated returns roles with pagination support.
+func (s *AdminService) ListRolesPaginated(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
+	return s.roleRepo.ListWithPagination(ctx, filter)
 }
 
 // ResetPassword resets a user's password to the provided new password.
@@ -377,4 +409,191 @@ func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 // ListAllPermissions returns all permissions across all roles.
 func (s *AdminService) ListAllPermissions(ctx context.Context) ([]Permission, error) {
 	return s.roleRepo.ListAllPermissions(ctx)
+}
+
+// ==================== Menu Methods ====================
+
+// CreateMenu creates a new menu item.
+func (s *AdminService) CreateMenu(ctx context.Context, req CreateMenuRequest, operatorID uuid.UUID) (*Menu, error) {
+	// Check if permission key already exists
+	existing, _ := s.menuRepo.GetByPermissionKey(ctx, req.PermissionKey)
+	if existing != nil {
+		return nil, commonerrors.NewBusinessError(7003, "permission key already exists", nil)
+	}
+
+	// Check parent menu exists if provided
+	if req.ParentID != nil {
+		parent, err := s.menuRepo.GetByID(ctx, *req.ParentID)
+		if err != nil {
+			return nil, commonerrors.NewBusinessError(7004, "parent menu not found", nil)
+		}
+		if parent.Type != MenuTypeDirectory && parent.Type != MenuTypeMenu {
+			return nil, commonerrors.NewBusinessError(7005, "parent menu must be directory or menu type", nil)
+		}
+	}
+
+	menu := &Menu{
+		Name:          req.Name,
+		Type:          req.Type,
+		PermissionKey: req.PermissionKey,
+		ParentID:      req.ParentID,
+		SortOrder:     req.SortOrder,
+		RoutePath:     req.RoutePath,
+		ComponentPath: req.ComponentPath,
+		Icon:          req.Icon,
+		ShowStatus:    req.ShowStatus,
+		Status:        MenuStatusNormal,
+	}
+
+	if err := s.menuRepo.Create(ctx, menu, operatorID); err != nil {
+		return nil, fmt.Errorf("create menu: %w", err)
+	}
+
+	return s.menuRepo.GetByID(ctx, menu.ID)
+}
+
+// GetMenu returns a menu by ID.
+func (s *AdminService) GetMenu(ctx context.Context, id uuid.UUID) (*Menu, error) {
+	return s.menuRepo.GetByID(ctx, id)
+}
+
+// ListMenus returns a filtered, paginated list of menus.
+func (s *AdminService) ListMenus(ctx context.Context, filter MenuFilter) (*model.ListResponse[Menu], error) {
+	return s.menuRepo.List(ctx, filter)
+}
+
+// UpdateMenu updates an existing menu.
+func (s *AdminService) UpdateMenu(ctx context.Context, id uuid.UUID, req *UpdateMenuRequest, operatorID uuid.UUID) error {
+	_, err := s.menuRepo.GetByID(ctx, id)
+	if err != nil {
+		return commonerrors.ErrNotFound
+	}
+
+	return s.menuRepo.Update(ctx, id, req, operatorID)
+}
+
+// DeleteMenus deletes menu items by IDs.
+func (s *AdminService) DeleteMenus(ctx context.Context, ids []uuid.UUID) error {
+	return s.menuRepo.Delete(ctx, ids)
+}
+
+// GetMenuTree returns the full menu tree.
+func (s *AdminService) GetMenuTree(ctx context.Context, status *MenuStatus) ([]Menu, error) {
+	return s.menuRepo.GetTree(ctx, status)
+}
+
+// GetUserMenuTree returns the menu tree for a specific user.
+func (s *AdminService) GetUserMenuTree(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
+	menus, err := s.menuRepo.GetByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build tree and filter out button type items for display
+	tree := buildMenuTree(menus)
+	return filterTreeForDisplay(tree), nil
+}
+
+// SetRoleMenus sets the menu permissions for a role.
+func (s *AdminService) SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error {
+	// Verify role exists
+	if _, err := s.roleRepo.GetByID(ctx, roleID); err != nil {
+		return commonerrors.ErrNotFound
+	}
+
+	return s.menuRepo.SetRoleMenus(ctx, roleID, menuIDs, operatorID)
+}
+
+// GetRoleMenus returns the menu permissions for a role.
+func (s *AdminService) GetRoleMenus(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
+	return s.menuRepo.GetByRole(ctx, roleID)
+}
+
+// GetRoleMenuIDs returns the menu IDs for a role.
+func (s *AdminService) GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	return s.menuRepo.GetRoleMenuIDs(ctx, roleID)
+}
+
+// CheckMenuPermission checks if a user has a specific menu permission.
+func (s *AdminService) CheckMenuPermission(ctx context.Context, userID uuid.UUID, permissionKey string) (bool, error) {
+	menus, err := s.menuRepo.GetByUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+
+	return checkPermissionInMenus(menus, permissionKey), nil
+}
+
+// buildMenuTree builds a tree structure from a flat list of menus.
+func buildMenuTree(menus []Menu) []Menu {
+	menuMap := make(map[uuid.UUID]*Menu)
+	var roots []Menu
+
+	for i := range menus {
+		menuMap[menus[i].ID] = &menus[i]
+		menus[i].Children = nil
+	}
+
+	for _, m := range menus {
+		if m.ParentID == nil {
+			roots = append(roots, m)
+		} else if parent, ok := menuMap[*m.ParentID]; ok {
+			parent.Children = append(parent.Children, m)
+		}
+	}
+
+	return roots
+}
+
+// filterTreeForDisplay filters the tree to only show directories and menus (no buttons).
+func filterTreeForDisplay(nodes []Menu) []Menu {
+	var result []Menu
+	for _, node := range nodes {
+		if node.Type == MenuTypeButton {
+			continue
+		}
+
+		filtered := Menu{
+			ID:            node.ID,
+			Name:          node.Name,
+			Type:          node.Type,
+			PermissionKey: node.PermissionKey,
+			SortOrder:     node.SortOrder,
+			RoutePath:     node.RoutePath,
+			Icon:          node.Icon,
+			ShowStatus:    node.ShowStatus,
+			Status:        node.Status,
+		}
+
+		if len(node.Children) > 0 {
+			filtered.Children = filterTreeForDisplay(node.Children)
+		}
+
+		result = append(result, filtered)
+	}
+	return result
+}
+
+// checkPermissionInMenus recursively checks if a permission key exists in the menu tree.
+func checkPermissionInMenus(menus []Menu, permissionKey string) bool {
+	for _, menu := range menus {
+		// Exact match
+		if menu.PermissionKey == permissionKey {
+			return true
+		}
+
+		// Prefix match (e.g., "device:list" matches "device:list:query")
+		if len(permissionKey) > len(menu.PermissionKey) &&
+			permissionKey[len(menu.PermissionKey)] == ':' &&
+			permissionKey[:len(menu.PermissionKey)] == menu.PermissionKey {
+			return true
+		}
+
+		// Check children recursively
+		if len(menu.Children) > 0 && checkPermissionInMenus(menu.Children, permissionKey) {
+			return true
+		}
+	}
+
+	return false
 }
