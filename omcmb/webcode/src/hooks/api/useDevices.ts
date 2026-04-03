@@ -77,6 +77,7 @@ export function useMoveDevices() {
       api.moveDevices(params),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
     },
   });
 }
@@ -122,6 +123,7 @@ export function useDeleteDevices() {
     mutationFn: (ids: string[]) => api.delete(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
     },
   });
 }
