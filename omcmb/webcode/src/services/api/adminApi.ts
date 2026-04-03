@@ -1,42 +1,64 @@
 import http from '../http';
-import type { User, Role, Permission, OperationLog, OperationType, Group } from '@/types/system';
+import type { User, Role, Permission, OperationLog, OperationType, Group, MenuItem, CreateMenuRequest, UpdateMenuRequest, MenuFilter, MenuListResponse, RoleWithMenus, SetRoleMenusRequest } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
-// Backend user model
+// Backend user model - matches Go User struct JSON tags
 interface BackendUser {
   id: string;
-  user_name: string;
-  email: string;
-  group_names: string[];
-  last_login_time: string;
-  source: string;
-  online_status: string; // online, offline
-  lock_status: number; // 0=解锁, 1=有效期锁定, 2=有效期锁定
-  built_in: number;
-  description: string;
-  created_at: string;
-  updated_at: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  carrier?: string;
+  status: string; // active, disabled
+  roles?: BackendRole[];
+  failedLoginAttempts?: number;
+  lockedUntil?: string;
+  lastFailedLoginAt?: string;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-// Backend role model
+// Backend role model - matches Go Role struct JSON tags
 interface BackendRole {
   id: string;
-  role_name: string;
-  batch_operation: number; // 1=是, 0=否
+  name: string;
   description: string;
-  permissions: BackendPermission[];
-  user_count: number;
-  upd_user: string;
-  upd_time: string;
-  is_system: boolean;
-  built_in: number;
-  created_at: string;
-  updated_at: string;
+  isSystem: boolean;
+  status?: string; // active, disabled - may be empty
+  createdAt: string;
+  updatedAt: string;
+  // Fields that may or may not be included in list response
+  permissions?: BackendPermission[];
+  deviceGroupIds?: string[];
+  menuIds?: string[];
+  menus?: BackendMenu[];
+  userCount?: number;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+// Backend menu model
+interface BackendMenu {
+  id: string;
+  name: string;
+  title: string;
+  icon?: string;
+  path?: string;
+  component?: string;
+  type: 'menu' | 'button' | 'link';
+  parentId?: string;
+  sortOrder: number;
+  status: 'active' | 'disabled';
+  visible: boolean;
+  children?: BackendMenu[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface BackendPermission {
   id: string;
-  role_id: string;
+  roleId: string;
   resource: string;
   action: string;
 }
@@ -44,79 +66,102 @@ interface BackendPermission {
 // Backend group model
 interface BackendGroup {
   id: string;
-  group_name: string;
+  groupName: string;
   description: string;
-  built_in: number;
-  user_count: number;
-  role_count: number;
-  upd_user: string;
-  upd_time: string;
-  created_at: string;
-  updated_at: string;
+  builtIn: number;
+  userCount: number;
+  roleCount: number;
+  updUser?: string;
+  updTime?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // Backend audit log model
 interface BackendAuditLog {
   id: string;
-  user_id?: string;
+  userId?: string;
   username: string;
   action: string;
   resource: string;
-  resource_id: string;
+  resourceId?: string;
   details?: Record<string, unknown>;
-  ip_address: string;
-  user_agent: string;
-  created_at: string;
+  ipAddress?: string;
+  userAgent?: string;
+  createdAt: string;
 }
 
 interface BackendListResponse<T> {
   items: T[];
   total: number;
   page: number;
-  page_size: number;
-  total_pages: number;
+  pageSize: number;
+  totalPages: number;
 }
 
 function mapBackendUser(bu: BackendUser): User {
+  // Map status: active -> enabled, disabled -> disabled
+  const status: UserStatus = bu.status === 'active' ? 'enabled' : 'disabled';
+
+  // Get role names
+  const groupNames = (bu.roles || []).map(r => r.name);
+
   return {
     id: bu.id,
-    userName: bu.user_name,
+    userName: bu.username,
     email: bu.email || '',
-    groupNames: bu.group_names || [],
-    lastLoginTime: bu.last_login_time || '',
-    source: bu.source || '本地',
-    onlineStatus: (bu.online_status === 'online' ? 'online' : 'offline') as 'online' | 'offline',
-    lockStatus: (bu.lock_status ?? 0) as 0 | 1 | 2,
-    builtIn: bu.built_in ?? 0,
-    description: bu.description || '',
-    createTime: bu.created_at,
+    phone: '', // Backend doesn't have phone field yet
+    groupNames,
+    department: '', // Backend doesn't have department field yet
+    lastLoginTime: bu.lastLoginAt || undefined,
+    source: bu.carrier || '本地',
+    onlineStatus: 'offline', // Backend doesn't have online status yet, default to offline
+    status,
+    expireTime: bu.lockedUntil || undefined,
+    builtIn: 0, // Backend doesn't have builtIn field for users
+    description: bu.displayName || '',
+    createTime: bu.createdAt,
+    updateTime: bu.updatedAt,
+    createUser: undefined,
+    updateUser: undefined,
   };
 }
 
 function mapFrontendUser(user: Partial<User>): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
-  if (user.userName !== undefined) payload.user_name = user.userName;
+  if (user.userName !== undefined) payload.username = user.userName;
   if (user.email !== undefined) payload.email = user.email;
-  if (user.groupNames !== undefined) payload.group_names = user.groupNames;
-  if (user.source !== undefined) payload.source = user.source;
-  if (user.lockStatus !== undefined) payload.lock_status = user.lockStatus;
-  if (user.description !== undefined) payload.description = user.description;
+  if (user.description !== undefined) payload.displayName = user.description;
+  if (user.status !== undefined) {
+    // Map 'enabled' -> 'active', 'disabled' -> 'disabled'
+    payload.status = user.status === 'enabled' ? 'active' : 'disabled';
+  }
   return payload;
 }
 
 function mapBackendRole(br: BackendRole): Role {
+  // Map permissions to string array
+  const permissions = (br.permissions || []).map(
+    (p) => `${p.resource}:${p.action}`
+  );
+
+  // Ensure required fields have values
+  const roleName = br.name || '';
+
   return {
     id: br.id,
-    roleName: br.role_name,
-    batchOperation: br.batch_operation ?? 0,
+    roleName,
+    roleCode: roleName,
+    batchOperation: 0, // Backend doesn't have this field
     description: br.description || '',
-    permissions: (br.permissions || []).map(
-      (p) => `${p.resource}:${p.action}`
-    ),
-    userCount: br.user_count ?? 0,
-    updUser: br.upd_user || '',
-    updTime: br.upd_time || br.updated_at || '',
-    builtIn: br.built_in ?? (br.is_system ? 1 : 0),
+    permissions,
+    deviceGroupIds: br.deviceGroupIds,
+    userCount: br.userCount ?? 0,
+    builtIn: br.isSystem ? 1 : 0,
+    createUser: br.createdBy,
+    updateUser: br.updatedBy,
+    createTime: br.createdAt,
+    updateTime: br.updatedAt,
   };
 }
 
@@ -124,27 +169,27 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
   return {
     id: ba.id,
     operator: ba.username,
-    clientIp: ba.ip_address || '',
+    clientIp: ba.ipAddress || '',
     module: ba.resource || '',
     operationType: (ba.action || 'query') as OperationType,
-    target: ba.resource_id || '',
+    target: ba.resourceId || '',
     content: ba.details ? JSON.stringify(ba.details) : '',
     result: 'success',
     message: '',
-    operationTime: ba.created_at,
+    operationTime: ba.createdAt,
   };
 }
 
 function mapBackendGroup(bg: BackendGroup): Group {
   return {
     id: bg.id,
-    groupName: bg.group_name,
+    groupName: bg.groupName,
     description: bg.description || '',
-    userCount: bg.user_count || 0,
-    roleCount: bg.role_count || 0,
-    builtIn: bg.built_in || 0,
-    updUser: bg.upd_user || '',
-    updTime: bg.upd_time || bg.updated_at || '',
+    userCount: bg.userCount || 0,
+    roleCount: bg.roleCount || 0,
+    builtIn: bg.builtIn || 0,
+    updUser: bg.updUser || '',
+    updTime: bg.updTime || bg.updatedAt || '',
   };
 }
 
@@ -155,7 +200,7 @@ function mapUserListResponse(
     items: (resp.items || []).map(mapBackendUser),
     total: resp.total,
     page: resp.page,
-    pageSize: resp.page_size,
+    pageSize: resp.pageSize,
   };
 }
 
@@ -195,12 +240,11 @@ export const adminApi = {
     data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & { password: string }
   ): Promise<User> {
     const { data: bu } = await http.post<BackendUser>('/admin/users', {
-      user_name: data.userName,
+      username: data.userName,
       password: data.password,
       email: data.email || undefined,
-      group_names: data.groupNames || [],
-      source: data.source || '本地',
-      description: data.description,
+      displayName: data.description || '',
+      status: data.status === 'enabled' ? 'active' : 'disabled',
     });
     return mapBackendUser(bu);
   },
@@ -221,7 +265,7 @@ export const adminApi = {
   },
 
   async resetPassword(id: string, newPassword: string): Promise<void> {
-    await http.post(`/admin/users/${id}/reset-password`, { new_password: newPassword });
+    await http.post(`/admin/users/${id}/reset-password`, { newPassword });
   },
 
   async lockUser(id: string): Promise<void> {
@@ -233,11 +277,11 @@ export const adminApi = {
   },
 
   async forceLogout(ids: string[]): Promise<void> {
-    await http.post('/admin/users/force-logout', { user_ids: ids });
+    await http.post('/admin/users/force-logout', { userIds: ids });
   },
 
   async moveUsersToGroup(userIds: string[], groupId: string): Promise<void> {
-    await http.post('/admin/users/move-group', { user_ids: userIds, group_id: groupId });
+    await http.post('/admin/users/move-group', { userIds, groupId });
   },
 
   async copyUser(id: string): Promise<User> {
@@ -245,19 +289,20 @@ export const adminApi = {
     return mapBackendUser(data);
   },
 
-  // Roles
+  // Roles - backend now supports pagination
   async getRoles(params: PageRequest & { roleName?: string }): Promise<PageResponse<Role>> {
     const query: Record<string, unknown> = {
       page: params.page,
       pageSize: params.pageSize,
     };
-    if (params.roleName) query.search = params.roleName;
+    if (params.roleName) query.name = params.roleName;
+
     const { data } = await http.get<BackendListResponse<BackendRole>>('/admin/roles', { params: query });
     return {
       items: (data.items || []).map(mapBackendRole),
       total: data.total,
       page: data.page,
-      pageSize: data.page_size,
+      pageSize: data.pageSize,
     };
   },
 
@@ -275,23 +320,23 @@ export const adminApi = {
     }
   },
 
-  async createRole(data: Omit<Role, 'id' | 'userCount' | 'updUser' | 'updTime'>): Promise<Role> {
+  async createRole(data: Omit<Role, 'id' | 'userCount' | 'createUser' | 'updateUser' | 'createTime' | 'updateTime'>): Promise<Role> {
     const { data: result } = await http.post<BackendRole>('/admin/roles', {
-      role_name: data.roleName,
-      batch_operation: data.batchOperation ?? 0,
+      name: data.roleName,
       description: data.description,
       permissions: (data.permissions || []).map((p) => {
         const parts = p.split(':');
         return { resource: parts[0], action: parts[1] || 'read' };
       }),
+      deviceGroupIds: data.deviceGroupIds,
+      menuIds: data.menuIds || [],
     });
     return mapBackendRole(result);
   },
 
   async updateRole(id: string, data: Partial<Role>): Promise<Role> {
     const payload: Record<string, unknown> = {};
-    if (data.roleName !== undefined) payload.role_name = data.roleName;
-    if (data.batchOperation !== undefined) payload.batch_operation = data.batchOperation;
+    if (data.roleName !== undefined) payload.name = data.roleName;
     if (data.description !== undefined) payload.description = data.description;
     if (data.permissions !== undefined) {
       payload.permissions = data.permissions.map((p) => {
@@ -299,6 +344,8 @@ export const adminApi = {
         return { resource: parts[0], action: parts[1] || 'read' };
       });
     }
+    if (data.deviceGroupIds !== undefined) payload.deviceGroupIds = data.deviceGroupIds;
+    if (data.menuIds !== undefined) payload.menuIds = data.menuIds;
     const { data: result } = await http.put<BackendRole>(`/admin/roles/${id}`, payload);
     return mapBackendRole(result);
   },
@@ -333,13 +380,24 @@ export const adminApi = {
       items: (data.items || []).map(mapBackendGroup),
       total: data.total,
       page: data.page,
-      pageSize: data.page_size,
+      pageSize: data.pageSize,
     };
   },
 
   async getAllGroups(): Promise<Group[]> {
-    const { data } = await http.get<BackendGroup[]>('/admin/groups');
-    return (Array.isArray(data) ? data : []).map(mapBackendGroup);
+    const { data } = await http.get<BackendRole[]>('/admin/roles/all');
+    // 将 BackendRole[] 映射为 Group[]，因为用户管理页面需要的是角色
+    const roles: BackendRole[] = Array.isArray(data) ? data : [];
+    return roles.map((role) => ({
+      id: role.id,
+      groupName: role.name,
+      description: role.description,
+      builtIn: role.isSystem ? 1 : 0,
+      userCount: role.userCount || 0,
+      roleCount: 0, // 角色没有"角色数"概念
+      updUser: role.updatedBy || '',
+      updTime: role.updatedAt || '',
+    }));
   },
 
   async getGroupById(id: string): Promise<Group | null> {
@@ -353,21 +411,21 @@ export const adminApi = {
 
   async createGroup(data: Omit<Group, 'id' | 'userCount' | 'roleCount' | 'updUser' | 'updTime'> & { roleIds?: string[]; userIds?: string[] }): Promise<Group> {
     const { data: result } = await http.post<BackendGroup>('/admin/groups', {
-      group_name: data.groupName,
+      groupName: data.groupName,
       description: data.description,
-      built_in: data.builtIn,
-      role_ids: data.roleIds,
-      user_ids: data.userIds,
+      builtIn: data.builtIn,
+      roleIds: data.roleIds,
+      userIds: data.userIds,
     });
     return mapBackendGroup(result);
   },
 
   async updateGroup(id: string, data: Partial<Group> & { roleIds?: string[]; userIds?: string[] }): Promise<Group> {
     const payload: Record<string, unknown> = {};
-    if (data.groupName !== undefined) payload.group_name = data.groupName;
+    if (data.groupName !== undefined) payload.groupName = data.groupName;
     if (data.description !== undefined) payload.description = data.description;
-    if (data.roleIds !== undefined) payload.role_ids = data.roleIds;
-    if (data.userIds !== undefined) payload.user_ids = data.userIds;
+    if (data.roleIds !== undefined) payload.roleIds = data.roleIds;
+    if (data.userIds !== undefined) payload.userIds = data.userIds;
     const { data: result } = await http.put<BackendGroup>(`/admin/groups/${id}`, payload);
     return mapBackendGroup(result);
   },
@@ -396,8 +454,8 @@ export const adminApi = {
     if (params.module) query.resource = params.module;
     if (params.operationType) query.action = params.operationType;
     if (params.timeRange) {
-      query.start_time = params.timeRange[0];
-      query.end_time = params.timeRange[1];
+      query.startTime = params.timeRange[0];
+      query.endTime = params.timeRange[1];
     }
 
     const { data } = await http.get<BackendListResponse<BackendAuditLog>>(
@@ -409,7 +467,67 @@ export const adminApi = {
       items: (data.items || []).map(mapBackendAuditLog),
       total: data.total,
       page: data.page,
-      pageSize: data.page_size,
+      pageSize: data.pageSize,
     };
+  },
+
+  // Menus (backend returns camelCase directly, no mapping needed)
+  async getMenus(params: MenuFilter = {}): Promise<MenuListResponse> {
+    const query: Record<string, unknown> = {};
+    if (params.page !== undefined) query.page = params.page;
+    if (params.pageSize !== undefined) query.pageSize = params.pageSize;
+    if (params.type) query.type = params.type;
+    if (params.status) query.status = params.status;
+    if (params.parentId) query.parentId = params.parentId;
+
+    const { data } = await http.get<MenuListResponse>('/admin/menus', { params: query });
+    return data;
+  },
+
+  async getMenuTree(): Promise<MenuItem[]> {
+    const { data } = await http.get<{data: MenuItem[]}>('/admin/menus/tree');
+    return data.data || [];
+  },
+
+  async getUserMenuTree(): Promise<MenuItem[]> {
+    const { data } = await http.get<{data: MenuItem[]}>('/admin/menus/user');
+    return data.data || [];
+  },
+
+  async getMenuById(id: string): Promise<MenuItem | null> {
+    try {
+      const { data } = await http.get<MenuItem>(`/admin/menus/${id}`);
+      return data;
+    } catch {
+      return null;
+    }
+  },
+
+  async createMenu(data: CreateMenuRequest): Promise<MenuItem> {
+    const { data: result } = await http.post<MenuItem>('/admin/menus', data);
+    return result;
+  },
+
+  async updateMenu(id: string, data: UpdateMenuRequest): Promise<MenuItem> {
+    const { data: result } = await http.put<MenuItem>(`/admin/menus/${id}`, data);
+    return result;
+  },
+
+  async deleteMenus(ids: string[]): Promise<void> {
+    await http.delete('/admin/menus', { data: { ids } });
+  },
+
+  // Role Menus
+  async setRoleMenus(roleId: string, data: SetRoleMenusRequest): Promise<void> {
+    await http.put(`/admin/roles/${roleId}/menus`, data);
+  },
+
+  async getRoleMenus(roleId: string): Promise<RoleWithMenus | null> {
+    try {
+      const { data } = await http.get<{data: RoleWithMenus}>(`/admin/roles/${roleId}/menus`);
+      return data.data;
+    } catch {
+      return null;
+    }
   },
 };
