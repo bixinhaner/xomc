@@ -90,7 +90,7 @@ export default function GroupDialogs({
   // 构建父级分组选择器的树形数据（仅显示 L1 根分组）
   const parentGroupTreeData = useMemo(() => {
     // 只显示根分组（parentId 为 null 或 undefined）
-    const rootGroups = groups.filter((g) => !g.parentId);
+    const rootGroups = (groups || []).filter((g) => !g.parentId);
     return rootGroups.map((g) => ({
         value: g.id,
         title: g.name,

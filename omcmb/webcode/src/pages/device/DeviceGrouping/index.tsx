@@ -555,6 +555,8 @@ export default function DeviceGrouping() {
       <GroupDialogs
         addModalOpen={addModalOpen}
         addForm={addForm}
+        groups={groups}
+        groups={groups}
         onAddModalOk={() => void handleAddGroup()}
         onAddModalCancel={() => setAddModalOpen(false)}
         editModalOpen={editModalOpen}
