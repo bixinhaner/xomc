@@ -496,7 +496,9 @@ const messages: Record<string, string> = {
   'device.deleteLevel1Desc':    'Child groups and devices in this group will be automatically moved to the default group',
   'device.deleteLevel2Desc':    'Devices in this group will be automatically moved to the default group',
   'device.editGroup':           'Edit Group',
-  'device.groupName':           'Group Name',
+  'device.parentGroup':         'Parent Group',
+  'device.parentGroupTooltip': 'Leave empty to create a top-level group',
+  'device.selectParentGroup':   'Select parent group',
   'device.rules.matchingMode':  'Matching Mode',
   'device.rules.deviceName':    'Device Name',
   'device.rules.filterCondition': 'Filter Condition',
@@ -679,8 +681,6 @@ const messages: Record<string, string> = {
   'alarm.search':             'Search',
   'alarm.searchPlaceholder':  'ID / Possible Cause / Equipment Info',
   'alarm.searchPlaceholderNew': 'Alarm ID (Exact) / Possible Cause / Equipment Info',
-  'alarm.eventTime':         'Event Time',
-  'alarm.neType':            'Alarm Source',
   'alarm.detail':            'Detail',
   'alarm.markRead':          'Mark as Read',
 
@@ -1148,7 +1148,6 @@ const messages: Record<string, string> = {
   'perf.query.maxDevices': 'Maximum 5 devices allowed',
   'perf.query.maxKpis': 'Maximum 3 KPIs allowed',
   'perf.query.timeRanges': 'Time Ranges',
-  'perf.query.timeRange': 'Time Range',
   'perf.query.timeRangeLabel': 'Time Label',
   'perf.query.timeRangeLabelRequired': 'Please enter time label',
   'perf.query.timeRangeRequired': 'Please select time range',
@@ -1204,7 +1203,6 @@ const messages: Record<string, string> = {
   'kpi.tree.custom':           'Custom',
   'kpi.tree.radioAccess':      'Radio Access',
   'kpi.tree.rrcAccess':        'RRC Access',
-  'kpi.tree.erab':             'E-RAB',
   'kpi.tree.handover':         'Handover',
   'kpi.tree.radioResource':    'Radio Resource',
   'kpi.tree.userCount':        'User Count',
@@ -1245,8 +1243,6 @@ const messages: Record<string, string> = {
   'kpi.addIndicator':           'Add Indicator',
   'kpi.basicInfo':              'Basic Info',
   'kpi.type':                   'Type',
-  'kpi.level':                  'Level',
-  'kpi.unit':                   'Unit',
   'kpi.unitPlaceholder':        'Select unit',
   'kpi.unitTimes':              'Times',
   'kpi.unitNone':               'None',
@@ -1260,7 +1256,6 @@ const messages: Record<string, string> = {
   'kpi.measurePlaceholder':     'Select measurement',
   'kpi.functionSet':            'Function Set',
   'kpi.functionSetPlaceholder': 'Select function set first',
-  'kpi.customName':             'Custom Name',
   'kpi.customNamePlaceholder':  'Enter custom name',
   'kpi.nameRequired':           'Indicator name is required',
   'kpi.nameMax50':              'Maximum 50 characters',
@@ -1274,8 +1269,6 @@ const messages: Record<string, string> = {
   'kpi.performanceIndicator':   'Performance Indicator',
   'kpi.definition':             'Definition',
   'kpi.definitionPlaceholder':  'Enter indicator definition',
-  'kpi.customIndicator':        'Custom Indicator',
-  'kpi.baseIndicator':          'Base Indicator',
 
   // Report categories
   'report.category.kpi':              'KPI Reports',
@@ -1478,7 +1471,6 @@ const messages: Record<string, string> = {
   'export.thisMonth':           'This Month',
   'export.last7Days':           'Last 7 Days',
   'export.last30Days':          'Last 30 Days',
-  'export.startExport':         'Start Export',
   'export.selectedCount':       '{count} device groups selected',
 
   // -------------------------------------------------------------------------
@@ -1799,7 +1791,6 @@ const messages: Record<string, string> = {
   'alarm.ruleType':     'Action Type',
   'alarm.operator':     'Operator',
   'alarm.updateTime':   'Update Time',
-  'alarm.searchPlaceholder': 'Enter rule name',
   'alarm.ruleType.forbidReport': 'Forbid Report',
   'alarm.ruleType.noStoreNoShow': 'No Store No Show',
   'alarm.ruleType.storeNoShow': 'Store No Show',
@@ -1810,7 +1801,6 @@ const messages: Record<string, string> = {
   'alarm.deleteRuleConfirm': 'Are you sure to delete rule "{name}"?',
   'alarm.rulesDesc': 'Configure alarm filtering rules, support filtering by device type, alarm level, etc.',
   'alarm.defaultRule': 'Default',
-  'alarm.searchPlaceholder': 'Enter rule name',
   'alarm.ruleEnabled': 'Rule enabled',
   'alarm.ruleDisabled': 'Rule disabled',
   'alarm.ruleToggleFailed': 'Failed to toggle rule status',
@@ -2098,10 +2088,6 @@ const messages: Record<string, string> = {
   'device.rules.targetGroup':       'Target Device Group',
   'device.rules.basicSettings':     'Basic Settings',
   'device.rules.matchingRule':      'Matching Rule',
-  'device.rules.matchingMode':      'Matching Mode',
-  'device.rules.deviceName':        'Device Name',
-  'device.rules.filterCondition':   'Filter Condition',
-  'device.rules.addCondition':      'Add Condition',
   'device.rules.maxConditions':     'Max {max} conditions',
   'device.rules.atLeastOneFilter':  'Please enter at least one filter condition',
   'device.rules.selectTargetGroup': 'Please select target device group',
@@ -2113,11 +2099,9 @@ const messages: Record<string, string> = {
   'device.rules.moveUp':            'Move Up',
   'device.rules.moveDown':          'Move Down',
   'device.rules.deleteConfirm':     'Are you sure you want to delete this rule?',
-  'device.rules.formatRange':       'Format: 1,2,3 or 1-10,20-30 (Range: {range})',
   'device.rules.inputRange':        'Please enter {type} range',
   'device.rules.operators':         'Operation Description',
   'device.rules.operation':         'Operation',
-  'device.rules.conditionLimit':    '(Max {max})',
   'device.rules.migrationResult':   'Migration Result',
   'device.rules.sourceGroup':       'Source Group',
   'device.rules.migrationSuccess':  'Migration successful',
@@ -2167,16 +2151,8 @@ const messages: Record<string, string> = {
   'recycle.importSuccess':          'Import successful',
 
   // Status
-  'status.enabled':                 'Enabled',
-  'status.disabled':                'Disabled',
 
   // Filter
-  'filter.contain':                 'Contains',
-  'filter.notContain':              'Not Contains',
-  'filter.startWith':               'Starts With',
-  'filter.endWith':                 'Ends With',
-  'filter.and':                     'And',
-  'filter.or':                      'Or',
 };
 
 export default messages;

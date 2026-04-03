@@ -225,7 +225,8 @@ export default function DeviceGrouping() {
   const handleAddGroup = useCallback(async () => {
     try {
       const values = await addForm.validateFields();
-      // 支持选择父级分组，      await createGroupMutation.mutateAsync({
+      // 支持选择父级分组
+      await createGroupMutation.mutateAsync({
         name: values.name,
         parent_id: values.parentId || undefined,
         remark: values.description,
