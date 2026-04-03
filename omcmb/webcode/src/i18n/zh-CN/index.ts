@@ -1071,6 +1071,14 @@ const messages: Record<string, string> = {
   'perf.measurement.uploadTime': '上传时间',
   'perf.measurement.dateRange': '日期范围',
   'perf.measurement.deleteConfirmMsg': '确认删除 {count} 个文件？',
+  'perf.measurement.fileList': '测量文件列表',
+  'perf.measurement.fileSize': '文件大小',
+  'perf.measurement.collectTime': '采集时间',
+  'perf.measurement.fileSuccess': '采集成功',
+  'perf.measurement.fileFailed': '采集失败',
+  'perf.measurement.filePending': '采集中',
+  'common.download': '下载',
+  'common.downloading': '正在下载...',
 
   // KPI Query page
   'perf.query.templateTitle': 'KPI性能查询模板',

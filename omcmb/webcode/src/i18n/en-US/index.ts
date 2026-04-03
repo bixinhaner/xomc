@@ -1067,6 +1067,14 @@ const messages: Record<string, string> = {
   'perf.measurement.uploadTime': 'Upload Time',
   'perf.measurement.dateRange': 'Date Range',
   'perf.measurement.deleteConfirmMsg': 'Confirm to delete {count} files?',
+  'perf.measurement.fileList': 'Measurement Files',
+  'perf.measurement.fileSize': 'File Size',
+  'perf.measurement.collectTime': 'Collect Time',
+  'perf.measurement.fileSuccess': 'Success',
+  'perf.measurement.fileFailed': 'Failed',
+  'perf.measurement.filePending': 'Pending',
+  'common.download': 'Download',
+  'common.downloading': 'Downloading...',
 
   // KPI Query page
   'perf.query.templateTitle': 'KPI Query Templates',
