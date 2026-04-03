@@ -211,8 +211,8 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 
 func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error) {
 	query, args, err := psql.Select(deviceColumns()...).
-		From("devices").
-		Where(sq.Eq{"id": id}).
+		From("devices d").
+		Where(sq.Eq{"d.id": id}).
 		Where(notDeleted).
 		ToSql()
 	if err != nil {
@@ -223,8 +223,8 @@ func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 
 func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
 	query, args, err := psql.Select(deviceColumns()...).
-		From("devices").
-		Where(sq.Eq{"serial_number": sn}).
+		From("devices d").
+		Where(sq.Eq{"d.serial_number": sn}).
 		Where(notDeleted).
 		ToSql()
 	if err != nil {
@@ -490,9 +490,9 @@ func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at
 }
 
 func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
-	builder := psql.Select("status", "COUNT(*)").From("devices").Where(notDeleted).GroupBy("status")
+	builder := psql.Select("d.status", "COUNT(*)").From("devices d").Where(notDeleted).GroupBy("d.status")
 	if carrier != nil {
-		builder = builder.Where(sq.Eq{"carrier": *carrier})
+		builder = builder.Where(sq.Eq{"d.carrier": *carrier})
 	}
 	query, args, _ := builder.ToSql()
 
@@ -515,10 +515,10 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 }
 
 func (r *PgDeviceRepository) ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error) {
-	builder := psql.Select(deviceColumns()...).From("devices").
-		Where(sq.Eq{"status": model.DeviceActive}).
+	builder := psql.Select(deviceColumns()...).From("devices d").
+		Where(sq.Eq{"d.status": model.DeviceActive}).
 		Where(notDeleted).
-		OrderBy("last_inform_at ASC NULLS FIRST", "id ASC").
+		OrderBy("d.last_inform_at ASC NULLS FIRST", "d.id ASC").
 		Limit(uint64(limit))
 
 	if cursorTime != nil && cursorID != nil {
@@ -526,7 +526,7 @@ func (r *PgDeviceRepository) ListActiveByLastInform(ctx context.Context, cursorT
 		// Handles NULL last_inform_at: NULLs sort first, so after we pass them
 		// we only need the non-NULL condition.
 		builder = builder.Where(
-			"(last_inform_at > ? OR (last_inform_at = ? AND id > ?))",
+			"(d.last_inform_at > ? OR (d.last_inform_at = ? AND d.id > ?))",
 			*cursorTime, *cursorTime, *cursorID,
 		)
 	}
