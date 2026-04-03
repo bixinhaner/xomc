@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { User } from '../types/system';
 
 export type { User };
@@ -22,11 +22,13 @@ interface UserState {
   isAuthenticated: boolean;
   permissions: string[];
   loading: boolean;
+  _hasHydrated: boolean; // Track hydration status
 
   // JWT token pair methods
   setTokenPair: (pair: TokenPairResponse) => void;
   clearAuth: () => void;
   isTokenExpired: () => boolean;
+  setHasHydrated: (state: boolean) => void;
 
   // Existing methods
   login: (user: User) => void;
@@ -52,10 +54,13 @@ export const useUserStore = create<UserState>()(
       isAuthenticated: false,
       permissions: [],
       loading: false,
+      _hasHydrated: false,
 
       get token() {
         return get().accessToken;
       },
+
+      setHasHydrated: (state: boolean) => set({ _hasHydrated: state }),
 
       login: (user) => set({ currentUser: user, isAuthenticated: true }),
       setUser: (user) => set({ currentUser: user, isAuthenticated: true }),
@@ -107,6 +112,10 @@ export const useUserStore = create<UserState>()(
     }),
     {
       name: 'omc-user-store',
+      storage: createJSONStorage(() => localStorage),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
       partialize: (state) => ({
         currentUser: state.currentUser,
         accessToken: state.accessToken,
