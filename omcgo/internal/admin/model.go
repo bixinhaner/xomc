@@ -161,3 +161,87 @@ type UpdateRoleRequest struct {
 	Description *string           `json:"description"`
 	Permissions []PermissionInput `json:"permissions"`
 }
+
+// RoleFilter provides filtering options for listing roles.
+type RoleFilter struct {
+	Search *string `form:"search"`
+	Name   *string `form:"name"`
+	model.ListRequest
+}
+
+// MenuStatus represents the lifecycle status of a menu.
+type MenuStatus string
+
+const (
+	MenuStatusActive   MenuStatus = "active"
+	MenuStatusInactive MenuStatus = "inactive"
+	// MenuStatusNormal is an alias for active status (backward compatibility)
+	MenuStatusNormal MenuStatus = "active"
+)
+
+// MenuType constants for menu item types.
+const (
+	MenuTypeDirectory string = "directory"
+	MenuTypeMenu      string = "menu"
+	MenuTypeButton    string = "button"
+)
+
+// Menu represents a navigation menu item.
+type Menu struct {
+	ID             uuid.UUID   `json:"id"`
+	Name           string      `json:"name"`
+	Type           string      `json:"type"`
+	PermissionKey  string      `json:"permission_key"`
+	ParentID       *uuid.UUID  `json:"parent_id,omitempty"`
+	SortOrder      int         `json:"sort_order"`
+	RoutePath      string      `json:"route_path,omitempty"`
+	ComponentPath  string      `json:"component_path,omitempty"`
+	Icon           string      `json:"icon,omitempty"`
+	ShowStatus     bool        `json:"show_status"`
+	Status         MenuStatus  `json:"status"`
+	CreatedBy      *uuid.UUID  `json:"created_by,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedBy      *uuid.UUID  `json:"updated_by,omitempty"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+	Children       []Menu      `json:"children,omitempty"`
+}
+
+// MenuFilter provides filtering options for listing menus.
+type MenuFilter struct {
+	Type     *string     `form:"type"`
+	Status   *MenuStatus `form:"status"`
+	ParentID *uuid.UUID  `form:"parent_id"`
+	model.ListRequest
+}
+
+// UpdateMenuRequest is the input for updating an existing menu.
+type UpdateMenuRequest struct {
+	Name          *string     `json:"name"`
+	Type          *string     `json:"type"`
+	PermissionKey *string     `json:"permission_key"`
+	ParentID      *uuid.UUID  `json:"parent_id"`
+	SortOrder     *int        `json:"sort_order"`
+	RoutePath     *string     `json:"route_path"`
+	ComponentPath *string     `json:"component_path"`
+	Icon          *string     `json:"icon"`
+	ShowStatus    *bool       `json:"show_status"`
+	Status        *MenuStatus `json:"status"`
+}
+
+// CreateMenuRequest is the input for creating a new menu.
+type CreateMenuRequest struct {
+	Name          string     `json:"name" binding:"required"`
+	Type          string     `json:"type" binding:"required"`
+	PermissionKey string     `json:"permission_key" binding:"required"`
+	ParentID      *uuid.UUID `json:"parent_id"`
+	SortOrder     int        `json:"sort_order"`
+	RoutePath     string     `json:"route_path"`
+	ComponentPath string     `json:"component_path"`
+	Icon          string     `json:"icon"`
+	ShowStatus    bool       `json:"show_status"`
+}
+
+// SetRoleMenusRequest is the input for setting role menu permissions.
+type SetRoleMenusRequest struct {
+	MenuIDs []uuid.UUID `json:"menu_ids" binding:"required"`
+}

@@ -208,11 +208,12 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	userRepo := admin.NewPgUserRepository(pgPool)
 	roleRepo := admin.NewPgRoleRepository(pgPool)
 	auditRepo := admin.NewPgAuditRepository(pgPool)
+	menuRepo := admin.NewPgMenuRepository(pgPool)
 	jwtService, err := admin.NewJWTServiceWithTTL(cfg.JWT.Secret, cfg.JWT.AccessTokenTTL, cfg.JWT.RefreshTokenTTL)
 	if err != nil {
 		return fmt.Errorf("init JWT service: %w", err)
 	}
-	adminService := admin.NewAdminService(userRepo, roleRepo, auditRepo, jwtService, logger)
+	adminService := admin.NewAdminService(userRepo, roleRepo, menuRepo, auditRepo, jwtService, logger)
 	adminHandler := admin.NewHandler(adminService, logger)
 	captchaService := admin.NewCaptchaService(redisClient)
 	loginGuard := admin.NewLoginGuard(redisClient)
