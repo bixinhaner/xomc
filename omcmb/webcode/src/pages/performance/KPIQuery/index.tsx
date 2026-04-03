@@ -32,6 +32,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import TemplateDrawer from './components/TemplateDrawer';
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -267,10 +268,11 @@ export default function KPIQuery() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(30);
 
-  // Template dialog state
+  // Template drawer state
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateDrawerMode, setTemplateDrawerMode] = useState<'add' | 'edit' | 'view' | 'copy'>('add');
   const [editingTemplate, setEditingTemplate] = useState<TemplateItem | null>(null);
-  const [templateForm] = Form.useForm();
+  const [templateSaving, setTemplateSaving] = useState(false);
 
   // Report config drawer state
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
@@ -368,8 +370,8 @@ export default function KPIQuery() {
         void message.success(t('common.addSuccess'));
       }
       setChartConfigModalOpen(false);
-    } catch (errorInfo) {
-      console.log('Validation failed:', errorInfo);
+    } catch {
+      // Form validation failed - errors are displayed inline
     } finally {
       setChartSaving(false);
     }
@@ -469,25 +471,20 @@ export default function KPIQuery() {
   const handleTemplateMenuClick = useCallback((key: string, template: TemplateItem) => {
     switch (key) {
       case 'detail':
-        // TODO: Show template detail modal
-        modal.info({
-          title: t('perf.query.templateDetail'),
-          content: (
-            <div>
-              <p><strong>{t('perf.query.templateName')}:</strong> {template.name}</p>
-              <p><strong>{t('perf.query.templateType')}:</strong> {template.isPublic === '1' ? t('perf.query.publicTemplate') : t('perf.query.privateTemplate')}</p>
-              {template.creator && <p><strong>{t('perf.query.creator')}:</strong> {template.creator}</p>}
-            </div>
-          ),
-        });
+        // 使用 TemplateDrawer 的 view 模式查看模板详情
+        setEditingTemplate(template);
+        setTemplateDrawerMode('view');
+        setTemplateDialogOpen(true);
         break;
       case 'edit':
         setEditingTemplate(template);
-        templateForm.setFieldsValue({ name: template.name, isPublic: template.isPublic });
+        setTemplateDrawerMode('edit');
         setTemplateDialogOpen(true);
         break;
       case 'copy':
-        void message.success(t('common.success'));
+        setEditingTemplate(template);
+        setTemplateDrawerMode('copy');
+        setTemplateDialogOpen(true);
         break;
       case 'setDefault':
         modal.confirm({
@@ -511,7 +508,7 @@ export default function KPIQuery() {
         });
         break;
     }
-  }, [templateForm, t, modal, message]);
+  }, [t, modal, message]);
 
   // Filter templates by search text
   const filteredPublicTemplates = useMemo(() => {
@@ -657,7 +654,6 @@ export default function KPIQuery() {
       return [
         { key: 'serialNumber', title: t('perf.query.serialNumber'), dataIndex: 'serialNumber', width: 160, fixed: 'left', mono: true },
         { key: 'hostName', title: t('perf.query.hostName'), dataIndex: 'hostName', width: 180, fixed: 'left' },
-        { key: 'subStationName', title: t('perf.query.subStationName'), dataIndex: 'subStationName', width: 180 },
         { key: 'enodeId', title: t('perf.query.enodeId'), dataIndex: 'enodeId', width: 120, mono: true },
         { key: 'cellId', title: t('perf.query.cellId'), dataIndex: 'cellId', width: 100 },
         { key: 'eci', title: t('perf.query.eci'), dataIndex: 'eci', width: 140, mono: true },
@@ -721,7 +717,7 @@ export default function KPIQuery() {
           icon={<PlusOutlined />}
           onClick={() => {
             setEditingTemplate(null);
-            templateForm.resetFields();
+            setTemplateDrawerMode('add');
             setTemplateDialogOpen(true);
           }}
         >
@@ -859,8 +855,8 @@ export default function KPIQuery() {
     </div>
   );
 
-  // Right content panel
-  const renderRightPanel = (tabId: string) => {
+  // Right content panel - wrapped in useCallback to avoid changing on every render
+  const renderRightPanel = useCallback((tabId: string) => {
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* Query conditions */}
@@ -871,59 +867,81 @@ export default function KPIQuery() {
             borderBottom: `1px solid ${token.colorBorderSecondary}`,
           }}
         >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.queryObjectType')}</Text>
-              <Radio.Group value={deviceType} onChange={(e) => setDeviceType(e.target.value)} size="small">
-                <Radio.Button value="2">{t('device.name')}</Radio.Button>
-                <Radio.Button value="1">{t('device.group')}</Radio.Button>
-              </Radio.Group>
-            </div>
-            <Input
-              placeholder={deviceType === '2' ? t('perf.query.deviceSearchPlaceholder') : t('perf.query.groupSearchPlaceholder')}
-              prefix={<SearchOutlined />}
-              value={deviceSearch}
-              onChange={(e) => setDeviceSearch(e.target.value)}
-              allowClear
-              style={{ width: 200 }}
-              size="small"
-            />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.granularity')}</Text>
-              <Select
-                value={granularity}
-                onChange={setGranularity}
-                options={granularityOptions}
-                style={{ width: 100 }}
-                size="small"
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* First row: Query object type (highlighted) */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+              padding: '12px 16px',
+              background: token.colorPrimaryBg,
+              borderRadius: 6,
+              border: `1px solid ${token.colorPrimaryBorder}`,
+            }}>
+              <span style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: token.colorPrimary,
+                whiteSpace: 'nowrap',
+            }}>{t('perf.query.queryObjectType')}</span>
+              <Segmented
+                value={deviceType}
+                onChange={(value) => setDeviceType(value as '1' | '2')}
+                options={[
+                  { value: '2', label: t('device.name') },
+                  { value: '1', label: t('device.group') },
+                ]}
+              />
+              <div style={{ flex: 1 }} />
+              <Input
+                placeholder={deviceType === '2' ? t('perf.query.deviceSearchPlaceholder') : t('perf.query.groupSearchPlaceholder')}
+                prefix={<SearchOutlined />}
+                value={deviceSearch}
+                onChange={(e) => setDeviceSearch(e.target.value)}
+                allowClear
+                style={{ width: 260 }}
               />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.timeRange')}</Text>
-              <RangePicker
-                value={dateRange}
-                onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
-                showTime={{ format: 'HH:mm' }}
-                format="YYYY-MM-DD HH:mm"
-                style={{ width: 340 }}
-                size="small"
-              />
+            {/* Second row: granularity + time range + actions */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.granularity')}</Text>
+                <Select
+                  value={granularity}
+                  onChange={setGranularity}
+                  options={granularityOptions}
+                  style={{ width: 100 }}
+                  size="small"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.timeRange')}</Text>
+                <RangePicker
+                  value={dateRange}
+                  onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                  showTime={{ format: 'HH:mm' }}
+                  format="YYYY-MM-DD HH:mm"
+                  style={{ width: 360 }}
+                  size="small"
+                />
+              </div>
+              <div style={{ flex: 1 }} />
+              <Space size="small">
+                <Button type="primary" onClick={handleQuery} loading={loading} size="small">
+                  {t('common.query')}
+                </Button>
+                <Dropdown
+                  menu={{
+                    items: [
+                      { key: 'excel', label: t('perf.query.exportExcel'), onClick: () => handleExport('excel') },
+                      { key: 'csv', label: t('perf.query.exportCsv'), onClick: () => handleExport('csv') },
+                    ],
+                  }}
+                >
+                  <Button icon={<DownloadOutlined />} size="small">{t('common.export')}</Button>
+                </Dropdown>
+              </Space>
             </div>
-            <Space size="small">
-              <Button type="primary" onClick={handleQuery} loading={loading} size="small">
-                {t('common.query')}
-              </Button>
-              <Dropdown
-                menu={{
-                  items: [
-                    { key: 'excel', label: t('perf.query.exportExcel'), onClick: () => handleExport('excel') },
-                    { key: 'csv', label: t('perf.query.exportCsv'), onClick: () => handleExport('csv') },
-                  ],
-                }}
-              >
-                <Button icon={<DownloadOutlined />} size="small">{t('common.export')}</Button>
-              </Dropdown>
-            </Space>
           </div>
         </div>
 
@@ -955,7 +973,7 @@ export default function KPIQuery() {
                 .kpi-query-table-wrapper [class*="tableContainer"] {
                   flex: 1;
                   min-height: 0;
-                  overflow: auto;
+                  overflow: hidden;
                 }
                 .kpi-query-table-wrapper [class*="paginationWrapper"] {
                   flex-shrink: 0;
@@ -1088,7 +1106,15 @@ export default function KPIQuery() {
         </div>
       </div>
     );
-  };
+  }, [
+    token, t, deviceType, setDeviceType, deviceSearch,
+    granularity, setGranularity, granularityOptions, dateRange, setDateRange,
+    handleQuery, loading, handleExport, getTemplateName,
+    viewMode, setViewMode, columns, paginatedData, currentPage, pageSize,
+    mockData.length, handlePageChange, charts, handleAddChart,
+    handleUpdateTimeRange, handleEditChart, handleDeleteChart,
+    generateChartSeries,
+  ]);
 
   // Tab items
   const tabItems = useMemo(() => {
@@ -1130,43 +1156,34 @@ export default function KPIQuery() {
         </div>
       </TreeListPageLayout>
 
-      {/* Template dialog */}
-      <Modal
-        title={editingTemplate ? t('perf.query.editTemplate') : t('perf.query.addTemplate')}
+      {/* Template drawer */}
+      <TemplateDrawer
         open={templateDialogOpen}
-        onCancel={() => setTemplateDialogOpen(false)}
-        onOk={() => {
-          templateForm.validateFields().then(() => {
-            void message.success(t('common.success'));
-            setTemplateDialogOpen(false);
-          }).catch(() => {});
+        onClose={() => {
+          setTemplateDialogOpen(false);
+          setEditingTemplate(null);
+          setTemplateDrawerMode('add');
         }}
-        width={500}
-      >
-        <Form form={templateForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="name"
-            label={t('perf.query.templateName')}
-            rules={[{ required: true, message: t('common.pleaseInput') }]}
-          >
-            <Input placeholder={t('perf.query.templateNamePlaceholder')} />
-          </Form.Item>
-          <Form.Item
-            name="isPublic"
-            label={t('perf.query.templateType')}
-            rules={[{ required: true }]}
-            initialValue="0"
-          >
-            <Radio.Group>
-              <Radio value="1">{t('perf.query.publicTemplate')}</Radio>
-              <Radio value="0">{t('perf.query.privateTemplate')}</Radio>
-            </Radio.Group>
-          </Form.Item>
-          <Form.Item name="description" label={t('common.description')}>
-            <Input.TextArea rows={3} placeholder={t('common.pleaseInput')} />
-          </Form.Item>
-        </Form>
-      </Modal>
+        mode={templateDrawerMode}
+        initialValues={editingTemplate ? {
+          tempName: editingTemplate.name,
+          isPublic: editingTemplate.isPublic,
+          description: editingTemplate.description,
+        } : undefined}
+        loading={templateSaving}
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        onSubmit={(values) => {
+          // TODO: Call API to save template with values
+          setTemplateSaving(true);
+          setTimeout(() => {
+            setTemplateSaving(false);
+            setTemplateDialogOpen(false);
+            setEditingTemplate(null);
+            setTemplateDrawerMode('add');
+            void message.success(t('common.success'));
+          }, 500);
+        }}
+      />
 
       {/* Report config drawer */}
       <Modal
