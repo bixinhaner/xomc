@@ -200,7 +200,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Performance
   // -------------------------------------------------------------------------
-  'nav.performance.kpiStandard':  'KPI指标管理',
+  'nav.performance.kpiStandard':  '指标管理',
   'nav.performance.kpiStation':   '测量维护',
   'nav.performance.extraction':   '数据提取',
   'nav.performance.query':        '性能查询',

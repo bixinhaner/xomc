@@ -200,7 +200,7 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Performance
   // -------------------------------------------------------------------------
-  'nav.performance.kpiStandard':  'KPI Management',
+  'nav.performance.kpiStandard':  'Indicator Management',
   'nav.performance.kpiStation':   'KPI Measurement',
   'nav.performance.query':        'KPI Query',
   'nav.performance.charts':       'Performance Charts',

@@ -89,16 +89,16 @@ export const NAV_CONFIG: NavConfig = [
     label: 'nav.performance',
     iconName: 'LineChartOutlined',
     children: [
-      { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
-      { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
       { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },
       { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },
-      { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },
-      { key: 'perf-file',       label: 'nav.performance.files',        path: '/performance/files' },
-      { key: 'perf-task',       label: 'nav.performance.taskConfig',   path: '/performance/task-config' },
-      { key: 'perf-kpi-mgmt',  label: 'nav.performance.kpiMgmt',      path: '/performance/kpi-management' },
-      { key: 'perf-query-tpl', label: 'nav.performance.queryTemplates',path: '/performance/query-templates' },
-      { key: 'perf-busy-hour', label: 'nav.performance.busyHour',     path: '/performance/busy-hour' },
+      { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
+      { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
+      // { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },  // 隐藏
+      // { key: 'perf-file',       label: 'nav.performance.files',        path: '/performance/files' },  // 隐藏
+      // { key: 'perf-task',       label: 'nav.performance.taskConfig',   path: '/performance/task-config' },  // 隐藏
+      // { key: 'perf-kpi-mgmt',   label: 'nav.performance.kpiMgmt',      path: '/performance/kpi-management' },  // 隐藏
+      // { key: 'perf-query-tpl',  label: 'nav.performance.queryTemplates',path: '/performance/query-templates' },  // 隐藏
+      // { key: 'perf-busy-hour',  label: 'nav.performance.busyHour',     path: '/performance/busy-hour' },  // 隐藏
     ],
   },
   {

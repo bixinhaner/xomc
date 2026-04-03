@@ -59,8 +59,9 @@ function generateMockTimeSeries(kpiCode: string, points = 24) {
     PDCP_LOSS: { base: 0.05, range: 0.08, unit: '%' },
   };
   const cfg = baseValues[kpiCode] ?? { base: 100, range: 10, unit: '' };
+  const kpiLabelKey = KPI_OPTION_KEYS.find((k) => k.value === kpiCode)?.labelKey;
   return {
-    kpiName: KPI_OPTIONS.find((k) => k.value === kpiCode)?.label ?? kpiCode,
+    kpiName: kpiLabelKey ?? kpiCode,
     unit: cfg.unit,
     data: Array.from({ length: points }, (_, i) => ({
       timestamp: `${String(i).padStart(2, '0')}:00`,

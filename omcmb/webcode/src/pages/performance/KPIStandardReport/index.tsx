@@ -491,6 +491,13 @@ export default function KPIStandardReport() {
     return data;
   }, [selectedCategory, tableSearchValue, productType, indicatorLevel]);
 
+  // 分页数据
+  const paginatedData = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    return filteredData.slice(start, end);
+  }, [filteredData, page, pageSize]);
+
   // 处理选中行变化
   const handleSelectChange = useCallback((newSelectedRowKeys: React.Key[], newSelectedRows: KPIIndicatorRow[]) => {
     setSelectedRowKeys(newSelectedRowKeys);
@@ -934,19 +941,45 @@ export default function KPIStandardReport() {
         </div>
 
         {/* 数据表格 */}
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div className="kpi-table-wrapper" style={{ flex: 1, overflow: 'auto' }}>
+          <style>{`
+            .kpi-table-wrapper {
+              display: flex;
+              flex-direction: column;
+              height: 100%;
+            }
+            .kpi-table-wrapper .ant-table-wrapper {
+              flex: 1;
+              overflow: hidden;
+            }
+            .kpi-table-wrapper .ant-table {
+              height: 100%;
+            }
+            .kpi-table-wrapper .ant-table-container {
+              height: 100%;
+              display: flex;
+              flex-direction: column;
+            }
+            .kpi-table-wrapper .ant-table-body {
+              flex: 1;
+              overflow-y: auto !important;
+              overflow-x: auto !important;
+            }
+          `}</style>
           <DataTable<KPIIndicatorRow>
             tableId="kpi-management"
             columns={columns}
-            dataSource={filteredData}
+            dataSource={paginatedData}
             loading={false}
             rowKey="kpiId"
             total={filteredData.length}
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 1200 }}
+            scroll={{ x: 1200, y: 'calc(100vh - 320px)' }}
             selectable
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
             selectedRowKeys={selectedRowKeys}
             onSelectionChange={(keys, rows) => {
               handleSelectChange(keys, rows as KPIIndicatorRow[]);
