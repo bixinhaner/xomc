@@ -13,7 +13,6 @@ import {
   useSyncStatus,
   useAddObject,
   useDeleteObject,
-  useSyncConfigFile,
 } from '@/hooks/api/useDeviceParameters';
 import ObjectTreePanel from './ObjectTreePanel';
 import ChildParamTable from './ChildParamTable';
@@ -46,23 +45,26 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
   }, [syncStatus]);
 
   // Mutations
-  const syncConfigFileMutation = useSyncConfigFile();
+  const syncMutation = useSyncParameters();
   const discoverMutation = useDiscoverParameters();
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
 
-  // 同步参数 - 创建 filetype=11 的 Upload RPC 任务让设备上传配置文件
+  // 同步参数 - 刷新设备参数值（创建 GetParameterValues RPC）
   const handleSync = useCallback(() => {
-    syncConfigFileMutation.mutate(deviceId, {
-      onSuccess: (result) => {
-        message.success(`配置文件同步任务已创建 (filetype=${result.file_type})`);
-        setIsSyncing(true);
-      },
-      onError: () => {
-        message.error('配置文件同步任务创建失败');
-      },
-    });
-  }, [deviceId, syncConfigFileMutation]);
+    syncMutation.mutate(
+      { deviceId },
+      {
+        onSuccess: () => {
+          message.success('参数同步已触发');
+          setIsSyncing(true);
+        },
+        onError: () => {
+          message.error('参数同步触发失败');
+        },
+      }
+    );
+  }, [deviceId, syncMutation]);
 
   const handleDiscover = useCallback(() => {
     discoverMutation.mutate(deviceId, {
@@ -137,7 +139,7 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
             <Button
               icon={<SyncOutlined />}
               onClick={handleSync}
-              loading={syncConfigFileMutation.isPending}
+              loading={syncMutation.isPending}
               disabled={isSyncing}
             >
               同步参数
