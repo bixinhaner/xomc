@@ -387,7 +387,7 @@ export const deviceApi = {
     return data;
   },
 
-  async getGroups(): Promise<DeviceGroup[]> {
+  async getGroups(): Promise<{ groups: DeviceGroup[]; stats: { totalDevices: number } }> {
     // Backend GET /device-groups/tree returns nested tree with device counts.
     // We flatten it to a flat list so the frontend tree builder works.
     interface BackendGroupItem {
@@ -421,7 +421,9 @@ export const deviceApi = {
       }
     }
     walk(data.items || []);
-    return flat;
+    // 计算总设备数 = 已分组设备 + 未分组设备
+    const totalDevices = (data.stats?.grouped_devices ?? 0) + (data.stats?.ungrouped_devices ?? 0);
+    return { groups: flat, stats: { totalDevices } };
   },
 
   async createGroup(data: { name: string; parent_id?: string; remark?: string }): Promise<DeviceGroup> {

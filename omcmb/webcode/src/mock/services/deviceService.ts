@@ -82,7 +82,8 @@ export const deviceService = {
     if (params.engStatus) filtered = filtered.filter((d) => d.engStatus === params.engStatus);
     // 按 groupId 过滤（模拟：基于分组名称匹配城市）
     if (params.groupId) {
-      const group = await this.getGroups().then((groups) => groups.find((g) => g.id === params.groupId));
+      const { groups } = await this.getGroups();
+      const group = groups.find((g) => g.id === params.groupId);
       if (group) {
         // 根据分组名称过滤设备（通过设备名称包含城市名来判断）
         const groupCityMap: Record<string, string> = {
@@ -142,9 +143,11 @@ export const deviceService = {
     return { total: ids.length, succeeded: count - devices.length, failed: 0 };
   },
 
-  async getGroups(): Promise<DeviceGroup[]> {
+  async getGroups(): Promise<{ groups: DeviceGroup[]; stats: { totalDevices: number } }> {
     await delay(80, 150);
-    return [...groups];
+    // 计算 totalDevices 作为所有设备的数量
+    const totalDevices = devices.length;
+    return { groups: [...groups], stats: { totalDevices } };
   },
 
   async createGroup(data: { name: string; parent_id?: string; remark?: string }): Promise<DeviceGroup> {

@@ -22,7 +22,8 @@ export default function DeviceGrouping() {
   const t = useT();
   const { modal, message } = App.useApp();
   const { data: groupsData, refetch: refetchGroups } = useDeviceGroups();
-  const groups = groupsData ?? [];
+  const groups = groupsData?.groups ?? [];
+  const totalDevicesFromStats = groupsData?.stats?.totalDevices ?? 0;
 
   // --- Selection & pagination state ---
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -518,7 +519,7 @@ export default function DeviceGrouping() {
       filteredGroups={filteredGroups}
       selectedGroupId={selectedGroupId}
       groupSearchText={groupSearchText}
-      total={total}
+      total={totalDevicesFromStats}
       onSelect={(key) => {
         setSelectedGroupId(key);
         setCurrentPage(1);
