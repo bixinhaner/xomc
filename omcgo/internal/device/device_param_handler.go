@@ -51,6 +51,8 @@ func (h *ParameterTreeHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.GET("/:id/parameters/sync-status", h.GetSyncStatus)
 		devices.POST("/:id/objects/add", h.AddObject)
 		devices.POST("/:id/objects/delete", h.DeleteObject)
+		// 配置文件同步 - 创建 filetype=11 的 Upload RPC 任务
+		devices.POST("/:id/config-file/sync", h.SyncConfigFile)
 	}
 }
 
@@ -428,6 +430,71 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		"status":           status,
 		"total_parameters": len(params),
 		"pending_commands": pendingCommands,
+	})
+}
+
+// SyncConfigFile handles POST /api/v1/devices/:id/config-file/sync.
+// Triggers an Upload RPC with filetype=11 (Configuration File) to sync device config.
+func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	dev, err := h.deviceService.GetDevice(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if dev == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+
+	// 检查命令队列是否可用
+	if h.deviceService.GetCommandQueue() == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
+		return
+	}
+
+	// 创建 Upload RPC 命令，filetype=11 (Configuration File / Data Model)
+	// URL 将由 ACS 的 Upload handler 根据 upload server 配置自动填充
+	uploadParams, _ := json.Marshal(map[string]interface{}{
+		"file_type":       "11", // Configuration File / Data Model
+		"url":             "",   // 由 ACS 根据 upload server 配置自动填充
+		"username":        "",
+		"password":        "",
+		"delay_seconds":   0,
+		"no_more_requests": 1, // 这是最后一个请求
+	})
+
+	cmd := &cmdqueue.Command{
+		ID:         uuid.New().String(),
+		Method:     "Upload",
+		Params:     uploadParams,
+		Priority:   5,
+		CommandKey: fmt.Sprintf("config-sync-%s-%d", dev.SerialNumber, time.Now().Unix()),
+	}
+
+	if err := h.deviceService.GetCommandQueue().Push(c.Request.Context(), dev.SerialNumber, cmd); err != nil {
+		h.logger.Error("failed to queue config sync command",
+			zap.String("device_id", id.String()),
+			zap.String("serial_number", dev.SerialNumber),
+			zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	h.logger.Info("config sync command queued",
+		zap.String("device_id", id.String()),
+		zap.String("serial_number", dev.SerialNumber),
+		zap.String("command_id", cmd.ID))
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message":    "configuration file sync command queued",
+		"command_id": cmd.ID,
+		"file_type":  "11",
 	})
 }
 
