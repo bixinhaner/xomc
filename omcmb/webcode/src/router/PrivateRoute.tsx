@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { Spin } from 'antd';
 import { useUserStore } from '@/store/userStore';
+import { useHydration } from '@/store/useHydration';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -18,11 +19,12 @@ interface PrivateRouteProps {
  * request interceptor in http.ts will handle silent refresh.
  */
 export default function PrivateRoute({ children }: PrivateRouteProps) {
-  const { isAuthenticated, accessToken, refreshToken, isTokenExpired, _hasHydrated } = useUserStore();
+  const { isAuthenticated, accessToken, refreshToken, isTokenExpired } = useUserStore();
   const location = useLocation();
+  const hydrated = useHydration();
 
   // Wait for zustand persist to hydrate from localStorage
-  if (!_hasHydrated) {
+  if (!hydrated) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <Spin size="large" />
