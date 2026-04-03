@@ -305,19 +305,17 @@ func (s *DeviceGroupService) CheckDelete(ctx context.Context, id uuid.UUID) (*Ch
 	return resp, nil
 }
 
-// MoveDevices moves devices to a target group (must be L2).
+// MoveDevices moves devices to a target group.
 func (s *DeviceGroupService) MoveDevices(ctx context.Context, req MoveDevicesRequest) (int64, error) {
 	targetID, err := uuid.Parse(req.TargetGroupID)
 	if err != nil {
 		return 0, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "invalid target_group_id", err)
 	}
 
-	target, err := s.repo.GetByID(ctx, targetID)
+	// 验证目标分组存在
+	_, err = s.repo.GetByID(ctx, targetID)
 	if err != nil {
 		return 0, err
-	}
-	if target.Level != 2 {
-		return 0, commonerrors.NewBusinessError(global.ErrCodeGroupDeviceOnlyL2, "devices can only belong to level-2 groups", nil)
 	}
 
 	deviceIDs, err := parseUUIDs(req.DeviceIDs)
