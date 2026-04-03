@@ -246,3 +246,182 @@ function generateDevice(index: number): Device {
 }
 
 export const mockDevices: Device[] = Array.from({ length: 200 }, (_, i) => generateDevice(i));
+
+// 为北京节点额外生成 50 条设备数据
+const beijingCity = cities.find(c => c.name === '北京')!;
+const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
+  const index = 200 + i;  // 从 200 开始，避免 ID 冲突
+  const type = networkTypes[i % networkTypes.length];
+  const vendor = vendors[i % vendors.length];
+  const sn = generateSN(type) + String(index).padStart(3, '0');
+  const isOnline = Math.random() < 0.85;
+  const alarmLevel = isOnline ? pickRandom(alarmLevels) : 'none';
+  const models = deviceModels[type];
+  const model = models[Math.floor(Math.random() * models.length)];
+  const isNR = type === 'gNB';
+  const isLTE = type === 'eNB';
+  const productModel = pickRandom(productModels[type]);
+  const platformType = pickRandom(platformTypes[type]);
+  const enbIdVal = isLTE ? String(10000 + index) : '';
+  const gnbIdVal = isNR ? String(50000 + index) : '';
+  const pciVal = String(Math.floor(Math.random() * 504));
+  const earfcn = String(Math.floor(Math.random() * 65535));
+
+  return {
+    id: `dev-${String(index + 1).padStart(4, '0')}`,
+    sn,
+    name: `${beijingCity.name}-${type}-${String(index + 1).padStart(4, '0')}`,
+    vendor,
+    productType: productModel,
+    networkType: type,
+    deviceModel: model,
+    region: beijingCity.region,
+    stationId: `ST${String(index + 1).padStart(6, '0')}`,
+    connStatus: isOnline ? 'online' : 'offline',
+    alarmLevel,
+    engStatus: pickRandom(engStatuses),
+    mgmtStatus: pickRandom(mgmtStatuses),
+    lastOnlineTime: isOnline ? new Date().toISOString() : randomDate(30),
+    ipAddress: generateIP(),
+    subnet: pickRandom(beijingCity.subnets),
+    site: `${beijingCity.name}站点${String((i % 20) + 1).padStart(2, '0')}`,
+    longitude: randomOffset(beijingCity.lng, 0.5),
+    latitude: randomOffset(beijingCity.lat, 0.5),
+    softwareVersion: pickRandom(softwareVersions),
+    createTime: randomDate(365),
+
+    // 监控扩展字段
+    platformType: platformType,
+    hostName: `${type}-${beijingCity.name}-${String(index + 1).padStart(3, '0')}`,
+    productName: `${vendor} ${model}`,
+    firmwareVersion: pickRandom(firmwareVersions),
+    macAddress: generateMAC(),
+    groupName: pickRandom(groupNames),
+    onlineTime: isOnline ? randomDate(7) : '',
+    offlineTime: isOnline ? '' : randomDate(3),
+    onlineDuration: isOnline ? Math.floor(Math.random() * 864000) : 0,
+    upTime: isOnline ? `${Math.floor(Math.random() * 720)}h${Math.floor(Math.random() * 60)}m` : '',
+    firstOnlineTime: randomDate(365),
+    lastInformTime: isOnline ? randomDate(1) : randomDate(30),
+    siteName: `${beijingCity.name}站点${String((i % 20) + 1).padStart(2, '0')}`,
+    gpsVersion: isLTE ? 'GPS V2.0' : '',
+    rom: isLTE ? `ROM-${Math.floor(Math.random() * 100)}` : '',
+    remark: i % 5 === 0 ? `备注-北京-${i}` : '',
+    gnbId: gnbIdVal,
+
+    enbId: enbIdVal,
+    cellId: String(Math.floor(Math.random() * 256)),
+    eci: isLTE ? `${enbIdVal}${String(Math.floor(Math.random() * 256)).padStart(2, '0')}` : '',
+    nrCellId: isNR ? `${gnbIdVal}-${Math.floor(Math.random() * 16)}` : '',
+    pci: pciVal,
+    plmnId: '46000',
+    tac: String(Math.floor(Math.random() * 65535)),
+    subframeAssignment: isLTE ? String(Math.floor(Math.random() * 7)) : '',
+    specialSubframe: isLTE ? String(Math.floor(Math.random() * 10)) : '',
+    rootIndex: isLTE ? String(Math.floor(Math.random() * 838)) : '',
+    siteId: `SITE-${String(index + 1).padStart(6, '0')}`,
+    bandwidth: isLTE ? `${pickRandom([5, 10, 15, 20])}MHz` : isNR ? `${pickRandom([20, 40, 60, 80, 100])}MHz` : '',
+    dlEarfcn: earfcn,
+    ulEarfcn: isNR ? String(parseInt(earfcn) + 18000) : '',
+    networkModel: isLTE ? pickRandom(['TDD', 'FDD']) : isNR ? pickRandom(['SA', 'NSA']) : '',
+    txPower: `${Math.floor(Math.random() * 46)}dBm`,
+    band: pickRandom(bands),
+    lac: isLTE ? '' : String(Math.floor(Math.random() * 65535)),
+    arfcn: earfcn,
+    uplinkFrequency: `${(1920 + Math.random() * 100).toFixed(1)}MHz`,
+    downlinkFrequency: `${(2110 + Math.random() * 100).toFixed(1)}MHz`,
+
+    opState: (() => {
+      if ((isLTE || isNR) && Math.random() < 0.7) {
+        const cellCount = Math.floor(Math.random() * 3) + 2;
+        return Array.from({ length: cellCount }, () => pickRandom(['1', '0'])).join(',');
+      }
+      return pickRandom(opStates);
+    })(),
+    mmeStatus: (() => {
+      if (!isLTE) return '';
+      const r = Math.random();
+      if (r < 0.7) {
+        const count = Math.floor(Math.random() * 3) + 2;
+        return JSON.stringify(Array.from({ length: count }, (_, i) => ({
+          mmeIp: `10.${20 + i}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
+          status: Math.random() > 0.3 ? '1' : '0',
+          plmnId: '46000',
+        })));
+      }
+      if (r < 0.85) return pickRandom(['1', '0']);
+      return '';
+    })(),
+    amfStatus: (() => {
+      if (!isNR) return '';
+      const r = Math.random();
+      if (r < 0.7) {
+        const count = Math.floor(Math.random() * 3) + 2;
+        return JSON.stringify(Array.from({ length: count }, (_, i) => ({
+          AmfIP1: `10.${30 + i}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
+          Status: Math.random() > 0.3 ? '1' : '0',
+          PLMNID: '46000',
+        })));
+      }
+      if (r < 0.85) return pickRandom(['1', '0']);
+      return '';
+    })(),
+    rfStatus: (() => {
+      if ((isLTE || isNR) && Math.random() < 0.7) {
+        const cellCount = Math.floor(Math.random() * 3) + 2;
+        return Array.from({ length: cellCount }, () => pickRandom(['on', 'off'])).join(',');
+      }
+      return pickRandom(rfStatuses);
+    })(),
+    pmReportStatus: isLTE ? pickRandom(['off', 'normal', 'broken', '']) : '',
+    halobFlag: (isNR || isLTE) ? Math.random() > 0.5 : false,
+    syncStatus: pickRandom(syncStatuses),
+    validity: isLTE && Math.random() > 0.8 ? randomDate(-90) : '',
+    lockStatus: Math.random() > 0.9 ? 'locked' : '',
+    ueCount: isOnline ? Math.floor(Math.random() * 200) : 0,
+    euCount: isNR ? (() => {
+      const total = Math.floor(Math.random() * 4) + 1;
+      const conn = Math.floor(Math.random() * (total + 1));
+      return `${conn}/${total}`;
+    })() : '',
+    ruCount: isNR ? (() => {
+      const total = Math.floor(Math.random() * 8) + 1;
+      const conn = Math.floor(Math.random() * (total + 1));
+      return `${conn}/${total}`;
+    })() : '',
+    cpeCount: isLTE ? Math.floor(Math.random() * 32) : 0,
+    wanSpeed: isLTE ? `${Math.floor(Math.random() * 1000)}Mbps` : '',
+    serviceStatus: '',
+    adminState: isNR ? pickRandom(['1', '2', '3', '2', '2']) : '',
+    multiPlmnEnable: isNR ? pickRandom(['true', 'false', '']) : '',
+    bscLinkStatus: '',
+    bscSelect: '',
+    bscSerialNumber: '',
+    btsNum: 0,
+
+    ipsecAddr: Math.random() > 0.7 ? generateIP() : '',
+    mmepoolIpsecAddr: isLTE && Math.random() > 0.8 ? generateIP() : '',
+    ipaUnitId: '',
+    omlRemoteIp: '',
+    omlRemoteIpBak: '',
+
+    gpsHeight: parseFloat((Math.random() * 500).toFixed(1)),
+    mechanicalDowntilt: isLTE ? `${Math.floor(Math.random() * 15)}°` : '',
+    electronicDowntilt: isLTE ? `${Math.floor(Math.random() * 10)}°` : '',
+    verticalBeamWidth: isLTE ? `${(5 + Math.random() * 10).toFixed(1)}°` : '',
+    horizontalAzimuth: isLTE ? `${Math.floor(Math.random() * 360)}°` : '',
+    installAddress: i % 10 === 0 ? `${beijingCity.name}市某区某路${i}号` : '',
+    gpsSatelliteCount: Math.floor(Math.random() * 16),
+
+    rollbackVersion: isNR && Math.random() > 0.7 ? pickRandom(softwareVersions) : '',
+    sasParam: isNR && Math.random() > 0.8 ? 'SAS-Config-1' : '',
+    euRu: isNR ? `${Math.floor(Math.random() * 4)}/${Math.floor(Math.random() * 8)}` : '',
+    halobLicense: isNR && Math.random() > 0.5 ? 'valid' : '',
+    energySaving: isNR ? pickRandom(['enabled', 'disabled', '']) : '',
+    gnbTopoCellmgr: isNR ? `TOPO-${index}` : '',
+    sslCertValidity: isNR && Math.random() > 0.5 ? randomDate(-365) : '',
+  };
+});
+
+// 合并数据：原有 200 条 + 北京额外 50 条
+export const allMockDevices: Device[] = [...mockDevices, ...beijingDevices];

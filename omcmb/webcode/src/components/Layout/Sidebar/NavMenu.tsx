@@ -159,7 +159,6 @@ export default function NavMenu({ collapsed, position = 'left' }: { collapsed?: 
       mode={isHorizontal ? 'horizontal' : 'inline'}
       theme={appTheme === 'fresh' ? 'light' : 'dark'}
       inlineCollapsed={isHorizontal ? undefined : collapsed}
-      inlineCollapsedWidth={64}
       items={menuItems}
       selectedKeys={selectedKeys}
       defaultOpenKeys={isHorizontal ? undefined : defaultOpenKeys}

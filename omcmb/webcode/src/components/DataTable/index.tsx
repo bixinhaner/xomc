@@ -62,6 +62,8 @@ export interface DataTableProps<T> {
   scroll?: { x?: number | string; y?: number | string };
   size?: 'small' | 'middle' | 'large';
   showPagination?: boolean;
+  showRowNumber?: boolean;
+  rowNumberTitle?: string;
 }
 
 type Density = 'compact' | 'default' | 'comfortable';
@@ -99,6 +101,8 @@ function DataTable<T>(
     scroll,
     size,
     showPagination = true,
+    showRowNumber = false,
+    rowNumberTitle,
   } = props;
 
   const t = useT();
@@ -236,6 +240,29 @@ function DataTable<T>(
         fixed: true,
         selectedRowKeys,
         onChange: handleSelectionChange,
+        columnWidth: showRowNumber ? 90 : 40,
+        renderCell: showRowNumber
+          ? (checked, record, index, originNode) => {
+              const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
+                    {rowNumber}
+                  </span>
+                  {originNode}
+                </div>
+              );
+            }
+          : undefined,
+        columnTitle: showRowNumber
+          ? () => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ minWidth: 30, textAlign: 'center', fontSize: 12 }}>
+                  {rowNumberTitle ?? t('table.rowNumber')}
+                </span>
+              </div>
+            )
+          : undefined,
       }
     : undefined;
 

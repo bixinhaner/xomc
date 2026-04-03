@@ -31,7 +31,9 @@ const MapStatsPanel: React.FC<MapStatsPanelProps> = ({
   if (!visible) return null;
 
   const totalCount = stats?.total ?? 0;
-  const onlineCount = stats?.statusCount?.online ?? 0;
+  const onlineActiveCount = stats?.statusCount?.onlineActive ?? 0;
+  const onlineInactiveCount = stats?.statusCount?.onlineInactive ?? 0;
+  const onlineCount = onlineActiveCount + onlineInactiveCount;
   const offlineCount = stats?.statusCount?.offline ?? 0;
   const alarmCount = stats?.alarmCount ?? 0;
 
@@ -110,10 +112,10 @@ const MapStatsPanel: React.FC<MapStatsPanelProps> = ({
         {/* Online */}
         <div style={rowStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={statusDotStyle(DEVICE_STATUS_CONFIG.online.color)} />
+            <div style={statusDotStyle(DEVICE_STATUS_CONFIG.onlineActive.color)} />
             <span style={{ fontSize: 12, color: token.colorText }}>{t('status.online')}</span>
           </div>
-          <span style={{ fontSize: 14, fontWeight: 600, color: DEVICE_STATUS_CONFIG.online.color }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: DEVICE_STATUS_CONFIG.onlineActive.color }}>
             {formatNumber(onlineCount)}
           </span>
         </div>

@@ -294,7 +294,7 @@ export default function DeviceListPanel({
         </div>
       </div>
 
-      <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
         <DataTable<Device>
           tableId="device-grouping-table"
           columns={columns}
@@ -311,40 +311,21 @@ export default function DeviceListPanel({
           onPageChange={onPageChange}
           onRefresh={onRefresh}
           defaultDensity="compact"
+          scroll={{ x: true, y: 'calc(100% - 56px)' }}
         />
       </div>
       <style>{`
-        .device-list-table-wrapper {
-          flex: 1;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
+        /* 设备分组表格滚动条样式 - 页面特定，只滚动表格内容 */
+        .device-list-table-wrapper > div {
+          position: absolute;
+          inset: 0;
         }
-        .device-list-table-wrapper > div[class*="dataTableWrapper"] {
-          flex: 1;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
+        .device-list-table-wrapper .omc-data-table {
+          overflow: hidden;
         }
-        .device-list-table-wrapper > div[class*="dataTableWrapper"] > div[class*="tableContainer"] {
-          flex: 1;
-          min-height: 0;
-          overflow: auto;
-        }
-        .device-list-table-wrapper .ant-table-wrapper {
-          height: 100%;
-        }
-        .device-list-table-wrapper .ant-table-wrapper .ant-table {
-          height: 100%;
-        }
-        .device-list-table-wrapper .ant-table-wrapper .ant-table-container {
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-        }
-        .device-list-table-wrapper .ant-table-wrapper .ant-table-body {
-          flex: 1;
-          overflow: auto !important;
+        .device-list-table-wrapper .ant-table-body {
+          overflow-y: auto !important;
+          max-height: calc(100vh - 340px) !important;
         }
       `}</style>
 

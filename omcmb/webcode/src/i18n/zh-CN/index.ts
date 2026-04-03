@@ -79,6 +79,7 @@ const messages: Record<string, string> = {
   'table.operation':       '操作',
   'table.action':          '操作',
   'table.index':           '序号',
+  'table.rowNumber':       '序号',
   'table.description':     '描述',
   'table.vendor':          '厂商',
   'table.type':            '类型',

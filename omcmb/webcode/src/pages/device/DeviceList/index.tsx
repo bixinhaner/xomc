@@ -1061,26 +1061,50 @@ export default function DeviceList() {
 
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
 
-          <DataTable<Device>
-            tableId="device-list-table"
-            columns={columns}
-            dataSource={devices}
-            loading={isLoading}
-            rowKey="id"
-            selectable
-            selectedRowKeys={selectedRowKeys}
-            onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-            total={total}
-            pageSize={pageSize}
-            currentPage={currentPage}
-            onPageChange={(page, size) => {
-              setCurrentPage(page);
-              setPageSize(size);
-            }}
-            batchActions={batchActions}
-            onRefresh={() => void refetch()}
-            defaultDensity="compact"
-          />
+          <div className="device-list-page-table-wrapper" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+            <DataTable<Device>
+              tableId="device-list-table"
+              columns={columns}
+              dataSource={devices}
+              loading={isLoading}
+              rowKey="id"
+              selectable
+              selectedRowKeys={selectedRowKeys}
+              onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+              total={total}
+              pageSize={pageSize}
+              currentPage={currentPage}
+              onPageChange={(page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              }}
+              batchActions={batchActions}
+              onRefresh={() => void refetch()}
+              defaultDensity="compact"
+              scroll={{ x: true, y: 'calc(100% - 56px)' }}
+              showRowNumber
+              rowNumberTitle={t('table.rowNumber')}
+            />
+          </div>
+          <style>{`
+            /* 设备列表表格滚动条样式 - 页面特定，只滚动表格内容 */
+            .device-list-page-table-wrapper > div {
+              position: absolute;
+              inset: 0;
+            }
+            .device-list-page-table-wrapper .omc-data-table {
+              overflow: hidden;
+            }
+            .device-list-page-table-wrapper .ant-table-body {
+              overflow-y: auto !important;
+              overflow-x: auto !important;
+              max-height: calc(100vh - 500px) !important;
+            }
+            .device-list-page-table-wrapper .ant-table-thead > tr > th,
+            .device-list-page-table-wrapper .ant-table-tbody > tr > td {
+              white-space: nowrap !important;
+            }
+          `}</style>
         </ListPageLayout>
       </div>
 

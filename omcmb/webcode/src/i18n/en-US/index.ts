@@ -79,6 +79,7 @@ const messages: Record<string, string> = {
   'table.operation':       'Actions',
   'table.action':          'Action',
   'table.index':           'No.',
+  'table.rowNumber':       'No.',
   'table.description':     'Description',
   'table.vendor':          'Vendor',
   'table.type':            'Type',
