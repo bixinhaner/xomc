@@ -68,6 +68,24 @@ export default function DeviceList() {
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
+  // 同步 URL 参数到 filterParams（解决返回时 state 未恢复的问题）
+  useEffect(() => {
+    const params: Record<string, unknown> = {};
+    searchParams.forEach((value, key) => {
+      if (key !== 'page' && key !== 'pageSize') {
+        if (value.includes(',')) {
+          params[key] = value.split(',');
+        } else {
+          params[key] = value;
+        }
+      }
+    });
+    // 只有当 params 与当前 filterParams 不同时才更新
+    if (JSON.stringify(params) !== JSON.stringify(filterParams)) {
+      setFilterParams(params);
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 本地任务面板状态
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
   interface LocalTask {
