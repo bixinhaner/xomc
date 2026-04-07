@@ -123,6 +123,7 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 	query, args, err := psql.Update("device_groups").
 		Set("name", group.Name).
 		Set("parent_id", nullableUUID(group.ParentID)).
+		Set("level", group.Level).
 		Set("carrier", nullableString(string(group.Carrier))).
 		Set("description", nullableString(group.Description)).
 		Set("sort_order", group.SortOrder).

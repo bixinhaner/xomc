@@ -181,9 +181,11 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 				return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "cannot set a child group as parent", nil)
 			}
 			group.ParentID = &parentUUID
+			group.Level = 2 // 有父级，变为 L2 分组
 		} else {
 			// 清空 parent_id，变为 L1 分组
 			group.ParentID = nil
+			group.Level = 1 // 无父级，变为 L1 分组
 		}
 	}
 
