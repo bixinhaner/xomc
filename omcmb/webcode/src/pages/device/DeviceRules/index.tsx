@@ -678,6 +678,13 @@ export default function DeviceRules() {
         ),
       },
       {
+        key: 'name',
+        title: t('device.rules.ruleName'),
+        dataIndex: 'name',
+        width: 150,
+        ellipsis: true,
+      },
+      {
         key: 'operators',
         title: t('device.rules.rule'),
         dataIndex: 'operators',

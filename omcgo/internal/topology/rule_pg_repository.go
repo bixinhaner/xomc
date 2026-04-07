@@ -64,9 +64,9 @@ func (r *PgDeviceRuleRepository) Create(ctx context.Context, rule *DeviceRule) e
 // GetByID 根据 ID 获取设备规则
 func (r *PgDeviceRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*DeviceRule, error) {
 	query, args, err := sq.Select(
-		"id", "name", "priority", "target_group_id", "enabled",
-		"matching_mode", "name_rule_list", "lac_list", "tac_list",
-		"description", "operators", "created_by", "updated_by", "created_at", "updated_at",
+		"dr.id", "dr.name", "dr.priority", "dr.target_group_id", "dr.enabled",
+		"dr.matching_mode", "dr.name_rule_list", "dr.lac_list", "dr.tac_list",
+		"dr.description", "dr.operators", "dr.created_by", "dr.updated_by", "dr.created_at", "dr.updated_at",
 		"COALESCE(dg.name, '') as target_group_name",
 	).
 		From("device_rules dr").

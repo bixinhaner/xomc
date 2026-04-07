@@ -2248,7 +2248,7 @@ const messages: Record<string, string> = {
   'device.rules.operators':         'Operation Description',
   'device.rules.operation':         'Operation',
   'device.rules.migrationResult':   'Migration Result',
-  'device.rules.sourceGroup':       'Source Group',
+  'device.rules.sourceGroup':       'Source Device Group',
   'device.rules.migrationSuccess':  'Migration successful',
   'device.rules.connectionTimeout': 'Connection timeout',
   'device.rules.enableStatus':      'Enable Status',
