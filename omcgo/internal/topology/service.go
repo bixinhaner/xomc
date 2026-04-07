@@ -94,14 +94,18 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 	}
 
 	group := &DeviceGroup{
-		Name:      req.Name,
-		ParentID:  parentID,
-		Carrier:   carrier(req.Carrier),
-		Remark:    req.Remark,
-		SortOrder: req.SortOrder,
-		Level:     level,
-		Status:    string(global.GroupStatusActive),
-		CreatedBy: operator,
+		Name:         req.Name,
+		ParentID:     parentID,
+		Carrier:      carrier(req.Carrier),
+		Remark:       req.Remark,
+		SortOrder:    req.SortOrder,
+		Level:        level,
+		Status:       string(global.GroupStatusActive),
+		CreatedBy:    operator,
+		MatchingMode: MatchingMode(req.MatchingMode),
+		NameRuleList: req.NameRuleList,
+		LACList:      req.LACList,
+		TACList:      req.TACList,
 	}
 
 	if err := s.repo.Create(ctx, group); err != nil {
@@ -169,6 +173,19 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 	}
 	if req.SortOrder != nil {
 		group.SortOrder = *req.SortOrder
+	}
+	// 更新匹配规则（仅 L2 分组）
+	if req.MatchingMode != nil {
+		group.MatchingMode = MatchingMode(*req.MatchingMode)
+	}
+	if req.NameRuleList != nil {
+		group.NameRuleList = req.NameRuleList
+	}
+	if req.LACList != nil {
+		group.LACList = req.LACList
+	}
+	if req.TACList != nil {
+		group.TACList = req.TACList
 	}
 	group.UpdatedBy = operator
 
