@@ -195,6 +195,18 @@ const AVAILABLE_DEVICES = [
   { value: 'ENB00401', label: '成都武侯基站01' },
 ];
 
+// Available device groups for selection
+const AVAILABLE_GROUPS = [
+  { value: 'group-1', label: '北京区域' },
+  { value: 'group-1-1', label: '北京朝阳' },
+  { value: 'group-1-2', label: '北京海淀' },
+  { value: 'group-2', label: '上海区域' },
+  { value: 'group-2-1', label: '上海浦东' },
+  { value: 'group-2-2', label: '上海徐汇' },
+  { value: 'group-3', label: '广州区域' },
+  { value: 'group-4', label: '深圳区域' },
+];
+
 // Available KPIs for selection
 const AVAILABLE_KPIS = [
   { value: 'RRC_SR', label: 'RRC建立成功率' },
@@ -288,6 +300,7 @@ export default function KPIQuery() {
   const [editingChart, setEditingChart] = useState<ChartConfig | null>(null);
   const [chartForm] = Form.useForm();
   const [chartSaving, setChartSaving] = useState(false);
+  const [chartDeviceSelectType, setChartDeviceSelectType] = useState<'device' | 'group'>('device');
 
   // All templates combined
   const allTemplates = useMemo(() => [...PUBLIC_TEMPLATES, ...PRIVATE_TEMPLATES], []);
@@ -471,6 +484,31 @@ export default function KPIQuery() {
     return items;
   }, [t]);
 
+  // 导出模版数据
+  const handleExportTemplate = useCallback((template: TemplateItem) => {
+    // 构建模版导出数据
+    const exportData = {
+      id: template.id,
+      name: template.name,
+      isPublic: template.isPublic,
+      isDefault: template.isDefault,
+      reportSwitch: template.reportSwitch,
+      exportedAt: new Date().toISOString(),
+    };
+
+    // 创建 Blob 并下载
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `template_${template.id}_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    void message.success(t('common.exportSuccess'));
+  }, [t, message]);
+
   // Handle template menu click
   const handleTemplateMenuClick = useCallback((key: string, template: TemplateItem) => {
     switch (key) {
@@ -498,7 +536,8 @@ export default function KPIQuery() {
         });
         break;
       case 'exportKpi':
-        setExportDrawerOpen(true);
+        // 直接导出模版数据
+        handleExportTemplate(template);
         break;
       case 'report':
         setReportDrawerOpen(true);
@@ -1322,9 +1361,24 @@ export default function KPIQuery() {
             <Input placeholder={t('perf.query.chartNamePlaceholder')} />
           </Form.Item>
 
+          <Form.Item label={t('perf.query.deviceSelectType')} required>
+            <Radio.Group
+              value={chartDeviceSelectType}
+              onChange={(e) => {
+                setChartDeviceSelectType(e.target.value);
+                chartForm.setFieldsValue({ devices: [] });
+              }}
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Radio.Button value="device">{t('perf.query.selectByDevice')}</Radio.Button>
+              <Radio.Button value="group">{t('perf.query.selectByGroup')}</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+
           <Form.Item
             name="devices"
-            label={t('perf.query.selectDevices')}
+            label={chartDeviceSelectType === 'device' ? t('perf.query.selectDevices') : t('perf.query.selectGroups')}
             rules={[
               { required: true, message: t('common.pleaseSelect') },
               {
@@ -1334,13 +1388,18 @@ export default function KPIQuery() {
                     : Promise.resolve(),
               },
             ]}
-            extra={t('perf.query.devicesExtra')}
+            extra={chartDeviceSelectType === 'device' ? t('perf.query.devicesExtra') : t('perf.query.groupsExtra')}
           >
             <Select
               mode="multiple"
-              placeholder={t('perf.query.selectDevicesPlaceholder')}
-              options={AVAILABLE_DEVICES}
+              placeholder={chartDeviceSelectType === 'device' ? t('perf.query.selectDevicesPlaceholder') : t('perf.query.selectGroupsPlaceholder')}
+              options={chartDeviceSelectType === 'device' ? AVAILABLE_DEVICES : AVAILABLE_GROUPS}
               maxTagCount={5}
+              showSearch
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase()) ||
+                (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+              }
             />
           </Form.Item>
 

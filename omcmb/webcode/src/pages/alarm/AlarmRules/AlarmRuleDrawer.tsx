@@ -154,7 +154,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
   // 处理设备组数据，构建层级结构
   const groupsWithLevel: DeviceGroupWithLevel[] = useMemo(() => {
-    const groups = groupsData || [];
+    const groups = groupsData?.groups || [];
     if (groups.length === 0) return [];
 
     // 构建父子关系映射

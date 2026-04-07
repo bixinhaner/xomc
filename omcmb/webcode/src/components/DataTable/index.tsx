@@ -235,25 +235,32 @@ function DataTable<T>(
       });
   }, [orderedColumns, hiddenKeys, columnFilters, handleColumnFilter]);
 
-  const rowSelection: TableProps<T>['rowSelection'] = selectable
+  const rowSelection: TableProps<T>['rowSelection'] = (selectable || showRowNumber)
     ? {
         fixed: true,
-        selectedRowKeys,
-        onChange: handleSelectionChange,
-        columnWidth: showRowNumber ? 90 : 40,
-        renderCell: showRowNumber
-          ? (checked, record, index, originNode) => {
-              const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
-                    {rowNumber}
-                  </span>
-                  {originNode}
-                </div>
-              );
-            }
-          : undefined,
+        ...(selectable ? { selectedRowKeys, onChange: handleSelectionChange } : {}),
+        columnWidth: showRowNumber ? (selectable ? 90 : 60) : 40,
+        renderCell: (checked, record, index, originNode) => {
+          const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
+          if (showRowNumber && selectable) {
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
+                  {rowNumber}
+                </span>
+                {originNode}
+              </div>
+            );
+          }
+          if (showRowNumber) {
+            return (
+              <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
+                {rowNumber}
+              </span>
+            );
+          }
+          return originNode;
+        },
         columnTitle: showRowNumber
           ? () => (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

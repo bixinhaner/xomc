@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Drawer,
   Form,
@@ -29,6 +29,8 @@ import {
   ClearOutlined,
   DeleteOutlined,
   PlusOutlined,
+  EditOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import type { DataNode, TreeProps } from 'antd/es/tree';
 import { useT } from '@/hooks/useT';
@@ -280,6 +282,10 @@ export default function TemplateDrawer({
   const [tempSelectedDevices, setTempSelectedDevices] = useState<string[]>([]);
   const [tempSelectedGroups, setTempSelectedGroups] = useState<string[]>([]);
 
+  // 批量输入状态
+  const [batchInputVisible, setBatchInputVisible] = useState(false);
+  const [batchInputValue, setBatchInputValue] = useState('');
+
   // KPI 选择状态
   const [kpiSearchText, setKpiSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string[]>([]);
@@ -291,8 +297,24 @@ export default function TemplateDrawer({
   const [kpiPageSize, setKpiPageSize] = useState(10);
   const [tempSelectedKpis, setTempSelectedKpis] = useState<string[]>([]);
 
+  // KPI 批量输入状态
+  const [kpiBatchInputVisible, setKpiBatchInputVisible] = useState(false);
+  const [kpiBatchInputValue, setKpiBatchInputValue] = useState('');
+
   // 是否只读模式
   const isReadOnly = mode === 'view';
+
+  // 初始化表单状态
+  useEffect(() => {
+    if (open && initialValues) {
+      if (initialValues.isPublic) {
+        setIsPublic(initialValues.isPublic);
+      }
+    } else if (open) {
+      // 新增模式，重置为默认值
+      setIsPublic('0');
+    }
+  }, [open, initialValues]);
 
   // 关闭抽屉
   const handleClose = () => {
@@ -309,6 +331,7 @@ export default function TemplateDrawer({
     form.validateFields().then((values) => {
       const submitData: TemplateFormValues = {
         ...values,
+        isPublic,
         reportPeriod,
         checkAll,
         week: checkAll === '1' ? [] : week,
@@ -378,6 +401,95 @@ export default function TemplateDrawer({
   const handleKpiTreeCheck: TreeProps['onCheck'] = (checkedKeys) => {
     const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
     setSelectedKpis(keys as string[]);
+  };
+
+  // 打开批量输入弹窗
+  const handleOpenBatchInput = () => {
+    setBatchInputValue('');
+    setBatchInputVisible(true);
+  };
+
+  // 解析批量输入的设备ID
+  const parseBatchInput = (input: string): string[] => {
+    // 支持换行、逗号、分号、空格分隔
+    return input
+      .split(/[\n,;，；\s]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  };
+
+  // 批量输入确认
+  const handleBatchInputConfirm = () => {
+    const inputIds = parseBatchInput(batchInputValue);
+    if (inputIds.length === 0) {
+      message.warning(t('perf.query.pleaseInputDeviceId'));
+      return;
+    }
+
+    if (selDeviceType === '2') {
+      // 按设备添加：过滤出存在的设备ID
+      const existingDeviceIds = new Set(MOCK_DEVICES.map(d => d.id));
+      const validIds = inputIds.filter(id => existingDeviceIds.has(id));
+      const invalidIds = inputIds.filter(id => !existingDeviceIds.has(id));
+
+      if (invalidIds.length > 0) {
+        message.warning(t('perf.query.batchInputNotFound', { count: invalidIds.length, ids: invalidIds.slice(0, 5).join(', ') }));
+      }
+
+      if (validIds.length > 0) {
+        setSelectedDevices(prev => [...new Set([...prev, ...validIds])]);
+        message.success(t('perf.query.batchInputSuccess', { count: validIds.length }));
+      }
+    } else {
+      // 按设备组添加：过滤出存在的设备组ID
+      const existingGroupIds = new Set(MOCK_DEVICE_GROUPS.map(g => g.id));
+      const validIds = inputIds.filter(id => existingGroupIds.has(id));
+      const invalidIds = inputIds.filter(id => !existingGroupIds.has(id));
+
+      if (invalidIds.length > 0) {
+        message.warning(t('perf.query.batchInputNotFound', { count: invalidIds.length, ids: invalidIds.slice(0, 5).join(', ') }));
+      }
+
+      if (validIds.length > 0) {
+        setSelectedGroups(prev => [...new Set([...prev, ...validIds])]);
+        message.success(t('perf.query.batchInputSuccess', { count: validIds.length }));
+      }
+    }
+
+    setBatchInputVisible(false);
+    setBatchInputValue('');
+  };
+
+  // 打开 KPI 批量输入弹窗
+  const handleOpenKpiBatchInput = () => {
+    setKpiBatchInputValue('');
+    setKpiBatchInputVisible(true);
+  };
+
+  // KPI 批量输入确认
+  const handleKpiBatchInputConfirm = () => {
+    const inputIds = parseBatchInput(kpiBatchInputValue);
+    if (inputIds.length === 0) {
+      message.warning(t('perf.query.pleaseInputKpiId'));
+      return;
+    }
+
+    // 过滤出存在的 KPI ID
+    const existingKpiIds = new Set(MOCK_KPIS.map(k => k.id));
+    const validIds = inputIds.filter(id => existingKpiIds.has(id));
+    const invalidIds = inputIds.filter(id => !existingKpiIds.has(id));
+
+    if (invalidIds.length > 0) {
+      message.warning(t('perf.query.batchInputNotFound', { count: invalidIds.length, ids: invalidIds.slice(0, 5).join(', ') }));
+    }
+
+    if (validIds.length > 0) {
+      setSelectedKpis(prev => [...new Set([...prev, ...validIds])]);
+      message.success(t('perf.query.batchInputSuccess', { count: validIds.length }));
+    }
+
+    setKpiBatchInputVisible(false);
+    setKpiBatchInputValue('');
   };
 
   // 获取抽屉标题
@@ -642,34 +754,29 @@ export default function TemplateDrawer({
           style={{ marginBottom: 16, borderRadius: 0 }}
           styles={{ body: { padding: '16px 24px' } }}
         >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="tempName"
-                label={t('perf.query.templateName')}
-                rules={[{ required: true, message: t('common.pleaseInput') }]}
-              >
-                <Input
-                  placeholder={t('perf.query.templateNamePlaceholder')}
-                  maxLength={50}
-                  showCount
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={t('perf.query.templateType')}>
-                <Radio.Group
-                  value={isPublic}
-                  onChange={(e) => setIsPublic(e.target.value)}
-                  optionType="button"
-                  buttonStyle="solid"
-                >
-                  <Radio.Button value="0">{t('perf.query.privateTemplate')}</Radio.Button>
-                  <Radio.Button value="1">{t('perf.query.publicTemplate')}</Radio.Button>
-                </Radio.Group>
-              </Form.Item>
-            </Col>
-          </Row>
+          <Form.Item
+            name="tempName"
+            label={t('perf.query.templateName')}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
+          >
+            <Input
+              placeholder={t('perf.query.templateNamePlaceholder')}
+              maxLength={50}
+              showCount
+            />
+          </Form.Item>
+
+          <Form.Item label={t('perf.query.templateType')}>
+            <Radio.Group
+              value={isPublic}
+              onChange={(e) => setIsPublic(e.target.value)}
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Radio.Button value="0">{t('perf.query.privateTemplate')}</Radio.Button>
+              <Radio.Button value="1">{t('perf.query.publicTemplate')}</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
 
           {/* 详情模式下显示创建人/更新人 */}
           {isReadOnly && (
@@ -839,6 +946,15 @@ export default function TemplateDrawer({
                 </Tag>
               </span>
               <Space size={8}>
+                {selDeviceType === '2' && (
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={handleOpenBatchInput}
+                  >
+                    {t('perf.query.batchInput')}
+                  </Button>
+                )}
                 <Button
                   size="small"
                   icon={<ClearOutlined />}
@@ -980,6 +1096,13 @@ export default function TemplateDrawer({
                 </Tag>
               </span>
               <Space size={8}>
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={handleOpenKpiBatchInput}
+                >
+                  {t('perf.query.batchInput')}
+                </Button>
                 <Button
                   size="small"
                   icon={<ClearOutlined />}
@@ -1450,6 +1573,96 @@ export default function TemplateDrawer({
               showTotal={(total) => t('perf.query.totalCount', { count: total })}
             />
           </div>
+        )}
+      </Modal>
+
+      {/* 批量输入弹窗 */}
+      <Modal
+        title={selDeviceType === '2' ? t('perf.query.batchInputDeviceTitle') : t('perf.query.batchInputGroupTitle')}
+        open={batchInputVisible}
+        onCancel={() => {
+          setBatchInputVisible(false);
+          setBatchInputValue('');
+        }}
+        onOk={handleBatchInputConfirm}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+            {selDeviceType === '2'
+              ? t('perf.query.batchInputDevicePlaceholder')
+              : t('perf.query.batchInputGroupPlaceholder')
+            }
+          </Text>
+          <TextArea
+            placeholder={selDeviceType === '2'
+              ? 'ENB00001\nENB00002, ENB00003; GNB00001'
+              : 'group-1\ngroup-2, group-3'
+            }
+            rows={6}
+            value={batchInputValue}
+            onChange={(e) => setBatchInputValue(e.target.value)}
+          />
+        </div>
+
+        {/* 预览结果 */}
+        {batchInputValue.trim() && (
+          <Alert
+            type="info"
+            showIcon
+            message={
+              <span>
+                {t('perf.query.batchInputPreview', {
+                  count: parseBatchInput(batchInputValue).length,
+                  type: selDeviceType === '2' ? t('perf.query.deviceUnit') : t('perf.query.groupUnit')
+                })}
+              </span>
+            }
+          />
+        )}
+      </Modal>
+
+      {/* KPI 批量输入弹窗 */}
+      <Modal
+        title={t('perf.query.batchInputKpiTitle')}
+        open={kpiBatchInputVisible}
+        onCancel={() => {
+          setKpiBatchInputVisible(false);
+          setKpiBatchInputValue('');
+        }}
+        onOk={handleKpiBatchInputConfirm}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+            {t('perf.query.batchInputKpiPlaceholder')}
+          </Text>
+          <TextArea
+            placeholder="KPI_001\nKPI_002, KPI_003; KPI_004"
+            rows={6}
+            value={kpiBatchInputValue}
+            onChange={(e) => setKpiBatchInputValue(e.target.value)}
+          />
+        </div>
+
+        {/* 预览结果 */}
+        {kpiBatchInputValue.trim() && (
+          <Alert
+            type="info"
+            showIcon
+            message={
+              <span>
+                {t('perf.query.batchInputPreview', {
+                  count: parseBatchInput(kpiBatchInputValue).length,
+                  type: t('perf.query.kpiUnit')
+                })}
+              </span>
+            }
+          />
         )}
       </Modal>
     </Drawer>

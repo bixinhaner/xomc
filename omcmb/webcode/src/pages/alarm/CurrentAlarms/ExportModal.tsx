@@ -61,7 +61,8 @@ function getAllGroupIds(groups: DeviceGroup[]): string[] {
 
 export default function ExportModal({ open, onClose, onConfirm, confirmLoading }: ExportModalProps) {
   const t = useT();
-  const { data: deviceGroups = [], isLoading: groupsLoading } = useDeviceGroups();
+  const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
+  const deviceGroups = groupsData?.groups ?? [];
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
 

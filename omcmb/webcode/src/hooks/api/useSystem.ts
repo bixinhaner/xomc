@@ -287,7 +287,10 @@ export function useSystemInfo() {
 export function useAllDeviceGroups() {
   return useQuery({
     queryKey: ['system', 'deviceGroups', 'all'],
-    queryFn: () => deviceService.getGroups(),
+    queryFn: async () => {
+      const result = await deviceService.getGroups();
+      return result.groups;
+    },
     staleTime: 5 * 60 * 1000,
   });
 }
