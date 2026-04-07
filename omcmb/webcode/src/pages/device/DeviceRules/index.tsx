@@ -55,7 +55,7 @@ import type {
   UpdateRuleRequest,
 } from '@/services/api/deviceRulesApi';
 import { deviceRulesApi } from '@/services/api/deviceRulesApi';
-import { useDomains } from '@/hooks/api/useTopology';
+import { useDomainTree } from '@/hooks/api/useTopology';
 
 const { Text } = Typography;
 
@@ -193,8 +193,8 @@ export default function DeviceRules() {
   const { data: rulesData, isLoading: rulesLoading, refetch: refetchRules } = useRules(listParams);
   const rules = rulesData?.items || [];
 
-  // 获取设备分组
-  const { data: domains } = useDomains();
+  // 获取设备分组树（使用树形结构避免重复数据）
+  const { data: domains } = useDomainTree();
 
   // 构建设备分组选项（显示层级结构，L1不可选）
   const deviceGroupOptions: { id: string; name: string; level: number; fullName: string; disabled?: boolean }[] = useMemo(() => {

@@ -532,7 +532,7 @@ func (m *DeviceMatcher) matchRule(ctx context.Context, rule *DeviceRule, req Mat
 // generateOperators 生成规则描述
 func (s *DeviceRuleService) generateOperators(mode string, nameRules []NameRule, lacList, tacList []int) string {
 	switch mode {
-	case "deviceName":
+	case "deviceName", "and", "or":
 		return s.generateNameOperators(nameRules)
 	case "lac":
 		return fmt.Sprintf("LAC: %v", lacList)
