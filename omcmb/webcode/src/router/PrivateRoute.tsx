@@ -1,56 +1,8 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { Spin } from 'antd';
 import { useUserStore } from '@/store/userStore';
-import { useState, useEffect } from 'react';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
-}
-
-/**
- * Custom hook to check if zustand persist has finished hydration.
- * Returns true immediately if persist is not configured or already hydrated.
- */
-function useHydrated() {
-  const [hydrated, setHydrated] = useState(() => {
-    // Check if persist middleware exists and if already hydrated
-    const persist = useUserStore.persist;
-    if (!persist) return true; // No persist middleware, consider as hydrated
-    return persist.hasHydrated?.() ?? true;
-  });
-
-  useEffect(() => {
-    const persist = useUserStore.persist;
-    if (!persist) {
-      setHydrated(true);
-      return;
-    }
-
-    // If already hydrated, set immediately
-    if (persist.hasHydrated?.()) {
-      setHydrated(true);
-      return;
-    }
-
-    // Subscribe to hydration finish event
-    const unsubFinish = persist.onFinishHydration?.(() => {
-      setHydrated(true);
-    });
-
-    // Fallback: Check again after a short delay (in case hydration is synchronous)
-    const timer = setTimeout(() => {
-      if (persist.hasHydrated?.()) {
-        setHydrated(true);
-      }
-    }, 50);
-
-    return () => {
-      unsubFinish?.();
-      clearTimeout(timer);
-    };
-  }, []);
-
-  return hydrated;
 }
 
 /**
@@ -67,16 +19,6 @@ function useHydrated() {
 export default function PrivateRoute({ children }: PrivateRouteProps) {
   const { isAuthenticated, accessToken, refreshToken, isTokenExpired } = useUserStore();
   const location = useLocation();
-  const hydrated = useHydrated();
-
-  // Wait for zustand persist to hydrate from localStorage
-  if (!hydrated) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
 
   // Not authenticated at all → redirect to login
   if (!isAuthenticated) {
