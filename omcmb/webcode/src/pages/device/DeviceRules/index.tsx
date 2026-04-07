@@ -198,27 +198,48 @@ export default function DeviceRules() {
 
   // 构建设备分组选项（只显示L2分组，带完整路径）
   const deviceGroupOptions: { id: string; name: string; level: number; fullName: string }[] = useMemo(() => {
+    // 使用 fullName 作为去重键，确保相同路径只出现一次
     const optionsMap = new Map<string, { id: string; name: string; level: number; fullName: string }>();
+    // 同时使用 id 作为辅助去重
+    const idSet = new Set<string>();
 
-    if (!domains) return [];
+    if (!domains || !Array.isArray(domains)) return [];
+
+    // 辅助函数：安全获取 level 值（处理字符串和数字类型）
+    const getLevel = (level: unknown): number => {
+      if (typeof level === 'number') return level;
+      if (typeof level === 'string') return parseInt(level, 10) || 0;
+      return 0;
+    };
 
     // 遍历分组树，只添加 L2 分组（带父级路径）
-    const buildOptions = (items: { id: string; name: string; level: number; children?: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[] }[], parentPath: string = '') => {
+    const buildOptions = (items: unknown[], parentPath: string = '') => {
+      if (!Array.isArray(items)) return;
+
       items.forEach((item) => {
-        if (item.level === 1) {
+        if (!item || typeof item !== 'object') return;
+
+        const group = item as { id?: string; name?: string; level?: unknown; children?: unknown[] };
+        const level = getLevel(group.level);
+        const id = String(group.id || '');
+        const name = String(group.name || '');
+
+        if (level === 1) {
           // L1 分组：不添加到选项，只遍历其子分组
-          if (item.children && item.children.length > 0) {
-            buildOptions(item.children as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[], item.name);
+          if (group.children && Array.isArray(group.children) && group.children.length > 0) {
+            buildOptions(group.children, name);
           }
-        } else if (item.level === 2) {
+        } else if (level === 2) {
           // L2 分组：添加到选项，显示完整路径（一级分组/二级分组）
-          const fullName = parentPath ? `${parentPath}/${item.name}` : item.name;
-          // 使用 Map 去重，避免重复数据
-          if (!optionsMap.has(item.id)) {
-            optionsMap.set(item.id, {
-              id: item.id,
-              name: item.name,
-              level: item.level,
+          const fullName = parentPath ? `${parentPath}/${name}` : name;
+
+          // 双重去重：先检查 id，再检查 fullName
+          if (id && !idSet.has(id) && !optionsMap.has(fullName)) {
+            idSet.add(id);
+            optionsMap.set(fullName, {
+              id: id,
+              name: name,
+              level: level,
               fullName: fullName,
             });
           }
@@ -226,8 +247,9 @@ export default function DeviceRules() {
       });
     };
 
-    buildOptions(domains as { id: string; name: string; level: number; children?: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[] }[]);
-    return Array.from(optionsMap.values());
+    buildOptions(domains as unknown[]);
+    // 按 fullName 排序
+    return Array.from(optionsMap.values()).sort((a, b) => a.fullName.localeCompare(b.fullName, 'zh-CN'));
   }, [domains]);
 
   // Mutations
@@ -721,6 +743,13 @@ export default function DeviceRules() {
         width: 160,
         render: (val) => (val ? new Date(val).toLocaleString('zh-CN') : ''),
       },
+      {
+        key: 'updatedAt',
+        title: t('table.updateTime'),
+        dataIndex: 'updatedAt',
+        width: 160,
+        render: (val) => (val ? new Date(val).toLocaleString('zh-CN') : ''),
+      },
     ],
     [handleToggle, handleEdit, handleDelete, handleActive, handleMoveUp, handleMoveDown, filteredRules.length, t]
   );
@@ -907,6 +936,11 @@ export default function DeviceRules() {
         }
       >
         <Form form={form} layout="vertical">
+          {/* 隐藏字段：priority */}
+          <Form.Item name="priority" hidden>
+            <Input type="hidden" />
+          </Form.Item>
+
           {/* 基本设置 */}
           <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
             {t('device.rules.basicSettings')}
