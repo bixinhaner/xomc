@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -23,6 +24,7 @@ var groupColumns = []string{
 	"id", "name", "parent_id", "carrier", "description", "sort_order",
 	"level", "status", "is_default", "remark", "created_by", "updated_by",
 	"created_at", "updated_at",
+	"matching_mode", "name_rule_list", "lac_list", "tac_list",
 }
 
 // PgDeviceGroupRepository implements DeviceGroupRepository using PostgreSQL.
@@ -53,6 +55,16 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 		group.Status = string(global.GroupStatusActive)
 	}
 
+	// 序列化 name_rule_list 为 JSONB
+	var nameRuleListJSON []byte
+	if len(group.NameRuleList) > 0 {
+		var err error
+		nameRuleListJSON, err = json.Marshal(group.NameRuleList)
+		if err != nil {
+			return fmt.Errorf("marshal name_rule_list: %w", err)
+		}
+	}
+
 	query, args, err := psql.Insert("device_groups").
 		Columns(groupColumns...).
 		Values(
@@ -62,6 +74,10 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 			nullableString(group.Remark), nullableString(group.CreatedBy),
 			nullableString(group.UpdatedBy),
 			group.CreatedAt, group.UpdatedAt,
+			nullableString(string(group.MatchingMode)),
+			nullableJSONB(nameRuleListJSON),
+			nullableIntArray(group.LACList),
+			nullableIntArray(group.TACList),
 		).
 		ToSql()
 	if err != nil {
@@ -94,6 +110,16 @@ func (r *PgDeviceGroupRepository) GetByID(ctx context.Context, id uuid.UUID) (*D
 func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup) error {
 	group.UpdatedAt = time.Now()
 
+	// 序列化 name_rule_list 为 JSONB
+	var nameRuleListJSON []byte
+	if len(group.NameRuleList) > 0 {
+		var err error
+		nameRuleListJSON, err = json.Marshal(group.NameRuleList)
+		if err != nil {
+			return fmt.Errorf("marshal name_rule_list: %w", err)
+		}
+	}
+
 	query, args, err := psql.Update("device_groups").
 		Set("name", group.Name).
 		Set("parent_id", nullableUUID(group.ParentID)).
@@ -103,6 +129,10 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 		Set("remark", nullableString(group.Remark)).
 		Set("updated_by", nullableString(group.UpdatedBy)).
 		Set("updated_at", group.UpdatedAt).
+		Set("matching_mode", nullableString(string(group.MatchingMode))).
+		Set("name_rule_list", nullableJSONB(nameRuleListJSON)).
+		Set("lac_list", nullableIntArray(group.LACList)).
+		Set("tac_list", nullableIntArray(group.TACList)).
 		Where(sq.Eq{"id": group.ID}).
 		ToSql()
 	if err != nil {
@@ -200,6 +230,7 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		SELECT dg.id, dg.name, dg.parent_id, dg.carrier, dg.description, dg.sort_order,
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
+		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
 		       COUNT(dgm.device_id) AS device_count
 		FROM device_groups dg
 		LEFT JOIN device_group_members dgm ON dgm.group_id = dg.id
@@ -598,15 +629,33 @@ func nullableUUID(id *uuid.UUID) interface{} {
 	return *id
 }
 
+func nullableJSONB(data []byte) interface{} {
+	if len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+func nullableIntArray(arr []int) interface{} {
+	if len(arr) == 0 {
+		return nil
+	}
+	return arr
+}
+
 func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 	var g DeviceGroup
 	var (
-		parentID    sql.NullString
-		carrier     sql.NullString
-		description sql.NullString
-		remark      sql.NullString
-		createdBy   sql.NullString
-		updatedBy   sql.NullString
+		parentID       sql.NullString
+		carrier        sql.NullString
+		description    sql.NullString
+		remark         sql.NullString
+		createdBy      sql.NullString
+		updatedBy      sql.NullString
+		matchingMode   sql.NullString
+		nameRuleList   []byte
+		lacList        []int
+		tacList        []int
 	)
 
 	err := row.Scan(
@@ -614,6 +663,7 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 		&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 		&remark, &createdBy, &updatedBy,
 		&g.CreatedAt, &g.UpdatedAt,
+		&matchingMode, &nameRuleList, &lacList, &tacList,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -641,6 +691,16 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 	if updatedBy.Valid {
 		g.UpdatedBy = updatedBy.String
 	}
+	if matchingMode.Valid {
+		g.MatchingMode = MatchingMode(matchingMode.String)
+	}
+	if len(nameRuleList) > 0 {
+		if err := json.Unmarshal(nameRuleList, &g.NameRuleList); err != nil {
+			return nil, fmt.Errorf("unmarshal name_rule_list: %w", err)
+		}
+	}
+	g.LACList = lacList
+	g.TACList = tacList
 
 	return &g, nil
 }
@@ -650,12 +710,16 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 	for rows.Next() {
 		var g DeviceGroup
 		var (
-			parentID    sql.NullString
-			carrier     sql.NullString
-			description sql.NullString
-			remark      sql.NullString
-			createdBy   sql.NullString
-			updatedBy   sql.NullString
+			parentID     sql.NullString
+			carrier      sql.NullString
+			description  sql.NullString
+			remark       sql.NullString
+			createdBy    sql.NullString
+			updatedBy    sql.NullString
+			matchingMode sql.NullString
+			nameRuleList []byte
+			lacList      []int
+			tacList      []int
 		)
 
 		err := rows.Scan(
@@ -663,6 +727,7 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
+			&matchingMode, &nameRuleList, &lacList, &tacList,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan group row: %w", err)
@@ -687,6 +752,16 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 		if updatedBy.Valid {
 			g.UpdatedBy = updatedBy.String
 		}
+		if matchingMode.Valid {
+			g.MatchingMode = MatchingMode(matchingMode.String)
+		}
+		if len(nameRuleList) > 0 {
+			if err := json.Unmarshal(nameRuleList, &g.NameRuleList); err != nil {
+				return nil, fmt.Errorf("unmarshal name_rule_list: %w", err)
+			}
+		}
+		g.LACList = lacList
+		g.TACList = tacList
 
 		items = append(items, g)
 	}
@@ -698,12 +773,16 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 	for rows.Next() {
 		var g DeviceGroup
 		var (
-			parentID    sql.NullString
-			carrier     sql.NullString
-			description sql.NullString
-			remark      sql.NullString
-			createdBy   sql.NullString
-			updatedBy   sql.NullString
+			parentID     sql.NullString
+			carrier      sql.NullString
+			description  sql.NullString
+			remark       sql.NullString
+			createdBy    sql.NullString
+			updatedBy    sql.NullString
+			matchingMode sql.NullString
+			nameRuleList []byte
+			lacList      []int
+			tacList      []int
 		)
 
 		err := rows.Scan(
@@ -711,6 +790,7 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
+			&matchingMode, &nameRuleList, &lacList, &tacList,
 			&g.DeviceCount,
 		)
 		if err != nil {
@@ -736,6 +816,16 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 		if updatedBy.Valid {
 			g.UpdatedBy = updatedBy.String
 		}
+		if matchingMode.Valid {
+			g.MatchingMode = MatchingMode(matchingMode.String)
+		}
+		if len(nameRuleList) > 0 {
+			if err := json.Unmarshal(nameRuleList, &g.NameRuleList); err != nil {
+				return nil, fmt.Errorf("unmarshal name_rule_list: %w", err)
+			}
+		}
+		g.LACList = lacList
+		g.TACList = tacList
 
 		items = append(items, g)
 	}

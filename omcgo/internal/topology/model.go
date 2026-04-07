@@ -7,24 +7,45 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// MatchingMode 匹配模式
+type MatchingMode string
+
+const (
+	MatchingModeDeviceName MatchingMode = "deviceName" // 设备名称匹配
+	MatchingModeLAC        MatchingMode = "lac"        // LAC 位置区码匹配
+	MatchingModeTAC        MatchingMode = "tac"        // TAC 跟踪区码匹配
+)
+
+// NameRule 设备名称匹配规则
+type NameRule struct {
+	Condition string `json:"condition"` // contain(包含), startWith(开头是), endWith(结尾是), equal(等于)
+	Value     string `json:"value"`     // 匹配值
+	AndOr     string `json:"andOr"`     // and, or (第一条不需要此字段)
+}
+
 // DeviceGroup represents a hierarchical group for organizing devices.
 type DeviceGroup struct {
-	ID          uuid.UUID         `json:"id"`
-	Name        string            `json:"name"`
-	ParentID    *uuid.UUID        `json:"parent_id,omitempty"`
-	Carrier     model.CarrierCode `json:"carrier,omitempty"`
-	Description string            `json:"description,omitempty"`
-	SortOrder   int               `json:"sort_order"`
-	Level       int               `json:"level"`
-	Status      string            `json:"status"`
-	IsDefault   bool              `json:"is_default"`
-	Remark      string            `json:"remark,omitempty"`
-	CreatedBy   string            `json:"created_by,omitempty"`
-	UpdatedBy   string            `json:"updated_by,omitempty"`
-	DeviceCount int               `json:"device_count"`
-	Children    []DeviceGroup     `json:"children,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID           uuid.UUID         `json:"id"`
+	Name         string            `json:"name"`
+	ParentID     *uuid.UUID        `json:"parent_id,omitempty"`
+	Carrier      model.CarrierCode `json:"carrier,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	SortOrder    int               `json:"sort_order"`
+	Level        int               `json:"level"`
+	Status       string            `json:"status"`
+	IsDefault    bool              `json:"is_default"`
+	Remark       string            `json:"remark,omitempty"`
+	CreatedBy    string            `json:"created_by,omitempty"`
+	UpdatedBy    string            `json:"updated_by,omitempty"`
+	DeviceCount  int               `json:"device_count"`
+	Children     []DeviceGroup     `json:"children,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+	// 匹配规则（仅 L2 分组使用）
+	MatchingMode MatchingMode `json:"matching_mode,omitempty"`
+	NameRuleList []NameRule   `json:"name_rule_list,omitempty"`
+	LACList      []int        `json:"lac_list,omitempty"`
+	TACList      []int        `json:"tac_list,omitempty"`
 }
 
 // DeviceGroupMember represents a device's membership in a group.
@@ -44,6 +65,11 @@ type CreateGroupRequest struct {
 	Remark    string          `json:"remark"`
 	SortOrder int             `json:"sort_order"`
 	SubGroups []SubGroupInput `json:"sub_groups,omitempty"`
+	// 匹配规则（仅 L2 分组使用）
+	MatchingMode string     `json:"matching_mode"`           // deviceName, lac, tac
+	NameRuleList []NameRule `json:"name_rule_list"`          // 设备名称匹配规则
+	LACList      []int      `json:"lac_list"`                // LAC 列表
+	TACList      []int      `json:"tac_list"`                // TAC 列表
 }
 
 // SubGroupInput defines a sub-group to create in batch.
@@ -55,9 +81,14 @@ type SubGroupInput struct {
 
 // UpdateGroupRequest is the payload for updating a device group.
 type UpdateGroupRequest struct {
-	Name      *string `json:"name"`
-	Remark    *string `json:"remark"`
-	SortOrder *int    `json:"sort_order"`
+	Name      *string    `json:"name"`
+	Remark    *string    `json:"remark"`
+	SortOrder *int       `json:"sort_order"`
+	// 匹配规则（仅 L2 分组使用）
+	MatchingMode *string    `json:"matching_mode"`
+	NameRuleList []NameRule `json:"name_rule_list"`
+	LACList      []int      `json:"lac_list"`
+	TACList      []int      `json:"tac_list"`
 }
 
 // CheckDeleteResponse describes the impact of deleting a group.

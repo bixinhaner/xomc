@@ -12,7 +12,7 @@ import { useDeviceGroups, useDeviceList, useCreateGroup, useUpdateGroup, useDele
 import { useT } from '@/hooks/useT';
 import type { Device, EngStatus } from '@/types/device';
 import type { NameFilterItem } from './types';
-import { generateId, generateOperators } from './types';
+import { generateId, generateOperators, parseRangeString } from './types';
 import GroupTreePanel from './GroupTreePanel';
 import DeviceListPanel from './DeviceListPanel';
 import GroupDialogs from './GroupDialogs';
@@ -293,17 +293,40 @@ export default function DeviceGrouping() {
   const handleSaveChildGroup = useCallback(async () => {
     try {
       const values = await addChildForm.validateFields();
+
+      // 构建匹配规则数据
+      let matchingMode: string | undefined;
+      let nameRuleList: NameFilterItem[] | undefined;
+      let lacList: number[] | undefined;
+      let tacList: number[] | undefined;
+
+      if (values.matchingMode === 'deviceName') {
+        matchingMode = 'deviceName';
+        // 过滤掉空值
+        nameRuleList = nameFilters.filter(f => f.value && f.value.trim() !== '');
+      } else if (values.matchingMode === 'lac') {
+        matchingMode = 'lac';
+        lacList = parseRangeString(values.tacRag || '');
+      } else if (values.matchingMode === 'tac') {
+        matchingMode = 'tac';
+        tacList = parseRangeString(values.tacRag || '');
+      }
+
       await createGroupMutation.mutateAsync({
         name: values.name,
         parent_id: parentGroupId ?? undefined,
         remark: '',
+        matching_mode: matchingMode,
+        name_rule_list: nameRuleList,
+        lac_list: lacList,
+        tac_list: tacList,
       });
       void message.success(t('common.success'));
       setAddChildDrawerOpen(false);
     } catch {
       // validation or API error
     }
-  }, [addChildForm, parentGroupId, createGroupMutation, message, t]);
+  }, [addChildForm, parentGroupId, createGroupMutation, message, t, nameFilters]);
 
   // --- Edit level-2 handler ---
   const handleSaveEditLevel2 = useCallback(async () => {

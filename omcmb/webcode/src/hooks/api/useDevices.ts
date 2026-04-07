@@ -1,11 +1,33 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { DeviceFilter } from '@/types/device';
 import type { PageRequest } from '@/types/pagination';
+import type { NameFilterItem } from '@/pages/device/DeviceGrouping/types';
 import { deviceService } from '@/mock/services/deviceService';
 import { deviceApi } from '@/services/api/deviceApi';
 import { createApiSwitch } from '@/services/apiSwitch';
 
 const api = createApiSwitch(deviceService, deviceApi);
+
+// 创建分组的请求类型
+export interface CreateGroupRequest {
+  name: string;
+  parent_id?: string;
+  remark?: string;
+  matching_mode?: 'deviceName' | 'lac' | 'tac';
+  name_rule_list?: NameFilterItem[];
+  lac_list?: number[];
+  tac_list?: number[];
+}
+
+// 更新分组的请求类型
+export interface UpdateGroupRequest {
+  name?: string;
+  remark?: string;
+  matching_mode?: 'deviceName' | 'lac' | 'tac';
+  name_rule_list?: NameFilterItem[];
+  lac_list?: number[];
+  tac_list?: number[];
+}
 
 export function useDeviceList(params: DeviceFilter & PageRequest) {
   return useQuery({
@@ -41,8 +63,7 @@ export function useDeviceGroups() {
 export function useCreateGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; parent_id?: string; remark?: string }) =>
-      api.createGroup(data),
+    mutationFn: (data: CreateGroupRequest) => api.createGroup(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
     },
@@ -52,7 +73,7 @@ export function useCreateGroup() {
 export function useUpdateGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; remark?: string } }) =>
+    mutationFn: ({ id, data }: { id: string; data: UpdateGroupRequest }) =>
       api.updateGroup(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });

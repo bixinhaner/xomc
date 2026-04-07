@@ -33,6 +33,43 @@ export const getAndOrOptions = (t: (key: string) => string) => [
 // Generate unique ID
 export const generateId = () => Math.random().toString(36).substring(2, 9);
 
+/**
+ * Parse range string to number array
+ * Examples: "1,2,3" => [1,2,3], "1-3" => [1,2,3], "1,2,10-12" => [1,2,10,11,12]
+ */
+export function parseRangeString(input: string): number[] {
+  if (!input || !input.trim()) return [];
+
+  const result: number[] = [];
+  const parts = input.split(',');
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    // Check if it's a range (e.g., "10-20")
+    if (trimmed.includes('-')) {
+      const [startStr, endStr] = trimmed.split('-');
+      const start = parseInt(startStr, 10);
+      const end = parseInt(endStr, 10);
+
+      if (!isNaN(start) && !isNaN(end) && start <= end) {
+        for (let i = start; i <= end; i++) {
+          result.push(i);
+        }
+      }
+    } else {
+      const num = parseInt(trimmed, 10);
+      if (!isNaN(num)) {
+        result.push(num);
+      }
+    }
+  }
+
+  // Remove duplicates and sort
+  return [...new Set(result)].sort((a, b) => a - b);
+}
+
 // Generate operators description
 export function generateOperators(
   rule: { matchingMode?: string; nameRuleList?: NameFilterItem[]; tacRag?: string },
