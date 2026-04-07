@@ -265,6 +265,16 @@ export default function DeviceRules() {
     () => [
       { name: 'operators', label: t('common.search'), type: 'input', placeholder: t('device.rules.searchPlaceholder') },
       {
+        name: 'targetGroupId',
+        label: t('device.rules.targetGroup'),
+        type: 'select',
+        options: deviceGroupOptions.map((g) => ({
+          label: g.fullName,
+          value: g.id,
+        })),
+        placeholder: t('common.pleaseSelect'),
+      },
+      {
         name: 'enable',
         label: t('table.status'),
         type: 'select',
@@ -274,13 +284,17 @@ export default function DeviceRules() {
         ],
       },
     ],
-    [t]
+    [t, deviceGroupOptions]
   );
 
   // 过滤规则列表
   const filteredRules = useMemo(() => {
     return rules.filter((r) => {
       if (filterParams.operators && !r.operators.toLowerCase().includes(String(filterParams.operators).toLowerCase())) {
+        return false;
+      }
+      // 按目标设备分组过滤
+      if (filterParams.targetGroupId && r.targetGroupId !== filterParams.targetGroupId) {
         return false;
       }
       if (filterParams.enable === '1' && !r.enabled) {
