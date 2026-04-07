@@ -196,45 +196,38 @@ export default function DeviceRules() {
   // 获取设备分组树（使用树形结构避免重复数据）
   const { data: domains } = useDomainTree();
 
-  // 构建设备分组选项（显示层级结构，L1不可选）
-  const deviceGroupOptions: { id: string; name: string; level: number; fullName: string; disabled?: boolean }[] = useMemo(() => {
-    const options: { id: string; name: string; level: number; fullName: string; disabled?: boolean }[] = [];
+  // 构建设备分组选项（只显示L2分组，带完整路径）
+  const deviceGroupOptions: { id: string; name: string; level: number; fullName: string }[] = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; name: string; level: number; fullName: string }>();
 
-    if (!domains) return options;
+    if (!domains) return [];
 
-    // 遍历分组树，构建层级选项
+    // 遍历分组树，只添加 L2 分组（带父级路径）
     const buildOptions = (items: { id: string; name: string; level: number; children?: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[] }[], parentPath: string = '') => {
       items.forEach((item) => {
-        const fullName = parentPath ? `${parentPath}/${item.name}` : item.name;
-
         if (item.level === 1) {
-          // L1 分组：添加但标记为不可选择
-          options.push({
-            id: item.id,
-            name: item.name,
-            level: item.level,
-            fullName: item.name,
-            disabled: true,
-          });
-          // 继续处理子分组
+          // L1 分组：不添加到选项，只遍历其子分组
           if (item.children && item.children.length > 0) {
             buildOptions(item.children as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[], item.name);
           }
         } else if (item.level === 2) {
-          // L2 分组：可选择，显示完整路径
-          options.push({
-            id: item.id,
-            name: item.name,
-            level: item.level,
-            fullName: fullName,
-            disabled: false,
-          });
+          // L2 分组：添加到选项，显示完整路径（一级分组/二级分组）
+          const fullName = parentPath ? `${parentPath}/${item.name}` : item.name;
+          // 使用 Map 去重，避免重复数据
+          if (!optionsMap.has(item.id)) {
+            optionsMap.set(item.id, {
+              id: item.id,
+              name: item.name,
+              level: item.level,
+              fullName: fullName,
+            });
+          }
         }
       });
     };
 
     buildOptions(domains as { id: string; name: string; level: number; children?: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[] }[]);
-    return options;
+    return Array.from(optionsMap.values());
   }, [domains]);
 
   // Mutations
@@ -938,10 +931,8 @@ export default function DeviceRules() {
               optionFilterProp="label"
             >
               {deviceGroupOptions.map((g) => (
-                <Select.Option key={g.id} value={g.id} disabled={g.disabled}>
-                  <span style={{ color: g.disabled ? 'var(--color-text-disabled)' : 'inherit' }}>
-                    {g.fullName}
-                  </span>
+                <Select.Option key={g.id} value={g.id} label={g.fullName}>
+                  {g.fullName}
                 </Select.Option>
               ))}
             </Select>
