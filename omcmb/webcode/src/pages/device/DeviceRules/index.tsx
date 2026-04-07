@@ -196,22 +196,44 @@ export default function DeviceRules() {
   // 获取设备分组
   const { data: domains } = useDomains();
 
-  // 扁平化设备分组（仅L2分组）
-  const deviceGroupOptions: DeviceGroupOption[] = useMemo(() => {
-    const options: DeviceGroupOption[] = [];
-    const flatten = (items: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[]) => {
+  // 构建设备分组选项（显示层级结构，L1不可选）
+  const deviceGroupOptions: { id: string; name: string; level: number; fullName: string; disabled?: boolean }[] = useMemo(() => {
+    const options: { id: string; name: string; level: number; fullName: string; disabled?: boolean }[] = [];
+
+    if (!domains) return options;
+
+    // 遍历分组树，构建层级选项
+    const buildOptions = (items: { id: string; name: string; level: number; children?: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[] }[], parentPath: string = '') => {
       items.forEach((item) => {
-        if (item.level === 2) {
-          options.push({ id: item.id, name: item.name, level: item.level });
-        }
-        if (item.children) {
-          flatten(item.children as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[]);
+        const fullName = parentPath ? `${parentPath}/${item.name}` : item.name;
+
+        if (item.level === 1) {
+          // L1 分组：添加但标记为不可选择
+          options.push({
+            id: item.id,
+            name: item.name,
+            level: item.level,
+            fullName: item.name,
+            disabled: true,
+          });
+          // 继续处理子分组
+          if (item.children && item.children.length > 0) {
+            buildOptions(item.children as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[], item.name);
+          }
+        } else if (item.level === 2) {
+          // L2 分组：可选择，显示完整路径
+          options.push({
+            id: item.id,
+            name: item.name,
+            level: item.level,
+            fullName: fullName,
+            disabled: false,
+          });
         }
       });
     };
-    if (domains) {
-      flatten(domains as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[]);
-    }
+
+    buildOptions(domains as { id: string; name: string; level: number; children?: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[] }[]);
     return options;
   }, [domains]);
 
@@ -912,8 +934,17 @@ export default function DeviceRules() {
           >
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={deviceGroupOptions.map((g) => ({ label: g.name, value: g.id }))}
-            />
+              showSearch
+              optionFilterProp="label"
+            >
+              {deviceGroupOptions.map((g) => (
+                <Select.Option key={g.id} value={g.id} disabled={g.disabled}>
+                  <span style={{ color: g.disabled ? 'var(--color-text-disabled)' : 'inherit' }}>
+                    {g.fullName}
+                  </span>
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
 
           <Form.Item
