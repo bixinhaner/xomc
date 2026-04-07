@@ -82,6 +82,7 @@ type SubGroupInput struct {
 // UpdateGroupRequest is the payload for updating a device group.
 type UpdateGroupRequest struct {
 	Name      *string    `json:"name"`
+	ParentID  *string    `json:"parent_id"` // 修改父级分组（L1 转 L2 或 L2 转 L1）
 	Remark    *string    `json:"remark"`
 	SortOrder *int       `json:"sort_order"`
 	// 匹配规则（仅 L2 分组使用）

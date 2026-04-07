@@ -262,10 +262,11 @@ export default function DeviceGrouping() {
       });
       void message.success(t('common.success'));
       setEditModalOpen(false);
+      void refetchGroups();
     } catch {
       // validation or API error
     }
-  }, [editForm, editingGroupId, updateGroupMutation, message, t]);
+  }, [editForm, editingGroupId, updateGroupMutation, message, t, refetchGroups]);
 
   // --- Add child group filter handlers ---
   const handleAddFilter = useCallback(() => {

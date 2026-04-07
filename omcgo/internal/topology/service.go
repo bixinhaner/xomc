@@ -158,8 +158,45 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 		return nil, commonerrors.NewBusinessError(global.ErrCodeGroupIsDefault, "cannot modify default group", nil)
 	}
 
+	// 处理 ParentID 变更（L1 ↔ L2 转换）
+	if req.ParentID != nil {
+		newParentID := *req.ParentID
+		// 不能将自己设为父级
+		if newParentID == id.String() {
+			return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "cannot set self as parent", nil)
+		}
+		// 如果新父级不为空，需要验证父级存在且不能是自己的子级
+		if newParentID != "" {
+			parentUUID, err := uuid.Parse(newParentID)
+			if err != nil {
+				return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "invalid parent_id format", nil)
+			}
+			// 检查父级是否存在
+			parent, err := s.repo.GetByID(ctx, parentUUID)
+			if err != nil {
+				return nil, commonerrors.NewBusinessError(global.ErrCodeGroupNotFound, "parent group not found", nil)
+			}
+			// 检查是否会形成循环（父级不能是当前分组的子级）
+			if parent.ParentID != nil && *parent.ParentID == id {
+				return nil, commonerrors.NewBusinessError(global.ErrCodeGroupParentInvalid, "cannot set a child group as parent", nil)
+			}
+			group.ParentID = &parentUUID
+		} else {
+			// 清空 parent_id，变为 L1 分组
+			group.ParentID = nil
+		}
+	}
+
+	// 确定用于名称唯一性检查的父级 ID
+	checkParentID := group.ParentID
+	if req.ParentID != nil && *req.ParentID != "" {
+		if parsed, err := uuid.Parse(*req.ParentID); err == nil {
+			checkParentID = &parsed
+		}
+	}
+
 	if req.Name != nil {
-		exists, err := s.repo.ExistsByParentAndName(ctx, group.ParentID, *req.Name, &id)
+		exists, err := s.repo.ExistsByParentAndName(ctx, checkParentID, *req.Name, &id)
 		if err != nil {
 			return nil, fmt.Errorf("check name uniqueness: %w", err)
 		}
