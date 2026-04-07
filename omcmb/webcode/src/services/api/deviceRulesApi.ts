@@ -22,9 +22,9 @@ interface BackendDeviceRule {
 }
 
 interface BackendNameRule {
-  type: string;
-  operator: string;
+  condition: string;
   value: string;
+  andOr: string;
 }
 
 interface BackendRuleTask {
@@ -43,8 +43,8 @@ interface BackendRuleTask {
 
 // Frontend model types (camelCase)
 export interface NameRule {
-  type: 'prefix' | 'suffix' | 'contains' | 'regex';
-  operator: string;
+  type: 'contain' | 'notContain' | 'startWith' | 'endWith';
+  operator: 'and' | 'or';
   value: string;
 }
 
@@ -136,9 +136,18 @@ export interface ApplyRuleRequest {
 // Mapper functions
 function mapBackendNameRule(bnr: BackendNameRule): NameRule {
   return {
-    type: bnr.type as NameRule['type'],
-    operator: bnr.operator,
+    type: bnr.condition as NameRule['type'],
+    operator: (bnr.andOr || 'and') as NameRule['operator'],
     value: bnr.value,
+  };
+}
+
+// Convert frontend NameRule to backend format
+function mapFrontendNameRule(nr: NameRule): BackendNameRule {
+  return {
+    condition: nr.type,
+    value: nr.value,
+    andOr: nr.operator,
   };
 }
 
@@ -214,7 +223,7 @@ const deviceRulesApi = {
       target_group_id: req.targetGroupId,
       enabled: req.enabled ?? false,
       matching_mode: req.matchingMode || 'and',
-      name_rule_list: req.nameRuleList,
+      name_rule_list: req.nameRuleList?.map(mapFrontendNameRule),
       lac_list: req.lacList,
       tac_list: req.tacList,
       description: req.description,
@@ -231,7 +240,7 @@ const deviceRulesApi = {
     if (req.targetGroupId !== undefined) payload.target_group_id = req.targetGroupId;
     if (req.enabled !== undefined) payload.enabled = req.enabled;
     if (req.matchingMode !== undefined) payload.matching_mode = req.matchingMode;
-    if (req.nameRuleList !== undefined) payload.name_rule_list = req.nameRuleList;
+    if (req.nameRuleList !== undefined) payload.name_rule_list = req.nameRuleList.map(mapFrontendNameRule);
     if (req.lacList !== undefined) payload.lac_list = req.lacList;
     if (req.tacList !== undefined) payload.tac_list = req.tacList;
     if (req.description !== undefined) payload.description = req.description;
