@@ -2286,6 +2286,13 @@ const messages: Record<string, string> = {
   'device.rules.connectionTimeout': '连接超时',
   'device.rules.enableStatus':      '启用状态',
   'device.rules.searchPlaceholder': '请输入规则内容搜索',
+  'device.rules.ruleName':          '规则名称',
+  'device.rules.inputRuleName':     '请输入规则名称',
+  'device.rules.nameMatch':         '名称匹配',
+  'device.rules.mustEnableFirst':   '请先启用规则',
+  'device.rules.taskInProgress':    '任务进行中',
+  'device.rules.taskCompleted':     '任务完成，匹配 {matched} 个设备，失败 {failed} 个',
+  'device.rules.applyConfirm':      '确认将规则 "{name}" 应用到所有匹配设备？',
 
   // Filter conditions
   'filter.contain':                 '包含',
