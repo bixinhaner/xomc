@@ -45,7 +45,7 @@ export default function DeviceGrouping() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [addForm] = Form.useForm<{ name: string; description: string }>();
+  const [addForm] = Form.useForm<{ name: string; parentId?: string; description: string }>();
   const [editForm] = Form.useForm<{ name: string; description: string }>();
 
   // --- Add child group state ---
@@ -561,7 +561,6 @@ export default function DeviceGrouping() {
       <GroupDialogs
         addModalOpen={addModalOpen}
         addForm={addForm}
-        groups={groups}
         groups={groups}
         onAddModalOk={() => void handleAddGroup()}
         onAddModalCancel={() => setAddModalOpen(false)}

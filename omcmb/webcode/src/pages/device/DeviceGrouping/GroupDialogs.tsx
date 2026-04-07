@@ -13,7 +13,7 @@ import {
 const { Text } = Typography;
 
 export interface GroupDialogsProps {
-  // Add Level-1 Group Modal
+  // Add Level-1 Group Drawer
   addModalOpen: boolean;
   addForm: FormInstance<{ name: string; parentId?: string; description: string }>;
   groups: GroupItem[];
@@ -100,37 +100,73 @@ export default function GroupDialogs({
 
   return (
     <>
-      {/* Add Group Modal */}
-      <Modal
-        title={t('common.add')}
+      {/* Add Group Drawer - 使用 Drawer 与新增子分组保持一致 */}
+      <Drawer
+        title={t('device.addGroup')}
         open={addModalOpen}
-        onOk={onAddModalOk}
-        onCancel={onAddModalCancel}
-        okText={t('common.confirm')}
+        onClose={onAddModalCancel}
+        width={520}
+        destroyOnClose
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={onAddModalCancel}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={onAddModalOk}>
+              {t('common.confirm')}
+            </Button>
+          </div>
+        }
       >
-        <Form form={addForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="name"
-            label={t('table.name')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
-          >
-            <Input placeholder={t('common.placeholder')} />
-          </Form.Item>
-          <Form.Item name="parentId" label={t('device.parentGroup')} tooltip={t('device.parentGroupTooltip')}>
-            <TreeSelect
-              treeData={parentGroupTreeData}
-              placeholder={t('device.selectParentGroup')}
-              allowClear
-              showSearch
-              treeNodeFilterProp="title"
-              treeDefaultExpandAll
-            />
-          </Form.Item>
-          <Form.Item name="description" label={t('table.description')}>
-            <Input.TextArea rows={3} placeholder={t('common.placeholder')} />
-          </Form.Item>
+        <Form form={addForm} layout="vertical">
+          {/* Basic info */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8,
+            marginBottom: 16
+          }}>
+            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('device.basicInfo')}
+            </div>
+            <Form.Item
+              name="name"
+              label={t('table.name')}
+              rules={[{ required: true, message: t('common.placeholder') }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input placeholder={t('common.placeholder')} maxLength={50} />
+            </Form.Item>
+            <Form.Item
+              name="parentId"
+              label={t('device.parentGroup')}
+              tooltip={t('device.parentGroupTooltip')}
+              style={{ marginBottom: 0 }}
+            >
+              <TreeSelect
+                treeData={parentGroupTreeData}
+                placeholder={t('device.selectParentGroup')}
+                allowClear
+                showSearch
+                treeNodeFilterProp="title"
+                treeDefaultExpandAll
+              />
+            </Form.Item>
+          </div>
+
+          {/* Description */}
+          <div style={{
+            padding: '16px',
+            background: 'var(--color-fill-quaternary)',
+            borderRadius: 8
+          }}>
+            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
+              {t('table.description')}
+            </div>
+            <Form.Item name="description" style={{ marginBottom: 0 }}>
+              <Input.TextArea rows={3} placeholder={t('common.placeholder')} maxLength={200} />
+            </Form.Item>
+          </div>
         </Form>
-      </Modal>
+      </Drawer>
 
       {/* Edit Group Modal */}
       <Modal

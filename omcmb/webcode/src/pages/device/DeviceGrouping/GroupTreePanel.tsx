@@ -124,9 +124,8 @@ function buildTreeData(
 
     return {
       key: group.id,
-      // L1 分组：如果没有子分组，则可以选择；如果有子分组，则不可选择（引导用户选择子分组）
-      // L2 分组：始终可以选择
-      selectable: isLevel1 ? children.length === 0 : true,
+      // 所有分组都可以点击，即使没有设备或子分组
+      selectable: true,
       title: (
         <div
           style={{
@@ -221,7 +220,20 @@ export default function GroupTreePanel({
         />
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
+        <style>{`
+          .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+            background-color: var(--color-primary-100, #e6f4ff) !important;
+            font-weight: 500;
+          }
+          .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .ant-tree-title {
+            color: var(--color-primary-700, #1d4ed8);
+          }
+          .group-tree .ant-tree-treenode-selected > .ant-tree-node-content-wrapper {
+            background-color: var(--color-primary-100, #e6f4ff) !important;
+          }
+        `}</style>
         <Tree
+          className="group-tree"
           treeData={[
             {
               key: '__all__',
@@ -248,6 +260,25 @@ export default function GroupTreePanel({
             // L2 分组（有 parentId）或没有子分组的 L1 分组可以被选择
             if (clickedGroup) {
               onSelect(key);
+            }
+          }}
+          onDoubleClick={(_, node) => {
+            // 双击 L1 分组（根分组）时，切换展开/折叠状态
+            const nodeKey = node.key as string;
+            if (nodeKey && nodeKey !== '__all__') {
+              const clickedGroup = groups.find((g) => g.id === nodeKey);
+              // 只有 L1 分组（没有 parentId）才处理双击展开
+              if (clickedGroup && !clickedGroup.parentId) {
+                setExpandedKeys((prev) => {
+                  if (prev.includes(nodeKey)) {
+                    // 如果已展开，则折叠
+                    return prev.filter((k) => k !== nodeKey);
+                  } else {
+                    // 如果未展开，则展开
+                    return [...prev, nodeKey];
+                  }
+                });
+              }
             }
           }}
           blockNode
