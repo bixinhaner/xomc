@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -471,34 +473,51 @@ func (r *PgDeviceRuleRepository) GetNextPriority(ctx context.Context) (int, erro
 }
 
 // BatchUpdatePriority 批量更新优先级
+// 使用单条 UPDATE ... CASE WHEN 语句原子更新，避免唯一约束冲突
 func (r *PgDeviceRuleRepository) BatchUpdatePriority(ctx context.Context, items []RuleSortItem) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+	if len(items) == 0 {
+		return nil
 	}
-	defer tx.Rollback(ctx)
 
-	for _, item := range items {
+	// 构建: UPDATE device_rules SET priority = CASE WHEN id=$1 THEN $2 WHEN id=$3 THEN $4 ... END, updated_at = $n WHERE id IN ($1,$3,...)
+	args := make([]interface{}, 0, len(items)*2+1)
+	caseParts := make([]string, 0, len(items))
+	inParts := make([]string, 0, len(items))
+
+	for i, item := range items {
 		id, err := uuid.Parse(item.ID)
 		if err != nil {
 			return fmt.Errorf("parse rule ID: %w", err)
 		}
 
-		query, args, err := sq.Update("device_rules").
-			Set("priority", item.Priority).
-			Set("updated_at", time.Now()).
-			Where(sq.Eq{"id": id}).
-			PlaceholderFormat(sq.Dollar).
-			ToSql()
-		if err != nil {
-			return fmt.Errorf("build update priority SQL: %w", err)
-		}
-
-		_, err = tx.Exec(ctx, query, args...)
-		if err != nil {
-			return fmt.Errorf("update priority: %w", err)
-		}
+		idxID := i*2 + 1
+		idxVal := i*2 + 2
+		caseParts = append(caseParts, fmt.Sprintf("WHEN id = $%d THEN $%d", idxID, idxVal))
+		inParts = append(inParts, fmt.Sprintf("$%d", idxID))
+		args = append(args, id, item.Priority)
 	}
 
-	return tx.Commit(ctx)
+	// 添加 updated_at 参数
+	updatedAtIdx := len(items)*2 + 1
+	args = append(args, time.Now())
+
+	// 构建完整 SQL
+	var sqlBuilder strings.Builder
+	sqlBuilder.WriteString("UPDATE device_rules SET priority = CASE ")
+	for _, part := range caseParts {
+		sqlBuilder.WriteString(part)
+		sqlBuilder.WriteString(" ")
+	}
+	sqlBuilder.WriteString("END, updated_at = $")
+	sqlBuilder.WriteString(strconv.Itoa(updatedAtIdx))
+	sqlBuilder.WriteString(" WHERE id IN (")
+	sqlBuilder.WriteString(strings.Join(inParts, ", "))
+	sqlBuilder.WriteString(")")
+
+	_, err := r.pool.Exec(ctx, sqlBuilder.String(), args...)
+	if err != nil {
+		return fmt.Errorf("batch update priority: %w", err)
+	}
+
+	return nil
 }
