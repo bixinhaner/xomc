@@ -356,6 +356,14 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	topologyHandler := topology.NewHandler(groupRepo, groupService, siteRepo, topoNodeRepo, topoEdgeRepo)
 	topologyHandler.RegisterRoutes(permGroup("devices"))
 
+	// Device Rules routes → resource "devices"
+	ruleRepo := topology.NewPgDeviceRuleRepository(pgPool)
+	ruleTaskRepo := topology.NewPgRuleTaskRepository(pgPool)
+	matcher := topology.NewDeviceMatcher(groupRepo, pgPool, logger)
+	ruleService := topology.NewDeviceRuleService(ruleRepo, ruleTaskRepo, groupRepo, matcher, pgPool, 4, logger)
+	ruleHandler := topology.NewRuleHandler(ruleService)
+	ruleHandler.RegisterRoutes(permGroup("devices"))
+
 	// PM routes → resource "pm"
 	pmHandler := pm.NewHandler(pmCounterRepo, pmKPIRepo, pmKPIEngine, pmTaskRepo, pmFileStore, minioClient, cfg.MinIO.Buckets.PMFiles, logger)
 	pmMetrics := pm.NewPMMetrics(metricsReg)

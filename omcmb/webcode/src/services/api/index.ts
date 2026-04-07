@@ -31,3 +31,4 @@ export { configSyncApi } from './configSyncApi';
 export { backupApi } from './backupApi';
 export { fileApi } from './fileApi';
 export { mmlApi } from './mmlApi';
+export { deviceRulesApi } from './deviceRulesApi';

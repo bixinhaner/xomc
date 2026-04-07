@@ -24,6 +24,9 @@ type GroupWriter interface {
 	Create(ctx context.Context, group *DeviceGroup) error
 	Update(ctx context.Context, group *DeviceGroup) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	// 规则绑定管理
+	UpdateBoundRule(ctx context.Context, groupID, ruleID uuid.UUID) error
+	ClearBoundRule(ctx context.Context, groupID uuid.UUID) error
 }
 
 // GroupMembership manages device-group associations.

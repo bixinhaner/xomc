@@ -833,4 +833,48 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 	return items, rows.Err()
 }
 
+// UpdateBoundRule 更新分组的绑定规则
+func (r *PgDeviceGroupRepository) UpdateBoundRule(ctx context.Context, groupID, ruleID uuid.UUID) error {
+	query, args, err := psql.Update("device_groups").
+		Set("bound_rule_id", ruleID).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": groupID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update bound rule SQL: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update bound rule: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("group not found: %s", groupID)
+	}
+
+	return nil
+}
+
+// ClearBoundRule 清除分组的绑定规则
+func (r *PgDeviceGroupRepository) ClearBoundRule(ctx context.Context, groupID uuid.UUID) error {
+	query, args, err := psql.Update("device_groups").
+		Set("bound_rule_id", nil).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": groupID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build clear bound rule SQL: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("clear bound rule: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("group not found: %s", groupID)
+	}
+
+	return nil
+}
+
 var _ DeviceGroupRepository = (*PgDeviceGroupRepository)(nil)

@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   App,
   Button,
-  Divider,
   Drawer,
   Dropdown,
   Form,
@@ -17,6 +16,7 @@ import {
   Tree,
   Typography,
   Radio,
+  Divider,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -24,12 +24,12 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExportOutlined,
-  EyeOutlined,
   PlusOutlined,
   SyncOutlined,
   MenuOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -37,10 +37,29 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import {
+  useRules,
+  useCreateRule,
+  useUpdateRule,
+  useDeleteRule,
+  useToggleRule,
+  useApplyRule,
+  useBatchSortRules,
+  useRuleTasks,
+} from '@/hooks/api/useDeviceRules';
+import type {
+  DeviceRule,
+  NameRule,
+  RuleTask,
+  CreateRuleRequest,
+  UpdateRuleRequest,
+} from '@/services/api/deviceRulesApi';
+import { deviceRulesApi } from '@/services/api/deviceRulesApi';
+import { useDomains } from '@/hooks/api/useTopology';
 
 const { Text } = Typography;
 
-// 名称过滤条件
+// 内部使用的过滤条件结构
 interface NameFilterItem {
   id: string;
   condition: 'contain' | 'notContain' | 'startWith' | 'endWith';
@@ -48,75 +67,14 @@ interface NameFilterItem {
   andOr?: 'and' | 'or';
 }
 
-// 设备归属规则
-interface DeviceGroupRule extends Record<string, unknown> {
+// 设备组选项（扁平化）
+interface DeviceGroupOption {
   id: string;
-  order: number;
-  moveToGroupId: string;
-  moveToGroupName: string;
-  enable: '0' | '1';
-  matchingMode: 'deviceName' | 'lac' | 'tac';
-  nameRuleList: NameFilterItem[];
-  tacRag: string;
-  operators: string;
-  createTime: string;
+  name: string;
+  level: number;
 }
 
-// 设备组选项
-interface DeviceGroup {
-  id: string;
-  groupName: string;
-}
-
-// 设备组树节点
-interface DeviceGroupTreeNode {
-  id: string;
-  groupName: string;
-  children?: DeviceGroupTreeNode[];
-}
-
-// Mock 设备组数据
-const MOCK_DEVICE_GROUPS: DeviceGroup[] = [
-  { id: '1', groupName: '默认设备组' },
-  { id: '2', groupName: '北京区域' },
-  { id: '3', groupName: '上海区域' },
-  { id: '4', groupName: '广州区域' },
-  { id: '5', groupName: '测试设备组' },
-];
-
-// Mock 设备组树 - 一级节点为区域，二级节点为设备组
-const MOCK_GROUP_TREE: DeviceGroupTreeNode[] = [
-  {
-    id: 'region-bj',
-    groupName: '北京区域',
-    children: [
-      { id: 'bj-group-1', groupName: '北京核心网' },
-      { id: 'bj-group-2', groupName: '北京郊区' },
-    ],
-  },
-  {
-    id: 'region-sh',
-    groupName: '上海区域',
-    children: [
-      { id: 'sh-group-1', groupName: '上海核心网' },
-      { id: 'sh-group-2', groupName: '上海郊区' },
-    ],
-  },
-  {
-    id: 'region-gz',
-    groupName: '广州区域',
-    children: [
-      { id: 'gz-group-1', groupName: '广州核心网' },
-      { id: 'gz-group-2', groupName: '广州郊区' },
-    ],
-  },
-  {
-    id: '1',
-    groupName: '默认设备组',
-  },
-];
-
-// 过滤条件选项 - 使用函数以便获取 t
+// 过滤条件选项
 const getFilterConditionOptions = (t: (key: string) => string) => [
   { label: t('filter.contain'), value: 'contain' },
   { label: t('filter.notContain'), value: 'notContain' },
@@ -134,11 +92,25 @@ const getAndOrOptions = (t: (key: string) => string) => [
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 // 生成操作描述
-function generateOperators(rule: Partial<DeviceGroupRule>, t: (key: string) => string): string {
-  if (rule.matchingMode === 'deviceName' && rule.nameRuleList?.length) {
+function generateOperators(
+  matchingMode: string,
+  nameRuleList: NameRule[] | null,
+  lacList: number[] | null,
+  tacList: number[] | null,
+  t: (key: string) => string
+): string {
+  if (matchingMode === 'and' && nameRuleList?.length) {
+    // 将 NameRule 转换为 NameFilterItem 格式进行处理
+    const filters: NameFilterItem[] = nameRuleList.map((rule, index) => ({
+      id: String(index),
+      condition: rule.type as NameFilterItem['condition'],
+      value: rule.value,
+      andOr: index > 0 ? 'and' : undefined,
+    }));
+
     const orGroups: NameFilterItem[][] = [[]];
 
-    rule.nameRuleList.forEach((filter, index) => {
+    filters.forEach((filter, index) => {
       if (filter.value && filter.value.trim() !== '') {
         if (index > 0 && filter.andOr === 'or') {
           orGroups.push([]);
@@ -163,107 +135,93 @@ function generateOperators(rule: Partial<DeviceGroupRule>, t: (key: string) => s
       return filteredGroups.length > 1 || group.length > 1 ? `(${groupText})` : groupText;
     });
 
-    let result = groupParts.join(` ${t('filter.or')} `);
-    return result;
-  } else if (rule.matchingMode === 'tac') {
-    return `TAC: ${rule.tacRag || ''}`;
-  } else if (rule.matchingMode === 'lac') {
-    return `LAC: ${rule.tacRag || ''}`;
+    return groupParts.join(` ${t('filter.or')} `);
+  } else if (matchingMode === 'or' && nameRuleList?.length) {
+    // OR 模式
+    const parts = nameRuleList.map((rule) => `"${rule.value}"`);
+    return `${t('filter.or')}: ${parts.join(', ')}`;
+  } else if (tacList?.length) {
+    return `TAC: ${tacList.join(', ')}`;
+  } else if (lacList?.length) {
+    return `LAC: ${lacList.join(', ')}`;
   }
   return '';
 }
 
-// Mock 规则数据
-const MOCK_RULES: DeviceGroupRule[] = [
-  {
-    id: '1',
-    order: 1,
-    moveToGroupId: '2',
-    moveToGroupName: 'Beijing Region',
-    enable: '1',
-    matchingMode: 'deviceName',
-    nameRuleList: [{ id: '1', condition: 'contain', value: 'BJ-' }],
-    tacRag: '',
-    operators: '包含 "BJ-"',
-    createTime: '2024-01-10 09:00:00',
-  },
-  {
-    id: '2',
-    order: 2,
-    moveToGroupId: '3',
-    moveToGroupName: 'Shanghai Region',
-    enable: '1',
-    matchingMode: 'deviceName',
-    nameRuleList: [
-      { id: '2', condition: 'contain', value: 'SH-' },
-      { id: '3', condition: 'contain', value: '-5G-', andOr: 'and' },
-    ],
-    tacRag: '',
-    operators: '必须 (包含 "SH-" 且 包含 "-5G-")',
-    createTime: '2024-01-12 10:00:00',
-  },
-  {
-    id: '3',
-    order: 3,
-    moveToGroupId: '4',
-    moveToGroupName: 'Guangzhou Region',
-    enable: '0',
-    matchingMode: 'tac',
-    nameRuleList: [],
-    tacRag: '1-100,200-300',
-    operators: 'TAC: 1-100,200-300',
-    createTime: '2024-01-15 11:00:00',
-  },
-  {
-    id: '4',
-    order: 4,
-    moveToGroupId: '5',
-    moveToGroupName: 'Test Group',
-    enable: '1',
-    matchingMode: 'deviceName',
-    nameRuleList: [{ id: '4', condition: 'startWith', value: 'TEST' }],
-    tacRag: '',
-    operators: '以...开始 "TEST"',
-    createTime: '2024-01-20 08:00:00',
-  },
-];
+// 迁移任务状态
+type MigrationStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-// 设备类型
-const DEVICE_TYPE = 'ENB';
-const SUPPORT_GSM = true;
+// 迁移任务（用于UI显示）
+interface MigrationTask {
+  id: string;
+  sn: string;
+  deviceName: string;
+  sourceGroup: string;
+  targetGroup: string;
+  status: MigrationStatus;
+  progress: number;
+  message?: string;
+}
 
 export default function DeviceRules() {
   const t = useT();
   const { modal, message } = App.useApp();
-  const [rules, setRules] = useState<DeviceGroupRule[]>(MOCK_RULES);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [activeModalOpen, setActiveModalOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<DeviceGroupRule | null>(null);
+  const [editingRule, setEditingRule] = useState<DeviceRule | null>(null);
   const [form] = Form.useForm();
   const [nameFilters, setNameFilters] = useState<NameFilterItem[]>([
     { id: generateId(), condition: 'contain', value: '' },
   ]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
-  const [currentEditingRule, setCurrentEditingRule] = useState<DeviceGroupRule | null>(null);
-
-  // 迁移任务抽屉状态
-  type MigrationStatus = 'pending' | 'running' | 'success' | 'failed';
-  interface MigrationTask {
-    id: string;
-    sn: string;
-    deviceName: string;
-    sourceGroup: string;
-    targetGroup: string;
-    status: MigrationStatus;
-    progress: number;
-    message?: string;
-  }
+  const [currentEditingRule, setCurrentEditingRule] = useState<DeviceRule | null>(null);
   const [migrationDrawerOpen, setMigrationDrawerOpen] = useState(false);
   const [migrationTasks, setMigrationTasks] = useState<MigrationTask[]>([]);
 
   // 匹配模式
   const matchingMode = Form.useWatch('matchingMode', form);
+
+  // 获取规则列表
+  const listParams = useMemo(() => ({
+    page: 1,
+    pageSize: 100,
+    enabled: filterParams.enable === '1' ? true : filterParams.enable === '0' ? false : undefined,
+    name: filterParams.operators as string | undefined,
+  }), [filterParams]);
+
+  const { data: rulesData, isLoading: rulesLoading, refetch: refetchRules } = useRules(listParams);
+  const rules = rulesData?.items || [];
+
+  // 获取设备分组
+  const { data: domains } = useDomains();
+
+  // 扁平化设备分组（仅L2分组）
+  const deviceGroupOptions: DeviceGroupOption[] = useMemo(() => {
+    const options: DeviceGroupOption[] = [];
+    const flatten = (items: { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[]) => {
+      items.forEach((item) => {
+        if (item.level === 2) {
+          options.push({ id: item.id, name: item.name, level: item.level });
+        }
+        if (item.children) {
+          flatten(item.children as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[]);
+        }
+      });
+    };
+    if (domains) {
+      flatten(domains as { id: string; name: string; level: number; children?: { id: string; name: string; level: number }[] }[]);
+    }
+    return options;
+  }, [domains]);
+
+  // Mutations
+  const createMutation = useCreateRule();
+  const updateMutation = useUpdateRule();
+  const deleteMutation = useDeleteRule();
+  const toggleMutation = useToggleRule();
+  const applyMutation = useApplyRule();
+  const batchSortMutation = useBatchSortRules();
 
   // 过滤字段配置
   const FILTER_FIELDS: FilterField[] = useMemo(
@@ -278,12 +236,6 @@ export default function DeviceRules() {
           { label: t('status.disabled'), value: '0' },
         ],
       },
-      {
-        name: 'moveToGroupId',
-        label: t('device.rules.targetGroup'),
-        type: 'select',
-        options: MOCK_DEVICE_GROUPS.map((g) => ({ label: g.groupName, value: g.id })),
-      },
     ],
     [t]
   );
@@ -294,10 +246,10 @@ export default function DeviceRules() {
       if (filterParams.operators && !r.operators.toLowerCase().includes(String(filterParams.operators).toLowerCase())) {
         return false;
       }
-      if (filterParams.enable && r.enable !== filterParams.enable) {
+      if (filterParams.enable === '1' && !r.enabled) {
         return false;
       }
-      if (filterParams.moveToGroupId && r.moveToGroupId !== filterParams.moveToGroupId) {
+      if (filterParams.enable === '0' && r.enabled) {
         return false;
       }
       return true;
@@ -307,10 +259,16 @@ export default function DeviceRules() {
   // 切换启用状态
   const handleToggle = useCallback(
     (id: string, checked: boolean) => {
-      setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enable: checked ? '1' : '0' } : r)));
-      void message.success(checked ? t('status.enabled') : t('status.disabled'));
+      toggleMutation.mutate({ id, enabled: checked }, {
+        onSuccess: () => {
+          void message.success(checked ? t('status.enabled') : t('status.disabled'));
+        },
+        onError: () => {
+          void message.error(t('common.operationFailed'));
+        },
+      });
     },
-    [t]
+    [toggleMutation, message, t]
   );
 
   // 删除规则
@@ -323,26 +281,54 @@ export default function DeviceRules() {
         cancelText: t('common.cancel'),
         okType: 'danger',
         onOk: () => {
-          setRules((prev) => prev.filter((r) => r.id !== id));
-          message.success(t('common.deleteSuccess'));
+          deleteMutation.mutate(id, {
+            onSuccess: () => {
+              void message.success(t('common.deleteSuccess'));
+            },
+            onError: () => {
+              void message.error(t('common.deleteFailed'));
+            },
+          });
         },
       });
     },
-    [t, modal, message]
+    [deleteMutation, modal, message, t]
   );
+
+  // 将 NameFilterItem 转换为 NameRule
+  const convertToNameRules = (filters: NameFilterItem[]): NameRule[] => {
+    return filters
+      .filter((f) => f.value?.trim())
+      .map((f) => ({
+        type: f.condition as NameRule['type'],
+        operator: f.andOr || 'and',
+        value: f.value,
+      }));
+  };
 
   // 打开编辑弹窗
   const handleEdit = useCallback(
-    (rule: DeviceGroupRule) => {
+    (rule: DeviceRule) => {
       setEditingRule(rule);
       form.setFieldsValue({
-        moveToGroupId: rule.moveToGroupId,
-        enable: rule.enable,
+        name: rule.name,
+        targetGroupId: rule.targetGroupId,
+        enable: rule.enabled ? '1' : '0',
         matchingMode: rule.matchingMode,
-        tacRag: rule.tacRag,
+        lacList: rule.lacList?.join(', '),
+        tacList: rule.tacList?.join(', '),
       });
-      if (rule.nameRuleList?.length > 0) {
-        setNameFilters(rule.nameRuleList.map((item) => ({ ...item, id: item.id || generateId() })));
+
+      // 将 NameRule 转换为 NameFilterItem
+      if (rule.nameRuleList?.length) {
+        setNameFilters(
+          rule.nameRuleList.map((nr, index) => ({
+            id: String(index),
+            condition: nr.type as NameFilterItem['condition'],
+            value: nr.value,
+            andOr: index > 0 ? (nr.operator as 'and' | 'or') : undefined,
+          }))
+        );
       } else {
         setNameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
       }
@@ -352,31 +338,45 @@ export default function DeviceRules() {
   );
 
   // 打开新增弹窗
-  const handleCreate = useCallback(() => {
+  const handleCreate = useCallback(async () => {
     setEditingRule(null);
     form.resetFields();
-    form.setFieldsValue({
-      moveToGroupId: MOCK_DEVICE_GROUPS[0]?.id,
-      enable: '0',
-      matchingMode: 'deviceName',
-      tacRag: '',
-    });
+
+    // 获取下一个优先级
+    try {
+      const nextPriority = await deviceRulesApi.getNextPriority();
+      form.setFieldsValue({
+        name: '',
+        priority: nextPriority,
+        targetGroupId: deviceGroupOptions[0]?.id,
+        enable: '0',
+        matchingMode: 'and',
+        lacList: '',
+        tacList: '',
+      });
+    } catch {
+      form.setFieldsValue({
+        name: '',
+        priority: 1,
+        targetGroupId: deviceGroupOptions[0]?.id,
+        enable: '0',
+        matchingMode: 'and',
+        lacList: '',
+        tacList: '',
+      });
+    }
+
     setNameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
     setEditModalOpen(true);
-  }, [form]);
+  }, [form, deviceGroupOptions]);
 
   // 保存规则
   const handleSave = useCallback(async () => {
     try {
-      const values = (await form.validateFields()) as {
-        moveToGroupId: string;
-        enable: '0' | '1';
-        matchingMode: 'deviceName' | 'lac' | 'tac';
-        tacRag: string;
-      };
+      const values = await form.validateFields();
 
       // 验证名称过滤器
-      if (values.matchingMode === 'deviceName') {
+      if (matchingMode === 'and' || matchingMode === 'or') {
         const validFilters = nameFilters.filter((f) => f.value?.trim());
         if (values.enable === '1' && validFilters.length === 0) {
           void message.error(t('device.rules.atLeastOneFilter'));
@@ -384,167 +384,142 @@ export default function DeviceRules() {
         }
       }
 
-      // 验证 TAC/LAC
-      if ((values.matchingMode === 'tac' || values.matchingMode === 'lac') && !values.tacRag?.trim()) {
-        void message.error(t('device.rules.inputRange', { type: values.matchingMode === 'tac' ? 'TAC' : 'LAC' }));
-        return;
-      }
+      const nameRuleList = matchingMode === 'and' || matchingMode === 'or'
+        ? convertToNameRules(nameFilters)
+        : undefined;
 
-      const groupName = MOCK_DEVICE_GROUPS.find((g) => g.id === values.moveToGroupId)?.groupName || '';
-      const ruleData: Partial<DeviceGroupRule> = {
-        moveToGroupId: values.moveToGroupId,
-        moveToGroupName: groupName,
-        enable: values.enable,
-        matchingMode: values.matchingMode,
-        nameRuleList: values.matchingMode === 'deviceName' ? nameFilters : [],
-        tacRag: values.matchingMode !== 'deviceName' ? values.tacRag : '',
-      };
-      ruleData.operators = generateOperators(ruleData, t);
+      const lacList = values.lacList
+        ? values.lacList.split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n))
+        : undefined;
+
+      const tacList = values.tacList
+        ? values.tacList.split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n))
+        : undefined;
 
       if (editingRule) {
-        setRules((prev) => prev.map((r) => (r.id === editingRule.id ? { ...r, ...ruleData } : r)));
-        void message.success(t('status.success'));
+        // 更新
+        const req: UpdateRuleRequest = {
+          name: values.name,
+          targetGroupId: values.targetGroupId,
+          enabled: values.enable === '1',
+          matchingMode: matchingMode,
+          nameRuleList,
+          lacList,
+          tacList,
+        };
+        updateMutation.mutate({ id: editingRule.id, req }, {
+          onSuccess: () => {
+            void message.success(t('status.success'));
+            setEditModalOpen(false);
+          },
+          onError: () => {
+            void message.error(t('common.operationFailed'));
+          },
+        });
       } else {
-        const newRule: DeviceGroupRule = {
-          id: generateId(),
-          order: rules.length + 1,
-          ...ruleData,
-          createTime: new Date().toLocaleString('zh-CN'),
-        } as DeviceGroupRule;
-        setRules((prev) => [...prev, newRule]);
-        void message.success(t('status.success'));
+        // 创建
+        const req: CreateRuleRequest = {
+          name: values.name,
+          priority: values.priority,
+          targetGroupId: values.targetGroupId,
+          enabled: values.enable === '1',
+          matchingMode: matchingMode,
+          nameRuleList,
+          lacList,
+          tacList,
+        };
+        createMutation.mutate(req, {
+          onSuccess: () => {
+            void message.success(t('status.success'));
+            setEditModalOpen(false);
+          },
+          onError: () => {
+            void message.error(t('common.operationFailed'));
+          },
+        });
       }
-      setEditModalOpen(false);
     } catch {
       // validation error
     }
-  }, [editingRule, form, nameFilters, rules.length, t]);
+  }, [editingRule, form, nameFilters, matchingMode, createMutation, updateMutation, message, t]);
 
   // 打开应用规则弹窗
-  const handleActive = useCallback((rule: DeviceGroupRule) => {
+  const handleActive = useCallback((rule: DeviceRule) => {
     setCurrentEditingRule(rule);
     setSelectedGroupIds([]);
     setActiveModalOpen(true);
   }, []);
 
-  // 模拟设备数据
-  const getMockDevices = useCallback((groupIds: string[]): { sn: string; name: string; sourceGroup: string }[] => {
-    const devices: { sn: string; name: string; sourceGroup: string }[] = [];
-    const groupNames: Record<string, string> = {
-      '1': 'Default Group',
-      '2': 'Beijing Region',
-      '3': 'Shanghai Region',
-      '4': 'Guangzhou Region',
-      '5': 'Test Group',
-    };
-
-    groupIds.forEach((groupId, groupIndex) => {
-      const count = Math.floor(Math.random() * 5) + 3; // 每组3-7个设备
-      for (let i = 0; i < count; i++) {
-        devices.push({
-          sn: `ENB${String(groupIndex * 10 + i + 1).padStart(5, '0')}`,
-          name: `设备-${groupNames[groupId] || 'Unknown'}-${i + 1}`,
-          sourceGroup: groupNames[groupId] || groupId,
-        });
-      }
-    });
-    return devices;
-  }, []);
-
   // 应用规则
   const handleExecute = useCallback(() => {
-    if (selectedGroupIds.length === 0) {
-      void message.warning(t('device.rules.selectAtLeastOne'));
+    if (!currentEditingRule) return;
+
+    if (!currentEditingRule.enabled) {
+      void message.warning(t('device.rules.mustEnableFirst'));
       return;
     }
 
-    // 获取要迁移的设备
-    const devices = getMockDevices(selectedGroupIds);
-    const targetGroup = currentEditingRule?.moveToGroupName || 'Target Group';
+    applyMutation.mutate({ id: currentEditingRule.id }, {
+      onSuccess: (task) => {
+        void message.success(t('common.commandSent'));
+        setActiveModalOpen(false);
 
-    // 创建迁移任务
-    const newTasks: MigrationTask[] = devices.map((device, index) => ({
-      id: `migration-${device.sn}-${Date.now()}-${index}`,
-      sn: device.sn,
-      deviceName: device.name,
-      sourceGroup: device.sourceGroup,
-      targetGroup,
-      status: 'pending' as MigrationStatus,
-      progress: 0,
-    }));
+        // 创建模拟迁移任务用于显示
+        const mockTask: MigrationTask = {
+          id: task.id,
+          sn: '',
+          deviceName: t('device.rules.taskInProgress'),
+          sourceGroup: '',
+          targetGroup: currentEditingRule.targetGroupName || '',
+          status: task.status as MigrationStatus,
+          progress: 0,
+        };
+        setMigrationTasks([mockTask]);
+        setMigrationDrawerOpen(true);
 
-    // 打开迁移结果抽屉
-    setMigrationTasks(newTasks);
-    setMigrationDrawerOpen(true);
-    setActiveModalOpen(false);
+        // 轮询任务状态
+        const pollInterval = setInterval(async () => {
+          try {
+            const updatedTask = await deviceRulesApi.getTask(currentEditingRule.id, task.id);
+            setMigrationTasks((prev) =>
+              prev.map((t) =>
+                t.id === task.id
+                  ? {
+                      ...t,
+                      status: updatedTask.status as MigrationStatus,
+                      progress:
+                        updatedTask.totalDevices > 0
+                          ? Math.round(
+                              ((updatedTask.matchedCount + updatedTask.failedCount) /
+                                updatedTask.totalDevices) *
+                                100
+                            )
+                          : 0,
+                      message:
+                        updatedTask.status === 'completed'
+                          ? t('device.rules.taskCompleted', {
+                              matched: updatedTask.matchedCount,
+                              failed: updatedTask.failedCount,
+                            })
+                          : updatedTask.errorMessage || '',
+                    }
+                  : t
+              )
+            );
 
-    // 模拟迁移进度
-    newTasks.forEach((task, index) => {
-      setTimeout(() => {
-        setMigrationTasks((prev) => prev.map((item) =>
-          item.id === task.id ? { ...item, status: 'running', progress: 10 } : item
-        ));
-
-        const progressInterval = setInterval(() => {
-          setMigrationTasks((prev) => prev.map((item) => {
-            if (item.id !== task.id) return item;
-            if (item.progress >= 100) {
-              clearInterval(progressInterval);
-              return item;
+            if (updatedTask.status === 'completed' || updatedTask.status === 'failed') {
+              clearInterval(pollInterval);
             }
-            const randomProgress = Math.random() * 30 + 10;
-            return { ...item, progress: Math.min(item.progress + randomProgress, 90) };
-          }));
-        }, 200);
-
-        // 模拟完成
-        setTimeout(() => {
-          clearInterval(progressInterval);
-          const success = Math.random() > 0.1;
-          setMigrationTasks((prev) => prev.map((item) =>
-            item.id === task.id ? {
-              ...item,
-              status: success ? 'success' : 'failed',
-              progress: 100,
-              message: success ? t('device.rules.migrationSuccess') : t('device.rules.connectionTimeout'),
-            } : item
-          ));
-        }, 1500 + Math.random() * 1000);
-      }, index * 300);
+          } catch {
+            clearInterval(pollInterval);
+          }
+        }, 2000);
+      },
+      onError: () => {
+        void message.error(t('common.operationFailed'));
+      },
     });
-
-    void message.success(t('common.commandSent'));
-  }, [selectedGroupIds, currentEditingRule, getMockDevices, t]);
-
-  // 导出迁移结果
-  const handleExportMigration = useCallback(() => {
-    if (migrationTasks.length === 0) return;
-
-    // 构建 CSV 内容
-    const headers = ['SN', t('alarm.deviceName'), t('device.rules.sourceGroup'), t('device.rules.targetGroup'), t('table.status'), t('task.progress'), t('task.message')];
-    const rows = migrationTasks.map((task) => [
-      task.sn,
-      task.deviceName,
-      task.sourceGroup,
-      task.targetGroup,
-      task.status === 'success' ? t('task.status.completed') : task.status === 'failed' ? t('task.status.failed') : task.status === 'running' ? t('task.status.running') : t('status.pending'),
-      `${task.progress}%`,
-      task.message || '',
-    ]);
-
-    const csvContent = [headers, ...rows].map((row) => row.join(',')).join('\n');
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `migration_result_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    void message.success(t('common.exportSuccess'));
-  }, [migrationTasks, t]);
+  }, [currentEditingRule, applyMutation, message, t]);
 
   // 添加过滤条件
   const handleAddFilter = useCallback(() => {
@@ -562,7 +537,7 @@ export default function DeviceRules() {
         andOr: hasOr ? 'or' : 'and',
       },
     ]);
-  }, [nameFilters]);
+  }, [nameFilters, message, t]);
 
   // 删除过滤条件
   const handleRemoveFilter = useCallback((id: string) => {
@@ -585,36 +560,42 @@ export default function DeviceRules() {
   // 切换匹配模式时重置
   const handleMatchingModeChange = useCallback(() => {
     setNameFilters([{ id: generateId(), condition: 'contain', value: '' }]);
-    form.setFieldsValue({ tacRag: '' });
+    form.setFieldsValue({ lacList: '', tacList: '' });
   }, [form]);
 
   // 上移
-  const handleMoveUp = useCallback((index: number) => {
-    if (index === 0) return;
-    setRules((prev) => {
-      const newRules = [...prev];
-      [newRules[index - 1], newRules[index]] = [newRules[index], newRules[index - 1]];
-      return newRules.map((r, i) => ({ ...r, order: i + 1 }));
-    });
-  }, []);
+  const handleMoveUp = useCallback(
+    (index: number) => {
+      if (index === 0) return;
+      const items = [
+        { id: filteredRules[index - 1].id, priority: filteredRules[index].priority },
+        { id: filteredRules[index].id, priority: filteredRules[index - 1].priority },
+      ];
+      batchSortMutation.mutate(items);
+    },
+    [filteredRules, batchSortMutation]
+  );
 
   // 下移
-  const handleMoveDown = useCallback((index: number) => {
-    setRules((prev) => {
-      if (index >= prev.length - 1) return prev;
-      const newRules = [...prev];
-      [newRules[index], newRules[index + 1]] = [newRules[index + 1], newRules[index]];
-      return newRules.map((r, i) => ({ ...r, order: i + 1 }));
-    });
-  }, []);
+  const handleMoveDown = useCallback(
+    (index: number) => {
+      if (index >= filteredRules.length - 1) return;
+      const items = [
+        { id: filteredRules[index].id, priority: filteredRules[index + 1].priority },
+        { id: filteredRules[index + 1].id, priority: filteredRules[index].priority },
+      ];
+      batchSortMutation.mutate(items);
+    },
+    [filteredRules, batchSortMutation]
+  );
 
   // 表格列定义
-  const columns: DataTableColumn<DeviceGroupRule>[] = useMemo(
+  const columns: DataTableColumn<DeviceRule>[] = useMemo(
     () => [
       {
         key: 'sort',
         title: t('device.rules.priority'),
-        dataIndex: 'id',
+        dataIndex: 'priority',
         width: 70,
         render: (_val, _record, index) => {
           const items: MenuProps['items'] = [
@@ -653,7 +634,7 @@ export default function DeviceRules() {
         fixed: 'left',
         render: (_val, record) => (
           <Space size={4}>
-            {record.enable === '1' && (
+            {record.enabled && (
               <Button
                 type="link"
                 size="small"
@@ -684,13 +665,13 @@ export default function DeviceRules() {
         ),
       },
       {
-        key: 'enable',
+        key: 'enabled',
         title: t('common.enable'),
-        dataIndex: 'enable',
+        dataIndex: 'enabled',
         width: 80,
         render: (_val, record) => (
           <Switch
-            checked={record.enable === '1'}
+            checked={record.enabled}
             size="small"
             onChange={(checked) => handleToggle(record.id, checked)}
           />
@@ -706,16 +687,17 @@ export default function DeviceRules() {
         ),
       },
       {
-        key: 'moveToGroupName',
+        key: 'targetGroupName',
         title: t('device.rules.targetGroup'),
-        dataIndex: 'moveToGroupName',
+        dataIndex: 'targetGroupName',
         width: 150,
       },
       {
-        key: 'createTime',
+        key: 'createdAt',
         title: t('table.createTime'),
-        dataIndex: 'createTime',
+        dataIndex: 'createdAt',
         width: 160,
+        render: (val) => (val ? new Date(val).toLocaleString('zh-CN') : ''),
       },
     ],
     [handleToggle, handleEdit, handleDelete, handleActive, handleMoveUp, handleMoveDown, filteredRules.length, t]
@@ -723,86 +705,132 @@ export default function DeviceRules() {
 
   // 预览条件描述
   const previewText = useMemo(() => {
-    if (matchingMode === 'deviceName') {
-      return generateOperators({ matchingMode: 'deviceName', nameRuleList: nameFilters }, t);
+    if (matchingMode === 'and' || matchingMode === 'or') {
+      return generateOperators(matchingMode, convertToNameRules(nameFilters), null, null, t);
     }
     return '';
   }, [matchingMode, nameFilters, t]);
 
   // 迁移任务表格列定义
-  const migrationColumns: ColumnsType<MigrationTask> = useMemo(() => [
-    {
-      title: 'SN',
-      dataIndex: 'sn',
-      key: 'sn',
-      width: 120,
-      ellipsis: true,
-      render: (sn: string) => (
-        <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{sn}</span>
-      ),
-    },
-    {
-      title: t('alarm.deviceName'),
-      dataIndex: 'deviceName',
-      key: 'deviceName',
-      ellipsis: true,
-      width: 120,
-    },
-    {
-      title: t('device.rules.sourceGroup'),
-      dataIndex: 'sourceGroup',
-      key: 'sourceGroup',
-      width: 100,
-      ellipsis: true,
-    },
-    {
-      title: t('device.rules.targetGroup'),
-      dataIndex: 'targetGroup',
-      key: 'targetGroup',
-      width: 100,
-      ellipsis: true,
-    },
-    {
-      title: t('table.status'),
-      dataIndex: 'status',
-      key: 'status',
-      width: 80,
-      render: (status: MigrationStatus) => {
-        const statusConfig: Record<MigrationStatus, { color: string; text: string }> = {
-          pending: { color: 'default', text: t('status.pending') },
-          running: { color: 'processing', text: t('task.status.running') },
-          success: { color: 'success', text: t('task.status.completed') },
-          failed: { color: 'error', text: t('task.status.failed') },
-        };
-        const cfg = statusConfig[status];
-        return (
-          <Tag color={cfg.color} style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>
-            {cfg.text}
-          </Tag>
-        );
+  const migrationColumns: ColumnsType<MigrationTask> = useMemo(
+    () => [
+      {
+        title: 'SN',
+        dataIndex: 'sn',
+        key: 'sn',
+        width: 120,
+        ellipsis: true,
+        render: (sn: string) => (
+          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{sn}</span>
+        ),
       },
-    },
-    {
-      title: t('task.progress'),
-      dataIndex: 'progress',
-      key: 'progress',
-      width: 120,
-      render: (progress: number, record) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Progress
-            percent={Math.round(progress)}
-            size="small"
-            status={record.status === 'failed' ? 'exception' : record.status === 'success' ? 'success' : 'active'}
-            showInfo={false}
-            style={{ flex: 1, minWidth: 60 }}
-          />
-          <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
-            {Math.round(progress)}%
-          </span>
-        </div>
-      ),
-    },
-  ], [t]);
+      {
+        title: t('alarm.deviceName'),
+        dataIndex: 'deviceName',
+        key: 'deviceName',
+        ellipsis: true,
+        width: 120,
+      },
+      {
+        title: t('device.rules.sourceGroup'),
+        dataIndex: 'sourceGroup',
+        key: 'sourceGroup',
+        width: 100,
+        ellipsis: true,
+      },
+      {
+        title: t('device.rules.targetGroup'),
+        dataIndex: 'targetGroup',
+        key: 'targetGroup',
+        width: 100,
+        ellipsis: true,
+      },
+      {
+        title: t('table.status'),
+        dataIndex: 'status',
+        key: 'status',
+        width: 80,
+        render: (status: MigrationStatus) => {
+          const statusConfig: Record<MigrationStatus, { color: string; text: string }> = {
+            pending: { color: 'default', text: t('status.pending') },
+            running: { color: 'processing', text: t('task.status.running') },
+            completed: { color: 'success', text: t('task.status.completed') },
+            failed: { color: 'error', text: t('task.status.failed') },
+          };
+          const cfg = statusConfig[status];
+          return (
+            <Tag color={cfg.color} style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>
+              {cfg.text}
+            </Tag>
+          );
+        },
+      },
+      {
+        title: t('task.progress'),
+        dataIndex: 'progress',
+        key: 'progress',
+        width: 120,
+        render: (progress: number, record) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Progress
+              percent={Math.round(progress)}
+              size="small"
+              status={record.status === 'failed' ? 'exception' : record.status === 'completed' ? 'success' : 'active'}
+              showInfo={false}
+              style={{ flex: 1, minWidth: 60 }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
+              {Math.round(progress)}%
+            </span>
+          </div>
+        ),
+      },
+    ],
+    [t]
+  );
+
+  // 导出迁移结果
+  const handleExportMigration = useCallback(() => {
+    if (migrationTasks.length === 0) return;
+
+    const headers = [
+      'SN',
+      t('alarm.deviceName'),
+      t('device.rules.sourceGroup'),
+      t('device.rules.targetGroup'),
+      t('table.status'),
+      t('task.progress'),
+      t('task.message'),
+    ];
+    const rows = migrationTasks.map((task) => [
+      task.sn,
+      task.deviceName,
+      task.sourceGroup,
+      task.targetGroup,
+      task.status === 'completed'
+        ? t('task.status.completed')
+        : task.status === 'failed'
+          ? t('task.status.failed')
+          : task.status === 'running'
+            ? t('task.status.running')
+            : t('status.pending'),
+      `${task.progress}%`,
+      task.message || '',
+    ]);
+
+    const csvContent = [headers, ...rows].map((row) => row.join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `migration_result_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    void message.success(t('common.exportSuccess'));
+  }, [migrationTasks, message, t]);
 
   return (
     <>
@@ -810,7 +838,7 @@ export default function DeviceRules() {
         title={t('device.rules.title')}
         subtitle={`${t('table.total')} ${rules.length}`}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => void handleCreate()}>
             {t('common.add')}
           </Button>
         }
@@ -823,11 +851,11 @@ export default function DeviceRules() {
           collapsedRows={1}
         />
 
-        <DataTable<DeviceGroupRule>
+        <DataTable<DeviceRule>
           tableId="device-rules-table"
           columns={columns}
           dataSource={filteredRules}
-          loading={false}
+          loading={rulesLoading}
           rowKey="id"
           total={filteredRules.length}
           pagination={false}
@@ -846,7 +874,11 @@ export default function DeviceRules() {
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => setEditModalOpen(false)}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={() => void handleSave()}>
+            <Button
+              type="primary"
+              loading={createMutation.isPending || updateMutation.isPending}
+              onClick={() => void handleSave()}
+            >
               {t('common.confirm')}
             </Button>
           </div>
@@ -854,11 +886,26 @@ export default function DeviceRules() {
       >
         <Form form={form} layout="vertical">
           {/* 基本设置 */}
-          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>{t('device.rules.basicSettings')}</div>
-          <Form.Item name="moveToGroupId" label={t('device.rules.targetGroup')} rules={[{ required: true, message: t('device.rules.selectTargetGroup') }]}>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
+            {t('device.rules.basicSettings')}
+          </div>
+
+          <Form.Item
+            name="name"
+            label={t('device.rules.ruleName')}
+            rules={[{ required: true, message: t('device.rules.inputRuleName') }]}
+          >
+            <Input placeholder={t('common.placeholder')} maxLength={100} />
+          </Form.Item>
+
+          <Form.Item
+            name="targetGroupId"
+            label={t('device.rules.targetGroup')}
+            rules={[{ required: true, message: t('device.rules.selectTargetGroup') }]}
+          >
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={MOCK_DEVICE_GROUPS.map((g) => ({ label: g.groupName, value: g.id }))}
+              options={deviceGroupOptions.map((g) => ({ label: g.name, value: g.id }))}
             />
           </Form.Item>
 
@@ -875,19 +922,31 @@ export default function DeviceRules() {
           <Divider style={{ margin: '16px 0' }} />
 
           {/* 匹配规则 */}
-          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>{t('device.rules.matchingRule')}</div>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-text)' }}>
+            {t('device.rules.matchingRule')}
+          </div>
+
           <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} rules={[{ required: true }]}>
             <Radio.Group onChange={handleMatchingModeChange}>
-              <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
-              {SUPPORT_GSM && DEVICE_TYPE === 'ENB' && <Radio value="lac">LAC</Radio>}
-              {DEVICE_TYPE !== 'CPE' && <Radio value="tac">TAC</Radio>}
+              <Radio value="and">{t('device.rules.nameMatch')}</Radio>
+              <Radio value="lac">LAC</Radio>
+              <Radio value="tac">TAC</Radio>
             </Radio.Group>
           </Form.Item>
 
           {/* 设备名称过滤条件 */}
-          {matchingMode === 'deviceName' && (
+          {(matchingMode === 'and' || matchingMode === 'or') && (
             <>
-              <Form.Item label={<span>{t('device.rules.filterCondition')} <Text type="secondary" style={{ fontSize: 12 }}>{t('device.rules.conditionLimit', { max: 10 })}</Text></span>}>
+              <Form.Item
+                label={
+                  <span>
+                    {t('device.rules.filterCondition')}{' '}
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('device.rules.conditionLimit', { max: 10 })}
+                    </Text>
+                  </span>
+                }
+              >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {nameFilters.map((filter, index) => (
                     <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -941,12 +1000,7 @@ export default function DeviceRules() {
                   ))}
                 </div>
                 {nameFilters.length < 10 && (
-                  <Button
-                    type="dashed"
-                    icon={<PlusOutlined />}
-                    onClick={handleAddFilter}
-                    style={{ marginTop: 8 }}
-                  >
+                  <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddFilter} style={{ marginTop: 8 }}>
                     {t('device.rules.addCondition')}
                   </Button>
                 )}
@@ -971,19 +1025,35 @@ export default function DeviceRules() {
             </>
           )}
 
-          {/* TAC/LAC 输入 */}
-          {(matchingMode === 'tac' || matchingMode === 'lac') && (
+          {/* TAC 输入 */}
+          {matchingMode === 'tac' && (
             <Form.Item
-              name="tacRag"
-              label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
-              rules={[{ required: true, message: t('device.rules.inputRange', { type: matchingMode === 'tac' ? 'TAC' : 'LAC' }) }]}
+              name="tacList"
+              label="TAC"
+              rules={[{ required: true, message: t('device.rules.inputRange', { type: 'TAC' }) }]}
               extra={
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('device.rules.formatRange', { range: DEVICE_TYPE === 'ENB' ? '0-65535' : '0-16777215' })}
+                  {t('device.rules.formatRange', { range: '0-16777215' })}
                 </Text>
               }
             >
-              <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
+              <Input placeholder="eg: 1,2,3" maxLength={200} />
+            </Form.Item>
+          )}
+
+          {/* LAC 输入 */}
+          {matchingMode === 'lac' && (
+            <Form.Item
+              name="lacList"
+              label="LAC"
+              rules={[{ required: true, message: t('device.rules.inputRange', { type: 'LAC' }) }]}
+              extra={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('device.rules.formatRange', { range: '0-65535' })}
+                </Text>
+              }
+            >
+              <Input placeholder="eg: 1,2,3" maxLength={200} />
             </Form.Item>
           )}
         </Form>
@@ -998,31 +1068,20 @@ export default function DeviceRules() {
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
         width={480}
+        confirmLoading={applyMutation.isPending}
       >
-        <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>{t('device.rules.selectGroupToApply')}</div>
+        <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>
+          {t('device.rules.applyConfirm', { name: currentEditingRule?.name })}
+        </div>
         <div
           style={{
-            border: '1px solid var(--color-border)',
+            padding: '12px 16px',
+            background: 'var(--color-fill-quaternary)',
             borderRadius: 6,
-            padding: 8,
-            maxHeight: 400,
-            overflow: 'auto',
           }}
         >
-          <Tree
-            checkable
-            defaultExpandedKeys={['region-bj', 'region-sh', 'region-gz']}
-            checkedKeys={selectedGroupIds}
-            onCheck={(keys) => setSelectedGroupIds(keys as string[])}
-            treeData={MOCK_GROUP_TREE.map((node) => ({
-              key: node.id,
-              title: node.groupName,
-              children: node.children?.map((child) => ({
-                key: child.id,
-                title: child.groupName,
-              })),
-            }))}
-          />
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('device.rules.matchingRule')}:</div>
+          <div style={{ color: 'var(--color-text-secondary)' }}>{currentEditingRule?.operators}</div>
         </div>
       </Modal>
 
@@ -1038,7 +1097,16 @@ export default function DeviceRules() {
         }}
       >
         {/* 任务统计 */}
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--color-border)',
+            flexShrink: 0,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
           <Space size={16}>
             <span>
               {t('task.total')}: {migrationTasks.length}
@@ -1047,7 +1115,7 @@ export default function DeviceRules() {
               {t('task.status.running')}: {migrationTasks.filter((item) => item.status === 'running').length}
             </span>
             <span style={{ color: '#52c41a' }}>
-              {t('task.status.completed')}: {migrationTasks.filter((item) => item.status === 'success').length}
+              {t('task.status.completed')}: {migrationTasks.filter((item) => item.status === 'completed').length}
             </span>
             <span style={{ color: '#ff4d4f' }}>
               {t('task.status.failed')}: {migrationTasks.filter((item) => item.status === 'failed').length}

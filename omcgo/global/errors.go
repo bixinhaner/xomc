@@ -30,6 +30,16 @@ const (
 	ErrCodeRegistrationInvalidSN = 1204
 )
 
+// Device Rules (1300-1399)
+const (
+	ErrCodeRuleNotFound          = 1301
+	ErrCodeRulePriorityDuplicate = 1302
+	ErrCodeRuleNotEnabled        = 1303
+	ErrCodeRuleTaskNotFound      = 1304
+	ErrCodeRuleTaskRunning       = 1305
+	ErrCodeRuleInvalidParameter  = 1306
+)
+
 // Data Model / Configuration (2000-2999)
 const (
 	ErrCodeDataModelNotFound     = 2001
