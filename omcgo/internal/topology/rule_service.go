@@ -284,6 +284,13 @@ func (s *DeviceRuleService) ListRules(ctx context.Context, req RuleListRequest) 
 		return nil, err
 	}
 
+	// 填充 operators 字段（如果为空则动态生成）
+	for i := range items {
+		if items[i].Operators == "" && len(items[i].NameRuleList) > 0 {
+			items[i].Operators = s.generateOperators(string(items[i].MatchingMode), items[i].NameRuleList, items[i].LACList, items[i].TACList)
+		}
+	}
+
 	return &RuleListResponse{
 		Items: items,
 		Total: total,
