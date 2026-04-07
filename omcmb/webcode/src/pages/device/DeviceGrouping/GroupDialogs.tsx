@@ -22,7 +22,8 @@ export interface GroupDialogsProps {
 
   // Edit Level-1 Group Modal
   editModalOpen: boolean;
-  editForm: FormInstance<{ name: string; description: string }>;
+  editForm: FormInstance<{ name: string; parentId?: string; description: string }>;
+  editingGroupId?: string;
   onEditModalOk: () => void;
   onEditModalCancel: () => void;
 
@@ -58,6 +59,7 @@ export default function GroupDialogs({
   onAddModalCancel,
   editModalOpen,
   editForm,
+  editingGroupId,
   onEditModalOk,
   onEditModalCancel,
   addChildDrawerOpen,
@@ -97,6 +99,17 @@ export default function GroupDialogs({
         key: g.id,
       }));
   }, [groups]);
+
+  // 编辑时构建父级分组选择器的树形数据（排除当前编辑的分组，防止循环引用）
+  const parentGroupTreeDataForEdit = useMemo(() => {
+    // 只显示根分组（parentId 为 null 或 undefined），排除当前编辑的分组
+    const rootGroups = (groups || []).filter((g) => !g.parentId && g.id !== editingGroupId);
+    return rootGroups.map((g) => ({
+      value: g.id,
+      title: g.name,
+      key: g.id,
+    }));
+  }, [groups, editingGroupId]);
 
   return (
     <>
@@ -183,6 +196,20 @@ export default function GroupDialogs({
             rules={[{ required: true, message: t('common.placeholder') }]}
           >
             <Input placeholder={t('common.placeholder')} />
+          </Form.Item>
+          <Form.Item
+            name="parentId"
+            label={t('device.parentGroup')}
+            tooltip={t('device.parentGroupEditTooltip')}
+          >
+            <TreeSelect
+              treeData={parentGroupTreeDataForEdit}
+              placeholder={t('device.selectParentGroup')}
+              allowClear
+              showSearch
+              treeNodeFilterProp="title"
+              treeDefaultExpandAll
+            />
           </Form.Item>
           <Form.Item name="description" label={t('table.description')}>
             <Input.TextArea rows={3} placeholder={t('common.placeholder')} />

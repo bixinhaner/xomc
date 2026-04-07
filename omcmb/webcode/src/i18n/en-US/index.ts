@@ -501,6 +501,7 @@ const messages: Record<string, string> = {
   'device.editGroup':           'Edit Group',
   'device.parentGroup':         'Parent Group',
   'device.parentGroupTooltip': 'Leave empty to create a top-level group',
+  'device.parentGroupEditTooltip': 'Change parent to make this a subgroup. Clear to make it a top-level group.',
   'device.selectParentGroup':   'Select parent group',
   'device.rules.matchingMode':  'Matching Mode',
   'device.rules.deviceName':    'Device Name',

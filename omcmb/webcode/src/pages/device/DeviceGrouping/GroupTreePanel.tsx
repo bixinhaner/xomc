@@ -257,29 +257,22 @@ export default function GroupTreePanel({
             const key = keys[0] as string | undefined;
             if (!key) return;
             const clickedGroup = groups.find((g) => g.id === key);
-            // L2 分组（有 parentId）或没有子分组的 L1 分组可以被选择
-            if (clickedGroup) {
-              onSelect(key);
+            if (!clickedGroup) return;
+
+            // L1 分组（无 parentId）：点击整行时切换展开/折叠，不触发选中
+            if (!clickedGroup.parentId) {
+              setExpandedKeys((prev) => {
+                if (prev.includes(key)) {
+                  return prev.filter((k) => k !== key);
+                } else {
+                  return [...prev, key];
+                }
+              });
+              return; // 不调用 onSelect，不更新设备列表
             }
-          }}
-          onDoubleClick={(_, node) => {
-            // 双击 L1 分组（根分组）时，切换展开/折叠状态
-            const nodeKey = node.key as string;
-            if (nodeKey && nodeKey !== '__all__') {
-              const clickedGroup = groups.find((g) => g.id === nodeKey);
-              // 只有 L1 分组（没有 parentId）才处理双击展开
-              if (clickedGroup && !clickedGroup.parentId) {
-                setExpandedKeys((prev) => {
-                  if (prev.includes(nodeKey)) {
-                    // 如果已展开，则折叠
-                    return prev.filter((k) => k !== nodeKey);
-                  } else {
-                    // 如果未展开，则展开
-                    return [...prev, nodeKey];
-                  }
-                });
-              }
-            }
+
+            // L2 分组：正常选中，更新设备列表
+            onSelect(key);
           }}
           blockNode
           style={{ fontSize: 13 }}

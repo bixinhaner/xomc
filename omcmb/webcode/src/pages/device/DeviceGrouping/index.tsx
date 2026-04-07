@@ -46,7 +46,7 @@ export default function DeviceGrouping() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [addForm] = Form.useForm<{ name: string; parentId?: string; description: string }>();
-  const [editForm] = Form.useForm<{ name: string; description: string }>();
+  const [editForm] = Form.useForm<{ name: string; parentId?: string; description: string }>();
 
   // --- Add child group state ---
   const [addChildDrawerOpen, setAddChildDrawerOpen] = useState(false);
@@ -183,7 +183,11 @@ export default function DeviceGrouping() {
         const grp = groups.find((g) => g.id === groupId);
         if (grp) {
           setEditingGroupId(groupId);
-          editForm.setFieldsValue({ name: grp.name, description: grp.description });
+          editForm.setFieldsValue({
+            name: grp.name,
+            parentId: grp.parentId || undefined,
+            description: grp.description,
+          });
           setEditModalOpen(true);
         }
       } else if (cmd === 'edit-level2') {
@@ -248,7 +252,14 @@ export default function DeviceGrouping() {
     try {
       if (!editingGroupId) return;
       const values = await editForm.validateFields();
-      await updateGroupMutation.mutateAsync({ id: editingGroupId, data: { name: values.name, remark: values.description } });
+      await updateGroupMutation.mutateAsync({
+        id: editingGroupId,
+        data: {
+          name: values.name,
+          parent_id: values.parentId || undefined,
+          remark: values.description,
+        },
+      });
       void message.success(t('common.success'));
       setEditModalOpen(false);
     } catch {
@@ -589,6 +600,7 @@ export default function DeviceGrouping() {
         onAddModalCancel={() => setAddModalOpen(false)}
         editModalOpen={editModalOpen}
         editForm={editForm}
+        editingGroupId={editingGroupId}
         onEditModalOk={() => void handleEditGroup()}
         onEditModalCancel={() => setEditModalOpen(false)}
         addChildDrawerOpen={addChildDrawerOpen}

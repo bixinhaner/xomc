@@ -502,6 +502,7 @@ const messages: Record<string, string> = {
   'device.editGroup':           '编辑分组',
   'device.parentGroup':         '父级分组',
   'device.parentGroupTooltip': '不选择则为顶级分组',
+  'device.parentGroupEditTooltip': '修改父级分组可将当前分组调整为其他分组的子分组，清空则为顶级分组',
   'device.selectParentGroup':   '请选择父级分组',
   'device.rules.matchingMode':  '匹配方式',
   'device.rules.deviceName':    '设备名称',
