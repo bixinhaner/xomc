@@ -1,15 +1,10 @@
 import React, { useCallback, useState } from 'react';
 import { Button, Input, Space, Tooltip, message } from 'antd';
-import {
-  SearchOutlined,
-  SyncOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons';
+import { SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import {
   useObjectTree,
   useDirectChildren,
   useSyncParameters,
-  useDiscoverParameters,
   useSyncStatus,
   useAddObject,
   useDeleteObject,
@@ -46,7 +41,6 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
 
   // Mutations
   const syncMutation = useSyncParameters();
-  const discoverMutation = useDiscoverParameters();
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
 
@@ -65,18 +59,6 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
       }
     );
   }, [deviceId, syncMutation]);
-
-  const handleDiscover = useCallback(() => {
-    discoverMutation.mutate(deviceId, {
-      onSuccess: () => {
-        message.success('参数发现已触发');
-        setIsSyncing(true);
-      },
-      onError: () => {
-        message.error('参数发现触发失败');
-      },
-    });
-  }, [deviceId, discoverMutation]);
 
   const handleSelectNode = useCallback((path: string) => {
     setSelectedPath(path);
@@ -143,17 +125,6 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
               disabled={isSyncing}
             >
               同步参数
-            </Button>
-          </Tooltip>
-          <Tooltip title="发现设备参数树结构（异步执行）">
-            <Button
-              type="primary"
-              icon={<ThunderboltOutlined />}
-              onClick={handleDiscover}
-              loading={discoverMutation.isPending}
-              disabled={isSyncing}
-            >
-              参数发现
             </Button>
           </Tooltip>
         </Space>

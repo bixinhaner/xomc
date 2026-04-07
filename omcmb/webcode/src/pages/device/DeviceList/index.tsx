@@ -86,6 +86,41 @@ export default function DeviceList() {
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 组件挂载时，如果 URL 无参数但 sessionStorage 有保存的筛选条件，则恢复到 URL
+  useEffect(() => {
+    const hasUrlParams = Array.from(searchParams.keys()).some(
+      (key) => key !== 'page' && key !== 'pageSize'
+    );
+    if (!hasUrlParams) {
+      try {
+        const stored = sessionStorage.getItem('omc_filter_device-list');
+        if (stored) {
+          const parsed = JSON.parse(stored) as Record<string, unknown>;
+          if (Object.keys(parsed).length > 0) {
+            // 恢复到 URL 和 filterParams
+            const newParams = new URLSearchParams();
+            Object.entries(parsed).forEach(([key, value]) => {
+              if (value !== undefined && value !== null && value !== '') {
+                if (Array.isArray(value)) {
+                  if (value.length > 0) {
+                    newParams.set(key, value.join(','));
+                  }
+                } else {
+                  newParams.set(key, String(value));
+                }
+              }
+            });
+            if (newParams.toString()) {
+              setSearchParams(newParams);
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 本地任务面板状态
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
   interface LocalTask {

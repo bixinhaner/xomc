@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,43 @@ type NameRule struct {
 	Condition string `json:"condition"` // contain(包含), startWith(开头是), endWith(结尾是), equal(等于)
 	Value     string `json:"value"`     // 匹配值
 	AndOr     string `json:"andOr"`     // and, or (第一条不需要此字段)
+}
+
+// UnmarshalJSON 自定义 JSON 解析，支持新旧字段名的兼容
+// 旧字段名: type, operator (前端之前使用)
+// 新字段名: condition, andOr (后端定义)
+func (nr *NameRule) UnmarshalJSON(data []byte) error {
+	// 临时结构体，包含新旧两种字段名
+	type Alias NameRule
+	aux := &struct {
+		// 新字段名
+		Condition string `json:"condition"`
+		AndOr     string `json:"andOr"`
+		// 旧字段名（兼容旧数据）
+		Type     string `json:"type"`
+		Operator string `json:"operator"`
+		// 共用字段
+		Value string `json:"value"`
+	}{}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// 优先使用新字段名，如果为空则使用旧字段名
+	nr.Condition = aux.Condition
+	if nr.Condition == "" {
+		nr.Condition = aux.Type
+	}
+
+	nr.AndOr = aux.AndOr
+	if nr.AndOr == "" {
+		nr.AndOr = aux.Operator
+	}
+
+	nr.Value = aux.Value
+
+	return nil
 }
 
 // DeviceGroup represents a hierarchical group for organizing devices.

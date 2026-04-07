@@ -183,6 +183,19 @@ func (s *DeviceRuleService) UpdateRule(ctx context.Context, id uuid.UUID, req Up
 		rule.TargetGroupName = group.Name
 	}
 	if req.Enabled != nil {
+		// 启用规则时，检查 priority 是否冲突，如果冲突则自动分配新的 priority
+		if *req.Enabled && !rule.Enabled {
+			exists, _ := s.repo.ExistsByPriority(ctx, rule.Priority, &rule.ID)
+			if exists {
+				// 获取下一个可用的 priority
+				nextPriority, err := s.repo.GetNextPriority(ctx)
+				if err != nil {
+					s.logger.Warn("failed to get next priority", zap.Error(err))
+				} else {
+					rule.Priority = nextPriority
+				}
+			}
+		}
 		rule.Enabled = *req.Enabled
 	}
 	if req.MatchingMode != nil {
