@@ -349,14 +349,6 @@ export default function KPIQuery() {
     return AVAILABLE_KPIS.filter(kpi => kpi.category === chartKpiCategory);
   }, [chartKpiCategory]);
 
-  // Filtered KPIs based on selected category
-  const filteredKpis = useMemo(() => {
-    if (chartKpiCategory === 'all') {
-      return AVAILABLE_KPIS;
-    }
-    return AVAILABLE_KPIS.filter(kpi => kpi.category === chartKpiCategory);
-  }, [chartKpiCategory]);
-
   // KPI category options with i18n
   const kpiCategoryOptions = useMemo(() => [
     { label: t('perf.query.allCategories'), value: 'all' },
