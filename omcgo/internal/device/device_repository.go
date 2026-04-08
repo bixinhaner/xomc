@@ -994,11 +994,89 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 
 // ===== Recycle Bin Operations =====
 
+// recycleBinColumns returns column names for recycle bin query (includes group_name via JOIN).
+func recycleBinColumns() []string {
+	return append(deviceColumns(), "dg.name as group_name")
+}
+
+// scanRecycleBinRow scans a recycle bin device row including group_name.
+func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
+	var d model.Device
+	var extData, eventsData []byte
+	var ipAddr, udpAddr *string
+	// nullable string columns from devices table
+	var productClass, manufacturer, modelName, firmwareVersion, connReqURL, siteName, siteID, deletedBy *string
+	// group_name from JOIN
+	var groupName *string
+
+	err := rows.Scan(
+		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
+		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&ipAddr, &connReqURL,
+		&d.NatDetected, &udpAddr,
+		&d.LastInformAt, &eventsData,
+		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&groupName,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Assign nullable fields
+	if productClass != nil {
+		d.ProductClass = *productClass
+	}
+	if manufacturer != nil {
+		d.Manufacturer = *manufacturer
+	}
+	if modelName != nil {
+		d.ModelName = *modelName
+	}
+	if firmwareVersion != nil {
+		d.FirmwareVersion = *firmwareVersion
+	}
+	if ipAddr != nil {
+		d.IPAddress = *ipAddr
+	}
+	if connReqURL != nil {
+		d.ConnectionRequestURL = *connReqURL
+	}
+	if udpAddr != nil {
+		d.UDPConnectionRequestAddress = *udpAddr
+	}
+	if siteName != nil {
+		d.SiteName = *siteName
+	}
+	if siteID != nil {
+		d.SiteID = *siteID
+	}
+	if deletedBy != nil {
+		d.DeletedBy = *deletedBy
+	}
+	if groupName != nil {
+		d.GroupName = *groupName
+	}
+	if len(extData) > 0 {
+		if err := json.Unmarshal(extData, &d.ExtensionData); err != nil {
+			return nil, fmt.Errorf("unmarshal extension_data: %w", err)
+		}
+	}
+	if len(eventsData) > 0 {
+		if err := json.Unmarshal(eventsData, &d.LastInformEvents); err != nil {
+			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
+		}
+	}
+	return &d, nil
+}
+
 // ListRecycleBin returns soft-deleted devices with filtering.
 func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
-	// Build base query for deleted devices
-	builder := psql.Select(deviceColumns()...).
+	// Build base query for deleted devices with group info
+	builder := psql.Select(recycleBinColumns()...).
 		From("devices d").
+		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
+		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.NotEq{"d.deleted_at": nil})
 
 	countBuilder := psql.Select("COUNT(*)").
@@ -1031,13 +1109,9 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 		countBuilder = countBuilder.Where(sq.Like{"d.deleted_by": "%" + *filter.DeletedBy + "%"})
 	}
 
-	// GroupID filter requires JOIN
+	// GroupID filter (LEFT JOIN already in main query, just add WHERE)
 	if filter.GroupID != nil {
-		// Note: deleted devices might not have group memberships anymore
-		// as they are removed during soft delete. This filter may return empty results.
-		builder = builder.
-			Join("device_group_members dgm ON d.id = dgm.device_id").
-			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
 		countBuilder = countBuilder.
 			Join("device_group_members dgm ON d.id = dgm.device_id").
 			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
@@ -1096,12 +1170,12 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 
 	var devices []model.Device
 	for rows.Next() {
-		d, err := scanDeviceRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan recycle bin device: %w", err)
-		}
-		devices = append(devices, *d)
-	}
+		d, err := scanRecycleBinRow(rows)
+        if err != nil {
+            return nil, fmt.Errorf("scan recycle bin device: %w", err)
+        }
+        devices = append(devices, *d)
+    }
 
 	if devices == nil {
 		devices = []model.Device{}

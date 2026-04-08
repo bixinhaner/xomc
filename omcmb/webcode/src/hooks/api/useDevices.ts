@@ -30,10 +30,19 @@ export interface UpdateGroupRequest {
   tac_list?: number[];
 }
 
-export function useDeviceList(params: DeviceFilter & PageRequest) {
+export interface UseDeviceListOptions {
+  /** 自动刷新间隔（毫秒），不传或 0 表示不自动刷新 */
+  refetchInterval?: number;
+}
+
+export function useDeviceList(
+  params: DeviceFilter & PageRequest,
+  options?: UseDeviceListOptions
+) {
   return useQuery({
     queryKey: ['devices', 'list', params],
     queryFn: () => api.getList(params),
+    refetchInterval: options?.refetchInterval || false,
   });
 }
 

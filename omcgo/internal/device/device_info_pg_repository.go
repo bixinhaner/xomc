@@ -177,13 +177,13 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	//   nil          → superadmin, no filtering (see all devices)
 	//   []uuid.UUID{} → no permissions, return empty result
 	//   [id1, id2]   → filter to devices in these groups
+	// Note: dgm (device_group_members) is already joined via LeftJoin at line 167
 	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
 		// User has no group permissions — short-circuit to empty result.
 		builder = builder.Where("FALSE")
 		countBuilder = countBuilder.Where("FALSE")
 	} else if filter.GroupID != nil || len(filter.VisibleGroups) > 0 {
-		builder = builder.Join("device_group_members dgm ON dgm.device_id = d.id")
-		countBuilder = countBuilder.Join("device_group_members dgm ON dgm.device_id = d.id")
+		// dgm is already joined, just add WHERE conditions
 		if filter.GroupID != nil {
 			builder = builder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
 			countBuilder = countBuilder.Where(sq.Eq{"dgm.group_id": *filter.GroupID})

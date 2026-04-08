@@ -193,6 +193,9 @@ export default function DeviceList() {
   }
   const [localTasks, setLocalTasks] = useState<LocalTask[]>([]);
 
+  // 实时刷新状态
+  const [autoRefresh, setAutoRefresh] = useState(false);
+
   // 收集任务抽屉状态
   const [collectDrawerOpen, setCollectDrawerOpen] = useState(false);
   const [collectTasks, setCollectTasks] = useState<LocalTask[]>([]);
@@ -277,7 +280,9 @@ export default function DeviceList() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useDeviceList(queryParams);
+  const { data, isLoading, refetch } = useDeviceList(queryParams, {
+    refetchInterval: autoRefresh ? 5000 : undefined,
+  });
   const batchReboot = useBatchRebootDevices();
   const devices: Device[] = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -1195,20 +1200,31 @@ export default function DeviceList() {
         <ListPageLayout
           title={t('nav.device.list')}
           extra={
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'xlsx', label: 'XLSX' },
-                  { key: 'csv', label: 'CSV' },
-                ],
-                onClick: ({ key }) => handleExport(key),
-              }}
-              trigger={['click']}
-            >
-              <Button type="primary" icon={<ExportOutlined />}>
-                {t('common.export')}
-              </Button>
-            </Dropdown>
+            <Space>
+              <Tooltip title={autoRefresh ? t('device.autoRefresh.off') : t('device.autoRefresh.on')}>
+                <Button
+                  type={autoRefresh ? 'primary' : 'default'}
+                  icon={<SyncOutlined spin={autoRefresh} />}
+                  onClick={() => setAutoRefresh(!autoRefresh)}
+                >
+                  {autoRefresh ? t('device.autoRefresh.enabled') : t('device.autoRefresh.disabled')}
+                </Button>
+              </Tooltip>
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'xlsx', label: 'XLSX' },
+                    { key: 'csv', label: 'CSV' },
+                  ],
+                  onClick: ({ key }) => handleExport(key),
+                }}
+                trigger={['click']}
+              >
+                <Button type="primary" icon={<ExportOutlined />}>
+                  {t('common.export')}
+                </Button>
+              </Dropdown>
+            </Space>
           }
         >
           <FilterBar

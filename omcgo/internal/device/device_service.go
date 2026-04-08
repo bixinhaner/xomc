@@ -528,23 +528,42 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	}
 
 	// Auto-transition to active when device informs (it's communicating, so it's online)
-	if device.Status == model.DeviceDiscovered || device.Status == model.DeviceOffline || device.Status == model.DeviceRegistered {
-		oldStatus := device.Status
-		device.Status = model.DeviceActive
+	// This provides fault tolerance for various non-active states:
+	// - discovered: new device sending first heartbeat
+	// - registered: device completed registration, now active
+	// - provisioning: device was being provisioned, now appears to be active
+	// - offline: device was offline, now back online
+	// - maintenance: device was in maintenance, now communicating (may indicate recovery)
+	shouldActivate := device.Status != model.DeviceActive &&
+		device.Status != model.DeviceDecommissioned
 
-		// Record online time: update last_online_time, and first_online_time if this is the first time
-		if s.infoSyncer != nil {
-			if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
-				s.logger.Warn("record online time failed",
-					zap.String("device_id", device.ID.String()),
-					zap.Error(err))
+	if shouldActivate {
+		// Validate that the transition is allowed by state machine
+		if err := ValidateTransition(device.Status, model.DeviceActive); err == nil {
+			oldStatus := device.Status
+			device.Status = model.DeviceActive
+
+			// Record online time: update last_online_time, and first_online_time if this is the first time
+			if s.infoSyncer != nil {
+				if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
+					s.logger.Warn("record online time failed",
+						zap.String("device_id", device.ID.String()),
+						zap.Error(err))
+				}
 			}
-		}
 
-		s.logger.Info("UpdateFromInform: device auto-transitioned to active",
-			zap.String("serial_number", device.SerialNumber),
-			zap.String("previous_status", string(oldStatus)),
-		)
+			s.logger.Info("UpdateFromInform: device auto-transitioned to active",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("previous_status", string(oldStatus)),
+			)
+		} else {
+			// Log when transition is not allowed (e.g., decommissioned devices)
+			s.logger.Debug("UpdateFromInform: state transition to active not allowed",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("current_status", string(device.Status)),
+				zap.Error(err),
+			)
+		}
 	}
 
 	s.logger.Debug("UpdateFromInform: calling deviceRepo.Update",

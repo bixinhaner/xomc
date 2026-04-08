@@ -40,4 +40,7 @@ type Device struct {
 	UpdatedAt                   time.Time              `json:"updated_at" db:"updated_at"`
 	DeletedAt                   *time.Time             `json:"deleted_at,omitempty" db:"deleted_at"`
 	DeletedBy                   string                 `json:"deleted_by,omitempty" db:"deleted_by"` // who moved to recycle bin
+
+	// Group info (from device_groups table via device_group_members)
+	GroupName                   string                 `json:"group_name,omitempty" db:"group_name"`
 }
