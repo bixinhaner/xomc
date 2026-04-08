@@ -450,6 +450,7 @@ const messages: Record<string, string> = {
   'device.ipAddress':       'IP地址',
   'device.subnet':          '子网',
   'device.lastOnlineTime':  '最后在线时间',
+  'device.offlineDuration': '离线时长',
   'device.longitude':       '经度',
   'device.latitude':        '纬度',
   'device.height':          '高度',

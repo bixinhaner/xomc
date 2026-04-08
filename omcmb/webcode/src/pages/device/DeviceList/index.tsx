@@ -36,6 +36,63 @@ const SEVERITY_COLOR: Record<string, string> = {
   none: 'default',
 };
 
+/**
+ * 格式化离线时长为可读字符串
+ * @param days 离线天数
+ * @param hours 剩余小时数 (0-23)
+ * @param minutes 剩余分钟数 (0-59)
+ */
+function formatOfflineDuration(days?: number, hours?: number, minutes?: number): React.ReactNode {
+  if (days === undefined || days === null) return '-';
+
+  // 超过1年
+  if (days >= 365) {
+    const years = Math.floor(days / 365);
+    const remainDays = days % 365;
+    return (
+      <Tag color="red">
+        {remainDays > 0 ? `${years}年${remainDays}天` : `${years}年`}
+      </Tag>
+    );
+  }
+
+  // 超过1月
+  if (days >= 30) {
+    const months = Math.floor(days / 30);
+    const remainDays = days % 30;
+    return (
+      <Tag color="orange">
+        {remainDays > 0 ? `${months}个月${remainDays}天` : `${months}个月`}
+      </Tag>
+    );
+  }
+
+  // 超过1天
+  if (days > 0) {
+    return (
+      <Tag color={days >= 7 ? 'orange' : 'gold'}>
+        {hours && hours > 0 ? `${days}天${hours}小时` : `${days}天`}
+      </Tag>
+    );
+  }
+
+  // 超过1小时
+  if (hours && hours > 0) {
+    return (
+      <Tag color="gold">
+        {minutes && minutes > 0 ? `${hours}小时${minutes}分钟` : `${hours}小时`}
+      </Tag>
+    );
+  }
+
+  // 不足1小时
+  if (minutes && minutes > 0) {
+    return <Tag color="default">{`${minutes}分钟`}</Tag>;
+  }
+
+  // 不足1分钟
+  return <Tag color="default">{'<1分钟'}</Tag>;
+}
 
 export default function DeviceList() {
   const t = useT();
@@ -753,6 +810,22 @@ export default function DeviceList() {
           { on: t('status.active'), off: t('status.inactive'), title: t('device.multiCellStatus') },
           { on: 'success', off: 'error', mixed: 'warning' },
         ),
+      },
+      {
+        key: 'offlineDuration',
+        title: t('device.offlineDuration'),
+        width: 120,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => {
+          // 仅离线设备显示
+          if (record.connStatus !== 'offline') return '-';
+          return formatOfflineDuration(
+            record.offlineDays,
+            record.offlineHours,
+            record.offlineMinutes
+          );
+        },
       },
       {
         key: 'ueCount',

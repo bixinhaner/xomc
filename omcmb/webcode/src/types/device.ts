@@ -124,6 +124,17 @@ export interface Device {
   // 回收站扩展字段
   deletedAt?: string;
   deletedBy?: string;
+
+  // ===== 离线时长（仅离线设备有值）=====
+
+  /** 离线总秒数 */
+  offlineSeconds?: number;
+  /** 离线天数 */
+  offlineDays?: number;
+  /** 剩余小时数（0-23）*/
+  offlineHours?: number;
+  /** 剩余分钟数（0-59）*/
+  offlineMinutes?: number;
 }
 
 export interface NE {

@@ -449,6 +449,7 @@ const messages: Record<string, string> = {
   'device.ipAddress':       'IP Address',
   'device.subnet':          'Subnet',
   'device.lastOnlineTime':  'Last Online Time',
+  'device.offlineDuration': 'Offline Duration',
   'device.longitude':       'Longitude',
   'device.latitude':        'Latitude',
   'device.height':          'Height',
