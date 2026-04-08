@@ -11,7 +11,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices, useDeviceGroups } from '@/hooks/api/useDevices';
+import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices } from '@/hooks/api/useDevices';
+import { useDomainTree } from '@/hooks/api/useTopology';
 import type { Device } from '@/types/device';
 import ImportModal from './ImportModal';
 
@@ -55,9 +56,62 @@ export default function RecycleBin() {
   const [pageSize, setPageSize] = useState(20);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
-  // 获取设备分组列表用于筛选
-  const { data: groupsData } = useDeviceGroups();
-  const deviceGroups = groupsData?.groups || [];
+  // 获取设备分组树（使用树形结构避免重复数据）
+  const { data: domains } = useDomainTree();
+
+  // 构建设备分组选项（只显示L2分组，带完整路径）
+  const deviceGroupOptions: { id: string; name: string; fullName: string }[] = useMemo(() => {
+    // 使用 fullName 作为去重键，确保相同路径只出现一次
+    const optionsMap = new Map<string, { id: string; name: string; fullName: string }>();
+    const idSet = new Set<string>();
+
+    if (!domains || !Array.isArray(domains)) return [];
+
+    // 辅助函数：安全获取 level 值（处理字符串和数字类型）
+    const getLevel = (level: unknown): number => {
+      if (typeof level === 'number') return level;
+      if (typeof level === 'string') return parseInt(level, 10) || 0;
+      return 0;
+    };
+
+    // 遍历分组树，只添加 L2 分组（带父级路径）
+    const buildOptions = (items: unknown[], parentPath: string = '') => {
+      if (!Array.isArray(items)) return;
+
+      items.forEach((item) => {
+        if (!item || typeof item !== 'object') return;
+
+        const group = item as { id?: string; name?: string; level?: unknown; children?: unknown[] };
+        const level = getLevel(group.level);
+        const id = String(group.id || '');
+        const name = String(group.name || '');
+
+        if (level === 1) {
+          // L1 分组：不添加到选项，只遍历其子分组
+          if (group.children && Array.isArray(group.children) && group.children.length > 0) {
+            buildOptions(group.children, name);
+          }
+        } else if (level === 2) {
+          // L2 分组：添加到选项，显示完整路径（一级分组/二级分组）
+          const fullName = parentPath ? `${parentPath}/${name}` : name;
+
+          // 双重去重：先检查 id，再检查 fullName
+          if (id && !idSet.has(id) && !optionsMap.has(fullName)) {
+            idSet.add(id);
+            optionsMap.set(fullName, {
+              id: id,
+              name: name,
+              fullName: fullName,
+            });
+          }
+        }
+      });
+    };
+
+    buildOptions(domains as unknown[]);
+    // 按 fullName 排序
+    return Array.from(optionsMap.values()).sort((a, b) => a.fullName.localeCompare(b.fullName, 'zh-CN'));
+  }, [domains]);
 
   // 获取回收站设备列表
   const { data, isLoading, refetch } = useRecycleBinList({
@@ -154,15 +208,16 @@ export default function RecycleBin() {
       },
       {
         name: 'group_id',
-        label: t('device.groupName'),
+        label: t('recycle.groupName'),
         type: 'select',
-        options: [
-          { label: 'All', value: '' },
-          ...deviceGroups.map((g) => ({ label: g.name, value: g.id })),
-        ],
+        options: deviceGroupOptions.map((g) => ({
+          label: g.fullName,
+          value: g.id,
+        })),
+        placeholder: t('common.pleaseSelect'),
       },
     ],
-    [t, deviceGroups]
+    [t, deviceGroupOptions]
   );
 
   // 列定义
