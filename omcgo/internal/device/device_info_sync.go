@@ -3,6 +3,8 @@ package device
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,12 +13,59 @@ import (
 	"go.uber.org/zap"
 )
 
+// runTimeRegex matches TR069 run time format like "40d 4h 58m" or "4h 58m" or "58m"
+// Captures: days, hours, minutes, seconds (each optional)
+var runTimeRegex = regexp.MustCompile(`(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?`)
+
+// parseRunTimeToSeconds parses TR069 run time format to seconds.
+// Supported formats: "40d 4h 58m", "4h 58m", "58m", "40d 4h 58m 30s"
+// Returns 0 if parsing fails.
+func parseRunTimeToSeconds(val string) int64 {
+	matches := runTimeRegex.FindStringSubmatch(val)
+	if matches == nil {
+		return 0
+	}
+
+	var totalSeconds int64
+	// matches[0] is the full match, matches[1-4] are days, hours, minutes, seconds
+	if matches[1] != "" {
+		if days, err := strconv.ParseInt(matches[1], 10, 64); err == nil {
+			totalSeconds += days * 86400
+		}
+	}
+	if matches[2] != "" {
+		if hours, err := strconv.ParseInt(matches[2], 10, 64); err == nil {
+			totalSeconds += hours * 3600
+		}
+	}
+	if matches[3] != "" {
+		if minutes, err := strconv.ParseInt(matches[3], 10, 64); err == nil {
+			totalSeconds += minutes * 60
+		}
+	}
+	if matches[4] != "" {
+		if seconds, err := strconv.ParseInt(matches[4], 10, 64); err == nil {
+			totalSeconds += seconds
+		}
+	}
+
+	return totalSeconds
+}
+
 // universalInformMapping maps TR069 parameter paths to device_info columns
 // for parameters that are identical across all carriers (not carrier-specific).
+// Note: run_time is handled separately with priority logic (UpTime > X_COM_STATION_RUN_Time)
 var universalInformMapping = map[string]string{
-	"Device.DeviceInfo.X_COM_STATION_RUN_Time":                          "run_time",
 	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
 }
+
+// TR069 parameter paths for run_time with priority
+const (
+	// ParamUpTime is the standard TR069 UpTime parameter (unit: seconds, direct storage)
+	ParamUpTime = "Device.DeviceInfo.UpTime"
+	// ParamStationRunTime is the vendor-specific run time parameter (format: "40d 4h 58m")
+	ParamStationRunTime = "Device.DeviceInfo.X_COM_STATION_RUN_Time"
+)
 
 // InfoSyncer extracts key TR069 parameters from device_parameters
 // and updates the corresponding device_info columns for fast query access.
@@ -82,6 +131,23 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 		}
 	}
 
+	// Handle run_time with priority: UpTime (seconds) > X_COM_STATION_RUN_Time (parsed format)
+	// Priority 1: Device.DeviceInfo.UpTime (standard TR069, unit is seconds)
+	if val, ok := paramValues[ParamUpTime]; ok && val != "" {
+		if seconds, err := strconv.ParseInt(val, 10, 64); err == nil {
+			fields["run_time"] = seconds
+		}
+	}
+	// Priority 2: Device.DeviceInfo.X_COM_STATION_RUN_Time (vendor-specific, format "40d 4h 58m")
+	// Only use if UpTime is not available or invalid
+	if _, exists := fields["run_time"]; !exists {
+		if val, ok := paramValues[ParamStationRunTime]; ok && val != "" {
+			if seconds := parseRunTimeToSeconds(val); seconds > 0 {
+				fields["run_time"] = seconds
+			}
+		}
+	}
+
 	// Computed quick-query columns from multiple parameters
 	fields["cell_status"] = CalcCellStatus(paramValues)
 	fields["mme_status"] = CalcMMEStatus(paramValues)
@@ -112,4 +178,21 @@ func (s *InfoSyncer) RecordOffline(ctx context.Context, deviceID uuid.UUID) erro
 	return s.infoRepo.UpdateSyncFields(ctx, deviceID, map[string]interface{}{
 		"last_offline_time": time.Now(),
 	})
+}
+
+// RecordOnline updates the last_online_time when a device comes online (from offline to active).
+// It also sets first_online_time if this is the device's first online event.
+func (s *InfoSyncer) RecordOnline(ctx context.Context, deviceID uuid.UUID) error {
+	now := time.Now()
+	fields := map[string]interface{}{
+		"last_online_time": now,
+	}
+
+	// 检查是否首次上线，如果是则同时设置 first_online_time
+	info, err := s.infoRepo.GetByDeviceID(ctx, deviceID)
+	if err == nil && info.FirstOnlineTime == nil {
+		fields["first_online_time"] = now
+	}
+
+	return s.infoRepo.UpdateSyncFields(ctx, deviceID, fields)
 }

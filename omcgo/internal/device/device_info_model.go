@@ -114,10 +114,13 @@ type DeviceInfo struct {
 
 	// ===== 时间信息 =====
 
-	// FirstOnlineTime 首次上线时间
+	// FirstOnlineTime 首次上线时间（设备生命周期内只记录一次）
 	FirstOnlineTime *time.Time `json:"first_online_time"`
 
-	// LastOfflineTime 最后离线时间
+	// LastOnlineTime 最后上线时间（设备从离线变为在线的时间）
+	LastOnlineTime *time.Time `json:"last_online_time"`
+
+	// LastOfflineTime 最后离线时间（设备从在线变为离线的时间）
 	LastOfflineTime *time.Time `json:"last_offline_time"`
 
 	// RunTime 累计运行时间（秒）

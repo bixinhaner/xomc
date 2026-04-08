@@ -99,14 +99,31 @@ type DeviceWithInfo struct {
 
 	// ===== device_info 时间信息（可能为空）=====
 
-	// FirstOnlineTime 首次上线时间
+	// FirstOnlineTime 首次上线时间（设备生命周期内只记录一次）
 	FirstOnlineTime *time.Time `json:"first_online_time"`
 
-	// LastOfflineTime 最后离线时间
+	// LastOnlineTime 最后上线时间（设备从离线变为在线的时间，对应前端"接入时间"）
+	LastOnlineTime *time.Time `json:"last_online_time"`
+
+	// LastOfflineTime 最后离线时间（设备从在线变为离线的时间，对应前端"断开时间"）
 	LastOfflineTime *time.Time `json:"last_offline_time"`
 
 	// RunTime 累计运行时长（秒）
 	RunTime *int64 `json:"run_time"`
+
+	// ===== 离线时长（动态计算，不存储）=====
+
+	// OfflineSeconds 离线总秒数（仅离线设备有值）
+	OfflineSeconds *int64 `json:"offline_seconds,omitempty"`
+
+	// OfflineDays 离线天数
+	OfflineDays *int64 `json:"offline_days,omitempty"`
+
+	// OfflineHours 剩余小时数（0-23）
+	OfflineHours *int64 `json:"offline_hours,omitempty"`
+
+	// OfflineMinutes 剩余分钟数（0-59）
+	OfflineMinutes *int64 `json:"offline_minutes,omitempty"`
 }
 
 // DeviceListItem 简化的设备列表项，用于前端表格展示。

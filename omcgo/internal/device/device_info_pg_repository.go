@@ -357,7 +357,29 @@ func deviceWithInfoSelectColumns() []string {
 		"di.rf_status", "di.cell_status", "di.mme_status", "di.sync_status", "di.kpi_status",
 		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
 		"di.mac", "di.hardware_version",
-		"di.first_online_time", "di.last_offline_time", "di.run_time",
+		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
+		// 离线时长计算（SQL层面，仅离线设备有值）
+		// 离线状态：offline, maintenance, decommissioned, discovered
+		`CASE
+			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			THEN EXTRACT(EPOCH FROM (NOW() - di.last_offline_time))::bigint
+			ELSE NULL
+		END AS offline_seconds`,
+		`CASE
+			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) / 86400)::bigint
+			ELSE NULL
+		END AS offline_days`,
+		`CASE
+			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 86400) / 3600)::bigint
+			ELSE NULL
+		END AS offline_hours`,
+		`CASE
+			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
+			ELSE NULL
+		END AS offline_minutes`,
 	}
 }
 
@@ -413,8 +435,14 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diMAC           *string
 		diHWVersion     *string
 		diFirstOnline   *time.Time
+		diLastOnline    *time.Time
 		diLastOffline   *time.Time
 		diRunTime       *int64
+		// 离线时长（SQL计算）
+		offlineSeconds *int64
+		offlineDays    *int64
+		offlineHours   *int64
+		offlineMinutes *int64
 	)
 
 	err := rows.Scan(
@@ -434,7 +462,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diRFStatus, &diCellStatus, &diMMEStatus, &diSyncStatus, &diKPIStatus,
 		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
-		&diFirstOnline, &diLastOffline, &diRunTime,
+		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
+		// 离线时长（SQL计算）
+		&offlineSeconds, &offlineDays, &offlineHours, &offlineMinutes,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan device with info: %w", err)
@@ -501,8 +531,14 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.MAC = diMAC
 	d.HardwareVersion = diHWVersion
 	d.FirstOnlineTime = diFirstOnline
+	d.LastOnlineTime = diLastOnline
 	d.LastOfflineTime = diLastOffline
 	d.RunTime = diRunTime
+	// 离线时长
+	d.OfflineSeconds = offlineSeconds
+	d.OfflineDays = offlineDays
+	d.OfflineHours = offlineHours
+	d.OfflineMinutes = offlineMinutes
 
 	return &d, nil
 }

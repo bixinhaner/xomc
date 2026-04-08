@@ -531,6 +531,16 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	if device.Status == model.DeviceDiscovered || device.Status == model.DeviceOffline || device.Status == model.DeviceRegistered {
 		oldStatus := device.Status
 		device.Status = model.DeviceActive
+
+		// Record online time: update last_online_time, and first_online_time if this is the first time
+		if s.infoSyncer != nil {
+			if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
+				s.logger.Warn("record online time failed",
+					zap.String("device_id", device.ID.String()),
+					zap.Error(err))
+			}
+		}
+
 		s.logger.Info("UpdateFromInform: device auto-transitioned to active",
 			zap.String("serial_number", device.SerialNumber),
 			zap.String("previous_status", string(oldStatus)),
@@ -678,14 +688,15 @@ func (s *DeviceService) UpdateDeviceInfo(ctx context.Context, deviceID uuid.UUID
 }
 
 // CreateDeviceInfo creates the initial device_info record for a newly registered device.
+// Note: first_online_time is NOT set here. It will be set when the device actually
+// transitions to active status (sends first heartbeat and becomes online).
 func (s *DeviceService) CreateDeviceInfo(ctx context.Context, deviceID uuid.UUID) error {
 	if s.deviceInfoRepo == nil {
 		return nil
 	}
-	now := time.Now()
 	info := &DeviceInfo{
-		DeviceID:        deviceID,
-		FirstOnlineTime: &now,
+		DeviceID: deviceID,
+		// FirstOnlineTime: nil - will be set when device actually goes online
 	}
 	return s.deviceInfoRepo.Create(ctx, info)
 }

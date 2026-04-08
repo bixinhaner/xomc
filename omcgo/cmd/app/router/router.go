@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -89,6 +90,21 @@ func Setup(r *gin.Engine, deps *Deps) error {
 	// InfoSyncer: extracts TR069 parameters into device_info for fast queries
 	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, carrierRegistry, logger)
 	deviceService.SetInfoSyncer(infoSyncer)
+
+	// OfflineDetector: detects stale devices and marks them as offline
+	offlineDetector := device.NewOfflineDetector(deviceRepo, infoSyncer, eventBus, logger)
+	go func() {
+		if err := offlineDetector.Start(context.Background()); err != nil {
+			logger.Error("offline detector stopped with error", zap.Error(err))
+		}
+	}()
+	gs.Register("offline-detector", 2, func(ctx context.Context) error {
+		// OfflineDetector.Start blocks until context is cancelled
+		return nil
+	})
+	logger.Info("offline detector started",
+		zap.Duration("check_interval", 5*time.Minute),
+		zap.Duration("offline_threshold", 10*time.Minute))
 
 	// Device Registration module
 	regRepo := device.NewPgRegistrationRepository(pgPool)

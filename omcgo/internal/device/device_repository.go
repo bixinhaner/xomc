@@ -119,6 +119,9 @@ type DeviceReader interface {
 	GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error)
 	// SearchDevices searches devices by keyword for map display.
 	SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error)
+	// FindStaleDevices finds active devices that haven't sent Inform within the threshold.
+	// Used by OfflineDetector to mark devices as offline.
+	FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
 }
 
 // DeviceWriter provides write operations for devices.
@@ -1176,4 +1179,38 @@ func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUI
 	}
 
 	return tag.RowsAffected(), nil
+}
+
+// FindStaleDevices finds active devices that haven't sent Inform within the threshold.
+// Used by OfflineDetector to mark devices as offline.
+func (r *PgDeviceRepository) FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
+	builder := psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.Eq{"d.status": model.DeviceActive}).
+		Where(sq.Lt{"d.last_inform_at": threshold}).
+		Where(notDeleted).
+		OrderBy("d.last_inform_at ASC").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find stale devices query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find stale devices: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []*model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan stale device: %w", err)
+		}
+		devices = append(devices, d)
+	}
+
+	return devices, nil
 }
