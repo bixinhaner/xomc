@@ -302,7 +302,16 @@ export const deviceApi = {
     if (params.searchText) query.search = params.searchText;
     if (params.sn) query.sn = params.sn;
     if (params.vendor) query.oui = params.vendor;
-    if (params.networkType) query.technology = params.networkType;
+    // networkType: 前端值 'eNB' → 后端 'lte', 'gNB' → 后端 'nr'
+    if (params.networkType) {
+      const networkTypeMap: Record<string, string> = {
+        'eNB': 'lte',
+        'gNB': 'nr',
+        // GSM 后端不支持，忽略
+      };
+      const mappedTech = networkTypeMap[params.networkType];
+      if (mappedTech) query.technology = mappedTech;
+    }
     // groupId → group_id (device group filter)
     if (params.groupId) query.group_id = params.groupId;
     // connStatus: 前端值 '1'(在线)→'active', '0'(离线)→'offline', '2'(同步失败)→'offline', '3'(同步中)→'active'

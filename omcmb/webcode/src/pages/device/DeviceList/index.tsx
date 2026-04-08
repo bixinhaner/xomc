@@ -270,9 +270,8 @@ export default function DeviceList() {
       label: t('device.radioMode'),
       type: 'select',
       options: [
-        { label: 'eNB', value: 'eNB' },
-        { label: 'gNB', value: 'gNB' },
-        { label: 'GSM', value: 'GSM' },
+        { label: 'eNB (LTE)', value: 'eNB' },
+        { label: 'gNB (NR)', value: 'gNB' },
       ],
     },
     {
@@ -280,18 +279,15 @@ export default function DeviceList() {
       label: t('device.productType'),
       type: 'multi-select',
       options: [
-        // eNB 产品类型（动态，后端返回）— 此处先列举已知选项
+        // eNB 产品类型（LTE）
         { label: 'PM-B4860', value: 'PM-B4860' },
         { label: 'QAFA', value: 'QAFA' },
         { label: 'QATA', value: 'QATA' },
         { label: 'QAFB', value: 'QAFB' },
         { label: 'RTD', value: 'RTD' },
-        // gNB 产品类型（硬编码）
+        // gNB 产品类型（NR）
         { label: 'BaiBNX', value: 'BaiBNX' },
         { label: 'BaiBNQ', value: 'BaiBNQ' },
-        // GSM 产品类型（硬编码）
-        { label: 'BSC', value: 'BSC' },
-        { label: 'BTS', value: 'BTS' },
       ],
     },
 
