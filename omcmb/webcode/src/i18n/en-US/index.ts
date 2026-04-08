@@ -1293,6 +1293,7 @@ const messages: Record<string, string> = {
   'perf.query.chartDateRange': 'Date Range',
   'perf.query.startDate': 'Start Date',
   'perf.query.endDate': 'End Date',
+  'perf.query.kpiSet': 'KPI Set',
 
   // Export drawer
   'perf.export.title': 'Export',

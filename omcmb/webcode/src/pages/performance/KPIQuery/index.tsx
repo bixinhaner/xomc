@@ -1480,7 +1480,7 @@ export default function KPIQuery() {
             />
           </Form.Item>
 
-          <Form.Item label={t('perf.query.kpiCategory')}>
+          <Form.Item label={t('perf.query.kpiSet')}>
             <Select
               value={chartKpiCategory}
               onChange={(value) => {

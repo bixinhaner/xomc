@@ -1295,6 +1295,7 @@ const messages: Record<string, string> = {
   'perf.query.chartDateRange': '日期范围',
   'perf.query.startDate': '开始日期',
   'perf.query.endDate': '结束日期',
+  'perf.query.kpiSet': '指标集',
 
   // Export drawer
   'perf.export.title': '导出',
