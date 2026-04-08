@@ -25,6 +25,7 @@ const messages: Record<string, string> = {
   'common.detail':         '详情',
   'common.description':    '描述',
   'common.copy':           '复制',
+  'common.copyFailed':     '复制失败',
   'common.download':       '下载',
   'common.upload':         '上传',
   'common.execute':        '执行',

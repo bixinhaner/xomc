@@ -25,6 +25,7 @@ const messages: Record<string, string> = {
   'common.detail':         'Detail',
   'common.description':    'Description',
   'common.copy':           'Copy',
+  'common.copyFailed':     'Copy failed',
   'common.download':       'Download',
   'common.upload':         'Upload',
   'common.execute':        'Execute',
