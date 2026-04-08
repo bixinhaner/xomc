@@ -510,7 +510,7 @@ export default function DeviceGrouping() {
           okType: 'danger',
           onOk: async () => {
             try {
-              await batchRebootMutation.mutateAsync(selectedKeys as string[]);
+              await deleteDevicesMutation.mutateAsync(selectedKeys as string[]);
               void message.success(t('common.success'));
             } catch {
               void message.error(t('common.operationFailed'));
