@@ -37,6 +37,7 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'device-ne',        label: 'nav.device.ne',          path: '/device/ne' },           // 隐藏
       // { key: 'device-monitor',   label: 'nav.device.monitor',     path: '/device/monitor' },       // 隐藏
       { key: 'device-launch',    label: 'nav.device.commission',  path: '/device/commission' },
+      { key: 'device-pnp',       label: 'nav.device.plugAndPlay', path: '/provision/plug-and-play' },
       // { key: 'device-transfer',  label: 'nav.device.handover',    path: '/device/handover' },      // 隐藏
       // { key: 'device-resource',  label: 'nav.device.stats',       path: '/device/stats' },         // 隐藏
       // { key: 'device-import',    label: 'nav.device.import',      path: '/device/import' },        // 隐藏

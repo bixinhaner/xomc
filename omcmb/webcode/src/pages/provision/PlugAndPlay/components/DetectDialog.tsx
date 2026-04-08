@@ -1,0 +1,394 @@
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { Modal, Input, Button, Space, Tag, Table, App, Typography, Tooltip, Empty } from 'antd';
+import type { TableColumnsType } from 'antd';
+import {
+  SearchOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  ClearOutlined,
+  EditOutlined,
+  CheckCircleOutlined,
+} from '@ant-design/icons';
+import { useT } from '@/hooks/useT';
+
+const { Text } = Typography;
+
+interface Device {
+  serialNumber: string;
+  cellName: string;
+  softwareVersion: string;
+  product: string;
+  groupName: string;
+  connectionStatus: 'online' | 'offline';
+}
+
+interface Policy {
+  policyId: string;
+  policyName: string;
+  productType: string;
+}
+
+interface Props {
+  open: boolean;
+  policy: Policy | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+// Mock device data
+const MOCK_DEVICES: Device[] = [
+  { serialNumber: 'ENB00001', cellName: '北京朝阳基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '北京区域', connectionStatus: 'online' },
+  { serialNumber: 'ENB00002', cellName: '北京海淀基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '北京区域', connectionStatus: 'online' },
+  { serialNumber: 'ENB00003', cellName: '上海浦东基站01', softwareVersion: 'V2.0.4', product: 'QAFA', groupName: '上海区域', connectionStatus: 'offline' },
+  { serialNumber: 'ENB00004', cellName: '上海徐汇基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '上海区域', connectionStatus: 'online' },
+  { serialNumber: 'ENB00005', cellName: '广州天河基站01', softwareVersion: 'V2.0.5', product: 'QAFB', groupName: '广州区域', connectionStatus: 'online' },
+  { serialNumber: 'ENB00006', cellName: '深圳南山基站01', softwareVersion: 'V2.0.3', product: 'QAFB', groupName: '深圳区域', connectionStatus: 'offline' },
+  { serialNumber: 'ENB00007', cellName: '杭州西湖基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '杭州区域', connectionStatus: 'online' },
+  { serialNumber: 'ENB00008', cellName: '成都武侯基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '成都区域', connectionStatus: 'online' },
+];
+
+export default function DetectDialog({ open, policy, onClose, onSuccess }: Props) {
+  const t = useT();
+  const { message } = App.useApp();
+
+  // State
+  const [searchText, setSearchText] = useState('');
+  const [selectedDevices, setSelectedDevices] = useState<Device[]>([]);
+  const [batchInputOpen, setBatchInputOpen] = useState(false);
+  const [batchInputValue, setBatchInputValue] = useState('');
+  const [batchInputError, setBatchInputError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Reset state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setSearchText('');
+      setSelectedDevices([]);
+      setBatchInputValue('');
+      setBatchInputError('');
+    }
+  }, [open]);
+
+  // Filtered available devices
+  const filteredDevices = useMemo(() => {
+    if (!searchText) return MOCK_DEVICES;
+    const search = searchText.toLowerCase();
+    return MOCK_DEVICES.filter(d =>
+      d.serialNumber.toLowerCase().includes(search) ||
+      d.cellName.toLowerCase().includes(search)
+    );
+  }, [searchText]);
+
+  // Available devices (not selected)
+  const availableDevices = useMemo(() => {
+    const selectedSns = new Set(selectedDevices.map(d => d.serialNumber));
+    return filteredDevices.filter(d => !selectedSns.has(d.serialNumber));
+  }, [filteredDevices, selectedDevices]);
+
+  // Add device to selected
+  const handleAddDevice = useCallback((device: Device) => {
+    setSelectedDevices(prev => [...prev, device]);
+  }, []);
+
+  // Remove device from selected
+  const handleRemoveDevice = useCallback((serialNumber: string) => {
+    setSelectedDevices(prev => prev.filter(d => d.serialNumber !== serialNumber));
+  }, []);
+
+  // Clear all selected
+  const handleClearSelected = useCallback(() => {
+    setSelectedDevices([]);
+  }, []);
+
+  // Batch input validation
+  const validateBatchInput = useCallback((value: string): boolean => {
+    if (!value.trim()) {
+      setBatchInputError(t('provision.serialNumberRequired'));
+      return false;
+    }
+
+    const sns = value.replace(/[(\r\n)\r\n\s；;]+/g, ';').split(';').filter(s => s.trim());
+    const regex = /^(\d|[a-zA-Z]|-|\s){1,30}$/;
+
+    for (const sn of sns) {
+      if (!regex.test(sn.trim())) {
+        setBatchInputError(t('provision.serialNumberFormat'));
+        return false;
+      }
+    }
+
+    setBatchInputError('');
+    return true;
+  }, [t]);
+
+  // Handle batch input submit
+  const handleBatchInputSubmit = useCallback(() => {
+    if (!validateBatchInput(batchInputValue)) return;
+
+    const sns = batchInputValue.replace(/[(\r\n)\r\n\s；;]+/g, ';').split(';').filter(s => s.trim());
+    const newDevices: Device[] = [];
+
+    for (const sn of sns) {
+      const device = MOCK_DEVICES.find(d => d.serialNumber.toLowerCase() === sn.trim().toLowerCase());
+      if (device && !selectedDevices.some(sd => sd.serialNumber === device.serialNumber)) {
+        newDevices.push(device);
+      }
+    }
+
+    if (newDevices.length > 0) {
+      setSelectedDevices(prev => [...prev, ...newDevices]);
+      message.success(t('provision.addedDevices', { count: newDevices.length }));
+    } else {
+      message.warning(t('provision.noNewDevices'));
+    }
+
+    setBatchInputOpen(false);
+    setBatchInputValue('');
+  }, [batchInputValue, selectedDevices, validateBatchInput, message, t]);
+
+  // Handle submit
+  const handleSubmit = useCallback(() => {
+    if (selectedDevices.length === 0) {
+      message.warning(t('provision.selectDeviceRequired'));
+      return;
+    }
+
+    setLoading(true);
+    // Simulate API call
+    setTimeout(() => {
+      setLoading(false);
+      onSuccess();
+    }, 1000);
+  }, [selectedDevices, onSuccess, message, t]);
+
+  // Available devices columns
+  const availableColumns: TableColumnsType<Device> = useMemo(() => [
+    {
+      title: '',
+      key: 'action',
+      width: 40,
+      render: (_, record) => (
+        <Tooltip title={t('common.add')}>
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => handleAddDevice(record)}
+          />
+        </Tooltip>
+      ),
+    },
+    {
+      title: '',
+      key: 'status',
+      width: 40,
+      render: (_, record) => (
+        <Tooltip title={record.connectionStatus === 'online' ? t('provision.online') : t('provision.offline')}>
+          <Tag
+            color={record.connectionStatus === 'online' ? 'success' : 'default'}
+            style={{ width: 8, height: 8, borderRadius: '50%', padding: 0 }}
+          />
+        </Tooltip>
+      ),
+    },
+    {
+      title: t('provision.deviceCode'),
+      dataIndex: 'serialNumber',
+      width: 120,
+    },
+    {
+      title: t('provision.hostName'),
+      dataIndex: 'cellName',
+      width: 120,
+      ellipsis: true,
+    },
+    {
+      title: t('provision.version'),
+      dataIndex: 'softwareVersion',
+      width: 80,
+    },
+    {
+      title: t('provision.productType'),
+      dataIndex: 'product',
+      width: 60,
+    },
+    {
+      title: t('provision.deviceGroup'),
+      dataIndex: 'groupName',
+      width: 100,
+      ellipsis: true,
+    },
+  ], [t, handleAddDevice]);
+
+  // Selected devices columns
+  const selectedColumns: TableColumnsType<Device> = useMemo(() => [
+    {
+      title: '',
+      key: 'action',
+      width: 40,
+      render: (_, record) => (
+        <Tooltip title={t('common.delete')}>
+          <Button
+            type="text"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleRemoveDevice(record.serialNumber)}
+          />
+        </Tooltip>
+      ),
+    },
+    {
+      title: t('provision.deviceCode'),
+      dataIndex: 'serialNumber',
+      width: 120,
+    },
+    {
+      title: t('provision.hostName'),
+      dataIndex: 'cellName',
+      width: 120,
+      ellipsis: true,
+    },
+  ], [t, handleRemoveDevice]);
+
+  return (
+    <>
+      <Modal
+        title={
+          <Space>
+            <span>{t('provision.deviceList')}</span>
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+              ({t('provision.detectHint')})
+            </Text>
+          </Space>
+        }
+        open={open}
+        onCancel={onClose}
+        width={1100}
+        footer={
+          <Space>
+            <Button onClick={onClose}>{t('common.cancel')}</Button>
+            <Button type="primary" loading={loading} onClick={handleSubmit}>
+              {t('common.confirm')}
+            </Button>
+          </Space>
+        }
+        styles={{ body: { padding: '16px 24px' } }}
+      >
+        <div style={{ display: 'flex', gap: 16, height: 400 }}>
+          {/* Left: Available devices */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text strong>{t('provision.availableDevices')}</Text>
+              <Space size={8}>
+                <Input
+                  placeholder={t('provision.searchDeviceCode')}
+                  prefix={<SearchOutlined />}
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  style={{ width: 180 }}
+                  size="small"
+                  allowClear
+                />
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => setBatchInputOpen(true)}
+                >
+                  {t('common.batchImport')}
+                </Button>
+              </Space>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <Table
+                columns={availableColumns}
+                dataSource={availableDevices}
+                rowKey="serialNumber"
+                size="small"
+                pagination={false}
+                showHeader={true}
+                locale={{ emptyText: <Empty description={t('common.noData')} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+              />
+            </div>
+          </div>
+
+          {/* Right: Selected devices */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <Text strong>{t('provision.selectedDevices')}</Text>
+                <Tag color="blue">{selectedDevices.length}</Tag>
+              </Space>
+              <Button
+                size="small"
+                danger
+                icon={<ClearOutlined />}
+                onClick={handleClearSelected}
+                disabled={selectedDevices.length === 0}
+              >
+                {t('common.clear')}
+              </Button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <Table
+                columns={selectedColumns}
+                dataSource={selectedDevices}
+                rowKey="serialNumber"
+                size="small"
+                pagination={false}
+                showHeader={true}
+                locale={{ emptyText: <Empty description={t('provision.noSelectedDevices')} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+              />
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Batch Input Modal */}
+      <Modal
+        title={t('common.batchImport')}
+        open={batchInputOpen}
+        onCancel={() => {
+          setBatchInputOpen(false);
+          setBatchInputValue('');
+          setBatchInputError('');
+        }}
+        width={630}
+        footer={
+          <Space>
+            <Button onClick={() => {
+              setBatchInputOpen(false);
+              setBatchInputValue('');
+              setBatchInputError('');
+            }}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="primary" onClick={handleBatchInputSubmit}>
+              {t('common.confirm')}
+            </Button>
+          </Space>
+        }
+      >
+        <div style={{ marginBottom: 8 }}>
+          <Text>{t('provision.serialNumber')}</Text>
+        </div>
+        <Input.TextArea
+          rows={4}
+          value={batchInputValue}
+          onChange={(e) => {
+            setBatchInputValue(e.target.value);
+            if (batchInputError) validateBatchInput(e.target.value);
+          }}
+          placeholder={t('provision.batchInputPlaceholder')}
+          status={batchInputError ? 'error' : undefined}
+        />
+        {batchInputError && (
+          <Text type="danger" style={{ fontSize: 12 }}>{batchInputError}</Text>
+        )}
+        <div style={{ marginTop: 8, color: '#bbb', fontSize: 12 }}>
+          <Text type="secondary">{t('provision.batchInputHint')}</Text>
+        </div>
+      </Modal>
+    </>
+  );
+}

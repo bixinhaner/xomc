@@ -137,6 +137,10 @@ const LicenseList        = React.lazy(() => import('@/pages/license/LicenseList'
 const LicenseOperations  = React.lazy(() => import('@/pages/license/LicenseOperations'));
 const LicenseLogs        = React.lazy(() => import('@/pages/license/LicenseLogs'));
 
+// Provision Management
+const PlugAndPlay        = React.lazy(() => import('@/pages/provision/PlugAndPlay'));
+const AddPolicyPage      = React.lazy(() => import('@/pages/provision/PlugAndPlay/AddPolicyPage'));
+
 // Ops Management
 const OpsTemplates       = React.lazy(() => import('@/pages/ops/Templates'));
 const OpsCommands        = React.lazy(() => import('@/pages/ops/CommandManagement'));
@@ -304,6 +308,12 @@ export const routes: RouteObject[] = [
       { path: 'license/list',       element: withSuspense(LicenseList) },
       { path: 'license/operations', element: withSuspense(LicenseOperations) },
       { path: 'license/logs',       element: withSuspense(LicenseLogs) },
+
+      // Provision Management
+      { path: 'provision/plug-and-play', element: withSuspense(PlugAndPlay) },
+      { path: 'provision/plug-and-play/add', element: withSuspense(AddPolicyPage) },
+      { path: 'provision/plug-and-play/edit/:id', element: withSuspense(AddPolicyPage) },
+      { path: 'provision/plug-and-play/view/:id', element: withSuspense(AddPolicyPage) },
 
       // Ops Management
       { path: 'ops/templates',         element: withSuspense(OpsTemplates) },
