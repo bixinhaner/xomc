@@ -36,7 +36,7 @@ export interface FilterBarProps {
   extra?: React.ReactNode;
   /** 不应用默认的 wrapper 样式（padding、margin） */
   noDefaultStyle?: boolean;
-  /** 初始值（优先级高于 sessionStorage） */
+  /** 初始值（优先级高于 sessionStorage），传空对象 {} 表示清空所有筛选 */
   initialValues?: Record<string, unknown>;
 }
 
@@ -59,15 +59,45 @@ const FilterBar: React.FC<FilterBarProps> = ({
   const [form] = Form.useForm<Record<string, unknown>>();
   const [expanded, setExpanded] = useState(false);
   const storageKey = `${SESSION_PREFIX}${filterId}`;
+  // 标记是否已初始化（用于区分首次渲染和后续 initialValues 变化）
+  const initializedRef = React.useRef(false);
 
   // Restore from initialValues (priority) or sessionStorage on mount
+  // Also sync form when initialValues changes (e.g., URL params cleared)
   useEffect(() => {
-    // 优先使用 initialValues（来自 URL 参数）
-    if (initialValues && Object.keys(initialValues).length > 0) {
-      form.setFieldsValue(initialValues);
+    // 如果传入了 initialValues
+    if (initialValues !== undefined) {
+      // 首次渲染时，如果 initialValues 为空，尝试从 sessionStorage 恢复
+      if (!initializedRef.current && Object.keys(initialValues).length === 0) {
+        try {
+          const stored = sessionStorage.getItem(storageKey);
+          if (stored) {
+            const parsed = JSON.parse(stored) as Record<string, unknown>;
+            form.setFieldsValue(parsed);
+            initializedRef.current = true;
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      // 如果 initialValues 为空对象（且不是首次渲染，或者首次渲染但没有 sessionStorage 数据）
+      // 需要清空所有表单字段
+      if (Object.keys(initialValues).length === 0) {
+        // 构建一个所有字段都为 undefined 的对象来清空表单
+        const resetValues: Record<string, undefined> = {};
+        fields.forEach((field) => {
+          resetValues[field.name] = undefined;
+        });
+        form.setFieldsValue(resetValues);
+      } else {
+        // 非空 initialValues，直接设置
+        form.setFieldsValue(initialValues);
+      }
+      initializedRef.current = true;
       return;
     }
-    // 否则从 sessionStorage 恢复
+    // 如果没有传 initialValues，从 sessionStorage 恢复
     try {
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
@@ -77,7 +107,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
     } catch {
       // ignore
     }
-  }, [form, storageKey, initialValues]);
+    initializedRef.current = true;
+  }, [form, storageKey, initialValues, fields]);
 
   const handleSearch = useCallback(() => {
     const values = form.getFieldsValue() as Record<string, unknown>;

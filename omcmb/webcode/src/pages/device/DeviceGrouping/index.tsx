@@ -391,6 +391,16 @@ export default function DeviceGrouping() {
     }
   }, [editDeviceForm, editingDevice, updateDeviceMutation, message, t, refetch]);
 
+  // 更新设备备注
+  const handleUpdateDeviceRemark = useCallback(async (deviceId: string, remark: string) => {
+    await updateDeviceMutation.mutateAsync({
+      id: deviceId,
+      data: { remark },
+    });
+    void message.success(t('common.operationSuccess'));
+    await refetch();
+  }, [updateDeviceMutation, message, t, refetch]);
+
   const handleMoveToGroup = useCallback(async () => {
     if (!targetGroupId) {
       message.warning(t('device.batch.selectGroup'));
@@ -589,6 +599,7 @@ export default function DeviceGrouping() {
           onImport={handleImport}
           onDownloadTemplate={handleDownloadTemplate}
           onEditDevice={handleEditDevice}
+          onUpdateDeviceRemark={handleUpdateDeviceRemark}
           t={t as (id: string, values?: Record<string, unknown>) => string}
         />
       </TreeListPageLayout>

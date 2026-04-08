@@ -26,6 +26,7 @@ export interface DeviceListPanelProps {
   onImport: (fileList: UploadFile[]) => void;
   onDownloadTemplate: () => void;
   onEditDevice: (device: Device) => void;
+  onUpdateDeviceRemark: (deviceId: string, remark: string) => Promise<void>;
   t: (id: string, values?: Record<string, unknown>) => string;
 }
 
@@ -45,6 +46,7 @@ export default function DeviceListPanel({
   onImport,
   onDownloadTemplate,
   onEditDevice,
+  onUpdateDeviceRemark,
   t,
 }: DeviceListPanelProps) {
   // 批量导入弹窗状态
@@ -132,6 +134,11 @@ export default function DeviceListPanel({
   const [editingRemark, setEditingRemark] = useState(false);
   const [remarkInput, setRemarkInput] = useState('');
 
+  // 行内备注编辑状态
+  const [editingRemarkDeviceId, setEditingRemarkDeviceId] = useState<string | null>(null);
+  const [editingRemarkValue, setEditingRemarkValue] = useState('');
+  const [savingRemark, setSavingRemark] = useState(false);
+
   const handleRemarkLabelSave = useCallback(() => {
     const val = remarkInput.trim();
     if (!val) return;
@@ -143,6 +150,28 @@ export default function DeviceListPanel({
   const handleRemarkLabelCancel = useCallback(() => {
     setEditingRemark(false);
   }, []);
+
+  // 行内备注编辑处理
+  const handleStartEditRemark = useCallback((device: Device) => {
+    setEditingRemarkDeviceId(device.id);
+    setEditingRemarkValue(device.remark || '');
+  }, []);
+
+  const handleCancelEditRemark = useCallback(() => {
+    setEditingRemarkDeviceId(null);
+    setEditingRemarkValue('');
+  }, []);
+
+  const handleSaveRemark = useCallback(async (deviceId: string) => {
+    setSavingRemark(true);
+    try {
+      await onUpdateDeviceRemark(deviceId, editingRemarkValue.trim());
+      setEditingRemarkDeviceId(null);
+      setEditingRemarkValue('');
+    } finally {
+      setSavingRemark(false);
+    }
+  }, [editingRemarkValue, onUpdateDeviceRemark]);
 
   const remarkHeaderRender = useMemo(() => {
     if (editingRemark) {
@@ -260,12 +289,70 @@ export default function DeviceListPanel({
         key: 'remark',
         title: remarkLabel,
         dataIndex: 'remark',
-        width: 140,
+        width: 180,
         ellipsis: true,
         headerRender: remarkHeaderRender,
+        render: (val: string | undefined, record: Device) => {
+          if (editingRemarkDeviceId === record.id) {
+            return (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                <Input
+                  size="small"
+                  value={editingRemarkValue}
+                  onChange={(e) => setEditingRemarkValue(e.target.value)}
+                  onPressEnter={() => void handleSaveRemark(record.id)}
+                  style={{ width: 100, fontSize: 12 }}
+                  maxLength={100}
+                  autoFocus
+                  disabled={savingRemark}
+                />
+                <CheckOutlined
+                  style={{ fontSize: 12, color: '#52c41a', cursor: savingRemark ? 'not-allowed' : 'pointer' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!savingRemark) {
+                      void handleSaveRemark(record.id);
+                    }
+                  }}
+                />
+                <CloseOutlined
+                  style={{ fontSize: 12, color: '#ff4d4f', cursor: savingRemark ? 'not-allowed' : 'pointer' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!savingRemark) {
+                      handleCancelEditRemark();
+                    }
+                  }}
+                />
+              </span>
+            );
+          }
+          return (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Tooltip title={val || '-'}>
+                <span style={{
+                  maxWidth: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: val ? 'inherit' : '#bfbfbf',
+                }}>
+                  {val || '-'}
+                </span>
+              </Tooltip>
+              <EditOutlined
+                style={{ fontSize: 12, color: '#8c8c8c', cursor: 'pointer', flexShrink: 0 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStartEditRemark(record);
+                }}
+              />
+            </span>
+          );
+        },
       },
     ],
-    [t, calculateOfflineDays, onEditDevice, remarkLabel, remarkHeaderRender]
+    [t, calculateOfflineDays, onEditDevice, remarkLabel, remarkHeaderRender, editingRemarkDeviceId, editingRemarkValue, savingRemark, handleStartEditRemark, handleCancelEditRemark, handleSaveRemark]
   );
 
   return (

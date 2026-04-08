@@ -379,6 +379,7 @@ export const deviceApi = {
     if (data.stationId !== undefined) payload.site_id = data.stationId;
     if (data.latitude !== undefined) payload.latitude = data.latitude;
     if (data.longitude !== undefined) payload.longitude = data.longitude;
+    if (data.remark !== undefined) payload.remark = data.remark;
     const { data: updated } = await http.put<BackendDevice>(`/devices/${id}`, payload);
     return mapBackendDevice(updated);
   },
