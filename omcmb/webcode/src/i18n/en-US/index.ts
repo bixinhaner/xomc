@@ -1285,6 +1285,15 @@ const messages: Record<string, string> = {
   'perf.query.timeRangeThisMonth': 'This Month',
   'perf.query.timeRangeLastMonth': 'Last Month',
 
+  // Unified chart time filter
+  'perf.query.chartTimeType': 'Time Granularity',
+  'perf.query.chartTimeDay': 'Day',
+  'perf.query.chartTimeWeek': 'Week',
+  'perf.query.chartTimeMonth': 'Month',
+  'perf.query.chartDateRange': 'Date Range',
+  'perf.query.startDate': 'Start Date',
+  'perf.query.endDate': 'End Date',
+
   // Export drawer
   'perf.export.title': 'Export',
   'perf.export.manualGenerate': 'Generate Report',

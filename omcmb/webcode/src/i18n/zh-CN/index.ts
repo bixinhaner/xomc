@@ -1287,6 +1287,15 @@ const messages: Record<string, string> = {
   'perf.query.timeRangeThisMonth': '本月',
   'perf.query.timeRangeLastMonth': '上月',
 
+  // Unified chart time filter
+  'perf.query.chartTimeType': '时间粒度',
+  'perf.query.chartTimeDay': '天',
+  'perf.query.chartTimeWeek': '周',
+  'perf.query.chartTimeMonth': '月',
+  'perf.query.chartDateRange': '日期范围',
+  'perf.query.startDate': '开始日期',
+  'perf.query.endDate': '结束日期',
+
   // Export drawer
   'perf.export.title': '导出',
   'perf.export.manualGenerate': '生成报表',

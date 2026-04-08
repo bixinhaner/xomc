@@ -209,53 +209,66 @@ const AVAILABLE_GROUPS = [
 
 // Available KPIs for selection
 const AVAILABLE_KPIS = [
-  { value: 'RRC_SR', label: 'RRC建立成功率' },
-  { value: 'ERAB_SR', label: 'ERAB建立成功率' },
-  { value: 'DL_THP', label: '下行吞吐量' },
-  { value: 'UL_THP', label: '上行吞吐量' },
-  { value: 'HO_SR', label: '切换成功率' },
-  { value: 'ACTIVE_USER', label: '活跃用户数' },
+  { value: 'RRC_SR', label: 'RRC建立成功率', category: 'access' },
+  { value: 'ERAB_SR', label: 'ERAB建立成功率', category: 'access' },
+  { value: 'DL_THP', label: '下行吞吐量', category: 'throughput' },
+  { value: 'UL_THP', label: '上行吞吐量', category: 'throughput' },
+  { value: 'HO_SR', label: '切换成功率', category: 'handover' },
+  { value: 'ACTIVE_USER', label: '活跃用户数', category: 'user' },
 ];
 
-// Generate mock chart data for a device and KPI
-// Time range configuration mapping
-const TIME_RANGE_CONFIG: Record<TimeRangeType, {
-  startUnit: dayjs.ManipulateType;
-  startAmount: number;
-  endUnit: dayjs.ManipulateType;
-  endAmount: number;
+// KPI categories for filtering
+const KPI_CATEGORIES = [
+  { value: 'all', label: '全部指标' },
+  { value: 'access', label: '接入类指标' },
+  { value: 'throughput', label: '吞吐量指标' },
+  { value: 'handover', label: '切换类指标' },
+  { value: 'user', label: '用户数指标' },
+];
+
+// Unified chart time type
+type ChartTimeType = 'day' | 'week' | 'month';
+
+// Unified chart time configuration
+const CHART_TIME_CONFIG: Record<ChartTimeType, {
   interval: number;
   intervalUnit: dayjs.ManipulateType;
   format: string;
+  defaultDays: number;
 }> = {
-  today: { startUnit: 'day', startAmount: 0, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'hour', format: 'HH:mm' },
-  yesterday: { startUnit: 'day', startAmount: 1, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'hour', format: 'HH:mm' },
-  thisWeek: { startUnit: 'day', startAmount: 6, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
-  lastWeek: { startUnit: 'day', startAmount: 13, endUnit: 'day', endAmount: 7, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
-  thisMonth: { startUnit: 'day', startAmount: 29, endUnit: 'day', endAmount: 0, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
-  lastMonth: { startUnit: 'day', startAmount: 59, endUnit: 'day', endAmount: 30, interval: 1, intervalUnit: 'day', format: 'MM-DD' },
+  day: { interval: 1, intervalUnit: 'hour', format: 'HH:mm', defaultDays: 1 },
+  week: { interval: 1, intervalUnit: 'day', format: 'MM-DD', defaultDays: 7 },
+  month: { interval: 1, intervalUnit: 'day', format: 'MM-DD', defaultDays: 30 },
 };
 
-// Generate mock chart data for a device and KPI
-const generateMockChartData = (device: string, kpi: string, timeRange: TimeRangeType = 'today') => {
+// Generate mock chart data for a device and KPI with unified time filter
+const generateMockChartDataUnified = (
+  device: string,
+  kpi: string,
+  timeType: ChartTimeType,
+  dateRange: [dayjs.Dayjs, dayjs.Dayjs] | null
+) => {
   const data: number[] = [];
   const xData: string[] = [];
 
-  const config = TIME_RANGE_CONFIG[timeRange];
+  const config = CHART_TIME_CONFIG[timeType];
   const now = dayjs();
 
-  // Calculate start and end times based on the selected range
-  let start = now.startOf('day').subtract(config.startAmount, config.startUnit);
-  const end = now.startOf('day').subtract(config.endAmount, config.endUnit).add(1, 'day').subtract(1, 'millisecond');
+  // Use date range if provided, otherwise use default based on time type
+  const start = dateRange ? dateRange[0].startOf('day') : now.subtract(config.defaultDays - 1, 'day').startOf('day');
+  const end = dateRange ? dateRange[1].endOf('day') : now.endOf('day');
 
   // Use device and kpi to generate consistent base value
   const seed = device.charCodeAt(0) + kpi.charCodeAt(0);
   const baseValue = (seed % 50) + 50; // 50-100 base
 
-  while (start.isBefore(end)) {
-    xData.push(start.format(config.format));
+  let current = start;
+  while (current.isBefore(end) || current.isSame(end, config.intervalUnit)) {
+    xData.push(current.format(config.format));
     data.push(Number((baseValue + Math.random() * 10 - 5).toFixed(1)));
-    start = start.add(config.interval, config.intervalUnit);
+    current = current.add(config.interval, config.intervalUnit);
+    // Prevent infinite loop
+    if (xData.length > 1000) break;
   }
 
   return { data, xData };
@@ -301,6 +314,11 @@ export default function KPIQuery() {
   const [chartForm] = Form.useForm();
   const [chartSaving, setChartSaving] = useState(false);
   const [chartDeviceSelectType, setChartDeviceSelectType] = useState<'device' | 'group'>('device');
+  const [chartKpiCategory, setChartKpiCategory] = useState<string>('all');
+
+  // Unified chart time filter state
+  const [chartTimeType, setChartTimeType] = useState<'day' | 'week' | 'month'>('day');
+  const [chartDateRange, setChartDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
 
   // All templates combined
   const allTemplates = useMemo(() => [...PUBLIC_TEMPLATES, ...PRIVATE_TEMPLATES], []);
@@ -312,6 +330,40 @@ export default function KPIQuery() {
     { label: t('perf.query.granularity24hour'), value: '1440' },
     { label: t('perf.query.granularityWeek'), value: '10080' },
     { label: t('perf.query.granularityMonth'), value: '43200' },
+  ], [t]);
+
+  // KPI categories for filtering
+  const kpiCategories = useMemo(() => [
+    { label: t('perf.query.allCategories'), value: 'all' },
+    { label: t('perf.query.accessKpiCategory'), value: 'access' },
+    { label: t('perf.query.throughputKpiCategory'), value: 'throughput' },
+    { label: t('perf.query.handoverKpiCategory'), value: 'handover' },
+    { label: t('perf.query.userKpiCategory'), value: 'user' },
+  ], [t]);
+
+  // Filtered KPIs based on selected category
+  const filteredKpis = useMemo(() => {
+    if (chartKpiCategory === 'all') {
+      return AVAILABLE_KPIS;
+    }
+    return AVAILABLE_KPIS.filter(kpi => kpi.category === chartKpiCategory);
+  }, [chartKpiCategory]);
+
+  // Filtered KPIs based on selected category
+  const filteredKpis = useMemo(() => {
+    if (chartKpiCategory === 'all') {
+      return AVAILABLE_KPIS;
+    }
+    return AVAILABLE_KPIS.filter(kpi => kpi.category === chartKpiCategory);
+  }, [chartKpiCategory]);
+
+  // KPI category options with i18n
+  const kpiCategoryOptions = useMemo(() => [
+    { label: t('perf.query.allCategories'), value: 'all' },
+    { label: t('perf.query.accessKpiCategory'), value: 'access' },
+    { label: t('perf.query.throughputKpiCategory'), value: 'throughput' },
+    { label: t('perf.query.handoverKpiCategory'), value: 'handover' },
+    { label: t('perf.query.userKpiCategory'), value: 'user' },
   ], [t]);
 
   // Chart management functions
@@ -395,7 +447,7 @@ export default function KPIQuery() {
   }, [chartForm, editingChart, t, message]);
 
   // Generate chart series data based on configuration
-  const generateChartSeries = useCallback((chart: ChartConfig) => {
+  const generateChartSeries = useCallback((chart: ChartConfig, timeType: ChartTimeType, dateRange: [dayjs.Dayjs, dayjs.Dayjs] | null) => {
     const series: { name: string; data: number[] }[] = [];
 
     chart.devices.forEach((device) => {
@@ -403,7 +455,7 @@ export default function KPIQuery() {
 
       chart.kpis.forEach((kpi) => {
         const kpiLabel = AVAILABLE_KPIS.find(k => k.value === kpi)?.label || kpi;
-        const mockData = generateMockChartData(device, kpi, chart.timeRange || 'today');
+        const mockData = generateMockChartDataUnified(device, kpi, timeType, dateRange);
 
         series.push({
           name: `${deviceLabel} - ${kpiLabel}`,
@@ -413,6 +465,24 @@ export default function KPIQuery() {
     });
 
     return series;
+  }, []);
+
+  // Generate chart xData based on unified time filter
+  const generateChartXData = useCallback((timeType: ChartTimeType, dateRange: [dayjs.Dayjs, dayjs.Dayjs] | null) => {
+    const config = CHART_TIME_CONFIG[timeType];
+    const now = dayjs();
+
+    const start = dateRange ? dateRange[0].startOf('day') : now.subtract(config.defaultDays - 1, 'day').startOf('day');
+    const end = dateRange ? dateRange[1].endOf('day') : now.endOf('day');
+
+    const xData: string[] = [];
+    let current = start;
+    while (current.isBefore(end) || current.isSame(end, config.intervalUnit)) {
+      xData.push(current.format(config.format));
+      current = current.add(config.interval, config.intervalUnit);
+      if (xData.length > 1000) break;
+    }
+    return xData;
   }, []);
 
   // Get template menu items - all templates have the same menu items
@@ -1033,9 +1103,37 @@ export default function KPIQuery() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              {/* Chart toolbar - fixed at top */}
-              <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
-                <Text type="secondary">{t('perf.query.chartTip')}</Text>
+              {/* Chart toolbar - fixed at top with unified time filter */}
+              <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, borderBottom: `1px solid ${token.colorBorderSecondary}`, gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  {/* Unified time type selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.chartTimeType')}</Text>
+                    <Segmented
+                      value={chartTimeType}
+                      onChange={(value) => setChartTimeType(value as ChartTimeType)}
+                      options={[
+                        { label: t('perf.query.chartTimeDay'), value: 'day' },
+                        { label: t('perf.query.chartTimeWeek'), value: 'week' },
+                        { label: t('perf.query.chartTimeMonth'), value: 'month' },
+                      ]}
+                      size="small"
+                    />
+                  </div>
+                  {/* Unified date range picker */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.chartDateRange')}</Text>
+                    <RangePicker
+                      value={chartDateRange}
+                      onChange={(dates) => setChartDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                      format="YYYY-MM-DD"
+                      style={{ width: 260 }}
+                      size="small"
+                      allowClear
+                      placeholder={[t('perf.query.startDate'), t('perf.query.endDate')]}
+                    />
+                  </div>
+                </div>
                 <Button type="primary" icon={<PlusOutlined />} onClick={handleAddChart} size="small">
                   {t('perf.query.addChart')}
                 </Button>
@@ -1072,20 +1170,6 @@ export default function KPIQuery() {
                         }
                         extra={
                           <Space size="small">
-                            <Select
-                              size="small"
-                              style={{ width: 90 }}
-                              value={chart.timeRange || 'today'}
-                              onChange={(value) => handleUpdateTimeRange(chart.id, value)}
-                              options={[
-                                { label: t('perf.query.timeRangeToday'), value: 'today' },
-                                { label: t('perf.query.timeRangeYesterday'), value: 'yesterday' },
-                                { label: t('perf.query.timeRangeThisWeek'), value: 'thisWeek' },
-                                { label: t('perf.query.timeRangeLastWeek'), value: 'lastWeek' },
-                                { label: t('perf.query.timeRangeThisMonth'), value: 'thisMonth' },
-                                { label: t('perf.query.timeRangeLastMonth'), value: 'lastMonth' },
-                              ]}
-                            />
                             <Tooltip title={t('common.edit')}>
                               <Button
                                 type="text"
@@ -1124,8 +1208,8 @@ export default function KPIQuery() {
                         </div>
                         <div style={{ height: 350 }}>
                           <LineChart
-                            series={generateChartSeries(chart)}
-                            xData={generateMockChartData(chart.devices[0], chart.kpis[0]).xData}
+                            series={generateChartSeries(chart, chartTimeType, chartDateRange)}
+                            xData={generateChartXData(chartTimeType, chartDateRange)}
                             height={350}
                             showLegend={true}
                           />
@@ -1146,8 +1230,9 @@ export default function KPIQuery() {
     handleQuery, loading, getTemplateName,
     viewMode, setViewMode, columns, paginatedData, currentPage, pageSize,
     mockData.length, handlePageChange, charts, handleAddChart,
-    handleUpdateTimeRange, handleEditChart, handleDeleteChart,
-    generateChartSeries, setExportDrawerOpen,
+    handleEditChart, handleDeleteChart,
+    generateChartSeries, generateChartXData, chartTimeType, chartDateRange, setChartTimeType, setChartDateRange,
+    setExportDrawerOpen,
   ]);
 
   // Tab items
@@ -1403,6 +1488,19 @@ export default function KPIQuery() {
             />
           </Form.Item>
 
+          <Form.Item label={t('perf.query.kpiCategory')}>
+            <Select
+              value={chartKpiCategory}
+              onChange={(value) => {
+                setChartKpiCategory(value);
+                // Clear selected KPIs when category changes
+                chartForm.setFieldsValue({ kpis: [] });
+              }}
+              options={kpiCategories}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+
           <Form.Item
             name="kpis"
             label={t('perf.query.selectKpis')}
@@ -1420,7 +1518,7 @@ export default function KPIQuery() {
             <Select
               mode="multiple"
               placeholder={t('perf.query.selectKpisPlaceholder')}
-              options={AVAILABLE_KPIS}
+              options={filteredKpis}
               maxTagCount={3}
             />
           </Form.Item>
