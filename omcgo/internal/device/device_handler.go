@@ -46,6 +46,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		// Batch routes must be registered before /:id to avoid path conflicts
 		devices.DELETE("/batch", h.BatchDeleteDevices)
 		devices.POST("/batch-reboot", h.BatchRebootDevices)
+		// Recycle bin routes
+		devices.GET("/recycle", h.ListRecycleBin)
+		devices.PATCH("/recycle/restore", h.RestoreDevices)
+		devices.DELETE("/recycle/permanent", h.PermanentDeleteDevices)
 		devices.GET("/:id", h.GetDevice)
 		devices.GET("/:id/parameters", h.GetDeviceParameters)
 		devices.POST("", h.CreateDevice)
@@ -516,7 +520,13 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 		return
 	}
 
-	result := h.service.BatchDeleteDevices(c.Request.Context(), req.IDs)
+	// Get username from context for recycle bin tracking
+	deletedBy := ""
+	if v, ok := c.Get(admin.CtxKeyUsername); ok {
+		deletedBy = v.(string)
+	}
+
+	result := h.service.BatchDeleteDevices(c.Request.Context(), req.IDs, deletedBy)
 	c.JSON(http.StatusOK, result)
 }
 
@@ -540,4 +550,120 @@ func (h *Handler) BatchRebootDevices(c *gin.Context) {
 
 	result := h.service.BatchRebootDevices(c.Request.Context(), req.IDs)
 	c.JSON(http.StatusAccepted, result)
+}
+
+// ===== Recycle Bin Handlers =====
+
+// RecycleBinFilterQuery binds query parameters for recycle bin list.
+type RecycleBinFilterQuery struct {
+	Page     int    `form:"page" binding:"omitempty,min=1"`
+	PageSize int    `form:"page_size" binding:"omitempty,min=1,max=100"`
+	SortBy   string `form:"sort_by" binding:"omitempty"`
+	SortDir  string `form:"sort_dir" binding:"omitempty,oneof=asc desc"`
+	Search   string `form:"search" binding:"omitempty"`
+	Carrier  string `form:"carrier" binding:"omitempty"`
+	DeletedBy string `form:"deleted_by" binding:"omitempty"`
+}
+
+// ListRecycleBin handles GET /api/v1/devices/recycle.
+// Returns a paginated list of soft-deleted devices.
+func (h *Handler) ListRecycleBin(c *gin.Context) {
+	var query RecycleBinFilterQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	filter := RecycleBinFilter{
+		ListRequest: model.ListRequest{
+			Page:     query.Page,
+			PageSize: query.PageSize,
+			SortBy:   query.SortBy,
+			SortDir:  query.SortDir,
+		},
+	}
+
+	if query.Search != "" {
+		filter.Search = &query.Search
+	}
+	if query.Carrier != "" {
+		carrier := model.CarrierCode(query.Carrier)
+		filter.Carrier = &carrier
+	}
+	if query.DeletedBy != "" {
+		filter.DeletedBy = &query.DeletedBy
+	}
+
+	result, err := h.service.ListRecycleBin(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// RestoreDevicesRequest binds the request body for restore operation.
+type RestoreDevicesRequest struct {
+	IDs []uuid.UUID `json:"ids" binding:"required"`
+}
+
+// RestoreDevices handles PATCH /api/v1/devices/recycle/restore.
+// Restores soft-deleted devices.
+func (h *Handler) RestoreDevices(c *gin.Context) {
+	var req RestoreDevicesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if len(req.IDs) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 100"})
+		return
+	}
+
+	restored, err := h.service.RestoreDevices(c.Request.Context(), req.IDs)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"restored": restored,
+		"message": "Devices restored successfully",
+	})
+}
+
+// PermanentDeleteDevices handles DELETE /api/v1/devices/recycle/permanent.
+// Permanently removes devices from the database.
+func (h *Handler) PermanentDeleteDevices(c *gin.Context) {
+	var req RestoreDevicesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if len(req.IDs) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 100"})
+		return
+	}
+
+	deleted, err := h.service.PermanentDeleteDevices(c.Request.Context(), req.IDs)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"deleted": deleted,
+		"message": "Devices permanently deleted",
+	})
 }

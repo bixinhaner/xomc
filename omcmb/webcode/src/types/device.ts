@@ -120,6 +120,10 @@ export interface Device {
   energySaving: string;
   gnbTopoCellmgr: string;
   sslCertValidity: string;
+
+  // 回收站扩展字段
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface NE {

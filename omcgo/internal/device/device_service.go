@@ -943,10 +943,10 @@ func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 
 // BatchDeleteDevices deletes multiple devices by their IDs.
 // Returns a BatchOperationResult summarising successes and failures.
-func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID) BatchOperationResult {
+func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID, deletedBy string) BatchOperationResult {
 	result := BatchOperationResult{Total: len(ids)}
 
-	deleted, err := s.deviceRepo.BatchDelete(ctx, ids)
+	deleted, err := s.deviceRepo.BatchDelete(ctx, ids, deletedBy)
 	if err != nil {
 		s.logger.Error("batch delete devices failed",
 			zap.Int("total", len(ids)),
@@ -1015,4 +1015,21 @@ func (s *DeviceService) GetGeoStats(ctx context.Context, groupIDs []string) (*Ge
 // SearchDevices searches devices by keyword for map display.
 func (s *DeviceService) SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error) {
 	return s.deviceRepo.SearchDevices(ctx, keyword, limit)
+}
+
+// ===== Recycle Bin Operations =====
+
+// ListRecycleBin returns soft-deleted devices with filtering.
+func (s *DeviceService) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	return s.deviceRepo.ListRecycleBin(ctx, filter)
+}
+
+// RestoreDevices restores soft-deleted devices.
+func (s *DeviceService) RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	return s.deviceRepo.RestoreDevices(ctx, ids)
+}
+
+// PermanentDeleteDevices permanently removes devices from the database.
+func (s *DeviceService) PermanentDeleteDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	return s.deviceRepo.PermanentDelete(ctx, ids)
 }

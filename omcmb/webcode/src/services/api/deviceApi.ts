@@ -25,6 +25,8 @@ interface BackendDevice {
   longitude: number;
   created_at: string;
   updated_at: string;
+  deleted_at?: string;
+  deleted_by?: string;
   platform_type?: string;
 
   // --- 监控扩展字段 ---
@@ -261,6 +263,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     energySaving: bd.energy_saving || '',
     gnbTopoCellmgr: bd.gnb_topo_cellmgr || '',
     sslCertValidity: bd.ssl_cert_validity || '',
+
+    // 回收站扩展字段
+    deletedAt: bd.deleted_at,
+    deletedBy: bd.deleted_by,
   };
 }
 
@@ -494,5 +500,46 @@ export const deviceApi = {
   async getNEBySn(sn: string): Promise<NE | null> {
     const result = await deviceApi.getNEList({ keyword: sn, page: 1, pageSize: 1 });
     return result.items.length > 0 ? result.items[0] : null;
+  },
+
+  // ========== Recycle Bin APIs ==========
+
+  async listRecycleBin(params: {
+    search?: string;
+    carrier?: string;
+    technology?: string;
+    group_id?: string;
+    deleted_by?: string;
+    page?: number;
+    pageSize?: number;
+    sortField?: string;
+    sortOrder?: string;
+  }): Promise<DeviceListResponse> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+      sortField: params.sortField,
+      sortOrder: params.sortOrder,
+    };
+    if (params.search) query.search = params.search;
+    if (params.carrier) query.carrier = params.carrier;
+    if (params.technology) query.technology = params.technology;
+    if (params.group_id) query.group_id = params.group_id;
+    if (params.deleted_by) query.deleted_by = params.deleted_by;
+
+    const { data } = await http.get<BackendListResponse<BackendDevice>>('/devices/recycle', {
+      params: query,
+    });
+    return mapListResponse(data);
+  },
+
+  async restoreDevices(ids: string[]): Promise<BatchOperationResult> {
+    const { data } = await http.patch<BatchOperationResult>('/devices/recycle/restore', { ids });
+    return data;
+  },
+
+  async permanentDeleteDevices(ids: string[]): Promise<BatchOperationResult> {
+    const { data } = await http.delete<BatchOperationResult>('/devices/recycle/permanent', { data: { ids } });
+    return data;
   },
 };

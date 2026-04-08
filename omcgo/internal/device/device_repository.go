@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -38,6 +39,17 @@ type DeviceFilter struct {
 	AlarmSeverity *string // device_info.alarm_severity exact match
 	LicenseStatus *string // device_info.license_status exact match
 	OpState       *string // "1" = active (status='active'), "0" = not active (status!='active')
+
+	model.ListRequest
+}
+
+// RecycleBinFilter specifies criteria for listing soft-deleted devices.
+type RecycleBinFilter struct {
+	Search     *string // fuzzy search across serial_number/site_name
+	Carrier    *model.CarrierCode
+	Technology *model.Technology
+	GroupID    *uuid.UUID // filter by original device group
+	DeletedBy  *string    // filter by who deleted the device
 
 	model.ListRequest
 }
@@ -116,9 +128,16 @@ type DeviceWriter interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	// BatchDelete soft-deletes multiple devices and removes their group memberships
 	// and device_info records within a transaction. Returns the number of deleted devices.
-	BatchDelete(ctx context.Context, ids []uuid.UUID) (int64, error)
+	BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
 	UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error
+	// RecycleBin operations
+	// ListRecycleBin returns soft-deleted devices with filtering.
+	ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error)
+	// RestoreDevices restores soft-deleted devices (sets deleted_at to NULL).
+	RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error)
+	// PermanentDelete permanently removes devices from the database.
+	PermanentDelete(ctx context.Context, ids []uuid.UUID) (int64, error)
 }
 
 // DeviceRepository defines the full interface for device persistence.
@@ -301,7 +320,7 @@ func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 // BatchDelete soft-deletes multiple devices and removes related device_group_members
 // and device_info records within a single transaction.
 // Returns the number of devices actually soft-deleted.
-func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID) (int64, error) {
+func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -330,11 +349,11 @@ func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID) (
 		return 0, fmt.Errorf("delete device_info: %w", err)
 	}
 
-	// Soft-delete devices
+	// Soft-delete devices with metadata
 	now := time.Now()
 	tag, err := tx.Exec(ctx,
-		`UPDATE devices SET deleted_at = $1 WHERE id = ANY($2) AND deleted_at IS NULL`,
-		now, ids,
+		`UPDATE devices SET deleted_at = $1, deleted_by = $2 WHERE id = ANY($3) AND deleted_at IS NULL`,
+		now, deletedBy, ids,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("soft delete devices: %w", err)
@@ -570,7 +589,7 @@ func deviceColumns() []string {
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
-		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at",
+		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 	}
 }
 
@@ -584,6 +603,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
 	var firmwareVersion, connReqURL, siteName, siteID *string
+	var deletedBy *string
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
@@ -592,10 +612,14 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
-		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
+		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if deletedBy != nil {
+		d.DeletedBy = *deletedBy
 	}
 
 	if productClass != nil {
@@ -648,7 +672,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	var ipAddr, udpAddr *string
 	// nullable string columns from devices table
 	var productClass, manufacturer, modelName *string
-	var firmwareVersion, connReqURL, siteName, siteID *string
+	var firmwareVersion, connReqURL, siteName, siteID, deletedBy *string
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
@@ -657,8 +681,12 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
-		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
+		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 	)
+
+	if deletedBy != nil {
+		d.DeletedBy = *deletedBy
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -959,4 +987,193 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 	}
 
 	return devices, nil
+}
+
+// ===== Recycle Bin Operations =====
+
+// ListRecycleBin returns soft-deleted devices with filtering.
+func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	// Build base query for deleted devices
+	builder := psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.NotEq{"d.deleted_at": nil})
+
+	countBuilder := psql.Select("COUNT(*)").
+		From("devices d").
+		Where(sq.NotEq{"d.deleted_at": nil})
+
+	// Apply filters
+	if filter.Search != nil && *filter.Search != "" {
+		searchPattern := "%" + strings.ToLower(*filter.Search) + "%"
+		searchCond := sq.Or{
+			sq.Like{"LOWER(d.serial_number)": searchPattern},
+			sq.Like{"LOWER(d.site_name)": searchPattern},
+		}
+		builder = builder.Where(searchCond)
+		countBuilder = countBuilder.Where(searchCond)
+	}
+
+	if filter.Carrier != nil {
+		builder = builder.Where(sq.Eq{"d.carrier": *filter.Carrier})
+		countBuilder = countBuilder.Where(sq.Eq{"d.carrier": *filter.Carrier})
+	}
+
+	if filter.Technology != nil {
+		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
+		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
+	}
+
+	if filter.DeletedBy != nil && *filter.DeletedBy != "" {
+		builder = builder.Where(sq.Like{"d.deleted_by": "%" + *filter.DeletedBy + "%"})
+		countBuilder = countBuilder.Where(sq.Like{"d.deleted_by": "%" + *filter.DeletedBy + "%"})
+	}
+
+	// GroupID filter requires JOIN
+	if filter.GroupID != nil {
+		// Note: deleted devices might not have group memberships anymore
+		// as they are removed during soft delete. This filter may return empty results.
+		builder = builder.
+			Join("device_group_members dgm ON d.id = dgm.device_id").
+			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+		countBuilder = countBuilder.
+			Join("device_group_members dgm ON d.id = dgm.device_id").
+			Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+	}
+
+	// Get total count
+	var total int64
+	countQuery, countArgs, err := countBuilder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count query: %w", err)
+	}
+	err = r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
+	if err != nil {
+		return nil, fmt.Errorf("count recycle bin devices: %w", err)
+	}
+
+	// Apply sorting
+	sortCol := "d.deleted_at"
+	if filter.SortBy != "" {
+		if allowedSortColumns[filter.SortBy] {
+			sortCol = "d." + filter.SortBy
+		}
+	}
+	sortOrder := "DESC"
+	if filter.SortDir == "asc" {
+		sortOrder = "ASC"
+	}
+	builder = builder.OrderBy(sortCol + " " + sortOrder)
+
+	// Apply pagination
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	offset := (page - 1) * pageSize
+	builder = builder.Limit(uint64(pageSize)).Offset(uint64(offset))
+
+	// Execute query
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list recycle bin query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list recycle bin devices: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan recycle bin device: %w", err)
+		}
+		devices = append(devices, *d)
+	}
+
+	if devices == nil {
+		devices = []model.Device{}
+	}
+
+	return &model.ListResponse[model.Device]{
+		Items:    devices,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+// RestoreDevices restores soft-deleted devices by setting deleted_at to NULL.
+// Returns the number of devices actually restored.
+func (r *PgDeviceRepository) RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE devices SET deleted_at = NULL, deleted_by = '', updated_at = NOW() WHERE id = ANY($1) AND deleted_at IS NOT NULL`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("restore devices: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
+}
+
+// PermanentDelete permanently removes devices from the database.
+// This also removes related device_group_members and device_info records.
+// Returns the number of devices actually deleted.
+func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Remove group memberships (if any exist for deleted devices)
+	_, err = tx.Exec(ctx,
+		`DELETE FROM device_group_members WHERE device_id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete device_group_members: %w", err)
+	}
+
+	// Remove device_info records
+	_, err = tx.Exec(ctx,
+		`DELETE FROM device_info WHERE device_id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete device_info: %w", err)
+	}
+
+	// Permanently delete devices
+	tag, err := tx.Exec(ctx,
+		`DELETE FROM devices WHERE id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("permanent delete devices: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit permanent delete: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
 }

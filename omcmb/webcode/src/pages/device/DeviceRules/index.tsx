@@ -293,7 +293,7 @@ export default function DeviceRules() {
       if (filterParams.operators && !r.operators.toLowerCase().includes(String(filterParams.operators).toLowerCase())) {
         return false;
       }
-      // 按目标设备分组过滤
+      // 按设备分组过滤
       if (filterParams.targetGroupId && r.targetGroupId !== filterParams.targetGroupId) {
         return false;
       }

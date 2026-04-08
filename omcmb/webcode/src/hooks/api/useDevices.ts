@@ -190,3 +190,45 @@ export function useBatchRebootDevices() {
     },
   });
 }
+
+// ========== Recycle Bin Hooks ==========
+
+export interface RecycleBinFilter {
+  search?: string;
+  carrier?: string;
+  technology?: string;
+  group_id?: string;
+  deleted_by?: string;
+  page?: number;
+  pageSize?: number;
+  sortField?: string;
+  sortOrder?: string;
+}
+
+export function useRecycleBinList(params: RecycleBinFilter) {
+  return useQuery({
+    queryKey: ['devices', 'recycle-bin', params],
+    queryFn: () => deviceApi.listRecycleBin(params),
+  });
+}
+
+export function useRestoreDevices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => deviceApi.restoreDevices(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'recycle-bin'] });
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+    },
+  });
+}
+
+export function usePermanentDeleteDevices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => deviceApi.permanentDeleteDevices(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'recycle-bin'] });
+    },
+  });
+}

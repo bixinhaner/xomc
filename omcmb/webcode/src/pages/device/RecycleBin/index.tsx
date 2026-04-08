@@ -11,6 +11,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices, useDeviceGroups } from '@/hooks/api/useDevices';
+import type { Device } from '@/types/device';
 import ImportModal from './ImportModal';
 
 // 设备类型
@@ -23,116 +25,25 @@ const DEVICE_TYPE_COLOR: Record<DeviceType, string> = {
   CPE: 'orange',
 };
 
-// 回收站设备通用接口
-interface RecycleDeviceItem {
-  id: string;
-  serial_number: string;
-  deviceType: DeviceType;
-  offlineDays: number;
-  group_id: string;
-  group_name: string;
-  moveType: '0' | '1';
-  moveTime: string;
-  move_author: string;
-  product?: string;
-  host_name?: string;
-  mac_address?: string;
-  longitude?: number | string;
-  latitude?: number | string;
-  height?: number | string;
-  macaddress?: string;
-  distance?: number | string;
+// 根据 product_class 推断设备类型
+function inferDeviceType(productClass: string): DeviceType {
+  const pc = productClass.toLowerCase();
+  if (pc.includes('gnb') || pc.includes('5g')) return 'gNB';
+  if (pc.includes('enb') || pc.includes('lte')) return 'eNB';
+  return 'CPE';
 }
 
-// 设备组
-interface DeviceGroup {
-  id: string;
-  group_name: string;
+// 计算离线天数
+function calcOfflineDays(lastInformTime: string, deletedAt: string): number {
+  const refTime = deletedAt || lastInformTime;
+  if (!refTime) return 0;
+  const diff = Date.now() - new Date(refTime).getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
-// Mock 设备组
-const MOCK_DEVICE_GROUPS: DeviceGroup[] = [
-  { id: '1', group_name: 'Default Group' },
-  { id: '2', group_name: 'Beijing Region' },
-  { id: '3', group_name: 'Shanghai Region' },
-  { id: '4', group_name: 'Guangzhou Region' },
-  { id: '5', group_name: 'Test Group' },
-];
-
-// Mock 数据
-const MOCK_ALL_DATA: RecycleDeviceItem[] = [
-  {
-    id: '1',
-    serial_number: 'SN-ENB-001',
-    deviceType: 'eNB',
-    host_name: 'eNB-Beijing-001',
-    mac_address: '00:11:22:33:44:01',
-    longitude: 116.48,
-    latitude: 39.99,
-    height: 30,
-    offlineDays: 5,
-    group_id: '2',
-    group_name: 'Beijing Region',
-    moveType: '1',
-    moveTime: '2024-03-10 10:00:00',
-    move_author: 'admin',
-  },
-  {
-    id: '2',
-    serial_number: 'SN-ENB-002',
-    deviceType: 'eNB',
-    host_name: 'eNB-Shanghai-001',
-    mac_address: '00:11:22:33:44:02',
-    longitude: 121.47,
-    latitude: 31.23,
-    height: 25,
-    offlineDays: 10,
-    group_id: '3',
-    group_name: 'Shanghai Region',
-    moveType: '0',
-    moveTime: '2024-03-08 14:30:00',
-    move_author: 'system',
-  },
-  {
-    id: '3',
-    serial_number: 'SN-GNB-001',
-    deviceType: 'gNB',
-    mac_address: '00:11:22:33:44:03',
-    longitude: 113.26,
-    latitude: 23.13,
-    height: 35,
-    offlineDays: 3,
-    group_id: '4',
-    group_name: 'Guangzhou Region',
-    moveType: '1',
-    moveTime: '2024-03-12 09:00:00',
-    move_author: 'admin',
-  },
-  {
-    id: '4',
-    serial_number: 'SN-CPE-001',
-    deviceType: 'CPE',
-    macaddress: 'AA:BB:CC:DD:EE:01',
-    longitude: 116.31,
-    latitude: 40.05,
-    height: 5,
-    distance: 1200,
-    offlineDays: 7,
-    group_id: '1',
-    group_name: 'Default Group',
-    moveType: '1',
-    moveTime: '2024-03-09 16:00:00',
-    move_author: 'admin',
-  },
-];
-
-// 回收方式映射
-const getMoveTypeLabel = (t: (key: string) => string, value: string) => {
-  const map: Record<string, string> = {
-    '0': t('recycle.auto'),
-    '1': t('recycle.manual'),
-  };
-  return map[value] || value;
+// 回收方式映射（暂时全部为手动）
+const getMoveTypeLabel = (t: (key: string) => string) => {
+  return t('recycle.manual');
 };
 
 export default function RecycleBin() {
@@ -141,29 +52,39 @@ export default function RecycleBin() {
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
-  // 过滤数据
-  const filteredData = useMemo(() => {
-    return MOCK_ALL_DATA.filter((item) => {
-      if (filterParams.deviceType && item.deviceType !== filterParams.deviceType) {
-        return false;
-      }
-      if (filterParams.searchText) {
-        const search = String(filterParams.searchText).toLowerCase();
-        const matchSn = item.serial_number?.toLowerCase().includes(search);
-        const matchMac = (item.mac_address || item.macaddress)?.toLowerCase().includes(search);
-        if (!matchSn && !matchMac) return false;
-      }
-      if (filterParams.group_id && item.group_id !== filterParams.group_id) {
-        return false;
-      }
-      if (filterParams.moveType && item.moveType !== filterParams.moveType) {
-        return false;
-      }
-      return true;
-    });
-  }, [filterParams]);
+  // 获取设备分组列表用于筛选
+  const { data: groupsData } = useDeviceGroups();
+  const deviceGroups = groupsData?.groups || [];
+
+  // 获取回收站设备列表
+  const { data, isLoading, refetch } = useRecycleBinList({
+    search: filterParams.searchText as string,
+    group_id: filterParams.group_id as string,
+    deleted_by: filterParams.deleted_by as string,
+    page: currentPage,
+    pageSize,
+  });
+
+  // 恢复设备
+  const restoreMutation = useRestoreDevices();
+
+  // 永久删除
+  const permanentDeleteMutation = usePermanentDeleteDevices();
+
+  // 转换数据格式以适配表格
+  const tableData = useMemo(() => {
+    if (!data?.items) return [];
+    return data.items.map((device: Device) => ({
+      ...device,
+      deviceType: inferDeviceType(device.productType),
+      offlineDays: calcOfflineDays(device.lastOnlineTime, device.deletedAt || ''),
+      moveTime: device.deletedAt || '',
+      move_author: device.deletedBy || 'system',
+    }));
+  }, [data]);
 
   // 移出回收站（带确认）
   const handleRestore = useCallback(
@@ -174,13 +95,18 @@ export default function RecycleBin() {
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         icon: <ExportOutlined style={{ color: '#52C41A' }} />,
-        onOk: () => {
-          message.success(t('status.success'));
-          setSelectedRowKeys([]);
+        onOk: async () => {
+          try {
+            await restoreMutation.mutateAsync(ids.map(String));
+            message.success(t('status.success'));
+            setSelectedRowKeys([]);
+          } catch {
+            message.error(t('common.operationFailed'));
+          }
         },
       });
     },
-    [t, modal, message]
+    [t, modal, message, restoreMutation]
   );
 
   // 批量删除（带确认）
@@ -192,13 +118,18 @@ export default function RecycleBin() {
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         okType: 'danger',
-        onOk: () => {
-          message.success(t('common.deleteSuccess'));
-          setSelectedRowKeys([]);
+        onOk: async () => {
+          try {
+            await permanentDeleteMutation.mutateAsync(ids.map(String));
+            message.success(t('common.deleteSuccess'));
+            setSelectedRowKeys([]);
+          } catch {
+            message.error(t('common.deleteFailed'));
+          }
         },
       });
     },
-    [t, modal, message]
+    [t, modal, message, permanentDeleteMutation]
   );
 
   // 打开导入弹窗
@@ -208,9 +139,9 @@ export default function RecycleBin() {
 
   // 导入完成
   const handleImportComplete = useCallback(() => {
-    // TODO: 刷新数据
+    void refetch();
     message.success(t('common.success'));
-  }, [message, t]);
+  }, [refetch, message, t]);
 
   // 筛选字段配置
   const FILTER_FIELDS: FilterField[] = useMemo(
@@ -222,46 +153,25 @@ export default function RecycleBin() {
         placeholder: t('recycle.searchPlaceholder'),
       },
       {
-        name: 'deviceType',
-        label: t('device.radioMode'),
-        type: 'select',
-        options: [
-          { label: 'All', value: '' },
-          { label: 'eNB', value: 'eNB' },
-          { label: 'gNB', value: 'gNB' },
-          { label: 'CPE', value: 'CPE' },
-        ],
-      },
-      {
         name: 'group_id',
         label: t('device.groupName'),
         type: 'select',
         options: [
           { label: 'All', value: '' },
-          ...MOCK_DEVICE_GROUPS.map((g) => ({ label: g.group_name, value: g.id })),
-        ],
-      },
-      {
-        name: 'moveType',
-        label: t('recycle.moveType'),
-        type: 'select',
-        options: [
-          { label: 'All', value: '' },
-          { label: t('recycle.auto'), value: '0' },
-          { label: t('recycle.manual'), value: '1' },
+          ...deviceGroups.map((g) => ({ label: g.name, value: g.id })),
         ],
       },
     ],
-    [t]
+    [t, deviceGroups]
   );
 
   // 列定义
-  const columns: DataTableColumn<RecycleDeviceItem>[] = useMemo(
+  const columns: DataTableColumn<Device & { deviceType: DeviceType; offlineDays: number; moveTime: string; move_author: string }>[] = useMemo(
     () => [
       {
         key: 'serial_number',
         title: t('device.serialNumber'),
-        dataIndex: 'serial_number',
+        dataIndex: 'sn',
         width: 140,
         mono: true,
         copyable: true,
@@ -275,25 +185,24 @@ export default function RecycleBin() {
           <Tag color={DEVICE_TYPE_COLOR[v as DeviceType] || 'default'}>{String(v)}</Tag>
         ),
       },
-      { key: 'host_name', title: 'HostName', dataIndex: 'host_name', width: 140, ellipsis: true },
+      { key: 'host_name', title: 'HostName', dataIndex: 'hostName', width: 140, ellipsis: true },
       {
         key: 'mac',
         title: t('device.macAddress'),
         width: 130,
         mono: true,
-        render: (_v, record) => record.mac_address || record.macaddress || '-',
+        render: (_v, record) => record.macAddress || '-',
       },
       { key: 'longitude', title: t('device.longitude'), dataIndex: 'longitude', width: 90 },
       { key: 'latitude', title: t('device.latitude'), dataIndex: 'latitude', width: 90 },
-      { key: 'height', title: t('recycle.height'), dataIndex: 'height', width: 70 },
+      { key: 'height', title: t('recycle.height'), dataIndex: 'gpsHeight', width: 70 },
       { key: 'offlineDays', title: t('recycle.offlineDays'), dataIndex: 'offlineDays', width: 90 },
-      { key: 'group_name', title: t('recycle.groupName'), dataIndex: 'group_name', width: 120 },
+      { key: 'group_name', title: t('recycle.groupName'), dataIndex: 'groupName', width: 120 },
       {
         key: 'moveType',
         title: t('recycle.moveType'),
-        dataIndex: 'moveType',
         width: 90,
-        render: (v) => <Tag color={v === '1' ? 'blue' : 'green'}>{getMoveTypeLabel(t, String(v))}</Tag>,
+        render: () => <Tag color="blue">{getMoveTypeLabel(t)}</Tag>,
       },
       { key: 'moveTime', title: t('recycle.moveTime'), dataIndex: 'moveTime', width: 160 },
       { key: 'move_author', title: t('recycle.account'), dataIndex: 'move_author', width: 90 },
@@ -324,7 +233,7 @@ export default function RecycleBin() {
   return (
     <ListPageLayout
       title={t('nav.device.recycle')}
-      subtitle={`${t('table.total')} ${filteredData.length}`}
+      subtitle={`${t('table.total')} ${data?.total || 0}`}
       extra={
         <Button type="primary" icon={<ImportOutlined />} onClick={handleOpenImportModal}>
           {t('common.import')}
@@ -345,19 +254,23 @@ export default function RecycleBin() {
         collapsedRows={1}
       />
 
-      <DataTable<RecycleDeviceItem>
+      <DataTable<Device & { deviceType: DeviceType; offlineDays: number; moveTime: string; move_author: string }>
         tableId="recycle-bin-table"
         columns={columns}
-        dataSource={filteredData}
-        loading={false}
+        dataSource={tableData}
+        loading={isLoading || restoreMutation.isPending || permanentDeleteMutation.isPending}
         rowKey="id"
         selectable
         selectedRowKeys={selectedRowKeys}
         onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-        total={filteredData.length}
-        pageSize={20}
+        total={data?.total || 0}
+        pageSize={pageSize}
         currentPage={currentPage}
         onPageChange={(p) => setCurrentPage(p)}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          setCurrentPage(1);
+        }}
         batchActions={batchActions}
         defaultDensity="compact"
       />
