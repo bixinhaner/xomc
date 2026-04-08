@@ -164,10 +164,13 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	builder := psql.Select(selectCols...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.Eq{"d.deleted_at": nil})
 	countBuilder := psql.Select("COUNT(*)").
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		Where(sq.Eq{"d.deleted_at": nil})
 
 	// Data permission filter: VisibleGroups semantics:
@@ -346,6 +349,8 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at",
+		// device_groups columns
+		"dg.name as group_name",
 		// device_info columns
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
@@ -421,6 +426,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastInformAt, &eventsData,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt,
+		// device_groups field (nullable from LEFT JOIN)
+		&d.GroupName,
 		// device_info fields (all nullable from LEFT JOIN)
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,
 		&diECI, &diPCI, &diCellID, &diFreqPoint, &diBandwidth, &diTransmitPower, &diPLMN,

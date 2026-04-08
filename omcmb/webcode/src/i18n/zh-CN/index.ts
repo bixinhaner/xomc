@@ -461,7 +461,7 @@ const messages: Record<string, string> = {
   'device.firmwareVersion':     '固件版本',
   'device.macAddress':          'MAC地址',
   'device.serialNumber':         '小站编码',
-  'device.groupName':           '设备组',
+  'device.groupName':           '设备分组',
   'device.moveToGroupTip':      '已选择 {count} 台设备，请选择目标设备组：',
   'device.searchGroup':         '搜索设备组',
   'device.selectedGroup':       '目标设备组',

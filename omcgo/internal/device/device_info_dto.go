@@ -8,12 +8,17 @@ import (
 )
 
 // DeviceWithInfo 组合设备核心信息与扩展信息，用于列表展示。
-// 字段来自 devices 表 LEFT JOIN device_info 表。
-// 前端无需感知双表架构，直接使用扁平化结构。
-// device_info 字段可能为空（设备刚注册，尚未同步参数）。
+// 字段来自 devices 表 LEFT JOIN device_info 表 LEFT JOIN device_groups 表。
+// 前端无需感知多表架构，直接使用扁平化结构。
+// device_info 和 group 字段可能为空（设备刚注册，尚未同步参数或未分配分组）。
 type DeviceWithInfo struct {
 	// 嵌入 devices 表核心字段
 	model.Device
+
+	// ===== 设备分组信息（可能为空）=====
+
+	// GroupName 设备分组名称
+	GroupName *string `json:"group_name"`
 
 	// ===== device_info 运维标识（可能为空）=====
 

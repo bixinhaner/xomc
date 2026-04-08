@@ -460,7 +460,7 @@ const messages: Record<string, string> = {
   'device.firmwareVersion':     'Firmware Version',
   'device.macAddress':          'MAC Address',
   'device.serialNumber':         'Serial Number',
-  'device.groupName':           'Device Group',
+  'device.groupName':           'Device Grouping',
   'device.moveToGroupTip':      '{count} device(s) selected. Please choose a target group:',
   'device.searchGroup':         'Search groups',
   'device.selectedGroup':       'Target group',
