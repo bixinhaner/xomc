@@ -281,6 +281,7 @@ export default function KPIQuery() {
   const [searchText, setSearchText] = useState('');
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('tpl-1');
+  const [defaultTemplateId, setDefaultTemplateId] = useState<string>('tpl-1');
   const [openTabs, setOpenTabs] = useState<string[]>(['tpl-1']);
   const [activeTab, setActiveTab] = useState<string>('tpl-1');
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
@@ -303,6 +304,13 @@ export default function KPIQuery() {
   // Report config drawer state
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
   const [reportForm] = Form.useForm();
+  const [reportTargetTemplateId, setReportTargetTemplateId] = useState<string | null>(null);
+  const [reportSwitchMap, setReportSwitchMap] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const t of PUBLIC_TEMPLATES) map[t.id] = t.reportSwitch;
+    for (const t of PRIVATE_TEMPLATES) map[t.id] = t.reportSwitch;
+    return map;
+  });
 
   // Export drawer state
   const [exportDrawerOpen, setExportDrawerOpen] = useState(false);
@@ -480,21 +488,24 @@ export default function KPIQuery() {
   // Get template menu items - all templates have the same menu items
   const getTemplateMenuItems = useCallback((template: TemplateItem): MenuProps['items'] => {
     const items: MenuProps['items'] = [];
+    const isDefault = template.id === defaultTemplateId;
 
-    // 已为默认 / 设为默认
-    if (template.isDefault) {
-      items.push({
-        key: 'isDefault',
-        label: t('perf.query.isDefault'),
-        icon: <StarFilled style={{ color: '#faad14' }} />,
-        disabled: true,
-      });
-    } else {
-      items.push({
-        key: 'setDefault',
-        label: t('perf.query.setAsDefault'),
-        icon: <StarOutlined />,
-      });
+    // 已为默认 / 设为默认（仅公共模板支持设为默认）
+    if (template.isPublic === '1') {
+      if (isDefault) {
+        items.push({
+          key: 'isDefault',
+          label: t('perf.query.isDefault'),
+          icon: <StarFilled style={{ color: '#faad14' }} />,
+          disabled: true,
+        });
+      } else {
+        items.push({
+          key: 'setDefault',
+          label: t('perf.query.setAsDefault'),
+          icon: <StarOutlined />,
+        });
+      }
     }
 
     // 详情
@@ -526,7 +537,7 @@ export default function KPIQuery() {
     });
 
     // 删除 - 非默认模板才显示
-    if (!template.isDefault) {
+    if (!isDefault) {
       items.push({ type: 'divider' });
       items.push({
         key: 'delete',
@@ -544,7 +555,7 @@ export default function KPIQuery() {
     });
 
     return items;
-  }, [t]);
+  }, [t, defaultTemplateId]);
 
   // 导出模版数据
   const handleExportTemplate = useCallback((template: TemplateItem) => {
@@ -594,7 +605,10 @@ export default function KPIQuery() {
         modal.confirm({
           title: t('perf.query.setAsDefault'),
           content: t('perf.query.setAsDefaultConfirm', { name: template.name }),
-          onOk: () => void message.success(t('common.success')),
+          onOk: () => {
+            setDefaultTemplateId(template.id);
+            void message.success(t('common.success'));
+          },
         });
         break;
       case 'exportKpi':
@@ -602,6 +616,10 @@ export default function KPIQuery() {
         handleExportTemplate(template);
         break;
       case 'report':
+        setReportTargetTemplateId(template.id);
+        reportForm.setFieldsValue({
+          reportStatus: reportSwitchMap[template.id] === '1',
+        });
         setReportDrawerOpen(true);
         break;
       case 'delete':
@@ -692,7 +710,7 @@ export default function KPIQuery() {
       key={template.id}
       onClick={() => handleTemplateSelect(template)}
       style={{
-        padding: '8px 12px',
+        padding: '8px 16px',
         cursor: 'pointer',
         background: selectedTemplateId === template.id ? token.colorPrimaryBg : 'transparent',
         borderRadius: 4,
@@ -714,8 +732,8 @@ export default function KPIQuery() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
           <FileOutlined style={{ color: '#8c8c8c', flexShrink: 0 }} />
           <Text ellipsis style={{ flex: 1 }}>{template.name}</Text>
-          {template.isDefault && <StarOutlined style={{ color: '#faad14', fontSize: 12, flexShrink: 0 }} />}
-          {template.reportSwitch === '1' && <ClockCircleOutlined style={{ color: '#52c41a', fontSize: 12, flexShrink: 0 }} />}
+          {template.isPublic === '1' && template.id === defaultTemplateId && <Tooltip title={t('perf.query.isDefault')}><StarOutlined style={{ color: '#faad14', fontSize: 12, flexShrink: 0 }} /></Tooltip>}
+          {reportSwitchMap[template.id] === '1' && <Tooltip title={t('perf.query.reportConfig')}><ClockCircleOutlined style={{ color: '#52c41a', fontSize: 12, flexShrink: 0 }} /></Tooltip>}
         </div>
         <Dropdown
           menu={{
@@ -737,7 +755,7 @@ export default function KPIQuery() {
         </Dropdown>
       </div>
     </List.Item>
-  ), [selectedTemplateId, token, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
+  ), [selectedTemplateId, defaultTemplateId, reportSwitchMap, token, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
 
   // Table columns - dynamic based on query object type (device or device group)
   const columns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => {
@@ -844,58 +862,53 @@ export default function KPIQuery() {
           padding: '12px 12px',
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
         }}>
-          <Segmented
+          <Radio.Group
             value={templateTab}
-            onChange={(value) => setTemplateTab(value as 'public' | 'private')}
-            block
-            style={{ width: '100%' }}
-            options={[
-              {
-                value: 'public',
-                label: (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                    <TeamOutlined />
-                    <span>{t('perf.query.publicTemplate')}</span>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minWidth: 18,
-                      height: 18,
-                      padding: '0 4px',
-                      borderRadius: 9,
-                      fontSize: 11,
-                      backgroundColor: 'rgba(0,0,0,0.15)',
-                    }}>
-                      {filteredPublicTemplates.length}
-                    </span>
-                  </div>
-                ),
-              },
-              {
-                value: 'private',
-                label: (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                    <UserOutlined />
-                    <span>{t('perf.query.privateTemplate')}</span>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minWidth: 18,
-                      height: 18,
-                      padding: '0 4px',
-                      borderRadius: 9,
-                      fontSize: 11,
-                      backgroundColor: 'rgba(0,0,0,0.15)',
-                    }}>
-                      {filteredPrivateTemplates.length}
-                    </span>
-                  </div>
-                ),
-              },
-            ]}
-          />
+            onChange={(e) => setTemplateTab(e.target.value)}
+            optionType="button"
+            buttonStyle="solid"
+            size="small"
+            style={{ width: '100%', display: 'flex' }}
+          >
+            <Radio.Button value="public" style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <TeamOutlined />
+                <span>{t('perf.query.publicTemplate')}</span>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 18,
+                  height: 18,
+                  padding: '0 4px',
+                  borderRadius: 9,
+                  fontSize: 11,
+                  backgroundColor: 'rgba(0,0,0,0.15)',
+                }}>
+                  {filteredPublicTemplates.length}
+                </span>
+              </div>
+            </Radio.Button>
+            <Radio.Button value="private" style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <UserOutlined />
+                <span>{t('perf.query.privateTemplate')}</span>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 18,
+                  height: 18,
+                  padding: '0 4px',
+                  borderRadius: 9,
+                  fontSize: 11,
+                  backgroundColor: 'rgba(0,0,0,0.15)',
+                }}>
+                  {filteredPrivateTemplates.length}
+                </span>
+              </div>
+            </Radio.Button>
+          </Radio.Group>
         </div>
 
         {/* Tab Content */}
@@ -938,9 +951,9 @@ export default function KPIQuery() {
                     </div>
                   ),
                   children: (
-                    <div style={{ paddingLeft: 24 }}>
+                    <>
                       {group.templates.map((template) => renderTemplateItem(template))}
-                    </div>
+                    </>
                   ),
                 }))}
               />
@@ -967,78 +980,61 @@ export default function KPIQuery() {
             borderBottom: `1px solid ${token.colorBorderSecondary}`,
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* First row: Query object type (highlighted) */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 16,
-              padding: '12px 16px',
-              background: token.colorPrimaryBg,
-              borderRadius: 6,
-              border: `1px solid ${token.colorPrimaryBorder}`,
-            }}>
-              <span style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: token.colorPrimary,
-                whiteSpace: 'nowrap',
-            }}>{t('perf.query.queryObjectType')}</span>
-              <Segmented
-                value={deviceType}
-                onChange={(value) => setDeviceType(value as '1' | '2')}
-                options={[
-                  { value: '2', label: t('device.name') },
-                  { value: '1', label: t('device.group') },
-                ]}
-              />
-              <div style={{ flex: 1 }} />
-              <Input
-                placeholder={deviceType === '2' ? t('perf.query.deviceSearchPlaceholder') : t('perf.query.groupSearchPlaceholder')}
-                prefix={<SearchOutlined />}
-                value={deviceSearch}
-                onChange={(e) => setDeviceSearch(e.target.value)}
-                allowClear
-                style={{ width: 260 }}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap' }}>{t('perf.query.queryObjectType')}</span>
+            <Radio.Group
+              value={deviceType}
+              onChange={(e) => setDeviceType(e.target.value as '1' | '2')}
+              optionType="button"
+              buttonStyle="solid"
+              size="small"
+            >
+              <Radio.Button value="2">设备</Radio.Button>
+              <Radio.Button value="1">{t('device.group')}</Radio.Button>
+            </Radio.Group>
+            <Input
+              placeholder={deviceType === '2' ? t('perf.query.deviceSearchPlaceholder') : t('perf.query.groupSearchPlaceholder')}
+              prefix={<SearchOutlined />}
+              value={deviceSearch}
+              onChange={(e) => setDeviceSearch(e.target.value)}
+              allowClear
+              style={{ width: 220 }}
+              size="small"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.granularity')}</Text>
+              <Select
+                value={granularity}
+                onChange={setGranularity}
+                options={granularityOptions}
+                style={{ width: 100 }}
+                size="small"
               />
             </div>
-            {/* Second row: granularity + time range + actions */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.granularity')}</Text>
-                <Select
-                  value={granularity}
-                  onChange={setGranularity}
-                  options={granularityOptions}
-                  style={{ width: 100 }}
-                  size="small"
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.timeRange')}</Text>
-                <RangePicker
-                  value={dateRange}
-                  onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
-                  showTime={{ format: 'HH:mm' }}
-                  format="YYYY-MM-DD HH:mm"
-                  style={{ width: 360 }}
-                  size="small"
-                />
-              </div>
-              <div style={{ flex: 1 }} />
-              <Space size="small">
-                <Button type="primary" onClick={handleQuery} loading={loading} size="small">
-                  {t('common.query')}
-                </Button>
-                <Button
-                  icon={<DownloadOutlined />}
-                  size="small"
-                  onClick={() => setExportDrawerOpen(true)}
-                >
-                  {t('common.export')}
-                </Button>
-              </Space>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Text style={{ whiteSpace: 'nowrap' }}>{t('perf.query.timeRange')}</Text>
+              <RangePicker
+                value={dateRange}
+                onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                showTime={{ format: 'HH:mm' }}
+                format="YYYY-MM-DD HH:mm"
+                style={{ width: 360 }}
+                size="small"
+              />
             </div>
+            <div style={{ flex: 1 }} />
+            <Space size="small">
+              <Button type="primary" onClick={handleQuery} loading={loading} size="small">
+                {t('common.query')}
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                size="small"
+                onClick={() => setExportDrawerOpen(true)}
+              >
+                {t('common.export')}
+              </Button>
+            </Space>
           </div>
         </div>
 
@@ -1054,7 +1050,7 @@ export default function KPIQuery() {
         {/* Result area */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {viewMode === 'table' ? (
-            <div className="kpi-query-table-wrapper" style={{ flex: 1, padding: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div className="kpi-query-table-wrapper" style={{ flex: 1, padding: '0 16px 16px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <style>{`
                 .kpi-query-table-wrapper .ant-table-thead > tr > th,
                 .kpi-query-table-wrapper .ant-table-tbody > tr > td {
@@ -1307,9 +1303,16 @@ export default function KPIQuery() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => setReportDrawerOpen(false)}>{t('common.cancel')}</Button>
             <Button type="primary" onClick={() => {
-              reportForm.validateFields().then(() => {
+              reportForm.validateFields().then((values) => {
+                if (reportTargetTemplateId) {
+                  setReportSwitchMap((prev) => ({
+                    ...prev,
+                    [reportTargetTemplateId]: values.reportStatus ? '1' : '0',
+                  }));
+                }
                 void message.success(t('common.success'));
                 setReportDrawerOpen(false);
+                setReportTargetTemplateId(null);
               }).catch(() => {});
             }}>{t('common.confirm')}</Button>
           </div>
