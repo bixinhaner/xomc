@@ -789,6 +789,9 @@ export default function CurrentAlarms() {
           onRefresh={() => void refetch()}
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
           defaultDensity="compact"
+          showRowNumber
+          rowNumberTitle="序号"
+          scroll={{ y: 'calc(100vh - 510px)' }}
         />
       </Card>
 

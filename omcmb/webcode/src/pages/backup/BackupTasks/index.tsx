@@ -535,6 +535,12 @@ export default function BackupTasks() {
     });
   }, [deviceFilters]);
 
+  // ========== 设备列表分页 ==========
+  const paginatedDeviceData = useMemo(() => {
+    const start = (devicePage - 1) * devicePageSize;
+    return filteredDeviceData.slice(start, start + devicePageSize);
+  }, [filteredDeviceData, devicePage, devicePageSize]);
+
   // ========== 任务列表列定义 ==========
   const taskColumns: DataTableColumn<BackupTaskRow>[] = useMemo(() => [
     {
@@ -793,13 +799,15 @@ export default function BackupTasks() {
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
             onRefresh={() => void refetch()}
             onExport={() => void message.info(t('common.exportInProgress'))}
-            scroll={{ x: 1600 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
+            showRowNumber
+            rowNumberTitle="序号"
           />
         ) : (
           <DataTable<BackupDeviceRow>
             tableId="backup-tasks-list-device"
             columns={deviceColumns}
-            dataSource={filteredDeviceData}
+            dataSource={paginatedDeviceData}
             loading={isLoading}
             rowKey="id"
             total={filteredDeviceData.length}
@@ -808,7 +816,9 @@ export default function BackupTasks() {
             onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
             onRefresh={() => void refetch()}
             onExport={() => void message.info(t('common.exportInProgress'))}
-            scroll={{ x: 1800 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
+            showRowNumber
+            rowNumberTitle="序号"
           />
         )}
       </Card>
