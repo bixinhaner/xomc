@@ -183,16 +183,16 @@ interface ChartConfig {
 
 // Available devices for selection
 const AVAILABLE_DEVICES = [
-  { value: 'ENB00001', label: '北京朝阳基站01' },
-  { value: 'ENB00002', label: '北京海淀基站01' },
-  { value: 'GNB00001', label: '北京5G基站01' },
-  { value: 'GNB00002', label: '上海5G基站01' },
-  { value: 'ENB00101', label: '广州天河基站01' },
-  { value: 'ENB00102', label: '广州越秀基站01' },
-  { value: 'ENB00201', label: '深圳南山基站01' },
-  { value: 'ENB00301', label: '杭州西湖基站01' },
-  { value: 'ENB00302', label: '杭州滨江基站01' },
-  { value: 'ENB00401', label: '成都武侯基站01' },
+  { value: 'ENB00001', label: 'ENB00001 北京朝阳基站01' },
+  { value: 'ENB00002', label: 'ENB00002 北京海淀基站01' },
+  { value: 'GNB00001', label: 'GNB00001 北京5G基站01' },
+  { value: 'GNB00002', label: 'GNB00002 上海5G基站01' },
+  { value: 'ENB00101', label: 'ENB00101 广州天河基站01' },
+  { value: 'ENB00102', label: 'ENB00102 广州越秀基站01' },
+  { value: 'ENB00201', label: 'ENB00201 深圳南山基站01' },
+  { value: 'ENB00301', label: 'ENB00301 杭州西湖基站01' },
+  { value: 'ENB00302', label: 'ENB00302 杭州滨江基站01' },
+  { value: 'ENB00401', label: 'ENB00401 成都武侯基站01' },
 ];
 
 // Available device groups for selection
@@ -451,7 +451,7 @@ export default function KPIQuery() {
     const series: { name: string; data: number[] }[] = [];
 
     chart.devices.forEach((device) => {
-      const deviceLabel = AVAILABLE_DEVICES.find(d => d.value === device)?.label || device;
+      const deviceLabel = AVAILABLE_DEVICES.find(d => d.value === device)?.label?.split(' ').slice(1).join(' ') || device;
 
       chart.kpis.forEach((kpi) => {
         const kpiLabel = AVAILABLE_KPIS.find(k => k.value === kpi)?.label || kpi;
@@ -1183,7 +1183,7 @@ export default function KPIQuery() {
                           <Space wrap size={[4, 8]}>
                             {chart.devices.map(device => (
                               <Tag key={device} color="processing" style={{ margin: 0 }}>
-                                {AVAILABLE_DEVICES.find(d => d.value === device)?.label || device}
+                                {AVAILABLE_DEVICES.find(d => d.value === device)?.label?.split(' ').slice(1).join(' ') || device}
                               </Tag>
                             ))}
                             <Divider type="vertical" style={{ height: 20, margin: '0 4px' }} />
