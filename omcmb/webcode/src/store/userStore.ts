@@ -22,8 +22,6 @@ interface UserState {
   isAuthenticated: boolean;
   permissions: string[];
   loading: boolean;
-  _hasHydrated: boolean;
-  _setHasHydrated: (v: boolean) => void;
 
   // JWT token pair methods
   setTokenPair: (pair: TokenPairResponse) => void;
@@ -54,9 +52,6 @@ export const useUserStore = create<UserState>()(
       isAuthenticated: false,
       permissions: [],
       loading: false,
-      _hasHydrated: false,
-
-      _setHasHydrated: (v: boolean) => set({ _hasHydrated: v }),
 
       get token() {
         return get().accessToken;
@@ -121,9 +116,6 @@ export const useUserStore = create<UserState>()(
         isAuthenticated: state.isAuthenticated,
         permissions: state.permissions,
       }),
-      onRehydrateStorage: () => (state) => {
-        state?._setHasHydrated(true);
-      },
     }
   )
 );
