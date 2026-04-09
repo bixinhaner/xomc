@@ -154,6 +154,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// Protected auth routes (no permission check)
 	v1.GET("/auth/me", ad.adminHandler.Me)
+	v1.POST("/auth/switch-role", ad.adminHandler.SwitchRole)
+	v1.GET("/auth/menus", ad.adminHandler.GetUserMenusByRole)
 
 	// Helper: permission-scoped sub-group
 	permGroup := func(resource string) *gin.RouterGroup {
@@ -287,6 +289,15 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(admin.RequirePermission(ad.roleRepo, "users", "admin"))
 	ad.adminHandler.RegisterAdminRoutes(adminGroup)
+
+	// ----- Dictionary management routes (require admin permission) -----
+	ad.dictHandler.RegisterRoutes(adminGroup)
+
+	// ----- System config management routes (require admin permission) -----
+	ad.sysConfigHandler.RegisterRoutes(adminGroup)
+
+	// ----- System log routes (require admin permission) -----
+	ad.logHandler.RegisterRoutes(adminGroup)
 
 	c.Logger.Info("all routes registered")
 	return nil

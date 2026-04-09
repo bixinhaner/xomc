@@ -16,7 +16,8 @@ import (
 
 // PgRoleRepository implements RoleRepository using PostgreSQL.
 type PgRoleRepository struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	authorizer *CasbinAuthorizer // optional: set via SetAuthorizer
 }
 
 var (
@@ -27,6 +28,11 @@ var (
 // NewPgRoleRepository creates a new PgRoleRepository.
 func NewPgRoleRepository(pool *pgxpool.Pool) *PgRoleRepository {
 	return &PgRoleRepository{pool: pool}
+}
+
+// SetAuthorizer sets the Casbin authorizer for in-memory permission checks.
+func (r *PgRoleRepository) SetAuthorizer(auth *CasbinAuthorizer) {
+	r.authorizer = auth
 }
 
 func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
@@ -247,6 +253,10 @@ func (r *PgRoleRepository) AssignRole(ctx context.Context, userID, roleID uuid.U
 	if err != nil {
 		return fmt.Errorf("assign role: %w", err)
 	}
+
+	if r.authorizer != nil {
+		_ = r.authorizer.NotifyPolicyChange()
+	}
 	return nil
 }
 
@@ -265,7 +275,56 @@ func (r *PgRoleRepository) RemoveRole(ctx context.Context, userID, roleID uuid.U
 	if tag.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
 	}
+
+	if r.authorizer != nil {
+		_ = r.authorizer.NotifyPolicyChange()
+	}
 	return nil
+}
+
+func (r *PgRoleRepository) GetDefaultRoleID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error) {
+	query, args, err := psql.Select("role_id").
+		From("user_roles").
+		Where(sq.And{sq.Eq{"user_id": userID}, sq.Eq{"is_default": true}}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get default role SQL: %w", err)
+	}
+
+	var roleID uuid.UUID
+	err = r.pool.QueryRow(ctx, query, args...).Scan(&roleID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get default role: %w", err)
+	}
+	return &roleID, nil
+}
+
+func (r *PgRoleRepository) SetDefaultRole(ctx context.Context, userID, roleID uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Clear existing default
+	_, err = tx.Exec(ctx, `UPDATE user_roles SET is_default = false WHERE user_id = $1 AND is_default = true`, userID)
+	if err != nil {
+		return fmt.Errorf("clear default role: %w", err)
+	}
+
+	// Set new default
+	tag, err := tx.Exec(ctx, `UPDATE user_roles SET is_default = true WHERE user_id = $1 AND role_id = $2`, userID, roleID)
+	if err != nil {
+		return fmt.Errorf("set default role: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.NewBusinessError(7003, "role not assigned to user", commonerrors.ErrNotFound)
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *PgRoleRepository) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error) {
@@ -374,6 +433,10 @@ func (r *PgRoleRepository) AddPermissions(ctx context.Context, roleID uuid.UUID,
 	if err != nil {
 		return fmt.Errorf("add permissions: %w", err)
 	}
+
+	if r.authorizer != nil {
+		_ = r.authorizer.NotifyPolicyChange()
+	}
 	return nil
 }
 
@@ -388,6 +451,10 @@ func (r *PgRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid
 	_, err = r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("remove all permissions: %w", err)
+	}
+
+	if r.authorizer != nil {
+		_ = r.authorizer.NotifyPolicyChange()
 	}
 	return nil
 }
@@ -482,6 +549,12 @@ func (r *PgRoleRepository) GetUserVisibleGroupIDs(ctx context.Context, userID uu
 }
 
 func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error) {
+	// Use Casbin in-memory evaluation when available
+	if r.authorizer != nil {
+		return r.authorizer.CheckPermission(ctx, userID, resource, action)
+	}
+
+	// Fallback: SQL query
 	query, args, err := psql.Select("COUNT(*)").
 		From("permissions p").
 		Join("user_roles ur ON ur.role_id = p.role_id").

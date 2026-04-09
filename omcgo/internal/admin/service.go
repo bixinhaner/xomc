@@ -81,10 +81,11 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	}
 
 	tokenPair, err := s.jwt.GenerateTokenPair(&Claims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Carrier:  user.Carrier,
-		Roles:    roleNames,
+		UserID:        user.ID,
+		Username:      user.Username,
+		Carrier:       user.Carrier,
+		Roles:         roleNames,
+		CurrentRoleID: s.getDefaultRoleID(ctx, user.ID, roles),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate token pair: %w", err)
@@ -95,6 +96,17 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	}
 
 	return tokenPair, nil
+}
+
+// getDefaultRoleID returns the user's default role ID, or the first role if none is set.
+func (s *AdminService) getDefaultRoleID(ctx context.Context, userID uuid.UUID, roles []Role) *uuid.UUID {
+	if defaultID, err := s.roleRepo.GetDefaultRoleID(ctx, userID); err == nil && defaultID != nil {
+		return defaultID
+	}
+	if len(roles) > 0 {
+		return &roles[0].ID
+	}
+	return nil
 }
 
 // RefreshToken generates a new token pair from a valid refresh token.
@@ -124,11 +136,14 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 		roleNames[i] = r.Name
 	}
 
+	defaultRoleID := s.getDefaultRoleID(ctx, user.ID, roles)
+
 	return s.jwt.GenerateTokenPair(&Claims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Carrier:  user.Carrier,
-		Roles:    roleNames,
+		UserID:        user.ID,
+		Username:      user.Username,
+		Carrier:       user.Carrier,
+		Roles:         roleNames,
+		CurrentRoleID: defaultRoleID,
 	})
 }
 
@@ -596,4 +611,50 @@ func checkPermissionInMenus(menus []Menu, permissionKey string) bool {
 	}
 
 	return false
+}
+
+// ==================== Role Switching ====================
+
+// SwitchRole switches the user's active role and returns a new token pair.
+func (s *AdminService) SwitchRole(ctx context.Context, userID uuid.UUID, targetRoleID uuid.UUID) (*TokenPair, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	// Verify the target role is assigned to this user
+	roles, err := s.roleRepo.GetUserRoles(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user roles: %w", err)
+	}
+
+	found := false
+	roleNames := make([]string, len(roles))
+	for i, r := range roles {
+		roleNames[i] = r.Name
+		if r.ID == targetRoleID {
+			found = true
+		}
+	}
+	if !found {
+		return nil, commonerrors.NewBusinessError(7003, "target role not assigned to user", commonerrors.ErrForbidden)
+	}
+
+	// Update default role
+	if err := s.roleRepo.SetDefaultRole(ctx, userID, targetRoleID); err != nil {
+		s.logger.Warn("set default role", zap.Error(err))
+	}
+
+	return s.jwt.GenerateTokenPair(&Claims{
+		UserID:        user.ID,
+		Username:      user.Username,
+		Carrier:       user.Carrier,
+		Roles:         roleNames,
+		CurrentRoleID: &targetRoleID,
+	})
+}
+
+// GetUserMenuTreeByRole returns the menu tree based on the user's current active role.
+func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) ([]Menu, error) {
+	return s.menuRepo.GetByRole(ctx, roleID)
 }

@@ -18,6 +18,7 @@ const (
 	CtxKeyCarrier        = "carrier"
 	CtxKeyCarrierFilter  = "carrier_filter"
 	CtxKeyRoles          = "roles"
+	CtxKeyClaims         = "claims"
 )
 
 // RequireAuth returns a Gin middleware that validates JWT access tokens
@@ -94,6 +95,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 		c.Set(CtxKeyUsername, claims.Username)
 		c.Set(CtxKeyCarrier, claims.Carrier)
 		c.Set(CtxKeyRoles, claims.Roles)
+		c.Set(CtxKeyClaims, claims)
 		c.Next()
 	}
 }
@@ -120,7 +122,15 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 			return
 		}
 
-		allowed, err := roleRepo.CheckPermission(c.Request.Context(), userID, resource, action)
+		// Inject carrier domain into context for Casbin
+		ctx := c.Request.Context()
+		if carrierVal, exists := c.Get(CtxKeyCarrier); exists {
+			if carrier, ok := carrierVal.(*model.CarrierCode); ok && carrier != nil {
+				ctx = context.WithValue(ctx, CtxKeyCarrier, string(*carrier))
+			}
+		}
+
+		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"code":    500,
@@ -190,7 +200,15 @@ func RequireResourcePermission(roleRepo PermissionChecker, resource string) gin.
 			return
 		}
 
-		allowed, err := roleRepo.CheckPermission(c.Request.Context(), userID, resource, action)
+		// Inject carrier domain into context for Casbin
+		ctx := c.Request.Context()
+		if carrierVal, exists := c.Get(CtxKeyCarrier); exists {
+			if carrier, ok := carrierVal.(*model.CarrierCode); ok && carrier != nil {
+				ctx = context.WithValue(ctx, CtxKeyCarrier, string(*carrier))
+			}
+		}
+
+		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"code":    500,

@@ -155,6 +155,22 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		groups.GET("/:id", h.GetRole)
 	}
 
+	// ----- Menu management routes -----
+	menus := rg.Group("/menus")
+	{
+		menus.GET("", h.ListMenus)
+		menus.GET("/tree", h.GetMenuTree)
+		menus.GET("/user-tree", h.GetUserMenuTree)
+		menus.GET("/:id", h.GetMenu)
+		menus.POST("", h.CreateMenu)
+		menus.PUT("/:id", h.UpdateMenu)
+		menus.DELETE("", h.DeleteMenus)
+	}
+
+	// ----- Role menu assignment -----
+	roles.GET("/:id/menus", h.GetRoleMenus)
+	roles.PUT("/:id/menus", h.SetRoleMenus)
+
 	rg.GET("/permissions", h.ListPermissions)
 	rg.GET("/audit-logs", h.ListAuditLogs)
 }
@@ -913,4 +929,60 @@ func getUserID(c *gin.Context) uuid.UUID {
 		}
 	}
 	return uuid.Nil
+}
+
+// SwitchRole handles POST /auth/switch-role
+func (h *Handler) SwitchRole(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "authentication required"})
+		return
+	}
+
+	var req struct {
+		RoleID uuid.UUID `json:"role_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	tokenPair, err := h.service.SwitchRole(c.Request.Context(), userID, req.RoleID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": tokenPair, "msg": "角色切换成功"})
+}
+
+// GetUserMenusByRole handles GET /auth/menus — returns menus for current role
+func (h *Handler) GetUserMenusByRole(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "authentication required"})
+		return
+	}
+
+	// Get current role from JWT claims if available, otherwise fall back to user menus
+	claims, exists := c.Get("claims")
+	if exists {
+		if cl, ok := claims.(*Claims); ok && cl.CurrentRoleID != nil {
+			menus, err := h.service.GetUserMenuTreeByRole(c.Request.Context(), userID, *cl.CurrentRoleID)
+			if err != nil {
+				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"code": 0, "data": menus, "msg": "查询成功"})
+			return
+		}
+	}
+
+	// Fallback: all user menus
+	menus, err := h.service.GetUserMenuTree(c.Request.Context(), userID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": menus, "msg": "查询成功"})
 }

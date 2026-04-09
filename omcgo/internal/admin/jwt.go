@@ -17,10 +17,11 @@ type JWTService struct {
 }
 
 type jwtClaims struct {
-	UserID   uuid.UUID          `json:"user_id"`
-	Username string             `json:"username"`
-	Carrier  *model.CarrierCode `json:"carrier,omitempty"`
-	Roles    []string           `json:"roles"`
+	UserID        uuid.UUID          `json:"user_id"`
+	Username      string             `json:"username"`
+	Carrier       *model.CarrierCode `json:"carrier,omitempty"`
+	Roles         []string           `json:"roles"`
+	CurrentRoleID *uuid.UUID         `json:"current_role_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -59,10 +60,11 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 	now := time.Now()
 
 	accessClaims := &jwtClaims{
-		UserID:   claims.UserID,
-		Username: claims.Username,
-		Carrier:  claims.Carrier,
-		Roles:    claims.Roles,
+		UserID:        claims.UserID,
+		Username:      claims.Username,
+		Carrier:       claims.Carrier,
+		Roles:         claims.Roles,
+		CurrentRoleID: claims.CurrentRoleID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "access",
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -136,9 +138,10 @@ func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims
 	}
 
 	return &Claims{
-		UserID:   claims.UserID,
-		Username: claims.Username,
-		Carrier:  claims.Carrier,
-		Roles:    claims.Roles,
+		UserID:        claims.UserID,
+		Username:      claims.Username,
+		Carrier:       claims.Carrier,
+		Roles:         claims.Roles,
+		CurrentRoleID: claims.CurrentRoleID,
 	}, nil
 }

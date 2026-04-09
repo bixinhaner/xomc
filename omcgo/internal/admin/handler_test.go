@@ -134,6 +134,12 @@ func (m *handlerMockRoleRepo) GetUserRolesBatch(_ context.Context, _ []uuid.UUID
 func (m *handlerMockRoleRepo) ListWithPagination(_ context.Context, _ RoleFilter) (*model.ListResponse[Role], error) {
 	return model.NewListResponse([]Role{}, 0, 1, 20), nil
 }
+func (m *handlerMockRoleRepo) GetDefaultRoleID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (m *handlerMockRoleRepo) SetDefaultRole(_ context.Context, _, _ uuid.UUID) error {
+	return nil
+}
 
 type handlerMockAuditRepo struct{}
 

@@ -39,6 +39,8 @@ type RoleAssigner interface {
 	RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error
 	GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error)
 	GetUserRolesBatch(ctx context.Context, userIds []uuid.UUID) (map[uuid.UUID][]Role, error)
+	GetDefaultRoleID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
+	SetDefaultRole(ctx context.Context, userID, roleID uuid.UUID) error
 }
 
 // PermissionChecker provides permission query capabilities.

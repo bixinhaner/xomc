@@ -205,6 +205,12 @@ func (m *mockRoleRepo) GetUserRolesBatch(_ context.Context, _ []uuid.UUID) (map[
 func (m *mockRoleRepo) ListWithPagination(_ context.Context, _ RoleFilter) (*model.ListResponse[Role], error) {
 	return model.NewListResponse([]Role{}, 0, 1, 20), nil
 }
+func (m *mockRoleRepo) GetDefaultRoleID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (m *mockRoleRepo) SetDefaultRole(_ context.Context, _, _ uuid.UUID) error {
+	return nil
+}
 
 type mockAuditRepo struct {
 	createFn func(ctx context.Context, log *AuditLog) error

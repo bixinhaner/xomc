@@ -77,10 +77,11 @@ type AuditLog struct {
 
 // Claims contains the JWT token claims for authenticated users.
 type Claims struct {
-	UserID   uuid.UUID          `json:"user_id"`
-	Username string             `json:"username"`
-	Carrier  *model.CarrierCode `json:"carrier,omitempty"`
-	Roles    []string           `json:"roles"`
+	UserID        uuid.UUID          `json:"user_id"`
+	Username      string             `json:"username"`
+	Carrier       *model.CarrierCode `json:"carrier,omitempty"`
+	Roles         []string           `json:"roles"`
+	CurrentRoleID *uuid.UUID         `json:"current_role_id,omitempty"`
 }
 
 // UserFilter provides filtering options for listing users.
