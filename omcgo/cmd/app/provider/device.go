@@ -38,7 +38,8 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetCommandQueue(c.CmdQueue)
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)
-	deviceService.SetMetrics(device.NewDeviceMetrics(c.MetricsReg))
+	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)
+	deviceService.SetMetrics(deviceMetrics)
 
 	// InfoSyncer
 	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, c.Carriers, logger)
@@ -67,7 +68,7 @@ func initDeviceModule(c *Container) error {
 		batchProcessor = device.NewBatchInformProcessor(
 			c.Cfg.BatchProcessor,
 			c.PgPool, c.Redis, heartbeatMonitor, deviceCache,
-			stunStore, device.NewDeviceMetrics(c.MetricsReg), logger,
+			stunStore, deviceMetrics, logger,
 		)
 		batchProcessor.Start()
 		c.GS.Register("batch-processor", 2, func(ctx context.Context) error {
