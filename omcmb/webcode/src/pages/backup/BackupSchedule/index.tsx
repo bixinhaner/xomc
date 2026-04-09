@@ -115,6 +115,12 @@ export default function BackupSchedule() {
     });
   }, [filters]);
 
+  // 分页数据切片
+  const paginatedData = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, page, pageSize]);
+
   // ========== 匹配结果统计 ==========
   const matchStats = useMemo(() => {
     const matched = matchResult.filter((r) => r.matched).length;
@@ -132,8 +138,8 @@ export default function BackupSchedule() {
       title: '配置文件',
       dataIndex: 'configFile',
       ellipsis: true,
-      render: (val: string) => (
-        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => handleDownloadFile(val)}>
+      render: (val: string, record: ConfigFileRow) => (
+        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => handleDownloadFile(val, record)}>
           {val}
         </Button>
       ),
@@ -142,8 +148,34 @@ export default function BackupSchedule() {
   ], []);
 
   // ========== 操作处理 ==========
-  const handleDownloadFile = (fileName: string) => {
-    void message.success(`开始下载: ${fileName}`);
+  const handleDownloadFile = (fileName: string, record: ConfigFileRow) => {
+    // 生成模拟 XML 配置文件内容
+    const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <device>
+    <sn>${record.deviceSn}</sn>
+    <name>${record.deviceName}</name>
+    <productType>${record.productType}</productType>
+  </device>
+  <parameters>
+    <parameter name="SystemName" value="${record.deviceName}"/>
+    <parameter name="SoftwareVersion" value="V1.3.0"/>
+    <parameter name="IPAddress" value="192.168.1.${parseInt(record.id, 10) * 10}"/>
+    <parameter name="SubnetMask" value="255.255.255.0"/>
+    <parameter name="Gateway" value="192.168.1.1"/>
+  </parameters>
+  <timestamp>${record.updateTime}</timestamp>
+</config>`;
+
+    const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    void message.success(`已下载: ${fileName}`);
   };
 
   const handleBatchExport = (keys: React.Key[]) => {
@@ -255,7 +287,7 @@ export default function BackupSchedule() {
       <DataTable<ConfigFileRow>
         tableId="config-file-list"
         columns={columns}
-        dataSource={filteredData}
+        dataSource={paginatedData}
         rowKey="id"
         selectable
         selectedRowKeys={selectedRowKeys}
@@ -267,7 +299,7 @@ export default function BackupSchedule() {
         batchActions={batchActions}
         showRowNumber
         rowNumberTitle="序号"
-        scroll={{ x: 800 }}
+        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
       />
 
       {/* 导入抽屉 */}
@@ -298,6 +330,7 @@ export default function BackupSchedule() {
               value={importMode}
               onChange={(e) => {
                 setImportMode(e.target.value);
+                setImportFileList([]);
                 setMatchResult([]);
               }}
             >
