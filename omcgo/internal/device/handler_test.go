@@ -69,7 +69,7 @@ func (m *fakeDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *fakeDeviceRepo) BatchDelete(ctx context.Context, ids []uuid.UUID) (int64, error) {
+func (m *fakeDeviceRepo) BatchDelete(ctx context.Context, ids []uuid.UUID, _ string) (int64, error) {
 	var deleted int64
 	for _, id := range ids {
 		if d, ok := m.devices[id]; ok {
@@ -121,6 +121,18 @@ func (m *fakeDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats, 
 }
 func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
 	return nil, nil
+}
+func (m *fakeDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *fakeDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
+}
+func (m *fakeDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *fakeDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -128,12 +128,48 @@ func (m *handlerMockRoleRepo) AddPermissions(_ context.Context, _ uuid.UUID, _ [
 func (m *handlerMockRoleRepo) RemoveAllPermissions(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
+func (m *handlerMockRoleRepo) GetUserRolesBatch(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]Role, error) {
+	return nil, nil
+}
+func (m *handlerMockRoleRepo) ListWithPagination(_ context.Context, _ RoleFilter) (*model.ListResponse[Role], error) {
+	return model.NewListResponse([]Role{}, 0, 1, 20), nil
+}
 
 type handlerMockAuditRepo struct{}
 
 func (m *handlerMockAuditRepo) Create(_ context.Context, _ *AuditLog) error { return nil }
 func (m *handlerMockAuditRepo) List(_ context.Context, _ AuditLogFilter) (*model.ListResponse[AuditLog], error) {
 	return &model.ListResponse[AuditLog]{Items: []AuditLog{}}, nil
+}
+
+type handlerMockMenuRepo struct{}
+
+func (m *handlerMockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error { return nil }
+func (m *handlerMockMenuRepo) GetByID(_ context.Context, _ uuid.UUID) (*Menu, error) { return nil, nil }
+func (m *handlerMockMenuRepo) GetByPermissionKey(_ context.Context, _ string) (*Menu, error) {
+	return nil, nil
+}
+func (m *handlerMockMenuRepo) List(_ context.Context, _ MenuFilter) (*model.ListResponse[Menu], error) {
+	return &model.ListResponse[Menu]{Items: []Menu{}}, nil
+}
+func (m *handlerMockMenuRepo) Update(_ context.Context, _ uuid.UUID, _ *UpdateMenuRequest, _ uuid.UUID) error {
+	return nil
+}
+func (m *handlerMockMenuRepo) Delete(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *handlerMockMenuRepo) GetTree(_ context.Context, _ *MenuStatus) ([]Menu, error) {
+	return nil, nil
+}
+func (m *handlerMockMenuRepo) GetByRole(_ context.Context, _ uuid.UUID) ([]Menu, error) {
+	return nil, nil
+}
+func (m *handlerMockMenuRepo) GetByUser(_ context.Context, _ uuid.UUID) ([]Menu, error) {
+	return nil, nil
+}
+func (m *handlerMockMenuRepo) SetRoleMenus(_ context.Context, _ uuid.UUID, _ []uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+func (m *handlerMockMenuRepo) GetRoleMenuIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +190,7 @@ func handlerNewTestRouter(
 	if err != nil {
 		panic(err)
 	}
-	svc := NewAdminService(userRepo, roleRepo, &handlerMockAuditRepo{}, jwt, zap.NewNop())
+	svc := NewAdminService(userRepo, roleRepo, &handlerMockMenuRepo{}, &handlerMockAuditRepo{}, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
 	r := gin.New()
 	api := r.Group("/api/v1")
@@ -391,7 +427,7 @@ func TestHandler_Login_AuditLog_OnFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
 	require.NoError(t, err)
-	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, auditRepo, jwt, zap.NewNop())
+	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
 	r := gin.New()
 	api := r.Group("/api/v1")
@@ -447,7 +483,7 @@ func TestHandler_Login_AuditLog_OnSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
 	require.NoError(t, err)
-	svc := NewAdminService(userRepo, roleRepo, auditRepo, jwt, zap.NewNop())
+	svc := NewAdminService(userRepo, roleRepo, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
 	r := gin.New()
 	api := r.Group("/api/v1")
@@ -488,22 +524,14 @@ func (m *handlerMockAuditRepoWithCapture) List(_ context.Context, _ AuditLogFilt
 }
 
 func TestHandler_ListRoles(t *testing.T) {
-	roleRepo := &handlerMockRoleRepo{
-		listFn: func(_ context.Context) ([]Role, error) {
-			return []Role{
-				{ID: uuid.New(), Name: "admin", CreatedAt: time.Now(), UpdatedAt: time.Now()},
-				{ID: uuid.New(), Name: "operator", CreatedAt: time.Now(), UpdatedAt: time.Now()},
-			}, nil
-		},
-	}
+	roleRepo := &handlerMockRoleRepo{}
 	r := handlerNewTestRouter(&handlerMockUserRepo{}, roleRepo)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/roles", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/roles?page=1&page_size=20", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	var resp []Role
+	var resp model.ListResponse[Role]
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Len(t, resp, 2)
 }

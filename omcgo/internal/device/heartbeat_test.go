@@ -63,7 +63,7 @@ func (m *hbMockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *hbMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+func (m *hbMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
 	return 0, nil
 }
 func (m *hbMockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
@@ -104,6 +104,18 @@ func (m *hbMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStats
 }
 func (m *hbMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
 	return nil, nil
+}
+func (m *hbMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *hbMockDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
+}
+func (m *hbMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *hbMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 // ---------------------------------------------------------------------------

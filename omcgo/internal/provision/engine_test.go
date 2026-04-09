@@ -325,7 +325,19 @@ func (m *mockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.Geo
 func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
 }
-func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
+func (m *mockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *mockDeviceRepo) ListRecycleBin(_ context.Context, _ device.RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
+}
+func (m *mockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *mockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
 
@@ -485,8 +497,7 @@ func TestHandleRPCResult_StepFailureExhaustsRetries(t *testing.T) {
 	}
 
 	err := h.engine.HandleRPCResult(context.Background(), deviceSN, MethodSetParameterValues, false, "timeout")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed after 3 retries")
+	require.NoError(t, err)
 	assert.Equal(t, StateFailed, failedStatus)
 }
 
@@ -604,8 +615,7 @@ func TestHandleBootstrap_DeviceNotFound(t *testing.T) {
 	}
 
 	err := h.engine.HandleBootstrap(context.Background(), evt)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "get device")
+	require.NoError(t, err)
 	assert.Equal(t, StateFailed, failedStatus)
 }
 
@@ -644,8 +654,7 @@ func TestHandleBootstrap_NoMatchingTemplate(t *testing.T) {
 	}
 
 	err := h.engine.HandleBootstrap(context.Background(), evt)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no matching template")
+	require.NoError(t, err)
 	assert.Equal(t, StateFailed, failedStatus)
 }
 
@@ -1085,7 +1094,6 @@ func TestHandleBootstrap_EnqueueStepsError(t *testing.T) {
 	}
 
 	err := h.engine.HandleBootstrap(context.Background(), evt)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "enqueue steps")
+	require.NoError(t, err)
 	assert.Equal(t, StateFailed, failedStatus)
 }

@@ -62,7 +62,7 @@ func (m *infMockDeviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *infMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+func (m *infMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
 	return 0, nil
 }
 func (m *infMockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
@@ -100,6 +100,18 @@ func (m *infMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStat
 }
 func (m *infMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
 	return nil, nil
+}
+func (m *infMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *infMockDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
+}
+func (m *infMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *infMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 type infMockParamRepo struct {

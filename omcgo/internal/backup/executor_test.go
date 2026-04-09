@@ -83,7 +83,19 @@ func (m *execDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*device.Geo
 func (m *execDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]device.GeoDevice, error) {
 	return nil, nil
 }
-func (m *execDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
+func (m *execDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
+func (m *execDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *execDeviceRepo) ListRecycleBin(_ context.Context, _ device.RecycleBinFilter) (*model.ListResponse[model.Device], error) {
+	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
+}
+func (m *execDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *execDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
 

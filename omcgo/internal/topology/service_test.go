@@ -131,6 +131,12 @@ func (m *mockGroupRepo) MoveDevices(_ context.Context, _ []uuid.UUID, _ uuid.UUI
 func (m *mockGroupRepo) MoveGroupDevicesToDefault(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *mockGroupRepo) ClearBoundRule(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+func (m *mockGroupRepo) UpdateBoundRule(_ context.Context, _, _ uuid.UUID) error {
+	return nil
+}
 
 // --- Helper ---
 

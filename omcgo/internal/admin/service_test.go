@@ -199,6 +199,13 @@ func (m *mockRoleRepo) RemoveAllPermissions(ctx context.Context, roleID uuid.UUI
 	return nil
 }
 
+func (m *mockRoleRepo) GetUserRolesBatch(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]Role, error) {
+	return nil, nil
+}
+func (m *mockRoleRepo) ListWithPagination(_ context.Context, _ RoleFilter) (*model.ListResponse[Role], error) {
+	return model.NewListResponse([]Role{}, 0, 1, 20), nil
+}
+
 type mockAuditRepo struct {
 	createFn func(ctx context.Context, log *AuditLog) error
 	listFn   func(ctx context.Context, filter AuditLogFilter) (*model.ListResponse[AuditLog], error)
@@ -218,6 +225,36 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 	return &model.ListResponse[AuditLog]{Items: []AuditLog{}}, nil
 }
 
+type mockMenuRepo struct{}
+
+func (m *mockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error { return nil }
+func (m *mockMenuRepo) GetByID(_ context.Context, _ uuid.UUID) (*Menu, error) { return nil, nil }
+func (m *mockMenuRepo) GetByPermissionKey(_ context.Context, _ string) (*Menu, error) {
+	return nil, nil
+}
+func (m *mockMenuRepo) List(_ context.Context, _ MenuFilter) (*model.ListResponse[Menu], error) {
+	return &model.ListResponse[Menu]{Items: []Menu{}}, nil
+}
+func (m *mockMenuRepo) Update(_ context.Context, _ uuid.UUID, _ *UpdateMenuRequest, _ uuid.UUID) error {
+	return nil
+}
+func (m *mockMenuRepo) Delete(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockMenuRepo) GetTree(_ context.Context, _ *MenuStatus) ([]Menu, error) {
+	return nil, nil
+}
+func (m *mockMenuRepo) GetByRole(_ context.Context, _ uuid.UUID) ([]Menu, error) {
+	return nil, nil
+}
+func (m *mockMenuRepo) GetByUser(_ context.Context, _ uuid.UUID) ([]Menu, error) {
+	return nil, nil
+}
+func (m *mockMenuRepo) SetRoleMenus(_ context.Context, _ uuid.UUID, _ []uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+func (m *mockMenuRepo) GetRoleMenuIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 // --- Helper ---
 
 func newTestService(userRepo *mockUserRepo, roleRepo *mockRoleRepo, auditRepo *mockAuditRepo) *AdminService {
@@ -226,7 +263,7 @@ func newTestService(userRepo *mockUserRepo, roleRepo *mockRoleRepo, auditRepo *m
 		panic(err)
 	}
 	logger := zap.NewNop()
-	return NewAdminService(userRepo, roleRepo, auditRepo, jwt, logger)
+	return NewAdminService(userRepo, roleRepo, &mockMenuRepo{}, auditRepo, jwt, logger)
 }
 
 func hashPassword(password string) string {
@@ -338,7 +375,7 @@ func TestAdminService_RefreshToken_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewAdminService(userRepo, roleRepo, &mockAuditRepo{}, jwt, zap.NewNop())
+	svc := NewAdminService(userRepo, roleRepo, &mockMenuRepo{}, &mockAuditRepo{}, jwt, zap.NewNop())
 
 	pair, err := svc.RefreshToken(context.Background(), original.RefreshToken)
 	require.NoError(t, err)
@@ -364,7 +401,7 @@ func TestAdminService_RefreshToken_DisabledUser(t *testing.T) {
 		},
 	}
 
-	svc := NewAdminService(userRepo, &mockRoleRepo{}, &mockAuditRepo{}, jwt, zap.NewNop())
+	svc := NewAdminService(userRepo, &mockRoleRepo{}, &mockMenuRepo{}, &mockAuditRepo{}, jwt, zap.NewNop())
 
 	_, err = svc.RefreshToken(context.Background(), original.RefreshToken)
 	assert.Error(t, err)

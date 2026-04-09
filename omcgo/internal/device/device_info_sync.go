@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ var runTimeRegex = regexp.MustCompile(`(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)
 // Supported formats: "40d 4h 58m", "4h 58m", "58m", "40d 4h 58m 30s"
 // Returns 0 if parsing fails.
 func parseRunTimeToSeconds(val string) int64 {
-	matches := runTimeRegex.FindStringSubmatch(val)
+	matches := runTimeRegex.FindStringSubmatch(strings.TrimSpace(val))
 	if matches == nil {
 		return 0
 	}
