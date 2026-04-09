@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { App, Button, Card, Space, Switch, Tag, Tooltip } from 'antd';
+import { App, Button, Card, Switch, Tag } from 'antd';
 import {
-  FileZipOutlined,
+  EyeOutlined,
   PlayCircleOutlined,
   StopOutlined,
 } from '@ant-design/icons';
@@ -29,10 +29,10 @@ interface MeasurementRow extends Record<string, unknown> {
 }
 
 // 状态配置
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
-  '0': { label: 'status.off', color: '#8c8c8c', icon: 'off' },
-  '1': { label: 'status.normal', color: '#52c41a', icon: 'normal' },
-  '2': { label: 'status.damaged', color: '#ff4d4f', icon: 'damaged' },
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  '0': { label: 'status.off', color: 'default' },
+  '1': { label: 'status.normal', color: 'success' },
+  '2': { label: 'status.damaged', color: 'error' },
 };
 
 // Mock 数据
@@ -92,20 +92,20 @@ export default function KPIMeasurement() {
   // 表格列配置
   const columns: DataTableColumn<MeasurementRow>[] = useMemo(() => [
     {
-      key: 'file',
-      title: t('perf.measurement.file'),
+      key: 'operation',
+      title: '',
       dataIndex: 'id',
-      width: 60,
-      align: 'center',
+      width: 80,
+      fixed: 'left',
       render: (_, record) => (
-        <Tooltip title={t('perf.measurement.viewFiles')}>
-          <Button
-            type="text"
-            size="small"
-            icon={<FileZipOutlined />}
-            onClick={() => handleOpenFileDrawer(record)}
-          />
-        </Tooltip>
+        <Button
+          type="link"
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={() => handleOpenFileDrawer(record)}
+        >
+          {t('perf.measurement.viewFiles')}
+        </Button>
       ),
     },
     {

@@ -1,8 +1,12 @@
-import { Drawer, Table, Button, Space, Tag, App } from 'antd';
+import { Drawer, Table, Button, Space, Tag, App, DatePicker, Alert, Divider } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 import { useState, useCallback, useMemo } from 'react';
+import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
+
+const { RangePicker } = DatePicker;
 
 /** 测量文件行数据 */
 interface MeasurementFile {
@@ -30,8 +34,13 @@ const mockFiles: MeasurementFile[] = [
   { id: '1', fileName: 'ENB00001_20260402_001.xml.gz', fileSize: 102400, collectTime: '2026-04-02 08:00:00', status: 'success' },
   { id: '2', fileName: 'ENB00001_20260402_002.xml.gz', fileSize: 98304, collectTime: '2026-04-02 08:15:00', status: 'success' },
   { id: '3', fileName: 'ENB00001_20260402_003.xml.gz', fileSize: 105472, collectTime: '2026-04-02 08:30:00', status: 'success' },
-  { id: '4', fileName: 'ENB00001_20260402_004.xml.gz', fileSize: 0, collectTime: '2026-04-02 08:45:00', status: 'pending' },
-  { id: '5', fileName: 'ENB00001_20260402_005.xml.gz', fileSize: 0, collectTime: '2026-04-02 09:00:00', status: 'failed' },
+  { id: '4', fileName: 'ENB00001_20260401_001.xml.gz', fileSize: 87040, collectTime: '2026-04-01 08:00:00', status: 'success' },
+  { id: '5', fileName: 'ENB00001_20260401_002.xml.gz', fileSize: 92160, collectTime: '2026-04-01 08:15:00', status: 'success' },
+  { id: '6', fileName: 'ENB00001_20260401_003.xml.gz', fileSize: 0, collectTime: '2026-04-01 08:30:00', status: 'pending' },
+  { id: '7', fileName: 'ENB00001_20260331_001.xml.gz', fileSize: 0, collectTime: '2026-03-31 08:00:00', status: 'failed' },
+  { id: '8', fileName: 'ENB00001_20260331_002.xml.gz', fileSize: 110592, collectTime: '2026-03-31 08:15:00', status: 'success' },
+  { id: '9', fileName: 'ENB00001_20260330_001.xml.gz', fileSize: 95000, collectTime: '2026-03-30 08:00:00', status: 'success' },
+  { id: '10', fileName: 'ENB00001_20260330_002.xml.gz', fileSize: 88000, collectTime: '2026-03-30 08:15:00', status: 'success' },
 ];
 
 // 状态颜色映射
@@ -39,13 +48,6 @@ const statusColorMap: Record<string, string> = {
   success: 'success',
   failed: 'error',
   pending: 'processing',
-};
-
-// 状态文本映射
-const statusTextMap: Record<string, string> = {
-  success: 'perf.measurement.fileSuccess',
-  failed: 'perf.measurement.fileFailed',
-  pending: 'perf.measurement.filePending',
 };
 
 // 格式化文件大小
@@ -58,8 +60,21 @@ function formatFileSize(bytes: number): string {
 
 export default function MeasurementFileDrawer({ open, device, onClose }: MeasurementFileDrawerProps) {
   const t = useT();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
+
+  // 按时间过滤文件
+  const filteredFiles = useMemo(() => {
+    if (!timeRange) return mockFiles;
+    const start = timeRange[0].startOf('day');
+    const end = timeRange[1].endOf('day');
+    return mockFiles.filter((f) => {
+      const fileTime = dayjs(f.collectTime);
+      return fileTime.isAfter(start) && fileTime.isBefore(end);
+    });
+  }, [timeRange]);
 
   // 刷新文件列表
   const handleRefresh = useCallback(() => {
@@ -70,11 +85,43 @@ export default function MeasurementFileDrawer({ open, device, onClose }: Measure
     }, 500);
   }, [message, t]);
 
-  // 下载文件
+  // 下载单个文件
   const handleDownload = useCallback((record: MeasurementFile) => {
-    console.log('下载测量文件:', record.fileName);
-    void message.info(t('common.downloading'));
+    void message.info(`${t('common.downloading')}: ${record.fileName}`);
   }, [message, t]);
+
+  // 批量下载
+  const handleBatchDownload = useCallback(() => {
+    if (selectedRowKeys.length === 0) {
+      void message.warning(t('common.selectAtLeastOne'));
+      return;
+    }
+    const selected = filteredFiles.filter(
+      (f) => selectedRowKeys.includes(f.id) && f.status === 'success'
+    );
+    if (selected.length === 0) {
+      void message.warning(t('perf.measurement.noDownloadableFiles'));
+      return;
+    }
+    void message.success(t('perf.measurement.batchDownloadSuccess', { count: selected.length }));
+  }, [selectedRowKeys, filteredFiles, message, t]);
+
+  // 批量删除
+  const handleBatchDelete = useCallback(() => {
+    if (selectedRowKeys.length === 0) {
+      void message.warning(t('common.selectAtLeastOne'));
+      return;
+    }
+    modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('perf.measurement.batchDeleteConfirm', { count: selectedRowKeys.length }),
+      okType: 'danger',
+      onOk: () => {
+        setSelectedRowKeys([]);
+        void message.success(t('common.deleteSuccess'));
+      },
+    });
+  }, [selectedRowKeys, modal, message, t]);
 
   // 表格列配置
   const columns: ColumnsType<MeasurementFile> = useMemo(() => [
@@ -107,13 +154,13 @@ export default function MeasurementFileDrawer({ open, device, onClose }: Measure
       width: 100,
       render: (status: string) => (
         <Tag color={statusColorMap[status] || 'default'}>
-          {t(statusTextMap[status] || status)}
+          {t(`perf.measurement.file${status.charAt(0).toUpperCase() + status.slice(1)}`)}
         </Tag>
       ),
     },
     {
       key: 'action',
-      title: t('common.action'),
+      title: t('common.operation'),
       width: 80,
       render: (_, record) => (
         <Button
@@ -137,17 +184,16 @@ export default function MeasurementFileDrawer({ open, device, onClose }: Measure
       placement="right"
       width={720}
       open={open}
-      onClose={onClose}
-      extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>
-            {t('common.refresh')}
-          </Button>
-        </Space>
-      }
+      onClose={() => {
+        setSelectedRowKeys([]);
+        setTimeRange(null);
+        onClose();
+      }}
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-          <Button onClick={onClose}>{t('common.close')}</Button>
+          <Button onClick={() => { setSelectedRowKeys([]); setTimeRange(null); onClose(); }}>
+            {t('common.close')}
+          </Button>
         </Space>
       }
     >
@@ -156,13 +202,68 @@ export default function MeasurementFileDrawer({ open, device, onClose }: Measure
           {t('device.hostName')}: {device.hostName} | {t('device.code')}: {device.serialNumber}
         </span>
       </div>
+
+      {/* 时间筛选 */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ whiteSpace: 'nowrap' }}>{t('perf.measurement.timeRange')}</span>
+        <RangePicker
+          value={timeRange}
+          onChange={(dates) => setTimeRange(dates as [Dayjs, Dayjs] | null)}
+          format="YYYY-MM-DD"
+          style={{ flex: 1 }}
+          size="small"
+          allowClear
+          placeholder={[t('perf.measurement.startDate'), t('perf.measurement.endDate')]}
+        />
+        <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading} size="small">
+          {t('common.refresh')}
+        </Button>
+      </div>
+
+      {/* 批量操作 */}
+      {selectedRowKeys.length > 0 && (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            message={t('perf.measurement.selectedFilesInfo', { count: selectedRowKeys.length })}
+            style={{ marginBottom: 12 }}
+            action={
+              <Space size="small">
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={handleBatchDownload}
+                >
+                  {t('perf.measurement.batchDownload')}
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={handleBatchDelete}
+                >
+                  {t('common.delete')}
+                </Button>
+              </Space>
+            }
+          />
+          <Divider style={{ margin: '0 0 12px' }} />
+        </>
+      )}
+
       <Table<MeasurementFile>
         rowKey="id"
         columns={columns}
-        dataSource={mockFiles}
+        dataSource={filteredFiles}
         loading={loading}
         size="small"
-        pagination={{ pageSize: 10, showSizeChanger: false }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => setSelectedRowKeys(keys),
+        }}
+        scroll={{ y: 'calc(100vh - 310px)' }}
+        pagination={{ pageSize: 10, showSizeChanger: false, size: 'small' }}
       />
     </Drawer>
   );

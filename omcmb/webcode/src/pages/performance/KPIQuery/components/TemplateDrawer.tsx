@@ -21,6 +21,7 @@ import {
   Modal,
   Table,
   Divider,
+  Alert,
 } from 'antd';
 import {
   InfoCircleOutlined,
@@ -1246,8 +1247,27 @@ export default function TemplateDrawer({
 
         {selDeviceType === '2' ? (
           <>
-            {/* 设备列表 */}
-            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Alert
+              type="info"
+              showIcon
+              message={t('perf.query.deviceSelectionInfo', {
+                total: filteredModalDevices.length,
+                selected: tempSelectedDevices.length,
+              })}
+              style={{ marginBottom: 16 }}
+            />
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Input
+                placeholder={t('perf.query.deviceSearchPlaceholder')}
+                prefix={<SearchOutlined />}
+                value={modalSearchText}
+                onChange={(e) => {
+                  setModalSearchText(e.target.value);
+                  setModalCurrentPage(1);
+                }}
+                allowClear
+                style={{ width: 250 }}
+              />
               <Checkbox
                 checked={tempSelectedDevices.length === filteredModalDevices.length && filteredModalDevices.length > 0}
                 indeterminate={tempSelectedDevices.length > 0 && tempSelectedDevices.length < filteredModalDevices.length}
@@ -1261,60 +1281,28 @@ export default function TemplateDrawer({
               >
                 {t('perf.query.selectAllDevices', { count: filteredModalDevices.length })}
               </Checkbox>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t('perf.query.selectedCount', { count: tempSelectedDevices.length })}
-              </Text>
             </div>
-            <div style={{ border: `1px solid ${token.colorBorder}`, borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
-              {filteredModalDevices.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: token.colorTextSecondary }}>
-                  {t('perf.query.noAvailableDevices')}
-                </div>
-              ) : (
-                <>
-                  {/* 表头 */}
-                  <div style={{ display: 'flex', padding: '8px 12px', background: token.colorBgLayout, borderBottom: `1px solid ${token.colorBorderSecondary}`, fontWeight: 500, fontSize: 12 }}>
-                    <div style={{ width: 40 }}></div>
-                    <div style={{ flex: 1 }}>{t('perf.query.baseStationCode')}</div>
-                    <div style={{ flex: 1 }}>{t('perf.query.baseStationName')}</div>
-                    <div style={{ width: 80, textAlign: 'center' }}>{t('perf.query.productType')}</div>
-                  </div>
-                  {/* 表体 */}
-                  {paginatedModalDevices.map(device => (
-                    <div
-                      key={device.id}
-                      onClick={() => {
-                        setTempSelectedDevices(prev =>
-                          prev.includes(device.id)
-                            ? prev.filter(id => id !== device.id)
-                            : [...prev, device.id]
-                        );
-                      }}
-                      style={{
-                        display: 'flex',
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        background: tempSelectedDevices.includes(device.id) ? token.colorPrimaryBg : 'transparent',
-                        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div style={{ width: 40 }}>
-                        <Checkbox
-                          checked={tempSelectedDevices.includes(device.id)}
-                          onChange={() => {}}
-                        />
-                      </div>
-                      <div style={{ flex: 1, fontSize: 12, fontFamily: 'monospace' }}>{device.id}</div>
-                      <div style={{ flex: 1 }}>{device.name}</div>
-                      <div style={{ width: 80, textAlign: 'center' }}>
-                        <Tag>{device.productType}</Tag>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+            <Table
+              size="small"
+              dataSource={paginatedModalDevices}
+              rowKey="id"
+              pagination={false}
+              scroll={{ y: 250 }}
+              rowSelection={{
+                selectedRowKeys: tempSelectedDevices,
+                onChange: (keys) => setTempSelectedDevices(keys as string[]),
+              }}
+              columns={[
+                { title: t('perf.query.baseStationCode'), dataIndex: 'id', width: 120 },
+                { title: t('perf.query.baseStationName'), dataIndex: 'name', ellipsis: true },
+                {
+                  title: t('perf.query.productType'),
+                  dataIndex: 'productType',
+                  width: 80,
+                  render: (val) => <Tag>{val}</Tag>,
+                },
+              ]}
+            />
             {filteredModalDevices.length > modalPageSize && (
               <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                 <Pagination
@@ -1334,8 +1322,27 @@ export default function TemplateDrawer({
           </>
         ) : (
           <>
-            {/* 设备组列表 */}
-            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Alert
+              type="info"
+              showIcon
+              message={t('perf.query.groupSelectionInfo', {
+                total: filteredModalGroups.length,
+                selected: tempSelectedGroups.length,
+              })}
+              style={{ marginBottom: 16 }}
+            />
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Input
+                placeholder={t('perf.query.groupSearchPlaceholder')}
+                prefix={<SearchOutlined />}
+                value={modalSearchText}
+                onChange={(e) => {
+                  setModalSearchText(e.target.value);
+                  setModalCurrentPage(1);
+                }}
+                allowClear
+                style={{ width: 250 }}
+              />
               <Checkbox
                 checked={tempSelectedGroups.length === filteredModalGroups.length && filteredModalGroups.length > 0}
                 indeterminate={tempSelectedGroups.length > 0 && tempSelectedGroups.length < filteredModalGroups.length}
@@ -1349,57 +1356,31 @@ export default function TemplateDrawer({
               >
                 {t('perf.query.selectAllGroups', { count: filteredModalGroups.length })}
               </Checkbox>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t('perf.query.selectedCount', { count: tempSelectedGroups.length })}
-              </Text>
             </div>
-            <div style={{ border: `1px solid ${token.colorBorder}`, borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
-              {filteredModalGroups.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: token.colorTextSecondary }}>
-                  {t('perf.query.noAvailableGroups')}
-                </div>
-              ) : (
-                <>
-                  {/* 表头 */}
-                  <div style={{ display: 'flex', padding: '8px 12px', background: token.colorBgLayout, borderBottom: `1px solid ${token.colorBorderSecondary}`, fontWeight: 500, fontSize: 12 }}>
-                    <div style={{ width: 40 }}></div>
-                    <div style={{ flex: 1 }}>{t('perf.query.groupName')}</div>
-                  </div>
-                  {/* 表体 */}
-                  {paginatedModalGroups.map(group => (
-                    <div
-                      key={group.id}
-                      onClick={() => {
-                        setTempSelectedGroups(prev =>
-                          prev.includes(group.id)
-                            ? prev.filter(id => id !== group.id)
-                            : [...prev, group.id]
-                        );
-                      }}
-                      style={{
-                        display: 'flex',
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        background: tempSelectedGroups.includes(group.id) ? token.colorPrimaryBg : 'transparent',
-                        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div style={{ width: 40 }}>
-                        <Checkbox
-                          checked={tempSelectedGroups.includes(group.id)}
-                          onChange={() => {}}
-                        />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <FolderOutlined style={{ marginRight: 8, color: '#FA8C16' }} />
-                        {group.name}
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+            <Table
+              size="small"
+              dataSource={paginatedModalGroups}
+              rowKey="id"
+              pagination={false}
+              scroll={{ y: 250 }}
+              rowSelection={{
+                selectedRowKeys: tempSelectedGroups,
+                onChange: (keys) => setTempSelectedGroups(keys as string[]),
+              }}
+              columns={[
+                {
+                  title: t('perf.query.groupName'),
+                  dataIndex: 'name',
+                  ellipsis: true,
+                  render: (val) => (
+                    <span>
+                      <FolderOutlined style={{ marginRight: 8, color: '#FA8C16' }} />
+                      {val}
+                    </span>
+                  ),
+                },
+              ]}
+            />
             {filteredModalGroups.length > modalPageSize && (
               <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                 <Pagination
@@ -1490,7 +1471,27 @@ export default function TemplateDrawer({
         </div>
 
         {/* 指标列表 */}
-        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Alert
+          type="info"
+          showIcon
+          message={t('perf.query.kpiSelectionInfo', {
+            total: filteredModalKpis.length,
+            selected: tempSelectedKpis.length,
+          })}
+          style={{ marginBottom: 16 }}
+        />
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Input
+            placeholder={t('perf.query.kpiSearchPlaceholder')}
+            prefix={<SearchOutlined />}
+            value={kpiModalSearchText}
+            onChange={(e) => {
+              setKpiModalSearchText(e.target.value);
+              setKpiCurrentPage(1);
+            }}
+            allowClear
+            style={{ width: 250 }}
+          />
           <Checkbox
             checked={tempSelectedKpis.length === filteredModalKpis.length && filteredModalKpis.length > 0}
             indeterminate={tempSelectedKpis.length > 0 && tempSelectedKpis.length < filteredModalKpis.length}
@@ -1504,60 +1505,28 @@ export default function TemplateDrawer({
           >
             {t('perf.query.selectAllKpis', { count: filteredModalKpis.length })}
           </Checkbox>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {t('perf.query.selectedCount', { count: tempSelectedKpis.length })}
-          </Text>
         </div>
-        <div style={{ border: `1px solid ${token.colorBorder}`, borderRadius: 6, minHeight: 300, maxHeight: 300, overflow: 'auto' }}>
-          {filteredModalKpis.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: token.colorTextSecondary }}>
-              {t('perf.query.noAvailableKpis')}
-            </div>
-          ) : (
-            <>
-              {/* 表头 */}
-              <div style={{ display: 'flex', padding: '8px 12px', background: token.colorBgLayout, borderBottom: `1px solid ${token.colorBorderSecondary}`, fontWeight: 500, fontSize: 12 }}>
-                <div style={{ width: 40 }}></div>
-                <div style={{ flex: 1 }}>{t('perf.query.kpiId')}</div>
-                <div style={{ flex: 1 }}>{t('perf.query.kpiName')}</div>
-                <div style={{ width: 80, textAlign: 'center' }}>{t('perf.query.unit')}</div>
-              </div>
-              {/* 表体 */}
-              {paginatedModalKpis.map(kpi => (
-                <div
-                  key={kpi.id}
-                  onClick={() => {
-                    setTempSelectedKpis(prev =>
-                      prev.includes(kpi.id)
-                        ? prev.filter(id => id !== kpi.id)
-                        : [...prev, kpi.id]
-                    );
-                  }}
-                  style={{
-                    display: 'flex',
-                    padding: '8px 12px',
-                    cursor: 'pointer',
-                    background: tempSelectedKpis.includes(kpi.id) ? token.colorPrimaryBg : 'transparent',
-                    borderBottom: `1px solid ${token.colorBorderSecondary}`,
-                    alignItems: 'center',
-                  }}
-                >
-                  <div style={{ width: 40 }}>
-                    <Checkbox
-                      checked={tempSelectedKpis.includes(kpi.id)}
-                      onChange={() => {}}
-                    />
-                  </div>
-                  <div style={{ flex: 1, fontSize: 12, fontFamily: 'monospace' }}>{kpi.id}</div>
-                  <div style={{ flex: 1 }}>{kpi.name}</div>
-                  <div style={{ width: 80, textAlign: 'center' }}>
-                    <Tag>{kpi.unit}</Tag>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+        <Table
+          size="small"
+          dataSource={paginatedModalKpis}
+          rowKey="id"
+          pagination={false}
+          scroll={{ y: 250 }}
+          rowSelection={{
+            selectedRowKeys: tempSelectedKpis,
+            onChange: (keys) => setTempSelectedKpis(keys as string[]),
+          }}
+          columns={[
+            { title: t('perf.query.kpiId'), dataIndex: 'id', width: 120 },
+            { title: t('perf.query.kpiName'), dataIndex: 'name', ellipsis: true },
+            {
+              title: t('perf.query.unit'),
+              dataIndex: 'unit',
+              width: 80,
+              render: (val) => <Tag>{val}</Tag>,
+            },
+          ]}
+        />
         {filteredModalKpis.length > kpiPageSize && (
           <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
             <Pagination
