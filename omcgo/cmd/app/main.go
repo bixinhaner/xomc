@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/omcgo/omcgo/cmd/app/router"
+	"github.com/omcgo/omcgo/cmd/app/provider"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -61,18 +61,18 @@ func runApp(cmd *cobra.Command, args []string) error {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	if err := router.Setup(engine, &router.Deps{
-		PgPool:          app.PgPool,
-		TsPool:          app.TsPool,
-		Redis:           app.Redis,
-		MinIO:           app.MinIO,
-		EventBus:        app.EventBus,
-		CmdQueue:        app.CmdQueue,
-		CarrierRegistry: app.Carriers,
-		Cfg:             &cfg,
-		Logger:          app.Logger,
-		GS:              app.GS,
-		MetricsReg:      app.MetricsReg,
+	if err := provider.Setup(engine, &provider.Container{
+		PgPool:     app.PgPool,
+		TsPool:     app.TsPool,
+		Redis:      app.Redis,
+		MinIO:      app.MinIO,
+		EventBus:   app.EventBus,
+		CmdQueue:   app.CmdQueue,
+		Carriers:   app.Carriers,
+		Cfg:        &cfg,
+		Logger:     app.Logger,
+		GS:         app.GS,
+		MetricsReg: app.MetricsReg,
 	}); err != nil {
 		return fmt.Errorf("setup routes: %w", err)
 	}
