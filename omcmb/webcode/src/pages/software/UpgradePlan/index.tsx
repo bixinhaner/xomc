@@ -129,10 +129,7 @@ export default function UpgradePlan() {
     notFound: string[];
     mixedTypes: string[];
   }>({ matched: [], notFound: [], mixedTypes: [] });
-  // 导出相关状态
-  const [exportVisible, setExportVisible] = useState(false);
-  const [exportType, setExportType] = useState<'all' | 'range'>('all');
-  const [exportTimeRange, setExportTimeRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  // 重新执行确认状态
   // 重新执行确认状态
   const [retryRecord, setRetryRecord] = useState<UpgradePlanRow | null>(null);
   // 批量升级抽屉状态
@@ -281,46 +278,15 @@ export default function UpgradePlan() {
     }
   };
 
-  // 打开导出弹窗
-  const handleOpenExport = () => {
-    setExportType('all');
-    setExportTimeRange(null);
-    setExportVisible(true);
-  };
-
-  // 执行导出
+  // 直接导出
   const handleExport = () => {
-    let dataToExport: UpgradePlanRow[];
-
-    if (exportType === 'all') {
-      dataToExport = filteredData;
-    } else {
-      if (!exportTimeRange || !exportTimeRange[0] || !exportTimeRange[1]) {
-        void message.warning('请选择时间范围');
-        return;
-      }
-      const startDate = exportTimeRange[0].toDate();
-      const endDate = exportTimeRange[1].endOf('day').toDate();
-      dataToExport = filteredData.filter((row) => {
-        const rowStartTime = row.startTime ? new Date(row.startTime) : null;
-        const rowEndTime = row.endTime ? new Date(row.endTime) : null;
-        if (!rowStartTime && !rowEndTime) return false;
-        return (
-          (rowStartTime && rowStartTime >= startDate && rowStartTime <= endDate) ||
-          (rowEndTime && rowEndTime >= startDate && rowEndTime <= endDate) ||
-          (rowStartTime && rowEndTime && rowStartTime <= startDate && rowEndTime >= endDate)
-        );
-      });
-    }
-
-    if (dataToExport.length === 0) {
+    if (filteredData.length === 0) {
       void message.warning('没有可导出的数据');
       return;
     }
 
-    // 生成 CSV 内容
     const headers = ['基站编码', '基站名称', '设备组', '初始版本', '升级版本', '升级类型', '产品类型', '保留配置', '升级进度', '结果', '失败原因', '操作人', '操作时间', '开始时间', '结束时间'];
-    const rows = dataToExport.map((row) => [
+    const rows = filteredData.map((row) => [
       row.deviceSn,
       row.deviceName,
       row.deviceGroup,
@@ -347,8 +313,7 @@ export default function UpgradePlan() {
     link.click();
     URL.revokeObjectURL(url);
 
-    setExportVisible(false);
-    void message.success(`已导出 ${dataToExport.length} 条记录`);
+    void message.success(`已导出 ${filteredData.length} 条记录`);
   };
 
   const filterFields: FilterField[] = useMemo(() => [
@@ -958,7 +923,7 @@ export default function UpgradePlan() {
       <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleOpenUpgradeDrawer}>
         升级
       </Button>
-      <Button icon={<DownloadOutlined />} onClick={handleOpenExport}>
+      <Button icon={<DownloadOutlined />} onClick={handleExport}>
         导出
       </Button>
     </Space>
@@ -1108,47 +1073,6 @@ export default function UpgradePlan() {
             style={{ marginBottom: 8 }}
           />
         )}
-      </Modal>
-
-      {/* 导出弹窗 */}
-      <Modal
-        title="导出升级计划"
-        open={exportVisible}
-        onCancel={() => setExportVisible(false)}
-        onOk={handleExport}
-        okText="导出"
-        cancelText="取消"
-        width={500}
-        okButtonProps={{
-          disabled: exportType === 'range' && (!exportTimeRange || !exportTimeRange[0] || !exportTimeRange[1]),
-        }}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <Radio.Group
-            value={exportType}
-            onChange={(e) => setExportType(e.target.value)}
-          >
-            <Radio value="all">导出全部</Radio>
-            <Radio value="range">按时间导出</Radio>
-          </Radio.Group>
-        </div>
-
-        {exportType === 'range' && (
-          <div style={{ marginBottom: 16 }}>
-            <DatePicker.RangePicker
-              style={{ width: '100%' }}
-              value={exportTimeRange}
-              onChange={(dates) => setExportTimeRange(dates)}
-              placeholder={['开始时间', '结束时间']}
-            />
-          </div>
-        )}
-
-        <Alert
-          type="info"
-          showIcon
-          message={`将导出 ${exportType === 'all' ? filteredData.length : '符合时间范围的'} 条记录，格式为 CSV`}
-        />
       </Modal>
 
       {/* 重新执行确认弹窗 */}

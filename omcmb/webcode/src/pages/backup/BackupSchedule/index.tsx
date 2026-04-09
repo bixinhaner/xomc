@@ -1,215 +1,427 @@
 import { useState, useMemo } from 'react';
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  Button,
+  message,
+  Drawer,
+  Radio,
+  Form,
+  Table,
+  Tag,
+  Alert,
+  Space,
+  Divider,
+} from 'antd';
+import {
+  UploadOutlined,
+  DownloadOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  InboxOutlined,
+} from '@ant-design/icons';
+import { Upload } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn } from '@/components/DataTable';
-import SchedulePicker from '@/components/SchedulePicker';
-import type { ScheduleValue } from '@/components/SchedulePicker';
-import { useBackupSchedules, useCreateBackupSchedule, useUpdateBackupSchedule, useDeleteBackupSchedules } from '@/hooks/api/useBackup';
-import type { BackupSchedule } from '@/mock/data/backup';
+import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import FilterBar from '@/components/FilterBar';
+import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
 
-interface ScheduleRow extends Record<string, unknown> {
-  id: string;
-  scheduleName: string;
-  backupType: 'full' | 'incremental' | 'config-only';
-  scheduleType: string;
-  cronDescription: string;
-  nextRunTime: string;
-  lastRunTime: string;
-  enabled: boolean;
-  retentionDays: number;
-  creator: string;
-}
-
-const BACKUP_TYPE_OPTIONS = [
-  { label: '全量备份', value: 'full' },
-  { label: '增量备份', value: 'incremental' },
-  { label: '配置备份', value: 'config-only' },
+// 产品类型选项
+const PRODUCT_TYPE_OPTIONS = [
+  'PM-B4860', 'QAFA', 'QATA', 'QAFB', 'RTD',
+  'BaiBNX', 'BaiBNQ', 'BSC', 'BTS',
 ];
 
-const BACKUP_TYPE_COLORS: Record<string, string> = {
-  full: 'blue',
-  incremental: 'purple',
-  'config-only': 'green',
-};
+// 导入方式
+type ImportMode = 'filename' | 'all';
 
-const mockData: ScheduleRow[] = [
-  { id: '1', scheduleName: '全网每日全量备份', backupType: 'full', scheduleType: '每天', cronDescription: '每天 02:00', nextRunTime: '2026-03-03 02:00:00', lastRunTime: '2026-03-02 02:45:32', enabled: true, retentionDays: 30, creator: 'admin' },
-  { id: '2', scheduleName: '5G基站每周增量', backupType: 'incremental', scheduleType: '每周', cronDescription: '每周一 04:00', nextRunTime: '2026-03-09 04:00:00', lastRunTime: '2026-03-02 04:12:05', enabled: true, retentionDays: 90, creator: 'admin' },
-  { id: '3', scheduleName: '核心设备配置备份', backupType: 'config-only', scheduleType: '每天', cronDescription: '每天 06:00', nextRunTime: '2026-03-03 06:00:00', lastRunTime: '2026-03-02 06:08:21', enabled: true, retentionDays: 60, creator: 'operator1' },
-  { id: '4', scheduleName: '月度全量归档', backupType: 'full', scheduleType: '每月', cronDescription: '每月1日 00:30', nextRunTime: '2026-04-01 00:30:00', lastRunTime: '2026-03-01 01:22:15', enabled: false, retentionDays: 365, creator: 'admin' },
+// 匹配结果行
+interface MatchRow {
+  id: string;
+  deviceSn: string;
+  deviceName: string;
+  productType: string;
+  fileName: string;
+  matched: boolean;
+}
+
+interface ConfigFileRow extends Record<string, unknown> {
+  id: string;
+  deviceSn: string;
+  deviceName: string;
+  productType: string;
+  configFile: string;
+  fileSize: string;
+  updateTime: string;
+}
+
+// Mock 数据
+const mockData: ConfigFileRow[] = [
+  { id: '1', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', productType: 'PM-B4860', configFile: 'ENB00001_config_20260302.xml', fileSize: '128 KB', updateTime: '2026-03-02 10:15:00' },
+  { id: '2', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', productType: 'PM-B4860', configFile: 'ENB00002_config_20260302.xml', fileSize: '115 KB', updateTime: '2026-03-02 10:12:00' },
+  { id: '3', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', productType: 'QAFA', configFile: 'ENB00003_config_20260301.xml', fileSize: '96 KB', updateTime: '2026-03-01 14:30:00' },
+  { id: '4', deviceSn: 'GNB00001', deviceName: '北京5G基站01', productType: 'BaiBNX', configFile: 'GNB00001_config_20260302.xml', fileSize: '256 KB', updateTime: '2026-03-02 08:45:00' },
+  { id: '5', deviceSn: 'GNB00002', deviceName: '上海5G基站01', productType: 'BaiBNX', configFile: 'GNB00002_config_20260228.xml', fileSize: '245 KB', updateTime: '2026-02-28 16:20:00' },
+  { id: '6', deviceSn: 'ENB00004', deviceName: '广州天河基站01', productType: 'QATA', configFile: 'ENB00004_config_20260302.xml', fileSize: '102 KB', updateTime: '2026-03-02 09:30:00' },
+  { id: '7', deviceSn: 'ENB00005', deviceName: '深圳南山基站01', productType: 'QAFB', configFile: 'ENB00005_config_20260301.xml', fileSize: '88 KB', updateTime: '2026-03-01 11:00:00' },
+  { id: '8', deviceSn: 'GNB00003', deviceName: '广州5G基站01', productType: 'BaiBNQ', configFile: 'GNB00003_config_20260302.xml', fileSize: '198 KB', updateTime: '2026-03-02 07:50:00' },
+  { id: '9', deviceSn: 'ENB00006', deviceName: '杭州西湖基站01', productType: 'RTD', configFile: 'ENB00006_config_20260227.xml', fileSize: '72 KB', updateTime: '2026-02-27 13:45:00' },
+  { id: '10', deviceSn: 'ENB00007', deviceName: '南京鼓楼基站01', productType: 'PM-B4860', configFile: 'ENB00007_config_20260302.xml', fileSize: '135 KB', updateTime: '2026-03-02 10:45:00' },
+  { id: '11', deviceSn: 'GNB00004', deviceName: '深圳5G基站01', productType: 'BaiBNX', configFile: 'GNB00004_config_20260301.xml', fileSize: '262 KB', updateTime: '2026-03-01 15:30:00' },
+  { id: '12', deviceSn: 'ENB00008', deviceName: '成都武侯基站01', productType: 'QAFA', configFile: 'ENB00008_config_20260228.xml', fileSize: '91 KB', updateTime: '2026-02-28 09:10:00' },
 ];
 
 export default function BackupSchedule() {
   const t = useT();
+  const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingRow, setEditingRow] = useState<ScheduleRow | null>(null);
-  const [scheduleValue, setScheduleValue] = useState<ScheduleValue | null>(null);
-  const [form] = Form.useForm();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  // 导入抽屉状态
+  const [importVisible, setImportVisible] = useState(false);
+  const [importMode, setImportMode] = useState<ImportMode>('filename');
+  const [importFileList, setImportFileList] = useState<any[]>([]);
+  const [matchResult, setMatchResult] = useState<MatchRow[]>([]);
 
-  const { data, isLoading, refetch } = useBackupSchedules({ page, pageSize });
-  const createSchedule = useCreateBackupSchedule();
-  const updateSchedule = useUpdateBackupSchedule();
-  const deleteSchedules = useDeleteBackupSchedules();
+  // ========== 筛选条件 ==========
+  const filterFields: FilterField[] = useMemo(() => [
+    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
+    {
+      name: 'productType',
+      label: '产品类型',
+      type: 'select',
+      placeholder: '请选择',
+      options: [
+        { label: '全部', value: 'all' },
+        ...PRODUCT_TYPE_OPTIONS.map((p) => ({ label: p, value: p })),
+      ],
+    },
+  ], []);
 
-  const tableSource = (data?.items ?? mockData) as unknown as ScheduleRow[];
+  // ========== 过滤数据 ==========
+  const filteredData = useMemo(() => {
+    return mockData.filter((row) => {
+      if (filters.keyword && typeof filters.keyword === 'string') {
+        const keyword = filters.keyword.toLowerCase();
+        if (!row.deviceSn.toLowerCase().includes(keyword) &&
+            !row.deviceName.toLowerCase().includes(keyword)) {
+          return false;
+        }
+      }
+      if (filters.productType && filters.productType !== 'all') {
+        if (row.productType !== filters.productType) return false;
+      }
+      return true;
+    });
+  }, [filters]);
 
-  const openEdit = (record: ScheduleRow) => {
-    setEditingRow(record);
-    form.setFieldsValue(record);
-    setModalVisible(true);
+  // ========== 匹配结果统计 ==========
+  const matchStats = useMemo(() => {
+    const matched = matchResult.filter((r) => r.matched).length;
+    const unmatched = matchResult.filter((r) => !r.matched).length;
+    return { matched, unmatched, total: matchResult.length };
+  }, [matchResult]);
+
+  // ========== 列定义（无操作列）==========
+  const columns: DataTableColumn<ConfigFileRow>[] = useMemo(() => [
+    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
+    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', width: 180, ellipsis: true },
+    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
+    {
+      key: 'configFile',
+      title: '配置文件',
+      dataIndex: 'configFile',
+      ellipsis: true,
+      render: (val: string) => (
+        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => handleDownloadFile(val)}>
+          {val}
+        </Button>
+      ),
+    },
+    { key: 'updateTime', title: '更新时间', dataIndex: 'updateTime', width: 160 },
+  ], []);
+
+  // ========== 操作处理 ==========
+  const handleDownloadFile = (fileName: string) => {
+    void message.success(`开始下载: ${fileName}`);
   };
 
-  const handleSave = () => {
-    form.validateFields().then((vals: Partial<BackupSchedule>) => {
-      const payload = { ...vals, cronExpression: '0 2 * * *', cronDescription: scheduleValue ? `${scheduleValue.mode}执行` : '每天执行' };
-      if (editingRow) {
-        updateSchedule.mutate({ id: editingRow.id, data: payload }, {
-          onSuccess: () => { void message.success(t('common.save')); setModalVisible(false); },
+  const handleBatchExport = (keys: React.Key[]) => {
+    if (keys.length === 0) {
+      void message.warning('请选择要导出的配置文件');
+      return;
+    }
+    const selected = filteredData.filter((d) => keys.includes(d.id));
+    void message.success(`开始导出 ${selected.length} 个配置文件`);
+  };
+
+  // 打开导入抽屉
+  const handleBatchImport = () => {
+    setImportMode('filename');
+    setImportFileList([]);
+    setMatchResult([]);
+    setImportVisible(true);
+  };
+
+  // 模拟匹配：上传文件后根据导入方式匹配设备
+  const handleMatchPreview = () => {
+    if (importFileList.length === 0) {
+      setMatchResult([]);
+      return;
+    }
+
+    // 获取已选设备（如果有选择则用已选，否则用全部）
+    const targetDevices = selectedRowKeys.length > 0
+      ? mockData.filter((d) => selectedRowKeys.includes(d.id))
+      : mockData;
+
+    if (importMode === 'filename') {
+      // 按文件名匹配：从文件名中提取设备SN前缀进行匹配
+      const result: MatchRow[] = [];
+      for (const device of targetDevices) {
+        const matchedFile = importFileList.find((f) => {
+          const fileName = (f.name || '').toUpperCase();
+          return fileName.includes(device.deviceSn.toUpperCase());
         });
-      } else {
-        createSchedule.mutate(payload as Omit<BackupSchedule, 'id' | 'createTime'>, {
-          onSuccess: () => { void message.success(t('common.save')); setModalVisible(false); },
+        result.push({
+          id: device.id,
+          deviceSn: device.deviceSn,
+          deviceName: device.deviceName,
+          productType: device.productType,
+          fileName: matchedFile ? matchedFile.name : '',
+          matched: !!matchedFile,
         });
       }
-      form.resetFields();
-    }).catch(() => undefined);
+      setMatchResult(result);
+    } else {
+      // 所有设备匹配一个配置文件：用第一个文件匹配所有设备
+      const firstFile = importFileList[0];
+      const result: MatchRow[] = targetDevices.map((device) => ({
+        id: device.id,
+        deviceSn: device.deviceSn,
+        deviceName: device.deviceName,
+        productType: device.productType,
+        fileName: firstFile?.name || '',
+        matched: true,
+      }));
+      setMatchResult(result);
+    }
   };
 
-  const handleToggle = (record: ScheduleRow) => {
-    updateSchedule.mutate(
-      { id: record.id, data: { enabled: !record.enabled } },
-      { onSuccess: () => void message.success(record.enabled ? t('common.disable') : t('common.enable')) },
-    );
+  // 确认导入
+  const handleImportConfirm = () => {
+    if (importFileList.length === 0) {
+      void message.warning('请选择要导入的文件');
+      return;
+    }
+    const matchedCount = matchResult.filter((r) => r.matched).length;
+    void message.success(`已成功导入配置文件，匹配设备 ${matchedCount} 台`);
+    setImportVisible(false);
+    setImportFileList([]);
+    setMatchResult([]);
+    setSelectedRowKeys([]);
   };
 
-  const columns: DataTableColumn<ScheduleRow>[] = useMemo(() => [
-    { key: 'scheduleName', title: t('table.name'), dataIndex: 'scheduleName', width: 220, ellipsis: true },
+  // ========== 批量操作（与设备列表风格一致）==========
+  const batchActions = useMemo((): BatchAction[] => [
     {
-      key: 'backupType',
-      title: t('table.type'),
-      dataIndex: 'backupType',
-      width: 110,
-      render: (val) => {
-        const opt = BACKUP_TYPE_OPTIONS.find((o) => o.value === val);
-        return <Tag color={BACKUP_TYPE_COLORS[val as string]}>{opt?.label ?? (val as string)}</Tag>;
-      },
-    },
-    { key: 'scheduleType', title: t('table.type'), dataIndex: 'scheduleType', width: 90 },
-    { key: 'cronDescription', title: t('table.description'), dataIndex: 'cronDescription', width: 140 },
-    { key: 'nextRunTime', title: t('table.time'), dataIndex: 'nextRunTime', width: 160 },
-    { key: 'lastRunTime', title: t('table.time'), dataIndex: 'lastRunTime', width: 160 },
-    { key: 'retentionDays', title: t('table.description'), dataIndex: 'retentionDays', width: 90 },
-    {
-      key: 'enabled',
-      title: t('table.status'),
-      dataIndex: 'enabled',
-      width: 90,
-      render: (val, record) => (
-        <Switch
-          size="small"
-          checked={val as boolean}
-          checkedChildren={t('common.enable')}
-          unCheckedChildren={t('common.disable')}
-          onChange={() => handleToggle(record)}
-        />
-      ),
+      key: 'batch-import',
+      label: '导入文件',
+      icon: <UploadOutlined />,
+      onClick: handleBatchImport,
     },
     {
-      key: 'action',
-      title: t('table.operation'),
-      dataIndex: 'id',
-      width: 120,
-      fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
-          <Popconfirm title={t('common.confirmDelete')} onConfirm={() => deleteSchedules.mutate([record.id])}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
-          </Popconfirm>
-        </Space>
-      ),
+      key: 'batch-export',
+      label: '导出文件',
+      icon: <DownloadOutlined />,
+      onClick: handleBatchExport,
     },
-  ], [t]);
+  ], [filteredData, selectedRowKeys]);
+
+  // ========== 页面头部按钮 ==========
+  const headerExtra = null;
 
   return (
-    <ListPageLayout
-      title={t('nav.backup.schedule')}
-      extra={
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => { setEditingRow(null); form.resetFields(); setScheduleValue(null); setModalVisible(true); }}
-        >
-          {t('common.add')}
-        </Button>
-      }
-    >
-      <DataTable<ScheduleRow>
-        tableId="backup-schedule"
+    <ListPageLayout title={t('nav.backup.schedule')} extra={headerExtra}>
+      {/* 筛选条件 */}
+      <FilterBar
+        filterId="config-file-filter"
+        fields={filterFields}
+        onSearch={(vals) => { setFilters(vals); setPage(1); }}
+        onReset={() => { setFilters({}); setPage(1); }}
+      />
+
+      {/* 列表 */}
+      <DataTable<ConfigFileRow>
+        tableId="config-file-list"
         columns={columns}
-        dataSource={tableSource}
-        loading={isLoading}
+        dataSource={filteredData}
         rowKey="id"
-        total={data?.total ?? tableSource.length}
+        selectable
+        selectedRowKeys={selectedRowKeys}
+        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+        total={filteredData.length}
         currentPage={page}
         pageSize={pageSize}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => void refetch()}
-        scroll={{ x: 1400 }}
+        batchActions={batchActions}
+        showRowNumber
+        rowNumberTitle="序号"
+        scroll={{ x: 800 }}
       />
 
-      <Modal
-        title={editingRow ? t('common.edit') : t('common.add')}
-        open={modalVisible}
-        onOk={handleSave}
-        onCancel={() => { setModalVisible(false); form.resetFields(); }}
-        okText={t('common.save')}
-        width={600}
-        confirmLoading={createSchedule.isPending || updateSchedule.isPending}
+      {/* 导入抽屉 */}
+      <Drawer
+        title="导入配置文件"
+        placement="right"
+        width={680}
+        open={importVisible}
+        onClose={() => { setImportVisible(false); setImportFileList([]); setMatchResult([]); }}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <Button onClick={() => { setImportVisible(false); setImportFileList([]); setMatchResult([]); }}>取消</Button>
+            {matchResult.length > 0 && matchStats.matched > 0 && (
+              <Button
+                type="primary"
+                onClick={handleImportConfirm}
+              >
+                导入匹配成功的文件（{matchStats.matched} 台）
+              </Button>
+            )}
+          </Space>
+        }
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item label={t('table.name')} name="scheduleName" rules={[{ required: true }]}>
-            <Input placeholder={t('common.placeholder')} />
+        <Form layout="vertical" size="small">
+          {/* 文件导入方式 */}
+          <Form.Item label="文件导入方式" required>
+            <Radio.Group
+              value={importMode}
+              onChange={(e) => {
+                setImportMode(e.target.value);
+                setMatchResult([]);
+              }}
+            >
+              <Radio value="filename">按导入文件名匹配</Radio>
+              <Radio value="all">所有设备匹配一个配置文件</Radio>
+            </Radio.Group>
+            <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
+              {importMode === 'filename'
+                ? '根据文件名中的设备SN自动匹配对应设备'
+                : '将选中的配置文件应用到所有已选设备'}
+            </div>
           </Form.Item>
-          <Form.Item label={t('table.type')} name="backupType" rules={[{ required: true }]}>
-            <Select options={BACKUP_TYPE_OPTIONS} placeholder={t('common.pleaseSelect')} />
+
+          {/* 导入配置文件 - 使用导入组件 */}
+          <Form.Item label="导入配置文件" required>
+            <Upload.Dragger
+              multiple={importMode === 'filename'}
+              accept=".xml,.zip"
+              maxCount={importMode === 'filename' ? undefined : 1}
+              fileList={importFileList}
+              onChange={({ fileList }) => {
+                setImportFileList(fileList);
+                setMatchResult([]);
+              }}
+              beforeUpload={() => false}
+              style={{ marginBottom: 8 }}
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+              <p className="ant-upload-hint">
+                支持 .xml、.zip 格式
+                {importMode === 'filename' ? '，可同时上传多个文件按文件名匹配' : '，只能上传一个配置文件'}
+              </p>
+            </Upload.Dragger>
           </Form.Item>
-          <Form.Item label={t('table.description')} name="deviceGroups" rules={[{ required: true }]}>
-            <Select
-              mode="multiple"
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: '全部设备', value: 'all' },
-                { label: '北京设备组', value: 'bj' },
-                { label: '上海设备组', value: 'sh' },
-                { label: '5G基站组', value: '5g' },
-                { label: '核心设备组', value: 'core' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label={t('table.time')} name="retentionDays" rules={[{ required: true }]}>
-            <Select
-              options={[
-                { label: '7天', value: 7 },
-                { label: '30天', value: 30 },
-                { label: '60天', value: 60 },
-                { label: '90天', value: 90 },
-                { label: '180天', value: 180 },
-                { label: '365天', value: 365 },
-              ]}
-              placeholder={t('common.pleaseSelect')}
-            />
-          </Form.Item>
-          <Form.Item label="执行计划">
-            <SchedulePicker value={scheduleValue ?? undefined} onChange={(val) => setScheduleValue(val)} />
-          </Form.Item>
+
+          {/* 匹配按钮 */}
+          {importFileList.length > 0 && matchResult.length === 0 && (
+            <Form.Item>
+              <Button type="primary" onClick={handleMatchPreview}>
+                开始匹配
+              </Button>
+            </Form.Item>
+          )}
+
+          {/* 匹配结果 */}
+          {matchResult.length > 0 && (
+            <>
+              <Divider />
+              <Form.Item label={
+                <span>
+                  匹配结果
+                  <Tag color="success" style={{ marginLeft: 8 }}>
+                    <CheckCircleOutlined /> 匹配成功 {matchStats.matched}
+                  </Tag>
+                  {matchStats.unmatched > 0 && (
+                    <Tag color="error" style={{ marginLeft: 4 }}>
+                      <CloseCircleOutlined /> 未匹配 {matchStats.unmatched}
+                    </Tag>
+                  )}
+                </span>
+              }>
+                {matchStats.matched > 0 && (
+                  <Alert
+                    type="success"
+                    showIcon
+                    message={`共匹配成功 ${matchStats.matched} 台设备${matchStats.unmatched > 0 ? `，${matchStats.unmatched} 台设备未匹配到配置文件` : ''}`}
+                    style={{ marginBottom: 12 }}
+                  />
+                )}
+                {matchStats.matched === 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="没有匹配到任何设备，请检查文件名是否包含设备SN"
+                    style={{ marginBottom: 12 }}
+                  />
+                )}
+                <Table
+                  size="small"
+                  dataSource={matchResult}
+                  rowKey="id"
+                  pagination={matchResult.length > 10 ? { pageSize: 10 } : false}
+                  scroll={{ y: 300 }}
+                  columns={[
+                    {
+                      title: '基站编码',
+                      dataIndex: 'deviceSn',
+                      width: 110,
+                    },
+                    {
+                      title: '基站名称',
+                      dataIndex: 'deviceName',
+                      ellipsis: true,
+                    },
+                    {
+                      title: '产品类型',
+                      dataIndex: 'productType',
+                      width: 90,
+                    },
+                    {
+                      title: '匹配文件',
+                      dataIndex: 'fileName',
+                      width: 200,
+                      ellipsis: true,
+                      render: (val: string) => val || '-',
+                    },
+                    {
+                      title: '匹配状态',
+                      width: 90,
+                      dataIndex: 'matched',
+                      render: (val: boolean) => val
+                        ? <Tag color="success" icon={<CheckCircleOutlined />}>成功</Tag>
+                        : <Tag color="error" icon={<CloseCircleOutlined />}>未匹配</Tag>,
+                    },
+                  ]}
+                />
+              </Form.Item>
+            </>
+          )}
         </Form>
-      </Modal>
+      </Drawer>
     </ListPageLayout>
   );
 }

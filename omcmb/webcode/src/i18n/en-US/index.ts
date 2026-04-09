@@ -235,7 +235,7 @@ const messages: Record<string, string> = {
   // Navigation — sub-pages: Backup
   // -------------------------------------------------------------------------
   'nav.backup.tasks':    'Backup Tasks',
-  'nav.backup.schedule': 'Backup Schedule',
+  'nav.backup.schedule': 'Config Files',
   'nav.backup.ftp':      'FTP Config',
   'nav.backup.restore':  'Restore Data',
   'nav.backup.policy':   'Backup Policy',

@@ -236,7 +236,7 @@ const messages: Record<string, string> = {
   // Navigation — sub-pages: Backup
   // -------------------------------------------------------------------------
   'nav.backup.tasks':    '备份任务',
-  'nav.backup.schedule': '备份计划',
+  'nav.backup.schedule': '配置文件',
   'nav.backup.ftp':      'FTP配置',
   'nav.backup.restore':  '数据恢复',
   'nav.backup.policy':   '备份策略',

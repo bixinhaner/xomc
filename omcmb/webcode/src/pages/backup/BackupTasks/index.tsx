@@ -69,6 +69,15 @@ const STATUS_MAP_KEYS: Record<string, { color: string; key: string }> = {
   cancelled: { color: 'warning', key: 'status.cancelled' },
 };
 
+// 设备级别状态配置（与任务列表风格一致）
+const DEVICE_STATUS_CONFIG: Record<string, { color: string; text: string }> = {
+  pending: { color: 'default', text: '等待' },
+  running: { color: 'processing', text: '进行中' },
+  success: { color: 'success', text: '成功' },
+  failed: { color: 'error', text: '失败' },
+  cancelled: { color: 'warning', text: '已取消' },
+};
+
 const BACKUP_TYPE_MAP: Record<string, string> = {
   full: '全量备份',
   incremental: '增量备份',
@@ -203,6 +212,63 @@ export default function BackupTasks() {
   const { data, isLoading, refetch } = useBackupTasks({ page, pageSize });
 
   void data;
+
+  // ========== 导出 ==========
+  const handleExport = () => {
+    const data = activeTab === 'task' ? filteredTaskData : filteredDeviceData;
+    if (data.length === 0) {
+      void message.warning('没有可导出的数据');
+      return;
+    }
+
+    let headers: string[];
+    let rows: string[][];
+
+    if (activeTab === 'task') {
+      headers = ['任务名称', '操作人', '操作时间', '任务类型', '备份类型', '状态', '任务进度', '成功', '失败', '进行中', '等待', '开始时间', '结束时间'];
+      rows = (data as BackupTaskRow[]).map((row) => [
+        row.taskName,
+        row.creator,
+        row.operateTime,
+        TASK_TYPE_MAP[row.taskType] ?? row.taskType,
+        BACKUP_TYPE_MAP[row.backupType] ?? row.backupType,
+        TASK_STATUS_CONFIG[row.status]?.text ?? String(row.status),
+        `${row.progress}%`,
+        String(row.successCount),
+        String(row.failedCount),
+        String(row.runningCount),
+        String(row.pendingCount),
+        row.startTime,
+        row.endTime,
+      ]);
+    } else {
+      headers = ['基站编码', '基站名称', '设备组', '备份类型', '任务名称', '状态', '进度', '失败原因', '开始时间', '结束时间', '文件大小'];
+      rows = (data as BackupDeviceRow[]).map((row) => [
+        row.deviceSn,
+        row.deviceName,
+        row.deviceGroup,
+        BACKUP_TYPE_MAP[row.backupType] ?? row.backupType,
+        row.taskName,
+        STATUS_MAP_KEYS[row.status]?.key ? t(STATUS_MAP_KEYS[row.status].key) : row.status,
+        `${row.progress}%`,
+        row.failureReason,
+        row.startTime,
+        row.endTime,
+        formatBytes(row.fileSize),
+      ]);
+    }
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `备份${activeTab === 'task' ? '任务' : '设备'}列表_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    void message.success(`已导出 ${data.length} 条记录`);
+  };
 
   // ========== 任务操作处理 ==========
   const handleStartTask = (record: BackupTaskRow) => {
@@ -538,9 +604,9 @@ export default function BackupTasks() {
     {
       key: 'taskType',
       title: '类型',
-      dataIndex: 'taskType',
-      width: 90,
-      render: (val) => <Tag>{TASK_TYPE_MAP[String(val)] ?? String(val)}</Tag>,
+      dataIndex: 'backupType',
+      width: 100,
+      render: (val) => <Tag color="blue">{BACKUP_TYPE_MAP[String(val)] ?? String(val)}</Tag>,
     },
     {
       key: 'status',
@@ -604,20 +670,8 @@ export default function BackupTasks() {
       dataIndex: 'status',
       width: 100,
       render: (val) => {
-        const cfg = STATUS_MAP_KEYS[String(val)] ?? STATUS_MAP_KEYS.pending;
-        return <Tag color={cfg.color}>{t(cfg.key)}</Tag>;
-      },
-    },
-    {
-      key: 'result',
-      title: '执行结果',
-      width: 100,
-      render: (_: unknown, record: BackupDeviceRow) => {
-        if (record.status === 'success') return <Tag color="success">成功</Tag>;
-        if (record.status === 'failed') return <Tag color="error">失败</Tag>;
-        if (record.status === 'running') return <Tag color="processing">进行中</Tag>;
-        if (record.status === 'cancelled') return <Tag color="warning">已取消</Tag>;
-        return <Tag color="default">等待中</Tag>;
+        const cfg = DEVICE_STATUS_CONFIG[String(val)] ?? DEVICE_STATUS_CONFIG.pending;
+        return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
     {
@@ -642,7 +696,7 @@ export default function BackupTasks() {
   }, [taskDetailId]);
 
   // ========== 页面头部按钮 ==========
-  const headerExtra = useMemo(() => (
+  const headerExtra = (
     <Space>
       <Button
         type="primary"
@@ -659,12 +713,12 @@ export default function BackupTasks() {
       </Button>
       <Button
         icon={<DownloadOutlined />}
-        onClick={() => void message.info(t('common.exportInProgress'))}
+        onClick={handleExport}
       >
         导出
       </Button>
     </Space>
-  ), [t]);
+  );
 
   return (
     <ListPageLayout title={t('nav.backup.tasks')} extra={headerExtra}>
