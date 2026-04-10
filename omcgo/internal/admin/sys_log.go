@@ -169,7 +169,7 @@ func (r *PgLogRepository) CreateLoginLog(ctx context.Context, req CreateLoginLog
 func (r *PgLogRepository) ListLoginLogs(ctx context.Context, filter LoginLogFilter) (*model.ListResponse[LoginLog], error) {
 	where := sq.And{}
 	if filter.Username != nil && *filter.Username != "" {
-		where = append(where, sq.Expr("username ILIKE ?", "%"+*filter.Username+"%"))
+		where = append(where, sq.Expr("username ILIKE ?", ilikePattern(*filter.Username)))
 	}
 	if filter.IPAddress != nil && *filter.IPAddress != "" {
 		where = append(where, sq.Eq{"ip_address": *filter.IPAddress})
@@ -205,7 +205,7 @@ func (r *PgLogRepository) CreateOperLog(ctx context.Context, req CreateOperLogRe
 func (r *PgLogRepository) ListOperLogs(ctx context.Context, filter OperLogFilter) (*model.ListResponse[OperLog], error) {
 	where := sq.And{}
 	if filter.Username != nil && *filter.Username != "" {
-		where = append(where, sq.Expr("username ILIKE ?", "%"+*filter.Username+"%"))
+		where = append(where, sq.Expr("username ILIKE ?", ilikePattern(*filter.Username)))
 	}
 	if filter.Action != nil && *filter.Action != "" {
 		where = append(where, sq.Eq{"action": *filter.Action})
@@ -250,7 +250,7 @@ func (r *PgLogRepository) ListTaskLogs(ctx context.Context, filter TaskLogFilter
 		where = append(where, sq.Eq{"status": *filter.Status})
 	}
 	if filter.Operator != nil && *filter.Operator != "" {
-		where = append(where, sq.Expr("operator ILIKE ?", "%"+*filter.Operator+"%"))
+		where = append(where, sq.Expr("operator ILIKE ?", ilikePattern(*filter.Operator)))
 	}
 	if filter.StartTime != nil && *filter.StartTime != "" {
 		where = append(where, sq.GtOrEq{"started_at": *filter.StartTime})

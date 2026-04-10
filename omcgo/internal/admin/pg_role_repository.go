@@ -40,12 +40,10 @@ func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
 		role.ID = uuid.New()
 	}
 	now := time.Now()
-	role.CreatedAt = now
-	role.UpdatedAt = now
 
 	query, args, err := psql.Insert("roles").
 		Columns("id", "name", "description", "is_system", "created_at", "updated_at").
-		Values(role.ID, role.Name, role.Description, role.IsSystem, role.CreatedAt, role.UpdatedAt).
+		Values(role.ID, role.Name, role.Description, role.IsSystem, now, now).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert role SQL: %w", err)
@@ -111,12 +109,12 @@ func (r *PgRoleRepository) GetByName(ctx context.Context, name string) (*Role, e
 }
 
 func (r *PgRoleRepository) Update(ctx context.Context, role *Role) error {
-	role.UpdatedAt = time.Now()
+	now := time.Now()
 
 	query, args, err := psql.Update("roles").
 		Set("name", role.Name).
 		Set("description", role.Description).
-		Set("updated_at", role.UpdatedAt).
+		Set("updated_at", now).
 		Where(sq.Eq{"id": role.ID}).
 		ToSql()
 	if err != nil {
@@ -203,7 +201,7 @@ func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFi
 	// Build filter conditions
 	where := sq.And{}
 	if filter.Name != nil && *filter.Name != "" {
-		where = append(where, sq.Expr("name ILIKE ?", "%"+*filter.Name+"%"))
+		where = append(where, sq.Expr("name ILIKE ?", ilikePattern(*filter.Name)))
 	}
 
 	offset := filter.Offset()

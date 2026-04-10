@@ -147,7 +147,8 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 	})
 }
 
-// CreateUser creates a new user account.
+// CreateUser creates a new user account with role assignments.
+// If role assignment fails, the created user is rolled back to maintain consistency.
 func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -169,11 +170,14 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 
 	for _, roleID := range req.RoleIDs {
 		if err := s.roleRepo.AssignRole(ctx, user.ID, roleID); err != nil {
-			s.logger.Warn("assign role during user creation",
-				zap.String("user_id", user.ID.String()),
-				zap.String("role_id", roleID.String()),
-				zap.Error(err),
-			)
+			// Roll back user creation to maintain consistency
+			if delErr := s.userRepo.Delete(ctx, user.ID); delErr != nil {
+				s.logger.Error("failed to rollback user after role assignment failure",
+					zap.String("user_id", user.ID.String()),
+					zap.Error(delErr),
+				)
+			}
+			return nil, fmt.Errorf("assign role %s: %w", roleID, err)
 		}
 	}
 

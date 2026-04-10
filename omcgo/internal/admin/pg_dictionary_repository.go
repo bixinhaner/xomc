@@ -26,14 +26,10 @@ func NewPgDictionaryRepository(pool *pgxpool.Pool) *PgDictionaryRepository {
 
 func (r *PgDictionaryRepository) Create(ctx context.Context, dict *Dictionary) error {
 	now := time.Now()
-	status := true
-	if dict.Status == false {
-		status = false
-	}
 
 	query, args, err := psql.Insert("sys_dictionaries").
 		Columns("name", "type", "status", "description", "created_at", "updated_at").
-		Values(dict.Name, dict.Type, status, dict.Description, now, now).
+		Values(dict.Name, dict.Type, dict.Status, dict.Description, now, now).
 		Suffix("RETURNING id, created_at, updated_at").
 		ToSql()
 	if err != nil {
@@ -44,7 +40,6 @@ func (r *PgDictionaryRepository) Create(ctx context.Context, dict *Dictionary) e
 	if err != nil {
 		return fmt.Errorf("insert dictionary: %w", err)
 	}
-	dict.Status = status
 	return nil
 }
 
@@ -127,10 +122,10 @@ func (r *PgDictionaryRepository) List(ctx context.Context) ([]Dictionary, error)
 }
 
 func (r *PgDictionaryRepository) Update(ctx context.Context, dict *Dictionary) error {
-	dict.UpdatedAt = time.Now()
+	now := time.Now()
 
 	builder := psql.Update("sys_dictionaries").
-		Set("updated_at", dict.UpdatedAt)
+		Set("updated_at", now)
 
 	if dict.Name != "" {
 		builder = builder.Set("name", dict.Name)
@@ -161,8 +156,14 @@ func (r *PgDictionaryRepository) Update(ctx context.Context, dict *Dictionary) e
 func (r *PgDictionaryRepository) Delete(ctx context.Context, id int64) error {
 	now := time.Now()
 
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin delete dictionary tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Soft-delete details first
-	_, err := r.pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`UPDATE sys_dictionary_details SET deleted_at = $1, updated_at = $1 WHERE sys_dictionary_id = $2 AND deleted_at IS NULL`,
 		now, id,
 	)
@@ -171,7 +172,7 @@ func (r *PgDictionaryRepository) Delete(ctx context.Context, id int64) error {
 	}
 
 	// Soft-delete dictionary
-	tag, err := r.pool.Exec(ctx,
+	tag, err := tx.Exec(ctx,
 		`UPDATE sys_dictionaries SET deleted_at = $1, updated_at = $1 WHERE id = $2 AND deleted_at IS NULL`,
 		now, id,
 	)
@@ -181,7 +182,8 @@ func (r *PgDictionaryRepository) Delete(ctx context.Context, id int64) error {
 	if tag.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
 	}
-	return nil
+
+	return tx.Commit(ctx)
 }
 
 // listActiveDetails returns enabled details for a dictionary, sorted by sort_order.
@@ -228,18 +230,10 @@ func NewPgDictionaryDetailRepository(pool *pgxpool.Pool) *PgDictionaryDetailRepo
 
 func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *DictionaryDetail) error {
 	now := time.Now()
-	status := true
-	if detail.Status == false {
-		status = false
-	}
-	sort := 0
-	if detail.Sort != 0 {
-		sort = detail.Sort
-	}
 
 	query, args, err := psql.Insert("sys_dictionary_details").
 		Columns("label", "value", "extend", "status", "sort", "sys_dictionary_id", "created_at", "updated_at").
-		Values(detail.Label, detail.Value, detail.Extend, status, sort, detail.SysDictionaryID, now, now).
+		Values(detail.Label, detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, now, now).
 		Suffix("RETURNING id, created_at, updated_at").
 		ToSql()
 	if err != nil {
@@ -250,8 +244,6 @@ func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *Dicti
 	if err != nil {
 		return fmt.Errorf("insert detail: %w", err)
 	}
-	detail.Status = status
-	detail.Sort = sort
 	return nil
 }
 
@@ -283,10 +275,10 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 		where = append(where, sq.Eq{"sys_dictionary_id": *req.SysDictionaryID})
 	}
 	if req.Label != nil && *req.Label != "" {
-		where = append(where, sq.Expr("label ILIKE ?", "%"+*req.Label+"%"))
+		where = append(where, sq.Expr("label ILIKE ?", ilikePattern(*req.Label)))
 	}
 	if req.Value != nil && *req.Value != "" {
-		where = append(where, sq.Expr("value ILIKE ?", "%"+*req.Value+"%"))
+		where = append(where, sq.Expr("value ILIKE ?", ilikePattern(*req.Value)))
 	}
 	if req.Status != nil {
 		where = append(where, sq.Eq{"status": *req.Status})
@@ -338,10 +330,10 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 }
 
 func (r *PgDictionaryDetailRepository) Update(ctx context.Context, detail *DictionaryDetail) error {
-	detail.UpdatedAt = time.Now()
+	now := time.Now()
 
 	builder := psql.Update("sys_dictionary_details").
-		Set("updated_at", detail.UpdatedAt)
+		Set("updated_at", now)
 
 	if detail.Label != "" {
 		builder = builder.Set("label", detail.Label)

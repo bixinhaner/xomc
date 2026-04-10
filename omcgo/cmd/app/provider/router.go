@@ -148,7 +148,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// Protected API v1 routes (JWT or API Key authentication required)
 	v1 := r.Group("/api/v1")
-	v1.Use(admin.RequireAuthWithAPIKey(ad.jwtService, ad.apiKeySvc, ad.userRepo))
+	v1.Use(admin.RequireAuthWithAPIKey(ad.jwtService, ad.apiKeySvc, ad.userRepo, ad.roleRepo))
 	v1.Use(admin.RequireCarrier())
 	v1.Use(admin.AuditLogger(ad.auditRepo))
 

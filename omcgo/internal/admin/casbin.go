@@ -33,17 +33,12 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	ctx := context.Background()
 
 	// 1. Load permission policies: p = (sub, dom, obj, act)
+	// Domain is "system" because permissions are role-level (carrier-agnostic).
+	// Carrier-level isolation is enforced via g (role assignment) domain.
 	rows, err := a.pool.Query(ctx, `
-		SELECT r.name AS role_name,
-		       COALESCE(c.code, 'system') AS domain,
-		       p.resource, p.action
+		SELECT r.name AS role_name, p.resource, p.action
 		FROM permissions p
 		JOIN roles r ON r.id = p.role_id
-		LEFT JOIN LATERAL (
-		    SELECT u.carrier AS code FROM user_roles ur
-		    JOIN users u ON u.id = ur.user_id
-		    WHERE ur.role_id = r.id LIMIT 1
-		) c ON true
 	`)
 	if err != nil {
 		return fmt.Errorf("load permission policies: %w", err)
@@ -51,11 +46,11 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	defer rows.Close()
 
 	for rows.Next() {
-		var roleName, domain, resource, action string
-		if err := rows.Scan(&roleName, &domain, &resource, &action); err != nil {
+		var roleName, resource, action string
+		if err := rows.Scan(&roleName, &resource, &action); err != nil {
 			return fmt.Errorf("scan permission policy: %w", err)
 		}
-		m.AddPolicy("p", "p", []string{"role:" + roleName, domain, resource, action})
+		m.AddPolicy("p", "p", []string{"role:" + roleName, "system", resource, action})
 	}
 	if err := rows.Err(); err != nil {
 		return err

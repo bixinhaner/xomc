@@ -25,12 +25,12 @@ const (
 // and sets user information in the request context.
 // It also supports X-API-Key header for programmatic access.
 func RequireAuth(jwt *JWTService) gin.HandlerFunc {
-	return RequireAuthWithAPIKey(jwt, nil, nil)
+	return RequireAuthWithAPIKey(jwt, nil, nil, nil)
 }
 
 // RequireAuthWithAPIKey returns a Gin middleware that validates either a JWT Bearer token
 // or an X-API-Key header, and sets user information in the request context.
-func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo UserRepository) gin.HandlerFunc {
+func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo UserRepository, roleReader RoleReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Try X-API-Key header first
 		apiKey := c.GetHeader("X-API-Key")
@@ -57,8 +57,19 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 			c.Set(CtxKeyUserID, user.ID)
 			c.Set(CtxKeyUsername, user.Username)
 			c.Set(CtxKeyCarrier, user.Carrier)
-			// Use empty roles for API key — scoped by key scopes
-			c.Set(CtxKeyRoles, []string{})
+
+			// Load roles for API key user when roleReader is available
+			var roleNames []string
+			if roleReader != nil {
+				if roles, err := roleReader.List(c.Request.Context()); err == nil {
+					// API key inherits all roles of the key owner
+					roleNames = make([]string, 0, len(roles))
+					for _, r := range roles {
+						roleNames = append(roleNames, r.Name)
+					}
+				}
+			}
+			c.Set(CtxKeyRoles, roleNames)
 			c.Next()
 			return
 		}

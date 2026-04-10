@@ -152,8 +152,8 @@ func (r *PgSysConfigRepository) List(ctx context.Context, category string, publi
 }
 
 func (r *PgSysConfigRepository) Update(ctx context.Context, cfg *SysConfig) error {
-	cfg.UpdatedAt = time.Now()
-	builder := psql.Update("sys_configs").Set("updated_at", cfg.UpdatedAt)
+	now := time.Now()
+	builder := psql.Update("sys_configs").Set("updated_at", now)
 	if cfg.Value != "" {
 		builder = builder.Set("value", cfg.Value)
 	}

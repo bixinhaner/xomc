@@ -57,15 +57,20 @@ func (h *DictionaryHandler) CreateDictionary(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "创建成功"})
 }
 
-// DeleteDictionary handles DELETE /sysDictionary/deleteSysDictionary
+// DeleteDictionary handles DELETE /sysDictionary/deleteSysDictionary?id=123
 func (h *DictionaryHandler) DeleteDictionary(c *gin.Context) {
-	var req DeleteDictionaryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+	idStr := c.Query("id")
+	if idStr == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "id is required", nil))
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "invalid id", err))
 		return
 	}
 
-	if err := h.service.DeleteDictionary(c.Request.Context(), req.ID); err != nil {
+	if err := h.service.DeleteDictionary(c.Request.Context(), id); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -146,15 +151,20 @@ func (h *DictionaryHandler) CreateDictionaryDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "创建成功"})
 }
 
-// DeleteDictionaryDetail handles DELETE /sysDictionaryDetail/deleteSysDictionaryDetail
+// DeleteDictionaryDetail handles DELETE /sysDictionaryDetail/deleteSysDictionaryDetail?id=1
 func (h *DictionaryHandler) DeleteDictionaryDetail(c *gin.Context) {
-	var req DeleteDictionaryDetailRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+	idStr := c.Query("id")
+	if idStr == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "id is required", nil))
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "invalid id", err))
 		return
 	}
 
-	if err := h.service.DeleteDictionaryDetail(c.Request.Context(), req.ID); err != nil {
+	if err := h.service.DeleteDictionaryDetail(c.Request.Context(), id); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
