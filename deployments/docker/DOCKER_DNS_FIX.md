@@ -10,17 +10,24 @@
 
 ### 错误信息分析
 
+**错误 1**: DNS 解析超时
 ```
 go: github.com/Masterminds/squirrel@v1.5.4: 
-Get "https://mirrors.aliyun.com/goproxy/github.com/%21masterminds/squirrel/@v/v1.5.4.mod": 
+Get "https://mirrors.aliyun.com/goproxy/...": 
 dial tcp: lookup mirrors.aliyun.com on 223.5.5.5:53: 
 read udp 172.17.0.2:42280->223.5.5.5:53: i/o timeout
+```
+
+**错误 2**: 只读文件系统 (Docker 新版本)
+```
+/bin/sh: can't create /etc/resolv.conf: Read-only file system
 ```
 
 **关键点**:
 1. ✅ 宿主机网络正常
 2. ✅ 已配置多个 GOPROXY
 3. ❌ **容器内 DNS 解析失败** (UDP 53 端口超时)
+4. ❌ **Docker 新版本限制**: `/etc/resolv.conf` 是只读的
 
 ### 为什么宿主机正常但容器失败?
 
@@ -184,7 +191,7 @@ RUN go mod download  # ← 这里失败
 
 ---
 
-#### **优化方案 A: 添加重试逻辑**
+#### **优化方案 A: 添加重试逻辑 (已实施)** ✅
 
 ```dockerfile
 FROM golang:1.25-alpine AS builder
@@ -195,18 +202,12 @@ RUN apk add --no-cache git
 ARG GOPROXY=https://mirrors.aliyun.com/goproxy/,https://goproxy.cn,https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 
-# 配置 DNS (可选,如果方案 1 已配置则不需要)
-RUN echo "nameserver 223.5.5.5" > /etc/resolv.conf && \
-    echo "nameserver 223.6.6.6" >> /etc/resolv.conf && \
-    echo "nameserver 114.114.114.114" >> /etc/resolv.conf
-
 WORKDIR /build
 
 COPY omcgo/go.mod omcgo/go.sum ./
 
 # 添加重试逻辑
 RUN for i in 1 2 3; do \
-      echo "Attempt $i: go mod download..." && \
       go mod download && break || \
       { echo "Attempt $i failed, retrying in 3s..."; sleep 3; }; \
     done
@@ -214,8 +215,10 @@ RUN for i in 1 2 3; do \
 COPY omcgo/ .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate
 ```
+
+**注意**: Docker 新版本中 `/etc/resolv.conf` 是只读的,不能修改。
+必须在宿主机配置 Docker daemon 的 DNS。
 
 ---
 
