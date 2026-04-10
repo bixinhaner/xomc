@@ -8,8 +8,13 @@ RUN for i in 1 2 3; do \
       npm config set registry https://registry.npmmirror.com && npm ci && break || \
       { echo "npm ci attempt $i failed, retrying in 3s..."; sleep 3; }; \
     done
+
 COPY omcmb/webcode/ .
-RUN npm run build
+
+# 确保 node_modules/.bin 在 PATH 中,并验证 vite 已安装
+RUN export PATH="/app/node_modules/.bin:$PATH" && \
+    which vite || (echo "ERROR: vite not found after npm ci" && ls -la node_modules/.bin/ && exit 1) && \
+    npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html

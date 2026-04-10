@@ -194,3 +194,7 @@ volumes:
   redisdata:
   natsdata:
   miniodata:
+
+networks:
+  default:
+    driver: bridge
