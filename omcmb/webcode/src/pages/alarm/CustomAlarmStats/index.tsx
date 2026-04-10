@@ -182,6 +182,7 @@ export default function CustomAlarmStats() {
   const [addGroupForm] = Form.useForm<{
     name: string;
     description: string;
+    alarmType?: 'active' | 'historical';
     alarmSources: string[];
     deviceIds: string[];
     enableNotification: boolean;
