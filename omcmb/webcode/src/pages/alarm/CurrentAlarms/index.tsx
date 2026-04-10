@@ -1,19 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Col, Dropdown, Form, Input, Modal, Row, Select, Space, Tag, Tooltip, Typography, App } from 'antd';
+import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
 import {
   CheckOutlined,
   ClearOutlined,
-  DeleteOutlined,
-  DownloadOutlined,
   ExportOutlined,
   EyeOutlined,
-  FilterOutlined,
   MinusCircleOutlined,
-  MoreOutlined,
-  SaveOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
+
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
@@ -62,16 +57,6 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
-// 快捷时间选项
-const QUICK_TIME_OPTIONS = [
-  { label: '今日', value: 'today' },
-  { label: '昨日', value: 'yesterday' },
-  { label: '本周', value: 'thisWeek' },
-  { label: '本月', value: 'thisMonth' },
-  { label: '最近7天', value: 'last7days' },
-  { label: '最近30天', value: 'last30days' },
-];
-
 // 快捷筛选选项
 const QUICK_FILTER_OPTIONS = [
   { label: '全部', key: 'all' },
@@ -90,28 +75,6 @@ const AUTO_REFRESH_INTERVALS = [
   { label: '1分钟', value: 60 },
   { label: '5分钟', value: 300 },
 ];
-
-// 快捷时间转日期范围
-function quickTimeToRange(value: string): [string, string] | undefined {
-  const now = dayjs();
-  switch (value) {
-    case 'today':
-      return [now.startOf('day').toISOString(), now.endOf('day').toISOString()];
-    case 'yesterday':
-      const yesterday = now.subtract(1, 'day');
-      return [yesterday.startOf('day').toISOString(), yesterday.endOf('day').toISOString()];
-    case 'thisWeek':
-      return [now.startOf('week').toISOString(), now.endOf('week').toISOString()];
-    case 'thisMonth':
-      return [now.startOf('month').toISOString(), now.endOf('month').toISOString()];
-    case 'last7days':
-      return [now.subtract(7, 'day').startOf('day').toISOString(), now.endOf('day').toISOString()];
-    case 'last30days':
-      return [now.subtract(30, 'day').startOf('day').toISOString(), now.endOf('day').toISOString()];
-    default:
-      return undefined;
-  }
-}
 
 // 统计项组件
 function StatItem({
@@ -173,8 +136,6 @@ export default function CurrentAlarms() {
 
   // 快捷筛选状态
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
-  const [activeQuickTime, setActiveQuickTime] = useState<string | undefined>(undefined);
-
   // 自动刷新状态
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
@@ -242,16 +203,13 @@ export default function CurrentAlarms() {
       ],
     },
     {
-      name: 'quickTime',
-      label: '快捷时间',
+      name: 'dealState',
+      label: t('alarm.dealState'),
       type: 'select',
       options: [
-        { label: '今日', value: 'today' },
-        { label: '昨日', value: 'yesterday' },
-        { label: '本周', value: 'thisWeek' },
-        { label: '本月', value: 'thisMonth' },
-        { label: '最近7天', value: 'last7days' },
-        { label: '最近30天', value: 'last30days' },
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.dealState.unconfirmedUncleared'), value: '0' },
+        { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
   ], [t]);
@@ -265,7 +223,7 @@ export default function CurrentAlarms() {
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
 
-  const rawAlarms: Alarm[] = data?.items ?? [];
+  const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
   // 自动刷新
@@ -316,14 +274,12 @@ export default function CurrentAlarms() {
     });
     setCurrentPage(1);
     setActiveQuickFilter('all');
-    setActiveQuickTime(undefined);
   }, []);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
     setActiveQuickFilter('all');
-    setActiveQuickTime(undefined);
   }, []);
 
   // 快捷筛选处理
@@ -339,25 +295,8 @@ export default function CurrentAlarms() {
       }));
     } else {
       setFilterParams((prev) => {
-        const { severity, dealState, unread, ...rest } = prev as any;
-        return rest;
-      });
-    }
-    setCurrentPage(1);
-  }, []);
-
-  // 快捷时间处理
-  const handleQuickTime = useCallback((value: string) => {
-    setActiveQuickTime(value);
-    const range = quickTimeToRange(value);
-    if (range) {
-      setFilterParams((prev) => ({
-        ...prev,
-        timeRange: range,
-      }));
-    } else {
-      setFilterParams((prev) => {
-        const { timeRange, ...rest } = prev as any;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { severity, dealState, unread, ...rest } = prev;
         return rest;
       });
     }
@@ -438,7 +377,7 @@ export default function CurrentAlarms() {
 
 
   const handleMarkRead = useCallback(
-    (ids: string[]) => {
+    () => {
       setSelectedRowKeys([]);
       refetch();
       message.success(t('common.markReadSuccess'));
@@ -477,6 +416,7 @@ export default function CurrentAlarms() {
   }, []);
 
   const alarmRowStyle = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     (_record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
       return null;
     },
@@ -638,10 +578,10 @@ export default function CurrentAlarms() {
         key: 'batch-read',
         label: t('alarm.markRead'),
         icon: <EyeOutlined />,
-        onClick: (keys) => handleMarkRead(keys as string[]),
+        onClick: () => handleMarkRead(),
       },
     ],
-    [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead]
+    [handleAcknowledge, handleUnacknowledge, handleClear, handleMarkRead, t]
   );
 
   // 自动刷新下拉菜单
