@@ -3,16 +3,9 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY omcmb/webcode/package.json omcmb/webcode/package-lock.json ./
 
-# 使用 npm install 替代 npm ci,并添加详细日志
-RUN npm config set registry https://registry.npmmirror.com && \
-    echo "=== Starting npm install ===" && \
-    npm install --legacy-peer-deps 2>&1 && \
-    echo "=== npm install completed ===" && \
-    echo "=== Checking node_modules ===" && \
-    ls -la node_modules/ | head -20 && \
-    echo "=== Checking vite ===" && \
-    ls -la node_modules/.bin/ | grep vite && \
-    echo "=== vite found ==="
+# 配置 npm 镜像源并安装依赖
+RUN npm config set registry https://registry.npmmirror.com
+RUN npm install --legacy-peer-deps
 
 COPY omcmb/webcode/ .
 
