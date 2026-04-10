@@ -1,0 +1,142 @@
+#!/bin/bash
+# Docker DNS 问题修复脚本
+# 使用方法: bash fix-docker-dns.sh
+
+set -e
+
+echo "=== Docker DNS 问题修复 ==="
+echo ""
+
+# 检查 Docker 是否运行
+if ! docker info > /dev/null 2>&1; then
+    echo "❌ Docker 未运行,请先启动 Docker"
+    exit 1
+fi
+
+echo "1️⃣  备份当前 Docker 配置..."
+if [ -f /etc/docker/daemon.json ]; then
+    sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.backup.$(date +%Y%m%d_%H%M%S)
+    echo "✅ 已备份到 /etc/docker/daemon.json.backup.*"
+else
+    echo "ℹ️  /etc/docker/daemon.json 不存在,将创建新文件"
+fi
+
+echo ""
+echo "2️⃣  配置 DNS 服务器..."
+
+if [ -f /etc/docker/daemon.json ]; then
+    echo "ℹ️  检测到现有配置,将合并 DNS 配置..."
+    
+    # 使用 jq 合并配置 (如果已安装)
+    if command -v jq &> /dev/null; then
+        # 备份原文件
+        sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.backup.$(date +%Y%m%d_%H%M%S)
+        
+        # 合并 DNS 配置 (保留其他配置)
+        sudo jq '. + {
+            "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"],
+            "dns-search": [],
+            "dns-opts": ["timeout:2", "attempts:3"]
+        }' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new > /dev/null
+        
+        sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+        echo "✅ DNS 配置已合并到 /etc/docker/daemon.json"
+    else
+        # 没有 jq,手动处理
+        echo "⚠️  未安装 jq,将手动合并配置..."
+        echo ""
+        echo "请选择操作:"
+        echo "  1) 安装 jq 后自动合并 (推荐)"
+        echo "  2) 手动编辑 /etc/docker/daemon.json"
+        echo "  3) 跳过,稍后手动配置"
+        read -p "请选择 [1-3]: " choice
+        
+        case $choice in
+            1)
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    brew install jq
+                else
+                    sudo apt-get install -y jq || sudo yum install -y jq
+                fi
+                # 重新执行合并
+                exec "$0"
+                ;;
+            2)
+                echo ""
+                echo "请编辑 /etc/docker/daemon.json,添加以下内容:"
+                echo ""
+                cat << 'EOF'
+  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114", "8.8.8.8"],
+  "dns-search": [],
+  "dns-opts": ["timeout:2", "attempts:3"],
+EOF
+                echo ""
+                sudo vi /etc/docker/daemon.json
+                echo "✅ 配置已更新"
+                ;;
+            3)
+                echo "⏭️  跳过 DNS 配置"
+                echo "   请手动编辑 /etc/docker/daemon.json 添加 DNS 配置"
+                ;;
+            *)
+                echo "❌ 无效选择"
+                exit 1
+                ;;
+        esac
+    fi
+else
+    echo "ℹ️  /etc/docker/daemon.json 不存在,将创建新文件"
+    sudo cat > /etc/docker/daemon.json << 'EOF'
+{
+  "dns": [
+    "223.5.5.5",
+    "223.6.6.6",
+    "114.114.114.114",
+    "8.8.8.8"
+  ],
+  "dns-search": [],
+  "dns-opts": [
+    "timeout:2",
+    "attempts:3"
+  ]
+}
+EOF
+    echo "✅ DNS 配置已写入 /etc/docker/daemon.json"
+fi
+
+echo ""
+echo "3️⃣  重启 Docker 服务..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "ℹ️  macOS 系统,请手动重启 Docker Desktop"
+    echo "   1. 点击菜单栏 Docker 图标"
+    echo "   2. 选择 'Restart'"
+    echo "   3. 等待重启完成"
+else
+    sudo systemctl restart docker
+    echo "✅ Docker 服务已重启"
+fi
+
+echo ""
+echo "4️⃣  清理 Docker 构建缓存..."
+docker builder prune -f
+echo "✅ 构建缓存已清理"
+
+echo ""
+echo "5️⃣  测试 DNS 解析..."
+if docker run --rm alpine:3.19 nslookup mirrors.aliyun.com > /dev/null 2>&1; then
+    echo "✅ DNS 解析正常"
+else
+    echo "⚠️  DNS 解析可能仍有问题,请检查网络"
+fi
+
+echo ""
+echo "6️⃣  重新构建镜像..."
+echo "   cd deployments/docker"
+echo "   docker compose build"
+echo ""
+echo "=== 修复完成 ==="
+echo ""
+echo "如果问题仍然存在,请尝试:"
+echo "  1. 检查防火墙设置"
+echo "  2. 使用方案 2: 在 docker-compose.yml 中添加 dns 配置"
+echo "  3. 使用方案 3: 修改 Dockerfile 使用国内基础镜像"

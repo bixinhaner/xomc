@@ -1,0 +1,55 @@
+# sqlc 配置文件
+# 用于生成类型安全的 Go 数据库查询代码
+
+version: "2"
+
+sql:
+  - engine: "postgresql"
+    queries: "sql/queries"
+    schema: "sql/schema"
+    gen:
+      go:
+        package: "db"
+        out: "internal/db"
+        sql_package: "pgx/v5"
+        
+        # 代码生成选项
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        
+        # 类型覆盖配置
+        overrides:
+          # JSONB 映射到 json.RawMessage (默认)
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          
+          # UUID 映射
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          
+          # TIMESTAMPTZ 映射
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          
+          # 针对特定列的自定义映射
+          - db_type: "jsonb"
+            column: "pm_counters.metadata"
+            go_type:
+              type: "CounterMetadata"
+              import: "github.com/omcgo/omcgo/internal/pm/model"
+        
+        # 重命名配置
+        rename:
+          time: "Time"
+          device_id: "DeviceID"
+          counter_name: "CounterName"
+          counter_value: "CounterValue"

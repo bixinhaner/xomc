@@ -1,0 +1,11 @@
+# Goose 数据库迁移工具配置
+# 用于管理数据库 Schema 版本
+
+# 迁移文件目录
+migration-dir: migrations
+
+# 数据库驱动
+driver: postgres
+
+# 数据库连接 (可通过环境变量覆盖)
+# goose postgres "postgres://user:pass@localhost:5432/dbname?sslmode=disable" up
