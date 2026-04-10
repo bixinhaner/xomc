@@ -1,9 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
+import { Badge, Button, Card, Space, Tag, Typography, App } from 'antd';
 import {
   CheckOutlined,
   DeleteOutlined,
-  DownloadOutlined,
   ExportOutlined,
   MinusCircleOutlined,
 } from '@ant-design/icons';
@@ -101,9 +100,6 @@ export default function HistoricalAlarms() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
-  const [exportMode, setExportMode] = useState<'all' | 'selected'>('all');
-
-  // 快捷筛选状态
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
 
   // 确认告警弹窗状态
@@ -176,7 +172,7 @@ export default function HistoricalAlarms() {
   const { data, isLoading, refetch } = useHistoricalAlarms(queryParams);
   const acknowledgeAlarms = useAcknowledgeAlarms();
 
-  const rawAlarms: Alarm[] = data?.items ?? [];
+  const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
   // 未读告警排在最前面
@@ -229,17 +225,20 @@ export default function HistoricalAlarms() {
     setActiveQuickFilter(key);
     if (key === 'all') {
       setFilterParams((prev) => {
-        const { severity, ...rest } = prev as any;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { severity, ...rest } = prev;
         return rest;
       });
     } else if (key === 'cleared') {
       setFilterParams((prev) => ({
         ...prev,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         dealState: ['2', '3'] as any,
       }));
     } else if (key === 'confirmed') {
       setFilterParams((prev) => ({
         ...prev,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         dealState: ['1', '3'] as any,
       }));
     } else {
@@ -296,7 +295,7 @@ export default function HistoricalAlarms() {
         },
       });
     },
-    [refetch, t]
+    [refetch, t, modal, message]
   );
 
   // 删除告警
@@ -320,7 +319,7 @@ export default function HistoricalAlarms() {
         },
       });
     },
-    [refetch, t]
+    [refetch, t, modal, message]
   );
 
   // 导出告警
@@ -354,6 +353,7 @@ export default function HistoricalAlarms() {
   }, []);
 
   const alarmRowStyle = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     (_record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
       return null;
     },
@@ -512,7 +512,7 @@ export default function HistoricalAlarms() {
         onClick: (keys) => handleDelete(keys as string[]),
       },
     ],
-    [handleAcknowledge, handleUnacknowledge, handleDelete]
+    [handleAcknowledge, handleUnacknowledge, handleDelete, t]
   );
 
   return (
@@ -522,7 +522,6 @@ export default function HistoricalAlarms() {
         <Button
           icon={<ExportOutlined />}
           onClick={() => {
-            setExportMode('all');
             setExportOpen(true);
           }}
         >
