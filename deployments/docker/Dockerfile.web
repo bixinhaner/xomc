@@ -1,7 +1,19 @@
 FROM node:20-alpine AS builder
+
+# 配置 DNS 服务器 (解决构建时 DNS 解析问题)
+RUN echo "nameserver 223.5.5.5" > /etc/resolv.conf && \
+    echo "nameserver 223.6.6.6" >> /etc/resolv.conf && \
+    echo "nameserver 114.114.114.114" >> /etc/resolv.conf && \
+    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+
 WORKDIR /app
 COPY omcmb/webcode/package.json omcmb/webcode/package-lock.json ./
-RUN npm config set registry https://registry.npmmirror.com && npm ci
+
+# npm ci 添加重试逻辑
+RUN for i in 1 2 3; do \
+      npm config set registry https://registry.npmmirror.com && npm ci && break || \
+      { echo "npm ci attempt $i failed, retrying in 3s..."; sleep 3; }; \
+    done
 COPY omcmb/webcode/ .
 RUN npm run build
 
