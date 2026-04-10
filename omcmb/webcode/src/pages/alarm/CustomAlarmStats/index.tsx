@@ -169,7 +169,6 @@ export default function CustomAlarmStats() {
 
   // 快捷筛选状态
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
-  const [activeQuickTime, setActiveQuickTime] = useState<string | undefined>(undefined);
 
   // 筛选模板状态
   const [filterTemplates, setFilterTemplates] = useState<FilterTemplate[]>([]);
@@ -405,7 +404,7 @@ export default function CustomAlarmStats() {
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
 
-  const rawAlarms: Alarm[] = data?.items ?? [];
+  const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
   // 未读告警排在最前面
@@ -452,7 +451,8 @@ export default function CustomAlarmStats() {
       }));
     } else {
       setFilterParams((prev) => {
-        const { severity: _s, dealState: _d, unread: _u, ...rest } = prev;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { severity, dealState, unread, ...rest } = prev;
         return rest;
       });
     }
@@ -714,7 +714,6 @@ export default function CustomAlarmStats() {
     setFilterParams({});
     setCurrentPage(1);
     setActiveQuickFilter('all');
-    setActiveQuickTime(undefined);
   }, []);
 
   const handleAcknowledge = useCallback((ids: string[]) => {
@@ -790,7 +789,7 @@ export default function CustomAlarmStats() {
     }
   }, [deleteTargetIds, refetch, t, message]);
 
-  const handleMarkRead = useCallback((ids: string[]) => {
+  const handleMarkRead = useCallback(() => {
     setSelectedRowKeys([]);
     void refetch();
     message.success(t('common.markReadSuccess'));
@@ -946,7 +945,7 @@ export default function CustomAlarmStats() {
       { key: 'batch-ack', label: t('alarm.acknowledge'), icon: <CheckOutlined />, onClick: (keys) => handleAcknowledge(keys as string[]) },
       { key: 'batch-unack', label: t('alarm.unacknowledge'), icon: <MinusCircleOutlined />, onClick: (keys) => handleUnacknowledge(keys as string[]) },
       { key: 'batch-clear', label: t('alarm.clear'), icon: <ClearOutlined />, danger: true, onClick: (keys) => handleClear(keys as string[]) },
-      { key: 'batch-read', label: t('alarm.markRead'), icon: <EyeOutlined />, onClick: (keys) => handleMarkRead(keys as string[]) }
+      { key: 'batch-read', label: t('alarm.markRead'), icon: <EyeOutlined />, onClick: () => handleMarkRead() }
     );
     actions.push({ key: 'batch-delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: (keys) => handleDelete(keys as string[]) });
     return actions;
@@ -1037,7 +1036,6 @@ export default function CustomAlarmStats() {
               setCurrentPage(1);
               setSelectedRowKeys([]);
               setActiveQuickFilter('all');
-              setActiveQuickTime(undefined);
             }
           }}
           blockNode
