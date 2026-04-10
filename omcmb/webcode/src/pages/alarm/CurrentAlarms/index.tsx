@@ -202,16 +202,6 @@ export default function CurrentAlarms() {
         { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
-    {
-      name: 'dealState',
-      label: t('alarm.dealState'),
-      type: 'select',
-      options: [
-        { label: t('common.all'), value: '' },
-        { label: t('alarm.dealState.unconfirmedUncleared'), value: '0' },
-        { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
-      ],
-    },
   ], [t]);
 
   const queryParams = useMemo(
