@@ -3,9 +3,12 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY omcmb/webcode/package.json omcmb/webcode/package-lock.json ./
 
-# 配置 npm 镜像源并安装依赖
-RUN npm config set registry https://registry.npmmirror.com
-RUN npm install --legacy-peer-deps
+# 配置国内 npm 镜像源,添加重试逻辑
+RUN for i in 1 2 3; do \
+      npm config set registry https://registry.npmmirror.com && \
+      npm install --legacy-peer-deps && break || \
+      { echo "Install attempt $i failed, retrying in 5s..."; sleep 5; }; \
+    done
 
 COPY omcmb/webcode/ .
 
