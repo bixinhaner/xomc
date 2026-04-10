@@ -17,6 +17,7 @@ import {
   Input,
   Checkbox,
   Select,
+  Switch,
   DatePicker,
   Table,
   Alert,
@@ -725,6 +726,9 @@ export default function BackupTasks() {
         onClick={() => openBackupDrawer('scheduled')}
       >
         周期备份
+        <Tag color={drawerCycleEnabled ? 'green' : 'default'} style={{ marginLeft: 6, marginRight: 0 }}>
+          {drawerCycleEnabled ? '已启用' : '未启用'}
+        </Tag>
       </Button>
       <Button
         icon={<DownloadOutlined />}
@@ -935,6 +939,21 @@ export default function BackupTasks() {
         }
       >
         <Form layout="vertical" size="small">
+          {/* 启用周期备份开关（仅周期备份模式，放在任务名称上面） */}
+          {backupDrawerMode === 'scheduled' && (
+            <Form.Item>
+              <Space>
+                <Switch
+                  checked={drawerCycleEnabled}
+                  onChange={(checked) => setDrawerCycleEnabled(checked)}
+                  checkedChildren="开"
+                  unCheckedChildren="关"
+                />
+                <span>启用周期备份</span>
+              </Space>
+            </Form.Item>
+          )}
+
           {/* 任务名称 */}
           <Form.Item label="任务名称" required>
             <Input
@@ -1034,88 +1053,74 @@ export default function BackupTasks() {
             </>
           ) : (
             <>
-              {/* 功能开关 */}
-              <Form.Item>
-                <Checkbox
-                  checked={drawerCycleEnabled}
-                  onChange={(e) => setDrawerCycleEnabled(e.target.checked)}
-                >
-                  启用周期备份
-                </Checkbox>
-              </Form.Item>
+              {/* 周期配置 */}
+              <Form.Item label="执行周期" required>
+                  <Radio.Group value={drawerCycleType} onChange={(e) => setDrawerCycleType(e.target.value)}>
+                    <Radio value="daily">每天</Radio>
+                    <Radio value="weekly">每周</Radio>
+                    <Radio value="monthly">每月</Radio>
+                  </Radio.Group>
+                </Form.Item>
 
-              {drawerCycleEnabled && (
-                <>
-                  {/* 周期配置 */}
-                  <Form.Item label="执行周期" required>
-                    <Radio.Group value={drawerCycleType} onChange={(e) => setDrawerCycleType(e.target.value)}>
-                      <Radio value="daily">每天</Radio>
-                      <Radio value="weekly">每周</Radio>
-                      <Radio value="monthly">每月</Radio>
-                    </Radio.Group>
-                  </Form.Item>
-
-                  {drawerCycleType === 'weekly' && (
-                    <Form.Item label="执行星期" required>
-                      <Checkbox.Group
-                        value={drawerCycleWeekDays}
-                        onChange={(vals) => setDrawerCycleWeekDays(vals as number[])}
-                        options={[
-                          { label: '周一', value: 1 },
-                          { label: '周二', value: 2 },
-                          { label: '周三', value: 3 },
-                          { label: '周四', value: 4 },
-                          { label: '周五', value: 5 },
-                          { label: '周六', value: 6 },
-                          { label: '周日', value: 7 },
-                        ]}
-                      />
-                    </Form.Item>
-                  )}
-
-                  {drawerCycleType === 'monthly' && (
-                    <>
-                      <Form.Item label="选择月份" required>
-                        <Checkbox.Group
-                          value={drawerCycleMonths}
-                          onChange={(vals) => setDrawerCycleMonths(vals as number[])}
-                          style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0' }}
-                        >
-                          {Array.from({ length: 12 }, (_, i) => (
-                            <Checkbox key={i + 1} value={i + 1} style={{ width: 72 }}>
-                              {i + 1}月
-                            </Checkbox>
-                          ))}
-                        </Checkbox.Group>
-                      </Form.Item>
-                      <Form.Item label="执行日期" required>
-                        <Checkbox.Group
-                          value={drawerCycleMonthDays}
-                          onChange={(vals) => setDrawerCycleMonthDays(vals as number[])}
-                          style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0' }}
-                        >
-                          {Array.from({ length: 31 }, (_, i) => (
-                            <Checkbox key={i + 1} value={i + 1} style={{ width: 72 }}>
-                              {i + 1}日
-                            </Checkbox>
-                          ))}
-                        </Checkbox.Group>
-                      </Form.Item>
-                    </>
-                  )}
-
-                  <Form.Item label="执行时间" required>
-                    <DatePicker
-                      picker="time"
-                      format="HH:mm"
-                      value={drawerCycleTime}
-                      onChange={setDrawerCycleTime}
-                      placeholder="请选择每日执行时间"
-                      style={{ width: '100%' }}
+                {drawerCycleType === 'weekly' && (
+                  <Form.Item label="执行星期" required>
+                    <Checkbox.Group
+                      value={drawerCycleWeekDays}
+                      onChange={(vals) => setDrawerCycleWeekDays(vals as number[])}
+                      options={[
+                        { label: '周一', value: 1 },
+                        { label: '周二', value: 2 },
+                        { label: '周三', value: 3 },
+                        { label: '周四', value: 4 },
+                        { label: '周五', value: 5 },
+                        { label: '周六', value: 6 },
+                        { label: '周日', value: 7 },
+                      ]}
                     />
                   </Form.Item>
-                </>
-              )}
+                )}
+
+                {drawerCycleType === 'monthly' && (
+                  <>
+                    <Form.Item label="选择月份" required>
+                      <Checkbox.Group
+                        value={drawerCycleMonths}
+                        onChange={(vals) => setDrawerCycleMonths(vals as number[])}
+                        style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0' }}
+                      >
+                        {Array.from({ length: 12 }, (_, i) => (
+                          <Checkbox key={i + 1} value={i + 1} style={{ width: 72 }}>
+                            {i + 1}月
+                          </Checkbox>
+                        ))}
+                      </Checkbox.Group>
+                    </Form.Item>
+                    <Form.Item label="执行日期" required>
+                      <Checkbox.Group
+                        value={drawerCycleMonthDays}
+                        onChange={(vals) => setDrawerCycleMonthDays(vals as number[])}
+                        style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0' }}
+                      >
+                        {Array.from({ length: 31 }, (_, i) => (
+                          <Checkbox key={i + 1} value={i + 1} style={{ width: 72 }}>
+                            {i + 1}日
+                          </Checkbox>
+                        ))}
+                      </Checkbox.Group>
+                    </Form.Item>
+                  </>
+                )}
+
+                <Form.Item label="执行时间" required>
+                  <DatePicker
+                    picker="time"
+                    format="HH:mm"
+                    value={drawerCycleTime}
+                    onChange={setDrawerCycleTime}
+                    placeholder="请选择每日执行时间"
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
             </>
           )}
 
