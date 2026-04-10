@@ -1442,6 +1442,11 @@ const messages: Record<string, string> = {
   'kpi.performanceIndicator':   'Performance Indicator',
   'kpi.definition':             'Definition',
   'kpi.definitionPlaceholder':  'Enter indicator definition',
+  'kpi.customKpi':              'Custom KPI',
+  'kpi.customCounter':          'Custom Counter',
+  'kpi.deviceLevel':            'Device',
+  'kpi.plmnLevel':              'PLMN',
+  'kpi.duration':               'Duration',
 
   // Report categories
   'report.category.kpi':              'KPI Reports',

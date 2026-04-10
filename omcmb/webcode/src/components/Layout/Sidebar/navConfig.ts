@@ -36,7 +36,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'device-group',     label: 'nav.device.group',       path: '/device/group' },
       // { key: 'device-ne',        label: 'nav.device.ne',          path: '/device/ne' },           // 隐藏
       // { key: 'device-monitor',   label: 'nav.device.monitor',     path: '/device/monitor' },       // 隐藏
-      { key: 'device-launch',    label: 'nav.device.commission',  path: '/device/commission' },
+      // { key: 'device-launch',    label: 'nav.device.commission',  path: '/device/commission' },  // 隐藏开通管理菜单
       { key: 'device-pnp',       label: 'nav.device.plugAndPlay', path: '/provision/plug-and-play' },
       // { key: 'device-transfer',  label: 'nav.device.handover',    path: '/device/handover' },      // 隐藏
       // { key: 'device-resource',  label: 'nav.device.stats',       path: '/device/stats' },         // 隐藏
@@ -132,9 +132,9 @@ export const NAV_CONFIG: NavConfig = [
     children: [
       { key: 'backup-task',     label: 'nav.backup.tasks',     path: '/backup/tasks' },
       { key: 'backup-plan',     label: 'nav.backup.schedule',  path: '/backup/schedule' },
-      { key: 'backup-ftp',      label: 'nav.backup.ftp',       path: '/backup/ftp' },
+      // { key: 'backup-ftp',      label: 'nav.backup.ftp',       path: '/backup/ftp' },
       { key: 'backup-restore',  label: 'nav.backup.restore',   path: '/backup/restore' },
-      { key: 'backup-strategy', label: 'nav.backup.policy',    path: '/backup/policy' },
+      // { key: 'backup-strategy', label: 'nav.backup.policy',    path: '/backup/policy' },
     ],
   },
   {

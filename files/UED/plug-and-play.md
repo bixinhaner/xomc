@@ -1234,20 +1234,22 @@ src/pages/provision/PlugAndPlay/
 
 #### 基础配置字段
 
-| 字段 | 字段名 | 类型 | 验证规则 | 说明 |
-|------|--------|------|----------|------|
-| 支持频段 | bands_support | 输入框 | 整形，范围：1~62 | 支持的频段 |
-| 带宽 | band_width | 下拉框 | 5MHz/10MHz/15MHz/20MHz | 带宽配置 |
-| eNB频率 | frequency | 输入框 | 整形，范围：1~65535 | 频率值 |
-| 子帧配比 | subframe_assignment | 下拉框 | 0/1/2/6 | 0(DL:UL=1:3)/1(DL:UL=2:2)/2(DL:UL=3:1)/6(DL:UL=3:5) |
-| 特殊子帧配比 | special_subframe_patterns | 下拉框 | 5/7 | 特殊子帧模式 |
-| PLMN ID | plmn_id | 输入框 | 整形，范围：00000~999999 | PLMN标识 |
-| TAC | tac | 输入框 | 整形，范围：0~65535 | 跟踪区域码 |
-| ECI | cell_identity | 输入框 | 整形，范围：0~268435455 | 小区标识 |
-| PCI | phycellid | 输入框 | 整形，范围：0~503 | 物理小区标识 |
-| 根序列索引 | root_sequence_index | 输入框 | 整形，范围：0~837 | RSI |
-| 载波类型 | carrier_mode | 下拉框 | 单载波/双载波 | 仅RTD产品 |
-| 时区 | timeZoneUtc | 下拉框 | - | UTC时区设置 |
+| 字段 | 字段名 | 类型 | 验证规则 | 必填 | 说明 |
+|------|--------|------|----------|------|------|
+| eNodeB ID | eNodeBId | 输入框 | - | 否 | eNB标识 |
+| 支持频段 | bands_support | 输入框 | 整形，范围：1~62 (DXDF: 1~85) | 是 | 支持的频段 |
+| 带宽 | band_width | 下拉框 | 5MHz/10MHz/15MHz/20MHz 或 6/15/25/50/75/100(DXDF) | 是 | 带宽配置 |
+| eNB频率 | frequency | 输入框 | 整形，范围：1~65535 (DXDF: 0~262143) | 是 | 频率值 |
+| 子帧配比 | subframe_assignment | 下拉框 | 0/1/2/6 | 是 | 0(DL:UL=1:3)/1(DL:UL=2:2)/2(DL:UL=3:1)/6(DL:UL=3:5) |
+| 特殊子帧配比 | special_subframe_patterns | 下拉框 | 5/7 | 否 | 特殊子帧模式 |
+| PLMN ID | plmn_id | 输入框 | 整形，范围：00000~999999 | 是 | PLMN标识 |
+| TAC | tac | 输入框 | 整形，范围：0~65535 | 是 | 跟踪区域码 |
+| ECI | cell_identity | 输入框 | 整形，范围：0~268435455 | 是 | 小区标识 |
+| PCI | phycellid | 输入框 | 整形，范围：0~503 | 是 | 物理小区标识 |
+| 根序列索引 | root_sequence_index | 输入框 | 整形，范围：0~837 | 否 | RSI |
+| 载波类型 | carrier_mode | 下拉框 | 单载波/双载波 | 否 | 仅RTD产品 |
+| 时区 | timeZoneUtc | 下拉框 | - | 否 | UTC时区设置 |
+| 载波制式 | carrier_type | 下拉框 | FDD/TDD | 否 | 仅DXDF产品 |
 
 #### DXDF 特殊字段
 
@@ -1257,11 +1259,38 @@ src/pages/provision/PlugAndPlay/
 
 #### 核心网配置字段
 
-| 字段 | 字段名 | 类型 | 验证规则 | 说明 |
-|------|--------|------|----------|------|
-| HaloB开关 | halob_enable | 下拉框 | '1'-开启，'0'-关闭 | 控制HaloB功能 |
-| MME | mme | 输入框 | - | MME地址（多个用逗号分隔） |
-| MME列表 | mmeGroup | 标签列表 | - | MME地址列表 |
+| 字段 | 字段名 | 类型 | 验证规则 | 必填 | 说明 |
+|------|--------|------|----------|------|------|
+| HaloB开关 | halob_enable | 下拉框 | '1'-开启，'0'-关闭 | 否 | 控制HaloB功能 |
+
+**MME 列表 (mmeGroup)** - 支持多个：
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| MME IP | mmeIp | 输入框 | MME IP地址 |
+| MME Port | mmePort | 输入框 | MME端口号 |
+
+#### IP 配置
+
+**Service IP 配置**:
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| Service IP | serviceIp | 输入框 | 业务IP地址 |
+| Subnet Mask | serviceMask | 输入框 | 子网掩码 |
+| Gateway | serviceGateway | 输入框 | 网关地址 |
+| Gateway Mask | serviceGatewayMask | 输入框 | 网关子网掩码 |
+| VLAN | serviceVlan | 输入框 | VLAN ID，范围：0~4095 |
+
+**Management IP 配置**:
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| Mgmt IP | mgmtIp | 输入框 | 管理IP地址 |
+| Subnet Mask | mgmtMask | 输入框 | 子网掩码 |
+| Gateway | mgmtGateway | 输入框 | 网关地址 |
+| Gateway Mask | mgmtGatewayMask | 输入框 | 网关子网掩码 |
+| VLAN | mgmtVlan | 输入框 | VLAN ID，范围：0~4095 |
 
 #### 小区参数2（仅 CR-B4860/MLN 产品）
 
@@ -1284,7 +1313,7 @@ src/pages/provision/PlugAndPlay/
 | Right IKE Port | ipsec_rightikeport | 输入框 | 右侧IKE端口 |
 | Left Interface | left_interface | 输入框 | 左侧接口 |
 
-**IPsec Tunnel 列表 (ipsecList)**:
+**IPsec Tunnel 列表 (ipsecList)** - 支持多组（QAFA/QATA/QAFB: 1组，其他产品: 2组）:
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
@@ -1292,26 +1321,26 @@ src/pages/provision/PlugAndPlay/
 | AuthBy | authBy | 下拉框 | psk/cert/aka_psk/aka_cert |
 | leftAuth | LEFT_AUTH | 下拉框 | psk/pubkey/eap-aka |
 | rightAuth | RIGHT_AUTH | 下拉框 | psk/pubkey/eap-aka |
-| Gateway | TUNNEL_GATEWAY | 输入框 | 网关地址 |
-| leftId | LEFT_IDENTIFIER | 输入框 | 左侧标识 |
-| rightId | RIGHT_IDENTIFIER | 输入框 | 右侧标识 |
-| leftCert | LEFT_CERT | 输入框 | 左侧证书 |
-| secretKey | SECRET_KEY | 输入框 | 密钥 |
-| rightSecretKey | RIGHT_SECRET_KEY | 输入框 | 右侧密钥 |
-| leftSourceIp | LEFTSOURCEIP | 输入框 | 左侧源IP |
-| leftSubnet | LEFT_SUBNET | 输入框 | 左侧子网 |
-| rightSubnet | RIGHT_SUBNET | 输入框 | 右侧子网 |
+| Gateway | TUNNEL_GATEWAY | 输入框 | 网关地址，0-64字符，不含中文 |
+| leftId | LEFT_IDENTIFIER | 输入框 | 左侧标识，0-64字符，不含中文 |
+| rightId | RIGHT_IDENTIFIER | 输入框 | 右侧标识，0-64字符，不含中文 |
+| leftCert | LEFT_CERT | 输入框 | 左侧证书，0-64字符，不含中文 |
+| secretKey | SECRET_KEY | 输入框 | 密钥，0-64字符，不含中文 |
+| rightSecretKey | RIGHT_SECRET_KEY | 输入框 | 右侧密钥，0-64字符，不含中文 |
+| leftSourceIp | LEFTSOURCEIP | 输入框 | 左侧源IP，IP地址或%config |
+| leftSubnet | LEFT_SUBNET | 输入框 | 左侧子网，0-64字符，不含中文 |
+| rightSubnet | RIGHT_SUBNET | 输入框 | 右侧子网，0-64字符，不含中文 |
 | IKE Encryption | IKE_ENCRYPTION | 下拉框 | aes128/aes256/3des/des |
 | IKE DH Group | IKE_DH_GROUP | 下拉框 | modp768/modp1024/modp1536/modp2048/modp4096 |
 | IKE Authentication | IKE_AUTHENTICATION | 下拉框 | sha1/sha1_160/sha256_96/sha256 |
 | ESP Encryption | ESP_ENCRYPTION | 下拉框 | aes128/aes256/3des/des |
 | ESP DH Group | ESP_DH_GROUP | 下拉框 | modp768/modp1024/modp1536/modp2048/modp4096 |
 | ESP Authentication | ESP_AUTHENTICATION | 下拉框 | sha1/sha1_160/sha256_96/sha256 |
-| IKELifeTime | IKELIFETIME | 输入框 | 数字+s/m/h/d格式 |
-| KeyLife | KEYLIFE | 输入框 | 数字+s/m/h/d格式 |
-| RekeyMargin | REKEYMARGIN | 输入框 | 数字+s/m/h/d格式 |
+| IKELifeTime | IKELIFETIME | 输入框 | 数字+s/m/h/d格式，如 8h |
+| KeyLife | KEYLIFE | 输入框 | 数字+s/m/h/d格式，如 1h |
+| RekeyMargin | REKEYMARGIN | 输入框 | 数字+s/m/h/d格式，如 9m |
 | Dpdaction | DPDACTION | 下拉框 | none/clear/hold/restart |
-| Dpddelay | DPDDELAY | 输入框 | 数字+s/m/h/d格式 |
+| Dpddelay | DPDDELAY | 输入框 | 数字+s/m/h/d格式，如 30s |
 
 #### WAN Config（仅 CR-B4860/BAIBLQ 产品）
 
@@ -1319,7 +1348,7 @@ src/pages/provision/PlugAndPlay/
 |------|--------|------|------|
 | WAN发送使能 | wanSendEnable | 开关 | WAN发送功能开关 |
 
-**WAN Binding 列表 (wanBindingList)**:
+**WAN 分组配置** - 4个分组（OAM-TR069/S1-C/S1-U/X2AP）：
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
@@ -1327,53 +1356,151 @@ src/pages/provision/PlugAndPlay/
 | 子网掩码 | netmask | 输入框 | 子网掩码 |
 | 网关 | gateway | 输入框 | 网关地址 |
 | VLAN ID | vlanId | 输入框 | VLAN标识 |
-| WAN Binding | wanBinding | 下拉框 | WAN绑定配置 |
+| Binding | binding | 输入框 | 绑定配置 |
+
+#### 功率控制参数
+
+| 字段 | 字段名 | 类型 | 选项/范围 | 说明 |
+|------|--------|------|----------|------|
+| Total Tx Power | totalTxPower | 可搜索下拉框 | - | 总发射功率（仅QAFA/QATA） |
+| Power Ramping | powerRamping | 下拉框 | 0/2/4/6 | 功率爬升 |
+| Preamble Init Target Power | preambleInitTargetPower | 下拉框 | -120~-90 | 前导初始目标功率 |
+| Po_nominal_pusch | poNominalPusch | 输入框 | 范围：-126~24 | PUSCH标称功率 |
+| Po_nominal_pucch | poNominalPucch | 输入框 | 范围：-126~24 | PUCCH标称功率 |
+
+#### MTU 配置
+
+| 字段 | 字段名 | 类型 | 验证规则 | 说明 |
+|------|--------|------|----------|------|
+| MTU | mtu | 输入框 | 范围：700-1600 | 最大传输单元 |
+
+#### 自定义参数（custParam） - 支持多个
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| 参数名称 | custParamName | 输入框 | 自定义参数名称 |
+| 参数值 | custParamValue | 输入框 | 参数值 |
+| TR069路径 | custParamPath | 输入框 | TR069参数路径 |
 
 ---
 
 ### gNB 批量导入修改页面
 
+#### 基础配置字段
+
+| 字段 | 字段名 | 类型 | 验证规则 | 必填 | 说明 |
+|------|--------|------|----------|------|------|
+| GNB名称 | gnbName | 输入框 | 长度1~150 | 否 | gNB名称 |
+| GNB标识长度 | gnbIdLength | 输入框 | 整形，范围：22~32 | 是 | gNB ID长度 |
+| GNB标识 | gnbId | 输入框 | 整形，范围：0~4294967295 | 是 | gNB标识 |
+| Cell ID | cellId | 输入框 | 整形，范围：0~268435455 | 是 | 小区标识 |
+| PCI | pci | 输入框 | 整形，范围：0~1007 | 是 | 物理小区标识 |
+| PLMN ID | plmnId | 输入框 | 5~6位数字 | 是 | PLMN标识 |
+| TAC | tac | 输入框 | 整形，范围：0~16777215 | 是 | 跟踪区域码 |
+
+#### 频率配置
+
+| 字段 | 字段名 | 类型 | 验证规则 | 必填 | 说明 |
+|------|--------|------|----------|------|------|
+| 频带指示 | freqBandIndicator | 输入框 | 整形，范围：1~1024 | 是 | 频带指示 |
+| 下行NRARFCN | nrarfcnndl | 输入框 | 整形，范围：0~3279165 | 是 | 下行NR绝对射频信道号 |
+| 下行带宽 | dlbandwidth | 下拉框 | 5/10/15/20/25/30/40/50/60/80/90/100/200/400 MHz | 是 | 下行带宽 |
+| SSB频率号 | ssbFrequency | 输入框 | 整形，范围：0~3279165 | 是 | SSB绝对频率 |
+| SSB绝对频率 | ssbAbsoluteFrequency | 输入框 | 整形 | 否 | SSB绝对频率值 |
+| 上行NRARFCN | nrarfcnul | 输入框 | 整形，范围：0~3279165 | 否 | 上行NR绝对射频信道号 |
+| ARFCN | arfcn | 输入框 | 整形 | 否 | 绝对射频信道号 |
+| 帧偏移 | frameOffset | 输入框 | 整形 | 否 | 帧偏移 |
+| PRACH配置索引 | prachConfigIndex | 输入框 | 整形 | 否 | PRACH配置索引 |
+
+#### 基站制式配置
+
+| 字段 | 字段名 | 类型 | 选项 | 说明 |
+|------|--------|------|------|------|
+| 基站制式 | duplex_mode | 下拉框 | TDD/FDD | 双工模式 |
+
+**TDD Pattern 配置（仅TDD模式）**:
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| Subframe Slot | subframeSlot | 下拉框 | 子帧时隙配置 |
+| Subframe Slot DL/UL | subframeSlotDlUl | 下拉框 | 上下行时隙配比 |
+| Slot Config | slotConfig | 输入框 | 时隙配置 |
+
 #### PLMN 配置
 
 | 字段 | 字段名 | 类型 | 验证规则 | 说明 |
 |------|--------|------|----------|------|
-| NCI | nci | 输入框 | 整形，范围：0~68719476735 | NR小区标识 |
-| TAC | tac | 输入框 | 整形，范围：0~16777215 | 跟踪区域码 |
+| NCI | nci | 输入框 | 整形，范围：0~68719476735 | NR小区标识（22~36位） |
 | RANAC | ranac | 输入框 | 整形，范围：0~255 | RAN区域码 |
 
-#### PLMN Config 列表 (plmnConfigList)
+#### PLMN Config 列表 (plmnConfigList) - 支持多个
 
 | 字段 | 字段名 | 类型 | 验证规则 | 说明 |
 |------|--------|------|----------|------|
 | PLMN ID | plmnId | 输入框 | 5~6位数字 | PLMN标识 |
 | Primary | primary | 下拉框 | 0/1 | 是否为主PLMN |
 
-#### Slice Config 列表 (sliceConfigList)
+#### Slice Config 列表 (sliceConfigList) - 支持多个
 
 | 字段 | 字段名 | 类型 | 验证规则 | 说明 |
 |------|--------|------|----------|------|
-| SD | sd | 下拉框 | 0-空/1-非空 | SD标识 |
-| SD Value | sd_value | 输入框 | SNSSAI格式 | SD值 |
+| SST | sliceSst | 输入框 | 整形 | 切片服务类型 |
+| SD | sliceSd | 输入框 | SNSSAI格式 | 切片差异化标识 |
+| SD开关 | sd | 下拉框 | 0-空/1-非空 | SD是否启用 |
 
 #### AMF 配置
+
+| 字段 | 字段名 | 类型 | 必填 | 说明 |
+|------|--------|------|------|------|
+| AMF IP | amfIp | 输入框 | 是 | AMF IP地址 |
+| AMF Port | amfPort | 输入框 | 是 | AMF端口号 |
+| PLMN ID | amfPlmnId | 输入框 | 否 | AMF PLMN标识 |
+| Default | amfDefault | 下拉框 | 否 | 是否为默认AMF |
+
+**AMF 列表 (amfList)** - 支持多个：
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
 | AMF IP | amfIp | 输入框 | AMF IP地址 |
-| PLMN ID | plmnId | 输入框 | PLMN标识 |
-| Default | default | 下拉框 | 是否为默认AMF |
+| AMF Port | amfPort | 输入框 | AMF端口号 |
+
+#### 同步配置
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| GPS同步 | gpsSync | 开关 | GPS时钟同步 |
+| NTP同步 | ntpSync | 开关 | NTP时钟同步 |
+| Offset To Point A | offsetToPointA | 输入框 | Point A偏移量 |
+| Kssb | kssb | 输入框 | SSB子载波偏移 |
+
+#### IP 配置
+
+**Service IP 配置**:
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| Service IP | serviceIp | 输入框 | 业务IP地址 |
+| Subnet Mask | serviceMask | 输入框 | 子网掩码 |
+| OM IP | omIp | 输入框 | 运维IP地址 |
+| OM Mask | omMask | 输入框 | 运维子网掩码 |
+| Service Gateway | serviceGateway | 输入框 | 业务网关 |
+| Service Gateway Mask | serviceGatewayMask | 输入框 | 业务网关子网掩码 |
+| Mgmt Gateway | mgmtGateway | 输入框 | 管理网关 |
+| Mgmt Gateway Mask | mgmtGatewayMask | 输入框 | 管理网关子网掩码 |
+| Service VLAN | serviceVlan | 输入框 | 业务VLAN ID |
+| Mgmt VLAN | mgmtVlan | 输入框 | 管理VLAN ID |
 
 #### WAN 配置
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
 | 地址类型 | addressType | 下拉框 | IPv4/IPv6 |
-| 承载类型 | bearType | 下拉框 | 承载类型 |
+| 承载类型 | bearType | 下拉框 | Ethernet/其他 |
 | IP地址 | ipAddress | 输入框 | WAN IP地址 |
 | 子网掩码 | subnetMask | 输入框 | 子网掩码（IPv4） |
 | 前缀长度 | prefixLength | 输入框 | 前缀长度（IPv6） |
-| 网关 | gateway | 输入框 | 网关地址 |
-| VLAN ID | vlanId | 输入框 | VLAN标识 |
+| 网关 | wanGateway | 输入框 | 网关地址 |
+| VLAN ID | wanVlanId | 输入框 | VLAN标识 |
 | VLAN名称 | vlanName | 输入框 | VLAN名称 |
 
 #### LAN 配置
@@ -1383,36 +1510,131 @@ src/pages/provision/PlugAndPlay/
 | LAN IP | lanIp | 输入框 | LAN IP地址 |
 | 子网掩码 | lanSubnetMask | 输入框 | LAN子网掩码 |
 
+#### IPSec 配置
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| IPSec启用 | ipsecEnable | 开关 | IPSec功能开关 |
+| IMSI | ipsecImsi | 输入框 | IPSec IMSI |
+| Key | ipsecKey | 输入框 | IPSec密钥 |
+| OPC | ipsecOpc | 输入框 | IPSec OPC |
+
+#### DNS 配置
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| DNS1 | dns1 | 输入框 | 主DNS服务器 |
+| DNS2 | dns2 | 输入框 | 备DNS服务器 |
+
+#### 自定义参数（custParam） - 支持多个
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| 参数名称 | custParamName | 输入框 | 自定义参数名称 |
+| 参数值 | custParamValue | 输入框 | 参数值 |
+| TR069路径 | custParamPath | 输入框 | TR069参数路径 |
+
 ---
 
 ### GSM 批量导入修改页面
 
-#### 基础参数表格
+#### 基础参数
+
+| 字段 | 字段名 | 类型 | 验证规则 | 必填 | 说明 |
+|------|--------|------|----------|------|------|
+| 序列号 | serialNumber | 输入框 | - | 是 | 设备序列号 |
+| IPA Unit ID | ipaUnitid | 输入框 | 范围: Ipa[0~65535],Id[0~255] | 是 | IPA单元标识，格式：Ipa{0-65535},Id{0-255} |
+| BSC Service IP | bscServiceIp | 输入框 | IP地址 | 是 | BSC服务IP地址 |
+| OML Remote IP | omlRemoteIp | 输入框 | IP地址 | 是 | OML远程IP地址 |
+| OML Remote IP 备份 | omlRemoteIpBak | 输入框 | IP地址 | 否 | OML远程IP备份地址 |
+| RF Power | rfPower | 输入框 | 范围：24~43 | 是 | 射频功率（dBm） |
+
+#### DNS 配置
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
-| 序列号 | serialNumber | 输入框 | 设备序列号 |
-| IPA Unit ID | ipaUnitid | 输入框 | IPA单元标识 |
-| OML Remote IP | omlRemoteIp | 输入框 | OML远程IP地址 |
-| OML Remote IP 备份 | omlRemoteIpBak | 输入框 | OML远程IP备份地址 |
-| RF Power | rfPower | 输入框 | 射频功率 |
+| DNS1 | dns1 | 输入框 | 主DNS服务器 |
+| DNS2 | dns2 | 输入框 | 备DNS服务器 |
 
-#### Route Config 路由配置
+#### 时区配置
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| 时区名称 | localTimezoneName | 下拉框 | 时区设置，如：Asia/Shanghai |
+
+#### Route Config 路由配置 - 支持多个
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
 | 开机启动 | onboot | 下拉框 | yes/no |
-| 网关 | gateway | 输入框 | 默认网关 |
-| 网络地址 | netAddr | 输入框 | 网络地址 |
+| 网关 | routeGateway | 输入框 | 默认网关 |
+| 网络地址 | netAddr | 输入框 | 目的网络地址 |
 | 子网掩码 | netMask | 输入框 | 子网掩码 |
 
-#### WAN Config 配置
+#### WAN Config 配置 - 支持多个
 
 | 字段 | 字段名 | 类型 | 说明 |
 |------|--------|------|------|
-| 使能 | enable | 开关 | WAN功能开关 |
+| 使能 | wanEnable | 开关 | WAN功能开关，'0'-禁用，'1'-启用 |
 | IP模式 | ipMode | 下拉框 | static/dhcp |
 | IP地址 | ipAddr | 输入框 | WAN IP地址 |
-| 子网掩码 | netMask | 输入框 | 子网掩码 |
+| 子网掩码 | wanNetMask | 输入框 | 子网掩码 |
 | 网关 | gateway | 输入框 | 网关地址 |
 | VLAN ID | vlanId | 输入框 | VLAN标识 |
+
+#### 自定义参数（custParam） - 支持多个
+
+| 字段 | 字段名 | 类型 | 说明 |
+|------|--------|------|------|
+| 参数名称 | custParamName | 输入框 | 自定义参数名称 |
+| 参数值 | custParamValue | 输入框 | 参数值 |
+| TR069路径 | custParamPath | 输入框 | TR069参数路径 |
+
+---
+
+## AddPolicyPage.tsx 字段对比与缺失分析
+
+### eNB 缺失字段
+
+基于 JSP 原始配置文件对比，AddPolicyPage.tsx 中 eNB 配置缺少以下字段：
+
+| 缺失字段 | 字段名 | 类型 | 说明 |
+|----------|--------|------|------|
+| eNodeB ID | eNodeBId | 输入框 | eNB标识 |
+| 时区 | timeZoneUtc | 下拉框 | UTC时区设置 |
+| 载波制式 | carrier_type | 下拉框 | FDD/TDD（仅DXDF产品） |
+| MME Port | mmePort | 输入框 | MME端口号 |
+| Management IP配置 | mgmtIp/mgmtMask等 | 输入框组 | 管理IP配置 |
+| 功率控制参数 | powerRamping等 | 输入框组 | 功率控制相关参数 |
+| MTU | mtu | 输入框 | 最大传输单元 |
+
+### gNB 缺失字段
+
+基于 JSP 原始配置文件对比，AddPolicyPage.tsx 中 gNB 配置缺少以下字段：
+
+| 缺失字段 | 字段名 | 类型 | 说明 |
+|----------|--------|------|------|
+| GNB名称 | gnbName | 输入框 | gNB名称，长度1~150 |
+| PCI | pci | 输入框 | 物理小区标识，范围：0~1007 |
+| 频带指示 | freqBandIndicator | 输入框 | 频带指示，范围：1~1024 |
+| 下行NRARFCN | nrarfcnndl | 输入框 | 下行NRARFCN，范围：0~3279165 |
+| 下行带宽 | dlbandwidth | 下拉框 | 下行带宽选项 |
+| SSB频率号 | ssbFrequency | 输入框 | SSB频率号，范围：0~3279165 |
+| 上行NRARFCN | nrarfcnul | 输入框 | 上行NRARFCN |
+| 基站制式 | duplex_mode | 下拉框 | TDD/FDD |
+| TDD Pattern配置 | subframeSlot等 | 输入框组 | TDD模式专用配置 |
+| PLMN Config列表 | plmnConfigList | 列表 | 支持多个PLMN配置 |
+| Slice Config列表 | sliceConfigList | 列表 | 支持多个切片配置 |
+| IPSec配置 | ipsecEnable等 | 输入框组 | IPSec相关配置 |
+| DNS配置 | dns1/dns2 | 输入框 | DNS服务器配置 |
+
+### GSM 缺失字段
+
+基于 JSP 原始配置文件对比，AddPolicyPage.tsx 中 GSM 配置缺少以下字段：
+
+| 缺失字段 | 字段名 | 类型 | 说明 |
+|----------|--------|------|------|
+| BSC Service IP | bscServiceIp | 输入框 | BSC服务IP地址 |
+| DNS1 | dns1 | 输入框 | 主DNS服务器 |
+| DNS2 | dns2 | 输入框 | 备DNS服务器 |
+| 时区名称 | localTimezoneName | 下拉框 | 时区设置 |

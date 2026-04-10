@@ -381,7 +381,7 @@ export default function DeviceListPanel({
         </div>
       </div>
 
-      <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+      <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0 }}>
         <DataTable<Device>
           tableId="device-grouping-table"
           columns={columns}
@@ -398,23 +398,33 @@ export default function DeviceListPanel({
           onPageChange={onPageChange}
           onRefresh={onRefresh}
           defaultDensity="compact"
-          scroll={{ x: true, y: 'calc(100% - 56px)' }}
+          scroll={{ x: 'max-content', y: 100 }}
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}
         />
       </div>
       <style>{`
-        /* 设备分组表格滚动条样式 - 页面特定，只滚动表格内容 */
-        .device-list-table-wrapper > div {
-          position: absolute;
-          inset: 0;
+        /* 设备分组表格 - flex 布局自适应高度，无需硬编码偏移 */
+        .device-list-table-wrapper {
+          display: flex;
+          flex-direction: column;
         }
-        .device-list-table-wrapper .omc-data-table {
-          overflow: hidden;
+        .device-list-table-wrapper .omc-data-table,
+        .device-list-table-wrapper .ant-table-wrapper,
+        .device-list-table-wrapper .ant-spin-nested-loading,
+        .device-list-table-wrapper .ant-spin-nested-loading > div,
+        .device-list-table-wrapper .ant-table,
+        .device-list-table-wrapper .ant-table-container {
+          display: flex !important;
+          flex-direction: column !important;
+          flex: 1 !important;
+          min-height: 0 !important;
         }
         .device-list-table-wrapper .ant-table-body {
+          flex: 1 !important;
+          min-height: 0 !important;
           overflow-y: auto !important;
-          max-height: calc(100vh - 340px) !important;
+          max-height: none !important;
         }
       `}</style>
 

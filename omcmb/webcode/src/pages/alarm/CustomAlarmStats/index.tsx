@@ -1278,7 +1278,7 @@ export default function CustomAlarmStats() {
       </Card>
 
       {/* 搜索卡片 */}
-      <Card size="small" bordered styles={{ body: { padding: '0 16px' } }}>
+      <Card size="small" bordered styles={{ body: { padding: '16px 16px 0 16px' } }}>
         <FilterBar
           filterId={`custom-alarm-stats-${selectedGroupId}`}
           fields={FILTER_FIELDS}
@@ -1313,11 +1313,30 @@ export default function CustomAlarmStats() {
           batchActions={batchActions}
           onRefresh={() => void refetch()}
           defaultDensity="compact"
-          scroll={{ x: true, y: 'calc(100% - 56px)' }}
+          scroll={{ x: 'max-content', y: 100 }}
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}
         />
       </Card>
+      <style>{`
+        .custom-alarm-list-card .omc-data-table,
+        .custom-alarm-list-card .ant-table-wrapper,
+        .custom-alarm-list-card .ant-spin-nested-loading,
+        .custom-alarm-list-card .ant-spin-nested-loading > div,
+        .custom-alarm-list-card .ant-table,
+        .custom-alarm-list-card .ant-table-container {
+          display: flex !important;
+          flex-direction: column !important;
+          flex: 1 !important;
+          min-height: 0 !important;
+        }
+        .custom-alarm-list-card .ant-table-body {
+          flex: 1 !important;
+          min-height: 0 !important;
+          overflow: auto !important;
+          max-height: none !important;
+        }
+      `}</style>
     </div>
   );
 

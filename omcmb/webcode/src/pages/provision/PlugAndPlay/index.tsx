@@ -291,7 +291,7 @@ export default function PlugAndPlay() {
     {
       key: 'actions',
       title: '',
-      width: 40,
+      width: 80,
       fixed: 'left',
       render: (_, record) => (
         <Dropdown
@@ -306,7 +306,7 @@ export default function PlugAndPlay() {
           }}
           trigger={['click']}
         >
-          <Button type="text" size="small" icon={<MoreOutlined />} />
+          <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
         </Dropdown>
       ),
     },
@@ -314,7 +314,7 @@ export default function PlugAndPlay() {
       key: 'selfStartEnable',
       title: t('provision.enabled'),
       dataIndex: 'selfStartEnable',
-      width: 70,
+      width: 90,
       render: (val, record) => (
         <Switch
           size="small"
@@ -394,37 +394,48 @@ export default function PlugAndPlay() {
 
   // Task columns
   const taskColumns: DataTableColumn<ExecuteTask>[] = useMemo(() => [
-    ...(taskTab === '0' ? [{
-      key: 'selection',
-      width: 50,
-    }] : []),
     {
       key: 'actions',
-      title: t('table.operation'),
-      width: 140,
+      title: '',
+      width: 80,
       fixed: 'left',
-      render: (_, record) => (
-        <Space size={4}>
-          {['0', '1', '4'].includes(record.status) && (
-            <Button type="link" size="small" icon={<RedoOutlined />} onClick={() => handleRetryTask(record)}>
-              {t('provision.retry')}
-            </Button>
-          )}
-          {record.executeType === '1' && record.status === '3' && (
-            <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => handleStartTask(record)}>
-              {t('common.execute')}
-            </Button>
-          )}
-          {['0', '1', '3', '4'].includes(record.status) && (
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteTask(record)}>
-              {t('common.delete')}
-            </Button>
-          )}
-          <Button type="link" size="small" icon={<InfoCircleOutlined />} onClick={() => setDetailTaskId(record.taskId)}>
-            {t('common.detail')}
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const items: MenuProps['items'] = [
+          ['0', '1', '4'].includes(record.status) ? {
+            key: 'retry',
+            label: t('provision.retry'),
+            icon: <RedoOutlined />,
+            onClick: () => handleRetryTask(record),
+          } : null,
+          record.executeType === '1' && record.status === '3' ? {
+            key: 'execute',
+            label: t('common.execute'),
+            icon: <PlayCircleOutlined />,
+            onClick: () => handleStartTask(record),
+          } : null,
+          ['0', '1', '3', '4'].includes(record.status) ? {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            onClick: () => handleDeleteTask(record),
+          } : null,
+          {
+            key: 'detail',
+            label: t('common.detail'),
+            icon: <InfoCircleOutlined />,
+            onClick: () => setDetailTaskId(record.taskId),
+          },
+        ].filter(Boolean) as MenuProps['items'];
+
+        if (!items || items.length === 0) return null;
+
+        return (
+          <Dropdown menu={{ items }} trigger={['click']}>
+            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
+          </Dropdown>
+        );
+      },
     },
     {
       key: 'serialNumber',
@@ -632,6 +643,8 @@ export default function PlugAndPlay() {
             rowKey="policyId"
             pageSize={10}
             defaultDensity="compact"
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
             pagination={false}
             scroll={{ x: 'max-content', y: 200 }}
             extraToolbarRight={
@@ -714,6 +727,8 @@ export default function PlugAndPlay() {
             rowKey="taskId"
             pageSize={10}
             defaultDensity="compact"
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
             selectable={taskTab === '0'}
             selectedRowKeys={selectedTaskIds}
             onSelectionChange={(keys) => setSelectedTaskIds(keys as string[])}

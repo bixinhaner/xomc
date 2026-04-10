@@ -1444,6 +1444,11 @@ const messages: Record<string, string> = {
   'kpi.performanceIndicator':   '性能指标',
   'kpi.definition':             '说明',
   'kpi.definitionPlaceholder':  '请输入指标说明',
+  'kpi.customKpi':              '自定义KPI',
+  'kpi.customCounter':          '自定义Counter',
+  'kpi.deviceLevel':            '设备级',
+  'kpi.plmnLevel':              'PLMN级',
+  'kpi.duration':               '持续时长',
 
   // Report categories
   'report.category.kpi':              'KPI报表',

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { App, Button, Drawer, Form, Input, Modal, Radio, Select, Space, Tag, Tree, Typography } from 'antd';
+import { App, Button, Col, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Tag, Tree, Typography } from 'antd';
 import { PlusOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
@@ -135,9 +135,9 @@ function TreeNodeTitle({ title, nodeKey, isCustom, onAdd, onEdit, onDelete }: Tr
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <span>{title}</span>
-      {hovered && onAdd && (
-        <Space size={0}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+      {onAdd && (
+        <Space size={0} style={{ visibility: hovered ? 'visible' : 'hidden', flexShrink: 0 }}>
           <Button
             type="text"
             size="small"
@@ -339,6 +339,7 @@ export default function KPIStandardReport() {
   const [calcFormula, setCalcFormula] = useState<string>('');
   const [formulaSearchValue, setFormulaSearchValue] = useState<string>('');
   const [formulaSelectedCategory, setFormulaSelectedCategory] = useState<string>('');
+  const [formulaProductType, setFormulaProductType] = useState<string>('');
 
   // Edit indicator drawer state
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
@@ -579,6 +580,9 @@ export default function KPIStandardReport() {
       setEditDrawerOpen(false);
       editIndicatorForm.resetFields();
       setEditingIndicator(null);
+      setFormulaSearchValue('');
+      setFormulaSelectedCategory('');
+      setFormulaProductType('');
     } catch {
       // validation error
     }
@@ -782,6 +786,9 @@ export default function KPIStandardReport() {
       addIndicatorForm.resetFields();
       setCurrentIndicatorType('kpi');
       setCalcFormula('');
+      setFormulaSearchValue('');
+      setFormulaSelectedCategory('');
+      setFormulaProductType('');
     } catch {
       // validation error
     }
@@ -825,13 +832,42 @@ export default function KPIStandardReport() {
 
   // 根据功能集筛选的指标数据
   const formulaFilteredIndicators = useMemo(() => {
-    if (!formulaSelectedCategory) {
-      return filteredData;
+    let data = [...MOCK_KPI_DATA];
+
+    // 按功能集树节点过滤
+    if (formulaSelectedCategory) {
+      // 一级节点：enb-set / gnb-set / gsm-set
+      const isEnb = formulaSelectedCategory.includes('enb');
+      const isGnb = formulaSelectedCategory.includes('gnb');
+      const isGsm = formulaSelectedCategory.includes('gsm');
+
+      if (isEnb) {
+        data = data.filter((row) => row.networkType === 'eNB');
+      } else if (isGnb) {
+        data = data.filter((row) => row.networkType === 'gNB');
+      } else if (isGsm) {
+        data = data.filter((row) => row.networkType === 'GSM');
+      }
+
+      // 二级节点：按 category 过滤
+      const parts = formulaSelectedCategory.split('-');
+      if (parts.length >= 3) {
+        const categoryKey = parts[parts.length - 1];
+        if (categoryKey === 'custom') {
+          data = data.filter((row) => row.isCustomize === 1);
+        } else {
+          data = data.filter((row) => row.category === categoryKey);
+        }
+      }
     }
-    // 简单模拟：根据选中的功能集过滤指标
-    // 实际应用中应根据API返回对应功能集的指标
-    return filteredData;
-  }, [filteredData, formulaSelectedCategory]);
+
+    // 按产品类型过滤
+    if (formulaProductType) {
+      data = data.filter((row) => row.productType === formulaProductType);
+    }
+
+    return data;
+  }, [formulaSelectedCategory, formulaProductType]);
 
   // 根据搜索词过滤指标
   const searchedIndicators = useMemo(() => {
@@ -1158,14 +1194,24 @@ export default function KPIStandardReport() {
         onClose={() => {
           setAddDrawerOpen(false);
           addIndicatorForm.resetFields();
+          setCurrentIndicatorType('kpi');
+          setCalcFormula('');
+          setFormulaSearchValue('');
+          setFormulaSelectedCategory('');
+          setFormulaProductType('');
         }}
-        width={600}
+        width={720}
         destroyOnClose
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => {
               setAddDrawerOpen(false);
               addIndicatorForm.resetFields();
+              setCurrentIndicatorType('kpi');
+              setCalcFormula('');
+              setFormulaSearchValue('');
+              setFormulaSelectedCategory('');
+              setFormulaProductType('');
             }}>
               {t('common.cancel')}
             </Button>
@@ -1197,16 +1243,16 @@ export default function KPIStandardReport() {
             {/* 类型 */}
             <Form.Item name="indicatorType" label={t('kpi.type')} style={{ marginBottom: 12 }}>
               <Radio.Group onChange={(e) => setCurrentIndicatorType(e.target.value)}>
-                <Radio value="kpi">Customize KPI</Radio>
-                <Radio value="counter">Customize Counter</Radio>
+                <Radio value="kpi">{t('kpi.customKpi')}</Radio>
+                <Radio value="counter">{t('kpi.customCounter')}</Radio>
               </Radio.Group>
             </Form.Item>
 
             {/* 等级 */}
             <Form.Item name="indicatorLevel" label={t('kpi.level')} style={{ marginBottom: 12 }}>
               <Radio.Group>
-                <Radio value="device">Device</Radio>
-                <Radio value="plmn">PLMN</Radio>
+                <Radio value="device">{t('kpi.deviceLevel')}</Radio>
+                <Radio value="plmn">{t('kpi.plmnLevel')}</Radio>
               </Radio.Group>
             </Form.Item>
 
@@ -1318,8 +1364,8 @@ export default function KPIStandardReport() {
               {/* 公式显示区域 */}
               <div
                 style={{
-                  minHeight: 48,
-                  maxHeight: 100,
+                  minHeight: 56,
+                  maxHeight: 140,
                   padding: '10px 12px',
                   background: '#fafafa',
                   borderRadius: 6,
@@ -1340,37 +1386,39 @@ export default function KPIStandardReport() {
                 )}
               </div>
 
-              {/* 运算符和数字按钮 - 分组显示 */}
+              {/* 运算符和数字按钮 - 分行排列 */}
               <div style={{ marginBottom: 12 }}>
                 <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
                   {t('kpi.operators')}
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {/* 数学运算符 */}
-                  <Space.Compact size="small">
-                    {['+', '-', '*', '/'].map((op) => (
-                      <Button key={op} style={{ width: 36 }} onClick={() => handleAddOperator(op)}>
-                        {op}
-                      </Button>
-                    ))}
-                  </Space.Compact>
-                  {/* 括号 */}
-                  <Space.Compact size="small">
-                    <Button style={{ width: 36 }} onClick={() => handleAddOperator('(')}>(</Button>
-                    <Button style={{ width: 36 }} onClick={() => handleAddOperator(')')}>)</Button>
-                  </Space.Compact>
-                  {/* 数字 */}
-                  <Space.Compact size="small">
-                    {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'].map((num) => (
-                      <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleAddOperator(num)}>
-                        {num}
-                      </Button>
-                    ))}
-                  </Space.Compact>
-                  {/* 特殊运算符 */}
-                  <Button size="small" onClick={() => handleAddOperator('Duration')}>
-                    Duration
-                  </Button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {/* 第一行：数学运算符 + 括号 */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Space.Compact size="small">
+                      {['+', '-', '*', '/'].map((op) => (
+                        <Button key={op} style={{ width: 36 }} onClick={() => handleAddOperator(op)}>
+                          {op}
+                        </Button>
+                      ))}
+                    </Space.Compact>
+                    <Space.Compact size="small">
+                      <Button style={{ width: 36 }} onClick={() => handleAddOperator('(')}>(</Button>
+                      <Button style={{ width: 36 }} onClick={() => handleAddOperator(')')}>)</Button>
+                    </Space.Compact>
+                  </div>
+                  {/* 第二行：数字 + Duration */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Space.Compact size="small">
+                      {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'].map((num) => (
+                        <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleAddOperator(num)}>
+                          {num}
+                        </Button>
+                      ))}
+                    </Space.Compact>
+                    <Button size="small" onClick={() => handleAddOperator('Duration')}>
+                      {t('kpi.duration')}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -1379,22 +1427,33 @@ export default function KPIStandardReport() {
                 <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
                   {t('kpi.availableIndicators')}
                 </div>
-                {/* 搜索框 */}
-                <Input
-                  size="small"
-                  placeholder={t('kpi.searchPlaceholder')}
-                  prefix={<SearchOutlined />}
-                  value={formulaSearchValue}
-                  onChange={(e) => setFormulaSearchValue(e.target.value)}
-                  allowClear
-                  style={{ width: '100%', marginBottom: 8 }}
-                />
+                {/* 搜索框 + 产品类型筛选 */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <Input
+                    size="small"
+                    placeholder={t('kpi.searchPlaceholder')}
+                    prefix={<SearchOutlined />}
+                    value={formulaSearchValue}
+                    onChange={(e) => setFormulaSearchValue(e.target.value)}
+                    allowClear
+                    style={{ flex: 1 }}
+                  />
+                  <Select
+                    size="small"
+                    placeholder={t('kpi.productType')}
+                    value={formulaProductType}
+                    onChange={setFormulaProductType}
+                    options={PRODUCT_TYPE_OPTIONS}
+                    style={{ width: 100, flexShrink: 0 }}
+                    allowClear
+                  />
+                </div>
                 {/* 左右分栏 */}
-                <div style={{ display: 'flex', gap: 8, height: 220 }}>
+                <div style={{ display: 'flex', gap: 8, height: 260 }}>
                   {/* 左侧：功能集树 */}
                   <div
                     style={{
-                      width: 130,
+                      width: 140,
                       flexShrink: 0,
                       border: '1px solid var(--color-border)',
                       borderRadius: 6,
@@ -1540,8 +1599,11 @@ export default function KPIStandardReport() {
           setEditDrawerOpen(false);
           editIndicatorForm.resetFields();
           setEditingIndicator(null);
+          setFormulaSearchValue('');
+          setFormulaSelectedCategory('');
+          setFormulaProductType('');
         }}
-        width={600}
+        width={720}
         destroyOnClose
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -1549,6 +1611,9 @@ export default function KPIStandardReport() {
               setEditDrawerOpen(false);
               editIndicatorForm.resetFields();
               setEditingIndicator(null);
+              setFormulaSearchValue('');
+              setFormulaSelectedCategory('');
+              setFormulaProductType('');
             }}>
               {t('common.cancel')}
             </Button>
@@ -1580,16 +1645,16 @@ export default function KPIStandardReport() {
             {/* 类型 - 只读 */}
             <Form.Item name="indicatorType" label={t('kpi.type')} style={{ marginBottom: 12 }}>
               <Radio.Group onChange={(e) => setEditIndicatorType(e.target.value)} disabled>
-                <Radio value="kpi">Customize KPI</Radio>
-                <Radio value="counter">Customize Counter</Radio>
+                <Radio value="kpi">{t('kpi.customKpi')}</Radio>
+                <Radio value="counter">{t('kpi.customCounter')}</Radio>
               </Radio.Group>
             </Form.Item>
 
             {/* 等级 */}
             <Form.Item name="indicatorLevel" label={t('kpi.level')} style={{ marginBottom: 12 }}>
               <Radio.Group>
-                <Radio value="device">Device</Radio>
-                <Radio value="plmn">PLMN</Radio>
+                <Radio value="device">{t('kpi.deviceLevel')}</Radio>
+                <Radio value="plmn">{t('kpi.plmnLevel')}</Radio>
               </Radio.Group>
             </Form.Item>
 
@@ -1701,8 +1766,8 @@ export default function KPIStandardReport() {
               {/* 公式显示区域 */}
               <div
                 style={{
-                  minHeight: 48,
-                  maxHeight: 100,
+                  minHeight: 56,
+                  maxHeight: 140,
                   padding: '10px 12px',
                   background: '#fafafa',
                   borderRadius: 6,
@@ -1723,37 +1788,39 @@ export default function KPIStandardReport() {
                 )}
               </div>
 
-              {/* 运算符和数字按钮 - 分组显示 */}
+              {/* 运算符和数字按钮 - 分行排列 */}
               <div style={{ marginBottom: 12 }}>
                 <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
                   {t('kpi.operators')}
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {/* 数学运算符 */}
-                  <Space.Compact size="small">
-                    {['+', '-', '*', '/'].map((op) => (
-                      <Button key={op} style={{ width: 36 }} onClick={() => handleEditAddOperator(op)}>
-                        {op}
-                      </Button>
-                    ))}
-                  </Space.Compact>
-                  {/* 括号 */}
-                  <Space.Compact size="small">
-                    <Button style={{ width: 36 }} onClick={() => handleEditAddOperator('(')}>(</Button>
-                    <Button style={{ width: 36 }} onClick={() => handleEditAddOperator(')')}>)</Button>
-                  </Space.Compact>
-                  {/* 数字 */}
-                  <Space.Compact size="small">
-                    {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'].map((num) => (
-                      <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleEditAddOperator(num)}>
-                        {num}
-                      </Button>
-                    ))}
-                  </Space.Compact>
-                  {/* 特殊运算符 */}
-                  <Button size="small" onClick={() => handleEditAddOperator('Duration')}>
-                    Duration
-                  </Button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {/* 第一行：数学运算符 + 括号 */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Space.Compact size="small">
+                      {['+', '-', '*', '/'].map((op) => (
+                        <Button key={op} style={{ width: 36 }} onClick={() => handleEditAddOperator(op)}>
+                          {op}
+                        </Button>
+                      ))}
+                    </Space.Compact>
+                    <Space.Compact size="small">
+                      <Button style={{ width: 36 }} onClick={() => handleEditAddOperator('(')}>(</Button>
+                      <Button style={{ width: 36 }} onClick={() => handleEditAddOperator(')')}>)</Button>
+                    </Space.Compact>
+                  </div>
+                  {/* 第二行：数字 + Duration */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Space.Compact size="small">
+                      {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'].map((num) => (
+                        <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleEditAddOperator(num)}>
+                          {num}
+                        </Button>
+                      ))}
+                    </Space.Compact>
+                    <Button size="small" onClick={() => handleEditAddOperator('Duration')}>
+                      {t('kpi.duration')}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -1762,22 +1829,33 @@ export default function KPIStandardReport() {
                 <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
                   {t('kpi.availableIndicators')}
                 </div>
-                {/* 搜索框 */}
-                <Input
-                  size="small"
-                  placeholder={t('kpi.searchPlaceholder')}
-                  prefix={<SearchOutlined />}
-                  value={formulaSearchValue}
-                  onChange={(e) => setFormulaSearchValue(e.target.value)}
-                  allowClear
-                  style={{ width: '100%', marginBottom: 8 }}
-                />
+                {/* 搜索框 + 产品类型筛选 */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <Input
+                    size="small"
+                    placeholder={t('kpi.searchPlaceholder')}
+                    prefix={<SearchOutlined />}
+                    value={formulaSearchValue}
+                    onChange={(e) => setFormulaSearchValue(e.target.value)}
+                    allowClear
+                    style={{ flex: 1 }}
+                  />
+                  <Select
+                    size="small"
+                    placeholder={t('kpi.productType')}
+                    value={formulaProductType}
+                    onChange={setFormulaProductType}
+                    options={PRODUCT_TYPE_OPTIONS}
+                    style={{ width: 100, flexShrink: 0 }}
+                    allowClear
+                  />
+                </div>
                 {/* 左右分栏 */}
-                <div style={{ display: 'flex', gap: 8, height: 220 }}>
+                <div style={{ display: 'flex', gap: 8, height: 260 }}>
                   {/* 左侧：功能集树 */}
                   <div
                     style={{
-                      width: 130,
+                      width: 140,
                       flexShrink: 0,
                       border: '1px solid var(--color-border)',
                       borderRadius: 6,
