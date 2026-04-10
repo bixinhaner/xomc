@@ -1,33 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Checkbox, Col, Divider, Drawer, Dropdown, Form, Input, Menu, Modal, Pagination, Radio, Row, Select, Space, Statistic, Switch, Table, Tag, Typography, App, Tree, message, Tooltip } from 'antd';
+import { Badge, Button, Card, Checkbox, Divider, Drawer, Form, Input, Modal, Pagination, Radio, Space, Table, Tag, Typography, App, Tree } from 'antd';
 import {
-  AlertOutlined,
-  BellOutlined,
-  CalendarOutlined,
   CheckOutlined,
   ClearOutlined,
-  ClockCircleOutlined,
   DeleteOutlined,
-  DownloadOutlined,
   EditOutlined,
   ExportOutlined,
   EyeOutlined,
-  FilterOutlined,
   FolderOutlined,
   MinusCircleOutlined,
   PlusOutlined,
-  ReloadOutlined,
-  SaveOutlined,
   SearchOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import LineChart from '@/components/Charts/LineChart';
 import { useCurrentAlarms, useHistoricalAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
@@ -113,16 +102,6 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
-// 快捷时间选项
-const QUICK_TIME_OPTIONS = [
-  { label: '今日', value: 'today' },
-  { label: '昨日', value: 'yesterday' },
-  { label: '本周', value: 'thisWeek' },
-  { label: '本月', value: 'thisMonth' },
-  { label: '最近7天', value: 'last7days' },
-  { label: '最近30天', value: 'last30days' },
-];
-
 // 快捷筛选选项
 const QUICK_FILTER_OPTIONS = [
   { label: '全部', key: 'all' },
@@ -172,56 +151,6 @@ const DEFAULT_GROUPS: CustomAlarmGroup[] = [
   { id: 'group-tianjin', name: '天津告警', alarmType: 'active', createdAt: '2026-03-01', stats: { total: 64, critical: 6, major: 18, minor: 24, warning: 16 } },
   { id: 'group-guangzhou', name: '广州告警', alarmType: 'active', createdAt: '2026-03-01', stats: { total: 192, critical: 18, major: 52, minor: 72, warning: 50 } },
 ];
-
-// 生成趋势图数据
-function generateTrendData(): { dates: string[]; series: { name: string; data: number[]; color?: string }[] } {
-  const dates: string[] = [];
-  const criticalData: number[] = [];
-  const majorData: number[] = [];
-  const minorData: number[] = [];
-  const warningData: number[] = [];
-
-  for (let i = 6; i >= 0; i--) {
-    const date = dayjs().subtract(i, 'day');
-    dates.push(date.format('MM-DD'));
-    criticalData.push(Math.floor(Math.random() * 20) + 5);
-    majorData.push(Math.floor(Math.random() * 40) + 15);
-    minorData.push(Math.floor(Math.random() * 60) + 20);
-    warningData.push(Math.floor(Math.random() * 50) + 10);
-  }
-
-  return {
-    dates,
-    series: [
-      { name: '严重', data: criticalData, color: '#E53935' },
-      { name: '主要', data: majorData, color: '#FB8C00' },
-      { name: '次要', data: minorData, color: '#FDD835' },
-      { name: '警告', data: warningData, color: '#42A5F5' },
-    ],
-  };
-}
-
-// 快捷时间转日期范围
-function quickTimeToRange(value: string): [string, string] | undefined {
-  const now = dayjs();
-  switch (value) {
-    case 'today':
-      return [now.startOf('day').toISOString(), now.endOf('day').toISOString()];
-    case 'yesterday':
-      const yesterday = now.subtract(1, 'day');
-      return [yesterday.startOf('day').toISOString(), yesterday.endOf('day').toISOString()];
-    case 'thisWeek':
-      return [now.startOf('week').toISOString(), now.endOf('week').toISOString()];
-    case 'thisMonth':
-      return [now.startOf('month').toISOString(), now.endOf('month').toISOString()];
-    case 'last7days':
-      return [now.subtract(7, 'day').startOf('day').toISOString(), now.endOf('day').toISOString()];
-    case 'last30days':
-      return [now.subtract(30, 'day').startOf('day').toISOString(), now.endOf('day').toISOString()];
-    default:
-      return undefined;
-  }
-}
 
 export default function CustomAlarmStats() {
   const t = useT();
@@ -296,8 +225,6 @@ export default function CustomAlarmStats() {
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // 趋势图数据
-  const trendData = useMemo(() => generateTrendData(), []);
 
   // 可添加的设备列表（不在已选列表中的设备，且根据关键字过滤）
   const filteredAvailableDevices = useMemo(() => {
@@ -470,11 +397,9 @@ export default function CustomAlarmStats() {
   const refetch = currentAlarmsQuery.refetch;
 
   // 活动告警数据
-  const activeAlarms: Alarm[] = currentAlarmsQuery.data?.items ?? [];
   const activeTotal = currentAlarmsQuery.data?.total ?? 0;
 
   // 历史告警数据
-  const historicalAlarms: Alarm[] = historicalAlarmsQuery.data?.items ?? [];
   const historicalTotal = historicalAlarmsQuery.data?.total ?? 0;
 
   const acknowledgeAlarms = useAcknowledgeAlarms();
@@ -527,25 +452,7 @@ export default function CustomAlarmStats() {
       }));
     } else {
       setFilterParams((prev) => {
-        const { severity, dealState, unread, ...rest } = prev as any;
-        return rest;
-      });
-    }
-    setCurrentPage(1);
-  }, []);
-
-  // 快捷时间处理
-  const handleQuickTime = useCallback((value: string) => {
-    setActiveQuickTime(value);
-    const range = quickTimeToRange(value);
-    if (range) {
-      setFilterParams((prev) => ({
-        ...prev,
-        timeRange: range,
-      }));
-    } else {
-      setFilterParams((prev) => {
-        const { timeRange, ...rest } = prev as any;
+        const { severity: _s, dealState: _d, unread: _u, ...rest } = prev;
         return rest;
       });
     }
@@ -573,20 +480,6 @@ export default function CustomAlarmStats() {
     }
   }, [filterParams, filterTemplates, templateForm, message]);
 
-  // 应用筛选模板
-  const handleApplyTemplate = useCallback((template: FilterTemplate) => {
-    setFilterParams(template.params);
-    setCurrentPage(1);
-    message.success(`已应用模板「${template.name}」`);
-  }, [message]);
-
-  // 删除筛选模板
-  const handleDeleteTemplate = useCallback((templateId: string) => {
-    const updated = filterTemplates.filter((t) => t.id !== templateId);
-    setFilterTemplates(updated);
-    localStorage.setItem(FILTER_TEMPLATES_KEY, JSON.stringify(updated));
-    message.success('模板已删除');
-  }, [filterTemplates, message]);
 
   // 添加/编辑分组
   const handleAddGroup = useCallback(async () => {
@@ -686,28 +579,6 @@ export default function CustomAlarmStats() {
     setAddGroupDrawerOpen(true);
   }, [addGroupForm]);
 
-
-  // 告警源变化时重新加载设备列表
-  const handleAlarmSourceChange = useCallback((checkedValues: string[]) => {
-    // 根据选中的告警源过滤设备
-    const filtered = availableDevices.filter(d => checkedValues.includes(d.neType));
-    // 如果当前选中的设备不在过滤列表中，则移除
-    setSelectedDevices(prev => prev.filter(id => filtered.some(d => d.id === id)));
-  }, [availableDevices]);
-
-  // 全选设备
-  const handleSelectAllDevices = useCallback(() => {
-    const filteredBySource = availableDevices.filter(d => {
-      const sources = addGroupForm.getFieldValue('alarmSources') || [];
-      return sources.length === 0 || sources.includes(d.neType);
-    });
-    setSelectedDevices(filteredBySource.map(d => d.id));
-  }, [availableDevices, addGroupForm]);
-
-  // 清空选中设备
-  const handleClearDevices = useCallback(() => {
-    setSelectedDevices([]);
-  }, []);
 
   // 打开添加设备弹窗
   const handleOpenAddDeviceModal = useCallback(() => {
