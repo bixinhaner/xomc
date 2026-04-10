@@ -12,9 +12,11 @@ CREATE TABLE sys_dictionaries (
     description VARCHAR(255) NOT NULL DEFAULT '',           -- 描述
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at  TIMESTAMPTZ,                                -- 软删除时间
-    CONSTRAINT uniq_dict_type UNIQUE(type) WHERE deleted_at IS NULL
+    deleted_at  TIMESTAMPTZ                                 -- 软删除时间
 );
+
+-- 部分唯一索引：仅对未软删除的记录强制 type 唯一
+CREATE UNIQUE INDEX uniq_dict_type_active ON sys_dictionaries(type) WHERE deleted_at IS NULL;
 
 CREATE INDEX idx_sys_dict_deleted_at ON sys_dictionaries(deleted_at) WHERE deleted_at IS NOT NULL;
 
