@@ -12,6 +12,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // PgRoleRepository implements RoleRepository using PostgreSQL.
@@ -41,7 +42,7 @@ func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
 	}
 	now := time.Now()
 
-	query, args, err := psql.Insert("roles").
+	query, args, err := storage.Psql.Insert("roles").
 		Columns("id", "name", "description", "is_system", "created_at", "updated_at").
 		Values(role.ID, role.Name, role.Description, role.IsSystem, now, now).
 		ToSql()
@@ -57,7 +58,7 @@ func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
 }
 
 func (r *PgRoleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Role, error) {
-	query, args, err := psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
 		From("roles").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -86,7 +87,7 @@ func (r *PgRoleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Role, er
 }
 
 func (r *PgRoleRepository) GetByName(ctx context.Context, name string) (*Role, error) {
-	query, args, err := psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
 		From("roles").
 		Where(sq.Eq{"name": name}).
 		ToSql()
@@ -111,7 +112,7 @@ func (r *PgRoleRepository) GetByName(ctx context.Context, name string) (*Role, e
 func (r *PgRoleRepository) Update(ctx context.Context, role *Role) error {
 	now := time.Now()
 
-	query, args, err := psql.Update("roles").
+	query, args, err := storage.Psql.Update("roles").
 		Set("name", role.Name).
 		Set("description", role.Description).
 		Set("updated_at", now).
@@ -134,7 +135,7 @@ func (r *PgRoleRepository) Update(ctx context.Context, role *Role) error {
 func (r *PgRoleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	// Prevent deleting system roles
 	var isSystem bool
-	checkQuery, checkArgs, _ := psql.Select("is_system").From("roles").Where(sq.Eq{"id": id}).ToSql()
+	checkQuery, checkArgs, _ := storage.Psql.Select("is_system").From("roles").Where(sq.Eq{"id": id}).ToSql()
 	err := r.pool.QueryRow(ctx, checkQuery, checkArgs...).Scan(&isSystem)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -146,7 +147,7 @@ func (r *PgRoleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return commonerrors.ErrForbidden
 	}
 
-	query, args, err := psql.Delete("roles").Where(sq.Eq{"id": id}).ToSql()
+	query, args, err := storage.Psql.Delete("roles").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return fmt.Errorf("build delete role SQL: %w", err)
 	}
@@ -159,7 +160,7 @@ func (r *PgRoleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgRoleRepository) List(ctx context.Context) ([]Role, error) {
-	query, args, err := psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
 		From("roles").
 		OrderBy("name ASC").
 		ToSql()
@@ -186,7 +187,7 @@ func (r *PgRoleRepository) List(ctx context.Context) ([]Role, error) {
 
 func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
 	// Count query
-	countQuery, countArgs, err := psql.Select("COUNT(*)").
+	countQuery, countArgs, err := storage.Psql.Select("COUNT(*)").
 		From("roles").
 		ToSql()
 	if err != nil {
@@ -208,7 +209,7 @@ func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFi
 	limit := filter.Limit()
 
 	// Data query
-	query, args, err := psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
 		From("roles").
 		Where(where).
 		OrderBy("name ASC").
@@ -238,7 +239,7 @@ func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFi
 }
 
 func (r *PgRoleRepository) AssignRole(ctx context.Context, userID, roleID uuid.UUID) error {
-	query, args, err := psql.Insert("user_roles").
+	query, args, err := storage.Psql.Insert("user_roles").
 		Columns("user_id", "role_id").
 		Values(userID, roleID).
 		Suffix("ON CONFLICT DO NOTHING").
@@ -259,7 +260,7 @@ func (r *PgRoleRepository) AssignRole(ctx context.Context, userID, roleID uuid.U
 }
 
 func (r *PgRoleRepository) RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error {
-	query, args, err := psql.Delete("user_roles").
+	query, args, err := storage.Psql.Delete("user_roles").
 		Where(sq.And{sq.Eq{"user_id": userID}, sq.Eq{"role_id": roleID}}).
 		ToSql()
 	if err != nil {
@@ -281,7 +282,7 @@ func (r *PgRoleRepository) RemoveRole(ctx context.Context, userID, roleID uuid.U
 }
 
 func (r *PgRoleRepository) GetDefaultRoleID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error) {
-	query, args, err := psql.Select("role_id").
+	query, args, err := storage.Psql.Select("role_id").
 		From("user_roles").
 		Where(sq.And{sq.Eq{"user_id": userID}, sq.Eq{"is_default": true}}).
 		ToSql()
@@ -326,7 +327,7 @@ func (r *PgRoleRepository) SetDefaultRole(ctx context.Context, userID, roleID uu
 }
 
 func (r *PgRoleRepository) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error) {
-	query, args, err := psql.Select("r.id", "r.name", "r.description", "r.is_system", "r.created_at", "r.updated_at").
+	query, args, err := storage.Psql.Select("r.id", "r.name", "r.description", "r.is_system", "r.created_at", "r.updated_at").
 		From("roles r").
 		Join("user_roles ur ON ur.role_id = r.id").
 		Where(sq.Eq{"ur.user_id": userID}).
@@ -354,7 +355,7 @@ func (r *PgRoleRepository) GetUserRoles(ctx context.Context, userID uuid.UUID) (
 }
 
 func (r *PgRoleRepository) GetPermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error) {
-	query, args, err := psql.Select("id", "role_id", "resource", "action").
+	query, args, err := storage.Psql.Select("id", "role_id", "resource", "action").
 		From("permissions").
 		Where(sq.Eq{"role_id": roleID}).
 		OrderBy("resource ASC", "action ASC").
@@ -381,7 +382,7 @@ func (r *PgRoleRepository) GetPermissions(ctx context.Context, roleID uuid.UUID)
 }
 
 func (r *PgRoleRepository) ListAllPermissions(ctx context.Context) ([]Permission, error) {
-	query, args, err := psql.Select("id", "role_id", "resource", "action").
+	query, args, err := storage.Psql.Select("id", "role_id", "resource", "action").
 		From("permissions").
 		OrderBy("resource ASC", "action ASC").
 		ToSql()
@@ -411,7 +412,7 @@ func (r *PgRoleRepository) AddPermissions(ctx context.Context, roleID uuid.UUID,
 		return nil
 	}
 
-	builder := psql.Insert("permissions").
+	builder := storage.Psql.Insert("permissions").
 		Columns("id", "role_id", "resource", "action")
 
 	for _, p := range perms {
@@ -439,7 +440,7 @@ func (r *PgRoleRepository) AddPermissions(ctx context.Context, roleID uuid.UUID,
 }
 
 func (r *PgRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid.UUID) error {
-	query, args, err := psql.Delete("permissions").
+	query, args, err := storage.Psql.Delete("permissions").
 		Where(sq.Eq{"role_id": roleID}).
 		ToSql()
 	if err != nil {
@@ -460,7 +461,7 @@ func (r *PgRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid
 // --- RoleDeviceGroupRepository methods ---
 
 func (r *PgRoleRepository) GetGroupIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
-	query, args, err := psql.Select("group_id").
+	query, args, err := storage.Psql.Select("group_id").
 		From("role_device_groups").
 		Where(sq.Eq{"role_id": roleID}).
 		ToSql()
@@ -493,7 +494,7 @@ func (r *PgRoleRepository) SetGroupIDs(ctx context.Context, roleID uuid.UUID, gr
 	defer tx.Rollback(ctx)
 
 	// Delete existing associations.
-	delQuery, delArgs, err := psql.Delete("role_device_groups").
+	delQuery, delArgs, err := storage.Psql.Delete("role_device_groups").
 		Where(sq.Eq{"role_id": roleID}).
 		ToSql()
 	if err != nil {
@@ -505,7 +506,7 @@ func (r *PgRoleRepository) SetGroupIDs(ctx context.Context, roleID uuid.UUID, gr
 
 	// Insert new associations.
 	if len(groupIDs) > 0 {
-		builder := psql.Insert("role_device_groups").
+		builder := storage.Psql.Insert("role_device_groups").
 			Columns("role_id", "group_id")
 		for _, gid := range groupIDs {
 			builder = builder.Values(roleID, gid)
@@ -553,7 +554,7 @@ func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID
 	}
 
 	// Fallback: SQL query
-	query, args, err := psql.Select("COUNT(*)").
+	query, args, err := storage.Psql.Select("COUNT(*)").
 		From("permissions p").
 		Join("user_roles ur ON ur.role_id = p.role_id").
 		Where(sq.And{
@@ -579,7 +580,7 @@ func (r *PgRoleRepository) GetUserRolesBatch(ctx context.Context, userIds []uuid
 		return make(map[uuid.UUID][]Role), nil
 	}
 
-	query, args, err := psql.Select("ur.user_id", "r.id", "r.name", "r.description", "r.is_system", "r.created_at", "r.updated_at").
+	query, args, err := storage.Psql.Select("ur.user_id", "r.id", "r.name", "r.description", "r.is_system", "r.created_at", "r.updated_at").
 		From("user_roles ur").
 		Join("roles r ON ur.role_id = r.id").
 		Where(sq.Eq{"ur.user_id": userIds}).

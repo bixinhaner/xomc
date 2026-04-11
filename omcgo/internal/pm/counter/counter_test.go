@@ -7,6 +7,7 @@ import (
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func Test_applyCounterFilters_NoFilters(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	filter := CounterFilter{}
 
 	result := applyCounterFilters(qb, filter)
@@ -28,7 +29,7 @@ func Test_applyCounterFilters_NoFilters(t *testing.T) {
 }
 
 func Test_applyCounterFilters_DeviceID(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	deviceID := uuid.New()
 	filter := CounterFilter{DeviceID: &deviceID}
 
@@ -41,7 +42,7 @@ func Test_applyCounterFilters_DeviceID(t *testing.T) {
 }
 
 func Test_applyCounterFilters_CellID(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	cellID := "cell-1"
 	filter := CounterFilter{CellID: &cellID}
 
@@ -54,7 +55,7 @@ func Test_applyCounterFilters_CellID(t *testing.T) {
 }
 
 func Test_applyCounterFilters_CounterGroup(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	group := "LTE.CellMeasReport"
 	filter := CounterFilter{CounterGroup: &group}
 
@@ -67,7 +68,7 @@ func Test_applyCounterFilters_CounterGroup(t *testing.T) {
 }
 
 func Test_applyCounterFilters_CounterName(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	name := "PRB.UlAvailProcMeas"
 	filter := CounterFilter{CounterName: &name}
 
@@ -80,7 +81,7 @@ func Test_applyCounterFilters_CounterName(t *testing.T) {
 }
 
 func Test_applyCounterFilters_TimeRange(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	start := time.Date(2026, 3, 22, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 3, 22, 23, 59, 59, 0, time.UTC)
 	filter := CounterFilter{
@@ -99,7 +100,7 @@ func Test_applyCounterFilters_TimeRange(t *testing.T) {
 }
 
 func Test_applyCounterFilters_AllFilters(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	deviceID := uuid.New()
 	cellID := "cell-1"
 	group := "LTE.CellMeasReport"
@@ -130,7 +131,7 @@ func Test_applyCounterFilters_AllFilters(t *testing.T) {
 }
 
 func Test_applyCounterFilters_ZeroTimeIgnored(t *testing.T) {
-	qb := psql.Select("*").From("pm_counters")
+	qb := storage.Psql.Select("*").From("pm_counters")
 	filter := CounterFilter{
 		StartTime: time.Time{}, // zero value
 		EndTime:   time.Time{}, // zero value
@@ -237,7 +238,7 @@ func Test_AggregatedCounter_Struct(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func Test_psql_DollarPlaceholder(t *testing.T) {
-	sql, args, err := psql.Select("counter_name").
+	sql, args, err := storage.Psql.Select("counter_name").
 		From("pm_counters").
 		Where(squirrel.Eq{"device_id": "test-id"}).
 		ToSql()

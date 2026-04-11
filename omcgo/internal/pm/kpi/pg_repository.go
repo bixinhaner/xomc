@@ -9,9 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
 // PgKPIRepository implements KPIRepository using TimescaleDB.
 type PgKPIRepository struct {
@@ -40,8 +39,8 @@ func (r *PgKPIRepository) BatchInsert(ctx context.Context, values []model.KPIVal
 }
 
 func (r *PgKPIRepository) Query(ctx context.Context, filter KPIFilter) (*model.ListResponse[model.KPIValue], error) {
-	qb := psql.Select("time", "device_id", "cell_id", "kpi_name", "kpi_value", "carrier", "technology").From("kpi_values")
-	countQb := psql.Select("COUNT(*)").From("kpi_values")
+	qb := storage.Psql.Select("time", "device_id", "cell_id", "kpi_name", "kpi_value", "carrier", "technology").From("kpi_values")
+	countQb := storage.Psql.Select("COUNT(*)").From("kpi_values")
 
 	if filter.DeviceID != nil {
 		qb = qb.Where(squirrel.Eq{"device_id": *filter.DeviceID})
@@ -104,7 +103,7 @@ func (r *PgKPIRepository) Query(ctx context.Context, filter KPIFilter) (*model.L
 }
 
 func (r *PgKPIRepository) ListDefinitions(ctx context.Context, carrier *model.CarrierCode, tech *model.Technology) ([]model.KPIDefinition, error) {
-	qb := psql.Select("name", "display_name", "formula", "unit", "category", "carrier", "technology", "counters").
+	qb := storage.Psql.Select("name", "display_name", "formula", "unit", "category", "carrier", "technology", "counters").
 		From("kpi_definitions")
 	if carrier != nil {
 		qb = qb.Where(squirrel.Or{squirrel.Eq{"carrier": *carrier}, squirrel.Eq{"carrier": nil}})

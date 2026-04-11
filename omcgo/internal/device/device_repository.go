@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // ===== 接口定义 =====
@@ -152,8 +153,6 @@ type DeviceRepository interface {
 
 // ===== PostgreSQL 实现 =====
 
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
-
 // allowedSortColumns prevents SQL injection in ORDER BY clauses.
 var allowedSortColumns = map[string]bool{
 	"created_at":     true,
@@ -205,7 +204,7 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 		udpAddr = device.UDPConnectionRequestAddress
 	}
 
-	query, args, err := psql.Insert("devices").
+	query, args, err := storage.Psql.Insert("devices").
 		Columns("id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
 			"carrier", "technology", "status", "firmware_version", "ip_address",
 			"connection_request_url", "nat_detected", "udp_connection_request_address",
@@ -232,7 +231,7 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 }
 
 func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error) {
-	query, args, err := psql.Select(deviceColumns()...).
+	query, args, err := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
 		Where(sq.Eq{"d.id": id}).
 		Where(notDeleted).
@@ -244,7 +243,7 @@ func (r *PgDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 }
 
 func (r *PgDeviceRepository) GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error) {
-	query, args, err := psql.Select(deviceColumns()...).
+	query, args, err := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
 		Where(sq.Eq{"d.serial_number": sn}).
 		Where(notDeleted).
@@ -276,7 +275,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		udpAddr = device.UDPConnectionRequestAddress
 	}
 
-	query, args, err := psql.Update("devices").
+	query, args, err := storage.Psql.Update("devices").
 		Set("oui", device.OUI).
 		Set("product_class", device.ProductClass).
 		Set("manufacturer", device.Manufacturer).
@@ -308,7 +307,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 }
 
 func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, _ := psql.Update("devices").
+	query, args, _ := storage.Psql.Update("devices").
 		Set("deleted_at", time.Now()).
 		Where(sq.Eq{"id": id}).
 		Where(notDeleted).
@@ -370,8 +369,8 @@ func (r *PgDeviceRepository) BatchDelete(ctx context.Context, ids []uuid.UUID, d
 }
 
 func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error) {
-	builder := psql.Select(deviceColumns()...).From("devices d").Where(notDeleted)
-	countBuilder := psql.Select("COUNT(*)").From("devices d").Where(notDeleted)
+	builder := storage.Psql.Select(deviceColumns()...).From("devices d").Where(notDeleted)
+	countBuilder := storage.Psql.Select("COUNT(*)").From("devices d").Where(notDeleted)
 
 	// GroupID filter - requires JOIN with device_group_members
 	if filter.GroupID != nil {
@@ -483,7 +482,7 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 }
 
 func (r *PgDeviceRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error {
-	query, args, _ := psql.Update("devices").
+	query, args, _ := storage.Psql.Update("devices").
 		Set("status", status).
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -499,7 +498,7 @@ func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at
 	if err != nil {
 		return fmt.Errorf("marshal last_inform_events: %w", err)
 	}
-	query, args, err := psql.Update("devices").
+	query, args, err := storage.Psql.Update("devices").
 		Set("last_inform_at", at).
 		Set("last_inform_events", eventsData).
 		Where(sq.Eq{"serial_number": sn}).
@@ -512,7 +511,7 @@ func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at
 }
 
 func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
-	builder := psql.Select("d.status", "COUNT(*)").From("devices d").Where(notDeleted).GroupBy("d.status")
+	builder := storage.Psql.Select("d.status", "COUNT(*)").From("devices d").Where(notDeleted).GroupBy("d.status")
 	if carrier != nil {
 		builder = builder.Where(sq.Eq{"d.carrier": *carrier})
 	}
@@ -537,7 +536,7 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 }
 
 func (r *PgDeviceRepository) ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error) {
-	builder := psql.Select(deviceColumns()...).From("devices d").
+	builder := storage.Psql.Select(deviceColumns()...).From("devices d").
 		Where(sq.Eq{"d.status": model.DeviceActive}).
 		Where(notDeleted).
 		OrderBy("d.last_inform_at ASC NULLS FIRST", "d.id ASC").
@@ -737,7 +736,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 // ListGeo returns devices with geographic coordinates for map display.
 func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	// Build base query with device group join
-	builder := psql.Select(
+	builder := storage.Psql.Select(
 		"d.id", "d.serial_number", "d.serial_number as name", "d.status",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
@@ -762,7 +761,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	}
 
 	// Get total count with a separate query
-	countBuilder := psql.Select("COUNT(DISTINCT d.id)").
+	countBuilder := storage.Psql.Select("COUNT(DISTINCT d.id)").
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -858,7 +857,7 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string)
 	// Query 1: Get status counts
 	// Use COUNT(DISTINCT d.id) to avoid counting devices multiple times
 	// when they belong to multiple groups due to LEFT JOIN
-	statusBuilder := psql.Select("d.status", "COUNT(DISTINCT d.id) as cnt").
+	statusBuilder := storage.Psql.Select("d.status", "COUNT(DISTINCT d.id) as cnt").
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
@@ -891,7 +890,7 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string)
 	}
 
 	// Query 2: Calculate center point (average latitude and longitude)
-	centerBuilder := psql.Select(
+	centerBuilder := storage.Psql.Select(
 		"AVG(d.latitude) as avg_lat",
 		"AVG(d.longitude) as avg_lng",
 	).
@@ -930,7 +929,7 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		limit = 20
 	}
 
-	builder := psql.Select(
+	builder := storage.Psql.Select(
 		"d.id", "d.serial_number", "d.serial_number as name", "d.status",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
@@ -1073,13 +1072,13 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 // ListRecycleBin returns soft-deleted devices with filtering.
 func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error) {
 	// Build base query for deleted devices with group info
-	builder := psql.Select(recycleBinColumns()...).
+	builder := storage.Psql.Select(recycleBinColumns()...).
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.NotEq{"d.deleted_at": nil})
 
-	countBuilder := psql.Select("COUNT(*)").
+	countBuilder := storage.Psql.Select("COUNT(*)").
 		From("devices d").
 		Where(sq.NotEq{"d.deleted_at": nil})
 
@@ -1258,7 +1257,7 @@ func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUI
 // FindStaleDevices finds active devices that haven't sent Inform within the threshold.
 // Used by OfflineDetector to mark devices as offline.
 func (r *PgDeviceRepository) FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
-	builder := psql.Select(deviceColumns()...).
+	builder := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
 		Where(sq.Eq{"d.status": model.DeviceActive}).
 		Where(sq.Lt{"d.last_inform_at": threshold}).

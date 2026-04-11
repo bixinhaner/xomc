@@ -11,9 +11,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ---- column lists ----
 
@@ -45,7 +44,7 @@ func NewPgSessionRepository(pool *pgxpool.Pool) *PgSessionRepository {
 }
 
 func (r *PgSessionRepository) Create(ctx context.Context, session *Session) error {
-	query, args, err := psql.Insert("nedirect_sessions").
+	query, args, err := storage.Psql.Insert("nedirect_sessions").
 		Columns("device_id", "device_sn", "user_id", "username",
 			"status", "ip_address", "connected_at", "last_active_at").
 		Values(session.DeviceID, session.DeviceSN, session.UserID, session.Username,
@@ -66,7 +65,7 @@ func (r *PgSessionRepository) Create(ctx context.Context, session *Session) erro
 }
 
 func (r *PgSessionRepository) GetByID(ctx context.Context, id uuid.UUID) (*Session, error) {
-	query, args, err := psql.Select(sessionColumns...).
+	query, args, err := storage.Psql.Select(sessionColumns...).
 		From("nedirect_sessions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -85,7 +84,7 @@ func (r *PgSessionRepository) GetByID(ctx context.Context, id uuid.UUID) (*Sessi
 }
 
 func (r *PgSessionRepository) GetActiveByDeviceAndUser(ctx context.Context, deviceSN, userID string) (*Session, error) {
-	query, args, err := psql.Select(sessionColumns...).
+	query, args, err := storage.Psql.Select(sessionColumns...).
 		From("nedirect_sessions").
 		Where(sq.Eq{
 			"device_sn": deviceSN,
@@ -108,7 +107,7 @@ func (r *PgSessionRepository) GetActiveByDeviceAndUser(ctx context.Context, devi
 }
 
 func (r *PgSessionRepository) Update(ctx context.Context, session *Session) error {
-	query, args, err := psql.Update("nedirect_sessions").
+	query, args, err := storage.Psql.Update("nedirect_sessions").
 		Set("status", session.Status).
 		Set("last_active_at", session.LastActiveAt).
 		Set("disconnect_at", session.DisconnectAt).
@@ -129,8 +128,8 @@ func (r *PgSessionRepository) Update(ctx context.Context, session *Session) erro
 }
 
 func (r *PgSessionRepository) List(ctx context.Context, filter SessionFilter) (*model.ListResponse[Session], error) {
-	base := psql.Select(sessionColumns...).From("nedirect_sessions")
-	countBase := psql.Select("COUNT(*)").From("nedirect_sessions")
+	base := storage.Psql.Select(sessionColumns...).From("nedirect_sessions")
+	countBase := storage.Psql.Select("COUNT(*)").From("nedirect_sessions")
 
 	if filter.DeviceSN != nil {
 		base = base.Where(sq.Eq{"device_sn": *filter.DeviceSN})
@@ -196,7 +195,7 @@ func (r *PgSessionRepository) List(ctx context.Context, filter SessionFilter) (*
 }
 
 func (r *PgSessionRepository) ListActiveByDevice(ctx context.Context, deviceSN string) ([]Session, error) {
-	query, args, err := psql.Select(sessionColumns...).
+	query, args, err := storage.Psql.Select(sessionColumns...).
 		From("nedirect_sessions").
 		Where(sq.Eq{"device_sn": deviceSN, "status": SessionActive}).
 		OrderBy("connected_at DESC").
@@ -226,7 +225,7 @@ func (r *PgSessionRepository) ListActiveByDevice(ctx context.Context, deviceSN s
 }
 
 func (r *PgSessionRepository) CloseExpiredSessions(ctx context.Context, timeoutMinutes int) (int64, error) {
-	query, args, err := psql.Update("nedirect_sessions").
+	query, args, err := storage.Psql.Update("nedirect_sessions").
 		Set("status", SessionTimedOut).
 		Set("disconnect_at", sq.Expr("NOW()")).
 		Where(sq.Eq{"status": SessionActive}).
@@ -288,7 +287,7 @@ func NewPgCommandRepository(pool *pgxpool.Pool) *PgCommandRepository {
 }
 
 func (r *PgCommandRepository) Create(ctx context.Context, cmd *Command) error {
-	query, args, err := psql.Insert("nedirect_commands").
+	query, args, err := storage.Psql.Insert("nedirect_commands").
 		Columns("session_id", "device_sn", "command", "status", "sent_at").
 		Values(cmd.SessionID, cmd.DeviceSN, cmd.CommandStr, cmd.Status, cmd.SentAt).
 		Suffix("RETURNING " + joinColumns(commandColumns)).
@@ -307,7 +306,7 @@ func (r *PgCommandRepository) Create(ctx context.Context, cmd *Command) error {
 }
 
 func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*Command, error) {
-	query, args, err := psql.Select(commandColumns...).
+	query, args, err := storage.Psql.Select(commandColumns...).
 		From("nedirect_commands").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -326,7 +325,7 @@ func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*Comma
 }
 
 func (r *PgCommandRepository) Update(ctx context.Context, cmd *Command) error {
-	query, args, err := psql.Update("nedirect_commands").
+	query, args, err := storage.Psql.Update("nedirect_commands").
 		Set("status", cmd.Status).
 		Set("response", cmd.Response).
 		Set("error_msg", cmd.ErrorMsg).
@@ -348,8 +347,8 @@ func (r *PgCommandRepository) Update(ctx context.Context, cmd *Command) error {
 }
 
 func (r *PgCommandRepository) List(ctx context.Context, filter CommandFilter) (*model.ListResponse[Command], error) {
-	base := psql.Select(commandColumns...).From("nedirect_commands")
-	countBase := psql.Select("COUNT(*)").From("nedirect_commands")
+	base := storage.Psql.Select(commandColumns...).From("nedirect_commands")
+	countBase := storage.Psql.Select("COUNT(*)").From("nedirect_commands")
 
 	if filter.SessionID != nil {
 		base = base.Where(sq.Eq{"session_id": *filter.SessionID})

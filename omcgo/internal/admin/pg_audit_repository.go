@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // PgAuditRepository implements AuditRepository using PostgreSQL.
@@ -30,7 +31,7 @@ func (r *PgAuditRepository) Create(ctx context.Context, log *AuditLog) error {
 		log.ID = uuid.New()
 	}
 
-	query, args, err := psql.Insert("audit_logs").
+	query, args, err := storage.Psql.Insert("audit_logs").
 		Columns("id", "user_id", "username", "action", "resource", "resource_id", "details", "ip_address", "user_agent").
 		Values(
 			log.ID, log.UserID, log.Username, log.Action,
@@ -50,9 +51,9 @@ func (r *PgAuditRepository) Create(ctx context.Context, log *AuditLog) error {
 }
 
 func (r *PgAuditRepository) List(ctx context.Context, filter AuditLogFilter) (*model.ListResponse[AuditLog], error) {
-	base := psql.Select("id", "user_id", "username", "action", "resource", "resource_id", "details", "ip_address::text", "user_agent", "created_at").
+	base := storage.Psql.Select("id", "user_id", "username", "action", "resource", "resource_id", "details", "ip_address::text", "user_agent", "created_at").
 		From("audit_logs")
-	countBase := psql.Select("COUNT(*)").From("audit_logs")
+	countBase := storage.Psql.Select("COUNT(*)").From("audit_logs")
 
 	if filter.UserID != nil {
 		base = base.Where(sq.Eq{"user_id": *filter.UserID})

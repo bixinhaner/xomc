@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // PgPMFileStore implements PMFileStore using PostgreSQL.
@@ -63,10 +64,10 @@ func (s *PgPMFileStore) GetFileByID(ctx context.Context, id uuid.UUID) (*PMFileI
 }
 
 func (s *PgPMFileStore) ListFiles(ctx context.Context, filter PMFileFilter) (*model.ListResponse[PMFileInfo], error) {
-	qb := psql.Select("id", "device_id", "device_sn", "carrier", "technology", "file_name",
+	qb := storage.Psql.Select("id", "device_id", "device_sn", "carrier", "technology", "file_name",
 		"file_size", "collect_time", "minio_path", "parsed", "parsed_at", "counter_count", "created_at").
 		From("pm_files")
-	countQb := psql.Select("COUNT(*)").From("pm_files")
+	countQb := storage.Psql.Select("COUNT(*)").From("pm_files")
 
 	if filter.DeviceID != nil {
 		qb = qb.Where(sq.Eq{"device_id": *filter.DeviceID})

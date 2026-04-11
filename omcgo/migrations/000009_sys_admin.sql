@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000009_sys_admin.up.sql
 -- Menus, role_menus, sys_dictionaries, sys_dictionary_details,
@@ -311,3 +312,13 @@ INSERT INTO sys_configs (category, key, value, value_type, description, is_publi
 ('system', 'max_login_attempts', '5', 'int', '最大登录尝试次数', FALSE),
 ('system', 'lockout_duration', '30', 'int', '锁定时长（分钟）', FALSE),
 ('system', 'password_min_length', '6', 'int', '密码最小长度', FALSE);
+
+-- +goose Down
+DROP TABLE IF EXISTS sys_task_logs CASCADE;
+DROP TABLE IF EXISTS sys_oper_logs CASCADE;
+DROP TABLE IF EXISTS sys_login_logs CASCADE;
+DROP TABLE IF EXISTS sys_configs CASCADE;
+DROP TABLE IF EXISTS sys_dictionary_details CASCADE;
+DROP TABLE IF EXISTS sys_dictionaries CASCADE;
+DROP TABLE IF EXISTS role_menus CASCADE;
+DROP TABLE IF EXISTS menus CASCADE;

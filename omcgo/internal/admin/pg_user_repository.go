@@ -13,9 +13,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var userColumns = []string{
 	"id", "username", "password_hash", "display_name", "email",
@@ -43,7 +42,7 @@ func (r *PgUserRepository) Create(ctx context.Context, user *User) error {
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
-	query, args, err := psql.Insert("users").
+	query, args, err := storage.Psql.Insert("users").
 		Columns(userColumns...).
 		Values(
 			user.ID, user.Username, user.PasswordHash, user.DisplayName,
@@ -65,7 +64,7 @@ func (r *PgUserRepository) Create(ctx context.Context, user *User) error {
 }
 
 func (r *PgUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
-	query, args, err := psql.Select(userColumns...).
+	query, args, err := storage.Psql.Select(userColumns...).
 		From("users").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -81,7 +80,7 @@ func (r *PgUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*User, er
 }
 
 func (r *PgUserRepository) GetByUsername(ctx context.Context, username string) (*User, error) {
-	query, args, err := psql.Select(userColumns...).
+	query, args, err := storage.Psql.Select(userColumns...).
 		From("users").
 		Where(sq.Eq{"username": username}).
 		ToSql()
@@ -99,7 +98,7 @@ func (r *PgUserRepository) GetByUsername(ctx context.Context, username string) (
 func (r *PgUserRepository) Update(ctx context.Context, user *User) error {
 	user.UpdatedAt = time.Now()
 
-	query, args, err := psql.Update("users").
+	query, args, err := storage.Psql.Update("users").
 		Set("display_name", user.DisplayName).
 		Set("email", nullableString(user.Email)).
 		Set("carrier", nullableCarrier(user.Carrier)).
@@ -122,7 +121,7 @@ func (r *PgUserRepository) Update(ctx context.Context, user *User) error {
 }
 
 func (r *PgUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
-	query, args, err := psql.Update("users").
+	query, args, err := storage.Psql.Update("users").
 		Set("password_hash", passwordHash).
 		Set("updated_at", time.Now()).
 		Where(sq.Eq{"id": id}).
@@ -142,7 +141,7 @@ func (r *PgUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, pas
 }
 
 func (r *PgUserRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("users").
+	query, args, err := storage.Psql.Delete("users").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -160,8 +159,8 @@ func (r *PgUserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgUserRepository) List(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error) {
-	base := psql.Select(userColumns...).From("users")
-	countBase := psql.Select("COUNT(*)").From("users")
+	base := storage.Psql.Select(userColumns...).From("users")
+	countBase := storage.Psql.Select("COUNT(*)").From("users")
 
 	if filter.Carrier != nil {
 		base = base.Where(sq.Eq{"carrier": *filter.Carrier})
@@ -249,7 +248,7 @@ func (r *PgUserRepository) List(ctx context.Context, filter UserFilter) (*model.
 }
 
 func (r *PgUserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Update("users").
+	query, args, err := storage.Psql.Update("users").
 		Set("last_login_at", time.Now()).
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -312,7 +311,7 @@ func scanUserFromRows(rows pgx.Rows) (*User, error) {
 // UpdateLoginSecurity updates the failed login attempt counter and lock fields.
 func (r *PgUserRepository) UpdateLoginSecurity(ctx context.Context, id uuid.UUID, failedAttempts int, lockedUntil *time.Time) error {
 	now := time.Now()
-	query, args, err := psql.Update("users").
+	query, args, err := storage.Psql.Update("users").
 		Set("failed_login_attempts", failedAttempts).
 		Set("locked_until", nullableTime(lockedUntil)).
 		Set("last_failed_login_at", now).
@@ -331,7 +330,7 @@ func (r *PgUserRepository) UpdateLoginSecurity(ctx context.Context, id uuid.UUID
 
 // ResetLoginSecurity clears failed login attempts and lock on successful login.
 func (r *PgUserRepository) ResetLoginSecurity(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Update("users").
+	query, args, err := storage.Psql.Update("users").
 		Set("failed_login_attempts", 0).
 		Set("locked_until", nil).
 		Set("updated_at", time.Now()).

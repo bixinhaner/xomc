@@ -13,6 +13,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // ======================================================================
@@ -60,7 +61,7 @@ func (r *PgSiteRepository) Create(ctx context.Context, site *Site) error {
 		site.Status = SiteActive
 	}
 
-	query, args, err := psql.Insert("sites").
+	query, args, err := storage.Psql.Insert("sites").
 		Columns("id", "name", "domain_id", "address", "longitude", "latitude",
 			"device_count", "status", "created_at", "updated_at").
 		Values(
@@ -82,7 +83,7 @@ func (r *PgSiteRepository) Create(ctx context.Context, site *Site) error {
 }
 
 func (r *PgSiteRepository) GetByID(ctx context.Context, id uuid.UUID) (*Site, error) {
-	query, args, err := psql.Select(siteColumns...).
+	query, args, err := storage.Psql.Select(siteColumns...).
 		From("sites").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -101,8 +102,8 @@ func (r *PgSiteRepository) GetByID(ctx context.Context, id uuid.UUID) (*Site, er
 }
 
 func (r *PgSiteRepository) List(ctx context.Context, filter SiteFilter) (*model.ListResponse[Site], error) {
-	base := psql.Select(siteColumns...).From("sites")
-	countBase := psql.Select("COUNT(*)").From("sites")
+	base := storage.Psql.Select(siteColumns...).From("sites")
+	countBase := storage.Psql.Select("COUNT(*)").From("sites")
 
 	if filter.DomainID != nil {
 		base = base.Where(sq.Eq{"domain_id": *filter.DomainID})
@@ -165,7 +166,7 @@ func (r *PgSiteRepository) List(ctx context.Context, filter SiteFilter) (*model.
 }
 
 func (r *PgSiteRepository) ListWithCoordinates(ctx context.Context) ([]Site, error) {
-	query, args, err := psql.Select(siteColumns...).
+	query, args, err := storage.Psql.Select(siteColumns...).
 		From("sites").
 		Where("longitude IS NOT NULL AND latitude IS NOT NULL").
 		OrderBy("name ASC").
@@ -285,8 +286,8 @@ func NewPgTopoNodeRepository(pool *pgxpool.Pool) *PgTopoNodeRepository {
 }
 
 func (r *PgTopoNodeRepository) List(ctx context.Context, filter TopoNodeFilter) (*model.ListResponse[TopoNode], error) {
-	base := psql.Select(topoNodeColumns...).From("topo_nodes")
-	countBase := psql.Select("COUNT(*)").From("topo_nodes")
+	base := storage.Psql.Select(topoNodeColumns...).From("topo_nodes")
+	countBase := storage.Psql.Select("COUNT(*)").From("topo_nodes")
 
 	if filter.DomainID != nil {
 		base = base.Where(sq.Eq{"domain_id": *filter.DomainID})
@@ -349,7 +350,7 @@ func (r *PgTopoNodeRepository) List(ctx context.Context, filter TopoNodeFilter) 
 }
 
 func (r *PgTopoNodeRepository) ListAll(ctx context.Context, domainID *uuid.UUID) ([]TopoNode, error) {
-	base := psql.Select(topoNodeColumns...).From("topo_nodes")
+	base := storage.Psql.Select(topoNodeColumns...).From("topo_nodes")
 	if domainID != nil {
 		base = base.Where(sq.Eq{"domain_id": *domainID})
 	}
@@ -431,8 +432,8 @@ func NewPgTopoEdgeRepository(pool *pgxpool.Pool) *PgTopoEdgeRepository {
 }
 
 func (r *PgTopoEdgeRepository) List(ctx context.Context, filter TopoEdgeFilter) (*model.ListResponse[TopoEdge], error) {
-	base := psql.Select(topoEdgeColumns...).From("topo_edges")
-	countBase := psql.Select("COUNT(*)").From("topo_edges")
+	base := storage.Psql.Select(topoEdgeColumns...).From("topo_edges")
+	countBase := storage.Psql.Select("COUNT(*)").From("topo_edges")
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
@@ -486,7 +487,7 @@ func (r *PgTopoEdgeRepository) List(ctx context.Context, filter TopoEdgeFilter) 
 }
 
 func (r *PgTopoEdgeRepository) ListAll(ctx context.Context) ([]TopoEdge, error) {
-	query, args, err := psql.Select(topoEdgeColumns...).
+	query, args, err := storage.Psql.Select(topoEdgeColumns...).
 		From("topo_edges").
 		OrderBy("created_at DESC").
 		ToSql()

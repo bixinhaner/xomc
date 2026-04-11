@@ -9,6 +9,8 @@ import (
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // ParameterDiscoveryLogRepository defines the persistence interface for discovery logs.
@@ -23,19 +25,17 @@ type ParameterDiscoveryLogRepository interface {
 // PgParameterDiscoveryLogRepository implements ParameterDiscoveryLogRepository using PostgreSQL.
 type PgParameterDiscoveryLogRepository struct {
 	pool *pgxpool.Pool
-	sq   squirrel.StatementBuilderType
 }
 
 // NewPgParameterDiscoveryLogRepository creates a new PostgreSQL-backed discovery log repository.
 func NewPgParameterDiscoveryLogRepository(pool *pgxpool.Pool) *PgParameterDiscoveryLogRepository {
 	return &PgParameterDiscoveryLogRepository{
 		pool: pool,
-		sq:   squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar),
 	}
 }
 
 func (r *PgParameterDiscoveryLogRepository) Create(ctx context.Context, log *ParameterDiscoveryLog) error {
-	query, args, err := r.sq.Insert("parameter_discovery_log").
+	query, args, err := storage.Psql.Insert("parameter_discovery_log").
 		Columns("id", "device_id", "device_sn", "oui", "product_class", "firmware_version",
 			"parameter_count", "data_model_id", "status", "error_message").
 		Values(log.ID, log.DeviceID, log.DeviceSN, log.OUI, log.ProductClass, log.FirmwareVersion,
@@ -51,7 +51,7 @@ func (r *PgParameterDiscoveryLogRepository) Create(ctx context.Context, log *Par
 }
 
 func (r *PgParameterDiscoveryLogRepository) Update(ctx context.Context, log *ParameterDiscoveryLog) error {
-	query, args, err := r.sq.Update("parameter_discovery_log").
+	query, args, err := storage.Psql.Update("parameter_discovery_log").
 		Set("parameter_count", log.ParameterCount).
 		Set("data_model_id", log.DataModelID).
 		Set("status", log.Status).
@@ -69,7 +69,7 @@ func (r *PgParameterDiscoveryLogRepository) Update(ctx context.Context, log *Par
 }
 
 func (r *PgParameterDiscoveryLogRepository) GetByID(ctx context.Context, id uuid.UUID) (*ParameterDiscoveryLog, error) {
-	query, args, err := r.sq.Select(
+	query, args, err := storage.Psql.Select(
 		"id", "device_id", "device_sn", "oui", "product_class", "firmware_version",
 		"parameter_count", "data_model_id", "status", "error_message", "created_at", "updated_at",
 	).From("parameter_discovery_log").
@@ -82,7 +82,7 @@ func (r *PgParameterDiscoveryLogRepository) GetByID(ctx context.Context, id uuid
 }
 
 func (r *PgParameterDiscoveryLogRepository) GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*ParameterDiscoveryLog, error) {
-	query, args, err := r.sq.Select(
+	query, args, err := storage.Psql.Select(
 		"id", "device_id", "device_sn", "oui", "product_class", "firmware_version",
 		"parameter_count", "data_model_id", "status", "error_message", "created_at", "updated_at",
 	).From("parameter_discovery_log").
@@ -97,7 +97,7 @@ func (r *PgParameterDiscoveryLogRepository) GetByDeviceID(ctx context.Context, d
 }
 
 func (r *PgParameterDiscoveryLogRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status DiscoveryStatus, errMsg string) error {
-	query, args, err := r.sq.Update("parameter_discovery_log").
+	query, args, err := storage.Psql.Update("parameter_discovery_log").
 		Set("status", status).
 		Set("error_message", errMsg).
 		Set("updated_at", time.Now()).

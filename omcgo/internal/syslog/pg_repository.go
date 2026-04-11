@@ -9,9 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var systemLogColumns = []string{
 	"id", "level", "source", "message", "details", "created_at",
@@ -34,8 +33,8 @@ func NewPgSyslogRepository(pool *pgxpool.Pool) *PgSyslogRepository {
 }
 
 func (r *PgSyslogRepository) ListSystemLogs(ctx context.Context, filter SystemLogFilter) (*model.ListResponse[SystemLog], error) {
-	builder := psql.Select(systemLogColumns...).From("system_logs")
-	countBuilder := psql.Select("COUNT(*)").From("system_logs")
+	builder := storage.Psql.Select(systemLogColumns...).From("system_logs")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("system_logs")
 
 	builder = applySystemLogFilters(builder, filter)
 	countBuilder = applySystemLogFilters(countBuilder, filter)
@@ -89,8 +88,8 @@ func (r *PgSyslogRepository) ListSystemLogs(ctx context.Context, filter SystemLo
 }
 
 func (r *PgSyslogRepository) ListNEMessageLogs(ctx context.Context, filter NEMessageLogFilter) (*model.ListResponse[NEMessageLog], error) {
-	builder := psql.Select(neMessageLogColumns...).From("ne_message_logs")
-	countBuilder := psql.Select("COUNT(*)").From("ne_message_logs")
+	builder := storage.Psql.Select(neMessageLogColumns...).From("ne_message_logs")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("ne_message_logs")
 
 	builder = applyNEMessageLogFilters(builder, filter)
 	countBuilder = applyNEMessageLogFilters(countBuilder, filter)

@@ -12,9 +12,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ---- column lists ----
 
@@ -48,7 +47,7 @@ func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 func (r *PgTaskRepository) Create(ctx context.Context, task *BackupTask) error {
 	targetIDsJSON, _ := json.Marshal(task.TargetIDs)
 
-	query, args, err := psql.Insert("backup_tasks").
+	query, args, err := storage.Psql.Insert("backup_tasks").
 		Columns("task_type", "target_type", "target_ids", "status", "progress",
 			"file_path", "error_message", "started_at", "completed_at").
 		Values(task.TaskType, task.TargetType, targetIDsJSON, task.Status, task.Progress,
@@ -69,7 +68,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *BackupTask) error {
 }
 
 func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*BackupTask, error) {
-	query, args, err := psql.Select(taskColumns...).
+	query, args, err := storage.Psql.Select(taskColumns...).
 		From("backup_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -90,7 +89,7 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*BackupTa
 func (r *PgTaskRepository) Update(ctx context.Context, task *BackupTask) error {
 	targetIDsJSON, _ := json.Marshal(task.TargetIDs)
 
-	query, args, err := psql.Update("backup_tasks").
+	query, args, err := storage.Psql.Update("backup_tasks").
 		Set("task_type", task.TaskType).
 		Set("target_type", task.TargetType).
 		Set("target_ids", targetIDsJSON).
@@ -117,7 +116,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *BackupTask) error {
 }
 
 func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("backup_tasks").
+	query, args, err := storage.Psql.Delete("backup_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -135,8 +134,8 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[BackupTask], error) {
-	base := psql.Select(taskColumns...).From("backup_tasks")
-	countBase := psql.Select("COUNT(*)").From("backup_tasks")
+	base := storage.Psql.Select(taskColumns...).From("backup_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").From("backup_tasks")
 
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})
@@ -261,7 +260,7 @@ func NewPgScheduleRepository(pool *pgxpool.Pool) *PgScheduleRepository {
 func (r *PgScheduleRepository) Create(ctx context.Context, schedule *BackupSchedule) error {
 	targetIDsJSON, _ := json.Marshal(schedule.TargetIDs)
 
-	query, args, err := psql.Insert("backup_schedules").
+	query, args, err := storage.Psql.Insert("backup_schedules").
 		Columns("name", "cron_expr", "enabled", "task_type",
 			"target_type", "target_ids").
 		Values(schedule.Name, schedule.CronExpr, schedule.Enabled, schedule.TaskType,
@@ -282,7 +281,7 @@ func (r *PgScheduleRepository) Create(ctx context.Context, schedule *BackupSched
 }
 
 func (r *PgScheduleRepository) GetByID(ctx context.Context, id uuid.UUID) (*BackupSchedule, error) {
-	query, args, err := psql.Select(scheduleColumns...).
+	query, args, err := storage.Psql.Select(scheduleColumns...).
 		From("backup_schedules").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -303,7 +302,7 @@ func (r *PgScheduleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Back
 func (r *PgScheduleRepository) Update(ctx context.Context, schedule *BackupSchedule) error {
 	targetIDsJSON, _ := json.Marshal(schedule.TargetIDs)
 
-	query, args, err := psql.Update("backup_schedules").
+	query, args, err := storage.Psql.Update("backup_schedules").
 		Set("name", schedule.Name).
 		Set("cron_expr", schedule.CronExpr).
 		Set("enabled", schedule.Enabled).
@@ -327,7 +326,7 @@ func (r *PgScheduleRepository) Update(ctx context.Context, schedule *BackupSched
 }
 
 func (r *PgScheduleRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("backup_schedules").
+	query, args, err := storage.Psql.Delete("backup_schedules").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -345,8 +344,8 @@ func (r *PgScheduleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgScheduleRepository) List(ctx context.Context, filter ScheduleFilter) (*model.ListResponse[BackupSchedule], error) {
-	base := psql.Select(scheduleColumns...).From("backup_schedules")
-	countBase := psql.Select("COUNT(*)").From("backup_schedules")
+	base := storage.Psql.Select(scheduleColumns...).From("backup_schedules")
+	countBase := storage.Psql.Select("COUNT(*)").From("backup_schedules")
 
 	if filter.Enabled != nil {
 		base = base.Where(sq.Eq{"enabled": *filter.Enabled})

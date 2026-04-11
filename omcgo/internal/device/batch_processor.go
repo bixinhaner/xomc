@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -328,7 +329,7 @@ func (p *BatchInformProcessor) batchUpsertParams(ctx context.Context, updates []
 		}
 		now := time.Now()
 		for _, param := range u.params {
-			query, args, err := psql.Insert("device_parameters").
+			query, args, err := storage.Psql.Insert("device_parameters").
 				Columns("device_id", "parameter_path", "parameter_value", "parameter_type", "writable", "last_updated_at").
 				Values(u.device.ID, param.ParameterPath, param.ParameterValue, param.ParameterType, param.Writable, now).
 				Suffix("ON CONFLICT (device_id, parameter_path) DO UPDATE SET parameter_value = EXCLUDED.parameter_value, parameter_type = EXCLUDED.parameter_type, writable = EXCLUDED.writable, last_updated_at = EXCLUDED.last_updated_at").

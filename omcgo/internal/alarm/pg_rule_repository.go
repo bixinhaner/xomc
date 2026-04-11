@@ -13,9 +13,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-// psql is defined in pg_store.go — reused here.
 
 var ruleColumns = []string{
 	"id", "name", "description", "alarm_code", "severity",
@@ -46,7 +45,7 @@ func (r *PgAlarmRuleRepository) Create(ctx context.Context, rule *AlarmRule) err
 	condCfg := ensureJSON(rule.ConditionConfig)
 	actCfg := ensureJSON(rule.ActionConfig)
 
-	query, args, err := psql.Insert("alarm_rules").
+	query, args, err := storage.Psql.Insert("alarm_rules").
 		Columns("id", "name", "description", "alarm_code", "severity",
 			"condition_type", "condition_config", "action_type", "action_config",
 			"carrier", "technology", "enabled", "created_at", "updated_at").
@@ -66,7 +65,7 @@ func (r *PgAlarmRuleRepository) Create(ctx context.Context, rule *AlarmRule) err
 }
 
 func (r *PgAlarmRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*AlarmRule, error) {
-	query, args, err := psql.Select(ruleColumns...).
+	query, args, err := storage.Psql.Select(ruleColumns...).
 		From("alarm_rules").
 		Where(squirrel.Eq{"id": id}).
 		ToSql()
@@ -90,7 +89,7 @@ func (r *PgAlarmRuleRepository) Update(ctx context.Context, rule *AlarmRule) err
 	condCfg := ensureJSON(rule.ConditionConfig)
 	actCfg := ensureJSON(rule.ActionConfig)
 
-	query, args, err := psql.Update("alarm_rules").
+	query, args, err := storage.Psql.Update("alarm_rules").
 		Set("name", rule.Name).
 		Set("description", rule.Description).
 		Set("alarm_code", rule.AlarmCode).
@@ -120,7 +119,7 @@ func (r *PgAlarmRuleRepository) Update(ctx context.Context, rule *AlarmRule) err
 }
 
 func (r *PgAlarmRuleRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("alarm_rules").
+	query, args, err := storage.Psql.Delete("alarm_rules").
 		Where(squirrel.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -138,8 +137,8 @@ func (r *PgAlarmRuleRepository) Delete(ctx context.Context, id uuid.UUID) error 
 }
 
 func (r *PgAlarmRuleRepository) List(ctx context.Context, filter AlarmRuleFilter) (*model.ListResponse[AlarmRule], error) {
-	builder := psql.Select(ruleColumns...).From("alarm_rules")
-	countBuilder := psql.Select("COUNT(*)").From("alarm_rules")
+	builder := storage.Psql.Select(ruleColumns...).From("alarm_rules")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("alarm_rules")
 
 	builder = applyRuleFilters(builder, filter)
 	countBuilder = applyRuleFilters(countBuilder, filter)

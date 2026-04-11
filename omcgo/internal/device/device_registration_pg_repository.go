@@ -14,6 +14,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 var regColumns = []string{
@@ -45,7 +46,7 @@ func (r *PgRegistrationRepository) Create(ctx context.Context, reg *DeviceRegist
 		reg.Status = global.RegistrationPending
 	}
 
-	query, args, err := psql.Insert("device_registrations").
+	query, args, err := storage.Psql.Insert("device_registrations").
 		Columns(regColumns...).
 		Values(
 			reg.ID, reg.SerialNumber, nullableUUID(reg.GroupID), reg.Carrier,
@@ -84,7 +85,7 @@ func (r *PgRegistrationRepository) BatchCreate(ctx context.Context, regs []*Devi
 			reg.Status = global.RegistrationPending
 		}
 
-		query, args, err := psql.Insert("device_registrations").
+		query, args, err := storage.Psql.Insert("device_registrations").
 			Columns(regColumns...).
 			Values(
 				reg.ID, reg.SerialNumber, nullableUUID(reg.GroupID), reg.Carrier,
@@ -115,7 +116,7 @@ func (r *PgRegistrationRepository) BatchCreate(ctx context.Context, regs []*Devi
 }
 
 func (r *PgRegistrationRepository) GetBySerialNumber(ctx context.Context, sn string) (*DeviceRegistration, error) {
-	query, args, err := psql.Select(regColumns...).
+	query, args, err := storage.Psql.Select(regColumns...).
 		From("device_registrations").
 		Where(sq.Eq{"serial_number": sn, "status": string(global.RegistrationPending)}).
 		Limit(1).
@@ -132,8 +133,8 @@ func (r *PgRegistrationRepository) GetBySerialNumber(ctx context.Context, sn str
 }
 
 func (r *PgRegistrationRepository) List(ctx context.Context, filter RegistrationFilter) (*model.ListResponse[DeviceRegistration], error) {
-	builder := psql.Select(regColumns...).From("device_registrations")
-	countBuilder := psql.Select("COUNT(*)").From("device_registrations")
+	builder := storage.Psql.Select(regColumns...).From("device_registrations")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("device_registrations")
 
 	if filter.Status != nil {
 		builder = builder.Where(sq.Eq{"status": string(*filter.Status)})
@@ -182,7 +183,7 @@ func (r *PgRegistrationRepository) List(ctx context.Context, filter Registration
 }
 
 func (r *PgRegistrationRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
-	query, args, err := psql.Update("device_registrations").
+	query, args, err := storage.Psql.Update("device_registrations").
 		Set("status", status).
 		Set("updated_at", time.Now()).
 		Where(sq.Eq{"id": id}).
@@ -202,7 +203,7 @@ func (r *PgRegistrationRepository) UpdateStatus(ctx context.Context, id uuid.UUI
 }
 
 func (r *PgRegistrationRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("device_registrations").
+	query, args, err := storage.Psql.Delete("device_registrations").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {

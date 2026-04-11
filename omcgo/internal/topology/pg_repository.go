@@ -16,9 +16,8 @@ import (
 	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var groupColumns = []string{
 	"id", "name", "parent_id", "carrier", "description", "sort_order",
@@ -65,7 +64,7 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 		}
 	}
 
-	query, args, err := psql.Insert("device_groups").
+	query, args, err := storage.Psql.Insert("device_groups").
 		Columns(groupColumns...).
 		Values(
 			group.ID, group.Name, nullableUUID(group.ParentID),
@@ -92,7 +91,7 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 }
 
 func (r *PgDeviceGroupRepository) GetByID(ctx context.Context, id uuid.UUID) (*DeviceGroup, error) {
-	query, args, err := psql.Select(groupColumns...).
+	query, args, err := storage.Psql.Select(groupColumns...).
 		From("device_groups").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -120,7 +119,7 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 		}
 	}
 
-	query, args, err := psql.Update("device_groups").
+	query, args, err := storage.Psql.Update("device_groups").
 		Set("name", group.Name).
 		Set("parent_id", nullableUUID(group.ParentID)).
 		Set("level", group.Level).
@@ -151,7 +150,7 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 }
 
 func (r *PgDeviceGroupRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("device_groups").
+	query, args, err := storage.Psql.Delete("device_groups").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -169,7 +168,7 @@ func (r *PgDeviceGroupRepository) Delete(ctx context.Context, id uuid.UUID) erro
 }
 
 func (r *PgDeviceGroupRepository) ListRoots(ctx context.Context) ([]DeviceGroup, error) {
-	query, args, err := psql.Select(groupColumns...).
+	query, args, err := storage.Psql.Select(groupColumns...).
 		From("device_groups").
 		Where("parent_id IS NULL").
 		OrderBy("sort_order ASC", "name ASC").
@@ -188,7 +187,7 @@ func (r *PgDeviceGroupRepository) ListRoots(ctx context.Context) ([]DeviceGroup,
 }
 
 func (r *PgDeviceGroupRepository) ListChildren(ctx context.Context, parentID uuid.UUID) ([]DeviceGroup, error) {
-	query, args, err := psql.Select(groupColumns...).
+	query, args, err := storage.Psql.Select(groupColumns...).
 		From("device_groups").
 		Where(sq.Eq{"parent_id": parentID}).
 		OrderBy("sort_order ASC", "name ASC").
@@ -208,7 +207,7 @@ func (r *PgDeviceGroupRepository) ListChildren(ctx context.Context, parentID uui
 
 // GetTree returns a flat list of all groups. Tree assembly is done in the service layer.
 func (r *PgDeviceGroupRepository) GetTree(ctx context.Context) ([]DeviceGroup, error) {
-	query, args, err := psql.Select(groupColumns...).
+	query, args, err := storage.Psql.Select(groupColumns...).
 		From("device_groups").
 		OrderBy("sort_order ASC", "name ASC").
 		ToSql()
@@ -249,7 +248,7 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 
 // ExistsByParentAndName checks if a group with the given name exists under the parent.
 func (r *PgDeviceGroupRepository) ExistsByParentAndName(ctx context.Context, parentID *uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
-	builder := psql.Select("1").
+	builder := storage.Psql.Select("1").
 		From("device_groups").
 		Where(sq.Eq{"name": name})
 
@@ -300,7 +299,7 @@ func (r *PgDeviceGroupRepository) GetStats(ctx context.Context) (*GroupStats, er
 
 // CountDevicesByGroup counts devices in a specific group.
 func (r *PgDeviceGroupRepository) CountDevicesByGroup(ctx context.Context, groupID uuid.UUID) (int, error) {
-	query, args, err := psql.Select("COUNT(*)").
+	query, args, err := storage.Psql.Select("COUNT(*)").
 		From("device_group_members").
 		Where(sq.Eq{"group_id": groupID}).
 		ToSql()
@@ -317,7 +316,7 @@ func (r *PgDeviceGroupRepository) CountDevicesByGroup(ctx context.Context, group
 
 // ListChildIDs returns the IDs of all direct children of the given parent.
 func (r *PgDeviceGroupRepository) ListChildIDs(ctx context.Context, parentID uuid.UUID) ([]uuid.UUID, error) {
-	query, args, err := psql.Select("id").
+	query, args, err := storage.Psql.Select("id").
 		From("device_groups").
 		Where(sq.Eq{"parent_id": parentID}).
 		ToSql()
@@ -344,7 +343,7 @@ func (r *PgDeviceGroupRepository) ListChildIDs(ctx context.Context, parentID uui
 
 // GetGroupLevel returns the level of a group by ID. Used by PermissionService.
 func (r *PgDeviceGroupRepository) GetGroupLevel(ctx context.Context, id uuid.UUID) (int, error) {
-	query, args, err := psql.Select("level").
+	query, args, err := storage.Psql.Select("level").
 		From("device_groups").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -379,7 +378,7 @@ func (r *PgDeviceGroupRepository) AddDevice(ctx context.Context, groupID, device
 }
 
 func (r *PgDeviceGroupRepository) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
-	query, args, err := psql.Delete("device_group_members").
+	query, args, err := storage.Psql.Delete("device_group_members").
 		Where(sq.And{
 			sq.Eq{"group_id": groupID},
 			sq.Eq{"device_id": deviceID},
@@ -400,7 +399,7 @@ func (r *PgDeviceGroupRepository) RemoveDevice(ctx context.Context, groupID, dev
 }
 
 func (r *PgDeviceGroupRepository) ListDeviceIDs(ctx context.Context, groupID uuid.UUID) ([]uuid.UUID, error) {
-	query, args, err := psql.Select("device_id").
+	query, args, err := storage.Psql.Select("device_id").
 		From("device_group_members").
 		Where(sq.Eq{"group_id": groupID}).
 		ToSql()
@@ -463,7 +462,7 @@ func (r *PgDeviceGroupRepository) BatchRemoveDevices(ctx context.Context, groupI
 		return 0, nil
 	}
 
-	query, args, err := psql.Delete("device_group_members").
+	query, args, err := storage.Psql.Delete("device_group_members").
 		Where(sq.And{
 			sq.Eq{"group_id": groupID},
 			sq.Eq{"device_id": deviceIDs},
@@ -511,7 +510,7 @@ func moveGroupDevicesToDefaultTx(ctx context.Context, ex pgxExecutor, groupIDs [
 
 // deleteGroupTx deletes a group row on a generic executor (pool or tx).
 func deleteGroupTx(ctx context.Context, ex pgxExecutor, id uuid.UUID) error {
-	query, args, err := psql.Delete("device_groups").
+	query, args, err := storage.Psql.Delete("device_groups").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -530,7 +529,7 @@ func deleteGroupTx(ctx context.Context, ex pgxExecutor, id uuid.UUID) error {
 
 // listChildIDsTx returns direct child IDs on a generic executor (pool or tx).
 func listChildIDsTx(ctx context.Context, ex pgxQuerier, parentID uuid.UUID) ([]uuid.UUID, error) {
-	query, args, err := psql.Select("id").
+	query, args, err := storage.Psql.Select("id").
 		From("device_groups").
 		Where(sq.Eq{"parent_id": parentID}).
 		ToSql()
@@ -835,7 +834,7 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 
 // UpdateBoundRule 更新分组的绑定规则
 func (r *PgDeviceGroupRepository) UpdateBoundRule(ctx context.Context, groupID, ruleID uuid.UUID) error {
-	query, args, err := psql.Update("device_groups").
+	query, args, err := storage.Psql.Update("device_groups").
 		Set("bound_rule_id", ruleID).
 		Set("updated_at", time.Now()).
 		Where(sq.Eq{"id": groupID}).
@@ -857,7 +856,7 @@ func (r *PgDeviceGroupRepository) UpdateBoundRule(ctx context.Context, groupID, 
 
 // ClearBoundRule 清除分组的绑定规则
 func (r *PgDeviceGroupRepository) ClearBoundRule(ctx context.Context, groupID uuid.UUID) error {
-	query, args, err := psql.Update("device_groups").
+	query, args, err := storage.Psql.Update("device_groups").
 		Set("bound_rule_id", nil).
 		Set("updated_at", time.Now()).
 		Where(sq.Eq{"id": groupID}).

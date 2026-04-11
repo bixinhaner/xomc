@@ -12,9 +12,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var licenseColumns = []string{
 	"id", "license_name", "license_code", "product_name",
@@ -46,7 +45,7 @@ func (r *PgLicenseRepository) Create(ctx context.Context, lic *License) error {
 		featuresJSON = json.RawMessage("[]")
 	}
 
-	query, args, err := psql.Insert("licenses").
+	query, args, err := storage.Psql.Insert("licenses").
 		Columns(
 			"license_name", "license_code", "product_name",
 			"license_type", "status", "max_devices", "used_devices",
@@ -75,7 +74,7 @@ func (r *PgLicenseRepository) Create(ctx context.Context, lic *License) error {
 }
 
 func (r *PgLicenseRepository) GetByID(ctx context.Context, id uuid.UUID) (*License, error) {
-	query, args, err := psql.Select(licenseColumns...).
+	query, args, err := storage.Psql.Select(licenseColumns...).
 		From("licenses").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -94,7 +93,7 @@ func (r *PgLicenseRepository) GetByID(ctx context.Context, id uuid.UUID) (*Licen
 }
 
 func (r *PgLicenseRepository) GetByCode(ctx context.Context, code string) (*License, error) {
-	query, args, err := psql.Select(licenseColumns...).
+	query, args, err := storage.Psql.Select(licenseColumns...).
 		From("licenses").
 		Where(sq.Eq{"license_code": code}).
 		ToSql()
@@ -118,7 +117,7 @@ func (r *PgLicenseRepository) Update(ctx context.Context, lic *License) error {
 		featuresJSON = json.RawMessage("[]")
 	}
 
-	query, args, err := psql.Update("licenses").
+	query, args, err := storage.Psql.Update("licenses").
 		Set("license_name", lic.LicenseName).
 		Set("license_code", lic.LicenseCode).
 		Set("product_name", lic.ProductName).
@@ -150,8 +149,8 @@ func (r *PgLicenseRepository) Update(ctx context.Context, lic *License) error {
 }
 
 func (r *PgLicenseRepository) List(ctx context.Context, filter LicenseFilter) (*model.ListResponse[License], error) {
-	base := psql.Select(licenseColumns...).From("licenses")
-	countBase := psql.Select("COUNT(*)").From("licenses")
+	base := storage.Psql.Select(licenseColumns...).From("licenses")
+	countBase := storage.Psql.Select("COUNT(*)").From("licenses")
 
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})

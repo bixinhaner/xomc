@@ -14,9 +14,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ---- column lists ----
 
@@ -71,7 +70,7 @@ func (r *PgDefinitionRepository) Create(ctx context.Context, def *ReportDefiniti
 		return fmt.Errorf("marshal device_groups: %w", err)
 	}
 
-	query, args, err := psql.Insert("report_definitions").
+	query, args, err := storage.Psql.Insert("report_definitions").
 		Columns("report_name", "report_type", "description", "format", "period",
 			"kpi_codes", "device_groups", "auto_generate", "cron_expression",
 			"status", "creator").
@@ -95,7 +94,7 @@ func (r *PgDefinitionRepository) Create(ctx context.Context, def *ReportDefiniti
 }
 
 func (r *PgDefinitionRepository) GetByID(ctx context.Context, id uuid.UUID) (*ReportDefinition, error) {
-	query, args, err := psql.Select(definitionColumns...).
+	query, args, err := storage.Psql.Select(definitionColumns...).
 		From("report_definitions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -129,7 +128,7 @@ func (r *PgDefinitionRepository) Update(ctx context.Context, def *ReportDefiniti
 		return fmt.Errorf("marshal device_groups: %w", err)
 	}
 
-	query, args, err := psql.Update("report_definitions").
+	query, args, err := storage.Psql.Update("report_definitions").
 		Set("report_name", def.ReportName).
 		Set("report_type", def.ReportType).
 		Set("description", nullableString(def.Description)).
@@ -159,7 +158,7 @@ func (r *PgDefinitionRepository) Update(ctx context.Context, def *ReportDefiniti
 }
 
 func (r *PgDefinitionRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("report_definitions").
+	query, args, err := storage.Psql.Delete("report_definitions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -177,8 +176,8 @@ func (r *PgDefinitionRepository) Delete(ctx context.Context, id uuid.UUID) error
 }
 
 func (r *PgDefinitionRepository) List(ctx context.Context, filter DefinitionFilter) (*model.ListResponse[ReportDefinition], error) {
-	base := psql.Select(definitionColumns...).From("report_definitions")
-	countBase := psql.Select("COUNT(*)").From("report_definitions")
+	base := storage.Psql.Select(definitionColumns...).From("report_definitions")
+	countBase := storage.Psql.Select("COUNT(*)").From("report_definitions")
 
 	if filter.ReportType != nil {
 		base = base.Where(sq.Eq{"report_type": string(*filter.ReportType)})
@@ -387,7 +386,7 @@ func NewPgRecordRepository(pool *pgxpool.Pool) *PgRecordRepository {
 }
 
 func (r *PgRecordRepository) Create(ctx context.Context, record *ReportRecord) error {
-	query, args, err := psql.Insert("report_records").
+	query, args, err := storage.Psql.Insert("report_records").
 		Columns("report_definition_id", "report_name", "period", "generate_time",
 			"file_size", "download_url", "format", "status", "minio_path").
 		Values(record.ReportDefinitionID, record.ReportName, nullableString(record.Period),
@@ -409,7 +408,7 @@ func (r *PgRecordRepository) Create(ctx context.Context, record *ReportRecord) e
 }
 
 func (r *PgRecordRepository) GetByID(ctx context.Context, id uuid.UUID) (*ReportRecord, error) {
-	query, args, err := psql.Select(recordColumns...).
+	query, args, err := storage.Psql.Select(recordColumns...).
 		From("report_records").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -428,7 +427,7 @@ func (r *PgRecordRepository) GetByID(ctx context.Context, id uuid.UUID) (*Report
 }
 
 func (r *PgRecordRepository) Update(ctx context.Context, record *ReportRecord) error {
-	query, args, err := psql.Update("report_records").
+	query, args, err := storage.Psql.Update("report_records").
 		Set("status", record.Status).
 		Set("file_size", record.FileSize).
 		Set("minio_path", nullableString(record.MinioPath)).
@@ -450,8 +449,8 @@ func (r *PgRecordRepository) Update(ctx context.Context, record *ReportRecord) e
 }
 
 func (r *PgRecordRepository) List(ctx context.Context, filter RecordFilter) (*model.ListResponse[ReportRecord], error) {
-	base := psql.Select(recordColumns...).From("report_records")
-	countBase := psql.Select("COUNT(*)").From("report_records")
+	base := storage.Psql.Select(recordColumns...).From("report_records")
+	countBase := storage.Psql.Select("COUNT(*)").From("report_records")
 
 	if filter.DefinitionID != nil {
 		base = base.Where(sq.Eq{"report_definition_id": *filter.DefinitionID})

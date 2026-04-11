@@ -13,6 +13,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 var menuColumns = []string{
@@ -40,7 +41,7 @@ func (r *PgMenuRepository) Create(ctx context.Context, menu *Menu, operatorID uu
 	menu.UpdatedBy = &operatorID
 	menu.UpdatedAt = time.Now()
 
-	query, args, err := psql.Insert("menus").
+	query, args, err := storage.Psql.Insert("menus").
 		Columns(menuColumns...).
 		Values(
 			menu.ID, menu.Name, menu.Type, menu.PermissionKey, nullableUUID(menu.ParentID), menu.SortOrder,
@@ -61,7 +62,7 @@ func (r *PgMenuRepository) Create(ctx context.Context, menu *Menu, operatorID uu
 }
 
 func (r *PgMenuRepository) GetByID(ctx context.Context, id uuid.UUID) (*Menu, error) {
-	query, args, err := psql.Select(menuColumns...).
+	query, args, err := storage.Psql.Select(menuColumns...).
 		From("menus").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -77,7 +78,7 @@ func (r *PgMenuRepository) GetByID(ctx context.Context, id uuid.UUID) (*Menu, er
 }
 
 func (r *PgMenuRepository) GetByPermissionKey(ctx context.Context, key string) (*Menu, error) {
-	query, args, err := psql.Select(menuColumns...).
+	query, args, err := storage.Psql.Select(menuColumns...).
 		From("menus").
 		Where(sq.Eq{"permission_key": key}).
 		ToSql()
@@ -93,8 +94,8 @@ func (r *PgMenuRepository) GetByPermissionKey(ctx context.Context, key string) (
 }
 
 func (r *PgMenuRepository) List(ctx context.Context, filter MenuFilter) (*model.ListResponse[Menu], error) {
-	base := psql.Select(menuColumns...).From("menus")
-	countBase := psql.Select("COUNT(*)").From("menus")
+	base := storage.Psql.Select(menuColumns...).From("menus")
+	countBase := storage.Psql.Select("COUNT(*)").From("menus")
 
 	// Apply filters
 	if filter.Type != nil {
@@ -197,7 +198,7 @@ func (r *PgMenuRepository) Update(ctx context.Context, id uuid.UUID, req *Update
 	updates["updated_by"] = operatorID
 	updates["updated_at"] = time.Now()
 
-	query, args, err := psql.Update("menus").
+	query, args, err := storage.Psql.Update("menus").
 		SetMap(updates).
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -216,7 +217,7 @@ func (r *PgMenuRepository) Update(ctx context.Context, id uuid.UUID, req *Update
 }
 
 func (r *PgMenuRepository) Delete(ctx context.Context, ids []uuid.UUID) error {
-	query, args, err := psql.Delete("menus").
+	query, args, err := storage.Psql.Delete("menus").
 		Where(sq.Eq{"id": ids}).
 		ToSql()
 	if err != nil {
@@ -231,7 +232,7 @@ func (r *PgMenuRepository) Delete(ctx context.Context, ids []uuid.UUID) error {
 }
 
 func (r *PgMenuRepository) GetTree(ctx context.Context, status *MenuStatus) ([]Menu, error) {
-	query := psql.Select(menuColumns...).From("menus")
+	query := storage.Psql.Select(menuColumns...).From("menus")
 
 	if status != nil {
 		query = query.Where(sq.Eq{"status": *status})
@@ -263,7 +264,7 @@ func (r *PgMenuRepository) GetTree(ctx context.Context, status *MenuStatus) ([]M
 }
 
 func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
-	query, args, err := psql.Select("m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
+	query, args, err := storage.Psql.Select("m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
 		From("menus m").
@@ -294,7 +295,7 @@ func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]M
 }
 
 func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
-	query, args, err := psql.Select("DISTINCT m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
+	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
 		From("menus m").
@@ -363,7 +364,7 @@ func (r *PgMenuRepository) SetRoleMenus(ctx context.Context, roleID uuid.UUID, m
 }
 
 func (r *PgMenuRepository) GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
-	query, args, err := psql.Select("menu_id").
+	query, args, err := storage.Psql.Select("menu_id").
 		From("role_menus").
 		Where(sq.Eq{"role_id": roleID}).
 		ToSql()

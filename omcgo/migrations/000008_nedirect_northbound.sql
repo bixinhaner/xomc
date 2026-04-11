@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000008_nedirect_northbound.up.sql
 -- NE Direct sessions, NE Direct commands, Northbound outbox
@@ -93,3 +94,8 @@ CREATE INDEX idx_northbound_outbox_dead
 -- Index for deduplication by event_id + target_id.
 CREATE UNIQUE INDEX idx_northbound_outbox_event_target
     ON northbound_outbox (event_id, target_id);
+
+-- +goose Down
+DROP TABLE IF EXISTS northbound_outbox CASCADE;
+DROP TABLE IF EXISTS nedirect_commands CASCADE;
+DROP TABLE IF EXISTS nedirect_sessions CASCADE;

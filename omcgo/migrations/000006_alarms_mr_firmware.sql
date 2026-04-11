@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000006_alarms_mr_firmware.up.sql
 -- Alarms (active + history), alarm rules, MR files/records/indicators/device_mappings,
@@ -357,3 +358,18 @@ INSERT INTO mr_indicators (indicator_name, indicator_code, description, unit, ca
     ('SINR', 'SINR', '信干噪比', 'dB', 'quality', -10, 30),
     ('TA', 'TA', '时间提前量', '', 'timing', 0, 1282),
     ('PHR', 'PHR', '功率余量', 'dB', 'power', -23, 40);
+
+-- +goose Down
+DROP TABLE IF EXISTS licenses CASCADE;
+DROP TABLE IF EXISTS managed_files CASCADE;
+DROP TABLE IF EXISTS backup_schedules CASCADE;
+DROP TABLE IF EXISTS backup_tasks CASCADE;
+DROP TABLE IF EXISTS upgrade_tasks CASCADE;
+DROP TABLE IF EXISTS firmware_versions CASCADE;
+DROP TABLE IF EXISTS mr_device_mappings CASCADE;
+DROP TABLE IF EXISTS mr_indicators CASCADE;
+DROP TABLE IF EXISTS mr_records CASCADE;
+DROP TABLE IF EXISTS mr_files CASCADE;
+DROP TABLE IF EXISTS alarm_rules CASCADE;
+DROP TABLE IF EXISTS alarms_history CASCADE;
+DROP TABLE IF EXISTS alarms_active CASCADE;

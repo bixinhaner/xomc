@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000004_data_models.up.sql
 -- 数据模型与厂商注册
@@ -83,3 +84,9 @@ CREATE TABLE parameter_discovery_log (
 CREATE INDEX idx_pdl_device_id ON parameter_discovery_log (device_id);
 CREATE INDEX idx_pdl_status ON parameter_discovery_log (status);
 CREATE INDEX idx_pdl_device_sn ON parameter_discovery_log (device_sn);
+
+-- +goose Down
+DROP TABLE IF EXISTS parameter_discovery_log CASCADE;
+DROP TABLE IF EXISTS data_model_import_log CASCADE;
+DROP TABLE IF EXISTS oui_registry CASCADE;
+DROP TABLE IF EXISTS data_model_definitions CASCADE;

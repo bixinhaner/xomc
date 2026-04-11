@@ -12,9 +12,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var thresholdColumns = []string{
 	"id", "kpi_name", "carrier", "technology",
@@ -44,7 +43,7 @@ func (r *PgThresholdRepository) Create(ctx context.Context, threshold *KPIThresh
 	threshold.CreatedAt = now
 	threshold.UpdatedAt = now
 
-	query, args, err := psql.Insert("kpi_thresholds").
+	query, args, err := storage.Psql.Insert("kpi_thresholds").
 		Columns("id", "kpi_name", "carrier", "technology",
 			"warning_threshold", "minor_threshold", "major_threshold", "critical_threshold",
 			"comparison", "enabled", "description", "created_at", "updated_at").
@@ -64,7 +63,7 @@ func (r *PgThresholdRepository) Create(ctx context.Context, threshold *KPIThresh
 }
 
 func (r *PgThresholdRepository) GetByID(ctx context.Context, id uuid.UUID) (*KPIThreshold, error) {
-	query, args, err := psql.Select(thresholdColumns...).
+	query, args, err := storage.Psql.Select(thresholdColumns...).
 		From("kpi_thresholds").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -85,7 +84,7 @@ func (r *PgThresholdRepository) GetByID(ctx context.Context, id uuid.UUID) (*KPI
 func (r *PgThresholdRepository) Update(ctx context.Context, threshold *KPIThreshold) error {
 	threshold.UpdatedAt = time.Now()
 
-	query, args, err := psql.Update("kpi_thresholds").
+	query, args, err := storage.Psql.Update("kpi_thresholds").
 		Set("kpi_name", threshold.KPIName).
 		Set("carrier", threshold.Carrier).
 		Set("technology", threshold.Technology).
@@ -114,7 +113,7 @@ func (r *PgThresholdRepository) Update(ctx context.Context, threshold *KPIThresh
 }
 
 func (r *PgThresholdRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("kpi_thresholds").
+	query, args, err := storage.Psql.Delete("kpi_thresholds").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -132,8 +131,8 @@ func (r *PgThresholdRepository) Delete(ctx context.Context, id uuid.UUID) error 
 }
 
 func (r *PgThresholdRepository) List(ctx context.Context, filter KPIThresholdFilter) (*model.ListResponse[KPIThreshold], error) {
-	builder := psql.Select(thresholdColumns...).From("kpi_thresholds")
-	countBuilder := psql.Select("COUNT(*)").From("kpi_thresholds")
+	builder := storage.Psql.Select(thresholdColumns...).From("kpi_thresholds")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("kpi_thresholds")
 
 	builder = applyThresholdFilters(builder, filter)
 	countBuilder = applyThresholdFilters(countBuilder, filter)

@@ -461,6 +461,13 @@ func Load(path string, target interface{}) error {
 		return fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	// Validate if target implements Validatable
+	if v, ok := target.(Validatable); ok {
+		if err := v.Validate(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -489,6 +496,13 @@ func LoadWithEnvOverride(path string, target interface{}, envOverrides map[strin
 
 	if err := v.Unmarshal(target); err != nil {
 		return fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	// Validate if target implements Validatable
+	if v, ok := target.(Validatable); ok {
+		if err := v.Validate(); err != nil {
+			return err
+		}
 	}
 
 	return nil

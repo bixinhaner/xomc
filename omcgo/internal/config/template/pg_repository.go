@@ -14,9 +14,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var templateColumns = []string{
 	"id", "name", "carrier", "technology", "product_class",
@@ -51,7 +50,7 @@ func (r *PgConfigTemplateRepository) Create(ctx context.Context, t *ConfigTempla
 	t.CreatedAt = now
 	t.UpdatedAt = now
 
-	query, args, err := psql.Insert("config_templates").
+	query, args, err := storage.Psql.Insert("config_templates").
 		Columns(templateColumns...).
 		Values(
 			t.ID, t.Name, t.Carrier, t.Technology, nullableString(t.ProductClass),
@@ -71,7 +70,7 @@ func (r *PgConfigTemplateRepository) Create(ctx context.Context, t *ConfigTempla
 }
 
 func (r *PgConfigTemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*ConfigTemplate, error) {
-	query, args, err := psql.Select(templateColumns...).
+	query, args, err := storage.Psql.Select(templateColumns...).
 		From("config_templates").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -89,7 +88,7 @@ func (r *PgConfigTemplateRepository) GetByID(ctx context.Context, id uuid.UUID) 
 func (r *PgConfigTemplateRepository) Update(ctx context.Context, t *ConfigTemplate) error {
 	t.UpdatedAt = time.Now()
 
-	query, args, err := psql.Update("config_templates").
+	query, args, err := storage.Psql.Update("config_templates").
 		Set("name", t.Name).
 		Set("carrier", t.Carrier).
 		Set("technology", t.Technology).
@@ -118,7 +117,7 @@ func (r *PgConfigTemplateRepository) Update(ctx context.Context, t *ConfigTempla
 }
 
 func (r *PgConfigTemplateRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("config_templates").
+	query, args, err := storage.Psql.Delete("config_templates").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -154,7 +153,7 @@ func (r *PgConfigTemplateRepository) List(ctx context.Context, filter ConfigTemp
 	}
 
 	// Count.
-	countBuilder := psql.Select("COUNT(*)").From("config_templates")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("config_templates")
 	if len(pred) > 0 {
 		countBuilder = countBuilder.Where(pred)
 	}
@@ -175,7 +174,7 @@ func (r *PgConfigTemplateRepository) List(ctx context.Context, filter ConfigTemp
 		page = 1
 	}
 
-	queryBuilder := psql.Select(templateColumns...).
+	queryBuilder := storage.Psql.Select(templateColumns...).
 		From("config_templates").
 		Limit(uint64(limit)).
 		Offset(uint64(offset))
@@ -214,7 +213,7 @@ func (r *PgConfigTemplateRepository) List(ctx context.Context, filter ConfigTemp
 }
 
 func (r *PgConfigTemplateRepository) FindByCarrierTech(ctx context.Context, carrier model.CarrierCode, tech model.Technology, templateType TemplateType) ([]ConfigTemplate, error) {
-	query, args, err := psql.Select(templateColumns...).
+	query, args, err := storage.Psql.Select(templateColumns...).
 		From("config_templates").
 		Where(sq.And{
 			sq.Eq{"carrier": carrier},
@@ -242,7 +241,7 @@ func (r *PgConfigTemplateRepository) FindByCarrierTech(ctx context.Context, carr
 func (r *PgConfigTemplateRepository) FindBestMatch(ctx context.Context, carrier model.CarrierCode, tech model.Technology, productClass string, templateType TemplateType) (*ConfigTemplate, error) {
 	// Try specific match first (with product_class).
 	if productClass != "" {
-		query, args, err := psql.Select(templateColumns...).
+		query, args, err := storage.Psql.Select(templateColumns...).
 			From("config_templates").
 			Where(sq.And{
 				sq.Eq{"carrier": carrier},
@@ -268,7 +267,7 @@ func (r *PgConfigTemplateRepository) FindBestMatch(ctx context.Context, carrier 
 	}
 
 	// Fallback: carrier + tech, no product_class constraint.
-	query, args, err := psql.Select(templateColumns...).
+	query, args, err := storage.Psql.Select(templateColumns...).
 		From("config_templates").
 		Where(sq.And{
 			sq.Eq{"carrier": carrier},

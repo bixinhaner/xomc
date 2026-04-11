@@ -11,9 +11,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var fileColumns = []string{
 	"id", "file_name", "file_type", "file_size", "minio_path",
@@ -35,7 +34,7 @@ func NewPgFileRepository(pool *pgxpool.Pool) *PgFileRepository {
 }
 
 func (r *PgFileRepository) Create(ctx context.Context, file *ManagedFile) error {
-	query, args, err := psql.Insert("managed_files").
+	query, args, err := storage.Psql.Insert("managed_files").
 		Columns("file_name", "file_type", "file_size", "minio_path",
 			"content_type", "uploader", "device_sn", "status", "description").
 		Values(file.FileName, file.FileType, file.FileSize, file.MinIOPath,
@@ -56,7 +55,7 @@ func (r *PgFileRepository) Create(ctx context.Context, file *ManagedFile) error 
 }
 
 func (r *PgFileRepository) GetByID(ctx context.Context, id uuid.UUID) (*ManagedFile, error) {
-	query, args, err := psql.Select(fileColumns...).
+	query, args, err := storage.Psql.Select(fileColumns...).
 		From("managed_files").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -75,7 +74,7 @@ func (r *PgFileRepository) GetByID(ctx context.Context, id uuid.UUID) (*ManagedF
 }
 
 func (r *PgFileRepository) Update(ctx context.Context, file *ManagedFile) error {
-	query, args, err := psql.Update("managed_files").
+	query, args, err := storage.Psql.Update("managed_files").
 		Set("file_name", file.FileName).
 		Set("file_type", file.FileType).
 		Set("file_size", file.FileSize).
@@ -102,7 +101,7 @@ func (r *PgFileRepository) Update(ctx context.Context, file *ManagedFile) error 
 }
 
 func (r *PgFileRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("managed_files").
+	query, args, err := storage.Psql.Delete("managed_files").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -120,8 +119,8 @@ func (r *PgFileRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgFileRepository) List(ctx context.Context, filter FileFilter) (*model.ListResponse[ManagedFile], error) {
-	base := psql.Select(fileColumns...).From("managed_files")
-	countBase := psql.Select("COUNT(*)").From("managed_files")
+	base := storage.Psql.Select(fileColumns...).From("managed_files")
+	countBase := storage.Psql.Select("COUNT(*)").From("managed_files")
 
 	if filter.FileType != nil {
 		base = base.Where(sq.Eq{"file_type": *filter.FileType})

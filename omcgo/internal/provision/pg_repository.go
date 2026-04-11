@@ -12,9 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var taskColumns = []string{
 	"id", "device_id", "template_id", "status", "current_step", "total_steps",
@@ -40,7 +39,7 @@ func (r *PgProvisioningTaskRepository) Create(ctx context.Context, task *Provisi
 	task.CreatedAt = now
 	task.UpdatedAt = now
 
-	query, args, err := psql.Insert("provisioning_tasks").
+	query, args, err := storage.Psql.Insert("provisioning_tasks").
 		Columns(taskColumns...).
 		Values(
 			task.ID, task.DeviceID, nullableUUID(task.TemplateID), task.Status,
@@ -62,7 +61,7 @@ func (r *PgProvisioningTaskRepository) Create(ctx context.Context, task *Provisi
 }
 
 func (r *PgProvisioningTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*ProvisioningTask, error) {
-	query, args, err := psql.Select(taskColumns...).
+	query, args, err := storage.Psql.Select(taskColumns...).
 		From("provisioning_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -78,7 +77,7 @@ func (r *PgProvisioningTaskRepository) GetByID(ctx context.Context, id uuid.UUID
 }
 
 func (r *PgProvisioningTaskRepository) GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*ProvisioningTask, error) {
-	query, args, err := psql.Select(taskColumns...).
+	query, args, err := storage.Psql.Select(taskColumns...).
 		From("provisioning_tasks").
 		Where(sq.Eq{"device_id": deviceID}).
 		OrderBy("created_at DESC").
@@ -98,7 +97,7 @@ func (r *PgProvisioningTaskRepository) GetByDeviceID(ctx context.Context, device
 func (r *PgProvisioningTaskRepository) Update(ctx context.Context, task *ProvisioningTask) error {
 	task.UpdatedAt = time.Now()
 
-	query, args, err := psql.Update("provisioning_tasks").
+	query, args, err := storage.Psql.Update("provisioning_tasks").
 		Set("template_id", nullableUUID(task.TemplateID)).
 		Set("status", task.Status).
 		Set("current_step", task.CurrentStep).
@@ -126,7 +125,7 @@ func (r *PgProvisioningTaskRepository) Update(ctx context.Context, task *Provisi
 }
 
 func (r *PgProvisioningTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error {
-	builder := psql.Update("provisioning_tasks").
+	builder := storage.Psql.Update("provisioning_tasks").
 		Set("status", status).
 		Set("error_message", nullableString(errorMsg)).
 		Set("updated_at", time.Now()).
@@ -162,7 +161,7 @@ func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter Provisio
 	}
 
 	// Count.
-	countBuilder := psql.Select("COUNT(*)").From("provisioning_tasks")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("provisioning_tasks")
 	if len(pred) > 0 {
 		countBuilder = countBuilder.Where(pred)
 	}
@@ -189,7 +188,7 @@ func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter Provisio
 	}
 	offset := (page - 1) * pageSize
 
-	queryBuilder := psql.Select(taskColumns...).
+	queryBuilder := storage.Psql.Select(taskColumns...).
 		From("provisioning_tasks").
 		Limit(uint64(pageSize)).
 		Offset(uint64(offset)).
@@ -219,7 +218,7 @@ func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter Provisio
 }
 
 func (r *PgProvisioningTaskRepository) CountByStatus(ctx context.Context) (map[ProvisioningState]int64, error) {
-	query, _, err := psql.Select("status", "COUNT(*)").
+	query, _, err := storage.Psql.Select("status", "COUNT(*)").
 		From("provisioning_tasks").
 		GroupBy("status").
 		ToSql()
@@ -247,7 +246,7 @@ func (r *PgProvisioningTaskRepository) CountByStatus(ctx context.Context) (map[P
 
 func (r *PgProvisioningTaskRepository) FailStale(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-maxAge)
-	query, args, err := psql.Update("provisioning_tasks").
+	query, args, err := storage.Psql.Update("provisioning_tasks").
 		Set("status", StateFailed).
 		Set("error_message", fmt.Sprintf("task timed out after %s", maxAge)).
 		Set("completed_at", time.Now()).

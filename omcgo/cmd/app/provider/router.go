@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
+	"github.com/omcgo/omcgo/internal/core/components"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/device"
@@ -133,8 +136,32 @@ func setupMiddleware(r *gin.Engine, c *Container) {
 		commonerrors.AbortWithError(gc, http.StatusNotFound, commonerrors.ErrNotFound)
 	})
 
+	// /healthz — liveness probe: quick Ping check with timeout
 	r.GET("/healthz", func(gc *gin.Context) {
+		if c.Health != nil {
+			ctx, cancel := context.WithTimeout(gc.Request.Context(), 2*time.Second)
+			defer cancel()
+			if !c.Health.IsHealthy(ctx) {
+				gc.JSON(http.StatusServiceUnavailable, gin.H{"status": "unhealthy"})
+				return
+			}
+		}
 		gc.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// /readyz — readiness probe: detailed component health with latency info
+	r.GET("/readyz", func(gc *gin.Context) {
+		if c.Health == nil {
+			gc.JSON(http.StatusOK, gin.H{"status": "ok", "components": nil})
+			return
+		}
+		ctx, cancel := context.WithTimeout(gc.Request.Context(), 5*time.Second)
+		defer cancel()
+		results := c.Health.CheckAll(ctx)
+		gc.JSON(c.Health.StatusCode(ctx), gin.H{
+			"status":     statusFromResults(results),
+			"components": results,
+		})
 	})
 }
 
@@ -301,5 +328,15 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	c.Logger.Info("all routes registered")
 	return nil
+}
+
+// statusFromResults derives overall status from component health results.
+func statusFromResults(results []components.ComponentHealth) string {
+	for _, r := range results {
+		if r.Status != "healthy" {
+			return "unhealthy"
+		}
+	}
+	return "ok"
 }
 

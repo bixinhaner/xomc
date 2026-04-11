@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000007_system_infra.up.sql
 -- Audit logs, system logs, NE message logs, sites, topology nodes/edges,
@@ -314,3 +315,19 @@ INSERT INTO mml_commands (command_name, command_code, category, rpc_method, desc
     ('查询设备参数', 'LST_DEVPARAM', 'query', 'GetParameterValues', '查询设备TR069参数树', '{"parameter_path": "Device."}'),
     ('设置设备参数', 'SET_DEVPARAM', 'config', 'SetParameterValues', '设置设备TR069参数', '{"parameters": []}'),
     ('设备重启', 'RST_DEV', 'maintenance', 'Reboot', '远程重启设备', '{}');
+
+-- +goose Down
+DROP TABLE IF EXISTS mml_tasks CASCADE;
+DROP TABLE IF EXISTS mml_scripts CASCADE;
+DROP TABLE IF EXISTS mml_commands CASCADE;
+DROP TABLE IF EXISTS ops_command_records CASCADE;
+DROP TABLE IF EXISTS ops_tasks CASCADE;
+DROP TABLE IF EXISTS ops_templates CASCADE;
+DROP TABLE IF EXISTS report_records CASCADE;
+DROP TABLE IF EXISTS report_definitions CASCADE;
+DROP TABLE IF EXISTS topo_edges CASCADE;
+DROP TABLE IF EXISTS topo_nodes CASCADE;
+DROP TABLE IF EXISTS sites CASCADE;
+DROP TABLE IF EXISTS ne_message_logs CASCADE;
+DROP TABLE IF EXISTS system_logs CASCADE;
+DROP TABLE IF EXISTS audit_logs CASCADE;

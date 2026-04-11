@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000003_devices.up.sql
 -- 设备核心表
@@ -264,3 +265,15 @@ CREATE INDEX idx_device_tasks_status ON device_tasks(status);
 CREATE INDEX idx_device_tasks_created_at ON device_tasks(created_at);
 CREATE INDEX idx_device_tasks_cwmp_id ON device_tasks(cwmp_id);
 CREATE INDEX idx_device_tasks_pending ON device_tasks(device_sn, status, priority, created_at) WHERE status = 'pending';
+
+-- +goose Down
+DROP TABLE IF EXISTS device_tasks CASCADE;
+DROP TABLE IF EXISTS device_rule_tasks CASCADE;
+DROP TABLE IF EXISTS device_rules CASCADE;
+DROP TABLE IF EXISTS device_registrations CASCADE;
+DROP TABLE IF EXISTS device_parameters CASCADE;
+DROP TABLE IF EXISTS device_info CASCADE;
+DROP TABLE IF EXISTS devices CASCADE;
+DROP TABLE IF EXISTS role_device_groups CASCADE;
+DROP TABLE IF EXISTS device_group_members CASCADE;
+DROP TABLE IF EXISTS device_groups CASCADE;

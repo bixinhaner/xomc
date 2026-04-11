@@ -10,9 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
 // PgAlarmStore implements AlarmStore using PostgreSQL and TimescaleDB.
 type PgAlarmStore struct {
@@ -41,11 +40,11 @@ func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error
 }
 
 func (s *PgAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
-	return s.scanActiveAlarm(ctx, psql.Select(activeColumns...).From("alarms_active").Where(squirrel.Eq{"id": id}))
+	return s.scanActiveAlarm(ctx, storage.Psql.Select(activeColumns...).From("alarms_active").Where(squirrel.Eq{"id": id}))
 }
 
 func (s *PgAlarmStore) GetActiveByDeviceAndCode(ctx context.Context, deviceSN string, alarmCode string) (*model.Alarm, error) {
-	return s.scanActiveAlarm(ctx, psql.Select(activeColumns...).From("alarms_active").
+	return s.scanActiveAlarm(ctx, storage.Psql.Select(activeColumns...).From("alarms_active").
 		Where(squirrel.Eq{"device_sn": deviceSN, "alarm_code": alarmCode}).
 		Where(squirrel.NotEq{"status": "cleared"}))
 }
@@ -73,8 +72,8 @@ func (s *PgAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	qb := psql.Select(activeColumns...).From("alarms_active")
-	countQb := psql.Select("COUNT(*)").From("alarms_active")
+	qb := storage.Psql.Select(activeColumns...).From("alarms_active")
+	countQb := storage.Psql.Select("COUNT(*)").From("alarms_active")
 
 	qb = applyActiveFilters(qb, filter)
 	countQb = applyActiveFilters(countQb, filter)
@@ -122,10 +121,10 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 }
 
 func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	qb := psql.Select("time", "alarm_id", "device_id", "device_sn", "carrier", "severity",
+	qb := storage.Psql.Select("time", "alarm_id", "device_id", "device_sn", "carrier", "severity",
 		"alarm_type", "alarm_code", "description", "status", "raised_at", "acknowledged_at", "cleared_at").
 		From("alarms_history")
-	countQb := psql.Select("COUNT(*)").From("alarms_history")
+	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history")
 
 	if filter.DeviceID != nil {
 		qb = qb.Where(squirrel.Eq{"device_id": *filter.DeviceID})

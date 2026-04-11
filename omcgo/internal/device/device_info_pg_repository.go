@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // allowedSortColumnsWithInfo maps user-facing sort keys to qualified column names
@@ -47,7 +48,7 @@ func NewPgDeviceInfoRepository(pool *pgxpool.Pool) *PgDeviceInfoRepository {
 }
 
 func (r *PgDeviceInfoRepository) GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*DeviceInfo, error) {
-	query, args, err := psql.Select(deviceInfoColumns()...).
+	query, args, err := storage.Psql.Select(deviceInfoColumns()...).
 		From("device_info").
 		Where(sq.Eq{"device_id": deviceID}).
 		ToSql()
@@ -71,7 +72,7 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 	info.CreatedAt = now
 	info.UpdatedAt = now
 
-	query, args, err := psql.Insert("device_info").
+	query, args, err := storage.Psql.Insert("device_info").
 		Columns(
 			"device_id", "device_name", "address", "remark", "project_status", "height",
 			"eci", "pci", "cell_id", "freq_point", "bandwidth", "transmit_power", "plmn",
@@ -103,7 +104,7 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 }
 
 func (r *PgDeviceInfoRepository) UpdateManualFields(ctx context.Context, deviceID uuid.UUID, req UpdateDeviceInfoRequest, updater string) error {
-	builder := psql.Update("device_info").Where(sq.Eq{"device_id": deviceID})
+	builder := storage.Psql.Update("device_info").Where(sq.Eq{"device_id": deviceID})
 
 	if req.DeviceName != nil {
 		builder = builder.Set("device_name", *req.DeviceName)
@@ -142,7 +143,7 @@ func (r *PgDeviceInfoRepository) UpdateSyncFields(ctx context.Context, deviceID 
 		return nil
 	}
 
-	builder := psql.Update("device_info").Where(sq.Eq{"device_id": deviceID})
+	builder := storage.Psql.Update("device_info").Where(sq.Eq{"device_id": deviceID})
 	for col, val := range fields {
 		builder = builder.Set(col, val)
 	}
@@ -161,13 +162,13 @@ func (r *PgDeviceInfoRepository) UpdateSyncFields(ctx context.Context, deviceID 
 
 func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	selectCols := deviceWithInfoSelectColumns()
-	builder := psql.Select(selectCols...).
+	builder := storage.Psql.Select(selectCols...).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
 		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
 		Where(sq.Eq{"d.deleted_at": nil})
-	countBuilder := psql.Select("COUNT(*)").
+	countBuilder := storage.Psql.Select("COUNT(*)").
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").

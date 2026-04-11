@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // paramColumns defines the standard column set for device_parameters queries.
@@ -49,7 +50,7 @@ func (r *PgDeviceParameterRepository) BatchUpsert(ctx context.Context, deviceID 
 	now := time.Now()
 
 	for _, p := range params {
-		query, args, err := psql.Insert("device_parameters").
+		query, args, err := storage.Psql.Insert("device_parameters").
 			Columns("device_id", "parameter_path", "parameter_value",
 				"parameter_type", "writable", "last_updated_at",
 				"fap_instance", "param_group").
@@ -81,7 +82,7 @@ func (r *PgDeviceParameterRepository) BatchUpsert(ctx context.Context, deviceID 
 }
 
 func (r *PgDeviceParameterRepository) GetByDevice(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		OrderBy("parameter_path ASC").
@@ -112,7 +113,7 @@ func (r *PgDeviceParameterRepository) GetByDevice(ctx context.Context, deviceID 
 }
 
 func (r *PgDeviceParameterRepository) GetByPath(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error) {
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID, "parameter_path": path}).
 		ToSql()
@@ -131,7 +132,7 @@ func (r *PgDeviceParameterRepository) GetByPath(ctx context.Context, deviceID uu
 }
 
 func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error {
-	query, args, _ := psql.Delete("device_parameters").Where(sq.Eq{"device_id": deviceID}).ToSql()
+	query, args, _ := storage.Psql.Delete("device_parameters").Where(sq.Eq{"device_id": deviceID}).ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete device parameters: %w", err)
@@ -140,7 +141,7 @@ func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, device
 }
 
 func (r *PgDeviceParameterRepository) GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": prefix + "%"}).
@@ -171,7 +172,7 @@ func (r *PgDeviceParameterRepository) GetByPathPrefix(ctx context.Context, devic
 }
 
 func (r *PgDeviceParameterRepository) CountByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int, error) {
-	query, args, err := psql.Select("COUNT(*)").
+	query, args, err := storage.Psql.Select("COUNT(*)").
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": prefix + "%"}).
@@ -191,7 +192,7 @@ func (r *PgDeviceParameterRepository) SearchByKeyword(ctx context.Context, devic
 	if limit <= 0 {
 		limit = 100
 	}
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.ILike{"parameter_path": "%" + keyword + "%"}).
@@ -233,7 +234,7 @@ func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, 
 	notLikeDeeper := prefix + "%.%"
 
 	// 先查总数
-	countQuery, countArgs, err := psql.Select("COUNT(*)").
+	countQuery, countArgs, err := storage.Psql.Select("COUNT(*)").
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": likePrefix}).
@@ -249,7 +250,7 @@ func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, 
 	}
 
 	// 查分页数据
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": likePrefix}).
@@ -283,7 +284,7 @@ func (r *PgDeviceParameterRepository) GetDirectChildLeaves(ctx context.Context, 
 }
 
 func (r *PgDeviceParameterRepository) GetByGroup(ctx context.Context, deviceID uuid.UUID, group string) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID, "param_group": group}).
 		OrderBy("parameter_path ASC").
@@ -313,7 +314,7 @@ func (r *PgDeviceParameterRepository) GetByGroup(ctx context.Context, deviceID u
 }
 
 func (r *PgDeviceParameterRepository) GetByFAPInstance(ctx context.Context, deviceID uuid.UUID, instance int) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID, "fap_instance": instance}).
 		OrderBy("parameter_path ASC").
@@ -343,7 +344,7 @@ func (r *PgDeviceParameterRepository) GetByFAPInstance(ctx context.Context, devi
 }
 
 func (r *PgDeviceParameterRepository) GetByFAPInstanceAndGroup(ctx context.Context, deviceID uuid.UUID, instance int, group string) ([]model.DeviceParameter, error) {
-	query, args, err := psql.Select(paramColumns...).
+	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").
 		Where(sq.Eq{"device_id": deviceID, "fap_instance": instance, "param_group": group}).
 		OrderBy("parameter_path ASC").

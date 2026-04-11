@@ -11,6 +11,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // ---- column lists ----
@@ -43,8 +44,8 @@ func NewPgIndicatorRepository(pool *pgxpool.Pool) *PgIndicatorRepository {
 }
 
 func (r *PgIndicatorRepository) List(ctx context.Context, filter IndicatorFilter) (*model.ListResponse[MRIndicator], error) {
-	base := psql.Select(indicatorColumns...).From("mr_indicators")
-	countBase := psql.Select("COUNT(*)").From("mr_indicators")
+	base := storage.Psql.Select(indicatorColumns...).From("mr_indicators")
+	countBase := storage.Psql.Select("COUNT(*)").From("mr_indicators")
 
 	if filter.Category != nil {
 		base = base.Where(squirrel.Eq{"category": *filter.Category})
@@ -112,7 +113,7 @@ func (r *PgIndicatorRepository) List(ctx context.Context, filter IndicatorFilter
 }
 
 func (r *PgIndicatorRepository) ListAll(ctx context.Context) ([]MRIndicator, error) {
-	query, args, err := psql.Select(indicatorColumns...).
+	query, args, err := storage.Psql.Select(indicatorColumns...).
 		From("mr_indicators").
 		OrderBy("indicator_code ASC").
 		ToSql()
@@ -142,7 +143,7 @@ func (r *PgIndicatorRepository) ListAll(ctx context.Context) ([]MRIndicator, err
 }
 
 func (r *PgIndicatorRepository) GetByCode(ctx context.Context, code string) (*MRIndicator, error) {
-	query, args, err := psql.Select(indicatorColumns...).
+	query, args, err := storage.Psql.Select(indicatorColumns...).
 		From("mr_indicators").
 		Where(squirrel.Eq{"indicator_code": code}).
 		ToSql()
@@ -203,8 +204,8 @@ func NewPgMappingRepository(pool *pgxpool.Pool) *PgMappingRepository {
 }
 
 func (r *PgMappingRepository) List(ctx context.Context, filter MappingFilter) (*model.ListResponse[MRDeviceMapping], error) {
-	base := psql.Select(mappingColumns...).From("mr_device_mappings")
-	countBase := psql.Select("COUNT(*)").From("mr_device_mappings")
+	base := storage.Psql.Select(mappingColumns...).From("mr_device_mappings")
+	countBase := storage.Psql.Select("COUNT(*)").From("mr_device_mappings")
 
 	if filter.DeviceSN != nil && *filter.DeviceSN != "" {
 		base = base.Where(squirrel.Eq{"device_sn": *filter.DeviceSN})
@@ -267,7 +268,7 @@ func (r *PgMappingRepository) List(ctx context.Context, filter MappingFilter) (*
 }
 
 func (r *PgMappingRepository) Update(ctx context.Context, mapping *MRDeviceMapping) error {
-	query, args, err := psql.Update("mr_device_mappings").
+	query, args, err := storage.Psql.Update("mr_device_mappings").
 		Set("device_sn", mapping.DeviceSN).
 		Set("device_name", mapping.DeviceName).
 		Set("cell_id", mapping.CellID).
@@ -293,7 +294,7 @@ func (r *PgMappingRepository) Update(ctx context.Context, mapping *MRDeviceMappi
 }
 
 func (r *PgMappingRepository) ToggleEnabled(ctx context.Context, id uuid.UUID, enabled bool) (*MRDeviceMapping, error) {
-	query, args, err := psql.Update("mr_device_mappings").
+	query, args, err := storage.Psql.Update("mr_device_mappings").
 		Set("enabled", enabled).
 		Where(squirrel.Eq{"id": id}).
 		Suffix("RETURNING " + joinMappingColumns(mappingColumns)).

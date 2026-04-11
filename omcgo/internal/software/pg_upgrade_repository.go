@@ -13,6 +13,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 var upgradeColumns = []string{
@@ -65,7 +66,7 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 }
 
 func (r *PgUpgradeTaskRepository) Create(ctx context.Context, task *UpgradeTask) error {
-	builder := psql.Insert("upgrade_tasks").
+	builder := storage.Psql.Insert("upgrade_tasks").
 		Columns("device_id", "firmware_id", "batch_id", "status", "max_retries")
 
 	var batchID interface{}
@@ -91,7 +92,7 @@ func (r *PgUpgradeTaskRepository) Create(ctx context.Context, task *UpgradeTask)
 }
 
 func (r *PgUpgradeTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*UpgradeTask, error) {
-	query, args, err := psql.Select(upgradeColumns...).
+	query, args, err := storage.Psql.Select(upgradeColumns...).
 		From("upgrade_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -110,7 +111,7 @@ func (r *PgUpgradeTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*U
 }
 
 func (r *PgUpgradeTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error {
-	builder := psql.Update("upgrade_tasks").
+	builder := storage.Psql.Update("upgrade_tasks").
 		Set("status", status).
 		Where(sq.Eq{"id": id})
 
@@ -141,8 +142,8 @@ func (r *PgUpgradeTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID
 }
 
 func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
-	base := psql.Select(upgradeColumns...).From("upgrade_tasks")
-	countBase := psql.Select("COUNT(*)").From("upgrade_tasks")
+	base := storage.Psql.Select(upgradeColumns...).From("upgrade_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").From("upgrade_tasks")
 
 	if filter.DeviceID != nil {
 		base = base.Where(sq.Eq{"device_id": *filter.DeviceID})
@@ -245,7 +246,7 @@ func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFi
 }
 
 func (r *PgUpgradeTaskRepository) GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeTask, error) {
-	query, args, err := psql.Select(upgradeColumns...).
+	query, args, err := storage.Psql.Select(upgradeColumns...).
 		From("upgrade_tasks").
 		Where(sq.And{
 			sq.Eq{"device_id": deviceID},
@@ -269,7 +270,7 @@ func (r *PgUpgradeTaskRepository) GetActiveByDeviceID(ctx context.Context, devic
 }
 
 func (r *PgUpgradeTaskRepository) CountByBatchStatus(ctx context.Context, batchID uuid.UUID) (map[UpgradeState]int64, error) {
-	query, args, err := psql.Select("status", "COUNT(*)").
+	query, args, err := storage.Psql.Select("status", "COUNT(*)").
 		From("upgrade_tasks").
 		Where(sq.Eq{"batch_id": batchID}).
 		GroupBy("status").

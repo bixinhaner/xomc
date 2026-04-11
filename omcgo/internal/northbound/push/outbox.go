@@ -9,6 +9,7 @@ import (
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"go.uber.org/zap"
 )
 
@@ -62,7 +63,6 @@ type OutboxRepository interface {
 type PgOutboxRepository struct {
 	pool   *pgxpool.Pool
 	logger *zap.Logger
-	sb     squirrel.StatementBuilderType
 }
 
 // NewPgOutboxRepository creates a new PgOutboxRepository.
@@ -70,7 +70,6 @@ func NewPgOutboxRepository(pool *pgxpool.Pool, logger *zap.Logger) *PgOutboxRepo
 	return &PgOutboxRepository{
 		pool:   pool,
 		logger: logger,
-		sb:     squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar),
 	}
 }
 
@@ -79,7 +78,7 @@ func (r *PgOutboxRepository) Insert(ctx context.Context, entry *OutboxEntry) err
 		entry.ID = uuid.New()
 	}
 
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Insert("northbound_outbox").
 		Columns("id", "event_id", "subject", "payload", "target_id", "status", "max_attempts", "next_retry_at").
 		Values(entry.ID, entry.EventID, entry.Subject, entry.Payload, entry.TargetID, OutboxStatusPending, entry.MaxAttempts, entry.NextRetryAt).
@@ -97,7 +96,7 @@ func (r *PgOutboxRepository) Insert(ctx context.Context, entry *OutboxEntry) err
 }
 
 func (r *PgOutboxRepository) FetchPending(ctx context.Context, limit int) ([]OutboxEntry, error) {
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Select("id", "event_id", "subject", "payload", "target_id", "status", "attempts", "max_attempts", "last_error", "next_retry_at", "created_at", "updated_at").
 		From("northbound_outbox").
 		Where(squirrel.And{
@@ -135,7 +134,7 @@ func (r *PgOutboxRepository) FetchPending(ctx context.Context, limit int) ([]Out
 }
 
 func (r *PgOutboxRepository) MarkProcessing(ctx context.Context, id uuid.UUID) error {
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Update("northbound_outbox").
 		Set("status", OutboxStatusProcessing).
 		Set("updated_at", time.Now()).
@@ -153,7 +152,7 @@ func (r *PgOutboxRepository) MarkProcessing(ctx context.Context, id uuid.UUID) e
 }
 
 func (r *PgOutboxRepository) MarkDelivered(ctx context.Context, id uuid.UUID) error {
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Update("northbound_outbox").
 		Set("status", OutboxStatusDelivered).
 		Set("updated_at", time.Now()).
@@ -171,7 +170,7 @@ func (r *PgOutboxRepository) MarkDelivered(ctx context.Context, id uuid.UUID) er
 }
 
 func (r *PgOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string, nextRetry time.Time) error {
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Update("northbound_outbox").
 		Set("status", OutboxStatusPending).
 		Set("attempts", squirrel.Expr("attempts + 1")).
@@ -192,7 +191,7 @@ func (r *PgOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMs
 }
 
 func (r *PgOutboxRepository) MarkDead(ctx context.Context, id uuid.UUID, errMsg string) error {
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Update("northbound_outbox").
 		Set("status", OutboxStatusDead).
 		Set("attempts", squirrel.Expr("attempts + 1")).
@@ -213,7 +212,7 @@ func (r *PgOutboxRepository) MarkDead(ctx context.Context, id uuid.UUID, errMsg 
 
 func (r *PgOutboxRepository) ListDead(ctx context.Context, limit, offset int) ([]OutboxEntry, int, error) {
 	// Count total dead entries.
-	countQuery, countArgs, err := r.sb.
+	countQuery, countArgs, err := storage.Psql.
 		Select("COUNT(*)").
 		From("northbound_outbox").
 		Where(squirrel.Eq{"status": OutboxStatusDead}).
@@ -228,7 +227,7 @@ func (r *PgOutboxRepository) ListDead(ctx context.Context, limit, offset int) ([
 	}
 
 	// Fetch dead entries.
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Select("id", "event_id", "subject", "payload", "target_id", "status", "attempts", "max_attempts", "last_error", "next_retry_at", "created_at", "updated_at").
 		From("northbound_outbox").
 		Where(squirrel.Eq{"status": OutboxStatusDead}).
@@ -264,7 +263,7 @@ func (r *PgOutboxRepository) ListDead(ctx context.Context, limit, offset int) ([
 }
 
 func (r *PgOutboxRepository) Replay(ctx context.Context, id uuid.UUID) error {
-	query, args, err := r.sb.
+	query, args, err := storage.Psql.
 		Update("northbound_outbox").
 		Set("status", OutboxStatusPending).
 		Set("attempts", 0).

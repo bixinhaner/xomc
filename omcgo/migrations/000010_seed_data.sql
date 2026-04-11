@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000010_seed_data.up.sql
 -- 全部种子数据
@@ -181,3 +182,20 @@ INSERT INTO sys_configs (category, key, value, value_type, description, is_publi
 ('system', 'lockout_duration', '30', 'int', '锁定时长（分钟）', FALSE),
 ('system', 'password_min_length', '6', 'int', '密码最小长度', FALSE)
 ON CONFLICT DO NOTHING;
+
+-- +goose Down
+DELETE FROM sys_dictionary_details;
+DELETE FROM sys_dictionaries;
+DELETE FROM sys_configs;
+DELETE FROM role_inheritance;
+DELETE FROM role_menus;
+DELETE FROM menus;
+DELETE FROM permissions;
+DELETE FROM user_roles;
+DELETE FROM users WHERE username = 'admin';
+DELETE FROM roles WHERE is_system = TRUE;
+DELETE FROM kpi_definitions;
+DELETE FROM data_model_definitions;
+DELETE FROM oui_registry;
+DELETE FROM device_group_members WHERE group_id = '00000000-0000-0000-0000-000000000002';
+DELETE FROM device_groups WHERE is_default = TRUE;

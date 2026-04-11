@@ -11,6 +11,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // ---- column list ----
@@ -38,7 +39,7 @@ func NewPgFTPConfigRepository(pool *pgxpool.Pool) *PgFTPConfigRepository {
 }
 
 func (r *PgFTPConfigRepository) Create(ctx context.Context, config *FTPConfig) error {
-	query, args, err := psql.Insert("ftp_configs").
+	query, args, err := storage.Psql.Insert("ftp_configs").
 		Columns("config_name", "host", "port", "username",
 			"password_encrypted", "protocol", "remote_path",
 			"passive", "enabled").
@@ -61,7 +62,7 @@ func (r *PgFTPConfigRepository) Create(ctx context.Context, config *FTPConfig) e
 }
 
 func (r *PgFTPConfigRepository) GetByID(ctx context.Context, id uuid.UUID) (*FTPConfig, error) {
-	query, args, err := psql.Select(ftpConfigColumns...).
+	query, args, err := storage.Psql.Select(ftpConfigColumns...).
 		From("ftp_configs").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -80,7 +81,7 @@ func (r *PgFTPConfigRepository) GetByID(ctx context.Context, id uuid.UUID) (*FTP
 }
 
 func (r *PgFTPConfigRepository) Update(ctx context.Context, config *FTPConfig) error {
-	query, args, err := psql.Update("ftp_configs").
+	query, args, err := storage.Psql.Update("ftp_configs").
 		Set("config_name", config.ConfigName).
 		Set("host", config.Host).
 		Set("port", config.Port).
@@ -107,7 +108,7 @@ func (r *PgFTPConfigRepository) Update(ctx context.Context, config *FTPConfig) e
 }
 
 func (r *PgFTPConfigRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("ftp_configs").
+	query, args, err := storage.Psql.Delete("ftp_configs").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -125,8 +126,8 @@ func (r *PgFTPConfigRepository) Delete(ctx context.Context, id uuid.UUID) error 
 }
 
 func (r *PgFTPConfigRepository) List(ctx context.Context, filter FTPConfigFilter) (*model.ListResponse[FTPConfig], error) {
-	base := psql.Select(ftpConfigColumns...).From("ftp_configs")
-	countBase := psql.Select("COUNT(*)").From("ftp_configs")
+	base := storage.Psql.Select(ftpConfigColumns...).From("ftp_configs")
+	countBase := storage.Psql.Select("COUNT(*)").From("ftp_configs")
 
 	if filter.Enabled != nil {
 		base = base.Where(sq.Eq{"enabled": *filter.Enabled})

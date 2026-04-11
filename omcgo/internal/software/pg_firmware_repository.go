@@ -12,9 +12,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 var firmwareColumns = []string{
 	"id", "carrier", "product_class", "version", "file_name", "file_size",
@@ -54,7 +53,7 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) error {
 	ouiJSON, _ := json.Marshal(fw.CompatibleOUI)
 
-	query, args, err := psql.Insert("firmware_versions").
+	query, args, err := storage.Psql.Insert("firmware_versions").
 		Columns("carrier", "product_class", "version", "file_name", "file_size",
 			"minio_path", "compatible_oui", "release_notes", "status").
 		Values(fw.Carrier, fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
@@ -75,7 +74,7 @@ func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) 
 }
 
 func (r *PgFirmwareRepository) GetByID(ctx context.Context, id uuid.UUID) (*FirmwareVersion, error) {
-	query, args, err := psql.Select(firmwareColumns...).
+	query, args, err := storage.Psql.Select(firmwareColumns...).
 		From("firmware_versions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -94,8 +93,8 @@ func (r *PgFirmwareRepository) GetByID(ctx context.Context, id uuid.UUID) (*Firm
 }
 
 func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) (*model.ListResponse[FirmwareVersion], error) {
-	base := psql.Select(firmwareColumns...).From("firmware_versions")
-	countBase := psql.Select("COUNT(*)").From("firmware_versions")
+	base := storage.Psql.Select(firmwareColumns...).From("firmware_versions")
+	countBase := storage.Psql.Select("COUNT(*)").From("firmware_versions")
 
 	if filter.Carrier != nil {
 		base = base.Where(sq.Eq{"carrier": *filter.Carrier})
@@ -176,7 +175,7 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 }
 
 func (r *PgFirmwareRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("firmware_versions").
+	query, args, err := storage.Psql.Delete("firmware_versions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {

@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000002_users_roles.up.sql
 -- 用户、角色、权限、菜单管理
@@ -101,3 +102,13 @@ CREATE TABLE dashboard_widgets (
     UNIQUE(user_id)
 );
 CREATE TRIGGER trigger_dashboard_widgets_updated_at BEFORE UPDATE ON dashboard_widgets FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- +goose Down
+DROP TABLE IF EXISTS dashboard_widgets CASCADE;
+DROP TABLE IF EXISTS user_column_configs CASCADE;
+DROP TABLE IF EXISTS role_inheritance CASCADE;
+DROP TABLE IF EXISTS api_keys CASCADE;
+DROP TABLE IF EXISTS permissions CASCADE;
+DROP TABLE IF EXISTS user_roles CASCADE;
+DROP TABLE IF EXISTS roles CASCADE;
+DROP TABLE IF EXISTS users CASCADE;

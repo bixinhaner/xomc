@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000005_config_pm.up.sql
 -- Config templates, baselines, tasks, neighbors, provisioning,
@@ -329,3 +330,18 @@ BEGIN
             WITH NO DATA';
     END IF;
 END $$;
+
+-- +goose Down
+DROP MATERIALIZED VIEW IF EXISTS pm_counters_hourly;
+DROP TABLE IF EXISTS kpi_thresholds CASCADE;
+DROP TABLE IF EXISTS kpi_values CASCADE;
+DROP TABLE IF EXISTS kpi_definitions CASCADE;
+DROP TABLE IF EXISTS pm_tasks CASCADE;
+DROP TABLE IF EXISTS pm_files CASCADE;
+DROP TABLE IF EXISTS pm_counters CASCADE;
+DROP TABLE IF EXISTS ftp_configs CASCADE;
+DROP TABLE IF EXISTS provisioning_tasks CASCADE;
+DROP TABLE IF EXISTS config_neighbors CASCADE;
+DROP TABLE IF EXISTS config_tasks CASCADE;
+DROP TABLE IF EXISTS config_baselines CASCADE;
+DROP TABLE IF EXISTS config_templates CASCADE;

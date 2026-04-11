@@ -12,14 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/topology"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // FrontendDeviceStats matches the frontend's expected device_stats format.
 type FrontendDeviceStats struct {
@@ -214,7 +213,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 
 	// 5. Count devices with active alarms
 	g.Go(func() error {
-		query, args, err := psql.Select("COUNT(DISTINCT device_id)").
+		query, args, err := storage.Psql.Select("COUNT(DISTINCT device_id)").
 			From("alarms_active").
 			Where(sq.Eq{"status": "active"}).
 			ToSql()
@@ -448,7 +447,7 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 			g2, gctx := errgroup.WithContext(ctx)
 
 			g2.Go(func() error {
-				onlineQuery, args, err := psql.Select("COUNT(*)").
+				onlineQuery, args, err := storage.Psql.Select("COUNT(*)").
 					From("devices").
 					Where("id = ANY(?)", deviceIDs).
 					Where(sq.Eq{"status": "active"}).
@@ -466,7 +465,7 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 			})
 
 			g2.Go(func() error {
-				alarmQuery, args, err := psql.Select("COUNT(*)").
+				alarmQuery, args, err := storage.Psql.Select("COUNT(*)").
 					From("alarms_active").
 					Where("device_id = ANY(?)", deviceIDs).
 					ToSql()
@@ -493,7 +492,7 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 
 // GetWidgetLayout retrieves the widget layout for a specific user.
 func (s *Service) GetWidgetLayout(ctx context.Context, userID uuid.UUID) (*WidgetLayout, error) {
-	query, args, err := psql.Select("id", "user_id", "layout", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "user_id", "layout", "created_at", "updated_at").
 		From("dashboard_widgets").
 		Where(sq.Eq{"user_id": userID}).
 		ToSql()
@@ -520,7 +519,7 @@ func (s *Service) GetWidgetLayout(ctx context.Context, userID uuid.UUID) (*Widge
 
 // SaveWidgetLayout upserts the widget layout for a specific user.
 func (s *Service) SaveWidgetLayout(ctx context.Context, userID uuid.UUID, layout json.RawMessage) (*WidgetLayout, error) {
-	query, args, err := psql.Insert("dashboard_widgets").
+	query, args, err := storage.Psql.Insert("dashboard_widgets").
 		Columns("user_id", "layout").
 		Values(userID, layout).
 		Suffix("ON CONFLICT (user_id) DO UPDATE SET layout = EXCLUDED.layout, updated_at = NOW() RETURNING id, user_id, layout, created_at, updated_at").
@@ -582,7 +581,7 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		result[name] = []KPITimeSeriesEntry{}
 	}
 
-	query, args, err := psql.Select("kpi_name", "time", "kpi_value").
+	query, args, err := storage.Psql.Select("kpi_name", "time", "kpi_value").
 		From("kpi_values").
 		Where("kpi_name = ANY(?)", kpiNames).
 		Where(sq.GtOrEq{"time": startTime}).

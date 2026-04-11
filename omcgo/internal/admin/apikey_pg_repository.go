@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 var apiKeyColumns = []string{
@@ -37,7 +38,7 @@ func (r *PgAPIKeyRepository) Create(ctx context.Context, key *APIKey) error {
 	key.CreatedAt = now
 	key.UpdatedAt = now
 
-	query, args, err := psql.Insert("api_keys").
+	query, args, err := storage.Psql.Insert("api_keys").
 		Columns(apiKeyColumns...).
 		Values(
 			key.ID, key.UserID, key.Name, key.KeyPrefix, key.KeyHash,
@@ -58,7 +59,7 @@ func (r *PgAPIKeyRepository) Create(ctx context.Context, key *APIKey) error {
 
 // GetByPrefix returns all non-revoked API keys matching the given prefix.
 func (r *PgAPIKeyRepository) GetByPrefix(ctx context.Context, prefix string) ([]*APIKey, error) {
-	query, args, err := psql.Select(apiKeyColumns...).
+	query, args, err := storage.Psql.Select(apiKeyColumns...).
 		From("api_keys").
 		Where(sq.Eq{"key_prefix": prefix}).
 		Where("revoked_at IS NULL").
@@ -86,7 +87,7 @@ func (r *PgAPIKeyRepository) GetByPrefix(ctx context.Context, prefix string) ([]
 
 // ListByUser returns all API keys for a given user.
 func (r *PgAPIKeyRepository) ListByUser(ctx context.Context, userID uuid.UUID) ([]*APIKey, error) {
-	query, args, err := psql.Select(apiKeyColumns...).
+	query, args, err := storage.Psql.Select(apiKeyColumns...).
 		From("api_keys").
 		Where(sq.Eq{"user_id": userID}).
 		OrderBy("created_at DESC").
@@ -115,7 +116,7 @@ func (r *PgAPIKeyRepository) ListByUser(ctx context.Context, userID uuid.UUID) (
 // Revoke soft-deletes an API key by setting revoked_at.
 func (r *PgAPIKeyRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 	now := time.Now()
-	query, args, err := psql.Update("api_keys").
+	query, args, err := storage.Psql.Update("api_keys").
 		Set("revoked_at", now).
 		Set("updated_at", now).
 		Where(sq.Eq{"id": id}).
@@ -137,7 +138,7 @@ func (r *PgAPIKeyRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 
 // UpdateLastUsed updates the last_used_at timestamp for an API key.
 func (r *PgAPIKeyRepository) UpdateLastUsed(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Update("api_keys").
+	query, args, err := storage.Psql.Update("api_keys").
 		Set("last_used_at", time.Now()).
 		Where(sq.Eq{"id": id}).
 		ToSql()

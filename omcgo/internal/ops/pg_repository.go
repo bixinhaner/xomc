@@ -11,9 +11,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ---- column lists ----
 
@@ -64,7 +63,7 @@ func (r *PgTemplateRepository) Create(ctx context.Context, tmpl *OpsTemplate) er
 		tmpl.Tags = []byte("[]")
 	}
 
-	query, args, err := psql.Insert("ops_templates").
+	query, args, err := storage.Psql.Insert("ops_templates").
 		Columns("template_name", "description", "category",
 			"target_device_types", "steps", "estimated_duration",
 			"creator", "use_count", "tags").
@@ -87,7 +86,7 @@ func (r *PgTemplateRepository) Create(ctx context.Context, tmpl *OpsTemplate) er
 }
 
 func (r *PgTemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*OpsTemplate, error) {
-	query, args, err := psql.Select(templateColumns...).
+	query, args, err := storage.Psql.Select(templateColumns...).
 		From("ops_templates").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -116,7 +115,7 @@ func (r *PgTemplateRepository) Update(ctx context.Context, tmpl *OpsTemplate) er
 		tmpl.Tags = []byte("[]")
 	}
 
-	query, args, err := psql.Update("ops_templates").
+	query, args, err := storage.Psql.Update("ops_templates").
 		Set("template_name", tmpl.TemplateName).
 		Set("description", tmpl.Description).
 		Set("category", tmpl.Category).
@@ -142,7 +141,7 @@ func (r *PgTemplateRepository) Update(ctx context.Context, tmpl *OpsTemplate) er
 }
 
 func (r *PgTemplateRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("ops_templates").
+	query, args, err := storage.Psql.Delete("ops_templates").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -160,8 +159,8 @@ func (r *PgTemplateRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[OpsTemplate], error) {
-	base := psql.Select(templateColumns...).From("ops_templates")
-	countBase := psql.Select("COUNT(*)").From("ops_templates")
+	base := storage.Psql.Select(templateColumns...).From("ops_templates")
+	countBase := storage.Psql.Select("COUNT(*)").From("ops_templates")
 
 	if filter.Category != "" {
 		base = base.Where(sq.Eq{"category": filter.Category})
@@ -226,7 +225,7 @@ func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) 
 }
 
 func (r *PgTemplateRepository) IncrementUseCount(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Update("ops_templates").
+	query, args, err := storage.Psql.Update("ops_templates").
 		Set("use_count", sq.Expr("use_count + 1")).
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -311,7 +310,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *OpsTask) error {
 		task.DeviceSNs = []byte("[]")
 	}
 
-	query, args, err := psql.Insert("ops_tasks").
+	query, args, err := storage.Psql.Insert("ops_tasks").
 		Columns("task_name", "template_id", "device_sns",
 			"status", "current_step", "total_steps", "progress",
 			"success_count", "fail_count", "total_count",
@@ -336,7 +335,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *OpsTask) error {
 }
 
 func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*OpsTask, error) {
-	query, args, err := psql.Select(taskColumns...).
+	query, args, err := storage.Psql.Select(taskColumns...).
 		From("ops_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -355,7 +354,7 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*OpsTask,
 }
 
 func (r *PgTaskRepository) UpdateStatus(ctx context.Context, task *OpsTask) error {
-	builder := psql.Update("ops_tasks").
+	builder := storage.Psql.Update("ops_tasks").
 		Set("status", task.Status).
 		Set("current_step", task.CurrentStep).
 		Set("progress", task.Progress).
@@ -382,8 +381,8 @@ func (r *PgTaskRepository) UpdateStatus(ctx context.Context, task *OpsTask) erro
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error) {
-	base := psql.Select(taskColumns...).From("ops_tasks")
-	countBase := psql.Select("COUNT(*)").From("ops_tasks")
+	base := storage.Psql.Select(taskColumns...).From("ops_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").From("ops_tasks")
 
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})
@@ -500,7 +499,7 @@ func NewPgCommandRecordRepository(pool *pgxpool.Pool) *PgCommandRecordRepository
 }
 
 func (r *PgCommandRecordRepository) Create(ctx context.Context, record *OpsCommandRecord) error {
-	query, args, err := psql.Insert("ops_command_records").
+	query, args, err := storage.Psql.Insert("ops_command_records").
 		Columns("command_text", "device_sn", "device_name",
 			"operator", "execute_time", "duration", "success",
 			"output", "error_message").
@@ -523,8 +522,8 @@ func (r *PgCommandRecordRepository) Create(ctx context.Context, record *OpsComma
 }
 
 func (r *PgCommandRecordRepository) List(ctx context.Context, filter CommandRecordFilter) (*model.ListResponse[OpsCommandRecord], error) {
-	base := psql.Select(cmdRecordColumns...).From("ops_command_records")
-	countBase := psql.Select("COUNT(*)").From("ops_command_records")
+	base := storage.Psql.Select(cmdRecordColumns...).From("ops_command_records")
+	countBase := storage.Psql.Select("COUNT(*)").From("ops_command_records")
 
 	if filter.DeviceSN != "" {
 		base = base.Where(sq.Eq{"device_sn": filter.DeviceSN})

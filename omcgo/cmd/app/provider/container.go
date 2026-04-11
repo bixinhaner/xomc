@@ -46,6 +46,7 @@ type Container struct {
 	Logger     *zap.Logger
 	GS         *components.GracefulShutdown
 	MetricsReg *prometheus.Registry
+	Health     *components.HealthChecker
 
 	// ===== 共享服务（由各模块 Init 设置）=====
 

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 var pmTaskColumns = []string{
@@ -54,7 +55,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *PerformanceTask) er
 		task.KPICodes = []byte("[]")
 	}
 
-	query, args, err := psql.Insert("pm_tasks").
+	query, args, err := storage.Psql.Insert("pm_tasks").
 		Columns("id", "task_name", "task_type", "device_sns", "kpi_codes",
 			"granularity", "time_range", "status", "progress",
 			"creator", "created_at", "updated_at").
@@ -74,8 +75,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *PerformanceTask) er
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[PerformanceTask], error) {
-	builder := psql.Select(pmTaskColumns...).From("pm_tasks")
-	countBuilder := psql.Select("COUNT(*)").From("pm_tasks")
+	builder := storage.Psql.Select(pmTaskColumns...).From("pm_tasks")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("pm_tasks")
 
 	builder = applyPMTaskFilters(builder, filter)
 	countBuilder = applyPMTaskFilters(countBuilder, filter)

@@ -12,9 +12,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ---- column lists ----
 
@@ -53,7 +52,7 @@ func NewPgCommandRepository(pool *pgxpool.Pool) *PgCommandRepository {
 }
 
 func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCommand, error) {
-	query, args, err := psql.Select(commandColumns...).
+	query, args, err := storage.Psql.Select(commandColumns...).
 		From("mml_commands").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -72,7 +71,7 @@ func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCo
 }
 
 func (r *PgCommandRepository) GetByCode(ctx context.Context, code string) (*MMLCommand, error) {
-	query, args, err := psql.Select(commandColumns...).
+	query, args, err := storage.Psql.Select(commandColumns...).
 		From("mml_commands").
 		Where(sq.Eq{"command_code": code}).
 		ToSql()
@@ -91,8 +90,8 @@ func (r *PgCommandRepository) GetByCode(ctx context.Context, code string) (*MMLC
 }
 
 func (r *PgCommandRepository) List(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error) {
-	base := psql.Select(commandColumns...).From("mml_commands")
-	countBase := psql.Select("COUNT(*)").From("mml_commands")
+	base := storage.Psql.Select(commandColumns...).From("mml_commands")
+	countBase := storage.Psql.Select("COUNT(*)").From("mml_commands")
 
 	if filter.Category != nil {
 		base = base.Where(sq.Eq{"category": *filter.Category})
@@ -246,7 +245,7 @@ func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) erro
 		return fmt.Errorf("marshal tags: %w", err)
 	}
 
-	query, args, err := psql.Insert("mml_scripts").
+	query, args, err := storage.Psql.Insert("mml_scripts").
 		Columns("script_name", "description", "content",
 			"device_type", "creator", "tags").
 		Values(script.ScriptName, script.Description, script.Content,
@@ -267,7 +266,7 @@ func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) erro
 }
 
 func (r *PgScriptRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error) {
-	query, args, err := psql.Select(scriptColumns...).
+	query, args, err := storage.Psql.Select(scriptColumns...).
 		From("mml_scripts").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -291,7 +290,7 @@ func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) erro
 		return fmt.Errorf("marshal tags: %w", err)
 	}
 
-	query, args, err := psql.Update("mml_scripts").
+	query, args, err := storage.Psql.Update("mml_scripts").
 		Set("script_name", script.ScriptName).
 		Set("description", script.Description).
 		Set("content", script.Content).
@@ -315,7 +314,7 @@ func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) erro
 }
 
 func (r *PgScriptRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("mml_scripts").
+	query, args, err := storage.Psql.Delete("mml_scripts").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -333,8 +332,8 @@ func (r *PgScriptRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgScriptRepository) List(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error) {
-	base := psql.Select(scriptColumns...).From("mml_scripts")
-	countBase := psql.Select("COUNT(*)").From("mml_scripts")
+	base := storage.Psql.Select(scriptColumns...).From("mml_scripts")
+	countBase := storage.Psql.Select("COUNT(*)").From("mml_scripts")
 
 	if filter.DeviceType != nil {
 		base = base.Where(sq.Eq{"device_type": *filter.DeviceType})
@@ -483,7 +482,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 		return fmt.Errorf("marshal results: %w", err)
 	}
 
-	query, args, err := psql.Insert("mml_tasks").
+	query, args, err := storage.Psql.Insert("mml_tasks").
 		Columns("task_name", "script_id", "device_sns",
 			"commands", "status", "results", "creator").
 		Values(task.TaskName, task.ScriptID, deviceSNsJSON,
@@ -504,7 +503,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 }
 
 func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
-	query, args, err := psql.Select(taskColumns...).
+	query, args, err := storage.Psql.Select(taskColumns...).
 		From("mml_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -536,7 +535,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 		return fmt.Errorf("marshal results: %w", err)
 	}
 
-	query, args, err := psql.Update("mml_tasks").
+	query, args, err := storage.Psql.Update("mml_tasks").
 		Set("task_name", task.TaskName).
 		Set("script_id", task.ScriptID).
 		Set("device_sns", deviceSNsJSON).
@@ -561,8 +560,8 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 }
 
 func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
-	base := psql.Select(taskColumns...).From("mml_tasks")
-	countBase := psql.Select("COUNT(*)").From("mml_tasks")
+	base := storage.Psql.Select(taskColumns...).From("mml_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").From("mml_tasks")
 
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})

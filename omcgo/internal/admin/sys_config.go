@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // SysConfig represents a system configuration entry.
@@ -69,7 +70,7 @@ func NewPgSysConfigRepository(pool *pgxpool.Pool) *PgSysConfigRepository {
 
 func (r *PgSysConfigRepository) Create(ctx context.Context, cfg *SysConfig) error {
 	now := time.Now()
-	query, args, err := psql.Insert("sys_configs").
+	query, args, err := storage.Psql.Insert("sys_configs").
 		Columns("category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
 		Values(cfg.Category, cfg.Key, cfg.Value, cfg.ValueType, cfg.Description, cfg.IsPublic, now, now).
 		Suffix("RETURNING id, created_at, updated_at").
@@ -81,7 +82,7 @@ func (r *PgSysConfigRepository) Create(ctx context.Context, cfg *SysConfig) erro
 }
 
 func (r *PgSysConfigRepository) GetByID(ctx context.Context, id uuid.UUID) (*SysConfig, error) {
-	query, args, err := psql.Select("id", "category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
 		From("sys_configs").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build get config SQL: %w", err)
@@ -98,7 +99,7 @@ func (r *PgSysConfigRepository) GetByID(ctx context.Context, id uuid.UUID) (*Sys
 }
 
 func (r *PgSysConfigRepository) GetByKey(ctx context.Context, category, key string) (*SysConfig, error) {
-	query, args, err := psql.Select("id", "category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
 		From("sys_configs").Where(sq.Eq{"category": category, "key": key}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build get config by key SQL: %w", err)
@@ -115,7 +116,7 @@ func (r *PgSysConfigRepository) GetByKey(ctx context.Context, category, key stri
 }
 
 func (r *PgSysConfigRepository) List(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error) {
-	builder := psql.Select("id", "category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
+	builder := storage.Psql.Select("id", "category", "key", "value", "value_type", "description", "is_public", "created_at", "updated_at").
 		From("sys_configs").OrderBy("category ASC", "key ASC")
 
 	where := sq.And{}
@@ -153,7 +154,7 @@ func (r *PgSysConfigRepository) List(ctx context.Context, category string, publi
 
 func (r *PgSysConfigRepository) Update(ctx context.Context, cfg *SysConfig) error {
 	now := time.Now()
-	builder := psql.Update("sys_configs").Set("updated_at", now)
+	builder := storage.Psql.Update("sys_configs").Set("updated_at", now)
 	if cfg.Value != "" {
 		builder = builder.Set("value", cfg.Value)
 	}

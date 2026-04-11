@@ -1,3 +1,4 @@
+-- +goose Up
 -- ============================================================
 -- 000001_extensions_functions.up.sql
 -- PostgreSQL 扩展和公共函数
@@ -21,3 +22,6 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- +goose Down
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;

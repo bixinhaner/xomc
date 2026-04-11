@@ -11,10 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/mr/parser"
 )
-
-var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
 // PgMRStore implements MRStore using PostgreSQL and TimescaleDB.
 type PgMRStore struct {
@@ -96,10 +95,10 @@ func (s *PgMRStore) GetFileByID(ctx context.Context, fileID uuid.UUID) (*MRFileI
 }
 
 func (s *PgMRStore) ListFiles(ctx context.Context, filter MRFileFilter) (*model.ListResponse[MRFileInfo], error) {
-	qb := psql.Select("id", "device_id", "device_sn", "carrier", "mr_type", "file_name",
+	qb := storage.Psql.Select("id", "device_id", "device_sn", "carrier", "mr_type", "file_name",
 		"file_size", "collect_time", "minio_path", "parsed", "parsed_at", "record_count", "created_at").
 		From("mr_files")
-	countQb := psql.Select("COUNT(*)").From("mr_files")
+	countQb := storage.Psql.Select("COUNT(*)").From("mr_files")
 
 	if filter.DeviceID != nil {
 		qb = qb.Where(squirrel.Eq{"device_id": *filter.DeviceID})
@@ -146,9 +145,9 @@ func (s *PgMRStore) ListFiles(ctx context.Context, filter MRFileFilter) (*model.
 }
 
 func (s *PgMRStore) QueryRecords(ctx context.Context, filter MRRecordFilter) (*model.ListResponse[MRRecordEntry], error) {
-	qb := psql.Select("time", "file_id", "device_id", "cell_id", "mr_type", "measurement_data").
+	qb := storage.Psql.Select("time", "file_id", "device_id", "cell_id", "mr_type", "measurement_data").
 		From("mr_records")
-	countQb := psql.Select("COUNT(*)").From("mr_records")
+	countQb := storage.Psql.Select("COUNT(*)").From("mr_records")
 
 	if filter.DeviceID != nil {
 		qb = qb.Where(squirrel.Eq{"device_id": *filter.DeviceID})

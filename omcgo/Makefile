@@ -86,9 +86,16 @@ migrate-up:
 migrate-down:
 	go run ./cmd/migrate down
 
+migrate-reset:
+	go run ./cmd/migrate reset
+
 migrate-create:
 	@if [ -z "$(name)" ]; then echo "Usage: make migrate-create name=<migration_name>"; exit 1; fi
-	migrate create -ext sql -dir migrations -seq $(name)
+	@next=$$(ls migrations/*.sql 2>/dev/null | wc -l | tr -d ' '); \
+		next=$$((next + 1)); \
+		fname=$$(printf "migrations/%06d_%s.sql" $$next "$(name)"); \
+		printf "-- +goose Up\n\n-- +goose Down\n" > $$fname; \
+		echo "Created $$fname"
 
 # Docker
 docker-build:

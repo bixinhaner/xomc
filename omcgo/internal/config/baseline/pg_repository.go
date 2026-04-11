@@ -12,9 +12,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ---- column lists ----
 
@@ -57,7 +56,7 @@ func (r *PgBaselineRepository) Create(ctx context.Context, baseline *BaselineCon
 		baseline.Params = json.RawMessage("[]")
 	}
 
-	query, args, err := psql.Insert("config_baselines").
+	query, args, err := storage.Psql.Insert("config_baselines").
 		Columns("baseline_name", "description", "device_type", "version",
 			"params", "creator", "status").
 		Values(baseline.BaselineName, baseline.Description, baseline.DeviceType,
@@ -78,7 +77,7 @@ func (r *PgBaselineRepository) Create(ctx context.Context, baseline *BaselineCon
 }
 
 func (r *PgBaselineRepository) GetByID(ctx context.Context, id uuid.UUID) (*BaselineConfig, error) {
-	query, args, err := psql.Select(baselineColumns...).
+	query, args, err := storage.Psql.Select(baselineColumns...).
 		From("config_baselines").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -101,7 +100,7 @@ func (r *PgBaselineRepository) Update(ctx context.Context, baseline *BaselineCon
 		baseline.Params = json.RawMessage("[]")
 	}
 
-	query, args, err := psql.Update("config_baselines").
+	query, args, err := storage.Psql.Update("config_baselines").
 		Set("baseline_name", baseline.BaselineName).
 		Set("description", baseline.Description).
 		Set("device_type", baseline.DeviceType).
@@ -126,7 +125,7 @@ func (r *PgBaselineRepository) Update(ctx context.Context, baseline *BaselineCon
 }
 
 func (r *PgBaselineRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("config_baselines").
+	query, args, err := storage.Psql.Delete("config_baselines").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -144,8 +143,8 @@ func (r *PgBaselineRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgBaselineRepository) List(ctx context.Context, filter BaselineFilter) (*model.ListResponse[BaselineConfig], error) {
-	base := psql.Select(baselineColumns...).From("config_baselines")
-	countBase := psql.Select("COUNT(*)").From("config_baselines")
+	base := storage.Psql.Select(baselineColumns...).From("config_baselines")
+	countBase := storage.Psql.Select("COUNT(*)").From("config_baselines")
 
 	if filter.DeviceType != nil {
 		base = base.Where(sq.Eq{"device_type": *filter.DeviceType})
@@ -270,7 +269,7 @@ func (r *PgConfigTaskRepository) Create(ctx context.Context, task *ConfigTask) e
 		task.DeviceSns = json.RawMessage("[]")
 	}
 
-	query, args, err := psql.Insert("config_tasks").
+	query, args, err := storage.Psql.Insert("config_tasks").
 		Columns("task_name", "task_type", "device_sns", "template_id",
 			"baseline_id", "params", "status", "progress", "success_count",
 			"fail_count", "total_count", "creator", "message").
@@ -294,8 +293,8 @@ func (r *PgConfigTaskRepository) Create(ctx context.Context, task *ConfigTask) e
 }
 
 func (r *PgConfigTaskRepository) List(ctx context.Context, filter ConfigTaskFilter) (*model.ListResponse[ConfigTask], error) {
-	base := psql.Select(configTaskColumns...).From("config_tasks")
-	countBase := psql.Select("COUNT(*)").From("config_tasks")
+	base := storage.Psql.Select(configTaskColumns...).From("config_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").From("config_tasks")
 
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})
@@ -424,8 +423,8 @@ func NewPgNeighborRepository(pool *pgxpool.Pool) *PgNeighborRepository {
 }
 
 func (r *PgNeighborRepository) List(ctx context.Context, filter NeighborFilter) (*model.ListResponse[NeighborParam], error) {
-	base := psql.Select(neighborColumns...).From("config_neighbors")
-	countBase := psql.Select("COUNT(*)").From("config_neighbors")
+	base := storage.Psql.Select(neighborColumns...).From("config_neighbors")
+	countBase := storage.Psql.Select("COUNT(*)").From("config_neighbors")
 
 	if filter.SourceCellID != nil {
 		base = base.Where(sq.Eq{"source_cell_id": *filter.SourceCellID})

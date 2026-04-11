@@ -9,9 +9,9 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
+	"github.com/omcgo/omcgo/internal/core/storage"
+)
 
 // PgTaskRepository 实现 TaskRepository 接口
 type PgTaskRepository struct {
@@ -25,7 +25,7 @@ func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 
 // Create 创建任务记录
 func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
-	query, args, err := psql.Insert("device_tasks").
+	query, args, err := storage.Psql.Insert("device_tasks").
 		Columns(
 			"id", "device_sn", "method", "params", "priority",
 			"command_key", "cwmp_id", "status", "retry_count", "max_retries",
@@ -55,7 +55,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 
 // Update 更新任务记录
 func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
-	query, args, err := psql.Update("device_tasks").
+	query, args, err := storage.Psql.Update("device_tasks").
 		Set("method", task.Method).
 		Set("params", task.Params).
 		Set("priority", task.Priority).
@@ -86,7 +86,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 
 // GetByID 根据 ID 获取任务
 func (r *PgTaskRepository) GetByID(ctx context.Context, id string) (*Task, error) {
-	query, args, err := psql.Select(taskColumns()...).
+	query, args, err := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -99,7 +99,7 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id string) (*Task, error
 
 // GetByCWMPID 根据 CWMP ID 获取任务
 func (r *PgTaskRepository) GetByCWMPID(ctx context.Context, cwmpID string) (*Task, error) {
-	query, args, err := psql.Select(taskColumns()...).
+	query, args, err := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(sq.Eq{"cwmp_id": cwmpID}).
 		OrderBy("created_at DESC").
@@ -140,7 +140,7 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 	}
 
 	// 构建基础查询
-	baseQuery := psql.Select(taskColumns()...).
+	baseQuery := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(whereClause)
 
@@ -149,7 +149,7 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 	}
 
 	// 获取总数
-	countQuery, countArgs, err := psql.Select("COUNT(*)").
+	countQuery, countArgs, err := storage.Psql.Select("COUNT(*)").
 		From("device_tasks").
 		Where(whereClause).
 		ToSql()
@@ -194,7 +194,7 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 
 // GetPendingByDevice 获取设备的所有 pending 状态任务
 func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN string) ([]*Task, error) {
-	query, args, err := psql.Select(taskColumns()...).
+	query, args, err := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(sq.Eq{
 			"device_sn": deviceSN,
@@ -226,7 +226,7 @@ func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN stri
 
 // Delete 删除任务
 func (r *PgTaskRepository) Delete(ctx context.Context, id string) error {
-	query, args, err := psql.Delete("device_tasks").
+	query, args, err := storage.Psql.Delete("device_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -256,7 +256,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		"source", "creator_id", "description",
 	}
 
-	insertBuilder := psql.Insert("device_tasks").Columns(columns...)
+	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
 
 	for _, task := range tasks {
 		insertBuilder = insertBuilder.Values(
@@ -283,7 +283,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 
 // CountByStatus 统计各状态任务数量
 func (r *PgTaskRepository) CountByStatus(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error) {
-	query, args, err := psql.Select("status", "COUNT(*) as count").
+	query, args, err := storage.Psql.Select("status", "COUNT(*) as count").
 		From("device_tasks").
 		Where(sq.Eq{"device_sn": deviceSN}).
 		GroupBy("status").
@@ -318,7 +318,7 @@ func (r *PgTaskRepository) PurgeOldTasks(ctx context.Context, before string) (in
 		return 0, fmt.Errorf("parse time: %w", err)
 	}
 
-	query, args, err := psql.Delete("device_tasks").
+	query, args, err := storage.Psql.Delete("device_tasks").
 		Where(sq.Eq{"status": []TaskStatus{TaskStatusCompleted, TaskStatusFailed, TaskStatusExpired, TaskStatusCancelled}}).
 		Where(sq.Lt{"completed_at": beforeTime}).
 		ToSql()

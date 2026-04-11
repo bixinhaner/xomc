@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // PgCounterRepository implements CounterRepository using TimescaleDB.
@@ -37,8 +38,6 @@ func (r *PgCounterRepository) BatchInsert(ctx context.Context, counters []model.
 	}
 	return nil
 }
-
-var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
 // allowedSortColumns prevents SQL injection in ORDER BY clauses.
 var allowedSortColumns = map[string]bool{
@@ -73,7 +72,7 @@ func applyCounterFilters(qb squirrel.SelectBuilder, filter CounterFilter) squirr
 
 func (r *PgCounterRepository) Query(ctx context.Context, filter CounterFilter) (*model.ListResponse[model.PMCounter], error) {
 	// Count
-	countQb := applyCounterFilters(psql.Select("COUNT(*)").From("pm_counters"), filter)
+	countQb := applyCounterFilters(storage.Psql.Select("COUNT(*)").From("pm_counters"), filter)
 	countSQL, countArgs, err := countQb.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build count query: %w", err)
@@ -85,7 +84,7 @@ func (r *PgCounterRepository) Query(ctx context.Context, filter CounterFilter) (
 
 	// Data
 	qb := applyCounterFilters(
-		psql.Select("time", "device_id", "cell_id", "counter_group", "counter_name", "counter_value", "granularity").From("pm_counters"),
+		storage.Psql.Select("time", "device_id", "cell_id", "counter_group", "counter_name", "counter_value", "granularity").From("pm_counters"),
 		filter,
 	)
 	sortBy := "time"
@@ -121,7 +120,7 @@ func (r *PgCounterRepository) Query(ctx context.Context, filter CounterFilter) (
 }
 
 func (r *PgCounterRepository) QueryAggregated(ctx context.Context, filter CounterFilter) ([]AggregatedCounter, error) {
-	qb := psql.Select("bucket", "device_id", "cell_id", "counter_group", "counter_name",
+	qb := storage.Psql.Select("bucket", "device_id", "cell_id", "counter_group", "counter_name",
 		"sum_value", "avg_value", "min_value", "max_value", "sample_count").From("pm_counters_hourly")
 
 	if filter.DeviceID != nil {
@@ -170,7 +169,7 @@ func (r *PgCounterRepository) QueryForKPI(ctx context.Context, deviceID uuid.UUI
 	if len(counterNames) == 0 {
 		return nil, nil
 	}
-	qb := psql.Select("counter_name", "SUM(counter_value) as total").
+	qb := storage.Psql.Select("counter_name", "SUM(counter_value) as total").
 		From("pm_counters").
 		Where(squirrel.Eq{"device_id": deviceID}).
 		Where(squirrel.Eq{"counter_name": counterNames}).

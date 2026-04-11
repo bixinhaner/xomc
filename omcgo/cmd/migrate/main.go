@@ -1,21 +1,21 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"strconv"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "omcgo-migrate",
 		Short: "OMC Database Migration Tool",
-		Long:  "Database schema migration tool for PostgreSQL/TimescaleDB",
+		Long:  "Database schema migration tool for PostgreSQL/TimescaleDB (powered by Goose)",
 	}
 
 	rootCmd.PersistentFlags().String("dsn", "", "database connection string (e.g. postgres://user:pass@localhost:5432/omcgo?sslmode=disable)")
@@ -33,6 +33,12 @@ func main() {
 			RunE:  runMigrateDown,
 		},
 		&cobra.Command{
+			Use:   "down-to [version]",
+			Short: "Rollback migrations down to the specified version (exclusive)",
+			Args:  cobra.ExactArgs(1),
+			RunE:  runMigrateDownTo,
+		},
+		&cobra.Command{
 			Use:   "version",
 			Short: "Show current migration version",
 			RunE:  runMigrateVersion,
@@ -43,6 +49,11 @@ func main() {
 			Args:  cobra.ExactArgs(1),
 			RunE:  runMigrateForce,
 		},
+		&cobra.Command{
+			Use:   "reset",
+			Short: "Rollback all migrations (drop all tables)",
+			RunE:  runMigrateReset,
+		},
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -51,7 +62,8 @@ func main() {
 	}
 }
 
-func newMigrate(cmd *cobra.Command) (*migrate.Migrate, error) {
+// openDB opens a database connection using the DSN from flag or env var.
+func openDB(cmd *cobra.Command) (*sql.DB, error) {
 	dsn, _ := cmd.Flags().GetString("dsn")
 	if dsn == "" {
 		dsn = os.Getenv("OMCGO_DB_DSN")
@@ -60,83 +72,140 @@ func newMigrate(cmd *cobra.Command) (*migrate.Migrate, error) {
 		return nil, fmt.Errorf("--dsn flag or OMCGO_DB_DSN env var is required")
 	}
 
-	path, _ := cmd.Flags().GetString("path")
-	sourceURL := "file://" + path
-
-	m, err := migrate.New(sourceURL, dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("create migrate instance: %w", err)
+		return nil, fmt.Errorf("open database: %w", err)
 	}
-	return m, nil
+	return db, nil
+}
+
+// migrateDir returns the migrations directory from flag.
+func migrateDir(cmd *cobra.Command) string {
+	path, _ := cmd.Flags().GetString("path")
+	return path
 }
 
 func runMigrateUp(cmd *cobra.Command, args []string) error {
-	m, err := newMigrate(cmd)
+	db, err := openDB(cmd)
 	if err != nil {
 		return err
 	}
-	defer m.Close()
+	defer db.Close()
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := goose.Up(db, migrateDir(cmd)); err != nil {
 		return fmt.Errorf("migrate up: %w", err)
 	}
 
-	version, dirty, _ := m.Version()
-	fmt.Printf("Migration complete. Version: %d, Dirty: %v\n", version, dirty)
+	version, err := goose.GetDBVersion(db)
+	if err != nil {
+		return fmt.Errorf("get version: %w", err)
+	}
+	fmt.Printf("Migration complete. Version: %d\n", version)
 	return nil
 }
 
 func runMigrateDown(cmd *cobra.Command, args []string) error {
-	m, err := newMigrate(cmd)
+	db, err := openDB(cmd)
 	if err != nil {
 		return err
 	}
-	defer m.Close()
+	defer db.Close()
 
-	if err := m.Steps(-1); err != nil && err != migrate.ErrNoChange {
+	if err := goose.Down(db, migrateDir(cmd)); err != nil {
 		return fmt.Errorf("migrate down: %w", err)
 	}
 
-	version, dirty, verr := m.Version()
-	if verr != nil {
+	version, err := goose.GetDBVersion(db)
+	if err != nil {
 		fmt.Println("Migration rolled back. No version set.")
-	} else {
-		fmt.Printf("Migration rolled back. Version: %d, Dirty: %v\n", version, dirty)
+		return nil
 	}
+	fmt.Printf("Migration rolled back. Version: %d\n", version)
 	return nil
 }
 
-func runMigrateVersion(cmd *cobra.Command, args []string) error {
-	m, err := newMigrate(cmd)
-	if err != nil {
-		return err
-	}
-	defer m.Close()
-
-	version, dirty, err := m.Version()
-	if err != nil {
-		return fmt.Errorf("get version: %w", err)
-	}
-	fmt.Printf("Version: %d, Dirty: %v\n", version, dirty)
-	return nil
-}
-
-func runMigrateForce(cmd *cobra.Command, args []string) error {
-	m, err := newMigrate(cmd)
-	if err != nil {
-		return err
-	}
-	defer m.Close()
-
-	version, err := strconv.Atoi(args[0])
+func runMigrateDownTo(cmd *cobra.Command, args []string) error {
+	version, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid version number: %w", err)
 	}
 
-	if err := m.Force(version); err != nil {
-		return fmt.Errorf("force version: %w", err)
+	db, err := openDB(cmd)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if err := goose.DownTo(db, migrateDir(cmd), version); err != nil {
+		return fmt.Errorf("migrate down-to %d: %w", version, err)
+	}
+
+	current, err := goose.GetDBVersion(db)
+	if err != nil {
+		return fmt.Errorf("get version: %w", err)
+	}
+	fmt.Printf("Rolled back to version: %d\n", current)
+	return nil
+}
+
+func runMigrateVersion(cmd *cobra.Command, args []string) error {
+	db, err := openDB(cmd)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	version, err := goose.GetDBVersion(db)
+	if err != nil {
+		return fmt.Errorf("get version: %w", err)
+	}
+	fmt.Printf("Version: %d\n", version)
+	return nil
+}
+
+func runMigrateForce(cmd *cobra.Command, args []string) error {
+	version, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid version number: %w", err)
+	}
+
+	db, err := openDB(cmd)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Ensure goose_db_version table exists, then set the version directly.
+	if _, err := goose.EnsureDBVersion(db); err != nil {
+		return fmt.Errorf("ensure version table: %w", err)
+	}
+
+	// Delete all existing version rows and insert the target version.
+	if _, err := db.Exec("DELETE FROM goose_db_version"); err != nil {
+		return fmt.Errorf("clear version table: %w", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO goose_db_version (version_id, is_applied) VALUES ($1, true)",
+		version,
+	); err != nil {
+		return fmt.Errorf("set version %d: %w", version, err)
 	}
 
 	fmt.Printf("Forced version to: %d\n", version)
+	return nil
+}
+
+func runMigrateReset(cmd *cobra.Command, args []string) error {
+	db, err := openDB(cmd)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if err := goose.Reset(db, migrateDir(cmd)); err != nil {
+		return fmt.Errorf("migrate reset: %w", err)
+	}
+
+	fmt.Println("All migrations rolled back. Database is empty.")
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
 // --- Models ---
@@ -271,7 +272,7 @@ func (r *PgLogRepository) ListTaskLogs(ctx context.Context, filter TaskLogFilter
 // listPaginated is a generic helper for paginated list queries.
 func listPaginated[T any](ctx context.Context, pool *pgxpool.Pool, table string, columns []string, where sq.And, orderBy string, lr *model.ListRequest, scanRow func(func(...interface{}) error, *T) error) (*model.ListResponse[T], error) {
 	// Count
-	countQ, countA, err := psql.Select("COUNT(*)").From(table).Where(where).ToSql()
+	countQ, countA, err := storage.Psql.Select("COUNT(*)").From(table).Where(where).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build count %s SQL: %w", table, err)
 	}
@@ -285,7 +286,7 @@ func listPaginated[T any](ctx context.Context, pool *pgxpool.Pool, table string,
 
 	cols := make([]string, len(columns))
 	copy(cols, columns)
-	selQ, selA, err := psql.Select(cols...).From(table).Where(where).OrderBy(orderBy).Limit(uint64(limit)).Offset(uint64(offset)).ToSql()
+	selQ, selA, err := storage.Psql.Select(cols...).From(table).Where(where).OrderBy(orderBy).Limit(uint64(limit)).Offset(uint64(offset)).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list %s SQL: %w", table, err)
 	}

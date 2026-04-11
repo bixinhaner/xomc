@@ -14,10 +14,8 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 )
-
-// psql is the squirrel statement builder configured for PostgreSQL dollar placeholders.
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // dataModelColumns lists all columns for scanning data_model_definitions rows.
 var dataModelColumns = []string{
@@ -62,7 +60,7 @@ func (r *PgDataModelRepository) Create(ctx context.Context, dm *DataModel) error
 	dm.CreatedAt = now
 	dm.UpdatedAt = now
 
-	query, args, err := psql.Insert("data_model_definitions").
+	query, args, err := storage.Psql.Insert("data_model_definitions").
 		Columns(dataModelColumns...).
 		Values(
 			dm.ID, dm.Carrier, dm.Technology, dm.Version,
@@ -88,7 +86,7 @@ func (r *PgDataModelRepository) Create(ctx context.Context, dm *DataModel) error
 
 // GetByID retrieves a data model definition by its UUID.
 func (r *PgDataModelRepository) GetByID(ctx context.Context, id uuid.UUID) (*DataModel, error) {
-	query, args, err := psql.Select(dataModelColumns...).
+	query, args, err := storage.Psql.Select(dataModelColumns...).
 		From("data_model_definitions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -108,7 +106,7 @@ func (r *PgDataModelRepository) GetByID(ctx context.Context, id uuid.UUID) (*Dat
 func (r *PgDataModelRepository) Update(ctx context.Context, dm *DataModel) error {
 	dm.UpdatedAt = time.Now()
 
-	query, args, err := psql.Update("data_model_definitions").
+	query, args, err := storage.Psql.Update("data_model_definitions").
 		Set("carrier", dm.Carrier).
 		Set("technology", dm.Technology).
 		Set("version", dm.Version).
@@ -152,7 +150,7 @@ func (r *PgDataModelRepository) Update(ctx context.Context, dm *DataModel) error
 
 // Delete removes a data model definition. Only draft models may be deleted.
 func (r *PgDataModelRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Delete("data_model_definitions").
+	query, args, err := storage.Psql.Delete("data_model_definitions").
 		Where(sq.And{
 			sq.Eq{"id": id},
 			sq.Eq{"status": StatusDraft},
@@ -196,7 +194,7 @@ func (r *PgDataModelRepository) List(ctx context.Context, filter DataModelFilter
 	}
 
 	// Count total matching rows.
-	countBuilder := psql.Select("COUNT(*)").From("data_model_definitions")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("data_model_definitions")
 	if len(pred) > 0 {
 		countBuilder = countBuilder.Where(pred)
 	}
@@ -219,7 +217,7 @@ func (r *PgDataModelRepository) List(ctx context.Context, filter DataModelFilter
 	}
 
 	// Build the data query.
-	queryBuilder := psql.Select(dataModelColumns...).
+	queryBuilder := storage.Psql.Select(dataModelColumns...).
 		From("data_model_definitions").
 		Limit(uint64(limit)).
 		Offset(uint64(offset))
@@ -262,7 +260,7 @@ func (r *PgDataModelRepository) List(ctx context.Context, filter DataModelFilter
 func (r *PgDataModelRepository) FindActive(ctx context.Context, carrier model.CarrierCode, tech model.Technology,
 	oui, productClass string, scope model.DataModelScope) (*DataModel, error) {
 
-	builder := psql.Select(dataModelColumns...).
+	builder := storage.Psql.Select(dataModelColumns...).
 		From("data_model_definitions").
 		Where(sq.And{
 			sq.Eq{"carrier": carrier},
@@ -299,7 +297,7 @@ func (r *PgDataModelRepository) FindActive(ctx context.Context, carrier model.Ca
 func (r *PgDataModelRepository) FindActiveWithFirmware(ctx context.Context, carrier model.CarrierCode,
 	tech model.Technology, oui, productClass, firmwareVersion string, scope model.DataModelScope) (*DataModel, error) {
 
-	builder := psql.Select(dataModelColumns...).
+	builder := storage.Psql.Select(dataModelColumns...).
 		From("data_model_definitions").
 		Where(sq.And{
 			sq.Eq{"carrier": carrier},
@@ -346,7 +344,7 @@ func (r *PgDataModelRepository) Activate(ctx context.Context, id uuid.UUID) erro
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 1. Get the model being activated.
-	getSQL, getArgs, err := psql.Select(dataModelColumns...).
+	getSQL, getArgs, err := storage.Psql.Select(dataModelColumns...).
 		From("data_model_definitions").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -364,7 +362,7 @@ func (r *PgDataModelRepository) Activate(ctx context.Context, id uuid.UUID) erro
 	}
 
 	// 2. Find any currently active model with the same classification and deprecate it.
-	deprecateBuilder := psql.Update("data_model_definitions").
+	deprecateBuilder := storage.Psql.Update("data_model_definitions").
 		Set("is_active", false).
 		Set("status", StatusDeprecated).
 		Set("updated_at", time.Now()).
@@ -402,7 +400,7 @@ func (r *PgDataModelRepository) Activate(ctx context.Context, id uuid.UUID) erro
 	}
 
 	// 3. Activate the new model.
-	activateSQL, activateArgs, err := psql.Update("data_model_definitions").
+	activateSQL, activateArgs, err := storage.Psql.Update("data_model_definitions").
 		Set("is_active", true).
 		Set("status", StatusActive).
 		Set("updated_at", time.Now()).
@@ -425,7 +423,7 @@ func (r *PgDataModelRepository) Activate(ctx context.Context, id uuid.UUID) erro
 
 // Deprecate sets a data model's status to deprecated and marks it inactive.
 func (r *PgDataModelRepository) Deprecate(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Update("data_model_definitions").
+	query, args, err := storage.Psql.Update("data_model_definitions").
 		Set("status", StatusDeprecated).
 		Set("is_active", false).
 		Set("updated_at", time.Now()).
@@ -453,7 +451,7 @@ func (r *PgDataModelRepository) Statistics(ctx context.Context) (*DataModelStats
 	}
 
 	// Total and by-status counts in a single query.
-	statusSQL, _, err := psql.Select(
+	statusSQL, _, err := storage.Psql.Select(
 		"COUNT(*) AS total",
 		"COUNT(*) FILTER (WHERE status = 'active') AS active",
 		"COUNT(*) FILTER (WHERE status = 'draft') AS draft",
@@ -470,7 +468,7 @@ func (r *PgDataModelRepository) Statistics(ctx context.Context) (*DataModelStats
 	}
 
 	// By carrier.
-	carrierSQL, _, err := psql.Select("carrier", "COUNT(*)").
+	carrierSQL, _, err := storage.Psql.Select("carrier", "COUNT(*)").
 		From("data_model_definitions").
 		GroupBy("carrier").
 		ToSql()
@@ -497,7 +495,7 @@ func (r *PgDataModelRepository) Statistics(ctx context.Context) (*DataModelStats
 	}
 
 	// By scope.
-	scopeSQL, _, err := psql.Select("scope", "COUNT(*)").
+	scopeSQL, _, err := storage.Psql.Select("scope", "COUNT(*)").
 		From("data_model_definitions").
 		GroupBy("scope").
 		ToSql()
@@ -528,7 +526,7 @@ func (r *PgDataModelRepository) Statistics(ctx context.Context) (*DataModelStats
 
 // TouchLastAccessed updates last_accessed_at to the current time for a data model.
 func (r *PgDataModelRepository) TouchLastAccessed(ctx context.Context, id uuid.UUID) error {
-	query, args, err := psql.Update("data_model_definitions").
+	query, args, err := storage.Psql.Update("data_model_definitions").
 		Set("last_accessed_at", time.Now()).
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -629,7 +627,7 @@ func (r *PgImportLogRepository) Create(ctx context.Context, entry *ImportLogEntr
 	}
 	entry.CreatedAt = time.Now()
 
-	query, args, err := psql.Insert("data_model_import_log").
+	query, args, err := storage.Psql.Insert("data_model_import_log").
 		Columns("id", "data_model_id", "action", "performed_by", "changes_summary", "created_at").
 		Values(entry.ID, entry.DataModelID, entry.Action, entry.PerformedBy, nullableJSON(entry.ChangesSummary), entry.CreatedAt).
 		ToSql()
@@ -646,7 +644,7 @@ func (r *PgImportLogRepository) Create(ctx context.Context, entry *ImportLogEntr
 
 // ListByModel retrieves all import log entries for a given data model, ordered by creation time descending.
 func (r *PgImportLogRepository) ListByModel(ctx context.Context, modelID uuid.UUID) ([]ImportLogEntry, error) {
-	query, args, err := psql.Select("id", "data_model_id", "action", "performed_by", "changes_summary", "created_at").
+	query, args, err := storage.Psql.Select("id", "data_model_id", "action", "performed_by", "changes_summary", "created_at").
 		From("data_model_import_log").
 		Where(sq.Eq{"data_model_id": modelID}).
 		OrderBy("created_at DESC").
@@ -697,7 +695,7 @@ func NewPgOUIRepository(pool *pgxpool.Pool) *PgOUIRepository {
 
 // GetByOUI retrieves an OUI entry by its code.
 func (r *PgOUIRepository) GetByOUI(ctx context.Context, oui string) (*OUIEntry, error) {
-	query, args, err := psql.Select("oui", "manufacturer", "short_name", "country", "created_at").
+	query, args, err := storage.Psql.Select("oui", "manufacturer", "short_name", "country", "created_at").
 		From("oui_registry").
 		Where(sq.Eq{"oui": oui}).
 		ToSql()
@@ -724,7 +722,7 @@ func (r *PgOUIRepository) GetByOUI(ctx context.Context, oui string) (*OUIEntry, 
 
 // List retrieves all OUI entries ordered by manufacturer short name.
 func (r *PgOUIRepository) List(ctx context.Context) ([]OUIEntry, error) {
-	query, args, err := psql.Select("oui", "manufacturer", "short_name", "country", "created_at").
+	query, args, err := storage.Psql.Select("oui", "manufacturer", "short_name", "country", "created_at").
 		From("oui_registry").
 		OrderBy("short_name ASC").
 		ToSql()
@@ -763,7 +761,7 @@ func (r *PgOUIRepository) List(ctx context.Context) ([]OUIEntry, error) {
 func (r *PgOUIRepository) Create(ctx context.Context, entry *OUIEntry) error {
 	entry.CreatedAt = time.Now()
 
-	query, args, err := psql.Insert("oui_registry").
+	query, args, err := storage.Psql.Insert("oui_registry").
 		Columns("oui", "manufacturer", "short_name", "country", "created_at").
 		Values(entry.OUI, entry.Manufacturer, entry.ShortName, nullableString(entry.Country), entry.CreatedAt).
 		ToSql()

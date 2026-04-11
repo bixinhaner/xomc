@@ -73,6 +73,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		Logger:     app.Logger,
 		GS:         app.GS,
 		MetricsReg: app.MetricsReg,
+		Health:     app.Health,
 	}); err != nil {
 		return fmt.Errorf("setup routes: %w", err)
 	}
