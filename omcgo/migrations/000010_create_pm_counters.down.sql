@@ -1,1 +1,0 @@
-DROP TABLE IF EXISTS pm_counters CASCADE;

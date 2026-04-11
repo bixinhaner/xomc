@@ -1,3 +1,0 @@
-DROP TABLE IF EXISTS topo_edges;
-DROP TABLE IF EXISTS topo_nodes;
-DROP TABLE IF EXISTS sites;
