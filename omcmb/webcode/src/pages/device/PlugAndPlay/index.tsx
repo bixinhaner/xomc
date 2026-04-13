@@ -744,11 +744,13 @@ export default function PlugAndPlay() {
             columns={policyColumns}
             dataSource={filteredPolicies}
             rowKey="policyId"
+            total={filteredPolicies.length}
+            showPagination
+            currentPage={1}
             pageSize={10}
             defaultDensity="compact"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
-            showPagination={false}
             scroll={{ x: 'max-content', y: 200 }}
             extraToolbarRight={
               <Space>
