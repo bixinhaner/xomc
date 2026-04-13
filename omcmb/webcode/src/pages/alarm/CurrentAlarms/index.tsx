@@ -348,10 +348,10 @@ export default function CurrentAlarms() {
   );
 
   const handleClearConfirm = useCallback(
-    async (note: string) => {
+    async () => {
       setClearLoading(true);
       try {
-        await clearAlarms.mutateAsync({ ids: clearTargetIds, note });
+        await clearAlarms.mutateAsync(clearTargetIds);
         setSelectedRowKeys([]);
         setClearModalOpen(false);
         refetch();
