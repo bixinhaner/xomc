@@ -18,7 +18,6 @@ import {
   ClockCircleOutlined,
   ForwardOutlined,
   SyncOutlined,
-  ReloadOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -237,7 +236,6 @@ export default function PlugAndPlay() {
 
   // Task filter state
   const [taskStatus, setTaskStatus] = useState<string>('');
-  const [taskTimeRange, setTaskTimeRange] = useState<[string, string] | null>(null);
   const [taskSearchText, setTaskSearchText] = useState('');
   const [taskTab, setTaskTab] = useState<string>('0');
 
@@ -285,6 +283,63 @@ export default function PlugAndPlay() {
     };
     return reasonMap[reason] || reason;
   }, [t]);
+
+  // Handlers - Policy
+  const handlePolicyMenuClick = useCallback((key: string, record: Policy) => {
+    switch (key) {
+      case 'info':
+        navigate(`/device/plug-and-play/view/${record.policyId}`);
+        break;
+      case 'edit':
+        navigate(`/device/plug-and-play/edit/${record.policyId}`);
+        break;
+      case 'detect':
+        setSelectedPolicy(record);
+        setDetectDialogOpen(true);
+        break;
+      case 'delete':
+        setPolicies(prev => prev.filter(p => p.policyId !== record.policyId));
+        message.success(t('common.deleteSuccess'));
+        break;
+    }
+  }, [navigate, message, t]);
+
+  const handlePolicySwitch = useCallback((record: Policy, checked: boolean) => {
+    const newEnable = checked ? '1' : '0';
+    setPolicies(prev => prev.map(p =>
+      p.policyId === record.policyId ? { ...p, selfStartEnable: newEnable } : p
+    ));
+    message.success(t('common.success'));
+  }, [message, t]);
+
+  // Handlers - Task
+  const handleRetryTask = useCallback((record: ExecuteTask) => {
+    setTasks(prev => prev.map(item =>
+      item.taskId === record.taskId ? { ...item, status: '2', startTime: new Date().toISOString(), endTime: '' } : item
+    ));
+    message.success(t('common.success'));
+  }, [message, t]);
+
+  const handleStartTask = useCallback((record: ExecuteTask) => {
+    setTasks(prev => prev.map(item =>
+      item.taskId === record.taskId ? { ...item, status: '2', startTime: new Date().toISOString() } : item
+    ));
+    message.success(t('common.commandSent'));
+  }, [message, t]);
+
+  const handleDeleteTask = useCallback((record: ExecuteTask) => {
+    setTasks(prev => prev.filter(item => item.taskId !== record.taskId));
+    message.success(t('common.deleteSuccess'));
+  }, [message, t]);
+
+  const handleAddPolicy = useCallback(() => {
+    navigate('/device/plug-and-play/add');
+  }, [navigate]);
+
+  const handleDetectSuccess = useCallback(() => {
+    setDetectDialogOpen(false);
+    message.success(t('provision.detectSuccess'));
+  }, [message, t]);
 
   // Policy columns
   const policyColumns: DataTableColumn<Policy>[] = useMemo(() => [
@@ -390,7 +445,7 @@ export default function PlugAndPlay() {
         )
       ),
     },
-  ], [t]);
+  ], [t, handlePolicyMenuClick, handlePolicySwitch]);
 
   // Task columns
   const taskColumns: DataTableColumn<ExecuteTask>[] = useMemo(() => [
@@ -506,63 +561,7 @@ export default function PlugAndPlay() {
       ellipsis: true,
       render: (val: string) => translateFailureReason(val),
     },
-  ], [t, taskTab, STATUS_CONFIG, translateProcedure, translateFailureReason]);
-
-  // Handlers
-  const handlePolicyMenuClick = useCallback((key: string, record: Policy) => {
-    switch (key) {
-      case 'info':
-        navigate(`/device/plug-and-play/view/${record.policyId}`);
-        break;
-      case 'edit':
-        navigate(`/device/plug-and-play/edit/${record.policyId}`);
-        break;
-      case 'detect':
-        setSelectedPolicy(record);
-        setDetectDialogOpen(true);
-        break;
-      case 'delete':
-        setPolicies(prev => prev.filter(p => p.policyId !== record.policyId));
-        message.success(t('common.deleteSuccess'));
-        break;
-    }
-  }, [navigate, message, t]);
-
-  const handlePolicySwitch = useCallback((record: Policy, checked: boolean) => {
-    const newEnable = checked ? '1' : '0';
-    setPolicies(prev => prev.map(p =>
-      p.policyId === record.policyId ? { ...p, selfStartEnable: newEnable } : p
-    ));
-    message.success(t('common.success'));
-  }, [message, t]);
-
-  const handleRetryTask = useCallback((record: ExecuteTask) => {
-    setTasks(prev => prev.map(t =>
-      t.taskId === record.taskId ? { ...t, status: '2', startTime: new Date().toISOString(), endTime: '' } : t
-    ));
-    message.success(t('common.success'));
-  }, [message, t]);
-
-  const handleStartTask = useCallback((record: ExecuteTask) => {
-    setTasks(prev => prev.map(t =>
-      t.taskId === record.taskId ? { ...t, status: '2', startTime: new Date().toISOString() } : t
-    ));
-    message.success(t('common.commandSent'));
-  }, [message, t]);
-
-  const handleDeleteTask = useCallback((record: ExecuteTask) => {
-    setTasks(prev => prev.filter(t => t.taskId !== record.taskId));
-    message.success(t('common.deleteSuccess'));
-  }, [message, t]);
-
-  const handleAddPolicy = useCallback(() => {
-    navigate('/device/plug-and-play/add');
-  }, [navigate]);
-
-  const handleDetectSuccess = useCallback(() => {
-    setDetectDialogOpen(false);
-    message.success(t('provision.detectSuccess'));
-  }, [message, t]);
+  ], [t, taskTab, STATUS_CONFIG, translateProcedure, translateFailureReason, handleRetryTask, handleStartTask, handleDeleteTask]);
 
   // Filtered policies
   const filteredPolicies = useMemo(() => {
