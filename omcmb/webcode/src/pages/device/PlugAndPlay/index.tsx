@@ -838,7 +838,7 @@ export default function PlugAndPlay() {
             onPageChange={(p, s) => { setTaskPage(p); setTaskPageSize(s); }}
             defaultDensity="compact"
             showRowNumber
-            rowNumberTitle={t('table.rowNumber')
+            rowNumberTitle={t('table.rowNumber')}
             selectable={taskTab === '0'}
             selectedRowKeys={selectedTaskIds}
             onSelectionChange={(keys) => setSelectedTaskIds(keys as string[])}
