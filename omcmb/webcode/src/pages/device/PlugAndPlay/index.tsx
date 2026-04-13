@@ -512,10 +512,10 @@ export default function PlugAndPlay() {
   const handlePolicyMenuClick = useCallback((key: string, record: Policy) => {
     switch (key) {
       case 'info':
-        navigate(`/provision/plug-and-play/view/${record.policyId}`);
+        navigate(`/device/plug-and-play/view/${record.policyId}`);
         break;
       case 'edit':
-        navigate(`/provision/plug-and-play/edit/${record.policyId}`);
+        navigate(`/device/plug-and-play/edit/${record.policyId}`);
         break;
       case 'detect':
         setSelectedPolicy(record);
@@ -556,7 +556,7 @@ export default function PlugAndPlay() {
   }, [message, t]);
 
   const handleAddPolicy = useCallback(() => {
-    navigate('/provision/plug-and-play/add');
+    navigate('/device/plug-and-play/add');
   }, [navigate]);
 
   const handleDetectSuccess = useCallback(() => {

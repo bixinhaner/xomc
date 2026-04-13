@@ -1033,7 +1033,7 @@ export default function AddPolicyPage() {
 
       console.log('Submit values:', values);
       message.success(t('common.success'));
-      navigate('/provision/plug-and-play');
+      navigate('/device/plug-and-play');
     } catch (error) {
       console.error('Validation error:', error);
     } finally {
@@ -1043,7 +1043,7 @@ export default function AddPolicyPage() {
 
   // Handle cancel
   const handleCancel = useCallback(() => {
-    navigate('/provision/plug-and-play');
+    navigate('/device/plug-and-play');
   }, [navigate]);
 
   // Render software upgrade config
