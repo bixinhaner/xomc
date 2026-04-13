@@ -248,6 +248,31 @@ export default function KPIMeasurement() {
     },
   ], [t, handleBatchEnable]);
 
+  // 过滤数据
+  const filteredData = useMemo(() => {
+    let data = mockData;
+
+    const searchText = (filters.searchText as string)?.toLowerCase() || '';
+    if (searchText) {
+      data = data.filter(item =>
+        item.serialNumber.toLowerCase().includes(searchText) ||
+        item.hostName.toLowerCase().includes(searchText)
+      );
+    }
+
+    const status = filters.status as string;
+    if (status) {
+      data = data.filter(item => item.status === status);
+    }
+
+    const measEnable = filters.measEnable as string;
+    if (measEnable) {
+      data = data.filter(item => item.reportEnable === measEnable);
+    }
+
+    return data;
+  }, [filters]);
+
   // 搜索处理
   const handleSearch = useCallback((vals: Record<string, unknown>) => {
     setFilters(vals);
@@ -286,18 +311,20 @@ export default function KPIMeasurement() {
         <DataTable<MeasurementRow>
           tableId="kpi-measurement-table"
           columns={columns}
-          dataSource={mockData}
+          dataSource={filteredData}
           loading={false}
           rowKey="id"
           selectable
           selectedRowKeys={selectedRowKeys}
           onSelectionChange={setSelectedRowKeys}
-          total={mockData.length}
+          total={filteredData.length}
           pageSize={pageSize}
           currentPage={page}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
           batchActions={batchActions}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1200, y: 'calc(100vh - 380px)' }}
+          showRowNumber
+          rowNumberTitle={t('table.rowNumber')}
           defaultDensity="compact"
         />
       </Card>
