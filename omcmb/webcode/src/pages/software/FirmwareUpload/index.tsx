@@ -6,16 +6,12 @@ import {
   Input,
   Select,
   Progress,
-  Table,
-  Tag,
   Space,
   Upload,
   message,
   Typography,
   Radio,
   Drawer,
-  Divider,
-  Checkbox,
   Modal,
   Alert,
   Dropdown,
@@ -38,7 +34,6 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useUploadSoftwareVersion } from '@/hooks/api/useSoftware';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;
@@ -93,21 +88,6 @@ const productTypeOptions = [
   { label: 'BaiBNQ', value: 'BaiBNQ' },
 ];
 
-// 文件类型映射
-const fileTypeMap: Record<FileType, { name: string; fileTypeParam: number }> = {
-  upgrade: { name: 'IMAGE', fileTypeParam: 0 },
-  ca: { name: 'CA版本', fileTypeParam: 1 },
-  fpga: { name: 'FPGA升级文件', fileTypeParam: 6 },
-  ap: { name: 'AP升级文件', fileTypeParam: 11 },
-};
-
-// 版本类型映射
-const versionTypeMap: Record<VersionType, { text: string; color: string }> = {
-  all: { text: '商用版本', color: 'green' },
-  none: { text: '测试版本', color: 'orange' },
-  beta: { text: 'Beta版本', color: 'blue' },
-};
-
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
@@ -132,7 +112,6 @@ export default function FirmwareUpload() {
   // 删除确认
   const [deleteFile, setDeleteFile] = useState<FirmwareFile | null>(null);
 
-  const uploadVersion = useUploadSoftwareVersion();
 
   // 获取当前文件类型的数据
   const fileData = useMemo(() => {
@@ -197,7 +176,7 @@ export default function FirmwareUpload() {
       return;
     }
 
-    form.validateFields().then((vals) => {
+    form.validateFields().then(() => {
       if (fileList.length === 0 && importMode === 'add') {
         void message.warning('请选择文件');
         return;
@@ -235,12 +214,11 @@ export default function FirmwareUpload() {
   };
 
   // 表格列定义
-  const columns: DataTableColumn<FirmwareFile>[] = useMemo(() => [
+  const columns: DataTableColumn<FirmwareFile>[] = [
     {
       key: 'operation',
       title: '操作',
       width: 60,
-      align: 'center',
       render: (_: unknown, record: FirmwareFile) => {
         const items: MenuProps['items'] = [
           {
@@ -317,7 +295,7 @@ export default function FirmwareUpload() {
       dataIndex: 'uploadTime',
       width: 180,
     },
-  ], []);
+  ];
 
   // 获取当前文件类型的中文名称
   const fileTypeName = useMemo(() => {
@@ -383,7 +361,9 @@ export default function FirmwareUpload() {
           currentPage={1}
           pageSize={20}
           onPageChange={() => {}}
-          scroll={{ x: 1100 }}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+          showRowNumber
+          rowNumberTitle="序号"
         />
       </Card>
 
@@ -428,7 +408,7 @@ export default function FirmwareUpload() {
               {fileType === 'upgrade' ? (
                 <Select
                   mode="multiple"
-                  collapseTags
+                  maxTagCount="responsive"
                   placeholder="请选择产品类型"
                   options={productTypeOptions}
                 />
