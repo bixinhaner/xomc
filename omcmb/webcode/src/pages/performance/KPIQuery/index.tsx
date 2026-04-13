@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Tabs, Button, Space, DatePicker, Select, Input, Radio, Typography, Dropdown, Modal, Form, Switch, InputNumber, TimePicker, List, Spin, Segmented, Collapse, Card, Tag, Tooltip, Divider, App, Drawer } from 'antd';
 import {
   PlusOutlined,
@@ -23,9 +23,6 @@ import {
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
-
-// Simple ID generator
-const generateId = () => `chart-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -34,6 +31,9 @@ import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import TemplateDrawer from './components/TemplateDrawer';
 import ExportDrawer from './components/ExportDrawer';
+
+// Simple ID generator
+const generateId = () => `chart-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -166,6 +166,7 @@ interface TemplateItem {
   isOneSelf?: string;
   isAdmin?: string;
   creator?: string;
+  description?: string;
 }
 
 // Time range type for chart display
@@ -215,15 +216,6 @@ const AVAILABLE_KPIS = [
   { value: 'UL_THP', label: '上行吞吐量', category: 'throughput' },
   { value: 'HO_SR', label: '切换成功率', category: 'handover' },
   { value: 'ACTIVE_USER', label: '活跃用户数', category: 'user' },
-];
-
-// KPI categories for filtering
-const KPI_CATEGORIES = [
-  { value: 'all', label: '全部指标' },
-  { value: 'access', label: '接入类指标' },
-  { value: 'throughput', label: '吞吐量指标' },
-  { value: 'handover', label: '切换类指标' },
-  { value: 'user', label: '用户数指标' },
 ];
 
 // Unified chart time type
@@ -307,8 +299,8 @@ export default function KPIQuery() {
   const [reportTargetTemplateId, setReportTargetTemplateId] = useState<string | null>(null);
   const [reportSwitchMap, setReportSwitchMap] = useState<Record<string, string>>(() => {
     const map: Record<string, string> = {};
-    for (const t of PUBLIC_TEMPLATES) map[t.id] = t.reportSwitch;
-    for (const t of PRIVATE_TEMPLATES) map[t.id] = t.reportSwitch;
+    for (const tpl of PUBLIC_TEMPLATES) map[tpl.id] = tpl.reportSwitch ?? '0';
+    for (const tpl of PRIVATE_TEMPLATES) map[tpl.id] = tpl.reportSwitch ?? '0';
     return map;
   });
 
@@ -357,15 +349,6 @@ export default function KPIQuery() {
     return AVAILABLE_KPIS.filter(kpi => kpi.category === chartKpiCategory);
   }, [chartKpiCategory]);
 
-  // KPI category options with i18n
-  const kpiCategoryOptions = useMemo(() => [
-    { label: t('perf.query.allCategories'), value: 'all' },
-    { label: t('perf.query.accessKpiCategory'), value: 'access' },
-    { label: t('perf.query.throughputKpiCategory'), value: 'throughput' },
-    { label: t('perf.query.handoverKpiCategory'), value: 'handover' },
-    { label: t('perf.query.userKpiCategory'), value: 'user' },
-  ], [t]);
-
   // Chart management functions
   const handleAddChart = useCallback(() => {
     setEditingChart(null);
@@ -402,15 +385,6 @@ export default function KPIQuery() {
       },
     });
   }, [t, modal, message]);
-
-  // Update chart time range
-  const handleUpdateTimeRange = useCallback((chartId: string, timeRange: TimeRangeType) => {
-    setCharts(prev => prev.map(c =>
-      c.id === chartId
-        ? { ...c, timeRange }
-        : c
-    ));
-  }, []);
 
   const handleSaveChart = useCallback(async () => {
     setChartSaving(true);
@@ -631,7 +605,7 @@ export default function KPIQuery() {
         });
         break;
     }
-  }, [t, modal, message]);
+  }, [t, modal, message, handleExportTemplate, reportForm, reportSwitchMap]);
 
   // Filter templates by search text
   const filteredPublicTemplates = useMemo(() => {
@@ -755,7 +729,7 @@ export default function KPIQuery() {
         </Dropdown>
       </div>
     </List.Item>
-  ), [selectedTemplateId, defaultTemplateId, reportSwitchMap, token, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
+  ), [selectedTemplateId, defaultTemplateId, reportSwitchMap, token, t, handleTemplateSelect, handleTemplateMenuClick, getTemplateMenuItems]);
 
   // Table columns - dynamic based on query object type (device or device group)
   const columns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => {
@@ -989,7 +963,7 @@ export default function KPIQuery() {
               buttonStyle="solid"
               size="small"
             >
-              <Radio.Button value="2">设备</Radio.Button>
+              <Radio.Button value="2">{t('perf.query.device')}</Radio.Button>
               <Radio.Button value="1">{t('device.group')}</Radio.Button>
             </Radio.Group>
             <Input
@@ -1274,12 +1248,11 @@ export default function KPIQuery() {
         mode={templateDrawerMode}
         initialValues={editingTemplate ? {
           tempName: editingTemplate.name,
-          isPublic: editingTemplate.isPublic,
+          isPublic: editingTemplate.isPublic as '0' | '1',
           description: editingTemplate.description,
         } : undefined}
         loading={templateSaving}
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        onSubmit={(values) => {
+        onSubmit={() => {
           // TODO: Call API to save template with values
           setTemplateSaving(true);
           setTimeout(() => {
