@@ -1,0 +1,24 @@
+{
+  "table": "roles",
+  "columns": ["id", "name", "description", "is_system"],
+  "records": [
+    {
+      "id": "10000000-0000-0000-0000-000000000001",
+      "name": "admin",
+      "description": "System administrator with full access",
+      "is_system": true
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000002",
+      "name": "operator",
+      "description": "Operator with read/write access to operational resources",
+      "is_system": true
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000003",
+      "name": "viewer",
+      "description": "Read-only viewer",
+      "is_system": true
+    }
+  ]
+}

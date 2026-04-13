@@ -8,6 +8,8 @@ import (
 )
 
 // DeviceInfoRepository provides persistence for the device_info table.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_device_info_repository_test.go -package=device . DeviceInfoRepository
 type DeviceInfoRepository interface {
 	// GetByDeviceID returns the extended info for a device.
 	GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*DeviceInfo, error)

@@ -1,5 +1,5 @@
 import http from '../http';
-import type { User, Role, Permission, OperationLog, OperationType, Group, MenuItem, CreateMenuRequest, UpdateMenuRequest, MenuFilter, MenuListResponse, RoleWithMenus, SetRoleMenusRequest } from '@/types/system';
+import type { User, Role, Permission, OperationLog, OperationType, Group, ApiEndpoint, ApiPermission } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // Backend user model - matches Go User struct JSON tags
@@ -529,5 +529,20 @@ export const adminApi = {
     } catch {
       return null;
     }
+  },
+
+  // API 权限
+  async listApiEndpoints(): Promise<ApiEndpoint[]> {
+    const { data } = await http.get<{ data: ApiEndpoint[] }>('/admin/api-endpoints');
+    return data.data;
+  },
+
+  async getRoleApiPermissions(roleId: string): Promise<ApiPermission[]> {
+    const { data } = await http.get<{ data: ApiPermission[] }>(`/admin/roles/${roleId}/api-permissions`);
+    return data.data;
+  },
+
+  async setRoleApiPermissions(roleId: string, permissions: ApiPermission[]): Promise<void> {
+    await http.put(`/admin/roles/${roleId}/api-permissions`, { permissions });
   },
 };

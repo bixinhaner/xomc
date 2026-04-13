@@ -16,6 +16,8 @@ var Psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // DB abstracts pgxpool.Pool for repository use, enabling mock testing.
 // Repositories should accept this interface instead of *pgxpool.Pool directly.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_db_test.go -package=storage . DB
 type DB interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

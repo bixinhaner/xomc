@@ -146,6 +146,8 @@ type DeviceWriter interface {
 
 // DeviceRepository defines the full interface for device persistence.
 // It composes smaller interfaces for backward compatibility.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_device_repository_test.go -package=device . DeviceRepository
 type DeviceRepository interface {
 	DeviceReader
 	DeviceWriter

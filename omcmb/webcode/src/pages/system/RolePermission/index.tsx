@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App,
   Button,
@@ -17,7 +18,7 @@ import {
   Tabs,
   Table,
 } from 'antd';
-import type { TreeDataNode, TreeProps } from 'antd';
+import type { TreeDataNode, TreeProps, TableColumnsType } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -37,9 +38,10 @@ import {
   useDeleteRoles,
   useAllDeviceGroups,
 } from '@/hooks/api/useSystem';
-import type { Role } from '@/types/system';
+import type { Role, ApiPermission, ApiEndpoint } from '@/types/system';
 import type { DeviceGroup } from '@/types/device';
 import { useT } from '@/hooks/useT';
+import { apiPermissionApi } from '@/services/api/apiPermissionApi';
 
 // 操作权限类型
 interface OperationItem {
@@ -322,6 +324,22 @@ export default function RoleManagement() {
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
   const deleteRoles = useDeleteRoles();
+
+  // API权限数据
+  const { data: apiEndpoints, isLoading: isLoadingApiEndpoints } = useQuery({
+    queryKey: ['apiEndpoints'],
+    queryFn: apiPermissionApi.listEndpoints,
+    staleTime: 5 * 60 * 1000, // 5分钟
+  });
+
+  const getRoleApiPermissions = useMutation({
+    mutationFn: (roleId: string) => apiPermissionApi.getRolePermissions(roleId),
+  });
+
+  const setRoleApiPermissions = useMutation({
+    mutationFn: ({ roleId, permissions }: { roleId: string; permissions: ApiPermission[] }) =>
+      apiPermissionApi.setRolePermissions(roleId, permissions),
+  });
 
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
 
@@ -915,6 +933,95 @@ export default function RoleManagement() {
     );
   };
 
+  // 渲染API权限配置
+  const renderApiPermissionConfig = (readOnly = false) => {
+    const columns: TableColumnsType<ApiEndpoint> = [
+      {
+        key: 'select',
+        width: 50,
+        render: (_, record) => (
+          <Checkbox
+            checked={selectedApiPermissions.includes(`${record.method}:${record.path}`)}
+            onChange={(e) => {
+              const key = `${record.method}:${record.path}`;
+              if (e.target.checked) {
+                setSelectedApiPermissions((prev) => [...prev, key]);
+              } else {
+                setSelectedApiPermissions((prev) => prev.filter((k) => k !== key));
+              }
+            }}
+            disabled={readOnly}
+          />
+        ),
+      },
+      {
+        key: 'method',
+        title: t('role.apiMethod'),
+        dataIndex: 'method',
+        width: 100,
+        render: (method: string) => (
+          <Tag color={method === 'GET' ? 'blue' : method === 'POST' ? 'green' : method === 'PUT' ? 'orange' : 'red'}>
+            {method}
+          </Tag>
+        ),
+      },
+      {
+        key: 'path',
+        title: t('role.apiPath'),
+        dataIndex: 'path',
+        ellipsis: true,
+      },
+      {
+        key: 'name',
+        title: t('role.apiName'),
+        dataIndex: 'name',
+        width: 150,
+      },
+      {
+        key: 'module',
+        title: t('role.apiModule'),
+        dataIndex: 'module',
+        width: 100,
+      },
+    ];
+
+    return (
+      <div>
+        {!readOnly && (
+          <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+            <Button
+              size="small"
+              onClick={() => {
+                if (apiEndpoints) {
+                  setSelectedApiPermissions(
+                    apiEndpoints.map((ep) => `${ep.method}:${ep.path}`)
+                  );
+                }
+              }}
+            >
+              {t('role.selectAllApis')}
+            </Button>
+            <Button
+              size="small"
+              onClick={() => setSelectedApiPermissions([])}
+            >
+              {t('common.clear')}
+            </Button>
+          </div>
+        )}
+        <Table
+          columns={columns}
+          dataSource={apiEndpoints || []}
+          loading={isLoadingApiEndpoints}
+          rowKey={(record) => `${record.method}:${record.path}`}
+          size="small"
+          pagination={{ pageSize: 10 }}
+          scroll={{ y: 400 }}
+        />
+      </div>
+    );
+  };
+
   // 关闭抽屉时重置状态
   const handleCloseCreate = useCallback(() => {
     setCreateVisible(false);
@@ -1033,11 +1140,7 @@ export default function RoleManagement() {
             {
               key: 'api',
               label: t('role.apiPermission'),
-              children: (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
-                  <Empty description={t('role.apiPermissionComingSoon')} />
-                </div>
-              ),
+              children: renderApiPermissionConfig(false),
             },
             {
               key: 'resource',
@@ -1095,11 +1198,7 @@ export default function RoleManagement() {
             {
               key: 'api',
               label: t('role.apiPermission'),
-              children: (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
-                  <Empty description={t('role.apiPermissionComingSoon')} />
-                </div>
-              ),
+              children: renderApiPermissionConfig(false),
             },
             {
               key: 'resource',
@@ -1146,11 +1245,7 @@ export default function RoleManagement() {
             {
               key: 'api',
               label: t('role.apiPermission'),
-              children: (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
-                  <Empty description={t('role.apiPermissionComingSoon')} />
-                </div>
-              ),
+              children: renderApiPermissionConfig(true),
             },
             {
               key: 'resource',

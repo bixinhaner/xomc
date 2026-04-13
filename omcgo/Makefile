@@ -1,11 +1,13 @@
-.PHONY: build build-acs build-app build-worker build-migrate build-omcctl build-rpctool \
-       test test-race test-coverage test-integration test-integration-up test-integration-down \
+.PHONY: build build-acs build-app build-worker build-migrate build-seed build-omcctl build-rpctool \
+       test test-race test-coverage test-integration test-integration-up test-integration-down test-e2e \
        test-cover cover-report cover-summary cover-check \
-       lint vet generate \
-       migrate-up migrate-down docker-build docker-up docker-down clean
+       lint vet generate generate-mocks sqlc-generate \
+       migrate-up migrate-down migrate-schema-up migrate-seed-up \
+       seed-apply seed-rollback seed-list \
+       docker-build docker-up docker-down clean
 
 # Build
-build: build-acs build-app build-worker build-migrate build-omcctl
+build: build-acs build-app build-worker build-migrate build-seed build-omcctl
 
 build-acs:
 	go build -o bin/omcgo-acs ./cmd/acs
@@ -18,6 +20,9 @@ build-worker:
 
 build-migrate:
 	go build -o bin/omcgo-migrate ./cmd/migrate
+
+build-seed:
+	go build -o bin/omcgo-seed ./cmd/seed
 
 build-omcctl:
 	go build -o bin/omcctl ./cmd/omcctl
@@ -65,6 +70,9 @@ test-integration-up:
 test-integration-down:
 	docker compose -f ../deployments/docker/docker-compose.test.yml down -v
 
+test-e2e:  ## Run end-to-end tests (requires Docker infrastructure)
+	bash scripts/e2e_test.sh
+
 # Quality
 lint:
 	golangci-lint run ./...
@@ -73,21 +81,46 @@ vet:
 	go vet ./...
 
 # Generate
-generate:
+generate: generate-mocks
 	@echo "Generating protobuf code..."
 	protoc --go_out=. --go-grpc_out=. api/proto/*.proto
 	@echo "Generating swagger docs..."
 	swag init -g cmd/app/main.go -o api/openapi
 
+generate-mocks:  ## Generate mock implementations for key interfaces
+	go generate ./internal/core/storage/... ./internal/admin/... ./internal/device/... ./internal/topology/...
+
+sqlc-generate:  ## Generate type-safe Go code from SQL queries
+	sqlc generate
+
+sqlc-validate:  ## Validate sqlc queries against the database schema
+	sqlc vet
+
 # Database
 migrate-up:
-	go run ./cmd/migrate up
+	go run ./cmd/migrate up --paths migrations,migrations/seed
 
 migrate-down:
 	go run ./cmd/migrate down
 
 migrate-reset:
 	go run ./cmd/migrate reset
+
+migrate-schema-up:  ## Run schema migrations only
+	go run ./cmd/migrate up --path migrations
+
+migrate-seed-up:  ## Run seed data migrations only
+	go run ./cmd/migrate up --path migrations/seed
+
+# Seed data management
+seed-apply:
+	go run ./cmd/seed apply
+
+seed-rollback:
+	go run ./cmd/seed rollback
+
+seed-list:
+	go run ./cmd/seed list
 
 migrate-create:
 	@if [ -z "$(name)" ]; then echo "Usage: make migrate-create name=<migration_name>"; exit 1; fi

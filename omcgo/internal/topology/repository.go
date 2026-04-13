@@ -42,6 +42,8 @@ type GroupMembership interface {
 
 // DeviceGroupRepository defines the full persistence interface for device groups.
 // It composes smaller interfaces for backward compatibility.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_device_group_repository_test.go -package=topology . DeviceGroupRepository
 type DeviceGroupRepository interface {
 	GroupReader
 	GroupWriter

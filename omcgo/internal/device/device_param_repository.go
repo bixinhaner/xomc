@@ -8,6 +8,8 @@ import (
 )
 
 // DeviceParameterRepository defines the interface for device parameter persistence.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_device_param_repository_test.go -package=device . DeviceParameterRepository
 type DeviceParameterRepository interface {
 	BatchUpsert(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error
 	GetByDevice(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error)

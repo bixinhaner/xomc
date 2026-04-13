@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
@@ -23,87 +24,96 @@ import (
 
 // Setup 初始化所有模块并注册路由。
 // 按以下顺序执行：
-//  1. 初始化各模块（按依赖顺序）
+//  1. 使用依赖图解析并初始化各模块
 //  2. 配置 Gin 中间件
 //  3. 注册所有路由
 func Setup(r *gin.Engine, c *Container) error {
-	// ===== Phase 1: 初始化各模块（按依赖顺序）=====
+	// ===== Phase 1: 使用依赖图初始化各模块 =====
 
-	// F02 数据模型与配置（无跨模块依赖）
-	if err := initConfigModule(c); err != nil {
+	graph := components.NewModuleGraph()
+
+	// Register all modules with their dependency declarations.
+	// The graph resolves correct initialization order automatically.
+	graph.Add(components.ModuleInitializer{
+		Name: "config",
+		Init: func() error { return initConfigModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name: "topology",
+		Init: func() error { return initTopologyModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "admin",
+		Depends: []string{"topology"},
+		Init:    func() error { return initAdminModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "device",
+		Depends: []string{"topology"},
+		Init:    func() error { return initDeviceModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name: "alarm",
+		Init: func() error { return initAlarmModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name: "pm",
+		Init: func() error { return initPMModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name: "mr",
+		Init: func() error { return initMRModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "software",
+		Depends: []string{"device"},
+		Init:    func() error { return initSoftwareModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "provision",
+		Depends: []string{"device", "config"},
+		Init:    func() error { return initProvisionModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "task",
+		Depends: []string{"device"},
+		Init:    func() error { return initTaskModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name: "backup",
+		Init: func() error { return initBackupModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "dashboard",
+		Depends: []string{"device", "alarm", "pm", "topology"},
+		Init:    func() error { return initDashboardModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "northbound",
+		Depends: []string{"alarm", "pm"},
+		Init:    func() error { return initNorthboundModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name:    "interop",
+		Depends: []string{"device", "config"},
+		Init:    func() error { return initInteropModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
+		Name: "misc",
+		Init: func() error { return initMiscModules(c) },
+	})
+
+	groups, err := graph.InitAll()
+	if err != nil {
 		return err
 	}
 
-	// F06 拓扑管理（无跨模块依赖）
-	if err := initTopologyModule(c); err != nil {
-		return err
+	for i, group := range groups {
+		c.Logger.Info("module group initialized",
+			zap.Int("group", i+1),
+			zap.Strings("modules", group),
+		)
 	}
-
-	// F06 用户/RBAC（依赖 GroupRepo from TopologyModule）
-	if err := initAdminModule(c); err != nil {
-		return err
-	}
-
-	// F06 设备管理（依赖 GroupRepo from TopologyModule）
-	if err := initDeviceModule(c); err != nil {
-		return err
-	}
-
-	// F04 告警管理（依赖 Carriers, EventBus）
-	if err := initAlarmModule(c); err != nil {
-		return err
-	}
-
-	// F03 性能管理（依赖 Carriers）
-	if err := initPMModule(c); err != nil {
-		return err
-	}
-
-	// F05 测量报告（无跨模块依赖）
-	if err := initMRModule(c); err != nil {
-		return err
-	}
-
-	// F06 固件管理（依赖 DeviceRepo, ConnReqClient from DeviceModule）
-	if err := initSoftwareModule(c); err != nil {
-		return err
-	}
-
-	// F09 自动开站（依赖 DeviceService, DMRegistry from DeviceModule/ConfigModule）
-	if err := initProvisionModule(c); err != nil {
-		return err
-	}
-
-	// F06 任务队列（依赖 DeviceRepo, StunStore from DeviceModule）
-	if err := initTaskModule(c); err != nil {
-		return err
-	}
-
-	// F06 备份（依赖 EventBus）
-	if err := initBackupModule(c); err != nil {
-		return err
-	}
-
-	// F06 仪表盘（依赖 DeviceService, AlarmPgStore, PMKPIRepo, GroupRepo）
-	if err := initDashboardModule(c); err != nil {
-		return err
-	}
-
-	// F08 北向接口（依赖 AlarmPgStore, PMCounterRepo, PMKPIRepo）
-	if err := initNorthboundModule(c); err != nil {
-		return err
-	}
-
-	// F10 互操作测试（依赖 DeviceRepo, DMRegistry）
-	if err := initInteropModule(c); err != nil {
-		return err
-	}
-
-	// 其余小型模块
-	if err := initMiscModules(c); err != nil {
-		return err
-	}
-
 	c.Logger.Info("all modules initialized")
 
 	// ===== Phase 2: 配置 Gin 中间件 =====

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
@@ -20,6 +21,7 @@ func main() {
 
 	rootCmd.PersistentFlags().String("dsn", "", "database connection string (e.g. postgres://user:pass@localhost:5432/omcgo?sslmode=disable)")
 	rootCmd.PersistentFlags().String("path", "migrations", "migrations directory path")
+	rootCmd.PersistentFlags().String("paths", "", "comma-separated migration directories (applied in order)")
 
 	rootCmd.AddCommand(
 		&cobra.Command{
@@ -85,12 +87,42 @@ func migrateDir(cmd *cobra.Command) string {
 	return path
 }
 
+// migratePaths returns the comma-separated migration directories from flag.
+// Returns nil if --paths is not set.
+func migratePaths(cmd *cobra.Command) []string {
+	paths, _ := cmd.Flags().GetString("paths")
+	if paths == "" {
+		return nil
+	}
+	parts := strings.Split(paths, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
 func runMigrateUp(cmd *cobra.Command, args []string) error {
 	db, err := openDB(cmd)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	// If --paths is set, run goose.Up on each directory in sequence.
+	if dirs := migratePaths(cmd); dirs != nil {
+		for _, dir := range dirs {
+			fmt.Printf("Migrating directory: %s\n", dir)
+			if err := goose.Up(db, dir); err != nil {
+				return fmt.Errorf("migrate up %s: %w", dir, err)
+			}
+		}
+		version, err := goose.GetDBVersion(db)
+		if err != nil {
+			return fmt.Errorf("get version: %w", err)
+		}
+		fmt.Printf("Migration complete. Version: %d\n", version)
+		return nil
+	}
 
 	if err := goose.Up(db, migrateDir(cmd)); err != nil {
 		return fmt.Errorf("migrate up: %w", err)

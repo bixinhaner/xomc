@@ -1,0 +1,26 @@
+{
+  "table": "device_groups",
+  "columns": ["id", "name", "parent_id", "level", "is_default", "status", "remark", "created_by"],
+  "records": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": "默认设备组",
+      "parent_id": null,
+      "level": 1,
+      "is_default": true,
+      "status": "active",
+      "remark": "系统默认一级设备组，不可修改删除",
+      "created_by": "system"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "name": "未分组设备",
+      "parent_id": "00000000-0000-0000-0000-000000000001",
+      "level": 2,
+      "is_default": true,
+      "status": "active",
+      "remark": "系统默认二级设备组，删除组后设备自动归入此组",
+      "created_by": "system"
+    }
+  ]
+}

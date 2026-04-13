@@ -8,6 +8,8 @@ import (
 )
 
 // UserRepository defines the persistence interface for users.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_user_repository_test.go -package=admin . UserRepository
 type UserRepository interface {
 	Create(ctx context.Context, user *User) error
 	GetByID(ctx context.Context, id uuid.UUID) (*User, error)
@@ -58,6 +60,8 @@ type PermissionWriter interface {
 
 // RoleRepository defines the full persistence interface for roles and permissions.
 // It composes smaller interfaces for backward compatibility.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_role_repository_test.go -package=admin . RoleRepository
 type RoleRepository interface {
 	RoleReader
 	RoleWriter
@@ -91,6 +95,8 @@ type MenuRepository interface {
 }
 
 // AuditRepository defines the persistence interface for audit logs.
+//
+//go:generate go run go.uber.org/mock/mockgen -destination=mock_audit_repository_test.go -package=admin . AuditRepository
 type AuditRepository interface {
 	Create(ctx context.Context, log *AuditLog) error
 	List(ctx context.Context, filter AuditLogFilter) (*model.ListResponse[AuditLog], error)

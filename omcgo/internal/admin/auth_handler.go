@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -17,7 +18,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	// Per-IP login rate limiting: reject if too many attempts.
 	if limiter := h.getIPLimiter(clientIP); !limiter.Allow() {
-		h.logger.Warn("login rate limited",
+		logger.L(c.Request.Context()).Warn("login rate limited",
 			zap.String("ip", clientIP),
 		)
 		commonerrors.AbortWithError(c, http.StatusTooManyRequests,
@@ -32,7 +33,7 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	log := h.logger
+	log := logger.L(ctx)
 	userAgent := c.Request.UserAgent()
 
 	// Brute-force protection: check if CAPTCHA is required for this username.
