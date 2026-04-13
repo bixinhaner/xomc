@@ -27,7 +27,6 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
-import { useT } from '@/hooks/useT';
 
 // 收集状态类型: 0-未收集, 1-收集中, 2-收集失败, 3-收集完成
 type CollectStatus = '0' | '1' | '2' | '3';
@@ -146,7 +145,6 @@ const initialMockExceptionLogs: ExceptionLog[] = [
 ];
 
 export default function ExceptionLog() {
-  const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [exceptionLogs, setExceptionLogs] = useState<ExceptionLog[]>(initialMockExceptionLogs);
@@ -386,7 +384,7 @@ export default function ExceptionLog() {
         if (record.manualCollectionStatus === '1') {
           return '-';
         }
-        const items = getActionMenu(record);
+        const items = getActionMenu(record) ?? [];
         if (items.length === 0) return '-';
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
@@ -522,7 +520,9 @@ export default function ExceptionLog() {
         selectedRowKeys={selectedRowKeys}
         onSelectionChange={setSelectedRowKeys}
         batchActions={batchActions}
-        scroll={{ x: 1800 }}
+        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+        showRowNumber
+        rowNumberTitle="序号"
       />
 
       {/* 日志详情抽屉 */}
