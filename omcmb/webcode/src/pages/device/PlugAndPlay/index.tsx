@@ -644,7 +644,7 @@ export default function PlugAndPlay() {
             defaultDensity="compact"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
-            pagination={false}
+            showPagination={false}
             scroll={{ x: 'max-content', y: 200 }}
             extraToolbarRight={
               <Space>
