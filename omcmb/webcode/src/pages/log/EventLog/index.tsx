@@ -6,7 +6,6 @@ import {
   Typography,
   Modal,
   message,
-  Drawer,
   Row,
   Col,
   Card,
@@ -22,7 +21,6 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useT } from '@/hooks/useT';
 
 // 事件级别类型
 type EventLevel = 'info' | 'warning' | 'error' | 'success';
@@ -36,14 +34,6 @@ interface EventLog {
   time: string;
   eventLevel: EventLevel;
 }
-
-// 事件级别配置
-const eventLevelConfig: Record<EventLevel, { text: string; color: string }> = {
-  info: { text: '信息', color: 'blue' },
-  warning: { text: '警告', color: 'orange' },
-  error: { text: '错误', color: 'red' },
-  success: { text: '成功', color: 'green' },
-};
 
 // Mock 数据
 const mockEventLogs: EventLog[] = [
@@ -70,7 +60,6 @@ const eventTypes = [
 ];
 
 export default function EventLog() {
-  const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [statisticVisible, setStatisticVisible] = useState(false);
 
@@ -210,7 +199,9 @@ export default function EventLog() {
         currentPage={1}
         pageSize={20}
         onPageChange={() => {}}
-        scroll={{ x: 800 }}
+        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+        showRowNumber
+        rowNumberTitle="序号"
       />
 
       {/* 统计弹窗 */}
