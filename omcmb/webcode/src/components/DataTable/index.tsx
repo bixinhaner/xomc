@@ -160,6 +160,12 @@ function DataTable<T>(
     return data;
   }, [dataSource, columnFilters]);
 
+  const pagedData = useMemo(() => {
+    if (!showPagination) return filteredData;
+    const start = (currentPage - 1) * pageSize;
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, showPagination, currentPage, pageSize]);
+
   const buildColumns = useMemo((): TableProps<T>['columns'] => {
     return orderedColumns
       .filter((col) => !hiddenKeys.includes(col.key))
@@ -328,7 +334,7 @@ function DataTable<T>(
       <div className={`${styles.tableContainer} omc-data-table`}>
         <Table<T>
           columns={buildColumns}
-          dataSource={filteredData}
+          dataSource={pagedData}
           loading={loading}
           rowKey={rowKey as string}
           rowSelection={rowSelection}

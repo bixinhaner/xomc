@@ -13,7 +13,6 @@ import {
   Radio,
   DatePicker,
   Drawer,
-  InputNumber,
   Form,
   Divider,
   Table,
@@ -23,20 +22,18 @@ import {
 } from 'antd';
 import type { MenuProps } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, UnorderedListOutlined, DesktopOutlined, PauseOutlined, StopOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, DesktopOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 
 // 升级类型枚举
 type UpgradeType = 'immediate' | 'scheduled' | 'manual';
 // 升级结果枚举
 type UpgradeResult = 'success' | 'failed' | 'partial' | 'running' | 'pending';
-// 升级类别枚举
-type UpgradeCategory = 'software' | 'patch' | 'fpga';
 // 执行方式枚举
 type ExecutionMethod = 'immediate' | 'suspend' | 'scheduled';
 // 任务状态枚举（1-6）
@@ -117,10 +114,6 @@ export default function UpgradePlan() {
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  // 设备列表状态
-  const [deviceFilters, setDeviceFilters] = useState<Record<string, unknown>>({});
-  const [devicePage, setDevicePage] = useState(1);
-  const [devicePageSize, setDevicePageSize] = useState(20);
   // 批量输入相关状态
   const [batchInputVisible, setBatchInputVisible] = useState(false);
   const [batchInputValue, setBatchInputValue] = useState('');
@@ -134,13 +127,8 @@ export default function UpgradePlan() {
   // 批量升级抽屉状态
   const [upgradeDrawerVisible, setUpgradeDrawerVisible] = useState(false);
   const [taskName, setTaskName] = useState('');
-  const [upgradeCategory, setUpgradeCategory] = useState<UpgradeCategory>('software');
   const [executionMethod, setExecutionMethod] = useState<ExecutionMethod>('immediate');
   const [scheduledTime, setScheduledTime] = useState<Dayjs | null>(null);
-  const [upgradeFile, setUpgradeFile] = useState<string | undefined>(undefined);
-  const [drawerKeepConfig, setDrawerKeepConfig] = useState(true);
-  const [retryOffline, setRetryOffline] = useState(true);
-  const [batchSize, setBatchSize] = useState(20);
   const [drawerDevices, setDrawerDevices] = useState<UpgradePlanRow[]>([]);
   const [drawerProductType, setDrawerProductType] = useState<string>('');
   // 抽屉中添加设备的状态
@@ -171,21 +159,6 @@ export default function UpgradePlan() {
     if (!drawerProductType) return 0;
     return mockData.filter((d) => d.productType === drawerProductType).length;
   }, [drawerProductType]);
-
-  // Mock 升级文件列表
-  const upgradeFiles = useMemo(() => [
-    { label: 'V1.3.0_full.bin', value: 'V1.3.0_full.bin', category: 'software', productType: 'PM-B4860' },
-    { label: 'V1.3.0_patch.bin', value: 'V1.3.0_patch.bin', category: 'patch', productType: 'PM-B4860' },
-    { label: 'V2.1.0_full.bin', value: 'V2.1.0_full.bin', category: 'software', productType: 'BaiBNX' },
-    { label: 'V2.1.0_fpga.bin', value: 'V2.1.0_fpga.bin', category: 'fpga', productType: 'BaiBNX' },
-  ], []);
-
-  // 根据产品类型和升级类别过滤文件
-  const filteredFiles = useMemo(() => {
-    return upgradeFiles.filter(
-      (f) => f.productType === drawerProductType && f.category === upgradeCategory
-    );
-  }, [upgradeFiles, drawerProductType, upgradeCategory]);
 
   // 解析批量输入的设备SN
   const parseBatchInput = (input: string): string[] => {
@@ -440,118 +413,13 @@ export default function UpgradePlan() {
     });
   }, [filters]);
 
-  // 设备列表筛选条件
-  const deviceFilterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
-    {
-      name: 'productType',
-      label: '产品类型',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: 'PM-B4860', value: 'PM-B4860' },
-        { label: 'QAFA', value: 'QAFA' },
-        { label: 'QATA', value: 'QATA' },
-        { label: 'QAFB', value: 'QAFB' },
-        { label: 'RTD', value: 'RTD' },
-        { label: 'BaiBNX', value: 'BaiBNX' },
-        { label: 'BaiBNQ', value: 'BaiBNQ' },
-        { label: 'BSC', value: 'BSC' },
-        { label: 'BTS', value: 'BTS' },
-      ],
-    },
-    {
-      name: 'deviceGroup',
-      label: '设备组',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: '北京移动', value: '北京移动' },
-        { label: '上海移动', value: '上海移动' },
-        { label: '广东移动', value: '广东移动' },
-        { label: '浙江移动', value: '浙江移动' },
-        { label: '江苏移动', value: '江苏移动' },
-        { label: '四川移动', value: '四川移动' },
-        { label: '湖北移动', value: '湖北移动' },
-        { label: '陕西移动', value: '陕西移动' },
-      ],
-    },
-    {
-      name: 'onlineStatus',
-      label: '在线状态',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: '在线', value: 'online' },
-        { label: '离线', value: 'offline' },
-      ],
-    },
-  ], []);
-
-  // 设备列表过滤数据
-  const filteredDeviceData = useMemo(() => {
-    return mockData.filter((row) => {
-      // 关键字搜索
-      if (deviceFilters.keyword && typeof deviceFilters.keyword === 'string') {
-        const keyword = deviceFilters.keyword.toLowerCase();
-        if (!row.deviceSn.toLowerCase().includes(keyword) &&
-            !row.deviceName.toLowerCase().includes(keyword)) {
-          return false;
-        }
-      }
-      // 产品类型
-      if (deviceFilters.productType && deviceFilters.productType !== 'all') {
-        if (row.productType !== deviceFilters.productType) return false;
-      }
-      // 设备组
-      if (deviceFilters.deviceGroup && deviceFilters.deviceGroup !== 'all') {
-        if (row.deviceGroup !== deviceFilters.deviceGroup) return false;
-      }
-      // 在线状态（mock: 根据结果模拟）
-      if (deviceFilters.onlineStatus && deviceFilters.onlineStatus !== 'all') {
-        // 简单模拟：success/running 为在线，其他为离线
-        const isOnline = row.result === 'success' || row.result === 'running';
-        if (deviceFilters.onlineStatus === 'online' && !isOnline) return false;
-        if (deviceFilters.onlineStatus === 'offline' && isOnline) return false;
-      }
-      return true;
-    });
-  }, [deviceFilters]);
-
-  // 设备列表列定义
-  const deviceColumns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
-    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-    { key: 'deviceGroup', title: '设备组', dataIndex: 'deviceGroup', width: 100 },
-    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
-    { key: 'sourceVersion', title: '当前版本', dataIndex: 'sourceVersion', width: 100 },
-    {
-      key: 'onlineStatus',
-      title: '在线状态',
-      width: 100,
-      render: (_: unknown, record: UpgradePlanRow) => {
-        const isOnline = record.result === 'success' || record.result === 'running';
-        return <Tag color={isOnline ? 'green' : 'default'}>{isOnline ? '在线' : '离线'}</Tag>;
-      },
-    },
-    { key: 'taskName', title: '任务名称', dataIndex: 'taskName', width: 150, ellipsis: true },
-  ], []);
-
   // 直接打开升级抽屉（不需要预选设备）
   const handleOpenUpgradeDrawer = () => {
     setTaskName('');
     setDrawerDevices([]);
     setDrawerProductType('');
-    setUpgradeCategory('software');
     setExecutionMethod('immediate');
     setScheduledTime(null);
-    setUpgradeFile(undefined);
-    setDrawerKeepConfig(true);
-    setRetryOffline(true);
-    setBatchSize(20);
     setSelectAllOfType(false);
     setUpgradeDrawerVisible(true);
   };
@@ -865,7 +733,7 @@ export default function UpgradePlan() {
       `}</style>
 
       {/* 页签选择 */}
-      <Card bordered={false} style={{ marginBottom: 16 }}>
+      <Card style={{ marginBottom: 16 }}>
         <Radio.Group
           value={activeTab}
           onChange={(e) => {
@@ -882,7 +750,7 @@ export default function UpgradePlan() {
       </Card>
 
       {/* 搜索表单 */}
-      <Card bordered={false} style={{ marginBottom: 16 }} className="upgrade-plan-filter-wrapper">
+      <Card style={{ marginBottom: 16 }} className="upgrade-plan-filter-wrapper">
         <FilterBar
           filterId={`upgrade-plan-filter-${activeTab}`}
           fields={activeTab === 'task' ? taskFilterFields : filterFields}
@@ -892,7 +760,7 @@ export default function UpgradePlan() {
       </Card>
 
       {/* 列表 */}
-      <Card bordered={false}>
+      <Card>
         {activeTab === 'task' ? (
           <DataTable<UpgradePlanRow>
             tableId="upgrade-plan-list-task"
@@ -903,7 +771,9 @@ export default function UpgradePlan() {
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 1600 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle="序号"
           />
         ) : (
           <DataTable<UpgradePlanRow>
@@ -915,7 +785,9 @@ export default function UpgradePlan() {
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 2000 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle="序号"
           />
         )}
       </Card>
@@ -1096,7 +968,6 @@ export default function UpgradePlan() {
               value={drawerProductType}
               onChange={(val) => {
                 setDrawerProductType(val);
-                setUpgradeFile(undefined);
                 // 切换产品类型时，重置全选状态并清空不匹配的设备
                 setSelectAllOfType(false);
                 setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
@@ -1220,7 +1091,7 @@ export default function UpgradePlan() {
                 onChange={setScheduledTime}
                 placeholder="请选择执行时间"
                 style={{ width: '100%' }}
-                disabledDate={(current) => current && current < new Date()}
+                disabledDate={(current) => current && current.isBefore(new Date(), 'day')}
               />
             </Form.Item>
           )}
