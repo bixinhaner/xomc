@@ -601,7 +601,7 @@ export default function KPIStandardReport() {
       key: 'operation',
       title: '',
       dataIndex: 'kpiId',
-      width: 120,
+      width: 140,
       fixed: 'left',
       render: (_, row) => (
         <Space size={4}>
