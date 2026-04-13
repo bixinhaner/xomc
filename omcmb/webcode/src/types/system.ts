@@ -30,6 +30,7 @@ export interface Role {
   permissions: string[];
   apiPermissions?: ApiPermission[]; // API权限
   deviceGroupIds?: string[]; // 数据权限（设备组）
+  networkTypes?: string[]; // 数据权限（网络类型）
   userCount: number;
   builtIn: number; // 内置角色标识
   createUser?: string; // 创建人
@@ -63,8 +64,37 @@ export interface ApiEndpoint {
   path: string;           // API路径，如 /api/v1/users
   method: string;         // HTTP方法: GET, POST, PUT, DELETE
   name: string;           // API名称
+  apiGroup?: string;      // API分组
   module: string;         // 所属模块
   description: string;    // 描述
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// API端点列表查询参数
+export interface ApiEndpointListParams {
+  page?: number;
+  pageSize?: number;
+  path?: string;
+  method?: string;
+  apiGroup?: string;
+  name?: string;
+}
+
+// API端点创建/更新数据
+export interface ApiEndpointPayload {
+  path: string;
+  method: string;
+  name?: string;
+  description?: string;
+  apiGroup?: string;
+}
+
+// 同步API结果
+export interface SyncApiResult {
+  created: number;
+  updated: number;
+  total: number;
 }
 
 // API权限项(角色分配的API权限)

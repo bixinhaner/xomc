@@ -662,3 +662,53 @@ func (s *AdminService) SwitchRole(ctx context.Context, userID uuid.UUID, targetR
 func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) ([]Menu, error) {
 	return s.menuRepo.GetByRole(ctx, roleID)
 }
+
+// ==================== Password Change ====================
+
+// ChangePasswordRequest is the input for changing a user's own password.
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+// ChangePassword verifies the old password and updates to the new one.
+func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req ChangePasswordRequest) error {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
+		return commonerrors.NewBusinessError(7020, "old password is incorrect", commonerrors.ErrUnauthorized)
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash new password: %w", err)
+	}
+
+	if err := s.userRepo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
+// ==================== Role User List ====================
+
+// RoleUserItem represents a user summary in a role's user list.
+type RoleUserItem struct {
+	ID          uuid.UUID  `json:"id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name"`
+	Email       string     `json:"email,omitempty"`
+	Status      UserStatus `json:"status"`
+}
+
+// GetRoleUsers returns a paginated list of users assigned to a role.
+func (s *AdminService) GetRoleUsers(ctx context.Context, roleID uuid.UUID, filter model.ListRequest) (*model.ListResponse[RoleUserItem], error) {
+	users, total, err := s.roleRepo.ListRoleUsers(ctx, roleID, filter.Limit(), filter.Offset())
+	if err != nil {
+		return nil, fmt.Errorf("list role users: %w", err)
+	}
+	return model.NewListResponse(users, total, filter.Page, filter.PageSize), nil
+}

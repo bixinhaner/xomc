@@ -211,6 +211,9 @@ func (m *mockRoleRepo) GetDefaultRoleID(_ context.Context, _ uuid.UUID) (*uuid.U
 func (m *mockRoleRepo) SetDefaultRole(_ context.Context, _, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockRoleRepo) ListRoleUsers(_ context.Context, _ uuid.UUID, _, _ int) ([]RoleUserItem, int64, error) {
+	return []RoleUserItem{}, 0, nil
+}
 
 type mockAuditRepo struct {
 	createFn func(ctx context.Context, log *AuditLog) error
@@ -233,7 +236,7 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 
 type mockMenuRepo struct{}
 
-func (m *mockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error { return nil }
+func (m *mockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error  { return nil }
 func (m *mockMenuRepo) GetByID(_ context.Context, _ uuid.UUID) (*Menu, error) { return nil, nil }
 func (m *mockMenuRepo) GetByPermissionKey(_ context.Context, _ string) (*Menu, error) {
 	return nil, nil

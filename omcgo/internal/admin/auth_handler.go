@@ -255,3 +255,27 @@ func classifyLoginFailure(err error) string {
 		return "unknown"
 	}
 }
+
+// ChangePassword handles POST /api/v1/auth/change-password.
+// The user must be authenticated; it verifies the old password before updating.
+func (h *Handler) ChangePassword(c *gin.Context) {
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.ChangePassword(c.Request.Context(), userID, req); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "password changed successfully"})
+}

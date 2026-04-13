@@ -70,6 +70,14 @@ type RoleRepository interface {
 	PermissionWriter
 	// ListWithPagination returns roles with pagination support.
 	ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error)
+	// ListRoleUsers returns a paginated list of users assigned to a role.
+	ListRoleUsers(ctx context.Context, roleID uuid.UUID, limit, offset int) ([]RoleUserItem, int64, error)
+}
+
+// RoleDeviceGroupData holds a role's device group IDs and optional network type filters.
+type RoleDeviceGroupData struct {
+	GroupIDs     []uuid.UUID `json:"group_ids"`
+	NetworkTypes []string    `json:"network_types"`
 }
 
 // RoleDeviceGroupRepository manages role–device-group associations.
@@ -77,6 +85,20 @@ type RoleDeviceGroupRepository interface {
 	GetGroupIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	SetGroupIDs(ctx context.Context, roleID uuid.UUID, groupIDs []uuid.UUID) error
 	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	// GetDeviceGroupData returns group IDs plus network_types for a role.
+	GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error)
+	// SetDeviceGroupData replaces group IDs and network_types for a role.
+	SetDeviceGroupData(ctx context.Context, roleID uuid.UUID, data RoleDeviceGroupData) error
+}
+
+// RoleApiPermissionRepository manages role–API-endpoint associations.
+type RoleApiPermissionRepository interface {
+	// GetRoleApiEndpoints returns all (path, method) pairs granted to the given roles.
+	GetRoleApiEndpoints(ctx context.Context, roleNames []string) ([]RoleApiEndpoint, error)
+	// GetRoleApiEndpointIDs returns endpoint IDs granted to a role.
+	GetRoleApiEndpointIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	// SetRoleApiEndpoints replaces the full set of API endpoint grants for a role.
+	SetRoleApiEndpoints(ctx context.Context, roleID uuid.UUID, endpointIDs []uuid.UUID) error
 }
 
 // MenuRepository defines the persistence interface for menus.
@@ -92,6 +114,18 @@ type MenuRepository interface {
 	GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error)
 	SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
 	GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// ApiEndpointRepository defines the persistence interface for API endpoints.
+type ApiEndpointRepository interface {
+	Create(ctx context.Context, ep *ApiEndpointDB) error
+	GetByID(ctx context.Context, id uuid.UUID) (*ApiEndpointDB, error)
+	Update(ctx context.Context, id uuid.UUID, req UpdateApiEndpointRequest) (*ApiEndpointDB, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	DeleteByIDs(ctx context.Context, ids []uuid.UUID) error
+	List(ctx context.Context, filter ApiEndpointFilter) (*model.ListResponse[ApiEndpointDB], error)
+	Upsert(ctx context.Context, path, method, name, apiGroup string) (created bool, err error)
+	GetGroups(ctx context.Context) ([]string, error)
 }
 
 // AuditRepository defines the persistence interface for audit logs.

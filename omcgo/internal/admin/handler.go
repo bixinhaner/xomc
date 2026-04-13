@@ -32,13 +32,16 @@ type ipLimiterEntry struct {
 
 // Handler provides HTTP endpoints for admin operations.
 type Handler struct {
-	service       *AdminService
-	captcha       *CaptchaService
-	loginGuard    *LoginGuard
-	roleGroupRepo RoleDeviceGroupRepository
-	permService   *PermissionService
-	logger        *zap.Logger
-	loginLimiter  sync.Map // map[string]*ipLimiterEntry
+	service            *AdminService
+	captcha            *CaptchaService
+	loginGuard         *LoginGuard
+	roleGroupRepo      RoleDeviceGroupRepository
+	apiPermRepo        RoleApiPermissionRepository
+	permService        *PermissionService
+	apiEndpointService *ApiEndpointService
+	ginRoutes          gin.RoutesInfo // set after router registration
+	logger             *zap.Logger
+	loginLimiter       sync.Map // map[string]*ipLimiterEntry
 }
 
 // NewHandler creates a new admin Handler.
@@ -67,9 +70,24 @@ func (h *Handler) SetRoleDeviceGroupRepo(repo RoleDeviceGroupRepository) {
 	h.roleGroupRepo = repo
 }
 
+// SetApiPermRepo sets the role API permission repository.
+func (h *Handler) SetApiPermRepo(repo RoleApiPermissionRepository) {
+	h.apiPermRepo = repo
+}
+
 // SetPermissionService sets the data permission service.
 func (h *Handler) SetPermissionService(ps *PermissionService) {
 	h.permService = ps
+}
+
+// SetApiEndpointService sets the API endpoint service.
+func (h *Handler) SetApiEndpointService(svc *ApiEndpointService) {
+	h.apiEndpointService = svc
+}
+
+// SetGinRoutes stores gin route info for use in SyncApiEndpoints.
+func (h *Handler) SetGinRoutes(routes gin.RoutesInfo) {
+	h.ginRoutes = routes
 }
 
 // getIPLimiter returns a rate.Limiter for the given IP, creating one if needed.
@@ -113,6 +131,15 @@ func (h *Handler) RegisterAuthRoutes(rg *gin.RouterGroup) {
 	}
 }
 
+// RegisterAuthenticatedRoutes registers routes that require authentication but not admin privileges.
+// E.g. change-password is called by any logged-in user.
+func (h *Handler) RegisterAuthenticatedRoutes(rg *gin.RouterGroup) {
+	auth := rg.Group("/auth")
+	{
+		auth.POST("/change-password", h.ChangePassword)
+	}
+}
+
 // RegisterAdminRoutes registers protected admin routes (auth + admin permission required).
 func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 	users := rg.Group("/users")
@@ -143,10 +170,20 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		roles.PUT("/:id/menus", h.SetRoleMenus)
 		roles.GET("/:id/api-permissions", h.GetRoleApiPermissions)
 		roles.PUT("/:id/api-permissions", h.SetRoleApiPermissions)
+		roles.GET("/:id/users", h.ListRoleUsers)
 	}
 
 	// API端点管理
-	rg.GET("/api-endpoints", h.ListApiEndpoints)
+	apiEndpoints := rg.Group("/api-endpoints")
+	{
+		apiEndpoints.GET("", h.ListApiEndpoints)
+		apiEndpoints.POST("", h.CreateApiEndpoint)
+		apiEndpoints.PUT("/:id", h.UpdateApiEndpoint)
+		apiEndpoints.DELETE("/:id", h.DeleteApiEndpoint)
+		apiEndpoints.DELETE("/batch", h.BatchDeleteApiEndpoints)
+		apiEndpoints.GET("/groups", h.GetApiGroups)
+		apiEndpoints.POST("/sync", h.SyncApiEndpoints)
+	}
 
 	// Groups endpoint - alias for roles (for frontend compatibility)
 	// Frontend UserManagement page expects /admin/groups to return role groups

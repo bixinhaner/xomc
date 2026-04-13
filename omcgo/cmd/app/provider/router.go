@@ -226,6 +226,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	v1.GET("/auth/me", ad.adminHandler.Me)
 	v1.POST("/auth/switch-role", ad.adminHandler.SwitchRole)
 	v1.GET("/auth/menus", ad.adminHandler.GetUserMenusByRole)
+	// Authenticated user routes (any authenticated user)
+	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
 
 	// Helper: permission-scoped sub-group
 	permGroup := func(resource string) *gin.RouterGroup {
@@ -368,6 +370,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- System log routes (require admin permission) -----
 	ad.logHandler.RegisterRoutes(adminGroup)
+
+	// Inject gin routes into admin handler for SyncApiEndpoints
+	ad.adminHandler.SetGinRoutes(r.Routes())
 
 	return nil
 }

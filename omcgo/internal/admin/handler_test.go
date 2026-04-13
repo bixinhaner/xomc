@@ -90,23 +90,23 @@ type handlerMockRoleRepo struct {
 	getUserRolesFn func(ctx context.Context, userID uuid.UUID) ([]Role, error)
 }
 
-func (m *handlerMockRoleRepo) Create(_ context.Context, _ *Role) error             { return nil }
+func (m *handlerMockRoleRepo) Create(_ context.Context, _ *Role) error { return nil }
 func (m *handlerMockRoleRepo) GetByID(_ context.Context, _ uuid.UUID) (*Role, error) {
 	return nil, commonerrors.ErrNotFound
 }
 func (m *handlerMockRoleRepo) GetByName(_ context.Context, _ string) (*Role, error) {
 	return nil, commonerrors.ErrNotFound
 }
-func (m *handlerMockRoleRepo) Update(_ context.Context, _ *Role) error             { return nil }
-func (m *handlerMockRoleRepo) Delete(_ context.Context, _ uuid.UUID) error         { return nil }
+func (m *handlerMockRoleRepo) Update(_ context.Context, _ *Role) error     { return nil }
+func (m *handlerMockRoleRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 func (m *handlerMockRoleRepo) List(ctx context.Context) ([]Role, error) {
 	if m.listFn != nil {
 		return m.listFn(ctx)
 	}
 	return []Role{}, nil
 }
-func (m *handlerMockRoleRepo) AssignRole(_ context.Context, _, _ uuid.UUID) error  { return nil }
-func (m *handlerMockRoleRepo) RemoveRole(_ context.Context, _, _ uuid.UUID) error  { return nil }
+func (m *handlerMockRoleRepo) AssignRole(_ context.Context, _, _ uuid.UUID) error { return nil }
+func (m *handlerMockRoleRepo) RemoveRole(_ context.Context, _, _ uuid.UUID) error { return nil }
 func (m *handlerMockRoleRepo) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error) {
 	if m.getUserRolesFn != nil {
 		return m.getUserRolesFn(ctx, userID)
@@ -140,6 +140,9 @@ func (m *handlerMockRoleRepo) GetDefaultRoleID(_ context.Context, _ uuid.UUID) (
 func (m *handlerMockRoleRepo) SetDefaultRole(_ context.Context, _, _ uuid.UUID) error {
 	return nil
 }
+func (m *handlerMockRoleRepo) ListRoleUsers(_ context.Context, _ uuid.UUID, _, _ int) ([]RoleUserItem, int64, error) {
+	return []RoleUserItem{}, 0, nil
+}
 
 type handlerMockAuditRepo struct{}
 
@@ -150,7 +153,7 @@ func (m *handlerMockAuditRepo) List(_ context.Context, _ AuditLogFilter) (*model
 
 type handlerMockMenuRepo struct{}
 
-func (m *handlerMockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error { return nil }
+func (m *handlerMockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error  { return nil }
 func (m *handlerMockMenuRepo) GetByID(_ context.Context, _ uuid.UUID) (*Menu, error) { return nil, nil }
 func (m *handlerMockMenuRepo) GetByPermissionKey(_ context.Context, _ string) (*Menu, error) {
 	return nil, nil

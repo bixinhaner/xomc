@@ -284,7 +284,27 @@ const messages: Record<string, string> = {
   'nav.system.operationLog':  'Operation Log',
   'nav.system.config':        'System Config',
   'nav.system.dataDict':      'Data Dictionary',
+  'nav.system.apiManagement': 'API Management',
   'nav.system.dashboard':     'System Dashboard',
+
+  // Dictionary management
+  'dictionary.name':          'Dictionary Name',
+  'dictionary.type':          'Dictionary Type',
+  'dictionary.label':         'Display Label',
+  'dictionary.value':         'Dictionary Value',
+  'dictionary.extend':        'Extended Value',
+  'dictionary.sort':          'Sort Order',
+  'dictionary.status':        'Status',
+  'dictionary.desc':          'Description',
+  'dictionary.addDict':       'Add Dictionary',
+  'dictionary.editDict':      'Edit Dictionary',
+  'dictionary.addDetail':     'Add Dictionary Item',
+  'dictionary.editDetail':    'Edit Dictionary Item',
+  'dictionary.searchLabel':   'Search display value',
+  'dictionary.detailTitle':   'Dictionary Details',
+  'dictionary.listTitle':     'Dictionary List',
+  'dictionary.deleteDictConfirm': 'Confirm delete this dictionary and all its items?',
+  'dictionary.deleteDetailConfirm': 'Confirm delete this dictionary item?',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Report
@@ -748,6 +768,7 @@ const messages: Record<string, string> = {
   'user.lastLoginTime':   'Last Login Time',
   'user.createTime':      'Created At',
   'user.password':        'Password',
+  'user.oldPassword':     'Current Password',
   'user.newPassword':     'New Password',
   'user.confirmPassword': 'Confirm Password',
   'user.confirmPwd':      'Confirm Password',
@@ -776,6 +797,7 @@ const messages: Record<string, string> = {
   'user.confirmUnlock':   'Confirm unlock selected users?',
   'user.confirmBatchResetPassword': 'Confirm reset password for selected users?',
   'user.passwordMismatch': 'Passwords do not match',
+  'user.passwordChanged': 'Password changed successfully, please login again',
   'user.builtIn':             'Built-in',
   'user.builtInCannotDelete': 'Built-in users cannot be deleted',
   'user.noUsersToDelete': 'No users to delete (built-in users cannot be deleted)',
@@ -792,6 +814,7 @@ const messages: Record<string, string> = {
   'user.pleaseInputPassword': 'Please enter password',
   'user.pleaseConfirmPassword': 'Please confirm password',
   'user.passwordMinLength': 'Password must be at least 8 characters',
+  'user.passwordMinLength6': 'Password must be at least 6 characters',
   'user.emailFormatError': 'Invalid email format',
   'user.pleaseInputPhone': 'Please enter phone number',
   'user.phoneFormatError': 'Invalid phone number format',
@@ -890,6 +913,25 @@ const messages: Record<string, string> = {
   'role.picoBaseStation': 'Pico Base Station',
   'role.noDeviceGroupData': 'No device group data',
   'role.menuPermissionConfig': 'Menu Permission Configuration',
+  // API 权限
+  'role.apiPermission': 'API Permissions',
+  'role.resourcePermission': 'Data Permissions',
+  'role.apiPermissionComingSoon': 'API permission coming soon',
+  'role.apiEndpoint': 'API Endpoint',
+  'role.apiPath': 'API Path',
+  'role.apiMethod': 'Method',
+  'role.apiName': 'API Name',
+  'role.apiModule': 'Module',
+  'role.selectAllApis': 'Select All APIs',
+  'role.selectByModule': 'Select by Module',
+  // 网络类型权限
+  'role.networkType':     'Network Type Permission',
+  'role.networkTypeHint': 'No selection means no network type restriction',
+  'role.networkType.lte': 'eNB (LTE)',
+  'role.networkType.nr':  'gNB (5G NR)',
+  'role.networkType.gsm': 'GSM',
+  'role.networkType.cpe': 'CPE',
+  'role.networkType.egw': 'eGW',
 
   // -------------------------------------------------------------------------
   // Log management
@@ -1568,6 +1610,11 @@ const messages: Record<string, string> = {
   'common.confirmDelete':   'Confirm Delete',
   'common.deleteConfirmMsg':'Are you sure you want to delete the selected {count} records? This cannot be undone.',
   'common.deleteSuccess':   'Deleted successfully',
+  'common.deleteFailed':    'Delete failed',
+  'common.createSuccess':   'Created successfully',
+  'common.saveSuccess':     'Saved successfully',
+  'common.saveFailed':      'Save failed',
+  'common.operationFailed': 'Operation failed',
   'common.addSuccess':      'Added successfully',
   'common.updateSuccess':   'Updated successfully',
   'common.operationSuccess':'Operation succeeded',
@@ -2616,6 +2663,33 @@ const messages: Record<string, string> = {
   // Status
 
   // Filter
+
+  // -------------------------------------------------------------------------
+  // API Management
+  // -------------------------------------------------------------------------
+  'api.path':                  'API Path',
+  'api.method':                'Request Method',
+  'api.group':                 'API Group',
+  'api.name':                  'API Name',
+  'api.description':           'API Description',
+  'api.addEndpoint':           'Add API',
+  'api.editEndpoint':          'Edit API',
+  'api.batchDelete':           'Batch Delete',
+  'api.sync':                  'Sync APIs',
+  'api.syncConfirm':           'Confirm Sync',
+  'api.syncConfirmContent':    'This will sync the latest API list from backend routes. Continue?',
+  'api.syncSuccess':           'Sync completed: {created} created, {updated} updated, {total} total',
+  'api.deleteConfirm':         'Delete this API endpoint?',
+  'api.batchDeleteConfirm':    'Delete {count} selected API endpoint(s)?',
+  'api.addTip':                'New APIs need to be configured in Role Management before use',
+  'api.pathPlaceholder':       'e.g. /api/v1/users',
+  'api.namePlaceholder':       'Enter API name',
+  'api.groupPlaceholder':      'Select or enter a group',
+  'api.descriptionPlaceholder':'Enter API description',
+  'api.pathRequired':          'Please enter the API path',
+  'api.methodRequired':        'Please select a request method',
+  'api.groupRequired':         'Please select or enter an API group',
+  'api.nameRequired':          'Please enter the API name',
 };
 
 export default messages;

@@ -188,6 +188,15 @@ const PERMISSION_MODULES: PermissionModule[] = [
   },
 ];
 
+// 网络类型权限选项
+const DATA_NETWORK_TYPE_OPTIONS = [
+  { label: 'eNB (LTE)', value: 'lte' },
+  { label: 'gNB (5G NR)', value: 'nr' },
+  { label: 'GSM', value: 'gsm' },
+  { label: 'CPE', value: 'cpe' },
+  { label: 'eGW', value: 'egw' },
+];
+
 // 基站制式选项
 const NETWORK_TYPE_OPTIONS = [
   { label: '全部', value: '' },
@@ -273,6 +282,8 @@ export default function RoleManagement() {
   const [permissionCheckStrictly, setPermissionCheckStrictly] = useState(true);
   // 设备组选择
   const [selectedDeviceGroupIds, setSelectedDeviceGroupIds] = useState<string[]>([]);
+  // 网络类型权限选择
+  const [selectedNetworkTypes, setSelectedNetworkTypes] = useState<string[]>([]);
   // 设备组筛选条件
   const [deviceGroupNetworkType, setDeviceGroupNetworkType] = useState<string>('');
   const [deviceGroupProductType, setDeviceGroupProductType] = useState<string>('');
@@ -521,6 +532,7 @@ export default function RoleManagement() {
           description: (vals.description as string) ?? '',
           permissions: permissionsToArray(checkedPermissionKeys),
           deviceGroupIds: selectedDeviceGroupIds,
+          networkTypes: selectedNetworkTypes,
           builtIn: 0,
         },
         {
@@ -531,11 +543,12 @@ export default function RoleManagement() {
             setCheckedPermissionKeys([]);
             setExpandedPermissionKeys([]);
             setSelectedDeviceGroupIds([]);
+            setSelectedNetworkTypes([]);
           },
         },
       );
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
+  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {
@@ -562,6 +575,7 @@ export default function RoleManagement() {
             description: vals.description as string,
             permissions: permissionsToArray(checkedPermissionKeys),
             deviceGroupIds: selectedDeviceGroupIds,
+            networkTypes: selectedNetworkTypes,
           },
         },
         {
@@ -573,11 +587,12 @@ export default function RoleManagement() {
             setCheckedPermissionKeys([]);
             setExpandedPermissionKeys([]);
             setSelectedDeviceGroupIds([]);
+            setSelectedNetworkTypes([]);
           },
         },
       );
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -609,6 +624,7 @@ export default function RoleManagement() {
                     setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
                     setExpandedPermissionKeys(allModuleKeys);
                     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
+                    setSelectedNetworkTypes(role.networkTypes || []);
                     setViewVisible(true);
                   },
                 },
@@ -626,6 +642,7 @@ export default function RoleManagement() {
                     setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
                     setExpandedPermissionKeys(allModuleKeys);
                     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
+                    setSelectedNetworkTypes(role.networkTypes || []);
                     setEditVisible(true);
                   },
                 },
@@ -813,7 +830,7 @@ export default function RoleManagement() {
     );
   };
 
-  // 渲染设备组树形选择
+  // 渲染设备组树形选择（包含网络类型权限）
   const renderDeviceGroupTree = (readOnly = false) => {
     // 只检查二级节点是否被选中（基于筛选后的数据）
     const selectedSecondLevelCount = selectedDeviceGroupIds.filter((id) =>
@@ -850,86 +867,115 @@ export default function RoleManagement() {
       selectedSecondLevelCount > 0 && selectedSecondLevelCount < filteredSecondLevelIds.length;
 
     return (
-      <Form.Item
-        label={t('role.dataPermission')}
-        required={!readOnly}
-        help={!readOnly && selectedSecondLevelCount === 0 ? t('role.pleaseSelectDeviceGroup') : undefined}
-        validateStatus={!readOnly && selectedSecondLevelCount === 0 ? 'warning' : undefined}
-      >
-        {readOnly ? (
-          <Space wrap>
-            {selectedDeviceGroupIds.length > 0 ? (
-              (allDeviceGroups ?? [])
-                .filter((g) => selectedDeviceGroupIds.includes(g.id))
-                .map((g) => <Tag key={g.id}>{g.name}</Tag>)
-            ) : (
-              <span style={{ color: 'var(--color-text-secondary)' }}>-</span>
-            )}
-          </Space>
-        ) : (
-          <div style={{ border: '1px solid var(--color-border)', borderRadius: 6 }}>
-            {/* 筛选区域 */}
-            <div
-              style={{
-                padding: '8px 12px',
-                borderBottom: '1px solid var(--color-border)',
-                background: 'var(--color-fill-quaternary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.filter')}</span>
-              <Select
-                size="small"
-                style={{ width: 120 }}
-                value={deviceGroupNetworkType}
-                onChange={(val) => setDeviceGroupNetworkType(val)}
-                options={NETWORK_TYPE_OPTIONS}
-                placeholder={t('role.baseStationType')}
-              />
-              <Select
-                size="small"
-                style={{ width: 120 }}
-                value={deviceGroupProductType}
-                onChange={(val) => setDeviceGroupProductType(val)}
-                options={PRODUCT_TYPE_OPTIONS}
-                placeholder={t('role.productType')}
-              />
-              <Divider type="vertical" style={{ height: 20, margin: 0 }} />
-              <Checkbox
-                checked={isAllSelected}
-                indeterminate={isIndeterminate}
-                onChange={(e) => handleSelectAll(e.target.checked)}
-              >
-                {t('role.selectAll')}
-              </Checkbox>
-            </div>
-            {/* 树形选择区域 */}
-            <div style={{ padding: 8, maxHeight: 280, overflow: 'auto' }}>
-              {isLoadingDeviceGroups ? (
-                <div style={{ textAlign: 'center', padding: 24 }}>
-                  <Spin />
-                </div>
-              ) : deviceGroupTreeData.length === 0 ? (
-                <Empty description={t('role.noDeviceGroupData')} />
+      <div>
+        {/* 网络类型权限区域 */}
+        <Form.Item label={t('role.networkType')}>
+          {readOnly ? (
+            <Space wrap>
+              {selectedNetworkTypes.length > 0 ? (
+                DATA_NETWORK_TYPE_OPTIONS
+                  .filter((opt) => selectedNetworkTypes.includes(opt.value))
+                  .map((opt) => <Tag key={opt.value}>{opt.label}</Tag>)
               ) : (
-                <Tree
-                  checkable
-                  checkedKeys={selectedDeviceGroupIds}
-                  treeData={deviceGroupTreeData}
-                  defaultExpandAll
-                  onCheck={(checked) => {
-                    setSelectedDeviceGroupIds(checked as string[]);
-                  }}
-                  selectable={false}
-                />
+                <span style={{ color: 'var(--color-text-secondary)' }}>{t('role.networkTypeHint')}</span>
               )}
+            </Space>
+          ) : (
+            <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 12px' }}>
+              <Checkbox.Group
+                options={DATA_NETWORK_TYPE_OPTIONS}
+                value={selectedNetworkTypes}
+                onChange={(vals) => setSelectedNetworkTypes(vals as string[])}
+              />
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                {t('role.networkTypeHint')}
+              </div>
             </div>
-          </div>
-        )}
-      </Form.Item>
+          )}
+        </Form.Item>
+
+        {/* 设备分组权限区域 */}
+        <Form.Item
+          label={t('role.dataPermission')}
+          required={!readOnly}
+          help={!readOnly && selectedSecondLevelCount === 0 ? t('role.pleaseSelectDeviceGroup') : undefined}
+          validateStatus={!readOnly && selectedSecondLevelCount === 0 ? 'warning' : undefined}
+        >
+          {readOnly ? (
+            <Space wrap>
+              {selectedDeviceGroupIds.length > 0 ? (
+                (allDeviceGroups ?? [])
+                  .filter((g) => selectedDeviceGroupIds.includes(g.id))
+                  .map((g) => <Tag key={g.id}>{g.name}</Tag>)
+              ) : (
+                <span style={{ color: 'var(--color-text-secondary)' }}>-</span>
+              )}
+            </Space>
+          ) : (
+            <div style={{ border: '1px solid var(--color-border)', borderRadius: 6 }}>
+              {/* 筛选区域 */}
+              <div
+                style={{
+                  padding: '8px 12px',
+                  borderBottom: '1px solid var(--color-border)',
+                  background: 'var(--color-fill-quaternary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{t('role.filter')}</span>
+                <Select
+                  size="small"
+                  style={{ width: 120 }}
+                  value={deviceGroupNetworkType}
+                  onChange={(val) => setDeviceGroupNetworkType(val)}
+                  options={NETWORK_TYPE_OPTIONS}
+                  placeholder={t('role.baseStationType')}
+                />
+                <Select
+                  size="small"
+                  style={{ width: 120 }}
+                  value={deviceGroupProductType}
+                  onChange={(val) => setDeviceGroupProductType(val)}
+                  options={PRODUCT_TYPE_OPTIONS}
+                  placeholder={t('role.productType')}
+                />
+                <Divider type="vertical" style={{ height: 20, margin: 0 }} />
+                <Checkbox
+                  checked={isAllSelected}
+                  indeterminate={isIndeterminate}
+                  onChange={(e) => handleSelectAll(e.target.checked)}
+                >
+                  {t('role.selectAll')}
+                </Checkbox>
+              </div>
+              {/* 树形选择区域 */}
+              <div style={{ padding: 8, maxHeight: 280, overflow: 'auto' }}>
+                {isLoadingDeviceGroups ? (
+                  <div style={{ textAlign: 'center', padding: 24 }}>
+                    <Spin />
+                  </div>
+                ) : deviceGroupTreeData.length === 0 ? (
+                  <Empty description={t('role.noDeviceGroupData')} />
+                ) : (
+                  <Tree
+                    checkable
+                    checkedKeys={selectedDeviceGroupIds}
+                    treeData={deviceGroupTreeData}
+                    defaultExpandAll
+                    onCheck={(checked) => {
+                      setSelectedDeviceGroupIds(checked as string[]);
+                    }}
+                    selectable={false}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </Form.Item>
+      </div>
     );
   };
 
@@ -1029,6 +1075,7 @@ export default function RoleManagement() {
     setCheckedPermissionKeys([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
+    setSelectedNetworkTypes([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1039,6 +1086,7 @@ export default function RoleManagement() {
     setCheckedPermissionKeys([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
+    setSelectedNetworkTypes([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1049,6 +1097,7 @@ export default function RoleManagement() {
     setCheckedPermissionKeys([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
+    setSelectedNetworkTypes([]);
     setActiveTab('menu');
   }, [form]);
 

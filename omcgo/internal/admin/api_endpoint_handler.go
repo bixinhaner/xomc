@@ -5,112 +5,185 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
-// ApiEndpoint represents an API endpoint
-type ApiEndpoint struct {
-	ID          uuid.UUID `json:"id"`
-	Path        string    `json:"path"`
-	Method      string    `json:"method"`
-	Name        string    `json:"name"`
-	Module      string    `json:"module"`
-	Description string    `json:"description"`
-}
-
-// ListApiEndpoints returns all registered API endpoints
+// ListApiEndpoints returns API endpoints from the database with pagination and filtering.
 func (h *Handler) ListApiEndpoints(c *gin.Context) {
-	// TODO: 从数据库或配置文件中读取API端点列表
-	// 这里返回一个示例数据
-	endpoints := []ApiEndpoint{
-		{
-			ID:          uuid.New(),
-			Path:        "/api/v1/users",
-			Method:      "GET",
-			Name:        "查询用户列表",
-			Module:      "user",
-			Description: "获取所有用户列表",
-		},
-		{
-			ID:          uuid.New(),
-			Path:        "/api/v1/users",
-			Method:      "POST",
-			Name:        "创建用户",
-			Module:      "user",
-			Description: "创建新用户",
-		},
-		{
-			ID:          uuid.New(),
-			Path:        "/api/v1/users/:id",
-			Method:      "PUT",
-			Name:        "更新用户",
-			Module:      "user",
-			Description: "更新用户信息",
-		},
-		{
-			ID:          uuid.New(),
-			Path:        "/api/v1/users/:id",
-			Method:      "DELETE",
-			Name:        "删除用户",
-			Module:      "user",
-			Description: "删除用户",
-		},
-		{
-			ID:          uuid.New(),
-			Path:        "/api/v1/roles",
-			Method:      "GET",
-			Name:        "查询角色列表",
-			Module:      "role",
-			Description: "获取所有角色列表",
-		},
-		{
-			ID:          uuid.New(),
-			Path:        "/api/v1/roles",
-			Method:      "POST",
-			Name:        "创建角色",
-			Module:      "role",
-			Description: "创建新角色",
-		},
-	}
-
-	c.JSON(http.StatusOK, gin.H{"data": endpoints})
-}
-
-// GetRoleApiPermissions returns API permissions for a role
-func (h *Handler) GetRoleApiPermissions(c *gin.Context) {
-	roleID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role id"})
+	var filter ApiEndpointFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	// TODO: 从数据库查询角色的API权限
-	// 这里返回示例数据
-	permissions := []map[string]string{
-		{"path": "/api/v1/users", "method": "GET"},
-		{"path": "/api/v1/roles", "method": "GET"},
+	result, err := h.apiEndpointService.ListApiEndpoints(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": permissions, "role_id": roleID})
+	c.JSON(http.StatusOK, result)
 }
 
-// SetRoleApiPermissions sets API permissions for a role
+// CreateApiEndpoint creates a new API endpoint.
+func (h *Handler) CreateApiEndpoint(c *gin.Context) {
+	var req CreateApiEndpointRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	ep, err := h.apiEndpointService.CreateApiEndpoint(c.Request.Context(), req)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, ep)
+}
+
+// UpdateApiEndpoint modifies an existing API endpoint.
+func (h *Handler) UpdateApiEndpoint(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req UpdateApiEndpointRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	ep, err := h.apiEndpointService.UpdateApiEndpoint(c.Request.Context(), id, req)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, ep)
+}
+
+// DeleteApiEndpoint removes a single API endpoint by ID.
+func (h *Handler) DeleteApiEndpoint(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.apiEndpointService.DeleteApiEndpoint(c.Request.Context(), id); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// BatchDeleteApiEndpoints removes multiple API endpoints by IDs.
+func (h *Handler) BatchDeleteApiEndpoints(c *gin.Context) {
+	var req BatchDeleteApiEndpointsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.apiEndpointService.DeleteApiEndpointsByIDs(c.Request.Context(), req.IDs); err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
+}
+
+// GetApiGroups returns the list of distinct api_group values.
+func (h *Handler) GetApiGroups(c *gin.Context) {
+	groups, err := h.apiEndpointService.GetApiGroups(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": groups})
+}
+
+// SyncApiEndpoints triggers a sync of Gin routes into the database.
+func (h *Handler) SyncApiEndpoints(c *gin.Context) {
+	if h.ginRoutes == nil {
+		c.JSON(http.StatusOK, SyncResult{})
+		return
+	}
+
+	result, err := h.apiEndpointService.SyncApiEndpoints(c.Request.Context(), h.ginRoutes)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ginRoutesContextKey is the context key used to pass gin.RoutesInfo into handlers.
+type ginRoutesKeyType struct{}
+
+var ginRoutesContextKey = ginRoutesKeyType{}
+
+// GetRoleApiPermissions returns API endpoint IDs granted to a role.
+func (h *Handler) GetRoleApiPermissions(c *gin.Context) {
+	roleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if h.apiPermRepo == nil {
+		c.JSON(http.StatusOK, gin.H{"endpoint_ids": []uuid.UUID{}})
+		return
+	}
+
+	ids, err := h.apiPermRepo.GetRoleApiEndpointIDs(c.Request.Context(), roleID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if ids == nil {
+		ids = []uuid.UUID{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"endpoint_ids": ids})
+}
+
+// SetRoleApiPermissions sets API endpoint permissions for a role.
 func (h *Handler) SetRoleApiPermissions(c *gin.Context) {
 	roleID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role id"})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 
 	var req struct {
-		Permissions []map[string]string `json:"permissions"`
+		EndpointIDs []uuid.UUID `json:"endpoint_ids" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	// TODO: 保存角色的API权限到数据库
-	// 这里只是返回成功
+	if h.apiPermRepo == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "api permission service not configured"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "role_id": roleID, "count": len(req.Permissions)})
+	if err := h.apiPermRepo.SetRoleApiEndpoints(c.Request.Context(), roleID, req.EndpointIDs); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "api permissions updated", "count": len(req.EndpointIDs)})
 }

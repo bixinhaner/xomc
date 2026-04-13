@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 func (h *Handler) ListRoles(c *gin.Context) {
@@ -134,13 +135,13 @@ func (h *Handler) GetRoleDeviceGroups(c *gin.Context) {
 		return
 	}
 
-	groupIDs, err := h.roleGroupRepo.GetGroupIDs(c.Request.Context(), id)
+	data, err := h.roleGroupRepo.GetDeviceGroupData(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"group_ids": groupIDs})
+	c.JSON(http.StatusOK, data)
 }
 
 // SetRoleDeviceGroups handles PUT /roles/:id/device-groups.
@@ -157,15 +158,13 @@ func (h *Handler) SetRoleDeviceGroups(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		GroupIDs []uuid.UUID `json:"group_ids" binding:"required"`
-	}
+	var req RoleDeviceGroupData
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	if err := h.roleGroupRepo.SetGroupIDs(c.Request.Context(), id, req.GroupIDs); err != nil {
+	if err := h.roleGroupRepo.SetDeviceGroupData(c.Request.Context(), id, req); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -186,6 +185,29 @@ func (h *Handler) ListAuditLogs(c *gin.Context) {
 	}
 
 	result, err := h.service.auditRepo.List(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ListRoleUsers handles GET /roles/:id/users — returns paginated users in a role.
+func (h *Handler) ListRoleUsers(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var filter model.ListRequest
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	result, err := h.service.GetRoleUsers(c.Request.Context(), id, filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

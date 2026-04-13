@@ -523,6 +523,148 @@ func (r *PgRoleRepository) SetGroupIDs(ctx context.Context, roleID uuid.UUID, gr
 	return tx.Commit(ctx)
 }
 
+// GetDeviceGroupData returns group IDs and network_types for a role.
+func (r *PgRoleRepository) GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT group_id, COALESCE(network_types, '{}') FROM role_device_groups WHERE role_id = $1`,
+		roleID)
+	if err != nil {
+		return nil, fmt.Errorf("get role device group data: %w", err)
+	}
+	defer rows.Close()
+
+	data := &RoleDeviceGroupData{
+		GroupIDs:     []uuid.UUID{},
+		NetworkTypes: []string{},
+	}
+	networkTypesSet := make(map[string]struct{})
+
+	for rows.Next() {
+		var groupID uuid.UUID
+		var networkTypes []string
+		if err := rows.Scan(&groupID, &networkTypes); err != nil {
+			return nil, fmt.Errorf("scan device group data: %w", err)
+		}
+		data.GroupIDs = append(data.GroupIDs, groupID)
+		for _, nt := range networkTypes {
+			networkTypesSet[nt] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for nt := range networkTypesSet {
+		data.NetworkTypes = append(data.NetworkTypes, nt)
+	}
+	return data, nil
+}
+
+// SetDeviceGroupData replaces group IDs and network_types for a role.
+func (r *PgRoleRepository) SetDeviceGroupData(ctx context.Context, roleID uuid.UUID, data RoleDeviceGroupData) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `DELETE FROM role_device_groups WHERE role_id = $1`, roleID)
+	if err != nil {
+		return fmt.Errorf("delete role device groups: %w", err)
+	}
+
+	if len(data.GroupIDs) > 0 {
+		for _, gid := range data.GroupIDs {
+			_, err = tx.Exec(ctx,
+				`INSERT INTO role_device_groups (role_id, group_id, network_types) VALUES ($1, $2, $3)`,
+				roleID, gid, data.NetworkTypes,
+			)
+			if err != nil {
+				return fmt.Errorf("insert role device group: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// GetRoleApiEndpoints returns (path, method) pairs for the given role names.
+func (r *PgRoleRepository) GetRoleApiEndpoints(ctx context.Context, roleNames []string) ([]RoleApiEndpoint, error) {
+	if len(roleNames) == 0 {
+		return nil, nil
+	}
+
+	const rawSQL = `
+		SELECT ae.path, ae.method
+		FROM role_api_permissions rap
+		JOIN api_endpoints ae ON ae.id = rap.endpoint_id
+		JOIN roles r ON r.id = rap.role_id
+		WHERE r.name = ANY($1)`
+
+	rows, err := r.pool.Query(ctx, rawSQL, roleNames)
+	if err != nil {
+		return nil, fmt.Errorf("get role api endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	var endpoints []RoleApiEndpoint
+	for rows.Next() {
+		var ep RoleApiEndpoint
+		if err := rows.Scan(&ep.Path, &ep.Method); err != nil {
+			return nil, fmt.Errorf("scan role api endpoint: %w", err)
+		}
+		endpoints = append(endpoints, ep)
+	}
+	return endpoints, rows.Err()
+}
+
+// GetRoleApiEndpointIDs returns endpoint IDs granted to a role.
+func (r *PgRoleRepository) GetRoleApiEndpointIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT endpoint_id FROM role_api_permissions WHERE role_id = $1 ORDER BY endpoint_id`,
+		roleID)
+	if err != nil {
+		return nil, fmt.Errorf("get role api endpoint IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan endpoint ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// SetRoleApiEndpoints replaces the full set of API endpoint grants for a role.
+func (r *PgRoleRepository) SetRoleApiEndpoints(ctx context.Context, roleID uuid.UUID, endpointIDs []uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `DELETE FROM role_api_permissions WHERE role_id = $1`, roleID)
+	if err != nil {
+		return fmt.Errorf("delete role api permissions: %w", err)
+	}
+
+	for _, epID := range endpointIDs {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO role_api_permissions (role_id, endpoint_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			roleID, epID,
+		)
+		if err != nil {
+			return fmt.Errorf("insert role api permission: %w", err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (r *PgRoleRepository) GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
 	const rawSQL = `
 		SELECT DISTINCT rdg.group_id
@@ -572,6 +714,47 @@ func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID
 		return false, fmt.Errorf("check permission: %w", err)
 	}
 	return count > 0, nil
+}
+
+// ListRoleUsers returns a paginated list of users assigned to a role.
+func (r *PgRoleRepository) ListRoleUsers(ctx context.Context, roleID uuid.UUID, limit, offset int) ([]RoleUserItem, int64, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	var total int64
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_roles WHERE role_id = $1`, roleID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count role users: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT u.id, u.username, u.display_name, COALESCE(u.email, ''), u.status
+		FROM user_roles ur
+		JOIN users u ON u.id = ur.user_id
+		WHERE ur.role_id = $1
+		ORDER BY u.username ASC
+		LIMIT $2 OFFSET $3`,
+		roleID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list role users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []RoleUserItem
+	for rows.Next() {
+		var u RoleUserItem
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.Status); err != nil {
+			return nil, 0, fmt.Errorf("scan role user: %w", err)
+		}
+		users = append(users, u)
+	}
+	if users == nil {
+		users = []RoleUserItem{}
+	}
+	return users, total, rows.Err()
 }
 
 // GetUserRolesBatch 批量获取多个用户的角色

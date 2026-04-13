@@ -14,11 +14,11 @@ import (
 // Context keys for authenticated user information.
 const (
 	CtxKeyUserID        = "user_id"
-	CtxKeyUsername       = "username"
-	CtxKeyCarrier        = "carrier"
-	CtxKeyCarrierFilter  = "carrier_filter"
-	CtxKeyRoles          = "roles"
-	CtxKeyClaims         = "claims"
+	CtxKeyUsername      = "username"
+	CtxKeyCarrier       = "carrier"
+	CtxKeyCarrierFilter = "carrier_filter"
+	CtxKeyRoles         = "roles"
+	CtxKeyClaims        = "claims"
 )
 
 // RequireAuth returns a Gin middleware that validates JWT access tokens
@@ -251,6 +251,90 @@ func httpMethodToAction(method string) string {
 		return "delete"
 	default:
 		return "read"
+	}
+}
+
+// ApiPermissionChecker is implemented by CasbinAuthorizer and provides
+// role-based API path permission checking.
+type ApiPermissionChecker interface {
+	// GetRoleApiEndpoints returns allowed (path, method) pairs for the given role IDs.
+	// An empty result means no explicit API permissions are configured.
+	GetRoleApiEndpoints(ctx context.Context, roleNames []string) ([]RoleApiEndpoint, error)
+}
+
+// RoleApiEndpoint represents a single (path, method) permission entry for a role.
+type RoleApiEndpoint struct {
+	Path   string
+	Method string
+}
+
+// RequireApiPermission returns a Gin middleware that checks whether the current user's
+// roles have explicit permission to access the current request path + method.
+//
+// Bypass rules:
+//   - If apiChecker is nil, the middleware is a no-op (allows everything).
+//   - If the user has no roles, the check is skipped (other middleware handles auth).
+//   - If the role list is empty in the database (no API permissions configured), the
+//     middleware passes through to avoid a hard break during initial setup.
+//
+// Access rules:
+//   - Roles named "admin" or "super_admin" are always granted access.
+//   - Otherwise, at least one of the user's roles must have an explicit allow entry.
+func RequireApiPermission(apiChecker ApiPermissionChecker) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if apiChecker == nil {
+			c.Next()
+			return
+		}
+
+		// Extract role names from JWT context
+		rolesVal, exists := c.Get(CtxKeyRoles)
+		if !exists {
+			c.Next()
+			return
+		}
+		roleNames, ok := rolesVal.([]string)
+		if !ok || len(roleNames) == 0 {
+			c.Next()
+			return
+		}
+
+		// Admin roles bypass API permission check
+		for _, name := range roleNames {
+			if name == "admin" || name == "super_admin" {
+				c.Next()
+				return
+			}
+		}
+
+		// Query allowed endpoints for the current roles
+		allowed, err := apiChecker.GetRoleApiEndpoints(c.Request.Context(), roleNames)
+		if err != nil {
+			// On error, allow through to avoid service disruption
+			c.Next()
+			return
+		}
+
+		// If no API permissions are configured, allow through (initial setup mode)
+		if len(allowed) == 0 {
+			c.Next()
+			return
+		}
+
+		reqPath := c.FullPath()
+		reqMethod := c.Request.Method
+
+		for _, ep := range allowed {
+			if ep.Path == reqPath && strings.EqualFold(ep.Method, reqMethod) {
+				c.Next()
+				return
+			}
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code":    403,
+			"message": "API access not permitted",
+		})
 	}
 }
 

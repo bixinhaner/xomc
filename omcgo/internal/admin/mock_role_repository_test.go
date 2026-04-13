@@ -248,6 +248,22 @@ func (mr *MockRoleRepositoryMockRecorder) ListWithPagination(ctx, filter any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListWithPagination", reflect.TypeOf((*MockRoleRepository)(nil).ListWithPagination), ctx, filter)
 }
 
+// ListRoleUsers mocks base method.
+func (m *MockRoleRepository) ListRoleUsers(ctx context.Context, roleID uuid.UUID, limit, offset int) ([]RoleUserItem, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRoleUsers", ctx, roleID, limit, offset)
+	ret0, _ := ret[0].([]RoleUserItem)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ListRoleUsers indicates an expected call of ListRoleUsers.
+func (mr *MockRoleRepositoryMockRecorder) ListRoleUsers(ctx, roleID, limit, offset any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRoleUsers", reflect.TypeOf((*MockRoleRepository)(nil).ListRoleUsers), ctx, roleID, limit, offset)
+}
+
 // RemoveAllPermissions mocks base method.
 func (m *MockRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid.UUID) error {
 	m.ctrl.T.Helper()

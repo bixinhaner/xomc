@@ -286,6 +286,27 @@ const messages: Record<string, string> = {
   'nav.system.config':        '系统配置',
   'nav.system.uiCustom':      'UI定制化',
   'nav.system.dashboard':     '系统仪表板',
+  'nav.system.dataDict':      '字典管理',
+  'nav.system.apiManagement': 'API管理',
+
+  // Dictionary management
+  'dictionary.name':          '字典名称',
+  'dictionary.type':          '字典类型',
+  'dictionary.label':         '展示值',
+  'dictionary.value':         '字典值',
+  'dictionary.extend':        '扩展值',
+  'dictionary.sort':          '排序',
+  'dictionary.status':        '启用状态',
+  'dictionary.desc':          '描述',
+  'dictionary.addDict':       '新增字典',
+  'dictionary.editDict':      '编辑字典',
+  'dictionary.addDetail':     '新增字典项',
+  'dictionary.editDetail':    '编辑字典项',
+  'dictionary.searchLabel':   '搜索展示值',
+  'dictionary.detailTitle':   '字典详细内容',
+  'dictionary.listTitle':     '字典列表',
+  'dictionary.deleteDictConfirm': '确认删除该字典及其所有字典项吗？',
+  'dictionary.deleteDetailConfirm': '确认删除该字典项吗？',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Report
@@ -752,8 +773,10 @@ const messages: Record<string, string> = {
   'user.lastLoginTime':   '上次登录时间',
   'user.createTime':      '创建时间',
   'user.password':        '密码',
+  'user.oldPassword':     '当前密码',
   'user.newPassword':     '新密码',
   'user.confirmPassword': '确认密码',
+  'user.passwordChanged': '密码修改成功，请重新登录',
   'user.confirmPwd':      '确认密码',
   'user.description':     '描述',
   'user.groupName':       '用户组',
@@ -796,6 +819,7 @@ const messages: Record<string, string> = {
   'user.pleaseInputPassword': '请输入密码',
   'user.pleaseConfirmPassword': '请确认密码',
   'user.passwordMinLength': '密码长度至少8位',
+  'user.passwordMinLength6': '密码长度至少6个字符',
   'user.emailFormatError': '邮箱格式不正确',
   'user.pleaseInputPhone': '请输入手机号',
   'user.phoneFormatError': '手机号格式不正确',
@@ -906,6 +930,14 @@ const messages: Record<string, string> = {
   'role.apiModule': '所属模块',
   'role.selectAllApis': '全选API',
   'role.selectByModule': '按模块选择',
+  // 网络类型权限
+  'role.networkType':     '网络类型权限',
+  'role.networkTypeHint': '不选择表示不限制网络类型',
+  'role.networkType.lte': 'eNB (LTE)',
+  'role.networkType.nr':  'gNB (5G NR)',
+  'role.networkType.gsm': 'GSM',
+  'role.networkType.cpe': 'CPE',
+  'role.networkType.egw': 'eGW',
 
   // -------------------------------------------------------------------------
   // Log management
@@ -1582,6 +1614,11 @@ const messages: Record<string, string> = {
   'common.confirmDelete':   '确认删除',
   'common.deleteConfirmMsg':'确定要删除选中的 {count} 条记录吗？此操作不可恢复。',
   'common.deleteSuccess':   '删除成功',
+  'common.deleteFailed':    '删除失败',
+  'common.createSuccess':   '创建成功',
+  'common.saveSuccess':     '保存成功',
+  'common.saveFailed':      '保存失败',
+  'common.operationFailed': '操作失败',
   'common.addSuccess':      '添加成功',
   'common.updateSuccess':   '更新成功',
   'common.operationSuccess':'操作成功',
@@ -2625,6 +2662,33 @@ const messages: Record<string, string> = {
   // Status
 
   // Filter
+
+  // -------------------------------------------------------------------------
+  // API Management
+  // -------------------------------------------------------------------------
+  'api.path':                  'API路径',
+  'api.method':                '请求方法',
+  'api.group':                 'API分组',
+  'api.name':                  'API简介',
+  'api.description':           'API描述',
+  'api.addEndpoint':           '新增API',
+  'api.editEndpoint':          '编辑API',
+  'api.batchDelete':           '批量删除',
+  'api.sync':                  '同步API',
+  'api.syncConfirm':           '确认同步API',
+  'api.syncConfirmContent':    '同步操作将从后端路由同步最新API列表，是否继续？',
+  'api.syncSuccess':           '同步完成：新增 {created} 条，更新 {updated} 条，共 {total} 条',
+  'api.deleteConfirm':         '确定删除此API端点？',
+  'api.batchDeleteConfirm':    '确定删除选中的 {count} 个API端点？',
+  'api.addTip':                '新增API，需要在角色管理内配置权限才可使用',
+  'api.pathPlaceholder':       '请输入API路径，如 /api/v1/users',
+  'api.namePlaceholder':       '请输入API简介',
+  'api.groupPlaceholder':      '请选择或输入分组',
+  'api.descriptionPlaceholder':'请输入API描述',
+  'api.pathRequired':          '请输入API路径',
+  'api.methodRequired':        '请选择请求方法',
+  'api.groupRequired':         '请选择或输入API分组',
+  'api.nameRequired':          '请输入API简介',
 };
 
 export default messages;

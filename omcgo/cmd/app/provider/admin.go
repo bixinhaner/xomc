@@ -33,6 +33,7 @@ func initAdminModule(c *Container) error {
 	adminHandler.SetCaptchaService(captchaService)
 	adminHandler.SetLoginGuard(loginGuard)
 	adminHandler.SetRoleDeviceGroupRepo(roleRepo)
+	adminHandler.SetApiPermRepo(roleRepo)
 
 	permService := admin.NewPermissionService(roleRepo, c.GroupRepo, c.Redis, logger)
 	adminHandler.SetPermissionService(permService)
@@ -74,6 +75,11 @@ func initAdminModule(c *Container) error {
 	// Log module
 	logRepo := admin.NewPgLogRepository(c.PgPool)
 	logHandler := admin.NewLogHandler(logRepo)
+
+	// API Endpoint module
+	apiEndpointRepo := admin.NewPgApiEndpointRepository(c.PgPool)
+	apiEndpointService := admin.NewApiEndpointService(apiEndpointRepo, logger)
+	adminHandler.SetApiEndpointService(apiEndpointService)
 
 	// Store handlers for route registration
 	c.adminHandlerDeps = &adminHandlerDeps{

@@ -1,6 +1,127 @@
 import http from '../http';
-import type { User, Role, Permission, OperationLog, OperationType, Group, ApiEndpoint, ApiPermission } from '@/types/system';
+import type { User, Role, Permission, OperationLog, OperationType, Group, ApiEndpoint, ApiPermission, ApiEndpointListParams, ApiEndpointPayload, SyncApiResult } from '@/types/system';
 import type { PageRequest, PageResponse } from '@/types/pagination';
+
+// ---- Dictionary types ----
+export interface Dictionary {
+  id: number;
+  name: string;
+  type: string;
+  status: boolean;
+  desc: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DictionaryDetail {
+  id: number;
+  label: string;
+  value: string;
+  extend: string;
+  status: boolean;
+  sort: number;
+  sysDictionaryId: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateDictionaryPayload {
+  name: string;
+  type: string;
+  status?: boolean;
+  desc?: string;
+}
+
+export interface UpdateDictionaryPayload {
+  id: number;
+  name?: string;
+  type?: string;
+  status?: boolean;
+  desc?: string;
+}
+
+export interface CreateDictionaryDetailPayload {
+  label: string;
+  value: string;
+  extend?: string;
+  status?: boolean;
+  sort?: number;
+  sysDictionaryId: number;
+}
+
+export interface UpdateDictionaryDetailPayload {
+  id: number;
+  label?: string;
+  value?: string;
+  extend?: string;
+  status?: boolean;
+  sort?: number;
+  sysDictionaryId?: number;
+}
+
+export interface DictDetailListParams {
+  sysDictionaryId?: number;
+  label?: string;
+}
+
+export interface DictListResponse {
+  list: Dictionary[];
+  total: number;
+}
+
+export interface DictDetailListResponse {
+  list: DictionaryDetail[];
+  total: number;
+}
+
+interface BackendDictionary {
+  id: number;
+  name: string;
+  type: string;
+  status: boolean;
+  desc: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface BackendDictionaryDetail {
+  id: number;
+  label: string;
+  value: string;
+  extend: string;
+  status: boolean;
+  sort: number;
+  sysDictionaryId: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+function mapBackendDictionary(b: BackendDictionary): Dictionary {
+  return {
+    id: b.id,
+    name: b.name,
+    type: b.type,
+    status: b.status,
+    desc: b.desc || '',
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+
+function mapBackendDictionaryDetail(b: BackendDictionaryDetail): DictionaryDetail {
+  return {
+    id: b.id,
+    label: b.label,
+    value: b.value,
+    extend: b.extend || '',
+    status: b.status,
+    sort: b.sort || 0,
+    sysDictionaryId: b.sysDictionaryId,
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+// ---- End Dictionary types ----
 
 // Backend user model - matches Go User struct JSON tags
 interface BackendUser {
@@ -531,6 +652,50 @@ export const adminApi = {
     }
   },
 
+  // ---- Dictionary management ----
+  async getDictionaryList(): Promise<DictListResponse> {
+    const { data } = await http.get<{ code: number; data: { list: BackendDictionary[]; total: number } }>('/admin/sysDictionary/getSysDictionaryList');
+    const list = (data.data?.list || []).map(mapBackendDictionary);
+    return { list, total: list.length };
+  },
+
+  async createDictionary(req: CreateDictionaryPayload): Promise<Dictionary> {
+    const { data } = await http.post<{ code: number; data: BackendDictionary }>('/admin/sysDictionary/createSysDictionary', req);
+    return mapBackendDictionary(data.data);
+  },
+
+  async updateDictionary(req: UpdateDictionaryPayload): Promise<Dictionary> {
+    const { data } = await http.put<{ code: number; data: BackendDictionary }>('/admin/sysDictionary/updateSysDictionary', req);
+    return mapBackendDictionary(data.data);
+  },
+
+  async deleteDictionary(id: number): Promise<void> {
+    await http.delete('/admin/sysDictionary/deleteSysDictionary', { params: { id } });
+  },
+
+  async getDictionaryDetailList(params: DictDetailListParams): Promise<DictDetailListResponse> {
+    const query: Record<string, unknown> = {};
+    if (params.sysDictionaryId !== undefined) query.sysDictionaryId = params.sysDictionaryId;
+    if (params.label) query.label = params.label;
+    const { data } = await http.get<{ code: number; data: { list: BackendDictionaryDetail[]; total: number } }>('/admin/sysDictionaryDetail/getSysDictionaryDetailList', { params: query });
+    const list = (data.data?.list || []).map(mapBackendDictionaryDetail);
+    return { list, total: data.data?.total || list.length };
+  },
+
+  async createDictionaryDetail(req: CreateDictionaryDetailPayload): Promise<DictionaryDetail> {
+    const { data } = await http.post<{ code: number; data: BackendDictionaryDetail }>('/admin/sysDictionaryDetail/createSysDictionaryDetail', req);
+    return mapBackendDictionaryDetail(data.data);
+  },
+
+  async updateDictionaryDetail(req: UpdateDictionaryDetailPayload): Promise<DictionaryDetail> {
+    const { data } = await http.put<{ code: number; data: BackendDictionaryDetail }>('/admin/sysDictionaryDetail/updateSysDictionaryDetail', req);
+    return mapBackendDictionaryDetail(data.data);
+  },
+
+  async deleteDictionaryDetail(id: number): Promise<void> {
+    await http.delete('/admin/sysDictionaryDetail/deleteSysDictionaryDetail', { params: { id } });
+  },
+
   // API 权限
   async listApiEndpoints(): Promise<ApiEndpoint[]> {
     const { data } = await http.get<{ data: ApiEndpoint[] }>('/admin/api-endpoints');
@@ -544,5 +709,65 @@ export const adminApi = {
 
   async setRoleApiPermissions(roleId: string, permissions: ApiPermission[]): Promise<void> {
     await http.put(`/admin/roles/${roleId}/api-permissions`, { permissions });
+  },
+
+  // API 管理（CRUD）
+  async getApiEndpoints(params: ApiEndpointListParams): Promise<PageResponse<ApiEndpoint>> {
+    const { data } = await http.get<BackendListResponse<ApiEndpoint>>('/admin/api-endpoints', { params });
+    return {
+      items: data.items || [],
+      total: data.total,
+      page: data.page,
+      pageSize: data.pageSize,
+    };
+  },
+
+  async createApiEndpoint(payload: ApiEndpointPayload): Promise<ApiEndpoint> {
+    const { data } = await http.post<ApiEndpoint>('/admin/api-endpoints', payload);
+    return data;
+  },
+
+  async updateApiEndpoint(id: string, payload: Partial<ApiEndpointPayload>): Promise<ApiEndpoint> {
+    const { data } = await http.put<ApiEndpoint>(`/admin/api-endpoints/${id}`, payload);
+    return data;
+  },
+
+  async deleteApiEndpoint(id: string): Promise<void> {
+    await http.delete(`/admin/api-endpoints/${id}`);
+  },
+
+  async batchDeleteApiEndpoints(ids: string[]): Promise<void> {
+    await http.delete('/admin/api-endpoints/batch', { data: { ids } });
+  },
+
+  async getApiGroups(): Promise<string[]> {
+    const { data } = await http.get<{ data: string[] }>('/admin/api-endpoints/groups');
+    return data.data || [];
+  },
+
+  async syncApiEndpoints(): Promise<SyncApiResult> {
+    const { data } = await http.post<{ data: SyncApiResult }>('/admin/api-endpoints/sync');
+    return data.data;
+  },
+
+  // Role device groups with network types
+  async getRoleDeviceGroups(roleId: string): Promise<{ deviceGroupIds: string[]; networkTypes: string[] }> {
+    const { data } = await http.get<{ device_group_ids?: string[]; network_types?: string[] }>(`/admin/roles/${roleId}/device-groups`);
+    return {
+      deviceGroupIds: data.device_group_ids || [],
+      networkTypes: data.network_types || [],
+    };
+  },
+
+  async setRoleDeviceGroups(roleId: string, payload: { deviceGroupIds: string[]; networkTypes: string[] }): Promise<void> {
+    await http.put(`/admin/roles/${roleId}/device-groups`, {
+      device_group_ids: payload.deviceGroupIds,
+      network_types: payload.networkTypes,
+    });
+  },
+
+  // Change password (current user)
+  async changePassword(data: { old_password: string; new_password: string }): Promise<void> {
+    await http.post('/auth/change-password', data);
   },
 };

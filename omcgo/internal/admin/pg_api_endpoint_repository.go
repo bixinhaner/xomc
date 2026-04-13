@@ -1,0 +1,269 @@
+package admin
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
+)
+
+// PgApiEndpointRepository implements ApiEndpointRepository using PostgreSQL.
+type PgApiEndpointRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewPgApiEndpointRepository creates a new PgApiEndpointRepository.
+func NewPgApiEndpointRepository(pool *pgxpool.Pool) *PgApiEndpointRepository {
+	return &PgApiEndpointRepository{pool: pool}
+}
+
+var _ ApiEndpointRepository = (*PgApiEndpointRepository)(nil)
+
+// Create inserts a new API endpoint into the database.
+func (r *PgApiEndpointRepository) Create(ctx context.Context, ep *ApiEndpointDB) error {
+	if ep.ID == uuid.Nil {
+		ep.ID = uuid.New()
+	}
+	now := time.Now()
+	ep.CreatedAt = now
+	ep.UpdatedAt = now
+
+	query, args, err := storage.Psql.Insert("api_endpoints").
+		Columns("id", "path", "method", "name", "description", "api_group", "is_auto", "created_at", "updated_at").
+		Values(ep.ID, ep.Path, ep.Method, ep.Name, ep.Description, ep.ApiGroup, ep.IsAuto, ep.CreatedAt, ep.UpdatedAt).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build insert api_endpoint SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("insert api_endpoint: %w", err)
+	}
+	return nil
+}
+
+// GetByID retrieves an API endpoint by its ID.
+func (r *PgApiEndpointRepository) GetByID(ctx context.Context, id uuid.UUID) (*ApiEndpointDB, error) {
+	query, args, err := storage.Psql.
+		Select("id", "path", "method", "name", "description", "api_group", "is_auto", "created_at", "updated_at").
+		From("api_endpoints").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get api_endpoint SQL: %w", err)
+	}
+
+	var ep ApiEndpointDB
+	err = r.pool.QueryRow(ctx, query, args...).Scan(
+		&ep.ID, &ep.Path, &ep.Method, &ep.Name, &ep.Description,
+		&ep.ApiGroup, &ep.IsAuto, &ep.CreatedAt, &ep.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get api_endpoint: %w", err)
+	}
+	return &ep, nil
+}
+
+// Update modifies an existing API endpoint.
+func (r *PgApiEndpointRepository) Update(ctx context.Context, id uuid.UUID, req UpdateApiEndpointRequest) (*ApiEndpointDB, error) {
+	setter := storage.Psql.Update("api_endpoints").
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id})
+
+	if req.Name != nil {
+		setter = setter.Set("name", *req.Name)
+	}
+	if req.Description != nil {
+		setter = setter.Set("description", *req.Description)
+	}
+	if req.ApiGroup != nil {
+		setter = setter.Set("api_group", *req.ApiGroup)
+	}
+
+	query, args, err := setter.Suffix("RETURNING id, path, method, name, description, api_group, is_auto, created_at, updated_at").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build update api_endpoint SQL: %w", err)
+	}
+
+	var ep ApiEndpointDB
+	err = r.pool.QueryRow(ctx, query, args...).Scan(
+		&ep.ID, &ep.Path, &ep.Method, &ep.Name, &ep.Description,
+		&ep.ApiGroup, &ep.IsAuto, &ep.CreatedAt, &ep.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("update api_endpoint: %w", err)
+	}
+	return &ep, nil
+}
+
+// Delete removes a single API endpoint by ID.
+func (r *PgApiEndpointRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("api_endpoints").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete api_endpoint SQL: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete api_endpoint: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// DeleteByIDs removes multiple API endpoints by their IDs.
+func (r *PgApiEndpointRepository) DeleteByIDs(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	query, args, err := storage.Psql.Delete("api_endpoints").
+		Where(sq.Eq{"id": ids}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build batch delete api_endpoints SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("batch delete api_endpoints: %w", err)
+	}
+	return nil
+}
+
+// List queries API endpoints with optional filtering and pagination.
+func (r *PgApiEndpointRepository) List(ctx context.Context, filter ApiEndpointFilter) (*model.ListResponse[ApiEndpointDB], error) {
+	// Build WHERE conditions
+	where := sq.And{}
+	if filter.Path != "" {
+		where = append(where, sq.Expr("path ILIKE ?", ilikePattern(filter.Path)))
+	}
+	if filter.Method != "" {
+		where = append(where, sq.Eq{"method": filter.Method})
+	}
+	if filter.ApiGroup != "" {
+		where = append(where, sq.Eq{"api_group": filter.ApiGroup})
+	}
+	if filter.Name != "" {
+		where = append(where, sq.Expr("name ILIKE ?", ilikePattern(filter.Name)))
+	}
+
+	// Count
+	countQuery, countArgs, err := storage.Psql.Select("COUNT(*)").
+		From("api_endpoints").
+		Where(where).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count api_endpoints SQL: %w", err)
+	}
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count api_endpoints: %w", err)
+	}
+
+	offset := filter.Offset()
+	limit := filter.Limit()
+
+	dataQuery, dataArgs, err := storage.Psql.
+		Select("id", "path", "method", "name", "description", "api_group", "is_auto", "created_at", "updated_at").
+		From("api_endpoints").
+		Where(where).
+		OrderBy("api_group ASC", "path ASC", "method ASC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list api_endpoints SQL: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, dataQuery, dataArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("list api_endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	var items []ApiEndpointDB
+	for rows.Next() {
+		var ep ApiEndpointDB
+		if err := rows.Scan(
+			&ep.ID, &ep.Path, &ep.Method, &ep.Name, &ep.Description,
+			&ep.ApiGroup, &ep.IsAuto, &ep.CreatedAt, &ep.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan api_endpoint: %w", err)
+		}
+		items = append(items, ep)
+	}
+	if items == nil {
+		items = []ApiEndpointDB{}
+	}
+
+	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
+}
+
+// Upsert inserts or updates an API endpoint (path+method as unique key).
+// Only updates name/api_group for rows where is_auto=true.
+func (r *PgApiEndpointRepository) Upsert(ctx context.Context, path, method, name, apiGroup string) (created bool, err error) {
+	// Check existence first
+	checkSQL := `SELECT COUNT(*) FROM api_endpoints WHERE path = $1 AND method = $2`
+	var count int
+	if err := r.pool.QueryRow(ctx, checkSQL, path, method).Scan(&count); err != nil {
+		return false, fmt.Errorf("check api_endpoint existence: %w", err)
+	}
+
+	upsertSQL := `
+INSERT INTO api_endpoints (path, method, name, api_group, is_auto)
+VALUES ($1, $2, $3, $4, TRUE)
+ON CONFLICT (path, method)
+DO UPDATE SET
+    name = EXCLUDED.name,
+    api_group = EXCLUDED.api_group,
+    updated_at = NOW()
+WHERE api_endpoints.is_auto = TRUE`
+
+	_, err = r.pool.Exec(ctx, upsertSQL, path, method, name, apiGroup)
+	if err != nil {
+		return false, fmt.Errorf("upsert api_endpoint: %w", err)
+	}
+	return count == 0, nil
+}
+
+// GetGroups returns a distinct sorted list of api_group values.
+func (r *PgApiEndpointRepository) GetGroups(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT api_group FROM api_endpoints WHERE api_group != '' ORDER BY api_group`)
+	if err != nil {
+		return nil, fmt.Errorf("get api groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err != nil {
+			return nil, fmt.Errorf("scan api group: %w", err)
+		}
+		groups = append(groups, g)
+	}
+	if groups == nil {
+		groups = []string{}
+	}
+	return groups, nil
+}

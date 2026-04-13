@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User, Role, Group } from '@/types/system';
+import type { User, Role, Group, ApiEndpointListParams, ApiEndpointPayload } from '@/types/system';
 import type { PageRequest } from '@/types/pagination';
 import { systemService } from '@/mock/services/systemService';
 import { adminApi } from '@/services/api/adminApi';
@@ -292,5 +292,75 @@ export function useAllDeviceGroups() {
       return result.groups;
     },
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- API Management ----
+export function useApiEndpoints(params: ApiEndpointListParams) {
+  return useQuery({
+    queryKey: ['system', 'apiEndpoints', params],
+    queryFn: () => adminApi.getApiEndpoints(params),
+  });
+}
+
+export function useApiGroups() {
+  return useQuery({
+    queryKey: ['system', 'apiGroups'],
+    queryFn: () => adminApi.getApiGroups(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateApiEndpoint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ApiEndpointPayload) => adminApi.createApiEndpoint(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiEndpoints'] });
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiGroups'] });
+    },
+  });
+}
+
+export function useUpdateApiEndpoint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<ApiEndpointPayload> }) =>
+      adminApi.updateApiEndpoint(id, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiEndpoints'] });
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiGroups'] });
+    },
+  });
+}
+
+export function useDeleteApiEndpoint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.deleteApiEndpoint(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiEndpoints'] });
+    },
+  });
+}
+
+export function useBatchDeleteApiEndpoints() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => adminApi.batchDeleteApiEndpoints(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiEndpoints'] });
+    },
+  });
+}
+
+export function useSyncApiEndpoints() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => adminApi.syncApiEndpoints(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiEndpoints'] });
+      void queryClient.invalidateQueries({ queryKey: ['system', 'apiGroups'] });
+    },
   });
 }
