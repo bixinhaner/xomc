@@ -342,6 +342,8 @@ export default function PlugAndPlay() {
   const [taskStatus, setTaskStatus] = useState<string>('');
   const [taskSearchText, setTaskSearchText] = useState('');
   const [taskTab, setTaskTab] = useState<string>('0');
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskPageSize, setTaskPageSize] = useState(10);
 
   // Dialog state
   const [detectDialogOpen, setDetectDialogOpen] = useState(false);
@@ -802,7 +804,7 @@ export default function PlugAndPlay() {
                 key={item.key}
                 color={taskTab === item.key ? 'blue' : 'default'}
                 style={{ cursor: 'pointer' }}
-                onClick={() => setTaskTab(item.key)}
+                onClick={() => { setTaskTab(item.key); setTaskPage(1); }}
               >
                 {item.label}
               </Tag>
@@ -830,10 +832,13 @@ export default function PlugAndPlay() {
             columns={taskColumns}
             dataSource={filteredTasks}
             rowKey="taskId"
-            pageSize={10}
+            total={filteredTasks.length}
+            currentPage={taskPage}
+            pageSize={taskPageSize}
+            onPageChange={(p, s) => { setTaskPage(p); setTaskPageSize(s); }}
             defaultDensity="compact"
             showRowNumber
-            rowNumberTitle={t('table.rowNumber')}
+            rowNumberTitle={t('table.rowNumber')
             selectable={taskTab === '0'}
             selectedRowKeys={selectedTaskIds}
             onSelectionChange={(keys) => setSelectedTaskIds(keys as string[])}
@@ -844,7 +849,7 @@ export default function PlugAndPlay() {
                 <Select
                   placeholder={t('table.status')}
                   value={taskStatus || undefined}
-                  onChange={(value) => setTaskStatus(value || '')}
+                  onChange={(value) => { setTaskStatus(value || ''); setTaskPage(1); }}
                   allowClear
                   style={{ width: 100 }}
                   options={[
@@ -859,7 +864,7 @@ export default function PlugAndPlay() {
                   placeholder={t('provision.searchPlaceholder')}
                   prefix={<SearchOutlined />}
                   value={taskSearchText}
-                  onChange={(e) => setTaskSearchText(e.target.value)}
+                  onChange={(e) => { setTaskSearchText(e.target.value); setTaskPage(1); }}
                   style={{ width: 180 }}
                   allowClear
                 />
