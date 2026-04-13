@@ -755,10 +755,10 @@ export default function CustomAlarmStats() {
     setClearModalOpen(true);
   }, []);
 
-  const handleClearConfirm = useCallback(async (note: string) => {
+  const handleClearConfirm = useCallback(async () => {
     setClearLoading(true);
     try {
-      await clearAlarms.mutateAsync({ ids: clearTargetIds, note });
+      await clearAlarms.mutateAsync(clearTargetIds);
       setSelectedRowKeys([]);
       setClearModalOpen(false);
       void refetch();
