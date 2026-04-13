@@ -894,6 +894,10 @@ const messages: Record<string, string> = {
   'role.picoBaseStation': '皮基站',
   'role.noDeviceGroupData': '暂无设备组数据',
   'role.menuPermissionConfig': '菜单权限配置',
+  // 标签页
+  'role.apiPermission': '角色API',
+  'role.resourcePermission': '资源权限',
+  'role.apiPermissionComingSoon': 'API权限功能即将上线',
 
   // -------------------------------------------------------------------------
   // Log management

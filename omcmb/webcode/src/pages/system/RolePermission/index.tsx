@@ -14,6 +14,7 @@ import {
   Divider,
   Spin,
   Empty,
+  Tabs,
 } from 'antd';
 import type { TreeDataNode, TreeProps } from 'antd';
 import {
@@ -259,6 +260,8 @@ export default function RoleManagement() {
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [form] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  // 当前激活的标签页
+  const [activeTab, setActiveTab] = useState<string>('menu');
   // 权限配置：选中的权限key列表
   const [checkedPermissionKeys, setCheckedPermissionKeys] = useState<React.Key[]>([]);
   // 权限树展开的节点
@@ -916,6 +919,7 @@ export default function RoleManagement() {
     setCheckedPermissionKeys([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
+    setActiveTab('menu');
   }, [form]);
 
   const handleCloseEdit = useCallback(() => {
@@ -925,6 +929,7 @@ export default function RoleManagement() {
     setCheckedPermissionKeys([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
+    setActiveTab('menu');
   }, [form]);
 
   const handleCloseView = useCallback(() => {
@@ -934,6 +939,7 @@ export default function RoleManagement() {
     setCheckedPermissionKeys([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
+    setActiveTab('menu');
   }, [form]);
 
   return (
@@ -981,7 +987,7 @@ export default function RoleManagement() {
         title={t('common.add')}
         open={createVisible}
         onClose={handleCloseCreate}
-        width={520}
+        width={600}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button style={{ marginRight: 8 }} onClick={handleCloseCreate}>
@@ -1009,9 +1015,34 @@ export default function RoleManagement() {
               showCount
             />
           </Form.Item>
-          {renderPermissionConfig(false)}
-          {renderDeviceGroupTree(false)}
         </Form>
+
+        {/* 标签页：角色菜单、角色API、资源权限 */}
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'menu',
+              label: t('role.menuPermission'),
+              children: renderPermissionConfig(false),
+            },
+            {
+              key: 'api',
+              label: t('role.apiPermission'),
+              children: (
+                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                  <Empty description={t('role.apiPermissionComingSoon')} />
+                </div>
+              ),
+            },
+            {
+              key: 'resource',
+              label: t('role.resourcePermission'),
+              children: renderDeviceGroupTree(false),
+            },
+          ]}
+        />
       </Drawer>
 
       {/* Edit Drawer */}
@@ -1019,7 +1050,7 @@ export default function RoleManagement() {
         title={t('common.edit')}
         open={editVisible}
         onClose={handleCloseEdit}
-        width={520}
+        width={600}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button style={{ marginRight: 8 }} onClick={handleCloseEdit}>
@@ -1046,9 +1077,34 @@ export default function RoleManagement() {
               showCount
             />
           </Form.Item>
-          {renderPermissionConfig(false)}
-          {renderDeviceGroupTree(false)}
         </Form>
+
+        {/* 标签页：角色菜单、角色API、资源权限 */}
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'menu',
+              label: t('role.menuPermission'),
+              children: renderPermissionConfig(false),
+            },
+            {
+              key: 'api',
+              label: t('role.apiPermission'),
+              children: (
+                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                  <Empty description={t('role.apiPermissionComingSoon')} />
+                </div>
+              ),
+            },
+            {
+              key: 'resource',
+              label: t('role.resourcePermission'),
+              children: renderDeviceGroupTree(false),
+            },
+          ]}
+        />
       </Drawer>
 
       {/* View Drawer */}
@@ -1056,7 +1112,7 @@ export default function RoleManagement() {
         title={t('common.view')}
         open={viewVisible}
         onClose={handleCloseView}
-        width={520}
+        width={600}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button onClick={handleCloseView}>
@@ -1072,24 +1128,51 @@ export default function RoleManagement() {
           <Form.Item name="description" label={t('role.description')}>
             <Input.TextArea rows={2} readOnly />
           </Form.Item>
-          {renderPermissionConfig(true)}
-          {renderDeviceGroupTree(true)}
-          <Form.Item label={t('role.userCount')}>
-            <span>{selectedRole?.userCount ?? 0}</span>
-          </Form.Item>
-          <Form.Item label={t('role.createUser')}>
-            <span>{selectedRole?.createUser ?? '-'}</span>
-          </Form.Item>
-          <Form.Item label={t('role.createTime')}>
-            <span>{selectedRole?.createTime ? new Date(selectedRole.createTime).toLocaleString('zh-CN') : '-'}</span>
-          </Form.Item>
-          <Form.Item label={t('role.updateUser')}>
-            <span>{selectedRole?.updateUser ?? '-'}</span>
-          </Form.Item>
-          <Form.Item label={t('role.updateTime')}>
-            <span>{selectedRole?.updateTime ? new Date(selectedRole.updateTime).toLocaleString('zh-CN') : '-'}</span>
-          </Form.Item>
         </Form>
+
+        {/* 标签页：角色菜单、角色API、资源权限 */}
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'menu',
+              label: t('role.menuPermission'),
+              children: renderPermissionConfig(true),
+            },
+            {
+              key: 'api',
+              label: t('role.apiPermission'),
+              children: (
+                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                  <Empty description={t('role.apiPermissionComingSoon')} />
+                </div>
+              ),
+            },
+            {
+              key: 'resource',
+              label: t('role.resourcePermission'),
+              children: renderDeviceGroupTree(true),
+            },
+          ]}
+        />
+
+        <Divider />
+        <Form.Item label={t('role.userCount')}>
+          <span>{selectedRole?.userCount ?? 0}</span>
+        </Form.Item>
+        <Form.Item label={t('role.createUser')}>
+          <span>{selectedRole?.createUser ?? '-'}</span>
+        </Form.Item>
+        <Form.Item label={t('role.createTime')}>
+          <span>{selectedRole?.createTime ? new Date(selectedRole.createTime).toLocaleString('zh-CN') : '-'}</span>
+        </Form.Item>
+        <Form.Item label={t('role.updateUser')}>
+          <span>{selectedRole?.updateUser ?? '-'}</span>
+        </Form.Item>
+        <Form.Item label={t('role.updateTime')}>
+          <span>{selectedRole?.updateTime ? new Date(selectedRole.updateTime).toLocaleString('zh-CN') : '-'}</span>
+        </Form.Item>
       </Drawer>
     </ListPageLayout>
   );
