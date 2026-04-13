@@ -136,6 +136,9 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 	}
 	inf.NATS = client
 	inf.GS.Register("nats", 2, func(ctx context.Context) error { client.Close(); return nil })
+	inf.Health.Register("nats", func(ctx context.Context) error {
+		return client.HealthCheck()
+	})
 
 	if err := client.EnsureStreams(ctx); err != nil {
 		inf.Logger.Warn("ensure NATS streams", zap.Error(err))
@@ -151,6 +154,9 @@ func (inf *Infra) ConnectMinIO(ctx context.Context, cfg appconfig.MinIOConfig) e
 		return fmt.Errorf("connect to MinIO: %w", err)
 	}
 	inf.MinIO = client
+	inf.Health.Register("minio", func(ctx context.Context) error {
+		return miniocomp.MinIOHealthCheck(ctx, client)
+	})
 
 	if err := miniocomp.EnsureBuckets(ctx, client, cfg.Buckets); err != nil {
 		inf.Logger.Warn("ensure MinIO buckets", zap.Error(err))

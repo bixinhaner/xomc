@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -20,6 +23,14 @@ func initPMModule(c *Container) error {
 	// Set shared services
 	c.PMCounterRepo = pmCounterRepo
 	c.PMKPIRepo = pmKPIRepo
+
+	// Register module-level health check (TimescaleDB is the PM module's primary dependency)
+	c.Health.Register("pm", func(ctx context.Context) error {
+		if err := c.TsPool.Ping(ctx); err != nil {
+			return fmt.Errorf("pm module tsdb ping: %w", err)
+		}
+		return nil
+	})
 
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{

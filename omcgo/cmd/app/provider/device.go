@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -96,10 +97,21 @@ func initDeviceModule(c *Container) error {
 	c.ConnReqClient = connReqClient
 	c.StunStore = stunStore
 
+	// Register module-level health check
+	c.Health.Register("device", func(ctx context.Context) error {
+		if err := c.PgPool.Ping(ctx); err != nil {
+			return fmt.Errorf("device module db ping: %w", err)
+		}
+		if err := c.Redis.Ping(ctx).Err(); err != nil {
+			return fmt.Errorf("device module redis ping: %w", err)
+		}
+		return nil
+	})
+
 	// Store deps for route registration
 	c.deviceHandlerDeps = &deviceHandlerDeps{
-		regRepo:       regRepo,
-		regService:    regService,
+		regRepo:        regRepo,
+		regService:     regService,
 		batchProcessor: batchProcessor,
 	}
 

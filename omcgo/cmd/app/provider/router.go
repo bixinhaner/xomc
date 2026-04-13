@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -103,24 +104,56 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init: func() error { return initMiscModules(c) },
 	})
 
-	groups, err := graph.InitAll()
+	totalStart := time.Now()
+
+	groups, err := graph.ParallelGroups()
 	if err != nil {
 		return err
 	}
 
+	moduleCount := 0
 	for i, group := range groups {
+		groupStart := time.Now()
+		for _, name := range group {
+			modStart := time.Now()
+			m := graph.Module(name)
+			if initErr := m.Init(); initErr != nil {
+				c.Logger.Error("module init failed",
+					zap.String("module", name),
+					zap.Duration("duration", time.Since(modStart)),
+					zap.Error(initErr),
+				)
+				return fmt.Errorf("init module %q: %w", name, initErr)
+			}
+			c.Logger.Info("module initialized",
+				zap.String("module", name),
+				zap.Duration("duration", time.Since(modStart)),
+			)
+			moduleCount++
+		}
 		c.Logger.Info("module group initialized",
 			zap.Int("group", i+1),
 			zap.Strings("modules", group),
+			zap.Duration("duration", time.Since(groupStart)),
 		)
 	}
-	c.Logger.Info("all modules initialized")
+	c.Logger.Info("all modules initialized",
+		zap.Int("module_count", moduleCount),
+		zap.Duration("total_duration", time.Since(totalStart)),
+	)
 
 	// ===== Phase 2: 配置 Gin 中间件 =====
 	setupMiddleware(r, c)
 
 	// ===== Phase 3: 注册所有路由 =====
-	return registerRoutes(r, c)
+	routeStart := time.Now()
+	if err := registerRoutes(r, c); err != nil {
+		return err
+	}
+	c.Logger.Info("routes registered",
+		zap.Duration("duration", time.Since(routeStart)),
+	)
+	return nil
 }
 
 // setupMiddleware 配置 Gin 全局中间件。
@@ -336,7 +369,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- System log routes (require admin permission) -----
 	ad.logHandler.RegisterRoutes(adminGroup)
 
-	c.Logger.Info("all routes registered")
 	return nil
 }
 
@@ -349,4 +381,3 @@ func statusFromResults(results []components.ComponentHealth) string {
 	}
 	return "ok"
 }
-

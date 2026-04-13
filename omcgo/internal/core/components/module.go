@@ -134,6 +134,12 @@ func (g *ModuleGraph) InitAll() ([][]string, error) {
 	return groups, nil
 }
 
+// Module returns the ModuleInitializer registered under the given name.
+// It panics if the name is not registered.
+func (g *ModuleGraph) Module(name string) ModuleInitializer {
+	return g.modules[name]
+}
+
 // ModuleNames returns all registered module names in sorted order.
 func (g *ModuleGraph) ModuleNames() []string {
 	names := make([]string, 0, len(g.modules))

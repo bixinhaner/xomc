@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/omcgo/omcgo/internal/topology"
 )
 
@@ -18,6 +21,14 @@ func initTopologyModule(c *Container) error {
 	// Set shared services
 	c.GroupRepo = groupRepo
 	c.GroupService = groupService
+
+	// Register module-level health check
+	c.Health.Register("topology", func(ctx context.Context) error {
+		if err := c.PgPool.Ping(ctx); err != nil {
+			return fmt.Errorf("topology module db ping: %w", err)
+		}
+		return nil
+	})
 
 	// Store repos for handler/route creation
 	c.topologyHandlerDeps = &topologyHandlerDeps{

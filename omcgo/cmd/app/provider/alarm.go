@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/omcgo/omcgo/internal/alarm"
 )
 
@@ -17,6 +20,14 @@ func initAlarmModule(c *Container) error {
 	// Set shared services
 	c.AlarmPgStore = alarmPgStore
 	c.AlarmEngine = alarmEngine
+
+	// Register module-level health check
+	c.Health.Register("alarm", func(ctx context.Context) error {
+		if err := c.Redis.Ping(ctx).Err(); err != nil {
+			return fmt.Errorf("alarm module redis ping: %w", err)
+		}
+		return nil
+	})
 
 	// Store deps for route registration
 	c.alarmHandlerDeps = &alarmHandlerDeps{
