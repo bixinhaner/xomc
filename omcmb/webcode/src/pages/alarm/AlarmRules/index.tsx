@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { App, Button, Space, Switch, Tag, Typography, message } from 'antd';
 import {
   DeleteOutlined,
@@ -300,7 +300,7 @@ export default function AlarmRules() {
   return (
     <ListPageLayout
       title={t('nav.alarm.rules')}
-      subTitle={t('alarm.rulesDesc')}
+      subtitle={t('alarm.rulesDesc')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
           {t('common.add')}
