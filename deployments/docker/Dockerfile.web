@@ -1,8 +1,9 @@
 FROM node:20-alpine AS builder
 
-RUN apk add --no-cache ca-certificates
-
 WORKDIR /app
+
+RUN npm config set registry https://registry.npmmirror.com
+
 COPY omcmb/webcode/package.json omcmb/webcode/package-lock.json ./
 
 # npm install 会基于 lock 文件快速安装大部分依赖
