@@ -28,6 +28,7 @@ export interface Role {
   batchOperation: number; // 1=是, 0=否
   description: string;
   permissions: string[];
+  apiPermissions?: ApiPermission[]; // API权限
   deviceGroupIds?: string[]; // 数据权限（设备组）
   userCount: number;
   builtIn: number; // 内置角色标识
@@ -54,6 +55,22 @@ export interface Permission {
   permName: string;
   module: string;
   description: string;
+}
+
+// API接口权限
+export interface ApiEndpoint {
+  id: string;
+  path: string;           // API路径，如 /api/v1/users
+  method: string;         // HTTP方法: GET, POST, PUT, DELETE
+  name: string;           // API名称
+  module: string;         // 所属模块
+  description: string;    // 描述
+}
+
+// API权限项(角色分配的API权限)
+export interface ApiPermission {
+  path: string;
+  method: string;
 }
 
 export type OperationResult = 'success' | 'failure' | 'partial';

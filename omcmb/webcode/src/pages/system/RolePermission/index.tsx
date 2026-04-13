@@ -15,6 +15,7 @@ import {
   Spin,
   Empty,
   Tabs,
+  Table,
 } from 'antd';
 import type { TreeDataNode, TreeProps } from 'antd';
 import {
@@ -273,6 +274,8 @@ export default function RoleManagement() {
   // 设备组筛选条件
   const [deviceGroupNetworkType, setDeviceGroupNetworkType] = useState<string>('');
   const [deviceGroupProductType, setDeviceGroupProductType] = useState<string>('');
+  // API权限选择
+  const [selectedApiPermissions, setSelectedApiPermissions] = useState<string[]>([]);
 
 
   const { data, isLoading, refetch } = useRoles({
@@ -987,7 +990,7 @@ export default function RoleManagement() {
         title={t('common.add')}
         open={createVisible}
         onClose={handleCloseCreate}
-        width={600}
+        width={800}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button style={{ marginRight: 8 }} onClick={handleCloseCreate}>

@@ -898,6 +898,14 @@ const messages: Record<string, string> = {
   'role.apiPermission': '角色API',
   'role.resourcePermission': '资源权限',
   'role.apiPermissionComingSoon': 'API权限功能即将上线',
+  // API权限
+  'role.apiEndpoint': 'API端点',
+  'role.apiPath': 'API路径',
+  'role.apiMethod': '请求方法',
+  'role.apiName': 'API名称',
+  'role.apiModule': '所属模块',
+  'role.selectAllApis': '全选API',
+  'role.selectByModule': '按模块选择',
 
   // -------------------------------------------------------------------------
   // Log management

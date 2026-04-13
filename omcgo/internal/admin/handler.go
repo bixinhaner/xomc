@@ -139,7 +139,14 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		roles.DELETE("/:id", h.DeleteRole)
 		roles.GET("/:id/device-groups", h.GetRoleDeviceGroups)
 		roles.PUT("/:id/device-groups", h.SetRoleDeviceGroups)
+		roles.GET("/:id/menus", h.GetRoleMenus)
+		roles.PUT("/:id/menus", h.SetRoleMenus)
+		roles.GET("/:id/api-permissions", h.GetRoleApiPermissions)
+		roles.PUT("/:id/api-permissions", h.SetRoleApiPermissions)
 	}
+
+	// API端点管理
+	rg.GET("/api-endpoints", h.ListApiEndpoints)
 
 	// Groups endpoint - alias for roles (for frontend compatibility)
 	// Frontend UserManagement page expects /admin/groups to return role groups
