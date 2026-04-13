@@ -31,7 +31,6 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
-import { useT } from '@/hooks/useT';
 
 // 任务状态类型
 type TaskStatus = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
@@ -114,7 +113,6 @@ const productTypeOptions = [
 ];
 
 export default function DeviceLog() {
-  const t = useT();
   const { modal, message } = App.useApp();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -483,7 +481,7 @@ export default function DeviceLog() {
       width: 100,
       align: 'center',
       render: (_: unknown, record: DeviceLogTask) => {
-        const items = getActionMenu(record);
+        const items = getActionMenu(record) ?? [];
         if (items.length === 0) return '-';
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
@@ -587,7 +585,7 @@ export default function DeviceLog() {
       title: '操作',
       key: 'action',
       width: 80,
-      render: (_: unknown, record: LogResultItem) => (
+      render: (_: unknown, _record: LogResultItem) => (
         <Button type="link" size="small" icon={<DownloadOutlined />}>
           下载
         </Button>
@@ -624,7 +622,9 @@ export default function DeviceLog() {
         selectedRowKeys={selectedRowKeys}
         onSelectionChange={setSelectedRowKeys}
         batchActions={batchActions}
-        scroll={{ x: 1400 }}
+        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+        showRowNumber
+        rowNumberTitle="序号"
       />
 
       {/* 新建任务抽屉 */}
