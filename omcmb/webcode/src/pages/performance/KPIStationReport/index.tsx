@@ -48,7 +48,8 @@ const mockData: MeasurementRow[] = [
 export default function KPIMeasurement() {
   const t = useT();
   const { modal, message } = App.useApp();
-  const [filters, setFilters] = useState<Record<string, unknown>>({});
+  const [
+    filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
