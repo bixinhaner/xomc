@@ -2,7 +2,7 @@
        test test-race test-coverage test-integration test-integration-up test-integration-down test-e2e \
        test-cover cover-report cover-summary cover-check \
        lint vet generate generate-mocks sqlc-generate \
-       migrate-up migrate-down migrate-schema-up migrate-seed-up \
+       migrate-up migrate-down migrate-reset migrate-schema-up migrate-schema-down migrate-seed-up migrate-seed-down \
        seed-apply seed-rollback seed-list \
        docker-build docker-up docker-down clean
 
@@ -101,16 +101,22 @@ migrate-up:
 	go run ./cmd/migrate up --paths migrations,migrations/seed
 
 migrate-down:
-	go run ./cmd/migrate down
+	go run ./cmd/migrate down --path migrations
 
 migrate-reset:
-	go run ./cmd/migrate reset
+	go run ./cmd/migrate reset --path migrations
 
 migrate-schema-up:  ## Run schema migrations only
 	go run ./cmd/migrate up --path migrations
 
+migrate-schema-down:  ## Rollback schema migrations only
+	go run ./cmd/migrate down --path migrations
+
 migrate-seed-up:  ## Run seed data migrations only
 	go run ./cmd/migrate up --path migrations/seed
+
+migrate-seed-down:  ## Rollback seed data migrations only
+	go run ./cmd/migrate down --path migrations/seed
 
 # Seed data management
 seed-apply:

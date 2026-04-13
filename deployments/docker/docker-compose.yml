@@ -88,20 +88,41 @@ services:
       timeout: 5s
       retries: 5
 
-  migrate:
+  migrate-schema:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.app
     environment:
       TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
     entrypoint: ["omcgo-migrate"]
-    command: ["--dsn", "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable", "--path", "/etc/omcgo/migrations", "up"]
+    command: ["--dsn", "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable",
+              "--path", "/etc/omcgo/migrations", "up"]
     volumes:
       - ../../omcgo/migrations:/etc/omcgo/migrations:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       postgres:
         condition: service_healthy
+    restart: on-failure:3
+
+  migrate-seed:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.app
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+    entrypoint: ["omcgo-migrate"]
+    command: ["--dsn", "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable",
+              "--path", "/etc/omcgo/migrations/seed", "up"]
+    volumes:
+      - ../../omcgo/migrations:/etc/omcgo/migrations:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-schema:
+        condition: service_completed_successfully
+    restart: on-failure:3
 
   acs:
     build:
@@ -116,7 +137,7 @@ services:
       - ../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      migrate:
+      migrate-seed:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -138,7 +159,7 @@ services:
       - ../../run/logs/app:/run/logs/app
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      migrate:
+      migrate-seed:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -159,7 +180,7 @@ services:
       - ../../run/logs/worker:/run/logs/worker
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      migrate:
+      migrate-seed:
         condition: service_completed_successfully
       redis:
         condition: service_healthy

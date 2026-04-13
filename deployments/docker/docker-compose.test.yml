@@ -45,3 +45,37 @@ services:
       interval: 2s
       timeout: 5s
       retries: 5
+
+  migrate-schema-test:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.app
+    restart: on-failure:3
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+    entrypoint: ["omcgo-migrate"]
+    command: ["--dsn", "postgres://omcgo_test:omcgo_test@postgres-test:5432/omcgo_test?sslmode=disable", "--path", "/etc/omcgo/migrations", "up"]
+    volumes:
+      - ../../omcgo/migrations:/etc/omcgo/migrations:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+  migrate-seed-test:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.app
+    restart: on-failure:3
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+    entrypoint: ["omcgo-migrate"]
+    command: ["--dsn", "postgres://omcgo_test:omcgo_test@postgres-test:5432/omcgo_test?sslmode=disable", "--path", "/etc/omcgo/migrations/seed", "up"]
+    volumes:
+      - ../../omcgo/migrations:/etc/omcgo/migrations:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-schema-test:
+        condition: service_completed_successfully
