@@ -22,13 +22,14 @@ import {
   Descriptions,
 } from 'antd';
 import type { MenuProps } from 'antd';
+import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, UnorderedListOutlined, DesktopOutlined, PauseOutlined, StopOutlined, InfoCircleOutlined, MoreOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, DesktopOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 
 // 升级类型枚举
@@ -117,10 +118,6 @@ export default function UpgradePlan() {
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  // 设备列表状态
-  const [deviceFilters, setDeviceFilters] = useState<Record<string, unknown>>({});
-  const [devicePage, setDevicePage] = useState(1);
-  const [devicePageSize, setDevicePageSize] = useState(20);
   // 批量输入相关状态
   const [batchInputVisible, setBatchInputVisible] = useState(false);
   const [batchInputValue, setBatchInputValue] = useState('');
@@ -479,107 +476,13 @@ export default function UpgradePlan() {
       }
       return true;
     });
-  }, [filters]);
+  }, [mockData, filters]);
 
-  // 设备列表筛选条件
-  const deviceFilterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
-    {
-      name: 'productType',
-      label: '产品类型',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: 'PM-B4860', value: 'PM-B4860' },
-        { label: 'QAFA', value: 'QAFA' },
-        { label: 'QATA', value: 'QATA' },
-        { label: 'QAFB', value: 'QAFB' },
-        { label: 'RTD', value: 'RTD' },
-        { label: 'BaiBNX', value: 'BaiBNX' },
-        { label: 'BaiBNQ', value: 'BaiBNQ' },
-        { label: 'BSC', value: 'BSC' },
-        { label: 'BTS', value: 'BTS' },
-      ],
-    },
-    {
-      name: 'deviceGroup',
-      label: '设备组',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: '北京移动', value: '北京移动' },
-        { label: '上海移动', value: '上海移动' },
-        { label: '广东移动', value: '广东移动' },
-        { label: '浙江移动', value: '浙江移动' },
-        { label: '江苏移动', value: '江苏移动' },
-        { label: '四川移动', value: '四川移动' },
-        { label: '湖北移动', value: '湖北移动' },
-        { label: '陕西移动', value: '陕西移动' },
-      ],
-    },
-    {
-      name: 'onlineStatus',
-      label: '在线状态',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        { label: '在线', value: 'online' },
-        { label: '离线', value: 'offline' },
-      ],
-    },
-  ], []);
-
-  // 设备列表过滤数据
-  const filteredDeviceData = useMemo(() => {
-    return mockData.filter((row) => {
-      // 关键字搜索
-      if (deviceFilters.keyword && typeof deviceFilters.keyword === 'string') {
-        const keyword = deviceFilters.keyword.toLowerCase();
-        if (!row.deviceSn.toLowerCase().includes(keyword) &&
-            !row.deviceName.toLowerCase().includes(keyword)) {
-          return false;
-        }
-      }
-      // 产品类型
-      if (deviceFilters.productType && deviceFilters.productType !== 'all') {
-        if (row.productType !== deviceFilters.productType) return false;
-      }
-      // 设备组
-      if (deviceFilters.deviceGroup && deviceFilters.deviceGroup !== 'all') {
-        if (row.deviceGroup !== deviceFilters.deviceGroup) return false;
-      }
-      // 在线状态（mock: 根据结果模拟）
-      if (deviceFilters.onlineStatus && deviceFilters.onlineStatus !== 'all') {
-        // 简单模拟：success/running 为在线，其他为离线
-        const isOnline = row.result === 'success' || row.result === 'running';
-        if (deviceFilters.onlineStatus === 'online' && !isOnline) return false;
-        if (deviceFilters.onlineStatus === 'offline' && isOnline) return false;
-      }
-      return true;
-    });
-  }, [deviceFilters]);
-
-  // 设备列表列定义
-  const deviceColumns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
-    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-    { key: 'deviceGroup', title: '设备组', dataIndex: 'deviceGroup', width: 100 },
-    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
-    { key: 'sourceVersion', title: '当前版本', dataIndex: 'sourceVersion', width: 100 },
-    {
-      key: 'onlineStatus',
-      title: '在线状态',
-      width: 100,
-      render: (_: unknown, record: UpgradePlanRow) => {
-        const isOnline = record.result === 'success' || record.result === 'running';
-        return <Tag color={isOnline ? 'green' : 'default'}>{isOnline ? '在线' : '离线'}</Tag>;
-      },
-    },
-    { key: 'taskName', title: '任务名称', dataIndex: 'taskName', width: 150, ellipsis: true },
-  ], []);
+  // 分页数据
+  const paginatedData = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, page, pageSize]);
 
   // 直接打开升级抽屉（不需要预选设备）
   const handleOpenUpgradeDrawer = () => {
@@ -717,12 +620,11 @@ export default function UpgradePlan() {
   // | 4      | 已结束   | 可用 | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 可用 |
   // | 5      | 终止中   | 可用 | 隐藏 | 隐藏 | 隐藏 | 隐藏 | 可用 |
   // | 6      | 暂停中   | 可用 | 隐藏 | 可用 | 隐藏 | 可用 | 可用 |
-  const taskColumns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
+  const taskColumns: DataTableColumn<UpgradePlanRow>[] = [
     {
       key: 'operation',
       title: '操作',
       width: 80,
-      align: 'center',
       fixed: 'left',
       render: (_: unknown, record: UpgradePlanRow) => {
         const status = record.status;
@@ -845,14 +747,13 @@ export default function UpgradePlan() {
     },
     { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
     { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
-  ], []);
+  ];
 
-  const columns: DataTableColumn<UpgradePlanRow>[] = useMemo(() => [
+  const columns: DataTableColumn<UpgradePlanRow>[] = [
     {
       key: 'operation',
       title: '操作',
       width: 80,
-      align: 'center',
       render: (_: unknown, record: UpgradePlanRow) => {
         if (record.result === 'failed') {
           return (
@@ -890,7 +791,6 @@ export default function UpgradePlan() {
       title: '保留配置',
       dataIndex: 'keepConfig',
       width: 90,
-      align: 'center',
       render: (val: boolean) => <Checkbox checked={val} />,
     },
     {
@@ -915,10 +815,10 @@ export default function UpgradePlan() {
     { key: 'operateTime', title: '操作时间', dataIndex: 'operateTime', width: 160 },
     { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
     { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
-  ], []);
+  ];
 
   // 页面头部按钮
-  const headerExtra = useMemo(() => (
+  const headerExtra = (
     <Space>
       <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleOpenUpgradeDrawer}>
         升级
@@ -927,7 +827,7 @@ export default function UpgradePlan() {
         导出
       </Button>
     </Space>
-  ), []);
+  );
 
   return (
     <ListPageLayout title={t('nav.software.versionUpgrade')} extra={headerExtra}>
@@ -972,25 +872,29 @@ export default function UpgradePlan() {
           <DataTable<UpgradePlanRow>
             tableId="upgrade-plan-list-task"
             columns={taskColumns}
-            dataSource={filteredData}
+            dataSource={paginatedData}
             rowKey="id"
             total={filteredData.length}
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 1600 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle="序号"
           />
         ) : (
           <DataTable<UpgradePlanRow>
             tableId="upgrade-plan-list-device"
             columns={columns}
-            dataSource={filteredData}
+            dataSource={paginatedData}
             rowKey="id"
             total={filteredData.length}
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 2000 }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle="序号"
           />
         )}
       </Card>
@@ -1333,7 +1237,7 @@ export default function UpgradePlan() {
                 onChange={setScheduledTime}
                 placeholder="请选择执行时间"
                 style={{ width: '100%' }}
-                disabledDate={(current) => current && current < new Date()}
+                disabledDate={(current) => current && current < dayjs().startOf('day')}
               />
             </Form.Item>
           )}
