@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { App, Button, Col, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Tag, Tree, Typography } from 'antd';
+import { App, Button, Drawer, Form, Input, Modal, Radio, Select, Space, Tag, Tree, Typography } from 'antd';
 import { PlusOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
@@ -315,7 +315,6 @@ export default function KPIStandardReport() {
 
   // 已选指标
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [selectedRows, setSelectedRows] = useState<KPIIndicatorRow[]>([]);
 
   // Add function set modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -370,7 +369,6 @@ export default function KPIStandardReport() {
   const [editNodeModalOpen, setEditNodeModalOpen] = useState(false);
   const [editNodeForm] = Form.useForm<{ name: string; description: string }>();
   const [editingNodeKey, setEditingNodeKey] = useState<string>('');
-  const [editingNodeTitle, setEditingNodeTitle] = useState<string>('');
 
   // 获取树节点名称的辅助函数
   const getTreeNodeName = useCallback((nodeKey: string): string => {
@@ -423,7 +421,6 @@ export default function KPIStandardReport() {
     const node = customNodes.find((n) => n.key === nodeKey);
     if (node) {
       setEditingNodeKey(nodeKey);
-      setEditingNodeTitle(title);
       editNodeForm.setFieldsValue({
         name: title,
         description: '', // 描述信息可以从扩展字段获取
@@ -500,13 +497,12 @@ export default function KPIStandardReport() {
   }, [filteredData, page, pageSize]);
 
   // 处理选中行变化
-  const handleSelectChange = useCallback((newSelectedRowKeys: React.Key[], newSelectedRows: KPIIndicatorRow[]) => {
+  const handleSelectChange = useCallback((newSelectedRowKeys: React.Key[]) => {
     setSelectedRowKeys(newSelectedRowKeys);
-    setSelectedRows(newSelectedRows);
   }, []);
 
   // 删除自定义指标
-  const handleDeleteIndicator = useCallback((kpiId: string) => {
+  const handleDeleteIndicator = useCallback(() => {
     modal.confirm({
       title: t('common.confirm'),
       content: t('common.confirmDelete'),
@@ -522,14 +518,13 @@ export default function KPIStandardReport() {
       key: 'enableMeasure',
       label: t('kpi.measure'),
       icon: <CheckOutlined />,
-      onClick: (keys: React.Key[]) => {
+      onClick: () => {
         modal.confirm({
           title: t('common.confirm'),
           content: t('kpi.confirmEnableMeasure'),
           onOk: () => {
             void message.success(t('common.success'));
             setSelectedRowKeys([]);
-            setSelectedRows([]);
           },
         });
       },
@@ -538,39 +533,20 @@ export default function KPIStandardReport() {
       key: 'disableMeasure',
       label: t('kpi.cancelMeasure'),
       icon: <CloseOutlined />,
-      onClick: (keys: React.Key[]) => {
+      onClick: () => {
         modal.confirm({
           title: t('common.confirm'),
           content: t('kpi.confirmDisableMeasure'),
           onOk: () => {
             void message.success(t('common.success'));
             setSelectedRowKeys([]);
-            setSelectedRows([]);
           },
         });
       },
     },
   ], [modal, message, t]);
 
-  // 编辑指标处理函数
-  const handleEditIndicator = useCallback((row: KPIIndicatorRow) => {
-    setEditingIndicator(row);
-    const indicatorType = row.indicatorType === 'kpi' ? 'kpi' : 'counter';
-    setEditIndicatorType(indicatorType);
-    setEditCalcFormula(''); // TODO: 从后端获取公式
-    editIndicatorForm.setFieldsValue({
-      indicatorType,
-      indicatorLevel: row.indicatorLevel,
-      kpiName: row.kpiName,
-      custName: row.custName || '',
-      unit: row.unit,
-      isEnable: row.isEnable.toString(),
-      definition: '', // TODO: 从后端获取定义
-    });
-    setEditDrawerOpen(true);
-  }, [editIndicatorForm]);
-
-  // 保存编辑指标
+  // 表格列定义
   const handleSaveEditIndicator = useCallback(async () => {
     try {
       const values = await editIndicatorForm.validateFields();
@@ -593,13 +569,31 @@ export default function KPIStandardReport() {
     setEditCalcFormula((prev) => prev + ' ' + op + ' ');
   }, []);
 
-  const handleEditAddIndicatorToFormula = useCallback((indicatorId: string, _indicatorName: string) => {
+  const handleEditAddIndicatorToFormula = useCallback((indicatorId: string) => {
     setEditCalcFormula((prev) => prev + `[${indicatorId}]`);
   }, []);
 
   const handleEditClearFormula = useCallback(() => {
     setEditCalcFormula('');
   }, []);
+
+  // 编辑指标处理函数
+  const handleEditIndicator = useCallback((row: KPIIndicatorRow) => {
+    setEditingIndicator(row);
+    const indicatorType = row.indicatorType === 'kpi' ? 'kpi' : 'counter';
+    setEditIndicatorType(indicatorType);
+    setEditCalcFormula(''); // TODO: 从后端获取公式
+    editIndicatorForm.setFieldsValue({
+      indicatorType,
+      indicatorLevel: row.indicatorLevel,
+      kpiName: row.kpiName,
+      custName: row.custName || '',
+      unit: row.unit,
+      isEnable: row.isEnable.toString(),
+      definition: '', // TODO: 从后端获取定义
+    });
+    setEditDrawerOpen(true);
+  }, [editIndicatorForm]);
 
   // 表格列定义
   const columns: DataTableColumn<KPIIndicatorRow>[] = useMemo(() => [
@@ -625,7 +619,7 @@ export default function KPIStandardReport() {
               size="small"
               icon={<DeleteOutlined />}
               danger
-              onClick={() => handleDeleteIndicator(row.kpiId)}
+              onClick={() => handleDeleteIndicator()}
             >
               {t('common.delete')}
             </Button>
@@ -707,7 +701,7 @@ export default function KPIStandardReport() {
       dataIndex: 'updateTime',
       width: 150,
     },
-  ], [t, handleDeleteIndicator]);
+  ], [t, handleDeleteIndicator, handleEditIndicator]);
 
   // Handle add function set
   const handleAddFunctionSet = useCallback(async () => {
@@ -799,7 +793,7 @@ export default function KPIStandardReport() {
     setCalcFormula((prev) => prev + ' ' + op + ' ');
   }, []);
 
-  const handleAddIndicatorToFormula = useCallback((indicatorId: string, indicatorName: string) => {
+  const handleAddIndicatorToFormula = useCallback((indicatorId: string) => {
     setCalcFormula((prev) => prev + `[${indicatorId}]`);
   }, []);
 
@@ -1017,8 +1011,8 @@ export default function KPIStandardReport() {
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
             selectedRowKeys={selectedRowKeys}
-            onSelectionChange={(keys, rows) => {
-              handleSelectChange(keys, rows as KPIIndicatorRow[]);
+            onSelectionChange={(keys) => {
+              handleSelectChange(keys);
             }}
             batchActions={batchActions}
             extraToolbarRight={
@@ -1524,7 +1518,7 @@ export default function KPIStandardReport() {
                               cursor: 'pointer',
                               transition: 'background 0.15s',
                             }}
-                            onClick={() => handleAddIndicatorToFormula(indicator.kpiId, indicator.kpiName)}
+                            onClick={() => handleAddIndicatorToFormula(indicator.kpiId)}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.background = 'var(--color-primary-bg)';
                             }}
@@ -1926,7 +1920,7 @@ export default function KPIStandardReport() {
                               cursor: 'pointer',
                               transition: 'background 0.15s',
                             }}
-                            onClick={() => handleEditAddIndicatorToFormula(indicator.kpiId, indicator.kpiName)}
+                            onClick={() => handleEditAddIndicatorToFormula(indicator.kpiId)}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.background = 'var(--color-primary-bg)';
                             }}
