@@ -17,7 +17,6 @@ import {
   LoadingOutlined,
   ClockCircleOutlined,
   ForwardOutlined,
-  SyncOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
@@ -351,8 +350,6 @@ export default function PlugAndPlay() {
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [batchRetryOpen, setBatchRetryOpen] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [policyAutoRefresh, setPolicyAutoRefresh] = useState(false);
 
   // Status config
   const STATUS_CONFIG = useMemo(() => ({
@@ -772,12 +769,6 @@ export default function PlugAndPlay() {
                   style={{ width: 200 }}
                   allowClear
                 />
-                <Button
-                  type={policyAutoRefresh ? 'primary' : 'default'}
-                  icon={<SyncOutlined spin={policyAutoRefresh} />}
-                  onClick={() => setPolicyAutoRefresh(!policyAutoRefresh)}
-                  title={policyAutoRefresh ? t('provision.stopRealRefresh') : t('provision.startRealRefresh')}
-                />
               </Space>
             }
           />
@@ -867,12 +858,6 @@ export default function PlugAndPlay() {
                   onChange={(e) => { setTaskSearchText(e.target.value); setTaskPage(1); }}
                   style={{ width: 180 }}
                   allowClear
-                />
-                <Button
-                  type={autoRefresh ? 'primary' : 'default'}
-                  icon={<SyncOutlined spin={autoRefresh} />}
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                  title={autoRefresh ? t('provision.stopRealRefresh') : t('provision.startRealRefresh')}
                 />
               </Space>
             }
