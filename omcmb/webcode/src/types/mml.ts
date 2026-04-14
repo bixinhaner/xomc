@@ -42,7 +42,11 @@ export interface MMLScript {
   tags: string[];
 }
 
-export type MMLTaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+export type MMLTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
+
+export type MMLExecuteType = 'immediate' | 'scheduled' | 'periodic' | 'suspended';
+
+export type MMLTaskResult = 'success' | 'partial' | 'failed';
 
 export interface MMLTask {
   id: string;
@@ -55,4 +59,28 @@ export interface MMLTask {
   createdAt: string;
   updatedAt: string;
   creator: string;
+
+  // Scheduling
+  executeType: MMLExecuteType;
+  scheduledAt?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  periodTime?: string;
+
+  // Retry strategy
+  offlineRetry: boolean;
+  offlineRetryWait: number;
+  failedRetry: boolean;
+  failedRetryCount: number;
+  failedRetryInterval: number;
+
+  // Execution timestamps
+  startedAt?: string;
+  finishedAt?: string;
+
+  // Statistics
+  totalDevices: number;
+  successCount: number;
+  failedCount: number;
+  result?: MMLTaskResult;
 }

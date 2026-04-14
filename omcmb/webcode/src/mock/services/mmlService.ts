@@ -56,17 +56,41 @@ export const mmlService = {
     commandCode: string,
     deviceSns: string[],
     params?: Record<string, string | number | boolean>
-  ): Promise<Array<{ deviceSn: string; result: MMLResult }>> {
+  ): Promise<MMLTask> {
     const fullCommand = params
       ? `${commandCode} ${Object.entries(params)
           .map(([k, v]) => `${k}:${v}`)
           .join(' ')}`
       : commandCode;
     await delay(500, 2000);
-    return deviceSns.map((sn) => ({
+    const results = deviceSns.map((sn) => ({
       deviceSn: sn,
       result: generateMMLOutput(fullCommand, sn),
     }));
+    const allSuccess = results.every((r) => r.result.success);
+    const newItem: MMLTask = {
+      id: generateId('mmltask'),
+      taskName: `Execute ${commandCode}`,
+      deviceSns,
+      commands: [commandCode],
+      status: 'completed',
+      results,
+      creator: 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      executeType: 'immediate',
+      offlineRetry: false,
+      offlineRetryWait: 60,
+      failedRetry: false,
+      failedRetryCount: 3,
+      failedRetryInterval: 5,
+      totalDevices: deviceSns.length,
+      successCount: results.filter((r) => r.result.success).length,
+      failedCount: results.filter((r) => !r.result.success).length,
+      result: allSuccess ? 'success' : results.some((r) => r.result.success) ? 'partial' : 'failed',
+    };
+    tasks.push(newItem);
+    return newItem;
   },
 
   async getScripts(p: PageRequest): Promise<PageResponse<MMLScript>> {
@@ -114,10 +138,11 @@ export const mmlService = {
     const newItem: MMLTask = {
       ...data,
       id: generateId('mmltask'),
-      status: 'pending',
+      status: data.executeType === 'suspended' ? 'paused' : 'pending',
       results: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      totalDevices: data.deviceSns?.length ?? 0,
     };
     tasks.push(newItem);
     return newItem;
@@ -137,6 +162,55 @@ export const mmlService = {
       deviceSns,
       commands,
       creator: 'admin',
+      executeType: 'immediate',
+      offlineRetry: false,
+      offlineRetryWait: 60,
+      failedRetry: false,
+      failedRetryCount: 3,
+      failedRetryInterval: 5,
+      totalDevices: deviceSns.length,
+      successCount: 0,
+      failedCount: 0,
     });
+  },
+
+  async getTaskById(id: string): Promise<MMLTask | null> {
+    await delay(80, 150);
+    return tasks.find((t) => t.id === id) ?? null;
+  },
+
+  async startTask(id: string): Promise<MMLTask> {
+    await delay(100, 200);
+    const task = tasks.find((t) => t.id === id);
+    if (!task) throw new Error(`Task ${id} not found`);
+    if (task.status !== 'pending' && task.status !== 'paused') {
+      throw new Error(`Cannot start task in ${task.status} state`);
+    }
+    task.status = 'running';
+    return task;
+  },
+
+  async pauseTask(id: string): Promise<MMLTask> {
+    await delay(100, 200);
+    const task = tasks.find((t) => t.id === id);
+    if (!task) throw new Error(`Task ${id} not found`);
+    if (task.status !== 'running') {
+      throw new Error(`Cannot pause task in ${task.status} state`);
+    }
+    task.status = 'paused';
+    return task;
+  },
+
+  async cancelTask(id: string): Promise<MMLTask> {
+    await delay(100, 200);
+    const task = tasks.find((t) => t.id === id);
+    if (!task) throw new Error(`Task ${id} not found`);
+    task.status = 'cancelled';
+    return task;
+  },
+
+  async deleteTask(id: string): Promise<void> {
+    await delay(100, 200);
+    tasks = tasks.filter((t) => t.id !== id);
   },
 };

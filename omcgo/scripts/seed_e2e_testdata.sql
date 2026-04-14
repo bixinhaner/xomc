@@ -314,27 +314,27 @@ INSERT INTO upgrade_tasks (
 -- ============================================================
 
 INSERT INTO device_groups (
-    id, name, parent_id, carrier, description, sort_order,
+    id, name, parent_id, carrier, description, sort_order, level,
     created_at, updated_at
 ) VALUES
 -- Group 1: Beijing Region (root)
 (
     'e2e00007-0000-0000-0000-000000000001',
     'Beijing Region', NULL, 'cmcc', 'Beijing metropolitan area device group',
-    1, NOW() - INTERVAL '60 days', NOW() - INTERVAL '1 day'
+    1, 1, NOW() - INTERVAL '60 days', NOW() - INTERVAL '1 day'
 ),
 -- Group 2: Beijing-Haidian (child of Beijing)
 (
     'e2e00007-0000-0000-0000-000000000002',
     'Beijing-Haidian', 'e2e00007-0000-0000-0000-000000000001', 'cmcc',
-    'Haidian district sub-group', 1,
+    'Haidian district sub-group', 1, 2,
     NOW() - INTERVAL '55 days', NOW() - INTERVAL '1 day'
 ),
 -- Group 3: Shanghai Region (root)
 (
     'e2e00007-0000-0000-0000-000000000003',
     'Shanghai Region', NULL, 'ctcc', 'Shanghai metropolitan area device group',
-    2, NOW() - INTERVAL '50 days', NOW() - INTERVAL '2 days'
+    2, 1, NOW() - INTERVAL '50 days', NOW() - INTERVAL '2 days'
 );
 
 -- Link devices to groups
@@ -457,11 +457,11 @@ VALUES
 -- ============================================================
 
 -- Sprint 4: NE Message Logs
-INSERT INTO ne_message_logs (id, device_id, device_sn, device_name, message_type, direction, content, created_at)
+INSERT INTO ne_message_logs (id, device_id, device_sn, message_type, direction, content, created_at)
 VALUES
-  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'eNB-BJ-001', 'Inform', 'inbound', '{"event":"2 PERIODIC"}', NOW() - INTERVAL '1 hour'),
-  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'eNB-BJ-001', 'GetParameterValuesResponse', 'inbound', '{"params":["Device.DeviceInfo.SoftwareVersion"]}', NOW() - INTERVAL '45 minutes'),
-  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000002', 'CMCC-ENB-002', 'eNB-SH-001', 'SetParameterValues', 'outbound', '{"params":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300"}]}', NOW() - INTERVAL '30 minutes');
+  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'Inform', 'inbound', '{"event":"2 PERIODIC"}', NOW() - INTERVAL '1 hour'),
+  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000001', 'CMCC-ENB-001', 'GetParameterValuesResponse', 'inbound', '{"params":["Device.DeviceInfo.SoftwareVersion"]}', NOW() - INTERVAL '45 minutes'),
+  (gen_random_uuid(), 'd0000000-0000-0000-0000-000000000002', 'CMCC-ENB-002', 'SetParameterValues', 'outbound', '{"params":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300"}]}', NOW() - INTERVAL '30 minutes');
 
 -- ============================================================
 -- 17. Alarm Trend Test Data (Sprint 7 — 3 条，不同日期用于告警趋势聚合验证)

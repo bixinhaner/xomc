@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -14,6 +15,35 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
+
+// ---- sort whitelists (prevent SQL injection in ORDER BY) ----
+
+var commandAllowedSortColumns = map[string]bool{
+	"command_name": true,
+	"command_code": true,
+	"category":     true,
+	"created_at":   true,
+}
+
+var scriptAllowedSortColumns = map[string]bool{
+	"script_name": true,
+	"device_type": true,
+	"creator":     true,
+	"created_at":  true,
+	"updated_at":  true,
+}
+
+var taskAllowedSortColumns = map[string]bool{
+	"task_name":    true,
+	"status":       true,
+	"execute_type": true,
+	"creator":      true,
+	"result":       true,
+	"created_at":   true,
+	"updated_at":   true,
+	"started_at":   true,
+	"finished_at":  true,
+}
 
 // ---- column lists ----
 
@@ -33,6 +63,12 @@ var taskColumns = []string{
 	"id", "task_name", "script_id", "device_sns",
 	"commands", "status", "results", "creator",
 	"created_at", "updated_at",
+	"execute_type", "scheduled_at",
+	"period_start", "period_end", "period_time",
+	"offline_retry", "offline_retry_wait",
+	"failed_retry", "failed_retry_count", "failed_retry_interval",
+	"started_at", "finished_at",
+	"total_devices", "success_count", "failed_count", "result",
 }
 
 // ======================================================================
@@ -119,13 +155,13 @@ func (r *PgCommandRepository) List(ctx context.Context, filter CommandFilter) (*
 	}
 
 	// Pagination
-	sortBy := filter.SortBy
-	if sortBy == "" {
-		sortBy = "created_at"
+	sortBy := "created_at"
+	if filter.SortBy != "" && commandAllowedSortColumns[filter.SortBy] {
+		sortBy = filter.SortBy
 	}
-	sortDir := filter.SortDir
-	if sortDir == "" {
-		sortDir = "desc"
+	sortDir := "DESC"
+	if filter.SortDir == "asc" {
+		sortDir = "ASC"
 	}
 	base = base.
 		OrderBy(sortBy + " " + sortDir).
@@ -364,13 +400,13 @@ func (r *PgScriptRepository) List(ctx context.Context, filter ScriptFilter) (*mo
 	}
 
 	// Pagination
-	sortBy := filter.SortBy
-	if sortBy == "" {
-		sortBy = "created_at"
+	sortBy := "created_at"
+	if filter.SortBy != "" && scriptAllowedSortColumns[filter.SortBy] {
+		sortBy = filter.SortBy
 	}
-	sortDir := filter.SortDir
-	if sortDir == "" {
-		sortDir = "desc"
+	sortDir := "DESC"
+	if filter.SortDir == "asc" {
+		sortDir = "ASC"
 	}
 	base = base.
 		OrderBy(sortBy + " " + sortDir).
@@ -484,9 +520,19 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 
 	query, args, err := storage.Psql.Insert("mml_tasks").
 		Columns("task_name", "script_id", "device_sns",
-			"commands", "status", "results", "creator").
+			"commands", "status", "results", "creator",
+			"execute_type", "scheduled_at",
+			"period_start", "period_end", "period_time",
+			"offline_retry", "offline_retry_wait",
+			"failed_retry", "failed_retry_count", "failed_retry_interval",
+			"total_devices").
 		Values(task.TaskName, task.ScriptID, deviceSNsJSON,
-			commandsJSON, task.Status, resultsJSON, task.Creator).
+			commandsJSON, task.Status, resultsJSON, task.Creator,
+			task.ExecuteType, task.ScheduledAt,
+			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
+			task.OfflineRetry, task.OfflineRetryWait,
+			task.FailedRetry, task.FailedRetryCount, task.FailedRetryInterval,
+			task.TotalDevices).
 		Suffix("RETURNING " + joinColumns(taskColumns)).
 		ToSql()
 	if err != nil {
@@ -543,6 +589,22 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 		Set("status", task.Status).
 		Set("results", resultsJSON).
 		Set("creator", task.Creator).
+		Set("execute_type", task.ExecuteType).
+		Set("scheduled_at", task.ScheduledAt).
+		Set("period_start", task.PeriodStart).
+		Set("period_end", task.PeriodEnd).
+		Set("period_time", task.PeriodTime).
+		Set("offline_retry", task.OfflineRetry).
+		Set("offline_retry_wait", task.OfflineRetryWait).
+		Set("failed_retry", task.FailedRetry).
+		Set("failed_retry_count", task.FailedRetryCount).
+		Set("failed_retry_interval", task.FailedRetryInterval).
+		Set("started_at", task.StartedAt).
+		Set("finished_at", task.FinishedAt).
+		Set("total_devices", task.TotalDevices).
+		Set("success_count", task.SuccessCount).
+		Set("failed_count", task.FailedCount).
+		Set("result", task.Result).
 		Where(sq.Eq{"id": task.ID}).
 		ToSql()
 	if err != nil {
@@ -567,6 +629,14 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 		base = base.Where(sq.Eq{"status": *filter.Status})
 		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
 	}
+	if filter.ExecuteType != nil {
+		base = base.Where(sq.Eq{"execute_type": *filter.ExecuteType})
+		countBase = countBase.Where(sq.Eq{"execute_type": *filter.ExecuteType})
+	}
+	if filter.Result != nil {
+		base = base.Where(sq.Eq{"result": *filter.Result})
+		countBase = countBase.Where(sq.Eq{"result": *filter.Result})
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
@@ -579,13 +649,13 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 	}
 
 	// Pagination
-	sortBy := filter.SortBy
-	if sortBy == "" {
-		sortBy = "created_at"
+	sortBy := "created_at"
+	if filter.SortBy != "" && taskAllowedSortColumns[filter.SortBy] {
+		sortBy = filter.SortBy
 	}
-	sortDir := filter.SortDir
-	if sortDir == "" {
-		sortDir = "desc"
+	sortDir := "DESC"
+	if filter.SortDir == "asc" {
+		sortDir = "ASC"
 	}
 	base = base.
 		OrderBy(sortBy + " " + sortDir).
@@ -629,6 +699,12 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
 		&commandsJSON, &t.Status, &resultsJSON, &t.Creator,
 		&t.CreatedAt, &t.UpdatedAt,
+		&t.ExecuteType, &t.ScheduledAt,
+		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
+		&t.OfflineRetry, &t.OfflineRetryWait,
+		&t.FailedRetry, &t.FailedRetryCount, &t.FailedRetryInterval,
+		&t.StartedAt, &t.FinishedAt,
+		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
 	)
 	if err != nil {
 		return nil, err
@@ -668,6 +744,12 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
 		&commandsJSON, &t.Status, &resultsJSON, &t.Creator,
 		&t.CreatedAt, &t.UpdatedAt,
+		&t.ExecuteType, &t.ScheduledAt,
+		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
+		&t.OfflineRetry, &t.OfflineRetryWait,
+		&t.FailedRetry, &t.FailedRetryCount, &t.FailedRetryInterval,
+		&t.StartedAt, &t.FinishedAt,
+		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
 	)
 	if err != nil {
 		return nil, err
@@ -697,6 +779,56 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 		t.Results = []map[string]interface{}{}
 	}
 	return &t, nil
+}
+
+func (r *PgTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error {
+	now := time.Now()
+
+	// Build dynamic SET clause based on target status
+	builder := storage.Psql.Update("mml_tasks").
+		Set("status", status).
+		Set("updated_at", now)
+
+	// Set started_at when entering running state
+	if status == TaskRunning {
+		builder = builder.Set("started_at", now)
+	}
+	// Set finished_at for terminal states
+	if status == TaskCompleted || status == TaskFailed || status == TaskCancelled {
+		builder = builder.Set("finished_at", now)
+	}
+
+	query, args, err := builder.Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_task status SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_task status: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("mml_tasks").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete mml_task SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete mml_task: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
 }
 
 // ---- shared helpers ----

@@ -28,5 +28,7 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *MMLTask) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 	Update(ctx context.Context, task *MMLTask) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }

@@ -4,6 +4,9 @@
 -- PostgreSQL 扩展和公共函数
 -- ============================================================
 
+-- uuid-ossp 扩展（uuid_generate_v5 等确定性 UUID 生成）
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- TimescaleDB 扩展（可选，不存在则跳过）
 -- +goose StatementBegin
 DO $$

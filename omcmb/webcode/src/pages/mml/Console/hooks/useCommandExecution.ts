@@ -63,22 +63,36 @@ export function useCommandExecution() {
     });
 
     try {
-      // 逐个设备执行
+      // 调用 API 创建任务（所有设备一次请求）
+      const task = await executeMutation.mutateAsync({
+        commandCode: command.commandCode,
+        deviceSns: devices.map((d) => d.sn),
+        params,
+      });
+
+      addOutput({
+        type: 'success',
+        text: `任务已创建 (ID: ${task.id})`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      addOutput({
+        type: 'info',
+        text: `共 ${task.totalDevices} 台设备待执行`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      addOutput({
+        type: 'info',
+        text: '',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+
+      // 逐设备显示信息
       for (const device of devices) {
         addOutput({
           type: 'info',
           text: `--- 设备: ${device.sn} ---`,
           timestamp: new Date().toLocaleTimeString(),
         });
-
-        // 调用 API
-        const result = await executeMutation.mutateAsync({
-          commandCode: command.commandCode,
-          deviceSns: [device.sn],
-          params,
-        });
-
-        // 模拟输出结果
         addOutput({
           type: 'stdout',
           text: `  设备名称: ${device.name}`,
@@ -100,11 +114,6 @@ export function useCommandExecution() {
           timestamp: new Date().toLocaleTimeString(),
         });
         addOutput({
-          type: result.success ? 'success' : 'stderr',
-          text: `  执行结果: ${result.success ? '成功' : '失败'}`,
-          timestamp: new Date().toLocaleTimeString(),
-        });
-        addOutput({
           type: 'info',
           text: '',
           timestamp: new Date().toLocaleTimeString(),
@@ -114,7 +123,7 @@ export function useCommandExecution() {
       // 执行完成
       addOutput({
         type: 'success',
-        text: `✓ 命令执行完成，共处理 ${devices.length} 台设备`,
+        text: `任务已提交，共 ${devices.length} 台设备`,
         timestamp: new Date().toLocaleTimeString(),
       });
     } catch (error) {

@@ -45,6 +45,14 @@ export function useMMLTasks(params: PageRequest) {
   });
 }
 
+export function useMMLTaskById(id: string) {
+  return useQuery({
+    queryKey: ['mml', 'tasks', 'detail', id],
+    queryFn: () => api.getTaskById(id),
+    enabled: Boolean(id),
+  });
+}
+
 export function useExecuteMMLCommand() {
   return useMutation({
     mutationFn: ({
@@ -106,5 +114,64 @@ export function useExecuteMMLScript() {
   return useMutation({
     mutationFn: ({ scriptId, deviceSns }: { scriptId: string; deviceSns: string[] }) =>
       api.executeScript(scriptId, deviceSns),
+  });
+}
+
+// --- Task control hooks ---
+
+export function useStartMMLTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.startTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
+export function usePauseMMLTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.pauseTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
+export function useCancelMMLTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.cancelTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
+export function useDeleteMMLTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    },
+  });
+}
+
+// --- Task polling hook ---
+
+const TERMINAL_STATES: string[] = ['completed', 'failed', 'cancelled'];
+
+export function useMMLTaskPolling(taskId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['mml', 'tasks', 'poll', taskId],
+    queryFn: () => api.getTaskById(taskId!),
+    enabled: Boolean(taskId) && enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && TERMINAL_STATES.includes(data.status)) return false;
+      return 2000;
+    },
   });
 }

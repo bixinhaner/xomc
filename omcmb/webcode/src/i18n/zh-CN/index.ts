@@ -851,7 +851,7 @@ const messages: Record<string, string> = {
   'role.selectedBuiltIn':     '选中的角色中有',
   'role.builtInSkipped':      '个内置角色将被跳过',
   'role.permissions':         '权限列表',
-  'role.dataPermission':      '数据权限',
+  'role.dataPermission':      '设备分组',
   'role.deviceGroups':        '设备组',
   'role.pleaseSelectDeviceGroups': '请选择设备组（可多选）',
   // 权限类型
@@ -919,8 +919,8 @@ const messages: Record<string, string> = {
   'role.noDeviceGroupData': '暂无设备组数据',
   'role.menuPermissionConfig': '菜单权限配置',
   // 标签页
-  'role.apiPermission': '角色API',
-  'role.resourcePermission': '资源权限',
+  'role.apiPermission': 'API 权限',
+  'role.resourcePermission': '数据权限',
   'role.apiPermissionComingSoon': 'API权限功能即将上线',
   // API权限
   'role.apiEndpoint': 'API端点',
@@ -929,9 +929,10 @@ const messages: Record<string, string> = {
   'role.apiName': 'API名称',
   'role.apiModule': '所属模块',
   'role.selectAllApis': '全选API',
+  'role.selectedApiCount': '已选 {count} 个',
   'role.selectByModule': '按模块选择',
   // 网络类型权限
-  'role.networkType':     '网络类型权限',
+  'role.networkType':     '设备网络',
   'role.networkTypeHint': '不选择表示不限制网络类型',
   'role.networkType.lte': 'eNB (LTE)',
   'role.networkType.nr':  'gNB (5G NR)',

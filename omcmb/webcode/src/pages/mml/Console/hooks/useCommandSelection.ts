@@ -1,27 +1,29 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { MMLCommand } from '@/types/mml';
-import { MOCK_COMMANDS } from '../constants';
+import { useAllMMLCommands } from '@/hooks/api/useMML';
 
 export function useCommandSelection() {
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
 
+  const { data: allCommands = [] } = useAllMMLCommands();
+
   // 过滤后的命令列表
   const filteredCommands = useMemo(() => {
-    return MOCK_COMMANDS.filter((command) => {
+    return allCommands.filter((command) => {
       const matchCategory = !categoryFilter || command.category === categoryFilter;
       const matchSearch = !searchText ||
         command.commandName.includes(searchText) ||
         command.commandCode.toLowerCase().includes(searchText.toLowerCase());
       return matchCategory && matchSearch;
     });
-  }, [searchText, categoryFilter]);
+  }, [allCommands, searchText, categoryFilter]);
 
   // 获取所有分类
   const categories = useMemo(() => {
-    return [...new Set(MOCK_COMMANDS.map((cmd) => cmd.category))];
-  }, []);
+    return [...new Set(allCommands.map((cmd) => cmd.category))];
+  }, [allCommands]);
 
   // 按分类分组的命令
   const commandsByCategory = useMemo(() => {
@@ -52,7 +54,7 @@ export function useCommandSelection() {
     filteredCommands,
     categories,
     commandsByCategory,
-    allCommands: MOCK_COMMANDS,
+    allCommands,
 
     // 操作
     setSearchText,

@@ -85,10 +85,12 @@ func (m *mockScriptRepo) List(ctx context.Context, filter ScriptFilter) (*model.
 }
 
 type mockTaskRepo struct {
-	createFn  func(ctx context.Context, task *MMLTask) error
-	getByIDFn func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
-	updateFn  func(ctx context.Context, task *MMLTask) error
-	listFn    func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	createFn        func(ctx context.Context, task *MMLTask) error
+	getByIDFn       func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	updateFn        func(ctx context.Context, task *MMLTask) error
+	updateStatusFn  func(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	deleteFn        func(ctx context.Context, id uuid.UUID) error
+	listFn          func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *MMLTask) error {
@@ -108,6 +110,20 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, err
 func (m *mockTaskRepo) Update(ctx context.Context, task *MMLTask) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, task)
+	}
+	return nil
+}
+
+func (m *mockTaskRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error {
+	if m.updateStatusFn != nil {
+		return m.updateStatusFn(ctx, id, status)
+	}
+	return nil
+}
+
+func (m *mockTaskRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, id)
 	}
 	return nil
 }
@@ -487,4 +503,152 @@ func TestService_ExecuteCommand_NilCommandsDefaultsToEmpty(t *testing.T) {
 	require.NotNil(t, capturedTask)
 	assert.NotNil(t, capturedTask.Commands)
 	assert.Empty(t, capturedTask.Commands, "nil commands should default to empty slice")
+}
+
+// --- Tests: ExecuteCommand sets TotalDevices ---
+
+func TestService_ExecuteCommand_TotalDevicesSet(t *testing.T) {
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+
+	req := ExecuteRequest{
+		DeviceSNs: []string{"SN-001", "SN-002", "SN-003"},
+		TaskName:  "Multi-device task",
+		Creator:   "admin",
+	}
+
+	result, err := svc.ExecuteCommand(context.Background(), req)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 3, capturedTask.TotalDevices, "TotalDevices should match device count")
+}
+
+// --- Tests: Task control methods ---
+
+func TestService_StartTask_PendingToRunning(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{ID: taskID, Status: TaskPending}
+
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+			assert.Equal(t, taskID, id)
+			return existing, nil
+		},
+		updateStatusFn: func(ctx context.Context, id uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, taskID, id)
+			assert.Equal(t, TaskRunning, status)
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	result, err := svc.StartTask(context.Background(), taskID)
+
+	require.NoError(t, err)
+	assert.Equal(t, TaskRunning, result.Status)
+}
+
+func TestService_StartTask_RunningFails(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{ID: taskID, Status: TaskRunning}
+
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+			return existing, nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	_, err := svc.StartTask(context.Background(), taskID)
+
+	require.ErrorIs(t, err, ErrInvalidTransition)
+}
+
+func TestService_PauseTask_RunningToPaused(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{ID: taskID, Status: TaskRunning}
+
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+			return existing, nil
+		},
+		updateStatusFn: func(ctx context.Context, id uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, TaskPaused, status)
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	result, err := svc.PauseTask(context.Background(), taskID)
+
+	require.NoError(t, err)
+	assert.Equal(t, TaskPaused, result.Status)
+}
+
+func TestService_CancelTask(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{ID: taskID, Status: TaskRunning}
+
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+			return existing, nil
+		},
+		updateStatusFn: func(ctx context.Context, id uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, TaskCancelled, status)
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	result, err := svc.CancelTask(context.Background(), taskID)
+
+	require.NoError(t, err)
+	assert.Equal(t, TaskCancelled, result.Status)
+}
+
+func TestService_DeleteTask_RunningFails(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{ID: taskID, Status: TaskRunning}
+
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+			return existing, nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	err := svc.DeleteTask(context.Background(), taskID)
+
+	require.ErrorIs(t, err, ErrCannotDeleteRunning)
+}
+
+func TestService_DeleteTask_NonRunning(t *testing.T) {
+	taskID := uuid.New()
+	existing := &MMLTask{ID: taskID, Status: TaskCompleted}
+
+	var deletedID uuid.UUID
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+			return existing, nil
+		},
+		deleteFn: func(ctx context.Context, id uuid.UUID) error {
+			deletedID = id
+			return nil
+		},
+	}
+
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	err := svc.DeleteTask(context.Background(), taskID)
+
+	require.NoError(t, err)
+	assert.Equal(t, taskID, deletedID)
 }

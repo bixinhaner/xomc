@@ -195,6 +195,8 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'sys-blacklist',   label: 'nav.system.blacklist',      path: '/system/blacklist' },
       { key: 'sys-migration',   label: 'nav.system.migration',      path: '/system/migration' },
       { key: 'sys-db-monitor',  label: 'nav.system.dbMonitor',      path: '/system/db-monitor' },
+      { key: 'sys-api',         label: 'nav.system.apiManagement',  path: '/system/api-management' },
+      { key: 'sys-dict',        label: 'nav.system.dataDict',        path: '/system/data-dictionary' },
     ],
   },
   // {

@@ -2,6 +2,7 @@ package mml
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -122,6 +123,20 @@ type ExecuteRequest struct {
 	TaskName    string                   `json:"task_name"`
 	Creator     string                   `json:"creator"`
 	Commands    []map[string]interface{} `json:"commands"`
+
+	// Scheduling
+	ExecuteType ExecuteType `json:"execute_type"`
+	ScheduledAt *string     `json:"scheduled_at"`
+	PeriodStart *string     `json:"period_start"`
+	PeriodEnd   *string     `json:"period_end"`
+	PeriodTime  string      `json:"period_time"`
+
+	// Retry strategy
+	OfflineRetry        bool `json:"offline_retry"`
+	OfflineRetryWait    int  `json:"offline_retry_wait"`
+	FailedRetry         bool `json:"failed_retry"`
+	FailedRetryCount    int  `json:"failed_retry_count"`
+	FailedRetryInterval int  `json:"failed_retry_interval"`
 }
 
 // ExecuteCommand creates an MML task with pending status.
@@ -155,6 +170,24 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		Status:    TaskPending,
 		Results:   []map[string]interface{}{},
 		Creator:   req.Creator,
+
+		ExecuteType:         req.ExecuteType,
+		OfflineRetry:        req.OfflineRetry,
+		OfflineRetryWait:    req.OfflineRetryWait,
+		FailedRetry:         req.FailedRetry,
+		FailedRetryCount:    req.FailedRetryCount,
+		FailedRetryInterval: req.FailedRetryInterval,
+		TotalDevices:        len(req.DeviceSNs),
+	}
+
+	// Map execute_type to initial status
+	switch req.ExecuteType {
+	case ExecuteSuspended:
+		task.Status = TaskPaused
+	case ExecuteScheduled, ExecutePeriodic:
+		task.Status = TaskPending
+	default:
+		task.Status = TaskPending
 	}
 
 	if err := s.taskRepo.Create(ctx, task); err != nil {
@@ -178,4 +211,92 @@ func (s *Service) GetTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 // ListTasks returns a paginated list of MML tasks.
 func (s *Service) ListTasks(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
 	return s.taskRepo.List(ctx, filter)
+}
+
+// ---- Task control operations (Phase 2) ----
+
+var (
+	// ErrInvalidTransition is returned when a task status transition is not allowed.
+	ErrInvalidTransition = errors.New("invalid task status transition")
+	// ErrCannotDeleteRunning is returned when trying to delete a running task.
+	ErrCannotDeleteRunning = errors.New("cannot delete a running task")
+)
+
+// StartTask transitions a task from pending/paused to running.
+func (s *Service) StartTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	task, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml task: %w", err)
+	}
+
+	if task.Status != TaskPending && task.Status != TaskPaused {
+		return nil, fmt.Errorf("start task: status %s cannot transition to running: %w", task.Status, ErrInvalidTransition)
+	}
+
+	if err := s.taskRepo.UpdateStatus(ctx, id, TaskRunning); err != nil {
+		return nil, fmt.Errorf("update mml task status: %w", err)
+	}
+
+	task.Status = TaskRunning
+	s.logger.Info("mml task started", zap.String("task_id", id.String()))
+	return task, nil
+}
+
+// PauseTask transitions a running task to paused.
+func (s *Service) PauseTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	task, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml task: %w", err)
+	}
+
+	if task.Status != TaskRunning {
+		return nil, fmt.Errorf("pause task: status %s cannot transition to paused: %w", task.Status, ErrInvalidTransition)
+	}
+
+	if err := s.taskRepo.UpdateStatus(ctx, id, TaskPaused); err != nil {
+		return nil, fmt.Errorf("update mml task status: %w", err)
+	}
+
+	task.Status = TaskPaused
+	s.logger.Info("mml task paused", zap.String("task_id", id.String()))
+	return task, nil
+}
+
+// CancelTask transitions any task to cancelled.
+func (s *Service) CancelTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
+	task, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml task: %w", err)
+	}
+
+	if task.Status == TaskCancelled || task.Status == TaskCompleted || task.Status == TaskFailed {
+		return nil, fmt.Errorf("cancel task: status %s cannot transition to cancelled: %w", task.Status, ErrInvalidTransition)
+	}
+
+	if err := s.taskRepo.UpdateStatus(ctx, id, TaskCancelled); err != nil {
+		return nil, fmt.Errorf("update mml task status: %w", err)
+	}
+
+	task.Status = TaskCancelled
+	s.logger.Info("mml task cancelled", zap.String("task_id", id.String()))
+	return task, nil
+}
+
+// DeleteTask removes a non-running task.
+func (s *Service) DeleteTask(ctx context.Context, id uuid.UUID) error {
+	task, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get mml task: %w", err)
+	}
+
+	if task.Status == TaskRunning {
+		return ErrCannotDeleteRunning
+	}
+
+	if err := s.taskRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete mml task: %w", err)
+	}
+
+	s.logger.Info("mml task deleted", zap.String("task_id", id.String()))
+	return nil
 }

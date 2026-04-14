@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Form, Input, Button, Checkbox, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
@@ -16,6 +16,25 @@ interface LoginFormValues {
   remember: boolean;
 }
 
+const REMEMBER_KEY = 'omc-remember-credentials';
+
+function getRemembered(): { username: string; password: string } | null {
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setRemembered(username: string, password: string) {
+  localStorage.setItem(REMEMBER_KEY, JSON.stringify({ username, password }));
+}
+
+function clearRemembered() {
+  localStorage.removeItem(REMEMBER_KEY);
+}
+
 export default function LoginPage() {
   const t = useT();
   const [loading, setLoading] = useState(false);
@@ -25,6 +44,18 @@ export default function LoginPage() {
   const { login, setTokenPair } = useUserStore();
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+
+  // 页面加载时填充记住的凭据
+  useEffect(() => {
+    const saved = getRemembered();
+    if (saved) {
+      form.setFieldsValue({
+        username: saved.username,
+        password: saved.password,
+        remember: true,
+      });
+    }
+  }, [form]);
 
   const handleMockLogin = async (values: LoginFormValues) => {
     await new Promise<void>((resolve) => setTimeout(resolve, 600));
@@ -76,6 +107,13 @@ export default function LoginPage() {
   const handleSubmit = async (values: LoginFormValues) => {
     setLoading(true);
     try {
+      // 记住/清除密码
+      if (values.remember) {
+        setRemembered(values.username, values.password);
+      } else {
+        clearRemembered();
+      }
+
       if (useMock) {
         await handleMockLogin(values);
       } else {

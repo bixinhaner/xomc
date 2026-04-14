@@ -374,6 +374,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Inject gin routes into admin handler for SyncApiEndpoints
 	ad.adminHandler.SetGinRoutes(r.Routes())
 
+	// Auto-sync API endpoints from Gin routes at startup
+	if err := syncApiEndpoints(c, ad); err != nil {
+		c.Logger.Warn("api endpoint auto-sync failed, manual sync required",
+			zap.Error(err),
+		)
+	}
+
 	return nil
 }
 
@@ -385,4 +392,32 @@ func statusFromResults(results []components.ComponentHealth) string {
 		}
 	}
 	return "ok"
+}
+
+// syncApiEndpoints auto-syncs Gin routes into the api_endpoints table at startup.
+// Only runs if api_endpointService is available; failures are logged but non-fatal.
+func syncApiEndpoints(c *Container, ad *adminHandlerDeps) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	routes := ad.adminHandler.GetGinRoutes()
+	if len(routes) == 0 {
+		return nil
+	}
+
+	svc := admin.NewApiEndpointService(
+		admin.NewPgApiEndpointRepository(c.PgPool),
+		c.Logger,
+	)
+	result, err := svc.SyncApiEndpoints(ctx, routes)
+	if err != nil {
+		return err
+	}
+
+	c.Logger.Info("api endpoints auto-synced at startup",
+		zap.Int("total", result.Total),
+		zap.Int("created", result.Created),
+		zap.Int("updated", result.Updated),
+	)
+	return nil
 }

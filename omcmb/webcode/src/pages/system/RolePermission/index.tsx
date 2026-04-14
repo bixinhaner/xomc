@@ -18,7 +18,7 @@ import {
   Tabs,
   Table,
 } from 'antd';
-import type { TreeDataNode, TreeProps, TableColumnsType } from 'antd';
+import type { TreeDataNode, TreeProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -38,7 +38,7 @@ import {
   useDeleteRoles,
   useAllDeviceGroups,
 } from '@/hooks/api/useSystem';
-import type { Role, ApiPermission, ApiEndpoint } from '@/types/system';
+import type { Role, ApiEndpoint } from '@/types/system';
 import type { DeviceGroup } from '@/types/device';
 import { useT } from '@/hooks/useT';
 import { apiPermissionApi } from '@/services/api/apiPermissionApi';
@@ -288,7 +288,7 @@ export default function RoleManagement() {
   const [deviceGroupNetworkType, setDeviceGroupNetworkType] = useState<string>('');
   const [deviceGroupProductType, setDeviceGroupProductType] = useState<string>('');
   // API权限选择
-  const [selectedApiPermissions, setSelectedApiPermissions] = useState<string[]>([]);
+  const [selectedApiEndpointIds, setSelectedApiEndpointIds] = useState<string[]>([]);
 
 
   const { data, isLoading, refetch } = useRoles({
@@ -336,20 +336,34 @@ export default function RoleManagement() {
   const updateRole = useUpdateRole();
   const deleteRoles = useDeleteRoles();
 
-  // API权限数据
+  // API权限数据（全部端点列表）
   const { data: apiEndpoints, isLoading: isLoadingApiEndpoints } = useQuery({
-    queryKey: ['apiEndpoints'],
+    queryKey: ['apiEndpoints', 'all'],
     queryFn: apiPermissionApi.listEndpoints,
-    staleTime: 5 * 60 * 1000, // 5分钟
+    staleTime: 5 * 60 * 1000,
   });
+
+  // 按 apiGroup 分组
+  const apiGroupMap = useMemo(() => {
+    const map = new Map<string, ApiEndpoint[]>();
+    for (const ep of apiEndpoints ?? []) {
+      const group = ep.apiGroup || 'other';
+      const list = map.get(group) || [];
+      list.push(ep);
+      map.set(group, list);
+    }
+    return map;
+  }, [apiEndpoints]);
+
+  const apiGroupNames = useMemo(() => Array.from(apiGroupMap.keys()).sort(), [apiGroupMap]);
 
   const getRoleApiPermissions = useMutation({
     mutationFn: (roleId: string) => apiPermissionApi.getRolePermissions(roleId),
   });
 
   const setRoleApiPermissions = useMutation({
-    mutationFn: ({ roleId, permissions }: { roleId: string; permissions: ApiPermission[] }) =>
-      apiPermissionApi.setRolePermissions(roleId, permissions),
+    mutationFn: ({ roleId, endpointIds }: { roleId: string; endpointIds: string[] }) =>
+      apiPermissionApi.setRolePermissions(roleId, endpointIds),
   });
 
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
@@ -536,7 +550,11 @@ export default function RoleManagement() {
           builtIn: 0,
         },
         {
-          onSuccess: () => {
+          onSuccess: (newRole) => {
+            // 保存 API 权限
+            if (newRole?.id && selectedApiEndpointIds.length > 0) {
+              setRoleApiPermissions.mutate({ roleId: newRole.id, endpointIds: selectedApiEndpointIds });
+            }
             message.success(t('common.save'));
             setCreateVisible(false);
             form.resetFields();
@@ -544,6 +562,7 @@ export default function RoleManagement() {
             setExpandedPermissionKeys([]);
             setSelectedDeviceGroupIds([]);
             setSelectedNetworkTypes([]);
+            setSelectedApiEndpointIds([]);
           },
         },
       );
@@ -580,6 +599,8 @@ export default function RoleManagement() {
         },
         {
           onSuccess: () => {
+            // 保存 API 权限
+            setRoleApiPermissions.mutate({ roleId: selectedRole.id, endpointIds: selectedApiEndpointIds });
             message.success(t('common.save'));
             setEditVisible(false);
             form.resetFields();
@@ -588,11 +609,12 @@ export default function RoleManagement() {
             setExpandedPermissionKeys([]);
             setSelectedDeviceGroupIds([]);
             setSelectedNetworkTypes([]);
+            setSelectedApiEndpointIds([]);
           },
         },
       );
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -625,6 +647,10 @@ export default function RoleManagement() {
                     setExpandedPermissionKeys(allModuleKeys);
                     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
                     setSelectedNetworkTypes(role.networkTypes || []);
+                    // 加载角色 API 权限
+                    getRoleApiPermissions.mutate(role.id, {
+                      onSuccess: (ids) => setSelectedApiEndpointIds(ids),
+                    });
                     setViewVisible(true);
                   },
                 },
@@ -643,6 +669,10 @@ export default function RoleManagement() {
                     setExpandedPermissionKeys(allModuleKeys);
                     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
                     setSelectedNetworkTypes(role.networkTypes || []);
+                    // 加载角色 API 权限
+                    getRoleApiPermissions.mutate(role.id, {
+                      onSuccess: (ids) => setSelectedApiEndpointIds(ids),
+                    });
                     setEditVisible(true);
                   },
                 },
@@ -979,91 +1009,100 @@ export default function RoleManagement() {
     );
   };
 
-  // 渲染API权限配置
+  // 渲染API权限配置（按分组展示，支持分组批量勾选）
   const renderApiPermissionConfig = (readOnly = false) => {
-    const columns: TableColumnsType<ApiEndpoint> = [
-      {
-        key: 'select',
-        width: 50,
-        render: (_, record) => (
-          <Checkbox
-            checked={selectedApiPermissions.includes(`${record.method}:${record.path}`)}
-            onChange={(e) => {
-              const key = `${record.method}:${record.path}`;
-              if (e.target.checked) {
-                setSelectedApiPermissions((prev) => [...prev, key]);
-              } else {
-                setSelectedApiPermissions((prev) => prev.filter((k) => k !== key));
-              }
-            }}
-            disabled={readOnly}
-          />
-        ),
-      },
-      {
-        key: 'method',
-        title: t('role.apiMethod'),
-        dataIndex: 'method',
-        width: 100,
-        render: (method: string) => (
-          <Tag color={method === 'GET' ? 'blue' : method === 'POST' ? 'green' : method === 'PUT' ? 'orange' : 'red'}>
-            {method}
-          </Tag>
-        ),
-      },
-      {
-        key: 'path',
-        title: t('role.apiPath'),
-        dataIndex: 'path',
-        ellipsis: true,
-      },
-      {
-        key: 'name',
-        title: t('role.apiName'),
-        dataIndex: 'name',
-        width: 150,
-      },
-      {
-        key: 'module',
-        title: t('role.apiModule'),
-        dataIndex: 'module',
-        width: 100,
-      },
-    ];
+    const toggleEndpoint = (epId: string, checked: boolean) => {
+      setSelectedApiEndpointIds((prev) =>
+        checked ? [...prev, epId] : prev.filter((id) => id !== epId),
+      );
+    };
+
+    const toggleGroup = (groupName: string, checked: boolean) => {
+      const groupIds = (apiGroupMap.get(groupName) || []).map((ep) => ep.id);
+      setSelectedApiEndpointIds((prev) => {
+        const set = new Set(prev);
+        if (checked) {
+          groupIds.forEach((id) => set.add(id));
+        } else {
+          groupIds.forEach((id) => set.delete(id));
+        }
+        return Array.from(set);
+      });
+    };
+
+    const methodColor = (method: string) => {
+      switch (method) {
+        case 'GET': return 'blue';
+        case 'POST': return 'green';
+        case 'PUT': return 'orange';
+        case 'DELETE': return 'red';
+        case 'PATCH': return 'purple';
+        default: return 'default';
+      }
+    };
 
     return (
       <div>
         {!readOnly && (
           <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
-            <Button
-              size="small"
-              onClick={() => {
-                if (apiEndpoints) {
-                  setSelectedApiPermissions(
-                    apiEndpoints.map((ep) => `${ep.method}:${ep.path}`)
-                  );
-                }
-              }}
-            >
+            <Button size="small" onClick={() => setSelectedApiEndpointIds((apiEndpoints || []).map((ep) => ep.id))}>
               {t('role.selectAllApis')}
             </Button>
-            <Button
-              size="small"
-              onClick={() => setSelectedApiPermissions([])}
-            >
+            <Button size="small" onClick={() => setSelectedApiEndpointIds([])}>
               {t('common.clear')}
             </Button>
+            <span style={{ marginLeft: 'auto', color: 'var(--color-text-secondary)', fontSize: 12, lineHeight: '24px' }}>
+              {t('role.selectedApiCount', { count: selectedApiEndpointIds.length })} / {apiEndpoints?.length ?? 0}
+            </span>
           </div>
         )}
-        <Table
-          columns={columns}
-          dataSource={apiEndpoints || []}
-          loading={isLoadingApiEndpoints}
-          rowKey={(record) => `${record.method}:${record.path}`}
-          size="small"
-          pagination={{ pageSize: 10 }}
-          scroll={{ y: 400 }}
-        />
+        {isLoadingApiEndpoints ? (
+          <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+        ) : (
+          <div style={{ maxHeight: 500, overflow: 'auto', border: '1px solid var(--color-border)', borderRadius: 6 }}>
+            {apiGroupNames.map((groupName) => {
+              const group = apiGroupMap.get(groupName) || [];
+              const checkedCount = group.filter((ep) => selectedApiEndpointIds.includes(ep.id)).length;
+              const isAllChecked = checkedCount === group.length;
+              const isIndeterminate = checkedCount > 0 && checkedCount < group.length;
+
+              return (
+                <div key={groupName} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <div style={{ padding: '8px 12px', background: 'var(--color-fill-quaternary)', display: 'flex', alignItems: 'center' }}>
+                    <Checkbox
+                      checked={isAllChecked}
+                      indeterminate={isIndeterminate}
+                      onChange={(e) => toggleGroup(groupName, e.target.checked)}
+                      disabled={readOnly}
+                    >
+                      <span style={{ fontWeight: 500 }}>{groupName}</span>
+                      <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
+                        ({checkedCount}/{group.length})
+                      </span>
+                    </Checkbox>
+                  </div>
+                  <div style={{ padding: '4px 12px 4px 36px' }}>
+                    {group.map((ep) => (
+                      <div key={ep.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0', borderBottom: '1px solid var(--color-fill-quaternary)' }}>
+                        <Checkbox
+                          checked={selectedApiEndpointIds.includes(ep.id)}
+                          onChange={(e) => toggleEndpoint(ep.id, e.target.checked)}
+                          disabled={readOnly}
+                          style={{ marginRight: 8 }}
+                        >
+                          <Tag color={methodColor(ep.method)} style={{ marginRight: 8, minWidth: 52, textAlign: 'center' }}>
+                            {ep.method}
+                          </Tag>
+                          <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{ep.path}</span>
+                        </Checkbox>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -1076,6 +1115,7 @@ export default function RoleManagement() {
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
+    setSelectedApiEndpointIds([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1087,6 +1127,7 @@ export default function RoleManagement() {
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
+    setSelectedApiEndpointIds([]);
     setActiveTab('menu');
   }, [form]);
 
@@ -1098,6 +1139,7 @@ export default function RoleManagement() {
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
+    setSelectedApiEndpointIds([]);
     setActiveTab('menu');
   }, [form]);
 

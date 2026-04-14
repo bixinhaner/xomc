@@ -90,6 +90,11 @@ func (h *Handler) SetGinRoutes(routes gin.RoutesInfo) {
 	h.ginRoutes = routes
 }
 
+// GetGinRoutes returns the stored Gin routes info.
+func (h *Handler) GetGinRoutes() gin.RoutesInfo {
+	return h.ginRoutes
+}
+
 // getIPLimiter returns a rate.Limiter for the given IP, creating one if needed.
 func (h *Handler) getIPLimiter(ip string) *rate.Limiter {
 	now := time.Now()

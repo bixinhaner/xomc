@@ -63,10 +63,12 @@ func (m *hScriptRepo) List(ctx context.Context, filter ScriptFilter) (*model.Lis
 }
 
 type hTaskRepo struct {
-	CreateFn  func(ctx context.Context, task *MMLTask) error
-	GetByIDFn func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
-	UpdateFn  func(ctx context.Context, task *MMLTask) error
-	ListFn    func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	CreateFn       func(ctx context.Context, task *MMLTask) error
+	GetByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLTask, error)
+	UpdateFn       func(ctx context.Context, task *MMLTask) error
+	UpdateStatusFn func(ctx context.Context, id uuid.UUID, status TaskStatus) error
+	DeleteFn       func(ctx context.Context, id uuid.UUID) error
+	ListFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
 func (m *hTaskRepo) Create(ctx context.Context, task *MMLTask) error {
@@ -77,6 +79,18 @@ func (m *hTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 }
 func (m *hTaskRepo) Update(ctx context.Context, task *MMLTask) error {
 	return m.UpdateFn(ctx, task)
+}
+func (m *hTaskRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus) error {
+	if m.UpdateStatusFn != nil {
+		return m.UpdateStatusFn(ctx, id, status)
+	}
+	return nil
+}
+func (m *hTaskRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if m.DeleteFn != nil {
+		return m.DeleteFn(ctx, id)
+	}
+	return nil
 }
 func (m *hTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error) {
 	return m.ListFn(ctx, filter)
@@ -393,4 +407,119 @@ func TestHandler_ListTasks(t *testing.T) {
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Batch Query", resp.Items[0].TaskName)
 	assert.Equal(t, TaskCompleted, resp.Items[0].Status)
+}
+
+// ---- Task control handler tests ----
+
+func TestHandler_StartTask(t *testing.T) {
+	taskID := uuid.New()
+
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			return &MMLTask{ID: id, Status: TaskPending}, nil
+		},
+		UpdateStatusFn: func(_ context.Context, id uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, TaskRunning, status)
+			return nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mml/tasks/"+taskID.String()+"/start", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp MMLTask
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, taskID, resp.ID)
+}
+
+func TestHandler_PauseTask(t *testing.T) {
+	taskID := uuid.New()
+
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			return &MMLTask{ID: id, Status: TaskRunning}, nil
+		},
+		UpdateStatusFn: func(_ context.Context, id uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, TaskPaused, status)
+			return nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mml/tasks/"+taskID.String()+"/pause", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandler_CancelTask(t *testing.T) {
+	taskID := uuid.New()
+
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			return &MMLTask{ID: id, Status: TaskRunning}, nil
+		},
+		UpdateStatusFn: func(_ context.Context, id uuid.UUID, status TaskStatus) error {
+			assert.Equal(t, TaskCancelled, status)
+			return nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mml/tasks/"+taskID.String()+"/cancel", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandler_DeleteTask(t *testing.T) {
+	taskID := uuid.New()
+
+	cmdRepo := &hCmdRepo{}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLTask, error) {
+			return &MMLTask{ID: id, Status: TaskCompleted}, nil
+		},
+		DeleteFn: func(_ context.Context, id uuid.UUID) error {
+			assert.Equal(t, taskID, id)
+			return nil
+		},
+	}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/mml/tasks/"+taskID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
 }

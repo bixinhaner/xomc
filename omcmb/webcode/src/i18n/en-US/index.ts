@@ -923,6 +923,7 @@ const messages: Record<string, string> = {
   'role.apiName': 'API Name',
   'role.apiModule': 'Module',
   'role.selectAllApis': 'Select All APIs',
+  'role.selectedApiCount': '{count} selected',
   'role.selectByModule': 'Select by Module',
   // 网络类型权限
   'role.networkType':     'Network Type Permission',

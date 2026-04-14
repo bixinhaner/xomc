@@ -1,23 +1,46 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { ConsoleDevice } from '../types';
-import { DEVICE_LIST, DEVICE_PAGE_SIZE } from '../constants';
+import { DEVICE_PAGE_SIZE } from '../constants';
+import { deviceApi } from '@/services/api/deviceApi';
 
 export function useDeviceSelection() {
   const [selectedDevices, setSelectedDevices] = useState<ConsoleDevice[]>([]);
   const [searchText, setSearchText] = useState('');
   const [productTypeFilter, setProductTypeFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [devices, setDevices] = useState<ConsoleDevice[]>([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+
+  // Fetch devices from API
+  const fetchDevices = useCallback(async () => {
+    setIsLoadingDevices(true);
+    try {
+      const result = await deviceApi.getList({ page: 1, pageSize: 1000 });
+      const mapped: ConsoleDevice[] = result.items.map((d) => ({
+        sn: d.sn,
+        name: d.siteName || d.sn,
+        type: d.networkType || 'eNB',
+        productType: d.productType || '',
+        status: (d.connStatus === 'online' ? 'online' : d.connStatus === 'alarm' ? 'alarm' : 'offline') as ConsoleDevice['status'],
+      }));
+      setDevices(mapped);
+    } catch {
+      setDevices([]);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  }, []);
 
   // 过滤后的设备列表
   const filteredDevices = useMemo(() => {
-    return DEVICE_LIST.filter((device) => {
+    return devices.filter((device) => {
       const matchSearch = !searchText ||
         device.sn.toLowerCase().includes(searchText.toLowerCase()) ||
         device.name.includes(searchText);
       const matchType = !productTypeFilter || device.productType === productTypeFilter;
       return matchSearch && matchType;
     });
-  }, [searchText, productTypeFilter]);
+  }, [devices, searchText, productTypeFilter]);
 
   // 分页后的设备列表
   const paginatedDevices = useMemo(() => {
@@ -75,16 +98,16 @@ export function useDeviceSelection() {
     setSelectedDevices((prev) => {
       const existingSns = new Set(prev.map((d) => d.sn));
       const devicesToAdd = sns
-        .map((sn) => DEVICE_LIST.find((d) => d.sn === sn))
+        .map((sn) => devices.find((d) => d.sn === sn))
         .filter((d): d is ConsoleDevice => d !== undefined && !existingSns.has(d.sn));
       return [...prev, ...devicesToAdd];
     });
-  }, []);
+  }, [devices]);
 
   // 所有设备SN的Set（用于批量输入验证）
   const allDeviceSns = useMemo(
-    () => new Set(DEVICE_LIST.map((d) => d.sn)),
-    []
+    () => new Set(devices.map((d) => d.sn)),
+    [devices]
   );
 
   return {
@@ -101,6 +124,7 @@ export function useDeviceSelection() {
     totalFiltered: filteredDevices.length,
     totalPages: Math.ceil(filteredDevices.length / DEVICE_PAGE_SIZE),
     allDeviceSns,
+    isLoadingDevices,
 
     // 操作
     setSearchText,
@@ -111,5 +135,6 @@ export function useDeviceSelection() {
     removeDevice,
     clearSelection,
     addDevicesBySns,
+    fetchDevices,
   };
 }

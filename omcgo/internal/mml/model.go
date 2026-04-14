@@ -15,6 +15,27 @@ const (
 	TaskRunning   TaskStatus = "running"
 	TaskCompleted TaskStatus = "completed"
 	TaskFailed    TaskStatus = "failed"
+	TaskPaused    TaskStatus = "paused"
+	TaskCancelled TaskStatus = "cancelled"
+)
+
+// ExecuteType defines how a task is scheduled for execution.
+type ExecuteType string
+
+const (
+	ExecuteImmediate ExecuteType = "immediate"
+	ExecuteScheduled ExecuteType = "scheduled"
+	ExecutePeriodic  ExecuteType = "periodic"
+	ExecuteSuspended ExecuteType = "suspended"
+)
+
+// TaskResult represents the outcome of a completed task.
+type TaskResult string
+
+const (
+	ResultSuccess TaskResult = "success"
+	ResultPartial TaskResult = "partial"
+	ResultFailed  TaskResult = "failed"
 )
 
 // MMLCommand represents a predefined MML command template.
@@ -55,6 +76,30 @@ type MMLTask struct {
 	Creator   string                   `json:"creator"`
 	CreatedAt time.Time                `json:"created_at"`
 	UpdatedAt time.Time                `json:"updated_at"`
+
+	// Scheduling
+	ExecuteType ExecuteType  `json:"execute_type"`
+	ScheduledAt *time.Time   `json:"scheduled_at,omitempty"`
+	PeriodStart *time.Time   `json:"period_start,omitempty"`
+	PeriodEnd   *time.Time   `json:"period_end,omitempty"`
+	PeriodTime  string       `json:"period_time,omitempty"`
+
+	// Retry strategy
+	OfflineRetry      bool `json:"offline_retry"`
+	OfflineRetryWait  int  `json:"offline_retry_wait"`
+	FailedRetry       bool `json:"failed_retry"`
+	FailedRetryCount  int  `json:"failed_retry_count"`
+	FailedRetryInterval int `json:"failed_retry_interval"`
+
+	// Execution timestamps
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Statistics
+	TotalDevices int       `json:"total_devices"`
+	SuccessCount int       `json:"success_count"`
+	FailedCount  int       `json:"failed_count"`
+	Result       TaskResult `json:"result,omitempty"`
 }
 
 // CommandFilter specifies criteria for listing MML commands.
@@ -74,6 +119,8 @@ type ScriptFilter struct {
 
 // TaskFilter specifies criteria for listing MML tasks.
 type TaskFilter struct {
-	Status *TaskStatus
+	Status      *TaskStatus
+	ExecuteType *ExecuteType
+	Result      *TaskResult
 	model.ListRequest
 }

@@ -38,12 +38,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	scripts := mml.Group("/scripts")
 	scripts.GET("", h.ListScripts)
 	scripts.POST("", h.CreateScript)
+	scripts.GET("/:id", h.GetScript)
 	scripts.PUT("/:id", h.UpdateScript)
 	scripts.DELETE("/:id", h.DeleteScript)
 
 	tasks := mml.Group("/tasks")
 	tasks.GET("", h.ListTasks)
 	tasks.GET("/:id", h.GetTask)
+	tasks.POST("/:id/start", h.StartTask)
+	tasks.POST("/:id/pause", h.PauseTask)
+	tasks.POST("/:id/cancel", h.CancelTask)
+	tasks.DELETE("/:id", h.DeleteTask)
 }
 
 // ---- Request types ----
@@ -54,6 +59,20 @@ type ExecuteHTTPRequest struct {
 	DeviceSNs   []string               `json:"device_sns" binding:"required"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
+
+	// Scheduling
+	ExecuteType string `json:"execute_type"`
+	ScheduledAt string `json:"scheduled_at"`
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
+	PeriodTime  string `json:"period_time"`
+
+	// Retry strategy
+	OfflineRetry        bool `json:"offline_retry"`
+	OfflineRetryWait    int  `json:"offline_retry_wait"`
+	FailedRetry         bool `json:"failed_retry"`
+	FailedRetryCount    int  `json:"failed_retry_count"`
+	FailedRetryInterval int  `json:"failed_retry_interval"`
 }
 
 // CreateScriptRequest defines the request body for creating an MML script.
@@ -135,12 +154,28 @@ func (h *Handler) Execute(c *gin.Context) {
 	creatorStr, _ := creator.(string)
 
 	execReq := ExecuteRequest{
-		CommandCode: req.CommandCode,
-		DeviceSNs:   req.DeviceSNs,
-		Parameters:  req.Parameters,
-		TaskName:    req.TaskName,
-		Creator:     creatorStr,
+		CommandCode:         req.CommandCode,
+		DeviceSNs:           req.DeviceSNs,
+		Parameters:          req.Parameters,
+		TaskName:            req.TaskName,
+		Creator:             creatorStr,
+		ExecuteType:         ExecuteType(req.ExecuteType),
+		OfflineRetry:        req.OfflineRetry,
+		OfflineRetryWait:    req.OfflineRetryWait,
+		FailedRetry:         req.FailedRetry,
+		FailedRetryCount:    req.FailedRetryCount,
+		FailedRetryInterval: req.FailedRetryInterval,
 	}
+	if req.ScheduledAt != "" {
+		execReq.ScheduledAt = &req.ScheduledAt
+	}
+	if req.PeriodStart != "" {
+		execReq.PeriodStart = &req.PeriodStart
+	}
+	if req.PeriodEnd != "" {
+		execReq.PeriodEnd = &req.PeriodEnd
+	}
+	execReq.PeriodTime = req.PeriodTime
 
 	task, err := h.service.ExecuteCommand(c.Request.Context(), execReq)
 	if err != nil {
@@ -181,6 +216,23 @@ func (h *Handler) ListScripts(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// GetScript handles GET /api/v1/mml/scripts/:id.
+func (h *Handler) GetScript(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	script, err := h.service.GetScript(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, script)
 }
 
 // CreateScript handles POST /api/v1/mml/scripts.
@@ -277,6 +329,14 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		s := TaskStatus(status)
 		filter.Status = &s
 	}
+	if executeType := c.Query("execute_type"); executeType != "" {
+		et := ExecuteType(executeType)
+		filter.ExecuteType = &et
+	}
+	if result := c.Query("result"); result != "" {
+		r := TaskResult(result)
+		filter.Result = &r
+	}
 
 	result, err := h.service.ListTasks(c.Request.Context(), filter)
 	if err != nil {
@@ -302,4 +362,73 @@ func (h *Handler) GetTask(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, task)
+}
+
+// ---- Task control handlers (Phase 2) ----
+
+// StartTask handles POST /api/v1/mml/tasks/:id/start.
+func (h *Handler) StartTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	task, err := h.service.StartTask(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, task)
+}
+
+// PauseTask handles POST /api/v1/mml/tasks/:id/pause.
+func (h *Handler) PauseTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	task, err := h.service.PauseTask(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, task)
+}
+
+// CancelTask handles POST /api/v1/mml/tasks/:id/cancel.
+func (h *Handler) CancelTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	task, err := h.service.CancelTask(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, task)
+}
+
+// DeleteTask handles DELETE /api/v1/mml/tasks/:id.
+func (h *Handler) DeleteTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.service.DeleteTask(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }

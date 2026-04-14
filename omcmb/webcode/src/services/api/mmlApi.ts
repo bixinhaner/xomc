@@ -30,14 +30,6 @@ interface BackendMMLScript {
   updated_at: string;
 }
 
-interface BackendMMLResult {
-  success: boolean;
-  raw_output: string;
-  parsed_data?: Record<string, unknown>;
-  execution_time: number;
-  timestamp: string;
-}
-
 interface BackendMMLTask {
   id: string;
   task_name: string;
@@ -49,6 +41,26 @@ interface BackendMMLTask {
   creator: string;
   created_at: string;
   updated_at: string;
+  // Scheduling
+  execute_type: string;
+  scheduled_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  period_time: string | null;
+  // Retry strategy
+  offline_retry: boolean;
+  offline_retry_wait: number;
+  failed_retry: boolean;
+  failed_retry_count: number;
+  failed_retry_interval: number;
+  // Execution timestamps
+  started_at: string | null;
+  finished_at: string | null;
+  // Statistics
+  total_devices: number;
+  success_count: number;
+  failed_count: number;
+  result: string | null;
 }
 
 interface BackendListResponse<T> {
@@ -159,6 +171,26 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     creator: bt.creator,
     createdAt: bt.created_at,
     updatedAt: bt.updated_at,
+    // Scheduling
+    executeType: (bt.execute_type ?? 'immediate') as MMLTask['executeType'],
+    scheduledAt: bt.scheduled_at || undefined,
+    periodStart: bt.period_start || undefined,
+    periodEnd: bt.period_end || undefined,
+    periodTime: bt.period_time || undefined,
+    // Retry strategy
+    offlineRetry: bt.offline_retry ?? false,
+    offlineRetryWait: bt.offline_retry_wait ?? 60,
+    failedRetry: bt.failed_retry ?? false,
+    failedRetryCount: bt.failed_retry_count ?? 3,
+    failedRetryInterval: bt.failed_retry_interval ?? 5,
+    // Execution timestamps
+    startedAt: bt.started_at || undefined,
+    finishedAt: bt.finished_at || undefined,
+    // Statistics
+    totalDevices: bt.total_devices ?? 0,
+    successCount: bt.success_count ?? 0,
+    failedCount: bt.failed_count ?? 0,
+    result: (bt.result || undefined) as MMLTask['result'],
   };
 }
 
@@ -217,30 +249,15 @@ export const mmlApi = {
     commandCode: string,
     deviceSns: string[],
     params?: Record<string, string | number | boolean>
-  ): Promise<Array<{ deviceSn: string; result: MMLResult }>> {
+  ): Promise<MMLTask> {
     const payload: Record<string, unknown> = {
       command_code: commandCode,
       device_sns: deviceSns,
     };
-    if (params) payload.params = params;
+    if (params) payload.parameters = params;
 
     const { data } = await http.post<BackendMMLTask>('/mml/execute', payload);
-
-    // The execute endpoint creates a task; extract results if available,
-    // otherwise return an empty-result per device (task is async).
-    if (data.results && data.results.length > 0) {
-      return data.results.map(mapBackendResult);
-    }
-    // Task created but not yet finished — return placeholder results
-    return deviceSns.map((sn) => ({
-      deviceSn: sn,
-      result: {
-        success: true,
-        rawOutput: '',
-        executionTime: 0,
-        timestamp: data.created_at || new Date().toISOString(),
-      },
-    }));
+    return mapBackendTask(data);
   },
 
   // --- Scripts ---
@@ -348,13 +365,24 @@ export const mmlApi = {
   async createTask(
     data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>
   ): Promise<MMLTask> {
-    const payload = {
+    const payload: Record<string, unknown> = {
       task_name: data.taskName,
       script_id: data.scriptId,
       device_sns: data.deviceSns,
       commands: data.commands.map((cmd) => ({ command_code: cmd })),
       creator: data.creator,
+      execute_type: data.executeType || 'immediate',
+      offline_retry: data.offlineRetry || false,
+      offline_retry_wait: data.offlineRetryWait || 60,
+      failed_retry: data.failedRetry || false,
+      failed_retry_count: data.failedRetryCount || 3,
+      failed_retry_interval: data.failedRetryInterval || 5,
     };
+    if (data.scheduledAt) payload.scheduled_at = data.scheduledAt;
+    if (data.periodStart) payload.period_start = data.periodStart;
+    if (data.periodEnd) payload.period_end = data.periodEnd;
+    if (data.periodTime) payload.period_time = data.periodTime;
+
     const { data: bt } = await http.post<BackendMMLTask>(
       '/mml/execute',
       payload
@@ -375,5 +403,26 @@ export const mmlApi = {
       payload
     );
     return mapBackendTask(bt);
+  },
+
+  // --- Task control ---
+
+  async startTask(id: string): Promise<MMLTask> {
+    const { data } = await http.post<BackendMMLTask>(`/mml/tasks/${id}/start`);
+    return mapBackendTask(data);
+  },
+
+  async pauseTask(id: string): Promise<MMLTask> {
+    const { data } = await http.post<BackendMMLTask>(`/mml/tasks/${id}/pause`);
+    return mapBackendTask(data);
+  },
+
+  async cancelTask(id: string): Promise<MMLTask> {
+    const { data } = await http.post<BackendMMLTask>(`/mml/tasks/${id}/cancel`);
+    return mapBackendTask(data);
+  },
+
+  async deleteTask(id: string): Promise<void> {
+    await http.delete(`/mml/tasks/${id}`);
   },
 };
