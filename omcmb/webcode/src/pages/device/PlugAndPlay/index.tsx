@@ -883,6 +883,7 @@ export default function PlugAndPlay() {
       {detailTaskId && (
         <ExecuteDetailPanel
           taskId={detailTaskId}
+          taskData={tasks.find(t => t.taskId === detailTaskId)}
           onClose={() => setDetailTaskId(null)}
         />
       )}
