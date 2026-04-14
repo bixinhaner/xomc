@@ -486,6 +486,7 @@ export default function PlugAndPlay() {
       title: t('provision.productType'),
       dataIndex: 'productType',
       width: 120,
+      ellipsis: true,
     },
     {
       key: 'policyName',
@@ -498,6 +499,7 @@ export default function PlugAndPlay() {
       title: t('provision.executeType'),
       dataIndex: 'executeType',
       width: 120,
+      ellipsis: true,
       render: (val) => (
         <Tag color={val === '0' ? 'green' : 'blue'}>
           {val === '0' ? t('provision.autoExecute') : t('provision.manualExecute')}
@@ -509,24 +511,29 @@ export default function PlugAndPlay() {
       title: t('provision.softwareUpgrade'),
       dataIndex: 'upgradeEnable',
       width: 200,
-      render: (val, record) => (
-        <Space size={4} style={{ whiteSpace: 'nowrap' }}>
-          {val === '1' ? (
-            <Tag icon={<CheckCircleOutlined />} color="success">{t('common.enabled')}</Tag>
-          ) : (
-            <Tag color="default">{t('common.disabled')}</Tag>
-          )}
-          {val === '1' && record.targetVersion?.[0] && (
-            <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{t('provision.targetVersion')}={record.targetVersion[0]}</Text>
-          )}
-        </Space>
-      ),
+      ellipsis: true,
+      render: (val, record) => {
+        const version = val === '1' && record.targetVersion?.[0]
+          ? ` ${t('provision.targetVersion')}=${record.targetVersion[0]}`
+          : '';
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            {val === '1' ? (
+              <Tag icon={<CheckCircleOutlined />} color="success">{t('common.enabled')}</Tag>
+            ) : (
+              <Tag color="default">{t('common.disabled')}</Tag>
+            )}
+            {version && <Text type="secondary" style={{ fontSize: 12 }}>{version}</Text>}
+          </span>
+        );
+      },
     },
     {
       key: 'licenseEnable',
       title: t('provision.license'),
       dataIndex: 'licenseEnable',
       width: 80,
+      ellipsis: true,
       render: (val) => (
         val === '1' ? (
           <Tag icon={<CheckCircleOutlined />} color="success" />
@@ -540,6 +547,7 @@ export default function PlugAndPlay() {
       title: t('provision.selfConfig'),
       dataIndex: 'selfConfigEnable',
       width: 120,
+      ellipsis: true,
       render: (val) => (
         val === '1' ? (
           <Tag icon={<CheckCircleOutlined />} color="success">{t('common.enabled')}</Tag>
@@ -786,20 +794,10 @@ export default function PlugAndPlay() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <Text strong style={{ fontSize: 14 }}>{t('provision.executeStatus')}</Text>
-            <Space split="|" size={8}>
-              <Space size={4}>
-                <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                <Text type="success">{successCount}</Text>
-              </Space>
-              <Space size={4}>
-                <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                <Text type="danger">{failCount}</Text>
-              </Space>
-            </Space>
             {[
               { key: '0', label: t('provision.allTasks') },
               { key: '1', label: t('provision.softwareUpgrade') },
-              { key: '2', label: 'License' },
+              { key: '2', label: t('provision.license') },
               { key: '3', label: t('provision.selfConfig') },
             ].map(item => (
               <Tag
@@ -811,6 +809,16 @@ export default function PlugAndPlay() {
                 {item.label}
               </Tag>
             ))}
+          </Space>
+          <Space split="|" size={8}>
+            <Space size={4}>
+              <CheckCircleOutlined style={{ color: '#52c41a' }} />
+              <Text type="success">{successCount}</Text>
+            </Space>
+            <Space size={4}>
+              <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+              <Text type="danger">{failCount}</Text>
+            </Space>
           </Space>
         </div>
 
