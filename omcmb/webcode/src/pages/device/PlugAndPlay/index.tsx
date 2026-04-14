@@ -58,6 +58,9 @@ interface ExecuteTask {
   status: TaskStatus;
   failureReason: string;
   policyId: string;
+  originalVersion: string;
+  targetVersion: string;
+  licenseFile: string;
 }
 
 // Product types
@@ -123,6 +126,84 @@ const MOCK_POLICIES: Policy[] = [
     createTime: '2026-03-10 10:00:00',
     updateTime: '2026-03-15 14:00:00',
   },
+  {
+    policyId: 'pnp-5',
+    policyName: 'QAFC全量开通策略',
+    productType: 'QAFC',
+    executeType: '0',
+    selfStartEnable: '1',
+    upgradeEnable: '1',
+    targetVersion: ['V3.0.0'],
+    licenseEnable: '1',
+    selfConfigEnable: '1',
+    createTime: '2026-03-18 09:30:00',
+    updateTime: '2026-04-02 10:00:00',
+  },
+  {
+    policyId: 'pnp-6',
+    policyName: 'CPE-B200手动升级策略',
+    productType: 'CPE-B200',
+    executeType: '1',
+    selfStartEnable: '0',
+    upgradeEnable: '1',
+    targetVersion: ['V2.0.0'],
+    licenseEnable: '0',
+    selfConfigEnable: '0',
+    createTime: '2026-03-22 14:00:00',
+    updateTime: '2026-03-28 16:00:00',
+  },
+  {
+    policyId: 'pnp-7',
+    policyName: 'QAFA参数自配置策略',
+    productType: 'QAFA',
+    executeType: '0',
+    selfStartEnable: '1',
+    upgradeEnable: '0',
+    targetVersion: [],
+    licenseEnable: '0',
+    selfConfigEnable: '1',
+    createTime: '2026-04-03 11:00:00',
+    updateTime: '2026-04-03 11:00:00',
+  },
+  {
+    policyId: 'pnp-8',
+    policyName: 'QAFB自动开通策略',
+    productType: 'QAFB',
+    executeType: '0',
+    selfStartEnable: '1',
+    upgradeEnable: '1',
+    targetVersion: ['V2.3.0'],
+    licenseEnable: '1',
+    selfConfigEnable: '1',
+    createTime: '2026-04-05 08:30:00',
+    updateTime: '2026-04-06 09:00:00',
+  },
+  {
+    policyId: 'pnp-9',
+    policyName: 'CPE-A100 License更新策略',
+    productType: 'CPE-A100',
+    executeType: '0',
+    selfStartEnable: '1',
+    upgradeEnable: '0',
+    targetVersion: [],
+    licenseEnable: '1',
+    selfConfigEnable: '0',
+    createTime: '2026-04-08 10:00:00',
+    updateTime: '2026-04-08 10:00:00',
+  },
+  {
+    policyId: 'pnp-10',
+    policyName: 'QAFC手动升级策略',
+    productType: 'QAFC',
+    executeType: '1',
+    selfStartEnable: '0',
+    upgradeEnable: '1',
+    targetVersion: ['V3.1.0'],
+    licenseEnable: '0',
+    selfConfigEnable: '1',
+    createTime: '2026-04-10 13:00:00',
+    updateTime: '2026-04-10 13:00:00',
+  },
 ];
 
 // Mock data - combined tasks
@@ -131,7 +212,7 @@ const MOCK_TASKS: ExecuteTask[] = [
     taskId: 'task-1',
     serialNumber: 'ENB00001',
     productType: 'QAFA',
-    policyName: 'QAFA Auto Provision Policy',
+    policyName: 'QAFA自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 10:00:00',
     endTime: '2026-04-07 10:15:00',
@@ -139,12 +220,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '0',
     failureReason: '',
     policyId: 'pnp-1',
+    originalVersion: 'V2.0.0',
+    targetVersion: 'V2.1.0',
+    licenseFile: 'license_ENB00001.dat',
   },
   {
     taskId: 'task-2',
     serialNumber: 'ENB00002',
     productType: 'QAFA',
-    policyName: 'QAFA Auto Provision Policy',
+    policyName: 'QAFA自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 10:00:00',
     endTime: '2026-04-07 10:20:00',
@@ -152,12 +236,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '1',
     failureReason: 'license_download_failed',
     policyId: 'pnp-1',
+    originalVersion: 'V2.0.0',
+    targetVersion: 'V2.1.0',
+    licenseFile: 'license_ENB00002.dat',
   },
   {
     taskId: 'task-3',
     serialNumber: 'ENB00003',
     productType: 'QAFB',
-    policyName: 'QAFB Manual Upgrade Policy',
+    policyName: 'QAFB手动升级策略',
     executeType: '1',
     startTime: '',
     endTime: '',
@@ -165,12 +252,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '3',
     failureReason: '',
     policyId: 'pnp-2',
+    originalVersion: 'V2.1.0',
+    targetVersion: 'V2.2.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-4',
     serialNumber: 'ENB00004',
     productType: 'QAFA',
-    policyName: 'QAFA Auto Provision Policy',
+    policyName: 'QAFA自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 10:30:00',
     endTime: '',
@@ -178,12 +268,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '2',
     failureReason: '',
     policyId: 'pnp-1',
+    originalVersion: 'V2.0.0',
+    targetVersion: 'V2.1.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-5',
     serialNumber: 'ENB00005',
     productType: 'QAFA',
-    policyName: 'QAFA Auto Provision Policy',
+    policyName: 'QAFA自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 09:00:00',
     endTime: '2026-04-07 09:10:00',
@@ -191,12 +284,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '4',
     failureReason: '',
     policyId: 'pnp-1',
+    originalVersion: 'V2.1.0',
+    targetVersion: 'V2.1.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-6',
     serialNumber: 'CPE00001',
     productType: 'CPE-A100',
-    policyName: 'CPE Auto Provision Policy',
+    policyName: 'CPE自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 10:00:00',
     endTime: '2026-04-07 10:10:00',
@@ -204,12 +300,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '0',
     failureReason: '',
     policyId: 'pnp-4',
+    originalVersion: 'V1.4.0',
+    targetVersion: 'V1.5.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-7',
     serialNumber: 'CPE00002',
     productType: 'CPE-A100',
-    policyName: 'CPE Auto Provision Policy',
+    policyName: 'CPE自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 10:05:00',
     endTime: '',
@@ -217,6 +316,9 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '2',
     failureReason: '',
     policyId: 'pnp-4',
+    originalVersion: 'V1.5.0',
+    targetVersion: 'V1.5.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-8',
@@ -230,12 +332,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '0',
     failureReason: '',
     policyId: 'pnp-3',
+    originalVersion: '',
+    targetVersion: '',
+    licenseFile: 'license_QAFA_2026Q2.dat',
   },
   {
     taskId: 'task-9',
     serialNumber: 'ENB00007',
     productType: 'QAFB',
-    policyName: 'QAFB Manual Upgrade Policy',
+    policyName: 'QAFB手动升级策略',
     executeType: '1',
     startTime: '',
     endTime: '',
@@ -243,12 +348,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '3',
     failureReason: '',
     policyId: 'pnp-2',
+    originalVersion: 'V2.1.0',
+    targetVersion: 'V2.2.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-10',
     serialNumber: 'ENB00008',
     productType: 'QAFA',
-    policyName: 'QAFA Auto Provision Policy',
+    policyName: 'QAFA自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 09:30:00',
     endTime: '2026-04-07 09:45:00',
@@ -256,12 +364,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '0',
     failureReason: '',
     policyId: 'pnp-1',
+    originalVersion: 'V2.0.0',
+    targetVersion: 'V2.1.0',
+    licenseFile: 'license_ENB00008.dat',
   },
   {
     taskId: 'task-11',
     serialNumber: 'CPE00003',
     productType: 'CPE-B200',
-    policyName: 'CPE Auto Provision Policy',
+    policyName: 'CPE自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 08:30:00',
     endTime: '2026-04-07 08:35:00',
@@ -269,6 +380,9 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '1',
     failureReason: 'license_download_failed',
     policyId: 'pnp-4',
+    originalVersion: 'V1.3.0',
+    targetVersion: 'V1.5.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-12',
@@ -282,12 +396,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '2',
     failureReason: '',
     policyId: 'pnp-3',
+    originalVersion: '',
+    targetVersion: '',
+    licenseFile: 'license_QAFA_2026Q2_v2.dat',
   },
   {
     taskId: 'task-13',
     serialNumber: 'ENB00010',
     productType: 'QAFB',
-    policyName: 'QAFB Manual Upgrade Policy',
+    policyName: 'QAFB手动升级策略',
     executeType: '1',
     startTime: '2026-04-07 13:00:00',
     endTime: '2026-04-07 13:20:00',
@@ -295,12 +412,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '0',
     failureReason: '',
     policyId: 'pnp-2',
+    originalVersion: 'V2.0.0',
+    targetVersion: 'V2.2.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-14',
     serialNumber: 'CPE00004',
     productType: 'CPE-A100',
-    policyName: 'CPE Auto Provision Policy',
+    policyName: 'CPE自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 07:50:00',
     endTime: '2026-04-07 07:55:00',
@@ -308,12 +428,15 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '4',
     failureReason: '',
     policyId: 'pnp-4',
+    originalVersion: 'V1.5.0',
+    targetVersion: 'V1.5.0',
+    licenseFile: '',
   },
   {
     taskId: 'task-15',
     serialNumber: 'ENB00011',
     productType: 'QAFA',
-    policyName: 'QAFA Auto Provision Policy',
+    policyName: 'QAFA自动开通策略',
     executeType: '0',
     startTime: '2026-04-07 11:30:00',
     endTime: '2026-04-07 11:50:00',
@@ -321,6 +444,9 @@ const MOCK_TASKS: ExecuteTask[] = [
     status: '1',
     failureReason: 'license_download_failed',
     policyId: 'pnp-1',
+    originalVersion: 'V2.0.0',
+    targetVersion: 'V2.1.0',
+    licenseFile: 'license_ENB00011.dat',
   },
 ];
 
@@ -558,121 +684,163 @@ export default function PlugAndPlay() {
     },
   ], [t, handlePolicyMenuClick, handlePolicySwitch]);
 
-  // Task columns
-  const taskColumns: DataTableColumn<ExecuteTask>[] = useMemo(() => [
-    {
-      key: 'actions',
-      title: '',
-      width: 80,
-      fixed: 'left',
-      render: (_, record) => {
-        const items: MenuProps['items'] = [
-          ['0', '1', '4'].includes(record.status) ? {
-            key: 'retry',
-            label: t('provision.retry'),
-            icon: <RedoOutlined />,
-            onClick: () => handleRetryTask(record),
-          } : null,
-          record.executeType === '1' && record.status === '3' ? {
-            key: 'execute',
-            label: t('common.execute'),
-            icon: <PlayCircleOutlined />,
-            onClick: () => handleStartTask(record),
-          } : null,
-          ['0', '1', '3', '4'].includes(record.status) ? {
-            key: 'delete',
-            label: t('common.delete'),
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: () => handleDeleteTask(record),
-          } : null,
-          {
-            key: 'detail',
-            label: t('common.detail'),
-            icon: <InfoCircleOutlined />,
-            onClick: () => setDetailTaskId(record.taskId),
-          },
-        ].filter(Boolean) as MenuProps['items'];
+  // Task columns - dynamic based on taskTab
+  const taskColumns: DataTableColumn<ExecuteTask>[] = useMemo(() => {
+    const commonColumns: DataTableColumn<ExecuteTask>[] = [
+      {
+        key: 'actions',
+        title: '',
+        width: 80,
+        fixed: 'left',
+        render: (_, record) => {
+          const items: MenuProps['items'] = [
+            ['0', '1', '4'].includes(record.status) ? {
+              key: 'retry',
+              label: t('provision.retry'),
+              icon: <RedoOutlined />,
+              onClick: () => handleRetryTask(record),
+            } : null,
+            record.executeType === '1' && record.status === '3' ? {
+              key: 'execute',
+              label: t('common.execute'),
+              icon: <PlayCircleOutlined />,
+              onClick: () => handleStartTask(record),
+            } : null,
+            ['0', '1', '3', '4'].includes(record.status) ? {
+              key: 'delete',
+              label: t('common.delete'),
+              icon: <DeleteOutlined />,
+              danger: true,
+              onClick: () => handleDeleteTask(record),
+            } : null,
+            {
+              key: 'detail',
+              label: t('common.detail'),
+              icon: <InfoCircleOutlined />,
+              onClick: () => setDetailTaskId(record.taskId),
+            },
+          ].filter(Boolean) as MenuProps['items'];
 
-        if (!items || items.length === 0) return null;
+          if (!items || items.length === 0) return null;
 
-        return (
-          <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
-        );
+          return (
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
+            </Dropdown>
+          );
+        },
       },
-    },
-    {
-      key: 'serialNumber',
-      title: t('provision.deviceCode'),
-      dataIndex: 'serialNumber',
-      width: 140,
-      mono: true,
-    },
-    {
-      key: 'productType',
-      title: t('provision.productType'),
-      dataIndex: 'productType',
-      width: 100,
-    },
-    {
-      key: 'policyName',
-      title: t('provision.policyName'),
-      dataIndex: 'policyName',
-      width: 160,
-      ellipsis: true,
-    },
-    {
-      key: 'executeType',
-      title: t('provision.executeType'),
-      dataIndex: 'executeType',
-      width: 100,
-      render: (val) => (
-        <Tag color={val === '0' ? 'green' : 'blue'}>
-          {val === '0' ? t('provision.autoExecute') : t('provision.manualExecute')}
-        </Tag>
-      ),
-    },
-    {
-      key: 'startTime',
-      title: t('provision.startTime'),
-      dataIndex: 'startTime',
-      width: 150,
-    },
-    {
-      key: 'endTime',
-      title: t('provision.endTime'),
-      dataIndex: 'endTime',
-      width: 150,
-    },
-    ...(taskTab === '0' ? [{
-      key: 'executeProcedure',
-      title: t('provision.progress'),
-      dataIndex: 'executeProcedure',
-      width: 200,
-      ellipsis: true,
-      render: (val: string) => translateProcedure(val),
-    }] : []),
-    {
-      key: 'status',
-      title: t('table.status'),
-      dataIndex: 'status',
-      width: 90,
-      render: (val: TaskStatus) => {
-        const cfg = STATUS_CONFIG[val];
-        return <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>;
+      {
+        key: 'serialNumber',
+        title: t('provision.deviceCode'),
+        dataIndex: 'serialNumber',
+        width: 140,
+        mono: true,
       },
-    },
-    {
-      key: 'failureReason',
-      title: t('provision.failureReason'),
-      dataIndex: 'failureReason',
-      width: 200,
-      ellipsis: true,
-      render: (val: string) => translateFailureReason(val),
-    },
-  ], [t, taskTab, STATUS_CONFIG, translateProcedure, translateFailureReason, handleRetryTask, handleStartTask, handleDeleteTask]);
+      {
+        key: 'productType',
+        title: t('provision.productType'),
+        dataIndex: 'productType',
+        width: 100,
+      },
+      {
+        key: 'policyName',
+        title: t('provision.policyName'),
+        dataIndex: 'policyName',
+        width: 160,
+        ellipsis: true,
+      },
+      {
+        key: 'executeType',
+        title: t('provision.executeType'),
+        dataIndex: 'executeType',
+        width: 100,
+        render: (val) => (
+          <Tag color={val === '0' ? 'green' : 'blue'}>
+            {val === '0' ? t('provision.autoExecute') : t('provision.manualExecute')}
+          </Tag>
+        ),
+      },
+      {
+        key: 'startTime',
+        title: t('provision.startTime'),
+        dataIndex: 'startTime',
+        width: 150,
+      },
+      {
+        key: 'endTime',
+        title: t('provision.endTime'),
+        dataIndex: 'endTime',
+        width: 150,
+      },
+    ];
+
+    // Tab-specific columns
+    const tabSpecificColumns: DataTableColumn<ExecuteTask>[] = (() => {
+      switch (taskTab) {
+        case '0': // All Tasks - show progress
+          return [{
+            key: 'executeProcedure',
+            title: t('provision.progress'),
+            dataIndex: 'executeProcedure',
+            width: 200,
+            ellipsis: true,
+            render: (val: string) => translateProcedure(val),
+          }];
+        case '1': // Software Upgrade - show original/target version
+          return [
+            {
+              key: 'originalVersion',
+              title: t('provision.originalVersion'),
+              dataIndex: 'originalVersion',
+              width: 120,
+              render: (val: string) => val || '-',
+            },
+            {
+              key: 'targetVersion',
+              title: t('provision.targetVersion'),
+              dataIndex: 'targetVersion',
+              width: 120,
+              render: (val: string) => val || '-',
+            },
+          ];
+        case '2': // License - show license file
+          return [{
+            key: 'licenseFile',
+            title: t('provision.licenseFile'),
+            dataIndex: 'licenseFile',
+            width: 200,
+            ellipsis: true,
+            render: (val: string) => val || '-',
+          }];
+        default: // Self Config - no extra columns
+          return [];
+      }
+    })();
+
+    const tailColumns: DataTableColumn<ExecuteTask>[] = [
+      {
+        key: 'status',
+        title: t('table.status'),
+        dataIndex: 'status',
+        width: 90,
+        render: (val: TaskStatus) => {
+          const cfg = STATUS_CONFIG[val];
+          return <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>;
+        },
+      },
+      {
+        key: 'failureReason',
+        title: t('provision.failureReason'),
+        dataIndex: 'failureReason',
+        width: 200,
+        ellipsis: true,
+        render: (val: string) => translateFailureReason(val),
+      },
+    ];
+
+    return [...commonColumns, ...tabSpecificColumns, ...tailColumns];
+  }, [t, taskTab, STATUS_CONFIG, translateProcedure, translateFailureReason, handleRetryTask, handleStartTask, handleDeleteTask]);
 
   // Filtered policies
   const filteredPolicies = useMemo(() => {
@@ -758,7 +926,7 @@ export default function PlugAndPlay() {
             defaultDensity="compact"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
-            scroll={{ x: 'max-content', y: 200 }}
+            scroll={{ x: 'max-content', y: 170 }}
             extraToolbarLeft={<Text strong>{t('provision.policyList')}</Text>}
             extraToolbarRight={
               <Space>
@@ -840,7 +1008,7 @@ export default function PlugAndPlay() {
             selectedRowKeys={selectedTaskIds}
             onSelectionChange={(keys) => setSelectedTaskIds(keys as string[])}
             batchActions={taskTab === '0' ? taskBatchActions : undefined}
-            scroll={{ x: 'max-content', y: 180 }}
+            scroll={{ x: 'max-content', y: 220 }}
             extraToolbarRight={
               <Space>
                 <Select

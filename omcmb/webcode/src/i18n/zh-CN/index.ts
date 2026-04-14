@@ -2411,6 +2411,7 @@ const messages: Record<string, string> = {
   'provision.startTime':              '开始时间',
   'provision.endTime':                '结束时间',
   'provision.failureReason':          '失败原因',
+  'provision.licenseFile':            'License文件',
   'provision.retry':                  '重新执行',
   'provision.detect':                 '检测',
   'provision.detectHint':             '设备检测提示',

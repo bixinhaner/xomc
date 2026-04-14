@@ -2407,6 +2407,7 @@ const messages: Record<string, string> = {
   'provision.startTime':              'Start Time',
   'provision.endTime':                'End Time',
   'provision.failureReason':          'Failure Reason',
+  'provision.licenseFile':            'License File',
   'provision.retry':                  'Retry',
   'provision.detect':                 'Detect',
   'provision.detectHint':             'Device Detection Hint',
