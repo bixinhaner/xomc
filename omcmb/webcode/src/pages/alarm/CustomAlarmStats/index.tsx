@@ -7,7 +7,7 @@ import {
   EditOutlined,
   ExportOutlined,
   EyeOutlined,
-  FolderOutlined,
+  AlertOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -1002,7 +1002,7 @@ export default function CustomAlarmStats() {
                 }}
               >
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
-                  <FolderOutlined style={{ marginRight: 6, color: '#fa8c16' }} />
+                  <AlertOutlined style={{ marginRight: 6, color: '#fa8c16' }} />
                   <span>{group.name}</span>
                 </span>
                 <Space size={0} className="node-actions" style={{ opacity: 0, transition: 'opacity 0.2s' }}>
@@ -1067,9 +1067,8 @@ export default function CustomAlarmStats() {
   const rightPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12 }}>
       {/* 标题卡片 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Space>
-          <FolderOutlined style={{ color: '#fa8c16' }} />
           <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || '自定义告警'}</Text>
         </Space>
         <Space>
@@ -1754,7 +1753,7 @@ export default function CustomAlarmStats() {
                         />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <FolderOutlined style={{ marginRight: 8, color: '#FA8C16' }} />
+                        <AlertOutlined style={{ marginRight: 8, color: '#FA8C16' }} />
                         {group.name}
                       </div>
                       <div style={{ width: 100, textAlign: 'center' }}>
