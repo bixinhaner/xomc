@@ -2394,7 +2394,7 @@ const messages: Record<string, string> = {
   'provision.policyList':             '策略列表',
   'provision.executeStatus':          '执行状态',
   'provision.policyName':             '策略名称',
-  'provision.productType':            '产品类型标志',
+  'provision.productType':            '产品类型',
   'provision.productModel':           '产品型号',
   'provision.executeType':            '执行方式',
   'provision.autoExecute':            '自动执行',
