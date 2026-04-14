@@ -26,6 +26,8 @@ interface TaskRecord {
   id: string;
   stepName: string;
   status: '0' | '1' | '2' | '3' | '4';
+  startTime: string;
+  endTime: string;
   failureReason: string;
 }
 
@@ -72,17 +74,19 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
     const procedure = taskData.executeProcedure || '';
     const taskStatus = taskData.status;
     const failureReason = taskData.failureReason;
+    const taskStartTime = taskData.startTime;
+    const taskEndTime = taskData.endTime;
 
     // Handle special procedure texts
     if (procedure === 'waiting') {
-      return [{ id: '1', stepName: t('provision.waitingExecute'), status: '3', failureReason: '' }];
+      return [{ id: '1', stepName: t('provision.waitingExecute'), status: '3', startTime: '', endTime: '', failureReason: '' }];
     }
     if (procedure === 'skipped_latest') {
-      return [{ id: '1', stepName: t('provision.skippedLatestVersion'), status: '4', failureReason: '' }];
+      return [{ id: '1', stepName: t('provision.skippedLatestVersion'), status: '4', startTime: taskStartTime, endTime: taskEndTime, failureReason: '' }];
     }
     if (procedure.endsWith('_running')) {
       const baseStep = procedure.replace('_running', '');
-      return [{ id: '1', stepName: stepNameMap[baseStep] || baseStep, status: '2', failureReason: '' }];
+      return [{ id: '1', stepName: stepNameMap[baseStep] || baseStep, status: '2', startTime: taskStartTime, endTime: '', failureReason: '' }];
     }
 
     // Parse normal procedure steps: "software_upgrade > license > self_config"
@@ -95,6 +99,8 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
       status: idx < failedIdx ? '0' as const
         : idx === failedIdx ? '1' as const
         : taskStatus === '0' ? '0' as const : '0' as const,
+      startTime: idx === 0 ? taskStartTime : '',
+      endTime: idx === steps.length - 1 ? taskEndTime : '',
       failureReason: idx === failedIdx ? failureReason : '',
     }));
   }, [taskData, stepNameMap, t]);
@@ -120,6 +126,20 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
           </Tag>
         );
       },
+    },
+    {
+      title: t('provision.startTime'),
+      dataIndex: 'startTime',
+      key: 'startTime',
+      width: 150,
+      render: (val: string) => val || '-',
+    },
+    {
+      title: t('provision.endTime'),
+      dataIndex: 'endTime',
+      key: 'endTime',
+      width: 150,
+      render: (val: string) => val || '-',
     },
     {
       title: t('provision.failureReason'),
