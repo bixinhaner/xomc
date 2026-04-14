@@ -205,10 +205,6 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		menus.DELETE("", h.DeleteMenus)
 	}
 
-	// ----- Role menu assignment -----
-	roles.GET("/:id/menus", h.GetRoleMenus)
-	roles.PUT("/:id/menus", h.SetRoleMenus)
-
 	rg.GET("/permissions", h.ListPermissions)
 	rg.GET("/audit-logs", h.ListAuditLogs)
 }

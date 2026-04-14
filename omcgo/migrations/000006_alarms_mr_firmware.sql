@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS alarms_history (
     cleared_at      TIMESTAMPTZ
 );
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
@@ -57,6 +58,7 @@ BEGIN
         PERFORM add_retention_policy('alarms_history', INTERVAL '365 days', if_not_exists => TRUE);
     END IF;
 END $$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_alarms_history_device ON alarms_history (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_alarms_history_alarm ON alarms_history (alarm_id, time DESC);
@@ -125,6 +127,7 @@ CREATE TABLE IF NOT EXISTS mr_records (
     measurement_data JSONB NOT NULL DEFAULT '{}'
 );
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
@@ -137,6 +140,7 @@ BEGIN
         PERFORM add_retention_policy('mr_records', INTERVAL '90 days', if_not_exists => TRUE);
     END IF;
 END $$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_mr_records_device ON mr_records (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_mr_records_file ON mr_records (file_id);

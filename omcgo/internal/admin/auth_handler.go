@@ -36,25 +36,26 @@ func (h *Handler) Login(c *gin.Context) {
 	log := logger.L(ctx)
 	userAgent := c.Request.UserAgent()
 
-	// Brute-force protection: check if CAPTCHA is required for this username.
-	if h.loginGuard != nil && h.captcha != nil {
-		if h.loginGuard.RequiresCaptcha(ctx, req.Username) {
-			if req.CaptchaID == "" || req.CaptchaAnswer == "" {
-				c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
-					"code":    7010,
-					"message": "captcha required due to multiple failed attempts",
-				})
-				return
-			}
-			if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
-				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-					"code":    7011,
-					"message": "invalid captcha answer",
-				})
-				return
-			}
-		}
-	}
+	// TODO: captcha verification temporarily disabled
+	// // Brute-force protection: check if CAPTCHA is required for this username.
+	// if h.loginGuard != nil && h.captcha != nil {
+	// 	if h.loginGuard.RequiresCaptcha(ctx, req.Username) {
+	// 		if req.CaptchaID == "" || req.CaptchaAnswer == "" {
+	// 			c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
+	// 				"code":    7010,
+	// 				"message": "captcha required due to multiple failed attempts",
+	// 			})
+	// 			return
+	// 		}
+	// 		if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
+	// 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+	// 				"code":    7011,
+	// 				"message": "invalid captcha answer",
+	// 			})
+	// 			return
+	// 		}
+	// 	}
+	// }
 
 	tokenPair, err := h.service.Login(ctx, req.Username, req.Password)
 	if err != nil {

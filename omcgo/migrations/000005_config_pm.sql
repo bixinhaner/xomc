@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS pm_counters (
     granularity    SMALLINT NOT NULL DEFAULT 15
 );
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
@@ -190,6 +191,7 @@ BEGIN
         PERFORM add_retention_policy('pm_counters', INTERVAL '90 days', if_not_exists => TRUE);
     END IF;
 END $$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_pm_counters_device_time ON pm_counters (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_counters_group_name ON pm_counters (counter_group, counter_name, time DESC);
@@ -271,12 +273,14 @@ CREATE TABLE IF NOT EXISTS kpi_values (
     technology VARCHAR(3) NOT NULL
 );
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
         PERFORM create_hypertable('kpi_values', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
     END IF;
 END $$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_kpi_values_device_time ON kpi_values (device_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_kpi_values_name ON kpi_values (kpi_name, time DESC);
@@ -312,6 +316,7 @@ CREATE TRIGGER trigger_kpi_thresholds_updated_at
 -- ============================================================
 -- 13. Continuous aggregate: hourly PM rollup (TimescaleDB only)
 -- ============================================================
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
@@ -330,6 +335,7 @@ BEGIN
             WITH NO DATA';
     END IF;
 END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 DROP MATERIALIZED VIEW IF EXISTS pm_counters_hourly;

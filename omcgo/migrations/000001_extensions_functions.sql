@@ -5,6 +5,7 @@
 -- ============================================================
 
 -- TimescaleDB 扩展（可选，不存在则跳过）
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
@@ -13,8 +14,10 @@ BEGIN
 EXCEPTION WHEN others THEN
     RAISE NOTICE 'TimescaleDB extension not available, time-series features will be disabled';
 END $$;
+-- +goose StatementEnd
 
 -- 通用 updated_at 自动更新触发器函数
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -22,6 +25,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 -- +goose Down
 DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;

@@ -155,12 +155,14 @@ CREATE TABLE device_parameters (
     param_group      VARCHAR(32)  NOT NULL DEFAULT 'other',
     PRIMARY KEY (device_id, parameter_path)
 ) PARTITION BY HASH (device_id);
+-- +goose StatementBegin
 DO $$
 BEGIN
     FOR i IN 0..31 LOOP
         EXECUTE format('CREATE TABLE device_parameters_p%s PARTITION OF device_parameters FOR VALUES WITH (MODULUS 32, REMAINDER %s)', lpad(i::text, 2, '0'), i);
     END LOOP;
 END $$;
+-- +goose StatementEnd
 CREATE INDEX idx_device_params_device ON device_parameters (device_id);
 CREATE INDEX idx_device_params_path_prefix ON device_parameters (device_id, parameter_path varchar_pattern_ops);
 

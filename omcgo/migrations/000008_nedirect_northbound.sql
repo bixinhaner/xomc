@@ -50,6 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_nedirect_commands_status ON nedirect_commands (st
 -- ============================================================
 -- 3. nedirect_sessions auto-update trigger
 -- ============================================================
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION nedirect_sessions_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -57,6 +58,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER trg_nedirect_sessions_updated_at
     BEFORE UPDATE ON nedirect_sessions
