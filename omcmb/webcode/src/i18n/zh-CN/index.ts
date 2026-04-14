@@ -2458,9 +2458,8 @@ const messages: Record<string, string> = {
   'provision.selfConfigRunning':      '参数配置中...',
   'provision.skippedLatestVersion':   '跳过（已是最新版本）',
   'provision.licenseDownloadFailed':  'License文件下载失败',
-  'provision.autoRefresh':            '自动刷新',
-  'provision.startAutoRefresh':       '开启自动刷新',
-  'provision.stopAutoRefresh':        '停止自动刷新',
+  'provision.startRealRefresh':       '开启实时刷新',
+  'provision.stopRealRefresh':        '关闭实时刷新',
   'provision.progress':               '执行进度',
   'provision.license':                'License',
 

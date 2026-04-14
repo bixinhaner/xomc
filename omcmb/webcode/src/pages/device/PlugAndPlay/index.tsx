@@ -776,7 +776,7 @@ export default function PlugAndPlay() {
                   type={policyAutoRefresh ? 'primary' : 'default'}
                   icon={<SyncOutlined spin={policyAutoRefresh} />}
                   onClick={() => setPolicyAutoRefresh(!policyAutoRefresh)}
-                  title={policyAutoRefresh ? t('provision.stopAutoRefresh') : t('provision.startAutoRefresh')}
+                  title={policyAutoRefresh ? t('provision.stopRealRefresh') : t('provision.startRealRefresh')}
                 />
               </Space>
             }
@@ -872,7 +872,7 @@ export default function PlugAndPlay() {
                   type={autoRefresh ? 'primary' : 'default'}
                   icon={<SyncOutlined spin={autoRefresh} />}
                   onClick={() => setAutoRefresh(!autoRefresh)}
-                  title={autoRefresh ? t('provision.stopAutoRefresh') : t('provision.startAutoRefresh')}
+                  title={autoRefresh ? t('provision.stopRealRefresh') : t('provision.startRealRefresh')}
                 />
               </Space>
             }

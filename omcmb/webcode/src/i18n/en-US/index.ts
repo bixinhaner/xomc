@@ -2460,9 +2460,8 @@ const messages: Record<string, string> = {
   'provision.selfConfigRunning':      'Configuring...',
   'provision.skippedLatestVersion':   'Skipped (already latest)',
   'provision.licenseDownloadFailed':  'License download failed',
-  'provision.autoRefresh':            'Auto Refresh',
-  'provision.startAutoRefresh':       'Start auto refresh',
-  'provision.stopAutoRefresh':        'Stop auto refresh',
+  'provision.startRealRefresh':       'Start realtime refresh',
+  'provision.stopRealRefresh':        'Stop realtime refresh',
   'provision.progress':               'Progress',
   'provision.license':                'License',
 
