@@ -519,7 +519,7 @@ export default function PlugAndPlay() {
         return (
           <span style={{ whiteSpace: 'nowrap' }}>
             {val === '1' ? (
-              <Tag icon={<CheckCircleOutlined />} color="success">{t('common.enabled')}</Tag>
+              <Tag color="success">{t('common.enabled')}</Tag>
             ) : (
               <Tag color="default">{t('common.disabled')}</Tag>
             )}
@@ -536,9 +536,9 @@ export default function PlugAndPlay() {
       ellipsis: true,
       render: (val) => (
         val === '1' ? (
-          <Tag icon={<CheckCircleOutlined />} color="success" />
+          <Tag color="success">{t('common.enabled')}</Tag>
         ) : (
-          <Tag color="default" />
+          <Tag color="default">{t('common.disabled')}</Tag>
         )
       ),
     },
@@ -550,7 +550,7 @@ export default function PlugAndPlay() {
       ellipsis: true,
       render: (val) => (
         val === '1' ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">{t('common.enabled')}</Tag>
+          <Tag color="success">{t('common.enabled')}</Tag>
         ) : (
           <Tag color="default">{t('common.disabled')}</Tag>
         )
