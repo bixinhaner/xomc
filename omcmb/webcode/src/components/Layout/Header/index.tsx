@@ -2,13 +2,8 @@ import { Badge } from 'antd';
 import {
   BellOutlined,
   MenuOutlined,
-  SkinOutlined,
-  ExperimentOutlined,
-  CoffeeOutlined,
-  ThunderboltOutlined,
-  SmileOutlined,
-  StarOutlined,
-  DollarOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@/store/appStore';
 import { useResponsive } from '@/hooks/useResponsive';
@@ -18,23 +13,13 @@ import TimezoneSelector from './TimezoneSelector';
 import UserDropdown from './UserDropdown';
 import styles from './Header.module.css';
 
+
 const DEVICE_TYPE_KEY: Record<string, string> = {
   all: 'device.type.all',
   eNB: 'device.type.eNB',
   gNB: 'device.type.gNB',
   CPE: 'device.type.CPE',
   eGW: 'device.type.eGW',
-};
-
-// Theme icon and tooltip mapping
-const THEME_CONFIG: Record<string, { icon: React.ReactNode; nextTooltip: string }> = {
-  classic: { icon: <SkinOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToTech' },
-  tech: { icon: <ExperimentOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToFresh' },
-  fresh: { icon: <CoffeeOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToCyberpunk' },
-  cyberpunk: { icon: <ThunderboltOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToMinions' },
-  minions: { icon: <SmileOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToTiffany' },
-  tiffany: { icon: <StarOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToRmb' },
-  rmb: { icon: <DollarOutlined style={{ fontSize: 16 }} />, nextTooltip: 'header.switchToClassic' },
 };
 
 export default function Header() {
@@ -46,7 +31,6 @@ export default function Header() {
   const t = useT();
 
   const deviceLabel = DEVICE_TYPE_KEY[deviceType] ? t(DEVICE_TYPE_KEY[deviceType]) : deviceType;
-  const themeConfig = THEME_CONFIG[theme] || THEME_CONFIG.classic;
 
   return (
     <header className={styles.header}>
@@ -64,6 +48,7 @@ export default function Header() {
         )}
         <div className={styles.logoMark}>OMC</div>
         {!isMobile && <span className={styles.systemName}>{t('app.title')}</span>}
+        {!isMobile && <div className={styles.logoDivider} />}
       </div>
 
       {/* Center zone — Current device type indicator */}
@@ -95,14 +80,14 @@ export default function Header() {
 
         <div className={styles.divider} />
 
-        {/* Style toggle */}
+        {/* Light/Dark toggle */}
         <button
           className={styles.headerAction}
           onClick={toggleTheme}
-          title={t(themeConfig.nextTooltip)}
+          title={theme === 'tech' ? t('header.switchToLight') : t('header.switchToDark')}
           type="button"
         >
-          {themeConfig.icon}
+          {theme === 'tech' ? <SunOutlined style={{ fontSize: 16 }} /> : <MoonOutlined style={{ fontSize: 16 }} />}
         </button>
 
         <div className={styles.divider} />

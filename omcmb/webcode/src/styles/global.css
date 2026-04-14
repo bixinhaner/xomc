@@ -59,39 +59,42 @@
   --color-severity-minor-hover: #fff1b8;
   --color-severity-warning-hover: #bae7ff;
 
-  /* ----- Header chrome ----- */
-  --color-header-bg: #001529;
-  --color-header-shadow: 0 1px 4px rgba(0, 21, 41, 0.35);
-  --color-header-text: #FFFFFF;
-  --color-header-text-secondary: rgba(255, 255, 255, 0.65);
-  --color-header-text-muted: rgba(255, 255, 255, 0.45);
-  --color-header-text-dim: rgba(255, 255, 255, 0.55);
-  --color-header-text-bright: rgba(255, 255, 255, 0.9);
-  --color-header-action-hover: rgba(255, 255, 255, 0.08);
-  --color-header-divider: rgba(255, 255, 255, 0.15);
-  --color-header-border: rgba(255, 255, 255, 0.12);
-  --color-header-border-hover: rgba(255, 255, 255, 0.35);
-  --color-header-input-bg: rgba(255, 255, 255, 0.06);
-  --color-header-input-text: rgba(255, 255, 255, 0.75);
-  --color-header-logo-gradient: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+  /* ----- Header chrome — Linear Panel Dark ----- */
+  --color-header-bg: #0f1011;
+  --color-header-shadow: none;
+  --color-header-text: #f7f8f8;
+  --color-header-text-secondary: #d0d6e0;
+  --color-header-text-muted: #8a8f98;
+  --color-header-text-dim: #62666d;
+  --color-header-text-bright: #f7f8f8;
+  --color-header-action-hover: rgba(255, 255, 255, 0.04);
+  --color-header-divider: rgba(255, 255, 255, 0.08);
+  --color-header-border: rgba(255, 255, 255, 0.08);
+  --color-header-border-hover: rgba(255, 255, 255, 0.12);
+  --color-header-input-bg: rgba(255, 255, 255, 0.02);
+  --color-header-input-text: #d0d6e0;
+  --color-header-logo-gradient: linear-gradient(135deg, #5e6ad2 0%, #7170ff 100%);
 
-  /* ----- Sidebar chrome ----- */
-  --color-sidebar-bg: #001529;
-  --color-sidebar-bg-deep: #000C17;
-  --color-sidebar-text: rgba(255, 255, 255, 0.65);
-  --color-sidebar-text-active: #FFFFFF;
-  --color-sidebar-text-hover: rgba(255, 255, 255, 0.85);
-  --color-sidebar-text-muted: rgba(255, 255, 255, 0.35);
-  --color-sidebar-text-dim: rgba(255, 255, 255, 0.25);
-  --color-sidebar-hover: rgba(255, 255, 255, 0.08);
-  --color-sidebar-divider: rgba(255, 255, 255, 0.06);
-  --color-sidebar-scrollbar: rgba(255, 255, 255, 0.15);
-  --color-sidebar-btn-border: rgba(255, 255, 255, 0.15);
-  --color-sidebar-btn-border-hover: rgba(255, 255, 255, 0.3);
-  --color-sidebar-btn-bg: rgba(255, 255, 255, 0.05);
-  --color-sidebar-btn-bg-hover: rgba(255, 255, 255, 0.12);
-  --color-sidebar-btn-text: rgba(255, 255, 255, 0.55);
-  --color-sidebar-btn-text-hover: rgba(255, 255, 255, 0.9);
+  /* ----- Sidebar chrome — Linear Panel Dark ----- */
+  --color-sidebar-bg: #0f1011;
+  --color-sidebar-bg-deep: #0a0a0b;
+  --color-sidebar-text: #8a8f98;
+  --color-sidebar-text-active: #f7f8f8;
+  --color-sidebar-text-hover: #d0d6e0;
+  --color-sidebar-text-muted: #62666d;
+  --color-sidebar-text-dim: #62666d;
+  --color-sidebar-hover: rgba(255, 255, 255, 0.04);
+  --color-sidebar-divider: rgba(255, 255, 255, 0.05);
+  --color-sidebar-scrollbar: rgba(255, 255, 255, 0.08);
+  --color-sidebar-btn-border: rgba(255, 255, 255, 0.08);
+  --color-sidebar-btn-border-hover: rgba(255, 255, 255, 0.12);
+  --color-sidebar-btn-bg: rgba(255, 255, 255, 0.04);
+  --color-sidebar-btn-bg-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-btn-text: #8a8f98;
+  --color-sidebar-btn-text-hover: #d0d6e0;
+  --color-sidebar-selected-bg: rgba(255, 255, 255, 0.06);
+  --color-sidebar-selected-text: #f7f8f8;
+  --color-sidebar-group-title: #62666d;
 
   /* ----- Login page ----- */
   --login-bg-gradient: linear-gradient(135deg, #001529 0%, #002d62 50%, #0958D9 100%);
@@ -149,108 +152,113 @@
    TECH theme — 科技未来 (Cyberpunk / Dark)
    =========================================================================== */
 [data-theme="tech"] {
-  /* 3D Effect tokens */
-  --effect-perspective: 1000px;
-  --effect-tilt-max: 10deg;
-  --effect-glow-color: rgba(0, 212, 255, 0.3);
-  --effect-glow-intensity: 0.3;
-  --effect-float-amplitude: 5px;
+  /* 3D Effect tokens — Apple: restrained, minimal */
+  --effect-perspective: 1100px;
+  --effect-tilt-max: 4deg;
+  --effect-glow-color: rgba(0, 113, 227, 0.15);
+  --effect-glow-intensity: 0.08;
+  --effect-float-amplitude: 2px;
 
-  --color-primary-50: #0A2A3A;
-  --color-primary-100: #0D3A4F;
-  --color-primary-200: #125570;
-  --color-primary-300: #1A7A9C;
-  --color-primary-400: #26A5CC;
-  --color-primary-500: #00C4EE;
-  --color-primary-600: #00D4FF;
-  --color-primary-700: #33DDFF;
-  --color-primary-800: #66E5FF;
-  --color-primary-900: #99EEFF;
+  /* Apple Blue scale */
+  --color-primary-50: #001a3a;
+  --color-primary-100: #002d5c;
+  --color-primary-200: #004a8f;
+  --color-primary-300: #0060bf;
+  --color-primary-400: #0071e3;
+  --color-primary-500: #0071e3;
+  --color-primary-600: #0071e3;
+  --color-primary-700: #2997ff;
+  --color-primary-800: #52abff;
+  --color-primary-900: #7ac0ff;
 
-  --color-neutral-50: #0D1117;
-  --color-neutral-100: #161B22;
-  --color-neutral-200: #1C2128;
-  --color-neutral-300: #21262D;
-  --color-neutral-400: #30363D;
-  --color-neutral-500: #484F58;
-  --color-neutral-600: #8B949E;
-  --color-neutral-700: #C9D1D9;
-  --color-neutral-800: #E6EDF3;
-  --color-neutral-900: #F0F6FC;
-  --color-neutral-950: #FFFFFF;
+  /* Apple dark surface scale */
+  --color-neutral-50: #000000;
+  --color-neutral-100: #000000;
+  --color-neutral-200: #1d1d1f;
+  --color-neutral-300: #272729;
+  --color-neutral-400: #333336;
+  --color-neutral-500: #424245;
+  --color-neutral-600: #6e6e73;
+  --color-neutral-700: #86868b;
+  --color-neutral-800: #d2d2d7;
+  --color-neutral-900: #f5f5f7;
+  --color-neutral-950: #ffffff;
 
-  --color-bg-container: #161B22;
-  --color-bg-elevated: #1C2128;
-  --color-border: #21262D;
-  --color-border-secondary: #30363D;
+  --color-bg-container: #1d1d1f;
+  --color-bg-elevated: #272729;
+  --color-border: #333336;
+  --color-border-secondary: #424245;
 
-  --color-severity-critical-bg: #3A1215;
-  --color-severity-major-bg: #3B2D11;
-  --color-severity-minor-bg: #3B3611;
-  --color-severity-warning-bg: #112D3C;
-  --color-row-hover: #1C2530;
-  --color-selection-bg: #0D2A3A;
-  --color-severity-critical-hover: #4A1A1D;
-  --color-severity-major-hover: #4B3D18;
-  --color-severity-minor-hover: #4B4618;
-  --color-severity-warning-hover: #183D4C;
+  --color-severity-critical-bg: #3a1215;
+  --color-severity-major-bg: #3b2d11;
+  --color-severity-minor-bg: #3b3611;
+  --color-severity-warning-bg: #0d1f3a;
+  --color-row-hover: #272729;
+  --color-selection-bg: rgba(0, 113, 227, 0.12);
+  --color-severity-critical-hover: #4a1a1d;
+  --color-severity-major-hover: #4b3d18;
+  --color-severity-minor-hover: #4b4618;
+  --color-severity-warning-hover: #153050;
 
-  --color-status-processing: #00D4FF;
+  --color-status-processing: #0071e3;
 
-  /* Header chrome — dark glassy */
-  --color-header-bg: rgba(13, 17, 23, 0.92);
-  --color-header-shadow: 0 1px 8px rgba(0, 0, 0, 0.5), 0 0 1px rgba(0, 212, 255, 0.1);
-  --color-header-text: #E6EDF3;
-  --color-header-text-secondary: rgba(201, 209, 217, 0.75);
-  --color-header-text-muted: rgba(139, 148, 158, 0.65);
-  --color-header-text-dim: rgba(139, 148, 158, 0.5);
-  --color-header-text-bright: #E6EDF3;
-  --color-header-action-hover: rgba(0, 212, 255, 0.1);
-  --color-header-divider: rgba(0, 212, 255, 0.12);
-  --color-header-border: rgba(0, 212, 255, 0.15);
-  --color-header-border-hover: rgba(0, 212, 255, 0.3);
-  --color-header-input-bg: rgba(0, 212, 255, 0.06);
-  --color-header-input-text: rgba(201, 209, 217, 0.8);
-  --color-header-logo-gradient: linear-gradient(135deg, #00D4FF 0%, #0090B0 100%);
+  /* Header chrome — Linear Panel Dark */
+  --color-header-bg: #0f1011;
+  --color-header-shadow: none;
+  --color-header-text: #f7f8f8;
+  --color-header-text-secondary: #d0d6e0;
+  --color-header-text-muted: #8a8f98;
+  --color-header-text-dim: #62666d;
+  --color-header-text-bright: #f7f8f8;
+  --color-header-action-hover: rgba(255, 255, 255, 0.04);
+  --color-header-divider: rgba(255, 255, 255, 0.08);
+  --color-header-border: rgba(255, 255, 255, 0.08);
+  --color-header-border-hover: rgba(255, 255, 255, 0.12);
+  --color-header-input-bg: rgba(255, 255, 255, 0.02);
+  --color-header-input-text: #d0d6e0;
+  --color-header-logo-gradient: linear-gradient(135deg, #5e6ad2 0%, #7170ff 100%);
 
-  /* Sidebar chrome — dark glassy */
-  --color-sidebar-bg: rgba(13, 17, 23, 0.95);
-  --color-sidebar-bg-deep: #0A0E14;
-  --color-sidebar-text: rgba(201, 209, 217, 0.7);
-  --color-sidebar-text-active: #00D4FF;
-  --color-sidebar-text-hover: #E6EDF3;
-  --color-sidebar-text-muted: rgba(139, 148, 158, 0.5);
-  --color-sidebar-text-dim: rgba(139, 148, 158, 0.35);
-  --color-sidebar-hover: rgba(0, 212, 255, 0.08);
-  --color-sidebar-divider: rgba(0, 212, 255, 0.06);
-  --color-sidebar-scrollbar: rgba(0, 212, 255, 0.12);
-  --color-sidebar-btn-border: rgba(0, 212, 255, 0.2);
-  --color-sidebar-btn-border-hover: rgba(0, 212, 255, 0.4);
-  --color-sidebar-btn-bg: rgba(0, 212, 255, 0.05);
-  --color-sidebar-btn-bg-hover: rgba(0, 212, 255, 0.12);
-  --color-sidebar-btn-text: rgba(201, 209, 217, 0.6);
-  --color-sidebar-btn-text-hover: #00D4FF;
+  /* Sidebar chrome — Linear Panel Dark */
+  --color-sidebar-bg: #0f1011;
+  --color-sidebar-bg-deep: #0a0a0b;
+  --color-sidebar-text: #8a8f98;
+  --color-sidebar-text-active: #f7f8f8;
+  --color-sidebar-text-hover: #d0d6e0;
+  --color-sidebar-text-muted: #62666d;
+  --color-sidebar-text-dim: #62666d;
+  --color-sidebar-hover: rgba(255, 255, 255, 0.04);
+  --color-sidebar-divider: rgba(255, 255, 255, 0.05);
+  --color-sidebar-scrollbar: rgba(255, 255, 255, 0.08);
+  --color-sidebar-btn-border: rgba(255, 255, 255, 0.08);
+  --color-sidebar-btn-border-hover: rgba(255, 255, 255, 0.12);
+  --color-sidebar-btn-bg: rgba(255, 255, 255, 0.04);
+  --color-sidebar-btn-bg-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-btn-text: #8a8f98;
+  --color-sidebar-btn-text-hover: #d0d6e0;
+  --color-sidebar-selected-bg: rgba(255, 255, 255, 0.06);
+  --color-sidebar-selected-text: #f7f8f8;
+  --color-sidebar-group-title: #62666d;
 
-  /* Login page — dark neon */
-  --login-bg-gradient: linear-gradient(135deg, #0A0E14 0%, #0D1117 50%, #111D2C 100%);
-  --login-bg-radial: radial-gradient(ellipse at center, rgba(0, 212, 255, 0.08) 0%, transparent 60%);
-  --login-bg-accent: radial-gradient(ellipse at center, rgba(0, 255, 136, 0.04) 0%, transparent 70%);
-  --login-card-bg: rgba(22, 27, 34, 0.92);
-  --login-card-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 212, 255, 0.08);
-  --login-logo-area-bg: linear-gradient(180deg, rgba(13, 17, 23, 0.98) 0%, rgba(22, 27, 34, 0.95) 100%);
-  --login-logo-gradient: linear-gradient(135deg, #00D4FF 0%, #0090B0 100%);
-  --login-logo-shadow: 0 8px 24px rgba(0, 212, 255, 0.3);
-  --login-logo-shadow-pulse: 0 8px 32px rgba(0, 212, 255, 0.6);
-  --login-btn-gradient: linear-gradient(135deg, #00D4FF 0%, #0090B0 100%);
-  --login-btn-shadow: 0 4px 16px rgba(0, 212, 255, 0.3);
-  --login-btn-shadow-hover: 0 6px 20px rgba(0, 212, 255, 0.5);
-  --login-footer-border: rgba(0, 212, 255, 0.06);
-  --login-footer-text: rgba(139, 148, 158, 0.5);
-  --login-input-icon: rgba(139, 148, 158, 0.5);
+  /* Login page — Apple dark */
+  --login-bg-gradient: linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #1d1d1f 100%);
+  --login-bg-radial: radial-gradient(ellipse at center, rgba(0, 113, 227, 0.06) 0%, transparent 60%);
+  --login-bg-accent: radial-gradient(ellipse at center, rgba(0, 113, 227, 0.03) 0%, transparent 70%);
+  --login-card-bg: rgba(29, 29, 31, 0.96);
+  --login-card-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 3px 5px 30px rgba(0, 0, 0, 0.22);
+  --login-logo-area-bg: linear-gradient(180deg, rgba(0, 0, 0, 0.98) 0%, rgba(29, 29, 31, 0.95) 100%);
+  --login-logo-gradient: linear-gradient(135deg, #0071e3 0%, #004a8f 100%);
+  --login-logo-shadow: 0 4px 12px rgba(0, 113, 227, 0.2);
+  --login-logo-shadow-pulse: 0 6px 18px rgba(0, 113, 227, 0.35);
+  --login-btn-gradient: linear-gradient(135deg, #0071e3 0%, #0060bf 100%);
+  --login-btn-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --login-btn-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --login-footer-border: rgba(255, 255, 255, 0.06);
+  --login-footer-text: rgba(134, 134, 139, 0.5);
+  --login-input-icon: rgba(134, 134, 139, 0.5);
 
-  --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.4), 0 1px 6px -1px rgba(0,0,0,0.3), 0 2px 4px 0 rgba(0,0,0,0.3);
-  --shadow-md: 0 3px 6px -4px rgba(0,0,0,0.5), 0 6px 16px 0 rgba(0,0,0,0.35), 0 9px 28px 8px rgba(0,0,0,0.25);
-  --shadow-lg: 0 6px 16px -8px rgba(0,0,0,0.5), 0 9px 28px 0 rgba(0,0,0,0.35), 0 12px 48px 16px rgba(0,0,0,0.25);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 3px 5px 30px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
 
 /* ===========================================================================
@@ -329,6 +337,9 @@
   --color-sidebar-btn-bg-hover: #E7E5E4;
   --color-sidebar-btn-text: #78716C;
   --color-sidebar-btn-text-hover: #292524;
+  --color-sidebar-selected-bg: rgba(99, 102, 241, 0.08);
+  --color-sidebar-selected-text: #6366F1;
+  --color-sidebar-group-title: #78716C;
 
   /* Login page — light purple gradient */
   --login-bg-gradient: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 50%, #C7D2FE 100%);

@@ -33,7 +33,7 @@ const STYLE_OPTIONS: {
     icon: <ExperimentOutlined />,
     labelKey: 'style.tech',
     descKey: 'style.techDesc',
-    colors: { header: '#0D1117', sidebar: '#0D1117', primary: '#00D4FF', bg: '#0D1117' },
+    colors: { header: '#0D1117', sidebar: '#0D1117', primary: '#0071e3', bg: '#000000' },
   },
   {
     key: 'fresh',

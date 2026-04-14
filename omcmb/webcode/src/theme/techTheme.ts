@@ -4,23 +4,23 @@ import { theme } from 'antd';
 export const antdTechTheme: ThemeConfig = {
   algorithm: theme.darkAlgorithm,
   token: {
-    colorPrimary: '#00D4FF',
-    colorBgLayout: '#0D1117',
-    colorBgContainer: '#161B22',
-    colorBgElevated: '#1C2128',
-    colorBorderSecondary: '#21262D',
-    colorBorder: '#30363D',
-    colorText: '#C9D1D9',
-    colorTextSecondary: '#8B949E',
-    colorTextHeading: '#E6EDF3',
-    borderRadius: 4,
+    colorPrimary: '#0071e3',
+    colorBgLayout: '#000000',
+    colorBgContainer: '#1d1d1f',
+    colorBgElevated: '#272729',
+    colorBorderSecondary: '#333336',
+    colorBorder: '#424245',
+    colorText: '#f5f5f7',
+    colorTextSecondary: '#86868b',
+    colorTextHeading: '#ffffff',
+    borderRadius: 8,
     wireframe: false,
   },
   components: {
     Layout: {
       headerBg: '#0D1117',
       siderBg: '#0D1117',
-      bodyBg: '#0D1117',
+      bodyBg: '#000000',
     },
     Menu: {
       darkItemBg: '#0D1117',
@@ -30,8 +30,8 @@ export const antdTechTheme: ThemeConfig = {
       darkItemSelectedColor: '#00D4FF',
     },
     Table: {
-      headerBg: '#161B22',
-      rowHoverBg: '#1C2128',
+      headerBg: '#1d1d1f',
+      rowHoverBg: '#272729',
     },
     Card: {
       paddingLG: 16,

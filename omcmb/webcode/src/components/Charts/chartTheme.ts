@@ -3,7 +3,7 @@ import type { Theme } from '@/types/common';
 
 const CHART_PALETTES: Record<Theme, string[]> = {
   classic: ['#1677FF', '#52C41A', '#FA8C16', '#F5222D', '#722ED1', '#13C2C2', '#EB2F96', '#FAAD14'],
-  tech:    ['#00D4FF', '#00FF88', '#FF6B6B', '#FFD93D', '#6C5CE7', '#A29BFE', '#FD79A8', '#FDCB6E'],
+  tech:    ['#0071e3', '#2997ff', '#FF6B6B', '#FFD93D', '#6C5CE7', '#A29BFE', '#FD79A8', '#FDCB6E'],
   fresh:   ['#6366F1', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#F97316'],
   cyberpunk: ['#00F5FF', '#BF00FF', '#00FF88', '#FF3366', '#FFDD00', '#7B68EE', '#FF6B9D', '#00CED1'],
   minions: ['#FFD93D', '#4169E1', '#FF6B35', '#54A0FF', '#5ED3A3', '#FF9F43', '#EE5A6F', '#A29BFE'],
@@ -27,7 +27,7 @@ export function getTooltipStyle(isDark: boolean) {
       fontSize: 13,
     },
     extraCssText: isDark
-      ? 'box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 1px rgba(0,212,255,0.15); border-radius: 8px; backdrop-filter: blur(12px);'
+      ? 'box-shadow: 0 3px 5px 30px rgba(0,0,0,0.22); border-radius: 12px;'
       : 'box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06); border-radius: 8px; backdrop-filter: blur(8px);',
   };
 }

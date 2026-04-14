@@ -1,4 +1,4 @@
-/* Header — fixed top bar, 48px high */
+/* Header — Linear-inspired: Panel Dark, subtle borders, no blur */
 
 .header {
   position: fixed;
@@ -10,9 +10,9 @@
   z-index: 100;
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 24px;
   justify-content: space-between;
-  box-shadow: var(--color-header-shadow);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 /* Left zone: logo + system name */
@@ -25,33 +25,39 @@
 }
 
 .logoMark {
-  width: 32px;
-  height: 32px;
+  width: 20px;
+  height: 20px;
   background: var(--color-header-logo-gradient);
-  border-radius: 6px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 14px;
-  color: #ffffff;
-  letter-spacing: -0.5px;
+  font-weight: 590;
+  font-size: 10px;
+  color: #292524;
+  letter-spacing: -0.165px;
   flex-shrink: 0;
-  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease;
-  transform-style: preserve-3d;
+  transition: opacity 150ms ease;
 }
 
 .logoMark:hover {
-  transform: perspective(400px) rotateY(180deg) scale(1.1);
-  box-shadow: 0 0 16px var(--effect-glow-color, rgba(22, 119, 255, 0.3));
+  opacity: 0.8;
 }
 
 .systemName {
   font-size: 15px;
-  font-weight: 600;
-  color: var(--color-header-text);
+  font-weight: 590;
+  color: #292524;
   white-space: nowrap;
-  letter-spacing: 0.3px;
+  letter-spacing: -0.165px;
+}
+
+/* Divider after system name — Linear style */
+.logoDivider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 0 2px;
 }
 
 /* Center zone: device type indicator */
@@ -67,24 +73,26 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 4px;
-  background: var(--color-header-action-hover);
-  border: 1px solid var(--color-header-border);
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .deviceIndicatorLabel {
   font-size: 12px;
-  color: var(--color-header-text-dim);
+  color: #62666d;
+  letter-spacing: -0.12px;
 }
 
 .deviceIndicatorValue {
   font-size: 13px;
-  color: var(--color-header-text-bright);
-  font-weight: 500;
+  color: #d0d6e0;
+  font-weight: 510;
+  letter-spacing: -0.13px;
 }
 
-/* Right zone: actions */
+/* Right zone: actions — Linear ghost button style */
 .right {
   display: flex;
   align-items: center;
@@ -96,26 +104,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
   cursor: pointer;
-  color: var(--color-header-text-secondary);
+  color: #8a8f98;
   transition: background-color 150ms ease, color 150ms ease;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   font-size: 16px;
 }
 
 .headerAction:hover {
-  background-color: var(--color-header-action-hover);
-  color: var(--color-header-text);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d0d6e0;
 }
 
 .divider {
   width: 1px;
-  height: 20px;
-  background: var(--color-header-divider);
+  height: 16px;
+  background: rgba(255, 255, 255, 0.08);
   margin: 0 4px;
 }
 
@@ -132,25 +140,23 @@
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: 9999px;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  transition: opacity 150ms ease, transform 150ms ease;
+  font-size: 10px;
+  font-weight: 510;
+  transition: opacity 150ms ease;
   border: none;
   line-height: 1;
-  height: 22px;
+  height: 20px;
   white-space: nowrap;
 }
 
 .alarmPill:hover {
   opacity: 0.85;
-  transform: translateY(-1px);
 }
 
 .alarmPill:active {
   opacity: 0.7;
-  transform: perspective(400px) translateZ(-3px) scale(0.96);
 }
 
 .alarmPillCritical {
@@ -174,42 +180,43 @@
 }
 
 .alarmPillIcon {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .alarmPillCount {
-  font-size: 12px;
-  font-weight: 700;
-  min-width: 14px;
+  font-size: 10px;
+  font-weight: 510;
+  min-width: 12px;
   text-align: center;
 }
 
-/* Timezone selector */
+/* Timezone selector — Linear subtle button style */
 .timezoneBtn {
   display: flex;
   align-items: center;
   gap: 4px;
   height: 28px;
   padding: 0 10px;
-  border-radius: 4px;
-  border: 1px solid var(--color-header-border);
-  background: var(--color-header-input-bg);
-  color: var(--color-header-input-text);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: #8a8f98;
   font-size: 12px;
+  font-weight: 510;
+  letter-spacing: -0.12px;
   cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  transition: background-color 150ms ease, color 150ms ease;
   white-space: nowrap;
 }
 
 .timezoneBtn:hover {
-  background: var(--color-header-action-hover);
-  border-color: var(--color-header-border-hover);
-  color: var(--color-header-text);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d0d6e0;
 }
 
 .timezoneLabel {
   font-size: 11px;
-  color: var(--color-header-text-muted);
+  color: #62666d;
   margin-right: 2px;
 }
 
@@ -219,18 +226,20 @@
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 150ms ease;
 }
 
 .userTrigger:hover {
-  background-color: var(--color-header-action-hover);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .userName {
   font-size: 13px;
-  color: var(--color-header-text-bright);
+  font-weight: 510;
+  color: #d0d6e0;
+  letter-spacing: -0.13px;
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -239,7 +248,8 @@
 
 .userRole {
   font-size: 11px;
-  color: var(--color-header-text-muted);
+  color: #62666d;
+  letter-spacing: -0.12px;
 }
 
 /* ============ Hamburger Menu Button ============ */
@@ -247,20 +257,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
-  color: var(--color-header-text);
+  color: #8a8f98;
   font-size: 18px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   flex-shrink: 0;
-  transition: background-color 150ms ease;
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 .hamburger:hover {
-  background-color: var(--color-header-action-hover);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d0d6e0;
 }
 
 /* ============ MOBILE (<768px) ============ */
@@ -300,10 +311,6 @@
 
   .userRole {
     display: none;
-  }
-
-  .logoMark:hover {
-    transform: none;
   }
 }
 

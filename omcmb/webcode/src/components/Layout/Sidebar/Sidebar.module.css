@@ -1,4 +1,4 @@
-/* Sidebar — uses CSS variables for theming */
+/* Sidebar — Linear-inspired: Panel Dark, subtle borders, no blur */
 
 .sidebar {
   display: flex;
@@ -8,6 +8,7 @@
   overflow: hidden;
   transition: width 300ms ease-in-out;
   user-select: none;
+  border-right: 1px solid var(--color-sidebar-divider, rgba(255, 255, 255, 0.05));
 }
 
 /* Scrollable menu area */
@@ -16,7 +17,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-sidebar-scrollbar) transparent;
+  scrollbar-color: var(--color-sidebar-scrollbar, rgba(255, 255, 255, 0.08)) transparent;
 }
 
 .menuWrapper::-webkit-scrollbar {
@@ -28,7 +29,7 @@
 }
 
 .menuWrapper::-webkit-scrollbar-thumb {
-  background-color: var(--color-sidebar-scrollbar);
+  background-color: var(--color-sidebar-scrollbar, rgba(255, 255, 255, 0.08));
   border-radius: 2px;
 }
 
@@ -38,16 +39,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-top: 1px solid var(--color-sidebar-divider);
-  background-color: var(--color-sidebar-bg);
+  border-top: 1px solid var(--color-sidebar-divider, rgba(255, 255, 255, 0.05));
   min-height: 40px;
   flex-shrink: 0;
 }
 
 .version {
   font-size: 11px;
-  color: var(--color-sidebar-text-dim);
-  letter-spacing: 0.3px;
+  color: var(--color-sidebar-group-title, #62666d);
+  letter-spacing: normal;
+  font-weight: 510;
 }
 
 .collapseBtn {
@@ -56,23 +57,20 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 4px;
-  border: 1px solid var(--color-sidebar-btn-border);
-  background: var(--color-sidebar-btn-bg);
-  color: var(--color-sidebar-btn-text);
+  border-radius: 6px;
+  border: none;
+  background: var(--color-sidebar-btn-bg, rgba(255, 255, 255, 0.04));
+  color: var(--color-sidebar-btn-text, #8a8f98);
   cursor: pointer;
   font-size: 10px;
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition: background-color 150ms ease, color 150ms ease;
   flex-shrink: 0;
   margin-left: auto;
 }
 
 .collapseBtn:hover {
-  background: var(--color-sidebar-btn-bg-hover);
-  color: var(--color-sidebar-btn-text-hover);
-  border-color: var(--color-sidebar-btn-border-hover);
-  transform: perspective(400px) rotateY(180deg);
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  background: var(--color-sidebar-btn-bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--color-sidebar-btn-text-hover, #d0d6e0);
 }
 
 /* When collapsed, center the button */
@@ -81,7 +79,7 @@
   padding: 8px 0;
 }
 
-/* Fix icon centering when sidebar is collapsed — comprehensive overrides */
+/* Fix icon centering when sidebar is collapsed */
 .sidebar :global(.ant-menu-inline-collapsed) :global(.ant-menu-item),
 .sidebar :global(.ant-menu-inline-collapsed) :global(.ant-menu-submenu-title) {
   padding: 0 !important;
@@ -96,7 +94,7 @@
 }
 
 .sidebar :global(.ant-menu-inline-collapsed) :global(.anticon) {
-  font-size: 18px;
+  font-size: 16px;
   margin: 0 !important;
   margin-inline: 0 !important;
 }
@@ -111,7 +109,8 @@
   flex-direction: row;
   height: 48px;
   width: 100% !important;
-  border-bottom: 1px solid var(--color-sidebar-divider);
+  border-right: none;
+  border-bottom: 1px solid var(--color-sidebar-divider, rgba(255, 255, 255, 0.05));
 }
 
 .sidebarHorizontal .menuWrapper {
@@ -135,7 +134,7 @@
 }
 
 .sidebarHorizontal :global(.ant-menu-horizontal) :global(.anticon) {
-  font-size: 18px;
+  font-size: 16px;
   margin: 0 !important;
 }
 
@@ -156,11 +155,79 @@
     display: none;
   }
 
-  .collapseBtn:hover {
-    transform: none;
-  }
-
   .menuWrapper {
     touch-action: pan-y;
   }
+}
+
+/* ============ Linear Menu Item Styles ============ */
+
+/* Base menu — transparent background */
+.sidebar :global(.ant-menu) {
+  background: transparent !important;
+  font-family: 'Inter Variable', -apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Submenu group title styling — Linear uppercase section headers */
+.sidebar :global(.ant-menu-item-group-title) {
+  font-size: 11px;
+  font-weight: 510;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-sidebar-group-title, #62666d) !important;
+  padding: 16px 12px 4px !important;
+  line-height: 1.4;
+}
+
+/* All menu items — Linear hover/active states */
+.sidebar :global(.ant-menu-item),
+.sidebar :global(.ant-menu-submenu-title) {
+  margin: 2px 8px !important;
+  padding: 0 12px !important;
+  border-radius: 6px !important;
+  height: 34px !important;
+  line-height: 34px !important;
+  font-size: 13px;
+  color: var(--color-sidebar-text, #8a8f98) !important;
+  background-color: transparent !important;
+}
+
+/* Hover — subtle */
+.sidebar :global(.ant-menu-item):hover,
+.sidebar :global(.ant-menu-submenu-title):hover {
+  background-color: var(--color-sidebar-hover, rgba(255, 255, 255, 0.04)) !important;
+  color: var(--color-sidebar-text-hover, #d0d6e0) !important;
+}
+
+/* Selected/active item */
+.sidebar :global(.ant-menu-item-selected),
+.sidebar :global(.ant-menu-item-selected):hover {
+  background-color: var(--color-sidebar-selected-bg, rgba(255, 255, 255, 0.06)) !important;
+  color: var(--color-sidebar-selected-text, #f7f8f8) !important;
+  font-weight: 510;
+}
+
+/* Remove Ant Design default selected indicator (left bar) */
+.sidebar :global(.ant-menu-item-selected)::after,
+.sidebar :global(.ant-menu-inline .ant-menu-item-selected)::after {
+  display: none !important;
+}
+
+/* Submenu arrow */
+.sidebar :global(.ant-menu-submenu-arrow) {
+  color: var(--color-sidebar-group-title, #62666d) !important;
+}
+
+/* Submenu expanded child items (not top-level direct items like Dashboard) */
+.sidebar :global(.ant-menu-submenu .ant-menu-inline .ant-menu-item) {
+  margin: 1px 8px 1px 8px !important;
+  padding-left: 40px !important;
+  height: 30px !important;
+  line-height: 30px !important;
+  font-size: 13px;
+}
+
+/* Menu icon sizing */
+.sidebar :global(.anticon) {
+  font-size: 16px !important;
 }

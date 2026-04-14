@@ -50,7 +50,7 @@ export const useAppStore = create<AppState>()(
       tabBarPosition: 'top',
       deviceType: 'all',
       timezone: 'local',
-      theme: 'classic',
+      theme: 'tech',
       locale: 'zh-CN',
       effects3DEnabled: false,
       isMobileOverlayOpen: false,
@@ -72,10 +72,8 @@ export const useAppStore = create<AppState>()(
       setTheme: (theme) => set({ theme }),
       toggleTheme: () =>
         set((state) => {
-          const themes: Theme[] = ['classic', 'tech', 'fresh', 'cyberpunk', 'minions', 'tiffany', 'rmb'];
-          const currentIndex = themes.indexOf(state.theme);
-          const next = themes[(currentIndex + 1) % themes.length];
-          return { theme: next };
+          // Simple light/dark toggle: tech (dark) ↔ fresh (light)
+          return { theme: state.theme === 'tech' ? 'fresh' : 'tech' };
         }),
       setLocale: (locale) => set({ locale }),
       toggleLocale: () =>
@@ -91,15 +89,18 @@ export const useAppStore = create<AppState>()(
         const { isMobileOverlayOpen, ...rest } = state;
         return rest;
       },
-      version: 1,
+      version: 2,
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         if (version === 0 || !version) {
-          // Migrate old theme values to new style names
           const oldTheme = state.theme as string;
           if (oldTheme && THEME_MIGRATION[oldTheme]) {
             state.theme = THEME_MIGRATION[oldTheme];
           }
+        }
+        // v1→v2: force theme to tech (Linear design)
+        if (version < 2) {
+          state.theme = 'tech';
         }
         return state as AppState;
       },

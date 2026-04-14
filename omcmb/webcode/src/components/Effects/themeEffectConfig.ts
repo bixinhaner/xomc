@@ -48,11 +48,11 @@ export const THEME_EFFECTS: Record<Theme, ThemeEffectConfig> = {
     glowColor: '#1677FF',
   },
   tech: {
-    tilt: { maxTilt: 10, perspective: 1000, scale: 1.02, glare: true, glareColor: 'rgba(0,212,255,0.1)' },
-    float: { amplitude: 5, speed: 3500 },
-    particles: { preset: 'node-network', density: 8, interactive: true, colors: ['#00D4FF', '#00FF88', '#6C5CE7'] },
-    lightSource: { enabled: true, color: 'rgba(0,212,255,0.05)', radius: 350 },
-    glowColor: '#00D4FF',
+    tilt: { maxTilt: 4, perspective: 1100, scale: 1.005, glare: false, glareColor: 'rgba(0,113,227,0.06)' },
+    float: { amplitude: 2, speed: 5000 },
+    particles: { preset: 'subtle-dots', density: 3, interactive: false, colors: ['#0071e3', '#2997ff', '#52abff'] },
+    lightSource: { enabled: true, color: 'rgba(0,113,227,0.03)', radius: 500 },
+    glowColor: '#0071e3',
   },
   fresh: {
     tilt: { maxTilt: 8, perspective: 1100, scale: 1.02, glare: false, glareColor: 'rgba(99,102,241,0.08)' },

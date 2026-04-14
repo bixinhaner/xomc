@@ -107,13 +107,77 @@
   transform: translateY(0);
 }
 
-/* Menu item smooth depth */
-[data-theme="fresh"] .ant-menu-item:hover {
-  transform: translateX(4px);
-  transition: transform 0.2s ease, background 0.2s ease !important;
+/* Menu item smooth transition */
+[data-theme="fresh"] .ant-menu-item:hover,
+[data-theme="fresh"] .ant-menu-submenu-title:hover {
+  transition: background 0.2s ease, color 0.2s ease !important;
 }
 
-[data-theme="fresh"] .ant-menu-item-selected {
-  transform: translateX(4px);
-  border-radius: 8px;
+/* ==================== FRESH SIDEBAR MENU — Minimalist Light Style ==================== */
+
+/* Selected item — blue left border indicator + indigo accent */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected:hover {
+  position: relative;
+  background-color: rgba(99, 102, 241, 0.06) !important;
+  color: #6366F1 !important;
+  border-radius: 4px !important;
+  font-weight: 500;
+}
+
+/* Blue left border indicator on selected items */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: #6366F1;
+  border-radius: 0 2px 2px 0;
+}
+
+/* Override Sidebar.module.css which hides ::after — use ::before for fresh */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected::after,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-inline .ant-menu-item-selected::after {
+  display: none !important;
+}
+
+/* Selected item icon color */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected .anticon,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected .ant-menu-item-icon {
+  color: #6366F1 !important;
+}
+
+/* Hover state — light background highlight */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item:hover,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-title:hover {
+  background-color: rgba(99, 102, 241, 0.04) !important;
+  color: #292524 !important;
+}
+
+/* Normal state text */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-title {
+  color: #57534E !important;
+}
+
+/* Submenu arrow */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-arrow {
+  color: #A8A29E !important;
+}
+
+/* Group title */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item-group-title {
+  color: #78716C !important;
+}
+
+/* Expanded submenu items — slightly indented */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-inline .ant-menu-item {
+  padding-left: 40px !important;
+}
+
+/* Selected expanded submenu item — blue left border */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-inline .ant-menu-item-selected::before {
+  left: 0;
 }

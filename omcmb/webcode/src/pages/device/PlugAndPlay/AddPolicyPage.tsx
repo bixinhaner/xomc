@@ -23,6 +23,7 @@ import {
   Tooltip,
   Drawer,
   Collapse,
+  Descriptions,
   Row,
   Col,
   type UploadFile,
@@ -670,10 +671,9 @@ export default function AddPolicyPage() {
 
   // State for software upgrade
   const [selectedOriginalVersions, setSelectedOriginalVersions] = useState<OriginalVersion[]>([]);
-  const [addVersionModalOpen, setAddVersionModalOpen] = useState(false);
   const [manualVersion, setManualVersion] = useState('');
   const [selectedAvailableVersions, setSelectedAvailableVersions] = useState<string[]>([]);
-  const [versionSearchText, setVersionSearchText] = useState('');
+  const [showVersionList, setShowVersionList] = useState(false);
 
   // State for license
   const [licenseFiles, setLicenseFiles] = useState<LicenseFile[]>(MOCK_LICENSE_FILES);
@@ -708,31 +708,28 @@ export default function AddPolicyPage() {
     setProductType(value);
   }, []);
 
-  // Handle add version
-  const handleAddVersion = useCallback(() => {
-    const versionsToAdd: OriginalVersion[] = [];
-
-    // Add manual version
-    if (manualVersion && !selectedOriginalVersions.find(v => v.originalVersion === manualVersion)) {
-      versionsToAdd.push({ originalVersion: manualVersion });
-    }
-
-    // Add selected available versions
-    selectedAvailableVersions.forEach(v => {
-      if (!selectedOriginalVersions.find(sv => sv.originalVersion === v)) {
-        versionsToAdd.push({ originalVersion: v });
-      }
-    });
-
+  // Handle add version from list
+  const handleAddVersionsFromList = useCallback(() => {
+    const versionsToAdd = selectedAvailableVersions.filter(
+      v => !selectedOriginalVersions.find(sv => sv.originalVersion === v)
+    );
     if (versionsToAdd.length > 0) {
-      setSelectedOriginalVersions(prev => [...prev, ...versionsToAdd]);
-      form.setFieldValue('originalVersion', [...selectedOriginalVersions, ...versionsToAdd].map(v => v.originalVersion).join(','));
+      setSelectedOriginalVersions(prev => [
+        ...prev,
+        ...versionsToAdd.map(v => ({ originalVersion: v })),
+      ]);
     }
-
-    setManualVersion('');
     setSelectedAvailableVersions([]);
-    setAddVersionModalOpen(false);
-  }, [manualVersion, selectedAvailableVersions, selectedOriginalVersions, form]);
+    setShowVersionList(false);
+  }, [selectedAvailableVersions, selectedOriginalVersions]);
+
+  // Handle manual add version
+  const handleManualAddVersion = useCallback(() => {
+    if (manualVersion && !selectedOriginalVersions.find(v => v.originalVersion === manualVersion)) {
+      setSelectedOriginalVersions(prev => [...prev, { originalVersion: manualVersion }]);
+      setManualVersion('');
+    }
+  }, [manualVersion, selectedOriginalVersions]);
 
   // Handle delete version
   const handleDeleteVersion = useCallback((version: string) => {
@@ -754,13 +751,8 @@ export default function AddPolicyPage() {
     setLicenseFiles(prev => prev.filter(f => f.file_name !== fileName));
   }, []);
 
-  // Filtered available versions
-  const filteredAvailableVersions = useMemo(() => {
-    if (!versionSearchText) return AVAILABLE_ORIGINAL_VERSIONS;
-    return AVAILABLE_ORIGINAL_VERSIONS.filter(v =>
-      v.originalVersion.toLowerCase().includes(versionSearchText.toLowerCase())
-    );
-  }, [versionSearchText]);
+  // Available versions list
+  const availableVersions = AVAILABLE_ORIGINAL_VERSIONS;
 
   // Filtered license files
   const filteredLicenseFiles = useMemo(() => {
@@ -769,29 +761,6 @@ export default function AddPolicyPage() {
       f.serial_number.toLowerCase().includes(licenseSearchText.toLowerCase())
     );
   }, [licenseFiles, licenseSearchText]);
-
-  // Original version table columns
-  const originalVersionColumns = [
-    {
-      title: t('provision.originalVersion'),
-      dataIndex: 'originalVersion',
-      key: 'originalVersion',
-    },
-    {
-      title: t('table.operation'),
-      key: 'action',
-      width: 60,
-      render: (_: unknown, record: OriginalVersion) => (
-        <Button
-          type="text"
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => handleDeleteVersion(record.originalVersion)}
-        />
-      ),
-    },
-  ];
 
   // License file table columns
   const licenseColumns = [
@@ -1056,104 +1025,159 @@ export default function AddPolicyPage() {
         </Form.Item>
       </Space>
     } style={{ marginBottom: 16 }}>
-      <div style={{ padding: '16px 0' }}>
-        <Text type="secondary">{t('provision.selectOriginalVersionHint')}</Text>
-
-        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Text>{t('provision.originalVersion')}</Text>
-          <Form.Item name="specifyVersionType" valuePropName="checked" noStyle>
-            <Checkbox onChange={(e) => {
-              if (e.target.checked) {
-                handleClearVersions();
-              }
-            }}>{t('provision.all')}</Checkbox>
-          </Form.Item>
+      {/* 初始版本区域 */}
+      <div style={{ padding: '16px 0 0' }}>
+        <div style={{ marginBottom: 12 }}>
+          <Space size={16}>
+            <Text>{t('provision.originalVersion')}</Text>
+            <Form.Item name="specifyVersionType" noStyle>
+              <Radio.Group>
+                <Radio value="specify">{t('provision.specifyVersion')}</Radio>
+                <Radio value="all">{t('provision.allVersions')}</Radio>
+              </Radio.Group>
+            </Form.Item>
+          </Space>
         </div>
 
         <Form.Item noStyle shouldUpdate={(prev, curr) => prev.specifyVersionType !== curr.specifyVersionType}>
           {({ getFieldValue }) => {
             const specifyVersionType = getFieldValue('specifyVersionType');
-            if (specifyVersionType) {
+
+            if (specifyVersionType === 'all') {
               return (
                 <div style={{
-                  width: 400,
-                  height: 254,
-                  border: '1px solid #E9EDF9',
+                  padding: '8px 12px',
+                  background: '#f6f8fc',
                   borderRadius: 4,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginTop: 16,
+                  border: '1px solid #E9EDF9',
                 }}>
-                  <PlusOutlined style={{ fontSize: 20, color: '#BFBFBF', marginBottom: 10 }} />
-                  <Text type="secondary">{t('provision.allVersionsSelected')}</Text>
+                  <Text type="secondary">{t('provision.allVersionsSelectedHint')}</Text>
                 </div>
               );
             }
 
             return (
-              <div style={{ marginTop: 16 }}>
-                {selectedOriginalVersions.length === 0 ? (
-                  <div
-                    onClick={() => setAddVersionModalOpen(true)}
-                    style={{
-                      width: 400,
-                      height: 254,
-                      border: '1px solid #E9EDF9',
-                      borderRadius: 4,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                    }}
+              <div>
+                {/* Manual input row */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <Input
+                    value={manualVersion}
+                    onChange={(e) => setManualVersion(e.target.value)}
+                    placeholder={t('provision.enterVersion')}
+                    style={{ width: 240 }}
+                    onPressEnter={handleManualAddVersion}
+                  />
+                  <Button type="primary" icon={<PlusOutlined />} onClick={handleManualAddVersion}>
+                    {t('common.add')}
+                  </Button>
+                  <Button
+                    type={showVersionList ? 'primary' : 'default'}
+                    ghost={showVersionList}
+                    onClick={() => setShowVersionList(!showVersionList)}
                   >
-                    <PlusOutlined style={{ fontSize: 20, color: '#4D84FF', marginBottom: 10 }} />
-                    <Text>{t('provision.canAddOriginalVersion')}</Text>
-                  </div>
-                ) : (
-                  <div style={{ border: '1px solid #E9EDF9', borderRadius: 4 }}>
-                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Input
-                        placeholder={t('provision.originalVersion')}
-                        prefix={<SearchOutlined />}
-                        value={versionSearchText}
-                        onChange={(e) => setVersionSearchText(e.target.value)}
-                        style={{ width: 220 }}
-                        size="small"
-                      />
-                      <Space>
-                        <Button size="small" icon={<DeleteOutlined />} onClick={handleClearVersions} />
-                        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAddVersionModalOpen(true)} />
-                      </Space>
+                    {t('provision.selectFromList')}
+                  </Button>
+                </div>
+
+                {/* Selected versions as tags */}
+                <div style={{ marginBottom: showVersionList ? 12 : 0 }}>
+                  {selectedOriginalVersions.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                      <Text type="secondary" style={{ marginRight: 4 }}>
+                        {t('provision.selectedVersions')} ({selectedOriginalVersions.length}):
+                      </Text>
+                      {selectedOriginalVersions.map(v => (
+                        <Tag
+                          key={v.originalVersion}
+                          closable
+                          color="blue"
+                          onClose={() => handleDeleteVersion(v.originalVersion)}
+                        >
+                          {v.originalVersion}
+                        </Tag>
+                      ))}
+                      <Button type="link" size="small" danger onClick={handleClearVersions}>
+                        {t('provision.clearAll')}
+                      </Button>
                     </div>
-                    <Table
-                      columns={originalVersionColumns}
-                      dataSource={selectedOriginalVersions.filter(v =>
-                        !versionSearchText || v.originalVersion.toLowerCase().includes(versionSearchText.toLowerCase())
-                      )}
-                      rowKey="originalVersion"
-                      pagination={false}
-                      size="small"
-                      style={{ maxHeight: 180, overflow: 'auto' }}
-                    />
+                  ) : (
+                    <Text type="secondary">{t('provision.noVersionAdded')}</Text>
+                  )}
+                </div>
+
+                {/* Available versions list (collapsible) */}
+                {showVersionList && (
+                  <div style={{
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 4,
+                    marginTop: 8,
+                    maxHeight: 220,
+                    overflow: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Checkbox
+                        checked={availableVersions.length > 0 && availableVersions.every(v => selectedAvailableVersions.includes(v.originalVersion))}
+                        indeterminate={selectedAvailableVersions.length > 0 && !availableVersions.every(v => selectedAvailableVersions.includes(v.originalVersion))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedAvailableVersions(availableVersions.map(v => v.originalVersion));
+                          } else {
+                            setSelectedAvailableVersions([]);
+                          }
+                        }}
+                      >
+                        {t('provision.selectAll')}
+                      </Checkbox>
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={selectedAvailableVersions.length === 0}
+                        onClick={handleAddVersionsFromList}
+                      >
+                        {t('common.confirm')} ({selectedAvailableVersions.length})
+                      </Button>
+                    </div>
+                    {availableVersions.map(v => (
+                      <div key={v.originalVersion} style={{
+                        padding: '6px 12px',
+                        borderBottom: '1px solid #f5f5f5',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}>
+                        <Checkbox
+                          checked={selectedAvailableVersions.includes(v.originalVersion)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedAvailableVersions(prev => [...prev, v.originalVersion]);
+                            } else {
+                              setSelectedAvailableVersions(prev => prev.filter(id => id !== v.originalVersion));
+                            }
+                          }}
+                        >
+                          {v.originalVersion}
+                        </Checkbox>
+                      </div>
+                    ))}
                   </div>
                 )}
-
-                <div style={{ marginTop: 24, display: 'flex', gap: 60 }}>
-                  <Form.Item name="targetVersion" label={t('provision.targetVersion')} style={{ marginBottom: 0 }}>
-                    <Select placeholder={t('common.pleaseSelect')} style={{ width: 300 }} options={TARGET_VERSIONS} />
-                  </Form.Item>
-                  <div style={{ display: 'flex', alignItems: 'center', paddingTop: 30 }}>
-                    <Form.Item name="preserveSetting" valuePropName="checked" noStyle>
-                      <Checkbox>{t('provision.preserveConfig')}</Checkbox>
-                    </Form.Item>
-                  </div>
-                </div>
               </div>
             );
           }}
+        </Form.Item>
+      </div>
+
+      {/* 分隔线 */}
+      <Divider style={{ margin: '8px 0 16px' }} />
+
+      {/* 目标版本 + 保留配置 */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32 }}>
+        <Form.Item name="targetVersion" label={t('provision.targetVersion')} style={{ marginBottom: 0 }}>
+          <Select placeholder={t('common.pleaseSelect')} style={{ width: 240 }} options={TARGET_VERSIONS} />
+        </Form.Item>
+        <Form.Item name="preserveSetting" valuePropName="checked" style={{ marginBottom: 0 }}>
+          <Checkbox>{t('provision.preserveConfig')}</Checkbox>
         </Form.Item>
       </div>
     </Card>
@@ -1283,45 +1307,37 @@ export default function AddPolicyPage() {
             licenseEnable: false,
             selfConfigEnable: false,
             switchEnable: false,
-            specifyVersionType: false,
+            specifyVersionType: 'specify',
             preserveSetting: false,
           }}
         >
           {/* Basic Info Card */}
           <Card size="small" title={t('common.basicInfo')} style={{ marginBottom: 16 }}>
-            <Row gutter={[24, 0]}>
-              <Col>
-                <Form.Item name="selfStartEnable" label={t('provision.settingSwitch')} valuePropName="checked">
+            <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }} contentStyle={{ flex: 1 }}>
+              <Descriptions.Item label={t('provision.settingSwitch')}>
+                <Form.Item name="selfStartEnable" valuePropName="checked" noStyle>
                   <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
                 </Form.Item>
-              </Col>
-              <Col flex="300px">
-                <Form.Item
-                  name="policyName"
-                  label={t('provision.policyName')}
-                  rules={[{ required: true, message: t('common.pleaseInput') }]}
-                >
+              </Descriptions.Item>
+              <Descriptions.Item label={t('provision.policyName')}>
+                <Form.Item name="policyName" noStyle rules={[{ required: true, message: t('common.pleaseInput') }]}>
                   <Input placeholder={t('provision.policyNamePlaceholder')} maxLength={50} />
                 </Form.Item>
-              </Col>
-              <Col flex="180px">
-                <Form.Item
-                  name="productType"
-                  label={t('provision.productType')}
-                  rules={[{ required: true, message: t('common.pleaseSelect') }]}
-                >
+              </Descriptions.Item>
+              <Descriptions.Item label={t('provision.productType')}>
+                <Form.Item name="productType" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
                   <Select placeholder={t('common.pleaseSelect')} options={PRODUCT_TYPES} onChange={handleProductTypeChange} />
                 </Form.Item>
-              </Col>
-              <Col>
-                <Form.Item name="executeType" label={t('provision.executeType')} rules={[{ required: true }]}>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('provision.executeType')}>
+                <Form.Item name="executeType" noStyle rules={[{ required: true }]}>
                   <Radio.Group>
                     <Radio value="0">{t('provision.autoExecute')}</Radio>
                     <Radio value="1">{t('provision.manualExecute')}</Radio>
                   </Radio.Group>
                 </Form.Item>
-              </Col>
-            </Row>
+              </Descriptions.Item>
+            </Descriptions>
           </Card>
 
           {/* Function Module Selection */}
@@ -1364,74 +1380,6 @@ export default function AddPolicyPage() {
           </Form.Item>
         </Form>
       </div>
-
-      {/* Add Version Drawer */}
-      <Drawer
-        title={t('provision.addVersion')}
-        open={addVersionModalOpen}
-        onClose={() => setAddVersionModalOpen(false)}
-        width={360}
-        destroyOnClose
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button onClick={() => setAddVersionModalOpen(false)}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={handleAddVersion}>{t('common.confirm')}</Button>
-          </div>
-        }
-      >
-        <div style={{ marginBottom: 16 }}>
-          <Text>{t('provision.originalVersion')}</Text>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <Input
-              value={manualVersion}
-              onChange={(e) => setManualVersion(e.target.value)}
-              placeholder={t('provision.enterVersion')}
-              style={{ flex: 1 }}
-            />
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-              if (manualVersion && !selectedOriginalVersions.find(v => v.originalVersion === manualVersion)) {
-                setSelectedOriginalVersions(prev => [...prev, { originalVersion: manualVersion }]);
-                setManualVersion('');
-              }
-            }} />
-          </div>
-        </div>
-
-        <Divider style={{ margin: '12px 0' }} />
-
-        <Text>{t('provision.originalVersionList')}</Text>
-        <div style={{ marginTop: 8, border: '1px solid #f0f0f0', borderRadius: 4, maxHeight: 280, overflow: 'auto' }}>
-          <Table
-            columns={[
-              {
-                title: '',
-                width: 40,
-                render: (_: unknown, record: OriginalVersion) => (
-                  <Checkbox
-                    checked={selectedAvailableVersions.includes(record.originalVersion)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedAvailableVersions(prev => [...prev, record.originalVersion]);
-                      } else {
-                        setSelectedAvailableVersions(prev => prev.filter(v => v !== record.originalVersion));
-                      }
-                    }}
-                  />
-                ),
-              },
-              {
-                title: t('provision.originalVersion'),
-                dataIndex: 'originalVersion',
-              },
-            ]}
-            dataSource={filteredAvailableVersions}
-            rowKey="originalVersion"
-            pagination={false}
-            size="small"
-            showHeader={false}
-          />
-        </div>
-      </Drawer>
 
       {/* Config Detail/Edit Drawer */}
       <Drawer
