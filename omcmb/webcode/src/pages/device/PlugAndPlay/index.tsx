@@ -508,23 +508,23 @@ export default function PlugAndPlay() {
       key: 'upgradeEnable',
       title: t('provision.softwareUpgrade'),
       dataIndex: 'upgradeEnable',
-      width: 160,
+      width: 200,
       render: (val, record) => (
-        <Space size={4}>
+        <Space size={4} style={{ whiteSpace: 'nowrap' }}>
           {val === '1' ? (
             <Tag icon={<CheckCircleOutlined />} color="success">{t('common.enabled')}</Tag>
           ) : (
             <Tag color="default">{t('common.disabled')}</Tag>
           )}
           {val === '1' && record.targetVersion?.[0] && (
-            <Text type="secondary" style={{ fontSize: 12 }}>Target Version={record.targetVersion[0]}</Text>
+            <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{t('provision.targetVersion')}={record.targetVersion[0]}</Text>
           )}
         </Space>
       ),
     },
     {
       key: 'licenseEnable',
-      title: 'License',
+      title: t('provision.license'),
       dataIndex: 'licenseEnable',
       width: 80,
       render: (val) => (
