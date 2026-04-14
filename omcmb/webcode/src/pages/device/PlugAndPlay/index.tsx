@@ -517,7 +517,7 @@ export default function PlugAndPlay() {
             <Tag color="default">{t('common.disabled')}</Tag>
           )}
           {val === '1' && record.targetVersion?.[0] && (
-            <Text type="secondary" style={{ fontSize: 12 }}>V{record.targetVersion[0]}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Target Version={record.targetVersion[0]}</Text>
           )}
         </Space>
       ),
