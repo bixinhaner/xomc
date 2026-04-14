@@ -730,7 +730,7 @@ export default function PlugAndPlay() {
       {/* Policy List Section */}
       <div style={{ flexShrink: 0 }}>
         <ListPageLayout
-          title={t('provision.policyList')}
+          title={t('provision.plugAndPlay')}
           subtitle={`${t('table.total')} ${filteredPolicies.length}`}
           extra={
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAddPolicy}>
@@ -751,6 +751,7 @@ export default function PlugAndPlay() {
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
             scroll={{ x: 'max-content', y: 200 }}
+            extraToolbarLeft={<Text strong>{t('provision.policyList')}</Text>}
             extraToolbarRight={
               <Space>
                 <Select
@@ -781,8 +782,22 @@ export default function PlugAndPlay() {
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
         style={{ flex: 1, minHeight: 0 }}
       >
-        {/* Header row: Task Type tabs | Execute Status title + counts */}
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* 执行状态标题 */}
+        <div style={{ padding: '12px 16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text strong style={{ fontSize: 14 }}>{t('provision.executeStatus')}</Text>
+          <Space split="|" size={8}>
+            <Space size={4}>
+              <CheckCircleOutlined style={{ color: '#52c41a' }} />
+              <Text type="success">{successCount}</Text>
+            </Space>
+            <Space size={4}>
+              <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+              <Text type="danger">{failCount}</Text>
+            </Space>
+          </Space>
+        </div>
+        {/* Task Type tabs */}
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center' }}>
           <Space>
             <Text type="secondary">{t('provision.taskType')}:</Text>
             {[
@@ -800,19 +815,6 @@ export default function PlugAndPlay() {
                 {item.label}
               </Tag>
             ))}
-          </Space>
-          <Space>
-            <Text strong>{t('provision.executeStatus')}</Text>
-            <Space split="|" size={8}>
-              <Space size={4}>
-                <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                <Text type="success">{successCount}</Text>
-              </Space>
-              <Space size={4}>
-                <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                <Text type="danger">{failCount}</Text>
-              </Space>
-            </Space>
           </Space>
         </div>
 
