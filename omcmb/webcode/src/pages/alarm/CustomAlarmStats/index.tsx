@@ -1146,13 +1146,15 @@ export default function CustomAlarmStats() {
         </div>
       </Card>
 
-      <FilterBar
-        filterId={`custom-alarm-stats-${selectedGroupId}`}
-        fields={FILTER_FIELDS}
-        onSearch={handleSearch}
-        onReset={handleReset}
-        collapsedRows={1}
-      />
+      <div className="custom-alarm-filter-wrapper">
+        <FilterBar
+          filterId={`custom-alarm-stats-${selectedGroupId}`}
+          fields={FILTER_FIELDS}
+          onSearch={handleSearch}
+          onReset={handleReset}
+          collapsedRows={1}
+        />
+      </div>
 
       {/* 列表卡片 */}
       <Card
@@ -1184,6 +1186,9 @@ export default function CustomAlarmStats() {
         />
       </Card>
       <style>{`
+        .custom-alarm-filter-wrapper [class*="_filterBarWrapper_"] {
+          margin-bottom: 0 !important;
+        }
         .custom-alarm-list-card .omc-data-table,
         .custom-alarm-list-card .ant-table-wrapper,
         .custom-alarm-list-card .ant-spin-nested-loading,

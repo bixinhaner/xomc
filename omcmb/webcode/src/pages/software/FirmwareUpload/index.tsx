@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react';
 import {
   Button,
-  Card,
   Form,
   Input,
   Select,
@@ -311,27 +310,25 @@ export default function FirmwareUpload() {
   return (
     <ListPageLayout title="升级文件管理">
       {/* 文件类型选择 */}
-      <Card bordered={false} style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Radio.Group
-            value={fileType}
-            onChange={(e) => {
-              setFileType(e.target.value);
-              setFilters({});
-            }}
-            optionType="button"
-            buttonStyle="solid"
-          >
-            <Radio.Button value="upgrade">IMAGE</Radio.Button>
-            <Radio.Button value="ca">CA版本</Radio.Button>
-            <Radio.Button value="fpga">FPGA升级文件</Radio.Button>
-            <Radio.Button value="ap">AP升级文件</Radio.Button>
-          </Radio.Group>
-          <Button type="primary" icon={<InboxOutlined />} onClick={() => handleOpenImportDrawer('add')}>
-            导入文件
-          </Button>
-        </div>
-      </Card>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Radio.Group
+          value={fileType}
+          onChange={(e) => {
+            setFileType(e.target.value);
+            setFilters({});
+          }}
+          optionType="button"
+          buttonStyle="solid"
+        >
+          <Radio.Button value="upgrade">IMAGE</Radio.Button>
+          <Radio.Button value="ca">CA版本</Radio.Button>
+          <Radio.Button value="fpga">FPGA升级文件</Radio.Button>
+          <Radio.Button value="ap">AP升级文件</Radio.Button>
+        </Radio.Group>
+        <Button type="primary" icon={<InboxOutlined />} onClick={() => handleOpenImportDrawer('add')}>
+          导入文件
+        </Button>
+      </div>
 
       {/* 搜索表单 */}
       <FilterBar

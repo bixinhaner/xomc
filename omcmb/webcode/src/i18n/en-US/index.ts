@@ -1144,6 +1144,7 @@ const messages: Record<string, string> = {
   'perf.query.searchTemplate': 'Search template name',
   'perf.query.selectTemplate': 'Please select a template from the left panel',
   'perf.query.queryObjectType': 'Query Object',
+  'perf.query.device': 'Device',
   'perf.query.granularity': 'Granularity',
   'perf.query.timeRange': 'Time Range',
   'perf.query.deviceSearchPlaceholder': 'Device code/name',

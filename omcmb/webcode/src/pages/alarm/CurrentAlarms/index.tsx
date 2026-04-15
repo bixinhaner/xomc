@@ -688,6 +688,7 @@ export default function CurrentAlarms() {
       <Card
         size="small"
         bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
         <DataTable<Alarm>
@@ -712,7 +713,7 @@ export default function CurrentAlarms() {
           defaultDensity="default"
           showRowNumber
           rowNumberTitle="序号"
-          scroll={{ y: 'calc(100vh - 510px)' }}
+          scroll={{ y: 'calc(100vh - 450px)' }}
         />
       </Card>
 

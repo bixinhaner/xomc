@@ -119,6 +119,96 @@ let MOCK_LIBRARY: AlarmLibrary[] = [
     eventType: '30000',
     explanation: '基站时钟同步异常，可能影响切换性能和定位精度。需要检查时钟源配置和同步链路状态。',
   },
+  {
+    id: 11,
+    deviceTypeName: 'eNB',
+    alarmIdentifier: 'ALM-0011',
+    alarmName: '电源模块故障',
+    serverityType: 'Critical',
+    eventType: '30003',
+    explanation: '电源模块发生故障，可能导致设备断电。需要立即更换电源模块或切换到备用电源。',
+  },
+  {
+    id: 12,
+    deviceTypeName: 'gNB',
+    alarmIdentifier: 'ALM-0012',
+    alarmName: 'S1接口链路中断',
+    serverityType: 'Major',
+    eventType: '30000',
+    explanation: 'S1接口链路中断，可能导致基站与核心网通信失败。需要检查传输链路和接口配置。',
+  },
+  {
+    id: 13,
+    deviceTypeName: 'CPE',
+    alarmIdentifier: 'ALM-0013',
+    alarmName: 'SIM卡状态异常',
+    serverityType: 'Warning',
+    eventType: '30003',
+    explanation: 'SIM卡状态异常，可能影响用户接入。需要检查SIM卡是否正常插入及卡状态。',
+  },
+  {
+    id: 14,
+    deviceTypeName: 'eNB',
+    alarmIdentifier: 'ALM-0014',
+    alarmName: '风扇故障',
+    serverityType: 'Minor',
+    eventType: '30004',
+    explanation: '设备风扇故障或转速异常，可能导致设备散热不良。建议检查风扇状态并及时更换。',
+  },
+  {
+    id: 15,
+    deviceTypeName: 'gNB',
+    alarmIdentifier: 'ALM-0015',
+    alarmName: 'GPS定位失效',
+    serverityType: 'Major',
+    eventType: '30003',
+    explanation: 'GPS模块无法获取卫星信号，可能影响时钟同步和定位功能。需要检查GPS天线安装和信号强度。',
+  },
+  {
+    id: 16,
+    deviceTypeName: 'eGW',
+    alarmIdentifier: 'ALM-0016',
+    alarmName: 'ARP表溢出',
+    serverityType: 'Warning',
+    eventType: '30006',
+    explanation: 'ARP表条目超过最大容量，可能导致网络通信异常。建议检查网络拓扑和ARP老化配置。',
+  },
+  {
+    id: 17,
+    deviceTypeName: 'RRU',
+    alarmIdentifier: 'ALM-0017',
+    alarmName: '驻波比异常',
+    serverityType: 'Critical',
+    eventType: '30003',
+    explanation: '天馈系统驻波比超过阈值，可能导致射频性能严重下降。需要检查天线和馈线连接。',
+  },
+  {
+    id: 18,
+    deviceTypeName: 'BBU',
+    alarmIdentifier: 'ALM-0018',
+    alarmName: 'CPRI链路误码率过高',
+    serverityType: 'Major',
+    eventType: '30000',
+    explanation: 'CPRI链路误码率超过阈值，可能影响基带与射频之间的数据传输。需要检查光纤连接质量。',
+  },
+  {
+    id: 19,
+    deviceTypeName: 'eNB',
+    alarmIdentifier: 'ALM-0019',
+    alarmName: 'PCI冲突告警',
+    serverityType: 'Warning',
+    eventType: '30001',
+    explanation: '检测到PCI冲突，可能导致小区间干扰。建议重新规划PCI分配方案。',
+  },
+  {
+    id: 20,
+    deviceTypeName: 'gNB',
+    alarmIdentifier: 'ALM-0020',
+    alarmName: 'X2接口握手失败',
+    serverityType: 'Minor',
+    eventType: '30000',
+    explanation: 'X2接口握手失败，可能影响基站间切换。需要检查X2接口配置和对端基站状态。',
+  },
 ];
 
 // 严重程度配置
@@ -457,7 +547,7 @@ export default function AlarmSupportLibrary() {
           setPageSize(size);
         }}
         defaultDensity="default"
-        scroll={{ x: 1400, y: 'calc(100vh - 400px)' }}
+        scroll={{ x: 1400, y: 'calc(100vh - 350px)' }}
         showRowNumber
         rowNumberTitle="序号"
       />

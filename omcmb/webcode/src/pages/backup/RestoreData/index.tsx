@@ -5,7 +5,6 @@ import {
   Progress,
   Space,
   Radio,
-  Card,
   Descriptions,
   Typography,
   Timeline,
@@ -686,23 +685,22 @@ export default function RestoreData() {
   return (
     <ListPageLayout title={t('nav.backup.restore')} extra={headerExtra}>
       {/* 页签选择 */}
-      <Card bordered={false} style={{ marginBottom: 16 }}>
-        <Radio.Group
-          value={activeTab}
-          onChange={(e) => {
-            setActiveTab(e.target.value);
-            setFilters({});
-            setDeviceFilters({});
-            setPage(1);
-            setDevicePage(1);
-          }}
-          optionType="button"
-          buttonStyle="solid"
-        >
-          <Radio.Button value="task">任务列表</Radio.Button>
-          <Radio.Button value="device">设备列表</Radio.Button>
-        </Radio.Group>
-      </Card>
+      <Radio.Group
+        value={activeTab}
+        onChange={(e) => {
+          setActiveTab(e.target.value);
+          setFilters({});
+          setDeviceFilters({});
+          setPage(1);
+          setDevicePage(1);
+        }}
+        optionType="button"
+        buttonStyle="solid"
+        style={{ marginBottom: 12 }}
+      >
+        <Radio.Button value="task">任务列表</Radio.Button>
+        <Radio.Button value="device">设备列表</Radio.Button>
+      </Radio.Group>
 
       <FilterBar
         filterId={`restore-data-filter-${activeTab}`}
@@ -728,41 +726,39 @@ export default function RestoreData() {
       />
 
       {/* 列表 */}
-      <Card bordered={false} className="restore-data-list-wrapper">
-        {activeTab === 'task' ? (
-          <DataTable<BackupTaskRow>
-            tableId="restore-data-list-task"
-            columns={taskColumns}
-            dataSource={filteredTaskData}
-            loading={isLoading}
-            rowKey="id"
-            total={filteredTaskData.length}
-            currentPage={page}
-            pageSize={pageSize}
-            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            onRefresh={() => void refetch()}
-            scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
-            showRowNumber
-            rowNumberTitle="序号"
-          />
-        ) : (
-          <DataTable<BackupDeviceRow>
-            tableId="restore-data-list-device"
-            columns={deviceColumns}
-            dataSource={paginatedDeviceData}
-            loading={isLoading}
-            rowKey="id"
-            total={filteredDeviceData.length}
-            currentPage={devicePage}
-            pageSize={devicePageSize}
-            onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
-            onRefresh={() => void refetch()}
-            scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
-            showRowNumber
-            rowNumberTitle="序号"
-          />
-        )}
-      </Card>
+      {activeTab === 'task' ? (
+        <DataTable<BackupTaskRow>
+          tableId="restore-data-list-task"
+          columns={taskColumns}
+          dataSource={filteredTaskData}
+          loading={isLoading}
+          rowKey="id"
+          total={filteredTaskData.length}
+          currentPage={page}
+          pageSize={pageSize}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => void refetch()}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
+          showRowNumber
+          rowNumberTitle="序号"
+        />
+      ) : (
+        <DataTable<BackupDeviceRow>
+          tableId="restore-data-list-device"
+          columns={deviceColumns}
+          dataSource={paginatedDeviceData}
+          loading={isLoading}
+          rowKey="id"
+          total={filteredDeviceData.length}
+          currentPage={devicePage}
+          pageSize={devicePageSize}
+          onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
+          onRefresh={() => void refetch()}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
+          showRowNumber
+          rowNumberTitle="序号"
+        />
+      )}
 
       {/* 任务详情弹窗 */}
       <Modal

@@ -137,7 +137,7 @@
 /* Mono cell text */
 :global(.cell-mono) {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* Empty state */

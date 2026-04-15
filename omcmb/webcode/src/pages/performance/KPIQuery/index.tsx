@@ -1013,7 +1013,7 @@ export default function KPIQuery() {
         </div>
 
         {/* View mode toggle */}
-        <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+        <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text strong>{getTemplateName(tabId)}</Text>
           <Radio.Group value={viewMode} onChange={(e) => setViewMode(e.target.value)} size="small">
             <Radio.Button value="table"><TableOutlined /> {t('perf.query.tableView')}</Radio.Button>
@@ -1052,7 +1052,7 @@ export default function KPIQuery() {
                   columns={columns}
                   dataSource={paginatedData}
                   rowKey="key"
-                  scroll={{ x: 'max-content', y: 'calc(100vh - 500px)' }}
+                  scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
                   showRowNumber
                   rowNumberTitle={t('table.rowNumber')}
                   showPagination
@@ -1214,6 +1214,7 @@ export default function KPIQuery() {
           {openTabs.length > 0 ? (
             <Tabs
               type="editable-card"
+              hideAdd
               activeKey={activeTab}
               onChange={setActiveTab}
               onEdit={(targetKey, action) => {

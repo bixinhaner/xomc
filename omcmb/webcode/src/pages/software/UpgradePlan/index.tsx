@@ -832,21 +832,20 @@ export default function UpgradePlan() {
   return (
     <ListPageLayout title={t('nav.software.versionUpgrade')} extra={headerExtra}>
       {/* 页签选择 */}
-      <Card bordered={false} style={{ marginBottom: 16 }}>
-        <Radio.Group
-          value={activeTab}
-          onChange={(e) => {
-            setActiveTab(e.target.value);
-            setFilters({});
-            setPage(1);
-          }}
-          optionType="button"
-          buttonStyle="solid"
-        >
-          <Radio.Button value="task">任务列表</Radio.Button>
-          <Radio.Button value="device">设备列表</Radio.Button>
-        </Radio.Group>
-      </Card>
+      <Radio.Group
+        value={activeTab}
+        onChange={(e) => {
+          setActiveTab(e.target.value);
+          setFilters({});
+          setPage(1);
+        }}
+        optionType="button"
+        buttonStyle="solid"
+        style={{ marginBottom: 12 }}
+      >
+        <Radio.Button value="task">任务列表</Radio.Button>
+        <Radio.Button value="device">设备列表</Radio.Button>
+      </Radio.Group>
 
       {/* 搜索表单 */}
       <FilterBar

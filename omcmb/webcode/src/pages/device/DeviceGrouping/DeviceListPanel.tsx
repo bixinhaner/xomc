@@ -268,7 +268,6 @@ export default function DeviceListPanel({
         dataIndex: 'sn',
         width: 150,
         mono: true,
-        copyable: true,
       },
       { key: 'name', title: t('device.stationName'), dataIndex: 'name', width: 160, ellipsis: true },
       { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true },
@@ -425,6 +424,10 @@ export default function DeviceListPanel({
           min-height: 0 !important;
           overflow-y: auto !important;
           max-height: none !important;
+        }
+        .device-list-table-wrapper .ant-table-thead > tr > th,
+        .device-list-table-wrapper .ant-table-tbody > tr > td {
+          font-size: 13px !important;
         }
       `}</style>
 
