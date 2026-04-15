@@ -17,7 +17,7 @@ export function useDeviceSelection() {
     try {
       const result = await deviceApi.getList({
         page: 1,
-        pageSize: 1000,
+        pageSize: 100,
         ...(productType ? { productType } : {}),
       });
       const mapped: ConsoleDevice[] = result.items.map((d) => ({
