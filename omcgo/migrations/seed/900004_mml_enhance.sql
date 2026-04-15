@@ -81,6 +81,7 @@ END $$;
 -- =============================================
 
 -- 先清理旧种子（000007 中的 LST_DEVPARAM/SET_DEVPARAM/RST_DEV 以及本文件之前的版本）
+DELETE FROM mml_commands WHERE command_code IN ('LST_DEVPARAM','SET_DEVPARAM','RST_DEV');
 DELETE FROM mml_commands WHERE id::text LIKE '00000000-0000-0000-%';
 
 INSERT INTO mml_commands (
@@ -280,7 +281,7 @@ ON CONFLICT (command_code) DO UPDATE SET
 -- C) 字典种子数据：产品类型 & MML 命令分类
 -- =============================================
 
--- 产品类型字典（值与设备种子数据 product_class 对齐）
+-- 产品类型字典（value=数字编码, label=实际 product_class 名）
 INSERT INTO sys_dictionaries (name, type, status, description) VALUES
 ('产品类型', 'product_type', TRUE, '设备产品类型')
 ON CONFLICT DO NOTHING;
@@ -288,12 +289,12 @@ ON CONFLICT DO NOTHING;
 DELETE FROM sys_dictionary_details WHERE sys_dictionary_id = (SELECT id FROM sys_dictionaries WHERE type = 'product_type');
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('SmallCell-LTE', 'SmallCell-LTE', 1, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
-('gNB-100', 'gNB-100', 2, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
-('gNB-200', 'gNB-200', 3, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
-('FAP-LTE-100', 'FAP-LTE-100', 4, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
-('FAP-LTE-200', 'FAP-LTE-200', 5, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
-('FAP-LTE-300', 'FAP-LTE-300', 6, (SELECT id FROM sys_dictionaries WHERE type = 'product_type'));
+('SmallCell-LTE', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('gNB-100', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('gNB-200', '3', 3, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('FAP-LTE-100', '4', 4, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('FAP-LTE-200', '5', 5, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('FAP-LTE-300', '6', 6, (SELECT id FROM sys_dictionaries WHERE type = 'product_type'));
 
 -- MML 命令分类字典
 INSERT INTO sys_dictionaries (name, type, status, description) VALUES
