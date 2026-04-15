@@ -1,32 +1,31 @@
-import { useState, useCallback, useMemo } from 'react';
-import { Input, Select, Tree, Typography, Empty } from 'antd';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { Input, Select, Tree, Typography, Empty, Spin } from 'antd';
 import { SearchOutlined, FolderOutlined, CodeOutlined } from '@ant-design/icons';
-import type { TreeDataNode, TreeProps } from 'antd';
+import type { TreeProps } from 'antd';
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
+import type { CommandTreeNode } from '../hooks/useCommandSelection';
 
 interface CommandTreeProps {
   selectedCommand: MMLCommand | null;
-  commands: MMLCommand[];
-  categories: string[];
+  treeData: CommandTreeNode[];
   categoryOptions: { label: string; value: string }[];
-  commandsByCategory: Map<string, MMLCommand[]>;
   searchText: string;
   categoryFilter: string;
+  isLoading?: boolean;
   onSearchChange: (text: string) => void;
   onFilterChange: (category: string) => void;
-  onSelectCommand: (command: MMLCommand | null) => void;
+  onSelectCommand: (command: MMLCommand | null) => void | Promise<void>;
 }
 
 export default function CommandTree({
   selectedCommand,
-  commands,
-  categories,
+  treeData,
   categoryOptions,
-  commandsByCategory,
   searchText,
   categoryFilter,
+  isLoading = false,
   onSearchChange,
   onFilterChange,
   onSelectCommand,
@@ -34,77 +33,92 @@ export default function CommandTree({
   const t = useT();
   const token = useThemeToken();
 
-  // 展开的树节点
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => {
-    return categories.map((cat) => `category-${cat}`);
-  });
+  const categoryNodeKeys = useMemo(
+    () => treeData.map((node) => String(node.key)),
+    [treeData]
+  );
 
-  // 生成树形数据
-  const treeData = useMemo((): TreeDataNode[] => {
-    // category value → label 映射
-    const catLabelMap = new Map(categoryOptions.map((o) => [o.value, o.label]));
-    const nodes: TreeDataNode[] = [];
-    commandsByCategory.forEach((cmds, category) => {
-      const catLabel = catLabelMap.get(category) || category;
-      nodes.push({
-        key: `category-${category}`,
-        title: (
-          <span style={{ fontWeight: 500 }}>
-            <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
-            {catLabel}
-            <span style={{ marginLeft: 8, fontSize: 12, color: '#8c8c8c', fontWeight: 'normal' }}>
-              ({cmds.length})
-            </span>
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(categoryNodeKeys);
+
+  useEffect(() => {
+    setExpandedKeys(categoryNodeKeys);
+  }, [categoryNodeKeys]);
+
+  const renderedTreeData = useMemo<TreeProps['treeData']>(() => {
+    return treeData.map((categoryNode) => ({
+      key: categoryNode.key,
+      selectable: false,
+      title: (
+        <span style={{ fontWeight: 500 }}>
+          <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
+          {categoryNode.label}
+          <span style={{ marginLeft: 8, fontSize: 12, color: '#8c8c8c', fontWeight: 'normal' }}>
+            ({categoryNode.count ?? categoryNode.children?.length ?? 0})
           </span>
-        ),
-        selectable: false,
-        children: cmds.map((cmd) => ({
-          key: cmd.id,
-          title: (
-            <div style={{
+        </span>
+      ),
+      children: categoryNode.children?.map((commandNode) => ({
+        key: commandNode.key,
+        isLeaf: true,
+        title: (
+          <div
+            style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               width: '100%',
               paddingRight: 8,
-            }}>
-              <span>
-                <CodeOutlined style={{ marginRight: 6, color: '#52c41a' }} />
-                <span style={{ fontWeight: 500 }}>{cmd.commandName}</span>
+              gap: 8,
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+              <CodeOutlined style={{ marginRight: 6, color: '#52c41a' }} />
+              <span style={{ fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {commandNode.label}
               </span>
-              <span style={{
+            </span>
+            <span
+              style={{
                 fontSize: 11,
                 color: '#8c8c8c',
                 fontFamily: 'monospace',
-              }}>
-                {cmd.commandCode}
-              </span>
-            </div>
-          ),
-          isLeaf: true,
-        })),
-      });
-    });
-    return nodes;
-  }, [commandsByCategory, categoryOptions, token.colorPrimary]);
+                flexShrink: 0,
+              }}
+            >
+              {commandNode.commandCode}
+            </span>
+          </div>
+        ),
+      })),
+    }));
+  }, [token.colorPrimary, treeData]);
 
-  // 树节点选择
+  const commandMap = useMemo(() => {
+    const entries = treeData.flatMap((categoryNode) =>
+      (categoryNode.children ?? [])
+        .filter((node): node is CommandTreeNode & { command: MMLCommand } => Boolean(node.command))
+        .map((node) => [String(node.key), node.command] as const)
+    );
+
+    return new Map<string, MMLCommand>(entries);
+  }, [treeData]);
+
   const handleSelect: TreeProps['onSelect'] = useCallback(
-    (selectedKeys: React.Key[]) => {
-      if (selectedKeys.length > 0) {
-        const key = String(selectedKeys[0]);
-        const cmd = commands.find((c) => c.id === key);
-        if (cmd) {
-          onSelectCommand(cmd);
-        }
+    (selectedKeys) => {
+      if (selectedKeys.length === 0) {
+        return;
+      }
+
+      const command = commandMap.get(String(selectedKeys[0]));
+      if (command) {
+        void onSelectCommand(command);
       }
     },
-    [commands, onSelectCommand]
+    [commandMap, onSelectCommand]
   );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* 头部 */}
       <div
         style={{
           padding: '10px 12px',
@@ -135,9 +149,8 @@ export default function CommandTree({
         )}
       </div>
 
-      {/* 搜索和筛选 */}
       <div style={{ padding: '10px 12px', background: token.colorBgContainer }}>
-        <Input
+        <Input.Search
           size="small"
           style={{ marginBottom: 8, borderRadius: 4 }}
           placeholder={t('common.search')}
@@ -157,7 +170,6 @@ export default function CommandTree({
         />
       </div>
 
-      {/* 命令树 */}
       <div
         className="no-scrollbar"
         style={{
@@ -168,14 +180,18 @@ export default function CommandTree({
           background: token.colorBgContainer,
         }}
       >
-        {treeData.length > 0 ? (
+        {isLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 48 }}>
+            <Spin size="small" />
+          </div>
+        ) : renderedTreeData && renderedTreeData.length > 0 ? (
           <Tree
             showLine={{ showLeafIcon: false }}
             expandedKeys={expandedKeys}
             onExpand={setExpandedKeys}
             selectedKeys={selectedCommand ? [selectedCommand.id] : []}
             onSelect={handleSelect}
-            treeData={treeData}
+            treeData={renderedTreeData}
             style={{ background: 'transparent', fontSize: 11 }}
           />
         ) : (

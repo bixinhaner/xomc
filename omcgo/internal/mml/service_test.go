@@ -2,9 +2,11 @@ package mml
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -236,6 +238,73 @@ func TestService_GetCommand(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, expected, result)
+}
+
+func TestService_GetCommandParamPaths_StringPaths(t *testing.T) {
+	cmdID := uuid.New()
+	paramPathsJSON := json.RawMessage(`[
+		"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF"
+	]`)
+	expected := &MMLCommand{
+		ID:                  cmdID,
+		CommandCode:         "MOD CELL",
+		OperationType:       "MOD",
+		ParamPaths:          paramPathsJSON,
+		SupportedOperations: pq.StringArray{"LST", "MOD"},
+	}
+
+	cmdRepo := &mockCommandRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLCommand, error) {
+			assert.Equal(t, cmdID, id)
+			return expected, nil
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, &mockTaskRepo{})
+	result, err := svc.GetCommandParamPaths(context.Background(), cmdID)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "MOD CELL", result.CommandCode)
+	assert.Equal(t, "MOD", result.OperationType)
+	assert.Equal(t, []string{"LST", "MOD"}, result.SupportedOperations)
+	require.Len(t, result.ParamPaths, 1)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", result.ParamPaths[0].Path)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", result.ParamPaths[0].Label)
+	assert.True(t, result.ParamPaths[0].Writable)
+}
+
+func TestService_GetCommandParamPaths_ObjectPaths(t *testing.T) {
+	cmdID := uuid.New()
+	paramPathsJSON := json.RawMessage(`[
+		{"path":"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF","label":"LTE射频参数","writable":true},
+		{"path":"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.CellState","label":"CellState"}
+	]`)
+	expected := &MMLCommand{
+		ID:                  cmdID,
+		CommandCode:         "MOD CELL",
+		OperationType:       "MOD",
+		ParamPaths:          paramPathsJSON,
+		SupportedOperations: pq.StringArray{"LST", "MOD"},
+	}
+
+	cmdRepo := &mockCommandRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLCommand, error) {
+			assert.Equal(t, cmdID, id)
+			return expected, nil
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, &mockTaskRepo{})
+	result, err := svc.GetCommandParamPaths(context.Background(), cmdID)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.ParamPaths, 2)
+	assert.Equal(t, "LTE射频参数", result.ParamPaths[0].Label)
+	assert.True(t, result.ParamPaths[0].Writable)
+	assert.Equal(t, "CellState", result.ParamPaths[1].Label)
+	assert.True(t, result.ParamPaths[1].Writable)
 }
 
 // --- Tests: GetCommandByCode ---

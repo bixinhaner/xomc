@@ -33,6 +33,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	commands := mml.Group("/commands")
 	commands.GET("", h.ListCommands)
 	commands.GET("/:id", h.GetCommand)
+	commands.GET("/:id/param-paths", h.GetCommandParamPaths)
 
 	mml.POST("/execute", h.Execute)
 	mml.GET("/dangerous-check", h.DangerousCheck)
@@ -88,6 +89,10 @@ type ExecuteHTTPRequest struct {
 	FailedRetry         bool `json:"failed_retry"`
 	FailedRetryCount    int  `json:"failed_retry_count"`
 	FailedRetryInterval int  `json:"failed_retry_interval"`
+
+	// Parameter path command support
+	ParamPaths    []string `json:"param_paths"`
+	OperationType string   `json:"operation_type"`
 }
 
 // CreateScriptRequest defines the request body for creating an MML script.
@@ -154,6 +159,26 @@ func (h *Handler) GetCommand(c *gin.Context) {
 	c.JSON(http.StatusOK, cmd)
 }
 
+// GetCommandParamPaths handles GET /api/v1/mml/commands/:id/param-paths.
+func (h *Handler) GetCommandParamPaths(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	result, err := h.service.GetCommandParamPaths(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": result,
+	})
+}
+
 // ---- Execute handler ----
 
 // Execute handles POST /api/v1/mml/execute.
@@ -181,6 +206,8 @@ func (h *Handler) Execute(c *gin.Context) {
 		FailedRetry:         req.FailedRetry,
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
+		ParamPaths:          req.ParamPaths,
+		OperationType:       req.OperationType,
 	}
 	if req.ScriptID != "" {
 		execReq.ScriptID = &req.ScriptID

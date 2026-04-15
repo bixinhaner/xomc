@@ -1,4 +1,4 @@
-export type MMLParamType = 'string' | 'number' | 'boolean' | 'enum' | 'range' | 'ipAddress' | 'list';
+export type MMLParamType = 'string' | 'number' | 'boolean' | 'enum' | 'range' | 'ipAddress' | 'list' | 'unsignedInt';
 
 export interface MMLParam {
   name: string;
@@ -10,7 +10,23 @@ export interface MMLParam {
   minValue?: number;
   maxValue?: number;
   pattern?: string;
+  // Extended fields aligned with backend ParamMeta
+  suggestedValue?: string | number | boolean;
+  unit?: string;
+  restartRequired?: boolean;
+  helpText?: string;
+  order?: number;
+  enumValues?: string[];
 }
+
+// Represents a TR-069 parameter path bound to a command
+export interface ParamPath {
+  path: string;
+  label: string;
+  writable: boolean;
+}
+
+export type MMLOperationType = 'LST' | 'MOD' | 'ADD' | 'RMV' | 'DSP' | 'ACT' | 'DEA' | 'RST' | 'CLR' | 'UPG';
 
 export interface MMLCommand {
   id: string;
@@ -20,6 +36,12 @@ export interface MMLCommand {
   description: string;
   params: MMLParam[];
   productTypes: string[];
+  // Extended fields aligned with backend model
+  operationType?: MMLOperationType;
+  paramPaths?: ParamPath[];
+  supportedOperations?: string[];
+  helpDoc?: string;
+  notes?: string;
 }
 
 export interface MMLResult {
@@ -89,7 +111,7 @@ export interface MMLTemplate {
   id: string;
   templateName: string;
   commandCode: string;
-  operationType: 'LST' | 'MOD' | 'ADD' | 'RMV';
+  operationType: MMLOperationType;
   templateScope: 'private' | 'public';
   parameters: Record<string, string | number | boolean>;
   paramPaths: string[];

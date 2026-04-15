@@ -6,6 +6,20 @@ import { useExecuteMMLCommand, useMMLTaskPolling } from '@/hooks/api/useMML';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 
+type ExecutePayload = Record<string, unknown>;
+
+type ExecuteCommandParams = {
+  activeTab: 'control' | 'paramPath';
+  command: MMLCommand | null;
+  commandLineText: string;
+  devices: ConsoleDevice[];
+  isManualEdit: boolean;
+  operationType: string;
+  paramPaths: string[];
+  parameters: Record<string, string | number | boolean>;
+  selectedFields: string[];
+};
+
 export function useCommandExecution() {
   const [outputLines, setOutputLines] = useState<TerminalLine[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -14,26 +28,21 @@ export function useCommandExecution() {
 
   const executeMutation = useExecuteMMLCommand();
 
-  // 轮询任务状态
   const { data: polledTask } = useMMLTaskPolling(pollingTaskId, !!pollingTaskId);
 
-  // 添加输出行
   const addOutput = useCallback((line: TerminalLine) => {
     setOutputLines((prev) => [...prev, line]);
   }, []);
 
-  // 清空输出
   const clearOutput = useCallback(() => {
     setOutputLines([]);
     setPollingTaskId(null);
     lastPolledStatus.current = '';
   }, []);
 
-  // 当轮询到任务完成时，输出结果
   useEffect(() => {
     if (!polledTask || !pollingTaskId) return;
 
-    // 避免重复输出
     if (lastPolledStatus.current === polledTask.status) return;
     lastPolledStatus.current = polledTask.status;
 
@@ -44,7 +53,6 @@ export function useCommandExecution() {
         timestamp: new Date().toLocaleTimeString(),
       });
 
-      // 输出每个设备的结果
       if (polledTask.results && polledTask.results.length > 0) {
         addOutput({ type: 'info', text: '─'.repeat(50), timestamp: new Date().toLocaleTimeString() });
         for (const r of polledTask.results) {
@@ -97,12 +105,17 @@ export function useCommandExecution() {
     }
   }, [polledTask, pollingTaskId, addOutput]);
 
-  // 执行命令
-  const executeCommand = useCallback(async (
-    devices: ConsoleDevice[],
-    command: MMLCommand | null,
-    params: Record<string, string | number | boolean>
-  ) => {
+  const executeCommand = useCallback(async ({
+    activeTab,
+    command,
+    commandLineText,
+    devices,
+    isManualEdit,
+    operationType,
+    paramPaths,
+    parameters,
+    selectedFields,
+  }: ExecuteCommandParams) => {
     if (devices.length === 0) {
       addOutput({
         type: 'stderr',
@@ -112,7 +125,17 @@ export function useCommandExecution() {
       return;
     }
 
-    if (!command) {
+    const trimmedCommandLineText = commandLineText.trim();
+    if (!trimmedCommandLineText) {
+      addOutput({
+        type: 'stderr',
+        text: '错误：请输入命令内容',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
+
+    if (!command && !isManualEdit) {
       addOutput({
         type: 'stderr',
         text: '错误：请先选择命令',
@@ -121,12 +144,23 @@ export function useCommandExecution() {
       return;
     }
 
+    const payload = buildExecutePayload({
+      activeTab,
+      command,
+      commandLineText: trimmedCommandLineText,
+      devices,
+      isManualEdit,
+      operationType,
+      paramPaths,
+      parameters,
+      selectedFields,
+    });
+
     setIsExecuting(true);
 
-    // 添加命令开始标记
     addOutput({
       type: 'info',
-      text: `执行命令: ${command.commandCode}`,
+      text: `执行命令: ${trimmedCommandLineText}`,
       timestamp: new Date().toLocaleTimeString(),
     });
     addOutput({
@@ -141,26 +175,19 @@ export function useCommandExecution() {
     });
 
     try {
-      // 调用 API 创建任务
-      const task = await executeMutation.mutateAsync({
-        commandCode: command.commandCode,
-        deviceSns: devices.map((d) => d.sn),
-        params,
-      });
+      const task = await executeMutation.mutateAsync({ payload });
 
       addOutput({
         type: 'success',
-        text: `任务已创建 (ID: ${task.id})`,
+        text: `命令已提交，任务ID: ${task.id}`,
         timestamp: new Date().toLocaleTimeString(),
       });
 
-      // 如果任务立即完成（mock 模式或同步执行），直接输出结果
       if (TERMINAL_STATES.has(task.status) && task.results && task.results.length > 0) {
         outputTaskResults(task, addOutput);
         addOutput({ type: 'info', text: '', timestamp: new Date().toLocaleTimeString() });
         setIsExecuting(false);
       } else {
-        // 异步任务：启动轮询
         addOutput({
           type: 'info',
           text: `共 ${task.totalDevices || devices.length} 台设备待执行，等待结果...`,
@@ -172,14 +199,13 @@ export function useCommandExecution() {
     } catch (error) {
       addOutput({
         type: 'stderr',
-        text: `执行失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        text: `命令提交失败: ${error instanceof Error ? error.message : '未知错误'}`,
         timestamp: new Date().toLocaleTimeString(),
       });
       setIsExecuting(false);
     }
   }, [executeMutation, addOutput]);
 
-  // 下载输出
   const downloadOutput = useCallback(() => {
     const content = outputLines
       .map((line) => {
@@ -209,7 +235,48 @@ export function useCommandExecution() {
   };
 }
 
-// 输出任务结果的辅助函数
+function buildExecutePayload({
+  activeTab,
+  command,
+  commandLineText,
+  devices,
+  isManualEdit,
+  operationType,
+  paramPaths,
+  parameters,
+  selectedFields,
+}: ExecuteCommandParams): ExecutePayload {
+  const deviceSns = devices.map((device) => device.sn);
+  const manualCommands = commandLineText
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => ({ command_code: item }));
+
+  if (isManualEdit || !command) {
+    return {
+      device_sns: deviceSns,
+      commands: manualCommands,
+    };
+  }
+
+  if (activeTab === 'control') {
+    return {
+      command_code: command.commandCode,
+      parameters,
+      device_sns: deviceSns,
+      ...(selectedFields.length > 0 ? { selected_fields: selectedFields } : {}),
+    };
+  }
+
+  return {
+    command_code: command.commandCode,
+    param_paths: paramPaths.filter((path) => path.trim()),
+    operation_type: operationType,
+    device_sns: deviceSns,
+  };
+}
+
 function outputTaskResults(task: MMLTask, addOutput: (line: TerminalLine) => void) {
   for (const r of task.results) {
     addOutput({

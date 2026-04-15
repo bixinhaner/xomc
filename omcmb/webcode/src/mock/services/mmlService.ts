@@ -68,17 +68,30 @@ export const mmlService = {
   },
 
   async executeCommand(
-    commandCode: string,
-    deviceSns: string[],
-    params?: Record<string, string | number | boolean>
+    commandCodeOrPayload: string | Record<string, unknown>,
+    deviceSns?: string[],
+    params?: Record<string, unknown>
   ): Promise<MMLTask> {
-    const fullCommand = params
-      ? `${commandCode} ${Object.entries(params)
+    const payload =
+      typeof commandCodeOrPayload === 'string'
+        ? {
+            command_code: commandCodeOrPayload,
+            device_sns: deviceSns ?? [],
+            parameters: params,
+          }
+        : commandCodeOrPayload;
+    const commandCode = (payload.command_code as string | undefined) ?? '';
+    const requestDeviceSns = Array.isArray(payload.device_sns) ? (payload.device_sns as string[]) : [];
+    const requestParameters = payload.parameters && typeof payload.parameters === 'object'
+      ? (payload.parameters as Record<string, unknown>)
+      : undefined;
+    const fullCommand = requestParameters
+      ? `${commandCode} ${Object.entries(requestParameters)
           .map(([k, v]) => `${k}:${v}`)
           .join(' ')}`
       : commandCode;
     await delay(500, 2000);
-    const results = deviceSns.map((sn) => ({
+    const results = requestDeviceSns.map((sn) => ({
       deviceSn: sn,
       result: generateMMLOutput(fullCommand, sn),
     }));
@@ -86,7 +99,7 @@ export const mmlService = {
     const newItem: MMLTask = {
       id: generateId('mmltask'),
       taskName: `Execute ${commandCode}`,
-      deviceSns,
+      deviceSns: requestDeviceSns,
       commands: [commandCode],
       status: 'completed',
       results,
@@ -99,7 +112,7 @@ export const mmlService = {
       failedRetry: false,
       failedRetryCount: 3,
       failedRetryInterval: 5,
-      totalDevices: deviceSns.length,
+      totalDevices: requestDeviceSns.length,
       successCount: results.filter((r) => r.result.success).length,
       failedCount: results.filter((r) => !r.result.success).length,
       result: allSuccess ? 'success' : results.some((r) => r.result.success) ? 'partial' : 'failed',

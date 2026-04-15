@@ -241,6 +241,50 @@ func TestHandler_GetCommand(t *testing.T) {
 	assert.Equal(t, "GetParameterValues", resp.RPCMethod)
 }
 
+func TestHandler_GetCommandParamPaths(t *testing.T) {
+	cmdID := uuid.New()
+	cmdRepo := &hCmdRepo{
+		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLCommand, error) {
+			assert.Equal(t, cmdID, id)
+			return &MMLCommand{
+				ID:                  cmdID,
+				CommandCode:         "MOD CELL",
+				OperationType:       "MOD",
+				ParamPaths:          json.RawMessage(`[{"path":"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF","label":"LTE射频参数","writable":true}]`),
+				SupportedOperations: []string{"LST", "MOD"},
+			}, nil
+		},
+	}
+	scriptRepo := &hScriptRepo{}
+	taskRepo := &hTaskRepo{}
+
+	logger := zap.NewNop()
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
+	h := NewHandler(svc, logger)
+	router := setupMMLRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mml/commands/"+cmdID.String()+"/param-paths", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Code int                       `json:"code"`
+		Data CommandParamPathsResponse `json:"data"`
+	}
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, 0, resp.Code)
+	assert.Equal(t, "MOD CELL", resp.Data.CommandCode)
+	assert.Equal(t, "MOD", resp.Data.OperationType)
+	assert.Equal(t, []string{"LST", "MOD"}, resp.Data.SupportedOperations)
+	require.Len(t, resp.Data.ParamPaths, 1)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", resp.Data.ParamPaths[0].Path)
+	assert.Equal(t, "LTE射频参数", resp.Data.ParamPaths[0].Label)
+	assert.True(t, resp.Data.ParamPaths[0].Writable)
+}
+
 func TestHandler_Execute(t *testing.T) {
 	cmdID := uuid.New()
 

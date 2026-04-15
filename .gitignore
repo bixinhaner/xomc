@@ -18,3 +18,6 @@ omcmb/webcode/node_modules/
 # Qoder (AI tool generated files)
 .qoder/
 
+run/app
+run/logs
+omcmb/webcode/dist

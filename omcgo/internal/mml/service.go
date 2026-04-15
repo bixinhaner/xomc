@@ -2,6 +2,7 @@ package mml
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -54,6 +55,120 @@ func (s *Service) GetCommand(ctx context.Context, id uuid.UUID) (*MMLCommand, er
 // GetCommandByCode retrieves a predefined MML command by its command code.
 func (s *Service) GetCommandByCode(ctx context.Context, code string) (*MMLCommand, error) {
 	return s.cmdRepo.GetByCode(ctx, code)
+}
+
+// CommandParamPath represents a TR-069 parameter path bound to an MML command.
+type CommandParamPath struct {
+	Path     string `json:"path"`
+	Label    string `json:"label"`
+	Writable bool   `json:"writable"`
+}
+
+// CommandParamPathsResponse defines the response payload for command parameter paths.
+type CommandParamPathsResponse struct {
+	CommandCode         string             `json:"command_code"`
+	OperationType       string             `json:"operation_type"`
+	SupportedOperations []string           `json:"supported_operations"`
+	ParamPaths          []CommandParamPath `json:"param_paths"`
+}
+
+// GetCommandParamPaths retrieves TR-069 parameter paths for a predefined MML command.
+func (s *Service) GetCommandParamPaths(ctx context.Context, id uuid.UUID) (*CommandParamPathsResponse, error) {
+	cmd, err := s.GetCommand(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	supportedOperations := make([]string, 0, len(cmd.SupportedOperations))
+	supportedOperations = append(supportedOperations, cmd.SupportedOperations...)
+
+	paramPaths, err := normalizeCommandParamPaths(cmd.ParamPaths, cmd.OperationType, supportedOperations)
+	if err != nil {
+		return nil, fmt.Errorf("parse command param paths: %w", err)
+	}
+
+	return &CommandParamPathsResponse{
+		CommandCode:         cmd.CommandCode,
+		OperationType:       cmd.OperationType,
+		SupportedOperations: supportedOperations,
+		ParamPaths:          paramPaths,
+	}, nil
+}
+
+func normalizeCommandParamPaths(raw json.RawMessage, operationType string, supportedOperations []string) ([]CommandParamPath, error) {
+	if len(raw) == 0 {
+		return []CommandParamPath{}, nil
+	}
+
+	defaultWritable := isWritableOperation(operationType)
+	if !defaultWritable {
+		for _, op := range supportedOperations {
+			if isWritableOperation(op) {
+				defaultWritable = true
+				break
+			}
+		}
+	}
+
+	type rawCommandParamPath struct {
+		Path     string `json:"path"`
+		Label    string `json:"label"`
+		Writable *bool  `json:"writable"`
+	}
+
+	var objectPaths []rawCommandParamPath
+	if err := json.Unmarshal(raw, &objectPaths); err == nil {
+		paramPaths := make([]CommandParamPath, 0, len(objectPaths))
+		for _, item := range objectPaths {
+			if item.Path == "" {
+				continue
+			}
+
+			label := item.Label
+			if label == "" {
+				label = item.Path
+			}
+
+			writable := defaultWritable
+			if item.Writable != nil {
+				writable = *item.Writable
+			}
+
+			paramPaths = append(paramPaths, CommandParamPath{
+				Path:     item.Path,
+				Label:    label,
+				Writable: writable,
+			})
+		}
+		return paramPaths, nil
+	}
+
+	var stringPaths []string
+	if err := json.Unmarshal(raw, &stringPaths); err != nil {
+		return nil, err
+	}
+
+	paramPaths := make([]CommandParamPath, 0, len(stringPaths))
+	for _, path := range stringPaths {
+		if path == "" {
+			continue
+		}
+		paramPaths = append(paramPaths, CommandParamPath{
+			Path:     path,
+			Label:    path,
+			Writable: defaultWritable,
+		})
+	}
+	return paramPaths, nil
+}
+
+func isWritableOperation(operation string) bool {
+	switch strings.ToUpper(operation) {
+	case "MOD", "ADD", "RMV", "ACT", "DEA", "RST", "CLR", "UPG":
+		return true
+	default:
+		return false
+	}
 }
 
 // ---- Script operations (CRUD) ----
@@ -130,6 +245,10 @@ type ExecuteRequest struct {
 	Commands    []map[string]interface{} `json:"commands"`
 	ScriptID    *string                  `json:"script_id,omitempty"`
 
+	// Parameter path command support
+	ParamPaths    []string `json:"param_paths"`
+	OperationType string   `json:"operation_type"`
+
 	// Scheduling
 	ExecuteType ExecuteType `json:"execute_type"`
 	ScheduledAt *string     `json:"scheduled_at"`
@@ -190,6 +309,12 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 			"command_code": cmd.CommandCode,
 			"rpc_method":   cmd.RPCMethod,
 			"parameters":   req.Parameters,
+		}
+		if len(req.ParamPaths) > 0 {
+			entry["param_paths"] = req.ParamPaths
+		}
+		if req.OperationType != "" {
+			entry["operation_type"] = req.OperationType
 		}
 		commands = append(commands, entry)
 	}

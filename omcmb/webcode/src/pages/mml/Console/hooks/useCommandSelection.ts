@@ -1,78 +1,133 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import type { TreeDataNode } from 'antd';
+import { useQuery } from '@tanstack/react-query';
 import type { MMLCommand } from '@/types/mml';
-import { useAllMMLCommands } from '@/hooks/api/useMML';
+import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
+import { COMMAND_PAGE_SIZE } from '../constants';
+
+export interface CommandTreeNode extends TreeDataNode {
+  nodeType: 'category' | 'command';
+  label: string;
+  category?: string;
+  count?: number;
+  commandCode?: string;
+  command?: MMLCommand;
+  children?: CommandTreeNode[];
+}
 
 export function useCommandSelection() {
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [categoryFilter, setCategoryFilter] = useState('');
 
-  const { data: allCommands = [] } = useAllMMLCommands();
+  const keyword = searchText.trim() || undefined;
+  const category = categoryFilter || undefined;
+
+  const { data: commandsResponse, isLoading, isFetching } = useQuery({
+    queryKey: ['mml-commands', { category: category ?? '', keyword: keyword ?? '' }],
+    queryFn: () =>
+      mmlApi.getCommands({
+        page: 1,
+        pageSize: COMMAND_PAGE_SIZE,
+        category,
+        keyword,
+      }),
+  });
+
   const { data: categoryDict } = useDictionary('mml_command_category');
 
-  // 分类选项（字典驱动，fallback 到从命令数据提取）
-  const categoryOptions = useMemo(
-    () => {
-      const dictDetails = categoryDict?.sysDictionaryDetails;
-      if (dictDetails && dictDetails.length > 0) {
-        return dictDetails.map((d) => ({ label: d.label, value: d.value }));
-      }
-      return [...new Set(allCommands.map((cmd) => cmd.category))].map((c) => ({ label: c, value: c }));
-    },
-    [categoryDict, allCommands]
-  );
+  const commands = useMemo(() => commandsResponse?.items ?? [], [commandsResponse]);
 
-  // 所有分类值（用于树分组）
-  const categories = useMemo(
-    () => categoryOptions.map((o) => o.value),
-    [categoryOptions]
-  );
+  const categoryOptions = useMemo(() => {
+    const dictDetails = categoryDict?.sysDictionaryDetails;
+    if (dictDetails && dictDetails.length > 0) {
+      return dictDetails.map((detail) => ({
+        label: detail.label,
+        value: detail.value,
+      }));
+    }
 
-  // 过滤后的命令列表
-  const filteredCommands = useMemo(() => {
-    return allCommands.filter((command) => {
-      const matchCategory = !categoryFilter || command.category === categoryFilter;
-      const matchSearch = !searchText ||
-        command.commandName.includes(searchText) ||
-        command.commandCode.toLowerCase().includes(searchText.toLowerCase());
-      return matchCategory && matchSearch;
+    return [...new Set(commands.map((command) => command.category))].map((value) => ({
+      label: value,
+      value,
+    }));
+  }, [categoryDict, commands]);
+
+  const treeData = useMemo((): CommandTreeNode[] => {
+    if (commands.length === 0) {
+      return [];
+    }
+
+    const categoryLabelMap = new Map(categoryOptions.map((option) => [option.value, option.label]));
+    const groupedCommands = commands.reduce<Map<string, MMLCommand[]>>((map, command) => {
+      const current = map.get(command.category) ?? [];
+      current.push(command);
+      map.set(command.category, current);
+      return map;
+    }, new Map<string, MMLCommand[]>());
+
+    const orderedCategories = [
+      ...categoryOptions.map((option) => option.value).filter((value) => groupedCommands.has(value)),
+      ...[...groupedCommands.keys()].filter(
+        (value) => !categoryOptions.some((option) => option.value === value)
+      ),
+    ];
+
+    return orderedCategories.map((categoryValue) => {
+      const categoryCommands = groupedCommands.get(categoryValue) ?? [];
+      const categoryLabel = categoryLabelMap.get(categoryValue) || categoryValue;
+
+      return {
+        key: `cat-${categoryValue}`,
+        title: categoryLabel,
+        label: categoryLabel,
+        category: categoryValue,
+        count: categoryCommands.length,
+        nodeType: 'category',
+        selectable: false,
+        children: categoryCommands.map((command) => ({
+          key: command.id,
+          title: `${command.commandName} ${command.commandCode}`,
+          label: command.commandName,
+          commandCode: command.commandCode,
+          category: command.category,
+          command,
+          nodeType: 'command',
+          isLeaf: true,
+        })),
+      };
     });
-  }, [allCommands, searchText, categoryFilter]);
+  }, [categoryOptions, commands]);
 
-  // 按分类分组的命令
-  const commandsByCategory = useMemo(() => {
-    const map = new Map<string, MMLCommand[]>();
-    filteredCommands.forEach((cmd) => {
-      const cmds = map.get(cmd.category) || [];
-      cmds.push(cmd);
-      map.set(cmd.category, cmds);
-    });
-    return map;
-  }, [filteredCommands]);
+  useEffect(() => {
+    if (selectedCommand && !commands.some((command) => command.id === selectedCommand.id)) {
+      setSelectedCommand(null);
+    }
+  }, [commands, selectedCommand]);
 
-  // 选择命令
-  const selectCommand = useCallback((command: MMLCommand | null) => {
-    setSelectedCommand(command);
+  const selectCommand = useCallback(async (command: MMLCommand | null) => {
+    if (!command) {
+      setSelectedCommand(null);
+      return;
+    }
+
+    const detail = await mmlApi.getCommandById(command.id);
+    setSelectedCommand(detail ?? command);
   }, []);
 
-  // 清除选择
   const clearSelection = useCallback(() => {
     setSelectedCommand(null);
   }, []);
 
   return {
-    // 状态
     selectedCommand,
     searchText,
     categoryFilter,
-    filteredCommands,
-    categories,
+    commands,
+    treeData,
     categoryOptions,
-    commandsByCategory,
-    allCommands,
-
-    // 操作
+    isLoading: isLoading || isFetching,
     setSearchText,
     setCategoryFilter,
     selectCommand,

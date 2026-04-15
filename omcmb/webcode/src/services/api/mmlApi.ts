@@ -1,5 +1,5 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate, ParamPath, MMLOperationType } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
@@ -16,6 +16,12 @@ interface BackendMMLCommand {
   param_template: Record<string, unknown> | null;
   product_types: string[] | null;
   created_at: string;
+  // Extended fields (may be absent in older backend versions)
+  operation_type?: string;
+  param_paths?: Array<string | { path: string; label?: string; writable?: boolean }> | null;
+  supported_operations?: string[] | null;
+  help_doc?: string;
+  notes?: string;
 }
 
 interface BackendMMLScript {
@@ -114,6 +120,12 @@ function mapParamTemplate(
         minValue: obj.min_value as number | undefined,
         maxValue: obj.max_value as number | undefined,
         pattern: obj.pattern as string | undefined,
+        suggestedValue: obj.suggested_value as MMLParam['suggestedValue'],
+        unit: obj.unit as string | undefined,
+        restartRequired: obj.restart_required as boolean | undefined,
+        helpText: obj.help_text as string | undefined,
+        order: obj.order as number | undefined,
+        enumValues: obj.enum_values as string[] | undefined,
       };
     }
     // Simple scalar — treat as a string param with a default
@@ -128,6 +140,25 @@ function mapParamTemplate(
 }
 
 function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
+  let paramPaths: ParamPath[] | undefined;
+  if (Array.isArray(bc.param_paths)) {
+    paramPaths = bc.param_paths
+      .map((item) => {
+        if (typeof item === 'string') {
+          const path = item.trim();
+          if (!path) return null;
+          return { path, label: path, writable: true } as ParamPath;
+        }
+        if (!item.path) return null;
+        return {
+          path: item.path,
+          label: item.label || item.path,
+          writable: item.writable ?? true,
+        } as ParamPath;
+      })
+      .filter((v): v is ParamPath => v !== null);
+  }
+
   return {
     id: bc.id,
     commandName: bc.command_name,
@@ -136,6 +167,11 @@ function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
     description: bc.description,
     params: mapParamTemplate(bc.param_template),
     productTypes: bc.product_types || [],
+    operationType: bc.operation_type as MMLOperationType | undefined,
+    paramPaths,
+    supportedOperations: bc.supported_operations || undefined,
+    helpDoc: bc.help_doc || undefined,
+    notes: bc.notes || undefined,
   };
 }
 
@@ -288,15 +324,18 @@ export const mmlApi = {
   // --- Execute ---
 
   async executeCommand(
-    commandCode: string,
-    deviceSns: string[],
-    params?: Record<string, string | number | boolean>
+    commandCodeOrPayload: string | Record<string, unknown>,
+    deviceSns?: string[],
+    params?: Record<string, unknown>
   ): Promise<MMLTask> {
-    const payload: Record<string, unknown> = {
-      command_code: commandCode,
-      device_sns: deviceSns,
-    };
-    if (params) payload.parameters = params;
+    const payload: Record<string, unknown> =
+      typeof commandCodeOrPayload === 'string'
+        ? {
+            command_code: commandCodeOrPayload,
+            device_sns: deviceSns ?? [],
+            ...(params ? { parameters: params } : {}),
+          }
+        : commandCodeOrPayload;
 
     const { data } = await http.post<BackendMMLTask>('/mml/execute', payload);
     return mapBackendTask(data);

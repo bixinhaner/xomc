@@ -59,11 +59,13 @@ export function useExecuteMMLCommand() {
       commandCode,
       deviceSns,
       params,
+      payload,
     }: {
-      commandCode: string;
-      deviceSns: string[];
-      params?: Record<string, string | number | boolean>;
-    }) => api.executeCommand(commandCode, deviceSns, params),
+      commandCode?: string;
+      deviceSns?: string[];
+      params?: Record<string, unknown>;
+      payload?: Record<string, unknown>;
+    }) => (payload ? api.executeCommand(payload) : api.executeCommand(commandCode!, deviceSns!, params)),
   });
 }
 

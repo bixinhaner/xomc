@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -49,7 +50,8 @@ var taskAllowedSortColumns = map[string]bool{
 
 var commandColumns = []string{
 	"id", "command_name", "command_code", "category",
-	"description", "rpc_method", "param_template", "product_types",
+	"description", "rpc_method", "operation_type", "param_template", "param_paths",
+	"supported_operations", "help_doc", "notes", "product_types",
 	"created_at",
 }
 
@@ -199,11 +201,12 @@ func (r *PgCommandRepository) List(ctx context.Context, filter CommandFilter) (*
 
 func scanCommand(row pgx.Row) (*MMLCommand, error) {
 	var c MMLCommand
-	var paramTemplateJSON, productTypesJSON []byte
+	var paramTemplateJSON, paramPathsJSON, productTypesJSON []byte
 
 	err := row.Scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.Category,
-		&c.Description, &c.RPCMethod, &paramTemplateJSON, &productTypesJSON,
+		&c.Description, &c.RPCMethod, &c.OperationType, &paramTemplateJSON, &paramPathsJSON,
+		&c.SupportedOperations, &c.HelpDoc, &c.Notes, &productTypesJSON,
 		&c.CreatedAt,
 	)
 	if err != nil {
@@ -216,6 +219,15 @@ func scanCommand(row pgx.Row) (*MMLCommand, error) {
 	}
 	if c.ParamTemplate == nil {
 		c.ParamTemplate = map[string]interface{}{}
+	}
+	if paramPathsJSON != nil {
+		c.ParamPaths = append(c.ParamPaths[:0], paramPathsJSON...)
+	}
+	if c.ParamPaths == nil {
+		c.ParamPaths = json.RawMessage("[]")
+	}
+	if c.SupportedOperations == nil {
+		c.SupportedOperations = pq.StringArray{}
 	}
 	if productTypesJSON != nil {
 		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
@@ -230,11 +242,12 @@ func scanCommand(row pgx.Row) (*MMLCommand, error) {
 
 func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
 	var c MMLCommand
-	var paramTemplateJSON, productTypesJSON []byte
+	var paramTemplateJSON, paramPathsJSON, productTypesJSON []byte
 
 	err := rows.Scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.Category,
-		&c.Description, &c.RPCMethod, &paramTemplateJSON, &productTypesJSON,
+		&c.Description, &c.RPCMethod, &c.OperationType, &paramTemplateJSON, &paramPathsJSON,
+		&c.SupportedOperations, &c.HelpDoc, &c.Notes, &productTypesJSON,
 		&c.CreatedAt,
 	)
 	if err != nil {
@@ -247,6 +260,15 @@ func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
 	}
 	if c.ParamTemplate == nil {
 		c.ParamTemplate = map[string]interface{}{}
+	}
+	if paramPathsJSON != nil {
+		c.ParamPaths = append(c.ParamPaths[:0], paramPathsJSON...)
+	}
+	if c.ParamPaths == nil {
+		c.ParamPaths = json.RawMessage("[]")
+	}
+	if c.SupportedOperations == nil {
+		c.SupportedOperations = pq.StringArray{}
 	}
 	if productTypesJSON != nil {
 		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {

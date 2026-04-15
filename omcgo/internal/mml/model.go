@@ -1,9 +1,11 @@
 package mml
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -40,15 +42,20 @@ const (
 
 // MMLCommand represents a predefined MML command template.
 type MMLCommand struct {
-	ID            uuid.UUID              `json:"id"`
-	CommandName   string                 `json:"command_name"`
-	CommandCode   string                 `json:"command_code"`
-	Category      string                 `json:"category"`
-	Description   string                 `json:"description"`
-	RPCMethod     string                 `json:"rpc_method"`
-	ParamTemplate map[string]interface{} `json:"param_template"`
-	ProductTypes  []string               `json:"product_types"`
-	CreatedAt     time.Time              `json:"created_at"`
+	ID                  uuid.UUID              `json:"id"`
+	CommandName         string                 `json:"command_name"`
+	CommandCode         string                 `json:"command_code"`
+	Category            string                 `json:"category"`
+	Description         string                 `json:"description"`
+	RPCMethod           string                 `json:"rpc_method"`
+	OperationType       string                 `json:"operation_type" db:"operation_type"`
+	ParamTemplate       map[string]interface{} `json:"param_template"`
+	ParamPaths          json.RawMessage        `json:"param_paths" db:"param_paths"`
+	SupportedOperations pq.StringArray         `json:"supported_operations" db:"supported_operations"`
+	HelpDoc             string                 `json:"help_doc" db:"help_doc"`
+	Notes               string                 `json:"notes" db:"notes"`
+	ProductTypes        []string               `json:"product_types"`
+	CreatedAt           time.Time              `json:"created_at"`
 }
 
 // MMLScript represents a user-defined MML command script.
