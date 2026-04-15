@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
-	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
@@ -292,9 +291,6 @@ func initMiscModules(c *Container) error {
 	// PM threshold
 	c.miscDeps.thresholdRepo = pm.NewPgThresholdRepository(c.PgPool)
 
-	// Alarm rule
-	c.miscDeps.alarmRuleRepo = alarm.NewPgAlarmRuleRepository(c.PgPool)
-
 	return nil
 }
 
@@ -360,9 +356,6 @@ type miscDeps struct {
 
 	// PM Threshold
 	thresholdRepo *pm.PgThresholdRepository
-
-	// Alarm Rule
-	alarmRuleRepo *alarm.PgAlarmRuleRepository
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

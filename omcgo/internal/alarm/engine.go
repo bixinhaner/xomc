@@ -83,10 +83,10 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 						existing.RaisedAt = alarm.RaisedAt
 						existing.Severity = alarm.Severity
 						existing.Description = alarm.Description
-						if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
-							return fmt.Errorf("update existing alarm: %w", updateErr)
-						}
-						e.logger.Debug("deduplicated alarm updated",
+					if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
+						return fmt.Errorf("update existing alarm: %w", updateErr)
+					}
+					e.logger.Debug("deduplicated alarm updated",
 							zap.String("device_sn", alarm.DeviceSN),
 							zap.String("alarm_code", alarm.AlarmCode))
 						return nil
@@ -170,7 +170,7 @@ func (e *AlarmEngine) Acknowledge(ctx context.Context, alarmID uuid.UUID, by str
 	now := time.Now()
 	alarm.Status = model.AlarmAcknowledged
 	alarm.AcknowledgedAt = &now
-	alarm.AcknowledgedBy = by
+	alarm.AcknowledgedBy = &by
 
 	if err := e.store.UpdateActive(ctx, alarm); err != nil {
 		return fmt.Errorf("update alarm: %w", err)

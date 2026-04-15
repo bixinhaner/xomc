@@ -22,7 +22,19 @@ type Alarm struct {
 	RaisedAt       time.Time         `json:"raised_at" db:"raised_at"`
 	AcknowledgedAt *time.Time        `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
 	ClearedAt      *time.Time        `json:"cleared_at,omitempty" db:"cleared_at"`
-	AcknowledgedBy string            `json:"acknowledged_by,omitempty" db:"acknowledged_by"`
+	// 增强字段 (v2.0)
+	DeviceName       *string           `json:"device_name,omitempty" db:"device_name"`
+	Technology      *string           `json:"technology,omitempty" db:"technology"`
+	AlarmSource     *string           `json:"alarm_source,omitempty" db:"alarm_source"`
+	EventType       *string           `json:"event_type,omitempty" db:"event_type"`
+	NetworkLocation *string           `json:"network_location,omitempty" db:"network_location"`
+	ExplicitCause    *string           `json:"explicit_cause,omitempty" db:"explicit_cause"`
+	IsRead          bool              `json:"is_read" db:"is_read"`
+	AckCount        int               `json:"ack_count" db:"ack_count"`
+	FirstRaisedAt   time.Time         `json:"first_raised_at,omitempty" db:"first_raised_at"`
+	LastUpdatedAt   time.Time         `json:"last_updated_at,omitempty" db:"last_updated_at"`
+	ProbableCause   *string           `json:"probable_cause,omitempty" db:"probable_cause"`
+	AcknowledgedBy *string           `json:"acknowledged_by,omitempty" db:"acknowledged_by"`
 	AdditionalInfo map[string]string `json:"additional_info,omitempty" db:"additional_info"`
 	CreatedAt      time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at" db:"updated_at"`

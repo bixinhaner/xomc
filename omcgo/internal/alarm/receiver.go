@@ -15,9 +15,13 @@ import (
 type AlarmPayload struct {
 	DeviceID    string            `json:"device_id"`
 	DeviceSN    string            `json:"device_sn"`
+	DeviceName  string            `json:"device_name,omitempty"`
 	Carrier     string            `json:"carrier"`
+	Technology  string            `json:"technology,omitempty"`
 	AlarmCode   string            `json:"alarm_code"`
 	AlarmType   string            `json:"alarm_type"`
+	AlarmSource string            `json:"alarm_source,omitempty"`
+	EventType   string            `json:"event_type,omitempty"`
 	Description string            `json:"description"`
 	Severity    int               `json:"severity"`
 	RaisedAt    time.Time         `json:"raised_at"`
@@ -65,9 +69,13 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 	alarm := &model.Alarm{
 		DeviceID:       deviceID,
 		DeviceSN:       payload.DeviceSN,
+		DeviceName:     strPtr(payload.DeviceName),
 		Carrier:        model.CarrierCode(payload.Carrier),
+		Technology:     strPtr(payload.Technology),
 		AlarmCode:      payload.AlarmCode,
 		AlarmType:      payload.AlarmType,
+		AlarmSource:    strPtr(payload.AlarmSource),
+		EventType:      strPtr(payload.EventType),
 		Description:    payload.Description,
 		Severity:       model.AlarmSeverity(payload.Severity),
 		RaisedAt:       payload.RaisedAt,

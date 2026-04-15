@@ -18,13 +18,25 @@ type AlarmFilter struct {
 	StartTime *time.Time
 	EndTime   *time.Time
 	model.ListRequest
+	// 新增过滤字段
+	AlarmCodes     []string           `form:"alarm_codes"`
+	AlarmSources   []string           `form:"alarm_sources"`
+	AlarmType      *string            `form:"alarm_type"`
+	IsRead         *bool              `form:"is_read"`
+	DeviceName     *string            `form:"device_name"`
+	Keyword        *string            `form:"keyword"`
+	// 数据权限
+	DeviceIDs      []uuid.UUID        `form:"-"`
+	Technologies   []string           `form:"-"`
 }
 
 // AlarmStatistics contains aggregated alarm metrics.
 type AlarmStatistics struct {
-	TotalActive int64                         `json:"total_active"`
-	BySeverity  map[model.AlarmSeverity]int64 `json:"by_severity"`
-	ByType      map[string]int64              `json:"by_type"`
+	TotalActive     int64                         `json:"total_active"`
+	Unacknowledged int64                         `json:"unacknowledged"`
+	Unread          int64                         `json:"unread"`
+	BySeverity      map[model.AlarmSeverity]int64 `json:"by_severity"`
+	ByType          map[string]int64              `json:"by_type"`
 }
 
 // AlarmStore defines the interface for alarm persistence.
@@ -38,4 +50,13 @@ type AlarmStore interface {
 	Archive(ctx context.Context, alarm *model.Alarm) error
 	ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error)
 	Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error)
+	HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error)
+	// 批量操作
+	BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string) error
+	BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error
+	BatchClear(ctx context.Context, ids []uuid.UUID) error
+	BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string) error
+	BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error
+	BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error
+	MarkRead(ctx context.Context, id uuid.UUID) error
 }

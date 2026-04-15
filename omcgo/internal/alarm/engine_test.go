@@ -91,6 +91,10 @@ func (m *mockAlarmStore) Statistics(_ context.Context, _ AlarmFilter) (*AlarmSta
 	return stats, nil
 }
 
+func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string) error { return nil }
+func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID) error                { return nil }
+func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error                  { return nil }
+
 func newTestEngine(store AlarmStore) *AlarmEngine {
 	return &AlarmEngine{
 		store:  store,

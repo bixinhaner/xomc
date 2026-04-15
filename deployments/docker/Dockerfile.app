@@ -1,23 +1,19 @@
+# syntax=docker/dockerfile:1
 FROM golang:1.25-alpine AS builder
 
-# 安装 git (添加重试逻辑解决 DNS 不稳定问题)
-RUN for i in 1 2 3; do \
-      apk add --no-cache git && break || \
-      { echo "apk add attempt $i failed, retrying in 2s..."; sleep 2; }; \
-    done
+RUN apk add --no-cache git
 
 ARG GOPROXY=https://mirrors.aliyun.com/goproxy/,https://goproxy.cn,https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 
 WORKDIR /build
 
-COPY omcgo/go.mod omcgo/go.sum ./
-RUN go mod download
-
 COPY omcgo/ .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate
 
 # ---
 
@@ -25,7 +21,6 @@ FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates tzdata
 
-# Create log directory with proper permissions
 RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
 
 COPY --from=builder /build/bin/omcgo-app /usr/local/bin/omcgo-app

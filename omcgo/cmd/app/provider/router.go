@@ -293,10 +293,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, c.Logger)
 	alarmHandler.RegisterRoutes(permGroup("alarms"))
 
-	// ----- Alarm rule routes → resource "alarms" -----
-	alarmRuleHandler := alarm.NewRuleHandler(md.alarmRuleRepo, c.Logger)
-	alarmsGroup := permGroup("alarms").Group("/alarms")
-	alarmRuleHandler.RegisterRoutes(alarmsGroup)
+	// ----- Alarm library routes → resource "alarms" -----
+	alarmLibraryHandler := alarm.NewLibraryHandler(ah.alarmLibraryService, c.Logger)
+	alarmLibraryHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-libraries"))
+
+	// ----- Alarm filter rule routes → resource "alarms" -----
+	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
+	alarmFilterHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-filters"))
 
 	// ----- KPI threshold routes → resource "pm" -----
 	thresholdHandler := pm.NewThresholdHandler(md.thresholdRepo, c.Logger)

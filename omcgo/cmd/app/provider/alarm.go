@@ -8,7 +8,7 @@ import (
 )
 
 // initAlarmModule 初始化 F04 告警管理模块。
-// 设置: AlarmPgStore, AlarmEngine
+// 设置: AlarmPgStore, AlarmEngine, AlarmLibraryRepository, AlarmFilterRuleRepository
 func initAlarmModule(c *Container) error {
 	logger := c.Logger.Named("alarm")
 
@@ -16,6 +16,16 @@ func initAlarmModule(c *Container) error {
 	alarmPgStore := alarm.NewPgAlarmStore(c.PgPool, c.TsPool)
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, c.Carriers, c.EventBus, logger)
 	alarmEngine.SetMetrics(alarm.NewAlarmMetrics(c.MetricsReg))
+
+	// 告警库仓储
+	alarmLibraryRepo := alarm.NewPgAlarmLibraryRepository(c.PgPool)
+	alarmLibraryService := alarm.NewLibraryService(alarmLibraryRepo, logger)
+
+	// 过滤规则仓储
+	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(c.PgPool)
+
+	// 数据权限检查器
+	dataPermissionChecker := alarm.NewDataPermissionChecker(logger)
 
 	// Set shared services
 	c.AlarmPgStore = alarmPgStore
@@ -31,7 +41,10 @@ func initAlarmModule(c *Container) error {
 
 	// Store deps for route registration
 	c.alarmHandlerDeps = &alarmHandlerDeps{
-		alarmPgStore: alarmPgStore,
+		alarmPgStore:           alarmPgStore,
+		alarmLibraryService:    alarmLibraryService,
+		alarmFilterRuleRepo:    alarmFilterRuleRepo,
+		dataPermissionChecker:  dataPermissionChecker,
 	}
 
 	logger.Info("alarm module initialized")
@@ -39,5 +52,8 @@ func initAlarmModule(c *Container) error {
 }
 
 type alarmHandlerDeps struct {
-	alarmPgStore *alarm.PgAlarmStore
+	alarmPgStore          *alarm.PgAlarmStore
+	alarmLibraryService   *alarm.LibraryService
+	alarmFilterRuleRepo   *alarm.PgAlarmFilterRuleRepository
+	dataPermissionChecker *alarm.DataPermissionChecker
 }
