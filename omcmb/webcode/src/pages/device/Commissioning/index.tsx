@@ -338,7 +338,7 @@ export default function Commissioning() {
           pageSize={pageSize}
           currentPage={currentPage}
           onPageChange={(page) => setCurrentPage(page)}
-          defaultDensity="compact"
+          defaultDensity="default"
         />
       </ListPageLayout>
 

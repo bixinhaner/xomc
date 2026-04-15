@@ -1201,15 +1201,6 @@ export default function DeviceList() {
           title={t('nav.device.list')}
           extra={
             <Space>
-              <Tooltip title={autoRefresh ? t('device.autoRefresh.off') : t('device.autoRefresh.on')}>
-                <Button
-                  type={autoRefresh ? 'primary' : 'default'}
-                  icon={<SyncOutlined spin={autoRefresh} />}
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                >
-                  {autoRefresh ? t('device.autoRefresh.enabled') : t('device.autoRefresh.disabled')}
-                </Button>
-              </Tooltip>
               <Dropdown
                 menu={{
                   items: [
@@ -1257,7 +1248,7 @@ export default function DeviceList() {
               }}
               batchActions={batchActions}
               onRefresh={() => void refetch()}
-              defaultDensity="compact"
+              defaultDensity="default"
               scroll={{ x: true, y: 'calc(100% - 56px)' }}
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}

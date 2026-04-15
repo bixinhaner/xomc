@@ -397,7 +397,7 @@ export default function DeviceListPanel({
           currentPage={currentPage}
           onPageChange={onPageChange}
           onRefresh={onRefresh}
-          defaultDensity="compact"
+          defaultDensity="default"
           scroll={{ x: 'max-content', y: 100 }}
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}

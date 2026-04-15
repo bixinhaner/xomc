@@ -4,6 +4,7 @@
   width: 100%;
   height: 100%;
   background: var(--color-bg-container);
+  border: 1px solid var(--color-card-border);
   border-radius: 8px;
 }
 
@@ -51,18 +52,19 @@
   overflow: hidden;
 }
 
-/* Unified cell font size */
+/* Unified font size */
+:global(.omc-data-table) :global(.ant-table-thead > tr > th),
 :global(.omc-data-table) :global(.ant-table-tbody > tr > td) {
   font-size: 13px;
 }
 
-/* Zebra striping */
-:global(.omc-data-table) :global(.ant-table-tbody > tr:nth-child(odd) > td) {
-  background-color: var(--color-neutral-50);
+/* Zebra striping via rowClassName */
+:global(.omc-data-table) :global(.row-odd) > td {
+  background-color: var(--color-bg-container) !important;
 }
 
-:global(.omc-data-table) :global(.ant-table-tbody > tr:nth-child(even) > td) {
-  background-color: var(--color-bg-container);
+:global(.omc-data-table) :global(.row-even) > td {
+  background-color: var(--color-neutral-50) !important;
 }
 
 :global(.omc-data-table) :global(.ant-table-tbody > tr:hover > td) {

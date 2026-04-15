@@ -1,14 +1,8 @@
 /* Fresh theme special effects — 简约清新风格特效 */
 
-/* Larger border-radius on cards */
-[data-theme="fresh"] .ant-card {
-  border-radius: 12px;
-}
-
-/* Softer shadows on cards */
+/* Softer shadows on cards (border/radius controlled by global CSS variables) */
 [data-theme="fresh"] .ant-card {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-  border: 1px solid #E7E5E4;
 }
 
 [data-theme="fresh"] .ant-card:hover {
@@ -45,13 +39,23 @@
 
 /* Table header softened */
 [data-theme="fresh"] .ant-table-thead > tr > th {
-  background: #FAFAF9 !important;
+  background: #f9fafb !important;
+  color: #6b7280 !important;
   font-weight: 500;
+  height: 32px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: 1px solid rgba(4, 32, 69, 0.1) !important;
+}
+
+/* Table cell borders */
+[data-theme="fresh"] .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(4, 32, 69, 0.1) !important;
 }
 
 /* Sidebar border instead of no border */
 [data-theme="fresh"] .ant-menu-light {
-  border-inline-end: 1px solid #E7E5E4 !important;
+  border-inline-end: 1px solid #1F2937 !important;
 }
 
 /* ==================== FRESH 3D EFFECTS ==================== */
@@ -115,12 +119,33 @@
 
 /* ==================== FRESH SIDEBAR MENU — Minimalist Light Style ==================== */
 
+/* Sidebar background */
+[data-theme="fresh"] .ant-layout-sider,
+[data-theme="fresh"] .ant-layout-sider .ant-menu {
+  background-color: #1f2937 !important;
+}
+
+/* Menu item height */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-title {
+  height: 40px !important;
+  line-height: 40px !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Hover state */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-item:hover,
+[data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-title:hover {
+  background-color: #252F3C !important;
+  color: #FFFFFF !important;
+}
+
 /* Selected item — blue left border indicator + indigo accent */
 [data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected,
 [data-theme="fresh"] .ant-layout-sider .ant-menu-item-selected:hover {
   position: relative;
   background-color: rgba(99, 102, 241, 0.06) !important;
-  color: #6366F1 !important;
+  color: #FFFFFF !important;
   border-radius: 4px !important;
   font-weight: 500;
 }
@@ -149,17 +174,10 @@
   color: #6366F1 !important;
 }
 
-/* Hover state — light background highlight */
+/* Hover state — dark background highlight */
 [data-theme="fresh"] .ant-layout-sider .ant-menu-item:hover,
 [data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-title:hover {
-  background-color: rgba(99, 102, 241, 0.04) !important;
-  color: #292524 !important;
-}
-
-/* Normal state text */
-[data-theme="fresh"] .ant-layout-sider .ant-menu-item,
-[data-theme="fresh"] .ant-layout-sider .ant-menu-submenu-title {
-  color: #57534E !important;
+  background-color: #252F3C !important;
 }
 
 /* Submenu arrow */
@@ -180,4 +198,10 @@
 /* Selected expanded submenu item — blue left border */
 [data-theme="fresh"] .ant-layout-sider .ant-menu-inline .ant-menu-item-selected::before {
   left: 0;
+}
+
+/* Submenu expanded child items — 40px height */
+[data-theme="fresh"] .ant-layout-sider .ant-menu-inline .ant-menu-item {
+  height: 40px !important;
+  line-height: 40px !important;
 }

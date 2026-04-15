@@ -630,7 +630,7 @@ export default function HistoricalAlarms() {
           batchActions={batchActions}
           onRefresh={() => void refetch()}
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
-          defaultDensity="compact"
+          defaultDensity="default"
           showRowNumber
           rowNumberTitle="序号"
           scroll={{ y: 'calc(100vh - 510px)' }}

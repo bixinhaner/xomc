@@ -336,7 +336,7 @@ export default function AlarmSync() {
           pageSize={20}
           currentPage={currentPage}
           onPageChange={(p) => setCurrentPage(p)}
-          defaultDensity="compact"
+          defaultDensity="default"
         />
       </ListPageLayout>
 

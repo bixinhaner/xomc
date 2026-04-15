@@ -1,3 +1,4 @@
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { useAppStore } from '@/store/appStore';
 import { useT } from '@/hooks/useT';
 import styles from './Sidebar.module.css';
@@ -8,10 +9,10 @@ export default function CollapseButton() {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const t = useT();
 
-  // Mirror arrow direction when sidebar is on the right
-  const collapseIcon = sidebarPosition === 'left'
-    ? (collapsed ? '▶' : '◀')
-    : (collapsed ? '◀' : '▶');
+  const isLeft = sidebarPosition === 'left';
+  const CollapseIcon = collapsed
+    ? (isLeft ? MenuUnfoldOutlined : MenuFoldOutlined)
+    : (isLeft ? MenuFoldOutlined : MenuUnfoldOutlined);
 
   return (
     <div className={`${styles.collapseArea}${collapsed ? ` ${styles.collapsedCollapseArea}` : ''}`}>
@@ -25,7 +26,7 @@ export default function CollapseButton() {
         type="button"
         aria-label={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
       >
-        {collapseIcon}
+        <CollapseIcon style={{ fontSize: 10 }} />
       </button>
     </div>
   );

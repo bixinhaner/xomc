@@ -907,7 +907,6 @@ export default function PlugAndPlay() {
       <div style={{ flexShrink: 0 }}>
         <ListPageLayout
           title={t('provision.plugAndPlay')}
-          subtitle={`${t('table.total')} ${filteredPolicies.length}`}
           extra={
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAddPolicy}>
               {t('common.add')}
@@ -923,7 +922,7 @@ export default function PlugAndPlay() {
             showPagination
             currentPage={1}
             pageSize={10}
-            defaultDensity="compact"
+            defaultDensity="default"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
             scroll={{ x: 'max-content', y: 170 }}
@@ -1001,7 +1000,7 @@ export default function PlugAndPlay() {
             currentPage={taskPage}
             pageSize={taskPageSize}
             onPageChange={(p, s) => { setTaskPage(p); setTaskPageSize(s); }}
-            defaultDensity="compact"
+            defaultDensity="default"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
             selectable={taskTab === '0'}

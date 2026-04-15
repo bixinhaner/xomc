@@ -456,7 +456,7 @@ export default function AlarmSupportLibrary() {
           setCurrentPage(page);
           setPageSize(size);
         }}
-        defaultDensity="compact"
+        defaultDensity="default"
         scroll={{ x: 1400, y: 'calc(100vh - 400px)' }}
         showRowNumber
         rowNumberTitle="序号"

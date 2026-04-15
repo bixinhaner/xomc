@@ -1181,7 +1181,7 @@ export default function CustomAlarmStats() {
           onPageChange={(page, size) => { setCurrentPage(page); setPageSize(size); }}
           batchActions={batchActions}
           onRefresh={() => void refetch()}
-          defaultDensity="compact"
+          defaultDensity="default"
           scroll={{ x: 'max-content', y: 100 }}
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}

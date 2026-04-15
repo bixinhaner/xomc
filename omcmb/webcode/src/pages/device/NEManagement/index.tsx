@@ -199,7 +199,7 @@ export default function NEManagement() {
           setPageSize(size);
         }}
         onRefresh={() => void refetch()}
-        defaultDensity="compact"
+        defaultDensity="default"
       />
     </ListPageLayout>
   );

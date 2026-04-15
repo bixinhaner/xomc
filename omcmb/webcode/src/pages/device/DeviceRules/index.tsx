@@ -901,7 +901,6 @@ export default function DeviceRules() {
     <>
       <ListPageLayout
         title={t('device.rules.title')}
-        subtitle={`${t('table.total')} ${rules.length}`}
         extra={
           <Button type="primary" icon={<PlusOutlined />} onClick={() => void handleCreate()}>
             {t('common.add')}
@@ -925,7 +924,7 @@ export default function DeviceRules() {
           total={filteredRules.length}
           pagination={false}
           showPagination={false}
-          defaultDensity="compact"
+          defaultDensity="default"
         />
       </ListPageLayout>
 

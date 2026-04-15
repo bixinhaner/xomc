@@ -288,7 +288,6 @@ export default function RecycleBin() {
   return (
     <ListPageLayout
       title={t('nav.device.recycle')}
-      subtitle={`${t('table.total')} ${data?.total || 0}`}
       extra={
         <Button type="primary" icon={<ImportOutlined />} onClick={handleOpenImportModal}>
           {t('common.import')}
@@ -327,7 +326,7 @@ export default function RecycleBin() {
           setCurrentPage(1);
         }}
         batchActions={batchActions}
-        defaultDensity="compact"
+        defaultDensity="default"
       />
 
       <ImportModal

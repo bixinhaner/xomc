@@ -1,5 +1,6 @@
 .filterBarWrapper {
   background: var(--color-bg-container);
+  border: 1px solid var(--color-card-border);
   border-radius: 8px;
   padding: 16px 16px 0 16px;
   margin-bottom: 12px;

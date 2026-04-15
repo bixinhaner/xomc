@@ -17,7 +17,7 @@ export default function Sidebar() {
       style={{ width }}
       aria-label="导航菜单"
     >
-      {!isTop && <DeviceTypeSelector collapsed={collapsed} />}
+      {/* <DeviceTypeSelector collapsed={collapsed} /> */}
       <div className={styles.menuWrapper}>
         <NavMenu collapsed={collapsed} position={sidebarPosition} />
       </div>

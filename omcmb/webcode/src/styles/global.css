@@ -146,6 +146,14 @@
   --effect-glow-color: rgba(22, 119, 255, 0.2);
   --effect-glow-intensity: 0.1;
   --effect-float-amplitude: 3px;
+
+  /* Card & Container — Linear */
+  --color-card-border: rgba(255, 255, 255, 0.08);
+  --radius-card: 8px;
+
+  /* Header text — Linear */
+  --color-header-text: #f7f8f8;
+  --color-header-divider: rgba(255, 255, 255, 0.08);
 }
 
 /* ===========================================================================
@@ -283,8 +291,8 @@
   --color-primary-800: #4338CA;
   --color-primary-900: #3730A3;
 
-  --color-neutral-50: #FAFAF9;
-  --color-neutral-100: #F5F5F4;
+  --color-neutral-50: #f9fafb;
+  --color-neutral-100: #f9fafb;
   --color-neutral-200: #E7E5E4;
   --color-neutral-300: #D6D3D1;
   --color-neutral-400: #A8A29E;
@@ -297,8 +305,8 @@
 
   --color-bg-container: #FFFFFF;
   --color-bg-elevated: #FFFFFF;
-  --color-border: #E7E5E4;
-  --color-border-secondary: #D6D3D1;
+  --color-border: #e6e6e6;
+  --color-border-secondary: #d0d6e0;
 
   --color-row-hover: rgba(99, 102, 241, 0.04);
   --color-selection-bg: rgba(99, 102, 241, 0.06);
@@ -320,17 +328,17 @@
   --color-header-input-text: #57534E;
   --color-header-logo-gradient: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
 
-  /* Sidebar chrome — white/light */
-  --color-sidebar-bg: #FFFFFF;
-  --color-sidebar-bg-deep: #FAFAF9;
-  --color-sidebar-text: #57534E;
+  /* Sidebar chrome — dark sidebar in light mode */
+  --color-sidebar-bg: #1F2937;
+  --color-sidebar-bg-deep: #1F2937;
+  --color-sidebar-text: rgba(255, 255, 255, 0.7);
   --color-sidebar-text-active: #6366F1;
-  --color-sidebar-text-hover: #292524;
+  --color-sidebar-text-hover: #FFFFFF;
   --color-sidebar-text-muted: #A8A29E;
   --color-sidebar-text-dim: #D6D3D1;
-  --color-sidebar-hover: rgba(99, 102, 241, 0.04);
+  --color-sidebar-hover: #252F3C;
   --color-sidebar-divider: #E7E5E4;
-  --color-sidebar-scrollbar: #D6D3D1;
+  --color-sidebar-scrollbar: #474F5B;
   --color-sidebar-btn-border: #D6D3D1;
   --color-sidebar-btn-border-hover: #A8A29E;
   --color-sidebar-btn-bg: #F5F5F4;
@@ -357,6 +365,10 @@
   --login-footer-border: #E7E5E4;
   --login-footer-text: #A8A29E;
   --login-input-icon: #A8A29E;
+
+  /* Card & Container — Linear Light */
+  --color-card-border: #e6e6e6;
+  --radius-card: 12px;
 }
 
 /* ===========================================================================
@@ -968,4 +980,15 @@ html, body, #root {
 /* OpenLayers canvas 透明 */
 .gis-map-container canvas {
   background: transparent !important;
+}
+
+/* Card — unified border & radius via CSS variables */
+.ant-card {
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card);
+}
+
+/* Tag — remove border from colored tags in tables */
+.ant-table .ant-tag {
+  border: none;
 }

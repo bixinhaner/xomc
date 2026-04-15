@@ -329,7 +329,7 @@ export default function AlarmRules() {
           setPageSize(size);
         }}
         onRefresh={() => void refetch()}
-        defaultDensity="compact"
+        defaultDensity="default"
       />
 
       <AlarmRuleDrawer

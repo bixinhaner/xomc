@@ -326,7 +326,7 @@ export default function KPIMeasurement() {
           scroll={{ x: 1200, y: 'calc(100vh - 380px)' }}
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}
-          defaultDensity="compact"
+          defaultDensity="default"
         />
       </Card>
 

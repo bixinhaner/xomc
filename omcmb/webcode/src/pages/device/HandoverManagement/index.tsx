@@ -269,7 +269,7 @@ export default function HandoverManagement() {
           pageSize={20}
           currentPage={currentPage}
           onPageChange={(page) => setCurrentPage(page)}
-          defaultDensity="compact"
+          defaultDensity="default"
         />
       </ListPageLayout>
 

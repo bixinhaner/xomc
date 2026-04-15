@@ -17,21 +17,21 @@ export const antdFreshTheme: ThemeConfig = {
   components: {
     Layout: {
       headerBg: '#FFFFFF',
-      siderBg: '#FFFFFF',
-      bodyBg: '#F5F5F4',
+      siderBg: '#1f2937',
+      bodyBg: '#f9fafb',
     },
     Menu: {
-      itemBg: '#FFFFFF',
-      subMenuItemBg: '#FAFAF9',
+      itemBg: '#1f2937',
+      subMenuItemBg: '#1f2937',
       itemSelectedBg: 'rgba(99, 102, 241, 0.08)',
       itemHoverBg: 'rgba(99, 102, 241, 0.04)',
       itemSelectedColor: '#6366F1',
       itemHeight: 40,
     },
     Table: {
-      headerBg: '#FAFAF9',
-      headerColor: '#292524',
-      rowHoverBg: '#FAFAF9',
+      headerBg: '#f9fafb',
+      headerColor: '#6b7280',
+      rowHoverBg: '#f1f5f9',
     },
     Card: {
       paddingLG: 16,

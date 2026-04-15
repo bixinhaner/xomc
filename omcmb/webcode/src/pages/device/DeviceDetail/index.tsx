@@ -664,7 +664,7 @@ export default function DeviceDetail() {
                     rowKey="id"
                     total={alarmData?.total ?? 0}
                     showPagination
-                    defaultDensity="compact"
+                    defaultDensity="default"
                     alarmRowStyle={(record) => record.severity as 'critical' | 'major' | 'minor' | 'warning'}
                   />
                 </div>

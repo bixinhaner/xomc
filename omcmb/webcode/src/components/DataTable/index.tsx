@@ -300,12 +300,16 @@ function DataTable<T>(
     : undefined;
 
   const rowClassName = useCallback(
-    (record: T): string => {
+    (record: T, index?: number): string => {
+      const classes: string[] = [];
+      if (index !== undefined) {
+        classes.push(index % 2 === 0 ? 'row-odd' : 'row-even');
+      }
       if (alarmRowStyle) {
         const severity = alarmRowStyle(record);
-        if (severity) return `row-${severity}`;
+        if (severity) classes.push(`row-${severity}`);
       }
-      return '';
+      return classes.join(' ');
     },
     [alarmRowStyle]
   );
