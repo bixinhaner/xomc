@@ -126,8 +126,11 @@ export default function DeviceTree({
           placeholder="产品类型"
           allowClear
           options={productTypeOptions}
-          value={productTypeFilter || undefined}
-          onChange={(val) => onFilterChange(val ?? '')}
+          value={productTypeOptions.find((o) => o.label === productTypeFilter)?.value || undefined}
+          onChange={(val) => {
+            const selected = productTypeOptions.find((o) => o.value === val);
+            onFilterChange(selected?.label ?? '');
+          }}
         />
       </div>
 
