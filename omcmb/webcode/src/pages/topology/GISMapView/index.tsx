@@ -144,7 +144,7 @@ export default function GISMapView() {
       status: statusList.length === 3 ? undefined : statusList,
       // 只有初始化完成后才启用请求，避免在 selectedGroupIds 为空时发送请求
       enabled: isInitialized,
-      pageSize: 10000, // 获取大量数据
+      pageSize: 100, // 获取大量数据
     };
   }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds]);
 

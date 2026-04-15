@@ -257,11 +257,21 @@ export const mmlApi = {
   },
 
   async getAllCommands(): Promise<MMLCommand[]> {
-    const { data } = await http.get<BackendListResponse<BackendMMLCommand>>(
-      '/mml/commands',
-      { params: { page: 1, page_size: 1000 } }
-    );
-    return (data.items || []).map(mapBackendCommand);
+    const allCommands: MMLCommand[] = [];
+    let page = 1;
+    const pageSize = 100;
+    let total = 0;
+    do {
+      const { data } = await http.get<BackendListResponse<BackendMMLCommand>>(
+        '/mml/commands',
+        { params: { page, page_size: pageSize } }
+      );
+      const items = (data.items || []).map(mapBackendCommand);
+      allCommands.push(...items);
+      total = data.total || 0;
+      page++;
+    } while (allCommands.length < total);
+    return allCommands;
   },
 
   async getCommandById(id: string): Promise<MMLCommand | null> {

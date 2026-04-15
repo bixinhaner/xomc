@@ -23,7 +23,7 @@ export function useDeviceSelection() {
       const mapped: ConsoleDevice[] = result.items.map((d) => ({
         sn: d.sn,
         name: d.siteName || d.sn,
-        type: d.networkType || 'eNB',
+        type: d.networkType === 'nr' ? 'gNB' : 'eNB',
         productType: d.productType || '',
         status: (d.connStatus === 'online' ? 'online' : d.connStatus === 'alarm' ? 'alarm' : 'offline') as ConsoleDevice['status'],
       }));
@@ -37,6 +37,7 @@ export function useDeviceSelection() {
 
   // 首次加载 & 产品类型切换时触发 API 调用
   useEffect(() => {
+    setCurrentPage(1);
     void fetchDevices(productTypeFilter || undefined);
   }, [productTypeFilter, fetchDevices]);
 

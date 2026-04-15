@@ -124,7 +124,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   // 获取设备列表
   const { data: deviceData, isLoading: deviceLoading } = useDeviceList({
     page: 1,
-    pageSize: 1000,
+    pageSize: 100,
   });
 
   // 获取设备组列表

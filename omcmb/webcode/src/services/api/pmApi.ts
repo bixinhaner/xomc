@@ -282,7 +282,7 @@ export const pmApi = {
       start_time: start.toISOString(),
       end_time: now.toISOString(),
       page: 1,
-      pageSize: 1000,
+      pageSize: 100,
     };
 
     const { data } = await http.get<BackendListResponse<BackendKPIValue>>(

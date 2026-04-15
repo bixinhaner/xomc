@@ -41,14 +41,17 @@ export default function CommandTree({
 
   // 生成树形数据
   const treeData = useMemo((): TreeDataNode[] => {
+    // category value → label 映射
+    const catLabelMap = new Map(categoryOptions.map((o) => [o.value, o.label]));
     const nodes: TreeDataNode[] = [];
     commandsByCategory.forEach((cmds, category) => {
+      const catLabel = catLabelMap.get(category) || category;
       nodes.push({
         key: `category-${category}`,
         title: (
           <span style={{ fontWeight: 500 }}>
             <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
-            {category}
+            {catLabel}
             <span style={{ marginLeft: 8, fontSize: 12, color: '#8c8c8c', fontWeight: 'normal' }}>
               ({cmds.length})
             </span>
@@ -83,7 +86,7 @@ export default function CommandTree({
       });
     });
     return nodes;
-  }, [commandsByCategory, token.colorPrimary]);
+  }, [commandsByCategory, categoryOptions, token.colorPrimary]);
 
   // 树节点选择
   const handleSelect: TreeProps['onSelect'] = useCallback(

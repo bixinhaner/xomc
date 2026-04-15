@@ -173,7 +173,7 @@ export default function DeviceTree({
                 style={{
                   cursor: 'pointer',
                   background: isSelected ? token.colorPrimaryBg : 'transparent',
-                  padding: '6px 12px',
+                  padding: '6px 8px 6px 12px',
                   borderLeft: isSelected ? `3px solid ${token.colorPrimary}` : '3px solid transparent',
                   transition: 'all 0.15s ease',
                 }}
@@ -212,9 +212,11 @@ export default function DeviceTree({
                     style={{
                       fontSize: 9,
                       margin: 0,
+                      marginLeft: 'auto',
                       background: token.colorBgLayout,
                       border: 'none',
                       borderRadius: 4,
+                      flexShrink: 0,
                     }}
                   >
                     {device.type}
@@ -252,8 +254,9 @@ export default function DeviceTree({
       {selectedDevices.length > 0 && (
         <div
           style={{
-            borderTop: `1px solid ${token.colorBorderSecondary}`,
+            borderTop: `2px solid ${token.colorPrimaryBorder}`,
             background: token.colorPrimaryBg,
+            flexShrink: 0,
           }}
         >
           <div
@@ -282,9 +285,9 @@ export default function DeviceTree({
           <div
             className="no-scrollbar"
             style={{
-              maxHeight: 70,
+              maxHeight: 80,
               overflow: 'auto',
-              padding: '4px 12px 8px',
+              padding: '2px 12px 8px',
             }}
           >
             {selectedDevices.map((d) => (

@@ -221,7 +221,7 @@ export const softwareApi = {
   ): Promise<PageResponse<UpgradePlan>> {
     const query: Record<string, unknown> = {
       page: 1,
-      pageSize: 200, // Fetch all tasks then aggregate by batch
+      pageSize: 100, // Fetch all tasks then aggregate by batch
     };
     if (params.status) query.status = params.status;
 
@@ -259,7 +259,7 @@ export const softwareApi = {
       // Try fetching tasks by batch_id
       const { data } = await http.get<BackendListResponse<BackendUpgradeTask>>(
         '/upgrade-tasks',
-        { params: { batch_id: id, page: 1, pageSize: 200 } }
+        { params: { batch_id: id, page: 1, pageSize: 100 } }
       );
 
       const tasks = data.items || [];
