@@ -7,7 +7,6 @@ import {
   CloseOutlined,
   CloudDownloadOutlined,
   EditOutlined,
-  ExclamationCircleOutlined,
   ExportOutlined,
   EyeOutlined,
   FileTextOutlined,
@@ -139,9 +138,10 @@ export default function DeviceList() {
     });
     // 只有当 params 与当前 filterParams 不同时才更新
     if (JSON.stringify(params) !== JSON.stringify(filterParams)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFilterParams(params);
     }
-  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams, filterParams]);
 
   // 组件挂载时，如果 URL 无参数但 sessionStorage 有保存的筛选条件，则恢复到 URL
   useEffect(() => {
@@ -191,10 +191,9 @@ export default function DeviceList() {
     logContent?: string;
     hasDetail?: boolean; // 是否有详情可查看（只有收集操作才有）
   }
-  const [localTasks, setLocalTasks] = useState<LocalTask[]>([]);
 
   // 实时刷新状态
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh] = useState(false);
 
   // 收集任务抽屉状态
   const [collectDrawerOpen, setCollectDrawerOpen] = useState(false);
@@ -1066,7 +1065,7 @@ export default function DeviceList() {
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender, message]
   );
 
   const batchActions = useMemo((): BatchAction[] => [
@@ -1249,7 +1248,7 @@ export default function DeviceList() {
               batchActions={batchActions}
               onRefresh={() => void refetch()}
               defaultDensity="default"
-              scroll={{ x: true, y: 'calc(100% - 56px)' }}
+              scroll={{ x: true, y: 'calc(100% + 50px - 56px)' }}
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />
@@ -1266,7 +1265,7 @@ export default function DeviceList() {
             .device-list-page-table-wrapper .ant-table-body {
               overflow-y: auto !important;
               overflow-x: auto !important;
-              max-height: calc(100vh - 500px) !important;
+              max-height: calc(100vh - 430px) !important;
             }
             .device-list-page-table-wrapper .ant-table-thead > tr > th,
             .device-list-page-table-wrapper .ant-table-tbody > tr > td {
