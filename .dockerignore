@@ -1,0 +1,25 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+!omcmb/webcode/README.md
+
+# Runtime / logs
+run/
+
+# Node (installed inside Docker)
+**/node_modules/
+
+# Build output (rebuilt in Docker)
+omcmb/webcode/dist/
+
+# IDE
+.idea/
+.vscode/
+.claude/
+
+# Go build cache
+omcgo/bin/
