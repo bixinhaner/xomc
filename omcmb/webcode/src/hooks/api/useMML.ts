@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLTask } from '@/types/mml';
+import type { MMLScript, MMLTask, MMLTemplate } from '@/types/mml';
 import type { PageRequest } from '@/types/pagination';
 import { mmlService } from '@/mock/services/mmlService';
 import { mmlApi } from '@/services/api/mmlApi';
@@ -173,5 +173,69 @@ export function useMMLTaskPolling(taskId: string | null, enabled: boolean) {
       if (data && TERMINAL_STATES.includes(data.status)) return false;
       return 2000;
     },
+  });
+}
+
+// --- Template hooks ---
+
+export function useMMLTemplates(
+  params?: { commandCode?: string; operationType?: string; templateScope?: string } & PageRequest
+) {
+  return useQuery({
+    queryKey: ['mml', 'templates', params],
+    queryFn: () => api.getTemplates(params),
+  });
+}
+
+export function useCreateMMLTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) =>
+      api.createTemplate(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+    },
+  });
+}
+
+export function useUpdateMMLTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<MMLTemplate> }) =>
+      api.updateTemplate(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+    },
+  });
+}
+
+export function useDeleteMMLTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTemplate(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+    },
+  });
+}
+
+export function useCloneMMLTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.cloneTemplate(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+    },
+  });
+}
+
+// --- Dangerous command check hook ---
+
+export function useDangerousCheck(commandCode: string) {
+  return useQuery({
+    queryKey: ['mml', 'dangerous-check', commandCode],
+    queryFn: () => api.checkDangerous(commandCode),
+    enabled: Boolean(commandCode),
+    staleTime: 5 * 60 * 1000,
   });
 }

@@ -84,3 +84,18 @@ export interface MMLTask {
   failedCount: number;
   result?: MMLTaskResult;
 }
+
+export interface MMLTemplate {
+  id: string;
+  templateName: string;
+  commandCode: string;
+  operationType: 'LST' | 'MOD' | 'ADD' | 'RMV';
+  templateScope: 'private' | 'public';
+  parameters: Record<string, string | number | boolean>;
+  paramPaths: string[];
+  description: string;
+  productTypes: string[];
+  creator: string;
+  createdAt: string;
+  updatedAt: string;
+}

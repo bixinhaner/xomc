@@ -1,5 +1,5 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,21 @@ interface BackendListResponse<T> {
   page: number;
   page_size: number;
   total_pages: number;
+}
+
+interface BackendMMLTemplate {
+  id: string;
+  template_name: string;
+  command_code: string;
+  operation_type: string;
+  template_scope: string;
+  parameters: Record<string, unknown> | null;
+  param_paths: string[] | null;
+  description: string;
+  product_types: string[] | null;
+  creator: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +209,23 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
   };
 }
 
+function mapBackendTemplate(bt: BackendMMLTemplate): MMLTemplate {
+  return {
+    id: bt.id,
+    templateName: bt.template_name,
+    commandCode: bt.command_code,
+    operationType: bt.operation_type as MMLTemplate['operationType'],
+    templateScope: bt.template_scope as MMLTemplate['templateScope'],
+    parameters: (bt.parameters as Record<string, string | number | boolean>) || {},
+    paramPaths: bt.param_paths || [],
+    description: bt.description || '',
+    productTypes: bt.product_types || [],
+    creator: bt.creator,
+    createdAt: bt.created_at,
+    updatedAt: bt.updated_at,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Public API  (matches the mmlService mock interface 1-to-1)
 // ---------------------------------------------------------------------------
@@ -206,7 +238,7 @@ export const mmlApi = {
   ): Promise<PageResponse<MMLCommand>> {
     const query: Record<string, unknown> = {
       page: params.page,
-      pageSize: params.pageSize,
+      page_size: params.pageSize,
     };
     if (params.keyword) query.search = params.keyword;
     if (params.category) query.category = params.category;
@@ -265,7 +297,7 @@ export const mmlApi = {
   async getScripts(p: PageRequest): Promise<PageResponse<MMLScript>> {
     const query: Record<string, unknown> = {
       page: p.page,
-      pageSize: p.pageSize,
+      page_size: p.pageSize,
     };
 
     const { data } = await http.get<BackendListResponse<BackendMMLScript>>(
@@ -337,7 +369,7 @@ export const mmlApi = {
   async getTasks(p: PageRequest): Promise<PageResponse<MMLTask>> {
     const query: Record<string, unknown> = {
       page: p.page,
-      pageSize: p.pageSize,
+      page_size: p.pageSize,
     };
 
     const { data } = await http.get<BackendListResponse<BackendMMLTask>>(
@@ -424,5 +456,116 @@ export const mmlApi = {
 
   async deleteTask(id: string): Promise<void> {
     await http.delete(`/mml/tasks/${id}`);
+  },
+
+  // --- Task results ---
+
+  async getTaskResults(
+    id: string,
+    page = 1,
+    pageSize = 20
+  ): Promise<PageResponse<{ deviceSn: string; result: MMLResult }>> {
+    const { data } = await http.get<BackendListResponse<Record<string, unknown>>>(
+      `/mml/tasks/${id}/results`,
+      { params: { page, page_size: pageSize } }
+    );
+    return {
+      items: (data.items || []).map(mapBackendResult),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  // --- Dangerous command check ---
+
+  async checkDangerous(
+    commandCode: string
+  ): Promise<{ dangerous: boolean; info: { Name: string; Desc: string } | null }> {
+    const { data } = await http.get('/mml/dangerous-check', {
+      params: { command_code: commandCode },
+    });
+    return data;
+  },
+
+  // --- Templates ---
+
+  async getTemplates(
+    params?: {
+      commandCode?: string;
+      operationType?: string;
+      templateScope?: string;
+    } & PageRequest
+  ): Promise<PageResponse<MMLTemplate>> {
+    const query: Record<string, unknown> = {
+      page: params?.page ?? 1,
+      page_size: params?.pageSize ?? 20,
+    };
+    if (params?.commandCode) query.command_code = params.commandCode;
+    if (params?.operationType) query.operation_type = params.operationType;
+    if (params?.templateScope) query.template_scope = params.templateScope;
+
+    const { data } = await http.get<BackendListResponse<BackendMMLTemplate>>(
+      '/mml/templates',
+      { params: query }
+    );
+    return {
+      items: (data.items || []).map(mapBackendTemplate),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async createTemplate(
+    tmpl: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
+  ): Promise<MMLTemplate> {
+    const payload = {
+      template_name: tmpl.templateName,
+      command_code: tmpl.commandCode,
+      operation_type: tmpl.operationType,
+      template_scope: tmpl.templateScope,
+      parameters: tmpl.parameters,
+      param_paths: tmpl.paramPaths,
+      description: tmpl.description,
+      product_types: tmpl.productTypes,
+    };
+    const { data } = await http.post<BackendMMLTemplate>(
+      '/mml/templates',
+      payload
+    );
+    return mapBackendTemplate(data);
+  },
+
+  async updateTemplate(
+    id: string,
+    tmpl: Partial<MMLTemplate>
+  ): Promise<MMLTemplate> {
+    const payload: Record<string, unknown> = {};
+    if (tmpl.templateName !== undefined) payload.template_name = tmpl.templateName;
+    if (tmpl.commandCode !== undefined) payload.command_code = tmpl.commandCode;
+    if (tmpl.operationType !== undefined) payload.operation_type = tmpl.operationType;
+    if (tmpl.templateScope !== undefined) payload.template_scope = tmpl.templateScope;
+    if (tmpl.parameters !== undefined) payload.parameters = tmpl.parameters;
+    if (tmpl.paramPaths !== undefined) payload.param_paths = tmpl.paramPaths;
+    if (tmpl.description !== undefined) payload.description = tmpl.description;
+    if (tmpl.productTypes !== undefined) payload.product_types = tmpl.productTypes;
+
+    const { data } = await http.put<BackendMMLTemplate>(
+      `/mml/templates/${id}`,
+      payload
+    );
+    return mapBackendTemplate(data);
+  },
+
+  async deleteTemplate(id: string): Promise<void> {
+    await http.delete(`/mml/templates/${id}`);
+  },
+
+  async cloneTemplate(id: string): Promise<MMLTemplate> {
+    const { data } = await http.post<BackendMMLTemplate>(
+      `/mml/templates/${id}/clone`
+    );
+    return mapBackendTemplate(data);
   },
 };

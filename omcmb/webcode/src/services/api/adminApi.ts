@@ -62,6 +62,8 @@ export interface UpdateDictionaryDetailPayload {
 export interface DictDetailListParams {
   sysDictionaryId?: number;
   label?: string;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface DictListResponse {
@@ -674,7 +676,10 @@ export const adminApi = {
   },
 
   async getDictionaryDetailList(params: DictDetailListParams): Promise<DictDetailListResponse> {
-    const query: Record<string, unknown> = {};
+    const query: Record<string, unknown> = {
+      page: params.page ?? 1,
+      page_size: params.pageSize ?? 100,
+    };
     if (params.sysDictionaryId !== undefined) query.sysDictionaryId = params.sysDictionaryId;
     if (params.label) query.label = params.label;
     const { data } = await http.get<{ code: number; data: { list: BackendDictionaryDetail[]; total: number } }>('/admin/sysDictionaryDetail/getSysDictionaryDetailList', { params: query });

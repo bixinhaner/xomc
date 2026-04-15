@@ -1,4 +1,4 @@
-import type { MMLCommand, MMLScript, MMLTask, MMLResult } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLTemplate } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { mockMMLCommands, mockMMLScripts, mockMMLTasks } from '../data/mml';
 import { delay, paginate, generateId } from '../utils';
@@ -212,5 +212,108 @@ export const mmlService = {
   async deleteTask(id: string): Promise<void> {
     await delay(100, 200);
     tasks = tasks.filter((t) => t.id !== id);
+  },
+
+  async getTaskResults(
+    id: string,
+    page = 1,
+    pageSize = 20
+  ): Promise<PageResponse<{ deviceSn: string; result: MMLResult }>> {
+    await delay(80, 150);
+    const task = tasks.find((t) => t.id === id);
+    const results = task?.results ?? [];
+    return {
+      items: results.slice((page - 1) * pageSize, page * pageSize),
+      total: results.length,
+      page,
+      pageSize,
+    };
+  },
+
+  async checkDangerous(
+    commandCode: string
+  ): Promise<{ dangerous: boolean; info: { Name: string; Desc: string } | null }> {
+    await delay(30, 80);
+    const dangerousPatterns = [
+      { pattern: /\bRST\b/i, name: '重启', desc: '此操作将重启设备' },
+      { pattern: /\bFACTORYRESET\b/i, name: '恢复默认配置', desc: '此操作将恢复设备出厂设置' },
+      { pattern: /\bCOLDREBOOT\b/i, name: '冷重启', desc: '此操作将执行设备冷重启' },
+    ];
+    for (const dp of dangerousPatterns) {
+      if (dp.pattern.test(commandCode)) {
+        return { dangerous: true, info: { Name: dp.name, Desc: dp.desc } };
+      }
+    }
+    return { dangerous: false, info: null };
+  },
+
+  // --- Templates (mock) ---
+
+  async getTemplates(
+    params?: { commandCode?: string; operationType?: string; templateScope?: string } & PageRequest
+  ): Promise<PageResponse<MMLTemplate>> {
+    await delay(80, 150);
+    return {
+      items: [],
+      total: 0,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    };
+  },
+
+  async createTemplate(
+    _tmpl: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
+  ): Promise<MMLTemplate> {
+    await delay(100, 200);
+    return {
+      id: generateId(),
+      ..._tmpl,
+      creator: 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  },
+
+  async updateTemplate(
+    _id: string,
+    _tmpl: Partial<MMLTemplate>
+  ): Promise<MMLTemplate> {
+    await delay(100, 200);
+    return {
+      id: _id,
+      templateName: _tmpl.templateName ?? '',
+      commandCode: _tmpl.commandCode ?? '',
+      operationType: _tmpl.operationType ?? 'LST',
+      templateScope: _tmpl.templateScope ?? 'private',
+      parameters: _tmpl.parameters ?? {},
+      paramPaths: _tmpl.paramPaths ?? [],
+      description: _tmpl.description ?? '',
+      productTypes: _tmpl.productTypes ?? [],
+      creator: 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  },
+
+  async deleteTemplate(_id: string): Promise<void> {
+    await delay(100, 200);
+  },
+
+  async cloneTemplate(_id: string): Promise<MMLTemplate> {
+    await delay(100, 200);
+    return {
+      id: generateId(),
+      templateName: 'Cloned Template',
+      commandCode: 'LST CELL',
+      operationType: 'LST',
+      templateScope: 'private',
+      parameters: {},
+      paramPaths: [],
+      description: '',
+      productTypes: [],
+      creator: 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
   },
 };
