@@ -135,10 +135,53 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 	return nil, nil
 }
 
+type mockTemplateRepo struct {
+	createFn  func(ctx context.Context, tmpl *MMLTemplate) error
+	getByIDFn func(ctx context.Context, id uuid.UUID) (*MMLTemplate, error)
+	updateFn  func(ctx context.Context, tmpl *MMLTemplate) error
+	deleteFn  func(ctx context.Context, id uuid.UUID) error
+	listFn    func(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error)
+}
+
+func (m *mockTemplateRepo) Create(ctx context.Context, tmpl *MMLTemplate) error {
+	if m.createFn != nil {
+		return m.createFn(ctx, tmpl)
+	}
+	return nil
+}
+
+func (m *mockTemplateRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTemplate, error) {
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, id)
+	}
+	return nil, nil
+}
+
+func (m *mockTemplateRepo) Update(ctx context.Context, tmpl *MMLTemplate) error {
+	if m.updateFn != nil {
+		return m.updateFn(ctx, tmpl)
+	}
+	return nil
+}
+
+func (m *mockTemplateRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockTemplateRepo) List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error) {
+	if m.listFn != nil {
+		return m.listFn(ctx, filter)
+	}
+	return nil, nil
+}
+
 // --- Helper ---
 
 func newTestService(cmdRepo *mockCommandRepo, scriptRepo *mockScriptRepo, taskRepo *mockTaskRepo) *Service {
-	return NewService(cmdRepo, scriptRepo, taskRepo, zap.NewNop())
+	return NewService(cmdRepo, scriptRepo, taskRepo, &mockTemplateRepo{}, zap.NewNop())
 }
 
 // --- Tests: ListCommands ---

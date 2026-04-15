@@ -96,6 +96,45 @@ func (m *hTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.ListRes
 	return m.ListFn(ctx, filter)
 }
 
+type hTemplateRepo struct {
+	CreateFn  func(ctx context.Context, tmpl *MMLTemplate) error
+	GetByIDFn func(ctx context.Context, id uuid.UUID) (*MMLTemplate, error)
+	UpdateFn  func(ctx context.Context, tmpl *MMLTemplate) error
+	DeleteFn  func(ctx context.Context, id uuid.UUID) error
+	ListFn    func(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error)
+}
+
+func (m *hTemplateRepo) Create(ctx context.Context, tmpl *MMLTemplate) error {
+	if m.CreateFn != nil {
+		return m.CreateFn(ctx, tmpl)
+	}
+	return nil
+}
+func (m *hTemplateRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLTemplate, error) {
+	if m.GetByIDFn != nil {
+		return m.GetByIDFn(ctx, id)
+	}
+	return nil, nil
+}
+func (m *hTemplateRepo) Update(ctx context.Context, tmpl *MMLTemplate) error {
+	if m.UpdateFn != nil {
+		return m.UpdateFn(ctx, tmpl)
+	}
+	return nil
+}
+func (m *hTemplateRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	if m.DeleteFn != nil {
+		return m.DeleteFn(ctx, id)
+	}
+	return nil
+}
+func (m *hTemplateRepo) List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error) {
+	if m.ListFn != nil {
+		return m.ListFn(ctx, filter)
+	}
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -142,7 +181,7 @@ func TestHandler_ListCommands(t *testing.T) {
 	taskRepo := &hTaskRepo{}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -184,7 +223,7 @@ func TestHandler_GetCommand(t *testing.T) {
 	taskRepo := &hTaskRepo{}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -225,7 +264,7 @@ func TestHandler_Execute(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -278,7 +317,7 @@ func TestHandler_ListScripts(t *testing.T) {
 	taskRepo := &hTaskRepo{}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -310,7 +349,7 @@ func TestHandler_CreateScript(t *testing.T) {
 	taskRepo := &hTaskRepo{}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -352,7 +391,7 @@ func TestHandler_DeleteScript(t *testing.T) {
 	taskRepo := &hTaskRepo{}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -390,7 +429,7 @@ func TestHandler_ListTasks(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -427,7 +466,7 @@ func TestHandler_StartTask(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -459,7 +498,7 @@ func TestHandler_PauseTask(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -486,7 +525,7 @@ func TestHandler_CancelTask(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 
@@ -513,7 +552,7 @@ func TestHandler_DeleteTask(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	svc := NewService(cmdRepo, scriptRepo, taskRepo, logger)
+	svc := NewService(cmdRepo, scriptRepo, taskRepo, &hTemplateRepo{}, logger)
 	h := NewHandler(svc, logger)
 	router := setupMMLRouter(h)
 

@@ -227,7 +227,8 @@ func initMiscModules(c *Container) error {
 	mmlCmdRepo := mml.NewPgCommandRepository(c.PgPool)
 	mmlScriptRepo := mml.NewPgScriptRepository(c.PgPool)
 	mmlTaskRepo := mml.NewPgTaskRepository(c.PgPool)
-	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, logger)
+	mmlTemplateRepo := mml.NewPgTemplateRepository(c.PgPool)
+	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlTemplateRepo, logger)
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	logger.Info("MML console module initialized")
 

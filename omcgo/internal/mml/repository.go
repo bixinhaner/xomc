@@ -32,3 +32,12 @@ type TaskRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
+
+// TemplateRepository provides CRUD operations for MML command templates.
+type TemplateRepository interface {
+	Create(ctx context.Context, tmpl *MMLTemplate) error
+	GetByID(ctx context.Context, id uuid.UUID) (*MMLTemplate, error)
+	Update(ctx context.Context, tmpl *MMLTemplate) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error)
+}

@@ -1,6 +1,7 @@
 package mml
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	commands.GET("/:id", h.GetCommand)
 
 	mml.POST("/execute", h.Execute)
+	mml.GET("/dangerous-check", h.DangerousCheck)
 
 	scripts := mml.Group("/scripts")
 	scripts.GET("", h.ListScripts)
@@ -45,10 +47,19 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	tasks := mml.Group("/tasks")
 	tasks.GET("", h.ListTasks)
 	tasks.GET("/:id", h.GetTask)
+	tasks.GET("/:id/results", h.GetTaskResults)
 	tasks.POST("/:id/start", h.StartTask)
 	tasks.POST("/:id/pause", h.PauseTask)
 	tasks.POST("/:id/cancel", h.CancelTask)
 	tasks.DELETE("/:id", h.DeleteTask)
+
+	templates := mml.Group("/templates")
+	templates.GET("", h.ListTemplates)
+	templates.POST("", h.CreateTemplate)
+	templates.GET("/:id", h.GetTemplate)
+	templates.PUT("/:id", h.UpdateTemplate)
+	templates.DELETE("/:id", h.DeleteTemplate)
+	templates.POST("/:id/clone", h.CloneTemplate)
 }
 
 // ---- Request types ----
@@ -59,6 +70,10 @@ type ExecuteHTTPRequest struct {
 	DeviceSNs   []string               `json:"device_sns" binding:"required"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
+
+	// Script execution support
+	ScriptID string                   `json:"script_id"`
+	Commands []map[string]interface{} `json:"commands"`
 
 	// Scheduling
 	ExecuteType string `json:"execute_type"`
@@ -159,12 +174,16 @@ func (h *Handler) Execute(c *gin.Context) {
 		Parameters:          req.Parameters,
 		TaskName:            req.TaskName,
 		Creator:             creatorStr,
+		Commands:            req.Commands,
 		ExecuteType:         ExecuteType(req.ExecuteType),
 		OfflineRetry:        req.OfflineRetry,
 		OfflineRetryWait:    req.OfflineRetryWait,
 		FailedRetry:         req.FailedRetry,
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
+	}
+	if req.ScriptID != "" {
+		execReq.ScriptID = &req.ScriptID
 	}
 	if req.ScheduledAt != "" {
 		execReq.ScheduledAt = &req.ScheduledAt
@@ -431,4 +450,253 @@ func (h *Handler) DeleteTask(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// ---- Dangerous command check ----
+
+// DangerousCheck handles GET /api/v1/mml/dangerous-check.
+func (h *Handler) DangerousCheck(c *gin.Context) {
+	commandCode := c.Query("command_code")
+	if commandCode == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	dc, err := h.service.IsDangerousCommand(c.Request.Context(), commandCode)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"dangerous": dc != nil,
+		"info":      dc,
+	})
+}
+
+// ---- Task result handler ----
+
+// GetTaskResults handles GET /api/v1/mml/tasks/:id/results.
+func (h *Handler) GetTaskResults(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	page := 1
+	pageSize := 20
+	if p := c.Query("page"); p != "" {
+		if v, e := parseInt(p); e == nil && v > 0 {
+			page = v
+		}
+	}
+	if ps := c.Query("page_size"); ps != "" {
+		if v, e := parseInt(ps); e == nil && v > 0 && v <= 100 {
+			pageSize = v
+		}
+	}
+
+	result, err := h.service.GetTaskResults(c.Request.Context(), id, page, pageSize)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// ---- Template handlers ----
+
+// ListTemplates handles GET /api/v1/mml/templates.
+func (h *Handler) ListTemplates(c *gin.Context) {
+	filter := TemplateFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if commandCode := c.Query("command_code"); commandCode != "" {
+		filter.CommandCode = &commandCode
+	}
+	if operationType := c.Query("operation_type"); operationType != "" {
+		filter.OperationType = &operationType
+	}
+	if templateScope := c.Query("template_scope"); templateScope != "" {
+		filter.TemplateScope = &templateScope
+	}
+
+	// Pass current user for private template filtering
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+	filter.Creator = &creatorStr
+
+	result, err := h.service.ListTemplates(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GetTemplate handles GET /api/v1/mml/templates/:id.
+func (h *Handler) GetTemplate(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	tmpl, err := h.service.GetTemplate(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, tmpl)
+}
+
+// CreateTemplateRequest defines the request body for creating an MML template.
+type CreateTemplateRequest struct {
+	TemplateName  string                 `json:"template_name" binding:"required"`
+	CommandCode   string                 `json:"command_code" binding:"required"`
+	OperationType string                 `json:"operation_type" binding:"required"`
+	TemplateScope string                 `json:"template_scope" binding:"required"`
+	Parameters    map[string]interface{} `json:"parameters"`
+	ParamPaths    []string               `json:"param_paths"`
+	Description   string                 `json:"description"`
+	ProductTypes  []string               `json:"product_types"`
+}
+
+// CreateTemplate handles POST /api/v1/mml/templates.
+func (h *Handler) CreateTemplate(c *gin.Context) {
+	var req CreateTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+
+	tmpl := &MMLTemplate{
+		TemplateName:  req.TemplateName,
+		CommandCode:   req.CommandCode,
+		OperationType: req.OperationType,
+		TemplateScope: req.TemplateScope,
+		Parameters:    req.Parameters,
+		ParamPaths:    req.ParamPaths,
+		Description:   req.Description,
+		ProductTypes:  req.ProductTypes,
+		Creator:       creatorStr,
+	}
+
+	created, err := h.service.CreateTemplate(c.Request.Context(), tmpl)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, created)
+}
+
+// UpdateTemplateRequest defines the request body for updating an MML template.
+type UpdateTemplateRequest struct {
+	TemplateName  string                 `json:"template_name" binding:"required"`
+	CommandCode   string                 `json:"command_code" binding:"required"`
+	OperationType string                 `json:"operation_type" binding:"required"`
+	TemplateScope string                 `json:"template_scope" binding:"required"`
+	Parameters    map[string]interface{} `json:"parameters"`
+	ParamPaths    []string               `json:"param_paths"`
+	Description   string                 `json:"description"`
+	ProductTypes  []string               `json:"product_types"`
+}
+
+// UpdateTemplate handles PUT /api/v1/mml/templates/:id.
+func (h *Handler) UpdateTemplate(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req UpdateTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	tmpl := &MMLTemplate{
+		TemplateName:  req.TemplateName,
+		CommandCode:   req.CommandCode,
+		OperationType: req.OperationType,
+		TemplateScope: req.TemplateScope,
+		Parameters:    req.Parameters,
+		ParamPaths:    req.ParamPaths,
+		Description:   req.Description,
+		ProductTypes:  req.ProductTypes,
+	}
+
+	updated, err := h.service.UpdateTemplate(c.Request.Context(), id, tmpl)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, updated)
+}
+
+// DeleteTemplate handles DELETE /api/v1/mml/templates/:id.
+func (h *Handler) DeleteTemplate(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+
+	if err := h.service.DeleteTemplate(c.Request.Context(), id, creatorStr); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// CloneTemplate handles POST /api/v1/mml/templates/:id/clone.
+func (h *Handler) CloneTemplate(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+
+	cloned, err := h.service.CloneTemplate(c.Request.Context(), id, creatorStr)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, cloned)
+}
+
+// parseInt is a helper to parse an int from a string.
+func parseInt(s string) (int, error) {
+	var v int
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid integer")
+		}
+		v = v*10 + int(c-'0')
+	}
+	return v, nil
 }

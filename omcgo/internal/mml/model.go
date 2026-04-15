@@ -124,3 +124,28 @@ type TaskFilter struct {
 	Result      *TaskResult
 	model.ListRequest
 }
+
+// MMLTemplate represents a user-defined command parameter template.
+type MMLTemplate struct {
+	ID            uuid.UUID              `json:"id"`
+	TemplateName  string                 `json:"template_name"`
+	CommandCode   string                 `json:"command_code"`
+	OperationType string                 `json:"operation_type"`
+	TemplateScope string                 `json:"template_scope"` // private or public
+	Parameters    map[string]interface{} `json:"parameters"`
+	ParamPaths    []string               `json:"param_paths"`
+	Description   string                 `json:"description"`
+	ProductTypes  []string               `json:"product_types"`
+	Creator       string                 `json:"creator"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+}
+
+// TemplateFilter specifies criteria for listing MML templates.
+type TemplateFilter struct {
+	CommandCode   *string
+	OperationType *string
+	TemplateScope *string
+	Creator       *string
+	model.ListRequest
+}

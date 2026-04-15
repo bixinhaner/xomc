@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -13,10 +15,11 @@ import (
 
 // Service provides business logic for the MML console module.
 type Service struct {
-	cmdRepo    CommandRepository
-	scriptRepo ScriptRepository
-	taskRepo   TaskRepository
-	logger     *zap.Logger
+	cmdRepo       CommandRepository
+	scriptRepo    ScriptRepository
+	taskRepo      TaskRepository
+	templateRepo  TemplateRepository
+	logger        *zap.Logger
 }
 
 // NewService creates a new MML Service.
@@ -24,13 +27,15 @@ func NewService(
 	cmdRepo CommandRepository,
 	scriptRepo ScriptRepository,
 	taskRepo TaskRepository,
+	templateRepo TemplateRepository,
 	logger *zap.Logger,
 ) *Service {
 	return &Service{
-		cmdRepo:    cmdRepo,
-		scriptRepo: scriptRepo,
-		taskRepo:   taskRepo,
-		logger:     logger.Named("mml"),
+		cmdRepo:      cmdRepo,
+		scriptRepo:   scriptRepo,
+		taskRepo:     taskRepo,
+		templateRepo: templateRepo,
+		logger:       logger.Named("mml"),
 	}
 }
 
@@ -123,6 +128,7 @@ type ExecuteRequest struct {
 	TaskName    string                   `json:"task_name"`
 	Creator     string                   `json:"creator"`
 	Commands    []map[string]interface{} `json:"commands"`
+	ScriptID    *string                  `json:"script_id,omitempty"`
 
 	// Scheduling
 	ExecuteType ExecuteType `json:"execute_type"`
@@ -148,6 +154,31 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		commands = []map[string]interface{}{}
 	}
 
+	// If a script_id is provided, resolve its content into commands
+	var scriptID *uuid.UUID
+	if req.ScriptID != nil && *req.ScriptID != "" {
+		sid, err := uuid.Parse(*req.ScriptID)
+		if err != nil {
+			return nil, fmt.Errorf("parse script_id %q: %w", *req.ScriptID, err)
+		}
+		script, err := s.scriptRepo.GetByID(ctx, sid)
+		if err != nil {
+			return nil, fmt.Errorf("resolve script %s: %w", sid, err)
+		}
+		scriptID = &sid
+		// Parse script content into command entries (one command per line)
+		for _, line := range splitScriptLines(script.Content) {
+			if line == "" {
+				continue
+			}
+			commands = append(commands, map[string]interface{}{
+				"command_code": line,
+				"source":       "script",
+				"script_name":  script.ScriptName,
+			})
+		}
+	}
+
 	// If a command_code is provided, resolve it and build the command entry
 	if req.CommandCode != "" {
 		cmd, err := s.cmdRepo.GetByCode(ctx, req.CommandCode)
@@ -165,6 +196,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 
 	task := &MMLTask{
 		TaskName:  req.TaskName,
+		ScriptID:  scriptID,
 		DeviceSNs: req.DeviceSNs,
 		Commands:  commands,
 		Status:    TaskPending,
@@ -299,4 +331,213 @@ func (s *Service) DeleteTask(ctx context.Context, id uuid.UUID) error {
 
 	s.logger.Info("mml task deleted", zap.String("task_id", id.String()))
 	return nil
+}
+
+// splitScriptLines splits script content into individual command lines,
+// trimming whitespace and ignoring empty lines and comments.
+func splitScriptLines(content string) []string {
+	var lines []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		// Strip trailing semicolons
+		line = strings.TrimSuffix(line, ";")
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// ---- Template operations (Phase 3) ----
+
+// ListTemplates returns a paginated list of MML templates.
+// For private templates, only the creator's templates are shown.
+func (s *Service) ListTemplates(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error) {
+	return s.templateRepo.List(ctx, filter)
+}
+
+// GetTemplate retrieves an MML template by ID.
+func (s *Service) GetTemplate(ctx context.Context, id uuid.UUID) (*MMLTemplate, error) {
+	return s.templateRepo.GetByID(ctx, id)
+}
+
+// CreateTemplate creates a new MML command template.
+func (s *Service) CreateTemplate(ctx context.Context, tmpl *MMLTemplate) (*MMLTemplate, error) {
+	if tmpl.Parameters == nil {
+		tmpl.Parameters = map[string]interface{}{}
+	}
+	if tmpl.ParamPaths == nil {
+		tmpl.ParamPaths = []string{}
+	}
+	if tmpl.ProductTypes == nil {
+		tmpl.ProductTypes = []string{}
+	}
+
+	if err := s.templateRepo.Create(ctx, tmpl); err != nil {
+		return nil, fmt.Errorf("create mml template: %w", err)
+	}
+
+	s.logger.Info("mml template created",
+		zap.String("template_id", tmpl.ID.String()),
+		zap.String("template_name", tmpl.TemplateName),
+	)
+	return tmpl, nil
+}
+
+// UpdateTemplate updates an existing MML template.
+func (s *Service) UpdateTemplate(ctx context.Context, id uuid.UUID, tmpl *MMLTemplate) (*MMLTemplate, error) {
+	existing, err := s.templateRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml template: %w", err)
+	}
+
+	existing.TemplateName = tmpl.TemplateName
+	existing.CommandCode = tmpl.CommandCode
+	existing.OperationType = tmpl.OperationType
+	existing.TemplateScope = tmpl.TemplateScope
+	existing.Description = tmpl.Description
+	if tmpl.Parameters != nil {
+		existing.Parameters = tmpl.Parameters
+	}
+	if tmpl.ParamPaths != nil {
+		existing.ParamPaths = tmpl.ParamPaths
+	}
+	if tmpl.ProductTypes != nil {
+		existing.ProductTypes = tmpl.ProductTypes
+	}
+
+	if err := s.templateRepo.Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("update mml template: %w", err)
+	}
+
+	s.logger.Info("mml template updated", zap.String("template_id", id.String()))
+	return existing, nil
+}
+
+// DeleteTemplate deletes an MML template.
+// Only the creator or an admin can delete public templates.
+func (s *Service) DeleteTemplate(ctx context.Context, id uuid.UUID, currentUser string) error {
+	tmpl, err := s.templateRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get mml template: %w", err)
+	}
+
+	if tmpl.TemplateScope == "public" && tmpl.Creator != currentUser {
+		return fmt.Errorf("only creator can delete public templates: %w", ErrForbidden)
+	}
+
+	if err := s.templateRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete mml template: %w", err)
+	}
+
+	s.logger.Info("mml template deleted", zap.String("template_id", id.String()))
+	return nil
+}
+
+// CloneTemplate clones a public template as a private copy for the current user.
+func (s *Service) CloneTemplate(ctx context.Context, id uuid.UUID, currentUser string) (*MMLTemplate, error) {
+	source, err := s.templateRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml template: %w", err)
+	}
+
+	clone := &MMLTemplate{
+		TemplateName:  source.TemplateName + " (副本)",
+		CommandCode:   source.CommandCode,
+		OperationType: source.OperationType,
+		TemplateScope: "private",
+		Parameters:    source.Parameters,
+		ParamPaths:    source.ParamPaths,
+		Description:   source.Description,
+		ProductTypes:  source.ProductTypes,
+		Creator:       currentUser,
+	}
+
+	if err := s.templateRepo.Create(ctx, clone); err != nil {
+		return nil, fmt.Errorf("clone mml template: %w", err)
+	}
+
+	s.logger.Info("mml template cloned",
+		zap.String("source_id", id.String()),
+		zap.String("clone_id", clone.ID.String()),
+	)
+	return clone, nil
+}
+
+// ErrForbidden is returned when a user lacks permission for an operation.
+var ErrForbidden = errors.New("forbidden")
+
+// ---- Dangerous command detection (Phase 2) ----
+
+// DangerousCommand describes a command pattern that requires confirmation.
+type DangerousCommand struct {
+	Pattern *regexp.Regexp
+	Name    string
+	Desc    string
+}
+
+// DangerousCommands holds the list of command patterns requiring extra confirmation.
+var DangerousCommands = []DangerousCommand{
+	{regexp.MustCompile(`(?i)\bRST\b`), "重启", "此操作将重启设备，设备会暂时断开连接"},
+	{regexp.MustCompile(`(?i)\bFACTORYRESET\b`), "恢复默认配置", "此操作将恢复设备出厂设置，所有配置将被清除"},
+	{regexp.MustCompile(`(?i)\bCELLDEACTIVATE\b`), "小区去激活", "此操作将去激活小区，可能影响网络服务"},
+	{regexp.MustCompile(`(?i)\bRFCTXOFF\b`), "关闭小区射频", "此操作将关闭小区射频发射，会影响无线信号"},
+	{regexp.MustCompile(`(?i)\bCOLDREBOOT\b`), "冷重启", "此操作将执行设备冷重启，设备会完全断电重启"},
+}
+
+// ErrDangerousCommand is returned when a command matches a dangerous pattern.
+var ErrDangerousCommand = errors.New("dangerous command requires confirmation")
+
+// CheckDangerousCommand checks if a command code matches any dangerous pattern.
+// Returns the matching DangerousCommand if found, or nil if safe.
+func CheckDangerousCommand(commandCode string) *DangerousCommand {
+	for _, dc := range DangerousCommands {
+		if dc.Pattern.MatchString(commandCode) {
+			return &dc
+		}
+	}
+	return nil
+}
+
+// IsDangerousCommand checks if a command code is dangerous and requires confirmation.
+func (s *Service) IsDangerousCommand(ctx context.Context, commandCode string) (*DangerousCommand, error) {
+	return CheckDangerousCommand(commandCode), nil
+}
+
+// GetTaskResults returns paginated per-device execution results for a task.
+func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSize int) (*model.ListResponse[map[string]interface{}], error) {
+	task, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml task: %w", err)
+	}
+
+	results := task.Results
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
+
+	total := int64(len(results))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start > int(total) {
+		start = int(total)
+	}
+	if end > int(total) {
+		end = int(total)
+	}
+
+	items := results[start:end]
+	if items == nil {
+		items = []map[string]interface{}{}
+	}
+
+	return model.NewListResponse(items, total, page, pageSize), nil
 }

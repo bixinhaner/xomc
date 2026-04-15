@@ -843,3 +843,308 @@ func joinColumns(cols []string) string {
 	}
 	return result
 }
+
+// ======================================================================
+// PgTemplateRepository
+// ======================================================================
+
+var _ TemplateRepository = (*PgTemplateRepository)(nil)
+
+var templateAllowedSortColumns = map[string]bool{
+	"template_name": true,
+	"command_code":  true,
+	"operation_type": true,
+	"template_scope": true,
+	"creator":       true,
+	"created_at":    true,
+	"updated_at":    true,
+}
+
+var templateColumns = []string{
+	"id", "template_name", "command_code", "operation_type",
+	"template_scope", "parameters", "param_paths",
+	"description", "product_types", "creator",
+	"created_at", "updated_at",
+}
+
+// PgTemplateRepository is a PostgreSQL implementation of TemplateRepository.
+type PgTemplateRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewPgTemplateRepository creates a new PgTemplateRepository.
+func NewPgTemplateRepository(pool *pgxpool.Pool) *PgTemplateRepository {
+	return &PgTemplateRepository{pool: pool}
+}
+
+func (r *PgTemplateRepository) Create(ctx context.Context, tmpl *MMLTemplate) error {
+	parametersJSON, err := json.Marshal(tmpl.Parameters)
+	if err != nil {
+		return fmt.Errorf("marshal parameters: %w", err)
+	}
+	paramPathsJSON, err := json.Marshal(tmpl.ParamPaths)
+	if err != nil {
+		return fmt.Errorf("marshal param_paths: %w", err)
+	}
+	productTypesJSON, err := json.Marshal(tmpl.ProductTypes)
+	if err != nil {
+		return fmt.Errorf("marshal product_types: %w", err)
+	}
+
+	query, args, err := storage.Psql.Insert("mml_templates").
+		Columns("template_name", "command_code", "operation_type",
+			"template_scope", "parameters", "param_paths",
+			"description", "product_types", "creator").
+		Values(tmpl.TemplateName, tmpl.CommandCode, tmpl.OperationType,
+			tmpl.TemplateScope, parametersJSON, paramPathsJSON,
+			tmpl.Description, productTypesJSON, tmpl.Creator).
+		Suffix("RETURNING " + joinColumns(templateColumns)).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build insert mml_template SQL: %w", err)
+	}
+
+	row := r.pool.QueryRow(ctx, query, args...)
+	created, err := scanTemplate(row)
+	if err != nil {
+		return fmt.Errorf("create mml_template: %w", err)
+	}
+	*tmpl = *created
+	return nil
+}
+
+func (r *PgTemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTemplate, error) {
+	query, args, err := storage.Psql.Select(templateColumns...).
+		From("mml_templates").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get mml_template SQL: %w", err)
+	}
+
+	tmpl, err := scanTemplate(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get mml_template: %w", err)
+	}
+	return tmpl, nil
+}
+
+func (r *PgTemplateRepository) Update(ctx context.Context, tmpl *MMLTemplate) error {
+	parametersJSON, err := json.Marshal(tmpl.Parameters)
+	if err != nil {
+		return fmt.Errorf("marshal parameters: %w", err)
+	}
+	paramPathsJSON, err := json.Marshal(tmpl.ParamPaths)
+	if err != nil {
+		return fmt.Errorf("marshal param_paths: %w", err)
+	}
+	productTypesJSON, err := json.Marshal(tmpl.ProductTypes)
+	if err != nil {
+		return fmt.Errorf("marshal product_types: %w", err)
+	}
+
+	query, args, err := storage.Psql.Update("mml_templates").
+		Set("template_name", tmpl.TemplateName).
+		Set("command_code", tmpl.CommandCode).
+		Set("operation_type", tmpl.OperationType).
+		Set("template_scope", tmpl.TemplateScope).
+		Set("parameters", parametersJSON).
+		Set("param_paths", paramPathsJSON).
+		Set("description", tmpl.Description).
+		Set("product_types", productTypesJSON).
+		Where(sq.Eq{"id": tmpl.ID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_template SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_template: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *PgTemplateRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("mml_templates").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete mml_template SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete mml_template: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error) {
+	base := storage.Psql.Select(templateColumns...).From("mml_templates")
+	countBase := storage.Psql.Select("COUNT(*)").From("mml_templates")
+
+	// Visibility rules: public templates + user's own private templates
+	if filter.Creator != nil && *filter.Creator != "" {
+		cond := sq.Or{
+			sq.Eq{"template_scope": "public"},
+			sq.And{sq.Eq{"template_scope": "private"}, sq.Eq{"creator": *filter.Creator}},
+		}
+		base = base.Where(cond)
+		countBase = countBase.Where(cond)
+	}
+
+	if filter.CommandCode != nil {
+		base = base.Where(sq.Eq{"command_code": *filter.CommandCode})
+		countBase = countBase.Where(sq.Eq{"command_code": *filter.CommandCode})
+	}
+	if filter.OperationType != nil {
+		base = base.Where(sq.Eq{"operation_type": *filter.OperationType})
+		countBase = countBase.Where(sq.Eq{"operation_type": *filter.OperationType})
+	}
+	if filter.TemplateScope != nil {
+		base = base.Where(sq.Eq{"template_scope": *filter.TemplateScope})
+		countBase = countBase.Where(sq.Eq{"template_scope": *filter.TemplateScope})
+	}
+
+	// Count total
+	countSQL, countArgs, err := countBase.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count mml_template SQL: %w", err)
+	}
+	var total int64
+	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count mml_templates: %w", err)
+	}
+
+	// Pagination
+	sortBy := "created_at"
+	if filter.SortBy != "" && templateAllowedSortColumns[filter.SortBy] {
+		sortBy = filter.SortBy
+	}
+	sortDir := "DESC"
+	if filter.SortDir == "asc" {
+		sortDir = "ASC"
+	}
+	base = base.
+		OrderBy(sortBy + " " + sortDir).
+		Limit(uint64(filter.Limit())).
+		Offset(uint64(filter.Offset()))
+
+	query, args, err := base.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list mml_template SQL: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list mml_templates: %w", err)
+	}
+	defer rows.Close()
+
+	var items []MMLTemplate
+	for rows.Next() {
+		tmpl, err := scanTemplateRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan mml_template row: %w", err)
+		}
+		items = append(items, *tmpl)
+	}
+
+	if items == nil {
+		items = []MMLTemplate{}
+	}
+
+	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
+}
+
+// ---- template scanning helpers ----
+
+func scanTemplate(row pgx.Row) (*MMLTemplate, error) {
+	var t MMLTemplate
+	var parametersJSON, paramPathsJSON, productTypesJSON []byte
+
+	err := row.Scan(
+		&t.ID, &t.TemplateName, &t.CommandCode, &t.OperationType,
+		&t.TemplateScope, &parametersJSON, &paramPathsJSON,
+		&t.Description, &productTypesJSON, &t.Creator,
+		&t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if parametersJSON != nil {
+		if err := json.Unmarshal(parametersJSON, &t.Parameters); err != nil {
+			return nil, fmt.Errorf("unmarshal parameters: %w", err)
+		}
+	}
+	if t.Parameters == nil {
+		t.Parameters = map[string]interface{}{}
+	}
+	if paramPathsJSON != nil {
+		if err := json.Unmarshal(paramPathsJSON, &t.ParamPaths); err != nil {
+			return nil, fmt.Errorf("unmarshal param_paths: %w", err)
+		}
+	}
+	if t.ParamPaths == nil {
+		t.ParamPaths = []string{}
+	}
+	if productTypesJSON != nil {
+		if err := json.Unmarshal(productTypesJSON, &t.ProductTypes); err != nil {
+			return nil, fmt.Errorf("unmarshal product_types: %w", err)
+		}
+	}
+	if t.ProductTypes == nil {
+		t.ProductTypes = []string{}
+	}
+	return &t, nil
+}
+
+func scanTemplateRow(rows pgx.Rows) (*MMLTemplate, error) {
+	var t MMLTemplate
+	var parametersJSON, paramPathsJSON, productTypesJSON []byte
+
+	err := rows.Scan(
+		&t.ID, &t.TemplateName, &t.CommandCode, &t.OperationType,
+		&t.TemplateScope, &parametersJSON, &paramPathsJSON,
+		&t.Description, &productTypesJSON, &t.Creator,
+		&t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if parametersJSON != nil {
+		if err := json.Unmarshal(parametersJSON, &t.Parameters); err != nil {
+			return nil, fmt.Errorf("unmarshal parameters: %w", err)
+		}
+	}
+	if t.Parameters == nil {
+		t.Parameters = map[string]interface{}{}
+	}
+	if paramPathsJSON != nil {
+		if err := json.Unmarshal(paramPathsJSON, &t.ParamPaths); err != nil {
+			return nil, fmt.Errorf("unmarshal param_paths: %w", err)
+		}
+	}
+	if t.ParamPaths == nil {
+		t.ParamPaths = []string{}
+	}
+	if productTypesJSON != nil {
+		if err := json.Unmarshal(productTypesJSON, &t.ProductTypes); err != nil {
+			return nil, fmt.Errorf("unmarshal product_types: %w", err)
+		}
+	}
+	if t.ProductTypes == nil {
+		t.ProductTypes = []string{}
+	}
+	return &t, nil
+}
