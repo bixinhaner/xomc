@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { MMLCommand } from '@/types/mml';
 import { useAllMMLCommands } from '@/hooks/api/useMML';
+import { useDictionary } from '@/hooks/api/useSystem';
 
 export function useCommandSelection() {
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
@@ -8,6 +9,25 @@ export function useCommandSelection() {
   const [categoryFilter, setCategoryFilter] = useState<string>('');
 
   const { data: allCommands = [] } = useAllMMLCommands();
+  const { data: categoryDict } = useDictionary('mml_command_category');
+
+  // 分类选项（字典驱动，fallback 到从命令数据提取）
+  const categoryOptions = useMemo(
+    () => {
+      const dictDetails = categoryDict?.sysDictionaryDetails;
+      if (dictDetails && dictDetails.length > 0) {
+        return dictDetails.map((d) => ({ label: d.label, value: d.value }));
+      }
+      return [...new Set(allCommands.map((cmd) => cmd.category))].map((c) => ({ label: c, value: c }));
+    },
+    [categoryDict, allCommands]
+  );
+
+  // 所有分类值（用于树分组）
+  const categories = useMemo(
+    () => categoryOptions.map((o) => o.value),
+    [categoryOptions]
+  );
 
   // 过滤后的命令列表
   const filteredCommands = useMemo(() => {
@@ -19,11 +39,6 @@ export function useCommandSelection() {
       return matchCategory && matchSearch;
     });
   }, [allCommands, searchText, categoryFilter]);
-
-  // 获取所有分类
-  const categories = useMemo(() => {
-    return [...new Set(allCommands.map((cmd) => cmd.category))];
-  }, [allCommands]);
 
   // 按分类分组的命令
   const commandsByCategory = useMemo(() => {
@@ -53,6 +68,7 @@ export function useCommandSelection() {
     categoryFilter,
     filteredCommands,
     categories,
+    categoryOptions,
     commandsByCategory,
     allCommands,
 

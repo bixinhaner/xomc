@@ -200,6 +200,7 @@ export default function MMLConsole() {
             selectedCommand={commandSelection.selectedCommand}
             commands={commandSelection.filteredCommands}
             categories={commandSelection.categories}
+            categoryOptions={commandSelection.categoryOptions}
             commandsByCategory={commandSelection.commandsByCategory}
             searchText={commandSelection.searchText}
             categoryFilter={commandSelection.categoryFilter}

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { User, Role, Group, ApiEndpointListParams, ApiEndpointPayload } from '@/types/system';
+import type { Dictionary } from '@/services/api/adminApi';
 import type { PageRequest } from '@/types/pagination';
 import { systemService } from '@/mock/services/systemService';
 import { adminApi } from '@/services/api/adminApi';
@@ -362,5 +363,16 @@ export function useSyncApiEndpoints() {
       void queryClient.invalidateQueries({ queryKey: ['system', 'apiEndpoints'] });
       void queryClient.invalidateQueries({ queryKey: ['system', 'apiGroups'] });
     },
+  });
+}
+
+// ---- Dictionary hooks ----
+
+export function useDictionary(dictType: string) {
+  return useQuery<Dictionary | null>({
+    queryKey: ['dictionary', dictType],
+    queryFn: () => adminApi.findDictionaryByType(dictType),
+    enabled: !!dictType,
+    staleTime: 5 * 60 * 1000,
   });
 }

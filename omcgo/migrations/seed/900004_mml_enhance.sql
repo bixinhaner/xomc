@@ -275,3 +275,42 @@ ON CONFLICT (command_code) DO UPDATE SET
     rpc_method     = EXCLUDED.rpc_method,
     param_template = EXCLUDED.param_template,
     product_types  = EXCLUDED.product_types;
+
+-- =============================================
+-- C) 字典种子数据：产品类型 & MML 命令分类
+-- =============================================
+
+-- 产品类型字典
+INSERT INTO sys_dictionaries (name, type, status, description) VALUES
+('产品类型', 'product_type', TRUE, '设备产品类型')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
+('PM-B4860', 'PM-B4860', 1, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('QAFA', 'QAFA', 2, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('BaiBNX', 'BaiBNX', 3, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('BaiBS5163', 'BaiBS5163', 4, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('BaiBS5263', 'BaiBS5263', 5, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('BTS', 'BTS', 6, (SELECT id FROM sys_dictionaries WHERE type = 'product_type')),
+('BSC', 'BSC', 7, (SELECT id FROM sys_dictionaries WHERE type = 'product_type'));
+
+-- MML 命令分类字典
+INSERT INTO sys_dictionaries (name, type, status, description) VALUES
+('MML命令类型', 'mml_command_category', TRUE, 'MML命令分类')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
+('小区管理', '小区管理', 1, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category')),
+('邻区管理', '邻区管理', 2, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category')),
+('基站管理', '基站管理', 3, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category')),
+('告警查询', '告警查询', 4, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category')),
+('性能采集', '性能采集', 5, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category')),
+('传输管理', '传输管理', 6, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category')),
+('版本管理', '版本管理', 7, (SELECT id FROM sys_dictionaries WHERE type = 'mml_command_category'));
+
+-- +goose Down
+DELETE FROM sys_dictionary_details WHERE sys_dictionary_id IN (
+    SELECT id FROM sys_dictionaries WHERE type IN ('product_type', 'mml_command_category')
+);
+DELETE FROM sys_dictionaries WHERE type IN ('product_type', 'mml_command_category');
+DELETE FROM mml_commands WHERE id::text LIKE '00000000-0000-0000-%';

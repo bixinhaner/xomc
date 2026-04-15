@@ -10,6 +10,7 @@ interface CommandTreeProps {
   selectedCommand: MMLCommand | null;
   commands: MMLCommand[];
   categories: string[];
+  categoryOptions: { label: string; value: string }[];
   commandsByCategory: Map<string, MMLCommand[]>;
   searchText: string;
   categoryFilter: string;
@@ -22,6 +23,7 @@ export default function CommandTree({
   selectedCommand,
   commands,
   categories,
+  categoryOptions,
   commandsByCategory,
   searchText,
   categoryFilter,
@@ -146,7 +148,7 @@ export default function CommandTree({
           style={{ width: '100%', borderRadius: 4 }}
           placeholder="命令类型"
           allowClear
-          options={categories.map((c) => ({ label: c, value: c }))}
+          options={categoryOptions}
           value={categoryFilter || undefined}
           onChange={(val) => onFilterChange(val ?? '')}
         />

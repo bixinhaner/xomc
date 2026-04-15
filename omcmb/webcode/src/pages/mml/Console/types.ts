@@ -16,16 +16,7 @@ export const STATUS_COLORS: Record<string, string> = {
   alarm: '#fa8c16',
 };
 
-// 产品类型选项
-export const PRODUCT_TYPE_OPTIONS = [
-  { label: 'PM-B4860', value: 'PM-B4860' },
-  { label: 'QAFA', value: 'QAFA' },
-  { label: 'BaiBNX', value: 'BaiBNX' },
-  { label: 'BaiBS5163', value: 'BaiBS5163' },
-  { label: 'BaiBS5263', value: 'BaiBS5263' },
-  { label: 'BTS', value: 'BTS' },
-  { label: 'BSC', value: 'BSC' },
-];
+// 产品类型选项（通过字典 API 获取，不再硬编码）
 
 // 终端行类型
 export interface TerminalLine {

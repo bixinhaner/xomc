@@ -2,9 +2,10 @@ import { useCallback, useMemo } from 'react';
 import { Button, Checkbox, Input, List, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { SearchOutlined, UserAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
-import { STATUS_COLORS, PRODUCT_TYPE_OPTIONS } from '../types';
+import { STATUS_COLORS } from '../types';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
+import { useDictionary } from '@/hooks/api/useSystem';
 
 interface DeviceTreeProps {
   selectedDevices: ConsoleDevice[];
@@ -48,6 +49,13 @@ export default function DeviceTree({
 }: DeviceTreeProps) {
   const t = useT();
   const token = useThemeToken();
+  const { data: productTypeDict } = useDictionary('product_type');
+
+  // 产品类型选项（字典驱动）
+  const productTypeOptions = useMemo(
+    () => (productTypeDict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
+    [productTypeDict]
+  );
 
   // 按类型分组设备
   const devicesByType = useMemo(() => {
@@ -117,7 +125,7 @@ export default function DeviceTree({
           style={{ width: '100%', borderRadius: 4 }}
           placeholder="产品类型"
           allowClear
-          options={PRODUCT_TYPE_OPTIONS}
+          options={productTypeOptions}
           value={productTypeFilter || undefined}
           onChange={(val) => onFilterChange(val ?? '')}
         />

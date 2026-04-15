@@ -9,6 +9,7 @@ export interface Dictionary {
   type: string;
   status: boolean;
   desc: string;
+  sysDictionaryDetails?: DictionaryDetail[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -699,6 +700,13 @@ export const adminApi = {
 
   async deleteDictionaryDetail(id: number): Promise<void> {
     await http.delete('/admin/sysDictionaryDetail/deleteSysDictionaryDetail', { params: { id } });
+  },
+
+  async findDictionaryByType(type: string): Promise<Dictionary | null> {
+    const { data } = await http.get<{ code: number; data: { sysDictionaryDetails?: BackendDictionaryDetail[] } & BackendDictionary }>('/admin/sysDictionary/findSysDictionary', { params: { type } });
+    const dict = mapBackendDictionary(data.data);
+    dict.sysDictionaryDetails = (data.data?.sysDictionaryDetails || []).map(mapBackendDictionaryDetail);
+    return dict;
   },
 
   // API 权限
