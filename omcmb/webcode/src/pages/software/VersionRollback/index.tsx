@@ -724,16 +724,6 @@ export default function UpgradePlan() {
 
   return (
     <ListPageLayout title={t('nav.software.versionRollback')} extra={headerExtra}>
-      {/* 覆盖 FilterBar 样式 */}
-      <style>{`
-        .upgrade-plan-filter-wrapper [class*="_filterBarWrapper_"] {
-          padding: 0 !important;
-          margin-bottom: 0 !important;
-          border: none !important;
-          background: transparent !important;
-        }
-      `}</style>
-
       {/* 页签选择 */}
       <Card style={{ marginBottom: 16 }}>
         <Radio.Group
@@ -752,14 +742,12 @@ export default function UpgradePlan() {
       </Card>
 
       {/* 搜索表单 */}
-      <Card style={{ marginBottom: 16 }} className="upgrade-plan-filter-wrapper">
-        <FilterBar
-          filterId={`upgrade-plan-filter-${activeTab}`}
-          fields={activeTab === 'task' ? taskFilterFields : filterFields}
-          onSearch={(vals) => { setFilters(vals); setPage(1); }}
+      <FilterBar
+        filterId={`upgrade-plan-filter-${activeTab}`}
+        fields={activeTab === 'task' ? taskFilterFields : filterFields}
+        onSearch={(vals) => { setFilters(vals); setPage(1); }}
           onReset={() => { setFilters({}); setPage(1); }}
         />
-      </Card>
 
       {/* 列表 */}
       {activeTab === 'task' ? (

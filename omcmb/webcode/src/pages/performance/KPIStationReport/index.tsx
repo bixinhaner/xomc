@@ -288,21 +288,13 @@ export default function KPIMeasurement() {
 
   return (
     <ListPageLayout title={t('nav.performance.kpiStation')}>
-      <Card
-        size="small"
-        bordered
-        style={{ marginBottom: 12 }}
-        styles={{ body: { padding: '12px 16px 0' } }}
-      >
-        <FilterBar
-          filterId="kpi-measurement"
-          fields={filterFields}
-          onSearch={handleSearch}
-          onReset={handleReset}
-          collapsedRows={1}
-          noDefaultStyle
-        />
-      </Card>
+      <FilterBar
+        filterId="kpi-measurement"
+        fields={filterFields}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+      />
 
       <Card
         size="small"

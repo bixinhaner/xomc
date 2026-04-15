@@ -676,22 +676,13 @@ export default function CurrentAlarms() {
         </div>
       </Card>
 
-      {/* 搜索卡片 */}
-      <Card
-        size="small"
-        bordered
-        style={{ marginBottom: 12 }}
-        styles={{ body: { padding: '12px 16px 0' } }}
-      >
-        <FilterBar
-          filterId="current-alarms"
-          fields={FILTER_FIELDS}
-          onSearch={handleSearch}
-          onReset={handleReset}
-          collapsedRows={1}
-          noDefaultStyle
-        />
-      </Card>
+      <FilterBar
+        filterId="current-alarms"
+        fields={FILTER_FIELDS}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+      />
 
       {/* 列表卡片 */}
       <Card

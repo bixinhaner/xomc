@@ -9,7 +9,7 @@
   grid-template-rows: 48px 36px 1fr auto;
   grid-template-columns: var(--current-sidebar-width, 240px) 1fr;
   grid-template-areas:
-    "header    header"
+    "sidebar   header"
     "sidebar   tabbar"
     "sidebar   content"
     "sidebar   taskpanel";
@@ -19,7 +19,7 @@
 .shell[data-sidebar="right"][data-tabbar="top"] {
   grid-template-columns: 1fr var(--current-sidebar-width, 240px);
   grid-template-areas:
-    "header    header"
+    "header    sidebar"
     "tabbar    sidebar"
     "content   sidebar"
     "taskpanel sidebar";
@@ -29,7 +29,7 @@
 .shell[data-sidebar="left"][data-tabbar="bottom"] {
   grid-template-rows: 48px 1fr 36px auto;
   grid-template-areas:
-    "header    header"
+    "sidebar   header"
     "sidebar   content"
     "sidebar   tabbar"
     "sidebar   taskpanel";
@@ -40,7 +40,7 @@
   grid-template-rows: 48px 1fr 36px auto;
   grid-template-columns: 1fr var(--current-sidebar-width, 240px);
   grid-template-areas:
-    "header    header"
+    "header    sidebar"
     "content   sidebar"
     "tabbar    sidebar"
     "taskpanel sidebar";
@@ -48,11 +48,11 @@
 
 /* Sidebar-top + TabBar-top */
 .shell[data-sidebar="top"][data-tabbar="top"] {
-  grid-template-rows: 48px auto 36px 1fr auto;
+  grid-template-rows: auto 36px 1fr auto;
   grid-template-columns: 1fr;
   grid-template-areas:
-    "header"
     "sidebar"
+    "header"
     "tabbar"
     "content"
     "taskpanel";
@@ -60,11 +60,11 @@
 
 /* Sidebar-top + TabBar-bottom */
 .shell[data-sidebar="top"][data-tabbar="bottom"] {
-  grid-template-rows: 48px auto 1fr 36px auto;
+  grid-template-rows: auto 1fr 36px auto;
   grid-template-columns: 1fr;
   grid-template-areas:
-    "header"
     "sidebar"
+    "header"
     "content"
     "tabbar"
     "taskpanel";
@@ -75,7 +75,7 @@
   grid-template-rows: 48px 1fr auto;
   grid-template-columns: var(--current-sidebar-width, 240px) 120px 1fr;
   grid-template-areas:
-    "header  header  header"
+    "sidebar  header  header"
     "sidebar tabbar  content"
     "sidebar tabbar  taskpanel";
 }
@@ -85,18 +85,18 @@
   grid-template-rows: 48px 1fr auto;
   grid-template-columns: 120px 1fr var(--current-sidebar-width, 240px);
   grid-template-areas:
-    "header  header  header"
+    "header  header  sidebar"
     "tabbar  content sidebar"
     "tabbar  taskpanel sidebar";
 }
 
 /* Sidebar-top + TabBar-left */
 .shell[data-sidebar="top"][data-tabbar="left"] {
-  grid-template-rows: 48px auto 1fr auto;
+  grid-template-rows: auto 48px 1fr auto;
   grid-template-columns: 120px 1fr;
   grid-template-areas:
+    "sidebar  sidebar"
     "header  header"
-    "sidebar sidebar"
     "tabbar  content"
     "tabbar  taskpanel";
 }

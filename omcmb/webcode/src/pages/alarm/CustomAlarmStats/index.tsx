@@ -1146,17 +1146,13 @@ export default function CustomAlarmStats() {
         </div>
       </Card>
 
-      {/* 搜索卡片 */}
-      <Card size="small" bordered styles={{ body: { padding: '16px 16px 0 16px' } }}>
-        <FilterBar
-          filterId={`custom-alarm-stats-${selectedGroupId}`}
-          fields={FILTER_FIELDS}
-          onSearch={handleSearch}
-          onReset={handleReset}
-          collapsedRows={1}
-          noDefaultStyle
-        />
-      </Card>
+      <FilterBar
+        filterId={`custom-alarm-stats-${selectedGroupId}`}
+        fields={FILTER_FIELDS}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+      />
 
       {/* 列表卡片 */}
       <Card

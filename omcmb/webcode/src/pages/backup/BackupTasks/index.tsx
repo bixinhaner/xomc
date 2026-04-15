@@ -741,19 +741,6 @@ export default function BackupTasks() {
 
   return (
     <ListPageLayout title={t('nav.backup.tasks')} extra={headerExtra}>
-      {/* 覆盖 FilterBar 样式 */}
-      <style>{`
-        .backup-tasks-filter-wrapper [class*="_filterBarWrapper_"] {
-          padding: 0 !important;
-          margin-bottom: 0 !important;
-          border: none !important;
-          background: transparent !important;
-        }
-        .backup-tasks-list-wrapper .ant-card-body {
-          padding: 0 !important;
-        }
-      `}</style>
-
       {/* 页签选择 */}
       <Card bordered={false} style={{ marginBottom: 16 }}>
         <Radio.Group
@@ -773,31 +760,28 @@ export default function BackupTasks() {
         </Radio.Group>
       </Card>
 
-      {/* 搜索表单 */}
-      <Card bordered={false} style={{ marginBottom: 16 }} className="backup-tasks-filter-wrapper">
-        <FilterBar
-          filterId={`backup-tasks-filter-${activeTab}`}
-          fields={activeTab === 'task' ? taskFilterFields : deviceFilterFields}
-          onSearch={(vals) => {
-            if (activeTab === 'task') {
-              setFilters(vals);
-              setPage(1);
-            } else {
-              setDeviceFilters(vals);
-              setDevicePage(1);
-            }
-          }}
-          onReset={() => {
-            if (activeTab === 'task') {
-              setFilters({});
-              setPage(1);
-            } else {
-              setDeviceFilters({});
-              setDevicePage(1);
-            }
-          }}
-        />
-      </Card>
+      <FilterBar
+        filterId={`backup-tasks-filter-${activeTab}`}
+        fields={activeTab === 'task' ? taskFilterFields : deviceFilterFields}
+        onSearch={(vals) => {
+          if (activeTab === 'task') {
+            setFilters(vals);
+            setPage(1);
+          } else {
+            setDeviceFilters(vals);
+            setDevicePage(1);
+          }
+        }}
+        onReset={() => {
+          if (activeTab === 'task') {
+            setFilters({});
+            setPage(1);
+          } else {
+            setDeviceFilters({});
+            setDevicePage(1);
+          }
+        }}
+      />
 
       {/* 列表 */}
       <Card bordered={false} className="backup-tasks-list-wrapper">

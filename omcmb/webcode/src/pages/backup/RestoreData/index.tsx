@@ -685,19 +685,6 @@ export default function RestoreData() {
 
   return (
     <ListPageLayout title={t('nav.backup.restore')} extra={headerExtra}>
-      {/* 覆盖 FilterBar 样式 */}
-      <style>{`
-        .restore-data-filter-wrapper [class*="_filterBarWrapper_"] {
-          padding: 0 !important;
-          margin-bottom: 0 !important;
-          border: none !important;
-          background: transparent !important;
-        }
-        .restore-data-list-wrapper .ant-card-body {
-          padding: 0 !important;
-        }
-      `}</style>
-
       {/* 页签选择 */}
       <Card bordered={false} style={{ marginBottom: 16 }}>
         <Radio.Group
@@ -717,31 +704,28 @@ export default function RestoreData() {
         </Radio.Group>
       </Card>
 
-      {/* 搜索表单 */}
-      <Card bordered={false} style={{ marginBottom: 16 }} className="restore-data-filter-wrapper">
-        <FilterBar
-          filterId={`restore-data-filter-${activeTab}`}
-          fields={activeTab === 'task' ? taskFilterFields : deviceFilterFields}
-          onSearch={(vals) => {
-            if (activeTab === 'task') {
-              setFilters(vals);
-              setPage(1);
-            } else {
-              setDeviceFilters(vals);
-              setDevicePage(1);
-            }
-          }}
-          onReset={() => {
-            if (activeTab === 'task') {
-              setFilters({});
-              setPage(1);
-            } else {
-              setDeviceFilters({});
-              setDevicePage(1);
-            }
-          }}
-        />
-      </Card>
+      <FilterBar
+        filterId={`restore-data-filter-${activeTab}`}
+        fields={activeTab === 'task' ? taskFilterFields : deviceFilterFields}
+        onSearch={(vals) => {
+          if (activeTab === 'task') {
+            setFilters(vals);
+            setPage(1);
+          } else {
+            setDeviceFilters(vals);
+            setDevicePage(1);
+          }
+        }}
+        onReset={() => {
+          if (activeTab === 'task') {
+            setFilters({});
+            setPage(1);
+          } else {
+            setDeviceFilters({});
+            setDevicePage(1);
+          }
+        }}
+      />
 
       {/* 列表 */}
       <Card bordered={false} className="restore-data-list-wrapper">

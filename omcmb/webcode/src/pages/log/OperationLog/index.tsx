@@ -362,13 +362,6 @@ export default function OperationLogPage() {
 
   return (
     <ListPageLayout title={t('log.operationLog')}>
-      {/* 覆盖 FilterBar 样式 */}
-      <style>{`
-        .operation-log-filter-wrapper [class*="_filterBarWrapper_"] {
-          padding: 0 !important;
-          margin-bottom: 0 !important;
-        }
-      `}</style>
       {/* Tab 页签 + 工具栏 */}
       <Card bordered={false} style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -396,16 +389,13 @@ export default function OperationLogPage() {
         </div>
       </Card>
 
-      {/* 搜索表单 */}
-      <Card bordered={false} style={{ marginBottom: 16 }} className="operation-log-filter-wrapper">
-        <FilterBar
-          filterId={`${activeTab}-log-filter`}
-          fields={getFilterFields()}
-          onSearch={handleSearch}
-          onReset={handleReset}
-          collapsedRows={1}
-        />
-      </Card>
+      <FilterBar
+        filterId={`${activeTab}-log-filter`}
+        fields={getFilterFields()}
+        onSearch={handleSearch}
+        onReset={handleReset}
+        collapsedRows={1}
+      />
 
       {/* 日志列表 */}
       <Card bordered={false}>

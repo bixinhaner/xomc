@@ -2,12 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/hooks/useT';
 import {
   Button,
-  Col,
   DatePicker,
   Form,
   Input,
   InputNumber,
-  Row,
   Select,
   TreeSelect,
 } from 'antd';
@@ -34,14 +32,13 @@ export interface FilterBarProps {
   onReset: () => void;
   collapsedRows?: number;
   extra?: React.ReactNode;
-  /** 不应用默认的 wrapper 样式（padding、margin） */
+  /** @deprecated 不再需要，FilterBar 默认无边框无背景 */
   noDefaultStyle?: boolean;
   /** 初始值（优先级高于 sessionStorage），传空对象 {} 表示清空所有筛选 */
   initialValues?: Record<string, unknown>;
 }
 
-const COLS_PER_ROW = 6;
-const COL_SPAN = 24 / COLS_PER_ROW; // 4
+const FIELDS_PER_ROW = 6;
 
 const SESSION_PREFIX = 'omc_filter_';
 
@@ -52,7 +49,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
   onReset,
   collapsedRows = 1,
   extra,
-  noDefaultStyle = false,
+  noDefaultStyle: _noDefaultStyle,
   initialValues,
 }) => {
   const t = useT();
@@ -131,24 +128,23 @@ const FilterBar: React.FC<FilterBarProps> = ({
   }, [form, onReset, storageKey]);
 
   // Calculate which fields to show based on collapsed state
-  const maxColsVisible = collapsedRows * COLS_PER_ROW;
-  // Reserve last slot in last row for action buttons
-  const fieldsToShow = expanded ? fields : fields.slice(0, maxColsVisible - 1);
-  const hasMore = fields.length > maxColsVisible - 1;
+  const maxFieldsVisible = collapsedRows * FIELDS_PER_ROW;
+  const fieldsToShow = expanded ? fields : fields.slice(0, maxFieldsVisible - 1);
+  const hasMore = fields.length > maxFieldsVisible - 1;
 
   const renderField = (field: FilterField): React.ReactNode => {
     switch (field.type) {
       case 'input':
         return (
           <Input
-            placeholder={field.placeholder ?? t('common.placeholder')}
+            placeholder={field.placeholder ?? field.label}
             allowClear
           />
         );
       case 'select':
         return (
           <Select
-            placeholder={field.placeholder ?? t('common.pleaseSelect')}
+            placeholder={field.placeholder ?? field.label}
             allowClear
             options={field.options}
             style={{ width: '100%' }}
@@ -157,7 +153,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
       case 'multi-select':
         return (
           <Select
-            placeholder={field.placeholder ?? t('common.pleaseSelect')}
+            placeholder={field.placeholder ?? field.label}
             mode="multiple"
             allowClear
             options={field.options}
@@ -175,7 +171,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
       case 'tree-select':
         return (
           <TreeSelect
-            placeholder={field.placeholder ?? t('common.pleaseSelect')}
+            placeholder={field.placeholder ?? field.label}
             allowClear
             treeData={field.treeData as Parameters<typeof TreeSelect>[0]['treeData']}
             style={{ width: '100%' }}
@@ -186,50 +182,37 @@ const FilterBar: React.FC<FilterBarProps> = ({
       case 'number':
         return (
           <InputNumber
-            placeholder={field.placeholder ?? t('common.placeholder')}
+            placeholder={field.placeholder ?? field.label}
             style={{ width: '100%' }}
           />
         );
       default:
-        return <Input placeholder={field.placeholder} allowClear />;
+        return <Input placeholder={field.placeholder ?? field.label} allowClear />;
     }
   };
 
-  const getFieldSpan = (field: FilterField): number => {
-    const fieldSpan = field.span ?? 1;
-    return fieldSpan * COL_SPAN;
-  };
-
-  // Action buttons occupy one "cell"
-  const actionSpan = COL_SPAN;
-
   return (
-    <div
-      className={styles.filterBarWrapper}
-      style={noDefaultStyle ? { padding: 0, margin: 0, marginBottom: 0, border: 'none', background: 'transparent' } : undefined}
-    >
-      <Form form={form} layout="vertical" size="small">
-        <Row gutter={[12, 0]} align="bottom">
+    <div className={styles.filterBarWrapper}>
+      <Form form={form} size="small">
+        <div className={styles.fieldsRow}>
           {fieldsToShow.map((field) => (
-            <Col key={field.name} span={getFieldSpan(field)}>
+            <div
+              key={field.name}
+              className={styles.fieldItem}
+              style={{ flex: field.span ?? 1 }}
+            >
               <Form.Item
                 name={field.name}
-                label={field.label}
                 initialValue={field.defaultValue}
-                className={styles.formItemWrapper}
-                style={{ marginBottom: 16 }}
+                className={styles.formItem}
               >
                 {renderField(field)}
               </Form.Item>
-            </Col>
+            </div>
           ))}
 
-          {/* Action column */}
-          <Col
-            span={actionSpan}
-            className={styles.actionCol}
-            style={{ marginBottom: 16 }}
-          >
+          {/* Action area */}
+          <div className={styles.actionArea}>
             {hasMore && (
               <Button
                 type="link"
@@ -242,16 +225,19 @@ const FilterBar: React.FC<FilterBarProps> = ({
               </Button>
             )}
             {extra && <span className={styles.extraWrapper}>{extra}</span>}
-            <Button onClick={handleReset}>{t('common.reset')}</Button>
-            <Button
-              type="primary"
-              icon={<SearchOutlined />}
+            <a className={styles.resetLink} onClick={handleReset}>
+              {t('common.reset')}
+            </a>
+            <button
+              className={styles.searchBtn}
               onClick={handleSearch}
+              type="button"
+              title={t('filter.query')}
             >
-              {t('filter.query')}
-            </Button>
-          </Col>
-        </Row>
+              <SearchOutlined />
+            </button>
+          </div>
+        </div>
       </Form>
     </div>
   );

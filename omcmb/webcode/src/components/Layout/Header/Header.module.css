@@ -1,10 +1,6 @@
 /* Header — Linear-inspired: Panel Dark, subtle borders, no blur */
 
 .header {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
   height: 48px;
   background-color: var(--color-header-bg);
   z-index: 100;
@@ -12,16 +8,36 @@
   align-items: center;
   padding: 0 24px;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--color-header-divider, rgba(255, 255, 255, 0.05));
 }
 
-/* Left zone: logo + system name */
+/* Left zone: collapse button (desktop) / hamburger+logo (mobile) */
 .left {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 240px;
   flex-shrink: 0;
+}
+
+/* Collapse/expand sidebar button */
+.collapseBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-header-text-muted, #8a8f98);
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.collapseBtn:hover {
+  background: var(--color-header-action-hover, rgba(255, 255, 255, 0.04));
+  color: var(--color-header-text-secondary, #d0d6e0);
 }
 
 .logoMark {
@@ -281,8 +297,11 @@
   }
 
   .left {
-    min-width: unset;
     gap: 6px;
+  }
+
+  .collapseBtn {
+    display: none;
   }
 
   .center {
@@ -316,15 +335,6 @@
 
 /* ============ TABLET (768–991px) ============ */
 @media (min-width: 768px) and (max-width: 991px) {
-  .left {
-    min-width: unset;
-    gap: 8px;
-  }
-
-  .systemName {
-    font-size: 13px;
-  }
-
   .center {
     display: none;
   }

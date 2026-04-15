@@ -4,6 +4,8 @@ import {
   MenuOutlined,
   SunOutlined,
   MoonOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@/store/appStore';
 import { useResponsive } from '@/hooks/useResponsive';
@@ -27,6 +29,8 @@ export default function Header() {
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const { isMobile } = useResponsive();
   const t = useT();
 
@@ -34,21 +38,32 @@ export default function Header() {
 
   return (
     <header className={styles.header}>
-      {/* Left zone — Hamburger (mobile) + Logo + System name */}
+      {/* Left zone */}
       <div className={styles.left}>
-        {isMobile && (
+        {isMobile ? (
+          <>
+            <button
+              className={styles.hamburger}
+              onClick={() => setMobileOverlayOpen(true)}
+              aria-label="Open navigation"
+              type="button"
+            >
+              <MenuOutlined />
+            </button>
+            <div className={styles.logoMark}>OMC</div>
+            <span className={styles.systemName}>{t('app.title')}</span>
+          </>
+        ) : (
           <button
-            className={styles.hamburger}
-            onClick={() => setMobileOverlayOpen(true)}
-            aria-label="Open navigation"
+            className={styles.collapseBtn}
+            onClick={toggleSidebar}
+            title={sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')}
             type="button"
+            aria-label={sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')}
           >
-            <MenuOutlined />
+            {sidebarCollapsed ? <MenuUnfoldOutlined style={{ fontSize: 16 }} /> : <MenuFoldOutlined style={{ fontSize: 16 }} />}
           </button>
         )}
-        <div className={styles.logoMark}>OMC</div>
-        {!isMobile && <span className={styles.systemName}>{t('app.title')}</span>}
-        {!isMobile && <div className={styles.logoDivider} />}
       </div>
 
       {/* Center zone — Current device type indicator */}

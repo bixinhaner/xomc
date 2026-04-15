@@ -310,15 +310,6 @@ export default function FirmwareUpload() {
 
   return (
     <ListPageLayout title="升级文件管理">
-      {/* 覆盖 FilterBar 样式 */}
-      <style>{`
-        .firmware-filter-wrapper [class*="_filterBarWrapper_"] {
-          padding: 0 !important;
-          margin-bottom: 0 !important;
-          border: none !important;
-          background: transparent !important;
-        }
-      `}</style>
       {/* 文件类型选择 */}
       <Card bordered={false} style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -343,14 +334,12 @@ export default function FirmwareUpload() {
       </Card>
 
       {/* 搜索表单 */}
-      <Card bordered={false} style={{ marginBottom: 16 }} className="firmware-filter-wrapper">
-        <FilterBar
-          filterId="firmware-filter"
-          fields={filterFields}
-          onSearch={(vals) => setFilters(vals)}
-          onReset={() => setFilters({})}
-        />
-      </Card>
+      <FilterBar
+        filterId="firmware-filter"
+        fields={filterFields}
+        onSearch={(vals) => setFilters(vals)}
+        onReset={() => setFilters({})}
+      />
 
       {/* 文件列表 */}
       <DataTable<FirmwareFile>
