@@ -144,7 +144,7 @@ export default function CommandTree({
         <Select
           size="small"
           style={{ width: '100%', borderRadius: 4 }}
-          placeholder="按分类筛选"
+          placeholder="命令类型"
           allowClear
           options={categories.map((c) => ({ label: c, value: c }))}
           value={categoryFilter || undefined}

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { ConsoleDevice } from '../types';
 import { DEVICE_PAGE_SIZE } from '../constants';
 import { deviceApi } from '@/services/api/deviceApi';
@@ -11,11 +11,15 @@ export function useDeviceSelection() {
   const [devices, setDevices] = useState<ConsoleDevice[]>([]);
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
 
-  // Fetch devices from API
-  const fetchDevices = useCallback(async () => {
+  // Fetch devices from API — productType 作为服务端筛选条件
+  const fetchDevices = useCallback(async (productType?: string) => {
     setIsLoadingDevices(true);
     try {
-      const result = await deviceApi.getList({ page: 1, pageSize: 1000 });
+      const result = await deviceApi.getList({
+        page: 1,
+        pageSize: 1000,
+        ...(productType ? { productType } : {}),
+      });
       const mapped: ConsoleDevice[] = result.items.map((d) => ({
         sn: d.sn,
         name: d.siteName || d.sn,
@@ -31,16 +35,20 @@ export function useDeviceSelection() {
     }
   }, []);
 
-  // 过滤后的设备列表
+  // 首次加载 & 产品类型切换时触发 API 调用
+  useEffect(() => {
+    void fetchDevices(productTypeFilter || undefined);
+  }, [productTypeFilter, fetchDevices]);
+
+  // 按搜索文本前端过滤（产品类型已由后端筛选）
   const filteredDevices = useMemo(() => {
     return devices.filter((device) => {
       const matchSearch = !searchText ||
         device.sn.toLowerCase().includes(searchText.toLowerCase()) ||
         device.name.includes(searchText);
-      const matchType = !productTypeFilter || device.productType === productTypeFilter;
-      return matchSearch && matchType;
+      return matchSearch;
     });
-  }, [devices, searchText, productTypeFilter]);
+  }, [devices, searchText]);
 
   // 分页后的设备列表
   const paginatedDevices = useMemo(() => {

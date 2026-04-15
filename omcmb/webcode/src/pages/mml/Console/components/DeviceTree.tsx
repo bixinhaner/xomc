@@ -106,7 +106,7 @@ export default function DeviceTree({
         <Input
           size="small"
           style={{ marginBottom: 8, borderRadius: 4 }}
-          placeholder={t('common.search')}
+          placeholder="设备SN,设备名称"
           prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
           value={searchText}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -115,7 +115,7 @@ export default function DeviceTree({
         <Select
           size="small"
           style={{ width: '100%', borderRadius: 4 }}
-          placeholder="按类型筛选"
+          placeholder="产品类型"
           allowClear
           options={PRODUCT_TYPE_OPTIONS}
           value={productTypeFilter || undefined}

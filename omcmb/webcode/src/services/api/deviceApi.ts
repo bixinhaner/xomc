@@ -302,6 +302,8 @@ export const deviceApi = {
     if (params.searchText) query.search = params.searchText;
     if (params.sn) query.sn = params.sn;
     if (params.vendor) query.oui = params.vendor;
+    // productType → product_class
+    if (params.productType) query.product_class = params.productType;
     // networkType: 前端值 'eNB' → 后端 'lte', 'gNB' → 后端 'nr'
     if (params.networkType) {
       const networkTypeMap: Record<string, string> = {

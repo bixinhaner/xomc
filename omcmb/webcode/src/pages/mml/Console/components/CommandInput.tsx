@@ -5,6 +5,7 @@ import type { ConsoleDevice } from '../types';
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
+import { useDangerousCheck } from '@/hooks/api/useMML';
 
 // 操作类型选项
 const OPERATION_TYPE_OPTIONS = [
@@ -13,25 +14,6 @@ const OPERATION_TYPE_OPTIONS = [
   { label: 'ADD - 增加', value: 'ADD' },
   { label: 'RMV - 删除', value: 'RMV' },
 ];
-
-// 需要确认的危险命令列表
-const DANGEROUS_COMMANDS = [
-  { pattern: /RST/i, name: '重启', description: '此操作将重启设备，设备会暂时断开连接' },
-  { pattern: /FACTORYRESET/i, name: '恢复默认配置', description: '此操作将恢复设备出厂设置，所有配置将被清除' },
-  { pattern: /CELLDEACTIVATE/i, name: '小区去激活', description: '此操作将去激活小区，可能影响网络服务' },
-  { pattern: /RFCTXOFF/i, name: '关闭小区射频', description: '此操作将关闭小区射频发射，会影响无线信号' },
-  { pattern: /COLDREBOOT/i, name: '冷重启', description: '此操作将执行设备冷重启，设备会完全断电重启' },
-];
-
-// 检查命令是否为危险命令
-function checkDangerousCommand(commandCode: string): { isDangerous: boolean; command?: typeof DANGEROUS_COMMANDS[0] } {
-  for (const cmd of DANGEROUS_COMMANDS) {
-    if (cmd.pattern.test(commandCode)) {
-      return { isDangerous: true, command: cmd };
-    }
-  }
-  return { isDangerous: false };
-}
 
 interface ParamPath {
   id: string;
@@ -64,13 +46,16 @@ export default function CommandInput({
   const [consoleInput, setConsoleInput] = useState('');
   const [activeTab, setActiveTab] = useState('control');
 
+  // 通过 API 检查危险命令
+  const { data: dangerousResult } = useDangerousCheck(selectedCommand?.commandCode ?? '');
+
   // 参数路径配置状态
   const [operationType, setOperationType] = useState<string>('LST');
   const [paramPaths, setParamPaths] = useState<ParamPath[]>([{ id: '1', path: '' }]);
 
   // 确认弹窗状态
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-  const [pendingCommand, setPendingCommand] = useState<typeof DANGEROUS_COMMANDS[0] | null>(null);
+  const [pendingDangerInfo, setPendingDangerInfo] = useState<{ name: string; desc: string } | null>(null);
 
   // 当选中命令变化时，自动填入命令代码
   useEffect(() => {
@@ -84,7 +69,7 @@ export default function CommandInput({
     onExecute();
     setConsoleInput('');
     setConfirmModalOpen(false);
-    setPendingCommand(null);
+    setPendingDangerInfo(null);
   }, [onExecute]);
 
   // 执行命令（带危险命令检查）
@@ -96,17 +81,16 @@ export default function CommandInput({
       return;
     }
 
-    // 检查是否为危险命令
-    const { isDangerous, command } = checkDangerousCommand(selectedCommand.commandCode);
-    if (isDangerous && command) {
-      setPendingCommand(command);
+    // 检查是否为危险命令（通过 API）
+    if (dangerousResult?.dangerous && dangerousResult.info) {
+      setPendingDangerInfo({ name: dangerousResult.info.Name, desc: dangerousResult.info.Desc });
       setConfirmModalOpen(true);
       return;
     }
 
     // 非危险命令直接执行
     doExecute();
-  }, [selectedDevices, selectedCommand, doExecute]);
+  }, [selectedDevices, selectedCommand, doExecute, dangerousResult]);
 
   // 确认执行危险命令
   const handleConfirmExecute = useCallback(() => {
@@ -116,7 +100,7 @@ export default function CommandInput({
   // 取消执行
   const handleCancelExecute = useCallback(() => {
     setConfirmModalOpen(false);
-    setPendingCommand(null);
+    setPendingDangerInfo(null);
   }, []);
 
   // 键盘快捷键
@@ -548,11 +532,11 @@ export default function CommandInput({
             }}
           >
             <Typography.Text strong style={{ fontSize: 14, color: token.colorWarningText }}>
-              {pendingCommand?.name}
+              {pendingDangerInfo?.name}
             </Typography.Text>
           </div>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            {pendingCommand?.description}
+            {pendingDangerInfo?.desc}
           </Typography.Text>
           <div style={{ marginTop: 16 }}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
