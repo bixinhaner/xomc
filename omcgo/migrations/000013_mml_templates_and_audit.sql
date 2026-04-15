@@ -24,6 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_mml_templates_product_types_gin ON mml_templates 
 CREATE INDEX IF NOT EXISTS idx_mml_templates_parameters_gin ON mml_templates USING GIN (parameters);
 
 -- Trigger for auto-updating updated_at
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -31,6 +32,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 DROP TRIGGER IF EXISTS trigger_mml_templates_updated_at ON mml_templates;
 CREATE TRIGGER trigger_mml_templates_updated_at

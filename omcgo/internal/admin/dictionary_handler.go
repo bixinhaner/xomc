@@ -226,5 +226,12 @@ func (h *DictionaryHandler) GetDictionaryDetailList(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"list":  result.Items,
+			"total": result.Total,
+		},
+		"msg": "查询成功",
+	})
 }
