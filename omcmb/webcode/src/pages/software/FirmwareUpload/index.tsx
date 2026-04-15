@@ -315,6 +315,8 @@ export default function FirmwareUpload() {
         .firmware-filter-wrapper [class*="_filterBarWrapper_"] {
           padding: 0 !important;
           margin-bottom: 0 !important;
+          border: none !important;
+          background: transparent !important;
         }
       `}</style>
       {/* 文件类型选择 */}
@@ -351,21 +353,19 @@ export default function FirmwareUpload() {
       </Card>
 
       {/* 文件列表 */}
-      <Card bordered={false}>
-        <DataTable<FirmwareFile>
-          tableId="firmware-list"
-          columns={columns}
-          dataSource={filteredData}
-          rowKey="id"
-          total={filteredData.length}
-          currentPage={1}
-          pageSize={20}
-          onPageChange={() => {}}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-          showRowNumber
-          rowNumberTitle="序号"
-        />
-      </Card>
+      <DataTable<FirmwareFile>
+        tableId="firmware-list"
+        columns={columns}
+        dataSource={filteredData}
+        rowKey="id"
+        total={filteredData.length}
+        currentPage={1}
+        pageSize={20}
+        onPageChange={() => {}}
+        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+        showRowNumber
+        rowNumberTitle="序号"
+      />
 
       {/* 导入/查看/修改文件抽屉 */}
       <Drawer

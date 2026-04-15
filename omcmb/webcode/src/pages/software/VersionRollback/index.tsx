@@ -729,6 +729,8 @@ export default function UpgradePlan() {
         .upgrade-plan-filter-wrapper [class*="_filterBarWrapper_"] {
           padding: 0 !important;
           margin-bottom: 0 !important;
+          border: none !important;
+          background: transparent !important;
         }
       `}</style>
 
@@ -760,37 +762,35 @@ export default function UpgradePlan() {
       </Card>
 
       {/* 列表 */}
-      <Card>
-        {activeTab === 'task' ? (
-          <DataTable<UpgradePlanRow>
-            tableId="upgrade-plan-list-task"
-            columns={taskColumns}
-            dataSource={filteredData}
-            rowKey="id"
-            total={filteredData.length}
-            currentPage={page}
-            pageSize={pageSize}
-            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
-            showRowNumber
-            rowNumberTitle="序号"
-          />
-        ) : (
-          <DataTable<UpgradePlanRow>
-            tableId="upgrade-plan-list-device"
-            columns={columns}
-            dataSource={filteredData}
-            rowKey="id"
-            total={filteredData.length}
-            currentPage={page}
-            pageSize={pageSize}
-            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
-            showRowNumber
-            rowNumberTitle="序号"
-          />
-        )}
-      </Card>
+      {activeTab === 'task' ? (
+        <DataTable<UpgradePlanRow>
+          tableId="upgrade-plan-list-task"
+          columns={taskColumns}
+          dataSource={filteredData}
+          rowKey="id"
+          total={filteredData.length}
+          currentPage={page}
+          pageSize={pageSize}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+          showRowNumber
+          rowNumberTitle="序号"
+        />
+      ) : (
+        <DataTable<UpgradePlanRow>
+          tableId="upgrade-plan-list-device"
+          columns={columns}
+          dataSource={filteredData}
+          rowKey="id"
+          total={filteredData.length}
+          currentPage={page}
+          pageSize={pageSize}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+          showRowNumber
+          rowNumberTitle="序号"
+        />
+      )}
 
       {/* 批量输入弹窗 */}
       <Modal

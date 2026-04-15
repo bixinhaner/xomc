@@ -690,6 +690,8 @@ export default function RestoreData() {
         .restore-data-filter-wrapper [class*="_filterBarWrapper_"] {
           padding: 0 !important;
           margin-bottom: 0 !important;
+          border: none !important;
+          background: transparent !important;
         }
         .restore-data-list-wrapper .ant-card-body {
           padding: 0 !important;

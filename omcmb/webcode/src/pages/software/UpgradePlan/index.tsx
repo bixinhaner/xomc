@@ -836,6 +836,8 @@ export default function UpgradePlan() {
         .upgrade-plan-filter-wrapper [class*="_filterBarWrapper_"] {
           padding: 0 !important;
           margin-bottom: 0 !important;
+          border: none !important;
+          background: transparent !important;
         }
       `}</style>
 
@@ -867,9 +869,8 @@ export default function UpgradePlan() {
       </Card>
 
       {/* 列表 */}
-      <Card bordered={false}>
-        {activeTab === 'task' ? (
-          <DataTable<UpgradePlanRow>
+      {activeTab === 'task' ? (
+        <DataTable<UpgradePlanRow>
             tableId="upgrade-plan-list-task"
             columns={taskColumns}
             dataSource={paginatedData}
@@ -897,7 +898,6 @@ export default function UpgradePlan() {
             rowNumberTitle="序号"
           />
         )}
-      </Card>
 
       {/* 批量输入弹窗 */}
       <Modal
