@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Space, Tag, App, Drawer, Form, Input, Select } from 'antd';
+import { Button, Space, Tag, App, Drawer, Form, Input, Select, Switch, message } from 'antd';
 import { ExportOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -7,209 +7,42 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import {
+  useAlarmLibraries,
+  useCreateAlarmLibrary,
+  useUpdateAlarmLibrary,
+  useDeleteAlarmLibrary,
+} from '@/hooks/api/useAlarms';
 
-// 告警库项类型定义
-interface AlarmLibrary {
-  id: number;
-  deviceTypeName: string;
-  alarmIdentifier: string;
-  alarmName: string;
-  serverityType: 'Critical' | 'Major' | 'Minor' | 'Warning';
-  eventType: EventType;
-  explanation: string;
-}
+// 告警源选项（对应后端 alarm_source）
+const ALARM_SOURCE_OPTIONS = ['ENB', 'GNB', 'CPE', 'eGW', 'RRU', 'BBU', 'DU', 'CU'];
 
-type EventType = '30000' | '30001' | '30002' | '30003' | '30004' | '30006';
+// 严重程度映射：后端 int 1-4 ↔ 前端显示
+const SEVERITY_NUM_TO_LABEL: Record<number, string> = {
+  1: 'Critical',
+  2: 'Major',
+  3: 'Minor',
+  4: 'Warning',
+};
 
-// 设备类型选项
-const DEVICE_TYPE_OPTIONS = ['eNB', 'gNB', 'CPE', 'eGW', 'RRU', 'BBU', 'DU', 'CU'];
+const SEVERITY_LABEL_TO_NUM: Record<string, number> = {
+  Critical: 1,
+  Major: 2,
+  Minor: 3,
+  Warning: 4,
+};
 
-// 严重程度选项
-const SEVERITY_OPTIONS: AlarmLibrary['serverityType'][] = ['Critical', 'Major', 'Minor', 'Warning'];
+// 事件类型映射
+const EVENT_TYPE_MAP: Record<string, string> = {
+  '30000': 'communication',
+  '30001': 'qualityOfService',
+  '30002': 'processingError',
+  '30003': 'device',
+  '30004': 'environment',
+  '30006': 'performance',
+};
 
-// Mock 数据
-let MOCK_LIBRARY: AlarmLibrary[] = [
-  {
-    id: 1,
-    deviceTypeName: 'eNB',
-    alarmIdentifier: 'ALM-0001',
-    alarmName: 'CPU占用率超阈值告警',
-    serverityType: 'Major',
-    eventType: '30003',
-    explanation: '当CPU占用率超过设定的阈值时产生此告警，可能导致系统性能下降。需要检查系统负载情况，必要时进行优化或扩容。',
-  },
-  {
-    id: 2,
-    deviceTypeName: 'gNB',
-    alarmIdentifier: 'ALM-0002',
-    alarmName: '设备断连告警',
-    serverityType: 'Critical',
-    eventType: '30000',
-    explanation: '设备与网管系统失去连接，可能是由于网络故障、设备断电或配置错误导致。需要立即检查设备状态和网络连接。',
-  },
-  {
-    id: 3,
-    deviceTypeName: 'CPE',
-    alarmIdentifier: 'ALM-0003',
-    alarmName: '温度过高告警',
-    serverityType: 'Major',
-    eventType: '30004',
-    explanation: '设备运行温度超过安全阈值，可能导致设备损坏或性能下降。需要检查机房散热条件和设备风扇状态。',
-  },
-  {
-    id: 4,
-    deviceTypeName: 'eNB',
-    alarmIdentifier: 'ALM-0004',
-    alarmName: '光模块接收功率低',
-    serverityType: 'Minor',
-    eventType: '30000',
-    explanation: '光模块接收光功率低于正常工作范围，可能是光纤损耗过大或光模块老化导致。建议检查光纤连接和光模块状态。',
-  },
-  {
-    id: 5,
-    deviceTypeName: 'eGW',
-    alarmIdentifier: 'ALM-0005',
-    alarmName: '磁盘空间不足',
-    serverityType: 'Warning',
-    eventType: '30006',
-    explanation: '磁盘空间使用率超过阈值，可能影响系统正常运行。建议清理日志文件或扩展存储容量。',
-  },
-  {
-    id: 6,
-    deviceTypeName: 'gNB',
-    alarmIdentifier: 'ALM-0006',
-    alarmName: '链路丢包率异常',
-    serverityType: 'Major',
-    eventType: '30001',
-    explanation: '链路丢包率超过正常范围，可能影响业务质量。需要检查网络链路质量和QoS配置。',
-  },
-  {
-    id: 7,
-    deviceTypeName: 'eNB',
-    alarmIdentifier: 'ALM-0007',
-    alarmName: '软件版本不匹配',
-    serverityType: 'Warning',
-    eventType: '30002',
-    explanation: '设备软件版本与预期版本不一致，可能导致功能异常。建议检查软件版本兼容性并进行升级或回退。',
-  },
-  {
-    id: 8,
-    deviceTypeName: 'eGW',
-    alarmIdentifier: 'ALM-0008',
-    alarmName: '内存使用率超阈值',
-    serverityType: 'Major',
-    eventType: '30006',
-    explanation: '内存使用率超过设定的阈值，可能导致系统性能下降或服务异常。需要检查内存占用情况并优化配置。',
-  },
-  {
-    id: 9,
-    deviceTypeName: 'RRU',
-    alarmIdentifier: 'ALM-0009',
-    alarmName: '射频单元发射功率异常',
-    serverityType: 'Critical',
-    eventType: '30003',
-    explanation: '射频单元发射功率超出正常范围，可能导致覆盖问题或干扰。需要立即检查射频单元状态和功率配置。',
-  },
-  {
-    id: 10,
-    deviceTypeName: 'BBU',
-    alarmIdentifier: 'ALM-0010',
-    alarmName: '时钟同步异常',
-    serverityType: 'Major',
-    eventType: '30000',
-    explanation: '基站时钟同步异常，可能影响切换性能和定位精度。需要检查时钟源配置和同步链路状态。',
-  },
-  {
-    id: 11,
-    deviceTypeName: 'eNB',
-    alarmIdentifier: 'ALM-0011',
-    alarmName: '电源模块故障',
-    serverityType: 'Critical',
-    eventType: '30003',
-    explanation: '电源模块发生故障，可能导致设备断电。需要立即更换电源模块或切换到备用电源。',
-  },
-  {
-    id: 12,
-    deviceTypeName: 'gNB',
-    alarmIdentifier: 'ALM-0012',
-    alarmName: 'S1接口链路中断',
-    serverityType: 'Major',
-    eventType: '30000',
-    explanation: 'S1接口链路中断，可能导致基站与核心网通信失败。需要检查传输链路和接口配置。',
-  },
-  {
-    id: 13,
-    deviceTypeName: 'CPE',
-    alarmIdentifier: 'ALM-0013',
-    alarmName: 'SIM卡状态异常',
-    serverityType: 'Warning',
-    eventType: '30003',
-    explanation: 'SIM卡状态异常，可能影响用户接入。需要检查SIM卡是否正常插入及卡状态。',
-  },
-  {
-    id: 14,
-    deviceTypeName: 'eNB',
-    alarmIdentifier: 'ALM-0014',
-    alarmName: '风扇故障',
-    serverityType: 'Minor',
-    eventType: '30004',
-    explanation: '设备风扇故障或转速异常，可能导致设备散热不良。建议检查风扇状态并及时更换。',
-  },
-  {
-    id: 15,
-    deviceTypeName: 'gNB',
-    alarmIdentifier: 'ALM-0015',
-    alarmName: 'GPS定位失效',
-    serverityType: 'Major',
-    eventType: '30003',
-    explanation: 'GPS模块无法获取卫星信号，可能影响时钟同步和定位功能。需要检查GPS天线安装和信号强度。',
-  },
-  {
-    id: 16,
-    deviceTypeName: 'eGW',
-    alarmIdentifier: 'ALM-0016',
-    alarmName: 'ARP表溢出',
-    serverityType: 'Warning',
-    eventType: '30006',
-    explanation: 'ARP表条目超过最大容量，可能导致网络通信异常。建议检查网络拓扑和ARP老化配置。',
-  },
-  {
-    id: 17,
-    deviceTypeName: 'RRU',
-    alarmIdentifier: 'ALM-0017',
-    alarmName: '驻波比异常',
-    serverityType: 'Critical',
-    eventType: '30003',
-    explanation: '天馈系统驻波比超过阈值，可能导致射频性能严重下降。需要检查天线和馈线连接。',
-  },
-  {
-    id: 18,
-    deviceTypeName: 'BBU',
-    alarmIdentifier: 'ALM-0018',
-    alarmName: 'CPRI链路误码率过高',
-    serverityType: 'Major',
-    eventType: '30000',
-    explanation: 'CPRI链路误码率超过阈值，可能影响基带与射频之间的数据传输。需要检查光纤连接质量。',
-  },
-  {
-    id: 19,
-    deviceTypeName: 'eNB',
-    alarmIdentifier: 'ALM-0019',
-    alarmName: 'PCI冲突告警',
-    serverityType: 'Warning',
-    eventType: '30001',
-    explanation: '检测到PCI冲突，可能导致小区间干扰。建议重新规划PCI分配方案。',
-  },
-  {
-    id: 20,
-    deviceTypeName: 'gNB',
-    alarmIdentifier: 'ALM-0020',
-    alarmName: 'X2接口握手失败',
-    serverityType: 'Minor',
-    eventType: '30000',
-    explanation: 'X2接口握手失败，可能影响基站间切换。需要检查X2接口配置和对端基站状态。',
-  },
-];
+const EVENT_TYPE_OPTIONS = Object.entries(EVENT_TYPE_MAP).map(([value, key]) => ({ value, labelKey: `alarm.eventType.${key}` }));
 
 // 严重程度配置
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
@@ -219,36 +52,39 @@ const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   Warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
 };
 
-// 事件类型映射
-const EVENT_TYPE_TYPE_MAP: Record<EventType, string> = {
-  '30000': 'communication',
-  '30001': 'qualityOfService',
-  '30002': 'processingError',
-  '30003': 'device',
-  '30004': 'environment',
-  '30006': 'performance',
-};
+type DrawerMode = 'add' | 'edit';
 
-// 表单初始值
-const INITIAL_FORM_VALUES = {
-  deviceTypeName: '',
-  alarmName: '',
-  serverityType: 'Major' as AlarmLibrary['serverityType'],
-  eventType: '30000' as EventType,
+interface LibraryFormValues {
+  alarmCode: string;
+  alarmSource: string;
+  probableCause: string;
+  severity: string;
+  eventType: string;
+  explanation?: string;
+  enabled?: boolean;
+}
+
+const INITIAL_FORM_VALUES: LibraryFormValues = {
+  alarmCode: '',
+  alarmSource: '',
+  probableCause: '',
+  severity: 'Major',
+  eventType: '30000',
   explanation: '',
+  enabled: true,
 };
 
 export default function AlarmSupportLibrary() {
   const t = useT();
-  const { message, modal } = App.useApp();
+  const { modal } = App.useApp();
   const [form] = Form.useForm();
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [exportLoading, setExportLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [dataVersion, setDataVersion] = useState(0);
+  const [drawerMode, setDrawerMode] = useState<DrawerMode>('add');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     Critical: t('alarm.severity.critical'),
@@ -265,12 +101,12 @@ export default function AlarmSupportLibrary() {
       placeholder: t('alarm.librarySearchPlaceholder'),
     },
     {
-      name: 'deviceTypeName',
+      name: 'alarmSource',
       label: t('alarm.deviceTypeName'),
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
-        ...DEVICE_TYPE_OPTIONS.map((item) => ({ label: item, value: item })),
+        ...ALARM_SOURCE_OPTIONS.map((item) => ({ label: item, value: item })),
       ],
     },
     {
@@ -279,10 +115,10 @@ export default function AlarmSupportLibrary() {
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
-        { label: t('alarm.severity.critical'), value: 'Critical' },
-        { label: t('alarm.severity.major'), value: 'Major' },
-        { label: t('alarm.severity.minor'), value: 'Minor' },
-        { label: t('alarm.severity.warning'), value: 'Warning' },
+        { label: t('alarm.severity.critical'), value: '1' },
+        { label: t('alarm.severity.major'), value: '2' },
+        { label: t('alarm.severity.minor'), value: '3' },
+        { label: t('alarm.severity.warning'), value: '4' },
       ],
     },
     {
@@ -291,43 +127,31 @@ export default function AlarmSupportLibrary() {
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
-        { label: t('alarm.eventType.communication'), value: '30000' },
-        { label: t('alarm.eventType.qualityOfService'), value: '30001' },
-        { label: t('alarm.eventType.processingError'), value: '30002' },
-        { label: t('alarm.eventType.device'), value: '30003' },
-        { label: t('alarm.eventType.environment'), value: '30004' },
-        { label: t('alarm.eventType.performance'), value: '30006' },
+        ...EVENT_TYPE_OPTIONS.map((item) => ({ label: t(item.labelKey), value: item.value })),
       ],
     },
   ], [t]);
 
-  // 过滤数据 - 告警标识精确查询，可能原因、告警解释模糊查询
-  const filteredData = useMemo(() => {
-    const _ = dataVersion;
-    return MOCK_LIBRARY.filter((entry) => {
-      if (filterParams.keyword) {
-        const keyword = String(filterParams.keyword).toLowerCase();
-        // 告警标识精确匹配，可能原因和告警解释模糊匹配
-        if (
-          entry.alarmIdentifier.toLowerCase() !== keyword &&
-          !entry.alarmName.toLowerCase().includes(keyword) &&
-          !entry.explanation.toLowerCase().includes(keyword)
-        ) {
-          return false;
-        }
-      }
-      if (filterParams.deviceTypeName && entry.deviceTypeName !== filterParams.deviceTypeName) {
-        return false;
-      }
-      if (filterParams.severity && entry.serverityType !== filterParams.severity) {
-        return false;
-      }
-      if (filterParams.eventType && entry.eventType !== filterParams.eventType) {
-        return false;
-      }
-      return true;
-    });
-  }, [filterParams, dataVersion]);
+  // 构建查询参数
+  const queryParams = useMemo(() => {
+    const params: Record<string, unknown> = {
+      page: currentPage,
+      pageSize,
+    };
+    if (filterParams.keyword) params.keyword = filterParams.keyword;
+    if (filterParams.alarmSource) params.alarmSource = filterParams.alarmSource;
+    if (filterParams.severity) params.severity = String(filterParams.severity);
+    if (filterParams.eventType) params.eventType = String(filterParams.eventType);
+    return params;
+  }, [filterParams, currentPage, pageSize]);
+
+  const { data, isLoading } = useAlarmLibraries(queryParams);
+  const createMutation = useCreateAlarmLibrary();
+  const updateMutation = useUpdateAlarmLibrary();
+  const deleteMutation = useDeleteAlarmLibrary();
+
+  const libraries = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams(values);
@@ -353,58 +177,78 @@ export default function AlarmSupportLibrary() {
 
   const handleAdd = useCallback(() => {
     setEditingId(null);
+    setDrawerMode('add');
     form.resetFields();
     form.setFieldsValue(INITIAL_FORM_VALUES);
     setDrawerOpen(true);
   }, [form]);
 
-  const handleEdit = useCallback((record: AlarmLibrary) => {
-    setEditingId(record.id);
+  const handleEdit = useCallback((record: Record<string, unknown>) => {
+    setEditingId(record.id as string);
+    setDrawerMode('edit');
     form.setFieldsValue({
-      deviceTypeName: record.deviceTypeName,
-      alarmName: record.alarmName,
-      serverityType: record.serverityType,
+      alarmCode: record.alarmCode,
+      alarmSource: record.alarmSource,
+      probableCause: record.probableCause,
+      severity: SEVERITY_NUM_TO_LABEL[record.severity as number] || 'Major',
       eventType: record.eventType,
-      explanation: record.explanation,
+      explanation: record.explanation || '',
+      enabled: record.enabled ?? true,
     });
     setDrawerOpen(true);
   }, [form]);
 
-  const handleDelete = useCallback((id: number) => {
-    MOCK_LIBRARY = MOCK_LIBRARY.filter((item) => item.id !== id);
-    setDataVersion((v) => v + 1);
-    message.success(t('common.deleteSuccess'));
-  }, [t, message]);
+  const handleDelete = useCallback((id: string) => {
+    modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('alarm.library.deleteConfirm'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await deleteMutation.mutateAsync(id);
+          message.success(t('common.deleteSuccess'));
+        } catch {
+          message.error(t('common.deleteFailed'));
+        }
+      },
+    });
+  }, [deleteMutation, modal, t, message]);
 
   const handleFormSubmit = useCallback(async () => {
     try {
       const values = await form.validateFields();
-      if (editingId) {
-        const index = MOCK_LIBRARY.findIndex((item) => item.id === editingId);
-        if (index !== -1) {
-          MOCK_LIBRARY[index] = {
-            ...MOCK_LIBRARY[index],
-            ...values,
-          };
-        }
-        message.success(t('common.updateSuccess'));
-      } else {
-        const maxId = Math.max(...MOCK_LIBRARY.map((item) => item.id), 0);
-        const newId = maxId + 1;
-        const newAlarmIdentifier = `ALM-${String(newId).padStart(4, '0')}`;
-        MOCK_LIBRARY.push({
-          id: newId,
-          alarmIdentifier: newAlarmIdentifier,
-          ...values,
-        });
+      const severityNum = SEVERITY_LABEL_TO_NUM[values.severity] ?? 2;
+
+      if (drawerMode === 'add') {
+        await createMutation.mutateAsync({
+          alarmCode: values.alarmCode,
+          alarmSource: values.alarmSource,
+          eventType: values.eventType,
+          severity: severityNum,
+          probableCause: values.probableCause,
+          explanation: values.explanation || undefined,
+          enabled: values.enabled ?? true,
+        } as Parameters<typeof createMutation.mutateAsync>[0]);
         message.success(t('common.addSuccess'));
+      } else if (editingId) {
+        await updateMutation.mutateAsync({
+          id: editingId,
+          payload: {
+            severity: severityNum,
+            enabled: values.enabled ?? true,
+            probableCause: values.probableCause,
+            explanation: values.explanation || undefined,
+          },
+        });
+        message.success(t('common.updateSuccess'));
       }
       setDrawerOpen(false);
-      setDataVersion((v) => v + 1);
     } catch {
       // 表单验证失败
     }
-  }, [editingId, form, t, message]);
+  }, [drawerMode, editingId, form, createMutation, updateMutation, t, message]);
 
   const handleDrawerClose = useCallback(() => {
     setDrawerOpen(false);
@@ -413,12 +257,12 @@ export default function AlarmSupportLibrary() {
   }, [form]);
 
   const columns = useMemo(
-    (): DataTableColumn<AlarmLibrary>[] => [
+    (): DataTableColumn<Record<string, unknown>>[] => [
       {
         key: 'action',
         title: t('table.operation'),
         width: 120,
-        render: (_: unknown, record: AlarmLibrary) => (
+        render: (_: unknown, record: Record<string, unknown>) => (
           <Space size="small">
             <Button
               type="link"
@@ -435,16 +279,7 @@ export default function AlarmSupportLibrary() {
               danger
               icon={<DeleteOutlined />}
               style={{ padding: 0 }}
-              onClick={() => {
-                modal.confirm({
-                  title: t('common.confirmDelete'),
-                  content: t('alarm.library.deleteConfirm'),
-                  okText: t('common.confirm'),
-                  cancelText: t('common.cancel'),
-                  okType: 'danger',
-                  onOk: () => handleDelete(record.id),
-                });
-              }}
+              onClick={() => handleDelete(record.id as string)}
             >
               {t('common.delete')}
             </Button>
@@ -452,35 +287,47 @@ export default function AlarmSupportLibrary() {
         ),
       },
       {
-        key: 'deviceTypeName',
+        key: 'enabled',
+        title: t('alarm.status'),
+        dataIndex: 'enabled',
+        width: 80,
+        render: (value: boolean) => (
+          <Tag color={value ? 'green' : 'default'}>
+            {value ? t('common.enabled') : t('common.disabled')}
+          </Tag>
+        ),
+      },
+      {
+        key: 'alarmSource',
         title: t('alarm.deviceTypeName'),
-        dataIndex: 'deviceTypeName',
+        dataIndex: 'alarmSource',
         width: 110,
       },
       {
-        key: 'alarmIdentifier',
+        key: 'alarmCode',
         title: t('alarm.alarmIdentifier'),
-        dataIndex: 'alarmIdentifier',
+        dataIndex: 'alarmCode',
         width: 130,
         mono: true,
       },
       {
-        key: 'alarmName',
+        key: 'probableCause',
         title: t('alarm.possibleCause'),
-        dataIndex: 'alarmName',
+        dataIndex: 'probableCause',
         width: 280,
         ellipsis: true,
       },
       {
-        key: 'serverityType',
+        key: 'severity',
         title: t('alarm.severity'),
-        dataIndex: 'serverityType',
+        dataIndex: 'severity',
         width: 100,
-        render: (value) => {
-          const config = SEVERITY_CONFIG[value as string];
+        render: (value: number) => {
+          const label = SEVERITY_NUM_TO_LABEL[value] || 'Warning';
+          const config = SEVERITY_CONFIG[label];
           return (
             <Tag style={{ color: config?.color, backgroundColor: config?.bgColor, border: 'none' }}>
-              {SEVERITY_LABEL[value as string] || value}
+              {SEVERITY_LABEL[label] || label}
             </Tag>
           );
         },
@@ -490,7 +337,10 @@ export default function AlarmSupportLibrary() {
         title: t('alarm.eventType'),
         dataIndex: 'eventType',
         width: 130,
-        render: (value) => t(`alarm.eventType.${EVENT_TYPE_TYPE_MAP[value as EventType]}`),
+        render: (value: string) => {
+          const typeKey = EVENT_TYPE_MAP[value];
+          return typeKey ? t(`alarm.eventType.${typeKey}`) : value;
+        },
       },
       {
         key: 'explanation',
@@ -500,7 +350,7 @@ export default function AlarmSupportLibrary() {
         ellipsis: true,
       },
     ],
-    [t, SEVERITY_LABEL, handleEdit, handleDelete, modal]
+    [t, SEVERITY_LABEL, handleEdit, handleDelete]
   );
 
   return (
@@ -533,13 +383,13 @@ export default function AlarmSupportLibrary() {
         collapsedRows={1}
       />
 
-      <DataTable<AlarmLibrary>
+      <DataTable<Record<string, unknown>>
         tableId="alarm-library-table"
         columns={columns}
-        dataSource={filteredData}
-        loading={false}
+        dataSource={libraries}
+        loading={isLoading}
         rowKey="id"
-        total={filteredData.length}
+        total={total}
         pageSize={pageSize}
         currentPage={currentPage}
         onPageChange={(page, size) => {
@@ -553,14 +403,14 @@ export default function AlarmSupportLibrary() {
       />
 
       <Drawer
-        title={editingId ? t('alarm.library.edit') : t('alarm.library.add')}
+        title={drawerMode === 'edit' ? t('alarm.library.edit') : t('alarm.library.add')}
         open={drawerOpen}
         onClose={handleDrawerClose}
         width={480}
         footer={
           <Space style={{ float: 'right' }}>
             <Button onClick={handleDrawerClose}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={handleFormSubmit}>
+            <Button type="primary" onClick={handleFormSubmit} loading={createMutation.isPending || updateMutation.isPending}>
               {t('common.confirm')}
             </Button>
           </Space>
@@ -572,32 +422,40 @@ export default function AlarmSupportLibrary() {
           initialValues={INITIAL_FORM_VALUES}
         >
           <Form.Item
-            name="deviceTypeName"
+            name="alarmCode"
+            label={t('alarm.alarmIdentifier')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Input placeholder={t('common.pleaseInput')} disabled={drawerMode === 'edit'} />
+          </Form.Item>
+          <Form.Item
+            name="alarmSource"
             label={t('alarm.library.alarmSource')}
             rules={[{ required: true, message: t('common.required') }]}
           >
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={DEVICE_TYPE_OPTIONS.map((item) => ({ label: item, value: item }))}
+              disabled={drawerMode === 'edit'}
+              options={ALARM_SOURCE_OPTIONS.map((item) => ({ label: item, value: item }))}
             />
           </Form.Item>
           <Form.Item
-            name="alarmName"
+            name="probableCause"
             label={t('alarm.possibleCause')}
             rules={[{ required: true, message: t('common.required') }]}
           >
             <Input.TextArea rows={3} placeholder={t('common.pleaseInput')} />
           </Form.Item>
           <Form.Item
-            name="serverityType"
+            name="severity"
             label={t('alarm.severity')}
             rules={[{ required: true, message: t('common.required') }]}
           >
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={SEVERITY_OPTIONS.map((item) => ({
-                label: SEVERITY_LABEL[item],
-                value: item,
+              options={Object.entries(SEVERITY_LABEL).map(([value, label]) => ({
+                label,
+                value,
               }))}
             />
           </Form.Item>
@@ -608,9 +466,10 @@ export default function AlarmSupportLibrary() {
           >
             <Select
               placeholder={t('common.pleaseSelect')}
-              options={Object.entries(EVENT_TYPE_TYPE_MAP).map(([value, key]) => ({
-                label: t(`alarm.eventType.${key}`),
-                value,
+              disabled={drawerMode === 'edit'}
+              options={EVENT_TYPE_OPTIONS.map((item) => ({
+                label: t(item.labelKey),
+                value: item.value,
               }))}
             />
           </Form.Item>
@@ -619,6 +478,13 @@ export default function AlarmSupportLibrary() {
             label={t('alarm.explanation')}
           >
             <Input.TextArea rows={4} placeholder={t('common.pleaseInput')} />
+          </Form.Item>
+          <Form.Item
+            name="enabled"
+            label={t('alarm.status')}
+            valuePropName="checked"
+          >
+            <Switch />
           </Form.Item>
         </Form>
       </Drawer>

@@ -23,10 +23,12 @@ import dayjs, { Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;
 
-// 执行动作配置
+// 执行动作配置 (匹配后端 action 值)
 const RULE_TYPE_OPTIONS = [
-  { value: '1', label: '不入库不显示' },
-  { value: '3', label: '自动确认' },
+  { value: 'default', label: '默认处理' },
+  { value: 'ignore', label: '不入库不显示' },
+  { value: 'auto_acknowledge', label: '自动确认' },
+  { value: 'auto_clear', label: '自动清除' },
 ];
 
 // 事件类型配置
@@ -476,7 +478,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
         form={form}
         layout="vertical"
         disabled={isViewMode}
-        initialValues={{ status: true, ruleType: '1' }}
+        initialValues={{ status: true, ruleType: 'default' }}
       >
         <Form.Item
           name="ruleName"

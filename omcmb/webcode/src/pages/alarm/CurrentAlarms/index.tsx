@@ -14,7 +14,7 @@ import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms } from '@/hooks/api/useAlarms';
+import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms, useAlarmCount, useMarkAlarmRead, useUnacknowledgeAlarms } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
@@ -205,13 +205,22 @@ export default function CurrentAlarms() {
   ], [t]);
 
   const queryParams = useMemo(
-    () => ({ ...filterParams, page: currentPage, pageSize }),
+    () => {
+      const clean: Record<string, unknown> = { page: currentPage, pageSize };
+      for (const [k, v] of Object.entries(filterParams)) {
+        if (v !== undefined && v !== '') clean[k] = v;
+      }
+      return clean;
+    },
     [filterParams, currentPage, pageSize]
   );
 
   const { data, isLoading, refetch } = useCurrentAlarms(queryParams);
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
+  const markAlarmRead = useMarkAlarmRead();
+  const unacknowledgeAlarms = useUnacknowledgeAlarms();
+  const { data: alarmCount } = useAlarmCount();
 
   const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
@@ -237,30 +246,26 @@ export default function CurrentAlarms() {
     [rawAlarms]
   );
 
-  // 实时统计（从查询结果计算）
-  const realStats = useMemo(() => {
-    const stats = { total, critical: 0, major: 0, minor: 0, warning: 0, unacked: 0 };
-    rawAlarms.forEach((alarm) => {
-      if (alarm.severity === 'critical') stats.critical++;
-      else if (alarm.severity === 'major') stats.major++;
-      else if (alarm.severity === 'minor') stats.minor++;
-      else if (alarm.severity === 'warning') stats.warning++;
-      if (alarm.dealState === '0') stats.unacked++;
-    });
-    return stats;
-  }, [rawAlarms, total]);
+  // 统计数据来自后端 API
+  const realStats = useMemo(() => ({
+    total: alarmCount?.total_active ?? total,
+    critical: alarmCount?.critical ?? 0,
+    major: alarmCount?.major ?? 0,
+    minor: alarmCount?.minor ?? 0,
+    warning: alarmCount?.warning ?? 0,
+    unacked: alarmCount?.unacknowledged ?? 0,
+    unread: alarmCount?.unread ?? 0,
+  }), [alarmCount, total]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
-    const keyword = values.keyword as string;
     setFilterParams({
       severity: values.severity as AlarmFilter['severity'],
       eventType: values.eventType as AlarmFilter['eventType'],
       neType: values.neType as string,
       unread: values.unread as '0' | '1',
       dealState: values.dealState as AlarmFilter['dealState'],
-      alarmIdentifier: keyword,
-      alarmName: keyword,
-      equipInfo: keyword,
+      keyword: values.keyword as string,
+      timeRange: values.timeRange as [string, string] | undefined,
     });
     setCurrentPage(1);
     setActiveQuickFilter('all');
@@ -327,8 +332,8 @@ export default function CurrentAlarms() {
         okText: t('common.confirm'),
         onOk: async () => {
           try {
+            await unacknowledgeAlarms.mutateAsync(ids);
             setSelectedRowKeys([]);
-            refetch();
             message.success(t('common.unackSuccess'));
           } catch {
             message.error(t('common.unackFailed'));
@@ -336,7 +341,7 @@ export default function CurrentAlarms() {
         },
       });
     },
-    [refetch, t, message, modal]
+    [unacknowledgeAlarms, t, message, modal]
   );
 
   const handleClear = useCallback(
@@ -367,12 +372,16 @@ export default function CurrentAlarms() {
 
 
   const handleMarkRead = useCallback(
-    () => {
-      setSelectedRowKeys([]);
-      refetch();
-      message.success(t('common.markReadSuccess'));
+    async () => {
+      try {
+        await Promise.all(selectedRowKeys.map((id) => markAlarmRead.mutateAsync(id as string)));
+        setSelectedRowKeys([]);
+        message.success(t('common.markReadSuccess'));
+      } catch {
+        message.error(t('common.markReadFailed'));
+      }
     },
-    [refetch, t, message]
+    [selectedRowKeys, markAlarmRead, t, message]
   );
 
   // 导出告警
@@ -527,6 +536,13 @@ export default function CurrentAlarms() {
         ellipsis: true,
       },
       {
+        key: 'alarmContent',
+        title: t('alarm.content'),
+        dataIndex: 'alarmContent',
+        width: 200,
+        ellipsis: true,
+      },
+      {
         key: 'alarmCount',
         title: t('alarm.alarmCount'),
         dataIndex: 'alarmCount',
@@ -668,7 +684,7 @@ export default function CurrentAlarms() {
           />
           <StatItem
             label="未读"
-            value={rawAlarms.filter(a => a.unread === '1').length}
+            value={realStats.unread}
             color="#722ED1"
             active={activeQuickFilter === 'unread'}
             onClick={() => handleQuickFilter('unread')}

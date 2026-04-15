@@ -46,6 +46,13 @@ export function useAlarmCount() {
   });
 }
 
+export function useHistoryAlarmCount() {
+  return useQuery({
+    queryKey: ['alarms', 'history-count'],
+    queryFn: () => api.getHistoryAlarmCount(),
+  });
+}
+
 export function useAlarmRules(params: PageRequest) {
   return useQuery({
     queryKey: ['alarms', 'rules', params],
@@ -68,6 +75,47 @@ export function useClearAlarms() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (ids: string[]) => api.clearAlarms(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    },
+  });
+}
+
+export function useUnacknowledgeAlarms() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.unacknowledgeAlarms(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    },
+  });
+}
+
+export function useAcknowledgeHistoryAlarms() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, note }: { ids: string[]; note?: string }) =>
+      api.acknowledgeHistoryAlarms(ids, note),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    },
+  });
+}
+
+export function useUnacknowledgeHistoryAlarms() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.unacknowledgeHistoryAlarms(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    },
+  });
+}
+
+export function useDeleteHistoryAlarms() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.deleteHistoryAlarms(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['alarms'] });
     },
@@ -102,6 +150,67 @@ export function useDeleteAlarmRules() {
     mutationFn: (ids: string[]) => api.deleteRules(ids),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['alarms', 'rules'] });
+    },
+  });
+}
+
+export function useMarkAlarmRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.markAlarmRead(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    },
+  });
+}
+
+export function useToggleAlarmRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.toggleRule(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms', 'rules'] });
+    },
+  });
+}
+
+// -- Alarm libraries --------------------------------------------------------
+
+export function useAlarmLibraries(params: Record<string, unknown> & { page: number; pageSize: number }) {
+  return useQuery({
+    queryKey: ['alarms', 'libraries', params],
+    queryFn: () => api.getAlarmLibraries(params),
+  });
+}
+
+export function useCreateAlarmLibrary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Parameters<typeof api.createAlarmLibrary>[0]) =>
+      api.createAlarmLibrary(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms', 'libraries'] });
+    },
+  });
+}
+
+export function useUpdateAlarmLibrary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof api.updateAlarmLibrary>[1] }) =>
+      api.updateAlarmLibrary(id, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms', 'libraries'] });
+    },
+  });
+}
+
+export function useDeleteAlarmLibrary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteAlarmLibrary(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms', 'libraries'] });
     },
   });
 }

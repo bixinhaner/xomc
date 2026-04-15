@@ -11,7 +11,7 @@ import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useHistoricalAlarms, useAcknowledgeAlarms } from '@/hooks/api/useAlarms';
+import { useHistoricalAlarms, useAcknowledgeHistoryAlarms, useUnacknowledgeHistoryAlarms, useDeleteHistoryAlarms, useHistoryAlarmCount } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
@@ -165,12 +165,21 @@ export default function HistoricalAlarms() {
   ], [t]);
 
   const queryParams = useMemo(
-    () => ({ ...filterParams, page: currentPage, pageSize }),
+    () => {
+      const clean: Record<string, unknown> = { page: currentPage, pageSize };
+      for (const [k, v] of Object.entries(filterParams)) {
+        if (v !== undefined && v !== '') clean[k] = v;
+      }
+      return clean;
+    },
     [filterParams, currentPage, pageSize]
   );
 
   const { data, isLoading, refetch } = useHistoricalAlarms(queryParams);
-  const acknowledgeAlarms = useAcknowledgeAlarms();
+  const acknowledgeHistoryAlarms = useAcknowledgeHistoryAlarms();
+  const unacknowledgeHistoryAlarms = useUnacknowledgeHistoryAlarms();
+  const deleteHistoryAlarms = useDeleteHistoryAlarms();
+  const { data: alarmCount } = useHistoryAlarmCount();
 
   const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
@@ -185,31 +194,23 @@ export default function HistoricalAlarms() {
     [rawAlarms]
   );
 
-  // 实时统计（从查询结果计算）
-  const realStats = useMemo(() => {
-    const stats = { total, critical: 0, major: 0, minor: 0, warning: 0, cleared: 0, confirmed: 0 };
-    rawAlarms.forEach((alarm) => {
-      if (alarm.severity === 'critical') stats.critical++;
-      else if (alarm.severity === 'major') stats.major++;
-      else if (alarm.severity === 'minor') stats.minor++;
-      else if (alarm.severity === 'warning') stats.warning++;
-      if (alarm.dealState === '2' || alarm.dealState === '3') stats.cleared++;
-      if (alarm.dealState === '1' || alarm.dealState === '3') stats.confirmed++;
-    });
-    return stats;
-  }, [rawAlarms, total]);
+  // 统计数据来自后端 API
+  const realStats = useMemo(() => ({
+    total: alarmCount?.total_active ?? total,
+    critical: alarmCount?.critical ?? 0,
+    major: alarmCount?.major ?? 0,
+    minor: alarmCount?.minor ?? 0,
+    warning: alarmCount?.warning ?? 0,
+  }), [alarmCount, total]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
-    const keyword = values.keyword as string;
     setFilterParams({
       severity: values.severity as AlarmFilter['severity'],
       eventType: values.eventType as AlarmFilter['eventType'],
       neType: values.neType as string,
       dealState: values.dealState as AlarmFilter['dealState'],
-      // 同一个关键字用于告警标识（精确）、可能原因（模糊）、网元定位（模糊）
-      alarmIdentifier: keyword,
-      alarmName: keyword,
-      equipInfo: keyword,
+      keyword: values.keyword as string,
+      timeRange: values.timeRange as [string, string] | undefined,
     });
     setCurrentPage(1);
   }, []);
@@ -263,10 +264,9 @@ export default function HistoricalAlarms() {
     async (note: string) => {
       setAckLoading(true);
       try {
-        await acknowledgeAlarms.mutateAsync({ ids: ackTargetIds, note });
+        await acknowledgeHistoryAlarms.mutateAsync({ ids: ackTargetIds, note });
         setSelectedRowKeys([]);
         setAckModalOpen(false);
-        refetch();
         message.success(t('common.ackSuccess'));
       } catch {
         message.error(t('common.ackFailed'));
@@ -274,7 +274,7 @@ export default function HistoricalAlarms() {
         setAckLoading(false);
       }
     },
-    [acknowledgeAlarms, ackTargetIds, refetch, t, message]
+    [acknowledgeHistoryAlarms, ackTargetIds, t, message]
   );
 
   const handleUnacknowledge = useCallback(
@@ -285,9 +285,8 @@ export default function HistoricalAlarms() {
         okText: t('common.confirm'),
         onOk: async () => {
           try {
-            // TODO: 调用反确认 API
+            await unacknowledgeHistoryAlarms.mutateAsync(ids);
             setSelectedRowKeys([]);
-            refetch();
             message.success(t('common.unackSuccess'));
           } catch {
             message.error(t('common.unackFailed'));
@@ -295,7 +294,7 @@ export default function HistoricalAlarms() {
         },
       });
     },
-    [refetch, t, modal, message]
+    [unacknowledgeHistoryAlarms, t, message, modal]
   );
 
   // 删除告警
@@ -309,9 +308,8 @@ export default function HistoricalAlarms() {
         icon: <DeleteOutlined />,
         onOk: async () => {
           try {
-            // TODO: 调用删除告警 API
+            await deleteHistoryAlarms.mutateAsync(ids);
             setSelectedRowKeys([]);
-            refetch();
             message.success(t('common.deleteSuccess'));
           } catch {
             message.error(t('common.deleteFailed'));
@@ -319,7 +317,7 @@ export default function HistoricalAlarms() {
         },
       });
     },
-    [refetch, t, modal, message]
+    [deleteHistoryAlarms, t, message, modal]
   );
 
   // 导出告警
@@ -467,10 +465,24 @@ export default function HistoricalAlarms() {
         render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
       },
       {
+        key: 'clearTime',
+        title: t('alarm.clearTime'),
+        dataIndex: 'clearTime',
+        width: 150,
+        render: (v) => v ? new Date(String(v)).toLocaleString('zh-CN') : '-',
+      },
+      {
         key: 'specificProblem',
         title: t('alarm.specificProblem'),
         dataIndex: 'specificProblem',
         width: 150,
+        ellipsis: true,
+      },
+      {
+        key: 'alarmContent',
+        title: t('alarm.content'),
+        dataIndex: 'alarmContent',
+        width: 200,
         ellipsis: true,
       },
       {
@@ -570,20 +582,6 @@ export default function HistoricalAlarms() {
             color="#42A5F5"
             active={activeQuickFilter === 'warning'}
             onClick={() => handleQuickFilter('warning')}
-          />
-          <StatItem
-            label="已清除"
-            value={realStats.cleared}
-            color="#67D972"
-            active={activeQuickFilter === 'cleared'}
-            onClick={() => handleQuickFilter('cleared')}
-          />
-          <StatItem
-            label="已确认"
-            value={realStats.confirmed}
-            color="#67D972"
-            active={activeQuickFilter === 'confirmed'}
-            onClick={() => handleQuickFilter('confirmed')}
           />
         </div>
       </Card>

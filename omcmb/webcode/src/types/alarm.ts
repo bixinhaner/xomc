@@ -99,6 +99,9 @@ export interface AlarmFilter {
 }
 
 export interface AlarmCount {
+  total_active: number;
+  unacknowledged: number;
+  unread: number;
   critical: number;
   major: number;
   minor: number;

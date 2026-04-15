@@ -183,6 +183,21 @@ export const alarmService = {
     );
   },
 
+  async unacknowledgeAlarms(ids: string[]): Promise<void> {
+    await delay(200, 400);
+    activeAlarms = activeAlarms.map((a) =>
+      ids.includes(a.id)
+        ? {
+            ...a,
+            ackStatus: 'unacknowledged' as const,
+            ackUser: undefined,
+            ackTime: undefined,
+            ackNote: undefined,
+          }
+        : a
+    );
+  },
+
   async clearAlarms(ids: string[]): Promise<void> {
     await delay(200, 400);
     const now = new Date().toISOString();
@@ -196,6 +211,30 @@ export const alarmService = {
     }));
     activeAlarms = activeAlarms.filter((a) => !ids.includes(a.id));
     historicalAlarms = [...cleared, ...historicalAlarms];
+  },
+
+  async acknowledgeHistoryAlarms(ids: string[], note?: string): Promise<void> {
+    await delay(200, 400);
+    const now = new Date().toISOString();
+    historicalAlarms = historicalAlarms.map((a) =>
+      ids.includes(a.id)
+        ? { ...a, ackStatus: 'acknowledged' as const, ackUser: 'admin', ackTime: now, ackNote: note ?? '已确认' }
+        : a
+    );
+  },
+
+  async unacknowledgeHistoryAlarms(ids: string[]): Promise<void> {
+    await delay(200, 400);
+    historicalAlarms = historicalAlarms.map((a) =>
+      ids.includes(a.id)
+        ? { ...a, ackStatus: 'unacknowledged' as const, ackUser: undefined, ackTime: undefined, ackNote: undefined }
+        : a
+    );
+  },
+
+  async deleteHistoryAlarms(ids: string[]): Promise<void> {
+    await delay(200, 400);
+    historicalAlarms = historicalAlarms.filter((a) => !ids.includes(a.id));
   },
 
   async getAlarmCount(): Promise<{ critical: number; major: number; minor: number; warning: number }> {
@@ -247,5 +286,43 @@ export const alarmService = {
   async deleteRules(ids: string[]): Promise<void> {
     await delay(150, 300);
     alarmRules = alarmRules.filter((r) => !ids.includes(r.id));
+  },
+
+  async toggleRule(id: string): Promise<AlarmRule> {
+    await delay(150, 300);
+    const index = alarmRules.findIndex((r) => r.id === id);
+    if (index === -1) throw new Error('Rule not found');
+    alarmRules[index] = { ...alarmRules[index], enabled: !alarmRules[index].enabled, updateTime: new Date().toISOString() };
+    return alarmRules[index];
+  },
+
+  async markAlarmRead(_id: string): Promise<void> {
+    await delay(50, 100);
+  },
+
+  // -- Alarm libraries (mock) ------------------------------------------------
+
+  async getAlarmLibraries(params: Record<string, unknown> & { page: number; pageSize: number }) {
+    await delay(100, 200);
+    const mockItems = [
+      { id: 'lib-001', alarmCode: 'ALM-0001', alarmSource: 'ENB', eventType: '30003', severity: 2, enabled: true, probableCause: 'CPU占用率超阈值', explanation: '可能导致系统性能下降', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+      { id: 'lib-002', alarmCode: 'ALM-0002', alarmSource: 'GNB', eventType: '30000', severity: 1, enabled: true, probableCause: '设备断连', explanation: '设备与网管系统失去连接', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+      { id: 'lib-003', alarmCode: 'ALM-0003', alarmSource: 'CPE', eventType: '30004', severity: 2, enabled: true, probableCause: '温度过高', explanation: '设备运行温度超过安全阈值', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+    ];
+    return { items: mockItems, total: mockItems.length, page: params.page, pageSize: params.pageSize };
+  },
+
+  async createAlarmLibrary(payload: Record<string, unknown>) {
+    await delay(200, 400);
+    return { id: generateId('lib'), ...payload, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  },
+
+  async updateAlarmLibrary(id: string, payload: Record<string, unknown>) {
+    await delay(150, 300);
+    return { id, ...payload, updatedAt: new Date().toISOString() };
+  },
+
+  async deleteAlarmLibrary(_id: string): Promise<void> {
+    await delay(150, 300);
   },
 };

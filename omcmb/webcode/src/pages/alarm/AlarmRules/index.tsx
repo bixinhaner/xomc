@@ -11,19 +11,19 @@ import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule } from '@/hooks/api/useAlarms';
+import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule, useToggleAlarmRule } from '@/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
-import type { AlarmRule } from '@/types/alarm';
+import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@/types/alarm';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
 
 const { Text } = Typography;
 
-// 执行动作配置
+// 执行动作配置 (后端 action 值)
 const RULE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  '0': { label: 'alarm.ruleType.forbidReport', color: 'red' },
-  '1': { label: 'alarm.ruleType.noStoreNoShow', color: 'orange' },
-  '2': { label: 'alarm.ruleType.storeNoShow', color: 'gold' },
-  '3': { label: 'alarm.ruleType.autoConfirm', color: 'green' },
+  default: { label: 'alarm.ruleType.default', color: 'blue' },
+  ignore: { label: 'alarm.ruleType.forbidReport', color: 'red' },
+  auto_acknowledge: { label: 'alarm.ruleType.autoConfirm', color: 'green' },
+  auto_clear: { label: 'alarm.ruleType.autoClear', color: 'orange' },
 };
 
 // 告警源配置
@@ -65,6 +65,7 @@ export default function AlarmRules() {
   const { data, isLoading, refetch } = useAlarmRules(queryParams);
   const deleteRules = useDeleteAlarmRules();
   const updateRule = useUpdateAlarmRule();
+  const toggleRule = useToggleAlarmRule();
   const createRule = useCreateAlarmRule();
 
   const rules: AlarmRule[] = data?.items ?? [];
@@ -75,7 +76,12 @@ export default function AlarmRules() {
     async (rule: AlarmRule, checked: boolean) => {
       setTogglingId(rule.id);
       try {
-        await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } });
+        // Use dedicated toggle endpoint when enabling; use updateRule for disabling
+        if (checked) {
+          await toggleRule.mutateAsync(rule.id);
+        } else {
+          await updateRule.mutateAsync({ id: rule.id, data: { enabled: false } });
+        }
         message.success(t(checked ? 'alarm.ruleEnabled' : 'alarm.ruleDisabled'));
         void refetch();
       } catch (error) {
@@ -85,7 +91,7 @@ export default function AlarmRules() {
         setTogglingId(null);
       }
     },
-    [updateRule, refetch, t]
+    [toggleRule, updateRule, refetch, t]
   );
 
   // 打开添加抽屉
@@ -124,17 +130,35 @@ export default function AlarmRules() {
 
   // 提交表单
   const handleDrawerSubmit = useCallback(async (formData: AlarmRuleFormData) => {
+    // 构造 conditions 从表单数据
+    const conditions: AlarmRuleCondition[] = [];
+    if (formData.selectedAlarms.length > 0) {
+      conditions.push({ field: 'alarm_code', operator: 'contains', value: formData.selectedAlarms });
+    }
+    if (formData.deviceSelectionMode === 'devices' && formData.selectedDevices.length > 0) {
+      conditions.push({ field: 'device_id', operator: 'contains', value: formData.selectedDevices });
+    }
+    if (formData.deviceSelectionMode === 'groups' && formData.selectedGroups.length > 0) {
+      conditions.push({ field: 'device_group_id', operator: 'contains', value: formData.selectedGroups });
+    }
+
+    // 从 ruleType 派生 actions
+    const actions: AlarmRuleAction[] = [];
+    if (formData.ruleType === 'ignore') {
+      actions.push({ type: 'suppress', target: 'ignore' });
+    } else if (formData.ruleType === 'auto_acknowledge') {
+      actions.push({ type: 'suppress', target: 'auto_acknowledge' });
+    } else if (formData.ruleType === 'auto_clear') {
+      actions.push({ type: 'suppress', target: 'auto_clear' });
+    }
+
     const ruleData = {
       ruleName: formData.ruleName,
       enabled: formData.status,
       ruleType: formData.ruleType,
-      deviceType: formData.deviceSelectionMode === 'devices'
-        ? formData.selectedDevices.join(',')
-        : formData.selectedGroups.join(','),
-      userCode: 'admin',
       severity: 'warning' as const,
-      conditions: [],
-      actions: [],
+      conditions,
+      actions,
     };
 
     if (drawerMode === 'add') {
