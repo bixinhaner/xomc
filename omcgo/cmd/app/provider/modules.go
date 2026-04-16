@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -17,8 +18,10 @@ import (
 	"github.com/omcgo/omcgo/internal/interop"
 	"github.com/omcgo/omcgo/internal/interop/cases"
 	"github.com/omcgo/omcgo/internal/license"
+	"github.com/omcgo/omcgo/internal/events"
 	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/mr"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/nedirect"
 	"github.com/omcgo/omcgo/internal/northbound"
 	"github.com/omcgo/omcgo/internal/northbound/push"
@@ -222,16 +225,32 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.fileHandler = filemanager.NewHandler(fileService, logger)
 	logger.Info("file manager module initialized")
 
+	// SSE / Events module (must init before MML so hub is available)
+	eventStore := events.NewRedisMessageStore(c.Redis, time.Hour)
+	messageHub := events.NewMessageHub(eventStore, logger)
+	sseHandler := events.NewSSEHandler(messageHub, c.JWTService, logger)
+	c.miscDeps.sseHandler = sseHandler
+	c.miscDeps.messageHub = messageHub
+	logger.Info("SSE events module initialized")
+
+	// Notification module
+	notifRepo := notification.NewPgRepository(c.PgPool)
+	notifService := notification.NewService(notifRepo, messageHub, logger)
+	c.miscDeps.notificationHandler = notification.NewHandler(notifService, logger)
+	logger.Info("notification module initialized")
+
 	// MML Console module
 	mmlCmdRepo := mml.NewPgCommandRepository(c.PgPool)
 	mmlScriptRepo := mml.NewPgScriptRepository(c.PgPool)
 	mmlTaskRepo := mml.NewPgTaskRepository(c.PgPool)
 	mmlTemplateRepo := mml.NewPgTemplateRepository(c.PgPool)
-	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlTemplateRepo, logger)
+	mmlAuditRepo := mml.NewPgAuditRepository(c.PgPool)
+	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlTemplateRepo, messageHub, logger)
+	mmlService.SetAuditRepo(mmlAuditRepo)
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	logger.Info("MML console module initialized")
 
-	// Config Baseline module
+		// Config Baseline module
 	baselineRepo := baseline.NewPgBaselineRepository(c.PgPool)
 	configTaskRepo := baseline.NewPgConfigTaskRepository(c.PgPool)
 	neighborRepo := baseline.NewPgNeighborRepository(c.PgPool)
@@ -356,6 +375,11 @@ type miscDeps struct {
 
 	// PM Threshold
 	thresholdRepo *pm.PgThresholdRepository
+
+		// SSE / Events
+		sseHandler          *events.SSEHandler
+		notificationHandler *notification.Handler
+		messageHub          *events.MessageHub
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

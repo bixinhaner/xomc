@@ -113,6 +113,7 @@ export interface MMLTemplate {
   commandCode: string;
   operationType: MMLOperationType;
   templateScope: 'private' | 'public';
+  categoryGroup: string;
   parameters: Record<string, string | number | boolean>;
   paramPaths: string[];
   description: string;

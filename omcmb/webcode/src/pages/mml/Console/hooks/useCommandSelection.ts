@@ -1,18 +1,21 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { TreeDataNode } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import type { MMLCommand } from '@/types/mml';
+import type { MMLCommand, MMLTemplate } from '@/types/mml';
 import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { COMMAND_PAGE_SIZE } from '../constants';
 
+export type CustomNodeType = 'custom_root' | 'custom_public' | 'custom_private' | 'user_dir';
+
 export interface CommandTreeNode extends TreeDataNode {
-  nodeType: 'category' | 'command';
+  nodeType: 'category' | 'command' | CustomNodeType;
   label: string;
   category?: string;
   count?: number;
   commandCode?: string;
   command?: MMLCommand;
+  template?: MMLTemplate;
   children?: CommandTreeNode[];
 }
 
@@ -100,6 +103,79 @@ export function useCommandSelection() {
     });
   }, [categoryOptions, commands]);
 
+  // Fetch templates for custom command directory
+  const { data: templatesResponse } = useQuery({
+    queryKey: ['mml', 'templates', 'all-for-tree'],
+    queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 1000 }),
+  });
+
+  const templates = useMemo(() => templatesResponse?.items ?? [], [templatesResponse]);
+
+  // Build the full tree including custom template directory
+  const fullTreeData = useMemo((): CommandTreeNode[] => {
+    const baseTree = treeData;
+
+    const publicTemplates = templates.filter((t) => t.templateScope === 'public');
+    const privateTemplates = templates.filter((t) => t.templateScope === 'private');
+
+    // Group private templates by creator
+    const privateByCreator = new Map<string, MMLTemplate[]>();
+    for (const t of privateTemplates) {
+      const list = privateByCreator.get(t.creator) ?? [];
+      list.push(t);
+      privateByCreator.set(t.creator, list);
+    }
+
+    // Helper: convert template to command-like tree node
+    const templateToNode = (t: MMLTemplate): CommandTreeNode => ({
+      key: `tmpl-${t.id}`,
+      title: `${t.templateName} ${t.commandCode}`,
+      label: t.templateName,
+      commandCode: t.commandCode,
+      template: t,
+      nodeType: 'command',
+      isLeaf: true,
+    });
+
+    const customRoot: CommandTreeNode = {
+      key: 'custom-root',
+      title: '自定义模板',
+      label: '自定义模板',
+      nodeType: 'custom_root',
+      selectable: false,
+      children: [
+        {
+          key: 'custom-public',
+          title: `公有命令`,
+          label: `公有命令`,
+          nodeType: 'custom_public',
+          selectable: false,
+          count: publicTemplates.length,
+          children: publicTemplates.map(templateToNode),
+        },
+        {
+          key: 'custom-private',
+          title: '私有命令',
+          label: '私有命令',
+          nodeType: 'custom_private',
+          selectable: false,
+          count: privateTemplates.length,
+          children: [...privateByCreator.entries()].map(([creator, creatorTemplates]) => ({
+            key: `custom-private-${creator}`,
+            title: creator,
+            label: creator,
+            nodeType: 'user_dir' as const,
+            selectable: false,
+            count: creatorTemplates.length,
+            children: creatorTemplates.map(templateToNode),
+          })),
+        },
+      ],
+    };
+
+    return [...baseTree, customRoot];
+  }, [treeData, templates]);
+
   useEffect(() => {
     if (selectedCommand && !commands.some((command) => command.id === selectedCommand.id)) {
       setSelectedCommand(null);
@@ -125,7 +201,7 @@ export function useCommandSelection() {
     searchText,
     categoryFilter,
     commands,
-    treeData,
+    treeData: fullTreeData,
     categoryOptions,
     isLoading: isLoading || isFetching,
     setSearchText,

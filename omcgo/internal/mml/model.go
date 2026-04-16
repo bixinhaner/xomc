@@ -80,6 +80,7 @@ type MMLTask struct {
 	Status    TaskStatus               `json:"status"`
 	Results   []map[string]interface{} `json:"results"`
 	Creator   string                   `json:"creator"`
+	Executor  string                   `json:"executor,omitempty"`
 	CreatedAt time.Time                `json:"created_at"`
 	UpdatedAt time.Time                `json:"updated_at"`
 
@@ -138,6 +139,7 @@ type MMLTemplate struct {
 	CommandCode   string                 `json:"command_code"`
 	OperationType string                 `json:"operation_type"`
 	TemplateScope string                 `json:"template_scope"` // private or public
+	CategoryGroup string                 `json:"category_group,omitempty"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
@@ -152,6 +154,23 @@ type TemplateFilter struct {
 	CommandCode   *string
 	OperationType *string
 	TemplateScope *string
+	CategoryGroup *string
 	Creator       *string
 	model.ListRequest
+}
+
+// MMLAuditLog records a single command execution for compliance auditing.
+type MMLAuditLog struct {
+	ID            uuid.UUID              `json:"id"`
+	TaskID        *uuid.UUID             `json:"task_id,omitempty"`
+	CommandCode   string                 `json:"command_code"`
+	OperationType string                 `json:"operation_type"`
+	DeviceSN      string                 `json:"device_sn"`
+	Parameters    map[string]interface{} `json:"parameters"`
+	ParamPaths    []string               `json:"param_paths"`
+	ResultStatus  string                 `json:"result_status"`
+	ResultMessage string                 `json:"result_message,omitempty"`
+	Creator       string                 `json:"creator"`
+	ExecutedAt    time.Time              `json:"executed_at"`
+	DurationMs    *int                   `json:"duration_ms,omitempty"`
 }

@@ -83,6 +83,7 @@ interface BackendMMLTemplate {
   command_code: string;
   operation_type: string;
   template_scope: string;
+  category_group?: string;
   parameters: Record<string, unknown> | null;
   param_paths: string[] | null;
   description: string;
@@ -252,6 +253,7 @@ function mapBackendTemplate(bt: BackendMMLTemplate): MMLTemplate {
     commandCode: bt.command_code,
     operationType: bt.operation_type as MMLTemplate['operationType'],
     templateScope: bt.template_scope as MMLTemplate['templateScope'],
+    categoryGroup: bt.category_group || '',
     parameters: (bt.parameters as Record<string, string | number | boolean>) || {},
     paramPaths: bt.param_paths || [],
     description: bt.description || '',
@@ -574,6 +576,7 @@ export const mmlApi = {
       command_code: tmpl.commandCode,
       operation_type: tmpl.operationType,
       template_scope: tmpl.templateScope,
+      category_group: tmpl.categoryGroup,
       parameters: tmpl.parameters,
       param_paths: tmpl.paramPaths,
       description: tmpl.description,

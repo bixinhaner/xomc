@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Card, Tag, Typography } from 'antd';
+import { Card, Tag, Typography, message } from 'antd';
 import { AppstoreOutlined } from '@ant-design/icons';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   DeviceTree,
   CommandTree,
@@ -8,6 +9,7 @@ import {
   CommandInput,
   BatchSnModal,
 } from './components';
+import AddTemplateModal from './components/AddTemplateModal';
 import {
   useDeviceSelection,
   useCommandSelection,
@@ -16,6 +18,7 @@ import {
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
+import { useCreateMMLScript } from '@/hooks/api/useMML';
 
 type CommandInputTab = 'control' | 'paramPath';
 type CommandParameters = Record<string, string | number | boolean>;
@@ -32,6 +35,7 @@ function getOperationType(command: MMLCommand | null): string {
 export default function MMLConsole() {
   const t = useT();
   const token = useThemeToken();
+  const queryClient = useQueryClient();
 
   const [batchSnModalOpen, setBatchSnModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<CommandInputTab>('control');
@@ -42,10 +46,13 @@ export default function MMLConsole() {
   const [parameters, setParameters] = useState<CommandParameters>({});
   const [operationType, setOperationType] = useState('');
   const [paramPaths, setParamPaths] = useState<string[]>(['']);
+  const [addTemplateModalOpen, setAddTemplateModalOpen] = useState(false);
+  const [addTemplateScope, setAddTemplateScope] = useState<'public' | 'private'>('private');
 
   const deviceSelection = useDeviceSelection();
   const commandSelection = useCommandSelection();
   const commandExecution = useCommandExecution();
+  const createScriptMutation = useCreateMMLScript();
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
@@ -171,6 +178,29 @@ export default function MMLConsole() {
     deviceSelection.addDevicesBySns(sns);
     setBatchSnModalOpen(false);
   }, [deviceSelection]);
+
+  const handleSaveScript = useCallback(() => {
+    const cmd = commandSelection.selectedCommand;
+    if (!cmd) {
+      void message.warning(t('mml.selectCommandFirst') || '请先选择命令');
+      return;
+    }
+    const lines = [commandLineText.trim()];
+    createScriptMutation.mutate(
+      {
+        scriptName: `${cmd.commandName}_${new Date().toISOString().slice(0, 10)}`,
+        description: `Saved from MML console: ${cmd.commandCode}`,
+        content: lines.join('\n'),
+        deviceType: '',
+        creator: '',
+        tags: [],
+      },
+      {
+        onSuccess: () => void message.success(t('mml.scriptSaved') || '脚本已保存'),
+        onError: (err) => void message.error(t('mml.scriptSaveFailed') || '保存失败: ' + (err instanceof Error ? err.message : 'Unknown')),
+      },
+    );
+  }, [commandSelection.selectedCommand, commandLineText, createScriptMutation, t]);
 
   const canExecute = deviceSelection.selectedDevices.length > 0 && commandLineText.trim().length > 0;
   const executeButtonText = `${deviceSelection.selectedDevices.length} 设备 · ${currentCommandLabel || '未选命令'}`;
@@ -302,6 +332,14 @@ export default function MMLConsole() {
             onSearchChange={commandSelection.setSearchText}
             onFilterChange={commandSelection.setCategoryFilter}
             onSelectCommand={handleCommandSelect}
+            onAddPublicTemplate={() => {
+              setAddTemplateScope('public');
+              setAddTemplateModalOpen(true);
+            }}
+            onAddPrivateTemplate={() => {
+              setAddTemplateScope('private');
+              setAddTemplateModalOpen(true);
+            }}
           />
         </Card>
 
@@ -348,6 +386,7 @@ export default function MMLConsole() {
               onExecute={handleExecute}
               onParamChange={handleParamChange}
               onReset={handleReset}
+              onSaveScript={handleSaveScript}
               selectedCommand={commandSelection.selectedCommand}
               selectedDevices={deviceSelection.selectedDevices}
             />
@@ -361,6 +400,15 @@ export default function MMLConsole() {
         onConfirm={handleBatchSnConfirm}
         existingSns={new Set(deviceSelection.selectedDevices.map((d) => d.sn))}
         allDeviceSns={deviceSelection.allDeviceSns}
+      />
+
+      <AddTemplateModal
+        open={addTemplateModalOpen}
+        scope={addTemplateScope}
+        onClose={() => setAddTemplateModalOpen(false)}
+        onSuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
+        }}
       />
     </div>
   );

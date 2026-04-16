@@ -563,14 +563,14 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 
 	query, args, err := storage.Psql.Insert("mml_tasks").
 		Columns("task_name", "script_id", "device_sns",
-			"commands", "status", "results", "creator",
+			"commands", "status", "results", "creator", "executor",
 			"execute_type", "scheduled_at",
 			"period_start", "period_end", "period_time",
 			"offline_retry", "offline_retry_wait",
 			"failed_retry", "failed_retry_count", "failed_retry_interval",
 			"total_devices").
 		Values(task.TaskName, task.ScriptID, deviceSNsJSON,
-			commandsJSON, task.Status, resultsJSON, task.Creator,
+			commandsJSON, task.Status, resultsJSON, task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
 			task.OfflineRetry, task.OfflineRetryWait,
@@ -740,7 +740,7 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 
 	err := row.Scan(
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
-		&commandsJSON, &t.Status, &resultsJSON, &t.Creator,
+		&commandsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
 		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
@@ -785,7 +785,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 
 	err := rows.Scan(
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
-		&commandsJSON, &t.Status, &resultsJSON, &t.Creator,
+		&commandsJSON, &t.Status, &resultsJSON, &t.Creator, &t.Executor,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.ExecuteType, &t.ScheduledAt,
 		&t.PeriodStart, &t.PeriodEnd, &t.PeriodTime,
@@ -936,10 +936,10 @@ func (r *PgTemplateRepository) Create(ctx context.Context, tmpl *MMLTemplate) er
 
 	query, args, err := storage.Psql.Insert("mml_templates").
 		Columns("template_name", "command_code", "operation_type",
-			"template_scope", "parameters", "param_paths",
+			"template_scope", "category_group", "parameters", "param_paths",
 			"description", "product_types", "creator").
 		Values(tmpl.TemplateName, tmpl.CommandCode, tmpl.OperationType,
-			tmpl.TemplateScope, parametersJSON, paramPathsJSON,
+			tmpl.TemplateScope, tmpl.CategoryGroup, parametersJSON, paramPathsJSON,
 			tmpl.Description, productTypesJSON, tmpl.Creator).
 		Suffix("RETURNING " + joinColumns(templateColumns)).
 		ToSql()
@@ -994,6 +994,7 @@ func (r *PgTemplateRepository) Update(ctx context.Context, tmpl *MMLTemplate) er
 		Set("command_code", tmpl.CommandCode).
 		Set("operation_type", tmpl.OperationType).
 		Set("template_scope", tmpl.TemplateScope).
+		Set("category_group", tmpl.CategoryGroup).
 		Set("parameters", parametersJSON).
 		Set("param_paths", paramPathsJSON).
 		Set("description", tmpl.Description).
@@ -1058,6 +1059,10 @@ func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) 
 		base = base.Where(sq.Eq{"template_scope": *filter.TemplateScope})
 		countBase = countBase.Where(sq.Eq{"template_scope": *filter.TemplateScope})
 	}
+	if filter.CategoryGroup != nil {
+		base = base.Where(sq.Eq{"category_group": *filter.CategoryGroup})
+		countBase = countBase.Where(sq.Eq{"category_group": *filter.CategoryGroup})
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
@@ -1118,7 +1123,7 @@ func scanTemplate(row pgx.Row) (*MMLTemplate, error) {
 
 	err := row.Scan(
 		&t.ID, &t.TemplateName, &t.CommandCode, &t.OperationType,
-		&t.TemplateScope, &parametersJSON, &paramPathsJSON,
+		&t.TemplateScope, &t.CategoryGroup, &parametersJSON, &paramPathsJSON,
 		&t.Description, &productTypesJSON, &t.Creator,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
@@ -1158,7 +1163,7 @@ func scanTemplateRow(rows pgx.Rows) (*MMLTemplate, error) {
 
 	err := rows.Scan(
 		&t.ID, &t.TemplateName, &t.CommandCode, &t.OperationType,
-		&t.TemplateScope, &parametersJSON, &paramPathsJSON,
+		&t.TemplateScope, &t.CategoryGroup, &parametersJSON, &paramPathsJSON,
 		&t.Description, &productTypesJSON, &t.Creator,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
@@ -1190,4 +1195,66 @@ func scanTemplateRow(rows pgx.Rows) (*MMLTemplate, error) {
 		t.ProductTypes = []string{}
 	}
 	return &t, nil
+}
+
+
+// ---- Audit Repository ----
+
+// PgAuditRepository implements AuditRepository with PostgreSQL.
+type PgAuditRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewPgAuditRepository creates a new PgAuditRepository.
+func NewPgAuditRepository(pool *pgxpool.Pool) *PgAuditRepository {
+	return &PgAuditRepository{pool: pool}
+}
+
+// Create inserts a single audit log entry.
+func (r *PgAuditRepository) Create(ctx context.Context, entry *MMLAuditLog) error {
+	paramsJSON, _ := json.Marshal(entry.Parameters)
+	paramPathsJSON, _ := json.Marshal(entry.ParamPaths)
+
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO mml_audit_log (task_id, command_code, operation_type, device_sn, parameters, param_paths, result_status, result_message, creator, duration_ms)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		entry.TaskID, entry.CommandCode, entry.OperationType, entry.DeviceSN,
+		paramsJSON, paramPathsJSON, entry.ResultStatus, entry.ResultMessage,
+		entry.Creator, entry.DurationMs,
+	)
+	if err != nil {
+		return fmt.Errorf("insert mml_audit_log: %w", err)
+	}
+	return nil
+}
+
+// CreateBatch inserts multiple audit log entries in a single transaction.
+func (r *PgAuditRepository) CreateBatch(ctx context.Context, entries []*MMLAuditLog) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin audit batch tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	for _, entry := range entries {
+		paramsJSON, _ := json.Marshal(entry.Parameters)
+		paramPathsJSON, _ := json.Marshal(entry.ParamPaths)
+
+		_, err := tx.Exec(ctx,
+			`INSERT INTO mml_audit_log (task_id, command_code, operation_type, device_sn, parameters, param_paths, result_status, result_message, creator, duration_ms)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			entry.TaskID, entry.CommandCode, entry.OperationType, entry.DeviceSN,
+			paramsJSON, paramPathsJSON, entry.ResultStatus, entry.ResultMessage,
+			entry.Creator, entry.DurationMs,
+		)
+		if err != nil {
+			return fmt.Errorf("insert mml_audit_log batch: %w", err)
+		}
+	}
+
+	return tx.Commit(ctx)
 }

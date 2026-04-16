@@ -36,7 +36,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult } from '@/types/mml';
-import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask } from '@/hooks/api/useMML';
+import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLTaskResults } from '@/hooks/api/useMML';
 import { useT } from '@/hooks/useT';
 
 // 任务类型映射 - use i18n keys
@@ -98,6 +98,7 @@ export default function ScriptTask() {
   const [editingTask, setEditingTask] = useState<MMLTask | null>(null);
   const [resultModalVisible, setResultModalVisible] = useState(false);
   const [resultTaskName, setResultTaskName] = useState<string>('');
+  const [resultTaskId, setResultTaskId] = useState<string | null>(null);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -110,6 +111,9 @@ export default function ScriptTask() {
   const pauseTaskMutation = usePauseMMLTask();
   const cancelTaskMutation = useCancelMMLTask();
   const deleteTaskMutation = useDeleteMMLTask();
+
+  // Task results for the result modal
+  const { data: resultData, isLoading: resultLoading } = useMMLTaskResults(resultTaskId);
 
   // Map API tasks to display rows with client-side filtering
   const tasks = useMemo(() => data?.items ?? [], [data?.items]);
@@ -178,6 +182,7 @@ export default function ScriptTask() {
 
   const showResult = (task: MMLTask) => {
     setResultTaskName(task.taskName);
+    setResultTaskId(task.id);
     setResultModalVisible(true);
   };
 
@@ -331,9 +336,40 @@ export default function ScriptTask() {
       </Modal>
 
       {/* 查看结果弹窗 */}
-      <Modal title={t('mml.executionResult', { name: resultTaskName })} open={resultModalVisible} onCancel={() => setResultModalVisible(false)} footer={null} width={900}>
+      <Modal title={t('mml.executionResult', { name: resultTaskName })} open={resultModalVisible} onCancel={() => { setResultModalVisible(false); setResultTaskId(null); }} footer={null} width={900}>
         <div style={{ padding: '16px 0' }}>
-          <p style={{ color: '#999' }}>{t('mml.resultPlaceholder')}</p>
+          {resultLoading && <p style={{ color: '#999' }}>{t('common.loading') || 'Loading...'}</p>}
+          {!resultLoading && resultData && resultData.items.length === 0 && (
+            <p style={{ color: '#999' }}>{t('mml.resultPlaceholder')}</p>
+          )}
+          {resultData && resultData.items.length > 0 && (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>{t('mml.deviceSn') || 'Device SN'}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'center' }}>{t('mml.status') || 'Status'}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'right' }}>{t('mml.executionTime') || 'Time (ms)'}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>{t('mml.output') || 'Output'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resultData.items.map((item, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '8px 12px', fontFamily: 'monospace' }}>{item.deviceSn}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                      <Tag color={item.result.success ? 'success' : 'error'}>
+                        {item.result.success ? (t('status.success') || 'Success') : (t('status.failed') || 'Failed')}
+                      </Tag>
+                    </td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{item.result.executionTime}</td>
+                    <td style={{ padding: '8px 12px', maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.result.rawOutput}>
+                      {item.result.rawOutput || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </Modal>
 

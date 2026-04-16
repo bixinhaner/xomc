@@ -41,3 +41,9 @@ type TemplateRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error)
 }
+
+// AuditRepository writes MML command execution audit records.
+type AuditRepository interface {
+	Create(ctx context.Context, entry *MMLAuditLog) error
+	CreateBatch(ctx context.Context, entries []*MMLAuditLog) error
+}

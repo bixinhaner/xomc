@@ -16,19 +16,30 @@ import (
 
 // Service provides business logic for the MML console module.
 type Service struct {
-	cmdRepo       CommandRepository
-	scriptRepo    ScriptRepository
-	taskRepo      TaskRepository
-	templateRepo  TemplateRepository
-	logger        *zap.Logger
+	cmdRepo      CommandRepository
+	scriptRepo   ScriptRepository
+	taskRepo     TaskRepository
+	templateRepo TemplateRepository
+	auditRepo    AuditRepository
+	hub          SSEPublisher
+	logger       *zap.Logger
+}
+
+// SSEPublisher defines the interface for publishing SSE events.
+// Implemented by *events.MessageHub; nil means SSE is disabled.
+type SSEPublisher interface {
+	PublishSimple(userID, eventType string, data []byte)
 }
 
 // NewService creates a new MML Service.
+// hub may be nil if SSE is not configured.
+// auditRepo may be nil if audit logging is not configured.
 func NewService(
 	cmdRepo CommandRepository,
 	scriptRepo ScriptRepository,
 	taskRepo TaskRepository,
 	templateRepo TemplateRepository,
+	hub SSEPublisher,
 	logger *zap.Logger,
 ) *Service {
 	return &Service{
@@ -36,8 +47,25 @@ func NewService(
 		scriptRepo:   scriptRepo,
 		taskRepo:     taskRepo,
 		templateRepo: templateRepo,
+		hub:          hub,
 		logger:       logger.Named("mml"),
 	}
+}
+
+// SetAuditRepo sets the audit repository for command execution logging.
+func (s *Service) SetAuditRepo(repo AuditRepository) {
+	s.auditRepo = repo
+}
+
+// publishTaskStatus pushes a task status change event via SSE.
+func (s *Service) publishTaskStatus(executor, taskID, oldStatus, newStatus string) {
+	data, _ := json.Marshal(map[string]string{
+		"task_id":    taskID,
+		"old_status": oldStatus,
+		"new_status": newStatus,
+		"executor":   executor,
+	})
+	s.hub.PublishSimple(executor, "mml_task_status", data)
 }
 
 // ---- Command operations (read-only) ----
@@ -242,6 +270,7 @@ type ExecuteRequest struct {
 	Parameters  map[string]interface{}   `json:"parameters"`
 	TaskName    string                   `json:"task_name"`
 	Creator     string                   `json:"creator"`
+	Executor    string                   `json:"executor,omitempty"`
 	Commands    []map[string]interface{} `json:"commands"`
 	ScriptID    *string                  `json:"script_id,omitempty"`
 
@@ -327,6 +356,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		Status:    TaskPending,
 		Results:   []map[string]interface{}{},
 		Creator:   req.Creator,
+		Executor:  req.Executor,
 
 		ExecuteType:         req.ExecuteType,
 		OfflineRetry:        req.OfflineRetry,
@@ -357,7 +387,73 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		zap.Int("device_count", len(task.DeviceSNs)),
 	)
 
+	// Write audit log entries for each command+device combination
+	s.writeAuditLogs(ctx, task)
+
+	// Push SSE event to executor
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), "", string(task.Status))
+	}
+
 	return task, nil
+}
+
+// writeAuditLogs creates audit log entries for a newly created task.
+// Errors are logged but do not fail the task creation.
+func (s *Service) writeAuditLogs(ctx context.Context, task *MMLTask) {
+	if s.auditRepo == nil {
+		return
+	}
+
+	creator := task.Creator
+	if creator == "" {
+		creator = task.Executor
+	}
+
+	var entries []*MMLAuditLog
+	for _, cmd := range task.Commands {
+		commandCode, _ := cmd["command_code"].(string)
+		operationType, _ := cmd["operation_type"].(string)
+
+		var params map[string]interface{}
+		if p, ok := cmd["parameters"]; ok {
+			if pm, ok := p.(map[string]interface{}); ok {
+				params = pm
+			}
+		}
+
+		var paramPaths []string
+		if pp, ok := cmd["param_paths"]; ok {
+			if ppSlice, ok := pp.([]string); ok {
+				paramPaths = ppSlice
+			}
+		}
+
+		for _, sn := range task.DeviceSNs {
+			entries = append(entries, &MMLAuditLog{
+				TaskID:        &task.ID,
+				CommandCode:   commandCode,
+				OperationType: operationType,
+				DeviceSN:      sn,
+				Parameters:    params,
+				ParamPaths:    paramPaths,
+				ResultStatus:  string(task.Status),
+				Creator:       creator,
+			})
+		}
+	}
+
+	if len(entries) == 0 {
+		return
+	}
+
+	if err := s.auditRepo.CreateBatch(ctx, entries); err != nil {
+		s.logger.Error("failed to write MML audit logs",
+			zap.String("task_id", task.ID.String()),
+			zap.Int("entry_count", len(entries)),
+			zap.Error(err),
+		)
+	}
 }
 
 // GetTask retrieves an MML task by ID.
@@ -390,12 +486,19 @@ func (s *Service) StartTask(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 		return nil, fmt.Errorf("start task: status %s cannot transition to running: %w", task.Status, ErrInvalidTransition)
 	}
 
+	oldStatus := string(task.Status)
+
 	if err := s.taskRepo.UpdateStatus(ctx, id, TaskRunning); err != nil {
 		return nil, fmt.Errorf("update mml task status: %w", err)
 	}
 
 	task.Status = TaskRunning
 	s.logger.Info("mml task started", zap.String("task_id", id.String()))
+
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), oldStatus, string(TaskRunning))
+	}
+
 	return task, nil
 }
 
@@ -410,12 +513,19 @@ func (s *Service) PauseTask(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 		return nil, fmt.Errorf("pause task: status %s cannot transition to paused: %w", task.Status, ErrInvalidTransition)
 	}
 
+	oldStatus := string(task.Status)
+
 	if err := s.taskRepo.UpdateStatus(ctx, id, TaskPaused); err != nil {
 		return nil, fmt.Errorf("update mml task status: %w", err)
 	}
 
 	task.Status = TaskPaused
 	s.logger.Info("mml task paused", zap.String("task_id", id.String()))
+
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), oldStatus, string(TaskPaused))
+	}
+
 	return task, nil
 }
 
@@ -430,12 +540,19 @@ func (s *Service) CancelTask(ctx context.Context, id uuid.UUID) (*MMLTask, error
 		return nil, fmt.Errorf("cancel task: status %s cannot transition to cancelled: %w", task.Status, ErrInvalidTransition)
 	}
 
+	oldStatus := string(task.Status)
+
 	if err := s.taskRepo.UpdateStatus(ctx, id, TaskCancelled); err != nil {
 		return nil, fmt.Errorf("update mml task status: %w", err)
 	}
 
 	task.Status = TaskCancelled
 	s.logger.Info("mml task cancelled", zap.String("task_id", id.String()))
+
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), oldStatus, string(TaskCancelled))
+	}
+
 	return task, nil
 }
 
@@ -521,6 +638,7 @@ func (s *Service) UpdateTemplate(ctx context.Context, id uuid.UUID, tmpl *MMLTem
 	existing.CommandCode = tmpl.CommandCode
 	existing.OperationType = tmpl.OperationType
 	existing.TemplateScope = tmpl.TemplateScope
+	existing.CategoryGroup = tmpl.CategoryGroup
 	existing.Description = tmpl.Description
 	if tmpl.Parameters != nil {
 		existing.Parameters = tmpl.Parameters
@@ -572,6 +690,7 @@ func (s *Service) CloneTemplate(ctx context.Context, id uuid.UUID, currentUser s
 		CommandCode:   source.CommandCode,
 		OperationType: source.OperationType,
 		TemplateScope: "private",
+		CategoryGroup: source.CategoryGroup,
 		Parameters:    source.Parameters,
 		ParamPaths:    source.ParamPaths,
 		Description:   source.Description,

@@ -199,6 +199,7 @@ func (h *Handler) Execute(c *gin.Context) {
 		Parameters:          req.Parameters,
 		TaskName:            req.TaskName,
 		Creator:             creatorStr,
+		Executor:            creatorStr,
 		Commands:            req.Commands,
 		ExecuteType:         ExecuteType(req.ExecuteType),
 		OfflineRetry:        req.OfflineRetry,
@@ -555,6 +556,9 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 	if templateScope := c.Query("template_scope"); templateScope != "" {
 		filter.TemplateScope = &templateScope
 	}
+	if categoryGroup := c.Query("category_group"); categoryGroup != "" {
+		filter.CategoryGroup = &categoryGroup
+	}
 
 	// Pass current user for private template filtering
 	creator, _ := c.Get("username")
@@ -593,6 +597,7 @@ type CreateTemplateRequest struct {
 	CommandCode   string                 `json:"command_code" binding:"required"`
 	OperationType string                 `json:"operation_type" binding:"required"`
 	TemplateScope string                 `json:"template_scope" binding:"required"`
+	CategoryGroup string                 `json:"category_group"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
@@ -615,6 +620,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		CommandCode:   req.CommandCode,
 		OperationType: req.OperationType,
 		TemplateScope: req.TemplateScope,
+		CategoryGroup: req.CategoryGroup,
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
 		Description:   req.Description,
@@ -637,6 +643,7 @@ type UpdateTemplateRequest struct {
 	CommandCode   string                 `json:"command_code" binding:"required"`
 	OperationType string                 `json:"operation_type" binding:"required"`
 	TemplateScope string                 `json:"template_scope" binding:"required"`
+	CategoryGroup string                 `json:"category_group"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
@@ -662,6 +669,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		CommandCode:   req.CommandCode,
 		OperationType: req.OperationType,
 		TemplateScope: req.TemplateScope,
+		CategoryGroup: req.CategoryGroup,
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
 		Description:   req.Description,

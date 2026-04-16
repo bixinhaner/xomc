@@ -178,6 +178,14 @@ export function useMMLTaskPolling(taskId: string | null, enabled: boolean) {
   });
 }
 
+export function useMMLTaskResults(taskId: string | null, page = 1, pageSize = 50) {
+  return useQuery({
+    queryKey: ['mml', 'tasks', taskId, 'results', page, pageSize],
+    queryFn: () => api.getTaskResults(taskId!, page, pageSize),
+    enabled: Boolean(taskId),
+  });
+}
+
 // --- Template hooks ---
 
 export function useMMLTemplates(
