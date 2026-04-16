@@ -240,7 +240,7 @@ export default function RecycleBin() {
           <Tag color={DEVICE_TYPE_COLOR[v as DeviceType] || 'default'}>{String(v)}</Tag>
         ),
       },
-      { key: 'host_name', title: 'HostName', dataIndex: 'hostName', width: 140, ellipsis: true },
+      { key: 'host_name', title: t('device.hostName'), dataIndex: 'hostName', width: 140, ellipsis: true },
       {
         key: 'mac',
         title: t('device.macAddress'),
@@ -320,14 +320,15 @@ export default function RecycleBin() {
         total={data?.total || 0}
         pageSize={pageSize}
         currentPage={currentPage}
-        onPageChange={(p) => setCurrentPage(p)}
-        onPageSizeChange={(s) => {
-          setPageSize(s);
-          setCurrentPage(1);
+        onPageChange={(p, s) => {
+          setCurrentPage(p);
+          if (s !== pageSize) setPageSize(s);
         }}
         batchActions={batchActions}
         defaultDensity="default"
-        scroll={{ x: 'max-content', y: 'calc(100vh - 450px)' }}
+        showRowNumber
+        rowNumberTitle={t('table.rowNumber')}
+        scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }}
       />
 
       <ImportModal
