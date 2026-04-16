@@ -24,7 +24,7 @@ export default function UICustomization() {
         void message.success(t('common.save'));
       }, 800);
     }).catch(() => {
-      void message.error('请检查表单填写是否正确');
+      void message.error(t('common.formValidationFailed'));
     });
   };
 

@@ -67,7 +67,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       rootDiskAlarmThresHold: '10%',
     }}>
       {/* 日志设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>日志设置</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.logSettings')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             <span>原始文件：设备上报的源文件将存储</span>
@@ -132,33 +132,33 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
 
         <div style={settingRowStyle}>
           <Form.Item name="logFtpEnable" valuePropName="checked" noStyle>
-            <Checkbox>日志文件将转发到远端地址</Checkbox>
+            <Checkbox>{t('system.storage.forwardLogsToRemote')}</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-              <Form.Item label="FTP协议" name="logFtpType" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('common.ftpProtocol')} name="logFtpType" style={{ marginBottom: 0 }}>
                 <Select style={{ width: 100 }} disabled={!logFtpEnable}>
                   <Option value="ftp">FTP</Option>
                   <Option value="sftp">SFTP</Option>
                 </Select>
               </Form.Item>
-              <Form.Item label="上传路径" name="logFtpSavePath" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('system.storage.uploadPath')} name="logFtpSavePath" style={{ marginBottom: 0 }}>
                 <Input style={{ width: 200 }} disabled={!logFtpEnable} />
               </Form.Item>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-              <Form.Item label="IP地址" name="logFtpIpAddr" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('common.ipAddress')} name="logFtpIpAddr" style={{ marginBottom: 0 }}>
                 <Input style={{ width: 140 }} disabled={!logFtpEnable} />
               </Form.Item>
-              <Form.Item label="端口" name="logFtpPort" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('common.port')} name="logFtpPort" style={{ marginBottom: 0 }}>
                 <InputNumber style={{ width: 80 }} disabled={!logFtpEnable} />
               </Form.Item>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              <Form.Item label="用户名" name="logFtpUser" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('common.username')} name="logFtpUser" style={{ marginBottom: 0 }}>
                 <Input style={{ width: 160 }} disabled={!logFtpEnable} />
               </Form.Item>
-              <Form.Item label="密码" name="logFtpPassword" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('common.password')} name="logFtpPassword" style={{ marginBottom: 0 }}>
                 <Input.Password style={{ width: 140 }} disabled={!logFtpEnable} />
               </Form.Item>
             </div>
@@ -167,7 +167,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       </Card>
 
       {/* 告警 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>告警</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.alarm')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             <span>历史告警存储：历史告警在数据库最多存储</span>
@@ -180,7 +180,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       </Card>
 
       {/* KPI */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>KPI</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.kpi')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             <span>KPI文件存储：设备上报的原始文件在服务器最多存储</span>
@@ -239,7 +239,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       </Card>
 
       {/* MR */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>MR</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.mr')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             <span>MR原始文件存储：设备上报的原始文件将在服务器最多存储</span>
@@ -252,7 +252,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       </Card>
 
       {/* 信令追踪 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>信令追踪</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.signalingTrace')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             <span>信令追踪文件存储：设备上报的原始文件在服务器最多存储</span>
@@ -265,7 +265,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       </Card>
 
       {/* 磁盘告警 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>磁盘告警</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.diskAlarm')}</span>}>
         <div style={settingRowStyle}>
           <Space>
             <span>日志目录磁盘可用存储百分比</span>

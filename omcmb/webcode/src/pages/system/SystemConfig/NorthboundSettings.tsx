@@ -59,13 +59,13 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
 
   const handleDeleteUser = (id: string) => {
     setUsers(users.filter(u => u.id !== id));
-    void message.success('删除成功');
+    void message.success(t('common.deleteSuccess'));
   };
 
   const handleToggleEnable = (user: NorthboundUser) => {
     const newEnable = user.userEnable === '1' ? '0' : '1';
     setUsers(users.map(u => u.id === user.id ? { ...u, userEnable: newEnable } : u));
-    void message.success(newEnable === '1' ? '已启用' : '已禁用');
+    void message.success(newEnable === '1' ? t('system.northbound.enabled') : t('system.northbound.disabled'));
   };
 
   const handleModalOk = () => {
@@ -76,7 +76,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
           ...values,
           userEnable: values.userEnable ? '1' : '0'
         } : u));
-        void message.success('修改成功');
+        void message.success(t('common.updateSuccess'));
       } else {
         const newUser: NorthboundUser = {
           id: Date.now().toString(),
@@ -86,7 +86,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
           responseTime: new Date().toLocaleString(),
         };
         setUsers([...users, newUser]);
-        void message.success('添加成功');
+        void message.success(t('common.addSuccess'));
       }
       setModalVisible(false);
     });
@@ -102,7 +102,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
       ),
     },
     {
-      title: '是否启用',
+      title: t('system.northbound.isEnabled'),
       dataIndex: 'userEnable',
       key: 'userEnable',
       width: 100,
@@ -115,17 +115,17 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
       ),
     },
     {
-      title: '用户名称',
+      title: t('system.northbound.username'),
       dataIndex: 'userName',
       key: 'userName',
     },
     {
-      title: '密码',
+      title: t('system.northbound.password'),
       dataIndex: 'userPwd',
       key: 'userPwd',
     },
     {
-      title: '创建时间',
+      title: t('table.createTime'),
       dataIndex: 'responseTime',
       key: 'responseTime',
     },
@@ -139,19 +139,19 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
         northboundServiceStatus: '1',
       }}>
         {/* 服务信息 */}
-        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>服务信息</span>} style={{ marginBottom: 16 }}>
+        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.northbound.serviceInfo')}</span>} style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 32 }}>
             <div style={infoItemStyle}>
-              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>IP地址：</span>
+              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.ipAddress')}：</span>
               <span style={{ fontWeight: 500 }}>192.168.1.100</span>
             </div>
             <div style={infoItemStyle}>
-              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>端口：</span>
+              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.port')}：</span>
               <span style={{ fontWeight: 500 }}>8081</span>
             </div>
             <div style={infoItemStyle}>
-              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>服务状态：</span>
-              <Tag color="green">运行中</Tag>
+              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('system.northbound.serviceStatus')}：</span>
+              <Tag color="green">{t('status.running')}</Tag>
             </div>
           </div>
         </Card>
@@ -159,10 +159,10 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
         {/* 用户管理 */}
         <Card
           size="small"
-          title={<span style={{ fontSize: 14, fontWeight: 600 }}>用户管理</span>}
+          title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.northbound.userManagement')}</span>}
           extra={
             <Button type="primary" icon={<PlusOutlined />} size="small" onClick={handleAddUser}>
-              添加
+              {t('common.add')}
             </Button>
           }
         >
@@ -179,22 +179,22 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
 
       {/* 添加/编辑用户弹窗 */}
       <Modal
-        title={editingUser ? '编辑用户' : '添加用户'}
+        title={editingUser ? t('system.northbound.editUser') : t('system.northbound.addUser')}
         open={modalVisible}
         onOk={handleModalOk}
         onCancel={() => setModalVisible(false)}
-        okText="确定"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
       >
         <Form form={userForm} layout="vertical">
-          <Form.Item name="userName" label="用户名称" rules={[{ required: true, message: '请输入用户名称' }]}>
-            <Input placeholder="请输入用户名称" disabled={!!editingUser} />
+          <Form.Item name="userName" label={t('system.northbound.username')} rules={[{ required: true, message: t('system.northbound.pleaseInputUsername') }]}>
+            <Input placeholder={t('system.northbound.pleaseInputUsername')} disabled={!!editingUser} />
           </Form.Item>
-          <Form.Item name="userPwd" label="密码" rules={editingUser ? [] : [{ required: true, message: '请输入密码' }]}>
-            <Input.Password placeholder={editingUser ? '不修改请留空' : '请输入密码'} />
+          <Form.Item name="userPwd" label={t('system.northbound.password')} rules={editingUser ? [] : [{ required: true, message: t('system.northbound.pleaseInputPassword') }]}>
+            <Input.Password placeholder={editingUser ? t('system.northbound.leaveEmptyToKeep') : t('system.northbound.pleaseInputPassword')} />
           </Form.Item>
-          <Form.Item name="userEnable" label="是否启用" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+          <Form.Item name="userEnable" label={t('system.northbound.isEnabled')} valuePropName="checked">
+            <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} />
           </Form.Item>
         </Form>
       </Modal>

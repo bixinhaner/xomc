@@ -149,7 +149,7 @@ export default function ActivationPlan() {
       title: t('table.total'),
       dataIndex: 'deviceRange',
       width: 110,
-      render: (val) => `${String(val)} 台`,
+      render: (val) => `${String(val)} ${t('common.devices')}`,
     },
     {
       key: 'activationMethod',
@@ -174,7 +174,7 @@ export default function ActivationPlan() {
     },
     {
       key: 'scheduledTime',
-      title: '执行时间',
+      title: t('software.upgrade.executeTime'),
       dataIndex: 'scheduledTime',
       width: 160,
       render: (val, record) => {

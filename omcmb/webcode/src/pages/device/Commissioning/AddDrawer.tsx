@@ -88,15 +88,17 @@ const initial2GValues = {
 // IP地址验证正则
 const IP_REGEX = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
 
-// IP地址验证规则
-const ipValidationRule = {
-  pattern: IP_REGEX,
-  message: '请输入有效的IP地址',
-};
+// IP地址验证正则和规则（message 使用函数动态获取i18n）
 
 export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'add', initialValues }: AddDrawerProps) {
   const t = useT();
   const { message } = App.useApp();
+
+  // IP地址验证规则（依赖 t 函数）
+  const ipValidationRule = {
+    pattern: IP_REGEX,
+    message: t('commission.inputValidIp'),
+  };
   const [form] = Form.useForm();
   const [provMode, setProvMode] = useState<ProvMode>('manual');
   const [stationType, setStationType] = useState<StationType>('eNB');
@@ -226,35 +228,35 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
             ipValidationRule,
           ]}
         >
-          <Input placeholder="例如: 192.168.1.1" />
+          <Input placeholder={t('commission.ipExample')} />
         </Form.Item>
       </Card>
 
       {/* 基站参数 */}
-      <Card title="基站参数" size="small" style={{ marginBottom: 16 }}>
+      <Card title={t('commission.stationParams')} size="small" style={{ marginBottom: 16 }}>
         <Form.Item
           name="eci"
           label="ECI"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { pattern: /^\d{1,10}$/, message: 'ECI必须为1-10位数字' },
+            { pattern: /^\d{1,10}$/, message: t('commission.eciRange') },
           ]}
         >
           <Input placeholder="E-UTRAN Cell Identifier" maxLength={10} />
         </Form.Item>
         <Form.Item
           name="frequency"
-          label="频点"
+          label={t('commission.frequency')}
           rules={[{ required: true, message: t('common.pleaseInput') }]}
         >
-          <InputNumber style={{ width: '100%' }} placeholder="频点值" min={0} />
+          <InputNumber style={{ width: '100%' }} placeholder={t('commission.frequencyPlaceholder')} min={0} />
         </Form.Item>
         <Form.Item
           name="pci"
           label="PCI"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { type: 'number', min: 0, max: 503, message: 'PCI范围: 0-503' },
+            { type: 'number', min: 0, max: 503, message: t('commission.pciRange4g') },
           ]}
         >
           <InputNumber style={{ width: '100%' }} placeholder="Physical Cell ID" min={0} max={503} />
@@ -264,7 +266,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
           label="TAC"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { pattern: /^\d{1,6}$/, message: 'TAC必须为1-6位数字' },
+            { pattern: /^\d{1,6}$/, message: t('commission.tacRange') },
           ]}
         >
           <Input placeholder="Tracking Area Code" maxLength={6} />
@@ -274,14 +276,14 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
           label="PLMN"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { pattern: /^\d{5,6}$/, message: 'PLMN必须为5-6位数字' },
+            { pattern: /^\d{5,6}$/, message: t('commission.plmnRange') },
           ]}
         >
-          <Input placeholder="例如: 46000" maxLength={6} />
+          <Input placeholder={t('commission.plmnExample')} maxLength={6} />
         </Form.Item>
         <Form.Item
           name="bandwidth"
-          label="带宽"
+          label={t('commission.bandwidth')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
           <Select placeholder={t('common.pleaseSelect')}>
@@ -294,16 +296,16 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
       </Card>
 
       {/* 核心网 IP */}
-      <Card title="核心网 IP" size="small">
+      <Card title={t('commission.coreIp')} size="small">
         <Form.Item
           name="coreIp4g"
-          label="核心网 IP"
+          label={t('commission.coreIp')}
           rules={[
             { required: true, message: t('common.pleaseInput') },
             ipValidationRule,
           ]}
         >
-          <Input placeholder="MME/核心网地址" />
+          <Input placeholder={t('commission.mmeAddress')} />
         </Form.Item>
       </Card>
     </>
@@ -322,35 +324,35 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
             ipValidationRule,
           ]}
         >
-          <Input placeholder="例如: 192.168.1.1" />
+          <Input placeholder={t('commission.ipExample')} />
         </Form.Item>
       </Card>
 
       {/* 基站参数 */}
-      <Card title="基站参数" size="small" style={{ marginBottom: 16 }}>
+      <Card title={t('commission.stationParams')} size="small" style={{ marginBottom: 16 }}>
         <Form.Item
           name="gnbId"
           label="GNB ID"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { pattern: /^\d{1,10}$/, message: 'GNB ID必须为1-10位数字' },
+            { pattern: /^\d{1,10}$/, message: t('commission.gnbIdRange') },
           ]}
         >
           <Input placeholder="gNB Identifier" maxLength={10} />
         </Form.Item>
         <Form.Item
           name="frequency5g"
-          label="频点"
+          label={t('commission.frequency')}
           rules={[{ required: true, message: t('common.pleaseInput') }]}
         >
-          <InputNumber style={{ width: '100%' }} placeholder="频点值" min={0} />
+          <InputNumber style={{ width: '100%' }} placeholder={t('commission.frequencyPlaceholder')} min={0} />
         </Form.Item>
         <Form.Item
           name="pci5g"
           label="PCI"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { type: 'number', min: 0, max: 1007, message: 'PCI范围: 0-1007' },
+            { type: 'number', min: 0, max: 1007, message: t('commission.pciRange5g') },
           ]}
         >
           <InputNumber style={{ width: '100%' }} placeholder="Physical Cell ID" min={0} max={1007} />
@@ -358,27 +360,27 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
       </Card>
 
       {/* 核心网 IP */}
-      <Card title="核心网 IP" size="small" style={{ marginBottom: 16 }}>
+      <Card title={t('commission.coreIp')} size="small" style={{ marginBottom: 16 }}>
         <Form.Item
           name="coreIp5g"
-          label="核心网 IP"
+          label={t('commission.coreIp')}
           rules={[
             { required: true, message: t('common.pleaseInput') },
             ipValidationRule,
           ]}
         >
-          <Input placeholder="AMF/核心网地址" />
+          <Input placeholder={t('commission.amfAddress')} />
         </Form.Item>
       </Card>
 
       {/* 切片配置 */}
       <Card
-        title="切片配置"
+        title={t('commission.sliceConfig')}
         size="small"
         style={{ marginBottom: 16 }}
         extra={
           <Button type="link" size="small" icon={<PlusOutlined />} onClick={addSlice}>
-            添加切片
+            {t('commission.addSlice')}
           </Button>
         }
       >
@@ -404,27 +406,27 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
               />
             )}
             <Text strong style={{ display: 'block', marginBottom: 8 }}>
-              切片 {index + 1}
+              {t('commission.slice')} {index + 1}
             </Text>
             <Form.Item label="TAC" style={{ marginBottom: 8 }}>
               <Input
                 value={slice.tac}
                 onChange={(e) => updateSlice(slice.id, 'tac', e.target.value)}
-                placeholder="TAC（切片）"
+                placeholder={t('commission.sliceTac')}
               />
             </Form.Item>
             <Form.Item label="PLMN" style={{ marginBottom: 8 }}>
               <Input
                 value={slice.plmn}
                 onChange={(e) => updateSlice(slice.id, 'plmn', e.target.value)}
-                placeholder="PLMN（切片）"
+                placeholder={t('commission.slicePlmn')}
               />
             </Form.Item>
             <Form.Item label="ECI" style={{ marginBottom: 0 }}>
               <Input
                 value={slice.eci}
                 onChange={(e) => updateSlice(slice.id, 'eci', e.target.value)}
-                placeholder="ECI（切片）"
+                placeholder={t('commission.sliceEci')}
               />
             </Form.Item>
           </div>
@@ -432,23 +434,23 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
       </Card>
 
       {/* 同步配置 */}
-      <Card title="同步" size="small" style={{ marginBottom: 16 }}>
-        <Form.Item label="同步模式">
+      <Card title={t('commission.sync')} size="small" style={{ marginBottom: 16 }}>
+        <Form.Item label={t('commission.syncMode')}>
           <Radio.Group
             value={syncConfig.syncMode}
             onChange={(e) => setSyncConfig({ ...syncConfig, syncMode: e.target.value })}
           >
-            <Radio value="gps">GPS同步</Radio>
-            <Radio value="ptp">PTP同步</Radio>
-            <Radio value="none">不同步</Radio>
+            <Radio value="gps">{t('commission.syncGps')}</Radio>
+            <Radio value="ptp">{t('commission.syncPtp')}</Radio>
+            <Radio value="none">{t('commission.syncNone')}</Radio>
           </Radio.Group>
         </Form.Item>
         {syncConfig.syncMode === 'ptp' && (
-          <Form.Item label="同步服务器">
+          <Form.Item label={t('commission.syncServer')}>
             <Input
               value={syncConfig.syncServer}
               onChange={(e) => setSyncConfig({ ...syncConfig, syncServer: e.target.value })}
-              placeholder="PTP服务器地址"
+              placeholder={t('commission.ptpServerPlaceholder')}
             />
           </Form.Item>
         )}
@@ -456,16 +458,16 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
 
       {/* 共享小区配置 */}
       <Card
-        title="共享小区配置"
+        title={t('commission.sharedCellConfig')}
         size="small"
         extra={
           <Button type="link" size="small" icon={<PlusOutlined />} onClick={addSharedCell}>
-            添加配置
+            {t('commission.addConfig')}
           </Button>
         }
       >
         {sharedCells.length === 0 ? (
-          <Text type="secondary">暂无共享小区配置</Text>
+          <Text type="secondary">{t('commission.noSharedCellConfig')}</Text>
         ) : (
           sharedCells.map((cell, index) => (
             <div
@@ -480,13 +482,13 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
               <Input
                 value={cell.name}
                 onChange={(e) => updateSharedCell(cell.id, 'name', e.target.value)}
-                placeholder="参数名"
+                placeholder={t('commission.paramName')}
                 style={{ flex: 1 }}
               />
               <Input
                 value={cell.value}
                 onChange={(e) => updateSharedCell(cell.id, 'value', e.target.value)}
-                placeholder="参数值"
+                placeholder={t('commission.paramValue')}
                 style={{ flex: 1 }}
               />
               <Button
@@ -511,14 +513,14 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
           label="IPA Unit"
           rules={[
             { required: true, message: t('common.pleaseInput') },
-            { max: 50, message: 'IPA Unit最多50个字符' },
+            { max: 50, message: t('commission.ipaUnitMax') },
           ]}
         >
-          <Input placeholder="IPA Unit标识" maxLength={50} />
+          <Input placeholder={t('commission.ipaUnitPlaceholder')} maxLength={50} />
         </Form.Item>
       </Card>
 
-      <Card title="BSC业务IP" size="small" style={{ marginBottom: 16 }}>
+      <Card title={t('commission.bscIp')} size="small" style={{ marginBottom: 16 }}>
         <Form.Item
           name="bscIp"
           label="BSC IP"
@@ -527,7 +529,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
             ipValidationRule,
           ]}
         >
-          <Input placeholder="BSC业务IP地址" />
+          <Input placeholder={t('commission.bscAddressPlaceholder')} />
         </Form.Item>
       </Card>
 
@@ -540,7 +542,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
             ipValidationRule,
           ]}
         >
-          <Input placeholder="例如: 192.168.1.1" />
+          <Input placeholder={t('commission.ipExample')} />
         </Form.Item>
       </Card>
     </>
@@ -592,7 +594,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
 
   return (
     <Drawer
-      title={mode === 'edit' ? '编辑开通任务' : '新增开通任务'}
+      title={mode === 'edit' ? t('commission.editTask') : t('commission.addTask')}
       open={open}
       onClose={handleClose}
       width={640}
@@ -611,7 +613,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
       <Form form={form} layout="vertical" initialValues={initial4GValues}>
         {/* 编辑模式下不显示开站方式 */}
         {mode === 'add' && (
-          <Form.Item label="开站方式" required>
+          <Form.Item label={t('commission.provisionMode')} required>
             <Radio.Group
               value={provMode}
               onChange={(e) => {
@@ -619,8 +621,8 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
                 form.resetFields();
               }}
             >
-              <Radio value="manual">手动配置参数</Radio>
-              <Radio value="import">导入方式</Radio>
+              <Radio value="manual">{t('commission.manualConfig')}</Radio>
+              <Radio value="import">{t('commission.batchImport')}</Radio>
             </Radio.Group>
           </Form.Item>
         )}
@@ -630,25 +632,25 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
             {/* 基站编码 */}
             <Form.Item
               name="stationCode"
-              label="基站编码"
+              label={t('commission.stationCode')}
               rules={[{ required: true, message: t('common.pleaseInput') }]}
             >
-              <Input placeholder="请输入基站编码" maxLength={50} />
+              <Input placeholder={t('commission.stationCodePlaceholder')} maxLength={50} />
             </Form.Item>
 
             {/* 基站名称 */}
             <Form.Item
               name="stationName"
-              label="基站名称"
+              label={t('commission.stationName')}
               rules={[{ required: true, message: t('common.pleaseInput') }]}
             >
-              <Input placeholder="请输入基站名称" maxLength={100} />
+              <Input placeholder={t('commission.stationNamePlaceholder')} maxLength={100} />
             </Form.Item>
 
             {/* 基站类型 - 编辑模式下只显示标签 */}
-            <Form.Item label="基站类型" required>
+            <Form.Item label={t('commission.stationType')} required>
               {mode === 'edit' ? (
-                <Text strong>{stationType === 'eNB' ? '4G (eNB)' : stationType === 'gNB' ? '5G (gNB)' : '2G (GSM)'}</Text>
+                <Text strong>{stationType === 'eNB' ? t('commission.stationType4g') : stationType === 'gNB' ? t('commission.stationType5g') : t('commission.stationType2g')}</Text>
               ) : (
                 <Select
                   value={stationType}
@@ -672,7 +674,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
         {provMode === 'import' && mode === 'add' && (
           <>
             {/* 导入模式下仍需选择基站类型 */}
-            <Form.Item label="基站类型" required>
+            <Form.Item label={t('commission.stationType')} required>
               <Select
                 value={stationType}
                 onChange={setStationType}

@@ -27,6 +27,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import { useT } from '@/hooks/useT';
 
 // 收集状态类型: 0-未收集, 1-收集中, 2-收集失败, 3-收集完成
 type CollectStatus = '0' | '1' | '2' | '3';
@@ -51,14 +52,6 @@ interface ExceptionLog {
   onlineStatus: OnlineStatus;
   isFileDeleted: string;
 }
-
-// 收集状态配置
-const collectStatusConfig: Record<CollectStatus, { text: string; color: string }> = {
-  '0': { text: '未收集', color: 'default' },
-  '1': { text: '收集中', color: 'processing' },
-  '2': { text: '收集失败', color: 'error' },
-  '3': { text: '收集完成', color: 'success' },
-};
 
 // 初始 Mock 数据
 const initialMockExceptionLogs: ExceptionLog[] = [
@@ -145,6 +138,7 @@ const initialMockExceptionLogs: ExceptionLog[] = [
 ];
 
 export default function ExceptionLog() {
+  const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [exceptionLogs, setExceptionLogs] = useState<ExceptionLog[]>(initialMockExceptionLogs);
@@ -152,6 +146,14 @@ export default function ExceptionLog() {
   const [logsToDelete, setLogsToDelete] = useState<ExceptionLog[]>([]);
   const [logDetailVisible, setLogDetailVisible] = useState(false);
   const [selectedLog, setSelectedLog] = useState<ExceptionLog | null>(null);
+
+  // 收集状态配置（依赖 t）
+  const collectStatusConfig = useMemo<Record<CollectStatus, { text: string; color: string }>>(() => ({
+    '0': { text: t('log.exception.notCollected'), color: 'default' },
+    '1': { text: t('log.exception.collecting'), color: 'processing' },
+    '2': { text: t('log.exception.collectFailed'), color: 'error' },
+    '3': { text: t('log.exception.collectCompleted'), color: 'success' },
+  }), [t]);
 
   // 过滤数据
   const filteredData = useMemo(() => {
@@ -191,34 +193,34 @@ export default function ExceptionLog() {
 
   // 筛选字段
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '设备编码', type: 'input', placeholder: '请输入设备编码/名称/IP' },
+    { name: 'keyword', label: t('log.exception.column.deviceCode'), type: 'input', placeholder: t('log.exception.devCodeNameIp') },
     {
       name: 'onlineStatus',
-      label: '在线状态',
+      label: t('log.exception.onlineStatus'),
       type: 'select',
       options: [
-        { label: '在线', value: '1' },
-        { label: '离线', value: '0' },
+        { label: t('log.exception.online'), value: '1' },
+        { label: t('log.exception.offline'), value: '0' },
       ],
     },
     {
       name: 'collectStatus',
-      label: '收集状态',
+      label: t('log.exception.collectStatus'),
       type: 'select',
       options: [
-        { label: '未收集', value: '0' },
-        { label: '收集中', value: '1' },
-        { label: '收集失败', value: '2' },
-        { label: '收集完成', value: '3' },
+        { label: t('log.exception.notCollected'), value: '0' },
+        { label: t('log.exception.collecting'), value: '1' },
+        { label: t('log.exception.collectFailed'), value: '2' },
+        { label: t('log.exception.collectCompleted'), value: '3' },
       ],
     },
-    { name: 'timeRange', label: '时间范围', type: 'date-range', span: 2 },
-  ], []);
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
+  ], [t]);
 
   // 开始收集
   const handleCollect = (record: ExceptionLog) => {
     if (record.onlineStatus === '0') {
-      void message.warning(`设备 ${record.deviceCode} 不在线，无法收集日志`);
+      void message.warning(t('log.exception.devNotOnline', { code: record.deviceCode }));
       return;
     }
     // 更新状态为收集中
@@ -227,13 +229,13 @@ export default function ExceptionLog() {
         log.id === record.id ? { ...log, manualCollectionStatus: '1' as CollectStatus } : log
       )
     );
-    void message.success(`开始收集设备 ${record.deviceCode} 的日志`);
+    void message.success(t('log.exception.startCollecting', { code: record.deviceCode }));
   };
 
   // 重新收集
   const handleRecollect = (record: ExceptionLog) => {
     if (record.onlineStatus === '0') {
-      void message.warning(`设备 ${record.deviceCode} 不在线，无法收集日志`);
+      void message.warning(t('log.exception.devNotOnline', { code: record.deviceCode }));
       return;
     }
     // 更新状态为收集中
@@ -242,12 +244,12 @@ export default function ExceptionLog() {
         log.id === record.id ? { ...log, manualCollectionStatus: '1' as CollectStatus } : log
       )
     );
-    void message.success(`重新收集设备 ${record.deviceCode} 的日志`);
+    void message.success(t('log.exception.recollecting', { code: record.deviceCode }));
   };
 
   // 下载日志
   const handleDownload = (record: ExceptionLog) => {
-    void message.success(`正在下载设备 ${record.deviceCode} 的日志文件: ${record.fileName}`);
+    void message.success(t('log.exception.downloading', { code: record.deviceCode, fileName: record.fileName ?? '' }));
   };
 
   // 查看文件
@@ -258,13 +260,13 @@ export default function ExceptionLog() {
 
   // 导出
   const handleExport = () => {
-    void message.success('正在导出异常日志数据...');
+    void message.success(t('log.exception.exporting'));
   };
 
   // 批量删除
   const handleBatchDelete = () => {
     if (selectedRowKeys.length === 0) {
-      void message.warning('请选择要删除的记录');
+      void message.warning(t('log.exception.selectDelete'));
       return;
     }
 
@@ -276,8 +278,8 @@ export default function ExceptionLog() {
 
     if (collectingLogs.length > 0) {
       Modal.warning({
-        title: '无法删除',
-        content: `选中的记录中有 ${collectingLogs.length} 个正在收集中，不允许删除。请等待收集完成后再删除。`,
+        title: t('log.exception.cannotDelete'),
+        content: t('log.exception.collectingCannotDelete', { count: collectingLogs.length }),
       });
       return;
     }
@@ -286,7 +288,7 @@ export default function ExceptionLog() {
     const deletableLogs = selectedLogs.filter((log) => log.manualCollectionStatus !== '1');
 
     if (deletableLogs.length === 0) {
-      void message.warning('选中的记录都在收集中，无法删除');
+      void message.warning(t('log.exception.allCollecting'));
       return;
     }
 
@@ -295,7 +297,7 @@ export default function ExceptionLog() {
   };
 
   const handleDeleteConfirm = () => {
-    void message.success(`已删除 ${logsToDelete.length} 条异常日志记录`);
+    void message.success(t('log.exception.deletedCount', { count: logsToDelete.length }));
     setDeleteModalVisible(false);
     setLogsToDelete([]);
     setSelectedRowKeys([]);
@@ -312,7 +314,7 @@ export default function ExceptionLog() {
     if (manualCollectionStatus === '0' && isOnline) {
       items.push({
         key: 'collect',
-        label: '开始收集',
+        label: t('log.exception.startCollect'),
         icon: <PlayCircleOutlined />,
         onClick: () => handleCollect(record),
       });
@@ -322,7 +324,7 @@ export default function ExceptionLog() {
     if (manualCollectionStatus === '2' && isOnline) {
       items.push({
         key: 'recollect',
-        label: '重新收集',
+        label: t('log.exception.recollect'),
         icon: <ReloadOutlined />,
         onClick: () => handleRecollect(record),
       });
@@ -332,7 +334,7 @@ export default function ExceptionLog() {
     if (manualCollectionStatus === '3' && hasFile) {
       items.push({
         key: 'download',
-        label: '下载日志',
+        label: t('log.exception.downloadLog'),
         icon: <DownloadOutlined />,
         onClick: () => handleDownload(record),
       });
@@ -342,7 +344,7 @@ export default function ExceptionLog() {
     if (hasFile) {
       items.push({
         key: 'view',
-        label: '查看详情',
+        label: t('log.exception.viewDetail'),
         icon: <EyeOutlined />,
         onClick: () => handleViewFile(record),
       });
@@ -352,7 +354,7 @@ export default function ExceptionLog() {
     if (!isOnline && (manualCollectionStatus === '0' || manualCollectionStatus === '2')) {
       items.push({
         key: 'offline',
-        label: '设备离线，无法收集',
+        label: t('log.exception.devOffline'),
         icon: <PlayCircleOutlined style={{ color: '#999' }} />,
         disabled: true,
       });
@@ -365,18 +367,18 @@ export default function ExceptionLog() {
   const batchActions: BatchAction[] = useMemo(() => [
     {
       key: 'delete',
-      label: '批量删除',
+      label: t('log.exception.batchDelete'),
       icon: <DeleteOutlined />,
       danger: true,
       onClick: handleBatchDelete,
     },
-  ], [selectedRowKeys]);
+  ], [selectedRowKeys, t]);
 
   // 表格列 - 在线状态放在设备名称前面
   const columns: DataTableColumn<ExceptionLog>[] = useMemo(() => [
     {
       key: 'operation',
-      title: '操作',
+      title: t('common.operation'),
       width: 100,
       fixed: 'right',
       render: (_: unknown, record: ExceptionLog) => {
@@ -389,7 +391,7 @@ export default function ExceptionLog() {
         if (items.length === 1) {
           const item = items[0] as NonNullable<MenuProps['items']>[number];
           if ('label' in item && 'onClick' in item) {
-            return <Button type="link" size="small" onClick={() => item.onClick?.({} as any, null)}>{item.label as string}</Button>;
+            return <Button type="link" size="small" onClick={() => item.onClick?.()}>{item.label as string}</Button>;
           }
         }
         return (
@@ -401,64 +403,64 @@ export default function ExceptionLog() {
     },
     {
       key: 'deviceCode',
-      title: '设备编码',
+      title: t('log.exception.column.deviceCode'),
       dataIndex: 'deviceCode',
       width: 140,
       render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
     },
     {
       key: 'onlineStatus',
-      title: '在线状态',
+      title: t('log.exception.onlineStatus'),
       dataIndex: 'onlineStatus',
       width: 100,
       render: (val: OnlineStatus) => (
         <Tag color={val === '1' ? 'success' : 'default'}>
-          {val === '1' ? '在线' : '离线'}
+          {val === '1' ? t('log.exception.online') : t('log.exception.offline')}
         </Tag>
       ),
     },
     {
       key: 'deviceName',
-      title: '设备名称',
+      title: t('log.exception.column.deviceName'),
       dataIndex: 'deviceName',
       width: 180,
       ellipsis: true,
     },
     {
       key: 'deviceType',
-      title: '设备类型',
+      title: t('log.exception.column.deviceType'),
       dataIndex: 'deviceType',
       width: 100,
     },
     {
       key: 'operateIp',
-      title: '基站IP',
+      title: t('log.exception.column.baseIp'),
       dataIndex: 'operateIp',
       width: 140,
       render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
     },
     {
       key: 'product',
-      title: '产品类型',
+      title: t('log.exception.column.productType'),
       dataIndex: 'product',
       width: 120,
     },
     {
       key: 'softwareVersion',
-      title: '软件版本',
+      title: t('log.exception.column.softwareVersion'),
       dataIndex: 'softwareVersion',
       width: 120,
     },
     {
       key: 'operationName',
-      title: '异常类型',
+      title: t('log.exception.column.exceptionType'),
       dataIndex: 'operationName',
       width: 100,
       render: (val: string) => <Tag color="orange">{val}</Tag>,
     },
     {
       key: 'manualCollectionStatus',
-      title: '收集状态',
+      title: t('log.exception.collectStatus'),
       dataIndex: 'manualCollectionStatus',
       width: 100,
       render: (val: CollectStatus) => {
@@ -468,7 +470,7 @@ export default function ExceptionLog() {
     },
     {
       key: 'fileName',
-      title: '文件名',
+      title: t('log.exception.column.fileName'),
       dataIndex: 'fileName',
       width: 200,
       ellipsis: true,
@@ -476,33 +478,33 @@ export default function ExceptionLog() {
     },
     {
       key: 'opStartTime',
-      title: '时间',
+      title: t('log.exception.column.time'),
       dataIndex: 'opStartTime',
       width: 160,
     },
     {
       key: 'runtimeBeforeReboot',
-      title: '运行时间',
+      title: t('log.exception.column.runtime'),
       dataIndex: 'runtimeBeforeReboot',
       width: 120,
       render: (val?: string) => val ?? '-',
     },
     {
       key: 'haltDetailReason',
-      title: '死机原因',
+      title: t('log.exception.column.haltReason'),
       dataIndex: 'haltDetailReason',
       width: 140,
       ellipsis: true,
       render: (val?: string) => val ?? '-',
     },
-  ], [exceptionLogs]);
+  ], [t, collectStatusConfig, getActionMenu]);
 
   return (
     <ListPageLayout
-      title="设备异常日志"
+      title={t('log.exceptionLog')}
       extra={
         <Button type="primary" icon={<ExportOutlined />} onClick={handleExport}>
-          导出
+          {t('log.export')}
         </Button>
       }
     >
@@ -528,12 +530,12 @@ export default function ExceptionLog() {
         batchActions={batchActions}
         scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
         showRowNumber
-        rowNumberTitle="序号"
+        rowNumberTitle={t('log.exception.column.seq')}
       />
 
       {/* 日志详情抽屉 */}
       <Drawer
-        title="日志文件详情"
+        title={t('log.exception.detail.title')}
         placement="right"
         width={640}
         open={logDetailVisible}
@@ -542,48 +544,48 @@ export default function ExceptionLog() {
         {selectedLog && (
           <div>
             {/* 设备信息 */}
-            <Card size="small" title="设备信息" style={{ marginBottom: 16 }}>
+            <Card size="small" title={t('log.exception.detail.devInfo')} style={{ marginBottom: 16 }}>
               <Descriptions column={2} size="small">
-                <Descriptions.Item label="设备编码">
+                <Descriptions.Item label={t('log.exception.detail.devCode')}>
                   <Typography.Text style={{ fontFamily: 'monospace' }}>{selectedLog.deviceCode}</Typography.Text>
                 </Descriptions.Item>
-                <Descriptions.Item label="设备名称">{selectedLog.deviceName}</Descriptions.Item>
-                <Descriptions.Item label="设备类型">{selectedLog.deviceType}</Descriptions.Item>
-                <Descriptions.Item label="基站IP">
+                <Descriptions.Item label={t('log.exception.detail.devName')}>{selectedLog.deviceName}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.devType')}>{selectedLog.deviceType}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.baseIp')}>
                   <Typography.Text style={{ fontFamily: 'monospace' }}>{selectedLog.operateIp}</Typography.Text>
                 </Descriptions.Item>
-                <Descriptions.Item label="产品类型">{selectedLog.product}</Descriptions.Item>
-                <Descriptions.Item label="软件版本">{selectedLog.softwareVersion}</Descriptions.Item>
-                <Descriptions.Item label="在线状态">
+                <Descriptions.Item label={t('log.exception.detail.productType')}>{selectedLog.product}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.softwareVersion')}>{selectedLog.softwareVersion}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.onlineStatus')}>
                   <Tag color={selectedLog.onlineStatus === '1' ? 'success' : 'default'}>
-                    {selectedLog.onlineStatus === '1' ? '在线' : '离线'}
+                    {selectedLog.onlineStatus === '1' ? t('log.exception.online') : t('log.exception.offline')}
                   </Tag>
                 </Descriptions.Item>
               </Descriptions>
             </Card>
 
             {/* 异常信息 */}
-            <Card size="small" title="异常信息" style={{ marginBottom: 16 }}>
+            <Card size="small" title={t('log.exception.detail.exceptionInfo')} style={{ marginBottom: 16 }}>
               <Descriptions column={2} size="small">
-                <Descriptions.Item label="异常类型">
+                <Descriptions.Item label={t('log.exception.detail.exceptionType')}>
                   <Tag color="orange">{selectedLog.operationName}</Tag>
                 </Descriptions.Item>
-                <Descriptions.Item label="收集状态">
+                <Descriptions.Item label={t('log.exception.detail.collectStatus')}>
                   <Tag color={collectStatusConfig[selectedLog.manualCollectionStatus].color}>
                     {collectStatusConfig[selectedLog.manualCollectionStatus].text}
                   </Tag>
                 </Descriptions.Item>
-                <Descriptions.Item label="发生时间">{selectedLog.opStartTime}</Descriptions.Item>
-                <Descriptions.Item label="运行时间">{selectedLog.runtimeBeforeReboot ?? '-'}</Descriptions.Item>
-                <Descriptions.Item label="死机原因" span={2}>{selectedLog.haltDetailReason ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.occurTime')}>{selectedLog.opStartTime}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.runtime')}>{selectedLog.runtimeBeforeReboot ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label={t('log.exception.detail.haltReason')} span={2}>{selectedLog.haltDetailReason ?? '-'}</Descriptions.Item>
               </Descriptions>
             </Card>
 
             {/* 文件信息 */}
             {selectedLog.fileName && (
-              <Card size="small" title="文件信息">
+              <Card size="small" title={t('log.exception.detail.fileInfo')}>
                 <Descriptions column={1} size="small">
-                  <Descriptions.Item label="文件名">
+                  <Descriptions.Item label={t('log.exception.detail.fileName')}>
                     <Typography.Text style={{ fontFamily: 'monospace' }} copyable>
                       {selectedLog.fileName}
                     </Typography.Text>
@@ -593,7 +595,7 @@ export default function ExceptionLog() {
                 <Divider style={{ margin: '12px 0' }} />
 
                 <div>
-                  <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>日志内容预览</Typography.Text>
+                  <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>{t('log.exception.detail.logPreview')}</Typography.Text>
                   <pre style={{
                     background: '#1e1e1e',
                     color: '#d4d4d4',
@@ -623,15 +625,15 @@ export default function ExceptionLog() {
 
       {/* 删除确认弹窗 */}
       <Modal
-        title="确认删除"
+        title={t('log.exception.deleteConfirm.title')}
         open={deleteModalVisible}
         onCancel={() => setDeleteModalVisible(false)}
         onOk={handleDeleteConfirm}
-        okText="确认删除"
-        cancelText="取消"
+        okText={t('log.exception.deleteConfirm.ok')}
+        cancelText={t('common.cancel')}
         okButtonProps={{ danger: true }}
       >
-        <p>确定要删除选中的 {logsToDelete.length} 条异常日志记录吗？此操作不可恢复。</p>
+        <p>{t('log.exception.deleteConfirm.content', { count: logsToDelete.length })}</p>
       </Modal>
     </ListPageLayout>
   );

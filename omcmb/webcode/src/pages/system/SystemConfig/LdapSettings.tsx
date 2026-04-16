@@ -34,9 +34,9 @@ export default function LdapSettings({ form }: LdapSettingsProps) {
   const ldapEnable = Form.useWatch('ldapEnable', form);
 
   const handleTestLdap = () => {
-    void message.info('正在测试LDAP连接...');
+    void message.info(t('system.ldap.testingConnection'));
     setTimeout(() => {
-      void message.success('LDAP连接成功');
+      void message.success(t('system.ldap.connectionSuccess'));
     }, 1000);
   };
 
@@ -51,51 +51,51 @@ export default function LdapSettings({ form }: LdapSettingsProps) {
       ldapPwd: '',
     }}>
       {/* LDAP服务设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>LDAP服务设置</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.ldap.serviceSettings')}</span>}>
         {/* LDAP Enable */}
         <div style={settingRowStyle}>
           <Space>
-            <span>LDAP Enable</span>
+            <span>{t('system.ldap.enable')}</span>
             <Form.Item name="ldapEnable" noStyle valuePropName="checked">
               <Switch size="small" />
             </Form.Item>
             <Button type="primary" size="small" onClick={handleTestLdap} disabled={!ldapEnable}>
-              测试
+              {t('common.test')}
             </Button>
           </Space>
         </div>
 
         {/* 服务器配置 */}
         <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>服务器配置</div>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>{t('system.ldap.serverConfig')}</div>
 
           <div style={formGroupStyle}>
-            <Form.Item label="LDAP IP" name="ldapIp" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('system.ldap.ip')} name="ldapIp" style={{ marginBottom: 0 }}>
               <Input style={{ width: 180 }} placeholder="192.168.1.50" disabled={!ldapEnable} />
             </Form.Item>
-            <Form.Item label="LDAP Port" name="ldapPort" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('system.ldap.port')} name="ldapPort" style={{ marginBottom: 0 }}>
               <Input style={{ width: 100 }} placeholder="389" disabled={!ldapEnable} />
             </Form.Item>
             <Form.Item name="ldapSSL" valuePropName="checked" noStyle style={{ marginTop: 30 }}>
-              <Checkbox disabled={!ldapEnable}>SSL/TLS</Checkbox>
+              <Checkbox disabled={!ldapEnable}>{t('system.ldap.sslTls')}</Checkbox>
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
-            <Form.Item label="LDAP Base" name="ldapBase" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('system.ldap.base')} name="ldapBase" style={{ marginBottom: 0 }}>
               <Input style={{ width: 300 }} placeholder="dc=example,dc=com" disabled={!ldapEnable} />
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
-            <Form.Item label="LDAP User" name="ldapUser" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('system.ldap.user')} name="ldapUser" style={{ marginBottom: 0 }}>
               <Input style={{ width: 300 }} placeholder="cn=admin,dc=example,dc=com" disabled={!ldapEnable} />
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
-            <Form.Item label="LDAP Password" name="ldapPwd" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 200 }} placeholder="请输入密码" disabled={!ldapEnable} />
+            <Form.Item label={t('system.ldap.password')} name="ldapPwd" style={{ marginBottom: 0 }}>
+              <Input.Password style={{ width: 200 }} placeholder={t('common.pleaseInput')} disabled={!ldapEnable} />
             </Form.Item>
           </div>
         </div>

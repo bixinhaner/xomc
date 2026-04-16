@@ -49,40 +49,39 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       msg: '',
     }}>
       {/* 默认密码 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>默认密码</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.defaultPassword')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="modifyPWD" valuePropName="checked" noStyle>
-            <Checkbox>用户需要在首次登录时修改默认密码</Checkbox>
+            <Checkbox>{t('system.security.forcePasswordChangeOnFirstLogin')}</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <Space>
-              将
+              {t('system.security.useAsDefaultPassword')}
               <Form.Item name="defaultPasswd" noStyle>
                 <Input style={{ width: 120 }} maxLength={50} />
               </Form.Item>
-              作为默认密码登录，用户被密码重置后使用此密码
             </Space>
           </div>
         </div>
       </Card>
 
       {/* 密码强度 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>密码强度</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.passwordStrength')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="passwordContent" valuePropName="checked" noStyle>
-            <Checkbox>密码需要包含数字、小写字母、大写字母和特殊字符(.!@#$%^&*?)</Checkbox>
+            <Checkbox>{t('system.security.passwordComplexityRequirement')}</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
-            <div style={{ marginBottom: 8 }}>用户密码长度：</div>
+            <div style={{ marginBottom: 8 }}>{t('system.security.userPasswordLength')}</div>
             <Space size="large">
               <Space>
-                最小值
+                {t('common.minLength')}
                 <Form.Item name="pwdMinLength" noStyle>
                   <InputNumber min={6} max={32} style={{ width: 60 }} />
                 </Form.Item>
               </Space>
               <Space>
-                最大值
+                {t('common.maxLength')}
                 <Form.Item name="pwdMaxLength" noStyle>
                   <InputNumber min={6} max={64} style={{ width: 60 }} />
                 </Form.Item>
@@ -93,47 +92,47 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       </Card>
 
       {/* 用户 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>用户</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.user')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            <span style={{ fontWeight: 500 }}>用户名称：</span>
+            <span style={{ fontWeight: 500 }}>{t('common.username')}：</span>
             <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>
-              只能包含数字、26个小写字母、大写字母和减号(-)、下划线(_)、破折号(-)
+              {t('system.security.usernameRule')}
             </span>
           </Space>
         </div>
       </Card>
 
       {/* 密码有效期 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>密码有效期</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.passwordExpiration')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space wrap>
             <Form.Item name="expires" valuePropName="checked" noStyle>
-              <Checkbox>密码有效期为</Checkbox>
+              <Checkbox>{t('system.security.passwordValidFor')}</Checkbox>
             </Form.Item>
             <Form.Item name="validPeriod" noStyle>
               <InputNumber min={1} max={365} style={{ width: 60 }} />
             </Form.Item>
-            <span>天修改一次密码，系统将在到期前</span>
+            <span>{t('system.security.daysBeforeExpiry')}</span>
             <Form.Item name="promptBeforeDays" noStyle>
               <InputNumber min={1} max={30} style={{ width: 60 }} />
             </Form.Item>
-            <span>天提醒</span>
+            <span>{t('system.security.daysRemind')}</span>
           </Space>
         </div>
       </Card>
 
       {/* 登录锁定 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>登录锁定</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.loginLockout')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space wrap>
             <Form.Item name="verifyEnable" valuePropName="checked" noStyle>
-              <Checkbox>用户登录需要验证码验证，如果用户名或密码输入错误</Checkbox>
+              <Checkbox>{t('system.security.requireCaptchaAfterFailedAttempts')}</Checkbox>
             </Form.Item>
             <Form.Item name="attemptTimes" noStyle>
               <InputNumber min={1} max={10} style={{ width: 60 }} />
             </Form.Item>
-            <span>次，将被要求输入验证码</span>
+            <span>{t('system.security.timesThenRequireCaptcha')}</span>
           </Space>
         </div>
         <div style={subSettingStyle}>
@@ -152,7 +151,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       </Card>
 
       {/* IP限流 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>IP限流</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.ipRateLimit')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space wrap>
             如果你在
@@ -173,7 +172,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       </Card>
 
       {/* 屏幕锁定 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>屏幕锁定</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.screenLockout')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             如果用户
@@ -186,16 +185,16 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       </Card>
 
       {/* 禁止浏览器自动记录密码 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>禁止浏览器自动记录密码</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.preventBrowserPasswordSave')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="isBrowserAutoRecordPass" valuePropName="checked" noStyle>
-            <Checkbox>禁止浏览器自动记录密码</Checkbox>
+            <Checkbox>{t('system.security.preventBrowserPasswordSave')}</Checkbox>
           </Form.Item>
         </div>
       </Card>
 
       {/* 账户锁定 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>账户锁定</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.accountLockout')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
             <Form.Item name="autoLockUserDayEnable" noStyle valuePropName="checked">
@@ -210,23 +209,23 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       </Card>
 
       {/* 最大会话限制 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>最大会话限制</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.maxSessionLimit')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item name="isOnlyOneUserLoginEnable" noStyle valuePropName="checked">
-            <Checkbox>允许用户同时在多个设备登陆</Checkbox>
+            <Checkbox>{t('system.security.allowMultipleConcurrentLogin')}</Checkbox>
           </Form.Item>
         </div>
       </Card>
 
       {/* 登录提示 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>登录提示</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.loginNotification')}</span>}>
         <div style={settingRowStyle}>
           <Form.Item name="enabledFlag" valuePropName="checked" noStyle>
-            <Checkbox>用户每次登录时，系统推送消息通知</Checkbox>
+            <Checkbox>{t('system.security.pushNotificationOnLogin')}</Checkbox>
           </Form.Item>
           <div style={subSettingStyle}>
             <Form.Item name="msg" noStyle>
-              <Input.TextArea rows={3} maxLength={500} showCount placeholder="请输入登录后提示消息" />
+              <Input.TextArea rows={3} maxLength={500} showCount placeholder={t('system.security.pleaseInputLoginMessage')} />
             </Form.Item>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Button,
   Space,
@@ -21,6 +21,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import { useT } from '@/hooks/useT';
 
 // 事件级别类型
 type EventLevel = 'info' | 'warning' | 'error' | 'success';
@@ -47,21 +48,39 @@ const mockEventLogs: EventLog[] = [
   { id: '8', neCode: 'ENB00006', neIpAddress: '10.2.0.106', eventName: '状态变化', eventReason: '设备状态从离线变为在线', time: '2026-03-25 08:00:00', eventLevel: 'info' },
 ];
 
-// 事件类型列表
-const eventTypes = [
-  { label: '配置变更', value: '配置变更' },
-  { label: '状态变化', value: '状态变化' },
-  { label: '告警产生', value: '告警产生' },
-  { label: '告警清除', value: '告警清除' },
-  { label: '连接建立', value: '连接建立' },
-  { label: '连接断开', value: '连接断开' },
-  { label: '软件升级', value: '软件升级' },
-  { label: '重启', value: '重启' },
-];
-
 export default function EventLog() {
+  const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [statisticVisible, setStatisticVisible] = useState(false);
+
+  // 事件类型列表（依赖 t）
+  const eventTypes = useMemo(() => [
+    { label: t('log.event.configChange'), value: t('log.event.configChange') },
+    { label: t('log.event.statusChange'), value: t('log.event.statusChange') },
+    { label: t('log.event.alarmGenerated'), value: t('log.event.alarmGenerated') },
+    { label: t('log.event.alarmCleared'), value: t('log.event.alarmCleared') },
+    { label: t('log.event.connectionEstablished'), value: t('log.event.connectionEstablished') },
+    { label: t('log.event.connectionLost'), value: t('log.event.connectionLost') },
+    { label: t('log.event.softwareUpgrade'), value: t('log.event.softwareUpgrade') },
+    { label: t('log.event.reboot'), value: t('log.event.reboot') },
+  ], [t]);
+
+  // 事件名称映射到 i18n 键（用于统计显示）
+  const eventNameToI18nKey = useMemo(() => ({
+    '配置变更': 'log.event.configChange',
+    '状态变化': 'log.event.statusChange',
+    '告警产生': 'log.event.alarmGenerated',
+    '告警清除': 'log.event.alarmCleared',
+    '连接建立': 'log.event.connectionEstablished',
+    '连接断开': 'log.event.connectionLost',
+    '软件升级': 'log.event.softwareUpgrade',
+    '重启': 'log.event.reboot',
+  } as const), []);
+
+  // 获取事件名称的国际化文本
+  const getEventNameLabel = useCallback((name: string) => {
+    return eventNameToI18nKey[name as keyof typeof eventNameToI18nKey] ? t(eventNameToI18nKey[name as keyof typeof eventNameToI18nKey]) : name;
+  }, [t, eventNameToI18nKey]);
 
   // 过滤数据
   const filteredData = useMemo(() => {
@@ -105,19 +124,19 @@ export default function EventLog() {
 
   // 筛选字段 - 增加时间搜索
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '设备编码', type: 'input', placeholder: '请输入设备编码' },
+    { name: 'keyword', label: t('log.deviceCode'), type: 'input', placeholder: t('log.inputDeviceCode') },
     {
       name: 'eventName',
-      label: '事件类型',
+      label: t('log.event.eventType'),
       type: 'select',
       options: eventTypes,
     },
-    { name: 'timeRange', label: '时间范围', type: 'date-range', span: 2 },
-  ], []);
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', span: 2 },
+  ], [t, eventTypes]);
 
   // 导出
   const handleExport = () => {
-    void message.success('正在导出事件日志数据...');
+    void message.success(t('log.event.exporting'));
   };
 
   // 统计
@@ -136,49 +155,49 @@ export default function EventLog() {
     },
     {
       key: 'neCode',
-      title: '设备编码',
+      title: t('log.deviceCode'),
       dataIndex: 'neCode',
       width: 140,
       render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
     },
     {
       key: 'neIpAddress',
-      title: '基站IP',
+      title: t('log.exception.column.baseIp'),
       dataIndex: 'neIpAddress',
       width: 140,
       render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
     },
     {
       key: 'eventName',
-      title: '事件类型',
+      title: t('log.event.eventType'),
       dataIndex: 'eventName',
       width: 120,
       render: (val: string) => <Tag color="blue">{val}</Tag>,
     },
     {
       key: 'eventReason',
-      title: '原因',
+      title: t('log.event.column.reason'),
       dataIndex: 'eventReason',
       ellipsis: true,
     },
     {
       key: 'time',
-      title: '时间',
+      title: t('log.event.column.time'),
       dataIndex: 'time',
       width: 160,
     },
-  ], []);
+  ], [t]);
 
   return (
     <ListPageLayout
-      title="事件日志"
+      title={t('log.eventLog')}
       extra={
         <Space>
           <Button icon={<BarChartOutlined />} onClick={handleStatistic}>
-            统计
+            {t('log.event.statistics')}
           </Button>
           <Button type="primary" icon={<ExportOutlined />} onClick={handleExport}>
-            导出
+            {t('log.event.export')}
           </Button>
         </Space>
       }
@@ -201,12 +220,12 @@ export default function EventLog() {
         onPageChange={() => {}}
         scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
         showRowNumber
-        rowNumberTitle="序号"
+        rowNumberTitle={t('log.event.seq')}
       />
 
       {/* 统计弹窗 */}
       <Modal
-        title="事件统计"
+        title={t('log.event.statModal.title')}
         open={statisticVisible}
         onCancel={() => setStatisticVisible(false)}
         footer={null}
@@ -217,7 +236,7 @@ export default function EventLog() {
             <Col span={6} key={stat.name}>
               <Card>
                 <Statistic
-                  title={stat.name}
+                  title={getEventNameLabel(stat.name)}
                   value={stat.count}
                   valueStyle={{ color: '#1890ff' }}
                 />
@@ -226,11 +245,11 @@ export default function EventLog() {
           ))}
         </Row>
         <div style={{ marginTop: 24 }}>
-          <h4>事件分布</h4>
+          <h4>{t('log.event.stat.eventDistribution')}</h4>
           <div style={{ background: '#f5f5f5', padding: 16, borderRadius: 4 }}>
             {statistics.map((stat) => (
               <div key={stat.name} style={{ marginBottom: 8, display: 'flex', alignItems: 'center' }}>
-                <span style={{ width: 100 }}>{stat.name}:</span>
+                <span style={{ width: 100 }}>{getEventNameLabel(stat.name)}:</span>
                 <div style={{
                   flex: 1,
                   height: 20,

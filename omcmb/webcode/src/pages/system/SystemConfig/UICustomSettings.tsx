@@ -26,7 +26,7 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
   const [logoBigFile, setLogoBigFile] = useState<UploadFile[]>([]);
 
   const handlePreview = () => {
-    void message.info('预览主题色效果');
+    void message.info(t('system.ui.previewThemeColor'));
     // 实际实现中可以动态修改CSS变量
   };
 
@@ -35,13 +35,13 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
     setLoginBgFile([]);
     setLogoSmallFile([]);
     setLogoBigFile([]);
-    void message.success('已恢复默认UI设置');
+    void message.success(t('system.ui.restoredDefault'));
   };
 
   const beforeUploadBg = (file: RcFile) => {
     const isLt1M = file.size / 1024 / 1024 < 1;
     if (!isLt1M) {
-      void message.error('登录背景图片大小不能超过1MB');
+      void message.error(t('system.ui.loginBgSizeExceeded'));
       return false;
     }
     setLoginBgFile([file]);
@@ -51,7 +51,7 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
   const beforeUploadLogo = (file: RcFile) => {
     const isLt400K = file.size / 1024 < 400;
     if (!isLt400K) {
-      void message.error('Logo图片大小不能超过400KB');
+      void message.error(t('system.ui.logoSizeExceeded'));
       return false;
     }
     return false;
@@ -61,27 +61,27 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
     <Form form={form} layout="vertical" size="small" initialValues={defaultUIConfig}>
       <Row gutter={24}>
         <Col span={12}>
-          <Form.Item name="ui_omc_name" label="OMC名称" rules={[{ required: true, message: '请输入OMC名称' }]}>
-            <Input placeholder="请输入系统名称，显示在浏览器标题" />
+          <Form.Item name="ui_omc_name" label={t('system.ui.omcName')} rules={[{ required: true, message: t('system.ui.pleaseInputOmcName') }]}>
+            <Input placeholder={t('system.ui.pleaseInputSystemName')} />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="ui_color" label="主题色" rules={[{ required: true }]}>
+          <Form.Item name="ui_color" label={t('system.ui.themeColor')} rules={[{ required: true }]}>
             <Space>
               <ColorPicker format="hex" />
               <Button icon={<EyeOutlined />} onClick={handlePreview}>
-                预览
+                {t('common.preview')}
               </Button>
             </Space>
           </Form.Item>
         </Col>
       </Row>
 
-      <Divider orientation="left" plain>图片上传</Divider>
+      <Divider orientation="left" plain>{t('system.ui.imageUpload')}</Divider>
 
       <Row gutter={24}>
         <Col span={8}>
-          <Card size="small" title="登录背景" extra={<span style={{ color: '#999', fontSize: 12 }}>最大1MB</span>}>
+          <Card size="small" title={t('system.ui.loginBackground')} extra={<span style={{ color: '#999', fontSize: 12 }}>{t('system.ui.max1mb')}</span>}>
             <Form.Item name="ui_login_background">
               <Dragger
                 fileList={loginBgFile}
@@ -93,14 +93,14 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
                 <p className="ant-upload-drag-icon">
                   <InboxOutlined />
                 </p>
-                <p className="ant-upload-text">点击或拖拽上传</p>
-                <p className="ant-upload-hint">支持 JPG / PNG 格式</p>
+                <p className="ant-upload-text">{t('common.clickOrDragToUpload')}</p>
+                <p className="ant-upload-hint">{t('common.supportJpgPng')}</p>
               </Dragger>
             </Form.Item>
           </Card>
         </Col>
         <Col span={8}>
-          <Card size="small" title="Logo小图" extra={<span style={{ color: '#999', fontSize: 12 }}>最大400KB</span>}>
+          <Card size="small" title={t('system.ui.logoSmall')} extra={<span style={{ color: '#999', fontSize: 12 }}>{t('system.ui.max400kb')}</span>}>
             <Form.Item name="ui_menu_logo_up">
               <Dragger
                 fileList={logoSmallFile}
@@ -116,13 +116,13 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
                 <p className="ant-upload-drag-icon">
                   <InboxOutlined />
                 </p>
-                <p className="ant-upload-text">菜单收起时显示</p>
+                <p className="ant-upload-text">{t('system.ui.showWhenMenuCollapsed')}</p>
               </Dragger>
             </Form.Item>
           </Card>
         </Col>
         <Col span={8}>
-          <Card size="small" title="Logo大图" extra={<span style={{ color: '#999', fontSize: 12 }}>最大400KB</span>}>
+          <Card size="small" title={t('system.ui.logoLarge')} extra={<span style={{ color: '#999', fontSize: 12 }}>{t('system.ui.max400kb')}</span>}>
             <Form.Item name="ui_menu_logo_down">
               <Dragger
                 fileList={logoBigFile}
@@ -138,7 +138,7 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
                 <p className="ant-upload-drag-icon">
                   <InboxOutlined />
                 </p>
-                <p className="ant-upload-text">菜单展开时显示</p>
+                <p className="ant-upload-text">{t('system.ui.showWhenMenuExpanded')}</p>
               </Dragger>
             </Form.Item>
           </Card>
@@ -149,14 +149,14 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
 
       <Space>
         <Popconfirm
-          title="确定恢复默认UI设置？"
-          description="此操作将覆盖当前设置"
+          title={t('system.ui.confirmRestoreDefault')}
+          description={t('system.ui.restoreWillOverwrite')}
           onConfirm={handleRestore}
-          okText="确定"
-          cancelText="取消"
+          okText={t('common.confirm')}
+          cancelText={t('common.cancel')}
         >
           <Button icon={<UndoOutlined />}>
-            恢复默认
+            {t('system.ui.restoreDefault')}
           </Button>
         </Popconfirm>
       </Space>

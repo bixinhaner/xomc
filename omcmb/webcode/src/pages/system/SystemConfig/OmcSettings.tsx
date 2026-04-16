@@ -47,9 +47,9 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
   const t = useT();
 
   const handleTestSyslog = () => {
-    void message.info('正在测试Syslog连接...');
+    void message.info(t('system.omc.testingSyslog'));
     setTimeout(() => {
-      void message.success('Syslog连接成功');
+      void message.success(t('system.omc.syslogConnected'));
     }, 1000);
   };
 
@@ -64,28 +64,28 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
       rootDiskAlarmThresHold: '10%',
     }}>
       {/* OMC协议设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>OMC协议设置</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.omc.protocolSettings')}</span>} style={{ marginBottom: 16 }}>
         {/* 协议方式 */}
         <div style={settingRowStyle}>
-          <div style={sectionTitleStyle}>协议方式</div>
+          <div style={sectionTitleStyle}>{t('system.omc.protocolMethod')}</div>
           <Space style={{ marginBottom: 8 }}>
             <Form.Item name="rsysLogEnable" noStyle valuePropName="checked">
-              <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+              <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
             </Form.Item>
             <Button type="primary" size="small" onClick={handleTestSyslog}>
-              测试
+              {t('common.test')}
             </Button>
           </Space>
           <div style={subSettingStyle}>
             <Space size="large">
               <Space>
-                <span>IP</span>
+                <span>{t('common.ip')}</span>
                 <Form.Item name="rsysLogIp" noStyle>
                   <Input style={{ width: 150 }} placeholder="请输入IP地址" />
                 </Form.Item>
               </Space>
               <Space>
-                <span>端口</span>
+                <span>{t('common.port')}</span>
                 <Form.Item name="rsysLogPort" noStyle>
                   <Input style={{ width: 100 }} placeholder="514" />
                 </Form.Item>
@@ -96,9 +96,9 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
       </Card>
 
       {/* 磁盘告警设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>磁盘告警设置</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.omc.diskAlarmSettings')}</span>}>
         <div style={settingRowStyle}>
-          <div style={{ marginBottom: 12 }}>磁盘告警阈值设置</div>
+          <div style={{ marginBottom: 12 }}>{t('system.omc.diskAlarmThreshold')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <span style={{ width: 200 }}>日志目录（/var）超过</span>

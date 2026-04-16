@@ -61,13 +61,13 @@ export default function SasSettings({ form }: SasSettingsProps) {
 
   const handleDeleteProvider = (id: string) => {
     modal.confirm({
-      title: '确认删除',
-      content: '确定要删除此SAS Provider吗？',
-      okText: '确定',
-      cancelText: '取消',
+      title: t('common.confirm'),
+      content: t('system.sas.confirmDeleteProvider'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
       onOk: () => {
         setProviders(providers.filter(p => p.id !== id));
-        message.success('删除成功');
+        message.success(t('common.deleteSuccess'));
       },
     });
   };
@@ -75,12 +75,12 @@ export default function SasSettings({ form }: SasSettingsProps) {
   const getOperationMenu = (record: SasProvider): MenuProps['items'] => [
     {
       key: 'edit',
-      label: '修改',
+      label: t('common.edit'),
       onClick: () => handleEditProvider(record),
     },
     {
       key: 'delete',
-      label: '删除',
+      label: t('common.delete'),
       danger: true,
       onClick: () => handleDeleteProvider(record.id),
     },
@@ -96,7 +96,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
           certName: certFileName || p.certName,
           updateTimeStr: new Date().toLocaleString(),
         } : p));
-        void message.success('修改成功');
+        void message.success(t('common.updateSuccess'));
       } else {
         const newProvider: SasProvider = {
           id: Date.now().toString(),
@@ -108,7 +108,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
           uploadSuccess: 1,
         };
         setProviders([...providers, newProvider]);
-        void message.success('添加成功');
+        void message.success(t('common.addSuccess'));
       }
       setModalVisible(false);
     });
@@ -151,21 +151,21 @@ export default function SasSettings({ form }: SasSettingsProps) {
       ),
     },
     {
-      title: 'Provider名称',
+      title: t('system.sas.providerName'),
       dataIndex: 'providerName',
       key: 'providerName',
       width: 150,
       ellipsis: true,
     },
     {
-      title: '服务器URL',
+      title: t('system.sas.serverUrl'),
       dataIndex: 'url',
       key: 'url',
       width: 250,
       ellipsis: true,
     },
     {
-      title: 'TLS证书',
+      title: t('system.sas.tlsCert'),
       key: 'cert',
       width: 260,
       ellipsis: true,
@@ -181,7 +181,7 @@ export default function SasSettings({ form }: SasSettingsProps) {
       ),
     },
     {
-      title: '更新时间',
+      title: t('common.updateTime'),
       dataIndex: 'updateTimeStr',
       key: 'updateTimeStr',
       width: 160,
@@ -195,18 +195,18 @@ export default function SasSettings({ form }: SasSettingsProps) {
         mainLogHbEnable: false,
       }}>
         {/* SAS */}
-        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>SAS</span>} style={{ marginBottom: 16 }}>
+        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.sas.title')}</span>} style={{ marginBottom: 16 }}>
           <Space style={{ marginBottom: 16 }}>
-            <span>SAS心跳日志</span>
+            <span>{t('system.sas.heartbeatLog')}</span>
             <Form.Item name="mainLogHbEnable" valuePropName="checked" noStyle>
               <Switch size="small" />
             </Form.Item>
           </Space>
 
           <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>SAS Provider列表</span>
+            <span>{t('system.sas.providerList')}</span>
             <Button type="primary" icon={<PlusOutlined />} size="small" onClick={handleAddProvider}>
-              添加
+              {t('common.add')}
             </Button>
           </div>
 
@@ -225,22 +225,22 @@ export default function SasSettings({ form }: SasSettingsProps) {
 
       {/* 添加/编辑Provider弹窗 */}
       <Modal
-        title={editingProvider ? 'Update SAS Provider' : 'New SAS Provider'}
+        title={editingProvider ? t('system.sas.editProvider') : t('system.sas.addProvider')}
         open={modalVisible}
         onOk={handleModalOk}
         onCancel={() => setModalVisible(false)}
-        okText="确定"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         width={600}
       >
         <Form form={providerForm} layout="vertical" initialValues={{ type: 'pem' }}>
           <Form.Item
             name="provider"
             label="SAS Provider"
-            rules={[{ required: true, message: 'SAS Provider不能为空' }]}
+            rules={[{ required: true, message: t('system.sas.providerRequired') }]}
           >
             <Input
-              placeholder="请输入SAS Provider"
+              placeholder={t('system.sas.pleaseInputProvider')}
               maxLength={50}
               disabled={!!editingProvider}
             />
@@ -249,26 +249,26 @@ export default function SasSettings({ form }: SasSettingsProps) {
           <Form.Item
             name="serverUrl"
             label="SAS Server URL"
-            rules={[{ required: true, message: 'SAS Server URL不能为空' }]}
+            rules={[{ required: true, message: t('system.sas.serverUrlRequired') }]}
           >
-            <Input placeholder="请输入SAS Server URL" maxLength={200} />
+            <Input placeholder={t('system.sas.pleaseInputServerUrl')} maxLength={200} />
           </Form.Item>
 
           {/* TLS证书 */}
-          <Card size="small" title="TLS证书" style={{ marginBottom: 16 }}>
-            <Form.Item name="type" label="证书文件类型">
+          <Card size="small" title={t('system.sas.tlsCert')} style={{ marginBottom: 16 }}>
+            <Form.Item name="type" label={t('system.sas.certFileType')}>
               <Radio.Group onChange={handleCertTypeChange}>
                 <Radio value="pem">.PEM</Radio>
                 <Radio value="p12">.P12</Radio>
               </Radio.Group>
             </Form.Item>
 
-            <Form.Item label="证书文件" required={!editingProvider}>
+            <Form.Item label={t('system.sas.certFile')} required={!editingProvider}>
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Input
                   readOnly
                   value={certFileName}
-                  placeholder="请先选择文件"
+                  placeholder={t('system.sas.pleaseSelectFileFirst')}
                   addonAfter={
                     <Upload
                       showUploadList={false}
@@ -287,12 +287,12 @@ export default function SasSettings({ form }: SasSettingsProps) {
             </Form.Item>
 
             {certType === 'pem' && (
-              <Form.Item label="私钥文件" required={!editingProvider}>
+              <Form.Item label={t('system.sas.privateKeyFile')} required={!editingProvider}>
                 <Space direction="vertical" style={{ width: '100%' }}>
                   <Input
                     readOnly
                     value={privateKeyFileName}
-                    placeholder="请先选择文件"
+                    placeholder={t('system.sas.pleaseSelectFileFirst')}
                     addonAfter={
                       <Upload
                         showUploadList={false}
@@ -309,10 +309,10 @@ export default function SasSettings({ form }: SasSettingsProps) {
               </Form.Item>
             )}
 
-            <Form.Item name="password" label="密码">
-              <Input.Password placeholder="证书存在密码时输入" maxLength={50} />
+            <Form.Item name="password" label={t('common.password')}>
+              <Input.Password placeholder={t('system.sas.inputPasswordIfCertHas')} maxLength={50} />
             </Form.Item>
-            <span style={{ color: '#bbb', fontSize: 12 }}>ℹ 证书存在密码时输入密码，否则无需填写</span>
+            <span style={{ color: '#bbb', fontSize: 12 }}>ℹ {t('system.sas.inputPasswordIfCertHas')}</span>
           </Card>
         </Form>
       </Modal>

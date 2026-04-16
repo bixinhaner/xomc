@@ -68,13 +68,7 @@ const QUICK_FILTER_OPTIONS = [
   { label: '未读', key: 'unread', unread: '1' },
 ];
 
-// 自动刷新间隔选项
-const AUTO_REFRESH_INTERVALS = [
-  { label: '15秒', value: 15 },
-  { label: '30秒', value: 30 },
-  { label: '1分钟', value: 60 },
-  { label: '5分钟', value: 300 },
-];
+// 自动刷新间隔选项 - 移至组件内 useMemo
 
 // 统计项组件
 function StatItem({
@@ -139,6 +133,14 @@ export default function CurrentAlarms() {
   // 自动刷新状态
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(30);
+
+  // 自动刷新间隔选项（依赖 t）
+  const AUTO_REFRESH_INTERVALS = useMemo(() => [
+    { label: t('common.15seconds'), value: 15 },
+    { label: t('common.30seconds'), value: 30 },
+    { label: t('common.1minute'), value: 60 },
+    { label: t('common.5minutes'), value: 300 },
+  ], [t]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -594,14 +596,14 @@ export default function CurrentAlarms() {
   const autoRefreshMenuItems = useMemo(() => [
     {
       key: 'toggle',
-      label: autoRefresh ? '关闭自动刷新' : '开启自动刷新',
+      label: autoRefresh ? t('alarm.autoRefreshOff') : t('alarm.autoRefreshOn'),
       icon: <SyncOutlined spin={autoRefresh} />,
     },
     ...(autoRefresh ? AUTO_REFRESH_INTERVALS.map((opt) => ({
       key: `interval-${opt.value}`,
       label: opt.label,
     })) : []),
-  ], [autoRefresh]);
+  ], [autoRefresh, AUTO_REFRESH_INTERVALS, t]);
 
   const handleAutoRefreshMenuClick = useCallback(({ key }: { key: string }) => {
     if (key === 'toggle') {
@@ -642,48 +644,48 @@ export default function CurrentAlarms() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <StatItem
-            label="总数"
+            label={t('alarm.statistics.total')}
             value={realStats.total}
             active={activeQuickFilter === 'all'}
             onClick={() => handleQuickFilter('all')}
           />
           <StatItem
-            label="严重"
+            label={t('alarm.statistics.critical')}
             value={realStats.critical}
             color="#E53935"
             active={activeQuickFilter === 'critical'}
             onClick={() => handleQuickFilter('critical')}
           />
           <StatItem
-            label="主要"
+            label={t('alarm.statistics.major')}
             value={realStats.major}
             color="#FB8C00"
             active={activeQuickFilter === 'major'}
             onClick={() => handleQuickFilter('major')}
           />
           <StatItem
-            label="次要"
+            label={t('alarm.statistics.minor')}
             value={realStats.minor}
             color="#FDD835"
             active={activeQuickFilter === 'minor'}
             onClick={() => handleQuickFilter('minor')}
           />
           <StatItem
-            label="警告"
+            label={t('alarm.statistics.warning')}
             value={realStats.warning}
             color="#42A5F5"
             active={activeQuickFilter === 'warning'}
             onClick={() => handleQuickFilter('warning')}
           />
           <StatItem
-            label="未确认"
+            label={t('alarm.statistics.unconfirmed')}
             value={realStats.unacked}
             color="#E53935"
             active={activeQuickFilter === 'unacked'}
             onClick={() => handleQuickFilter('unacked')}
           />
           <StatItem
-            label="未读"
+            label={t('alarm.statistics.unread')}
             value={realStats.unread}
             color="#722ED1"
             active={activeQuickFilter === 'unread'}
@@ -728,7 +730,7 @@ export default function CurrentAlarms() {
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
           defaultDensity="default"
           showRowNumber
-          rowNumberTitle="序号"
+          rowNumberTitle={t('common.rowNumber')}
           scroll={{ y: 'calc(100vh - 450px)' }}
         />
       </Card>

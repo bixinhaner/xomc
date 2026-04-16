@@ -69,12 +69,12 @@ const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
   warning: { color: '#42A5F5', bgColor: '#E3F2FD' },
 };
 
-// 告警级别标签
-const SEVERITY_LABEL: Record<string, string> = {
-  critical: '严重',
-  major: '主要',
-  minor: '次要',
-  warning: '警告',
+// 告警级别标签 - use i18n keys
+const SEVERITY_LABEL_KEYS: Record<string, string> = {
+  critical: 'alarm.severity.critical',
+  major: 'alarm.severity.major',
+  minor: 'alarm.severity.minor',
+  warning: 'alarm.severity.warning',
 };
 
 // 告警状态配置
@@ -102,15 +102,15 @@ const NE_TYPE_CONFIG: Record<string, string> = {
   'GSM': 'GSM',
 };
 
-// 快捷筛选选项
-const QUICK_FILTER_OPTIONS = [
-  { label: '全部', key: 'all' },
-  { label: '严重', key: 'critical', severity: ['critical'] },
-  { label: '主要', key: 'major', severity: ['major'] },
-  { label: '次要', key: 'minor', severity: ['minor'] },
-  { label: '警告', key: 'warning', severity: ['warning'] },
-  { label: '未确认', key: 'unacked', dealState: ['0'] },
-  { label: '未读', key: 'unread', unread: '1' },
+// 快捷筛选选项 - use i18n keys
+const QUICK_FILTER_KEYS = [
+  { labelKey: 'alarm.quickFilter.all', key: 'all' },
+  { labelKey: 'alarm.quickFilter.critical', key: 'critical', severity: ['critical'] },
+  { labelKey: 'alarm.quickFilter.major', key: 'major', severity: ['major'] },
+  { labelKey: 'alarm.quickFilter.minor', key: 'minor', severity: ['minor'] },
+  { labelKey: 'alarm.quickFilter.warning', key: 'warning', severity: ['warning'] },
+  { labelKey: 'alarm.quickFilter.unacked', key: 'unacked', dealState: ['0'] },
+  { labelKey: 'alarm.quickFilter.unread', key: 'unread', unread: '1' },
 ];
 
 // 筛选模板存储 key
@@ -442,7 +442,7 @@ export default function CustomAlarmStats() {
   // 快捷筛选处理
   const handleQuickFilter = useCallback((key: string) => {
     setActiveQuickFilter(key);
-    const option = QUICK_FILTER_OPTIONS.find((o) => o.key === key);
+    const option = QUICK_FILTER_KEYS.find((o) => o.key === key);
     if (option && option.key !== 'all') {
       setFilterParams((prev) => ({
         ...prev,
@@ -475,7 +475,7 @@ export default function CustomAlarmStats() {
       localStorage.setItem(FILTER_TEMPLATES_KEY, JSON.stringify(updated));
       setSaveTemplateModalOpen(false);
       templateForm.resetFields();
-      message.success('模板保存成功');
+      message.success(t('alarm.templateSaveSuccess'));
     } catch {
       // validation error
     }
@@ -677,12 +677,12 @@ export default function CustomAlarmStats() {
   const handleDeleteGroup = useCallback((groupId: string) => {
     const group = groups.find((g) => g.id === groupId);
     if (groups.length <= 1) {
-      message.warning('至少保留一个分组');
+      message.warning(t('alarm.keepAtLeastOneGroup'));
       return;
     }
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: `确定要删除分组「${group?.name}」吗？`,
+      content: t('alarm.confirmDeleteGroup', { name: group?.name }),
       okText: t('common.confirm'),
       okType: 'danger',
       onOk: () => {
@@ -841,7 +841,7 @@ export default function CustomAlarmStats() {
         const config = SEVERITY_CONFIG[record.severity] || SEVERITY_CONFIG.warning;
         return (
           <Tag style={{ color: config.color, backgroundColor: config.bgColor, border: 'none' }}>
-            {SEVERITY_LABEL[record.severity] ?? record.severity}
+            {t(SEVERITY_LABEL_KEYS[record.severity]) ?? record.severity}
           </Tag>
         );
       },
@@ -884,12 +884,12 @@ export default function CustomAlarmStats() {
     },
     {
       key: 'alarmType',
-      title: '告警类型',
+      title: t('alarm.alarmTypeCol'),
       dataIndex: 'alarmType',
       width: 100,
       render: () => (
         <Tag color="red">
-          活动告警
+          {t('alarm.activeAlarm')}
         </Tag>
       ),
     },
@@ -965,7 +965,7 @@ export default function CustomAlarmStats() {
         }}
       >
         <Text strong style={{ fontSize: 14 }}>
-          自定义告警分组
+          {t('alarm.customAlarmGroup')}
         </Text>
         <Button
           type="text"
@@ -973,12 +973,12 @@ export default function CustomAlarmStats() {
           icon={<PlusOutlined />}
           onClick={handleOpenAddGroupDrawer}
         >
-          添加
+          {t('alarm.addGroupBtn')}
         </Button>
       </div>
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
         <Input
-          placeholder="搜索分组"
+          placeholder={t('alarm.searchGroup')}
           prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
@@ -1012,7 +1012,7 @@ export default function CustomAlarmStats() {
                     icon={<EditOutlined />}
                     onClick={(e) => { e.stopPropagation(); handleEditGroup(group.id); }}
                     style={{ flexShrink: 0, padding: '0 4px' }}
-                    title="编辑"
+                    title={t('common.edit')}
                   />
                   <Button
                     type="text"
@@ -1021,7 +1021,7 @@ export default function CustomAlarmStats() {
                     onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
                     style={{ flexShrink: 0, padding: '0 4px' }}
                     danger
-                    title="删除"
+                    title={t('common.delete')}
                   />
                 </Space>
               </div>
@@ -1069,11 +1069,11 @@ export default function CustomAlarmStats() {
       {/* 标题卡片 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Space>
-          <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || '自定义告警'}</Text>
+          <Text strong style={{ fontSize: 16 }}>{selectedGroup?.name || t('alarm.customAlarmGroup')}</Text>
         </Space>
         <Space>
           <Button icon={<ExportOutlined />} onClick={handleExport}>
-            导出
+            {t('alarm.export')}
           </Button>
         </Space>
       </div>
@@ -1082,62 +1082,62 @@ export default function CustomAlarmStats() {
       <Card size="small" bordered styles={{ body: { padding: '12px 16px' } }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <StatItem
-            label="总数"
+            label={t('alarm.stat.total')}
             value={total}
             active={activeQuickFilter === 'all'}
             onClick={() => handleQuickFilter('all')}
           />
           <StatItem
-            label="活动告警"
+            label={t('alarm.stat.activeAlarm')}
             value={activeTotal}
             color="#E53935"
             active={activeQuickFilter === 'active'}
             onClick={() => handleQuickFilter('active')}
           />
           <StatItem
-            label="历史告警"
+            label={t('alarm.stat.historicalAlarm')}
             value={historicalTotal}
             color="#1890ff"
             active={activeQuickFilter === 'historical'}
             onClick={() => handleQuickFilter('historical')}
           />
           <StatItem
-            label="严重"
+            label={t('alarm.stat.critical')}
             value={realStats.critical}
             color="#E53935"
             active={activeQuickFilter === 'critical'}
             onClick={() => handleQuickFilter('critical')}
           />
           <StatItem
-            label="主要"
+            label={t('alarm.stat.major')}
             value={realStats.major}
             color="#FB8C00"
             active={activeQuickFilter === 'major'}
             onClick={() => handleQuickFilter('major')}
           />
           <StatItem
-            label="次要"
+            label={t('alarm.stat.minor')}
             value={realStats.minor}
             color="#FDD835"
             active={activeQuickFilter === 'minor'}
             onClick={() => handleQuickFilter('minor')}
           />
           <StatItem
-            label="警告"
+            label={t('alarm.stat.warning')}
             value={realStats.warning}
             color="#42A5F5"
             active={activeQuickFilter === 'warning'}
             onClick={() => handleQuickFilter('warning')}
           />
           <StatItem
-            label="未确认"
+            label={t('alarm.stat.unacked')}
             value={realStats.unacked}
             color="#E53935"
             active={activeQuickFilter === 'unacked'}
             onClick={() => handleQuickFilter('unacked')}
           />
           <StatItem
-            label="未读"
+            label={t('alarm.stat.unread')}
             value={rawAlarms.filter(a => a.unread === '1').length}
             color="#722ED1"
             active={activeQuickFilter === 'unread'}
@@ -1253,7 +1253,7 @@ export default function CustomAlarmStats() {
       {/* 添加/编辑分组抽屉 */}
       <Drawer
         open={addGroupDrawerOpen}
-        title={isEditingGroup ? '编辑自定义告警分组' : '添加自定义告警分组'}
+        title={isEditingGroup ? t('alarm.editCustomGroup') : t('alarm.addCustomGroup')}
         placement="right"
         width={520}
         onClose={() => setAddGroupDrawerOpen(false)}
@@ -1268,36 +1268,35 @@ export default function CustomAlarmStats() {
           {/* 模版名称 */}
           <Form.Item
             name="name"
-            label="模版名称"
+            label={t('alarm.templateName')}
             rules={[
-              { required: true, message: '请输入模版名称' },
-              { min: 1, max: 50, message: '模版名称长度为1-50个字符' },
+              { required: true, message: t('alarm.inputTemplateName') },
+              { min: 1, max: 50, message: t('alarm.templateNameLength') },
               {
                 validator: (_, value) => {
-                  // 编辑时排除当前分组
                   const otherGroups = isEditingGroup
                     ? groups.filter(g => g.id !== editGroupId)
                     : groups;
                   if (value && otherGroups.some(g => g.name === value)) {
-                    return Promise.reject(new Error('模版名称已存在，请使用其他名称'));
+                    return Promise.reject(new Error(t('alarm.templateNameExists')));
                   }
                   return Promise.resolve();
                 },
               },
             ]}
           >
-            <Input placeholder="请输入模版名称" maxLength={50} showCount />
+            <Input placeholder={t('alarm.inputTemplateName')} maxLength={50} showCount />
           </Form.Item>
 
           {/* 描述 */}
-          <Form.Item name="description" label="描述">
-            <Input.TextArea placeholder="请输入描述信息" rows={3} maxLength={200} showCount />
+          <Form.Item name="description" label={t('alarm.description')}>
+            <Input.TextArea placeholder={t('alarm.inputDescription')} rows={3} maxLength={200} showCount />
           </Form.Item>
 
           <Divider />
 
           {/* 告警源 - 全选复选框 */}
-          <Form.Item label="告警源">
+          <Form.Item label={t('alarm.alarmSource')}>
             <Space direction="vertical" style={{ width: '100%' }}>
               <Checkbox
                 checked={selectAllENB}
@@ -1316,9 +1315,9 @@ export default function CustomAlarmStats() {
                   }
                 }}
               >
-                eNB 的全部设备
+                {t('alarm.allENBDevices')}
                 <Tag color="blue" style={{ marginLeft: 8 }}>
-                  {availableDevices.filter(d => d.neType === 'eNB').length} 台
+                  {availableDevices.filter(d => d.neType === 'eNB').length} {t('alarm.deviceUnit')}
                 </Tag>
               </Checkbox>
               <Checkbox
@@ -1336,9 +1335,9 @@ export default function CustomAlarmStats() {
                   }
                 }}
               >
-                gNB 的全部设备
+                {t('alarm.allGNBDevices')}
                 <Tag color="blue" style={{ marginLeft: 8 }}>
-                  {availableDevices.filter(d => d.neType === 'gNB').length} 台
+                  {availableDevices.filter(d => d.neType === 'gNB').length} {t('alarm.deviceUnit')}
                 </Tag>
               </Checkbox>
               <Checkbox
@@ -1356,9 +1355,9 @@ export default function CustomAlarmStats() {
                   }
                 }}
               >
-                GSM 的全部设备
+                {t('alarm.allGSMDevices')}
                 <Tag color="blue" style={{ marginLeft: 8 }}>
-                  {availableDevices.filter(d => d.neType === 'GSM').length} 台
+                  {availableDevices.filter(d => d.neType === 'GSM').length} {t('alarm.deviceUnit')}
                 </Tag>
               </Checkbox>
             </Space>
@@ -1370,8 +1369,8 @@ export default function CustomAlarmStats() {
           <Form.Item label={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <span>
-                已选设备
-                <Tag color="blue" style={{ marginLeft: 8 }}>{selectedDevices.length} 台</Tag>
+                {t('alarm.selectedDevices')}
+                <Tag color="blue" style={{ marginLeft: 8 }}>{selectedDevices.length} {t('alarm.deviceUnit')}</Tag>
               </span>
               <Space size={8}>
                 <Button
@@ -1385,7 +1384,7 @@ export default function CustomAlarmStats() {
                     setSelectAllGSM(false);
                   }}
                 >
-                  清空
+                                    {t('alarm.clearAll')}
                 </Button>
                 <Button
                   size="small"
@@ -1393,14 +1392,14 @@ export default function CustomAlarmStats() {
                   icon={<PlusOutlined />}
                   onClick={handleOpenAddDeviceModal}
                 >
-                  添加设备
+                  {t('alarm.addDevice')}
                 </Button>
               </Space>
             </div>
           }>
             {selectedDevices.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: '#999', border: '1px dashed #d9d9d9', borderRadius: 6 }}>
-                请选择告警源或添加设备
+                {t('alarm.selectAlarmSource')}
               </div>
             ) : (
               <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, maxHeight: 300, overflow: 'auto' }}>
@@ -1410,8 +1409,8 @@ export default function CustomAlarmStats() {
                   rowKey="id"
                   pagination={false}
                   columns={[
-                    { title: '设备名称', dataIndex: 'name', ellipsis: true },
-                    { title: '网元类型', dataIndex: 'neType', width: 80, render: (val) => <Tag>{val}</Tag> },
+                    { title: t('alarm.deviceNameCol'), dataIndex: 'name', ellipsis: true },
+                    { title: t('alarm.neTypeCol'), dataIndex: 'neType', width: 80, render: (val) => <Tag>{val}</Tag> },
                     {
                       title: '',
                       width: 40,
@@ -1458,8 +1457,8 @@ export default function CustomAlarmStats() {
           <Form.Item label={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <span>
-                已选告警
-                <Tag color="orange" style={{ marginLeft: 8 }}>{selectedAlarms.length} 条</Tag>
+                {t('alarm.selectedAlarms')}
+                <Tag color="orange" style={{ marginLeft: 8 }}>{selectedAlarms.length} {t('alarm.alarmCountUnit')}</Tag>
               </span>
               <Space size={8}>
                 <Button
@@ -1476,14 +1475,14 @@ export default function CustomAlarmStats() {
                   icon={<PlusOutlined />}
                   onClick={() => setAddAlarmModalVisible(true)}
                 >
-                  添加告警
+                  {t('alarm.addAlarmBtn')}
                 </Button>
               </Space>
             </div>
           }>
             {selectedAlarms.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: '#999', border: '1px dashed #d9d9d9', borderRadius: 6 }}>
-                暂无选中的告警
+                {t('alarm.noSelectedAlarm')}
               </div>
             ) : (
               <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, maxHeight: 200, overflow: 'auto' }}>
@@ -1493,9 +1492,9 @@ export default function CustomAlarmStats() {
                   rowKey="id"
                   pagination={false}
                   columns={[
-                    { title: '告警标识', dataIndex: 'alarmIdentifier', ellipsis: true },
-                    { title: '告警源', dataIndex: 'alarmSource', width: 80, render: (val) => <Tag>{val}</Tag> },
-                    { title: '可能原因', dataIndex: 'possibleCause', ellipsis: true },
+                    { title: t('alarm.alarmIdentifierCol'), dataIndex: 'alarmIdentifier', ellipsis: true },
+                    { title: t('alarm.alarmSourceCol'), dataIndex: 'alarmSource', width: 80, render: (val) => <Tag>{val}</Tag> },
+                    { title: t('alarm.possibleCauseCol'), dataIndex: 'possibleCause', ellipsis: true },
                     {
                       title: '',
                       width: 40,
@@ -1522,7 +1521,7 @@ export default function CustomAlarmStats() {
       {/* 添加设备弹窗 */}
       <Modal
         open={addDeviceModalVisible}
-        title="添加设备"
+        title={t('alarm.addDeviceTitle')}
         onCancel={() => {
           setAddDeviceModalVisible(false);
           setSelectedNewDevices([]);
@@ -1586,15 +1585,15 @@ export default function CustomAlarmStats() {
             optionType="button"
             buttonStyle="solid"
           >
-            <Radio.Button value="device">按照设备添加</Radio.Button>
-            <Radio.Button value="deviceGroup">按照设备组添加</Radio.Button>
+            <Radio.Button value="device">{t('alarm.addByDevice')}</Radio.Button>
+            <Radio.Button value="deviceGroup">{t('alarm.addByDeviceGroup')}</Radio.Button>
           </Radio.Group>
         </div>
 
         {/* 搜索框 */}
         <div style={{ marginBottom: 12 }}>
           <Input
-            placeholder={addDeviceMode === 'device' ? '搜索设备名称' : '搜索设备组名称'}
+            placeholder={addDeviceMode === 'device' ? t('alarm.searchDeviceName') : t('alarm.searchDeviceGroupName')}
             prefix={<SearchOutlined />}
             value={addDeviceKeyword}
             onChange={(e) => {

@@ -34,9 +34,9 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
   const emEnabel = Form.useWatch('emEnabel', form);
 
   const handleTestEmail = () => {
-    void message.info('正在发送测试邮件...');
+    void message.info(t('system.notification.sendingTestEmail'));
     setTimeout(() => {
-      void message.success('测试邮件发送成功');
+      void message.success(t('system.notification.testEmailSent'));
     }, 1000);
   };
 
@@ -49,36 +49,36 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
       mailPort: '',
     }}>
       {/* 邮件通知服务 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>邮件通知服务</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.notification.emailService')}</span>}>
         <div style={settingRowStyle}>
           <Form.Item name="emEnabel" valuePropName="checked" noStyle>
-            <Checkbox>通知邮件服务器</Checkbox>
+            <Checkbox>{t('system.notification.enableEmailServer')}</Checkbox>
           </Form.Item>
         </div>
 
         <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>邮件服务器配置</div>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>{t('system.notification.mailServerConfig')}</div>
 
           <div style={formGroupStyle}>
-            <Form.Item label="邮箱" name="mailUsername" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('system.notification.email')} name="mailUsername" style={{ marginBottom: 0 }}>
               <Input style={{ width: 280 }} placeholder="noreply@example.com" prefix={<MailOutlined />} disabled={!emEnabel} />
             </Form.Item>
-            <Form.Item label="密码" name="mailPassword" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 180 }} placeholder="请输入邮箱密码" maxLength={50} disabled={!emEnabel} />
+            <Form.Item label={t('common.password')} name="mailPassword" style={{ marginBottom: 0 }}>
+              <Input.Password style={{ width: 180 }} placeholder={t('system.notification.pleaseInputEmailPassword')} maxLength={50} disabled={!emEnabel} />
             </Form.Item>
           </div>
 
           <div style={formGroupStyle}>
-            <Form.Item label="SMTP服务器" name="mailHost" style={{ marginBottom: 0 }}>
+            <Form.Item label={t('system.notification.smtpServer')} name="mailHost" style={{ marginBottom: 0 }}>
               <Input style={{ width: 280 }} placeholder="smtp.example.com" disabled={!emEnabel} />
             </Form.Item>
             <Space>
-              <Form.Item label="端口" name="mailPort" style={{ marginBottom: 0 }}>
+              <Form.Item label={t('common.port')} name="mailPort" style={{ marginBottom: 0 }}>
                 <InputNumber min={1} max={65535} style={{ width: 100 }} disabled={!emEnabel} />
               </Form.Item>
               <Form.Item style={{ marginBottom: 0, marginTop: 24 }}>
                 <Button type="primary" size="small" onClick={handleTestEmail} disabled={!emEnabel}>
-                  测试
+                  {t('common.test')}
                 </Button>
               </Form.Item>
             </Space>

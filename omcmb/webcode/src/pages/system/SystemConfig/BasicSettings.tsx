@@ -30,38 +30,38 @@ export default function BasicSettings({ form }: BasicSettingsProps) {
       timezoneCode: '',
     }}>
       {/* 基本信息 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>基本信息</span>} style={{ marginBottom: 16 }}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.basic.info')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Form.Item
             name="mrVendor"
-            label="运营商名称"
-            rules={[{ max: 50, message: '最大50个字符' }]}
+            label={t('system.basic.operatorName')}
+            rules={[{ max: 50, message: t('common.max50Chars') }]}
             style={{ marginBottom: 0 }}
           >
-            <Input placeholder="请输入运营商名称" maxLength={50} style={{ width: 300 }} />
+            <Input placeholder={t('system.basic.pleaseInputOperatorName')} maxLength={50} style={{ width: 300 }} />
           </Form.Item>
         </div>
 
         <div style={settingRowStyle}>
           <Form.Item
             name="mrOMCName"
-            label="OMC名称"
-            rules={[{ max: 200, message: '最大200个字符' }]}
+            label={t('system.basic.omcName')}
+            rules={[{ max: 200, message: t('common.max200Chars') }]}
             style={{ marginBottom: 0 }}
           >
-            <Input placeholder="请输入网管系统名称" maxLength={200} style={{ width: 350 }} />
+            <Input placeholder={t('system.basic.pleaseInputOmcName')} maxLength={200} style={{ width: 350 }} />
           </Form.Item>
         </div>
       </Card>
 
       {/* 系统设置 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>系统设置</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.basic.systemSettings')}</span>}>
         <Form.Item
           name="timezoneCode"
-          label="时区设置"
+          label={t('system.basic.timezoneSetting')}
           style={{ marginBottom: 0 }}
         >
-          <Select placeholder="请选择系统时区" options={timezoneOptions} style={{ width: 400 }} />
+          <Select placeholder={t('system.basic.pleaseSelectTimezone')} options={timezoneOptions} style={{ width: 400 }} />
         </Form.Item>
       </Card>
     </Form>

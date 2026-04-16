@@ -88,7 +88,7 @@ export default function SystemDashboard() {
 
       <Row gutter={16}>
         <Col span={8}>
-          <Card title="CPU" size="small" style={{ textAlign: 'center' }}>
+          <Card title={t('system.dashboard.cpu')} size="small" style={{ textAlign: 'center' }}>
             <GaugeChart value={cpuUsage} max={100} unit="%" />
             <div style={{ marginTop: 8, color: cpuUsage > 80 ? '#ff4d4f' : cpuUsage > 60 ? '#faad14' : '#52c41a', fontWeight: 500 }}>
               {cpuUsage}%
@@ -96,7 +96,7 @@ export default function SystemDashboard() {
           </Card>
         </Col>
         <Col span={8}>
-          <Card title="Memory" size="small" style={{ textAlign: 'center' }}>
+          <Card title={t('system.dashboard.memory')} size="small" style={{ textAlign: 'center' }}>
             <GaugeChart value={memUsage} max={100} unit="%" />
             <div style={{ marginTop: 8, color: memUsage > 85 ? '#ff4d4f' : memUsage > 70 ? '#faad14' : '#52c41a', fontWeight: 500 }}>
               {memUsage}%
@@ -104,7 +104,7 @@ export default function SystemDashboard() {
           </Card>
         </Col>
         <Col span={8}>
-          <Card title="Disk" size="small" style={{ textAlign: 'center' }}>
+          <Card title={t('system.dashboard.disk')} size="small" style={{ textAlign: 'center' }}>
             <GaugeChart value={diskUsage} max={100} unit="%" />
             <div style={{ marginTop: 8, color: diskUsage > 85 ? '#ff4d4f' : diskUsage > 70 ? '#faad14' : '#52c41a', fontWeight: 500 }}>
               {diskUsage}%

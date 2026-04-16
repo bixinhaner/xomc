@@ -550,34 +550,34 @@ export default function HistoricalAlarms() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <StatItem
-            label="总数"
+            label={t('alarm.statistics.total')}
             value={realStats.total}
             active={activeQuickFilter === 'all'}
             onClick={() => handleQuickFilter('all')}
           />
           <StatItem
-            label="严重"
+            label={t('alarm.statistics.critical')}
             value={realStats.critical}
             color="#E53935"
             active={activeQuickFilter === 'critical'}
             onClick={() => handleQuickFilter('critical')}
           />
           <StatItem
-            label="主要"
+            label={t('alarm.statistics.major')}
             value={realStats.major}
             color="#FB8C00"
             active={activeQuickFilter === 'major'}
             onClick={() => handleQuickFilter('major')}
           />
           <StatItem
-            label="次要"
+            label={t('alarm.statistics.minor')}
             value={realStats.minor}
             color="#FDD835"
             active={activeQuickFilter === 'minor'}
             onClick={() => handleQuickFilter('minor')}
           />
           <StatItem
-            label="警告"
+            label={t('alarm.statistics.warning')}
             value={realStats.warning}
             color="#42A5F5"
             active={activeQuickFilter === 'warning'}
@@ -622,7 +622,7 @@ export default function HistoricalAlarms() {
           alarmRowStyle={alarmRowStyle as (record: Alarm) => 'critical' | 'major' | 'minor' | 'warning' | null}
           defaultDensity="default"
           showRowNumber
-          rowNumberTitle="序号"
+          rowNumberTitle={t('common.rowNumber')}
           scroll={{ y: 'calc(100vh - 450px)' }}
         />
       </Card>

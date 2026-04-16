@@ -230,7 +230,7 @@ export default function AutoProvisioning() {
         loading={isLoading}
         rowKey="id"
         size="small"
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
         pagination={{
           current: currentPage,
           pageSize,

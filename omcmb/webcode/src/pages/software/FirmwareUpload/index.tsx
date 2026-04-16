@@ -138,8 +138,8 @@ export default function FirmwareUpload() {
 
   // 搜索字段
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '版本', type: 'input', placeholder: '请输入版本号' },
-  ], []);
+    { name: 'keyword', label: t('software.firmware.version'), type: 'input', placeholder: t('software.firmware.inputVersion') },
+  ], [t]);
 
   // 打开导入抽屉
   const handleOpenImportDrawer = (mode: 'add' | 'view' | 'modify', file?: FirmwareFile) => {
@@ -177,7 +177,7 @@ export default function FirmwareUpload() {
 
     form.validateFields().then(() => {
       if (fileList.length === 0 && importMode === 'add') {
-        void message.warning('请选择文件');
+        void message.warning(t('software.firmware.selectFile'));
         return;
       }
 
@@ -189,7 +189,7 @@ export default function FirmwareUpload() {
           if (prev >= 100) {
             clearInterval(timer);
             setUploading(false);
-            void message.success(importMode === 'add' ? '文件导入成功' : '文件修改成功');
+            void message.success(importMode === 'add' ? t('software.firmware.importSuccess') : t('software.firmware.modifySuccess'));
             handleCloseImportDrawer();
             return 100;
           }
@@ -202,40 +202,40 @@ export default function FirmwareUpload() {
   // 删除文件
   const handleDeleteFile = () => {
     if (deleteFile) {
-      void message.success(`已删除文件: ${deleteFile.fileName}`);
+      void message.success(t('software.firmware.deleted', { name: deleteFile.fileName }));
       setDeleteFile(null);
     }
   };
 
   // 切换推荐状态
   const handleToggleRecommend = (file: FirmwareFile) => {
-    void message.success(`已${file.recommend ? '取消' : '设置'}推荐: ${file.version}`);
+    void message.success(file.recommend ? t('software.firmware.recommendUnset', { version: file.version }) : t('software.firmware.recommendSet', { version: file.version }));
   };
 
   // 表格列定义
   const columns: DataTableColumn<FirmwareFile>[] = [
     {
       key: 'operation',
-      title: '操作',
+      title: t('common.operation'),
       width: 100,
       fixed: 'right',
       render: (_: unknown, record: FirmwareFile) => {
         const items: MenuProps['items'] = [
           {
             key: 'download',
-            label: '下载',
+            label: t('common.download'),
             icon: <DownloadOutlined />,
-            onClick: () => void message.success(`下载文件: ${record.fileName}`),
+            onClick: () => void message.success(t('software.firmware.deleted', { name: record.fileName })),
           },
           {
             key: 'modify',
-            label: '修改',
+            label: t('common.edit'),
             icon: <EditOutlined />,
             onClick: () => handleOpenImportDrawer('modify', record),
           },
           {
             key: 'delete',
-            label: '删除',
+            label: t('common.delete'),
             icon: <DeleteOutlined />,
             danger: true,
             onClick: () => setDeleteFile(record),
@@ -243,14 +243,14 @@ export default function FirmwareUpload() {
           { type: 'divider' },
           {
             key: 'recommend',
-            label: record.recommend ? '取消推荐' : '设为推荐',
+            label: record.recommend ? t('software.firmware.cancelRecommend') : t('software.firmware.setRecommend'),
             icon: record.recommend ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />,
             onClick: () => handleToggleRecommend(record),
           },
         ];
         return (
           <Space size={4}>
-            <Button type="link" size="small" onClick={() => handleOpenImportDrawer('view', record)}>信息</Button>
+            <Button type="link" size="small" onClick={() => handleOpenImportDrawer('view', record)}>{t('common.info')}</Button>
             <Dropdown menu={{ items }} trigger={['click']}>
               <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
             </Dropdown>
@@ -260,7 +260,7 @@ export default function FirmwareUpload() {
     },
     {
       key: 'version',
-      title: '版本',
+      title: t('software.firmware.version'),
       dataIndex: 'version',
       width: 300,
       ellipsis: true,
@@ -273,7 +273,7 @@ export default function FirmwareUpload() {
     },
     {
       key: 'product',
-      title: '产品类型标识',
+      title: t('software.firmware.productType'),
       dataIndex: 'product',
       width: 250,
       ellipsis: true,
@@ -281,14 +281,14 @@ export default function FirmwareUpload() {
     },
     {
       key: 'size',
-      title: '文件大小',
+      title: t('table.fileSize') ?? '文件大小',
       dataIndex: 'size',
       width: 120,
       render: (val: number) => formatFileSize(val),
     },
     {
       key: 'uploadTime',
-      title: '上传时间',
+      title: t('table.uploadTime') ?? '上传时间',
       dataIndex: 'uploadTime',
       width: 180,
     },
@@ -298,15 +298,15 @@ export default function FirmwareUpload() {
   const fileTypeName = useMemo(() => {
     const nameMap: Record<FileType, string> = {
       upgrade: 'IMAGE',
-      ca: 'CA版本',
-      fpga: 'FPGA升级文件',
-      ap: 'AP升级文件',
+      ca: t('software.firmware.caVersion'),
+      fpga: t('software.firmware.fpgaFile'),
+      ap: t('software.firmware.apFile'),
     };
     return nameMap[fileType];
-  }, [fileType]);
+  }, [fileType, t]);
 
   return (
-    <ListPageLayout title="升级文件管理">
+    <ListPageLayout title={t('software.firmware.title')}>
       {/* 文件类型选择 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Radio.Group
@@ -319,12 +319,12 @@ export default function FirmwareUpload() {
           buttonStyle="solid"
         >
           <Radio.Button value="upgrade">IMAGE</Radio.Button>
-          <Radio.Button value="ca">CA版本</Radio.Button>
-          <Radio.Button value="fpga">FPGA升级文件</Radio.Button>
-          <Radio.Button value="ap">AP升级文件</Radio.Button>
+          <Radio.Button value="ca">{t('software.firmware.caVersion')}</Radio.Button>
+          <Radio.Button value="fpga">{t('software.firmware.fpgaFile')}</Radio.Button>
+          <Radio.Button value="ap">{t('software.firmware.apFile')}</Radio.Button>
         </Radio.Group>
         <Button type="primary" icon={<InboxOutlined />} onClick={() => handleOpenImportDrawer('add')}>
-          导入文件
+          {t('software.firmware.importFile')}
         </Button>
       </div>
 
@@ -348,14 +348,14 @@ export default function FirmwareUpload() {
         onPageChange={() => {}}
         scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
         showRowNumber
-        rowNumberTitle="序号"
+        rowNumberTitle={t('table.rowNumber')}
       />
 
       {/* 导入/查看/修改文件抽屉 */}
       <Drawer
         title={
-          importMode === 'add' ? `导入${fileTypeName}` :
-          importMode === 'view' ? '文件信息' : '修改文件'
+          importMode === 'add' ? `${t('software.firmware.importFile')}${fileTypeName}` :
+          importMode === 'view' ? t('software.firmware.fileInfo') : t('software.firmware.modifyFile')
         }
         placement="right"
         width={400}
@@ -364,13 +364,13 @@ export default function FirmwareUpload() {
         footer={
           importMode === 'view' ? null : (
             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={handleCloseImportDrawer}>取消</Button>
+              <Button onClick={handleCloseImportDrawer}>{t('common.cancel')}</Button>
               <Button
                 type="primary"
                 onClick={handleImportSubmit}
                 loading={uploading}
               >
-                确定
+                {t('common.confirm')}
               </Button>
             </Space>
           )
@@ -386,19 +386,19 @@ export default function FirmwareUpload() {
           {fileType !== 'ap' && (
             <Form.Item
               name="product"
-              label="产品类型标识"
-              rules={[{ required: true, message: '请选择产品类型' }]}
+              label={t('software.firmware.productType')}
+              rules={[{ required: true, message: t('software.firmware.selectProductType') }]}
             >
               {fileType === 'upgrade' ? (
                 <Select
                   mode="multiple"
                   maxTagCount="responsive"
-                  placeholder="请选择产品类型"
+                  placeholder={t('software.firmware.selectProductType')}
                   options={productTypeOptions}
                 />
               ) : (
                 <Select
-                  placeholder="请选择产品类型"
+                  placeholder={t('software.firmware.selectProductType')}
                   options={productTypeOptions}
                 />
               )}
@@ -409,10 +409,10 @@ export default function FirmwareUpload() {
           <Form.Item
             label={
               <Space>
-                文件名
+                {t('software.firmware.fileName')}
                 {importMode === 'add' && (
                   <span style={{ color: '#999', fontSize: 12 }}>
-                    (支持 {fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'ca' ? 'Patch' : 'IMG'} 格式)
+                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'ca' ? 'Patch' : 'IMG' })})
                   </span>
                 )}
               </Space>
@@ -433,7 +433,7 @@ export default function FirmwareUpload() {
                   <p className="ant-upload-drag-icon">
                     <InboxOutlined />
                   </p>
-                  <p className="ant-upload-text">点击或拖拽文件到此区域</p>
+                  <p className="ant-upload-text">{t('software.firmware.clickOrDrag')}</p>
                 </Dragger>
                 {uploading && (
                   <Progress
@@ -451,41 +451,41 @@ export default function FirmwareUpload() {
           {/* 版本 */}
           <Form.Item
             name="version"
-            label="版本"
+            label={t('software.firmware.version')}
             rules={[
-              { required: true, message: '请输入版本号' },
-              { max: 45, message: '版本号不能超过45个字符' },
+              { required: true, message: t('software.firmware.inputVersion') },
+              { max: 45, message: t('software.firmware.versionMaxLen') },
             ]}
           >
-            <Input placeholder="请输入版本号" maxLength={45} />
+            <Input placeholder={t('software.firmware.inputVersion')} maxLength={45} />
           </Form.Item>
 
           {/* 推荐 */}
-          <Form.Item name="recommend" label="推荐">
+          <Form.Item name="recommend" label={t('software.firmware.recommend')}>
             <Select
-              placeholder="请选择"
+              placeholder={t('common.pleaseSelect')}
               options={[
-                { label: '是', value: '1' },
-                { label: '否', value: '0' },
+                { label: t('common.yes'), value: '1' },
+                { label: t('common.no'), value: '0' },
               ]}
             />
           </Form.Item>
 
           {/* 描述 */}
-          <Form.Item name="description" label="描述">
-            <TextArea rows={3} placeholder="请输入描述信息" />
+          <Form.Item name="description" label={t('software.firmware.description')}>
+            <TextArea rows={3} placeholder={t('software.firmware.inputDescription')} />
           </Form.Item>
         </Form>
       </Drawer>
 
       {/* 删除确认弹窗 */}
       <Modal
-        title="确认删除"
+        title={t('software.firmware.confirmDelete')}
         open={!!deleteFile}
         onCancel={() => setDeleteFile(null)}
         onOk={handleDeleteFile}
-        okText="确认删除"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         okButtonProps={{ danger: true }}
       >
         <Alert
@@ -495,12 +495,12 @@ export default function FirmwareUpload() {
           message={
             <div>
               <p style={{ marginBottom: 8 }}>
-                确定要删除以下升级文件吗？此操作不可恢复。
+                {t('software.firmware.confirmDeleteMsg')}
               </p>
               <p style={{ marginBottom: 0 }}>
-                <strong>版本：</strong>{deleteFile?.version}<br />
-                <strong>文件名：</strong>{deleteFile?.fileName}<br />
-                <strong>文件大小：</strong>{deleteFile ? formatFileSize(deleteFile.size) : '-'}
+                <strong>{t('software.firmware.versionLabel')}</strong>{deleteFile?.version}<br />
+                <strong>{t('software.firmware.fileNameLabel')}</strong>{deleteFile?.fileName}<br />
+                <strong>{t('software.firmware.fileSizeLabel')}</strong>{deleteFile ? formatFileSize(deleteFile.size) : '-'}
               </p>
             </div>
           }

@@ -43,14 +43,14 @@ type ExecutionMethod = 'immediate' | 'suspend' | 'scheduled';
 // 任务状态枚举（1-6）
 type TaskStatus = 1 | 2 | 3 | 4 | 5 | 6;
 
-// 任务状态配置
-const TASK_STATUS_CONFIG: Record<TaskStatus, { color: string; text: string }> = {
-  1: { color: 'default', text: '等待' },
-  2: { color: 'processing', text: '进行中' },
-  3: { color: 'warning', text: '暂停' },
-  4: { color: 'success', text: '已结束' },
-  5: { color: 'error', text: '终止中' },
-  6: { color: 'warning', text: '暂停中' },
+// 任务状态颜色配置
+const TASK_STATUS_COLORS: Record<TaskStatus, string> = {
+  1: 'default',
+  2: 'processing',
+  3: 'warning',
+  4: 'success',
+  5: 'error',
+  6: 'warning',
 };
 
 interface UpgradePlanRow extends Record<string, unknown> {
@@ -74,20 +74,20 @@ interface UpgradePlanRow extends Record<string, unknown> {
   status: TaskStatus; // 任务状态：1-等待, 2-进行中, 3-暂停, 4-已结束, 5-终止中, 6-暂停中
 }
 
-// 升级类型映射
-const UPGRADE_TYPE_MAP: Record<UpgradeType, { color: string; text: string }> = {
-  immediate: { color: 'green', text: '立即升级' },
-  scheduled: { color: 'blue', text: '定时升级' },
-  manual: { color: 'orange', text: '手动升级' },
+// 升级类型颜色
+const UPGRADE_TYPE_COLORS: Record<UpgradeType, string> = {
+  immediate: 'green',
+  scheduled: 'blue',
+  manual: 'orange',
 };
 
-// 升级结果映射
-const UPGRADE_RESULT_MAP: Record<UpgradeResult, { color: string; text: string }> = {
-  success: { color: 'success', text: '成功' },
-  failed: { color: 'error', text: '失败' },
-  partial: { color: 'warning', text: '部分成功' },
-  running: { color: 'processing', text: '升级中' },
-  pending: { color: 'default', text: '等待中' },
+// 升级结果颜色
+const UPGRADE_RESULT_COLORS: Record<UpgradeResult, string> = {
+  success: 'success',
+  failed: 'error',
+  partial: 'warning',
+  running: 'processing',
+  pending: 'default',
 };
 
 // Mock 数据
@@ -112,6 +112,32 @@ const mockData: UpgradePlanRow[] = [
 
 export default function UpgradePlan() {
   const t = useT();
+
+  // 任务状态配置（带 i18n）
+  const TASK_STATUS_CONFIG = useMemo(() => ({
+    1: { color: TASK_STATUS_COLORS[1], text: t('software.status.waiting') },
+    2: { color: TASK_STATUS_COLORS[2], text: t('software.status.inProgress') },
+    3: { color: TASK_STATUS_COLORS[3], text: t('software.status.paused') },
+    4: { color: TASK_STATUS_COLORS[4], text: t('software.status.ended') },
+    5: { color: TASK_STATUS_COLORS[5], text: t('software.status.terminating') },
+    6: { color: TASK_STATUS_COLORS[6], text: t('software.status.pausing') },
+  }), [t]);
+
+  // 升级类型映射（带 i18n）
+  const UPGRADE_TYPE_MAP = useMemo(() => ({
+    immediate: { color: UPGRADE_TYPE_COLORS.immediate, text: t('software.upgrade.immediateUpgrade') },
+    scheduled: { color: UPGRADE_TYPE_COLORS.scheduled, text: t('software.upgrade.scheduledUpgrade') },
+    manual: { color: UPGRADE_TYPE_COLORS.manual, text: t('software.upgrade.manualUpgrade') },
+  }), [t]);
+
+  // 升级结果映射（带 i18n）
+  const UPGRADE_RESULT_MAP = useMemo(() => ({
+    success: { color: UPGRADE_RESULT_COLORS.success, text: t('status.success') },
+    failed: { color: UPGRADE_RESULT_COLORS.failed, text: t('status.failed') },
+    partial: { color: UPGRADE_RESULT_COLORS.partial, text: t('software.status.partialSuccess') },
+    running: { color: UPGRADE_RESULT_COLORS.running, text: t('software.status.upgrading') },
+    pending: { color: UPGRADE_RESULT_COLORS.pending, text: t('software.status.pendingStatus') },
+  }), [t]);
   // 页签状态
   const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
   // 任务列表状态
@@ -231,7 +257,7 @@ export default function UpgradePlan() {
     const { matched } = batchInputPreview;
 
     if (matched.length === 0) {
-      void message.warning('没有匹配到任何设备');
+      void message.warning(t('software.upgrade.noMatchedDevices'));
       return;
     }
 
@@ -242,7 +268,7 @@ export default function UpgradePlan() {
     );
 
     if (validDevices.length === 0) {
-      void message.warning('没有可添加的设备（设备类型不匹配或已存在）');
+      void message.warning(t('software.upgrade.noAddableDevices'));
       return;
     }
 
@@ -252,7 +278,7 @@ export default function UpgradePlan() {
     setBatchInputValue('');
     setBatchInputPreview({ matched: [], notFound: [], mixedTypes: [] });
 
-    void message.success(`已添加 ${validDevices.length} 台设备`);
+    void message.success(t('software.upgrade.addedDevices', { count: validDevices.length }));
   };
 
   // 打开批量输入弹窗
@@ -270,7 +296,7 @@ export default function UpgradePlan() {
   // 确认重新执行升级
   const handleRetryConfirm = () => {
     if (retryRecord) {
-      void message.success(`已重新发起 ${retryRecord.deviceSn} 的升级任务`);
+      void message.success(t('software.upgrade.rerunSuccess', { sn: retryRecord.deviceSn }));
       setRetryRecord(null);
     }
   };
@@ -278,11 +304,11 @@ export default function UpgradePlan() {
   // 直接导出
   const handleExport = () => {
     if (filteredData.length === 0) {
-      void message.warning('没有可导出的数据');
+      void message.warning(t('software.upgrade.exportNoData'));
       return;
     }
 
-    const headers = ['基站编码', '基站名称', '设备组', '初始版本', '升级版本', '升级类型', '产品类型', '保留配置', '升级进度', '结果', '失败原因', '操作人', '操作时间', '开始时间', '结束时间'];
+    const headers = t('software.upgrade.exportHeaders').split(',');
     const rows = filteredData.map((row) => [
       row.deviceSn,
       row.deviceName,
@@ -291,7 +317,7 @@ export default function UpgradePlan() {
       row.targetVersion,
       UPGRADE_TYPE_MAP[row.upgradeType]?.text ?? row.upgradeType,
       row.productType,
-      row.keepConfig ? '是' : '否',
+      row.keepConfig ? t('common.yes') : t('common.no'),
       `${row.progress}%`,
       UPGRADE_RESULT_MAP[row.result]?.text ?? row.result,
       row.failureReason,
@@ -306,43 +332,40 @@ export default function UpgradePlan() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `升级计划_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `${t('software.upgrade.exportFileName')}_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
 
-    void message.success(`已导出 ${filteredData.length} 条记录`);
+    void message.success(t('software.upgrade.exportSuccess', { count: filteredData.length }));
   };
 
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
+    { name: 'keyword', label: t('software.stationCodeOrName'), type: 'input', placeholder: t('software.inputStationCodeOrName') },
     {
       name: 'productType',
-      label: '产品类型',
+      label: t('software.upgrade.productType'),
       type: 'select',
-      placeholder: '请选择',
+      placeholder: t('common.pleaseSelect'),
       options: [
-        { label: '全部', value: 'all' },
-        // eNB 产品类型
+        { label: t('common.all'), value: 'all' },
         { label: 'PM-B4860', value: 'PM-B4860' },
         { label: 'QAFA', value: 'QAFA' },
         { label: 'QATA', value: 'QATA' },
         { label: 'QAFB', value: 'QAFB' },
         { label: 'RTD', value: 'RTD' },
-        // gNB 产品类型
         { label: 'BaiBNX', value: 'BaiBNX' },
         { label: 'BaiBNQ', value: 'BaiBNQ' },
-        // GSM 产品类型
         { label: 'BSC', value: 'BSC' },
         { label: 'BTS', value: 'BTS' },
       ],
     },
     {
       name: 'sourceVersion',
-      label: '初始版本',
+      label: t('software.upgrade.sourceVersion'),
       type: 'select',
-      placeholder: '请选择',
+      placeholder: t('common.pleaseSelect'),
       options: [
-        { label: '全部', value: 'all' },
+        { label: t('common.all'), value: 'all' },
         { label: 'V1.1.5', value: 'V1.1.5' },
         { label: 'V1.2.0', value: 'V1.2.0' },
         { label: 'V2.0.0', value: 'V2.0.0' },
@@ -350,22 +373,22 @@ export default function UpgradePlan() {
     },
     {
       name: 'targetVersion',
-      label: '升级版本',
+      label: t('software.upgrade.targetVersion'),
       type: 'select',
-      placeholder: '请选择',
+      placeholder: t('common.pleaseSelect'),
       options: [
-        { label: '全部', value: 'all' },
+        { label: t('common.all'), value: 'all' },
         { label: 'V1.3.0', value: 'V1.3.0' },
         { label: 'V2.1.0', value: 'V2.1.0' },
       ],
     },
     {
       name: 'deviceGroup',
-      label: '设备组',
+      label: t('software.deviceGroup'),
       type: 'select',
-      placeholder: '请选择',
+      placeholder: t('common.pleaseSelect'),
       options: [
-        { label: '全部', value: 'all' },
+        { label: t('common.all'), value: 'all' },
         { label: '北京移动', value: '北京移动' },
         { label: '上海移动', value: '上海移动' },
         { label: '广东移动', value: '广东移动' },
@@ -378,48 +401,48 @@ export default function UpgradePlan() {
     },
     {
       name: 'upgradeType',
-      label: '升级类型',
+      label: t('software.upgrade.upgradeType'),
       type: 'select',
-      placeholder: '请选择',
+      placeholder: t('common.pleaseSelect'),
       options: [
-        { label: '全部', value: 'all' },
-        { label: '立即升级', value: 'immediate' },
-        { label: '定时升级', value: 'scheduled' },
-        { label: '手动升级', value: 'manual' },
+        { label: t('common.all'), value: 'all' },
+        { label: t('software.upgrade.immediateUpgrade'), value: 'immediate' },
+        { label: t('software.upgrade.scheduledUpgrade'), value: 'scheduled' },
+        { label: t('software.upgrade.manualUpgrade'), value: 'manual' },
       ],
     },
     {
       name: 'result',
-      label: '结果',
+      label: t('table.result'),
       type: 'select',
-      placeholder: '请选择',
+      placeholder: t('common.pleaseSelect'),
       options: [
-        { label: '全部', value: 'all' },
-        { label: '成功', value: 'success' },
-        { label: '失败', value: 'failed' },
-        { label: '部分成功', value: 'partial' },
-        { label: '升级中', value: 'running' },
-        { label: '等待中', value: 'pending' },
+        { label: t('common.all'), value: 'all' },
+        { label: t('status.success'), value: 'success' },
+        { label: t('status.failed'), value: 'failed' },
+        { label: t('software.status.partialSuccess'), value: 'partial' },
+        { label: t('software.status.upgrading'), value: 'running' },
+        { label: t('software.status.pendingStatus'), value: 'pending' },
       ],
     },
     {
       name: 'timeRange',
-      label: '时间范围',
+      label: t('common.timeRange') ?? '时间范围',
       type: 'date-range',
-      placeholder: '请选择时间范围',
+      placeholder: t('common.selectTimeRange') ?? '请选择时间范围',
     },
-  ], []);
+  ], [t]);
 
   // 任务列表筛选条件（只有任务名称和时间）
   const taskFilterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '任务名称', type: 'input', placeholder: '请输入任务名称' },
+    { name: 'keyword', label: t('software.taskName'), type: 'input', placeholder: t('software.upgrade.inputTaskName') },
     {
       name: 'timeRange',
-      label: '时间范围',
+      label: t('common.timeRange') ?? '时间范围',
       type: 'date-range',
-      placeholder: '请选择时间范围',
+      placeholder: t('common.selectTimeRange') ?? '请选择时间范围',
     },
-  ], []);
+  ], [t]);
 
   // 过滤数据
   const filteredData = useMemo(() => {
@@ -524,7 +547,7 @@ export default function UpgradePlan() {
   // 确认添加选中的设备
   const handleConfirmAddDevices = () => {
     if (selectedNewDevices.length === 0) {
-      void message.warning('请选择要添加的设备');
+      void message.warning(t('software.upgrade.selectDeviceToAdd'));
       return;
     }
 
@@ -533,43 +556,43 @@ export default function UpgradePlan() {
     setAddDeviceModalVisible(false);
     setSelectedNewDevices([]);
     setAddDeviceKeyword('');
-    void message.success(`已添加 ${newDevices.length} 台设备`);
+    void message.success(t('software.upgrade.addedDevices', { count: newDevices.length }));
   };
 
   // 提交批量升级
   const handleSubmitUpgrade = () => {
     // 验证任务名称
     if (!taskName.trim()) {
-      void message.warning('请输入任务名称');
+      void message.warning(t('software.upgrade.inputTaskNameWarning'));
       return;
     }
     // 验证设备选择
     if (!selectAllOfType && drawerDevices.length === 0) {
-      void message.warning('请选择要升级的设备或勾选"升级该产品类型的全部设备"');
+      void message.warning(t('software.upgrade.selectDeviceOrAll'));
       return;
     }
     if (selectAllOfType && allDevicesCountOfType === 0) {
-      void message.warning('该产品类型下没有设备');
+      void message.warning(t('software.upgrade.noDevicesOfType'));
       return;
     }
     if (!upgradeFile) {
-      void message.warning('请选择升级文件');
+      void message.warning(t('software.upgrade.selectUpgradeFileWarn'));
       return;
     }
     if (executionMethod === 'scheduled' && !scheduledTime) {
-      void message.warning('请选择定时执行时间');
+      void message.warning(t('software.upgrade.selectScheduleTime'));
       return;
     }
 
     // 提交升级任务
-    const execMethodText = executionMethod === 'immediate' ? '立即执行' :
-                          executionMethod === 'suspend' ? '挂起' : `定时执行 (${scheduledTime?.format('YYYY-MM-DD HH:mm')})`;
+    const execMethodText = executionMethod === 'immediate' ? t('software.upgrade.immediateExecText') :
+                          executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') });
     const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
     const deviceInfo = selectAllOfType
-      ? `产品类型「${drawerProductType}」全部 ${deviceCount} 台设备`
-      : `${deviceCount} 台设备`;
+      ? t('software.upgrade.productTypeAll', { type: drawerProductType, count: deviceCount })
+      : t('software.upgrade.deviceCountInfo', { count: deviceCount });
 
-    void message.success(`已创建批量升级任务「${taskName}」：${deviceInfo}，${execMethodText}`);
+    void message.success(t('software.upgrade.createTaskSuccess', { name: taskName, deviceInfo, execMethod: execMethodText }));
 
     // 关闭抽屉并清空选择
     setUpgradeDrawerVisible(false);
@@ -579,19 +602,19 @@ export default function UpgradePlan() {
 
   // 任务操作处理函数
   const handlePauseTask = (record: UpgradePlanRow) => {
-    void message.success(`已暂停任务: ${record.deviceName}`);
+    void message.success(t('software.upgrade.pausedTask', { name: record.deviceName }));
   };
 
   const handleStopTask = (record: UpgradePlanRow) => {
-    void message.success(`已终止任务: ${record.deviceName}`);
+    void message.success(t('software.upgrade.stoppedTask', { name: record.deviceName }));
   };
 
   const handleStartTask = (record: UpgradePlanRow) => {
-    void message.success(`已开始任务: ${record.deviceName}`);
+    void message.success(t('software.upgrade.startedTask', { name: record.deviceName }));
   };
 
   const handleEditTask = (record: UpgradePlanRow) => {
-    void message.success(`打开编辑任务: ${record.deviceName}`);
+    void message.success(t('software.upgrade.editTask', { name: record.deviceName }));
   };
 
   const handleViewTaskDetail = (record: UpgradePlanRow) => {
@@ -605,7 +628,7 @@ export default function UpgradePlan() {
 
   const handleDeleteTaskConfirm = () => {
     if (deleteTaskRecord) {
-      void message.success(`已删除任务: ${deleteTaskRecord.deviceName}`);
+      void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.deviceName }));
       setDeleteTaskRecord(null);
     }
   };
@@ -623,7 +646,7 @@ export default function UpgradePlan() {
   const taskColumns: DataTableColumn<UpgradePlanRow>[] = [
     {
       key: 'operation',
-      title: '操作',
+      title: t('common.operation'),
       width: 100,
       fixed: 'right',
       render: (_: unknown, record: UpgradePlanRow) => {
@@ -639,25 +662,25 @@ export default function UpgradePlan() {
         const items: MenuProps['items'] = [
           showEdit ? {
             key: 'edit',
-            label: '修改',
+            label: t('common.modify'),
             icon: <DesktopOutlined />,
             onClick: () => handleEditTask(record),
           } : null,
           showStart ? {
             key: 'start',
-            label: '开始',
+            label: t('common.start'),
             icon: <PlayCircleOutlined />,
             onClick: () => handleStartTask(record),
           } : null,
           showPause ? {
             key: 'pause',
-            label: '暂停',
+            label: t('common.pause'),
             icon: <PauseOutlined />,
             onClick: () => handlePauseTask(record),
           } : null,
           showTerminate ? {
             key: 'terminate',
-            label: '终止',
+            label: t('common.terminate'),
             icon: <StopOutlined />,
             danger: true,
             onClick: () => handleStopTask(record),
@@ -665,7 +688,7 @@ export default function UpgradePlan() {
           (showEdit || showStart || showPause || showTerminate) && showDelete ? { type: 'divider' } : null,
           showDelete ? {
             key: 'delete',
-            label: '删除',
+            label: t('common.delete'),
             icon: <DeleteOutlined />,
             danger: true,
             onClick: () => setDeleteTaskRecord(record),
@@ -674,7 +697,7 @@ export default function UpgradePlan() {
 
         return (
           <Space size={4}>
-            <Button type="link" size="small" onClick={() => handleViewTaskDetail(record)}>详情</Button>
+            <Button type="link" size="small" onClick={() => handleViewTaskDetail(record)}>{t('common.details')}</Button>
             <Dropdown menu={{ items }} trigger={['click']}>
               <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
             </Dropdown>
@@ -684,7 +707,7 @@ export default function UpgradePlan() {
     },
     {
       key: 'taskName',
-      title: '任务名称',
+      title: t('software.taskName'),
       dataIndex: 'deviceName',
       width: 150,
       ellipsis: true,
@@ -699,11 +722,11 @@ export default function UpgradePlan() {
         </Button>
       ),
     },
-    { key: 'operator', title: '操作人', dataIndex: 'operator', width: 100 },
-    { key: 'operateTime', title: '操作时间', dataIndex: 'operateTime', width: 160 },
+    { key: 'operator', title: t('table.operator'), dataIndex: 'operator', width: 100 },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'operateTime', width: 160 },
     {
       key: 'status',
-      title: '任务状态',
+      title: t('software.taskStatus'),
       dataIndex: 'status',
       width: 100,
       render: (val: TaskStatus) => {
@@ -711,10 +734,10 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'targetVersion', title: '升级版本', dataIndex: 'targetVersion', width: 100 },
+    { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'targetVersion', width: 100 },
     {
       key: 'upgradeType',
-      title: '升级类型',
+      title: t('software.upgrade.upgradeType'),
       dataIndex: 'upgradeType',
       width: 100,
       render: (val: UpgradeType) => {
@@ -722,17 +745,17 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
+    { key: 'productType', title: t('software.upgrade.productType'), dataIndex: 'productType', width: 100 },
     {
       key: 'progress',
-      title: '升级进度',
+      title: t('software.upgrade.upgradeProgress'),
       dataIndex: 'progress',
       width: 120,
       render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
     },
     {
       key: 'result',
-      title: '结果',
+      title: t('table.result'),
       dataIndex: 'result',
       width: 100,
       render: (val: UpgradeResult) => {
@@ -740,14 +763,14 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
-    { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startTime', width: 160 },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endTime', width: 160 },
   ];
 
   const columns: DataTableColumn<UpgradePlanRow>[] = [
     {
       key: 'operation',
-      title: '操作',
+      title: t('common.operation'),
       width: 80,
       fixed: 'right',
       render: (_: unknown, record: UpgradePlanRow) => {
@@ -759,21 +782,21 @@ export default function UpgradePlan() {
               icon={<ReloadOutlined />}
               onClick={() => handleRetry(record)}
             >
-              重新执行
+              {t('software.upgrade.rerun')}
             </Button>
           );
         }
         return null;
       },
     },
-    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-    { key: 'deviceGroup', title: '设备组', dataIndex: 'deviceGroup', width: 100 },
-    { key: 'sourceVersion', title: '初始版本', dataIndex: 'sourceVersion', width: 100 },
-    { key: 'targetVersion', title: '升级版本', dataIndex: 'targetVersion', width: 100 },
+    { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120 },
+    { key: 'deviceName', title: t('software.stationName'), dataIndex: 'deviceName', ellipsis: true },
+    { key: 'deviceGroup', title: t('software.deviceGroup'), dataIndex: 'deviceGroup', width: 100 },
+    { key: 'sourceVersion', title: t('software.upgrade.sourceVersion'), dataIndex: 'sourceVersion', width: 100 },
+    { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'targetVersion', width: 100 },
     {
       key: 'upgradeType',
-      title: '升级类型',
+      title: t('software.upgrade.upgradeType'),
       dataIndex: 'upgradeType',
       width: 100,
       render: (val: UpgradeType) => {
@@ -781,24 +804,24 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
+    { key: 'productType', title: t('software.upgrade.productType'), dataIndex: 'productType', width: 100 },
     {
       key: 'keepConfig',
-      title: '保留配置',
+      title: t('software.upgrade.keepConfig'),
       dataIndex: 'keepConfig',
       width: 90,
       render: (val: boolean) => <Checkbox checked={val} />,
     },
     {
       key: 'progress',
-      title: '升级进度',
+      title: t('software.upgrade.upgradeProgress'),
       dataIndex: 'progress',
       width: 120,
       render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
     },
     {
       key: 'result',
-      title: '结果',
+      title: t('table.result'),
       dataIndex: 'result',
       width: 100,
       render: (val: UpgradeResult) => {
@@ -806,21 +829,21 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'failureReason', title: '失败原因', dataIndex: 'failureReason', width: 150, ellipsis: true },
-    { key: 'operator', title: '操作人', dataIndex: 'operator', width: 100 },
-    { key: 'operateTime', title: '操作时间', dataIndex: 'operateTime', width: 160 },
-    { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
-    { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
+    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'failureReason', width: 150, ellipsis: true },
+    { key: 'operator', title: t('table.operator'), dataIndex: 'operator', width: 100 },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'operateTime', width: 160 },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startTime', width: 160 },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endTime', width: 160 },
   ];
 
   // 页面头部按钮
   const headerExtra = (
     <Space>
       <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleOpenUpgradeDrawer}>
-        升级
+        {t('software.upgrade.upgrade')}
       </Button>
       <Button icon={<DownloadOutlined />} onClick={handleExport}>
-        导出
+        {t('common.export')}
       </Button>
     </Space>
   );
@@ -839,8 +862,8 @@ export default function UpgradePlan() {
         buttonStyle="solid"
         style={{ marginBottom: 12 }}
       >
-        <Radio.Button value="task">任务列表</Radio.Button>
-        <Radio.Button value="device">设备列表</Radio.Button>
+        <Radio.Button value="task">{t('software.upgrade.taskList')}</Radio.Button>
+        <Radio.Button value="device">{t('software.upgrade.deviceList')}</Radio.Button>
       </Radio.Group>
 
       {/* 搜索表单 */}
@@ -864,7 +887,7 @@ export default function UpgradePlan() {
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
             scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
             showRowNumber
-            rowNumberTitle="序号"
+            rowNumberTitle={t('table.rowNumber')}
           />
         ) : (
           <DataTable<UpgradePlanRow>
@@ -878,18 +901,18 @@ export default function UpgradePlan() {
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
             scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
             showRowNumber
-            rowNumberTitle="序号"
+            rowNumberTitle={t('table.rowNumber')}
           />
         )}
 
       {/* 批量输入弹窗 */}
       <Modal
-        title={`批量输入设备SN - ${drawerProductType || '请先选择产品类型'}`}
+        title={t('software.upgrade.batchInputTitle', { type: drawerProductType || t('software.upgrade.selectProductTypeFirst') })}
         open={batchInputVisible}
         onCancel={() => setBatchInputVisible(false)}
         onOk={handleBatchInputConfirm}
-        okText="确认添加"
-        cancelText="取消"
+        okText={t('software.upgrade.confirmAdd')}
+        cancelText={t('common.cancel')}
         width={600}
         okButtonProps={{
           disabled: batchInputPreview.matched.length === 0 || !drawerProductType,
@@ -899,14 +922,14 @@ export default function UpgradePlan() {
           <Alert
             type="warning"
             showIcon
-            message="请先选择产品类型"
+            message={t('software.upgrade.selectProductTypeFirst')}
             style={{ marginBottom: 16 }}
           />
         )}
 
         <div style={{ marginBottom: 16 }}>
           <Input.TextArea
-            placeholder="请输入设备SN，支持换行、逗号、分号、空格分隔&#10;例如：&#10;ENB00001&#10;ENB00002, ENB00003; GNB00001"
+            placeholder={`${t('software.upgrade.batchInputPlaceholder')}\n例如：\nENB00001\nENB00002, ENB00003; GNB00001`}
             rows={6}
             value={batchInputValue}
             onChange={(e) => setBatchInputValue(e.target.value)}
@@ -924,15 +947,15 @@ export default function UpgradePlan() {
               message={
                 <Space direction="vertical" size="small">
                   <span>
-                    匹配到 <strong>{batchInputPreview.matched.length}</strong> 个设备
+                    {t('software.upgrade.matchedDevices', { count: batchInputPreview.matched.length })}
                     {batchInputPreview.mixedTypes.includes(drawerProductType) && (
-                      <Tag color="blue" style={{ marginLeft: 8 }}>可添加: {batchInputPreview.matched.filter(d => d.productType === drawerProductType).length} 台</Tag>
+                      <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.addableCount', { count: batchInputPreview.matched.filter(d => d.productType === drawerProductType).length })}</Tag>
                     )}
                   </span>
                   {!batchInputPreview.mixedTypes.includes(drawerProductType) && drawerProductType && (
                     <span style={{ color: '#faad14' }}>
                       <WarningOutlined style={{ marginRight: 4 }} />
-                      没有产品类型为「{drawerProductType}」的设备，请重新输入
+                      {t('software.upgrade.noMatchedType', { type: drawerProductType })}
                     </span>
                   )}
                 </Space>
@@ -949,7 +972,7 @@ export default function UpgradePlan() {
             showIcon
             message={
               <div>
-                <div>以下 {batchInputPreview.notFound.length} 个设备SN未找到:</div>
+                <div>{t('software.upgrade.notFoundSns', { count: batchInputPreview.notFound.length })}</div>
                 <div style={{ maxHeight: 80, overflow: 'auto', marginTop: 4 }}>
                   {batchInputPreview.notFound.map((sn) => (
                     <Tag key={sn} style={{ margin: '2px' }}>{sn}</Tag>
@@ -964,12 +987,12 @@ export default function UpgradePlan() {
 
       {/* 重新执行确认弹窗 */}
       <Modal
-        title="确认重新执行"
+        title={t('software.upgrade.confirmRerun')}
         open={!!retryRecord}
         onCancel={() => setRetryRecord(null)}
         onOk={handleRetryConfirm}
-        okText="确认"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         okButtonProps={{ danger: true }}
       >
         <Alert
@@ -979,12 +1002,12 @@ export default function UpgradePlan() {
           message={
             <div>
               <p style={{ marginBottom: 8 }}>
-                确定要重新执行以下设备的升级任务吗？
+                {t('software.upgrade.confirmRerunMsg')}
               </p>
               <p style={{ marginBottom: 0 }}>
-                <strong>基站编码：</strong>{retryRecord?.deviceSn}<br />
-                <strong>基站名称：</strong>{retryRecord?.deviceName}<br />
-                <strong>目标版本：</strong>{retryRecord?.targetVersion}
+                <strong>{t('software.upgrade.stationCodeLabel')}</strong>{retryRecord?.deviceSn}<br />
+                <strong>{t('software.upgrade.stationNameLabel')}</strong>{retryRecord?.deviceName}<br />
+                <strong>{t('software.upgrade.targetVersionLabel')}</strong>{retryRecord?.targetVersion}
               </p>
             </div>
           }
@@ -993,12 +1016,12 @@ export default function UpgradePlan() {
 
       {/* 删除任务确认弹窗 */}
       <Modal
-        title="确认删除"
+        title={t('software.firmware.confirmDelete')}
         open={!!deleteTaskRecord}
         onCancel={() => setDeleteTaskRecord(null)}
         onOk={handleDeleteTaskConfirm}
-        okText="确认删除"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         okButtonProps={{ danger: true }}
       >
         <Alert
@@ -1008,12 +1031,12 @@ export default function UpgradePlan() {
           message={
             <div>
               <p style={{ marginBottom: 8 }}>
-                确定要删除以下升级任务吗？此操作不可恢复。
+                {t('software.upgrade.confirmDeleteTask')}
               </p>
               <p style={{ marginBottom: 0 }}>
-                <strong>任务名称：</strong>{deleteTaskRecord?.deviceName}<br />
-                <strong>操作人：</strong>{deleteTaskRecord?.operator}<br />
-                <strong>升级版本：</strong>{deleteTaskRecord?.targetVersion}
+                <strong>{t('software.upgrade.taskNameLabel')}</strong>{deleteTaskRecord?.deviceName}<br />
+                <strong>{t('software.upgrade.operatorLabel')}</strong>{deleteTaskRecord?.operator}<br />
+                <strong>{t('software.upgrade.upgradeVersionLabel')}</strong>{deleteTaskRecord?.targetVersion}
               </p>
             </div>
           }
@@ -1022,38 +1045,38 @@ export default function UpgradePlan() {
 
       {/* 批量升级抽屉 */}
       <Drawer
-        title="批量升级"
+        title={t('software.upgrade.batchUpgrade')}
         placement="right"
         width={600}
         open={upgradeDrawerVisible}
         onClose={() => setUpgradeDrawerVisible(false)}
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setUpgradeDrawerVisible(false)}>取消</Button>
+            <Button onClick={() => setUpgradeDrawerVisible(false)}>{t('common.cancel')}</Button>
             <Button
               type="primary"
               onClick={handleSubmitUpgrade}
               disabled={(!selectAllOfType && drawerDevices.length === 0) || !upgradeFile}
             >
-              确认升级
+              {t('software.upgrade.confirmUpgrade')}
             </Button>
           </Space>
         }
       >
         <Form layout="vertical" size="small">
           {/* 任务名称 */}
-          <Form.Item label="任务名称" required>
+          <Form.Item label={t('software.upgrade.taskName')} required>
             <Input
               value={taskName}
               onChange={(e) => setTaskName(e.target.value)}
-              placeholder="请输入任务名称"
+              placeholder={t('software.upgrade.inputTaskName')}
               maxLength={100}
               showCount
             />
           </Form.Item>
 
           {/* 已选产品类型 */}
-          <Form.Item label="产品类型" required>
+          <Form.Item label={t('software.upgrade.productType')} required>
             <Select
               value={drawerProductType}
               onChange={(val) => {
@@ -1083,15 +1106,15 @@ export default function UpgradePlan() {
               onChange={(e) => setSelectAllOfType(e.target.checked)}
               disabled={!drawerProductType}
             >
-              升级该产品类型的全部设备
+              {t('software.upgrade.upgradeAllOfType')}
               {drawerProductType && (
-                <Tag color="blue" style={{ marginLeft: 8 }}>共 {allDevicesCountOfType} 台</Tag>
+                <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.totalDevices', { count: allDevicesCountOfType })}</Tag>
               )}
             </Checkbox>
           </Form.Item>
 
           {/* 升级类型 */}
-          <Form.Item label="升级类型" required>
+          <Form.Item label={t('software.upgrade.upgradeCategory')} required>
             <Radio.Group
               value={upgradeCategory}
               onChange={(e) => {
@@ -1099,9 +1122,9 @@ export default function UpgradePlan() {
                 setUpgradeFile(undefined);
               }}
             >
-              <Radio value="software">软件升级</Radio>
-              <Radio value="patch">PATCH升级</Radio>
-              <Radio value="fpga">FPGA升级</Radio>
+              <Radio value="software">{t('software.upgrade.softwareUpgrade')}</Radio>
+              <Radio value="patch">{t('software.upgrade.patchUpgrade')}</Radio>
+              <Radio value="fpga">{t('software.upgrade.fpgaUpgrade')}</Radio>
             </Radio.Group>
           </Form.Item>
 

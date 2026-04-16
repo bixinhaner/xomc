@@ -23,16 +23,16 @@ import LdapSettings from './LdapSettings';
 type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound' | 'sas' | 'ldap';
 
 // 设置子页签配置
-const settingsTabs: { key: SettingsTab; label: string }[] = [
-  { key: 'basic', label: '基本设置' },
-  { key: 'security', label: '安全设置' },
-  { key: 'device', label: '设备设置' },
-  { key: 'notify', label: '通知设置' },
-  { key: 'storage', label: '存储设置' },
-  { key: 'omc', label: '网管设置' },
-  { key: 'northbound', label: '北向接口设置' },
-  { key: 'sas', label: 'SAS设置' },
-  { key: 'ldap', label: 'LDAP协议' },
+const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
+  { key: 'basic', labelKey: 'system.config.basic' },
+  { key: 'security', labelKey: 'system.config.security' },
+  { key: 'device', labelKey: 'system.config.device' },
+  { key: 'notify', labelKey: 'system.config.notify' },
+  { key: 'storage', labelKey: 'system.config.storage' },
+  { key: 'omc', labelKey: 'system.config.omc' },
+  { key: 'northbound', labelKey: 'system.config.northbound' },
+  { key: 'sas', labelKey: 'system.config.sas' },
+  { key: 'ldap', labelKey: 'system.config.ldap' },
 ];
 
 export default function SystemConfig() {
@@ -76,7 +76,7 @@ export default function SystemConfig() {
         void message.success(t('common.save'));
       }, 800);
     }).catch(() => {
-      void message.error('请检查表单填写是否正确');
+      void message.error(t('common.formValidationFailed'));
     });
   };
 
@@ -109,7 +109,7 @@ export default function SystemConfig() {
   // Tabs 配置
   const tabItems = settingsTabs.map((tab) => ({
     key: tab.key,
-    label: tab.label,
+    label: t(tab.labelKey),
   }));
 
   return (

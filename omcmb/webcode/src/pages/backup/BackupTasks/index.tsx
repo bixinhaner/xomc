@@ -52,13 +52,13 @@ type TaskStatus = 1 | 2 | 3 | 4 | 5;
 // 备份抽屉模式
 type BackupDrawerMode = 'manual' | 'scheduled' | null;
 
-// 任务级别状态配置
-const TASK_STATUS_CONFIG: Record<TaskStatus, { color: string; text: string }> = {
-  1: { color: 'default', text: '等待' },
-  2: { color: 'processing', text: '进行中' },
-  3: { color: 'warning', text: '暂停' },
-  4: { color: 'success', text: '已结束' },
-  5: { color: 'error', text: '终止中' },
+// 任务级别状态配置 - use i18n keys
+const TASK_STATUS_KEYS: Record<TaskStatus, { color: string; key: string }> = {
+  1: { color: 'default', key: 'status.waiting' },
+  2: { color: 'processing', key: 'status.inProgress' },
+  3: { color: 'warning', key: 'status.paused' },
+  4: { color: 'success', key: 'status.ended' },
+  5: { color: 'error', key: 'status.terminating' },
 };
 
 const STATUS_MAP_KEYS: Record<string, { color: string; key: string }> = {
@@ -69,24 +69,24 @@ const STATUS_MAP_KEYS: Record<string, { color: string; key: string }> = {
   cancelled: { color: 'warning', key: 'status.cancelled' },
 };
 
-// 设备级别状态配置（与任务列表风格一致）
-const DEVICE_STATUS_CONFIG: Record<string, { color: string; text: string }> = {
-  pending: { color: 'default', text: '等待' },
-  running: { color: 'processing', text: '进行中' },
-  success: { color: 'success', text: '成功' },
-  failed: { color: 'error', text: '失败' },
-  cancelled: { color: 'warning', text: '已取消' },
+// 设备级别状态配置 - use i18n keys
+const DEVICE_STATUS_KEYS: Record<string, { color: string; key: string }> = {
+  pending: { color: 'default', key: 'status.pending' },
+  running: { color: 'processing', key: 'status.running' },
+  success: { color: 'success', key: 'status.success' },
+  failed: { color: 'error', key: 'status.failed' },
+  cancelled: { color: 'warning', key: 'status.cancelled' },
 };
 
-const BACKUP_TYPE_MAP: Record<string, string> = {
-  full: '全量备份',
-  incremental: '增量备份',
-  'config-only': '配置备份',
+const BACKUP_TYPE_KEYS: Record<string, string> = {
+  full: 'backup.fullBackup',
+  incremental: 'backup.incrementalBackup',
+  'config-only': 'backup.configBackup',
 };
 
-const TASK_TYPE_MAP: Record<string, string> = {
-  manual: '手动',
-  scheduled: '计划',
+const TASK_TYPE_KEYS: Record<string, string> = {
+  manual: 'status.waiting',
+  scheduled: 'status.inProgress',
 };
 
 function formatBytes(bytes?: number): string {
@@ -219,7 +219,7 @@ export default function BackupTasks() {
   const handleExport = () => {
     const data = activeTab === 'task' ? filteredTaskData : filteredDeviceData;
     if (data.length === 0) {
-      void message.warning('没有可导出的数据');
+      void message.warning(t('common.noDataToExport'));
       return;
     }
 
@@ -227,14 +227,14 @@ export default function BackupTasks() {
     let rows: string[][];
 
     if (activeTab === 'task') {
-      headers = ['任务名称', '操作人', '操作时间', '任务类型', '备份类型', '状态', '任务进度', '成功', '失败', '进行中', '等待', '开始时间', '结束时间'];
+      headers = [t('table.taskName'), t('table.operator'), t('table.operateTime'), t('backup.taskType'), t('backup.backupType'), t('common.status'), t('backup.taskProgress'), t('table.success'), t('table.failed'), t('status.running'), t('status.waiting'), t('table.startTime'), t('table.endTime')];
       rows = (data as BackupTaskRow[]).map((row) => [
         row.taskName,
         row.creator,
         row.operateTime,
-        TASK_TYPE_MAP[row.taskType] ?? row.taskType,
-        BACKUP_TYPE_MAP[row.backupType] ?? row.backupType,
-        TASK_STATUS_CONFIG[row.status]?.text ?? String(row.status),
+        t(TASK_TYPE_KEYS[row.taskType] ?? ''),
+        t(BACKUP_TYPE_KEYS[row.backupType] ?? ''),
+        TASK_STATUS_KEYS[row.status] ? t(TASK_STATUS_KEYS[row.status].key) : String(row.status),
         `${row.progress}%`,
         String(row.successCount),
         String(row.failedCount),
@@ -244,12 +244,12 @@ export default function BackupTasks() {
         row.endTime,
       ]);
     } else {
-      headers = ['基站编码', '基站名称', '设备组', '备份类型', '任务名称', '状态', '进度', '失败原因', '开始时间', '结束时间', '文件大小'];
+      headers = [t('device.stationCode'), t('device.stationName'), t('common.deviceGroup'), t('backup.backupType'), t('table.taskName'), t('common.status'), t('table.progress'), t('table.failureReason'), t('table.startTime'), t('table.endTime'), t('table.fileSize')];
       rows = (data as BackupDeviceRow[]).map((row) => [
         row.deviceSn,
         row.deviceName,
         row.deviceGroup,
-        BACKUP_TYPE_MAP[row.backupType] ?? row.backupType,
+        t(BACKUP_TYPE_KEYS[row.backupType] ?? ''),
         row.taskName,
         STATUS_MAP_KEYS[row.status]?.key ? t(STATUS_MAP_KEYS[row.status].key) : row.status,
         `${row.progress}%`,
@@ -265,20 +265,20 @@ export default function BackupTasks() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `备份${activeTab === 'task' ? '任务' : '设备'}列表_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `${t(activeTab === 'task' ? 'backup.csvTaskFileName' : 'backup.csvDeviceFileName')}_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
 
-    void message.success(`已导出 ${data.length} 条记录`);
+    void message.success(t('backup.exportSuccess', { count: data.length }));
   };
 
   // ========== 任务操作处理 ==========
   const handleStartTask = (record: BackupTaskRow) => {
-    void message.success(`已开始任务: ${record.taskName}`);
+    void message.success(t('backup.startedTask', { name: record.taskName }));
   };
 
   const handleStopTask = (record: BackupTaskRow) => {
-    void message.success(`已终止任务: ${record.taskName}`);
+    void message.success(t('backup.stoppedTask', { name: record.taskName }));
   };
 
   const handleDeleteTask = (record: BackupTaskRow) => {
@@ -360,14 +360,14 @@ export default function BackupTasks() {
   const handleBatchInputConfirm = () => {
     const { matched } = batchInputPreview;
     if (matched.length === 0) {
-      void message.warning('没有匹配到任何设备');
+      void message.warning(t('backup.noMatchedDevice'));
       return;
     }
     setDrawerDevices((prev) => [...prev, ...matched]);
     setBatchInputVisible(false);
     setBatchInputValue('');
     setBatchInputPreview({ matched: [], notFound: [] });
-    void message.success(`已添加 ${matched.length} 台设备`);
+    void message.success(t('backup.deviceCountUnit', { count: matched.length }));
   };
 
   // ========== 表单校验 ==========
@@ -396,45 +396,45 @@ export default function BackupTasks() {
 
   const handleSubmitBackup = () => {
     if (!drawerTaskName.trim()) {
-      void message.warning('请输入任务名称');
+      void message.warning(t('backup.pleaseInputTaskName'));
       return;
     }
     if (!selectAllDevices && drawerDevices.length === 0) {
-      void message.warning('请选择要备份的设备');
+      void message.warning(t('backup.pleaseSelectDevices'));
       return;
     }
 
-    const mode = backupDrawerMode === 'scheduled' ? '周期备份' : '新建备份';
-    const deviceInfo = selectAllDevices ? `全部 ${mockDeviceData.length} 台设备` : `${drawerDevices.length} 台设备`;
-    void message.success(`已创建${mode}任务「${drawerTaskName}」：${deviceInfo}`);
+    const mode = backupDrawerMode === 'scheduled' ? t('backup.cycleBackupMode') : t('backup.newBackupMode');
+    const deviceInfo = selectAllDevices ? t('backup.allDeviceCount', { count: mockDeviceData.length }) : t('backup.deviceCountUnit', { count: drawerDevices.length });
+    void message.success(t('backup.createdBackupTask', { mode, name: drawerTaskName, deviceInfo }));
     closeBackupDrawer();
   };
 
   // ========== 任务列表筛选条件 ==========
   const taskFilterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '任务名称', type: 'input', placeholder: '请输入任务名称' },
+    { name: 'keyword', label: t('table.taskName'), type: 'input', placeholder: t('backup.inputTaskName') },
     {
       name: 'status',
       label: t('table.status'),
       type: 'select',
       options: [
-        { label: '全部', value: 'all' },
-        { label: '等待', value: 1 },
-        { label: '进行中', value: 2 },
-        { label: '暂停', value: 3 },
-        { label: '已结束', value: 4 },
-        { label: '终止中', value: 5 },
+        { label: t('common.all'), value: 'all' },
+        { label: t('status.waiting'), value: 1 },
+        { label: t('status.inProgress'), value: 2 },
+        { label: t('status.paused'), value: 3 },
+        { label: t('status.ended'), value: 4 },
+        { label: t('status.terminating'), value: 5 },
       ],
     },
     {
       name: 'backupType',
-      label: '备份类型',
+      label: t('backup.backupType'),
       type: 'select',
       options: [
-        { label: '全部', value: 'all' },
-        { label: '全量备份', value: 'full' },
-        { label: '增量备份', value: 'incremental' },
-        { label: '配置备份', value: 'config-only' },
+        { label: t('common.all'), value: 'all' },
+        { label: t('backup.fullBackup'), value: 'full' },
+        { label: t('backup.incrementalBackup'), value: 'incremental' },
+        { label: t('backup.configBackup'), value: 'config-only' },
       ],
     },
     {
@@ -442,28 +442,28 @@ export default function BackupTasks() {
       label: t('table.type'),
       type: 'select',
       options: [
-        { label: '全部', value: 'all' },
-        { label: '手动', value: 'manual' },
-        { label: '计划', value: 'scheduled' },
+        { label: t('common.all'), value: 'all' },
+        { label: t('status.waiting'), value: 'manual' },
+        { label: t('status.inProgress'), value: 'scheduled' },
       ],
     },
     {
       name: 'timeRange',
-      label: '时间范围',
+      label: t('common.timeRange'),
       type: 'date-range',
-      placeholder: '请选择时间范围',
+      placeholder: t('common.selectTimeRange'),
     },
   ], [t]);
 
   // ========== 设备列表筛选条件 ==========
   const deviceFilterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
+    { name: 'keyword', label: t('device.stationCodeOrName'), type: 'input', placeholder: t('device.searchStationCodeOrName') },
     {
       name: 'status',
       label: t('table.status'),
       type: 'select',
       options: [
-        { label: '全部', value: 'all' },
+        { label: t('common.all'), value: 'all' },
         { label: t('status.pending'), value: 'pending' },
         { label: t('status.running'), value: 'running' },
         { label: t('status.success'), value: 'success' },
@@ -473,20 +473,20 @@ export default function BackupTasks() {
     },
     {
       name: 'backupType',
-      label: '备份类型',
+      label: t('backup.backupType'),
       type: 'select',
       options: [
-        { label: '全部', value: 'all' },
-        { label: '全量备份', value: 'full' },
-        { label: '增量备份', value: 'incremental' },
-        { label: '配置备份', value: 'config-only' },
+        { label: t('common.all'), value: 'all' },
+        { label: t('backup.fullBackup'), value: 'full' },
+        { label: t('backup.incrementalBackup'), value: 'incremental' },
+        { label: t('backup.configBackup'), value: 'config-only' },
       ],
     },
     {
       name: 'taskName',
-      label: '任务名称',
+      label: t('table.taskName'),
       type: 'input',
-      placeholder: '请输入任务名称',
+      placeholder: t('backup.inputTaskName'),
     },
   ], [t]);
 
@@ -553,16 +553,11 @@ export default function BackupTasks() {
   const taskColumns: DataTableColumn<BackupTaskRow>[] = useMemo(() => [
     {
       key: 'operation',
-      title: '操作',
+      title: t('table.operation'),
       width: 100,
       fixed: 'right',
       render: (_: unknown, record: BackupTaskRow) => {
         const status = record.status;
-        // 等待(1): 开始、终止、删除
-        // 进行中(2): 终止
-        // 暂停(3): 开始、终止
-        // 已结束(4): 删除
-        // 终止中(5): 删除
         const showStart = status === 1 || status === 3;
         const showTerminate = status === 1 || status === 2 || status === 3;
         const showDelete = status === 1 || status === 4 || status === 5;
@@ -570,13 +565,13 @@ export default function BackupTasks() {
         const items: MenuProps['items'] = [
           showStart ? {
             key: 'start',
-            label: '开始',
+            label: t('common.start'),
             icon: <PlayCircleOutlined />,
             onClick: () => handleStartTask(record),
           } : null,
           showTerminate ? {
             key: 'terminate',
-            label: '终止',
+            label: t('common.terminate'),
             icon: <StopOutlined />,
             danger: true,
             onClick: () => handleStopTask(record),
@@ -584,7 +579,7 @@ export default function BackupTasks() {
           (showStart || showTerminate) && showDelete ? { type: 'divider' } : null,
           showDelete ? {
             key: 'delete',
-            label: '删除',
+            label: t('common.delete'),
             icon: <DeleteOutlined />,
             danger: true,
             onClick: () => handleDeleteTask(record),
@@ -595,7 +590,7 @@ export default function BackupTasks() {
 
         return (
           <Space size={4}>
-            <Button type="link" size="small" onClick={() => setTaskDetailId(record.id)}>详情</Button>
+            <Button type="link" size="small" onClick={() => setTaskDetailId(record.id)}>{t('common.details')}</Button>
             <Dropdown menu={{ items }} trigger={['click']}>
               <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
             </Dropdown>
@@ -605,7 +600,7 @@ export default function BackupTasks() {
     },
     {
       key: 'taskName',
-      title: '任务名称',
+      title: t('table.taskName'),
       dataIndex: 'taskName',
       width: 180,
       ellipsis: true,
@@ -615,92 +610,92 @@ export default function BackupTasks() {
         </Button>
       ),
     },
-    { key: 'creator', title: '操作人', dataIndex: 'creator', width: 100 },
-    { key: 'operateTime', title: '操作时间', dataIndex: 'operateTime', width: 160 },
+    { key: 'creator', title: t('table.operator'), dataIndex: 'creator', width: 100 },
+    { key: 'operateTime', title: t('table.operateTime'), dataIndex: 'operateTime', width: 160 },
     {
       key: 'taskType',
-      title: '类型',
+      title: t('table.type'),
       dataIndex: 'backupType',
       width: 100,
-      render: (val) => <Tag color="blue">{BACKUP_TYPE_MAP[String(val)] ?? String(val)}</Tag>,
+      render: (val) => <Tag color="blue">{t(BACKUP_TYPE_KEYS[String(val)] ?? '') || String(val)}</Tag>,
     },
     {
       key: 'status',
-      title: '状态',
+      title: t('common.status'),
       dataIndex: 'status',
       width: 100,
       render: (val: TaskStatus) => {
-        const cfg = TASK_STATUS_CONFIG[val] ?? { color: 'default', text: String(val) };
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+        const cfg = TASK_STATUS_KEYS[val] ?? { color: 'default', key: '' };
+        return <Tag color={cfg.color}>{t(cfg.key) || String(val)}</Tag>;
       },
     },
     {
       key: 'progress',
-      title: '任务进度',
+      title: t('backup.taskProgress'),
       dataIndex: 'progress',
       width: 120,
       render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
     },
     {
       key: 'result',
-      title: '执行结果',
+      title: t('backup.executionResult'),
       width: 200,
       render: (_: unknown, record: BackupTaskRow) => (
         <Space size={4}>
-          {record.successCount > 0 && <Tag color="success">成功 {record.successCount}</Tag>}
-          {record.failedCount > 0 && <Tag color="error">失败 {record.failedCount}</Tag>}
-          {record.runningCount > 0 && <Tag color="processing">进行中 {record.runningCount}</Tag>}
-          {record.pendingCount > 0 && <Tag color="default">等待 {record.pendingCount}</Tag>}
+          {record.successCount > 0 && <Tag color="success">{t('status.success')} {record.successCount}</Tag>}
+          {record.failedCount > 0 && <Tag color="error">{t('status.failed')} {record.failedCount}</Tag>}
+          {record.runningCount > 0 && <Tag color="processing">{t('status.inProgress')} {record.runningCount}</Tag>}
+          {record.pendingCount > 0 && <Tag color="default">{t('status.waiting')} {record.pendingCount}</Tag>}
         </Space>
       ),
     },
-    { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
-    { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
+    { key: 'startTime', title: t('table.startTime'), dataIndex: 'startTime', width: 160 },
+    { key: 'endTime', title: t('table.endTime'), dataIndex: 'endTime', width: 160 },
   ], [t]);
 
   // ========== 设备列表列定义 ==========
   const deviceColumns: DataTableColumn<BackupDeviceRow>[] = useMemo(() => [
-    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', width: 150, ellipsis: true },
-    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
+    { key: 'deviceSn', title: t('device.stationCode'), dataIndex: 'deviceSn', width: 120 },
+    { key: 'deviceName', title: t('device.stationName'), dataIndex: 'deviceName', width: 150, ellipsis: true },
+    { key: 'productType', title: t('backup.productType'), dataIndex: 'productType', width: 100 },
     {
       key: 'backupType',
-      title: '类型',
+      title: t('table.type'),
       dataIndex: 'backupType',
       width: 100,
-      render: (val) => <Tag color="blue">{BACKUP_TYPE_MAP[String(val)] ?? String(val)}</Tag>,
+      render: (val) => <Tag color="blue">{t(BACKUP_TYPE_KEYS[String(val)] ?? '') || String(val)}</Tag>,
     },
-    { key: 'taskName', title: '任务名称', dataIndex: 'taskName', width: 160, ellipsis: true },
+    { key: 'taskName', title: t('table.taskName'), dataIndex: 'taskName', width: 160, ellipsis: true },
     {
       key: 'fileSize',
-      title: '配置文件',
+      title: t('backup.configFile'),
       dataIndex: 'fileSize',
       width: 180,
       render: (val: number, record: BackupDeviceRow) =>
         record.status === 'success' && val > 0
-          ? <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => void message.success(`开始下载: ${record.deviceSn}`)}>{record.deviceSn}_CFG.xml</Button>
+          ? <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => void message.success(t('backup.startDownload', { sn: record.deviceSn }))}>{record.deviceSn}_CFG.xml</Button>
           : '-',
     },
     {
       key: 'status',
-      title: '状态',
+      title: t('common.status'),
       dataIndex: 'status',
       width: 100,
       render: (val) => {
-        const cfg = DEVICE_STATUS_CONFIG[String(val)] ?? DEVICE_STATUS_CONFIG.pending;
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+        const cfg = DEVICE_STATUS_KEYS[String(val)] ?? DEVICE_STATUS_KEYS.pending;
+        return <Tag color={cfg.color}>{t(cfg.key)}</Tag>;
       },
     },
     {
       key: 'failureReason',
-      title: '失败原因',
+      title: t('table.failureReason'),
       dataIndex: 'failureReason',
       width: 150,
       ellipsis: true,
       render: (val: string) => val ? <span style={{ color: '#ff4d4f' }}>{val}</span> : '-',
     },
-    { key: 'startTime', title: '开始时间', dataIndex: 'startTime', width: 160 },
-    { key: 'endTime', title: '结束时间', dataIndex: 'endTime', width: 160 },
+    { key: 'startTime', title: t('table.startTime'), dataIndex: 'startTime', width: 160 },
+    { key: 'endTime', title: t('table.endTime'), dataIndex: 'endTime', width: 160 },
   ], [t]);
 
   // ========== 查找任务详情 ==========
@@ -720,22 +715,22 @@ export default function BackupTasks() {
         icon={<PlayCircleOutlined />}
         onClick={() => openBackupDrawer('manual')}
       >
-        新建备份
+        {t('backup.newBackup')}
       </Button>
       <Button
         icon={<ClockCircleOutlined />}
         onClick={() => openBackupDrawer('scheduled')}
       >
-        周期备份
+        {t('backup.scheduledBackup')}
         <Tag color={drawerCycleEnabled ? 'green' : 'default'} style={{ marginLeft: 6, marginRight: 0 }}>
-          {drawerCycleEnabled ? '已启用' : '未启用'}
+          {drawerCycleEnabled ? t('common.enable') : t('common.disable')}
         </Tag>
       </Button>
       <Button
         icon={<DownloadOutlined />}
         onClick={handleExport}
       >
-        导出
+        {t('common.export')}
       </Button>
     </Space>
   );
@@ -756,8 +751,8 @@ export default function BackupTasks() {
         buttonStyle="solid"
         style={{ marginBottom: 12 }}
       >
-        <Radio.Button value="task">任务列表</Radio.Button>
-        <Radio.Button value="device">设备列表</Radio.Button>
+        <Radio.Button value="task">{t('backup.taskList')}</Radio.Button>
+        <Radio.Button value="device">{t('backup.deviceList')}</Radio.Button>
       </Radio.Group>
 
       <FilterBar
@@ -798,7 +793,7 @@ export default function BackupTasks() {
           onRefresh={() => void refetch()}
           scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
           showRowNumber
-          rowNumberTitle="序号"
+          rowNumberTitle={t('common.rowNumber')}
         />
       ) : (
         <DataTable<BackupDeviceRow>
@@ -814,13 +809,13 @@ export default function BackupTasks() {
           onRefresh={() => void refetch()}
           scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
           showRowNumber
-          rowNumberTitle="序号"
+          rowNumberTitle={t('common.rowNumber')}
         />
       )}
 
       {/* 任务详情弹窗 */}
       <Modal
-        title="任务详情"
+        title={t('backup.taskDetail')}
         open={!!taskDetailId}
         onCancel={() => setTaskDetailId(null)}
         footer={null}
@@ -829,50 +824,50 @@ export default function BackupTasks() {
         {taskDetail && (
           <>
             <Descriptions bordered size="small" column={3} style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="任务名称" span={2}>{taskDetail.task.taskName}</Descriptions.Item>
-              <Descriptions.Item label="操作人">{taskDetail.task.creator}</Descriptions.Item>
-              <Descriptions.Item label="任务类型">{TASK_TYPE_MAP[taskDetail.task.taskType]}</Descriptions.Item>
-              <Descriptions.Item label="备份类型">{BACKUP_TYPE_MAP[taskDetail.task.backupType]}</Descriptions.Item>
-              <Descriptions.Item label="设备范围">{taskDetail.task.deviceCount} 台</Descriptions.Item>
-              <Descriptions.Item label="开始时间">{taskDetail.task.startTime}</Descriptions.Item>
-              <Descriptions.Item label="结束时间">{taskDetail.task.endTime}</Descriptions.Item>
-              <Descriptions.Item label="文件大小">{formatBytes(taskDetail.task.fileSize)}</Descriptions.Item>
+              <Descriptions.Item label={t('table.taskName')} span={2}>{taskDetail.task.taskName}</Descriptions.Item>
+              <Descriptions.Item label={t('table.operator')}>{taskDetail.task.creator}</Descriptions.Item>
+              <Descriptions.Item label={t('backup.taskType')}>{t(TASK_TYPE_KEYS[taskDetail.task.taskType] ?? '')}</Descriptions.Item>
+              <Descriptions.Item label={t('backup.backupType')}>{t(BACKUP_TYPE_KEYS[taskDetail.task.backupType] ?? '')}</Descriptions.Item>
+              <Descriptions.Item label={t('backup.deviceRange')}>{t('backup.deviceCountUnit', { count: taskDetail.task.deviceCount })}</Descriptions.Item>
+              <Descriptions.Item label={t('table.startTime')}>{taskDetail.task.startTime}</Descriptions.Item>
+              <Descriptions.Item label={t('table.endTime')}>{taskDetail.task.endTime}</Descriptions.Item>
+              <Descriptions.Item label={t('table.fileSize')}>{formatBytes(taskDetail.task.fileSize)}</Descriptions.Item>
             </Descriptions>
 
             <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>
-              设备执行情况
+              {t('backup.deviceExecution')}
             </Typography.Text>
             <Space direction="vertical" style={{ width: '100%' }}>
               <Space>
-                {taskDetail.task.successCount > 0 && <Tag color="success">成功 {taskDetail.task.successCount}</Tag>}
-                {taskDetail.task.failedCount > 0 && <Tag color="error">失败 {taskDetail.task.failedCount}</Tag>}
-                {taskDetail.task.runningCount > 0 && <Tag color="processing">进行中 {taskDetail.task.runningCount}</Tag>}
-                {taskDetail.task.pendingCount > 0 && <Tag color="default">等待 {taskDetail.task.pendingCount}</Tag>}
+                {taskDetail.task.successCount > 0 && <Tag color="success">{t('status.success')} {taskDetail.task.successCount}</Tag>}
+                {taskDetail.task.failedCount > 0 && <Tag color="error">{t('status.failed')} {taskDetail.task.failedCount}</Tag>}
+                {taskDetail.task.runningCount > 0 && <Tag color="processing">{t('status.inProgress')} {taskDetail.task.runningCount}</Tag>}
+                {taskDetail.task.pendingCount > 0 && <Tag color="default">{t('status.waiting')} {taskDetail.task.pendingCount}</Tag>}
               </Space>
             </Space>
 
             <Typography.Text strong style={{ fontSize: 12, display: 'block', marginTop: 16, marginBottom: 8 }}>
-              执行时间线
+              {t('backup.executionTimeline')}
             </Typography.Text>
             <Timeline
               items={[
-                { color: 'blue', children: <span style={{ fontSize: 12 }}>[{taskDetail.task.startTime}] 备份任务开始执行</span> },
+                { color: 'blue', children: <span style={{ fontSize: 12 }}>[{taskDetail.task.startTime}] {t('backup.backupTaskStarted')}</span> },
                 ...taskDetail.devices.slice(0, 3).map((d) => ({
                   color: d.status === 'success' ? 'green' : d.status === 'failed' ? 'red' : 'gray',
                   children: (
                     <span style={{ fontSize: 12 }}>
-                      [{d.endTime || '进行中'}] {d.deviceSn} {d.deviceName} — {
-                        d.status === 'success' ? `备份完成 ${formatBytes(d.fileSize)}` :
-                        d.status === 'failed' ? `备份失败: ${d.failureReason}` :
-                        d.status === 'running' ? `备份中 ${d.progress}%` :
-                        d.status === 'cancelled' ? '已取消' : '等待中'
+                      [{d.endTime || t('status.inProgress')}] {d.deviceSn} {d.deviceName} — {
+                        d.status === 'success' ? t('backup.backupComplete', { size: formatBytes(d.fileSize) }) :
+                        d.status === 'failed' ? t('backup.backupFailed', { reason: d.failureReason }) :
+                        d.status === 'running' ? t('backup.backupRunning', { progress: d.progress }) :
+                        d.status === 'cancelled' ? t('status.cancelled') : t('backup.backupWaiting')
                       }
                     </span>
                   ),
                 })),
                 taskDetail.devices.length > 3 ? {
                   color: 'gray',
-                  children: <span style={{ fontSize: 12 }}>...还有 {taskDetail.devices.length - 3} 条记录</span>,
+                  children: <span style={{ fontSize: 12 }}>{t('backup.moreRecords', { count: taskDetail.devices.length - 3 })}</span>,
                 } : null,
               ].filter(Boolean) as { color: string; children: React.ReactNode }[]}
             />
@@ -882,7 +877,7 @@ export default function BackupTasks() {
 
       {/* 删除确认弹窗 */}
       <Modal
-        title="确认删除"
+        title={t('backup.confirmDeleteTask')}
         open={!!deleteRecord}
         onCancel={() => setDeleteRecord(null)}
         onOk={() => {
@@ -891,33 +886,33 @@ export default function BackupTasks() {
             setDeleteRecord(null);
           }
         }}
-        okText="确认删除"
-        cancelText="取消"
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         okButtonProps={{ danger: true }}
       >
         {deleteRecord && (
           <Typography.Text>
-            确定要删除任务「<strong>{deleteRecord.taskName}</strong>」吗？此操作不可恢复。
+            {t('backup.deleteTaskConfirm', { name: deleteRecord.taskName })}
           </Typography.Text>
         )}
       </Modal>
 
       {/* 新建备份 / 周期备份抽屉 */}
       <Drawer
-        title={backupDrawerMode === 'scheduled' ? '周期备份' : '新建备份'}
+        title={backupDrawerMode === 'scheduled' ? t('backup.scheduledBackup') : t('backup.newBackup')}
         placement="right"
         width={600}
         open={!!backupDrawerMode}
         onClose={closeBackupDrawer}
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={closeBackupDrawer}>取消</Button>
+            <Button onClick={closeBackupDrawer}>{t('common.cancel')}</Button>
             <Button
               type="primary"
               onClick={handleSubmitBackup}
               disabled={!canSubmit}
             >
-              确认
+              {t('common.confirm')}
             </Button>
           </Space>
         }
@@ -930,20 +925,20 @@ export default function BackupTasks() {
                 <Switch
                   checked={drawerCycleEnabled}
                   onChange={(checked) => setDrawerCycleEnabled(checked)}
-                  checkedChildren="开"
-                  unCheckedChildren="关"
+                  checkedChildren={t('common.on')}
+                  unCheckedChildren={t('common.off')}
                 />
-                <span>启用周期备份</span>
+                <span>{t('backup.enableScheduledBackup')}</span>
               </Space>
             </Form.Item>
           )}
 
           {/* 任务名称 */}
-          <Form.Item label="任务名称" required>
+          <Form.Item label={t('table.taskName')} required>
             <Input
               value={drawerTaskName}
               onChange={(e) => setDrawerTaskName(e.target.value)}
-              placeholder="请输入任务名称"
+              placeholder={t('backup.inputTaskName')}
               maxLength={100}
               showCount
             />
@@ -955,8 +950,8 @@ export default function BackupTasks() {
               checked={selectAllDevices}
               onChange={(e) => setSelectAllDevices(e.target.checked)}
             >
-              备份全部设备
-              <Tag color="blue" style={{ marginLeft: 8 }}>共 {mockDeviceData.length} 台</Tag>
+              {t('backup.backupAllDevices')}
+              <Tag color="blue" style={{ marginLeft: 8 }}>{t('backup.allDeviceCount', { count: mockDeviceData.length })}</Tag>
             </Checkbox>
           </Form.Item>
 
@@ -964,13 +959,13 @@ export default function BackupTasks() {
           {!selectAllDevices && (
             <Form.Item label={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                <span>已选备份设备 <Tag color="blue">{drawerDevices.length} 台</Tag></span>
+                <span>{t('backup.selectedBackupDevices')} <Tag color="blue">{t('backup.deviceCountUnit', { count: drawerDevices.length })}</Tag></span>
                 <Button
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={() => { setBatchInputValue(''); setBatchInputPreview({ matched: [], notFound: [] }); setBatchInputVisible(true); }}
                 >
-                  批量输入
+                  {t('backup.batchInput')}
                 </Button>
               </div>
             }>
@@ -982,9 +977,9 @@ export default function BackupTasks() {
                     rowKey="id"
                     pagination={false}
                     columns={[
-                      { title: '基站编码', dataIndex: 'deviceSn', width: 100 },
-                      { title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-                      { title: '产品类型', dataIndex: 'productType', width: 80 },
+                      { title: t('device.stationCode'), dataIndex: 'deviceSn', width: 100 },
+                      { title: t('device.stationName'), dataIndex: 'deviceName', ellipsis: true },
+                      { title: t('backup.productType'), dataIndex: 'productType', width: 80 },
                       {
                         title: '',
                         width: 40,
@@ -1002,7 +997,7 @@ export default function BackupTasks() {
                     onClick={() => { setAddDeviceSearch(''); setAddDeviceProductTypes([]); setSelectedNewDevices([]); setAddDeviceVisible(true); }}
                     style={{ width: '100%' }}
                   >
-                    添加设备
+                    {t('common.addDevice')}
                   </Button>
                 </div>
               </>
@@ -1014,21 +1009,21 @@ export default function BackupTasks() {
           {/* 执行方式（新建备份才有，周期备份固定为定时） */}
           {backupDrawerMode === 'manual' ? (
             <>
-              <Form.Item label="执行方式" required>
+              <Form.Item label={t('backup.executionMethod')} required>
                 <Radio.Group value={drawerExecutionMethod} onChange={(e) => setDrawerExecutionMethod(e.target.value)}>
-                  <Radio value="immediate">立即执行</Radio>
-                  <Radio value="scheduled">定时执行</Radio>
+                  <Radio value="immediate">{t('backup.immediateExecution')}</Radio>
+                  <Radio value="scheduled">{t('backup.scheduledExecution')}</Radio>
                 </Radio.Group>
               </Form.Item>
 
               {drawerExecutionMethod === 'scheduled' && (
-                <Form.Item label="执行时间" required>
+                <Form.Item label={t('backup.executionTime')} required>
                   <DatePicker
                     showTime
                     format="YYYY-MM-DD HH:mm"
                     value={drawerScheduledTime}
                     onChange={setDrawerScheduledTime}
-                    placeholder="请选择执行时间"
+                    placeholder={t('backup.selectExecutionTime')}
                     style={{ width: '100%' }}
                     disabledDate={(current) => !!(current && current.isBefore(new Date()))}
                   />
@@ -1038,27 +1033,27 @@ export default function BackupTasks() {
           ) : (
             <>
               {/* 周期配置 */}
-              <Form.Item label="执行周期" required>
+              <Form.Item label={t('backup.executionCycle')} required>
                   <Radio.Group value={drawerCycleType} onChange={(e) => setDrawerCycleType(e.target.value)}>
-                    <Radio value="daily">每天</Radio>
-                    <Radio value="weekly">每周</Radio>
-                    <Radio value="monthly">每月</Radio>
+                    <Radio value="daily">{t('backup.policy.everyday')}</Radio>
+                    <Radio value="weekly">{t('backup.policy.weekday.sun').replace('周日', '每周')}</Radio>
+                    <Radio value="monthly">{t('backup.selectMonth')}</Radio>
                   </Radio.Group>
                 </Form.Item>
 
                 {drawerCycleType === 'weekly' && (
-                  <Form.Item label="执行星期" required>
+                  <Form.Item label={t('backup.executionWeekday')} required>
                     <Checkbox.Group
                       value={drawerCycleWeekDays}
                       onChange={(vals) => setDrawerCycleWeekDays(vals as number[])}
                       options={[
-                        { label: '周一', value: 1 },
-                        { label: '周二', value: 2 },
-                        { label: '周三', value: 3 },
-                        { label: '周四', value: 4 },
-                        { label: '周五', value: 5 },
-                        { label: '周六', value: 6 },
-                        { label: '周日', value: 7 },
+                        { label: t('backup.policy.weekday.mon'), value: 1 },
+                        { label: t('backup.policy.weekday.tue'), value: 2 },
+                        { label: t('backup.policy.weekday.wed'), value: 3 },
+                        { label: t('backup.policy.weekday.thu'), value: 4 },
+                        { label: t('backup.policy.weekday.fri'), value: 5 },
+                        { label: t('backup.policy.weekday.sat'), value: 6 },
+                        { label: t('backup.policy.weekday.sun'), value: 7 },
                       ]}
                     />
                   </Form.Item>
@@ -1066,7 +1061,7 @@ export default function BackupTasks() {
 
                 {drawerCycleType === 'monthly' && (
                   <>
-                    <Form.Item label="选择月份" required>
+                    <Form.Item label={t('backup.selectMonth')} required>
                       <Checkbox.Group
                         value={drawerCycleMonths}
                         onChange={(vals) => setDrawerCycleMonths(vals as number[])}
@@ -1074,12 +1069,12 @@ export default function BackupTasks() {
                       >
                         {Array.from({ length: 12 }, (_, i) => (
                           <Checkbox key={i + 1} value={i + 1} style={{ width: 72 }}>
-                            {i + 1}月
+                            {i + 1}
                           </Checkbox>
                         ))}
                       </Checkbox.Group>
                     </Form.Item>
-                    <Form.Item label="执行日期" required>
+                    <Form.Item label={t('backup.executionDate')} required>
                       <Checkbox.Group
                         value={drawerCycleMonthDays}
                         onChange={(vals) => setDrawerCycleMonthDays(vals as number[])}
@@ -1087,7 +1082,7 @@ export default function BackupTasks() {
                       >
                         {Array.from({ length: 31 }, (_, i) => (
                           <Checkbox key={i + 1} value={i + 1} style={{ width: 72 }}>
-                            {i + 1}日
+                            {i + 1}
                           </Checkbox>
                         ))}
                       </Checkbox.Group>
@@ -1095,13 +1090,13 @@ export default function BackupTasks() {
                   </>
                 )}
 
-                <Form.Item label="执行时间" required>
+                <Form.Item label={t('backup.executionTime')} required>
                   <DatePicker
                     picker="time"
                     format="HH:mm"
                     value={drawerCycleTime}
                     onChange={setDrawerCycleTime}
-                    placeholder="请选择每日执行时间"
+                    placeholder={t('backup.selectDailyExecutionTime')}
                     style={{ width: '100%' }}
                   />
                 </Form.Item>
@@ -1118,13 +1113,13 @@ export default function BackupTasks() {
                   checked={ftpEnabled}
                   onChange={(e) => setFtpEnabled(e.target.checked)}
                 >
-                  FTP Server 配置
+                  {t('backup.ftpServerConfig')}
                 </Checkbox>
               </Form.Item>
 
               {ftpEnabled && (
                 <>
-                  <Form.Item label="FTP协议" required>
+                  <Form.Item label={t('backup.ftpProtocol')} required>
                     <Select
                       value={ftpProtocol}
                       onChange={(val) => {
@@ -1139,40 +1134,40 @@ export default function BackupTasks() {
                       ]}
                     />
                   </Form.Item>
-                  <Form.Item label="IP地址" required>
+                  <Form.Item label={t('backup.ipAddress')} required>
                     <Input
                       value={ftpHost}
                       onChange={(e) => setFtpHost(e.target.value)}
-                      placeholder="请输入FTP服务器IP地址"
+                      placeholder={t('backup.inputFtpIp')}
                     />
                   </Form.Item>
-                  <Form.Item label="端口" required>
+                  <Form.Item label={t('backup.port')} required>
                     <Input
                       value={ftpPort}
                       onChange={(e) => setFtpPort(e.target.value)}
-                      placeholder="请输入端口号"
+                      placeholder={t('backup.inputPort')}
                       style={{ width: '100%' }}
                     />
                   </Form.Item>
-                  <Form.Item label="上传路径" required>
+                  <Form.Item label={t('backup.uploadPath')} required>
                     <Input
                       value={ftpPath}
                       onChange={(e) => setFtpPath(e.target.value)}
-                      placeholder="请输入上传路径，如 /backup/"
+                      placeholder={t('backup.inputUploadPath')}
                     />
                   </Form.Item>
-                  <Form.Item label="用户名" required>
+                  <Form.Item label={t('backup.inputFtpUser')} required>
                     <Input
                       value={ftpUser}
                       onChange={(e) => setFtpUser(e.target.value)}
-                      placeholder="请输入FTP用户名"
+                      placeholder={t('backup.inputFtpUser')}
                     />
                   </Form.Item>
-                  <Form.Item label="密码" required>
+                  <Form.Item label={t('backup.inputFtpPassword')} required>
                     <Input.Password
                       value={ftpPassword}
                       onChange={(e) => setFtpPassword(e.target.value)}
-                      placeholder="请输入FTP密码"
+                      placeholder={t('backup.inputFtpPassword')}
                     />
                   </Form.Item>
                 </>
@@ -1184,12 +1179,12 @@ export default function BackupTasks() {
 
       {/* 添加设备弹窗 */}
       <Modal
-        title="添加设备"
+        title={t('common.addDevice')}
         open={addDeviceVisible}
         onCancel={() => setAddDeviceVisible(false)}
         onOk={() => {
           if (selectedNewDevices.length === 0) {
-            void message.warning('请选择要添加的设备');
+            void message.warning(t('backup.pleaseSelectDevices'));
             return;
           }
           const newDevices = availableDevices.filter((d) => selectedNewDevices.includes(d.id));
@@ -1197,27 +1192,27 @@ export default function BackupTasks() {
           setAddDeviceVisible(false);
           setSelectedNewDevices([]);
           setAddDeviceSearch('');
-          void message.success(`已添加 ${newDevices.length} 台设备`);
+          void message.success(t('backup.deviceCountUnit', { count: newDevices.length }));
         }}
-        okText="确认添加"
-        cancelText="取消"
+        okText={t('common.confirmAdd')}
+        cancelText={t('common.cancel')}
         width={700}
         okButtonProps={{ disabled: selectedNewDevices.length === 0 }}
       >
         {availableDevices.length === 0 ? (
-          <Alert type="info" showIcon message="没有可添加的设备" />
+          <Alert type="info" showIcon message={t('backup.noDeviceToAdd')} />
         ) : (
           <>
             <Alert
               type="info"
               showIcon
-              message={`共 ${availableDevices.length} 台设备可选，已选择 ${selectedNewDevices.length} 台`}
+              message={t('backup.availableDeviceCount', { total: availableDevices.length, selected: selectedNewDevices.length })}
               style={{ marginBottom: 16 }}
             />
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <Space>
                 <Input.Search
-                  placeholder="搜索基站编码或名称"
+                  placeholder={t('backup.searchDeviceSnOrName')}
                   value={addDeviceSearch}
                   onChange={(e) => setAddDeviceSearch(e.target.value)}
                   style={{ width: 220 }}
@@ -1225,7 +1220,7 @@ export default function BackupTasks() {
                 />
                 <Select
                   mode="multiple"
-                  placeholder="产品类型"
+                  placeholder={t('backup.productType')}
                   value={addDeviceProductTypes}
                   onChange={setAddDeviceProductTypes}
                   options={[
@@ -1243,7 +1238,7 @@ export default function BackupTasks() {
                 indeterminate={selectedNewDevices.length > 0 && selectedNewDevices.length < filteredAvailableDevices.length}
                 onChange={(e) => setSelectedNewDevices(e.target.checked ? filteredAvailableDevices.map((d) => d.id) : [])}
               >
-                全选 ({filteredAvailableDevices.length} 台)
+                {t('backup.selectAllWithCount', { count: filteredAvailableDevices.length })}
               </Checkbox>
             </div>
             <Table
@@ -1257,9 +1252,9 @@ export default function BackupTasks() {
                 onChange: (keys) => setSelectedNewDevices(keys),
               }}
               columns={[
-                { title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-                { title: '基站名称', dataIndex: 'deviceName', ellipsis: true },
-                { title: '产品类型', dataIndex: 'productType', width: 100 },
+                { title: t('device.stationCode'), dataIndex: 'deviceSn', width: 120 },
+                { title: t('device.stationName'), dataIndex: 'deviceName', ellipsis: true },
+                { title: t('backup.productType'), dataIndex: 'productType', width: 100 },
               ]}
             />
           </>
@@ -1268,18 +1263,18 @@ export default function BackupTasks() {
 
       {/* 批量输入弹窗 */}
       <Modal
-        title="批量输入设备SN"
+        title={t('backup.batchInputDeviceSn')}
         open={batchInputVisible}
         onCancel={() => setBatchInputVisible(false)}
         onOk={handleBatchInputConfirm}
-        okText="确认添加"
-        cancelText="取消"
+        okText={t('common.confirmAdd')}
+        cancelText={t('common.cancel')}
         width={600}
         okButtonProps={{ disabled: batchInputPreview.matched.length === 0 }}
       >
         <div style={{ marginBottom: 16 }}>
           <Input.TextArea
-            placeholder="请输入设备SN，支持换行、逗号、分号、空格分隔&#10;例如：&#10;ENB00001&#10;ENB00002, ENB00003; GNB00001"
+            placeholder={t('backup.batchInputPlaceholder')}
             rows={6}
             value={batchInputValue}
             onChange={(e) => setBatchInputValue(e.target.value)}
@@ -1291,7 +1286,7 @@ export default function BackupTasks() {
           <Alert
             type="success"
             showIcon
-            message={`匹配到 ${batchInputPreview.matched.length} 个设备，可添加 ${batchInputPreview.matched.length} 台`}
+            message={t('backup.matchedDeviceCount', { matched: batchInputPreview.matched.length })}
             style={{ marginBottom: 8 }}
           />
         )}
@@ -1302,7 +1297,7 @@ export default function BackupTasks() {
             showIcon
             message={
               <div>
-                <div>以下 {batchInputPreview.notFound.length} 个设备SN未找到或已在列表中:</div>
+                <div>{t('backup.notFoundSnCount', { count: batchInputPreview.notFound.length })}</div>
                 <div style={{ maxHeight: 80, overflow: 'auto', marginTop: 4 }}>
                   {batchInputPreview.notFound.map((sn) => (
                     <Tag key={sn} style={{ margin: '2px' }}>{sn}</Tag>

@@ -94,16 +94,16 @@ export default function Commissioning() {
   };
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'stationCode', label: '基站编码', type: 'input' },
-    { name: 'stationName', label: '基站名称', type: 'input' },
+    { name: 'stationCode', label: t('device.commission.stationCode'), type: 'input' },
+    { name: 'stationName', label: t('device.commission.stationName'), type: 'input' },
     {
       name: 'stationType',
-      label: '基站类型',
+      label: t('device.commission.stationType'),
       type: 'select',
       options: [
-        { label: '4G (eNB)', value: 'eNB' },
-        { label: '5G (gNB)', value: 'gNB' },
-        { label: '2G (GSM)', value: 'GSM' },
+        { label: t('device.commission.stationType4g'), value: 'eNB' },
+        { label: t('device.commission.stationType5g'), value: 'gNB' },
+        { label: t('device.commission.stationType2g'), value: 'GSM' },
       ],
     },
     {
@@ -174,24 +174,24 @@ export default function Commissioning() {
   // 处理重新执行（仅失败状态）
   const handleRetry = useCallback((record: CommissioningTask) => {
     modal.confirm({
-      title: '确认重新执行',
-      content: `确定要重新执行开通任务 "${record.stationName}" 吗？`,
+      title: t('device.commission.retryConfirm'),
+      content: t('device.commission.retryContent', { name: record.stationName }),
       onOk: () => {
         setTasks((prev) =>
           prev.map((tk) =>
             tk.id === record.id ? { ...tk, status: 'running', progress: 0, currentStep: 'Step 1' } : tk
           )
         );
-        message.success('任务已重新执行');
+        message.success(t('device.commission.retrySuccess'));
       },
     });
-  }, [modal, message]);
+  }, [modal, message, t]);
 
   // 处理删除
   const handleDelete = useCallback((record: CommissioningTask) => {
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: `确定要删除开通任务 "${record.stationName}" 吗？`,
+      content: t('device.commission.deleteContent', { name: record.stationName }),
       onOk: () => {
         setTasks((prev) => prev.filter((tk) => tk.id !== record.id));
         message.success(t('common.deleteSuccess'));
@@ -211,7 +211,7 @@ export default function Commissioning() {
         render: (_val, record) => {
           const moreItems: MenuProps['items'] = [
             ...(record.status === 'failed'
-              ? [{ key: 'retry', label: '重新执行', icon: <RedoOutlined />, onClick: () => handleRetry(record) }]
+              ? [{ key: 'retry', label: t('device.commission.retry'), icon: <RedoOutlined />, onClick: () => handleRetry(record) }]
               : []),
             { type: 'divider' as const },
             { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.status === 'running', onClick: () => handleDelete(record) },
@@ -238,7 +238,7 @@ export default function Commissioning() {
       },
       {
         key: 'stationCode',
-        title: '基站编码',
+        title: t('device.commission.stationCode'),
         dataIndex: 'stationCode',
         width: 140,
         mono: true,
@@ -255,14 +255,14 @@ export default function Commissioning() {
       },
       {
         key: 'stationName',
-        title: '基站名称',
+        title: t('device.commission.stationName'),
         dataIndex: 'stationName',
         width: 180,
         ellipsis: true,
       },
       {
         key: 'stationType',
-        title: '基站类型',
+        title: t('device.commission.stationType'),
         dataIndex: 'stationType',
         width: 110,
         render: (v) => {
@@ -298,7 +298,7 @@ export default function Commissioning() {
       },
       {
         key: 'operateTime',
-        title: '操作时间',
+        title: t('device.commission.operateTime'),
         dataIndex: 'operateTime',
         width: 160,
       },
@@ -340,7 +340,7 @@ export default function Commissioning() {
 
       {/* Detail Modal */}
       <Modal
-        title={`开站详情 - ${detailTask?.stationName ?? ''}`}
+        title={t('device.commission.detailTitle', { name: detailTask?.stationName ?? '' })}
         open={Boolean(detailTask)}
         onCancel={() => setDetailTask(null)}
         footer={<Button onClick={() => setDetailTask(null)}>{t('common.close')}</Button>}
@@ -352,13 +352,13 @@ export default function Commissioning() {
               <table style={{ width: '100%', fontSize: 13 }}>
                 <tbody>
                   {[
-                    { label: '基站编码', value: detailTask.stationCode },
-                    { label: '基站名称', value: detailTask.stationName },
-                    { label: '基站类型', value: STATION_TYPE_MAP[detailTask.stationType]?.label },
+                    { label: t('device.commission.stationCode'), value: detailTask.stationCode },
+                    { label: t('device.commission.stationName'), value: detailTask.stationName },
+                    { label: t('device.commission.stationType'), value: STATION_TYPE_MAP[detailTask.stationType]?.label },
                     { label: t('table.status'), value: STATUS_CONFIG[detailTask.status]?.label },
                     { label: t('table.operator'), value: detailTask.operator },
                     { label: t('table.createTime'), value: detailTask.createTime },
-                    { label: '操作时间', value: detailTask.operateTime },
+                    { label: t('device.commission.operateTime'), value: detailTask.operateTime },
                   ].map(({ label, value }) => (
                     <tr key={label}>
                       <td style={{ padding: '8px 0', color: '#8c8c8c', width: 100 }}>{label}</td>

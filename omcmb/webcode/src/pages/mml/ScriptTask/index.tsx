@@ -39,55 +39,30 @@ import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult } from '@/ty
 import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask } from '@/hooks/api/useMML';
 import { useT } from '@/hooks/useT';
 
-// 任务类型映射
-const CREATE_STATUS_MAP: Record<MMLExecuteType, { color: string; text: string }> = {
-  immediate: { color: 'green', text: '立即执行' },
-  suspended: { color: 'orange', text: '挂起' },
-  scheduled: { color: 'blue', text: '定时执行' },
-  periodic: { color: 'purple', text: '周期任务' },
+// 任务类型映射 - use i18n keys
+const CREATE_STATUS_KEYS: Record<MMLExecuteType, { color: string; key: string }> = {
+  immediate: { color: 'green', key: 'mml.immediateExecute' },
+  suspended: { color: 'orange', key: 'mml.suspended' },
+  scheduled: { color: 'blue', key: 'mml.scheduledExecute' },
+  periodic: { color: 'purple', key: 'mml.periodicTask' },
 };
 
-// 任务状态映射
-const TASK_STATUS_MAP: Record<MMLTaskStatus, { color: string; text: string }> = {
-  pending: { color: 'default', text: '等待中' },
-  running: { color: 'processing', text: '执行中' },
-  paused: { color: 'warning', text: '已暂停' },
-  completed: { color: 'success', text: '已完成' },
-  cancelled: { color: 'error', text: '已终止' },
-  failed: { color: 'error', text: '失败' },
+// 任务状态映射 - use i18n keys
+const TASK_STATUS_KEYS: Record<MMLTaskStatus, { color: string; key: string }> = {
+  pending: { color: 'default', key: 'mml.pendingStatus' },
+  running: { color: 'processing', key: 'mml.runningStatus' },
+  paused: { color: 'warning', key: 'mml.pausedStatus' },
+  completed: { color: 'success', key: 'mml.completedStatus' },
+  cancelled: { color: 'error', key: 'mml.cancelledStatus' },
+  failed: { color: 'error', key: 'mml.failedStatus' },
 };
 
-// 任务结果映射
-const TASK_RESULT_MAP: Record<MMLTaskResult, { color: string; text: string }> = {
-  success: { color: 'success', text: '成功' },
-  partial: { color: 'warning', text: '部分成功' },
-  failed: { color: 'error', text: '失败' },
+// 任务结果映射 - use i18n keys
+const TASK_RESULT_KEYS: Record<MMLTaskResult, { color: string; key: string }> = {
+  success: { color: 'success', key: 'status.success' },
+  partial: { color: 'warning', key: 'mml.partialSuccess' },
+  failed: { color: 'error', key: 'status.failed' },
 };
-
-// 任务类型选项
-const CREATE_STATUS_OPTIONS = [
-  { label: '立即执行', value: 'immediate' },
-  { label: '挂起', value: 'suspended' },
-  { label: '定时执行', value: 'scheduled' },
-  { label: '周期任务', value: 'periodic' },
-];
-
-// 任务状态选项
-const TASK_STATUS_OPTIONS = [
-  { label: '等待中', value: 'pending' },
-  { label: '执行中', value: 'running' },
-  { label: '已暂停', value: 'paused' },
-  { label: '已完成', value: 'completed' },
-  { label: '已终止', value: 'cancelled' },
-  { label: '失败', value: 'failed' },
-];
-
-// 任务结果选项
-const TASK_RESULT_OPTIONS = [
-  { label: '成功', value: 'success' },
-  { label: '部分成功', value: 'partial' },
-  { label: '失败', value: 'failed' },
-];
 
 // 添加任务表单接口
 interface AddTaskForm {
@@ -165,12 +140,31 @@ export default function ScriptTask() {
   }, [tasks, filterParams]);
 
   const filterFields: FilterField[] = useMemo(() => [
-    { name: 'taskName', label: '任务名称', type: 'input', placeholder: '请输入任务名称' },
-    { name: 'startTime', label: '开始时间', type: 'date-range' },
-    { name: 'executeType', label: '类型', type: 'select', placeholder: '请选择类型', options: [{ label: '全部', value: 'all' }, ...CREATE_STATUS_OPTIONS] },
-    { name: 'taskStatus', label: '状态', type: 'select', placeholder: '请选择状态', options: [{ label: '全部', value: 'all' }, ...TASK_STATUS_OPTIONS] },
-    { name: 'taskResult', label: '结果', type: 'select', placeholder: '请选择结果', options: [{ label: '全部', value: 'all' }, ...TASK_RESULT_OPTIONS] },
-  ], []);
+    { name: 'taskName', label: t('mml.taskName'), type: 'input', placeholder: t('mml.inputTaskNameRequired') },
+    { name: 'startTime', label: t('mml.startTime'), type: 'date-range' },
+    { name: 'executeType', label: t('mml.type'), type: 'select', placeholder: t('mml.type'), options: [
+      { label: t('common.all'), value: 'all' },
+      { label: t('mml.immediateExecute'), value: 'immediate' },
+      { label: t('mml.suspended'), value: 'suspended' },
+      { label: t('mml.scheduledExecute'), value: 'scheduled' },
+      { label: t('mml.periodicTask'), value: 'periodic' },
+    ] },
+    { name: 'taskStatus', label: t('mml.status'), type: 'select', placeholder: t('mml.status'), options: [
+      { label: t('common.all'), value: 'all' },
+      { label: t('mml.pendingStatus'), value: 'pending' },
+      { label: t('mml.runningStatus'), value: 'running' },
+      { label: t('mml.pausedStatus'), value: 'paused' },
+      { label: t('mml.completedStatus'), value: 'completed' },
+      { label: t('mml.cancelledStatus'), value: 'cancelled' },
+      { label: t('mml.failedStatus'), value: 'failed' },
+    ] },
+    { name: 'taskResult', label: t('mml.result'), type: 'select', placeholder: t('mml.result'), options: [
+      { label: t('common.all'), value: 'all' },
+      { label: t('status.success'), value: 'success' },
+      { label: t('mml.partialSuccess'), value: 'partial' },
+      { label: t('status.failed'), value: 'failed' },
+    ] },
+  ], [t]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams(values);
@@ -189,29 +183,29 @@ export default function ScriptTask() {
 
   const handleStartTask = (task: MMLTask) => {
     startTaskMutation.mutate(task.id, {
-      onSuccess: () => void message.success(`任务 ${task.taskName} 已启动`),
-      onError: (err) => void message.error(`启动失败: ${err instanceof Error ? err.message : '未知错误'}`),
+      onSuccess: () => void message.success(t('mml.taskStarted', { name: task.taskName })),
+      onError: (err) => void message.error(t('mml.startFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
     });
   };
 
   const handlePauseTask = (task: MMLTask) => {
     pauseTaskMutation.mutate(task.id, {
-      onSuccess: () => void message.success(`任务 ${task.taskName} 已暂停`),
-      onError: (err) => void message.error(`暂停失败: ${err instanceof Error ? err.message : '未知错误'}`),
+      onSuccess: () => void message.success(t('mml.taskPaused', { name: task.taskName })),
+      onError: (err) => void message.error(t('mml.pauseFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
     });
   };
 
   const handleCancelTask = (task: MMLTask) => {
     cancelTaskMutation.mutate(task.id, {
-      onSuccess: () => void message.success(`任务 ${task.taskName} 已终止`),
-      onError: (err) => void message.error(`终止失败: ${err instanceof Error ? err.message : '未知错误'}`),
+      onSuccess: () => void message.success(t('mml.taskCancelled', { name: task.taskName })),
+      onError: (err) => void message.error(t('mml.cancelFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
     });
   };
 
   const handleDeleteTask = (task: MMLTask) => {
     deleteTaskMutation.mutate(task.id, {
-      onSuccess: () => void message.success(`任务 ${task.taskName} 已删除`),
-      onError: (err) => void message.error(`删除失败: ${err instanceof Error ? err.message : '未知错误'}`),
+      onSuccess: () => void message.success(t('mml.taskDeleted', { name: task.taskName })),
+      onError: (err) => void message.error(t('mml.deleteFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
     });
   };
 
@@ -254,32 +248,32 @@ export default function ScriptTask() {
       };
       createTaskMutation.mutate(payload, {
         onSuccess: () => {
-          void message.success('任务创建成功');
+          void message.success(t('mml.taskCreated'));
           setAddModalVisible(false);
         },
-        onError: (err) => void message.error(`创建失败: ${err instanceof Error ? err.message : '未知错误'}`),
+        onError: (err) => void message.error(t('mml.taskCreateFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
       });
     }).catch(() => undefined);
   };
 
   const handleDownloadTemplate = () => {
-    void message.info('模板下载功能开发中...');
+    void message.info(t('mml.templateDownloading'));
   };
 
   const getActionMenu = (task: MMLTask): MenuProps['items'] => {
     const status = task.status;
     return [
-      { key: 'info', icon: <InfoCircleOutlined />, label: '信息', onClick: () => viewTaskInfo(task) },
-      { key: 'start', icon: <PlayCircleOutlined />, label: '开始', disabled: status !== 'paused' && status !== 'pending', onClick: () => handleStartTask(task) },
-      { key: 'wait', icon: <PauseCircleOutlined />, label: '暂停', disabled: status !== 'running', onClick: () => handlePauseTask(task) },
-      { key: 'end', icon: <StopOutlined />, label: '终止任务', disabled: !['running', 'pending', 'paused'].includes(status), onClick: () => handleCancelTask(task) },
-      { key: 'del', icon: <DeleteOutlined />, label: '删除', danger: true, disabled: status === 'running', onClick: () => handleDeleteTask(task) },
+      { key: 'info', icon: <InfoCircleOutlined />, label: t('mml.info'), onClick: () => viewTaskInfo(task) },
+      { key: 'start', icon: <PlayCircleOutlined />, label: t('common.start'), disabled: status !== 'paused' && status !== 'pending', onClick: () => handleStartTask(task) },
+      { key: 'wait', icon: <PauseCircleOutlined />, label: t('common.pause'), disabled: status !== 'running', onClick: () => handlePauseTask(task) },
+      { key: 'end', icon: <StopOutlined />, label: t('mml.terminateTask'), disabled: !['running', 'pending', 'paused'].includes(status), onClick: () => handleCancelTask(task) },
+      { key: 'del', icon: <DeleteOutlined />, label: t('common.delete'), danger: true, disabled: status === 'running', onClick: () => handleDeleteTask(task) },
     ];
   };
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
-      key: 'operation', title: '操作', dataIndex: 'id', width: 100, fixed: 'right',
+      key: 'operation', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => showResult(record)}>{t('common.view')}</Button>
@@ -289,15 +283,15 @@ export default function ScriptTask() {
         </Space>
       ),
     },
-    { key: 'taskName', title: '任务名称', dataIndex: 'taskName', ellipsis: true },
-    { key: 'creator', title: '创建者', dataIndex: 'creator', width: 100 },
-    { key: 'createdAt', title: '创建时间', dataIndex: 'createdAt', width: 160, render: (val: string) => formatTime(val) },
-    { key: 'executeType', title: '类型', dataIndex: 'executeType', width: 100, render: (val: MMLExecuteType) => <Tag color={CREATE_STATUS_MAP[val]?.color}>{CREATE_STATUS_MAP[val]?.text}</Tag> },
-    { key: 'status', title: '状态', dataIndex: 'status', width: 100, render: (val: MMLTaskStatus) => <Tag color={TASK_STATUS_MAP[val]?.color}>{TASK_STATUS_MAP[val]?.text}</Tag> },
-    { key: 'progress', title: '进度', width: 80, render: (_: unknown, record: MMLTask) => computeProgress(record) },
-    { key: 'result', title: '结果', dataIndex: 'result', width: 100, render: (val?: MMLTaskResult) => val ? <Tag color={TASK_RESULT_MAP[val]?.color}>{TASK_RESULT_MAP[val]?.text}</Tag> : '-' },
-    { key: 'startedAt', title: '开始时间', dataIndex: 'startedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
-    { key: 'finishedAt', title: '结束时间', dataIndex: 'finishedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
+    { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
+    { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
+    { key: 'createdAt', title: t('mml.createTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => formatTime(val) },
+    { key: 'executeType', title: t('mml.type'), dataIndex: 'executeType', width: 100, render: (val: MMLExecuteType) => <Tag color={CREATE_STATUS_KEYS[val]?.color}>{t(CREATE_STATUS_KEYS[val]?.key)}</Tag> },
+    { key: 'status', title: t('mml.status'), dataIndex: 'status', width: 100, render: (val: MMLTaskStatus) => <Tag color={TASK_STATUS_KEYS[val]?.color}>{t(TASK_STATUS_KEYS[val]?.key)}</Tag> },
+    { key: 'progress', title: t('mml.progress'), width: 80, render: (_: unknown, record: MMLTask) => computeProgress(record) },
+    { key: 'result', title: t('mml.result'), dataIndex: 'result', width: 100, render: (val?: MMLTaskResult) => val ? <Tag color={TASK_RESULT_KEYS[val]?.color}>{t(TASK_RESULT_KEYS[val]?.key)}</Tag> : '-' },
+    { key: 'startedAt', title: t('mml.startTime'), dataIndex: 'startedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
+    { key: 'finishedAt', title: t('mml.endTime'), dataIndex: 'finishedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
   ], [t]);
 
   return (
@@ -318,42 +312,42 @@ export default function ScriptTask() {
       />
 
       {/* 任务详情弹窗 */}
-      <Modal title="任务详情" open={modalVisible} onCancel={() => setModalVisible(false)} footer={null} width={680}>
+      <Modal title={t('mml.taskDetail')} open={modalVisible} onCancel={() => setModalVisible(false)} footer={null} width={680}>
         {editingTask && (
           <div style={{ padding: '16px 0' }}>
-            <p><strong>任务名称：</strong>{editingTask.taskName}</p>
-            <p><strong>创建者：</strong>{editingTask.creator}</p>
-            <p><strong>创建时间：</strong>{formatTime(editingTask.createdAt)}</p>
-            <p><strong>类型：</strong>{CREATE_STATUS_MAP[editingTask.executeType]?.text}</p>
-            <p><strong>状态：</strong>{TASK_STATUS_MAP[editingTask.status]?.text}</p>
-            <p><strong>进度：</strong>{computeProgress(editingTask)}</p>
-            <p><strong>结果：</strong>{editingTask.result ? TASK_RESULT_MAP[editingTask.result]?.text : '-'}</p>
-            <p><strong>设备总数：</strong>{editingTask.totalDevices}</p>
-            <p><strong>成功：</strong>{editingTask.successCount} / <strong>失败：</strong>{editingTask.failedCount}</p>
-            <p><strong>开始时间：</strong>{formatTime(editingTask.startedAt) || '-'}</p>
-            <p><strong>结束时间：</strong>{formatTime(editingTask.finishedAt) || '-'}</p>
+            <p><strong>{t('mml.taskNameLabel')}</strong>{editingTask.taskName}</p>
+            <p><strong>{t('mml.creatorLabel')}</strong>{editingTask.creator}</p>
+            <p><strong>{t('mml.createTimeLabel')}</strong>{formatTime(editingTask.createdAt)}</p>
+            <p><strong>{t('mml.typeLabel')}</strong>{t(CREATE_STATUS_KEYS[editingTask.executeType]?.key)}</p>
+            <p><strong>{t('mml.statusLabel')}</strong>{t(TASK_STATUS_KEYS[editingTask.status]?.key)}</p>
+            <p><strong>{t('mml.progressLabel')}</strong>{computeProgress(editingTask)}</p>
+            <p><strong>{t('mml.resultLabel')}</strong>{editingTask.result ? t(TASK_RESULT_KEYS[editingTask.result]?.key) : '-'}</p>
+            <p><strong>{t('mml.deviceCountLabel')}</strong>{editingTask.totalDevices}</p>
+            <p><strong>{t('mml.successCountLabel')}</strong>{editingTask.successCount} / <strong>{t('mml.failedCountLabel')}</strong>{editingTask.failedCount}</p>
+            <p><strong>{t('mml.startTimeLabel')}</strong>{formatTime(editingTask.startedAt) || '-'}</p>
+            <p><strong>{t('mml.endTimeLabel')}</strong>{formatTime(editingTask.finishedAt) || '-'}</p>
           </div>
         )}
       </Modal>
 
       {/* 查看结果弹窗 */}
-      <Modal title={`执行结果 - ${resultTaskName}`} open={resultModalVisible} onCancel={() => setResultModalVisible(false)} footer={null} width={900}>
+      <Modal title={t('mml.executionResult', { name: resultTaskName })} open={resultModalVisible} onCancel={() => setResultModalVisible(false)} footer={null} width={900}>
         <div style={{ padding: '16px 0' }}>
-          <p style={{ color: '#999' }}>任务执行结果列表将在此显示...</p>
+          <p style={{ color: '#999' }}>{t('mml.resultPlaceholder')}</p>
         </div>
       </Modal>
 
       {/* 新建任务抽屉 */}
       <Drawer
-        title="新建MML脚本任务"
+        title={t('mml.newMmlTask')}
         open={addModalVisible}
         onClose={() => setAddModalVisible(false)}
         width={560}
         destroyOnClose
         footer={
           <div style={{ textAlign: 'right' }}>
-            <Button onClick={() => setAddModalVisible(false)} style={{ marginRight: 8 }}>取消</Button>
-            <Button type="primary" onClick={handleAddTask} loading={createTaskMutation.isPending}>确定</Button>
+            <Button onClick={() => setAddModalVisible(false)} style={{ marginRight: 8 }}>{t('common.cancel')}</Button>
+            <Button type="primary" onClick={handleAddTask} loading={createTaskMutation.isPending}>{t('common.confirm')}</Button>
           </div>
         }
       >
@@ -361,12 +355,12 @@ export default function ScriptTask() {
           {/* 基本信息 */}
           <div style={{ marginBottom: 8, fontWeight: 500, color: '#333' }}>
             <span style={{ display: 'inline-block', width: 4, height: 14, background: '#1890ff', borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
-            基本信息
+            {t('mml.basicInfo')}
           </div>
-          <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]} style={{ marginLeft: 12 }}>
-            <Input maxLength={50} placeholder="请输入新建任务名称" style={{ width: '100%' }} />
+          <Form.Item label={t('mml.taskName')} name="taskName" rules={[{ required: true, message: t('mml.inputTaskNameRequired') }]} style={{ marginLeft: 12 }}>
+            <Input maxLength={50} placeholder={t('mml.inputTaskName')} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="选择脚本" name="fileName" rules={[{ required: true, message: '请先选择文件' }]} style={{ marginLeft: 12 }}>
+          <Form.Item label={t('mml.selectScript')} name="fileName" rules={[{ required: true, message: t('mml.selectFileFirst') }]} style={{ marginLeft: 12 }}>
             <Space direction="vertical" style={{ width: '100%' }}>
               <Space>
                 <Upload
@@ -383,13 +377,13 @@ export default function ScriptTask() {
                   }}
                   maxCount={1}
                 >
-                  <Button icon={<UploadOutlined />}>选择文件</Button>
+                  <Button icon={<UploadOutlined />}>{t('mml.selectFile')}</Button>
                 </Upload>
-                <span style={{ color: '#999', fontSize: 12 }}>( 仅支持 .txt 格式 )</span>
+                <span style={{ color: '#999', fontSize: 12 }}>{t('mml.onlyTxtFormat')}</span>
               </Space>
               <div>
-                <span style={{ color: '#999', fontSize: 12 }}>使用模板导入提示：支持使用模板导入</span>
-                <Button type="link" size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>导出模板</Button>
+                <span style={{ color: '#999', fontSize: 12 }}>{t('mml.templateImportTip')}</span>
+                <Button type="link" size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>{t('mml.exportTemplate')}</Button>
               </div>
             </Space>
           </Form.Item>
@@ -399,16 +393,16 @@ export default function ScriptTask() {
           {/* 选择执行方式 */}
           <div style={{ marginBottom: 8, fontWeight: 500, color: '#333' }}>
             <span style={{ display: 'inline-block', width: 4, height: 14, background: '#1890ff', borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
-            选择执行方式
+            {t('mml.selectExecuteMethod')}
           </div>
           <Form.Item name="executeType" style={{ marginBottom: 8, marginLeft: 12 }}>
             <Radio.Group>
-              <Radio value="immediate">立即执行</Radio>
-              <Radio value="suspended">挂起</Radio>
+              <Radio value="immediate">{t('mml.immediateExecute')}</Radio>
+              <Radio value="suspended">{t('mml.suspended')}</Radio>
               <Space>
-                <Radio value="scheduled">定时执行</Radio>
+                <Radio value="scheduled">{t('mml.scheduledExecute')}</Radio>
                 {executeType === 'scheduled' && (
-                  <Form.Item name="time" noStyle rules={[{ required: executeType === 'scheduled', message: '请选择定时执行时间' }]}>
+                  <Form.Item name="time" noStyle rules={[{ required: executeType === 'scheduled', message: t('mml.selectScheduledTime') }]}>
                     <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" disabledDate={(current) => current && current < dayjs().startOf('day')} style={{ width: 185 }} />
                   </Form.Item>
                 )}
@@ -417,14 +411,14 @@ export default function ScriptTask() {
           </Form.Item>
           <Form.Item style={{ marginBottom: 8, marginLeft: 12 }}>
             <Space align="start">
-              <Radio value="periodic" checked={executeType === 'periodic'} onChange={() => addForm.setFieldValue('executeType', 'periodic')}>周期任务</Radio>
+              <Radio value="periodic" checked={executeType === 'periodic'} onChange={() => addForm.setFieldValue('executeType', 'periodic')}>{t('mml.periodicTask')}</Radio>
               {executeType === 'periodic' && (
                 <>
-                  <Form.Item name="periodDateRange" noStyle rules={[{ required: executeType === 'periodic', message: '请选择日期范围' }]}>
+                  <Form.Item name="periodDateRange" noStyle rules={[{ required: executeType === 'periodic', message: t('mml.selectDateRange') }]}>
                     <DatePicker.RangePicker disabledDate={(current) => current && current < dayjs().startOf('day')} style={{ width: 240 }} />
                   </Form.Item>
                   <span>:</span>
-                  <Form.Item name="periodTime" noStyle rules={[{ required: executeType === 'periodic', message: '请选择时间' }]}>
+                  <Form.Item name="periodTime" noStyle rules={[{ required: executeType === 'periodic', message: t('mml.selectTime') }]}>
                     <DatePicker.TimePicker format="HH:mm:ss" style={{ width: 110 }} />
                   </Form.Item>
                 </>
@@ -437,31 +431,31 @@ export default function ScriptTask() {
           {/* 执行策略 */}
           <div style={{ marginBottom: 8, fontWeight: 500, color: '#333' }}>
             <span style={{ display: 'inline-block', width: 4, height: 14, background: '#1890ff', borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
-            执行策略
+            {t('mml.executionStrategy')}
           </div>
           <div style={{ marginLeft: 12, marginBottom: 16 }}>
-            离线设备
+            {t('mml.offlineDevice')}
             <Form.Item name="offlineRetryEnable" valuePropName="checked" noStyle>
-              <Checkbox style={{ marginLeft: 8 }}>等待设备上线重试</Checkbox>
+              <Checkbox style={{ marginLeft: 8 }}>{t('mml.waitOnlineRetry')}</Checkbox>
             </Form.Item>
             <Form.Item name="offlineRetryWaitTime" noStyle>
               <InputNumber min={20} max={10080} style={{ width: 80, margin: '0 8px' }} />
             </Form.Item>
-            分钟
+            {t('mml.minutes')}
           </div>
           <div style={{ marginLeft: 12, marginBottom: 8 }}>
-            在线设备
+            {t('mml.onlineDevice')}
             <Form.Item name="failedRetryEnable" valuePropName="checked" noStyle>
-              <Checkbox style={{ marginLeft: 8 }}>配置失败重试</Checkbox>
+              <Checkbox style={{ marginLeft: 8 }}>{t('mml.failedRetry')}</Checkbox>
             </Form.Item>
             <Form.Item name="failedRetryCount" noStyle>
               <InputNumber min={1} style={{ width: 70, margin: '0 8px' }} />
             </Form.Item>
-            间隔次数重试
+            {t('mml.intervalRetry')}
             <Form.Item name="failedRetryWaitTime" noStyle>
               <InputNumber min={1} style={{ width: 70, margin: '0 8px' }} />
             </Form.Item>
-            分钟
+            {t('mml.minutes')}
           </div>
         </Form>
       </Drawer>
