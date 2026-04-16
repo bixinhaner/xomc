@@ -27,6 +27,7 @@ import {
   PlusOutlined,
   SyncOutlined,
   MenuOutlined,
+  MoreOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   CloseCircleOutlined,
@@ -681,39 +682,27 @@ export default function DeviceRules() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 200,
-        fixed: 'left',
-        render: (_val, record) => (
-          <Space size={4}>
-            {record.enabled && (
-              <Button
-                type="link"
-                size="small"
-                icon={<SyncOutlined />}
-                onClick={() => handleActive(record)}
-              >
-                {t('device.rules.apply')}
+        width: 100,
+        fixed: 'right',
+        render: (_val, record) => {
+          const moreItems: MenuProps['items'] = [
+            ...(record.enabled
+              ? [{ key: 'apply', label: t('device.rules.apply'), icon: <SyncOutlined />, onClick: () => handleActive(record) }]
+              : []),
+            { type: 'divider' as const },
+            { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(record.id) },
+          ];
+          return (
+            <Space size={4}>
+              <Button type="link" size="small" onClick={() => handleEdit(record)}>
+                {t('common.edit')}
               </Button>
-            )}
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
-            >
-              {t('common.edit')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(record.id)}
-            >
-              {t('common.delete')}
-            </Button>
-          </Space>
-        ),
+              <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+              </Dropdown>
+            </Space>
+          );
+        },
       },
       {
         key: 'enabled',

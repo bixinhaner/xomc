@@ -193,7 +193,7 @@ export default function HandoverManagement() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 160,
+        width: 120,
         fixed: 'right',
         render: (_val, record) => (
           <Space size={4}>

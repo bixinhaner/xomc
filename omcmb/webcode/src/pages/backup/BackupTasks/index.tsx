@@ -554,9 +554,8 @@ export default function BackupTasks() {
     {
       key: 'operation',
       title: '操作',
-      width: 80,
-      align: 'center',
-      fixed: 'left',
+      width: 100,
+      fixed: 'right',
       render: (_: unknown, record: BackupTaskRow) => {
         const status = record.status;
         // 等待(1): 开始、终止、删除
@@ -595,9 +594,12 @@ export default function BackupTasks() {
         if (!items || items.length === 0) return null;
 
         return (
-          <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => setTaskDetailId(record.id)}>详情</Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
         );
       },
     },

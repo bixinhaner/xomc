@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
   Button,
-  Card,
   Form,
   message,
   Space,
@@ -31,9 +30,7 @@ export default function UICustomization() {
 
   return (
     <ListPageLayout title={t('nav.system.uiCustom')}>
-      <Card bordered={false}>
-        <UICustomSettings form={form} />
-      </Card>
+      <UICustomSettings form={form} />
       {/* 底部保存按钮 */}
       <div style={{ marginTop: 16, textAlign: 'center' }}>
         <Space>

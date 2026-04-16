@@ -94,7 +94,7 @@ export default function Files() {
     {
       key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: () => (
-        <Button type="link" size="small" icon={<DownloadOutlined />}
+        <Button type="link" size="small"
           onClick={() => void message.success(t('mr.downloadTaskCreated'))}>
           {t('common.download')}
         </Button>

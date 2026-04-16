@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Space, Table, Tabs, Tag, message } from 'antd';
+import { Button, Dropdown, Form, Input, Modal, Select, Space, Table, Tabs, Tag, message } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   CheckCircleOutlined,
   CloudSyncOutlined,
   DeleteOutlined,
   EditOutlined,
+  MoreOutlined,
   PlusOutlined,
   StopOutlined,
   ThunderboltOutlined,
@@ -277,50 +279,42 @@ export default function DataModelManagement() {
       {
         title: 'Actions',
         key: 'actions',
-        width: 220,
+        width: 100,
         fixed: 'right',
-        render: (_: unknown, record: DataModel) => (
-          <Space size={4}>
-            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
-              Edit
-            </Button>
-            {record.status === 'draft' && (
-              <Button
-                type="link"
-                size="small"
-                icon={<CheckCircleOutlined />}
-                onClick={() => handleActivate(record.id)}
-              >
-                Activate
+        render: (_: unknown, record: DataModel) => {
+          const moreItems: MenuProps['items'] = [
+            ...(record.status === 'draft'
+              ? [{ key: 'activate', label: 'Activate', icon: <CheckCircleOutlined />, onClick: () => handleActivate(record.id) }]
+              : []),
+            ...(record.status === 'active'
+              ? [{ key: 'deprecate', label: 'Deprecate', icon: <StopOutlined />, onClick: () => handleDeprecate(record.id) }]
+              : []),
+            ...(record.status === 'draft'
+              ? [
+                  { type: 'divider' as const },
+                  { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(record.id) },
+                ]
+              : []),
+          ];
+          return (
+            <Space size={4}>
+              <Button type="link" size="small" onClick={() => handleEdit(record)}>
+                Edit
               </Button>
-            )}
-            {record.status === 'active' && (
-              <Button
-                type="link"
-                size="small"
-                danger
-                icon={<StopOutlined />}
-                onClick={() => handleDeprecate(record.id)}
-              >
-                Deprecate
-              </Button>
-            )}
-            {record.status === 'draft' && (
-              <Button
-                type="link"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleDelete(record.id)}
-              >
-                Delete
-              </Button>
-            )}
-          </Space>
-        ),
+              {moreItems.length > 0 && (
+                <Dropdown
+                  menu={{ items: moreItems }}
+                  trigger={['click']}
+                >
+                  <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+                </Dropdown>
+              )}
+            </Space>
+          );
+        },
       },
     ],
-    [handleEdit, handleActivate, handleDeprecate, handleDelete]
+    [handleEdit, handleActivate, handleDeprecate, handleDelete],
   );
 
   const statsBar = stats ? (

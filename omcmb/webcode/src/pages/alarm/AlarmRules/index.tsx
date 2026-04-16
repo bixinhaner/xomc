@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import { App, Button, Space, Switch, Tag, Typography, message } from 'antd';
+import { App, Button, Dropdown, Space, Switch, Tag, Typography, message } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  MoreOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -206,39 +208,25 @@ export default function AlarmRules() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 160,
-        fixed: 'left',
-        render: (_val, record) => (
-          <Space size={4}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => handleView(record)}
-            >
-              {t('common.view')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              disabled={record.enabled}
-              onClick={() => handleEdit(record)}
-            >
-              {t('common.edit')}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              disabled={record.enabled || record.isDefault}
-              onClick={() => handleDelete(record)}
-            >
-              {t('common.delete')}
-            </Button>
-          </Space>
-        ),
+        width: 100,
+        fixed: 'right',
+        render: (_val, record) => {
+          const moreItems: MenuProps['items'] = [
+            { key: 'view', label: t('common.view'), icon: <EyeOutlined />, onClick: () => handleView(record) },
+            { type: 'divider' as const },
+            { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.enabled || record.isDefault, onClick: () => handleDelete(record) },
+          ];
+          return (
+            <Space size={4}>
+              <Button type="link" size="small" disabled={record.enabled} onClick={() => handleEdit(record)}>
+                {t('common.edit')}
+              </Button>
+              <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+              </Dropdown>
+            </Space>
+          );
+        },
       },
       {
         key: 'status',

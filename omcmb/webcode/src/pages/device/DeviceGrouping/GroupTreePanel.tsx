@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Button, Dropdown, Input, Tree, Typography } from 'antd';
+import { Button, Dropdown, Input, Tooltip, Tree, Typography } from 'antd';
 import {
+  AppstoreOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderAddOutlined,
@@ -13,7 +14,7 @@ import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import type { GroupItem } from './types';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 export interface GroupTreePanelProps {
   groups: GroupItem[];
@@ -34,12 +35,10 @@ function buildTreeData(
   onContextMenu: (groupId: string) => void,
   t: (id: string, values?: Record<string, unknown>) => string
 ): DataNode[] {
-  // 兼容 null 和 undefined（后端 omitempty 导致根分组没有 parent_id 字段）
   const rootGroups = groups.filter((g) => !g.parentId);
 
   function buildNode(group: GroupItem, isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
-    // 兼容 null 和 undefined
     const isLevel1 = !group.parentId;
     const isDefaultGroup = group.builtIn === 1;
 
@@ -122,39 +121,38 @@ function buildTreeData(
       ];
     }
 
+    const isL1 = !group.parentId;
+
     return {
       key: group.id,
-      // 所有分组都可以点击，即使没有设备或子分组
       selectable: true,
       title: (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            width: '100%',
-            padding: '2px 0',
-          }}
-        >
-          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <FolderOutlined style={{ marginRight: 6, color: '#FA8C16' }} />
-            {group.name}
-            <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-              ({group.deviceCount})
-            </Text>
+        <div className="group-tree-node">
+          <Tooltip title={group.name} mouseEnterDelay={0.8} placement="right">
+            <span className="group-tree-node-name">
+              {isL1 ? (
+                <FolderOutlined style={{ marginRight: 6, fontSize: 12, color: '#FA8C16' }} />
+              ) : (
+                <span className="group-tree-dot" />
+              )}
+              <span className="group-tree-node-text">{group.name}</span>
+            </span>
+          </Tooltip>
+          <span className="group-tree-node-count">{group.deviceCount}</span>
+          <span className="group-tree-node-actions">
+            <Dropdown
+              menu={{ items: menuItems }}
+              trigger={['click']}
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<MoreOutlined />}
+                onClick={(e) => e.stopPropagation()}
+                className="group-tree-more-btn"
+              />
+            </Dropdown>
           </span>
-          <Dropdown
-            menu={{ items: menuItems }}
-            trigger={['click']}
-          >
-            <Button
-              type="text"
-              size="small"
-              icon={<MoreOutlined />}
-              onClick={(e) => e.stopPropagation()}
-              style={{ flexShrink: 0 }}
-            />
-          </Dropdown>
         </div>
       ),
       icon: null,
@@ -177,9 +175,8 @@ export default function GroupTreePanel({
   onAddGroup,
   t,
 }: GroupTreePanelProps) {
-  // 默认展开 __all__ 和所有 L1 root groups
-  // 兼容 null 和 undefined（后端 omitempty 导致根分组没有 parent_id 字段）
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => ['__all__', ...groups.filter((g) => !g.parentId).map((g) => g.id)]);
+  const [searchVisible, setSearchVisible] = useState(false);
 
   const filteredTreeData = useMemo(
     () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t),
@@ -187,64 +184,61 @@ export default function GroupTreePanel({
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          padding: '12px 12px 8px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: '1px solid #f0f0f0',
-        }}
-      >
-        <Title level={5} style={{ margin: 0, fontSize: 14 }}>
-          {t('nav.device.group')}
-        </Title>
-        <Button
-          type="text"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={onAddGroup}
-        >
-          {t('common.add')}
-        </Button>
+    <div className="group-tree-panel">
+      {/* 头部：标题 + 搜索/添加图标 */}
+      <div className="group-tree-header">
+        <span className="group-tree-header-title">{t('nav.device.group')}</span>
+        <span className="group-tree-header-actions">
+          <Button
+            type="text"
+            size="small"
+            icon={<SearchOutlined />}
+            onClick={() => { setSearchVisible(!searchVisible); if (searchVisible) onSearchChange(''); }}
+            title={t('device.searchGroup')}
+            className="group-tree-icon-btn"
+          />
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={onAddGroup}
+            title={t('common.add')}
+            className="group-tree-icon-btn"
+          />
+        </span>
       </div>
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
-        <Input
-          placeholder={t('device.searchGroup')}
-          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
-          value={groupSearchText}
-          onChange={(e) => onSearchChange(e.target.value)}
-          allowClear
-          size="small"
-        />
-      </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
-        <style>{`
-          .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-            background-color: var(--color-primary-100, #e6f4ff) !important;
-            font-weight: 500;
-          }
-          .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .ant-tree-title {
-            color: var(--color-primary-700, #1d4ed8);
-          }
-          .group-tree .ant-tree-treenode-selected > .ant-tree-node-content-wrapper {
-            background-color: var(--color-primary-100, #e6f4ff) !important;
-          }
-        `}</style>
+
+      {/* 搜索框：展开式 */}
+      {searchVisible && (
+        <div className="group-tree-search">
+          <Input
+            placeholder={t('device.searchGroup')}
+            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+            value={groupSearchText}
+            onChange={(e) => onSearchChange(e.target.value)}
+            allowClear
+            size="small"
+            autoFocus
+            onBlur={() => { if (!groupSearchText) setSearchVisible(false); }}
+          />
+        </div>
+      )}
+
+      {/* 树区域 */}
+      <div className="group-tree-body">
         <Tree
           className="group-tree"
           treeData={[
             {
               key: '__all__',
               title: (
-                <span>
-                  <FolderOutlined style={{ marginRight: 6, color: 'var(--color-primary-600)' }} />
-                  {t('common.all')}
-                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-                    ({total})
-                  </Text>
-                </span>
+                <div className="group-tree-root-node">
+                  <span className="group-tree-node-name">
+                    <AppstoreOutlined style={{ marginRight: 6, fontSize: 12, color: 'var(--color-primary-600)' }} />
+                    <span className="group-tree-node-text" style={{ fontWeight: 500 }}>{t('common.all')}</span>
+                  </span>
+                  <span className="group-tree-node-count">{total}</span>
+                </div>
               ),
               children: filteredTreeData,
               selectable: false,
@@ -259,7 +253,6 @@ export default function GroupTreePanel({
             const clickedGroup = groups.find((g) => g.id === key);
             if (!clickedGroup) return;
 
-            // L1 分组（无 parentId）：点击整行时切换展开/折叠，不触发选中
             if (!clickedGroup.parentId) {
               setExpandedKeys((prev) => {
                 if (prev.includes(key)) {
@@ -268,16 +261,198 @@ export default function GroupTreePanel({
                   return [...prev, key];
                 }
               });
-              return; // 不调用 onSelect，不更新设备列表
+              return;
             }
 
-            // L2 分组：正常选中，更新设备列表
             onSelect(key);
           }}
           blockNode
-          style={{ fontSize: 13 }}
         />
       </div>
+
+      {/* 样式 */}
+      <style>{`
+        /* Panel layout */
+        .group-tree-panel {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+        }
+
+        /* Header */
+        .group-tree-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 14px;
+          height: 40px;
+          flex-shrink: 0;
+        }
+        .group-tree-header-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--color-text, #262626);
+        }
+        .group-tree-header-actions {
+          display: flex;
+          gap: 4px;
+        }
+        .group-tree-icon-btn {
+          color: var(--color-text-tertiary, #8c8c8c) !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        .group-tree-icon-btn:hover {
+          color: var(--color-primary-600, #1677ff) !important;
+          background: var(--color-primary-1, #e6f4ff) !important;
+        }
+
+        /* Search */
+        .group-tree-search {
+          padding: 0 14px 8px;
+          flex-shrink: 0;
+        }
+
+        /* Tree body */
+        .group-tree-body {
+          flex: 1;
+          overflow: auto;
+          padding: 4px 6px 12px 10px;
+        }
+
+        /* Root "全部设备" node */
+        .group-tree-root-node {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          padding: 4px 0;
+        }
+
+        /* Tree node row */
+        .group-tree-node {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          padding: 2px 0;
+          position: relative;
+        }
+        .group-tree-node-name {
+          display: flex;
+          align-items: center;
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .group-tree-node-text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .group-tree-node-count {
+          font-size: 11px;
+          color: var(--color-text-quaternary, #bfbfbf);
+          margin-left: 8px;
+          flex-shrink: 0;
+          min-width: 20px;
+          text-align: right;
+        }
+        .group-tree-node-actions {
+          flex-shrink: 0;
+          margin-left: 2px;
+          transition: opacity 150ms ease;
+        }
+        .group-tree-node-actions .group-tree-more-btn {
+          color: var(--color-text-quaternary, #d9d9d9) !important;
+          border: none !important;
+          box-shadow: none !important;
+          font-size: 12px !important;
+          width: 20px !important;
+          height: 20px !important;
+          min-width: 20px !important;
+          padding: 0 !important;
+        }
+
+        /* Hover / selected: deepen more button */
+        .group-tree .ant-tree-treenode:hover .group-tree-more-btn,
+        .group-tree .ant-tree-treenode-selected .group-tree-more-btn {
+          color: var(--color-text-tertiary, #8c8c8c) !important;
+        }
+
+        /* L2 dot indicator */
+        .group-tree-dot {
+          display: inline-block;
+          width: 4px;
+          height: 4px;
+          border-radius: 50%;
+          background: var(--color-text-quaternary, #d9d9d9);
+          margin-right: 8px;
+          margin-left: 2px;
+          flex-shrink: 0;
+        }
+
+        /* Selection state: left bar + text color instead of full background */
+        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+          background: rgba(var(--color-primary-rgb, 22,119,255), 0.04) !important;
+          border-radius: 4px;
+        }
+        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .group-tree-node-text {
+          color: var(--color-primary-600, #1677ff);
+          font-weight: 500;
+        }
+        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .group-tree-dot {
+          background: var(--color-primary-600, #1677ff);
+        }
+        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .group-tree-node-count {
+          color: var(--color-primary-400, #69b1ff);
+        }
+
+        /* Hover state */
+        .group-tree .ant-tree-node-content-wrapper:hover:not(.ant-tree-node-selected) {
+          background: var(--color-fill-quaternary, rgba(0,0,0,0.02)) !important;
+          border-radius: 4px;
+        }
+
+        /* Tree item spacing */
+        .group-tree .ant-tree-treenode {
+          padding: 1px 0 !important;
+        }
+        .group-tree .ant-tree-node-content-wrapper {
+          border-radius: 4px;
+          transition: background 150ms ease;
+        }
+
+        /* Root node divider */
+        .group-tree > .ant-tree-treenode:first-child {
+          border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
+          margin-bottom: 4px;
+          padding-bottom: 4px !important;
+        }
+
+        /* L1 vertical guide line */
+        .group-tree .ant-tree-treenode-selected::before,
+        .group-tree .ant-tree-treenode:hover::before {
+          content: none;
+        }
+
+        /* Reduce indent */
+        .group-tree .ant-tree-indent-unit {
+          width: 16px !important;
+        }
+
+        /* Scrollbar */
+        .group-tree-body::-webkit-scrollbar {
+          width: 4px;
+        }
+        .group-tree-body::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .group-tree-body::-webkit-scrollbar-thumb {
+          background: var(--color-border-secondary, #f0f0f0);
+          border-radius: 2px;
+        }
+      `}</style>
     </div>
   );
 }

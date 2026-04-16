@@ -147,7 +147,7 @@ export default function LicenseList() {
       render: (_, record) => {
         const lic = record as License;
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<EyeOutlined />}
               onClick={() => setSelectedLicense(lic)}>
               {t('common.detail')}

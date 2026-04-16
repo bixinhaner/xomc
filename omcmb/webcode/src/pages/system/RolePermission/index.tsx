@@ -18,7 +18,7 @@ import {
   Tabs,
   Table,
 } from 'antd';
-import type { TreeDataNode, TreeProps } from 'antd';
+import type { MenuProps, TreeDataNode, TreeProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -626,70 +626,66 @@ export default function RoleManagement() {
       title: t('table.operation'),
       dataIndex: 'id',
       width: 100,
-      fixed: 'left',
+      fixed: 'right',
       render: (_, record) => {
         const role = record as Role;
+        const moreItems: MenuProps['items'] = [
+          {
+            key: 'view',
+            label: t('common.view'),
+            icon: <EyeOutlined />,
+            onClick: () => {
+              setSelectedRole(role);
+              form.setFieldsValue({
+                roleName: role.roleName,
+                description: role.description,
+              });
+              setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
+              setExpandedPermissionKeys(allModuleKeys);
+              setSelectedDeviceGroupIds(role.deviceGroupIds || []);
+              setSelectedNetworkTypes(role.networkTypes || []);
+              // 加载角色 API 权限
+              getRoleApiPermissions.mutate(role.id, {
+                onSuccess: (ids) => setSelectedApiEndpointIds(ids),
+              });
+              setViewVisible(true);
+            },
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            disabled: isBuiltIn(role),
+            onClick: () => handleDelete(role),
+          },
+        ];
         return (
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'view',
-                  label: t('common.view'),
-                  icon: <EyeOutlined />,
-                  onClick: () => {
-                    setSelectedRole(role);
-                    form.setFieldsValue({
-                      roleName: role.roleName,
-                      description: role.description,
-                    });
-                    setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
-                    setExpandedPermissionKeys(allModuleKeys);
-                    setSelectedDeviceGroupIds(role.deviceGroupIds || []);
-                    setSelectedNetworkTypes(role.networkTypes || []);
-                    // 加载角色 API 权限
-                    getRoleApiPermissions.mutate(role.id, {
-                      onSuccess: (ids) => setSelectedApiEndpointIds(ids),
-                    });
-                    setViewVisible(true);
-                  },
-                },
-                {
-                  key: 'edit',
-                  label: t('common.edit'),
-                  icon: <EditOutlined />,
-                  disabled: isBuiltIn(role),
-                  onClick: () => {
-                    setSelectedRole(role);
-                    form.setFieldsValue({
-                      roleName: role.roleName,
-                      description: role.description,
-                    });
-                    setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
-                    setExpandedPermissionKeys(allModuleKeys);
-                    setSelectedDeviceGroupIds(role.deviceGroupIds || []);
-                    setSelectedNetworkTypes(role.networkTypes || []);
-                    // 加载角色 API 权限
-                    getRoleApiPermissions.mutate(role.id, {
-                      onSuccess: (ids) => setSelectedApiEndpointIds(ids),
-                    });
-                    setEditVisible(true);
-                  },
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  label: t('common.delete'),
-                  icon: <DeleteOutlined />,
-                  danger: true,
-                  disabled: isBuiltIn(role),
-                  onClick: () => handleDelete(role),
-                },
-              ],
-            }}
-          >
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
+          <Space size={4}>
+            <Button type="link" size="small" disabled={isBuiltIn(role)}
+              onClick={() => {
+                setSelectedRole(role);
+                form.setFieldsValue({
+                  roleName: role.roleName,
+                  description: role.description,
+                });
+                setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
+                setExpandedPermissionKeys(allModuleKeys);
+                setSelectedDeviceGroupIds(role.deviceGroupIds || []);
+                setSelectedNetworkTypes(role.networkTypes || []);
+                // 加载角色 API 权限
+                getRoleApiPermissions.mutate(role.id, {
+                  onSuccess: (ids) => setSelectedApiEndpointIds(ids),
+                });
+                setEditVisible(true);
+              }}>
+              {t('common.edit')}
+            </Button>
+            <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
         );
       },
     },

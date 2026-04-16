@@ -84,7 +84,7 @@ export default function MRRetrieval() {
     { key: 'neType', title: t('table.type'), dataIndex: 'neType', width: 80 },
     { key: 'region', title: t('table.region'), dataIndex: 'region', width: 80 },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 90,
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: (_, record) => {
         const ne = record as NEItem;
         return <Button type="link" size="small" danger icon={<MinusCircleOutlined />}
@@ -116,15 +116,12 @@ export default function MRRetrieval() {
     },
     { key: 'retrievalTime', title: t('table.time'), dataIndex: 'retrievalTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 110,
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: (_, record) => {
         const r = record as MRRetrievalResult;
-        return (
-          <Space size="small">
-            {r.status === 'success' && <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>}
-            {r.status === 'failed' && <Button type="link" size="small" icon={<ReloadOutlined />}>{t('common.refresh')}</Button>}
-          </Space>
-        );
+        if (r.status === 'success') return <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>;
+        if (r.status === 'failed') return <Button type="link" size="small" icon={<ReloadOutlined />}>{t('common.refresh')}</Button>;
+        return null;
       },
     },
   ], [t]);

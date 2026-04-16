@@ -100,11 +100,10 @@ export default function ParamSync() {
       width: 120,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size={4}>
           <Button
             type="link"
             size="small"
-            icon={<SyncOutlined />}
             onClick={() => void message.success(`${t('config.sync')}: ${record.paramCode as string}`)}
           >
             {t('config.sync')}

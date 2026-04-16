@@ -132,11 +132,11 @@ export default function Reports() {
       render: (val) => val ? formatFileSize(Number(val)) : '—',
     },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 130, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',
       render: (_, record) => {
         const r = record as MRAnalysisReport;
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<EyeOutlined />} disabled={r.status !== 'generated'}>{t('common.view')}</Button>
             <Button type="link" size="small" icon={<DownloadOutlined />} disabled={r.status !== 'generated'}
               onClick={() => downloadReport.mutate(r.id, { onSuccess: () => void message.success(t('mr.downloadTaskCreated')) })}>

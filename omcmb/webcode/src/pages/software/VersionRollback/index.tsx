@@ -544,27 +544,19 @@ export default function UpgradePlan() {
     {
       key: 'operation',
       title: '操作',
-      width: 80,
-      align: 'center',
-      fixed: 'left',
+      width: 100,
+      fixed: 'right',
       render: (_: unknown, record: UpgradePlanRow) => {
         const status = record.status;
 
         // 根据状态操作矩阵计算每个操作的可见性
         // 状态：1=等待, 2=进行中, 3=暂停, 4=已结束, 5=终止中, 6=暂停中
-        // 1. 成功/失败(已结束 status=4) → 信息、删除
-        // 2. 等待中(status=1) → 信息、修改、开始、终止、删除
-        // 3. 升级中(进行中 status=2) → 信息、暂停、终止
-        // 4. 已终止(status=5) → 信息、删除
-        // 5. 暂停中(status=3,6) → 信息、开始、终止、删除
+        const showEdit = status === 1;
+        const showStart = status === 1 || status === 3 || status === 6;
+        const showPause = status === 2;
+        const showTerminate = status === 1 || status === 2 || status === 3 || status === 6;
+        const showDelete = status !== 2;
 
-        const showEdit = status === 1; // 只有等待可修改
-        const showStart = status === 1 || status === 3 || status === 6; // 等待、暂停、暂停中显示开始
-        const showPause = status === 2; // 只有进行中显示暂停
-        const showTerminate = status === 1 || status === 2 || status === 3 || status === 6; // 等待、进行中、暂停、暂停中显示终止
-        const showDelete = status !== 2; // 进行中不显示删除，其他都显示
-
-        // 动态构建菜单项数组（不使用 hidden 属性，直接过滤）
         const items: MenuProps['items'] = [
           showEdit ? {
             key: 'edit',
@@ -602,9 +594,12 @@ export default function UpgradePlan() {
         ].filter(Boolean) as MenuProps['items'];
 
         return (
-          <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => handleViewTaskDetail(record)}>详情</Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
         );
       },
     },
@@ -664,7 +659,7 @@ export default function UpgradePlan() {
       key: 'operation',
       title: '操作',
       width: 80,
-      align: 'center',
+      fixed: 'right',
       render: (_: unknown, record: UpgradePlanRow) => {
         if (record.result === 'failed') {
           return (

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
   Button,
-  Card,
   Form,
   message,
   Tabs,
@@ -121,10 +120,8 @@ export default function SystemConfig() {
         onChange={(key) => setActiveTab(key as SettingsTab)}
         items={tabItems}
       />
-      {/* 设置内容 - 放在 Card 内部 */}
-      <Card bordered={false}>
-        {renderSettingsContent()}
-      </Card>
+      {/* 设置内容 */}
+      {renderSettingsContent()}
       {/* 底部保存按钮 */}
       <div style={{ marginTop: 16, textAlign: 'center' }}>
         <Space>

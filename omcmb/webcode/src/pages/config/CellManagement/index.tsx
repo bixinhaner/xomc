@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, PoweroffOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Tag, message } from 'antd';
+import { PlusOutlined, DeleteOutlined, PoweroffOutlined, MoreOutlined } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -116,24 +117,22 @@ export default function CellManagement() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 160,
+      width: 100,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<PoweroffOutlined />}
-            onClick={() => void message.info(`${record.status === 'active' ? t('common.disable') : t('common.enable')}: ${record.cellName as string}`)}
-          >
-            {record.status === 'active' ? t('common.disable') : t('common.enable')}
-          </Button>
-          <Popconfirm title={t('common.confirmDelete')} onConfirm={() => void message.success(t('common.deleteSuccess'))}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, record) => {
+        const menuItems: MenuProps['items'] = [
+          { key: 'toggle', label: record.status === 'active' ? t('common.disable') : t('common.enable'), icon: <PoweroffOutlined />, onClick: () => void message.info(`${record.status === 'active' ? t('common.disable') : t('common.enable')}: ${record.cellName as string}`) },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => void message.success(t('common.deleteSuccess')) },
+        ];
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
+            <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+              <Button type="link" size="small" icon={<MoreOutlined />} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
   ], [t, STATUS_MAP]);
 

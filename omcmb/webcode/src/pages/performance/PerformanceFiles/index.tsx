@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Space, Tag, message } from 'antd';
-import { DownloadOutlined, EyeOutlined } from '@ant-design/icons';
+
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -123,11 +123,10 @@ export default function PerformanceFiles() {
       width: 120,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size={4}>
           <Button
             type="link"
             size="small"
-            icon={<DownloadOutlined />}
             disabled={record.status !== 'ready'}
             onClick={() => void message.success(`${t('common.download')}: ${record.fileName as string}`)}
           >
@@ -136,7 +135,6 @@ export default function PerformanceFiles() {
           <Button
             type="link"
             size="small"
-            icon={<EyeOutlined />}
             disabled={record.status !== 'ready'}
             onClick={() => void message.info(`${t('common.view')}: ${record.fileName as string}`)}
           >

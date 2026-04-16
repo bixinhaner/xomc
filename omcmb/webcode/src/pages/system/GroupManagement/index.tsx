@@ -8,7 +8,9 @@ import {
   Dropdown,
   Tag,
   Select,
+  Space,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -168,56 +170,52 @@ export default function GroupManagement() {
       title: t('table.operation'),
       dataIndex: 'id',
       width: 100,
-      fixed: 'left',
+      fixed: 'right',
       render: (_, record) => {
         const group = record as Group;
+        const moreItems: MenuProps['items'] = [
+          {
+            key: 'view',
+            label: t('common.view'),
+            icon: <EyeOutlined />,
+            onClick: () => {
+              setSelectedGroup(group);
+              form.setFieldsValue({
+                groupName: group.groupName,
+                description: group.description,
+              });
+              setViewVisible(true);
+            },
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            disabled: isBuiltIn(group),
+            onClick: () => handleDelete(group),
+          },
+        ];
         return (
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'view',
-                  label: t('common.view'),
-                  icon: <EyeOutlined />,
-                  onClick: () => {
-                    setSelectedGroup(group);
-                    form.setFieldsValue({
-                      groupName: group.groupName,
-                      description: group.description,
-                    });
-                    setViewVisible(true);
-                  },
-                },
-                {
-                  key: 'edit',
-                  label: t('common.edit'),
-                  icon: <EditOutlined />,
-                  disabled: isBuiltIn(group),
-                  onClick: () => {
-                    setSelectedGroup(group);
-                    form.setFieldsValue({
-                      groupName: group.groupName,
-                      description: group.description,
-                    });
-                    setSelectedRoleIds([]);
-                    setSelectedUserIds([]);
-                    setEditVisible(true);
-                  },
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  label: t('common.delete'),
-                  icon: <DeleteOutlined />,
-                  danger: true,
-                  disabled: isBuiltIn(group),
-                  onClick: () => handleDelete(group),
-                },
-              ],
-            }}
-          >
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
+          <Space size={4}>
+            <Button type="link" size="small" disabled={isBuiltIn(group)}
+              onClick={() => {
+                setSelectedGroup(group);
+                form.setFieldsValue({
+                  groupName: group.groupName,
+                  description: group.description,
+                });
+                setSelectedRoleIds([]);
+                setSelectedUserIds([]);
+                setEditVisible(true);
+              }}>
+              {t('common.edit')}
+            </Button>
+            <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
         );
       },
     },

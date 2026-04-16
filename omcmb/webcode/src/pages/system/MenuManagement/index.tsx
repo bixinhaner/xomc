@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   App,
   Button,
+  Dropdown,
   Tag,
   Drawer,
   Form,
@@ -13,11 +14,14 @@ import {
   Radio,
   Checkbox,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   UpOutlined,
   DownOutlined,
   RightOutlined,
   PlusOutlined,
+  MoreOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -539,29 +543,23 @@ export default function MenuManagement() {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 120,
-      fixed: 'left',
-      render: (_, record) => (
-        <Space size={4}>
-          <Button
-            size="small"
-            type="link"
-            onClick={() => handleEdit(record)}
-            style={{ padding: '0 4px' }}
-          >
-            编辑
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            danger
-            onClick={() => handleDelete(record)}
-            style={{ padding: '0 4px' }}
-          >
-            删除
-          </Button>
-        </Space>
-      ),
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => {
+        const moreItems: MenuProps['items'] = [
+          { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(record) },
+        ];
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => handleEdit(record)}>
+              编辑
+            </Button>
+            <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
     {
       key: 'name',

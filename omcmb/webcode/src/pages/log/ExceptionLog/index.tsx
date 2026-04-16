@@ -378,7 +378,7 @@ export default function ExceptionLog() {
       key: 'operation',
       title: '操作',
       width: 100,
-      align: 'center',
+      fixed: 'right',
       render: (_: unknown, record: ExceptionLog) => {
         // 收集中状态不允许任何操作，显示"-"
         if (record.manualCollectionStatus === '1') {
@@ -386,9 +386,15 @@ export default function ExceptionLog() {
         }
         const items = getActionMenu(record) ?? [];
         if (items.length === 0) return '-';
+        if (items.length === 1) {
+          const item = items[0] as NonNullable<MenuProps['items']>[number];
+          if ('label' in item && 'onClick' in item) {
+            return <Button type="link" size="small" onClick={() => item.onClick?.({} as any, null)}>{item.label as string}</Button>;
+          }
+        }
         return (
           <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />}>更多</Button>
+            <Button type="link" size="small" icon={<MoreOutlined />} />
           </Dropdown>
         );
       },

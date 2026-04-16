@@ -111,7 +111,7 @@ export default function CommandManagement() {
       },
     },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 90, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: (_, record) => {
         const r = record as OpsCommandRecord;
         return (

@@ -17,7 +17,6 @@ import {
 } from 'antd';
 import {
   ApiOutlined,
-  DeleteOutlined,
   PlusOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
@@ -203,14 +202,13 @@ export default function NorthboundManagement() {
       {
         title: 'Actions',
         key: 'actions',
-        width: 100,
+        width: 80,
         fixed: 'right',
         render: (_: unknown, record: PushTarget) => (
           <Button
             type="link"
             size="small"
             danger
-            icon={<DeleteOutlined />}
             onClick={() => handleRemoveTarget(record.id)}
           >
             Remove

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Form, Input, Modal, Popconfirm, Select, Space, Tag, message } from 'antd';
+import { PlusOutlined, DeleteOutlined, CopyOutlined, MoreOutlined } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -115,17 +116,22 @@ export default function BatchParamTemplate() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 160,
+      width: 100,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
-          <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => void message.info(t('common.copy'))}>{t('common.copy')}</Button>
-          <Popconfirm title={t('common.confirmDelete')} onConfirm={() => handleDelete([record.id])}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, record) => {
+        const menuItems: MenuProps['items'] = [
+          { key: 'copy', label: t('common.copy'), icon: <CopyOutlined />, onClick: () => void message.info(t('common.copy')) },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete([record.id]) },
+        ];
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
+            <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+              <Button type="link" size="small" icon={<MoreOutlined />} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
   ], [t]);
 

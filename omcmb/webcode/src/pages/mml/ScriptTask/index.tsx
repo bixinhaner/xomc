@@ -18,7 +18,6 @@ import {
 } from 'antd';
 import {
   PlusOutlined,
-  EyeOutlined,
   MoreOutlined,
   PlayCircleOutlined,
   PauseCircleOutlined,
@@ -280,10 +279,10 @@ export default function ScriptTask() {
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
-      key: 'operation', title: '操作', dataIndex: 'id', width: 70, fixed: 'left',
+      key: 'operation', title: '操作', dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => showResult(record)} title="查看结果" />
+          <Button type="link" size="small" onClick={() => showResult(record)}>{t('common.view')}</Button>
           <Dropdown menu={{ items: getActionMenu(record) }} trigger={['click']}>
             <Button type="link" size="small" icon={<MoreOutlined />} />
           </Dropdown>

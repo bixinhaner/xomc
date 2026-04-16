@@ -137,7 +137,7 @@ export default function VersionQuery() {
       width: 120,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size={4}>
           <Button
             type="link"
             size="small"

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Button, Tag, Space, Progress, Modal, Form, Input, Select, message, Tabs, Descriptions, Drawer } from 'antd';
-import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, StopOutlined, EyeOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message, Tabs, Descriptions, Drawer } from 'antd';
+import type { MenuProps } from 'antd';
+import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, StopOutlined, EyeOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -208,32 +209,29 @@ export default function TaskManagement() {
     },
     { key: 'creator', title: '创建者', dataIndex: 'creator', width: 90 },
     {
-      key: 'actions', title: '操作', dataIndex: 'id', width: 160, fixed: 'right',
+      key: 'actions', title: '操作', dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => {
         const t = record as OpsTask;
+        const moreItems: MenuProps['items'] = [
+          ...(t.status === 'running'
+            ? [{ key: 'pause', label: '暂停', icon: <PauseCircleOutlined />, onClick: () => handlePause(t.id) }]
+            : []),
+          ...((t.status === 'paused' || t.status === 'pending')
+            ? [{ key: 'resume', label: '继续', icon: <PlayCircleOutlined />, onClick: () => handleResume(t.id) }]
+            : []),
+          ...((t.status === 'running' || t.status === 'paused' || t.status === 'pending')
+            ? [{ type: 'divider' as const }, { key: 'cancel', label: '取消', icon: <StopOutlined />, danger: true, onClick: () => handleCancel(t.id) }]
+            : []),
+        ];
         return (
-          <Space size="small">
-            <Button type="link" size="small" icon={<EyeOutlined />}
-              onClick={() => { setSelectedTask(t); setDetailVisible(true); }}>
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => { setSelectedTask(t); setDetailVisible(true); }}>
               详情
             </Button>
-            {t.status === 'running' && (
-              <Button type="link" size="small" icon={<PauseCircleOutlined />}
-                onClick={() => handlePause(t.id)}>
-                暂停
-              </Button>
-            )}
-            {(t.status === 'paused' || t.status === 'pending') && (
-              <Button type="link" size="small" icon={<PlayCircleOutlined />}
-                onClick={() => handleResume(t.id)}>
-                继续
-              </Button>
-            )}
-            {(t.status === 'running' || t.status === 'paused' || t.status === 'pending') && (
-              <Button type="link" size="small" danger icon={<StopOutlined />}
-                onClick={() => handleCancel(t.id)}>
-                取消
-              </Button>
+            {moreItems.length > 0 && (
+              <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+              </Dropdown>
             )}
           </Space>
         );

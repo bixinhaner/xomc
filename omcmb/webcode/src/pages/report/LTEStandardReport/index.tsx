@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Tree, Tag, Space, Tooltip, message } from 'antd';
-import { EyeOutlined, DownloadOutlined, ExportOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Tree, Tag, Space, Tooltip, message, Dropdown } from 'antd';
+import { EyeOutlined, DownloadOutlined, ExportOutlined, PlusOutlined, MoreOutlined } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -124,17 +125,21 @@ export default function LTEStandardReport() {
       render: (val) => val ? formatFileSize(Number(val)) : '—',
     },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 150, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => {
         const r = record as ReportRecord;
+        const items: MenuProps['items'] = [
+          { key: 'download', label: t('common.download'), icon: <DownloadOutlined />, disabled: r.status !== 'generated',
+            onClick: () => downloadReport.mutate(r.id, { onSuccess: () => void message.success(t('common.download')) }),
+          },
+          { key: 'export', label: t('common.export'), icon: <ExportOutlined />, disabled: r.status !== 'generated' },
+        ];
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<EyeOutlined />} disabled={r.status !== 'generated'}>{t('common.view')}</Button>
-            <Button type="link" size="small" icon={<DownloadOutlined />} disabled={r.status !== 'generated'}
-              onClick={() => downloadReport.mutate(r.id, { onSuccess: () => void message.success(t('common.download')) })}>
-              {t('common.download')}
-            </Button>
-            <Button type="link" size="small" icon={<ExportOutlined />} disabled={r.status !== 'generated'}>{t('common.export')}</Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} />
+            </Dropdown>
           </Space>
         );
       },

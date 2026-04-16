@@ -599,16 +599,15 @@ export default function KPIStandardReport() {
   const columns: DataTableColumn<KPIIndicatorRow>[] = useMemo(() => [
     {
       key: 'operation',
-      title: '',
+      title: t('table.operation'),
       dataIndex: 'kpiId',
-      width: 140,
-      fixed: 'left',
+      width: 120,
+      fixed: 'right',
       render: (_, row) => (
         <Space size={4}>
           <Button
             type="link"
             size="small"
-            icon={<EditOutlined />}
             onClick={() => handleEditIndicator(row)}
           >
             {t('common.edit')}
@@ -617,7 +616,6 @@ export default function KPIStandardReport() {
             <Button
               type="link"
               size="small"
-              icon={<DeleteOutlined />}
               danger
               onClick={() => handleDeleteIndicator()}
             >

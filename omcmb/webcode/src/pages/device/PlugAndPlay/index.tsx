@@ -5,7 +5,6 @@ import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
   SearchOutlined,
-  InfoCircleOutlined,
   EditOutlined,
   DeleteOutlined,
   ScanOutlined,
@@ -575,23 +574,28 @@ export default function PlugAndPlay() {
     {
       key: 'actions',
       title: '',
-      width: 80,
-      fixed: 'left',
+      width: 100,
+      fixed: 'right',
       render: (_, record) => (
-        <Dropdown
-          menu={{
-            items: [
-              { key: 'info', label: t('common.detail'), icon: <InfoCircleOutlined /> },
-              { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, disabled: record.selfStartEnable === '1' },
-              { key: 'detect', label: t('provision.detect'), icon: <ScanOutlined /> },
-              { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.selfStartEnable === '1' },
-            ] as MenuProps['items'],
-            onClick: ({ key }) => handlePolicyMenuClick(key, record),
-          }}
-          trigger={['click']}
-        >
-          <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-        </Dropdown>
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => handlePolicyMenuClick('info', record)}>
+            {t('common.detail')}
+          </Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, disabled: record.selfStartEnable === '1' },
+                { key: 'detect', label: t('provision.detect'), icon: <ScanOutlined /> },
+                { type: 'divider' as const },
+                { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.selfStartEnable === '1' },
+              ] as MenuProps['items'],
+              onClick: ({ key }) => handlePolicyMenuClick(key, record),
+            }}
+            trigger={['click']}
+          >
+            <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+          </Dropdown>
+        </Space>
       ),
     },
     {
@@ -690,8 +694,8 @@ export default function PlugAndPlay() {
       {
         key: 'actions',
         title: '',
-        width: 80,
-        fixed: 'left',
+        width: 100,
+        fixed: 'right',
         render: (_, record) => {
           const items: MenuProps['items'] = [
             ['0', '1', '4'].includes(record.status) ? {
@@ -713,20 +717,19 @@ export default function PlugAndPlay() {
               danger: true,
               onClick: () => handleDeleteTask(record),
             } : null,
-            {
-              key: 'detail',
-              label: t('common.detail'),
-              icon: <InfoCircleOutlined />,
-              onClick: () => setDetailTaskId(record.taskId),
-            },
-          ].filter(Boolean) as MenuProps['items'];
-
-          if (!items || items.length === 0) return null;
+          ].filter(Boolean) as NonNullable<MenuProps['items']>;
 
           return (
-            <Dropdown menu={{ items }} trigger={['click']}>
-              <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-            </Dropdown>
+            <Space size={4}>
+              <Button type="link" size="small" onClick={() => setDetailTaskId(record.taskId)}>
+                {t('common.detail')}
+              </Button>
+              {items && items.length > 0 && (
+                <Dropdown menu={{ items }} trigger={['click']}>
+                  <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+                </Dropdown>
+              )}
+            </Space>
           );
         },
       },

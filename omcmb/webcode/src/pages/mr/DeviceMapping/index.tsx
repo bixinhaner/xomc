@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Button, Tag, Space, Switch, message } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -95,7 +94,7 @@ export default function DeviceMapping() {
     },
     {
       key: 'actions', title: '操作', dataIndex: 'id', width: 80,
-      render: () => <Button type="link" size="small" icon={<EditOutlined />}>编辑</Button>,
+      render: () => <Button type="link" size="small">编辑</Button>,
     },
   ];
 

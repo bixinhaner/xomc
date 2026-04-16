@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Tag, Progress, Tooltip } from 'antd';
-import { ReloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { ReloadOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -126,9 +126,9 @@ export default function PollStatistics() {
       },
     },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: () => (
-        <Button type="link" size="small" icon={<EyeOutlined />}>{t('common.detail')}</Button>
+        <Button type="link" size="small">查看</Button>
       ),
     },
   ], [t]);

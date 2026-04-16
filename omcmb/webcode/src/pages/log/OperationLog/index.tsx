@@ -2,7 +2,6 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   App,
   Button,
-  Card,
   Radio,
   Tag,
   Space,
@@ -363,31 +362,29 @@ export default function OperationLogPage() {
   return (
     <ListPageLayout title={t('log.operationLog')}>
       {/* Tab 页签 + 工具栏 */}
-      <Card bordered={false} style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Radio.Group
-            value={activeTab}
-            onChange={(e) => handleTabChange(e.target.value)}
-            optionType="button"
-            buttonStyle="solid"
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Radio.Group
+          value={activeTab}
+          onChange={(e) => handleTabChange(e.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+        >
+          <Radio.Button value="operation">{t('log.operationLog')}</Radio.Button>
+          <Radio.Button value="security">{t('log.securityLog')}</Radio.Button>
+          <Radio.Button value="system">{t('log.systemLog')}</Radio.Button>
+          <Radio.Button value="northbound">{t('log.northboundLog')}</Radio.Button>
+        </Radio.Group>
+        <Space>
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+            loading={exportLogs.isPending}
           >
-            <Radio.Button value="operation">{t('log.operationLog')}</Radio.Button>
-            <Radio.Button value="security">{t('log.securityLog')}</Radio.Button>
-            <Radio.Button value="system">{t('log.systemLog')}</Radio.Button>
-            <Radio.Button value="northbound">{t('log.northboundLog')}</Radio.Button>
-          </Radio.Group>
-          <Space>
-            <Button
-              type="primary"
-              icon={<DownloadOutlined />}
-              onClick={handleExport}
-              loading={exportLogs.isPending}
-            >
-              {t('common.export')}
-            </Button>
-          </Space>
-        </div>
-      </Card>
+            {t('common.export')}
+          </Button>
+        </Space>
+      </div>
 
       <FilterBar
         filterId={`${activeTab}-log-filter`}
@@ -398,21 +395,19 @@ export default function OperationLogPage() {
       />
 
       {/* 日志列表 */}
-      <Card bordered={false}>
-        <DataTable<OperationLog & Record<string, unknown>>
-          tableId={`${activeTab}-log-list`}
-          columns={getColumns() as DataTableColumn<OperationLog & Record<string, unknown>>[]}
-          dataSource={(data?.items ?? []) as (OperationLog & Record<string, unknown>)[]}
-          loading={isLoading}
-          rowKey="id"
-          total={data?.total ?? 0}
-          pageSize={pageSize}
-          currentPage={page}
-          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          onRefresh={() => void refetch()}
-          scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
-        />
-      </Card>
+      <DataTable<OperationLog & Record<string, unknown>>
+        tableId={`${activeTab}-log-list`}
+        columns={getColumns() as DataTableColumn<OperationLog & Record<string, unknown>>[]}
+        dataSource={(data?.items ?? []) as (OperationLog & Record<string, unknown>)[]}
+        loading={isLoading}
+        rowKey="id"
+        total={data?.total ?? 0}
+        pageSize={pageSize}
+        currentPage={page}
+        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+        onRefresh={() => void refetch()}
+        scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
+      />
     </ListPageLayout>
   );
 }

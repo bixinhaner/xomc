@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Tree, Tag, Space, Tooltip, Input } from 'antd';
+import { Button, Tree, Tag, Space, Input } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
@@ -90,13 +90,11 @@ export default function DeviceClassification() {
       render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span>,
     },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 90,
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: () => (
-        <Space size="small">
-          <Tooltip title={t('common.edit')}>
-            <Button type="link" size="small" icon={<EditOutlined />} />
-          </Tooltip>
-        </Space>
+        <Button type="link" size="small" icon={<EditOutlined />}>
+          {t('common.edit')}
+        </Button>
       ),
     },
   ], [t]);

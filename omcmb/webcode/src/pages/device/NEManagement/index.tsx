@@ -143,19 +143,17 @@ export default function NEManagement() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 120,
+        width: 80,
         fixed: 'right',
         render: (_val, record) => (
-          <Space size={4}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => void navigate(`/device/detail/${record.sn}`)}
-            >
-              {t('common.detail')}
-            </Button>
-          </Space>
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => void navigate(`/device/detail/${record.sn}`)}
+          >
+            {t('common.detail')}
+          </Button>
         ),
       },
     ],

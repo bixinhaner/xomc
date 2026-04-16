@@ -26,8 +26,10 @@ import {
   Descriptions,
   Row,
   Col,
+  Dropdown,
   type UploadFile,
   type UploadProps,
+  type MenuProps,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -41,6 +43,7 @@ import {
   EyeOutlined,
   EditOutlined,
   InboxOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 
@@ -767,10 +770,11 @@ export default function AddPolicyPage() {
     {
       title: t('table.operation'),
       key: 'action',
-      width: 60,
+      width: 80,
+      fixed: 'right' as const,
       render: (_: unknown, record: LicenseFile) => (
         <Button
-          type="text"
+          type="link"
           size="small"
           danger
           icon={<DeleteOutlined />}
@@ -812,57 +816,29 @@ export default function AddPolicyPage() {
     {
       title: t('table.operation'),
       key: 'action',
-      width: 140,
-      fixed: 'left' as const,
-      render: (_: unknown, record: ParamConfig) => (
-        <Space size={4}>
-          <Tooltip title={t('common.view')}>
-            <Button
-              type="text"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => {
-                setCurrentConfig(record);
-                setConfigDetailMode('view');
-                configForm.setFieldsValue(record);
-                setConfigDetailVisible(true);
-              }}
-            />
-          </Tooltip>
-          <Tooltip title={t('common.edit')}>
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              disabled={selfConfigEnabled}
-              onClick={() => {
-                setCurrentConfig(record);
-                setConfigDetailMode('edit');
-                configForm.setFieldsValue(record);
-                setConfigDetailVisible(true);
-              }}
-            />
-          </Tooltip>
-          <Popconfirm
-            title={t('provision.confirmDeleteConfig')}
-            onConfirm={() => {
-              setParamConfigList(prev => prev.filter(item => item.id !== record.id));
-              message.success(t('common.success'));
-            }}
-            disabled={selfConfigEnabled}
-          >
-            <Tooltip title={t('common.delete')}>
-              <Button
-                type="text"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                disabled={selfConfigEnabled}
-              />
-            </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
+      width: 100,
+      fixed: 'right' as const,
+      render: (_: unknown, record: ParamConfig) => {
+        const items: MenuProps['items'] = [
+          { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, disabled: !!selfConfigEnabled,
+            onClick: () => { setCurrentConfig(record); setConfigDetailMode('edit'); configForm.setFieldsValue(record); setConfigDetailVisible(true); },
+          },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: !!selfConfigEnabled,
+            onClick: () => { setParamConfigList(prev => prev.filter(item => item.id !== record.id)); message.success(t('common.success')); },
+          },
+        ];
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" icon={<EyeOutlined />}
+              onClick={() => { setCurrentConfig(record); setConfigDetailMode('view'); configForm.setFieldsValue(record); setConfigDetailVisible(true); }}>
+              {t('common.view')}
+            </Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
     {
       title: t('provision.serialNumber'),

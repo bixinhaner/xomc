@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, message } from 'antd';
+import type { MenuProps } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -143,25 +144,33 @@ export default function FTPConfigPage() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 200,
+      width: 100,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<ApiOutlined />}
-            loading={testingId === record.id}
-            onClick={() => handleTestConnection(record.id)}
-          >
-            {t('common.execute')}
-          </Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
-          <Popconfirm title={t('common.confirmDelete')} onConfirm={() => deleteConfigs.mutate([record.id])}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, record) => {
+        const items: MenuProps['items'] = [
+          {
+            key: 'test',
+            label: t('common.execute'),
+            icon: <ApiOutlined />,
+            onClick: () => handleTestConnection(record.id),
+          },
+          {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            onClick: () => deleteConfigs.mutate([record.id]),
+          },
+        ];
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
   ], [t, testingId]);
 

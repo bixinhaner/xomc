@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Tag, Space, Modal, Form, Input, Select, message, Drawer, Steps, Descriptions, Tabs } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Tag, Space, Modal, Form, Input, Select, message, Drawer, Steps, Descriptions, Tabs } from 'antd';
+import type { MenuProps } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, DownloadOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -162,20 +163,26 @@ export default function Templates() {
     { key: 'useCount', title: t('ops.useCount'), dataIndex: 'useCount', width: 90 },
     { key: 'creator', title: t('mr.creator'), dataIndex: 'creator', width: 90 },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 140, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => {
         const tp = record as OpsTemplate;
+        const moreItems: MenuProps['items'] = [
+          { key: 'edit', label: t('common.edit'), icon: <EditOutlined /> },
+          { type: 'divider' as const },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(tp.id) },
+        ];
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<EyeOutlined />}
               onClick={() => { setSelectedTemplate(tp); setDetailVisible(true); }}>
               {t('common.detail')}
             </Button>
-            <Button type="link" size="small" icon={<EditOutlined />}>{t('common.edit')}</Button>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}
-              onClick={() => handleDelete(tp.id)}>
-              {t('common.delete')}
-            </Button>
+            <Dropdown
+              menu={{ items: moreItems }}
+              trigger={['click']}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
           </Space>
         );
       },

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EnvironmentOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Form, Input, InputNumber, Modal, Space, Tag, message } from 'antd';
+import type { MenuProps } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -142,24 +143,39 @@ export default function SiteManagement() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 150,
+      width: 100,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<EnvironmentOutlined />}
-            onClick={() => void message.info(`在地图上定位: ${record.name as string}`)}
-          >
-            {t('common.view')}
-          </Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
-          <Popconfirm title={t('common.confirmDelete')} onConfirm={() => void message.success(t('common.deleteSuccess'))}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, record) => {
+        const items: MenuProps['items'] = [
+          {
+            key: 'edit',
+            label: t('common.edit'),
+            icon: <EditOutlined />,
+            onClick: () => openEdit(record),
+          },
+          {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            onClick: () => void message.success(t('common.deleteSuccess')),
+          },
+        ];
+        return (
+          <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => void message.info(`在地图上定位: ${record.name as string}`)}
+            >
+              {t('common.view')}
+            </Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
   ], [t]);
 

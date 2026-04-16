@@ -1,10 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { App, Button, Modal, Space, Steps, Tag, Typography } from 'antd';
+import { App, Button, Dropdown, Modal, Space, Steps, Tag, Typography } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   EditOutlined,
   LoadingOutlined,
+  MoreOutlined,
   PlusOutlined,
   RedoOutlined,
   DeleteOutlined,
@@ -204,41 +206,35 @@ export default function Commissioning() {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 180,
-        fixed: 'left',
-        render: (_val, record) => (
-          <Space size={4}>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
-              disabled={record.status === 'running'}
-            >
-              {t('common.edit')}
-            </Button>
-            {record.status === 'failed' && (
+        width: 100,
+        fixed: 'right',
+        render: (_val, record) => {
+          const moreItems: MenuProps['items'] = [
+            ...(record.status === 'failed'
+              ? [{ key: 'retry', label: '重新执行', icon: <RedoOutlined />, onClick: () => handleRetry(record) }]
+              : []),
+            { type: 'divider' as const },
+            { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.status === 'running', onClick: () => handleDelete(record) },
+          ];
+          return (
+            <Space size={4}>
               <Button
                 type="link"
                 size="small"
-                icon={<RedoOutlined />}
-                onClick={() => handleRetry(record)}
+                onClick={() => handleEdit(record)}
+                disabled={record.status === 'running'}
               >
-                重新执行
+                {t('common.edit')}
               </Button>
-            )}
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(record)}
-              disabled={record.status === 'running'}
-            >
-              {t('common.delete')}
-            </Button>
-          </Space>
-        ),
+              <Dropdown
+                menu={{ items: moreItems }}
+                trigger={['click']}
+              >
+                <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+              </Dropdown>
+            </Space>
+          );
+        },
       },
       {
         key: 'stationCode',

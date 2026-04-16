@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { App, Button, Card, Switch, Tag } from 'antd';
 import {
-  EyeOutlined,
   PlayCircleOutlined,
   StopOutlined,
 } from '@ant-design/icons';
@@ -94,15 +93,14 @@ export default function KPIMeasurement() {
   const columns: DataTableColumn<MeasurementRow>[] = useMemo(() => [
     {
       key: 'operation',
-      title: '',
+      title: t('table.operation'),
       dataIndex: 'id',
       width: 80,
-      fixed: 'left',
+      fixed: 'right',
       render: (_, record) => (
         <Button
           type="link"
           size="small"
-          icon={<EyeOutlined />}
           onClick={() => handleOpenFileDrawer(record)}
         >
           {t('perf.measurement.viewFiles')}

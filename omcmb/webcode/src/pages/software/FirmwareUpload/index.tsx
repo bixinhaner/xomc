@@ -217,15 +217,10 @@ export default function FirmwareUpload() {
     {
       key: 'operation',
       title: '操作',
-      width: 60,
+      width: 100,
+      fixed: 'right',
       render: (_: unknown, record: FirmwareFile) => {
         const items: MenuProps['items'] = [
-          {
-            key: 'view',
-            label: '信息',
-            icon: <InfoCircleOutlined />,
-            onClick: () => handleOpenImportDrawer('view', record),
-          },
           {
             key: 'download',
             label: '下载',
@@ -254,9 +249,12 @@ export default function FirmwareUpload() {
           },
         ];
         return (
-          <Dropdown menu={{ items }} trigger={['click']}>
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => handleOpenImportDrawer('view', record)}>信息</Button>
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
         );
       },
     },

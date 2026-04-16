@@ -124,9 +124,9 @@ export default function NotificationSettings() {
       ),
     },
     {
-      title: t('table.operation'), key: 'actions', width: 120,
+      title: t('table.operation'), key: 'actions', width: 120, fixed: 'right',
       render: (_: unknown, record: NotificationRule) => (
-        <Space size="small">
+        <Space size={4}>
           <Button type="link" size="small" icon={<EditOutlined />}
             onClick={() => { setEditRule(record); ruleForm.setFieldsValue(record); setRuleModalVisible(true); }}>
             {t('common.edit')}
@@ -146,9 +146,9 @@ export default function NotificationSettings() {
     { title: t('user.phone'), dataIndex: 'phones', key: 'phones', ellipsis: true },
     { title: t('table.total'), dataIndex: 'memberCount', key: 'memberCount', width: 80, render: (val: number) => `${val}` },
     {
-      title: t('table.operation'), key: 'actions', width: 120,
+      title: t('table.operation'), key: 'actions', width: 120, fixed: 'right',
       render: (_: unknown, record: RecipientGroup) => (
-        <Space size="small">
+        <Space size={4}>
           <Button type="link" size="small" icon={<EditOutlined />}
             onClick={() => { setEditGroup(record); groupForm.setFieldsValue(record); setGroupModalVisible(true); }}>
             {t('common.edit')}

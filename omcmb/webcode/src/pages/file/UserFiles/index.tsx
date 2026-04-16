@@ -135,7 +135,7 @@ export default function UserFiles() {
       render: (_, record) => {
         const file = record as ManagedFile;
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}
               onClick={() => deleteFiles.mutate([file.id], { onSuccess: () => void message.success(t('common.deleteSuccess')) })}>
@@ -159,7 +159,7 @@ export default function UserFiles() {
       render: (_, record) => {
         const fw = record as FirmwareItem;
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}
               onClick={() => setFirmware((prev) => prev.filter((f) => f.id !== fw.id))}>

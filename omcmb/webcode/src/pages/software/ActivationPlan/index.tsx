@@ -188,12 +188,12 @@ export default function ActivationPlan() {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 140,
+      width: 120,
       fixed: 'right',
       render: (_, record) => {
         const plan = record as ActivationPlanRecord;
         return (
-          <Space size="small">
+          <Space size={4}>
             {(plan.status === 'pending' || plan.status === 'scheduled') && (
               <Button
                 type="link"

@@ -12,7 +12,9 @@ import {
   Drawer,
   Radio,
   DatePicker,
+  Space,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -384,122 +386,117 @@ export default function UserManagement() {
       title: t('table.operation'),
       dataIndex: 'id',
       width: 100,
-      fixed: 'left',
+      fixed: 'right',
       render: (_, record) => {
         const user = record as User;
         const isBuiltInUser = isBuiltIn(user);
         const isOnline = user.onlineStatus === 'online';
-        // 内置用户只允许查看和复制
         const canEdit = !isBuiltInUser;
         const canDelete = !isBuiltInUser;
-        const canChangeStatus = !isBuiltInUser; // 非内置用户可以启用/禁用
-        const canForceLogout = !isBuiltInUser && isOnline; // 非内置且在线用户可以强制退出
+        const canChangeStatus = !isBuiltInUser;
+        const canForceLogout = !isBuiltInUser && isOnline;
         const canResetPwd = !isBuiltInUser && user.source !== 'LDAP';
 
+        const moreItems: MenuProps['items'] = [
+          {
+            key: 'edit',
+            label: t('common.edit'),
+            icon: <EditOutlined />,
+            disabled: !canEdit,
+            onClick: () => {
+              setSelectedUser(user);
+              form.setFieldsValue({
+                userName: user.userName,
+                email: user.email,
+                phone: user.phone,
+                groupNames: user.groupNames,
+                description: user.description,
+                status: user.status,
+                expireTime: user.expireTime ? dayjs(user.expireTime) : undefined,
+              });
+              setEditVisible(true);
+            },
+          },
+          {
+            key: 'copy',
+            label: t('user.copy'),
+            icon: <CopyOutlined />,
+            onClick: () => handleCopy(user),
+          },
+          { type: 'divider' },
+          {
+            key: 'status',
+            label: user.status === 'enabled' ? '禁用' : '启用',
+            icon: user.status === 'enabled' ? <StopOutlined /> : <CheckCircleOutlined />,
+            disabled: !canChangeStatus,
+            onClick: () => {
+              modal.confirm({
+                title: t('common.confirm'),
+                content: user.status === 'enabled' ? '确定要禁用该用户吗？禁用后用户将无法登录系统。' : '确定要启用该用户吗？',
+                onOk: () => {
+                  message.success(t('common.success'));
+                  void refetch();
+                },
+              });
+            },
+          },
+          {
+            key: 'forceLogout',
+            label: t('user.forceLogout'),
+            icon: <LogoutOutlined />,
+            disabled: !canForceLogout,
+            onClick: () => {
+              modal.confirm({
+                title: t('common.confirm'),
+                content: t('user.confirmForceLogout'),
+                onOk: () => {
+                  forceLogout.mutate([user.id], {
+                    onSuccess: () => message.success(t('common.success')),
+                  });
+                },
+              });
+            },
+          },
+          {
+            key: 'resetPwd',
+            label: t('user.resetPassword'),
+            icon: <KeyOutlined />,
+            disabled: !canResetPwd,
+            onClick: () => {
+              setSelectedUser(user);
+              setResetPwdVisible(true);
+            },
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            label: t('common.delete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            disabled: !canDelete,
+            onClick: () => handleDelete(user),
+          },
+        ];
         return (
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'view',
-                  label: t('common.view'),
-                  icon: <EyeOutlined />,
-                  onClick: () => {
-                    setSelectedUser(user);
-                    form.setFieldsValue({
-                      userName: user.userName,
-                      email: user.email,
-                      phone: user.phone,
-                      groupNames: user.groupNames,
-                      description: user.description,
-                    });
-                    setViewVisible(true);
-                  },
-                },
-                {
-                  key: 'edit',
-                  label: t('common.edit'),
-                  icon: <EditOutlined />,
-                  disabled: !canEdit,
-                  onClick: () => {
-                    setSelectedUser(user);
-                    form.setFieldsValue({
-                      userName: user.userName,
-                      email: user.email,
-                      phone: user.phone,
-                      groupNames: user.groupNames,
-                      description: user.description,
-                      status: user.status,
-                      expireTime: user.expireTime ? dayjs(user.expireTime) : undefined,
-                    });
-                    setEditVisible(true);
-                  },
-                },
-                {
-                  key: 'copy',
-                  label: t('user.copy'),
-                  icon: <CopyOutlined />,
-                  onClick: () => handleCopy(user),
-                },
-                { type: 'divider' },
-                {
-                  key: 'status',
-                  label: user.status === 'enabled' ? '禁用' : '启用',
-                  icon: user.status === 'enabled' ? <StopOutlined /> : <CheckCircleOutlined />,
-                  disabled: !canChangeStatus,
-                  onClick: () => {
-                    modal.confirm({
-                      title: t('common.confirm'),
-                      content: user.status === 'enabled' ? '确定要禁用该用户吗？禁用后用户将无法登录系统。' : '确定要启用该用户吗？',
-                      onOk: () => {
-                        // TODO: 调用API更新用户状态
-                        message.success(t('common.success'));
-                        void refetch();
-                      },
-                    });
-                  },
-                },
-                {
-                  key: 'forceLogout',
-                  label: t('user.forceLogout'),
-                  icon: <LogoutOutlined />,
-                  disabled: !canForceLogout,
-                  onClick: () => {
-                    modal.confirm({
-                      title: t('common.confirm'),
-                      content: t('user.confirmForceLogout'),
-                      onOk: () => {
-                        forceLogout.mutate([user.id], {
-                          onSuccess: () => message.success(t('common.success')),
-                        });
-                      },
-                    });
-                  },
-                },
-                {
-                  key: 'resetPwd',
-                  label: t('user.resetPassword'),
-                  icon: <KeyOutlined />,
-                  disabled: !canResetPwd,
-                  onClick: () => {
-                    setSelectedUser(user);
-                    setResetPwdVisible(true);
-                  },
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  label: t('common.delete'),
-                  icon: <DeleteOutlined />,
-                  danger: true,
-                  disabled: !canDelete,
-                  onClick: () => handleDelete(user),
-                },
-              ],
-            }}
-          >
-            <Button size="small" icon={<MoreOutlined />}>{t('common.more')}</Button>
-          </Dropdown>
+          <Space size={4}>
+            <Button type="link" size="small"
+              onClick={() => {
+                setSelectedUser(user);
+                form.setFieldsValue({
+                  userName: user.userName,
+                  email: user.email,
+                  phone: user.phone,
+                  groupNames: user.groupNames,
+                  description: user.description,
+                });
+                setViewVisible(true);
+              }}>
+              {t('common.view')}
+            </Button>
+            <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
         );
       },
     },

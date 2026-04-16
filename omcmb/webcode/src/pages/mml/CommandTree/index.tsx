@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Input, Modal, Space, Tag, Tree, Typography, Descriptions } from 'antd';
-import { SearchOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { SearchOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -113,7 +113,7 @@ export default function CommandTree() {
       width: 120,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size={4}>
           <Button
             type="link"
             size="small"
@@ -127,7 +127,6 @@ export default function CommandTree() {
           <Button
             type="link"
             size="small"
-            icon={<PlayCircleOutlined />}
             onClick={() => {
               const cmd = allCommands.find((c) => c.id === record.id);
               if (cmd) setSelectedCommand(cmd);

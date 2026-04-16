@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Form, Input, Modal, Select, Space, Switch, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -127,12 +127,12 @@ export default function PerformanceTaskConfig() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 150,
+      width: 120,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => void message.info(`${t('common.execute')}: ${record.taskName as string}`)}>{t('common.execute')}</Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => void message.info(`${t('common.execute')}: ${record.taskName as string}`)}>{t('common.execute')}</Button>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
         </Space>
       ),
     },

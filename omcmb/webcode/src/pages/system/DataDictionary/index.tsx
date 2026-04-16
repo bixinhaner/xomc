@@ -411,11 +411,12 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 130,
+        width: 120,
+        fixed: 'right',
         render: (_, record) => {
           const detail = record as DictionaryDetail;
           return (
-            <Space size="small">
+            <Space size={4}>
               <Button
                 type="link"
                 size="small"

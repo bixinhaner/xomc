@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Input, Space, Tag, Tree, Typography, message } from 'antd';
-import { PlusOutlined, SearchOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -104,14 +104,13 @@ export default function BaselineManagement() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 100,
+      width: 80,
       fixed: 'right',
       render: (_, record) =>
         record.isDiff ? (
           <Button
             type="link"
             size="small"
-            icon={<CheckCircleOutlined />}
             onClick={() => void message.info(`${t('common.reset')}: ${record.paramCode as string}`)}
           >
             {t('common.reset')}

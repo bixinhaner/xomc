@@ -108,7 +108,8 @@ export default function ConfigRetrieval() {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 90,
+      width: 80,
+      fixed: 'right',
       render: (_, record) => {
         const ne = record as NEItem;
         return (
@@ -155,15 +156,13 @@ export default function ConfigRetrieval() {
       key: 'actions',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 110,
+      width: 80,
+      fixed: 'right',
       render: (_, record) => {
         const r = record as RetrievalResult;
-        return (
-          <Space size="small">
-            {r.status === 'success' && <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>}
-            {r.status === 'failed' && <Button type="link" size="small" icon={<ReloadOutlined />}>{t('common.refresh')}</Button>}
-          </Space>
-        );
+        if (r.status === 'success') return <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>;
+        if (r.status === 'failed') return <Button type="link" size="small" icon={<ReloadOutlined />}>{t('common.refresh')}</Button>;
+        return null;
       },
     },
   ], [t]);

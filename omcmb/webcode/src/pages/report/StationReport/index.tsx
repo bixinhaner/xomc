@@ -118,7 +118,7 @@ export default function StationReport() {
     },
     {
       key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
-      render: () => <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.export')}</Button>,
+      render: () => <Button type="link" size="small">{t('common.export')}</Button>,
     },
   ], [t]);
 

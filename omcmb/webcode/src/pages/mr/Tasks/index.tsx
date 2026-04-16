@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Button, Tag, Space, Progress, Modal, Form, Input, Select, message, DatePicker } from 'antd';
-import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message, DatePicker } from 'antd';
+import type { MenuProps } from 'antd';
+import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, DeleteOutlined, EyeOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -138,28 +139,28 @@ export default function Tasks() {
     },
     { key: 'creator', title: t('mr.creator'), dataIndex: 'creator', width: 90 },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 140, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => {
         const tk = record as MRTask;
+        const moreItems: MenuProps['items'] = [
+          ...(tk.status === 'running'
+            ? [{ key: 'pause', label: t('mr.pause'), icon: <PauseCircleOutlined />, onClick: () => setTasks((prev) => prev.map((item) => item.id === tk.id ? { ...item, status: 'paused' } : item)) }]
+            : []),
+          ...(tk.status === 'paused' || tk.status === 'pending'
+            ? [{ key: 'resume', label: t('common.execute'), icon: <PlayCircleOutlined />, onClick: () => setTasks((prev) => prev.map((item) => item.id === tk.id ? { ...item, status: 'running' } : item)) }]
+            : []),
+          { type: 'divider' as const },
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => { setTasks((prev) => prev.filter((item) => item.id !== tk.id)); void message.success(t('common.deleteSuccess')); } },
+        ];
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<EyeOutlined />}>{t('common.detail')}</Button>
-            {tk.status === 'running' && (
-              <Button type="link" size="small" icon={<PauseCircleOutlined />}
-                onClick={() => setTasks((prev) => prev.map((item) => item.id === tk.id ? { ...item, status: 'paused' } : item))}>
-                {t('mr.pause')}
-              </Button>
-            )}
-            {(tk.status === 'paused' || tk.status === 'pending') && (
-              <Button type="link" size="small" icon={<PlayCircleOutlined />}
-                onClick={() => setTasks((prev) => prev.map((item) => item.id === tk.id ? { ...item, status: 'running' } : item))}>
-                {t('common.execute')}
-              </Button>
-            )}
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}
-              onClick={() => { setTasks((prev) => prev.filter((item) => item.id !== tk.id)); void message.success(t('common.deleteSuccess')); }}>
-              {t('common.delete')}
-            </Button>
+            <Dropdown
+              menu={{ items: moreItems }}
+              trigger={['click']}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
           </Space>
         );
       },

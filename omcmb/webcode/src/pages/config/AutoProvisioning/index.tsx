@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Progress, Select, Space, Table, Tag, message } from 'antd';
+import { Button, Dropdown, Form, Input, Modal, Progress, Select, Space, Table, Tag, message } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
   RedoOutlined,
   ReloadOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -161,25 +163,27 @@ export default function AutoProvisioning() {
       {
         title: 'Actions',
         key: 'actions',
-        width: 160,
+        width: 100,
         fixed: 'right',
-        render: (_: unknown, record: ProvisioningTask) => (
-          <Space size={4}>
-            <Button type="link" size="small" onClick={() => handleViewDetail(record)}>
-              Detail
-            </Button>
-            {record.status === 'failed' && (
-              <Button
-                type="link"
-                size="small"
-                icon={<RedoOutlined />}
-                onClick={() => handleRetry(record.id)}
-              >
-                Retry
+        render: (_: unknown, record: ProvisioningTask) => {
+          const moreItems: MenuProps['items'] = [
+            ...(record.status === 'failed'
+              ? [{ key: 'retry', label: 'Retry', icon: <RedoOutlined />, onClick: () => handleRetry(record.id) }]
+              : []),
+          ];
+          return (
+            <Space size={4}>
+              <Button type="link" size="small" onClick={() => handleViewDetail(record)}>
+                Detail
               </Button>
-            )}
-          </Space>
-        ),
+              {moreItems.length > 0 && (
+                <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                  <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+                </Dropdown>
+              )}
+            </Space>
+          );
+        },
       },
     ],
     [handleViewDetail, handleRetry]

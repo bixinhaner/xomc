@@ -84,9 +84,9 @@ function ConfigFilesTab({ source }: { source: 'device' | 'user' | 'nms' }) {
     },
     { key: 'uploadTime', title: t('table.time'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 110,
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right' as const,
       render: () => (
-        <Space size="small">
+        <Space size={4}>
           <Button type="link" size="small" icon={<EyeOutlined />}>{t('common.detail')}</Button>
           <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>
         </Space>
@@ -163,9 +163,9 @@ function LogFilesListTab() {
     { key: 'collectTime', title: t('table.time'), dataIndex: 'collectTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     { key: 'uploadTime', title: t('table.createTime'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 110,
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right' as const,
       render: () => (
-        <Space size="small">
+        <Space size={4}>
           <Button type="link" size="small" icon={<DownloadOutlined />}>{t('common.download')}</Button>
           <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
         </Space>

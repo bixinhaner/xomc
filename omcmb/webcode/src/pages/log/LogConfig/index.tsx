@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button, InputNumber, Progress, Table, message } from 'antd';
-import { EditOutlined, SaveOutlined } from '@ant-design/icons';
+import { SaveOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
@@ -105,7 +105,8 @@ export default function LogConfig() {
     {
       title: t('table.operation'),
       key: 'actions',
-      width: 140,
+      width: 80,
+      fixed: 'right',
       render: (_: unknown, record: LogConfigRow) => {
         if (record.editing) {
           return (
@@ -131,7 +132,6 @@ export default function LogConfig() {
           <Button
             type="link"
             size="small"
-            icon={<EditOutlined />}
             onClick={() => startEdit(record.id)}
           >
             {t('common.edit')}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Table, Tag, Typography, Space, Empty } from 'antd';
+import { Table, Tag, Typography, Button, Empty } from 'antd';
 import { EditOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import type { DeviceParameter, ParameterType } from '@/types/deviceParameter';
@@ -130,22 +130,22 @@ export default function TableView({
     {
       title: '操作',
       key: 'action',
-      width: 70,
+      width: 80,
       fixed: 'right',
       render: (_: unknown, record: DeviceParameter) =>
         record.writable ? (
-          <Space>
-            <EditOutlined
-              style={{ color: '#1677ff', cursor: 'pointer' }}
-              onClick={() =>
-                setEditTarget({
-                  parameterPath: record.parameterPath,
-                  currentValue: record.parameterValue,
-                  parameterType: record.parameterType,
-                })
-              }
-            />
-          </Space>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() =>
+              setEditTarget({
+                parameterPath: record.parameterPath,
+                currentValue: record.parameterValue,
+                parameterType: record.parameterType,
+              })
+            }
+          />
         ) : null,
     },
   ];

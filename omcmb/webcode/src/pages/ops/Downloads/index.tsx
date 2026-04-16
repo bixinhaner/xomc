@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { Button, Tag, Space, Progress, message, Tabs } from 'antd';
-import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -259,12 +258,12 @@ export default function Downloads() {
     },
     { key: 'creator', title: t('mr.creator'), dataIndex: 'creator', width: 90 },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: (_, record) => {
         const d = record as ResourceDownload;
         if (d.status === 'ready') {
           return (
-            <Button type="link" size="small" icon={<DownloadOutlined />}
+            <Button type="link" size="small"
               onClick={() => handleDownload(d.fileName)}>
               {t('common.download')}
             </Button>
@@ -272,7 +271,7 @@ export default function Downloads() {
         }
         if (d.status === 'failed') {
           return (
-            <Button type="link" size="small" icon={<ReloadOutlined />}
+            <Button type="link" size="small"
               onClick={() => handleRetry(d.id, 'resource')}>
               {t('ops.retry')}
             </Button>
@@ -322,12 +321,12 @@ export default function Downloads() {
     },
     { key: 'creator', title: t('mr.creator'), dataIndex: 'creator', width: 90 },
     {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
+      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: (_, record) => {
         const r = record as ReportDownload;
         if (r.status === 'ready') {
           return (
-            <Button type="link" size="small" icon={<DownloadOutlined />}
+            <Button type="link" size="small"
               onClick={() => handleDownload(r.reportName)}>
               {t('common.download')}
             </Button>
@@ -335,7 +334,7 @@ export default function Downloads() {
         }
         if (r.status === 'failed') {
           return (
-            <Button type="link" size="small" icon={<ReloadOutlined />}
+            <Button type="link" size="small"
               onClick={() => handleRetry(r.id, 'report')}>
               {t('ops.retry')}
             </Button>

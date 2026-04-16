@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -119,10 +119,10 @@ export default function NeighborParams() {
       width: 120,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t('common.edit')}</Button>
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
           <Popconfirm title={t('common.confirmDelete')} onConfirm={() => void message.success(t('common.deleteSuccess'))}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>{t('common.delete')}</Button>
+            <Button type="link" size="small" danger>{t('common.delete')}</Button>
           </Popconfirm>
         </Space>
       ),

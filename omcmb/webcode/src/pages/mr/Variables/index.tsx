@@ -123,7 +123,7 @@ export default function Variables() {
       render: (_, record) => {
         const v = record as MRVariable;
         return (
-          <Space size="small">
+          <Space size={4}>
             <Button type="link" size="small" icon={<EditOutlined />}
               onClick={() => { setEditVar(v); form.setFieldsValue(v); setEditVisible(true); }}>
               {t('common.edit')}
