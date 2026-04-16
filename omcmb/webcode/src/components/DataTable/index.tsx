@@ -270,8 +270,8 @@ function DataTable<T>(
           const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
           if (showRowNumber && selectable) {
             return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, lineHeight: '1' }}>
+                <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 13 }}>
                   {rowNumber}
                 </span>
                 {originNode}
