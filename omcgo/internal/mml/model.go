@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -51,7 +50,7 @@ type MMLCommand struct {
 	OperationType       string                 `json:"operation_type" db:"operation_type"`
 	ParamTemplate       map[string]interface{} `json:"param_template"`
 	ParamPaths          json.RawMessage        `json:"param_paths" db:"param_paths"`
-	SupportedOperations pq.StringArray         `json:"supported_operations" db:"supported_operations"`
+	SupportedOperations []string               `json:"supported_operations" db:"supported_operations"`
 	HelpDoc             string                 `json:"help_doc" db:"help_doc"`
 	Notes               string                 `json:"notes" db:"notes"`
 	ProductTypes        []string               `json:"product_types"`

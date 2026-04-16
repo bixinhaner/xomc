@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -250,7 +249,7 @@ func TestService_GetCommandParamPaths_StringPaths(t *testing.T) {
 		CommandCode:         "MOD CELL",
 		OperationType:       "MOD",
 		ParamPaths:          paramPathsJSON,
-		SupportedOperations: pq.StringArray{"LST", "MOD"},
+		SupportedOperations: []string{"LST", "MOD"},
 	}
 
 	cmdRepo := &mockCommandRepo{
@@ -285,7 +284,7 @@ func TestService_GetCommandParamPaths_ObjectPaths(t *testing.T) {
 		CommandCode:         "MOD CELL",
 		OperationType:       "MOD",
 		ParamPaths:          paramPathsJSON,
-		SupportedOperations: pq.StringArray{"LST", "MOD"},
+		SupportedOperations: []string{"LST", "MOD"},
 	}
 
 	cmdRepo := &mockCommandRepo{
