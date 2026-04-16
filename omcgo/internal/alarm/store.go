@@ -52,10 +52,10 @@ type AlarmStore interface {
 	Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error)
 	HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error)
 	// 批量操作
-	BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string) error
+	BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error
 	BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error
-	BatchClear(ctx context.Context, ids []uuid.UUID) error
-	BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string) error
+	BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error
+	BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error
 	BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error
 	BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error
 	MarkRead(ctx context.Context, id uuid.UUID) error

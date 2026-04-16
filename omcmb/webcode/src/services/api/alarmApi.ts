@@ -26,6 +26,9 @@ interface BackendAlarm {
   raised_at: string;
   acknowledged_at?: string;
   acknowledged_by?: string;
+  ack_note?: string;
+  cleared_by?: string;
+  clear_note?: string;
   device_name?: string;
   technology?: string;
   alarm_source?: string;
@@ -176,32 +179,28 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
 
   return {
     id: ba.id,
-    alarmId: ba.id,
-    alarmIdentifier: ba.alarm_code,
     alarmCode: ba.alarm_code,
     alarmName: ba.probable_cause || ba.description || ba.alarm_code,
     specificProblem: ba.probable_cause || '',
     severity: (severityNumToStr[ba.severity] || 'warning') as Alarm['severity'],
     deviceSn: ba.device_sn,
     deviceName: ba.device_name || ba.device_sn,
+    description: ba.description,
     neType: ba.technology || '',
     equipInfo: ba.device_name ? `${ba.device_name}(${ba.device_sn})` : ba.device_sn,
-    eventType: (ba.event_type || '') as Alarm['eventType'],
+    eventType: (ba.event_type || ba.alarm_type || '') as Alarm['eventType'],
     dealState,
     eventTime: ba.raised_at,
     updTime: ba.updated_at,
     dealUser: ba.acknowledged_by,
     dealTime: ba.acknowledged_at,
-    clearUser: undefined,
     clearTime: ba.cleared_at,
-    suggestion: undefined,
-    dealMemo: undefined,
+    clearUser: ba.cleared_by,
+    clearMemo: ba.clear_note,
+    dealMemo: (ba as Record<string, unknown>).ack_note || undefined,
     alarmType: ba.status === 'cleared' ? 'history' : 'active',
     alarmCount: ba.ack_count || 1,
     unread: ba.is_read ? '0' : '1',
-    // 以下为兼容旧字段
-    alarmContent: ba.description,
-    alarmTime: ba.raised_at,
     duration: ba.cleared_at && ba.raised_at
       ? Math.floor(
           (new Date(ba.cleared_at).getTime() -
@@ -215,12 +214,16 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
               60000
           )
         : undefined,
-    ackStatus: isAcked ? 'acknowledged' : 'unacknowledged',
-    ackUser: ba.acknowledged_by,
-    ackTime: ba.acknowledged_at,
     alarmSource: ba.alarm_source || ba.carrier,
-    alarmLocation: ba.additional_info?.location,
+    technology: ba.technology || '',
     isActive: ba.status === 'active' || ba.status === 'acknowledged',
+    // 后端直传字段
+    probableCause: ba.probable_cause,
+    additionalInfo: ba.additional_info,
+    acknowledgedAt: ba.acknowledged_at,
+    acknowledgedBy: ba.acknowledged_by,
+    clearedAt: ba.cleared_at,
+    isRead: ba.is_read,
   };
 }
 
@@ -470,8 +473,8 @@ export const alarmApi = {
     await http.post('/alarms/history/batch/delete', { ids });
   },
 
-  async clearAlarms(ids: string[]): Promise<void> {
-    await http.post('/alarms/active/batch/clear', { ids });
+  async clearAlarms(ids: string[], note?: string): Promise<void> {
+    await http.post('/alarms/active/batch/clear', { ids, clear_note: note });
   },
 
   async markAlarmRead(id: string): Promise<void> {

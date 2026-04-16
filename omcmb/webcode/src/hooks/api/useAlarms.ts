@@ -74,7 +74,7 @@ export function useAcknowledgeAlarms() {
 export function useClearAlarms() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (ids: string[]) => api.clearAlarms(ids),
+    mutationFn: ({ ids, note }: { ids: string[]; note?: string }) => api.clearAlarms(ids, note),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['alarms'] });
     },

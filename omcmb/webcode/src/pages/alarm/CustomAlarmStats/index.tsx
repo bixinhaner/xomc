@@ -755,10 +755,10 @@ export default function CustomAlarmStats() {
     setClearModalOpen(true);
   }, []);
 
-  const handleClearConfirm = useCallback(async () => {
+  const handleClearConfirm = useCallback(async (note: string) => {
     setClearLoading(true);
     try {
-      await clearAlarms.mutateAsync(clearTargetIds);
+      await clearAlarms.mutateAsync({ ids: clearTargetIds, note });
       setSelectedRowKeys([]);
       setClearModalOpen(false);
       void refetch();
@@ -819,9 +819,9 @@ export default function CustomAlarmStats() {
   // 表格列
   const columns = useMemo((): DataTableColumn<Alarm>[] => [
     {
-      key: 'alarmId',
+      key: 'id',
       title: t('alarm.alarmId'),
-      dataIndex: 'alarmId',
+      dataIndex: 'id',
       width: 100,
       render: (val, record) => (
         <Space size={4}>
@@ -847,9 +847,9 @@ export default function CustomAlarmStats() {
       },
     },
     {
-      key: 'alarmIdentifier',
+      key: 'alarmCode',
       title: t('alarm.alarmIdentifier'),
-      dataIndex: 'alarmIdentifier',
+      dataIndex: 'alarmCode',
       width: 130,
       mono: true,
     },

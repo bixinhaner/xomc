@@ -95,44 +95,32 @@ function generateAlarm(isActive: boolean, index: number, unread: '0' | '1' = '0'
 
   return {
     id,
-    alarmId: id,
-    alarmIdentifier: def.code,
     alarmCode: def.code,
     alarmName: def.name,
     severity,
     deviceSn: device.sn,
     deviceName: device.name,
+    description: generateAlarmContent(def, device.name),
     neType: device.type,
     equipInfo: `SN=${device.sn};Name=${device.name}`,
-    eventType: '30003', // 设备告警
+    eventType: 'device',
     dealState: dealState as '0' | '1' | '2' | '3',
     alarmType: isActive ? 'active' : 'history',
     eventTime: alarmTime,
     updTime: alarmTime,
-    alarmContent: generateAlarmContent(def, device.name),
-    alarmTime,
     clearTime,
     specificProblem: def.name,
     alarmCount: Math.floor(Math.random() * 10) + 1,
     dealMemo: isAcknowledged ? '已确认，正在处理' : '',
     unread,
-    // 详情页新增字段
-    additionalInformation: `设备${device.type}，序列号${device.sn}`,
-    additionalText: `告警类型：${def.type}`,
     dealUser,
     dealTime,
     clearUser,
-    suggestion: `建议检查${def.name}相关配置和硬件状态`,
-    // 兼容旧字段
     duration: clearTime
       ? Math.floor((new Date(clearTime).getTime() - new Date(alarmTime).getTime()) / 60000)
       : Math.floor((Date.now() - new Date(alarmTime).getTime()) / 60000),
-    ackStatus: isAcknowledged ? 'acknowledged' : 'unacknowledged',
-    ackUser: dealUser,
-    ackTime: dealTime,
-    ackNote: isAcknowledged ? '已确认，正在处理' : undefined,
     alarmSource: device.sn,
-    alarmLocation: `${device.name}-${def.type}`,
+    technology: device.type,
     isActive,
   };
 }

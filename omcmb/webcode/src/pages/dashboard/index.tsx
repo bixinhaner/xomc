@@ -106,12 +106,12 @@ export default function DashboardPage() {
   // Mock recent alarms
   const recentAlarms = useMemo(
     () => [
-      { id: '1', alarmName: 'CPU占用率超阈值', deviceName: '北京基站-001', severity: 'critical', alarmTime: '09:32:15' },
-      { id: '2', alarmName: '链路丢包率异常', deviceName: '上海基站-002', severity: 'major', alarmTime: '09:28:41' },
-      { id: '3', alarmName: '温度过高告警', deviceName: '广州基站-003', severity: 'major', alarmTime: '09:21:03' },
-      { id: '4', alarmName: '光模块接收功率低', deviceName: '成都基站-005', severity: 'minor', alarmTime: '09:15:58' },
-      { id: '5', alarmName: '软件版本不匹配', deviceName: '西安基站-007', severity: 'warning', alarmTime: '09:10:22' },
-      { id: '6', alarmName: '磁盘空间不足', deviceName: '南京基站-008', severity: 'warning', alarmTime: '09:05:11' },
+      { id: '1', alarmName: 'CPU占用率超阈值', deviceName: '北京基站-001', severity: 'critical', eventTime: '09:32:15' },
+      { id: '2', alarmName: '链路丢包率异常', deviceName: '上海基站-002', severity: 'major', eventTime: '09:28:41' },
+      { id: '3', alarmName: '温度过高告警', deviceName: '广州基站-003', severity: 'major', eventTime: '09:21:03' },
+      { id: '4', alarmName: '光模块接收功率低', deviceName: '成都基站-005', severity: 'minor', eventTime: '09:15:58' },
+      { id: '5', alarmName: '软件版本不匹配', deviceName: '西安基站-007', severity: 'warning', eventTime: '09:10:22' },
+      { id: '6', alarmName: '磁盘空间不足', deviceName: '南京基站-008', severity: 'warning', eventTime: '09:05:11' },
     ],
     []
   );
@@ -316,7 +316,7 @@ export default function DashboardPage() {
                       </Text>
                     </Space>
                     <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-                      {alarm.alarmTime}
+                      {alarm.eventTime}
                     </Text>
                   </Space>
                 </List.Item>

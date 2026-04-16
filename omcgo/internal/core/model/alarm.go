@@ -35,6 +35,9 @@ type Alarm struct {
 	LastUpdatedAt   time.Time         `json:"last_updated_at,omitempty" db:"last_updated_at"`
 	ProbableCause   *string           `json:"probable_cause,omitempty" db:"probable_cause"`
 	AcknowledgedBy *string           `json:"acknowledged_by,omitempty" db:"acknowledged_by"`
+	AckNote         *string           `json:"ack_note,omitempty" db:"ack_note"`
+	ClearedBy      *string           `json:"cleared_by,omitempty" db:"cleared_by"`
+	ClearNote      *string           `json:"clear_note,omitempty" db:"clear_note"`
 	AdditionalInfo map[string]string `json:"additional_info,omitempty" db:"additional_info"`
 	CreatedAt      time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at" db:"updated_at"`

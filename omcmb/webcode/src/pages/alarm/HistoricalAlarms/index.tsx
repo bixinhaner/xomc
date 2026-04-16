@@ -39,12 +39,12 @@ const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string; icon:
 
 // 事件类型配置
 const EVENT_TYPE_CONFIG: Record<EventType, string> = {
-  '30000': 'alarm.eventType.communication',
-  '30001': 'alarm.eventType.qualityOfService',
-  '30002': 'alarm.eventType.processingError',
-  '30003': 'alarm.eventType.device',
-  '30004': 'alarm.eventType.environment',
-  '30006': 'alarm.eventType.performance',
+  communication: 'alarm.eventType.communication',
+  qualityOfService: 'alarm.eventType.qualityOfService',
+  processingError: 'alarm.eventType.processingError',
+  device: 'alarm.eventType.device',
+  environment: 'alarm.eventType.environment',
+  performance: 'alarm.eventType.performance',
 };
 
 // 基站制式配置
@@ -134,11 +134,11 @@ export default function HistoricalAlarms() {
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
-        { label: t('alarm.eventType.communication'), value: '30000' },
-        { label: t('alarm.eventType.qualityOfService'), value: '30001' },
-        { label: t('alarm.eventType.processingError'), value: '30002' },
-        { label: t('alarm.eventType.device'), value: '30003' },
-        { label: t('alarm.eventType.environment'), value: '30004' },
+        { label: t('alarm.eventType.communication'), value: 'communication' },
+        { label: t('alarm.eventType.qualityOfService'), value: 'qualityOfService' },
+        { label: t('alarm.eventType.processingError'), value: 'processingError' },
+        { label: t('alarm.eventType.device'), value: 'device' },
+        { label: t('alarm.eventType.environment'), value: 'environment' },
       ],
     },
     {
@@ -361,9 +361,9 @@ export default function HistoricalAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
-        key: 'alarmId',
+        key: 'id',
         title: t('alarm.alarmId'),
-        dataIndex: 'alarmId',
+        dataIndex: 'id',
         width: 100,
         render: (val, record) => (
           <Space size={4}>
@@ -400,9 +400,9 @@ export default function HistoricalAlarms() {
         },
       },
       {
-        key: 'alarmIdentifier',
+        key: 'alarmCode',
         title: t('alarm.alarmIdentifier'),
-        dataIndex: 'alarmIdentifier',
+        dataIndex: 'alarmCode',
         width: 130,
         mono: true,
       },
@@ -479,9 +479,9 @@ export default function HistoricalAlarms() {
         ellipsis: true,
       },
       {
-        key: 'alarmContent',
+        key: 'description',
         title: t('alarm.content'),
-        dataIndex: 'alarmContent',
+        dataIndex: 'description',
         width: 200,
         ellipsis: true,
       },

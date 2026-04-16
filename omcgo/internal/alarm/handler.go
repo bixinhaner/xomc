@@ -244,14 +244,18 @@ func (h *Handler) HistoryStatistics(c *gin.Context) {
 // BatchAcknowledge handles POST /alarms/active/batch/acknowledge.
 func (h *Handler) BatchAcknowledge(c *gin.Context) {
 	var req struct {
-		IDs            []uuid.UUID `json:"ids" binding:"required"`
-		AcknowledgedBy string      `json:"acknowledged_by" binding:"required"`
+		IDs   []uuid.UUID `json:"ids" binding:"required"`
+		Note  string      `json:"acknowledged_by"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := h.store.BatchAcknowledge(c.Request.Context(), req.IDs, req.AcknowledgedBy); err != nil {
+	username, _ := c.Get("username")
+	if username == nil {
+		username = "operator"
+	}
+	if err := h.store.BatchAcknowledge(c.Request.Context(), req.IDs, username.(string), req.Note); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -277,13 +281,18 @@ func (h *Handler) BatchUnacknowledge(c *gin.Context) {
 // BatchClear handles POST /alarms/active/batch/clear.
 func (h *Handler) BatchClear(c *gin.Context) {
 	var req struct {
-		IDs []uuid.UUID `json:"ids" binding:"required"`
+		IDs  []uuid.UUID `json:"ids" binding:"required"`
+		Note string      `json:"clear_note"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := h.store.BatchClear(c.Request.Context(), req.IDs); err != nil {
+	username, _ := c.Get("username")
+	if username == nil {
+		username = "operator"
+	}
+	if err := h.store.BatchClear(c.Request.Context(), req.IDs, username.(string), req.Note); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -293,14 +302,18 @@ func (h *Handler) BatchClear(c *gin.Context) {
 // BatchHistoryAcknowledge handles POST /alarms/history/batch/acknowledge.
 func (h *Handler) BatchHistoryAcknowledge(c *gin.Context) {
 	var req struct {
-		IDs            []uuid.UUID `json:"ids" binding:"required"`
-		AcknowledgedBy string      `json:"acknowledged_by" binding:"required"`
+		IDs   []uuid.UUID `json:"ids" binding:"required"`
+		Note  string      `json:"acknowledged_by"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := h.store.BatchHistoryAcknowledge(c.Request.Context(), req.IDs, req.AcknowledgedBy); err != nil {
+	username, _ := c.Get("username")
+	if username == nil {
+		username = "operator"
+	}
+	if err := h.store.BatchHistoryAcknowledge(c.Request.Context(), req.IDs, username.(string), req.Note); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}

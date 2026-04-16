@@ -53,16 +53,22 @@ function generateNewAlarm(): Alarm {
     severity,
     deviceSn: device.sn,
     deviceName: device.name,
+    description: `设备${device.name}检测到${alarmName}，${alarmType}异常，请及时处理`,
     neType: device.productType,
-    alarmContent: `设备${device.name}检测到${alarmName}，${alarmType}异常，请及时处理`,
-    alarmTime: new Date().toISOString(),
+    eventTime: new Date().toISOString(),
+    updTime: new Date().toISOString(),
     clearTime: undefined,
     duration: 0,
-    ackStatus: 'unacknowledged',
+    dealState: '0' as const,
+    alarmType: 'active' as const,
+    unread: '1' as const,
+    alarmCount: 1,
     alarmSource: device.sn,
-    alarmLocation: `${device.name}-${alarmType}`,
-    alarmType,
+    technology: device.productType,
     isActive: true,
+    equipInfo: `${device.name}(${device.sn})`,
+    eventType: 'device' as const,
+    specificProblem: alarmName,
   };
 }
 
@@ -97,7 +103,7 @@ export class AlarmWebSocket extends MockWebSocket {
         clearTime,
         isActive: false,
         duration: Math.floor(
-          (new Date(clearTime).getTime() - new Date(randomAlarm.alarmTime).getTime()) / 60000
+          (new Date(clearTime).getTime() - new Date(randomAlarm.eventTime).getTime()) / 60000
         ),
       };
       this.activeAlarms = this.activeAlarms.filter((a) => a.id !== randomAlarm.id);

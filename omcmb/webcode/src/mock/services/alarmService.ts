@@ -46,7 +46,7 @@ let alarmRules: import('@/types/alarm').AlarmRule[] = [
     enabled: false,
     isDefault: false,
     userCode: 'admin',
-    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0004' }, { field: 'alarmContent', operator: 'contains', value: '温度' }],
+    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0004' }, { field: 'description', operator: 'contains', value: '温度' }],
     actions: [{ type: 'suppress' }],
     createTime: '2024-03-01T00:00:00.000Z',
     updateTime: '2024-03-01T00:00:00.000Z',
@@ -359,7 +359,6 @@ function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
     result = result.filter((a) => a.unread === filter.unread);
   }
 
-  if (filter.ackStatus) result = result.filter((a) => a.ackStatus === filter.ackStatus);
   if (filter.deviceSn) result = result.filter((a) => a.deviceSn.includes(filter.deviceSn!));
   if (filter.alarmCode) result = result.filter((a) => a.alarmCode.includes(filter.alarmCode!));
   if (filter.neType) result = result.filter((a) => a.neType === filter.neType);
@@ -367,7 +366,7 @@ function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
   // 告警标识 - 精确查询
   if (filter.alarmIdentifier) {
     const identifier = filter.alarmIdentifier.toLowerCase();
-    result = result.filter((a) => a.alarmIdentifier.toLowerCase() === identifier);
+    result = result.filter((a) => a.alarmCode.toLowerCase() === identifier);
   }
 
   // 可能原因 - 模糊查询
@@ -388,13 +387,13 @@ function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
       (a) =>
         a.alarmName.toLowerCase().includes(kw) ||
         a.deviceName.toLowerCase().includes(kw) ||
-        a.alarmContent.toLowerCase().includes(kw)
+        a.description.toLowerCase().includes(kw)
     );
   }
   if (filter.timeRange) {
     const [start, end] = filter.timeRange;
     result = result.filter(
-      (a) => a.alarmTime >= start && a.alarmTime <= end
+      (a) => a.eventTime >= start && a.eventTime <= end
     );
   }
   return result;
@@ -454,10 +453,10 @@ export const alarmService = {
       ids.includes(a.id)
         ? {
             ...a,
-            ackStatus: 'acknowledged' as const,
-            ackUser: 'admin',
-            ackTime: now,
-            ackNote: note ?? '已确认',
+            dealState: (a.dealState === '2' ? '3' : '1') as Alarm['dealState'],
+            dealUser: 'admin',
+            dealTime: now,
+            dealMemo: note ?? '已确认',
           }
         : a
     );
@@ -469,10 +468,10 @@ export const alarmService = {
       ids.includes(a.id)
         ? {
             ...a,
-            ackStatus: 'unacknowledged' as const,
-            ackUser: undefined,
-            ackTime: undefined,
-            ackNote: undefined,
+            dealState: (a.dealState === '3' ? '2' : '0') as Alarm['dealState'],
+            dealUser: undefined,
+            dealTime: undefined,
+            dealMemo: undefined,
           }
         : a
     );
@@ -484,9 +483,10 @@ export const alarmService = {
     const cleared = activeAlarms.filter((a) => ids.includes(a.id)).map((a) => ({
       ...a,
       clearTime: now,
+      dealState: (a.dealState === '1' ? '3' : '2') as Alarm['dealState'],
       isActive: false,
       duration: Math.floor(
-        (new Date(now).getTime() - new Date(a.alarmTime).getTime()) / 60000
+        (new Date(now).getTime() - new Date(a.eventTime).getTime()) / 60000
       ),
     }));
     activeAlarms = activeAlarms.filter((a) => !ids.includes(a.id));
@@ -498,7 +498,7 @@ export const alarmService = {
     const now = new Date().toISOString();
     historicalAlarms = historicalAlarms.map((a) =>
       ids.includes(a.id)
-        ? { ...a, ackStatus: 'acknowledged' as const, ackUser: 'admin', ackTime: now, ackNote: note ?? '已确认' }
+        ? { ...a, dealState: (a.dealState === '2' ? '3' : '1') as Alarm['dealState'], dealUser: 'admin', dealTime: now, dealMemo: note ?? '已确认' }
         : a
     );
   },
@@ -507,7 +507,7 @@ export const alarmService = {
     await delay(200, 400);
     historicalAlarms = historicalAlarms.map((a) =>
       ids.includes(a.id)
-        ? { ...a, ackStatus: 'unacknowledged' as const, ackUser: undefined, ackTime: undefined, ackNote: undefined }
+        ? { ...a, dealState: (a.dealState === '3' ? '2' : '0') as Alarm['dealState'], dealUser: undefined, dealTime: undefined, dealMemo: undefined }
         : a
     );
   },

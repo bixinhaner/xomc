@@ -219,7 +219,7 @@ const AlarmFilterDialog: React.FC<AlarmFilterDialogProps> = ({
                   placeholder={t('common.pleaseSelect')}
                   allowClear
                   options={[
-                    { label: t('alarm.filter.alarmTime'), value: 'alarmTime' },
+                    { label: t('alarm.filter.alarmTime'), value: 'eventTime' },
                     { label: t('alarm.filter.severity'), value: 'severity' },
                     { label: t('alarm.filter.alarmCode'), value: 'alarmCode' },
                   ]}

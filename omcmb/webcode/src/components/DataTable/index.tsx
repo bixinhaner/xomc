@@ -162,9 +162,12 @@ function DataTable<T>(
 
   const pagedData = useMemo(() => {
     if (!showPagination) return filteredData;
+    // Server-side pagination: onPageChange is provided, data is already paginated
+    if (onPageChange) return filteredData;
+    // Client-side pagination: slice the data
     const start = (currentPage - 1) * pageSize;
     return filteredData.slice(start, start + pageSize);
-  }, [filteredData, showPagination, currentPage, pageSize]);
+  }, [filteredData, showPagination, currentPage, pageSize, onPageChange]);
 
   const buildColumns = useMemo((): TableProps<T>['columns'] => {
     return orderedColumns

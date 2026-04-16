@@ -523,22 +523,22 @@ export default function DeviceDetail() {
       },
       { key: 'alarmCode', title: t('alarm.code'), dataIndex: 'alarmCode', width: 100, mono: true },
       { key: 'alarmName', title: t('alarm.name'), dataIndex: 'alarmName', width: 180, ellipsis: true },
-      { key: 'alarmContent', title: t('alarm.possibleCause'), dataIndex: 'alarmContent', width: 220, ellipsis: true },
+      { key: 'description', title: t('alarm.possibleCause'), dataIndex: 'description', width: 220, ellipsis: true },
       {
-        key: 'alarmTime',
+        key: 'eventTime',
         title: t('alarm.time'),
-        dataIndex: 'alarmTime',
+        dataIndex: 'eventTime',
         width: 160,
-        render: (_val, record) => new Date(record.alarmTime).toLocaleString('zh-CN'),
+        render: (_val, record) => new Date(record.eventTime).toLocaleString('zh-CN'),
       },
       {
-        key: 'ackStatus',
+        key: 'dealState',
         title: t('alarm.status'),
-        dataIndex: 'ackStatus',
+        dataIndex: 'dealState',
         width: 100,
         render: (_val, record) => (
-          <Tag color={record.ackStatus === 'acknowledged' ? 'success' : 'warning'}>
-            {record.ackStatus === 'acknowledged' ? t('alarm.ackStatus.acknowledged') : t('alarm.ackStatus.unacknowledged')}
+          <Tag color={record.dealState === '1' || record.dealState === '3' ? 'success' : 'warning'}>
+            {record.dealState === '1' || record.dealState === '3' ? t('alarm.dealState.confirmedUncleared') : t('alarm.dealState.unconfirmedUncleared')}
           </Tag>
         ),
       },
