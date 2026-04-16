@@ -928,7 +928,7 @@ export default function PlugAndPlay() {
             defaultDensity="default"
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
-            scroll={{ x: 'max-content', y: 170 }}
+            scroll={{ x: 'max-content', y: 200 }}
             extraToolbarLeft={<Text strong>{t('provision.policyList')}</Text>}
             extraToolbarRight={
               <Space>
