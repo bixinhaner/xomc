@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Tag, Space, message } from 'antd';
+import { Button, Card, Tag, Space, message } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -122,22 +122,29 @@ export default function Files() {
         onSearch={(vals) => { setFilters(vals); setPage(1); }}
         onReset={() => { setFilters({}); setPage(1); }}
       />
-      <DataTable
-        tableId="mr-files-list"
-        columns={columns}
-        dataSource={paginated as (MRFile & Record<string, unknown>)[]}
-        loading={false}
-        rowKey="id"
-        total={filtered.length}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        selectable
-        selectedRowKeys={selectedKeys}
-        onSelectionChange={(keys) => setSelectedKeys(keys)}
-        onExport={(format) => void console.log(t('common.export'), format)}
-        scroll={{ x: 1200 }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable
+          tableId="mr-files-list"
+          columns={columns}
+          dataSource={paginated as (MRFile & Record<string, unknown>)[]}
+          loading={false}
+          rowKey="id"
+          total={filtered.length}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          selectable
+          selectedRowKeys={selectedKeys}
+          onSelectionChange={(keys) => setSelectedKeys(keys)}
+          onExport={(format) => void console.log(t('common.export'), format)}
+          scroll={{ x: 1200 }}
+        />
+      </Card>
     </ListPageLayout>
   );
 }

@@ -1,0 +1,70 @@
+/* PageCard - 通用的页面卡片组件 */
+.pageCard {
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+  background: #ffffff;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+
+.pageCard:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06),
+              0 4px 16px rgba(0,0,0,0.04);
+  border-color: #e6e6e6;
+}
+
+/* Dark mode styles */
+:global([data-theme='tech']) .pageCard,
+:global([data-theme='cyberpunk']) .pageCard {
+  background: #1f1f1f;
+  border-color: #303030;
+}
+
+:global([data-theme='tech']) .pageCard:hover,
+:global([data-theme='cyberpunk']) .pageCard:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3),
+              0 4px 16px rgba(0,0,0,0.2);
+  border-color: #404040;
+}
+
+/* Card body styles */
+.cardBody {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Card header styles */
+.cardHeader {
+  background: linear-gradient(to bottom, #fafafa, #ffffff);
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+:global([data-theme='tech']) .cardHeader,
+:global([data-theme='cyberpunk']) .cardHeader {
+  background: linear-gradient(to bottom, #1a1a1a, #141414);
+  border-bottom-color: #303030;
+}
+
+.cardHeaderTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #262626;
+}
+
+:global([data-theme='tech']) .cardHeaderTitle,
+:global([data-theme='cyberpunk']) .cardHeaderTitle {
+  color: #e8e8e8;
+}
+
+/* Card content */
+.cardContent {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

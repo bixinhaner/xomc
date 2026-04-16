@@ -1047,20 +1047,27 @@ export default function KPIQuery() {
                 }
               `}</style>
               <Spin spinning={loading} style={{ height: '100%' }}>
-                <DataTable
-                  tableId={`kpi-query-${tabId}`}
-                  columns={columns}
-                  dataSource={paginatedData}
-                  rowKey="key"
-                  scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-                  showRowNumber
-                  rowNumberTitle={t('table.rowNumber')}
-                  showPagination
-                  currentPage={currentPage}
-                  pageSize={pageSize}
-                  total={mockData.length}
-                  onPageChange={handlePageChange}
-                />
+                <Card
+                  size="small"
+                  bordered
+                  style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+                  styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+                >
+                  <DataTable
+                    tableId={`kpi-query-${tabId}`}
+                    columns={columns}
+                    dataSource={paginatedData}
+                    rowKey="key"
+                    scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+                    showRowNumber
+                    rowNumberTitle={t('table.rowNumber')}
+                    showPagination
+                    currentPage={currentPage}
+                    pageSize={pageSize}
+                    total={mockData.length}
+                    onPageChange={handlePageChange}
+                  />
+                </Card>
               </Spin>
             </div>
           ) : (

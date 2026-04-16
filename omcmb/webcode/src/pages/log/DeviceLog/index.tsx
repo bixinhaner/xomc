@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   App,
   Button,
+  Card,
   Space,
   Tag,
   Typography,
@@ -612,23 +613,30 @@ export default function DeviceLog() {
         onReset={() => setFilters({})}
       />
 
-      <DataTable<DeviceLogTask>
-        tableId="device-log-list"
-        columns={columns}
-        dataSource={filteredData}
-        rowKey="id"
-        total={filteredData.length}
-        currentPage={1}
-        pageSize={20}
-        onPageChange={() => {}}
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={setSelectedRowKeys}
-        batchActions={batchActions}
-        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-        showRowNumber
-        rowNumberTitle={t('common.rowNumber')}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<DeviceLogTask>
+          tableId="device-log-list"
+          columns={columns}
+          dataSource={filteredData}
+          rowKey="id"
+          total={filteredData.length}
+          currentPage={1}
+          pageSize={20}
+          onPageChange={() => {}}
+          selectable
+          selectedRowKeys={selectedRowKeys}
+          onSelectionChange={setSelectedRowKeys}
+          batchActions={batchActions}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+          showRowNumber
+          rowNumberTitle={t('common.rowNumber')}
+        />
+      </Card>
 
       {/* 新建任务抽屉 */}
       <Drawer

@@ -56,7 +56,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'alarm-rule',         label: 'nav.alarm.rules',          path: '/alarm/rules' },
       { key: 'alarm-knowledge',    label: 'nav.alarm.library',        path: '/alarm/library' },
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
-      { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },
+      // { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },  // 隐藏告警通知
       // { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' }, // 隐藏
       { key: 'alarm-custom-stats', label: 'nav.alarm.customAlarm',    path: '/alarm/custom-stats' },
     ],
@@ -73,7 +73,7 @@ export const NAV_CONFIG: NavConfig = [
   //     { key: 'config-list',      label: 'nav.config.paramList',       path: '/config/param-list' },
   //     { key: 'config-cmd',       label: 'nav.config.commandMode',     path: '/config/command-mode' },
   //     { key: 'config-cell',      label: 'nav.config.cell',            path: '/config/cell' },
-  //     { key: 'config-baseline',  label: 'nav.config.baseline',        path: '/config/baseline' },
+  //     { key: 'config-baseline', label: 'nav.config.baseline',        path: '/config/baseline' },
   //     { key: 'config-general',    label: 'nav.config.common',          path: '/config/common' },
   //     { key: 'config-neighbor',   label: 'nav.config.neighbor',        path: '/config/neighbor' },
   //     { key: 'config-son',        label: 'nav.config.son',             path: '/config/son' },
@@ -91,14 +91,14 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'LineChartOutlined',
     children: [
       { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },
-      { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },
+      // { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },  // 隐藏性能图表
       { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
       { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
       // { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },  // 隐藏
       // { key: 'perf-file',       label: 'nav.performance.files',        path: '/performance/files' },  // 隐藏
       // { key: 'perf-task',       label: 'nav.performance.taskConfig',   path: '/performance/task-config' },  // 隐藏
       // { key: 'perf-kpi-mgmt',   label: 'nav.performance.kpiMgmt',      path: '/performance/kpi-management' },  // 隐藏
-      // { key: 'perf-query-tpl',  label: 'nav.performance.queryTemplates',path: '/performance/query-templates' },  // 隐藏
+      // { key: 'perf-query-tpl', label: 'nav.performance.queryTemplates',path: '/performance/query-templates' },  // 隐藏
       // { key: 'perf-busy-hour',  label: 'nav.performance.busyHour',     path: '/performance/busy-hour' },  // 隐藏
     ],
   },
@@ -108,8 +108,8 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'CodeOutlined',
     children: [
       { key: 'mml-console', label: 'nav.mml.console',  path: '/mml/console' },
-      { key: 'mml-script',  label: 'nav.mml.script',   path: '/mml/script' },
-      // { key: 'mml-cmd',     label: 'nav.mml.commands',  path: '/mml/commands' },  // 隐藏
+      // { key: 'mml-script',   label: 'nav.mml.script',           path: '/mml/script' },  // 隐藏脚本任务
+      // { key: 'mml-cmd',     label: 'nav.mml.commands',         path: '/mml/commands' },  // 隐藏
     ],
   },
   {
@@ -117,12 +117,12 @@ export const NAV_CONFIG: NavConfig = [
     label: 'nav.topology',
     iconName: 'GlobalOutlined',
     children: [
-      { key: 'topo-gis',      label: 'nav.topology.gisMap',    path: '/topology/gis-map' },
+      // { key: 'topo-gis',      label: 'nav.topology.gisMap',    path: '/topology/gis-map' },      // 隐藏拓扑图
       { key: 'topo-canvas',   label: 'nav.topology.canvas',    path: '/topology/canvas' },
-      { key: 'topo-domain',   label: 'nav.topology.domain',    path: '/topology/domain' },
-      { key: 'topo-site',     label: 'nav.topology.site',      path: '/topology/site' },
-      { key: 'topo-settings', label: 'nav.topology.settings',  path: '/topology/settings' },
-      { key: 'topo-legend',   label: 'nav.topology.legend',    path: '/topology/legend' },
+      // { key: 'topo-domain',   label: 'nav.topology.domain',    path: '/topology/domain' },      // 隐藏域管理
+      // { key: 'topo-site',     label: 'nav.topology.site',      path: '/topology/site' },        // 隐藏站点管理
+      // { key: 'topo-settings', label: 'nav.topology.settings',  path: '/topology/settings' },    // 隐藏拓扑设置
+      // { key: 'topo-legend',   label: 'nav.topology.legend',    path: '/topology/legend' },      // 隐藏图例管理
     ],
   },
   {
@@ -133,7 +133,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'backup-task',     label: 'nav.backup.tasks',     path: '/backup/tasks' },
       { key: 'backup-plan',     label: 'nav.backup.schedule',  path: '/backup/schedule' },
       // { key: 'backup-ftp',      label: 'nav.backup.ftp',       path: '/backup/ftp' },
-      { key: 'backup-restore',  label: 'nav.backup.restore',   path: '/backup/restore' },
+      { key: 'backup-restore', label: 'nav.backup.restore',   path: '/backup/restore' },
       // { key: 'backup-strategy', label: 'nav.backup.policy',    path: '/backup/policy' },
     ],
   },
@@ -181,7 +181,7 @@ export const NAV_CONFIG: NavConfig = [
     label: 'nav.system',
     iconName: 'ToolOutlined',
     children: [
-      { key: 'sys-device-type', label: 'nav.system.deviceClass',    path: '/system/device-class' },
+      // { key: 'sys-device-type', label: 'nav.system.deviceClass',    path: '/system/device-class' },  // 隐藏设备分类
       { key: 'sys-user',        label: 'nav.system.users',          path: '/system/users' },
       // { key: 'sys-group',       label: 'nav.system.groups',         path: '/system/groups' },  // 隐藏用户组菜单
       { key: 'sys-role',        label: 'nav.system.roles',          path: '/system/roles' },
@@ -189,12 +189,12 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'sys-op-log',      label: 'nav.system.operationLog',   path: '/system/operation-log' },
       { key: 'sys-config',      label: 'nav.system.config',         path: '/system/config' },
       { key: 'sys-ui-custom',   label: 'nav.system.uiCustom',       path: '/system/ui-custom' },
-      { key: 'sys-home',        label: 'nav.system.dashboard',      path: '/system/dashboard' },
-      { key: 'sys-operator',    label: 'nav.system.operators',      path: '/system/operators' },
-      { key: 'sys-cert',        label: 'nav.system.certificates',   path: '/system/certificates' },
-      { key: 'sys-blacklist',   label: 'nav.system.blacklist',      path: '/system/blacklist' },
-      { key: 'sys-migration',   label: 'nav.system.migration',      path: '/system/migration' },
-      { key: 'sys-db-monitor',  label: 'nav.system.dbMonitor',      path: '/system/db-monitor' },
+      // { key: 'sys-home',        label: 'nav.system.dashboard',      path: '/system/dashboard' },  // 隐藏系统仪表板
+      // { key: 'sys-operator',    label: 'nav.system.operators',      path: '/system/operators' },  // 隐藏运营商管理
+      // { key: 'sys-cert',        label: 'nav.system.certificates',   path: '/system/certificates' },  // 隐藏证书管理
+      // { key: 'sys-blacklist',   label: 'nav.system.blacklist',      path: '/system/blacklist' },  // 隐藏设备黑名单
+      // { key: 'sys-migration',   label: 'nav.system.migration',      path: '/system/migration' },  // 隐藏设备迁移
+      // { key: 'sys-db-monitor',  label: 'nav.system.dbMonitor',      path: '/system/db-monitor' },  // 隐藏数据库监控
       { key: 'sys-api',         label: 'nav.system.apiManagement',  path: '/system/api-management' },
       { key: 'sys-dict',        label: 'nav.system.dataDict',        path: '/system/data-dictionary' },
     ],
@@ -210,29 +210,28 @@ export const NAV_CONFIG: NavConfig = [
   //     { key: 'report-poll',     label: 'nav.report.pollStats',     path: '/report/poll-stats' },
   //   ],
   // },  // 隐藏报表管理菜单
-  {
-    key: 'mr',
-    label: 'nav.mr',
-    iconName: 'RadarChartOutlined',
-    children: [
-      { key: 'mr-index',  label: 'nav.mr.indicators',    path: '/mr/indicators' },
-      { key: 'mr-device', label: 'nav.mr.deviceMapping',  path: '/mr/device-mapping' },
-      { key: 'mr-var',    label: 'nav.mr.variables',      path: '/mr/variables' },
-      { key: 'mr-report', label: 'nav.mr.reports',        path: '/mr/reports' },
-      { key: 'mr-task',   label: 'nav.mr.tasks',          path: '/mr/tasks' },
-      { key: 'mr-file',   label: 'nav.mr.files',          path: '/mr/files' },
-    ],
-  },
-  {
-    key: 'license',
-    label: 'nav.license',
-    iconName: 'SafetyOutlined',
-    children: [
-      { key: 'license-list',  label: 'nav.license.list',       path: '/license/list' },
-      { key: 'license-op',    label: 'nav.license.operations',  path: '/license/operations' },
-      { key: 'license-log',   label: 'nav.license.logs',        path: '/license/logs' },
-    ],
-  },
+  // {
+  //   key: 'mr',
+  //   label: 'nav.mr',
+  //   iconName: 'RadarChartOutlined',
+  //   children: [
+  //     { key: 'mr-index',  label: 'nav.mr.indicators',    path: '/mr/indicators' },
+  //     { key: 'mr-device', label: 'nav.mr.deviceMapping',  path: '/mr/device-mapping' },
+  //     { key: 'mr-var',    label: 'nav.mr.variables',      path: '/mr/variables' },
+  //     { key: 'mr-report', label: 'nav.mr.reports',        path: '/mr/reports' },
+  //     { key: 'mr-task',   label: 'nav.mr.tasks',          path: '/mr/tasks' },
+  //     { key: 'mr-file',   label: 'nav.mr.files',          path: '/mr/files' },
+  //   ],
+  // },  // 隐藏MR管理一级菜单
+  // {
+  //   key: 'license',
+  //   label: 'nav.license',
+  //   iconName: 'SafetyOutlined',
+  //   children: [
+  //     { key: 'license-list',  label: 'nav.license.list',       path: '/license/list' },
+  //     { key: 'license-op',    label: 'nav.license.operations', path: '/license/operations' },
+  //     { key: 'license-log',   label: 'nav.license.logs',        path: '/license/logs' },
+  //   ],  // 隐藏许可证管理一级菜单
   // {
   //   key: 'ops',
   //   label: 'nav.ops',
@@ -252,7 +251,7 @@ export const NAV_CONFIG: NavConfig = [
   //   children: [
   //     { key: 'egw-monitor',       label: 'nav.egw.monitor',       path: '/egw/monitor' },
   //     { key: 'egw-maintenance',   label: 'nav.egw.maintenance',   path: '/egw/maintenance' },
-  //     { key: 'egw-registration',  label: 'nav.egw.registration',  path: '/egw/registration' },
+  //     { key: 'egw-registration', label: 'nav.egw.registration', path: '/egw/registration' },
   //     { key: 'egw-upgrade',       label: 'nav.egw.upgrade',       path: '/egw/upgrade' },
   //   ],
   // },  // 隐藏网关管理菜单
@@ -264,7 +263,7 @@ export const NAV_CONFIG: NavConfig = [
   //     { key: 'newegw-monitor',       label: 'nav.newegw.monitor',       path: '/newegw/monitor' },
   //     { key: 'newegw-topology',      label: 'nav.newegw.topology',      path: '/newegw/topology' },
   //     { key: 'newegw-maintenance',   label: 'nav.newegw.maintenance',   path: '/newegw/maintenance' },
-  //     { key: 'newegw-registration',  label: 'nav.newegw.registration',  path: '/newegw/registration' },
+  //     { key: 'newegw-registration', label: 'nav.newegw.registration', path: '/newegw/registration' },
   //     { key: 'newegw-upgrade',       label: 'nav.newegw.upgrade',       path: '/newegw/upgrade' },
   //     { key: 'newegw-access',        label: 'nav.newegw.accessControl', path: '/newegw/access-control' },
   //   ],
@@ -285,7 +284,7 @@ export const NAV_CONFIG: NavConfig = [
   //   iconName: 'ThunderboltOutlined',
   //   children: [
   //     { key: 'ups-monitor',       label: 'nav.ups.monitor',       path: '/ups/monitor' },
-  //     { key: 'ups-registration',  label: 'nav.ups.registration',  path: '/ups/registration' },
+  //     { key: 'ups-registration', label: 'nav.ups.registration', path: '/ups/registration' },
   //     { key: 'ups-upgrade',       label: 'nav.ups.upgrade',       path: '/ups/upgrade' },
   //   ],
   // },  // 隐藏电源管理菜单
@@ -294,7 +293,7 @@ export const NAV_CONFIG: NavConfig = [
   //   label: 'nav.dhcp',
   //   iconName: 'ApartmentOutlined',
   //   children: [
-  //     { key: 'dhcp-config',  label: 'nav.dhcp.serverConfig', path: '/dhcp/server-config' },
+  //     { key: 'dhcp-config', label: 'nav.dhcp.serverConfig', path: '/dhcp/server-config' },
   //     { key: 'dhcp-clients', label: 'nav.dhcp.clientList',   path: '/dhcp/client-list' },
   //     { key: 'dhcp-service', label: 'nav.dhcp.service',      path: '/dhcp/service' },
   //   ],

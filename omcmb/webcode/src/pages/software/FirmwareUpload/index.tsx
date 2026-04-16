@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
   Button,
+  Card,
   Form,
   Input,
   Select,
@@ -337,19 +338,26 @@ export default function FirmwareUpload() {
       />
 
       {/* 文件列表 */}
-      <DataTable<FirmwareFile>
-        tableId="firmware-list"
-        columns={columns}
-        dataSource={filteredData}
-        rowKey="id"
-        total={filteredData.length}
-        currentPage={1}
-        pageSize={20}
-        onPageChange={() => {}}
-        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-        showRowNumber
-        rowNumberTitle={t('table.rowNumber')}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<FirmwareFile>
+          tableId="firmware-list"
+          columns={columns}
+          dataSource={filteredData}
+          rowKey="id"
+          total={filteredData.length}
+          currentPage={1}
+          pageSize={20}
+          onPageChange={() => {}}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+          showRowNumber
+          rowNumberTitle={t('table.rowNumber')}
+        />
+      </Card>
 
       {/* 导入/查看/修改文件抽屉 */}
       <Drawer

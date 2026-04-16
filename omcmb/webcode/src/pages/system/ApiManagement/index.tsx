@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import {
   App,
   Button,
+  Card,
   Tag,
   Form,
   Input,
@@ -325,25 +326,32 @@ export default function ApiManagement() {
         }}
       />
 
-      <DataTable<ApiEndpoint>
-        tableId="api-management"
-        columns={columns}
-        dataSource={data?.items ?? []}
-        loading={isLoading}
-        rowKey="id"
-        selectable
-        extraToolbarLeft={toolbar}
-        total={data?.total ?? 0}
-        currentPage={page}
-        pageSize={pageSize}
-        onPageChange={(p, ps) => {
-          setPage(p);
-          setPageSize(ps);
-        }}
-        selectedRowKeys={selectedKeys}
-        onSelectionChange={(keys) => setSelectedKeys(keys)}
-        scroll={{ x: 900 }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<ApiEndpoint>
+          tableId="api-management"
+          columns={columns}
+          dataSource={data?.items ?? []}
+          loading={isLoading}
+          rowKey="id"
+          selectable
+          extraToolbarLeft={toolbar}
+          total={data?.total ?? 0}
+          currentPage={page}
+          pageSize={pageSize}
+          onPageChange={(p, ps) => {
+            setPage(p);
+            setPageSize(ps);
+          }}
+          selectedRowKeys={selectedKeys}
+          onSelectionChange={(keys) => setSelectedKeys(keys)}
+          scroll={{ x: 900 }}
+        />
+      </Card>
 
       <Drawer
         title={editingEndpoint ? t('api.editEndpoint') : t('api.addEndpoint')}

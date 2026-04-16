@@ -209,19 +209,26 @@ export default function EventLog() {
         onReset={() => setFilters({})}
       />
 
-      <DataTable<EventLog>
-        tableId="event-log-list"
-        columns={columns}
-        dataSource={filteredData}
-        rowKey="id"
-        total={filteredData.length}
-        currentPage={1}
-        pageSize={20}
-        onPageChange={() => {}}
-        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-        showRowNumber
-        rowNumberTitle={t('log.event.seq')}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<EventLog>
+          tableId="event-log-list"
+          columns={columns}
+          dataSource={filteredData}
+          rowKey="id"
+          total={filteredData.length}
+          currentPage={1}
+          pageSize={20}
+          onPageChange={() => {}}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+          showRowNumber
+          rowNumberTitle={t('log.event.seq')}
+        />
+      </Card>
 
       {/* 统计弹窗 */}
       <Modal

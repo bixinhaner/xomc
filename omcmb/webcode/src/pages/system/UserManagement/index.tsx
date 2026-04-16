@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useRef } from 'react';
 import {
   App,
   Button,
+  Card,
   Tag,
   Modal,
   Form,
@@ -633,64 +634,71 @@ export default function UserManagement() {
         onSearch={(vals) => { setFilters(vals); setPage(1); }}
         onReset={() => { setFilters({}); setPage(1); }}
       />
-      <DataTable
-        tableId="user-management-list"
-        columns={columns}
-        dataSource={(data?.items ?? []) as (User & Record<string, unknown>)[]}
-        loading={isLoading}
-        rowKey="id"
-        total={data?.total ?? 0}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => void refetch()}
-        selectable
-        selectedRowKeys={selectedKeys}
-        onSelectionChange={(keys) => setSelectedKeys(keys)}
-        batchActions={[
-          {
-            key: 'forceLogout',
-            label: t('user.forceLogout'),
-            icon: <LogoutOutlined />,
-            onClick: handleBatchForceLogout,
-            disabled: hasBuiltInSelected,
-          },
-          {
-            key: 'disable',
-            label: '禁用',
-            icon: <StopOutlined />,
-            onClick: handleBatchLock,
-            disabled: hasBuiltInSelected,
-          },
-          {
-            key: 'enable',
-            label: '启用',
-            icon: <CheckCircleOutlined />,
-            onClick: handleBatchUnlock,
-            disabled: hasBuiltInSelected,
-          },
-          {
-            key: 'resetPwd',
-            label: t('user.resetPassword'),
-            icon: <KeyOutlined />,
-            onClick: handleBatchResetPassword,
-            disabled: hasBuiltInSelected,
-          },
-          {
-            key: 'moveGroup',
-            label: t('user.moveGroup'),
-            onClick: handleBatchMoveGroup,
-            disabled: hasBuiltInSelected,
-          },
-          {
-            key: 'delete',
-            label: t('common.batchDelete'),
-            danger: true,
-            onClick: handleBatchDelete,
-          },
-        ]}
-        scroll={{ x: 1200 }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable
+          tableId="user-management-list"
+          columns={columns}
+          dataSource={(data?.items ?? []) as (User & Record<string, unknown>)[]}
+          loading={isLoading}
+          rowKey="id"
+          total={data?.total ?? 0}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => void refetch()}
+          selectable
+          selectedRowKeys={selectedKeys}
+          onSelectionChange={(keys) => setSelectedKeys(keys)}
+          batchActions={[
+            {
+              key: 'forceLogout',
+              label: t('user.forceLogout'),
+              icon: <LogoutOutlined />,
+              onClick: handleBatchForceLogout,
+              disabled: hasBuiltInSelected,
+            },
+            {
+              key: 'disable',
+              label: '禁用',
+              icon: <StopOutlined />,
+              onClick: handleBatchLock,
+              disabled: hasBuiltInSelected,
+            },
+            {
+              key: 'enable',
+              label: '启用',
+              icon: <CheckCircleOutlined />,
+              onClick: handleBatchUnlock,
+              disabled: hasBuiltInSelected,
+            },
+            {
+              key: 'resetPwd',
+              label: t('user.resetPassword'),
+              icon: <KeyOutlined />,
+              onClick: handleBatchResetPassword,
+              disabled: hasBuiltInSelected,
+            },
+            {
+              key: 'moveGroup',
+              label: t('user.moveGroup'),
+              onClick: handleBatchMoveGroup,
+              disabled: hasBuiltInSelected,
+            },
+            {
+              key: 'delete',
+              label: t('common.batchDelete'),
+              danger: true,
+              onClick: handleBatchDelete,
+            },
+          ]}
+          scroll={{ x: 1200 }}
+        />
+      </Card>
 
       {/* Create Drawer - 包含添加和导入两种模式 */}
       <Drawer

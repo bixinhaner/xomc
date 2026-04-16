@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
   Button,
+  Card,
   Tag,
   message,
   Progress,
@@ -780,37 +781,51 @@ export default function BackupTasks() {
 
       {/* 列表 */}
       {activeTab === 'task' ? (
-        <DataTable<BackupTaskRow>
-          tableId="backup-tasks-list-task"
-          columns={taskColumns}
-          dataSource={filteredTaskData}
-          loading={isLoading}
-          rowKey="id"
-          total={filteredTaskData.length}
-          currentPage={page}
-          pageSize={pageSize}
-          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          onRefresh={() => void refetch()}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
-          showRowNumber
-          rowNumberTitle={t('common.rowNumber')}
-        />
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<BackupTaskRow>
+            tableId="backup-tasks-list-task"
+            columns={taskColumns}
+            dataSource={filteredTaskData}
+            loading={isLoading}
+            rowKey="id"
+            total={filteredTaskData.length}
+            currentPage={page}
+            pageSize={pageSize}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            onRefresh={() => void refetch()}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
+            showRowNumber
+            rowNumberTitle={t('common.rowNumber')}
+          />
+        </Card>
       ) : (
-        <DataTable<BackupDeviceRow>
-          tableId="backup-tasks-list-device"
-          columns={deviceColumns}
-          dataSource={paginatedDeviceData}
-          loading={isLoading}
-          rowKey="id"
-          total={filteredDeviceData.length}
-          currentPage={devicePage}
-          pageSize={devicePageSize}
-          onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
-          onRefresh={() => void refetch()}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
-          showRowNumber
-          rowNumberTitle={t('common.rowNumber')}
-        />
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<BackupDeviceRow>
+            tableId="backup-tasks-list-device"
+            columns={deviceColumns}
+            dataSource={paginatedDeviceData}
+            loading={isLoading}
+            rowKey="id"
+            total={filteredDeviceData.length}
+            currentPage={devicePage}
+            pageSize={devicePageSize}
+            onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
+            onRefresh={() => void refetch()}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 510px)' }}
+            showRowNumber
+            rowNumberTitle={t('common.rowNumber')}
+          />
+        </Card>
       )}
 
       {/* 任务详情弹窗 */}

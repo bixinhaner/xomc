@@ -876,7 +876,13 @@ export default function UpgradePlan() {
 
       {/* 列表 */}
       {activeTab === 'task' ? (
-        <DataTable<UpgradePlanRow>
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<UpgradePlanRow>
             tableId="upgrade-plan-list-task"
             columns={taskColumns}
             dataSource={paginatedData}
@@ -889,7 +895,14 @@ export default function UpgradePlan() {
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
           />
-        ) : (
+        </Card>
+      ) : (
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
           <DataTable<UpgradePlanRow>
             tableId="upgrade-plan-list-device"
             columns={columns}
@@ -903,7 +916,8 @@ export default function UpgradePlan() {
             showRowNumber
             rowNumberTitle={t('table.rowNumber')}
           />
-        )}
+        </Card>
+      )}
 
       {/* 批量输入弹窗 */}
       <Modal

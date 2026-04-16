@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message, DatePicker } from 'antd';
+import { Button, Card, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message, DatePicker } from 'antd';
 import type { MenuProps } from 'antd';
 import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, DeleteOutlined, EyeOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -179,19 +179,26 @@ export default function Tasks() {
         onSearch={(vals) => { setFilters(vals); setPage(1); }}
         onReset={() => { setFilters({}); setPage(1); }}
       />
-      <DataTable
-        tableId="mr-tasks-list"
-        columns={columns}
-        dataSource={paginated as (MRTask & Record<string, unknown>)[]}
-        loading={false}
-        rowKey="id"
-        total={filtered.length}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => setTasks([...mockTasks])}
-        scroll={{ x: 1100 }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable
+          tableId="mr-tasks-list"
+          columns={columns}
+          dataSource={paginated as (MRTask & Record<string, unknown>)[]}
+          loading={false}
+          rowKey="id"
+          total={filtered.length}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => setTasks([...mockTasks])}
+          scroll={{ x: 1100 }}
+        />
+      </Card>
 
       <Modal
         title={t('mr.newCollectTask')}

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { App, Button, Drawer, Dropdown, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Card, Drawer, Dropdown, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -1228,7 +1228,13 @@ export default function DeviceList() {
 
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
 
-          <div className="device-list-page-table-wrapper" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+          {/* 设备列表卡片 */}
+          <Card
+            size="small"
+            bordered
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+          >
             <DataTable<Device>
               tableId="device-list-table"
               columns={columns}
@@ -1252,26 +1258,7 @@ export default function DeviceList() {
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />
-          </div>
-          <style>{`
-            /* 设备列表表格滚动条样式 - 页面特定，只滚动表格内容 */
-            .device-list-page-table-wrapper > div {
-              position: absolute;
-              inset: 0;
-            }
-            .device-list-page-table-wrapper .omc-data-table {
-              overflow: hidden;
-            }
-            .device-list-page-table-wrapper .ant-table-body {
-              overflow-y: auto !important;
-              overflow-x: auto !important;
-              max-height: calc(100vh - 430px) !important;
-            }
-            .device-list-page-table-wrapper .ant-table-thead > tr > th,
-            .device-list-page-table-wrapper .ant-table-tbody > tr > td {
-              white-space: nowrap !important;
-            }
-          `}</style>
+          </Card>
         </ListPageLayout>
       </div>
 

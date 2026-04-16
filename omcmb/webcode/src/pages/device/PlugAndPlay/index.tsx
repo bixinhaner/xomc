@@ -21,6 +21,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import styles from './index.module.css';
 import DetectDialog from './components/DetectDialog';
 import ExecuteDetailPanel from './components/ExecuteDetailPanel';
 import BatchRetryDialog from './components/BatchRetryDialog';
@@ -905,32 +906,25 @@ export default function PlugAndPlay() {
   ], [t]);
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Policy List Section */}
-      <div style={{ flexShrink: 0 }}>
-        <ListPageLayout
-          title={t('provision.plugAndPlay')}
-          extra={
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddPolicy}>
-              {t('common.add')}
-            </Button>
-          }
+    <ListPageLayout
+      title={t('provision.plugAndPlay')}
+      extra={
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleAddPolicy}>
+          {t('common.add')}
+        </Button>
+      }
+    >
+      <div className="plug-and-play-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Policy List Section */}
+        <Card
+          size="small"
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+          style={{ flexShrink: 0 }}
         >
-          <DataTable<Policy>
-            tableId="policy-table"
-            columns={policyColumns}
-            dataSource={filteredPolicies}
-            rowKey="policyId"
-            total={filteredPolicies.length}
-            showPagination
-            currentPage={1}
-            pageSize={10}
-            defaultDensity="default"
-            showRowNumber
-            rowNumberTitle={t('table.rowNumber')}
-            scroll={{ x: 'max-content', y: 200 }}
-            extraToolbarLeft={<Text strong>{t('provision.policyList')}</Text>}
-            extraToolbarRight={
+          {/* 策略列表标题 */}
+          <div className={styles.cardHeader}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <Text className={styles.cardHeaderTitle}>{t('provision.policyList')}</Text>
               <Space>
                 <Select
                   placeholder={t('provision.productType')}
@@ -949,47 +943,66 @@ export default function PlugAndPlay() {
                   allowClear
                 />
               </Space>
-            }
-          />
-        </ListPageLayout>
-      </div>
+            </div>
+          </div>
 
-      {/* Execute Status Section */}
-      <Card
-        size="small"
-        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
-        style={{ flex: 1, minHeight: 0 }}
-      >
+          {/* Policy table */}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <DataTable<Policy>
+              tableId="policy-table"
+              columns={policyColumns}
+              dataSource={filteredPolicies}
+              rowKey="policyId"
+              total={filteredPolicies.length}
+              showPagination
+              currentPage={1}
+              defaultDensity="default"
+              showRowNumber
+              rowNumberTitle={t('table.rowNumber')}
+              scroll={{ x: 'max-content', y: 200 }}
+            />
+          </div>
+        </Card>
+
+        {/* Execute Status Section */}
+        <Card
+          size="small"
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+          style={{ flex: 1, minHeight: 0 }}
+        >
         {/* 执行状态标题 + 计数 + 任务类型筛选 */}
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Space>
-            <Text strong style={{ fontSize: 14 }}>{t('provision.executeStatus')}</Text>
-            {[
-              { key: '0', label: t('provision.allTasks') },
-              { key: '1', label: t('provision.softwareUpgrade') },
-              { key: '2', label: t('provision.license') },
-              { key: '3', label: t('provision.selfConfig') },
-            ].map(item => (
-              <Tag
-                key={item.key}
-                color={taskTab === item.key ? 'blue' : 'default'}
-                style={{ cursor: 'pointer' }}
-                onClick={() => { setTaskTab(item.key); setTaskPage(1); }}
-              >
-                {item.label}
-              </Tag>
-            ))}
-          </Space>
-          <Space split="|" size={8}>
-            <Space size={4}>
-              <CheckCircleOutlined style={{ color: '#52c41a' }} />
-              <Text type="success">{successCount}</Text>
+        <div className={styles.cardHeader}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <Space size={16}>
+              <Text className={styles.cardHeaderTitle}>{t('provision.executeStatus')}</Text>
+              <div className={styles.pillTabs}>
+                {[
+                  { key: '0', label: t('provision.allTasks') },
+                  { key: '1', label: t('provision.softwareUpgrade') },
+                  { key: '2', label: t('provision.license') },
+                  { key: '3', label: t('provision.selfConfig') },
+                ].map(item => (
+                  <span
+                    key={item.key}
+                    className={`${styles.pillTab} ${taskTab === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
+                    onClick={() => { setTaskTab(item.key); setTaskPage(1); }}
+                  >
+                    {item.label}
+                  </span>
+                ))}
+              </div>
             </Space>
-            <Space size={4}>
-              <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-              <Text type="danger">{failCount}</Text>
+            <Space size={12}>
+              <div className={`${styles.statsBadge} ${styles.statsSuccess}`}>
+                <CheckCircleOutlined className={styles.statsIcon} />
+                <span>{successCount}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsFailed}`}>
+                <CloseCircleOutlined className={styles.statsIcon} />
+                <span>{failCount}</span>
+              </div>
             </Space>
-          </Space>
+          </div>
         </div>
 
         {/* Task table with filters in toolbar */}
@@ -1040,6 +1053,7 @@ export default function PlugAndPlay() {
           />
         </div>
       </Card>
+      </div>
 
       {/* Detect Dialog */}
       <DetectDialog
@@ -1070,6 +1084,6 @@ export default function PlugAndPlay() {
           message.success(t('common.success'));
         }}
       />
-    </div>
+    </ListPageLayout>
   );
 }

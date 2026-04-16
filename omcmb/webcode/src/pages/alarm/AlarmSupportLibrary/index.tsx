@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Space, Tag, App, Drawer, Form, Input, Select } from 'antd';
+import { Button, Card, Space, Tag, App, Drawer, Form, Input, Select } from 'antd';
 import { ExportOutlined, PlusOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -530,24 +530,31 @@ export default function AlarmSupportLibrary() {
         collapsedRows={1}
       />
 
-      <DataTable<AlarmLibrary>
-        tableId="alarm-library-table"
-        columns={columns}
-        dataSource={filteredData}
-        loading={false}
-        rowKey="id"
-        total={filteredData.length}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={(page, size) => {
-          setCurrentPage(page);
-          setPageSize(size);
-        }}
-        defaultDensity="default"
-        scroll={{ x: 1400, y: 'calc(100vh - 350px)' }}
-        showRowNumber
-        rowNumberTitle="序号"
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<AlarmLibrary>
+          tableId="alarm-library-table"
+          columns={columns}
+          dataSource={filteredData}
+          loading={false}
+          rowKey="id"
+          total={filteredData.length}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={(page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          }}
+          defaultDensity="default"
+          scroll={{ x: 1400, y: 'calc(100vh - 350px)' }}
+          showRowNumber
+          rowNumberTitle="序号"
+        />
+      </Card>
 
       <Drawer
         title={editingId ? t('alarm.library.edit') : t('alarm.library.add')}

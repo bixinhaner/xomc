@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { App, Button, Dropdown, Space, Switch, Tag, Typography, message } from 'antd';
+import { App, Button, Card, Dropdown, Space, Switch, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   DeleteOutlined,
@@ -327,22 +327,29 @@ export default function AlarmRules() {
         collapsedRows={1}
       />
 
-      <DataTable<AlarmRule>
-        tableId="alarm-rules-table"
-        columns={columns}
-        dataSource={rules}
-        loading={isLoading}
-        rowKey="id"
-        total={total}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={(page, size) => {
-          setCurrentPage(page);
-          setPageSize(size);
-        }}
-        onRefresh={() => void refetch()}
-        defaultDensity="default"
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<AlarmRule>
+          tableId="alarm-rules-table"
+          columns={columns}
+          dataSource={rules}
+          loading={isLoading}
+          rowKey="id"
+          total={total}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={(page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          }}
+          onRefresh={() => void refetch()}
+          defaultDensity="default"
+        />
+      </Card>
 
       <AlarmRuleDrawer
         open={drawerOpen}

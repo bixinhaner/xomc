@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Button, Input, Modal, Progress, Tag, Tooltip, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Input, Modal, Progress, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
 import { CheckCircleOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, EditOutlined, InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -293,26 +293,33 @@ export default function DeviceListPanel({
       </div>
 
       <div className="device-list-table-wrapper" style={{ flex: 1, minHeight: 0 }}>
-        <DataTable<Device>
-          tableId="device-grouping-table"
-          columns={columns}
-          dataSource={devices}
-          loading={loading}
-          rowKey="id"
-          selectable
-          selectedRowKeys={selectedDeviceIds}
-          onSelectionChange={onSelectionChange}
-          batchActions={batchActions}
-          total={total}
-          pageSize={pageSize}
-          currentPage={currentPage}
-          onPageChange={onPageChange}
-          onRefresh={onRefresh}
-          defaultDensity="default"
-          scroll={{ x: 'max-content', y: 100 }}
-          showRowNumber
-          rowNumberTitle={t('table.rowNumber')}
-        />
+        <Card
+          size="small"
+          bordered
+          style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<Device>
+            tableId="device-grouping-table"
+            columns={columns}
+            dataSource={devices}
+            loading={loading}
+            rowKey="id"
+            selectable
+            selectedRowKeys={selectedDeviceIds}
+            onSelectionChange={onSelectionChange}
+            batchActions={batchActions}
+            total={total}
+            pageSize={pageSize}
+            currentPage={currentPage}
+            onPageChange={onPageChange}
+            onRefresh={onRefresh}
+            defaultDensity="default"
+            scroll={{ x: 'max-content', y: 100 }}
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
+          />
+        </Card>
       </div>
       <style>{`
         /* 设备分组表格 - flex 布局自适应高度，无需硬编码偏移 */

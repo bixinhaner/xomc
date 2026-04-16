@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { App, Button, Tag } from 'antd';
+import { App, Button, Card, Tag } from 'antd';
 import {
   DeleteOutlined,
   ExportOutlined,
@@ -308,28 +308,35 @@ export default function RecycleBin() {
         collapsedRows={1}
       />
 
-      <DataTable<Device & { deviceType: DeviceType; offlineDays: number; moveTime: string; move_author: string }>
-        tableId="recycle-bin-table"
-        columns={columns}
-        dataSource={tableData}
-        loading={isLoading || restoreMutation.isPending || permanentDeleteMutation.isPending}
-        rowKey="id"
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-        total={data?.total || 0}
-        pageSize={pageSize}
-        currentPage={currentPage}
-        onPageChange={(p, s) => {
-          setCurrentPage(p);
-          if (s !== pageSize) setPageSize(s);
-        }}
-        batchActions={batchActions}
-        defaultDensity="default"
-        showRowNumber
-        rowNumberTitle={t('table.rowNumber')}
-        scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<Device & { deviceType: DeviceType; offlineDays: number; moveTime: string; move_author: string }>
+          tableId="recycle-bin-table"
+          columns={columns}
+          dataSource={tableData}
+          loading={isLoading || restoreMutation.isPending || permanentDeleteMutation.isPending}
+          rowKey="id"
+          selectable
+          selectedRowKeys={selectedRowKeys}
+          onSelectionChange={(keys) => setSelectedRowKeys(keys)}
+          total={data?.total || 0}
+          pageSize={pageSize}
+          currentPage={currentPage}
+          onPageChange={(p, s) => {
+            setCurrentPage(p);
+            if (s !== pageSize) setPageSize(s);
+          }}
+          batchActions={batchActions}
+          defaultDensity="default"
+          showRowNumber
+          rowNumberTitle={t('table.rowNumber')}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }}
+        />
+      </Card>
 
       <ImportModal
         open={importModalOpen}

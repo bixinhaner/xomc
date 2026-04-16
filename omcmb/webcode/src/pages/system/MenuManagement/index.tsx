@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   App,
   Button,
+  Card,
   Dropdown,
   Tag,
   Drawer,
@@ -685,7 +686,12 @@ export default function MenuManagement() {
         onSearch={(vals) => setFilters(vals)}
         onReset={() => setFilters({})}
       />
-      <div className={styles.menuTable}>
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
         <DataTable
           tableId="menu-management-list"
           columns={columns}
@@ -693,7 +699,7 @@ export default function MenuManagement() {
           rowKey="id"
           scroll={{ x: 1000 }}
         />
-      </div>
+      </Card>
 
       {/* Edit Drawer */}
       <Drawer

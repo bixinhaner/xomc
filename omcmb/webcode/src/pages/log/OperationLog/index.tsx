@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   App,
   Button,
+  Card,
   Radio,
   Tag,
   Space,
@@ -395,19 +396,26 @@ export default function OperationLogPage() {
       />
 
       {/* 日志列表 */}
-      <DataTable<OperationLog & Record<string, unknown>>
-        tableId={`${activeTab}-log-list`}
-        columns={getColumns() as DataTableColumn<OperationLog & Record<string, unknown>>[]}
-        dataSource={(data?.items ?? []) as (OperationLog & Record<string, unknown>)[]}
-        loading={isLoading}
-        rowKey="id"
-        total={data?.total ?? 0}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => void refetch()}
-        scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<OperationLog & Record<string, unknown>>
+          tableId={`${activeTab}-log-list`}
+          columns={getColumns() as DataTableColumn<OperationLog & Record<string, unknown>>[]}
+          dataSource={(data?.items ?? []) as (OperationLog & Record<string, unknown>)[]}
+          loading={isLoading}
+          rowKey="id"
+          total={data?.total ?? 0}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => void refetch()}
+          scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
+        />
+      </Card>
     </ListPageLayout>
   );
 }

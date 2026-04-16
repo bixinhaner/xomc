@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App,
   Button,
+  Card,
   Input,
   Modal,
   Form,
@@ -492,16 +493,23 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         {!selectedDict ? (
           <Empty description={t('common.selectHint') || '请先选择左侧字典'} style={{ marginTop: 80 }} />
         ) : (
-          <DataTable
-            tableId="dict-detail-table"
-            columns={columns}
-            dataSource={detailList as (DictionaryDetail & Record<string, unknown>)[]}
-            loading={isLoading}
-            rowKey="id"
-            total={detailData?.total ?? 0}
-            pageSize={20}
-            currentPage={1}
-          />
+          <Card
+            size="small"
+            bordered
+            style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+          >
+            <DataTable
+              tableId="dict-detail-table"
+              columns={columns}
+              dataSource={detailList as (DictionaryDetail & Record<string, unknown>)[]}
+              loading={isLoading}
+              rowKey="id"
+              total={detailData?.total ?? 0}
+              pageSize={20}
+              currentPage={1}
+            />
+          </Card>
         )}
       </div>
 

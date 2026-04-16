@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App,
   Button,
+  Card,
   Tag,
   Drawer,
   Form,
@@ -1154,30 +1155,37 @@ export default function RoleManagement() {
         onSearch={(vals) => { setFilters(vals); setPage(1); }}
         onReset={() => { setFilters({}); setPage(1); }}
       />
-      <DataTable
-        tableId="role-management-list"
-        columns={columns}
-        dataSource={(data?.items ?? []) as (Role & Record<string, unknown>)[]}
-        loading={isLoading}
-        rowKey="id"
-        total={data?.total ?? 0}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => void refetch()}
-        selectable
-        selectedRowKeys={selectedKeys}
-        onSelectionChange={(keys) => setSelectedKeys(keys)}
-        batchActions={[
-          {
-            key: 'delete',
-            label: t('common.batchDelete'),
-            danger: true,
-            onClick: handleBatchDelete,
-          },
-        ]}
-        scroll={{ x: 1100 }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable
+          tableId="role-management-list"
+          columns={columns}
+          dataSource={(data?.items ?? []) as (Role & Record<string, unknown>)[]}
+          loading={isLoading}
+          rowKey="id"
+          total={data?.total ?? 0}
+          pageSize={pageSize}
+          currentPage={page}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => void refetch()}
+          selectable
+          selectedRowKeys={selectedKeys}
+          onSelectionChange={(keys) => setSelectedKeys(keys)}
+          batchActions={[
+            {
+              key: 'delete',
+              label: t('common.batchDelete'),
+              danger: true,
+              onClick: handleBatchDelete,
+            },
+          ]}
+          scroll={{ x: 1100 }}
+        />
+      </Card>
 
       {/* Create Drawer */}
       <Drawer

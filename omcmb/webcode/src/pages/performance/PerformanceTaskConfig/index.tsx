@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Form, Input, Modal, Select, Space, Switch, Tag, message } from 'antd';
+import { Button, Card, Form, Input, Modal, Select, Space, Switch, Tag, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -151,19 +151,26 @@ export default function PerformanceTaskConfig() {
         </Button>
       }
     >
-      <DataTable<PerfTaskRow>
-        tableId="performance-task-config"
-        columns={columns}
-        dataSource={tableSource}
-        loading={isLoading}
-        rowKey="id"
-        total={data?.total ?? tableSource.length}
-        currentPage={page}
-        pageSize={pageSize}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onRefresh={() => void refetch()}
-        scroll={{ x: 1100 }}
-      />
+      <Card
+        size="small"
+        bordered
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+      >
+        <DataTable<PerfTaskRow>
+          tableId="performance-task-config"
+          columns={columns}
+          dataSource={tableSource}
+          loading={isLoading}
+          rowKey="id"
+          total={data?.total ?? tableSource.length}
+          currentPage={page}
+          pageSize={pageSize}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => void refetch()}
+          scroll={{ x: 1100 }}
+        />
+      </Card>
 
       <Modal
         title={editingRow ? t('common.edit') : t('common.add')}

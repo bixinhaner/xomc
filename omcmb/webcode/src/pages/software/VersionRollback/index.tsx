@@ -769,33 +769,47 @@ export default function UpgradePlan() {
 
       {/* 列表 */}
       {activeTab === 'task' ? (
-        <DataTable<UpgradePlanRow>
-          tableId="upgrade-plan-list-task"
-          columns={taskColumns}
-          dataSource={filteredData}
-          rowKey="id"
-          total={filteredData.length}
-          currentPage={page}
-          pageSize={pageSize}
-          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
-          showRowNumber
-          rowNumberTitle={t('table.rowNumber')}
-        />
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<UpgradePlanRow>
+            tableId="upgrade-plan-list-task"
+            columns={taskColumns}
+            dataSource={filteredData}
+            rowKey="id"
+            total={filteredData.length}
+            currentPage={page}
+            pageSize={pageSize}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
+          />
+        </Card>
       ) : (
-        <DataTable<UpgradePlanRow>
-          tableId="upgrade-plan-list-device"
-          columns={columns}
-          dataSource={filteredData}
-          rowKey="id"
-          total={filteredData.length}
-          currentPage={page}
-          pageSize={pageSize}
-          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
-          showRowNumber
-          rowNumberTitle={t('table.rowNumber')}
-        />
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<UpgradePlanRow>
+            tableId="upgrade-plan-list-device"
+            columns={columns}
+            dataSource={filteredData}
+            rowKey="id"
+            total={filteredData.length}
+            currentPage={page}
+            pageSize={pageSize}
+            onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
+          />
+        </Card>
       )}
 
       {/* 批量输入弹窗 */}
