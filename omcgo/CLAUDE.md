@@ -83,7 +83,7 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 | Redis | `github.com/redis/go-redis/v9` | 缓存、会话、命令队列 |
 | 消息队列 | `github.com/nats-io/nats.go` | NATS JetStream |
 | 对象存储 | `github.com/minio/minio-go/v7` | MinIO/S3 |
-| 数据库迁移 | `github.com/golang-migrate/migrate/v4` | Schema 版本管理 |
+| 数据库迁移 | `pressly/goose/v3` | Schema 版本管理 |
 | SQL 构建 | `github.com/Masterminds/squirrel` | 动态 SQL 构建（不使用 ORM） |
 | 参数验证 | `github.com/go-playground/validator/v10` | 结构体校验 |
 | UUID | `github.com/google/uuid` | UUID 生成 |
@@ -206,7 +206,9 @@ omcgo/
 │   └── xmlutil/                    #   XML 辅助工具
 │
 ├── api/                            # API 定义
-├── migrations/                     # 数据库迁移文件
+├── migrations/                     # 数据库迁移文件（goose 格式）
+│   ├── 000NNN_description.sql      #   表结构迁移（DDL），严格连续递增
+│   └── seed/                       #   种子数据迁移（DML），紧接主目录版本号继续递增
 ├── configs/                        # 压测专用配置（acs-stress.yaml）
 ├── datamodels/                     # TR069 数据模型种子数据
 ├── deployments/                    # 部署清单
@@ -345,6 +347,54 @@ mr.file.received / mr.file.parsed
 alarm.raised / alarm.cleared / alarm.acknowledged
 oss.alarm.forward / oss.pm.export
 ```
+
+### 5.5 数据库迁移规范
+
+**迁移工具**：`pressly/goose/v3`，版本记录在数据库 `goose_db_version` 表中。
+
+**版本号规则（CRITICAL）**：
+
+| 规则 | 说明 |
+|------|------|
+| **严格连续递增** | 版本号必须从现有最大值 +1，禁止跳跃、禁止重复 |
+| **禁止重用已用版本号** | 即使旧迁移已删除，其版本号也不得再用 |
+| **禁止插入低版本迁移** | 数据库当前版本之后才能添加新迁移 |
+
+**文件命名格式**：
+
+```
+migrations/
+├── 000NNN_description.sql          # 表结构迁移（DDL）
+└── seed/                           # 种子数据迁移（DML）
+    ├── 000MMM_seed_data.sql
+    └── ...
+```
+
+**新增迁移步骤**：
+
+1. 检查本地文件最大版本号：`ls migrations/ migrations/seed/ | sort | tail -5`
+2. 新文件版本号 = 本地文件最大版本号 + 1
+3. DDL 变更放 `migrations/`，DML 种子数据放 `migrations/seed/`
+
+**多人协作注意事项（CRITICAL）**：
+
+- 合并代码时务必检查是否有版本号冲突（多人同时新增相同版本号的迁移文件）
+- 合并后执行前确认版本号无重复：`ls migrations/ migrations/seed/ | sort | uniq -d`
+- 如果发现重复，将后合并的文件重命名为更大版本号
+
+**迁移文件格式**：
+
+```sql
+-- +goose Up
+CREATE TABLE ...;
+
+-- +goose Down
+DROP TABLE IF EXISTS ...;
+```
+
+**幂等性要求**：
+- `CREATE TABLE IF NOT EXISTS`、`ADD COLUMN IF NOT EXISTS`
+- 使用 `DO $$ BEGIN ... EXCEPTION WHEN ... END $$` 包裹可能重复的 DDL
 
 ---
 

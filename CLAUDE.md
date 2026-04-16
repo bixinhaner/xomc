@@ -318,7 +318,7 @@ Related: F06
 | 文件 (PM/MR/固件/备份) | MinIO |
 | 消息 | NATS JetStream |
 
-**迁移**: `omcgo/migrations/000NNN_description.up.sql` / `.down.sql`
+**迁移**: `omcgo/migrations/000NNN_description.sql`（goose 格式，版本号严格连续递增，详见 `omcgo/CLAUDE.md` 5.5 节）
 
 ---
 
