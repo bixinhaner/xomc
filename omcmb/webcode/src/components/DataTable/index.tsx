@@ -287,7 +287,7 @@ function DataTable<T>(
           }
           return originNode;
         },
-        columnTitle: showRowNumber
+        columnTitle: showRowNumber && !selectable
           ? () => (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ minWidth: 30, textAlign: 'center', fontSize: 12 }}>
