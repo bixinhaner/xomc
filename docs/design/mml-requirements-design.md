@@ -1,11 +1,11 @@
 # OMC MML 维护命令功能需求设计文档
 
-> **文档版本**: v3.0  
-> **创建日期**: 2026-04-14  
-> **更新日期**: 2026-04-14  
-> **适用项目**: OMC（基站网络运营管理系统）  
-> **技术栈**: Go + Gin + PostgreSQL + React 18 + Ant Design 5 + TanStack Query  
-> **变更说明**: v3.0 基于新版 UI 截图与源码全量重写，覆盖两大独立页面（Console + ScriptTask）的精确组件规格、API 接口、数据模型和实施建议
+> **文档版本**: v3.1
+> **创建日期**: 2026-04-14
+> **更新日期**: 2026-04-14
+> **适用项目**: OMC（基站网络运营管理系统）
+> **技术栈**: Go + Gin + PostgreSQL + React 18 + Ant Design 5 + TanStack Query
+> **变更说明**: v3.1 新增实时推送架构（SSE + 统一消息通道），更新自定义模板公有/私有分类目录机制；v3.0 基于新版 UI 截图与源码全量重写
 
 ---
 
@@ -1468,9 +1468,490 @@ GET /api/v1/mml/tasks/:id
 
 ---
 
-## 6. 操作类型详解
+## 6. 实时推送架构（SSE + 统一消息通道）
 
-### 6.1 操作类型总表
+### 6.1 需求背景
+
+MML 命令执行是异步过程，前端提交命令后需要实时回显执行进度和结果到终端输出区。同时，系统还需要支持**站内消息**（如告警通知、任务完成通知、系统公告等）。为避免重复开发两套实时通信机制，设计一套**统一消息通道**，同时满足命令执行结果回显和站内消息推送的需求。
+
+### 6.2 技术选型：SSE（Server-Sent Events）
+
+| 维度 | SSE | WebSocket | 结论 |
+|------|-----|-----------|------|
+| 协议 | 基于 HTTP/1.1，单向（服务端→客户端） | 全双工，独立协议 | 命令回显和站内消息均为服务端→客户端推送，不需要双向通信 |
+| 断线重连 | 浏览器原生自动重连（`Last-Event-ID`） | 需要自行实现 | SSE 更简单可靠 |
+| 代理/防火墙兼容 | 标准 HTTP，兼容性好 | 部分代理不支持 Upgrade | 运维网络环境 SSE 更友好 |
+| 浏览器支持 | 除 IE 外全部支持 | 全部支持 | 本项目目标浏览器 Chrome/Edge 均支持 |
+| 复杂度 | 低 | 高（需要连接管理、心跳、协议帧） | SSE 实现和维护成本更低 |
+| 扩展性 | 可通过多个 SSE 连接分流 | 单连接承载所有消息 | 够用 |
+
+**结论：选用 SSE**。命令回显和站内消息都是服务端主动推送场景，不需要客户端向服务端发送数据（命令执行仍走 REST POST）。SSE 在简单性、可靠性、兼容性上均优于 WebSocket。
+
+### 6.3 统一消息通道架构
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         后端消息产生源                                │
+│                                                                     │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
+│  │  MML 命令执行     │  │  站内消息服务     │  │  其他事件源       │  │
+│  │  (ACS Worker)    │  │  (告警/通知/公告)  │  │  (升级/配置变更)  │  │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘  │
+│           │                      │                      │           │
+│           ▼                      ▼                      ▼           │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │              MessageHub（统一消息分发中心）                   │   │
+│  │                                                             │   │
+│  │  - 按用户 ID 分发（user-specific）                           │   │
+│  │  - 按频道分发（channel-based）                               │   │
+│  │  - 消息类型路由（mml_result / notification / system）        │   │
+│  │  - 背压控制（slow consumer 丢弃策略）                        │   │
+│  └───────────────────────────┬─────────────────────────────────┘   │
+│                              │                                      │
+│                              ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │              SSE Endpoint                                    │   │
+│  │              GET /api/v1/events/stream                       │   │
+│  │                                                             │   │
+│  │  - 认证: Bearer Token (query param or header)               │   │
+│  │  - Last-Event-ID: 断线重连续传                               │   │
+│  │  - Heartbeat: 每 30s 发送 `:keepalive\n\n`                  │   │
+│  └───────────────────────────┬─────────────────────────────────┘   │
+│                              │                                      │
+└──────────────────────────────┼──────────────────────────────────────┘
+                               │ SSE Stream
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                          前端消费层                                   │
+│                                                                      │
+│  ┌──────────────────────┐  ┌──────────────────────────────────────┐ │
+│  │  useEventStream      │  │  消息分发器                          │ │
+│  │  (全局 SSE Hook)     │  │  根据 event.type 分发到对应处理器    │ │
+│  │  - 自动连接/重连     │  │                                      │ │
+│  │  - 认证 Token 注入   │  │  mml_result → TerminalPanel          │ │
+│  │  - 连接状态管理      │  │  notification → 站内消息组件          │ │
+│  │                      │  │  system → 全局通知                   │ │
+│  └──────────────────────┘  └──────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.4 SSE 消息格式
+
+每条 SSE 消息使用标准 `event` + `data` 格式：
+
+```
+event: {消息类型}
+id: {消息唯一ID（用于断线重连）}
+data: {JSON payload}
+```
+
+#### 6.4.1 消息类型定义
+
+| event 类型 | 用途 | payload 结构 |
+|-----------|------|-------------|
+| `mml_output` | MML 命令执行进度/结果回显 | `MMLExecutionEvent` |
+| `mml_task_status` | MML 任务状态变更通知 | `MMLTaskStatusEvent` |
+| `notification` | 站内消息（告警通知、系统公告等） | `NotificationEvent` |
+| `system` | 系统级消息（版本升级、强制登出等） | `SystemEvent` |
+| `:keepalive` | 心跳（SSE 注释行） | 无 |
+
+#### 6.4.2 MML 命令执行事件（`mml_output`）
+
+```json
+{
+  "event": "mml_output",
+  "id": "evt-uuid-001",
+  "data": {
+    "task_id": "task-uuid",
+    "device_sn": "ENB00001",
+    "command_code": "LST BASIC_INFO",
+    "executor": "admin",
+    "output_type": "stdout | stderr | info | success",
+    "text": "设备名称: 北京朝阳基站01",
+    "timestamp": "2026-04-14T10:00:01Z",
+    "progress": {
+      "total": 3,
+      "completed": 1,
+      "current_device": "ENB00001"
+    }
+  }
+}
+```
+
+#### 6.4.3 MML 任务状态变更事件（`mml_task_status`）
+
+```json
+{
+  "event": "mml_task_status",
+  "id": "evt-uuid-002",
+  "data": {
+    "task_id": "task-uuid",
+    "old_status": "pending",
+    "new_status": "running",
+    "executor": "admin",
+    "timestamp": "2026-04-14T10:00:00Z",
+    "summary": {
+      "total_devices": 3,
+      "success_count": 0,
+      "failed_count": 0
+    }
+  }
+}
+```
+
+#### 6.4.4 站内通知事件（`notification`）
+
+```json
+{
+  "event": "notification",
+  "id": "evt-uuid-003",
+  "data": {
+    "notification_id": "notif-uuid",
+    "type": "alarm | task_complete | system | approval",
+    "priority": "critical | high | normal | low",
+    "title": "告警通知",
+    "content": "设备 ENB00001 产生紧急告警",
+    "link": "/mml/console?task=task-uuid",
+    "sender": "system",
+    "created_at": "2026-04-14T10:00:05Z"
+  }
+}
+```
+
+### 6.5 后端实现设计
+
+#### 6.5.1 SSE Endpoint
+
+```
+GET /api/v1/events/stream
+```
+
+**认证**：通过 Query 参数 `?token={jwt}` 或 Header `Authorization: Bearer {jwt}`。
+
+**请求头**：
+
+| Header | 说明 |
+|--------|------|
+| `Authorization` / `?token=` | JWT Token，认证当前用户身份 |
+| `Last-Event-ID` | 断线重连时传递上次收到的最后一条消息 ID |
+| `Accept` | `text/event-stream` |
+
+**响应头**：
+
+| Header | 值 |
+|--------|-----|
+| `Content-Type` | `text/event-stream` |
+| `Cache-Control` | `no-cache` |
+| `Connection` | `keep-alive` |
+| `X-Accel-Buffering` | `no`（禁用 Nginx 缓冲） |
+
+**连接生命周期**：
+
+```
+客户端连接
+    │
+    ├── 认证 JWT → 提取 user_id
+    ├── 注册到 MessageHub（user_id → SSE channel）
+    ├── 发送历史未读消息（可选，基于 Last-Event-ID）
+    │
+    ├── 循环:
+    │   ├── MessageHub.Push(user_id, event) → 写入 SSE
+    │   ├── 每 30s 发送 `:keepalive\n\n`
+    │   └── 监听 ctx.Done() → 清理注册
+    │
+    └── 客户端断开 → 从 MessageHub 注销
+```
+
+#### 6.5.2 MessageHub 核心设计
+
+```go
+// MessageHub 统一消息分发中心
+type MessageHub struct {
+    mu       sync.RWMutex
+    channels map[string]*UserChannel  // key: user_id
+    store    MessageStore             // 消息持久化（支持断线重连）
+}
+
+// UserChannel 单用户的 SSE 通道
+type UserChannel struct {
+    userID    string
+    ch        chan *SSEMessage
+    lastAckID string
+    created   time.Time
+}
+
+// SSEMessage SSE 消息结构
+type SSEMessage struct {
+    ID      string          `json:"id"`
+    Event   string          `json:"event"`     // mml_output / mml_task_status / notification / system
+    Data    json.RawMessage `json:"data"`
+    UserID  string          `json:"-"`         // 目标用户（空表示广播）
+}
+
+// Publish 向指定用户推送消息
+func (h *MessageHub) Publish(userID string, msg *SSEMessage) error
+
+// PublishGlobal 全局广播（所有在线用户）
+func (h *MessageHub) PublishGlobal(msg *SSEMessage) error
+
+// Subscribe 订阅用户的 SSE 通道
+func (h *MessageHub) Subscribe(userID string) (<-chan *SSEMessage, error)
+
+// Unsubscribe 取消订阅
+func (h *MessageHub) Unsubscribe(userID string)
+```
+
+#### 6.5.3 命令执行关联当前管理员
+
+每次 MML 命令执行都会关联当前操作的管理员，消息精确推送给执行者：
+
+```go
+// ExecuteCommand 执行命令时记录 executor
+func (s *MMLService) ExecuteCommand(ctx context.Context, req *ExecuteRequest) (*MMLTask, error) {
+    // 从 context 获取当前管理员
+    executor := auth.GetUsernameFromContext(ctx)
+
+    task := &MMLTask{
+        ID:        uuid.New(),
+        Executor:  executor,       // 记录执行者
+        DeviceSNs: req.DeviceSNs,
+        Commands:  req.Commands,
+        Status:    TaskPending,
+    }
+
+    // 持久化任务
+    if err := s.repo.CreateTask(ctx, task); err != nil {
+        return nil, fmt.Errorf("create task: %w", err)
+    }
+
+    // 通过 MessageHub 实时推送执行进度给 executor
+    go s.executeAsync(task, executor)
+
+    return task, nil
+}
+
+// executeAsync 异步执行，逐台推送结果
+func (s *MMLService) executeAsync(task *MMLTask, executor string) {
+    for _, sn := range task.DeviceSNs {
+        result := s.executeForDevice(task, sn)
+
+        // 推送单台设备执行结果到执行者的 SSE 通道
+        s.hub.Publish(executor, &SSEMessage{
+            Event: "mml_output",
+            Data:  marshalMMLResult(task.ID, sn, result),
+        })
+    }
+
+    // 推送任务完成状态
+    s.hub.Publish(executor, &SSEMessage{
+        Event: "mml_task_status",
+        Data:  marshalTaskStatus(task.ID, TaskCompleted),
+    })
+}
+```
+
+#### 6.5.4 消息持久化与断线重连
+
+| 维度 | 设计 |
+|------|------|
+| 持久化存储 | Redis Sorted Set（key: `sse:pending:{user_id}`，score: timestamp），TTL 1 小时 |
+| 断线重连 | 客户端发送 `Last-Event-ID`，服务端从 Redis 读取该 ID 之后的消息重放 |
+| 消息窗口 | 保留最近 1 小时的消息，超时自动清理 |
+| 背压策略 | 用户通道缓冲区 256 条，慢消费者丢弃最老消息并推送 `buffer_overflow` 警告 |
+
+#### 6.5.5 与站内消息服务的复用
+
+站内消息服务和 MML 执行结果共用同一个 MessageHub 和 SSE 连接：
+
+```
+站内消息产生源:
+  - 告警服务 → notification (alarm)
+  - 任务完成 → notification (task_complete) + mml_task_status
+  - 审批流程 → notification (approval)
+  - 系统公告 → notification (system)
+  - 设备上下线 → notification (device_status)
+
+所有消息统一通过 MessageHub.Publish() 推送到用户的 SSE 通道，
+前端通过 event type 区分处理逻辑。
+```
+
+### 6.6 前端实现设计
+
+#### 6.6.1 全局 SSE Hook（useEventStream）
+
+```typescript
+// hooks/useEventStream.ts
+// 全局单例，App 级别初始化，自动管理连接生命周期
+
+interface SSEEvent {
+  id: string;
+  event: string;
+  data: unknown;
+}
+
+function useEventStream() {
+  // 连接状态: connecting | connected | disconnected
+  const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+
+  // 事件分发器
+  const dispatcher = useRef<EventTarget>(new EventTarget());
+
+  // 自动连接、认证、重连
+  useEffect(() => {
+    const token = getToken();
+    const es = new EventSource(`/api/v1/events/stream?token=${token}`);
+
+    es.onopen = () => setStatus('connected');
+    es.onerror = () => setStatus('disconnected'); // 浏览器自动重连
+
+    // 心跳处理
+    es.addEventListener('keepalive', () => { /* 更新最后心跳时间 */ });
+
+    // 统一消息分发
+    const eventTypes = ['mml_output', 'mml_task_status', 'notification', 'system'];
+    eventTypes.forEach(type => {
+      es.addEventListener(type, (e) => {
+        dispatcher.current.dispatchEvent(
+          new CustomEvent(type, { detail: JSON.parse(e.data) })
+        );
+      });
+    });
+
+    return () => es.close();
+  }, []);
+
+  return { status, dispatcher: dispatcher.current };
+}
+```
+
+#### 6.6.2 MML 终端输出消费
+
+```typescript
+// Console/hooks/useTerminalSSE.ts
+// 在 Console 页面内监听 mml_output 事件，实时追加到终端输出
+
+function useTerminalSSE(dispatcher: EventTarget) {
+  const { appendLine } = useCommandExecution();
+
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      const data = e.detail as MMLExecutionEvent;
+
+      appendLine({
+        text: `[${formatTime(data.timestamp)}] ${data.text}`,
+        type: data.output_type,  // stdout | stderr | info | success
+        timestamp: data.timestamp,
+      });
+    };
+
+    dispatcher.addEventListener('mml_output', handler);
+    return () => dispatcher.removeEventListener('mml_output', handler);
+  }, [dispatcher, appendLine]);
+}
+```
+
+#### 6.6.3 站内消息消费
+
+```typescript
+// hooks/useNotifications.ts
+// 全局监听 notification 事件，更新站内消息状态
+
+function useNotifications(dispatcher: EventTarget) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      const data = e.detail as NotificationEvent;
+
+      // 更新未读消息计数（触发 Header 铃铛 Badge 刷新）
+      queryClient.setQueryData(['notifications', 'unread_count'], (old: number) => old + 1);
+
+      // 根据 priority 弹出全局提示
+      if (data.priority === 'critical' || data.priority === 'high') {
+        notification.open({
+          message: data.title,
+          description: data.content,
+          duration: 0,  // 不自动关闭
+        });
+      }
+    };
+
+    dispatcher.addEventListener('notification', handler);
+    return () => dispatcher.removeEventListener('notification', handler);
+  }, [dispatcher, queryClient]);
+}
+```
+
+### 6.7 数据模型
+
+#### 6.7.1 站内消息表
+
+```sql
+CREATE TABLE notifications (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         VARCHAR(100) NOT NULL,              -- 目标用户
+    type            VARCHAR(20) NOT NULL,                -- alarm / task_complete / system / approval / device_status
+    priority        VARCHAR(10) NOT NULL DEFAULT 'normal', -- critical / high / normal / low
+    title           VARCHAR(200) NOT NULL,               -- 通知标题
+    content         TEXT,                                -- 通知内容
+    link            VARCHAR(500),                        -- 跳转链接
+    sender          VARCHAR(100) DEFAULT 'system',       -- 发送者
+    is_read         BOOLEAN NOT NULL DEFAULT false,      -- 已读标记
+    read_at         TIMESTAMPTZ,                         -- 已读时间
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, is_read, created_at DESC);
+CREATE INDEX idx_notifications_type ON notifications(type, created_at DESC);
+```
+
+#### 6.7.2 mml_tasks 表增强
+
+在现有 `mml_tasks` 表基础上增加 `executor` 字段，关联执行命令的管理员：
+
+```sql
+-- mml_tasks 增加执行者字段
+ALTER TABLE mml_tasks ADD COLUMN IF NOT EXISTS executor VARCHAR(100);
+COMMENT ON COLUMN mml_tasks.executor IS '命令执行者（管理员用户名），用于 SSE 精确推送';
+```
+
+### 6.8 API 接口设计
+
+#### 6.8.1 SSE 连接
+
+```
+GET /api/v1/events/stream?token={jwt}
+```
+
+响应：`text/event-stream`，长连接，持续推送。
+
+#### 6.8.2 站内消息管理
+
+```
+GET    /api/v1/notifications              获取通知列表（分页）
+GET    /api/v1/notifications/unread-count 获取未读数量
+PUT    /api/v1/notifications/:id/read     标记已读
+PUT    /api/v1/notifications/read-all     全部标记已读
+DELETE /api/v1/notifications/:id          删除通知
+```
+
+### 6.9 性能与可靠性
+
+| 维度 | 设计 |
+|------|------|
+| 连接数 | 单用户最多 1 个 SSE 连接（新连接踢掉旧连接） |
+| 心跳间隔 | 30 秒 |
+| 消息延迟 | < 500ms（内存直推，不经消息队列） |
+| 断线重连 | 浏览器原生重连 + Last-Event-ID 补发 |
+| 消息窗口 | Redis 保留最近 1 小时，断线超 1 小时后消息可从 DB 补查 |
+| 并发 SSE | 预估 100 并发管理员，MessageHub 使用 ring buffer |
+| Nginx 配置 | `proxy_buffering off; proxy_read_timeout 3600s;` |
+
+---
+
+## 7. 操作类型详解
+
+### 7.1 操作类型总表
 
 | 操作类型 | 中文含义 | TR-069 RPC | 典型命令模式 | 是否改变设备配置 | 是否要求危险确认 |
 |---------|----------|------------|--------------|------------------|------------------|
@@ -1479,9 +1960,9 @@ GET /api/v1/mml/tasks/:id
 | ADD | 增加 | `AddObject` | `ADD XXX` | 是 | 是 |
 | RMV | 删除 | `DeleteObject` | `RMV XXX` | 是 | 是 |
 
-### 6.2 LST（查询）
+### 7.2 LST（查询）
 
-#### 6.2.1 含义与适用场景
+#### 7.2.1 含义与适用场景
 
 LST 用于读取设备当前配置、运行状态、告警、性能等只读信息，不修改设备配置。适合以下场景：
 
@@ -1489,13 +1970,13 @@ LST 用于读取设备当前配置、运行状态、告警、性能等只读信�
 - 故障定位：查询告警、参数、链路状态。
 - 批量核查：对大量设备统一读取相同参数。
 
-#### 6.2.2 RPC 映射
+#### 7.2.2 RPC 映射
 
 ```text
 MML LST → TR-069 GetParameterValues → 返回参数树当前值
 ```
 
-#### 6.2.3 参数规则
+#### 7.2.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1504,16 +1985,16 @@ MML LST → TR-069 GetParameterValues → 返回参数树当前值
 | 参数路径 | 支持在“参数路径指定”Tab 中录入 TR-069 完整路径 |
 | 返回结果 | 可能为表格型、键值型、纯文本型 |
 
-#### 6.2.4 UI 行为
+#### 7.2.4 UI 行为
 
 - 默认操作类型为 `LST`。
 - 动态参数表单中通常仅显示查询条件。
 - 执行后优先在 [CommandInput](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandInput.tsx) 和 [TerminalPanel](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/TerminalPanel.tsx) 展示结果摘要。
 - 结果明细应通过任务详情接口轮询补全。
 
-### 6.3 MOD（修改）
+### 7.3 MOD（修改）
 
-#### 6.3.1 含义与适用场景
+#### 7.3.1 含义与适用场景
 
 MOD 用于修改已存在参数值，如开关状态、频点、功率、阈值等。属于高风险操作。
 
@@ -1522,13 +2003,13 @@ MOD 用于修改已存在参数值，如开关状态、频点、功率、阈值�
 - 调整小区参数。
 - 清除告警标志、改变设备状态。
 
-#### 6.3.2 RPC 映射
+#### 7.3.2 RPC 映射
 
 ```text
 MML MOD → TR-069 SetParameterValues → 写入参数值
 ```
 
-#### 6.3.3 参数规则
+#### 7.3.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1537,25 +2018,25 @@ MML MOD → TR-069 SetParameterValues → 写入参数值
 | enum 校验 | 值必须在 `options` 集合中 |
 | 批量执行 | 建议按设备逐台记录结果，避免整体回滚语义不清 |
 
-#### 6.3.4 安全要求
+#### 7.3.4 安全要求
 
 - 命令码命中危险模式时必须二次确认。
 - 审计日志需记录操作者、旧值（如可取）、新值、设备 SN、时间戳。
 - 默认仅管理员或具备 `mml.console.execute.write` 权限的角色可执行。
 
-### 6.4 ADD（增加）
+### 7.4 ADD（增加）
 
-#### 6.4.1 含义与适用场景
+#### 7.4.1 含义与适用场景
 
 ADD 用于在 TR-069 对象树中增加实例，例如新增邻区、端口、规则项、路由项等。
 
-#### 6.4.2 RPC 映射
+#### 7.4.2 RPC 映射
 
 ```text
 MML ADD → TR-069 AddObject → 返回 instance number / status
 ```
 
-#### 6.4.3 参数规则
+#### 7.4.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1563,23 +2044,23 @@ MML ADD → TR-069 AddObject → 返回 instance number / status
 | 新建后补写参数 | 如返回对象实例号，系统应串接后续 `SetParameterValues` |
 | 结果处理 | 响应需保存新实例号，便于后续显示和回滚 |
 
-#### 6.4.4 实施注意
+#### 7.4.4 实施注意
 
 当前后端模型和执行引擎仅完成 `ExecuteCommand` 框架，[service.go](file:///Users/cb/code/baicells/goomc/omcgo/internal/mml/service.go) 与 [handler.go](file:///Users/cb/code/baicells/goomc/omcgo/internal/mml/handler.go) 尚未体现 `AddObject` 的完整执行逻辑，因此本类型属于待实现项。
 
-### 6.5 RMV（删除）
+### 7.5 RMV（删除）
 
-#### 6.5.1 含义与适用场景
+#### 7.5.1 含义与适用场景
 
 RMV 用于删除对象实例，如删除邻区、规则项、临时策略等。
 
-#### 6.5.2 RPC 映射
+#### 7.5.2 RPC 映射
 
 ```text
 MML RMV → TR-069 DeleteObject → 删除目标实例
 ```
 
-#### 6.5.3 参数规则
+#### 7.5.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1587,7 +2068,7 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 | 删除前确认 | 必须弹出危险操作确认框 |
 | 删除后刷新 | 建议自动触发一次 LST 校验对象是否已删除 |
 
-### 6.6 操作类型与参数路径联动规则
+### 7.6 操作类型与参数路径联动规则
 
 | 场景 | UI 行为 | 后端要求 |
 |------|---------|---------|
@@ -1598,9 +2079,9 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 
 ---
 
-## 7. 自定义命令模板
+## 8. 自定义命令模板
 
-### 7.1 模板目标与范围
+### 8.1 模板目标与范围
 
 自定义命令模板用于沉淀常用参数组合，减少重复录入，提高批量维护效率。模板与脚本不同：
 
@@ -1614,7 +2095,7 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 | PrivateTemplate | 私有模板 | 仅创建者本人 |
 | PublicTemplate | 公共模板 | 有读取权限的全部用户 |
 
-### 7.2 业务规则
+### 8.2 业务规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1626,9 +2107,64 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 | 产品类型限制 | 可选绑定 `product_types`，仅在匹配设备型号时显示 |
 | 删除规则 | PublicTemplate 仅创建者或管理员可删除 |
 
-### 7.3 推荐数据模型
+#### 8.2.1 分类目录机制
 
-#### 7.3.1 mml_templates 表 DDL
+自定义模板在命令树中以**分组节点**形式展示，公有模板和私有模板采用不同的分类目录策略：
+
+**公有模板**：
+- 所有用户创建的公有模板统一放在同一个"公有模板"分类下，不按管理员创建子目录
+- 任何有创建公共模板权限的用户都可以直接将模板添加到该分类
+- 前端树结构示例：
+  ```
+  ▼ 公有模板 (5)
+      ▼ 总览
+          模板A - LST BASIC_INFO
+      ▼ 快速设置
+          模板B - MOD eNB_CONFIG
+          模板C - LST CELL
+  ```
+
+**私有模板**：
+- 创建私有模板时，系统自动为当前管理员创建专属分类目录（以管理员用户名命名）
+- 该管理员的所有私有模板均添加到其专属分类目录下
+- **仅创建者本人和超级管理员**可见该分类目录及其下的模板
+- 前端树结构示例（admin 用户视角）：
+  ```
+  ▼ 私有模板
+      ▼ admin (3)              ← 自动创建，以管理员用户名命名
+          模板D - LST ALARM
+          模板E - MOD STATUS_INFO
+      ▼ operator_zhang (2)     ← 超级管理员可见，普通管理员不可见
+          模板F - LST PM
+          模板G - RST DEVICE
+  ```
+- 普通管理员只能看到自己的私有模板目录，看不到其他管理员的目录
+- 超级管理员可以看到所有管理员的私有模板目录
+
+**命令树整合结构**：
+```
+▼ 内置命令
+    ▼ 总览 (3)
+        LST BASIC_INFO
+        LST STATUS_INFO
+        MOD STATUS_INFO
+    ▼ 快速设置 (3)
+        ...
+▼ 公有模板
+    ▼ 总览
+        [模板列表...]
+    ▼ 快速设置
+        [模板列表...]
+▼ 私有模板
+    ▼ {当前用户名} (3)
+        [当前用户的私有模板...]
+    ▼ {其他用户名} (2)       ← 仅超级管理员可见
+        [其他用户的私有模板...]
+```
+
+### 8.3 推荐数据模型
+
+#### 8.3.1 mml_templates 表 DDL
 
 ```sql
 CREATE TABLE mml_templates (
@@ -1637,6 +2173,7 @@ CREATE TABLE mml_templates (
     command_code    VARCHAR(100) NOT NULL,                 -- 绑定命令编码
     operation_type  VARCHAR(20) NOT NULL,                  -- LST/MOD/ADD/RMV
     template_scope  VARCHAR(20) NOT NULL DEFAULT 'private',-- private/public
+    category_group  VARCHAR(50),                           -- 分类组（关联 mml_commands.category，如"总览""快速设置"）
     parameters      JSONB NOT NULL DEFAULT '{}'::jsonb,    -- 参数快照
     param_paths     JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 参数路径列表
     description     TEXT,                                  -- 模板说明
@@ -1650,11 +2187,20 @@ CREATE TABLE mml_templates (
 
 CREATE INDEX idx_mml_templates_command_code ON mml_templates(command_code);
 CREATE INDEX idx_mml_templates_scope_creator ON mml_templates(template_scope, creator);
+CREATE INDEX idx_mml_templates_scope_group ON mml_templates(template_scope, category_group);
 CREATE INDEX idx_mml_templates_product_types_gin ON mml_templates USING GIN (product_types);
 CREATE INDEX idx_mml_templates_parameters_gin ON mml_templates USING GIN (parameters);
 ```
 
-#### 7.3.2 前端类型建议
+**分类目录查询逻辑**：
+
+| 模板类型 | 目录结构 | 查询条件 |
+|---------|---------|---------|
+| 公有模板 | 按命令分类（category_group）分组展示 | `WHERE template_scope = 'public'`，按 `category_group` 聚合 |
+| 私有模板（本人） | 按管理员用户名自动创建一级目录，其下按 `category_group` 分组 | `WHERE template_scope = 'private' AND creator = '{current_user}'` |
+| 私有模板（超管视角） | 按管理员用户名分目录，每个目录下按 `category_group` 分组 | `WHERE template_scope = 'private'`，按 `creator` + `category_group` 聚合 |
+
+#### 8.3.2 前端类型建议
 
 ```typescript
 interface MMLTemplate {
@@ -1663,6 +2209,7 @@ interface MMLTemplate {
   commandCode: string;
   operationType: 'LST' | 'MOD' | 'ADD' | 'RMV';
   templateScope: 'private' | 'public';
+  categoryGroup: string;  // 分类组，对应 mml_commands.category（如"总览""快速设置"）
   parameters: Record<string, string | number | boolean>;
   paramPaths: string[];
   description: string;
@@ -1673,9 +2220,9 @@ interface MMLTemplate {
 }
 ```
 
-### 7.4 API 设计（待新增）
+### 8.4 API 设计（待新增）
 
-#### 7.4.1 查询模板列表
+#### 8.4.1 查询模板列表
 
 ```text
 GET /api/v1/mml/templates
@@ -1718,7 +2265,7 @@ GET /api/v1/mml/templates
 }
 ```
 
-#### 7.4.2 创建模板
+#### 8.4.2 创建模板
 
 ```text
 POST /api/v1/mml/templates
@@ -1741,48 +2288,76 @@ POST /api/v1/mml/templates
 }
 ```
 
-#### 7.4.3 更新模板
+#### 8.4.3 更新模板
 
 ```text
 PUT /api/v1/mml/templates/:id
 ```
 
-#### 7.4.4 删除模板
+#### 8.4.4 删除模板
 
 ```text
 DELETE /api/v1/mml/templates/:id
 ```
 
-#### 7.4.5 复制公共模板为私有模板
+#### 8.4.5 复制公共模板为私有模板
 
 ```text
 POST /api/v1/mml/templates/:id/clone
 ```
 
-### 7.5 前端交互建议
+### 8.5 前端交互建议
 
 | 位置 | 行为 |
 |------|------|
-| [CommandInput](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandInput.tsx) | 点击“保存脚本/模板”时区分命令模板和脚本模板 |
-| [CommandTree](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandTree.tsx) | 在分类树末尾增加“自定义模板”分组 |
-| 控制面板 Tab | 增加“从模板加载”下拉 |
+| [CommandInput](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandInput.tsx) | 点击”保存脚本/模板”时区分命令模板和脚本模板 |
+| [CommandTree](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandTree.tsx) | 在分类树末尾增加”公有模板”和”私有模板”两个独立分组（详见 7.2.1 树结构） |
+| 控制面板 Tab | 增加”从模板加载”下拉 |
 | 参数路径 Tab | 加载模板时同步恢复 `operationType` 与 `paramPaths` |
+| 保存模板弹窗 | 新增”模板可见性”选择（private/public），选择 private 时自动关联当前用户的分类目录，选择 public 时选择目标命令分类（category_group） |
+| 命令树模板节点 | 右键或操作按钮支持：加载模板、编辑模板、删除模板、复制为我的私有模板 |
 
-### 7.6 权限规则
+**模板加载流程**：
 
-| 动作 | 普通用户 | 运维管理员 | 系统管理员 |
+```
+用户点击”保存模板”
+    │
+    ├── 选择可见性: private / public
+    │
+    ├── private: 自动设置 creator = 当前用户
+    │            自动设置 category_group = 当前命令的 category
+    │            前端树中归入”私有模板 → {当前用户名} → {category_group}”
+    │
+    └── public:  用户选择目标 category_group（下拉选择命令分类）
+                前端树中归入”公有模板 → {category_group}”
+                所有人可见
+```
+
+### 8.6 权限规则
+
+| 动作 | 普通用户 | 运维管理员 | 系统管理员（超级管理员） |
 |------|----------|------------|------------|
-| 查看私有模板 | 仅本人 | 仅本人 | 全部 |
+| 查看私有模板 | 仅本人 | 仅本人 | **全部**（可见所有管理员的私有模板目录） |
 | 查看公共模板 | ✅ | ✅ | ✅ |
 | 创建私有模板 | ✅ | ✅ | ✅ |
 | 创建公共模板 | ❌ | ✅ | ✅ |
 | 删除他人公共模板 | ❌ | ❌ | ✅ |
+| 查看他人私有模板目录 | ❌ | ❌ | ✅ |
+| 删除他人私有模板 | ❌ | ❌ | ✅ |
+
+**分类目录可见性规则**：
+
+| 用户角色 | 可见的命令树模板节点 |
+|---------|-------------------|
+| 普通用户 | "公有模板"全部分类 + "私有模板"下仅自己的目录 |
+| 运维管理员 | 同上 |
+| 超级管理员 | "公有模板"全部分类 + "私有模板"下**所有管理员**的目录 |
 
 ---
 
-## 8. 内置命令种子数据
+## 9. 内置命令种子数据
 
-### 8.1 当前应落库的命令分类树
+### 9.1 当前应落库的命令分类树
 
 以下分类树以当前前端 [MOCK_COMMANDS](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/constants.ts) 与后端 [MMLCommand](file:///Users/cb/code/baicells/goomc/omcgo/internal/mml/model.go) 数据模型为准，用于初始化 `mml_commands`。
 
@@ -1834,7 +2409,7 @@ GSM
     └── LST VERSION
 ```
 
-### 8.2 种子数据设计原则
+### 9.2 种子数据设计原则
 
 | 原则 | 说明 |
 |------|------|
@@ -1844,7 +2419,7 @@ GSM
 | param_template 为 JSONB | 直接驱动动态表单渲染 |
 | product_types 精确 | 前端根据设备型号过滤可用命令 |
 
-### 8.3 内置命令种子 SQL
+### 9.3 内置命令种子 SQL
 
 ```sql
 INSERT INTO mml_commands (
@@ -1973,7 +2548,7 @@ INSERT INTO mml_commands (
 );
 ```
 
-### 8.4 初始化与刷新策略
+### 9.4 初始化与刷新策略
 
 | 场景 | 建议 |
 |------|------|
@@ -1984,9 +2559,9 @@ INSERT INTO mml_commands (
 
 ---
 
-## 9. 前端技术方案
+## 10. 前端技术方案
 
-### 9.1 组件架构图
+### 10.1 组件架构图
 
 ```text
 页面层
@@ -2010,7 +2585,7 @@ INSERT INTO mml_commands (
 └── mmlApi / mmlService(apiSwitch)
 ```
 
-### 9.2 状态管理
+### 10.2 状态管理
 
 | 层次 | 实现方式 | 说明 |
 |------|----------|------|
@@ -2019,7 +2594,7 @@ INSERT INTO mml_commands (
 | 服务端缓存 | TanStack Query | 命令、脚本、任务列表查询 |
 | 主题与国际化 | `useThemeToken`、`useT` | 统一颜色 Token 与文案翻译 |
 
-### 9.3 API 接入层
+### 10.3 API 接入层
 
 当前接入通过 [useMML](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/hooks/api/useMML.ts) 中的 `createApiSwitch(mmlService, mmlApi)` 实现 Mock / Real API 可切换。
 
@@ -2029,13 +2604,13 @@ INSERT INTO mml_commands (
 | API 层 | [mmlApi.ts](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/services/api/mmlApi.ts) | HTTP 调用、snake_case → camelCase 映射 |
 | Mock 层 | [mmlService.ts](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/mock/services/mmlService.ts) | 本地假数据与延时模拟 |
 
-### 9.4 i18n 方案
+### 10.4 i18n 方案
 
 - 控制台标题、搜索框、命令树标题等已使用 `useT()` 获取国际化文案。
 - 命令分类在 [zh-CN 词条](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/i18n/zh-CN/index.ts) 与 [en-US 词条](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/i18n/en-US/index.ts) 中已有基础定义。
 - 建议将脚本任务页当前硬编码中文文案也迁移至 i18n，以支持国际版本。
 
-### 9.5 Mock 数据策略
+### 10.5 Mock 数据策略
 
 | 模块 | 当前策略 | 后续要求 |
 |------|---------|---------|
@@ -2044,13 +2619,13 @@ INSERT INTO mml_commands (
 | 执行结果 | Mock 服务直接返回 `MMLResult[]` | 真实接口返回任务对象 + 轮询 |
 | 脚本任务页 | 本地表格数据 + 前端过滤 | 切换为服务端分页与过滤 |
 
-### 9.6 推荐前端改造步骤
+### 10.6 推荐前端改造步骤
 
 1. 先完成命令树与脚本/任务列表的真实接口接入。
 2. 再补齐控制台执行结果轮询和任务详情展示。
 3. 最后实现模板系统、脚本上传解析、结果导出。
 
-### 9.7 页面级错误与空状态规范
+### 10.7 页面级错误与空状态规范
 
 | 场景 | 组件表现 |
 |------|---------|
@@ -2061,9 +2636,9 @@ INSERT INTO mml_commands (
 
 ---
 
-## 10. 权限与安全
+## 11. 权限与安全
 
-### 10.1 权限矩阵
+### 11.1 权限矩阵
 
 | 功能 | 权限编码建议 | 说明 |
 |------|--------------|------|
@@ -2075,14 +2650,14 @@ INSERT INTO mml_commands (
 | 控制任务 | `mml.script.control` | 启动/暂停/终止/删除 |
 | 管理公共模板 | `mml.template.public.manage` | 创建/编辑/删除公共模板 |
 
-### 10.2 前端安全控制
+### 11.2 前端安全控制
 
 - 页面路由需按权限控制菜单显隐。
 - 写操作按钮无权限时直接禁用，并显示 Tooltip 提示。
 - 危险命令必须弹出二次确认，确认信息中展示命令名、设备数、影响说明。
 - 文件上传仅允许 `.txt`，并限制大小与 MIME。
 
-### 10.3 后端安全控制
+### 11.3 后端安全控制
 
 | 项目 | 设计要求 |
 |------|---------|
@@ -2093,20 +2668,20 @@ INSERT INTO mml_commands (
 | SQL 安全 | 使用参数化查询 / Query Builder |
 | 数据隔离 | 私有模板与私有脚本需按 creator 过滤 |
 
-### 10.4 危险命令防护
+### 11.4 危险命令防护
 
 当前前端已在 [CommandInput](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandInput.tsx) 内置危险命令正则。后端还需增加同等校验，避免绕过前端直接调用接口。
 
-### 10.5 数据脱敏与导出控制
+### 11.5 数据脱敏与导出控制
 
 - 终端导出结果中如包含 IP、认证信息、密钥参数，应支持脱敏导出。
 - 公共模板与公共脚本导出时不得包含用户私有标签与备注。
 
 ---
 
-## 11. 非功能需求
+## 12. 非功能需求
 
-### 11.1 性能要求
+### 12.1 性能要求
 
 | 指标 | 目标值 |
 |------|--------|
@@ -2116,7 +2691,7 @@ INSERT INTO mml_commands (
 | 单批次执行任务创建 | ≤ 500ms 返回 task id |
 | 100 台设备批量执行调度启动 | ≤ 5s 完成任务入队 |
 
-### 11.2 可用性要求
+### 12.2 可用性要求
 
 | 项目 | 要求 |
 |------|------|
@@ -2124,13 +2699,13 @@ INSERT INTO mml_commands (
 | 失败恢复 | ACS Worker 重启后可继续消费 `pending/running` 任务 |
 | 幂等性 | 重试提交时通过业务 key 避免重复创建相同任务 |
 
-### 11.3 可观测性要求
+### 12.3 可观测性要求
 
 - 为 MML 执行链路增加 trace id。
 - 记录任务创建、出队、下发、回执、完成五个阶段日志。
 - 暴露 Prometheus 指标：任务创建数、成功率、平均耗时、超时数、失败原因分布。
 
-### 11.4 兼容性要求
+### 12.4 兼容性要求
 
 | 维度 | 要求 |
 |------|------|
@@ -2138,13 +2713,13 @@ INSERT INTO mml_commands (
 | 设备类型 | eNB、gNB、GSM（按 `product_types` 过滤能力） |
 | 响应格式 | 兼容纯文本结果与结构化 JSON 结果 |
 
-### 11.5 易用性要求
+### 12.5 易用性要求
 
 - 三栏布局在 1440px 宽度下不应出现水平滚动。
 - 参数过多时执行面板内部滚动，不影响终端输出区。
 - 常用操作支持键盘快捷键：执行 `Ctrl/Cmd+Enter`，保存 `Ctrl/Cmd+S`。
 
-### 11.6 可维护性要求
+### 12.6 可维护性要求
 
 - 命令参数模板必须来源于数据库 JSONB，不得在前端硬编码多份。
 - 任务状态枚举必须前后端统一并集中维护。
@@ -2152,9 +2727,9 @@ INSERT INTO mml_commands (
 
 ---
 
-## 12. 待完善事项与实施建议
+## 13. 待完善事项与实施建议
 
-### 12.1 当前 Mock vs 真实 API 对照
+### 13.1 当前 Mock vs 真实 API 对照
 
 | 项目 | Mock/前端现状 | 真实后端现状 | 问题 |
 |------|---------------|--------------|------|
@@ -2169,7 +2744,7 @@ INSERT INTO mml_commands (
 | 执行脚本 | 前端 `executeScript()` POST `/mml/execute`，发送 `script_id` | 后端无 `script_id` 字段 | 脚本执行未真正打通 |
 | 任务状态枚举 | [types/mml.ts](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/types/mml.ts) 为 `pending/running/success/failed/cancelled`；脚本页 Mock 又使用 `waiting/paused/terminated/exception` | 后端 [model.go](file:///Users/cb/code/baicells/goomc/omcgo/internal/mml/model.go) 为 `pending/running/completed/failed` | 三套枚举并存，需统一 |
 
-### 12.2 后端待实现清单
+### 13.2 后端待实现清单
 
 1. 新增 `GET /mml/scripts/:id`。
 2. 为任务新增启动、暂停、终止、删除、结果明细接口。
@@ -2181,7 +2756,7 @@ INSERT INTO mml_commands (
 8. 增加任务轮询接口的结果分页能力。
 9. 增加命令执行审计日志表。
 
-### 12.3 前端待完善清单
+### 13.3 前端待完善清单
 
 1. 将控制台命令树从 [MOCK_COMMANDS](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/constants.ts) 切换到真实接口。
 2. 修复 [mmlApi](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/services/api/mmlApi.ts) 中 `pageSize` / `page_size`、`params` / `parameters` 字段不一致问题。
@@ -2192,7 +2767,7 @@ INSERT INTO mml_commands (
 7. 补充模板管理入口和从模板加载交互。
 8. 将脚本任务页所有中文硬编码迁移到 i18n。
 
-### 12.4 分阶段实施建议
+### 13.4 分阶段实施建议
 
 #### 第一阶段：接口对齐
 - 统一任务状态枚举。
@@ -2209,7 +2784,7 @@ INSERT INTO mml_commands (
 - 脚本校验与模板导入。
 - 大批量设备并发、分批、失败重试。
 
-### 12.5 验收要点
+### 13.5 验收要点
 
 | 验收项 | 标准 |
 |------|------|
