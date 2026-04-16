@@ -327,6 +327,7 @@ export default function RecycleBin() {
         }}
         batchActions={batchActions}
         defaultDensity="default"
+        scroll={{ x: 'max-content', y: 'calc(100vh - 450px)' }}
       />
 
       <ImportModal
