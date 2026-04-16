@@ -13,6 +13,7 @@ import {
 import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import type { GroupItem } from './types';
+import styles from './DeviceGrouping.module.css';
 
 const { Text } = Typography;
 
@@ -127,19 +128,19 @@ function buildTreeData(
       key: group.id,
       selectable: true,
       title: (
-        <div className="group-tree-node">
+        <div className={`${styles.groupNode} ${isL1 ? styles.groupNodeLevel1 : styles.groupNodeLevel2}`}>
           <Tooltip title={group.name} mouseEnterDelay={0.8} placement="right">
-            <span className="group-tree-node-name">
+            <span className={styles.treeNodeContent}>
               {isL1 ? (
                 <FolderOutlined style={{ marginRight: 6, fontSize: 12, color: '#FA8C16' }} />
               ) : (
                 <span className="group-tree-dot" />
               )}
-              <span className="group-tree-node-text">{group.name}</span>
+              <span className={styles.treeNodeText}>{group.name}</span>
             </span>
           </Tooltip>
-          <span className="group-tree-node-count">{group.deviceCount}</span>
-          <span className="group-tree-node-actions">
+          <span className={styles.groupCountBadge}>{group.deviceCount}</span>
+          <span className={styles.treeNodeActions}>
             <Dropdown
               menu={{ items: menuItems }}
               trigger={['click']}
@@ -149,7 +150,7 @@ function buildTreeData(
                 size="small"
                 icon={<MoreOutlined />}
                 onClick={(e) => e.stopPropagation()}
-                className="group-tree-more-btn"
+                className={styles.treeNodeActionButton}
               />
             </Dropdown>
           </span>
@@ -184,18 +185,17 @@ export default function GroupTreePanel({
   );
 
   return (
-    <div className="group-tree-panel">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 头部：标题 + 搜索/添加图标 */}
-      <div className="group-tree-header">
-        <span className="group-tree-header-title">{t('nav.device.group')}</span>
-        <span className="group-tree-header-actions">
+      <div className={styles.treePanelHeader}>
+        <span className={styles.treePanelTitle}>{t('nav.device.group')}</span>
+        <span style={{ display: 'flex', gap: 4 }}>
           <Button
             type="text"
             size="small"
             icon={<SearchOutlined />}
             onClick={() => { setSearchVisible(!searchVisible); if (searchVisible) onSearchChange(''); }}
             title={t('device.searchGroup')}
-            className="group-tree-icon-btn"
           />
           <Button
             type="text"
@@ -203,14 +203,13 @@ export default function GroupTreePanel({
             icon={<PlusOutlined />}
             onClick={onAddGroup}
             title={t('common.add')}
-            className="group-tree-icon-btn"
           />
         </span>
       </div>
 
       {/* 搜索框：展开式 */}
       {searchVisible && (
-        <div className="group-tree-search">
+        <div className={styles.treeSearchContainer}>
           <Input
             placeholder={t('device.searchGroup')}
             prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
@@ -220,24 +219,25 @@ export default function GroupTreePanel({
             size="small"
             autoFocus
             onBlur={() => { if (!groupSearchText) setSearchVisible(false); }}
+            className={styles.treeSearchInput}
           />
         </div>
       )}
 
       {/* 树区域 */}
-      <div className="group-tree-body">
+      <div className={styles.treeNodesContainer}>
         <Tree
           className="group-tree"
           treeData={[
             {
               key: '__all__',
               title: (
-                <div className="group-tree-root-node">
-                  <span className="group-tree-node-name">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '4px 0' }}>
+                  <span className={styles.treeNodeContent}>
                     <AppstoreOutlined style={{ marginRight: 6, fontSize: 12, color: 'var(--color-primary-600)' }} />
-                    <span className="group-tree-node-text" style={{ fontWeight: 500 }}>{t('common.all')}</span>
+                    <span className={styles.treeNodeText} style={{ fontWeight: 500 }}>{t('common.all')}</span>
                   </span>
-                  <span className="group-tree-node-count">{total}</span>
+                  <span className={styles.groupCountBadge}>{total}</span>
                 </div>
               ),
               children: filteredTreeData,
@@ -270,116 +270,8 @@ export default function GroupTreePanel({
         />
       </div>
 
-      {/* 样式 */}
+      {/* 保留部分原有的样式，用于特定细节 */}
       <style>{`
-        /* Panel layout */
-        .group-tree-panel {
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-        }
-
-        /* Header */
-        .group-tree-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 14px;
-          height: 40px;
-          flex-shrink: 0;
-        }
-        .group-tree-header-title {
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--color-text, #262626);
-        }
-        .group-tree-header-actions {
-          display: flex;
-          gap: 4px;
-        }
-        .group-tree-icon-btn {
-          color: var(--color-text-tertiary, #8c8c8c) !important;
-          border: none !important;
-          box-shadow: none !important;
-        }
-        .group-tree-icon-btn:hover {
-          color: var(--color-primary-600, #1677ff) !important;
-          background: var(--color-primary-1, #e6f4ff) !important;
-        }
-
-        /* Search */
-        .group-tree-search {
-          padding: 0 14px 8px;
-          flex-shrink: 0;
-        }
-
-        /* Tree body */
-        .group-tree-body {
-          flex: 1;
-          overflow: auto;
-          padding: 4px 6px 12px 10px;
-        }
-
-        /* Root "全部设备" node */
-        .group-tree-root-node {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          width: 100%;
-          padding: 4px 0;
-        }
-
-        /* Tree node row */
-        .group-tree-node {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          width: 100%;
-          padding: 2px 0;
-          position: relative;
-        }
-        .group-tree-node-name {
-          display: flex;
-          align-items: center;
-          flex: 1;
-          min-width: 0;
-          overflow: hidden;
-        }
-        .group-tree-node-text {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .group-tree-node-count {
-          font-size: 11px;
-          color: var(--color-text-quaternary, #bfbfbf);
-          margin-left: 8px;
-          flex-shrink: 0;
-          min-width: 20px;
-          text-align: right;
-        }
-        .group-tree-node-actions {
-          flex-shrink: 0;
-          margin-left: 2px;
-          transition: opacity 150ms ease;
-        }
-        .group-tree-node-actions .group-tree-more-btn {
-          color: var(--color-text-quaternary, #d9d9d9) !important;
-          border: none !important;
-          box-shadow: none !important;
-          font-size: 12px !important;
-          width: 20px !important;
-          height: 20px !important;
-          min-width: 20px !important;
-          padding: 0 !important;
-        }
-
-        /* Hover / selected: deepen more button */
-        .group-tree .ant-tree-treenode:hover .group-tree-more-btn,
-        .group-tree .ant-tree-treenode-selected .group-tree-more-btn {
-          color: var(--color-text-tertiary, #8c8c8c) !important;
-        }
-
         /* L2 dot indicator */
         .group-tree-dot {
           display: inline-block;
@@ -392,37 +284,6 @@ export default function GroupTreePanel({
           flex-shrink: 0;
         }
 
-        /* Selection state: left bar + text color instead of full background */
-        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-          background: rgba(var(--color-primary-rgb, 22,119,255), 0.04) !important;
-          border-radius: 4px;
-        }
-        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .group-tree-node-text {
-          color: var(--color-primary-600, #1677ff);
-          font-weight: 500;
-        }
-        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .group-tree-dot {
-          background: var(--color-primary-600, #1677ff);
-        }
-        .group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected .group-tree-node-count {
-          color: var(--color-primary-400, #69b1ff);
-        }
-
-        /* Hover state */
-        .group-tree .ant-tree-node-content-wrapper:hover:not(.ant-tree-node-selected) {
-          background: var(--color-fill-quaternary, rgba(0,0,0,0.02)) !important;
-          border-radius: 4px;
-        }
-
-        /* Tree item spacing */
-        .group-tree .ant-tree-treenode {
-          padding: 1px 0 !important;
-        }
-        .group-tree .ant-tree-node-content-wrapper {
-          border-radius: 4px;
-          transition: background 150ms ease;
-        }
-
         /* Root node divider */
         .group-tree > .ant-tree-treenode:first-child {
           border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
@@ -430,27 +291,9 @@ export default function GroupTreePanel({
           padding-bottom: 4px !important;
         }
 
-        /* L1 vertical guide line */
-        .group-tree .ant-tree-treenode-selected::before,
-        .group-tree .ant-tree-treenode:hover::before {
-          content: none;
-        }
-
         /* Reduce indent */
         .group-tree .ant-tree-indent-unit {
           width: 16px !important;
-        }
-
-        /* Scrollbar */
-        .group-tree-body::-webkit-scrollbar {
-          width: 4px;
-        }
-        .group-tree-body::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .group-tree-body::-webkit-scrollbar-thumb {
-          background: var(--color-border-secondary, #f0f0f0);
-          border-radius: 2px;
         }
       `}</style>
     </div>

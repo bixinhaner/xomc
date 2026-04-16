@@ -921,32 +921,7 @@ export default function PlugAndPlay() {
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
           style={{ flexShrink: 0 }}
         >
-          {/* 策略列表标题 */}
-          <div className={styles.cardHeader}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-              <Text className={styles.cardHeaderTitle}>{t('provision.policyList')}</Text>
-              <Space>
-                <Select
-                  placeholder={t('provision.productType')}
-                  value={policyProductType || undefined}
-                  onChange={(value) => setPolicyProductType(value || '')}
-                  allowClear
-                  style={{ width: 140 }}
-                  options={PRODUCT_TYPES}
-                />
-                <Input
-                  placeholder={t('provision.searchPolicyPlaceholder')}
-                  prefix={<SearchOutlined />}
-                  value={policySearchText}
-                  onChange={(e) => setPolicySearchText(e.target.value)}
-                  style={{ width: 200 }}
-                  allowClear
-                />
-              </Space>
-            </div>
-          </div>
-
-          {/* Policy table */}
+          {/* Policy table with title in toolbar */}
           <div style={{ flex: 1, minHeight: 0 }}>
             <DataTable<Policy>
               tableId="policy-table"
@@ -960,6 +935,27 @@ export default function PlugAndPlay() {
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
               scroll={{ x: 'max-content', y: 200 }}
+              extraToolbarLeft={<Text className={styles.cardHeaderTitle}>{t('provision.policyList')}</Text>}
+              extraToolbarRight={
+                <Space>
+                  <Select
+                    placeholder={t('provision.productType')}
+                    value={policyProductType || undefined}
+                    onChange={(value) => setPolicyProductType(value || '')}
+                    allowClear
+                    style={{ width: 140 }}
+                    options={PRODUCT_TYPES}
+                  />
+                  <Input
+                    placeholder={t('provision.searchPolicyPlaceholder')}
+                    prefix={<SearchOutlined />}
+                    value={policySearchText}
+                    onChange={(e) => setPolicySearchText(e.target.value)}
+                    style={{ width: 200 }}
+                    allowClear
+                  />
+                </Space>
+              }
             />
           </div>
         </Card>

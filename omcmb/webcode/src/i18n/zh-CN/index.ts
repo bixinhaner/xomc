@@ -686,7 +686,9 @@ const messages: Record<string, string> = {
   'alarm.active':       '活跃告警',
 
   // 告警统计
+  'alarm.statistics.all':         '全部',
   'alarm.statistics.total':       '总数',
+  'alarm.statistics.title':       '告警统计',
   'alarm.statistics.critical':    '严重',
   'alarm.statistics.major':       '主要',
   'alarm.statistics.minor':       '次要',

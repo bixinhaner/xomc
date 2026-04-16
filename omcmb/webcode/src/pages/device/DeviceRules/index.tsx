@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   App,
   Button,
+  Card,
   Drawer,
   Dropdown,
   Form,
@@ -904,17 +905,24 @@ export default function DeviceRules() {
           collapsedRows={1}
         />
 
-        <DataTable<DeviceRule>
-          tableId="device-rules-table"
-          columns={columns}
-          dataSource={filteredRules}
-          loading={rulesLoading}
-          rowKey="id"
-          total={filteredRules.length}
-          pagination={false}
-          showPagination={false}
-          defaultDensity="default"
-        />
+        <Card
+          size="small"
+          bordered
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        >
+          <DataTable<DeviceRule>
+            tableId="device-rules-table"
+            columns={columns}
+            dataSource={filteredRules}
+            loading={rulesLoading}
+            rowKey="id"
+            total={filteredRules.length}
+            pagination={false}
+            showPagination={false}
+            defaultDensity="default"
+          />
+        </Card>
       </ListPageLayout>
 
       {/* 添加/编辑规则抽屉 */}

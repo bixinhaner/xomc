@@ -23,43 +23,9 @@ import type { Alarm, DealState, EventType } from '@/types/alarm';
 import type { AlarmFilter } from '@/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
+import styles from './CustomAlarmStats.module.css';
 
 const { Text } = Typography;
-
-// 统计项组件
-function StatItem({
-  label,
-  value,
-  color,
-  active,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  color?: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: '8px 16px',
-        borderRadius: 6,
-        cursor: onClick ? 'pointer' : 'default',
-        background: active ? '#E6F4FF' : 'transparent',
-        transition: 'all 0.2s',
-        minWidth: 70,
-      }}
-    >
-      <Text type="secondary" style={{ fontSize: 12 }}>{label}</Text>
-      <Text strong style={{ fontSize: 20, color: color || '#1F1F1F', lineHeight: 1.2 }}>{value}</Text>
-    </div>
-  );
-}
 
 // 告警级别颜色
 const SEVERITY_CONFIG: Record<string, { color: string; bgColor: string }> = {
@@ -955,16 +921,8 @@ export default function CustomAlarmStats() {
   // 左侧树面板
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          padding: '12px 12px 8px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: '1px solid #f0f0f0',
-        }}
-      >
-        <Text strong style={{ fontSize: 14 }}>
+      <div className={styles.treePanelHeader}>
+        <Text strong className={styles.treePanelTitle}>
           {t('alarm.customAlarmGroup')}
         </Text>
         <Button
@@ -976,7 +934,7 @@ export default function CustomAlarmStats() {
           {t('alarm.addGroupBtn')}
         </Button>
       </div>
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+      <div className={styles.treeSearchContainer}>
         <Input
           placeholder={t('alarm.searchGroup')}
           prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
@@ -984,34 +942,27 @@ export default function CustomAlarmStats() {
           onChange={(e) => setSearchText(e.target.value)}
           allowClear
           size="small"
+          className={styles.treeSearchInput}
         />
       </div>
-      <div className="custom-alarm-tree" style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
+      <div className={styles.treeNodesContainer}>
         <Tree
+          className="alarm-tree"
           treeData={filteredGroups.map((group) => ({
             key: group.id,
             title: (
-              <div
-                className="alarm-group-node"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  width: '100%',
-                  padding: '2px 0',
-                }}
-              >
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
-                  <AlertOutlined style={{ marginRight: 6, color: '#fa8c16' }} />
-                  <span>{group.name}</span>
+              <div className={styles.alarmGroupNode}>
+                <span className={styles.treeNodeContent}>
+                  <AlertOutlined className={styles.alarmGroupNodeIcon} />
+                  <span className={styles.treeNodeText}>{group.name}</span>
                 </span>
-                <Space size={0} className="node-actions" style={{ opacity: 0, transition: 'opacity 0.2s' }}>
+                <span className={styles.treeNodeActions}>
                   <Button
                     type="text"
                     size="small"
                     icon={<EditOutlined />}
                     onClick={(e) => { e.stopPropagation(); handleEditGroup(group.id); }}
-                    style={{ flexShrink: 0, padding: '0 4px' }}
+                    className={styles.treeNodeActionButton}
                     title={t('common.edit')}
                   />
                   <Button
@@ -1019,11 +970,11 @@ export default function CustomAlarmStats() {
                     size="small"
                     icon={<DeleteOutlined />}
                     onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
-                    style={{ flexShrink: 0, padding: '0 4px' }}
+                    className={styles.treeNodeActionButton}
                     danger
                     title={t('common.delete')}
                   />
-                </Space>
+                </span>
               </div>
             ),
             isLeaf: true,
@@ -1045,8 +996,6 @@ export default function CustomAlarmStats() {
         />
       </div>
       <style>{`
-        .alarm-group-node:hover .node-actions { opacity: 1 !important; }
-        .custom-alarm-tree .ant-tree-switcher-noop { display: none; }
         /* 列表卡片滚动条样式 - 页面特定，只滚动表格内容 */
         .custom-alarm-list-card .ant-card-body > div {
           position: absolute;
@@ -1078,71 +1027,59 @@ export default function CustomAlarmStats() {
         </Space>
       </div>
 
-      {/* 统计卡片 - 使用 StatItem 组件 */}
-      <Card size="small" bordered styles={{ body: { padding: '12px 16px' } }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <StatItem
-            label={t('alarm.stat.total')}
-            value={total}
-            active={activeQuickFilter === 'all'}
-            onClick={() => handleQuickFilter('all')}
-          />
-          <StatItem
-            label={t('alarm.stat.activeAlarm')}
-            value={activeTotal}
-            color="#E53935"
-            active={activeQuickFilter === 'active'}
-            onClick={() => handleQuickFilter('active')}
-          />
-          <StatItem
-            label={t('alarm.stat.historicalAlarm')}
-            value={historicalTotal}
-            color="#1890ff"
-            active={activeQuickFilter === 'historical'}
-            onClick={() => handleQuickFilter('historical')}
-          />
-          <StatItem
-            label={t('alarm.stat.critical')}
-            value={realStats.critical}
-            color="#E53935"
-            active={activeQuickFilter === 'critical'}
-            onClick={() => handleQuickFilter('critical')}
-          />
-          <StatItem
-            label={t('alarm.stat.major')}
-            value={realStats.major}
-            color="#FB8C00"
-            active={activeQuickFilter === 'major'}
-            onClick={() => handleQuickFilter('major')}
-          />
-          <StatItem
-            label={t('alarm.stat.minor')}
-            value={realStats.minor}
-            color="#FDD835"
-            active={activeQuickFilter === 'minor'}
-            onClick={() => handleQuickFilter('minor')}
-          />
-          <StatItem
-            label={t('alarm.stat.warning')}
-            value={realStats.warning}
-            color="#42A5F5"
-            active={activeQuickFilter === 'warning'}
-            onClick={() => handleQuickFilter('warning')}
-          />
-          <StatItem
-            label={t('alarm.stat.unacked')}
-            value={realStats.unacked}
-            color="#E53935"
-            active={activeQuickFilter === 'unacked'}
-            onClick={() => handleQuickFilter('unacked')}
-          />
-          <StatItem
-            label={t('alarm.stat.unread')}
-            value={rawAlarms.filter(a => a.unread === '1').length}
-            color="#722ED1"
-            active={activeQuickFilter === 'unread'}
-            onClick={() => handleQuickFilter('unread')}
-          />
+      {/* 统计卡片 - Pill Tabs 风格 */}
+      <Card size="small" styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}>
+        <div className={styles.cardHeader}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <Space size={16}>
+              <Text className={styles.cardHeaderTitle}>{t('alarm.statistics.title')}</Text>
+              <div className={styles.pillTabs}>
+                {[
+                  { key: 'all', label: t('alarm.stat.total') },
+                  { key: 'active', label: t('alarm.stat.activeAlarm') },
+                  { key: 'historical', label: t('alarm.stat.historicalAlarm') },
+                  { key: 'critical', label: t('alarm.stat.critical') },
+                  { key: 'major', label: t('alarm.stat.major') },
+                  { key: 'minor', label: t('alarm.stat.minor') },
+                  { key: 'warning', label: t('alarm.stat.warning') },
+                ].map(item => (
+                  <span
+                    key={item.key}
+                    className={`${styles.pillTab} ${activeQuickFilter === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
+                    onClick={() => handleQuickFilter(item.key)}
+                  >
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </Space>
+            <Space size={8}>
+              <div className={`${styles.statsBadge} ${styles.statsActive}`}>
+                <span>{t('alarm.stat.activeAlarm')}: {activeTotal}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsHistorical}`}>
+                <span>{t('alarm.stat.historicalAlarm')}: {historicalTotal}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsCritical}`}>
+                <span>{t('alarm.stat.critical')}: {realStats.critical}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsMajor}`}>
+                <span>{t('alarm.stat.major')}: {realStats.major}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsMinor}`}>
+                <span>{t('alarm.stat.minor')}: {realStats.minor}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsWarning}`}>
+                <span>{t('alarm.stat.warning')}: {realStats.warning}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsUnacked}`}>
+                <span>{t('alarm.stat.unacked')}: {realStats.unacked}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsUnread}`}>
+                <span>{t('alarm.stat.unread')}: {rawAlarms.filter(a => a.unread === '1').length}</span>
+              </div>
+            </Space>
+          </div>
         </div>
       </Card>
 

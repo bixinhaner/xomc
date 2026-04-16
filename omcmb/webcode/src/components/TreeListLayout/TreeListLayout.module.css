@@ -1,0 +1,247 @@
+/**
+ * TreeListLayout - Tree 内部样式优化
+ * 只调整 tree 内部间距和样式，不改变整体宽度
+ */
+
+/* ========================================
+   树面板 Header
+   ======================================== */
+.treePanelHeader {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, #fafafa, #ffffff);
+}
+
+:global([data-theme='tech']) .treePanelHeader,
+:global([data-theme='cyberpunk']) .treePanelHeader {
+  background: linear-gradient(to bottom, #1a1a1a, #141414);
+  border-bottom-color: #262626;
+}
+
+.treePanelTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: #262626;
+  letter-spacing: -0.01em;
+}
+
+:global([data-theme='tech']) .treePanelTitle,
+:global([data-theme='cyberpunk']) .treePanelTitle {
+  color: #e8e8e8;
+}
+
+/* ========================================
+   搜索框容器
+   ======================================== */
+.treeSearchContainer {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+:global([data-theme='tech']) .treeSearchContainer,
+:global([data-theme='cyberpunk']) .treeSearchContainer {
+  border-bottom-color: #262626;
+}
+
+.treeSearchInput {
+  height: 32px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.treeSearchInput:focus,
+.treeSearchInput:focus-within {
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
+}
+
+/* ========================================
+   树节点容器
+   ======================================== */
+.treeNodesContainer {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 8px 12px;
+}
+
+/* 滚动条样式优化 */
+.treeNodesContainer::-webkit-scrollbar {
+  width: 6px;
+}
+
+.treeNodesContainer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.treeNodesContainer::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+.treeNodesContainer::-webkit-scrollbar-thumb:hover {
+  background: #bfbfbf;
+}
+
+:global([data-theme='tech']) .treeNodesContainer::-webkit-scrollbar-thumb,
+:global([data-theme='cyberpunk']) .treeNodesContainer::-webkit-scrollbar-thumb {
+  background: #404040;
+}
+
+:global([data-theme='tech']) .treeNodesContainer::-webkit-scrollbar-thumb:hover,
+:global([data-theme='cyberpunk']) .treeNodesContainer::-webkit-scrollbar-thumb:hover {
+  background: #525252;
+}
+
+/* ========================================
+   树节点样式
+   ======================================== */
+
+/* 禁用 antd 默认的 hover 和 selected 背景 */
+:global(.ant-tree-node-content-wrapper) {
+  background: transparent !important;
+}
+
+:global(.ant-tree-node-content-wrapper:hover) {
+  background: transparent !important;
+}
+
+:global(.ant-tree-node-content-wrapper.ant-tree-node-selected) {
+  background: transparent !important;
+}
+
+/* 树节点基础样式 */
+.treeNode {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  margin: 1px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  position: relative;
+  min-height: 36px;
+}
+
+.treeNode:hover {
+  background: rgba(0, 0, 0, 0.04);
+  transform: translateX(2px);
+}
+
+:global([data-theme='tech']) .treeNode:hover,
+:global([data-theme='cyberpunk']) .treeNode:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 选中状态 */
+.treeNodeSelected {
+  background: linear-gradient(90deg, rgba(22, 119, 255, 0.08), rgba(22, 119, 255, 0.03)) !important;
+}
+
+:global([data-theme='tech']) .treeNodeSelected,
+:global([data-theme='cyberpunk']) .treeNodeSelected {
+  background: linear-gradient(90deg, rgba(22, 119, 255, 0.15), rgba(22, 119, 255, 0.05)) !important;
+}
+
+/* 树节点内容 */
+.treeNodeContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.treeNodeIcon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #8c8c8c;
+}
+
+.treeNodeSelected .treeNodeIcon {
+  color: #1677ff;
+}
+
+.treeNodeText {
+  font-size: 13px;
+  color: #595959;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeNodeSelected .treeNodeText {
+  color: #1677ff;
+  font-weight: 500;
+}
+
+:global([data-theme='tech']) .treeNodeText,
+:global([data-theme='cyberpunk']) .treeNodeText {
+  color: #a6a6a6;
+}
+
+:global([data-theme='tech']) .treeNodeSelected .treeNodeText,
+:global([data-theme='cyberpunk']) .treeNodeSelected .treeNodeText {
+  color: #4096ff;
+}
+
+/* 树节点操作按钮 */
+.treeNodeActions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.treeNode:hover .treeNodeActions {
+  opacity: 1;
+}
+
+.treeNodeActionButton {
+  padding: 2px 4px;
+  height: auto;
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.treeNodeActionButton:hover {
+  color: #595959;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:global([data-theme='tech']) .treeNodeActionButton:hover,
+:global([data-theme='cyberpunk']) .treeNodeActionButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ========================================
+   树节点数量标签
+   ======================================== */
+.treeNodeCountBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: #f0f0f0;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8c8c8c;
+  margin-left: auto;
+}
+
+.treeNodeSelected .treeNodeCountBadge {
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+}
+
+:global([data-theme='tech']) .treeNodeCountBadge,
+:global([data-theme='cyberpunk']) .treeNodeCountBadge {
+  background: #303030;
+  color: #a6a6a6;
+}

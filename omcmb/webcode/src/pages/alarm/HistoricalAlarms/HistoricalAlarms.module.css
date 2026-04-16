@@ -1,0 +1,150 @@
+/**
+ * 历史告警页面 - Pill Tabs 风格统计卡片
+ * 参考即插即用执行状态卡片样式
+ */
+
+/* Card Header */
+.cardHeader {
+  background: linear-gradient(to bottom, #fafafa, #ffffff);
+  padding: 16px 20px;
+  border-bottom: none;
+}
+
+/* Dark mode */
+:global([data-theme="tech"]) .cardHeader,
+:global([data-theme="cyberpunk"]) .cardHeader {
+  background: linear-gradient(to bottom, #1a1a1a, #141414);
+}
+
+.cardHeaderTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #262626;
+}
+
+:global([data-theme="tech"]) .cardHeaderTitle,
+:global([data-theme="cyberpunk"]) .cardHeaderTitle {
+  color: #e8e8e8;
+}
+
+/* Pill Tabs */
+.pillTabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pillTab {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+/* Pill Tab Active - Light mode */
+.pillTabActive {
+  background: #1677ff;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(22, 119, 255, 0.25);
+}
+
+/* Pill Tab Active - Dark mode */
+:global([data-theme="tech"]) .pillTabActive,
+:global([data-theme="cyberpunk"]) .pillTabActive {
+  background: #1677ff;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(22, 119, 255, 0.4);
+}
+
+/* Pill Tab Inactive - Light mode */
+.pillTabInactive {
+  background: #f5f5f5;
+  color: #595959;
+}
+
+.pillTabInactive:hover {
+  background: #e8e8e8;
+}
+
+/* Pill Tab Inactive - Dark mode */
+:global([data-theme="tech"]) .pillTabInactive,
+:global([data-theme="cyberpunk"]) .pillTabInactive {
+  background: #2a2a2a;
+  color: #a6a6a6;
+}
+
+:global([data-theme="tech"]) .pillTabInactive:hover,
+:global([data-theme="cyberpunk"]) .pillTabInactive:hover {
+  background: #3a3a3a;
+}
+
+/* Stats Badge */
+.statsBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Critical - Light mode */
+.statsCritical {
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  color: #ff4d4f;
+}
+
+:global([data-theme="tech"]) .statsCritical,
+:global([data-theme="cyberpunk"]) .statsCritical {
+  background: rgba(255, 77, 79, 0.15);
+  border-color: rgba(255, 77, 79, 0.4);
+  color: #ff7875;
+}
+
+/* Major - Light mode */
+.statsMajor {
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  color: #fa8c16;
+}
+
+:global([data-theme="tech"]) .statsMajor,
+:global([data-theme="cyberpunk"]) .statsMajor {
+  background: rgba(250, 140, 22, 0.15);
+  border-color: rgba(250, 140, 22, 0.4);
+  color: #ffc069;
+}
+
+/* Minor - Light mode */
+.statsMinor {
+  background: #feffe6;
+  border: 1px solid #fff1b8;
+  color: #faad14;
+}
+
+:global([data-theme="tech"]) .statsMinor,
+:global([data-theme="cyberpunk"]) .statsMinor {
+  background: rgba(250, 173, 20, 0.15);
+  border-color: rgba(250, 173, 20, 0.4);
+  color: #ffc53d;
+}
+
+/* Warning - Light mode */
+.statsWarning {
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  color: #1677ff;
+}
+
+:global([data-theme="tech"]) .statsWarning,
+:global([data-theme="cyberpunk"]) .statsWarning {
+  background: rgba(22, 119, 255, 0.15);
+  border-color: rgba(22, 119, 255, 0.4);
+  color: #4096ff;
+}

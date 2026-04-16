@@ -70,7 +70,7 @@ export default function TreeListPageLayout({
         width: '100%',
         height: '100%',
         overflow: 'hidden',
-        gap: 0,
+        gap: 15,
       }}
     >
       {/* Left tree panel */}
@@ -89,29 +89,6 @@ export default function TreeListPageLayout({
       >
         {tree}
       </div>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="拖拽调整面板宽度"
-        onMouseDown={handleDividerMouseDown}
-        style={{
-          width: 4,
-          flexShrink: 0,
-          cursor: 'col-resize',
-          background: 'transparent',
-          transition: 'background 150ms ease',
-          position: 'relative',
-          zIndex: 1,
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = token.colorBorder;
-        }}
-        onMouseLeave={(e) => {
-          if (!isDragging.current) {
-            (e.currentTarget as HTMLElement).style.background = 'transparent';
-          }
-        }}
-      />
 
       {/* Right content panel */}
       <div

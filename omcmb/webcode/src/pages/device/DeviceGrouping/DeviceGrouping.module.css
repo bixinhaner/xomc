@@ -1,0 +1,120 @@
+/**
+ * 设备分组页面 - Tree 内部样式
+ * 只调整 tree 内部间距和样式，不改变整体宽度
+ */
+
+@import '../../../components/TreeListLayout/TreeListLayout.module.css';
+
+/* 分组节点特定样式 */
+.groupNode {
+  composes: treeNode;
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.groupNodeLevel1 {
+  font-weight: 500;
+}
+
+.groupNodeLevel1 .treeNodeText {
+  font-size: 13px;
+  color: #262626;
+}
+
+.groupNodeLevel2 {
+  padding-left: 20px;
+}
+
+.groupNodeLevel2 .treeNodeText {
+  font-size: 13px;
+  color: #595959;
+}
+
+/* 分组统计标签 */
+.groupCountBadge {
+  composes: treeNodeCountBadge;
+}
+
+/* 禁用展开收起箭头的所有背景和hover效果 */
+:global(.group-tree .ant-tree-switcher) {
+  display: flex;
+  align-items: center;
+  background: transparent !important;
+}
+
+:global(.group-tree .ant-tree-switcher:hover) {
+  background: transparent !important;
+}
+
+:global(.group-tree .ant-tree-switcher::before) {
+  background: transparent !important;
+}
+
+:global(.group-tree .ant-tree-switcher:hover::before) {
+  background: transparent !important;
+}
+
+/* 禁用 antd 默认的 node-content-wrapper hover 背景 */
+:global(.group-tree .ant-tree-node-content-wrapper) {
+  display: flex;
+  align-items: center;
+  background: transparent !important;
+}
+
+:global(.group-tree .ant-tree-node-content-wrapper:hover) {
+  background: transparent !important;
+}
+
+:global(.group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected) {
+  background: transparent !important;
+}
+
+/* 确保 antd 的 title 元素不限制宽度 */
+:global(.group-tree .ant-tree-title) {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 当整个 treenode 被 hover 时应用背景 */
+:global(.group-tree .ant-tree-treenode:hover .groupNode) {
+  background: rgba(0, 0, 0, 0.04);
+  transform: translateX(2px);
+}
+
+:global([data-theme='tech'] .group-tree .ant-tree-treenode:hover .groupNode),
+:global([data-theme='cyberpunk'] .group-tree .ant-tree-treenode:hover .groupNode) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 当 treenode 被选中时应用背景 */
+:global(.group-tree .ant-tree-treenode-selected .groupNode) {
+  background: linear-gradient(90deg, rgba(22, 119, 255, 0.08), rgba(22, 119, 255, 0.03)) !important;
+}
+
+:global([data-theme='tech'] .group-tree .ant-tree-treenode-selected .groupNode),
+:global([data-theme='cyberpunk'] .group-tree .ant-tree-treenode-selected .groupNode) {
+  background: linear-gradient(90deg, rgba(22, 119, 255, 0.15), rgba(22, 119, 255, 0.05)) !important;
+}
+
+/* 操作按钮样式加深 */
+:global(.group-tree .treeNodeActionButton) {
+  color: #595959 !important;
+  font-size: 14px !important;
+}
+
+:global(.group-tree .treeNodeActionButton:hover) {
+  color: #1677ff !important;
+  background: rgba(22, 119, 255, 0.08) !important;
+}
+
+:global(.group-tree .ant-tree-treenode-selected .treeNodeActionButton) {
+  color: #1677ff !important;
+}
+
+:global(.group-tree .ant-tree-treenode-selected .treeNodeActionButton:hover) {
+  background: rgba(22, 119, 255, 0.15) !important;
+}

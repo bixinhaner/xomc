@@ -685,7 +685,9 @@ const messages: Record<string, string> = {
   'alarm.active':       'Active Alarms',
 
   // Alarm Statistics
+  'alarm.statistics.all':         'All',
   'alarm.statistics.total':       'Total',
+  'alarm.statistics.title':       'Alarm Statistics',
   'alarm.statistics.critical':    'Critical',
   'alarm.statistics.major':       'Major',
   'alarm.statistics.minor':       'Minor',

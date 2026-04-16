@@ -7,6 +7,8 @@ import {
   EyeOutlined,
   MinusCircleOutlined,
   SyncOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 
 import DataTable from '@/components/DataTable';
@@ -21,6 +23,7 @@ import type { AlarmFilter } from '@/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal, { type ExportParams } from './ExportModal';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
+import styles from './CurrentAlarms.module.css';
 
 const { Text } = Typography;
 
@@ -69,41 +72,6 @@ const QUICK_FILTER_OPTIONS = [
 ];
 
 // 自动刷新间隔选项 - 移至组件内 useMemo
-
-// 统计项组件
-function StatItem({
-  label,
-  value,
-  color,
-  active,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  color?: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: '8px 16px',
-        borderRadius: 6,
-        cursor: onClick ? 'pointer' : 'default',
-        background: active ? '#E6F4FF' : 'transparent',
-        transition: 'all 0.2s',
-        minWidth: 70,
-      }}
-    >
-      <Text type="secondary" style={{ fontSize: 12 }}>{label}</Text>
-      <Text strong style={{ fontSize: 20, color: color || '#1F1F1F', lineHeight: 1.2 }}>{value}</Text>
-    </div>
-  );
-}
 
 export default function CurrentAlarms() {
   const t = useT();
@@ -635,62 +603,57 @@ export default function CurrentAlarms() {
         </Space>
       }
     >
-      {/* 统计卡片 */}
+      {/* 统计卡片 - Pill Tabs 风格 */}
       <Card
         size="small"
-        bordered
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
         style={{ marginBottom: 12 }}
-        styles={{ body: { padding: '12px 16px' } }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <StatItem
-            label={t('alarm.statistics.total')}
-            value={realStats.total}
-            active={activeQuickFilter === 'all'}
-            onClick={() => handleQuickFilter('all')}
-          />
-          <StatItem
-            label={t('alarm.statistics.critical')}
-            value={realStats.critical}
-            color="#E53935"
-            active={activeQuickFilter === 'critical'}
-            onClick={() => handleQuickFilter('critical')}
-          />
-          <StatItem
-            label={t('alarm.statistics.major')}
-            value={realStats.major}
-            color="#FB8C00"
-            active={activeQuickFilter === 'major'}
-            onClick={() => handleQuickFilter('major')}
-          />
-          <StatItem
-            label={t('alarm.statistics.minor')}
-            value={realStats.minor}
-            color="#FDD835"
-            active={activeQuickFilter === 'minor'}
-            onClick={() => handleQuickFilter('minor')}
-          />
-          <StatItem
-            label={t('alarm.statistics.warning')}
-            value={realStats.warning}
-            color="#42A5F5"
-            active={activeQuickFilter === 'warning'}
-            onClick={() => handleQuickFilter('warning')}
-          />
-          <StatItem
-            label={t('alarm.statistics.unconfirmed')}
-            value={realStats.unacked}
-            color="#E53935"
-            active={activeQuickFilter === 'unacked'}
-            onClick={() => handleQuickFilter('unacked')}
-          />
-          <StatItem
-            label={t('alarm.statistics.unread')}
-            value={realStats.unread}
-            color="#722ED1"
-            active={activeQuickFilter === 'unread'}
-            onClick={() => handleQuickFilter('unread')}
-          />
+        <div className={styles.cardHeader}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <Space size={16}>
+              <Text className={styles.cardHeaderTitle}>{t('nav.alarm.statistics')}</Text>
+              <div className={styles.pillTabs}>
+                {[
+                  { key: 'all', label: t('alarm.statistics.all') },
+                  { key: 'critical', label: t('alarm.statistics.critical') },
+                  { key: 'major', label: t('alarm.statistics.major') },
+                  { key: 'minor', label: t('alarm.statistics.minor') },
+                  { key: 'warning', label: t('alarm.statistics.warning') },
+                  { key: 'unacked', label: t('alarm.statistics.unconfirmed') },
+                  { key: 'unread', label: t('alarm.statistics.unread') },
+                ].map(item => (
+                  <span
+                    key={item.key}
+                    className={`${styles.pillTab} ${activeQuickFilter === item.key ? styles.pillTabActive : styles.pillTabInactive}`}
+                    onClick={() => handleQuickFilter(item.key)}
+                  >
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </Space>
+            <Space size={8}>
+              <div className={`${styles.statsBadge} ${styles.statsCritical}`}>
+                <span>{t('alarm.statistics.critical')}: {realStats.critical}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsMajor}`}>
+                <span>{t('alarm.statistics.major')}: {realStats.major}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsMinor}`}>
+                <span>{t('alarm.statistics.minor')}: {realStats.minor}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsWarning}`}>
+                <span>{t('alarm.statistics.warning')}: {realStats.warning}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsUnacked}`}>
+                <span>{t('alarm.statistics.unconfirmed')}: {realStats.unacked}</span>
+              </div>
+              <div className={`${styles.statsBadge} ${styles.statsUnread}`}>
+                <span>{t('alarm.statistics.unread')}: {realStats.unread}</span>
+              </div>
+            </Space>
+          </div>
         </div>
       </Card>
 

@@ -108,7 +108,7 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'CodeOutlined',
     children: [
       { key: 'mml-console', label: 'nav.mml.console',  path: '/mml/console' },
-      // { key: 'mml-script',   label: 'nav.mml.script',           path: '/mml/script' },  // 隐藏脚本任务
+      { key: 'mml-script',   label: 'nav.mml.script',           path: '/mml/script' },  // 脚本任务
       // { key: 'mml-cmd',     label: 'nav.mml.commands',         path: '/mml/commands' },  // 隐藏
     ],
   },
