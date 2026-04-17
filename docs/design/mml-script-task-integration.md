@@ -1,258 +1,12 @@
-# MML Tasks 与 Device Tasks 整合完整方案
+# MML 脚本与任务系统共用整合方案
 
-> 基于父子关系方案（方案 B），结合 MML 脚本需求，形成完整的任务系统整合方案
-
----
-
-## 目录
-
-- [一、需求背景与表结构对比](#一需求背景与表结构对比)
-- [二、功能差异分析](#二功能差异分析)
-- [三、整合方案对比与推荐](#三整合方案对比与推荐)
-- [四、共用点分析与共用服务设计](#四共用点分析与共用服务设计)
-- [五、完整数据模型设计](#五完整数据模型设计)
-- [六、共用服务架构与实现](#六共用服务架构与实现)
-- [七、API 设计](#七api-设计)
-- [八、完整业务流程示例](#八完整业务流程示例)
-- [九、实施计划](#九实施计划)
-- [十、优势与收益分析](#十优势与收益分析)
-- [十一、风险与注意事项](#十一风险与注意事项)
-- [十二、总结](#十二总结)
+> 基于父子关系方案（方案 B），分析 MML 脚本与设备任务系统的共用点和整合策略
 
 ---
 
-## 一、需求背景与表结构对比
+## 一、共用点分析
 
-### 1.1 device_tasks 表（现有）
-
-```sql
-CREATE TABLE device_tasks (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_sn       VARCHAR(64) NOT NULL,           -- 单个设备 SN
-    method          VARCHAR(64) NOT NULL,           -- RPC 方法名
-    params          JSONB,                          -- 方法参数
-    priority        INTEGER DEFAULT 10,             -- 优先级
-    command_key     VARCHAR(128),                   -- TR069 CommandKey
-    cwmp_id         VARCHAR(256),                   -- SOAP Header ID
-    
-    status          VARCHAR(16) NOT NULL DEFAULT 'pending',
-    retry_count     INTEGER DEFAULT 0,
-    max_retries     INTEGER DEFAULT 3,
-    
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    sent_at         TIMESTAMPTZ,
-    completed_at    TIMESTAMPTZ,
-    expires_at      TIMESTAMPTZ,
-    
-    result          JSONB,                          -- 单个设备执行结果
-    error_code      INTEGER,
-    error_message   TEXT,
-    
-    source          VARCHAR(32) DEFAULT 'api',      -- 任务来源
-    creator_id      VARCHAR(64),                    -- 创建者 ID
-    description     TEXT                            -- 任务描述
-);
-```
-
-**核心特征：**
-- ✅ 面向**单个设备**的任务
-- ✅ TR-069 RPC 方法调用
-- ✅ 实时异步任务队列
-- ✅ 支持重试、优先级、超时
-- ✅ 与 Redis 队列配合使用
-- ❌ 不支持批量设备
-- ❌ 不支持定时/周期执行
-- ❌ 不支持任务编排（多命令序列）
-
----
-
-### 1.2 mml_tasks 表（计划）
-
-```sql
-CREATE TABLE mml_tasks (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_name       VARCHAR(200),                   -- 任务名称
-    script_id       UUID REFERENCES mml_scripts(id),-- 关联脚本（可选）
-    device_sns      JSONB NOT NULL,                 -- 多个设备 SN 列表
-    commands        JSONB NOT NULL DEFAULT '[]',    -- 多个命令序列
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
-    results         JSONB DEFAULT '[]',             -- 所有设备执行结果
-    creator         VARCHAR(100),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 扩展字段
-execute_type      VARCHAR(20) DEFAULT 'active',     -- 执行类型：active/scheduled/periodic
-scheduled_at      TIMESTAMPTZ,                      -- 定时执行时间
-period_start      TIMESTAMPTZ,                      -- 周期开始时间
-period_end        TIMESTAMPTZ,                      -- 周期结束时间
-period_time       TIME,                             -- 周期执行时间点
-offline_retry     BOOLEAN DEFAULT false,            -- 离线重试
-offline_wait      INT DEFAULT 60,                   -- 离线等待时间（秒）
-failed_retry      BOOLEAN DEFAULT false,            -- 失败重试
-retry_count       INT DEFAULT 3,                    -- 重试次数
-retry_interval    INT DEFAULT 5,                    -- 重试间隔（分钟）
-started_at        TIMESTAMPTZ,                      -- 开始执行时间
-finished_at       TIMESTAMPTZ,                      -- 完成时间
-total_devices     INT DEFAULT 0,                    -- 设备总数
-success_count     INT DEFAULT 0,                    -- 成功设备数
-failed_count      INT DEFAULT 0;                    -- 失败设备数
-```
-
-**核心特征：**
-- ✅ 面向**批量设备**的任务
-- ✅ 支持**多命令序列**（脚本）
-- ✅ 支持**定时/周期执行**
-- ✅ 支持**离线重试**策略
-- ✅ 任务级别的状态跟踪（汇总统计）
-- ✅ 与 MML 脚本关联
-- ❌ 不直接管理单个 RPC 调用细节
-
----
-
-## 二、功能差异分析
-
-| 功能维度 | device_tasks | mml_tasks | 差异程度 |
-|---------|--------------|-----------|---------|
-| **任务粒度** | 单设备单命令 | 多设备多命令 | 🔴 重大差异 |
-| **批量支持** | ❌ 不支持 | ✅ 支持 | 🔴 重大差异 |
-| **命令序列** | ❌ 单命令 | ✅ 多命令编排 | 🔴 重大差异 |
-| **定时执行** | ❌ 不支持 | ✅ 支持 | 🟡 中等差异 |
-| **周期执行** | ❌ 不支持 | ✅ 支持 | 🟡 中等差异 |
-| **离线重试** | ❌ 不支持 | ✅ 支持 | 🟡 中等差异 |
-| **任务编排** | ❌ 无 | ✅ 脚本关联 | 🟡 中等差异 |
-| **状态管理** | 单任务状态 | 汇总统计状态 | 🟡 中等差异 |
-| **RPC 细节** | ✅ cwmp_id、command_key | ❌ 不关心 | 🟢 可忽略 |
-| **优先级** | ✅ 支持 | ❌ 不需要 | 🟢 可忽略 |
-| **超时控制** | ✅ expires_at | ❌ 不需要 | 🟢 可忽略 |
-
----
-
-## 三、整合方案对比与推荐
-
-### 方案 A：完全整合（不推荐 ❌）
-
-**思路：** 删除 `mml_tasks` 表，所有功能合并到 `device_tasks` 表
-
-**问题：**
-1. **数据模型不匹配**：`device_tasks` 一条记录 = 一个设备的一个命令，`mml_tasks` 一条记录 = 多个设备的多个命令
-2. **批量操作困难**：需要大量聚合查询才能展示任务进度
-3. **定时/周期执行无法表达**：`device_tasks` 是即时任务，创建后立即进入队列
-4. **脚本关联丢失**：`mml_tasks` 可以关联 `mml_scripts` 表，`device_tasks` 没有这个概念
-5. **前端展示复杂**：前端需要显示"任务列表"（宏观视角），如果只有 `device_tasks`，需要大量聚合查询
-
-**结论：❌ 不可行，会严重破坏现有架构**
-
----
-
-### 方案 B：父子关系 + 共用服务层（强烈推荐 ✅✅✅）
-
-**思路：** 
-- `mml_tasks` 作为父任务（业务层），`device_tasks` 作为子任务（执行层）
-- 提取共用能力（任务拆分、调度、监控、重试）形成共用服务层
-- 所有批量任务共用底层执行引擎
-
-**数据模型：**
-
-```sql
--- mml_tasks 作为高层任务编排
-CREATE TABLE mml_tasks (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_name       VARCHAR(200),
-    script_id       UUID REFERENCES mml_scripts(id),
-    device_sns      JSONB NOT NULL,
-    commands        JSONB NOT NULL DEFAULT '[]',
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
-    
-    -- 执行策略
-    execute_type    VARCHAR(20) DEFAULT 'active',
-    scheduled_at    TIMESTAMPTZ,
-    period_start    TIMESTAMPTZ,
-    period_end      TIMESTAMPTZ,
-    period_time     TIME,
-    offline_retry   BOOLEAN DEFAULT false,
-    offline_wait    INT DEFAULT 60,
-    failed_retry    BOOLEAN DEFAULT false,
-    retry_count     INT DEFAULT 3,
-    retry_interval  INT DEFAULT 5,
-    
-    -- 汇总统计
-    total_devices   INT DEFAULT 0,
-    success_count   INT DEFAULT 0,
-    failed_count    INT DEFAULT 0,
-    
-    -- 时间
-    started_at      TIMESTAMPTZ,
-    finished_at     TIMESTAMPTZ,
-    creator         VARCHAR(100),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- device_tasks 扩展字段（多态关联）
-ALTER TABLE device_tasks 
-ADD COLUMN parent_task_id UUID,              -- 关联父任务（多态）
-ADD COLUMN parent_task_type VARCHAR(50),     -- 父任务类型：mml/provisioning/rule
-ADD COLUMN task_type VARCHAR(32) DEFAULT 'normal',
-ADD COLUMN retry_strategy JSONB DEFAULT '{}',
-ADD COLUMN next_retry_at TIMESTAMPTZ,
-ADD COLUMN command_order INT,
-ADD COLUMN depends_on INT[];
-
--- 索引
-CREATE INDEX idx_device_tasks_parent ON device_tasks(parent_task_id, parent_task_type);
-CREATE INDEX idx_device_tasks_type ON device_tasks(task_type);
-CREATE INDEX idx_device_tasks_retry ON device_tasks(next_retry_at) WHERE next_retry_at IS NOT NULL;
-```
-
-**优势：**
-
-1. ✅ **完全复用现有基础设施**
-   - `device_tasks` 的核心逻辑完全复用
-   - ACS Worker 无需修改
-   - Redis 队列机制不变
-
-2. ✅ **清晰的任务层次**
-   - `mml_tasks`：用户视角的"任务"（宏观）
-   - `device_tasks`：系统视角的"子任务"（微观）
-
-3. ✅ **高度共用的服务层**
-   - Task Splitter：所有批量任务共用
-   - Task Scheduler：所有定时/周期任务共用
-   - Progress Monitor：所有父任务进度汇总共用
-   - Retry Engine：所有重试策略共用
-
-4. ✅ **灵活的扩展性**
-   - 未来新增任务类型只需创建父任务表
-   - 调用共用服务，无需修改底层执行引擎
-
-5. ✅ **前端友好**
-   - 任务列表页面：查询父任务表
-   - 任务详情页面：查询 `device_tasks WHERE parent_task_id = ?`
-
-**劣势：**
-
-1. ⚠️ 需要额外的数据同步逻辑（可通过事件驱动优化）
-2. ⚠️ 需要扩展 `device_tasks` 表（增加字段，影响范围小）
-
----
-
-### 方案 C：独立并存（备选 ⚠️）
-
-**思路：** `mml_tasks` 和 `device_tasks` 完全独立，通过应用层协调
-
-**劣势：**
-- ❌ 数据关联弱，依赖应用层维护
-- ❌ 查询复杂，需要多次 JOIN 或聚合
-- ❌ 数据一致性难以保证
-- ❌ 不推荐用于生产环境
-
----
-
-## 四、共用点分析与共用服务设计
-
-### 4.1 现有功能矩阵
+### 1.1 现有功能矩阵
 
 | 功能模块 | MML 脚本任务 | 设备任务 | 共用可能性 |
 |---------|-------------|---------|-----------|
@@ -269,9 +23,9 @@ CREATE INDEX idx_device_tasks_retry ON device_tasks(next_retry_at) WHERE next_re
 
 ---
 
-### 4.2 可共用的核心能力
+### 1.2 可共用的核心能力
 
-#### ✅ 4.2.1 任务拆分引擎（高度共用）
+#### ✅ 1.2.1 任务拆分引擎（高度共用）
 
 **现状：**
 - MML 任务需要拆分为 N（设备）× M（命令）个子任务
@@ -286,7 +40,7 @@ package task
 // TaskSplitter 任务拆分器（通用）
 type TaskSplitter interface {
     // SplitTask 将父任务拆分为子任务
-    SplitTask(ctx context.Context, parentTaskID uuid.UUID, parentType string, strategy SplitStrategy) error
+    SplitTask(ctx context.Context, parentTaskID uuid.UUID, strategy SplitStrategy) error
 }
 
 // SplitStrategy 拆分策略
@@ -311,7 +65,7 @@ type CommandTemplate struct {
 
 ```go
 // MML 任务拆分
-splitter.SplitTask(ctx, mmlTaskID, "mml", SplitStrategy{
+splitter.SplitTask(ctx, mmlTaskID, SplitStrategy{
     Devices:  []string{"SN001", "SN002"},
     Commands: []CommandTemplate{
         {Method: "GetParameterValues", Params: {"names": ["Device.DeviceInfo."]}, Order: 1},
@@ -321,7 +75,7 @@ splitter.SplitTask(ctx, mmlTaskID, "mml", SplitStrategy{
 })
 
 // 自动开站任务拆分
-splitter.SplitTask(ctx, provTaskID, "provisioning", SplitStrategy{
+splitter.SplitTask(ctx, provTaskID, SplitStrategy{
     Devices:  []string{"SN003"},
     Commands: []CommandTemplate{
         {Method: "GetParameterValues", Params: {...}, Order: 1},
@@ -334,13 +88,34 @@ splitter.SplitTask(ctx, provTaskID, "provisioning", SplitStrategy{
 
 ---
 
-#### ✅ 4.2.2 任务调度器（高度共用）
+#### ✅ 1.2.2 任务调度器（高度共用）
 
 **现状：**
 - MML 任务支持：立即执行、定时执行、周期执行、挂起
 - 其他批量任务也可能需要定时/周期执行
 
 **共用方案：**
+
+```sql
+-- 通用任务调度配置表（可选，也可以直接存在父任务表中）
+CREATE TABLE task_schedules (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_task_id  UUID NOT NULL,              -- 关联父任务
+    execute_type    VARCHAR(20) NOT NULL DEFAULT 'active', -- active/scheduled/periodic/suspended
+    scheduled_at    TIMESTAMPTZ,                -- 定时执行时间
+    period_start    TIMESTAMPTZ,                -- 周期开始时间
+    period_end      TIMESTAMPTZ,                -- 周期结束时间
+    period_time     TIME,                       -- 周期执行时间点
+    status          VARCHAR(20) DEFAULT 'active', -- active/paused/completed
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_task_schedules_parent ON task_schedules(parent_task_id);
+CREATE INDEX idx_task_schedules_type ON task_schedules(execute_type);
+CREATE INDEX idx_task_schedules_scheduled ON task_schedules(scheduled_at) 
+    WHERE scheduled_at IS NOT NULL AND status = 'active';
+```
 
 ```go
 package scheduler
@@ -360,7 +135,7 @@ func (s *TaskScheduler) CheckAndExecute(ctx context.Context) error {
     
     for _, task := range scheduledTasks {
         // 拆分并执行
-        if err := s.splitAndExecute(ctx, task.ID, task.Type); err != nil {
+        if err := s.splitAndExecute(ctx, task.ID); err != nil {
             log.Printf("Failed to execute scheduled task %s: %v", task.ID, err)
         }
     }
@@ -373,14 +148,14 @@ func (s *TaskScheduler) CheckAndExecute(ctx context.Context) error {
     
     for _, task := range periodicTasks {
         // 创建新的任务实例
-        instanceID, err := s.createPeriodicInstance(ctx, task.ID, task.Type)
+        instanceID, err := s.createPeriodicInstance(ctx, task.ID)
         if err != nil {
             log.Printf("Failed to create periodic instance: %v", err)
             continue
         }
         
         // 拆分并执行
-        if err := s.splitAndExecute(ctx, instanceID, task.Type); err != nil {
+        if err := s.splitAndExecute(ctx, instanceID); err != nil {
             log.Printf("Failed to execute periodic task %s: %v", instanceID, err)
         }
     }
@@ -412,7 +187,7 @@ func StartSchedulerWorker(ctx context.Context, scheduler *TaskScheduler) {
 
 ---
 
-#### ✅ 4.2.3 进度监控器（高度共用）
+#### ✅ 1.2.3 进度监控器（高度共用）
 
 **现状：**
 - MML 任务需要汇总统计：total_devices、success_count、failed_count
@@ -429,7 +204,7 @@ type ProgressMonitor struct {
 }
 
 // UpdateProgress 更新父任务进度
-func (m *ProgressMonitor) UpdateProgress(ctx context.Context, parentTaskID uuid.UUID, parentType string) error {
+func (m *ProgressMonitor) UpdateProgress(ctx context.Context, parentTaskID uuid.UUID) error {
     // 查询子任务统计
     var stats struct {
         Total       int
@@ -447,8 +222,8 @@ func (m *ProgressMonitor) UpdateProgress(ctx context.Context, parentTaskID uuid.
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'sent') as running
         FROM device_tasks
-        WHERE parent_task_id = $1 AND parent_task_type = $2
-    `, parentTaskID, parentType).Scan(&stats.Total, &stats.Completed, &stats.Failed, &stats.Pending, &stats.Running)
+        WHERE parent_task_id = $1
+    `, parentTaskID).Scan(&stats.Total, &stats.Completed, &stats.Failed, &stats.Pending, &stats.Running)
     if err != nil {
         return fmt.Errorf("query stats: %w", err)
     }
@@ -456,8 +231,9 @@ func (m *ProgressMonitor) UpdateProgress(ctx context.Context, parentTaskID uuid.
     // 判断父任务状态
     parentStatus := m.determineParentStatus(stats)
     
-    // 更新父任务（根据类型更新不同的表）
-    return m.updateParentTask(ctx, parentTaskID, parentType, stats, parentStatus)
+    // 更新父任务（支持不同类型的父任务表）
+    // 使用多态更新或分别处理
+    return m.updateParentTask(ctx, parentTaskID, stats, parentStatus)
 }
 
 func (m *ProgressMonitor) determineParentStatus(stats struct{...}) string {
@@ -484,7 +260,7 @@ func (r *PgTaskRepository) UpdateTaskStatus(ctx context.Context, taskID string, 
     // 如果有父任务，异步更新进度
     if task.ParentTaskID != nil {
         go func() {
-            monitor.UpdateProgress(context.Background(), *task.ParentTaskID, task.ParentTaskType)
+            monitor.UpdateProgress(context.Background(), *task.ParentTaskID)
         }()
     }
     
@@ -494,7 +270,7 @@ func (r *PgTaskRepository) UpdateTaskStatus(ctx context.Context, taskID string, 
 
 ---
 
-#### ✅ 4.2.4 重试策略引擎（中度共用）
+#### ✅ 1.2.4 重试策略引擎（中度共用）
 
 **现状：**
 - MML 任务支持：离线重试、失败重试、重试次数、重试间隔
@@ -600,22 +376,49 @@ func (e *RetryEngine) shouldRetry(ctx context.Context, task *Task, strategy Retr
 
 ---
 
-#### ⚠️ 4.2.5 脚本模板引擎（低度共用）
+#### ⚠️ 1.2.5 脚本模板引擎（低度共用）
 
 **现状：**
 - MML 脚本有独立的 `mml_scripts` 表
 - 其他任务类型可能不需要脚本模板
 
-**推荐方案：保持独立**
+**共用方案：**
+
+**方案 A：保持独立（推荐）**
 - `mml_scripts` 表专门用于 MML 脚本管理
 - 其他任务类型如有需要，创建各自的模板表
-- 原因：MML 脚本有复杂的解析逻辑（命令码、参数映射），其他任务类型的模板格式差异大
+
+**方案 B：通用模板表（可选）**
+
+```sql
+-- 通用任务模板表（如果需要）
+CREATE TABLE task_templates (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_name   VARCHAR(200) NOT NULL,
+    template_type   VARCHAR(50) NOT NULL,     -- mml/provisioning/config/etc.
+    content         TEXT NOT NULL,            -- 模板内容
+    parameters      JSONB DEFAULT '{}',       -- 参数定义
+    device_type     VARCHAR(50),              -- 适用设备类型
+    tags            JSONB DEFAULT '[]',
+    creator         VARCHAR(100),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_task_templates_type ON task_templates(template_type);
+CREATE INDEX idx_task_templates_tags_gin ON task_templates USING GIN (tags);
+```
+
+**推荐：方案 A（保持独立）**
+- MML 脚本有复杂的解析逻辑（命令码、参数映射）
+- 其他任务类型的模板格式差异大
+- 独立表更清晰，避免过度抽象
 
 ---
 
-## 五、完整数据模型设计
+## 二、整合后的数据模型
 
-### 5.1 完整 Schema
+### 2.1 完整 Schema
 
 ```sql
 -- ==========================================
@@ -683,7 +486,6 @@ CREATE INDEX idx_mml_tasks_status ON mml_tasks(status);
 CREATE INDEX idx_mml_tasks_created ON mml_tasks(created_at DESC);
 CREATE INDEX idx_mml_tasks_execute_type ON mml_tasks(execute_type);
 CREATE INDEX idx_mml_tasks_scheduled ON mml_tasks(scheduled_at) WHERE scheduled_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_mml_tasks_commands_gin ON mml_tasks USING GIN (commands jsonb_path_ops);
 
 CREATE TRIGGER trigger_mml_tasks_updated_at
     BEFORE UPDATE ON mml_tasks
@@ -767,14 +569,17 @@ CREATE INDEX idx_device_rule_tasks_status ON device_rule_tasks(status);
 
 ---
 
-### 5.2 多态关联设计
+### 2.2 多态关联设计
 
 **问题：** `device_tasks.parent_task_id` 需要关联多种类型的父任务表
 
-**解决方案：使用组合字段 + 应用层约束**
+**解决方案：**
 
 ```sql
--- 组合字段
+-- 方案 1：使用外键约束（不推荐，PostgreSQL 不支持多态外键）
+-- parent_task_id UUID REFERENCES ??? 
+
+-- 方案 2：使用组合字段 + 应用层约束（推荐）
 parent_task_id UUID,
 parent_task_type VARCHAR(50),  -- 'mml' / 'provisioning' / 'rule'
 
@@ -807,9 +612,9 @@ func (s *TaskSplitter) SplitTask(ctx context.Context, parentTaskID uuid.UUID, pa
 
 ---
 
-## 六、共用服务架构与实现
+## 三、共用服务架构
 
-### 6.1 服务分层架构
+### 3.1 服务分层
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -860,7 +665,7 @@ func (s *TaskSplitter) SplitTask(ctx context.Context, parentTaskID uuid.UUID, pa
 └────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 代码组织
+### 3.2 代码组织
 
 ```
 internal/
@@ -892,84 +697,9 @@ internal/
 
 ---
 
-## 七、API 设计
+## 四、共用场景示例
 
-### 7.1 通用任务管理 API
-
-```go
-// 通用任务查询（支持所有类型的父任务）
-GET /api/v1/tasks?type=mml&status=running&page=1&page_size=20
-GET /api/v1/tasks?type=provisioning&status=pending
-GET /api/v1/tasks?type=rule&status=completed
-
-// 通用任务进度查询
-GET /api/v1/tasks/:id/progress
-Response:
-{
-    "task_id": "uuid",
-    "task_type": "mml",
-    "status": "running",
-    "total": 100,
-    "completed": 67,
-    "failed": 3,
-    "progress": "67%"
-}
-
-// 通用任务详情（子任务列表）
-GET /api/v1/tasks/:id/details?page=1&page_size=20
-Response:
-{
-    "items": [
-        {
-            "id": "subtask-uuid",
-            "device_sn": "SN001",
-            "method": "GetParameterValues",
-            "status": "completed",
-            "command_order": 1,
-            "created_at": "2026-04-16T10:00:00Z",
-            "completed_at": "2026-04-16T10:00:05Z"
-        }
-    ],
-    "total": 100,
-    "page": 1,
-    "page_size": 20
-}
-
-// 通用任务控制
-POST /api/v1/tasks/:id/start      // 启动挂起任务
-POST /api/v1/tasks/:id/pause      // 暂停任务
-POST /api/v1/tasks/:id/terminate  // 终止任务
-DELETE /api/v1/tasks/:id          // 删除任务
-```
-
-### 7.2 MML 特定 API
-
-```go
-// MML 脚本管理
-GET    /api/v1/mml/scripts         // 脚本列表
-POST   /api/v1/mml/scripts         // 创建脚本
-PUT    /api/v1/mml/scripts/:id     // 更新脚本
-DELETE /api/v1/mml/scripts/:id     // 删除脚本
-
-// MML 任务管理
-GET    /api/v1/mml/tasks           // 任务列表
-POST   /api/v1/mml/tasks           // 创建任务
-GET    /api/v1/mml/tasks/:id       // 任务详情
-POST   /api/v1/mml/tasks/:id/start      // 启动任务
-POST   /api/v1/mml/tasks/:id/pause      // 暂停任务
-POST   /api/v1/mml/tasks/:id/terminate  // 终止任务
-DELETE /api/v1/mml/tasks/:id             // 删除任务
-GET    /api/v1/mml/tasks/:id/results    // 任务结果
-
-// MML 命令执行（单设备即时执行）
-POST   /api/v1/mml/execute         // 执行 MML 命令
-```
-
----
-
-## 八、完整业务流程示例
-
-### 8.1 MML 脚本任务完整流程
+### 4.1 MML 脚本任务完整流程
 
 ```
 1. 用户创建 MML 脚本任务
@@ -1033,7 +763,7 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
    }
 ```
 
-### 8.2 自动开站任务完整流程
+### 4.2 自动开站任务完整流程
 
 ```
 1. 设备上线触发开站
@@ -1059,14 +789,84 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 
 ---
 
-## 九、实施计划
+## 五、API 设计增强
+
+### 5.1 通用任务管理 API
+
+```go
+// 通用任务查询（支持所有类型的父任务）
+GET /api/v1/tasks?type=mml&status=running&page=1&page_size=20
+GET /api/v1/tasks?type=provisioning&status=pending
+GET /api/v1/tasks?type=rule&status=completed
+
+// 通用任务进度查询
+GET /api/v1/tasks/:id/progress
+{
+    "task_id": "uuid",
+    "task_type": "mml",
+    "status": "running",
+    "total": 100,
+    "completed": 67,
+    "failed": 3,
+    "progress": "67%"
+}
+
+// 通用任务详情（子任务列表）
+GET /api/v1/tasks/:id/details?page=1&page_size=20
+{
+    "items": [
+        {
+            "id": "subtask-uuid",
+            "device_sn": "SN001",
+            "method": "GetParameterValues",
+            "status": "completed",
+            "command_order": 1,
+            "created_at": "2026-04-16T10:00:00Z",
+            "completed_at": "2026-04-16T10:00:05Z"
+        }
+    ],
+    "total": 100,
+    "page": 1,
+    "page_size": 20
+}
+
+// 通用任务控制
+POST /api/v1/tasks/:id/start      // 启动挂起任务
+POST /api/v1/tasks/:id/pause      // 暂停任务
+POST /api/v1/tasks/:id/terminate  // 终止任务
+DELETE /api/v1/tasks/:id          // 删除任务
+```
+
+### 5.2 MML 特定 API
+
+```go
+// MML 脚本管理
+GET    /api/v1/mml/scripts         // 脚本列表
+POST   /api/v1/mml/scripts         // 创建脚本
+PUT    /api/v1/mml/scripts/:id     // 更新脚本
+DELETE /api/v1/mml/scripts/:id     // 删除脚本
+
+// MML 任务管理
+GET    /api/v1/mml/tasks           // 任务列表
+POST   /api/v1/mml/tasks           // 创建任务
+GET    /api/v1/mml/tasks/:id       // 任务详情
+POST   /api/v1/mml/tasks/:id/start      // 启动任务
+POST   /api/v1/mml/tasks/:id/pause      // 暂停任务
+POST   /api/v1/mml/tasks/:id/terminate  // 终止任务
+DELETE /api/v1/mml/tasks/:id             // 删除任务
+GET    /api/v1/mml/tasks/:id/results    // 任务结果
+
+// MML 命令执行（单设备即时执行）
+POST   /api/v1/mml/execute         // 执行 MML 命令
+```
+
+---
+
+## 六、实施计划
 
 ### Phase 1: 基础设施扩展（3-5 天）
 
 - [ ] 扩展 `device_tasks` 表（增加共用字段）
-  - `parent_task_id`, `parent_task_type`
-  - `task_type`, `retry_strategy`, `next_retry_at`
-  - `command_order`, `depends_on`
 - [ ] 创建 `mml_tasks` 表
 - [ ] 创建共用服务层基础结构
   - [ ] Task Splitter 接口和实现
@@ -1104,9 +904,9 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 
 ---
 
-## 十、优势与收益分析
+## 七、优势总结
 
-### 10.1 代码复用率
+### 7.1 代码复用率
 
 | 模块 | 复用程度 | 说明 |
 |------|---------|------|
@@ -1119,13 +919,13 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 
 **整体复用率：~70%**
 
-### 10.2 维护成本降低
+### 7.2 维护成本降低
 
 - **Bug 修复**：共用服务修复一次，所有任务类型受益
 - **功能增强**：新增功能（如优先级队列）只需在共用服务实现
 - **性能优化**：批量插入、索引优化等只需做一次
 
-### 10.3 扩展性提升
+### 7.3 扩展性提升
 
 未来新增任务类型（如批量配置、批量诊断）：
 1. 创建新的父任务表（如 `config_tasks`）
@@ -1133,13 +933,11 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 3. 调用共用服务（Splitter、Scheduler、Monitor）
 4. **无需修改底层执行引擎**
 
-**扩展成本：1-2 天/新任务类型**
-
 ---
 
-## 十一、风险与注意事项
+## 八、风险与注意事项
 
-### 11.1 数据一致性
+### 8.1 数据一致性
 
 **风险：** 多态关联可能导致数据不一致
 
@@ -1148,7 +946,7 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 - 定期运行数据一致性检查脚本
 - 使用数据库触发器记录变更日志
 
-### 11.2 性能考虑
+### 8.2 性能考虑
 
 **风险：** 大量子任务可能影响查询性能
 
@@ -1157,7 +955,7 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 - 使用分区表（按月分区）存储历史任务
 - 进度汇总使用事件驱动，避免频繁全表扫描
 
-### 11.3 复杂度控制
+### 8.3 复杂度控制
 
 **风险：** 共用服务层过度抽象，增加理解成本
 
@@ -1168,9 +966,9 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 
 ---
 
-## 十二、总结
+## 九、总结
 
-### 推荐方案：父子关系 + 共用服务层 ✅✅✅
+### 推荐方案：父子关系 + 共用服务层 ✅
 
 **核心架构：**
 ```
@@ -1193,39 +991,8 @@ POST   /api/v1/mml/execute         // 执行 MML 命令
 - 代码复用率 ~70%
 - 维护成本降低 50%+
 - 扩展新任务类型只需 1-2 天
-- ACS Worker 零修改
 
 **实施建议：**
-1. 分阶段实施，先完成基础设施扩展
-2. 共用服务层先行，业务层后续
-3. 充分测试共用服务的边界场景
-4. 保持业务层独立性，避免过度耦合
-
----
-
-## 附录
-
-### A. 现有 device_tasks 使用场景
-
-| 场景 | 来源 | 说明 |
-|------|------|------|
-| API 创建任务 | 用户手动触发 | 单设备参数查询/设置 |
-| 自动开站 | 开站引擎 | 开站流程中的 RPC 调用 |
-| 设备规则 | 规则引擎 | 批量规则应用 |
-| 定时任务 | 调度器 | 周期性参数同步 |
-
-### B. 未来扩展性
-
-通过 `task_type` 字段，可以支持更多任务类型：
-
-```sql
--- 任务类型枚举
-task_type = 'normal'         -- 普通任务（API 创建）
-task_type = 'mml'            -- MML 任务
-task_type = 'provisioning'   -- 自动开站任务
-task_type = 'rule'           -- 设备规则任务
-task_type = 'upgrade'        -- 批量升级任务
-task_type = 'config'         -- 批量配置任务
-```
-
-所有类型的任务都共享 `device_tasks` 的执行机制，但通过 `mml_tasks`、`provisioning_tasks` 等父任务表实现不同的业务逻辑。
+- 分阶段实施，先完成基础设施扩展
+- 共用服务层先行，业务层后续
+- 充分测试共用服务的边界场景

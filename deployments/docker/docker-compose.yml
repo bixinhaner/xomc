@@ -204,7 +204,6 @@ services:
         soft: 20480
         hard: 40960
     volumes:
-      - ../../omcmb/webcode/dist:/usr/share/nginx/html:ro
       - ../../run/logs/nginx:/var/log/nginx
       - /etc/localtime:/etc/localtime:ro
     depends_on:

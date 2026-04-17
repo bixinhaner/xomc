@@ -4,7 +4,7 @@ package model
 // 使用场景：所有列表类接口的请求结构体嵌入此字段，如 DeviceListRequest{ ListRequest ... }。
 type ListRequest struct {
 	Page     int    `form:"page" binding:"min=1"`
-	PageSize int    `form:"page_size" binding:"min=1,max=100"`
+	PageSize int    `form:"page_size" binding:"min=1,max=1000"`
 	SortBy   string `form:"sort_by"`
 	SortDir  string `form:"sort_dir" binding:"omitempty,oneof=asc desc"`
 }
@@ -27,8 +27,8 @@ func (r *ListRequest) Limit() int {
 	if r.PageSize < 1 {
 		r.PageSize = 20
 	}
-	if r.PageSize > 100 {
-		r.PageSize = 100
+	if r.PageSize > 1000 {
+		r.PageSize = 1000
 	}
 	return r.PageSize
 }

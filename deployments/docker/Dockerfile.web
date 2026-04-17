@@ -15,13 +15,21 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# 先复制源码（即使包含 node_modules 也会被下一步覆盖）
+# 仅复制构建所需源码（.dockerignore 已排除 node_modules 和 dist）
 COPY omcmb/webcode/ .
+
+# 清除可能残留的旧构建产物，确保全新构建
+RUN rm -rf dist
 
 # 从 deps 阶段覆盖正确的 node_modules（确保是 Linux 平台二进制）
 COPY --from=deps /app/node_modules ./node_modules
 
 RUN npm run build
+
+# 验证构建产物完整性：index.html 引用的主入口文件必须存在
+RUN grep -oP 'src="/assets/[^"]+\.js"' dist/index.html | grep -oP '/assets/[^"]+' | while read f; do \
+      test -f "dist$f" || { echo "ERROR: build output missing: dist$f"; exit 1; }; \
+    done
 
 # 阶段3: Nginx 静态服务
 FROM nginx:alpine
