@@ -22,6 +22,7 @@ func main() {
 	rootCmd.PersistentFlags().String("dsn", "", "database connection string (e.g. postgres://user:pass@localhost:5432/omcgo?sslmode=disable)")
 	rootCmd.PersistentFlags().String("path", "migrations", "migrations directory path")
 	rootCmd.PersistentFlags().String("paths", "", "comma-separated migration directories (applied in order)")
+	rootCmd.PersistentFlags().String("table", "", "custom goose version table name (default: goose_db_version)")
 
 	rootCmd.AddCommand(
 		&cobra.Command{
@@ -81,6 +82,17 @@ func openDB(cmd *cobra.Command) (*sql.DB, error) {
 	return db, nil
 }
 
+// setupGooseTable configures the goose version table from --table flag or GOOSE_TABLE env var.
+func setupGooseTable(cmd *cobra.Command) {
+	table, _ := cmd.Flags().GetString("table")
+	if table == "" {
+		table = os.Getenv("GOOSE_TABLE")
+	}
+	if table != "" {
+		goose.SetTableName(table)
+	}
+}
+
 // migrateDir returns the migrations directory from flag.
 func migrateDir(cmd *cobra.Command) string {
 	path, _ := cmd.Flags().GetString("path")
@@ -102,6 +114,7 @@ func migratePaths(cmd *cobra.Command) []string {
 }
 
 func runMigrateUp(cmd *cobra.Command, args []string) error {
+	setupGooseTable(cmd)
 	db, err := openDB(cmd)
 	if err != nil {
 		return err
@@ -137,6 +150,7 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 }
 
 func runMigrateDown(cmd *cobra.Command, args []string) error {
+	setupGooseTable(cmd)
 	db, err := openDB(cmd)
 	if err != nil {
 		return err
@@ -157,6 +171,7 @@ func runMigrateDown(cmd *cobra.Command, args []string) error {
 }
 
 func runMigrateDownTo(cmd *cobra.Command, args []string) error {
+	setupGooseTable(cmd)
 	version, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid version number: %w", err)
@@ -181,6 +196,7 @@ func runMigrateDownTo(cmd *cobra.Command, args []string) error {
 }
 
 func runMigrateVersion(cmd *cobra.Command, args []string) error {
+	setupGooseTable(cmd)
 	db, err := openDB(cmd)
 	if err != nil {
 		return err
@@ -196,6 +212,7 @@ func runMigrateVersion(cmd *cobra.Command, args []string) error {
 }
 
 func runMigrateForce(cmd *cobra.Command, args []string) error {
+	setupGooseTable(cmd)
 	version, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid version number: %w", err)
@@ -207,17 +224,13 @@ func runMigrateForce(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Ensure goose_db_version table exists, then set the version directly.
-	if _, err := goose.EnsureDBVersion(db); err != nil {
-		return fmt.Errorf("ensure version table: %w", err)
-	}
-
-	// Delete all existing version rows and insert the target version.
-	if _, err := db.Exec("DELETE FROM goose_db_version"); err != nil {
+	// Ensure version table exists, then set the version directly.
+	tableName := goose.TableName()
+	if _, err := db.Exec(fmt.Sprintf("DELETE FROM %s", tableName)); err != nil {
 		return fmt.Errorf("clear version table: %w", err)
 	}
 	if _, err := db.Exec(
-		"INSERT INTO goose_db_version (version_id, is_applied) VALUES ($1, true)",
+		fmt.Sprintf("INSERT INTO %s (version_id, is_applied) VALUES ($1, true)", tableName),
 		version,
 	); err != nil {
 		return fmt.Errorf("set version %d: %w", version, err)
@@ -228,6 +241,7 @@ func runMigrateForce(cmd *cobra.Command, args []string) error {
 }
 
 func runMigrateReset(cmd *cobra.Command, args []string) error {
+	setupGooseTable(cmd)
 	db, err := openDB(cmd)
 	if err != nil {
 		return err

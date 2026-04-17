@@ -2,7 +2,7 @@
 
 ## 📦 数据概览
 ```
-文件: migrations/seed/000023_seed_mml_param_library.sql
+文件: migrations/seed/000005_seed_mml_param_library.sql
 大小: 4.0 MB (103,803 行)
 数据: 1,919 分组 + 7,207 参数 = 9,126 条
 格式: PostgreSQL Goose 种子文件
@@ -38,7 +38,7 @@ LIMIT 3;
 ## 🔑 关键特性
 - ✅ **幂等性**: 可重复执行 (ON CONFLICT DO NOTHING)
 - ✅ **完整性**: 99.8% 数据转换成功
-- ✅ **追溯性**: UUID 格式保留老 ID (a/b{ID}-0000-0000-0000-000000000000)
+- ✅ **追溯性**: UUID 格式保留老 ID (a/b + 31位填充, 标准 8-4-4-4-12 格式)
 - ✅ **兼容性**: 老系统 V_TYPE → JSONB 自动转换
 
 ## 📊 数据版本 Top 5

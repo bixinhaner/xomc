@@ -21,7 +21,7 @@ import sys
 
 OLD_GROUP_FILE = "../../../files/db/mml/small_cell_param_group.sql"
 OLD_PARAM_FILE = "../../../files/db/mml/small_cell_param.sql"
-OUTPUT_FILE = "../seed/000023_seed_mml_param_library.sql"
+OUTPUT_FILE = "../seed/000005_seed_mml_param_library.sql"
 
 # 合法的 value_type 值（对应 mml_params.chk_value_type 约束）
 VALID_TYPES = {'string', 'enum', 'unsignedInt', 'unsignedIntList',
