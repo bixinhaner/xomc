@@ -38,7 +38,9 @@ export function useMMLScriptById(id: string) {
   });
 }
 
-export function useMMLTasks(params: PageRequest) {
+export function useMMLTasks(
+  params: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
+) {
   return useQuery({
     queryKey: ['mml', 'tasks', params],
     queryFn: () => api.getTasks(params),

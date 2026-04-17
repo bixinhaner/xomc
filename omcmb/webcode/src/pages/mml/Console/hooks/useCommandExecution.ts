@@ -3,6 +3,7 @@ import type { TerminalLine } from '../types';
 import type { ConsoleDevice } from '../types';
 import type { MMLCommand, MMLTask } from '@/types/mml';
 import { useExecuteMMLCommand, useMMLTaskPolling } from '@/hooks/api/useMML';
+import { useT } from '@/hooks/useT';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 
@@ -21,6 +22,7 @@ type ExecuteCommandParams = {
 };
 
 export function useCommandExecution() {
+  const t = useT();
   const [outputLines, setOutputLines] = useState<TerminalLine[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [pollingTaskId, setPollingTaskId] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export function useCommandExecution() {
     if (polledTask.status === 'completed') {
       addOutput({
         type: 'success',
-        text: `任务完成 — 成功: ${polledTask.successCount}, 失败: ${polledTask.failedCount}`,
+        text: t('mml.console.taskCompleted', { success: String(polledTask.successCount), failed: String(polledTask.failedCount) }),
         timestamp: new Date().toLocaleTimeString(),
       });
 
@@ -58,7 +60,7 @@ export function useCommandExecution() {
         for (const r of polledTask.results) {
           addOutput({
             type: r.result.success ? 'stdout' : 'stderr',
-            text: `[${r.deviceSn}] ${r.result.success ? '成功' : '失败'}${r.result.rawOutput ? '\n' + r.result.rawOutput : ''}`,
+            text: `[${r.deviceSn}] ${r.result.success ? t('mml.console.execSuccess') : t('mml.console.execFailed')}${r.result.rawOutput ? '\n' + r.result.rawOutput : ''}`,
             timestamp: r.result.timestamp ?? new Date().toLocaleTimeString(),
           });
         }
@@ -70,7 +72,7 @@ export function useCommandExecution() {
     } else if (polledTask.status === 'failed') {
       addOutput({
         type: 'stderr',
-        text: `任务失败 — ${polledTask.result || '未知错误'}`,
+        text: t('mml.console.taskFailed', { error: polledTask.result || 'Unknown' }),
         timestamp: new Date().toLocaleTimeString(),
       });
 
@@ -91,7 +93,7 @@ export function useCommandExecution() {
     } else if (polledTask.status === 'cancelled') {
       addOutput({
         type: 'stderr',
-        text: '任务已取消',
+        text: t('mml.console.taskCancelled'),
         timestamp: new Date().toLocaleTimeString(),
       });
       setPollingTaskId(null);
@@ -99,7 +101,7 @@ export function useCommandExecution() {
     } else if (polledTask.status === 'running') {
       addOutput({
         type: 'info',
-        text: `任务执行中... (已完成 ${polledTask.successCount + polledTask.failedCount}/${polledTask.totalDevices})`,
+        text: t('mml.console.taskRunning', { done: String(polledTask.successCount + polledTask.failedCount), total: String(polledTask.totalDevices) }),
         timestamp: new Date().toLocaleTimeString(),
       });
     }
@@ -119,7 +121,7 @@ export function useCommandExecution() {
     if (devices.length === 0) {
       addOutput({
         type: 'stderr',
-        text: '错误：请先选择设备',
+        text: t('mml.console.errorNoDevice'),
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -129,7 +131,7 @@ export function useCommandExecution() {
     if (!trimmedCommandLineText) {
       addOutput({
         type: 'stderr',
-        text: '错误：请输入命令内容',
+        text: t('mml.console.errorNoCommand'),
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -138,7 +140,7 @@ export function useCommandExecution() {
     if (!command && !isManualEdit) {
       addOutput({
         type: 'stderr',
-        text: '错误：请先选择命令',
+        text: t('mml.console.errorSelectCommand'),
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -160,12 +162,12 @@ export function useCommandExecution() {
 
     addOutput({
       type: 'info',
-      text: `执行命令: ${trimmedCommandLineText}`,
+      text: t('mml.console.executingCommand', { command: trimmedCommandLineText }),
       timestamp: new Date().toLocaleTimeString(),
     });
     addOutput({
       type: 'info',
-      text: `目标设备: ${devices.map((d) => d.sn).join(', ')}`,
+      text: t('mml.console.targetDevices', { devices: devices.map((d) => d.sn).join(', ') }),
       timestamp: new Date().toLocaleTimeString(),
     });
     addOutput({
@@ -179,18 +181,18 @@ export function useCommandExecution() {
 
       addOutput({
         type: 'success',
-        text: `命令已提交，任务ID: ${task.id}`,
+        text: t('mml.console.commandSubmitted', { id: task.id }),
         timestamp: new Date().toLocaleTimeString(),
       });
 
       if (TERMINAL_STATES.has(task.status) && task.results && task.results.length > 0) {
-        outputTaskResults(task, addOutput);
+        outputTaskResults(t, task, addOutput);
         addOutput({ type: 'info', text: '', timestamp: new Date().toLocaleTimeString() });
         setIsExecuting(false);
       } else {
         addOutput({
           type: 'info',
-          text: `共 ${task.totalDevices || devices.length} 台设备待执行，等待结果...`,
+          text: t('mml.console.waitingForResults', { count: String(task.totalDevices || devices.length) }),
           timestamp: new Date().toLocaleTimeString(),
         });
         lastPolledStatus.current = '';
@@ -199,7 +201,7 @@ export function useCommandExecution() {
     } catch (error) {
       addOutput({
         type: 'stderr',
-        text: `命令提交失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        text: t('mml.console.commandSubmitFailed', { error: error instanceof Error ? error.message : 'Unknown' }),
         timestamp: new Date().toLocaleTimeString(),
       });
       setIsExecuting(false);
@@ -277,29 +279,29 @@ function buildExecutePayload({
   };
 }
 
-function outputTaskResults(task: MMLTask, addOutput: (line: TerminalLine) => void) {
+function outputTaskResults(t: ReturnType<typeof useT>, task: MMLTask, addOutput: (line: TerminalLine) => void) {
   for (const r of task.results) {
     addOutput({
       type: 'info',
-      text: `--- 设备: ${r.deviceSn} ---`,
+      text: t('mml.console.deviceHeader', { sn: r.deviceSn }),
       timestamp: r.result.timestamp ?? new Date().toLocaleTimeString(),
     });
     addOutput({
       type: r.result.success ? 'stdout' : 'stderr',
-      text: r.result.rawOutput || (r.result.success ? '执行成功' : '执行失败'),
+      text: r.result.rawOutput || (r.result.success ? t('mml.console.execSuccess') : t('mml.console.execFailed')),
       timestamp: r.result.timestamp ?? new Date().toLocaleTimeString(),
     });
     if (r.result.executionTime) {
       addOutput({
         type: 'info',
-        text: `  执行耗时: ${r.result.executionTime}ms`,
+        text: t('mml.console.executionTimeLabel', { time: String(r.result.executionTime) }),
         timestamp: r.result.timestamp ?? new Date().toLocaleTimeString(),
       });
     }
   }
   addOutput({
     type: 'success',
-    text: `执行完成 — 成功: ${task.successCount}, 失败: ${task.failedCount}`,
+    text: t('mml.console.executionCompleted', { success: String(task.successCount), failed: String(task.failedCount) }),
     timestamp: new Date().toLocaleTimeString(),
   });
 }

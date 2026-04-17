@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AutoComplete, Button, Empty, Select, Space, Typography } from 'antd';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
-import type { MMLCommand, MMLOperationType } from '@/types/mml';
+import type { MMLCommand } from '@/types/mml';
+import { resolveOperationType } from '../utils/resolveOperationType';
+import { useT } from '@/hooks/useT';
 
 export interface ParamPathChangePayload {
   operationType: string;
@@ -26,16 +28,8 @@ const OP_LABELS: Record<string, string> = {
   CLR: 'SetParameterValues',
 };
 
-function resolveOperationType(command: MMLCommand | null): string {
-  const operationType = command?.operationType?.trim().toUpperCase();
-  if (operationType) {
-    return operationType;
-  }
-
-  return command?.commandCode?.trim().split(/\s+/)[0]?.toUpperCase() || 'LST';
-}
-
 export default function ParamPathPanel({ command, onChange }: ParamPathPanelProps) {
+  const t = useT();
   const defaultOperation = useMemo(() => resolveOperationType(command), [command]);
   const operationOptions = useMemo(() => {
     const operations = command?.supportedOperations?.length
@@ -107,7 +101,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   };
 
   if (!command) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先从左侧选择命令" />;
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.selectCommandFirst')} />;
   }
 
   return (
@@ -158,7 +152,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
       </div>
 
       <Typography.Text type="secondary">
-        参数路径支持 TR-069 参数树路径格式
+        {t('mml.console.paramPathFormatHint')}
       </Typography.Text>
     </Space>
   );

@@ -19,18 +19,10 @@ import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import { useCreateMMLScript } from '@/hooks/api/useMML';
+import { resolveOperationType } from './utils/resolveOperationType';
 
 type CommandInputTab = 'control' | 'paramPath';
 type CommandParameters = Record<string, string | number | boolean>;
-
-function getOperationType(command: MMLCommand | null): string {
-  const operationType = command?.operationType?.trim().toUpperCase();
-  if (operationType) {
-    return operationType;
-  }
-
-  return command?.commandCode?.trim().split(/\s+/)[0]?.toUpperCase() || 'LST';
-}
 
 export default function MMLConsole() {
   const t = useT();
@@ -73,7 +65,7 @@ export default function MMLConsole() {
     setIsManualEdit(false);
     setSelectedFields([]);
     setParameters({});
-    setOperationType(getOperationType(selectedCommand));
+    setOperationType(resolveOperationType(selectedCommand));
     setParamPaths(['']);
     setCurrentCommandLabel(selectedCommand.commandCode);
   }, [commandSelection.selectedCommand]);
@@ -85,7 +77,7 @@ export default function MMLConsole() {
     }
 
     const code = selectedCommand.commandCode;
-    const nextOperationType = getOperationType(selectedCommand);
+    const nextOperationType = resolveOperationType(selectedCommand);
 
     if (activeTab !== 'control') {
       setCommandLineText(code);
@@ -122,12 +114,12 @@ export default function MMLConsole() {
           ? values.parameters as CommandParameters
           : {}
       );
-      setOperationType(getOperationType(commandSelection.selectedCommand));
+      setOperationType(resolveOperationType(commandSelection.selectedCommand));
       return;
     }
 
     setParamPaths(Array.isArray(values.paramPaths) ? values.paramPaths.map(String) : ['']);
-    setOperationType(typeof values.operationType === 'string' ? values.operationType : getOperationType(commandSelection.selectedCommand));
+    setOperationType(typeof values.operationType === 'string' ? values.operationType : resolveOperationType(commandSelection.selectedCommand));
   }, [activeTab, commandSelection.selectedCommand]);
 
   const handleCommandLineChange = useCallback((value: string) => {
@@ -182,7 +174,7 @@ export default function MMLConsole() {
   const handleSaveScript = useCallback(() => {
     const cmd = commandSelection.selectedCommand;
     if (!cmd) {
-      void message.warning(t('mml.selectCommandFirst') || '请先选择命令');
+      void message.warning(t('mml.selectCommandFirst'));
       return;
     }
     const lines = [commandLineText.trim()];
@@ -196,14 +188,14 @@ export default function MMLConsole() {
         tags: [],
       },
       {
-        onSuccess: () => void message.success(t('mml.scriptSaved') || '脚本已保存'),
-        onError: (err) => void message.error(t('mml.scriptSaveFailed') || '保存失败: ' + (err instanceof Error ? err.message : 'Unknown')),
+        onSuccess: () => void message.success(t('mml.scriptSaved')),
+        onError: (err) => void message.error(t('mml.scriptSaveFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
       },
     );
   }, [commandSelection.selectedCommand, commandLineText, createScriptMutation, t]);
 
   const canExecute = deviceSelection.selectedDevices.length > 0 && commandLineText.trim().length > 0;
-  const executeButtonText = `${deviceSelection.selectedDevices.length} 设备 · ${currentCommandLabel || '未选命令'}`;
+  const executeButtonText = `${t('mml.console.deviceUnit', { count: deviceSelection.selectedDevices.length })} · ${currentCommandLabel || t('mml.console.noCommandSelected')}`;
 
   return (
     <div
@@ -257,7 +249,7 @@ export default function MMLConsole() {
               padding: '2px 10px',
             }}
           >
-            设备: {deviceSelection.selectedDevices.length}
+            {t('mml.console.deviceCount', { count: deviceSelection.selectedDevices.length })}
           </Tag>
           {commandSelection.selectedCommand && (
             <Tag
@@ -323,6 +315,7 @@ export default function MMLConsole() {
           style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         >
           <CommandTree
+            commands={commandSelection.commands}
             selectedCommand={commandSelection.selectedCommand}
             treeData={commandSelection.treeData}
             categoryOptions={commandSelection.categoryOptions}

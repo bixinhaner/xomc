@@ -4,9 +4,11 @@ import { PlayCircleOutlined, ReloadOutlined, SaveOutlined, WarningOutlined } fro
 import type { ConsoleDevice } from '../types';
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { useT } from '@/hooks/useT';
 import { useDangerousCheck } from '@/hooks/api/useMML';
 import ParamFormRenderer, { type ParamFormChangePayload } from './ParamFormRenderer';
 import ParamPathPanel, { type ParamPathChangePayload } from './ParamPathPanel';
+import { resolveOperationType } from '../utils/resolveOperationType';
 
 interface CommandInputProps {
   activeTab: 'control' | 'paramPath';
@@ -23,15 +25,6 @@ interface CommandInputProps {
   onSaveScript?: () => void;
   onReset?: () => void;
   loading?: boolean;
-}
-
-function resolveOperationType(command: MMLCommand | null): string {
-  const operationType = command?.operationType?.trim().toUpperCase();
-  if (operationType) {
-    return operationType;
-  }
-
-  return command?.commandCode?.trim().split(/\s+/)[0]?.toUpperCase() || 'LST';
 }
 
 export default function CommandInput({
@@ -51,6 +44,7 @@ export default function CommandInput({
   loading,
 }: CommandInputProps) {
   const token = useThemeToken();
+  const t = useT();
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [pendingDangerInfo, setPendingDangerInfo] = useState<{ name: string; desc: string } | null>(null);
   const [controlPayload, setControlPayload] = useState<ParamFormChangePayload>({});
@@ -188,7 +182,7 @@ export default function CommandInput({
       >
         <Descriptions column={2} size="small">
           <Descriptions.Item
-            label={<span style={{ fontSize: 11, color: token.colorTextSecondary }}>当前命令</span>}
+            label={<span style={{ fontSize: 11, color: token.colorTextSecondary }}>{t('mml.console.currentCommand')}</span>}
           >
             {selectedCommand ? (
               <Typography.Text
@@ -204,11 +198,11 @@ export default function CommandInput({
                 {selectedCommand.commandCode}
               </Typography.Text>
             ) : (
-              <span style={{ color: '#bfbfbf', fontSize: 11 }}>未选择</span>
+              <span style={{ color: '#bfbfbf', fontSize: 11 }}>{t('mml.console.notSelected')}</span>
             )}
           </Descriptions.Item>
           <Descriptions.Item
-            label={<span style={{ fontSize: 11, color: token.colorTextSecondary }}>目标设备</span>}
+            label={<span style={{ fontSize: 11, color: token.colorTextSecondary }}>{t('mml.console.targetDevice')}</span>}
           >
             <span
               style={{
@@ -217,7 +211,7 @@ export default function CommandInput({
                 fontWeight: selectedDevices.length > 0 ? 500 : 400,
               }}
             >
-              {selectedDevices.length > 0 ? `${selectedDevices.length} 台` : '未选择'}
+              {selectedDevices.length > 0 ? t('mml.console.deviceUnit', { count: selectedDevices.length }) : t('mml.console.notSelected')}
             </span>
           </Descriptions.Item>
         </Descriptions>
@@ -250,7 +244,7 @@ export default function CommandInput({
             value={commandLineText}
             onChange={(event) => onCommandLineChange(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入命令，多个命令用分号隔开"
+            placeholder={t('mml.console.commandInputPlaceholder')}
             prefix={
               <span
                 style={{
@@ -295,9 +289,9 @@ export default function CommandInput({
         {!isParamPathTab && (
           <Space size={8}>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              <span style={{ color: token.colorPrimary }}>{selectedDevices.length}</span> 设备
+              <span style={{ color: token.colorPrimary }}>{selectedDevices.length}</span> {t('mml.console.deviceUnit', { count: selectedDevices.length })}
               <span style={{ margin: '0 4px', color: token.colorBorder }}>·</span>
-              {currentCommandLabel || <span style={{ color: '#bfbfbf' }}>未选命令</span>}
+              {currentCommandLabel || <span style={{ color: '#bfbfbf' }}>{t('mml.console.noCommandSelected')}</span>}
               <span style={{ margin: '0 4px', color: token.colorBorder }}>·</span>
               {currentOperationType}
             </Typography.Text>
@@ -324,7 +318,7 @@ export default function CommandInput({
               onClick={onReset}
               style={{ borderRadius: 4 }}
             >
-              重置
+              {t('common.reset')}
             </Button>
           )}
           {onSaveScript && !isParamPathTab && (
@@ -334,7 +328,7 @@ export default function CommandInput({
               onClick={onSaveScript}
               style={{ borderRadius: 4 }}
             >
-              保存脚本
+              {t('mml.console.saveScript')}
             </Button>
           )}
         </Space>
@@ -344,8 +338,8 @@ export default function CommandInput({
         open={confirmModalOpen}
         onCancel={handleCancelExecute}
         onOk={handleConfirmExecute}
-        okText="确认执行"
-        cancelText="取消"
+        okText={t('mml.console.confirmExecute')}
+        cancelText={t('common.cancel')}
         okButtonProps={{
           danger: true,
           loading,
@@ -353,7 +347,7 @@ export default function CommandInput({
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <WarningOutlined style={{ color: '#faad14', fontSize: 20 }} />
-            <span>确认执行危险操作</span>
+            <span>{t('mml.console.confirmDangerousTitle')}</span>
           </div>
         }
         width={420}
@@ -377,7 +371,7 @@ export default function CommandInput({
           </Typography.Text>
           <div style={{ marginTop: 16 }}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              目标设备：<span style={{ color: token.colorPrimary, fontWeight: 500 }}>{selectedDevices.length} 台</span>
+              <span style={{ color: token.colorPrimary, fontWeight: 500 }}>{t('mml.console.targetDeviceCount', { count: selectedDevices.length })}</span>
             </Typography.Text>
           </div>
           <div
@@ -390,7 +384,7 @@ export default function CommandInput({
             }}
           >
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              请确认是否继续执行此操作
+              {t('mml.console.confirmContinue')}
             </Typography.Text>
           </div>
         </div>

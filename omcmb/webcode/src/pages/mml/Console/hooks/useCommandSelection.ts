@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { MMLCommand, MMLTemplate } from '@/types/mml';
 import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
+import { useT } from '@/hooks/useT';
 import { COMMAND_PAGE_SIZE } from '../constants';
 
 export type CustomNodeType = 'custom_root' | 'custom_public' | 'custom_private' | 'user_dir';
@@ -20,6 +21,7 @@ export interface CommandTreeNode extends TreeDataNode {
 }
 
 export function useCommandSelection() {
+  const t = useT();
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -139,15 +141,15 @@ export function useCommandSelection() {
 
     const customRoot: CommandTreeNode = {
       key: 'custom-root',
-      title: '自定义模板',
-      label: '自定义模板',
+      title: t('mml.console.customTemplates'),
+      label: t('mml.console.customTemplates'),
       nodeType: 'custom_root',
       selectable: false,
       children: [
         {
           key: 'custom-public',
-          title: `公有命令`,
-          label: `公有命令`,
+          title: t('mml.console.publicCommands'),
+          label: t('mml.console.publicCommands'),
           nodeType: 'custom_public',
           selectable: false,
           count: publicTemplates.length,
@@ -155,8 +157,8 @@ export function useCommandSelection() {
         },
         {
           key: 'custom-private',
-          title: '私有命令',
-          label: '私有命令',
+          title: t('mml.console.privateCommands'),
+          label: t('mml.console.privateCommands'),
           nodeType: 'custom_private',
           selectable: false,
           count: privateTemplates.length,

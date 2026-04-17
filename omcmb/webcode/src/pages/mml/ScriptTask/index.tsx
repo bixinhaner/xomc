@@ -11,6 +11,7 @@ import {
   InputNumber,
   Modal,
   Radio,
+  Select,
   Space,
   Tag,
   Upload,
@@ -37,6 +38,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult } from '@/types/mml';
 import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLTaskResults } from '@/hooks/api/useMML';
+import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 
 // 任务类型映射 - use i18n keys
@@ -68,6 +70,7 @@ const TASK_RESULT_KEYS: Record<MMLTaskResult, { color: string; key: string }> = 
 interface AddTaskForm {
   taskName: string;
   fileName: string;
+  productType: string;
   executeType: MMLExecuteType;
   time: Dayjs | null;
   periodStartTime: Dayjs | null;
@@ -104,8 +107,26 @@ export default function ScriptTask() {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [addForm] = Form.useForm<AddTaskForm>();
   const executeType = Form.useWatch('executeType', addForm);
+  const [deviceSns, setDeviceSns] = useState<string[]>([]);
+  const [parsedCommands, setParsedCommands] = useState<string[]>([]);
 
-  const { data, isLoading, refetch } = useMMLTasks({ page, pageSize });
+  const { data: productTypeDict } = useDictionary('product_type');
+  const productTypeOptions = useMemo(() => {
+    const details = productTypeDict?.sysDictionaryDetails;
+    if (details && details.length > 0) {
+      return details.map((d) => ({ label: d.label, value: d.value }));
+    }
+    return [];
+  }, [productTypeDict]);
+
+  const { data, isLoading, refetch } = useMMLTasks({
+    page,
+    pageSize,
+    status: filterParams.taskStatus && filterParams.taskStatus !== 'all' ? filterParams.taskStatus as string : undefined,
+    executeType: filterParams.executeType && filterParams.executeType !== 'all' ? filterParams.executeType as string : undefined,
+    result: filterParams.taskResult && filterParams.taskResult !== 'all' ? filterParams.taskResult as string : undefined,
+    taskName: filterParams.taskName ? filterParams.taskName as string : undefined,
+  });
   const createTaskMutation = useCreateMMLTask();
   const startTaskMutation = useStartMMLTask();
   const pauseTaskMutation = usePauseMMLTask();
@@ -115,33 +136,8 @@ export default function ScriptTask() {
   // Task results for the result modal
   const { data: resultData, isLoading: resultLoading } = useMMLTaskResults(resultTaskId);
 
-  // Map API tasks to display rows with client-side filtering
+  // Map API tasks to display rows (server-side filtering)
   const tasks = useMemo(() => data?.items ?? [], [data?.items]);
-
-  const filteredData = useMemo(() => {
-    return tasks.filter((task) => {
-      if (filterParams.taskName && typeof filterParams.taskName === 'string') {
-        if (!task.taskName.toLowerCase().includes(filterParams.taskName.toLowerCase())) return false;
-      }
-      if (filterParams.startTime && Array.isArray(filterParams.startTime) && filterParams.startTime.length === 2) {
-        const [start, end] = filterParams.startTime as [string, string];
-        if (task.startedAt) {
-          if (start && task.startedAt < start) return false;
-          if (end && task.startedAt > end) return false;
-        }
-      }
-      if (filterParams.executeType && filterParams.executeType !== 'all') {
-        if (task.executeType !== filterParams.executeType) return false;
-      }
-      if (filterParams.taskStatus && filterParams.taskStatus !== 'all') {
-        if (task.status !== filterParams.taskStatus) return false;
-      }
-      if (filterParams.taskResult && filterParams.taskResult !== 'all') {
-        if (task.result !== filterParams.taskResult) return false;
-      }
-      return true;
-    });
-  }, [tasks, filterParams]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'taskName', label: t('mml.taskName'), type: 'input', placeholder: t('mml.inputTaskNameRequired') },
@@ -230,15 +226,25 @@ export default function ScriptTask() {
       failedRetryWaitTime: 5,
     });
     setFileList([]);
+    setDeviceSns([]);
+    setParsedCommands([]);
     setAddModalVisible(true);
   };
 
   const handleAddTask = () => {
     addForm.validateFields().then((values) => {
+      if (deviceSns.length === 0) {
+        void message.warning(t('mml.selectDeviceFirst') || '请先输入设备SN');
+        return;
+      }
+      if (parsedCommands.length === 0) {
+        void message.warning(t('mml.selectFileFirst') || '请先上传脚本文件');
+        return;
+      }
       const payload = {
         taskName: values.taskName,
-        deviceSns: [] as string[],
-        commands: [] as string[],
+        deviceSns,
+        commands: parsedCommands,
         creator: '',
         executeType: values.executeType,
         offlineRetry: values.offlineRetryEnable,
@@ -262,10 +268,38 @@ export default function ScriptTask() {
   };
 
   const handleDownloadTemplate = () => {
-    void message.info(t('mml.templateDownloading'));
+    const templateContent = `# MML Script Template
+# One command per line. Lines starting with # are comments.
+# Example:
+# LST CELL
+# DSP Equipment
+# MOD CELL:CellId=1,CellName=TestCell
+`;
+    const blob = new Blob([templateContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'mml-script-template.txt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  const getActionMenu = (task: MMLTask): MenuProps['items'] => {
+  const parseUploadedFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const lines = content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'));
+      setParsedCommands(lines);
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const getActionMenu = useCallback((task: MMLTask): MenuProps['items'] => {
     const status = task.status;
     return [
       { key: 'info', icon: <InfoCircleOutlined />, label: t('mml.info'), onClick: () => viewTaskInfo(task) },
@@ -274,7 +308,7 @@ export default function ScriptTask() {
       { key: 'end', icon: <StopOutlined />, label: t('mml.terminateTask'), disabled: !['running', 'pending', 'paused'].includes(status), onClick: () => handleCancelTask(task) },
       { key: 'del', icon: <DeleteOutlined />, label: t('common.delete'), danger: true, disabled: status === 'running', onClick: () => handleDeleteTask(task) },
     ];
-  };
+  }, [t, viewTaskInfo, handleStartTask, handlePauseTask, handleCancelTask, handleDeleteTask]);
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
@@ -297,7 +331,7 @@ export default function ScriptTask() {
     { key: 'result', title: t('mml.result'), dataIndex: 'result', width: 100, render: (val?: MMLTaskResult) => val ? <Tag color={TASK_RESULT_KEYS[val]?.color}>{t(TASK_RESULT_KEYS[val]?.key)}</Tag> : '-' },
     { key: 'startedAt', title: t('mml.startTime'), dataIndex: 'startedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
     { key: 'finishedAt', title: t('mml.endTime'), dataIndex: 'finishedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
-  ], [t]);
+  ], [t, getActionMenu]);
 
   return (
     <ListPageLayout
@@ -311,7 +345,7 @@ export default function ScriptTask() {
       <FilterBar filterId="mml-script-task" fields={filterFields} onSearch={handleSearch} onReset={handleReset} />
 
       <DataTable<MMLTask>
-        tableId="script-task" columns={columns} dataSource={filteredData} loading={isLoading} rowKey="id"
+        tableId="script-task" columns={columns} dataSource={tasks} loading={isLoading} rowKey="id"
         total={data?.total ?? 0} currentPage={page} pageSize={pageSize}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }} onRefresh={() => void refetch()} scroll={{ x: 1400 }}
       />
@@ -396,6 +430,28 @@ export default function ScriptTask() {
           <Form.Item label={t('mml.taskName')} name="taskName" rules={[{ required: true, message: t('mml.inputTaskNameRequired') }]} style={{ marginLeft: 12 }}>
             <Input maxLength={50} placeholder={t('mml.inputTaskName')} style={{ width: '100%' }} />
           </Form.Item>
+          <Form.Item label={t('mml.productType') || '产品类型'} name="productType" style={{ marginLeft: 12 }}>
+            <Select
+              placeholder={t('mml.selectProductType') || '选择产品类型'}
+              allowClear
+              options={productTypeOptions}
+            />
+          </Form.Item>
+          <div style={{ marginLeft: 12, marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
+              {t('mml.deviceSn') || '设备SN'} <span style={{ color: '#ff4d4f' }}>*</span>
+            </label>
+            <Select
+              mode="tags"
+              value={deviceSns}
+              onChange={setDeviceSns}
+              placeholder={t('mml.inputDeviceSn') || '输入设备SN，按回车添加'}
+              style={{ width: '100%' }}
+              tokenSeparators={[',', ';', '\n']}
+              open={false}
+            />
+            <span style={{ color: '#999', fontSize: 12 }}>{t('mml.deviceSnTip') || '输入SN后按回车确认，支持逗号分隔'}</span>
+          </div>
           <Form.Item label={t('mml.selectScript')} name="fileName" rules={[{ required: true, message: t('mml.selectFileFirst') }]} style={{ marginLeft: 12 }}>
             <Space direction="vertical" style={{ width: '100%' }}>
               <Space>
@@ -405,11 +461,13 @@ export default function ScriptTask() {
                   beforeUpload={(file) => {
                     setFileList([file as unknown as UploadFile]);
                     addForm.setFieldValue('fileName', file.name);
+                    parseUploadedFile(file);
                     return false;
                   }}
                   onRemove={() => {
                     setFileList([]);
                     addForm.setFieldValue('fileName', '');
+                    setParsedCommands([]);
                   }}
                   maxCount={1}
                 >
@@ -417,6 +475,11 @@ export default function ScriptTask() {
                 </Upload>
                 <span style={{ color: '#999', fontSize: 12 }}>{t('mml.onlyTxtFormat')}</span>
               </Space>
+              {parsedCommands.length > 0 && (
+                <div style={{ color: '#52c41a', fontSize: 12 }}>
+                  {t('mml.commandsParsed') || `已解析 ${parsedCommands.length} 条命令`}
+                </div>
+              )}
               <div>
                 <span style={{ color: '#999', fontSize: 12 }}>{t('mml.templateImportTip')}</span>
                 <Button type="link" size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>{t('mml.exportTemplate')}</Button>

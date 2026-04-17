@@ -8,6 +8,7 @@ import { useT } from '@/hooks/useT';
 import type { CommandTreeNode, CustomNodeType } from '../hooks/useCommandSelection';
 
 interface CommandTreeProps {
+  commands: MMLCommand[];
   selectedCommand: MMLCommand | null;
   treeData: CommandTreeNode[];
   categoryOptions: { label: string; value: string }[];
@@ -22,6 +23,7 @@ interface CommandTreeProps {
 }
 
 export default function CommandTree({
+  commands,
   selectedCommand,
   treeData,
   categoryOptions,
@@ -181,32 +183,57 @@ export default function CommandTree({
       .filter((node): node is CommandTreeNode & { command: MMLCommand } => Boolean(node.command))
       .map((node) => [String(node.key), node.command] as const);
 
+    // Build a lookup from commandCode to command definition for metadata inheritance
+    const commandByCode = new Map<string, MMLCommand>();
+    for (const cmd of commands) {
+      commandByCode.set(cmd.commandCode, cmd);
+    }
+
     // Also include template nodes — convert template to a synthetic MMLCommand
     const templateEntries = allNodes
       .filter((node): node is CommandTreeNode & { template: NonNullable<CommandTreeNode['template']> } => Boolean(node.template))
       .map((node) => {
         const tmpl = node.template;
-        const syntheticCommand: MMLCommand = {
-          id: `tmpl-${tmpl.id}`,
-          commandName: tmpl.templateName,
-          commandCode: tmpl.commandCode,
-          category: tmpl.categoryGroup || '自定义模板',
-          description: tmpl.description,
-          params: Object.entries(tmpl.parameters).map(([name, defaultValue]) => ({
+        // Look up the matching command definition to inherit parameter metadata
+        const matchedCmd = commandByCode.get(tmpl.commandCode);
+
+        const params = Object.entries(tmpl.parameters).map(([name, defaultValue]) => {
+          // Inherit metadata from the matched command's param definition
+          const matchedParam = matchedCmd?.params?.find((p) => p.name === name);
+          if (matchedParam) {
+            return {
+              ...matchedParam,
+              defaultValue: defaultValue ?? matchedParam.defaultValue,
+            };
+          }
+          return {
             name,
             type: 'string' as const,
             required: false,
             description: '',
             defaultValue,
-          })),
+          };
+        });
+
+        const syntheticCommand: MMLCommand = {
+          id: `tmpl-${tmpl.id}`,
+          commandName: tmpl.templateName,
+          commandCode: tmpl.commandCode,
+          category: tmpl.categoryGroup || t('mml.console.customTemplates'),
+          description: tmpl.description,
+          params,
           productTypes: tmpl.productTypes,
           operationType: tmpl.operationType,
+          paramPaths: matchedCmd?.paramPaths,
+          supportedOperations: matchedCmd?.supportedOperations,
+          helpDoc: matchedCmd?.helpDoc,
+          notes: matchedCmd?.notes,
         };
         return [String(node.key), syntheticCommand] as const;
       });
 
     return new Map<string, MMLCommand>([...entries, ...templateEntries]);
-  }, [treeData]);
+  }, [commands, treeData]);
 
   const handleSelect: TreeProps['onSelect'] = useCallback(
     (selectedKeys) => {
@@ -267,7 +294,7 @@ export default function CommandTree({
         <Select
           size="small"
           style={{ width: '100%', borderRadius: 4 }}
-          placeholder="命令类型"
+          placeholder={t('mml.console.commandType')}
           allowClear
           options={categoryOptions}
           value={categoryFilter || undefined}
@@ -302,7 +329,7 @@ export default function CommandTree({
         ) : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无匹配的命令"
+            description={t('mml.console.noMatchingCommands')}
             style={{ marginTop: 40 }}
           />
         )}

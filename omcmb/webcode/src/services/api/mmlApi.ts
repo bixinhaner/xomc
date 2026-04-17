@@ -417,11 +417,17 @@ export const mmlApi = {
 
   // --- Tasks ---
 
-  async getTasks(p: PageRequest): Promise<PageResponse<MMLTask>> {
+  async getTasks(
+    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
+  ): Promise<PageResponse<MMLTask>> {
     const query: Record<string, unknown> = {
       page: p.page,
       page_size: p.pageSize,
     };
+    if (p.status) query.status = p.status;
+    if (p.executeType) query.execute_type = p.executeType;
+    if (p.result) query.result = p.result;
+    if (p.taskName) query.task_name = p.taskName;
 
     const { data } = await http.get<BackendListResponse<BackendMMLTask>>(
       '/mml/tasks',

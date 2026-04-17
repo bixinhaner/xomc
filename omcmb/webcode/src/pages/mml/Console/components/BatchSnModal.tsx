@@ -88,12 +88,12 @@ export default function BatchSnModal({
 
   return (
     <Modal
-      title={showResult ? '批量添加结果' : '批量输入设备SN'}
+      title={showResult ? t('mml.console.batchAddResult') : '批量输入设备SN'}
       open={open}
       onOk={showResult ? handleFinish : handleConfirm}
       onCancel={showResult ? handleContinue : handleClose}
       okText={showResult ? t('common.finish') : t('common.confirm')}
-      cancelText={showResult ? '继续添加' : t('common.cancel')}
+      cancelText={showResult ? t('mml.console.continueAdd') : t('common.cancel')}
       width={480}
       destroyOnClose
     >
@@ -106,7 +106,7 @@ export default function BatchSnModal({
               <div style={{ marginBottom: 8 }}>
                 <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 6 }} />
                 <Typography.Text strong style={{ color: '#52c41a' }}>
-                  添加成功 ({result!.success.length})
+                  {t('mml.console.addSuccessCount', { count: result!.success.length })}
                 </Typography.Text>
               </div>
               <div style={{ maxHeight: 100, overflow: 'auto' }}>
@@ -124,7 +124,7 @@ export default function BatchSnModal({
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>
                 <Typography.Text type="warning" strong>
-                  已存在，跳过 ({result!.duplicate.length})
+                  {t('mml.console.alreadyExistsSkipped', { count: result!.duplicate.length })}
                 </Typography.Text>
               </div>
               <div style={{ maxHeight: 80, overflow: 'auto' }}>
@@ -143,7 +143,7 @@ export default function BatchSnModal({
               <div style={{ marginBottom: 8 }}>
                 <CloseCircleOutlined style={{ color: '#ff4d4f', marginRight: 6 }} />
                 <Typography.Text type="danger" strong>
-                  设备不存在 ({result!.failed.length})
+                  {t('mml.console.deviceNotFound', { count: result!.failed.length })}
                 </Typography.Text>
               </div>
               <div style={{ maxHeight: 100, overflow: 'auto' }}>
@@ -157,7 +157,7 @@ export default function BatchSnModal({
           )}
 
           {result!.success.length === 0 && result!.failed.length === 0 && result!.duplicate.length === 0 && (
-            <Typography.Text type="secondary">没有有效的设备SN</Typography.Text>
+            <Typography.Text type="secondary">{t('mml.console.noValidDeviceSN')}</Typography.Text>
           )}
         </div>
       ) : (
@@ -165,7 +165,7 @@ export default function BatchSnModal({
         <div>
           <div style={{ marginBottom: 12 }}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              每行一个SN，或用逗号、分号分隔
+              {t('mml.console.snInputHint')}
             </Typography.Text>
           </div>
           <TextArea
@@ -177,10 +177,10 @@ export default function BatchSnModal({
           />
           <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between' }}>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              已选设备: {existingSns.size} 台
+              {t('mml.console.selectedDeviceCount', { count: existingSns.size })}
             </Typography.Text>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              待解析: {parsedSns.length} 个SN
+              {t('mml.console.pendingParseCount', { count: parsedSns.length })}
             </Typography.Text>
           </div>
         </div>

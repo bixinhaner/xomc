@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Checkbox,
@@ -14,6 +14,8 @@ import {
 } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import type { MMLCommand, MMLParam, MMLOperationType } from '@/types/mml';
+import { resolveOperationType } from '../utils/resolveOperationType';
+import { useT } from '@/hooks/useT';
 
 export type ParamFormPrimitive = string | number | boolean;
 
@@ -32,16 +34,6 @@ const QUERY_OPERATIONS = new Set<MMLOperationType>(['LST', 'DSP']);
 const EDIT_OPERATIONS = new Set<MMLOperationType>(['MOD', 'ADD']);
 const REMOVE_OPERATIONS = new Set<MMLOperationType>(['RMV']);
 const ACTION_OPERATIONS = new Set<MMLOperationType>(['ACT', 'DEA', 'RST', 'CLR']);
-
-function resolveOperationType(command: MMLCommand | null): MMLOperationType {
-  const operationType = command?.operationType?.trim().toUpperCase();
-  if (operationType) {
-    return operationType as MMLOperationType;
-  }
-
-  const prefix = command?.commandCode?.trim().split(/\s+/)[0]?.toUpperCase();
-  return (prefix || 'LST') as MMLOperationType;
-}
 
 function sortParams(params: MMLParam[]): MMLParam[] {
   return [...params].sort((a, b) => {
@@ -78,6 +70,7 @@ export default function ParamFormRenderer({
   value,
   onChange,
 }: ParamFormRendererProps) {
+  const t = useT();
   const operationType = useMemo(() => resolveOperationType(command), [command]);
   const sortedParams = useMemo(() => sortParams(command?.params ?? []), [command]);
   const visibleParams = useMemo(() => {
@@ -103,32 +96,38 @@ export default function ParamFormRenderer({
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [formValues, setFormValues] = useState<Record<string, ParamFormPrimitive>>({});
 
+  // Stabilize onChange/value with refs to avoid stale closure in useEffect
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
   useEffect(() => {
     if (!command) {
       setSelectedFields([]);
       setFormValues({});
-      onChange?.({});
+      onChangeRef.current?.({});
       return;
     }
 
     if (QUERY_OPERATIONS.has(operationType)) {
       setSelectedFields([]);
       setFormValues({});
-      onChange?.({ selectedFields: [] });
+      onChangeRef.current?.({ selectedFields: [] });
       return;
     }
 
-    const initialValues = buildInitialValues(visibleParams, value);
+    const initialValues = buildInitialValues(visibleParams, valueRef.current);
     setSelectedFields([]);
     setFormValues(initialValues);
 
     if (ACTION_OPERATIONS.has(operationType) && Object.keys(initialValues).length === 0) {
-      onChange?.({});
+      onChangeRef.current?.({});
       return;
     }
 
-    onChange?.({ parameters: initialValues });
-  }, [command?.id, operationType]);
+    onChangeRef.current?.({ parameters: initialValues });
+  }, [command?.id, operationType, visibleParams]);
 
   useEffect(() => {
     if (!value || QUERY_OPERATIONS.has(operationType)) {
@@ -148,13 +147,13 @@ export default function ParamFormRenderer({
     }
 
     setFormValues(nextValues);
-    onChange?.({ parameters: nextValues });
+    onChangeRef.current?.({ parameters: nextValues });
   };
 
   const handleFieldsChange = (nextFields: Array<string | number>) => {
     const values = nextFields.map(String);
     setSelectedFields(values);
-    onChange?.({ selectedFields: values });
+    onChangeRef.current?.({ selectedFields: values });
   };
 
   const renderControl = (param: MMLParam) => {
@@ -173,7 +172,7 @@ export default function ParamFormRenderer({
             max={param.maxValue}
             step={1}
             value={typeof formValues[param.name] === 'number' ? (formValues[param.name] as number) : undefined}
-            placeholder={required ? '请输入数值' : '选填'}
+            placeholder={required ? t('mml.console.inputNumber') : t('mml.console.optional')}
             onChange={(nextValue) => updateParameters(param.name, nextValue ?? undefined)}
           />
         );
@@ -190,7 +189,7 @@ export default function ParamFormRenderer({
             allowClear={!required}
             value={formValues[param.name] as string | number | undefined}
             options={enumOptions}
-            placeholder={required ? '请选择' : '选填'}
+            placeholder={required ? t('common.pleaseSelect') : t('mml.console.optional')}
             onChange={(nextValue) => updateParameters(param.name, nextValue)}
             onClear={() => updateParameters(param.name, undefined)}
           />
@@ -199,7 +198,7 @@ export default function ParamFormRenderer({
         return (
           <Input
             value={formValues[param.name] as string | undefined}
-            placeholder={required ? '请输入' : '选填'}
+            placeholder={required ? t('common.pleaseInput') : t('mml.console.optional')}
             onChange={(event) => updateParameters(param.name, event.target.value)}
           />
         );
@@ -207,18 +206,18 @@ export default function ParamFormRenderer({
   };
 
   if (!command) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先从左侧选择命令" />;
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.selectCommandFirst')} />;
   }
 
   if (QUERY_OPERATIONS.has(operationType)) {
     if (visibleParams.length === 0) {
-      return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该命令无需配置参数" />;
+      return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.noParamsNeeded')} />;
     }
 
     return (
       <div>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          勾选需要查询的字段，未勾选时由后续执行逻辑决定默认查询范围。
+          {t('mml.console.queryFieldsHint')}
         </Typography.Text>
         <Checkbox.Group value={selectedFields} onChange={handleFieldsChange} style={{ width: '100%', marginTop: 12 }}>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
@@ -242,10 +241,10 @@ export default function ParamFormRenderer({
         <Alert
           type="warning"
           showIcon
-          message="该命令将直接执行，请确认"
-          description={command.description || command.helpDoc || '该操作会立即向目标设备下发执行。'}
+          message={t('mml.console.directExecuteWarning')}
+          description={command.description || command.helpDoc || t('mml.console.directExecuteDesc')}
         />
-        <Typography.Text type="secondary">该命令无需配置参数</Typography.Text>
+        <Typography.Text type="secondary">{t('mml.console.noParamsNeeded')}</Typography.Text>
       </Space>
     );
   }
@@ -260,8 +259,8 @@ export default function ParamFormRenderer({
         <Alert
           type="warning"
           showIcon
-          message="该命令将直接执行，请确认"
-          description={command.description || command.helpDoc || '请确认操作对象与参数无误后再执行。'}
+          message={t('mml.console.directExecuteWarning')}
+          description={command.description || command.helpDoc || t('mml.console.confirmBeforeExecute')}
         />
       ) : null}
 
@@ -285,7 +284,7 @@ export default function ParamFormRenderer({
               label={labelNode}
               required={required}
               tooltip={param.description || undefined}
-              extra={param.unit ? `单位: ${param.unit}` : undefined}
+              extra={param.unit ? t('mml.console.unitLabel', { unit: param.unit }) : undefined}
             >
               {renderControl(param)}
             </Form.Item>
