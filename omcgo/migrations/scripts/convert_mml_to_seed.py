@@ -12,7 +12,7 @@
 # - ../../../files/db/mml/small_cell_param.sql
 #
 # 输出:
-# ../seed/000023_seed_mml_param_library.sql
+# ../seed/000005_seed_mml_param_library.sql
 # ============================================================
 
 import re
@@ -342,7 +342,7 @@ def main():
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         f.write("""-- +goose Up
 -- ============================================================
--- 000023_seed_mml_param_library.sql
+-- 000005_seed_mml_param_library.sql
 -- MML 参数库完整种子数据(自动生成)
 --
 -- 数据来源: files/db/mml/
