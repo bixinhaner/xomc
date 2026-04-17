@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Form, Input, Select, message, Space, InputNumber, Switch } from 'antd';
+import { Modal, Form, Input, Select, Button, message, Space, InputNumber, Switch } from 'antd';
 import { useCreateMMLTemplate } from '@/hooks/api/useMML';
 import { useAllMMLCommands } from '@/hooks/api/useMML';
 import { useDictionary } from '@/hooks/api/useSystem';
@@ -11,9 +11,10 @@ interface AddTemplateModalProps {
   scope: 'public' | 'private';
   onClose: () => void;
   onSuccess: () => void;
+  onSaveAndExecute?: (template: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) => void;
 }
 
-export default function AddTemplateModal({ open, scope, onClose, onSuccess }: AddTemplateModalProps) {
+export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSaveAndExecute }: AddTemplateModalProps) {
   const t = useT();
 
   const OPERATION_TYPE_OPTIONS = [
@@ -99,7 +100,7 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess }: Ad
     });
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (andExecute: boolean) => {
     try {
       const values = await form.validateFields();
 
@@ -118,6 +119,11 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess }: Ad
       await createMutation.mutateAsync(template);
       message.success(scope === 'public' ? t('mml.console.publicTemplateCreated') : t('mml.console.privateTemplateCreated'));
       onSuccess();
+
+      if (andExecute && onSaveAndExecute) {
+        onSaveAndExecute(template);
+      }
+
       onClose();
     } catch {
       // validation errors are shown inline
@@ -176,11 +182,22 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess }: Ad
     <Modal
       title={scope === 'public' ? t('mml.console.addPublicTemplate') : t('mml.console.addPrivateTemplate')}
       open={open}
-      onOk={handleSubmit}
       onCancel={onClose}
-      confirmLoading={createMutation.isPending}
       width={600}
       destroyOnClose
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={() => void handleSubmit(false)} loading={createMutation.isPending}>
+            {t('mml.console.saveOnly')}
+          </Button>
+          {onSaveAndExecute && (
+            <Button type="primary" onClick={() => void handleSubmit(true)} loading={createMutation.isPending}>
+              {t('mml.console.saveAndExecute')}
+            </Button>
+          )}
+        </div>
+      }
     >
       <Form form={form} layout="vertical" size="small">
         <Form.Item

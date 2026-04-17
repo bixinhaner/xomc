@@ -402,6 +402,36 @@ export default function MMLConsole() {
         onSuccess={() => {
           void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
         }}
+        onSaveAndExecute={(template) => {
+          const devices = deviceSelection.selectedDevices;
+          if (devices.length === 0) {
+            void message.warning(t('mml.console.errorNoDevice'));
+            return;
+          }
+
+          const syntheticCommand: MMLCommand = {
+            id: `tmpl-${Date.now()}`,
+            commandName: template.templateName,
+            commandCode: template.commandCode,
+            category: template.categoryGroup || '',
+            description: template.description,
+            params: [],
+            productTypes: template.productTypes,
+            operationType: template.operationType,
+          };
+
+          commandExecution.executeCommand({
+            activeTab: 'control',
+            command: syntheticCommand,
+            commandLineText: template.commandCode,
+            devices,
+            isManualEdit: false,
+            operationType: template.operationType,
+            paramPaths: template.paramPaths,
+            parameters: template.parameters as Record<string, string | number | boolean>,
+            selectedFields: [],
+          });
+        }}
       />
     </div>
   );

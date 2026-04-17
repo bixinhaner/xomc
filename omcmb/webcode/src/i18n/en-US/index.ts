@@ -3582,6 +3582,8 @@ const messages: Record<string, string> = {
   'mml.console.selectProductTypes':          'Select product types (multiple)',
   'mml.console.paramConfig':                 'Parameter Configuration',
   'mml.console.commandDescriptionOptional':  'Command description (optional)',
+  'mml.console.saveAndExecute':              'Save & Execute',
+  'mml.console.saveOnly':                    'Save Only',
 
   // MML Console - Command tree
   'mml.console.customTemplates':             'Custom Templates',

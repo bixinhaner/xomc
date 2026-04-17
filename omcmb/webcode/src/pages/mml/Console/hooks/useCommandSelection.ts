@@ -59,6 +59,13 @@ export function useCommandSelection() {
     }));
   }, [categoryDict, commands]);
 
+  // 初次加载时自动选中第一个分类
+  useEffect(() => {
+    if (categoryFilter === '' && categoryOptions.length > 0) {
+      setCategoryFilter(categoryOptions[0].value);
+    }
+  }, [categoryOptions, categoryFilter]);
+
   const treeData = useMemo((): CommandTreeNode[] => {
     if (commands.length === 0) {
       return [];

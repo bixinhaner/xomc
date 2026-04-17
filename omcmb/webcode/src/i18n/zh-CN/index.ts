@@ -3589,6 +3589,8 @@ const messages: Record<string, string> = {
   'mml.console.selectProductTypes':          '选择产品类型（可多选）',
   'mml.console.paramConfig':                 '参数配置',
   'mml.console.commandDescriptionOptional':  '命令描述（可选）',
+  'mml.console.saveAndExecute':              '保存并执行',
+  'mml.console.saveOnly':                    '仅保存',
 
   // MML Console - Command tree
   'mml.console.customTemplates':             '自定义模板',
