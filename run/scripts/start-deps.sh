@@ -16,30 +16,30 @@ log_ok()   { echo -e "${GREEN}[✓]${NC} $1"; }
 log_fail() { echo -e "${RED}[✗]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 
-PG_READY="/usr/local/Cellar/postgresql@16/16.13/bin/pg_isready"
-
 echo "========== 启动基础依赖 =========="
 
 # --- PostgreSQL ---
 echo -n "PostgreSQL ... "
-if $PG_READY -h localhost -q 2>/dev/null; then
+if pg_isready -h localhost -q 2>/dev/null; then
     log_ok "已运行"
 else
-    # 清理残留 PID 文件
-    PID_FILE="/usr/local/var/postgresql@16/postmaster.pid"
-    if [ -f "$PID_FILE" ]; then
-        PG_PID=$(head -1 "$PID_FILE")
-        if ! ps -p "$PG_PID" -o comm= 2>/dev/null | grep -q postgres; then
-            rm -f "$PID_FILE"
+    PGDATA="$(brew --prefix postgresql@16 2>/dev/null | sed 's|/opt/postgresql@16|/var/postgresql@16|')"
+    [ -d "$PGDATA" ] || PGDATA="/opt/homebrew/var/postgresql@16"
+    # 清理已崩溃进程留下的 postmaster.pid
+    if [ -f "$PGDATA/postmaster.pid" ]; then
+        PG_PID=$(head -1 "$PGDATA/postmaster.pid")
+        if ! kill -0 "$PG_PID" 2>/dev/null; then
+            rm -f "$PGDATA/postmaster.pid"
             log_warn "已清理残留 postmaster.pid"
         fi
     fi
-    brew services restart postgresql@16 >/dev/null 2>&1
-    sleep 2
-    if $PG_READY -h localhost -q 2>/dev/null; then
-        log_ok "已启动"
+    pg_ctl -D "$PGDATA" -l "$PGDATA/server.log" -o "-p 5432" start -w >/dev/null 2>&1
+    sleep 1
+    if pg_isready -h localhost -q 2>/dev/null; then
+        head -1 "$PGDATA/postmaster.pid" > "$RUN_DIR/postgres.pid"
+        log_ok "已启动 (PID: $(cat "$RUN_DIR/postgres.pid"))"
     else
-        log_fail "启动失败，请检查: brew services info postgresql@16"
+        log_fail "启动失败，请查看: $PGDATA/server.log"
         exit 1
     fi
 fi
@@ -49,12 +49,18 @@ echo -n "Redis ...... "
 if redis-cli ping 2>/dev/null | grep -q PONG; then
     log_ok "已运行"
 else
-    brew services restart redis >/dev/null 2>&1
+    REDIS_DATA_DIR="$HOME/data/redis"
+    mkdir -p "$REDIS_DATA_DIR"
+    redis-server --daemonize yes \
+        --dir "$REDIS_DATA_DIR" \
+        --logfile "$REDIS_DATA_DIR/redis.log" \
+        --pidfile "$RUN_DIR/redis.pid" \
+        --port 6379 >/dev/null 2>&1
     sleep 1
     if redis-cli ping 2>/dev/null | grep -q PONG; then
-        log_ok "已启动"
+        log_ok "已启动 (PID: $(cat "$RUN_DIR/redis.pid"))"
     else
-        log_fail "启动失败，请检查: brew services info redis"
+        log_fail "启动失败，请查看: $REDIS_DATA_DIR/redis.log"
         exit 1
     fi
 fi
