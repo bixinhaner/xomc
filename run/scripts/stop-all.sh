@@ -68,9 +68,8 @@ stop_process "omcgo-worker" "$RUN_DIR/worker.pid"    "omcgo-worker"
 stop_process "NATS"         "$RUN_DIR/nats.pid"      "nats-server"
 stop_process "MinIO"        "$RUN_DIR/minio.pid"     "minio"
 
-# PostgreSQL 和 Redis 为有状态依赖，默认跨 restart 保持运行（restart-all 依赖它们在 migrate 阶段可用）。
-# 如需完全停止：bash run/scripts/stop-all.sh --with-db
-if [ "${1:-}" = "--with-db" ]; then
+# 默认完全停止 PostgreSQL 和 Redis；restart-all 调用时传 --keep-db 保留运行供迁移使用。
+if [ "${1:-}" != "--keep-db" ]; then
     stop_process "Redis" "$RUN_DIR/redis.pid" "redis-server"
     echo -n "PostgreSQL ... "
     PGDATA="$(brew --prefix postgresql@16 2>/dev/null | sed 's|/opt/postgresql@16|/var/postgresql@16|')"
@@ -85,8 +84,7 @@ if [ "${1:-}" = "--with-db" ]; then
     fi
 else
     echo ""
-    echo "注意: PostgreSQL 和 Redis 保持运行以便 restart-all 迁移阶段使用。"
-    echo "如需完全停止: bash run/scripts/stop-all.sh --with-db"
+    echo "注意: PostgreSQL 和 Redis 保留运行 (--keep-db)。"
 fi
 
 echo "========== 完成 =========="

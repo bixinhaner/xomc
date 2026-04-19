@@ -18,8 +18,8 @@ echo "║       OMC 开发环境一键重启           ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 
-# 1. 停止所有服务
-bash "$SCRIPT_DIR/stop-all.sh"
+# 1. 停止所有服务（保留 PG/Redis 以便下面 migrate 阶段连接）
+bash "$SCRIPT_DIR/stop-all.sh" --keep-db
 echo ""
 
 # 2. 清理旧日志和 Redis 临时状态
