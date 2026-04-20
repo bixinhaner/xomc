@@ -8,7 +8,13 @@ Thumbs.db
 
 # Build artifacts
 omcgo/bin/
+omcgo/acs
 omcgo/app
+omcgo/worker
+omcgo/migrate
+omcgo/omcctl
+omcgo/loadtest
+run/app
 omcmb/webcode/node_modules/
 omcmb/webcode/dist/
 
@@ -21,7 +27,5 @@ omcmb/webcode/dist/
 # Qoder (AI tool generated files)
 .qoder/
 
-run/app
 run/logs
 omcmb/webcode/dist
-omcgo/acs
