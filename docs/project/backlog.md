@@ -50,8 +50,8 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 37 | — | 初始化 |
-| `done` | 4 | — | 含 R-005 / R-108 关闭 + 流程体系搭建 |
-| `in_dev` | 2 | — | Sprint-01 在飞 |
+| `done` | 5 | — | 含 R-005 / R-108 关闭 + 流程体系搭建 + L0 Backlog/流水线落地 |
+| `in_dev` | 1 | — | T-0006 贯穿 Sprint-01..07 |
 | `planned` | 20 | — | Sprint-01 ~ 07 全量切分 |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
@@ -68,7 +68,6 @@
 
 | ID | Title | Type | Domain | Prio | State | Owner | Est | Deps | Risk/PRD | Sprint | Updated |
 |----|-------|------|--------|------|-------|-------|-----|------|----------|--------|---------|
-| T-0005 | 开发流水线 skill 设计 + L0 Backlog | proc | process | P1 | in_dev | AI | L | — | — | sprint-01 | 2026-04-20 |
 | T-0006 | E2E 用例补齐（贯穿 01→07 累计 ≥200） | td | infra | P0 | in_dev | QA | XL | — | R-002 | sprint-01..07 | 2026-04-20 |
 | T-0007 | F04 告警邮件通道 | feat | F04 | P0 | planned | 电信+Go | M | — | R-001 / `prd/F04-alarm-notification.md` | sprint-01 | 2026-04-20 |
 | T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | planned | 运维 | M | — | R-107 | sprint-01 | 2026-04-20 |
@@ -136,6 +135,7 @@
 | T-0002 | 补 5 个 `reserved_placeholder` 迁移（闭合版本号跳跃） | td | infra | 2026-04-20 | commit `6a6560e1`；`scripts/check-migrations.sh` 通过；**关闭 R-005** |
 | T-0003 | 修正 `check-migrations.sh` Down 空判定阈值（撤销 R-108 误报） | bug | infra | 2026-04-20 | commit `36907a36`；**关闭 R-108**（误报） |
 | T-0004 | 重构 Claude git 权限（软约束行为准则 + 硬约束 settings.json） | proc | process | 2026-04-20 | commit `7d212ce2`；`.claude/settings.json` 分层 allow/ask/deny |
+| T-0005 | 开发流水线 skill 设计 + L0 Backlog | proc | process | 2026-04-20 | commit `b59811e4`（L0 + skill + 设计文档 + CLAUDE.md）+ commit `04781919`（既有制品联通：/commit 四元组 / DoD / Gate / Risk / Milestone）；设计 `docs/project/dev-pipeline-design-20260420.md`；skill `.claude/commands/dev-pipeline.md`；**首次 dogfooding**：本三连 commit 自身全部走四元组 footer |
 
 ---
 
@@ -202,6 +202,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-20 | in_dev | T-0006 | E2E 补齐正式启动，Sprint-01 目标首批 20 条 |
 | 2026-04-20 | schema 调整 | T-0025 | Deps 由 `T-0006` 改为 `T-0006@累计≥150`（累计型依赖语法，设计 §11.7.1） |
 | 2026-04-20 | Owner 补齐 | T-0007..T-0026 | 按 risk-register 角色映射填入（电信/Go/PM/架构/运维/前端/QA），Sprint Planning 时替换为人名 |
+| 2026-04-20 | done | T-0005 | S7 回写：commit `b59811e4` + `04781919`；L0 Backlog + 流水线 skill + 既有制品联通全部完成，首次 dogfooding 成功 |
 
 ---
 
@@ -239,5 +240,5 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 ---
 
-**当前版本**：v1.1（2026-04-20 Bootstrap Day 1-3；补 Owner 角色占位 + 累计型依赖豁免）
+**当前版本**：v1.2（2026-04-20 Bootstrap Day 1-3；补 Owner 角色占位 + 累计型依赖豁免 + T-0005 S7 回写关闭）
 **维护节奏**：每日（状态回写）· 每周一（Triage）· 每 2 周（Sprint Planning + 仪表盘刷新）· 每季度（深度清理）
