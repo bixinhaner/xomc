@@ -279,6 +279,11 @@ Related: F06
 
 ## 9. 开发流程
 
+> **首选入口**：调 `/dev-pipeline` 走 S0→S7 七阶段流水线（任务出队/立项/规划/设计/开发/验证/审查/提交/收尾）。
+> 任务先登记到 `docs/project/backlog.md`（唯一任务清单），再由 `/dev-pipeline pick T-NNNN` 拉起。
+> 完整设计：`docs/project/dev-pipeline-design-20260420.md`。
+> 下面的"实施步骤"是流水线 S2–S6 的操作性摘要，适用于小改/hotfix 等快速通道场景。
+
 ### 实施步骤
 
 1. **理解** — 研究代码库中的现有模式，阅读相关模块的 handler/service/repository
@@ -286,7 +291,7 @@ Related: F06
 3. **测试** — 先编写测试用例（后端 `_test.go`，E2E 脚本）
 4. **实现** — 最少代码使测试通过
 5. **重构** — 在测试通过的前提下清理代码
-6. **提交** — 使用 `/commit` 自动审查并提交
+6. **提交** — 使用 `/commit` 自动审查并提交（S6 需在 footer 补 PRD/Sprint/Risk/Backlog 四元组，见 dev-pipeline §D3）
 
 ### 遇到困难时（3 次尝试规则）
 
@@ -414,6 +419,9 @@ npm run lint        # ESLint
 | 文档 | 路径 |
 |------|------|
 | 后端详细指导 | `omcgo/CLAUDE.md` |
+| 开发流水线 Skill | `.claude/commands/dev-pipeline.md` |
+| 开发流水线设计 | `docs/project/dev-pipeline-design-20260420.md` |
+| 需求池（Backlog，唯一任务清单） | `docs/project/backlog.md` |
 | E2E 测试 Skill | `.claude/commands/e2e.md` |
 | 压力测试 Skill | `.claude/commands/acs-stress-test.md` |
 | 代码审查 Skill | `.claude/commands/review.md` |
