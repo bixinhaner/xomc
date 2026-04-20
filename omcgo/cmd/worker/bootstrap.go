@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +18,7 @@ import (
 type workerInfra struct {
 	*components.Infra
 	Carriers *carrier.CarrierRegistry
-	CmdQueue *cmdqueue.RedisCommandQueue
+	CmdQueue cmdqueue.CommandQueue
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -50,7 +51,12 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 
 	w := &workerInfra{Infra: inf}
 	w.registerCarriers()
-	w.CmdQueue = cmdqueue.NewRedisCommandQueue(inf.Redis)
+
+	// 创建统一任务队列：TaskService（Redis + PG） + BridgeQueue 适配器
+	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	taskRepo := task.NewPgTaskRepository(inf.PgPool)
+	taskSvc := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	w.CmdQueue = task.NewBridgeQueue(taskSvc)
 
 	return w, nil
 }

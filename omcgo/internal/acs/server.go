@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/download"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/stun"
@@ -31,8 +30,7 @@ type ACSServer struct {
 // ServerDeps holds the dependencies for the ACS server.
 type ServerDeps struct {
 	SessionStore            SessionStore
-	CommandQueue            cmdqueue.CommandQueue // deprecated: use TaskService instead
-	TaskService             *task.TaskService     // new task management service
+	TaskService             *task.TaskService
 	EventBus                event.EventBus
 	Authenticator           auth.DeviceAuthenticator
 	RPCDispatcher           *rpc.Dispatcher
@@ -58,7 +56,6 @@ type ServerDeps struct {
 func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	h := &Handler{
 		sessionStore:            deps.SessionStore,
-		commandQueue:            deps.CommandQueue,
 		taskService:             deps.TaskService,
 		eventBus:                deps.EventBus,
 		authenticator:           deps.Authenticator,
@@ -158,7 +155,6 @@ func RegisterMetrics(reg prometheus.Registerer) *ACSMetrics {
 // starting the ACS server with Redis and NATS-backed components.
 func NewDefaultDeps(
 	sessionStore SessionStore,
-	cmdQueue cmdqueue.CommandQueue,
 	taskSvc *task.TaskService,
 	eventBus event.EventBus,
 	authMode, authUser, authPass string,
@@ -171,7 +167,6 @@ func NewDefaultDeps(
 ) ServerDeps {
 	return ServerDeps{
 		SessionStore:            sessionStore,
-		CommandQueue:            cmdQueue,
 		TaskService:             taskSvc,
 		EventBus:                eventBus,
 		Authenticator:           auth.NewAuthenticator(authMode, authUser, authPass),

@@ -1,7 +1,8 @@
 # TR-069 协议与交互流程梳理
 
-> **文档版本**: v1.0
+> **文档版本**: v2.0
 > **创建日期**: 2026-04-20
+> **最后更新**: 2026-04-20 — 增加队列流转流程与代码定位
 > **适用项目**: OMC（基站网络运营管理系统）
 
 ---
@@ -346,6 +347,197 @@ ResultAggregator.OnTaskCompleted()             internal/mml/result_aggregator.go
 ```
 
 ---
+
+## 6.1 任务队列流转详解（附代码定位）
+
+> 以下追踪 device_task 从创建、入队、弹出、执行、到结果回写的完整生命周期，每一步标注源码位置。
+
+### 6.1.1 入队：APP 创建任务并推送到 Redis
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ① MML Service.ExecuteCommand()                    mml/service.go:304   │
+│     ├─ 解析 command_code / script_id → commands[]                       │
+│     ├─ taskRepo.Create(mmlTask)                     mml/pg_repository.go│
+│     └─ fanouter.Fanout(ctx, mmlTask)                mml/fanout.go:35    │
+│         ├─ buildDeviceTaskRequests(mmlTask)          mml/fanout.go:61   │
+│         │   for cmdIdx,cmd := range Commands {                           │
+│         │     for devIdx,sn := range DeviceSNs {                         │
+│         │       → CreateTaskRequest{ParentTaskID, CommandIndex, ...}     │
+│         │     }                                                          │
+│         │   }                                                            │
+│         └─ taskCreator.BatchCreateTasks(ctx, reqs)  task/service.go:400 │
+└───────────────────────────────┬───────────────────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ② TaskService.BatchCreateTasks()                  task/service.go:400  │
+│     ├─ repo.BatchCreate(ctx, tasks)                 task/pg_repository.go:242│
+│     │   └─ INSERT INTO device_tasks ... (批量)                          │
+│     │                                                                    │
+│     ├─ for each task:                                                    │
+│     │   └─ queue.Push(ctx, task)                   task/redis_queue.go:49│
+│     │       ├─ score = priority × 10¹³ + createdAt.UnixNano  :56        │
+│     │       ├─ Pipeline:                                                 │
+│     │       │   ZADD acs:taskq:{sn} score taskID            :68         │
+│     │       │   HSET acs:task:{id} data {json}              :74         │
+│     │       │   EXPIRE acs:task:{id} 24h                    :75         │
+│     │       └─ pipe.Exec()                                    :77        │
+│     │                                                                    │
+│     └─ for each unique deviceSN:                                         │
+│         └─ wakeDevice(sn)                           task/service.go:440 │
+│             └─ go func() {                                              │
+│                 deviceLookup.GetConnectionRequestURL()  :447             │
+│                 connReq.Send(ctx, sn, httpURL)         :455             │
+│               }()                                                        │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.1.2 弹出：ACS 从 Redis 取任务并下发 RPC
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ③ ACS Handler — 会话中弹出任务                                            │
+│                                                                          │
+│  handleEmpty()                                     acs/handler.go:494    │
+│     └─ taskService.PopTask(ctx, deviceSN)          task/service.go:152   │
+│         └─ queue.Pop(ctx, deviceSN)                task/redis_queue.go:86│
+│             ├─ ZRANGE acs:taskq:{sn} 0 0 WITHSCORES     :90             │
+│             ├─ Pipeline:                                                 │
+│             │   ZREM acs:taskq:{sn} taskID                :105           │
+│             │   HGET acs:task:{id} data                    :108          │
+│             │   pipe.Exec()                                :110           │
+│             └─ json.Unmarshal(taskData, &task)             :122          │
+│                                                                          │
+│  handleRPCResponse()                               acs/handler.go:662    │
+│     └─ taskService.PopTask(ctx, deviceSN)          (同上, 取下一个任务)    │
+│                                                                          │
+│  handleSOAPFault()                                 acs/handler.go:1008   │
+│     └─ taskService.PopTask(ctx, deviceSN)          (同上, 故障后继续)      │
+└───────────────────────────────┬───────────────────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ④ 标记已发送 — 关联 CWMP ID                                              │
+│                                                                          │
+│  TaskService.MarkTaskSent(ctx, taskID, cwmpID)     task/service.go:176   │
+│     ├─ queue.MarkTaskSent(ctx, taskID, cwmpID)     task/redis_queue.go:288│
+│     │   ├─ task.MarkSent(cwmpID)                         :298            │
+│     │   ├─ Pipeline:                                                     │
+│     │   │   HSET acs:task:{id} data {updated_json}       :304            │
+│     │   │   SET acs:cwmp2task:{hash(cwmpID)} taskID 24h  :305           │
+│     │   └─ pipe.Exec()                                    :307           │
+│     │                                                                     │
+│     └─ repo.Update(ctx, task)                      task/pg_repository.go:59│
+│         └─ UPDATE device_tasks SET status='sent', cwmp_id=? WHERE id=?  │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.1.3 完成/失败：CPE 响应处理与结果回写
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ⑤ 成功路径                                                               │
+│                                                                          │
+│  TaskService.MarkTaskCompleted(ctx, taskID, result) task/service.go:201  │
+│     ├─ queue.MarkTaskCompleted(ctx, taskID, result) task/redis_queue.go:312│
+│     │   ├─ task.MarkCompleted(result)                     :321            │
+│     │   ├─ HSET acs:task:{id} data {updated_json}        :325            │
+│     │   └─ DEL acs:cwmp2task:{cwmpID}                    :330-332        │
+│     │                                                                     │
+│     ├─ repo.Update(ctx, task)                      task/pg_repository.go:59│
+│     │   └─ UPDATE device_tasks SET status='completed', result=?, ...     │
+│     │                                                                     │
+│     └─ notifyCompletion(ctx, task)                 task/service.go:465   │
+│         ├─ guard: Source==MML && ParentTaskID!=""                        │
+│         └─ for cb := range callbacks {                                   │
+│              cb.OnTaskCompleted(ctx, task)                                │
+│            }                                                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ⑤ 失败路径                                                               │
+│                                                                          │
+│  TaskService.MarkTaskFailed(ctx, taskID, code, msg) task/service.go:233  │
+│     ├─ queue.MarkTaskFailed(ctx, taskID, code, msg) task/redis_queue.go:338│
+│     │   ├─ task.MarkFailed(errorCode, errorMsg)           :347            │
+│     │   ├─ HSET acs:task:{id} data {updated_json}        :351            │
+│     │   └─ DEL acs:cwmp2task:{cwmpID}                    :356-358        │
+│     │                                                                     │
+│     ├─ repo.Update(ctx, task)                      task/pg_repository.go:59│
+│     └─ notifyCompletion(ctx, task)                 task/service.go:465   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.1.4 MML 结果回聚
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ⑥ ResultAggregator.OnTaskCompleted()              mml/result_aggregator.go:31│
+│     ├─ 解析 parentTaskID → mmlID                                         │
+│     ├─ 计算 delta: completed→success+1, failed/expired→failed+1          │
+│     ├─ taskRepo.IncrementStats(ctx, mmlID, deltas) mml/pg_repository.go │
+│     │   └─ UPDATE mml_tasks SET success_count=success_count+?, ...      │
+│     └─ finalizeIfComplete(ctx, mmlID)              mml/result_aggregator.go:62│
+│         ├─ total = TotalDevices × len(Commands)  :68                     │
+│         ├─ done = SuccessCount + FailedCount      :69                    │
+│         ├─ done < total → return (等待更多)        :70                   │
+│         ├─ done == total → 确定终态:                                      │
+│         │   failed==0    → completed + success                            │
+│         │   success==0   → failed + failed                                │
+│         │   otherwise    → completed + partial                             │
+│         ├─ taskRepo.Update(ctx, mmlTask)                                  │
+│         └─ hub.PublishSimple(executor, "mml_task_completed", data) :112 │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.1.5 BridgeQueue 兼容队列（旧 cmdqueue → device_tasks 桥接）
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  BridgeQueue — 旧模块(backup/software/provision)的透明适配               │
+│  文件: task/bridge_queue.go                                              │
+│                                                                          │
+│  Push(ctx, deviceSN, cmd)                          :25                  │
+│     ├─ cmdqueue.Command → task.CreateTaskRequest 转换                     │
+│     └─ svc.CreateTask(ctx, req)                    走新的 TaskService    │
+│                                                                          │
+│  Pop(ctx, deviceSN)                                :60                  │
+│     ├─ svc.PopTask(ctx, deviceSN)                  走新的 TaskService    │
+│     └─ task → cmdqueue.Command 转换 (taskToCommand)  :93                │
+│                                                                          │
+│  Peek(ctx, deviceSN)                               :72                  │
+│  Len(ctx, deviceSN)                                :84                  │
+│  Clear(ctx, deviceSN)                              :89  (no-op)        │
+│                                                                          │
+│  旧 cmdqueue.Pop()                                 acs/cmdqueue/queue.go:75│
+│     ├─ ZRANGE + ZREM (直接操作 acs:cmdq:{sn})                           │
+│     └─ json.Unmarshal (最多 100 次重试跳过过期命令)                       │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.1.6 Connection Request 唤醒设备
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  connreq.Dispatcher.Send(ctx, deviceSN, httpURL)  connreq/dispatcher.go:55│
+│     │                                                                    │
+│     ├─[策略1] UDP (NAT 穿透)                                             │
+│     │   udpSender.Send(ctx, deviceSN, serverAddr, isENB)                  │
+│     │   文件: connreq/udp_sender.go:52                                   │
+│     │     ├─ store.Get(ctx, deviceSN) → 获取 STUN 地址       :53         │
+│     │     ├─ eNB: 直接发送 "infromrequest"                    :64         │
+│     │     ├─ CPE: buildCPEConnectionRequest() HMAC-SHA1 签名  :130       │
+│     │     └─ sendUDP(addr, msg, logger)                       :70        │
+│     │         └─ net.DialUDP + 发送 (重试 3 次)               :74        │
+│     │                                                                    │
+│     └─[策略2] HTTP (直连设备)                                             │
+│         httpClient.Send(ctx, deviceSN, httpURL)              :77         │
+│         └─ Digest/Basic 认证 HTTP GET                       (降级路径)  │
+│                                                                          │
+│     返回 ErrNoConnectionMethod (两种都不可用)                             │
+└───────────────────────────────────────────────────────────────────────────┘
+```
 
 ## 7. 消息订阅完整流程
 

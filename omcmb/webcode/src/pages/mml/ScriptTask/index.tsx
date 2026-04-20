@@ -325,10 +325,10 @@ export default function ScriptTask() {
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
     { key: 'createdAt', title: t('mml.createTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => formatTime(val) },
-    { key: 'executeType', title: t('mml.type'), dataIndex: 'executeType', width: 100, render: (val: MMLExecuteType) => <Tag color={CREATE_STATUS_KEYS[val]?.color}>{t(CREATE_STATUS_KEYS[val]?.key)}</Tag> },
-    { key: 'status', title: t('mml.status'), dataIndex: 'status', width: 100, render: (val: MMLTaskStatus) => <Tag color={TASK_STATUS_KEYS[val]?.color}>{t(TASK_STATUS_KEYS[val]?.key)}</Tag> },
+    { key: 'executeType', title: t('mml.type'), dataIndex: 'executeType', width: 100, render: (val: MMLExecuteType) => { const e = CREATE_STATUS_KEYS[val]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{val}</Tag>; } },
+    { key: 'status', title: t('mml.status'), dataIndex: 'status', width: 100, render: (val: MMLTaskStatus) => { const e = TASK_STATUS_KEYS[val]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{val}</Tag>; } },
     { key: 'progress', title: t('mml.progress'), width: 80, render: (_: unknown, record: MMLTask) => computeProgress(record) },
-    { key: 'result', title: t('mml.result'), dataIndex: 'result', width: 100, render: (val?: MMLTaskResult) => val ? <Tag color={TASK_RESULT_KEYS[val]?.color}>{t(TASK_RESULT_KEYS[val]?.key)}</Tag> : '-' },
+    { key: 'result', title: t('mml.result'), dataIndex: 'result', width: 100, render: (val?: MMLTaskResult) => { if (!val) return '-'; const e = TASK_RESULT_KEYS[val]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{val}</Tag>; } },
     { key: 'startedAt', title: t('mml.startTime'), dataIndex: 'startedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
     { key: 'finishedAt', title: t('mml.endTime'), dataIndex: 'finishedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
   ], [t, getActionMenu]);
@@ -357,10 +357,10 @@ export default function ScriptTask() {
             <p><strong>{t('mml.taskNameLabel')}</strong>{editingTask.taskName}</p>
             <p><strong>{t('mml.creatorLabel')}</strong>{editingTask.creator}</p>
             <p><strong>{t('mml.createTimeLabel')}</strong>{formatTime(editingTask.createdAt)}</p>
-            <p><strong>{t('mml.typeLabel')}</strong>{t(CREATE_STATUS_KEYS[editingTask.executeType]?.key)}</p>
-            <p><strong>{t('mml.statusLabel')}</strong>{t(TASK_STATUS_KEYS[editingTask.status]?.key)}</p>
+            <p><strong>{t('mml.typeLabel')}</strong>{CREATE_STATUS_KEYS[editingTask.executeType] ? t(CREATE_STATUS_KEYS[editingTask.executeType].key) : editingTask.executeType}</p>
+            <p><strong>{t('mml.statusLabel')}</strong>{TASK_STATUS_KEYS[editingTask.status] ? t(TASK_STATUS_KEYS[editingTask.status].key) : editingTask.status}</p>
             <p><strong>{t('mml.progressLabel')}</strong>{computeProgress(editingTask)}</p>
-            <p><strong>{t('mml.resultLabel')}</strong>{editingTask.result ? t(TASK_RESULT_KEYS[editingTask.result]?.key) : '-'}</p>
+            <p><strong>{t('mml.resultLabel')}</strong>{editingTask.result ? (TASK_RESULT_KEYS[editingTask.result] ? t(TASK_RESULT_KEYS[editingTask.result].key) : editingTask.result) : '-'}</p>
             <p><strong>{t('mml.deviceCountLabel')}</strong>{editingTask.totalDevices}</p>
             <p><strong>{t('mml.successCountLabel')}</strong>{editingTask.successCount} / <strong>{t('mml.failedCountLabel')}</strong>{editingTask.failedCount}</p>
             <p><strong>{t('mml.startTimeLabel')}</strong>{formatTime(editingTask.startedAt) || '-'}</p>

@@ -12,7 +12,6 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/omcgo/omcgo/internal/acs"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/download"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
@@ -62,16 +61,15 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 	// Create ACS-specific components
 	sessionStore := acs.NewRedisSessionStore(inf.Redis, cfg.Session.Timeout)
-	cmdQueue := cmdqueue.NewRedisCommandQueue(inf.Redis)
 
-	// Create TaskService if PostgreSQL is available
-	var taskService *task.TaskService
-	if inf.PgPool != nil {
-		taskQueue := task.NewRedisTaskQueue(inf.Redis)
-		taskRepo := task.NewPgTaskRepository(inf.PgPool)
-		taskService = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
-		inf.Logger.Info("task service initialized")
+	// TaskService（必需）：统一任务队列，Redis + PostgreSQL 双写
+	if inf.PgPool == nil {
+		return fmt.Errorf("PostgreSQL connection required for ACS task service")
 	}
+	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	taskRepo := task.NewPgTaskRepository(inf.PgPool)
+	taskService := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	inf.Logger.Info("task service initialized")
 
 	// Get request ID prefix from config, default to "acs"
 	requestIDPrefix := cfg.RequestIDPrefix
@@ -81,7 +79,6 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 	deps := acs.NewDefaultDeps(
 		sessionStore,
-		cmdQueue,
 		taskService,
 		inf.EventBus,
 		cfg.Auth.Mode, cfg.Auth.Username, cfg.Auth.Password,

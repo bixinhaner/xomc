@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/alarm"
@@ -40,7 +41,8 @@ type Container struct {
 	Redis      redis.UniversalClient
 	MinIO      *minio.Client
 	EventBus   event.EventBus
-	CmdQueue   *cmdqueue.RedisCommandQueue
+	CmdQueue   cmdqueue.CommandQueue
+	TaskSvc    *task.TaskService
 	Carriers   *carrier.CarrierRegistry
 	Cfg        *appconfig.AppConfig
 	Logger     *zap.Logger

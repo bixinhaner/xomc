@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
@@ -117,10 +116,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	// Backup Executor
 	backupTaskRepo := backup.NewPgTaskRepository(w.PgPool)
-	cmdQueue := cmdqueue.NewRedisCommandQueue(w.Redis)
 	connReqClient := connreq.NewClient(w.Redis, logger)
 	backupExecutor := backup.NewBackupExecutor(
-		backupTaskRepo, deviceRepo, cmdQueue, connReqClient,
+		backupTaskRepo, deviceRepo, w.CmdQueue, connReqClient,
 		w.EventBus, logger,
 	)
 	if err := backupExecutor.Subscribe(w.EventBus); err != nil {

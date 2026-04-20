@@ -60,8 +60,7 @@ type deviceSessionEntry struct {
 // Handler 处理 TR069/CWMP HTTP 请求。
 type Handler struct {
 	sessionStore            SessionStore
-	commandQueue            cmdqueue.CommandQueue // 已废弃：请使用 taskService
-	taskService             TaskService           // 新任务管理服务（接口）
+	taskService             TaskService // 统一任务管理服务
 	eventBus                event.EventBus
 	authenticator           auth.DeviceAuthenticator
 	rpcDispatcher           *rpc.Dispatcher
@@ -517,8 +516,6 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		zap.String("device_sn", deviceSN),
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)),
-		zap.Bool("task_service_available", h.taskService != nil),
-		zap.Bool("command_queue_available", h.commandQueue != nil),
 	)
 
 	// 协议日志元数据
@@ -552,97 +549,60 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		return
 	}
 
-	// 优先级 1：尝试新 TaskService
-	if h.taskService != nil {
-		taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)
-		if err != nil {
-			log.Error("pop task from queue", zap.Error(err))
-		} else if taskItem != nil {
-			// 为此任务生成 CWMP ID
-			cwmpID := task.GenerateCWMPID(taskItem.Method)
-
-			// 标记任务已发送
-			if err := h.taskService.MarkTaskSent(r.Context(), taskItem.ID, cwmpID); err != nil {
-				log.Error("mark task sent", zap.Error(err), zap.String("task_id", taskItem.ID))
-			}
-
-			// 更新会话状态
-			session.State = StateRPCPending
-			session.LastRPC = taskItem.Method
-			session.RPCCount++
-			session.UpdatedAt = time.Now()
-			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-
-			// 使用 CWMP ID 构建 RPC 请求
-			cmd := &cmdqueue.Command{
-				ID:         taskItem.ID,
-				Method:     taskItem.Method,
-				Params:     taskItem.Params,
-				CommandKey: taskItem.CommandKey,
-			}
-			respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
-			if err != nil {
-				log.Error("build RPC request from task", zap.Error(err))
-				h.metrics.RPCErrorsTotal.WithLabelValues(taskItem.Method).Inc()
-				// 标记任务失败
-				h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, 0, err.Error())
-			} else {
-				log.Info("ACS sending RPC request from task",
-					zap.String("device_sn", deviceSN),
-					zap.String("method", taskItem.Method),
-					zap.String("task_id", taskItem.ID),
-					zap.String("cwmp_id", cwmpID),
-				)
-				if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
-					entry.Method = taskItem.Method
-					entry.TaskID = taskItem.ID
-					entry.CwmpID = cwmpID
-				}
-				// 在响应中设置 Session Cookie
-				h.setSessionCookie(w, sessionID)
-				h.sendSOAPResponse(w, respData, log)
-				return
-			}
-		} else {
-			log.Info("ACS TaskService.PopTask returned nil",
-				zap.String("device_sn", deviceSN),
-				zap.String("reason", "no pending tasks in queue"))
-		}
-	}
-
-	// 优先级 2：回退到旧版命令队列（向后兼容）
-	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+	// 尝试从统一任务队列获取下一个任务
+	taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)
 	if err != nil {
-		log.Error("pop command queue", zap.Error(err))
-	}
+		log.Error("pop task from queue", zap.Error(err))
+	} else if taskItem != nil {
+		// 为此任务生成 CWMP ID
+		cwmpID := task.GenerateCWMPID(taskItem.Method)
 
-	if cmd != nil {
+		// 标记任务已发送
+		if err := h.taskService.MarkTaskSent(r.Context(), taskItem.ID, cwmpID); err != nil {
+			log.Error("mark task sent", zap.Error(err), zap.String("task_id", taskItem.ID))
+		}
+
+		// 更新会话状态
 		session.State = StateRPCPending
-		session.LastRPC = cmd.Method
-		session.LastCommandParams = cmd.Params
+		session.LastRPC = taskItem.Method
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
-		respData, err := h.rpcDispatcher.BuildRequest(cmd, session.CWMPId)
+		// 使用 CWMP ID 构建 RPC 请求
+		cmd := &cmdqueue.Command{
+			ID:         taskItem.ID,
+			Method:     taskItem.Method,
+			Params:     taskItem.Params,
+			CommandKey: taskItem.CommandKey,
+		}
+		respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
 		if err != nil {
-			log.Error("build RPC request", zap.Error(err))
-			h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
+			log.Error("build RPC request from task", zap.Error(err))
+			h.metrics.RPCErrorsTotal.WithLabelValues(taskItem.Method).Inc()
+			// 标记任务失败
+			h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, 0, err.Error())
 		} else {
-			log.Debug("ACS sending RPC request",
+			log.Info("ACS sending RPC request from task",
 				zap.String("device_sn", deviceSN),
-				zap.String("method", cmd.Method),
-				zap.String("xml", string(respData)),
+				zap.String("method", taskItem.Method),
+				zap.String("task_id", taskItem.ID),
+				zap.String("cwmp_id", cwmpID),
 			)
 			if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
-				entry.Method = cmd.Method
-				entry.CwmpID = session.CWMPId
+				entry.Method = taskItem.Method
+				entry.TaskID = taskItem.ID
+				entry.CwmpID = cwmpID
 			}
 			// 在响应中设置 Session Cookie
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
 		}
+	} else {
+		log.Info("ACS TaskService.PopTask returned nil",
+			zap.String("device_sn", deviceSN),
+			zap.String("reason", "no pending tasks in queue"))
 	}
 
 	// 没有更多命令 —— 完成会话。
@@ -710,7 +670,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
 	// 检查是否为基于任务的 RPC（新任务队列系统）
-	if h.taskService != nil && cwmpID != "" {
+	if cwmpID != "" {
 		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
@@ -756,65 +716,37 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		return
 	}
 
-	// 优先级 1：尝试从新 TaskService 获取下一个任务
-	if h.taskService != nil {
-		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
-		if err != nil {
-			log.Error("pop task from queue", zap.Error(err))
-		} else if nextTask != nil {
-			// 为此任务生成 CWMP ID
-			newCWMPID := task.GenerateCWMPID(nextTask.Method)
-
-			// 标记任务已发送
-			if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
-				log.Error("mark task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
-			}
-
-			session.State = StateRPCPending
-			session.LastRPC = nextTask.Method
-			session.RPCCount++
-			session.UpdatedAt = time.Now()
-			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-
-			cmd := &cmdqueue.Command{
-				ID:         nextTask.ID,
-				Method:     nextTask.Method,
-				Params:     nextTask.Params,
-				CommandKey: nextTask.CommandKey,
-			}
-			respData, err := h.rpcDispatcher.BuildRequest(cmd, newCWMPID)
-			if err != nil {
-				log.Error("build next RPC request from task", zap.Error(err))
-				h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
-				h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
-			} else {
-				h.setSessionCookie(w, sessionID)
-				h.sendSOAPResponse(w, respData, log)
-				return
-			}
-		}
-	}
-
-	// 优先级 2：回退到旧版命令队列（向后兼容）
-	cmd, err := h.commandQueue.Pop(r.Context(), deviceSN)
+	// 尝试从统一任务队列获取下一个任务
+	nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
 	if err != nil {
-		log.Error("pop command queue", zap.Error(err))
-	}
+		log.Error("pop task from queue", zap.Error(err))
+	} else if nextTask != nil {
+		// 为此任务生成 CWMP ID
+		newCWMPID := task.GenerateCWMPID(nextTask.Method)
 
-	if cmd != nil {
+		// 标记任务已发送
+		if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
+			log.Error("mark task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
+		}
+
 		session.State = StateRPCPending
-		session.LastRPC = cmd.Method
-		session.LastCommandParams = cmd.Params
+		session.LastRPC = nextTask.Method
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
-		respData, err := h.rpcDispatcher.BuildRequest(cmd, cwmpID)
+		cmd := &cmdqueue.Command{
+			ID:         nextTask.ID,
+			Method:     nextTask.Method,
+			Params:     nextTask.Params,
+			CommandKey: nextTask.CommandKey,
+		}
+		respData, err := h.rpcDispatcher.BuildRequest(cmd, newCWMPID)
 		if err != nil {
-			log.Error("build next RPC request", zap.Error(err))
-			h.metrics.RPCErrorsTotal.WithLabelValues(cmd.Method).Inc()
+			log.Error("build next RPC request from task", zap.Error(err))
+			h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
+			h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
 		} else {
-			// 在响应中设置 Session Cookie
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
@@ -894,8 +826,6 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		zap.String("device_sn", deviceSN),
 		zap.Bool("has_connReqSender", h.connReqSender != nil),
 		zap.Bool("enabled", h.postSessionWakeCfg.Enabled),
-		zap.Bool("has_taskService", h.taskService != nil),
-		zap.Bool("has_commandQueue", h.commandQueue != nil),
 		zap.Bool("has_redisClient", h.redisClient != nil))
 
 	if h.connReqSender == nil || !h.postSessionWakeCfg.Enabled {
@@ -913,27 +843,14 @@ func (h *Handler) postSessionWake(deviceSN string) {
 	}
 	time.Sleep(delay)
 
-	// 延迟后检查合并队列深度（任务队列 + 旧版命令队列）。
+	// 延迟后检查任务队列深度。
 	var remaining int64
-	if h.taskService != nil {
-		if n, err := h.taskService.GetQueueLength(ctx, deviceSN); err == nil {
-			remaining += n
-		}
-		h.logger.Debug("post-session wake: task queue check",
-			zap.String("device_sn", deviceSN),
-			zap.Int64("task_remaining", remaining))
+	if n, err := h.taskService.GetQueueLength(ctx, deviceSN); err == nil {
+		remaining += n
 	}
-	if h.commandQueue != nil {
-		cmdLen := int64(0)
-		if n, err := h.commandQueue.Len(ctx, deviceSN); err == nil {
-			cmdLen = n
-			remaining += n
-		}
-		h.logger.Debug("post-session wake: cmd queue check",
-			zap.String("device_sn", deviceSN),
-			zap.Int64("cmd_remaining", cmdLen),
-			zap.Int64("total_remaining", remaining))
-	}
+	h.logger.Debug("post-session wake: task queue check",
+		zap.String("device_sn", deviceSN),
+		zap.Int64("task_remaining", remaining))
 
 	if remaining == 0 {
 		h.logger.Info("post-session wake: queue empty, skip",
@@ -1033,7 +950,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	}
 
 	// 如果任务服务可用，标记任务失败
-	if h.taskService != nil && cwmpID != "" {
+	if cwmpID != "" {
 		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
 			log.Warn("get task by cwmp_id for fault", zap.Error(err), zap.String("cwmp_id", cwmpID))
@@ -1051,38 +968,36 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	}
 
 	// 检查队列中是否有更多任务
-	if h.taskService != nil {
-		deviceSN := session.DeviceSN
-		nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
+	deviceSN := session.DeviceSN
+	nextTask, err := h.taskService.PopTask(r.Context(), deviceSN)
+	if err != nil {
+		log.Error("pop next task after fault", zap.Error(err))
+	} else if nextTask != nil {
+		newCWMPID := task.GenerateCWMPID(nextTask.Method)
+		if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
+			log.Error("mark next task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
+		}
+
+		session.State = StateRPCPending
+		session.LastRPC = nextTask.Method
+		session.UpdatedAt = time.Now()
+		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
+
+		cmd := &cmdqueue.Command{
+			ID:         nextTask.ID,
+			Method:     nextTask.Method,
+			Params:     nextTask.Params,
+			CommandKey: nextTask.CommandKey,
+		}
+		respData, err := h.rpcDispatcher.BuildRequest(cmd, newCWMPID)
 		if err != nil {
-			log.Error("pop next task after fault", zap.Error(err))
-		} else if nextTask != nil {
-			newCWMPID := task.GenerateCWMPID(nextTask.Method)
-			if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
-				log.Error("mark next task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
-			}
-
-			session.State = StateRPCPending
-			session.LastRPC = nextTask.Method
-			session.UpdatedAt = time.Now()
-			h.sessionStore.UpdateByID(r.Context(), sessionID, session)
-
-			cmd := &cmdqueue.Command{
-				ID:         nextTask.ID,
-				Method:     nextTask.Method,
-				Params:     nextTask.Params,
-				CommandKey: nextTask.CommandKey,
-			}
-			respData, err := h.rpcDispatcher.BuildRequest(cmd, newCWMPID)
-			if err != nil {
-				log.Error("build next RPC request after fault", zap.Error(err))
-				h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
-				h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
-			} else {
-				h.setSessionCookie(w, sessionID)
-				h.sendSOAPResponse(w, respData, log)
-				return
-			}
+			log.Error("build next RPC request after fault", zap.Error(err))
+			h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
+			h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
+		} else {
+			h.setSessionCookie(w, sessionID)
+			h.sendSOAPResponse(w, respData, log)
+			return
 		}
 	}
 

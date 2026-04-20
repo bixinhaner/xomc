@@ -148,15 +148,15 @@ func (s *acsHSubscription) Unsubscribe() error { return nil }
 // ---------------------------------------------------------------------------
 
 func newTestACSHandler() *Handler {
-	return newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHCmdQueue{}, &acsHEventBus{})
+	return newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHEventBus{})
 }
 
-func newTestACSHandlerWithDeps(store SessionStore, cmdQ cmdqueue.CommandQueue, bus event.EventBus) *Handler {
+func newTestACSHandlerWithDeps(store SessionStore, bus event.EventBus) *Handler {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
 	return &Handler{
 		sessionStore:  store,
-		commandQueue:  cmdQ,
+			taskService:   newAcsHTaskService(),
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
 		rpcDispatcher: rpc.NewDispatcher(),
@@ -307,7 +307,7 @@ func TestServeHTTP_EmptyBody_NoSession_Returns204(t *testing.T) {
 func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
 
 	// Simulate a prior Inform that created a session with Cookie.
 	deviceSN := "TEST-SN-EMPTY"
@@ -337,9 +337,10 @@ func TestServeHTTP_EmptyBody_WithSession_NoCommands_CompletesSession(t *testing.
 
 func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 	store := newAcsHSessionStore()
-	cmdQ := &acsHCmdQueue{}
+	taskSvc := newAcsHTaskService()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
+		h.taskService = taskSvc
 
 	deviceSN := "TEST-SN-CMD"
 	sessionID := "test-session-id-002"
@@ -359,10 +360,12 @@ func TestServeHTTP_EmptyBody_WithSession_HasCommand_SendsRPC(t *testing.T) {
 	params, _ := json.Marshal(map[string]interface{}{
 		"names": []string{"Device.DeviceInfo.SoftwareVersion"},
 	})
-	cmdQ.Push(context.Background(), deviceSN, &cmdqueue.Command{
+	taskSvc.addTask(&task.Task{
 		ID:         "cmd-1",
+		DeviceSN:   deviceSN,
 		Method:     "GetParameterValues",
 		Params:     params,
+		Status:     task.TaskStatusPending,
 		CommandKey: "test-key",
 		CreatedAt:  time.Now(),
 	})
@@ -404,7 +407,7 @@ func TestServeHTTP_UnknownSOAP_Returns400(t *testing.T) {
 func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformBootstrapXML))
@@ -445,7 +448,7 @@ func TestServeHTTP_Inform_Bootstrap_Success(t *testing.T) {
 
 func TestServeHTTP_Inform_Periodic_PublishesPeriodicEvent(t *testing.T) {
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), bus)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
@@ -478,7 +481,7 @@ func TestServeHTTP_Inform_MalformedXML_Returns400(t *testing.T) {
 func TestServeHTTP_Inform_RateLimited_Returns503(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
 	// Set very low rate limit: 1 per minute, burst 1.
 	h.rateLimiter = NewDeviceRateLimiter(1, 1, 10000, zap.NewNop())
 
@@ -522,7 +525,7 @@ func TestServeHTTP_Inform_AdmissionDenied_Returns503(t *testing.T) {
 func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
 
 	deviceSN := "TEST-SN-001"
 	sessionID := "test-session-id-003"
@@ -557,9 +560,10 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 
 func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	store := newAcsHSessionStore()
-	cmdQ := &acsHCmdQueue{}
+	taskSvc := newAcsHTaskService()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
+		h.taskService = taskSvc
 
 	deviceSN := "TEST-SN-001"
 	sessionID := "test-session-id-004"
@@ -575,16 +579,16 @@ func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {
 	store.CreateWithID(context.Background(), sessionID, session)
 	h.admission.Acquire()
 	h.metrics.ActiveSessions.Inc()
-
-	// Queue another command to be dispatched after the RPC response.
-	rebootCmd := &cmdqueue.Command{
+	// Queue another task to be dispatched after the RPC response.
+	taskSvc.addTask(&task.Task{
 		ID:         "cmd-reboot",
+		DeviceSN:   deviceSN,
 		Method:     "Reboot",
 		Params:     json.RawMessage(`{}`),
+		Status:     task.TaskStatusPending,
 		CommandKey: "reboot-key",
 		CreatedAt:  time.Now(),
-	}
-	cmdQ.Push(context.Background(), deviceSN, rebootCmd)
+	})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
@@ -618,7 +622,7 @@ func TestServeHTTP_RPCResponse_NoCookie_Returns204(t *testing.T) {
 func TestServeHTTP_TransferComplete_PublishesEvent(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
 
 	sessionID := "test-session-id-tc"
 	session := &Session{
@@ -707,7 +711,7 @@ func TestCompleteSession_NilSession_StillReleasesResources(t *testing.T) {
 func TestFullSessionLifecycle_InformThenEmpty(t *testing.T) {
 	store := newAcsHSessionStore()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, &acsHCmdQueue{}, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
 
 	// Step 1: Send Inform.
 	w1 := httptest.NewRecorder()
@@ -741,18 +745,21 @@ func TestFullSessionLifecycle_InformThenEmpty(t *testing.T) {
 
 func TestFullSessionLifecycle_InformThenRPCThenEmpty(t *testing.T) {
 	store := newAcsHSessionStore()
-	cmdQ := &acsHCmdQueue{}
+	taskSvc := newAcsHTaskService()
 	bus := &acsHEventBus{}
-	h := newTestACSHandlerWithDeps(store, cmdQ, bus)
+	h := newTestACSHandlerWithDeps(store, bus)
+	h.taskService = taskSvc
 
-	// Queue a command before the Inform.
+	// Queue a task before the Inform.
 	params, _ := json.Marshal(map[string]interface{}{
 		"names": []string{"Device.DeviceInfo.SoftwareVersion"},
 	})
-	cmdQ.Push(context.Background(), "TEST-SN-001", &cmdqueue.Command{
+	taskSvc.addTask(&task.Task{
 		ID:         "cmd-gpv",
+		DeviceSN:   "TEST-SN-001",
 		Method:     "GetParameterValues",
 		Params:     params,
+		Status:     task.TaskStatusPending,
 		CommandKey: "gpv-key",
 		CreatedAt:  time.Now(),
 	})
@@ -927,7 +934,6 @@ func TestTaskQueue_ProcessMultipleRPCMethods(t *testing.T) {
 	metrics := NewACSMetrics(reg)
 	h := &Handler{
 		sessionStore:  store,
-		commandQueue:  &acsHCmdQueue{}, // empty legacy queue
 		taskService:   taskSvc,         // new task service
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
@@ -1060,7 +1066,6 @@ func TestTaskQueue_MarkTaskCompleted(t *testing.T) {
 	metrics := NewACSMetrics(reg)
 	h := &Handler{
 		sessionStore:  store,
-		commandQueue:  &acsHCmdQueue{},
 		taskService:   taskSvc,
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},
@@ -1152,7 +1157,6 @@ func TestTaskQueue_SOAPFaultMarksTaskFailed(t *testing.T) {
 	metrics := NewACSMetrics(reg)
 	h := &Handler{
 		sessionStore:  store,
-		commandQueue:  &acsHCmdQueue{},
 		taskService:   taskSvc,
 		eventBus:      bus,
 		authenticator: &auth.NoopAuthenticator{},

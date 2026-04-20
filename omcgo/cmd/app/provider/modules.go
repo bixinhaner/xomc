@@ -119,12 +119,12 @@ func initProvisionModule(c *Container) error {
 }
 
 // initTaskModule 初始化 F06 任务队列模块。
+// TaskService 核心已在 bootstrap 中创建（供 BridgeQueue 使用），
+// 此处仅添加运行时增强（指标、Connection Request）并注册 handler。
 func initTaskModule(c *Container) error {
 	logger := c.Logger.Named("task")
 
-	taskQueue := task.NewRedisTaskQueue(c.Redis)
-	taskRepo := task.NewPgTaskRepository(c.PgPool)
-	taskService := task.NewTaskService(taskQueue, taskRepo, logger)
+	taskService := c.TaskSvc
 	taskService.SetMetrics(task.NewTaskMetrics(c.MetricsReg))
 
 	// Wire Connection Request into TaskService

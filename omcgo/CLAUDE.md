@@ -100,7 +100,7 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 | PM 计数器 & KPI 时序 | TimescaleDB（PostgreSQL 扩展） |
 | 历史告警 | TimescaleDB 超表 |
 | TR069 会话状态 | Redis 7 Cluster（TTL 自动过期） |
-| 设备命令队列 | Redis Sorted Set |
+| 设备任务队列 | Redis Sorted Set + PostgreSQL（`device_tasks` 表） |
 | 数据模型缓存 | Redis + 内存 L1 |
 | PM/MR/固件/备份文件 | MinIO（S3 兼容） |
 | 进程内事件 | Go channel |
@@ -259,7 +259,7 @@ ScopeCarrierDefault = "carrier_default" // 运营商默认级
 - 核心领域概念用接口定义，便于测试和替换实现：
   - `Carrier` — 运营商适配
   - `SessionStore` — TR069 会话存储
-  - `CommandQueue` — 设备命令队列
+  - `TaskService` — 统一任务队列（Redis + PG 双写）
   - `EventBus` — 事件总线
   - `DataModelRepository` — 数据模型持久层
 
@@ -294,7 +294,9 @@ IDLE → INFORM_RECEIVED → PROCESSING → RPC_PENDING → RPC_RESPONSE → COM
 **Redis Key 命名**：
 ```
 acs:session:{device_serial}          — 会话状态 Hash（TTL 5 分钟）
-acs:cmdq:{device_serial}             — 命令队列 Sorted Set
+acs:taskq:{device_serial}             — 任务队列 Sorted Set（member=taskID）
+acs:task:{taskID}                     — 任务详情 Hash（TTL 24h）
+acs:cwmp2task:{hash}                  — CWMP ID → Task ID 映射（TTL 24h）
 acs:heartbeat:{device_serial}        — 心跳时间戳（TTL = 2×inform_interval）
 acs:connreq:pending:{device_serial}  — Connection Request 去重（TTL 30 秒）
 datamodel:product:{carrier}:{tech}:{oui}:{product_class} — 数据模型缓存

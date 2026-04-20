@@ -68,6 +68,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		MinIO:      app.MinIO,
 		EventBus:   app.EventBus,
 		CmdQueue:   app.CmdQueue,
+		TaskSvc:    app.TaskSvc,
 		Carriers:   app.Carriers,
 		Cfg:        &cfg,
 		Logger:     app.Logger,

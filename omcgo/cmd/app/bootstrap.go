@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +18,8 @@ import (
 type appInfra struct {
 	*components.Infra
 	Carriers *carrier.CarrierRegistry
-	CmdQueue *cmdqueue.RedisCommandQueue
+	CmdQueue cmdqueue.CommandQueue
+	TaskSvc  *task.TaskService
 }
 
 // initApp initializes all infrastructure for the main application.
@@ -50,7 +52,12 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 
 	app := &appInfra{Infra: inf}
 	app.registerCarriers()
-	app.CmdQueue = cmdqueue.NewRedisCommandQueue(inf.Redis)
+
+	// 创建统一任务队列：TaskService（Redis + PG） + BridgeQueue 适配器
+	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	taskRepo := task.NewPgTaskRepository(inf.PgPool)
+	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	app.CmdQueue = task.NewBridgeQueue(app.TaskSvc)
 
 	return app, nil
 }
