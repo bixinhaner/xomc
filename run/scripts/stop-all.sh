@@ -62,6 +62,7 @@ echo "========== 停止 OMC 服务 =========="
 
 # 前端：vite 启动后进程名是 node，用 PID 文件为主
 stop_process "前端"         "$RUN_DIR/frontend.pid" ""
+stop_process "设计基线前端" "$RUN_DIR/design-baseline.pid" ""
 stop_process "omcgo-app"    "$RUN_DIR/app.pid"      "omcgo-app"
 stop_process "omcgo-acs"    "$RUN_DIR/acs.pid"       "omcgo-acs"
 stop_process "omcgo-worker" "$RUN_DIR/worker.pid"    "omcgo-worker"

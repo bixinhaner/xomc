@@ -13,7 +13,20 @@ ok()   { echo -e "  ${GREEN}● 运行中${NC}  $1"; }
 fail() { echo -e "  ${RED}○ 未运行${NC}  $1"; }
 warn() { echo -e "  ${YELLOW}● 运行中${NC}  $1"; }
 
-PG_READY="/usr/local/Cellar/postgresql@16/16.13/bin/pg_isready"
+# 自动发现 pg_isready：先用 PATH，否则兜底 brew 常见路径（Apple Silicon / Intel）
+PG_READY="$(command -v pg_isready 2>/dev/null || true)"
+if [ -z "$PG_READY" ]; then
+    for candidate in \
+        "$(brew --prefix postgresql@16 2>/dev/null)/bin/pg_isready" \
+        /opt/homebrew/opt/postgresql@16/bin/pg_isready \
+        /usr/local/opt/postgresql@16/bin/pg_isready; do
+        if [ -x "$candidate" ]; then
+            PG_READY="$candidate"
+            break
+        fi
+    done
+fi
+PG_READY="${PG_READY:-pg_isready}"
 
 echo "╔══════════════════════════════════════╗"
 echo "║          OMC 服务状态                ║"
@@ -92,5 +105,6 @@ check_app "omcgo-app"    "$RUN_DIR/app.pid"      "omcgo-app"    "8081"
 check_app "omcgo-acs"    "$RUN_DIR/acs.pid"       "omcgo-acs"    "8080"
 check_app "omcgo-worker" "$RUN_DIR/worker.pid"    "omcgo-worker" " -  "
 check_app "前端 Vite"     "$RUN_DIR/frontend.pid"  ""             "3000"
+check_app "设计基线"      "$RUN_DIR/design-baseline.pid" ""       "3001"
 
 echo ""
