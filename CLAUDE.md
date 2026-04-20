@@ -61,6 +61,32 @@ omc/                                # 根仓库
 
 **子仓库规则**：`omcgo/` 和 `omcmb/` 各自拥有独立 `.git`，根目录 `.gitignore` 忽略它们。后端/前端代码必须在各自子目录内执行 git 操作。
 
+### 3.1 设计基线对比环境（worktree）
+
+本仓库使用 `design-baseline` 分支 + `goomc-design` 姊妹 worktree，用于 UI 设计还原度对比。
+
+```
+omc/
+├── goomc/            # 主工作区（main，日常开发）
+└── goomc-design/     # 基线工作区（design-baseline 分支）— 仅对比用，不在此开发
+```
+
+**初次 clone / pull 后一次性 setup**（必须执行，否则 `start-all.sh` 会跳过基线启动）：
+
+```bash
+cd <path>/omc/goomc
+git fetch origin design-baseline:design-baseline     # 拉取基线分支到本地
+git worktree add ../goomc-design design-baseline     # 建立姊妹 worktree
+ln -s "$(pwd)/omcmb/webcode/node_modules" \
+      ../goomc-design/omcmb/webcode/node_modules    # 共享 node_modules，省一次 npm install
+```
+
+之后 `bash run/scripts/restart-all.sh`（或 `start-all.sh`）会同时启动：
+- `:3000` — 当前开发版
+- `:3001` — 设计基线
+
+浏览器并排对比即可。**基线更新规则**：维护者把 `design-baseline` 分支 ff 到新目标 commit 后 `git push`，其他人 `git pull` 对应 worktree 同步即可。
+
 ---
 
 ## 4. 技术栈总览
