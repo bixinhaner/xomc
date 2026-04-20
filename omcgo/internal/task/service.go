@@ -23,6 +23,12 @@ type ConnectionRequestSender interface {
 	Send(ctx context.Context, deviceSN, httpURL string) error
 }
 
+// TaskCompletionCallback is invoked when a task reaches a terminal state.
+// Used by MML to aggregate results back to the parent mml_task.
+type TaskCompletionCallback interface {
+	OnTaskCompleted(ctx context.Context, task *Task)
+}
+
 // TaskService 任务管理服务
 // 协调 Redis 队列（运行时）和 PostgreSQL（持久化）
 type TaskService struct {
@@ -31,6 +37,7 @@ type TaskService struct {
 	metrics      *TaskMetrics
 	deviceLookup DeviceLookup
 	connReq      ConnectionRequestSender
+	callbacks    []TaskCompletionCallback
 	logger       *zap.Logger
 }
 
@@ -52,6 +59,11 @@ func (s *TaskService) SetMetrics(m *TaskMetrics) {
 func (s *TaskService) SetConnectionRequester(dl DeviceLookup, cr ConnectionRequestSender) {
 	s.deviceLookup = dl
 	s.connReq = cr
+}
+
+// AddCompletionCallback registers a callback invoked when tasks reach terminal states.
+func (s *TaskService) AddCompletionCallback(cb TaskCompletionCallback) {
+	s.callbacks = append(s.callbacks, cb)
 }
 
 // CreateTask 创建新任务
@@ -212,6 +224,8 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 		zap.String("task_id", taskID),
 		zap.String("method", task.Method))
 
+	s.notifyCompletion(ctx, task)
+
 	return nil
 }
 
@@ -242,6 +256,8 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 		zap.String("task_id", taskID),
 		zap.Int("error_code", errorCode),
 		zap.String("error_message", errorMsg))
+
+	s.notifyCompletion(ctx, task)
 
 	return nil
 }
@@ -442,6 +458,17 @@ func (s *TaskService) wakeDevice(deviceSN string) {
 				zap.Error(err))
 		}
 	}()
+}
+
+// notifyCompletion invokes registered callbacks for a task reaching terminal state.
+// Only notifies for MML-sourced tasks that have a parent_task_id.
+func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
+	if task.Source != TaskSourceMML || task.ParentTaskID == "" || len(s.callbacks) == 0 {
+		return
+	}
+	for _, cb := range s.callbacks {
+		cb.OnTaskCompleted(ctx, task)
+	}
 }
 
 // TaskHistoryOptions 任务历史查询选项（定义在 model.go）

@@ -856,6 +856,28 @@ func (r *PgTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, statu
 	return nil
 }
 
+func (r *PgTaskRepository) IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error {
+	builder := storage.Psql.Update("mml_tasks").
+		Set("success_count", sq.Expr("success_count + ?", successDelta)).
+		Set("failed_count", sq.Expr("failed_count + ?", failedDelta)).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id})
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build increment mml_task stats SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("increment mml_task stats: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query, args, err := storage.Psql.Delete("mml_tasks").
 		Where(sq.Eq{"id": id}).

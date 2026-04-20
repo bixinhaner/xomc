@@ -137,6 +137,7 @@ func initTaskModule(c *Container) error {
 	)
 
 	c.miscDeps.taskHandler = task.NewHandler(taskService)
+	c.miscDeps.taskSvc = taskService
 
 	logger.Info("task queue module initialized")
 	return nil
@@ -248,6 +249,23 @@ func initMiscModules(c *Container) error {
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlTemplateRepo, messageHub, logger)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
+	c.miscDeps.mmlService = mmlService
+
+	// Wire MML fan-out to device tasks (TaskService must be initialized first)
+	if c.miscDeps.taskSvc != nil {
+		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
+		mmlService.SetFanouter(fanouter)
+
+		aggregator := mml.NewResultAggregator(mmlTaskRepo, messageHub, logger)
+		c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
+
+		logger.Info("MML fan-out bridge enabled")
+	}
+
+	// Parameter Library module
+	paramRepo := mml.NewPgParamRepository(c.PgPool)
+	paramService := mml.NewParamService(paramRepo)
+	c.miscDeps.paramHandler = mml.NewParamHandler(paramService, logger)
 	logger.Info("MML console module initialized")
 
 		// Config Baseline module
@@ -330,6 +348,7 @@ type miscDeps struct {
 
 	// Task
 	taskHandler *task.Handler
+	taskSvc     *task.TaskService
 
 	// Backup
 	backupHandler *backup.Handler
@@ -354,6 +373,10 @@ type miscDeps struct {
 
 	// MML
 	mmlHandler *mml.Handler
+	mmlService *mml.Service
+
+	// Param Library
+	paramHandler *mml.ParamHandler
 
 	// Baseline
 	baselineHandler *baseline.Handler

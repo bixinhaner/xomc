@@ -396,6 +396,158 @@ DROP TABLE IF EXISTS ...;
 - `CREATE TABLE IF NOT EXISTS`、`ADD COLUMN IF NOT EXISTS`
 - 使用 `DO $$ BEGIN ... EXCEPTION WHEN ... END $$` 包裹可能重复的 DDL
 
+#### 5.5.1 goose StatementBegin/End 注解规则（CRITICAL）
+
+goose 默认以分号分割 SQL 语句。以下场景 **必须** 使用 `-- +goose StatementBegin` / `-- +goose StatementEnd` 包裹，否则 goose 会将内部语句截断导致解析失败：
+
+| 场景 | 示例 |
+|------|------|
+| PL/pgSQL 匿名块 | `DO $$ ... END $$;` |
+| 创建函数 | `CREATE OR REPLACE FUNCTION ... $$ ... $$ LANGUAGE plpgsql;` |
+| 创建触发器函数 | 同上 |
+| 循环/条件语句 | `FOR ... IN ... LOOP ... END LOOP;` |
+
+```sql
+-- +goose Up
+-- 正确示例：DO 块必须包裹
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        CREATE EXTENSION IF NOT EXISTS timescaledb;
+    END IF;
+END $$;
+-- +goose StatementEnd
+```
+
+> **历史教训**：6 个迁移文件因缺少此注解导致 goose panic（commit `05e0d6f`）。
+
+#### 5.5.2 TimescaleDB 迁移规则
+
+**必须先启用压缩再创建压缩策略**：
+
+```sql
+-- 正确顺序：
+-- 1. 创建 hypertable
+SELECT create_hypertable('table_name', 'time_column');
+-- 2. 启用压缩（必须在压缩策略之前）
+ALTER TABLE table_name SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'column_name',
+    timescaledb.compress_orderby = 'time_column DESC'
+);
+-- 3. 添加压缩策略
+SELECT add_compression_policy('table_name', INTERVAL '7 days');
+```
+
+> **历史教训**：2 个 hypertable 因缺少步骤 2 导致 `columnstore not enabled` 错误（commit `dcd4870`）。
+
+#### 5.5.3 分区表外键限制
+
+PostgreSQL **不支持** 对分区表建立外键引用（分区表的主键必须包含分区键，且外键目标必须是唯一约束列）。分区表之间的关联关系通过应用层保证数据一致性。
+
+```sql
+-- 错误：devices 是分区表，不支持外键
+-- CONSTRAINT fk_device FOREIGN KEY (device_sn) REFERENCES devices(serial_number)
+
+-- 正确：仅保留逻辑引用，应用层校验
+device_sn VARCHAR(64) NOT NULL  -- 逻辑引用 devices.serial_number
+```
+
+> **历史教训**：device_tasks 因外键引用分区表失败（commit `c0adfa4`）。
+
+#### 5.5.4 INSERT 语句与表 Schema 一致性
+
+迁移文件中的 `INSERT` 语句 **必须** 与同目录下 DDL 定义的实际表结构完全匹配：
+
+- 新增迁移前先确认目标表的实际列定义（查看同目录 DDL 文件或 `\d table_name`）
+- 所有 NOT NULL 列必须提供值
+- 不能引用不存在的列
+- 空字符串 `''` 与 `NULL` 要区分清楚，注意 CHECK 约束
+- JSON 字符串不能有尾随逗号（如 `'{"a":1,}'`）
+
+```sql
+-- 错误：引用不存在的 name/rpc_methods 列，缺少 version/is_active 列
+-- INSERT INTO data_model_definitions (id, name, rpc_methods, ...) VALUES (...);
+
+-- 正确：与 DDL 定义的列完全匹配
+INSERT INTO data_model_definitions (id, carrier, tech, scope, version, is_active, ...)
+VALUES (gen_random_uuid(), 'cmcc', 'lte', 'product', '1.0', true, ...);
+```
+
+> **历史教训**：2 次 INSERT 与 Schema 不匹配导致迁移失败（commits `c2e820c`, `985e469`）。
+
+#### 5.5.5 PostgreSQL CREATE TABLE 内不支持部分唯一约束
+
+PostgreSQL 的 `CREATE TABLE` 内联 `CONSTRAINT ... UNIQUE(...) WHERE ...` 语法 **不被支持**。部分唯一约束（带 WHERE 条件）必须用独立的 `CREATE UNIQUE INDEX` 语句：
+
+```sql
+-- 错误：CREATE TABLE 内不支持带 WHERE 的 UNIQUE 约束
+CREATE TABLE t (
+    name VARCHAR(100),
+    deleted_at TIMESTAMPTZ,
+    CONSTRAINT uniq_name UNIQUE(name) WHERE deleted_at IS NULL  -- 语法错误
+);
+
+-- 正确：用独立的 CREATE UNIQUE INDEX
+CREATE TABLE t (
+    name VARCHAR(100),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uniq_name ON t(name) WHERE deleted_at IS NULL;
+```
+
+> **历史教训**：字典表迁移因此语法错误失败（commit `fce3a65`）。
+
+#### 5.5.6 UUID 格式校验
+
+PostgreSQL 的 UUID 类型严格校验格式（8-4-4-4-12）。种子数据中的 UUID 必须：
+- 最后一段固定 12 个十六进制字符
+- 使用 `gen_random_uuid()` 或经过校验的硬编码 UUID
+- 批量插入前可用正则验证：`grep -P '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{11}\b'` 捕获格式错误
+
+> **历史教训**：菜单表种子数据 UUID 最后一段仅 11 字符导致插入失败（commit `0ba37b0`）。
+
+#### 5.5.7 种子数据与 DDL 迁移去重
+
+DDL 迁移文件和 `seed/` 种子文件中的初始数据会重叠。规则：
+
+- **DDL 迁移文件中的 INSERT**：使用 `ON CONFLICT DO NOTHING` 保证幂等
+- **seed/ 文件中的 INSERT**：同样使用 `ON CONFLICT DO NOTHING`
+- **禁止** 在 DDL 迁移中放不带 `ON CONFLICT` 的 INSERT，否则与 seed 文件重复执行时会失败
+
+#### 5.5.8 Down 迁移完整性
+
+Down 迁移必须清除 Up 迁移创建的 **所有** 数据库对象：
+
+| Up 创建 | Down 必须删除 |
+|---------|-------------|
+| 表 | `DROP TABLE IF EXISTS` |
+| 函数 | `DROP FUNCTION IF EXISTS` |
+| 触发器 | `DROP TRIGGER IF EXISTS` |
+| 索引 | `DROP INDEX IF EXISTS` |
+| 扩展 | `DROP EXTENSION IF EXISTS`（仅限迁移专属扩展） |
+| 类型 | `DROP TYPE IF EXISTS` |
+
+**注意**：共享函数（如 `update_updated_at_column()`）在 `000001` 中创建，后续迁移不应重复创建。如需确保存在，用 `CREATE OR REPLACE FUNCTION`。
+
+#### 5.5.9 迁移文件自查清单
+
+每次新增迁移文件后，按此清单自查：
+
+- [ ] 版本号 = 现有最大版本号 + 1（无跳跃、无重复）
+- [ ] 文件包含 `-- +goose Up` 和 `-- +goose Down` 两个段落
+- [ ] 所有 `DO $$` / `CREATE FUNCTION` / `CREATE OR REPLACE FUNCTION` 被 `StatementBegin/End` 包裹
+- [ ] INSERT 语句的列名与目标表 DDL 完全匹配
+- [ ] INSERT 语句包含 `ON CONFLICT DO NOTHING`（种子数据类）
+- [ ] TimescaleDB hypertable 压缩策略前已启用 `timescaledb.compress`
+- [ ] 无分区表间的外键约束
+- [ ] `CREATE TABLE` 内无带 WHERE 的 UNIQUE 约束
+- [ ] UUID 格式正确（8-4-4-4-12）
+- [ ] Down 段删除 Up 段创建的所有对象（表、函数、索引、触发器）
+- [ ] 无与 `seed/` 目录的重复 INSERT（或均使用 `ON CONFLICT`）
+- [ ] JSON 字符串无尾随逗号
+
 ---
 
 ## 6. Git 工作流

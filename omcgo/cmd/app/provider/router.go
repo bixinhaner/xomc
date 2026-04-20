@@ -336,6 +336,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- MML Console routes → resource "devices" -----
 	md.mmlHandler.RegisterRoutes(permGroup("devices"))
+	md.paramHandler.RegisterRoutes(permGroup("devices"))
 
 		// ----- SSE Stream endpoint (authenticated users, no permission check) -----
 		md.sseHandler.RegisterRoutes(v1)

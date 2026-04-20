@@ -32,6 +32,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			"created_at", "sent_at", "completed_at", "expires_at",
 			"result", "error_code", "error_message",
 			"source", "creator_id", "description",
+			"parent_task_id", "command_index", "device_index",
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
@@ -39,6 +40,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
+			task.ParentTaskID, task.CommandIndex, task.DeviceIndex,
 		).
 		ToSql()
 	if err != nil {
@@ -124,13 +126,11 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 		opts.PageSize = 20
 	}
 
-	// 构建查询条件
 	whereClause := sq.Eq{"device_sn": deviceSN}
 	if opts.Status != "" {
 		whereClause["status"] = opts.Status
 	}
 
-	// 时间范围
 	var timeConditions []sq.Sqlizer
 	if opts.Start != nil {
 		timeConditions = append(timeConditions, sq.GtOrEq{"created_at": opts.Start})
@@ -139,7 +139,6 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 		timeConditions = append(timeConditions, sq.LtOrEq{"created_at": opts.End})
 	}
 
-	// 构建基础查询
 	baseQuery := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(whereClause)
@@ -148,7 +147,6 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 		baseQuery = baseQuery.Where(cond)
 	}
 
-	// 获取总数
 	countQuery, countArgs, err := storage.Psql.Select("COUNT(*)").
 		From("device_tasks").
 		Where(whereClause).
@@ -163,7 +161,6 @@ func (r *PgTaskRepository) GetHistory(ctx context.Context, deviceSN string, opts
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
 	}
 
-	// 获取数据
 	offset := (opts.Page - 1) * opts.PageSize
 	query, args, err := baseQuery.
 		OrderBy("created_at DESC").
@@ -247,13 +244,13 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		return nil
 	}
 
-	// 使用 batch insert
 	columns := []string{
 		"id", "device_sn", "method", "params", "priority",
 		"command_key", "cwmp_id", "status", "retry_count", "max_retries",
 		"created_at", "sent_at", "completed_at", "expires_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
+		"parent_task_id", "command_index", "device_index",
 	}
 
 	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
@@ -265,6 +262,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
+			task.ParentTaskID, task.CommandIndex, task.DeviceIndex,
 		)
 	}
 
@@ -342,6 +340,7 @@ func taskColumns() []string {
 		"created_at", "sent_at", "completed_at", "expires_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
+		"parent_task_id", "command_index", "device_index",
 	}
 }
 
@@ -362,38 +361,13 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
 		&result, &task.ErrorCode, &task.ErrorMessage,
 		&task.Source, &task.CreatorID, &task.Description,
+		&task.ParentTaskID, &task.CommandIndex, &task.DeviceIndex,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scan task: %w", err)
-	}
-
-	if len(params) > 0 {
-		task.Params = json.RawMessage(params)
-	}
-	if len(result) > 0 {
-		task.Result = json.RawMessage(result)
-	}
-
-	return &task, nil
-}
-
-// scanTaskFromRows 扫描多行任务（用于 Query 结果）
-func (r *PgTaskRepository) scanTaskFromRows(rows pgx.Rows) (*Task, error) {
-	var task Task
-	var params, result []byte
-
-	err := rows.Scan(
-		&task.ID, &task.DeviceSN, &task.Method, &params, &task.Priority,
-		&task.CommandKey, &task.CWMPID, &task.Status, &task.RetryCount, &task.MaxRetries,
-		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
-		&result, &task.ErrorCode, &task.ErrorMessage,
-		&task.Source, &task.CreatorID, &task.Description,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("scan task row: %w", err)
 	}
 
 	if len(params) > 0 {

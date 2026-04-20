@@ -21,6 +21,7 @@ type Service struct {
 	taskRepo     TaskRepository
 	templateRepo TemplateRepository
 	auditRepo    AuditRepository
+	fanouter     *Fanouter
 	hub          SSEPublisher
 	logger       *zap.Logger
 }
@@ -55,6 +56,11 @@ func NewService(
 // SetAuditRepo sets the audit repository for command execution logging.
 func (s *Service) SetAuditRepo(repo AuditRepository) {
 	s.auditRepo = repo
+}
+
+// SetFanouter sets the fan-out engine for creating device_tasks from MML tasks.
+func (s *Service) SetFanouter(f *Fanouter) {
+	s.fanouter = f
 }
 
 // publishTaskStatus pushes a task status change event via SSE.
@@ -390,6 +396,19 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	// Write audit log entries for each command+device combination
 	s.writeAuditLogs(ctx, task)
 
+	// Fan-out to device_tasks for immediate execution
+	if task.Status == TaskPending && s.fanouter != nil {
+		created, err := s.fanouter.Fanout(ctx, task)
+		if err != nil {
+			s.logger.Error("fanout mml task failed", zap.Error(err))
+		} else if created > 0 {
+			if err := s.taskRepo.UpdateStatus(ctx, task.ID, TaskRunning); err != nil {
+				s.logger.Error("update mml task to running", zap.Error(err))
+			}
+			task.Status = TaskRunning
+		}
+	}
+
 	// Push SSE event to executor
 	if s.hub != nil && task.Executor != "" {
 		s.publishTaskStatus(task.Executor, task.ID.String(), "", string(task.Status))
@@ -493,6 +512,19 @@ func (s *Service) StartTask(ctx context.Context, id uuid.UUID) (*MMLTask, error)
 	}
 
 	task.Status = TaskRunning
+
+	// Fan-out to device_tasks when starting from paused
+	if s.fanouter != nil {
+		created, err := s.fanouter.Fanout(ctx, task)
+		if err != nil {
+			s.logger.Error("fanout on start failed", zap.Error(err))
+		} else {
+			s.logger.Info("mml task fanned out on start",
+				zap.String("task_id", id.String()),
+				zap.Int("device_tasks", created))
+		}
+	}
+
 	s.logger.Info("mml task started", zap.String("task_id", id.String()))
 
 	if s.hub != nil && task.Executor != "" {

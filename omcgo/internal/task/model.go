@@ -24,6 +24,7 @@ const (
 	TaskSourceAPI       TaskSource = "api"       // REST API 创建
 	TaskSourceScheduler TaskSource = "scheduler" // 定时任务创建
 	TaskSourceSystem    TaskSource = "system"    // 系统内部创建
+	TaskSourceMML       TaskSource = "mml"       // MML 批量任务扇出
 )
 
 // Task 表示一个设备任务
@@ -59,6 +60,11 @@ type Task struct {
 	Source      TaskSource `json:"source"`                // 任务来源
 	CreatorID   string     `json:"creator_id,omitempty"`  // 创建者 ID
 	Description string     `json:"description,omitempty"` // 任务描述
+
+	// 父任务关联（MML 批量扇出时使用）
+	ParentTaskID string `json:"parent_task_id,omitempty"` // 关联的 MML 任务 ID
+	CommandIndex int    `json:"command_index"`            // 在父任务 commands[] 中的索引
+	DeviceIndex  int    `json:"device_index"`             // 在父任务 device_sns[] 中的索引
 }
 
 // CreateTaskRequest 创建任务请求
@@ -72,6 +78,14 @@ type CreateTaskRequest struct {
 	Source      TaskSource      `json:"source"`
 	CreatorID   string          `json:"creator_id"`
 	Description string          `json:"description"`
+
+	// TR069 CommandKey（预设的命令标识）
+	CommandKey string `json:"command_key,omitempty"`
+
+	// 父任务关联（MML 扇出时使用）
+	ParentTaskID string `json:"parent_task_id"`
+	CommandIndex int    `json:"command_index"`
+	DeviceIndex  int    `json:"device_index"`
 }
 
 // TaskHistoryOptions 任务历史查询选项
@@ -95,17 +109,21 @@ type TaskListResponse struct {
 func NewTask(req *CreateTaskRequest) *Task {
 	now := time.Now()
 	task := &Task{
-		ID:          generateUUID(),
-		DeviceSN:    req.DeviceSN,
-		Method:      req.Method,
-		Params:      req.Params,
-		Priority:    req.Priority,
-		Status:      TaskStatusPending,
-		MaxRetries:  3,
-		CreatedAt:   now,
-		Source:      TaskSourceAPI,
-		CreatorID:   req.CreatorID,
-		Description: req.Description,
+		ID:           generateUUID(),
+		DeviceSN:     req.DeviceSN,
+		Method:       req.Method,
+		Params:       req.Params,
+		Priority:     req.Priority,
+		CommandKey:   req.CommandKey,
+		Status:       TaskStatusPending,
+		MaxRetries:   3,
+		CreatedAt:    now,
+		Source:       TaskSourceAPI,
+		CreatorID:    req.CreatorID,
+		Description:  req.Description,
+		ParentTaskID: req.ParentTaskID,
+		CommandIndex: req.CommandIndex,
+		DeviceIndex:  req.DeviceIndex,
 	}
 
 	// 设置默认值
