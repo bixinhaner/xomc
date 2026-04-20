@@ -42,13 +42,13 @@
 ```
 omc/                                # 根仓库
 ├── CLAUDE.md                       # 本文件 — 全局指导
-├── omcgo/                          # Go 后端（独立 git 仓库，根 .gitignore 忽略）
+├── omcgo/                          # Go 后端源码（子目录，随主仓库追踪）
 │   ├── CLAUDE.md                   # 后端详细指导
 │   ├── cmd/                        # 入口：app / acs / worker / migrate / omcctl
 │   ├── internal/                   # 私有代码（按功能域组织）
 │   ├── migrations/                 # 数据库迁移
 │   └── scripts/                    # E2E 测试、压测工具
-├── omcmb/                          # React 前端（独立 git 仓库，根 .gitignore 忽略）
+├── omcmb/                          # React 前端源码（子目录，随主仓库追踪）
 │   └── webcode/                    # 前端源码
 │       ├── src/services/api/       # API 服务层（24 文件）
 │       ├── src/hooks/api/          # React Query Hooks（21 文件）
@@ -59,7 +59,7 @@ omc/                                # 根仓库
 └── *.md                            # 分析报告、开发计划等
 ```
 
-**子仓库规则**：`omcgo/` 和 `omcmb/` 各自拥有独立 `.git`，根目录 `.gitignore` 忽略它们。后端/前端代码必须在各自子目录内执行 git 操作。
+**仓库组成**：本项目是**单一 git 仓库**（根 `goomc/.git`），`omcgo/` 和 `omcmb/` 是源码子目录，**不含独立 `.git`**。所有 git 操作在 `goomc/` 根目录执行。根 `.gitignore` 只忽略编译产物（`omcgo/bin/`、`omcmb/webcode/node_modules/`、`omcmb/webcode/dist/` 等），源码全部随主仓库追踪。
 
 ### 3.1 设计基线对比环境（worktree）
 
@@ -209,10 +209,9 @@ Vite dev server :3000 通过 `/api` 代理到后端 :8080。
 **Scope** (与功能域对应):
 `acs` `config` `pm` `alarm` `mr` `device` `admin` `topology` `software` `backup` `dashboard` `ops` `report` `mml` `filemanager` `syslog` `license` `nedirect` `northbound` `provision` `interop` `carrier` `components` `api` `deploy`
 
-**子仓库 git 操作**:
-- 后端: `cd omcgo && git add ... && git commit ...`
-- 前端: `cd omcmb && git add ... && git commit ...`
-- 禁止从根目录对子仓库文件执行 git 操作
+**Git 操作规则**:
+- 本项目单一 git 仓库，统一在 `goomc/` 根目录执行 `git add / commit / push`，无需 `cd` 到子目录
+- 额外 worktree `goomc-design/`（`design-baseline` 分支）共享同一个 `.git`，仅用于 UI 对比，不在其中开发（参见 3.1 节）
 
 **推送规范**:
 - **严禁** 将 `git pull` 和 `git push` 放在同一条命令中执行
