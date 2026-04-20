@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { TreeDataNode } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { MMLCommand, MMLTemplate } from '@/types/mml';
@@ -24,18 +24,15 @@ export function useCommandSelection() {
   const t = useT();
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
 
   const keyword = searchText.trim() || undefined;
-  const category = categoryFilter || undefined;
 
   const { data: commandsResponse, isLoading, isFetching } = useQuery({
-    queryKey: ['mml-commands', { category: category ?? '', keyword: keyword ?? '' }],
+    queryKey: ['mml-commands', { keyword: keyword ?? '' }],
     queryFn: () =>
       mmlApi.getCommands({
         page: 1,
         pageSize: COMMAND_PAGE_SIZE,
-        category,
         keyword,
       }),
   });
@@ -58,13 +55,6 @@ export function useCommandSelection() {
       value,
     }));
   }, [categoryDict, commands]);
-
-  // 初次加载时自动选中第一个分类
-  useEffect(() => {
-    if (categoryFilter === '' && categoryOptions.length > 0) {
-      setCategoryFilter(categoryOptions[0].value);
-    }
-  }, [categoryOptions, categoryFilter]);
 
   const treeData = useMemo((): CommandTreeNode[] => {
     if (commands.length === 0) {
@@ -208,13 +198,11 @@ export function useCommandSelection() {
   return {
     selectedCommand,
     searchText,
-    categoryFilter,
     commands,
     treeData: fullTreeData,
     categoryOptions,
     isLoading: isLoading || isFetching,
     setSearchText,
-    setCategoryFilter,
     selectCommand,
     clearSelection,
   };

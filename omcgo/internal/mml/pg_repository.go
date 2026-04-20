@@ -62,7 +62,7 @@ var scriptColumns = []string{
 
 var taskColumns = []string{
 	"id", "task_name", "script_id", "device_sns",
-	"commands", "status", "results", "creator",
+	"commands", "status", "results", "creator", "executor",
 	"created_at", "updated_at",
 	"execute_type", "scheduled_at",
 	"period_start", "period_end", "period_time",

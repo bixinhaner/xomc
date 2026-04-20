@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Input, Select, Tree, Typography, Empty, Spin, Button } from 'antd';
+import { useState, useCallback, useMemo } from 'react';
+import { Input, Tree, Typography, Empty, Spin, Button } from 'antd';
 import { SearchOutlined, FolderOutlined, CodeOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
 import type { TreeProps } from 'antd';
 import type { MMLCommand } from '@/types/mml';
@@ -11,12 +11,9 @@ interface CommandTreeProps {
   commands: MMLCommand[];
   selectedCommand: MMLCommand | null;
   treeData: CommandTreeNode[];
-  categoryOptions: { label: string; value: string }[];
   searchText: string;
-  categoryFilter: string;
   isLoading?: boolean;
   onSearchChange: (text: string) => void;
-  onFilterChange: (category: string) => void;
   onSelectCommand: (command: MMLCommand | null) => void | Promise<void>;
   onAddPublicTemplate?: () => void;
   onAddPrivateTemplate?: () => void;
@@ -26,12 +23,9 @@ export default function CommandTree({
   commands,
   selectedCommand,
   treeData,
-  categoryOptions,
   searchText,
-  categoryFilter,
   isLoading = false,
   onSearchChange,
-  onFilterChange,
   onSelectCommand,
   onAddPublicTemplate,
   onAddPrivateTemplate,
@@ -39,16 +33,7 @@ export default function CommandTree({
   const t = useT();
   const token = useThemeToken();
 
-  const categoryNodeKeys = useMemo(
-    () => treeData.map((node) => String(node.key)),
-    [treeData]
-  );
-
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(categoryNodeKeys);
-
-  useEffect(() => {
-    setExpandedKeys(categoryNodeKeys);
-  }, [categoryNodeKeys]);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
 
   const renderAddButton = (onClick?: () => void) => {
     if (!onClick) return null;
@@ -284,21 +269,12 @@ export default function CommandTree({
       <div style={{ padding: '10px 12px', background: token.colorBgContainer }}>
         <Input.Search
           size="small"
-          style={{ marginBottom: 8, borderRadius: 4 }}
+          style={{ borderRadius: 4 }}
           placeholder={t('common.search')}
           prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
           value={searchText}
           onChange={(e) => onSearchChange(e.target.value)}
           allowClear
-        />
-        <Select
-          size="small"
-          style={{ width: '100%', borderRadius: 4 }}
-          placeholder={t('mml.console.commandType')}
-          allowClear
-          options={categoryOptions}
-          value={categoryFilter || undefined}
-          onChange={(val) => onFilterChange(val ?? '')}
         />
       </div>
 

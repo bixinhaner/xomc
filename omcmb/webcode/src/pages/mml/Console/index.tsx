@@ -318,12 +318,9 @@ export default function MMLConsole() {
             commands={commandSelection.commands}
             selectedCommand={commandSelection.selectedCommand}
             treeData={commandSelection.treeData}
-            categoryOptions={commandSelection.categoryOptions}
             searchText={commandSelection.searchText}
-            categoryFilter={commandSelection.categoryFilter}
             isLoading={commandSelection.isLoading}
             onSearchChange={commandSelection.setSearchText}
-            onFilterChange={commandSelection.setCategoryFilter}
             onSelectCommand={handleCommandSelect}
             onAddPublicTemplate={() => {
               setAddTemplateScope('public');
