@@ -71,10 +71,10 @@
 - **状态**：**Closed（2026-04-20）**
 - **关闭依据**：采用方案 (a) 补占位——创建 5 个 `000010/000015-000018_reserved_placeholder.sql`
   （Up/Down 均为 `SELECT 1;` noop + 注释说明占位用途）。`scripts/check-migrations.sh`
-  运行确认编号 000001→000023 连续无跳跃。`check-migrations.sh` 同时排除占位文件
-  的 Down 空告警，避免 CI 噪声。后续接入 CI 由 R-107 跟进。
-- **衍生风险**：000001_extensions_functions.sql 和 000021_notifications.sql 的 Down 段
-  为空（非占位迁移，是真实回滚逻辑缺失），已在下方 R-108 登记
+  运行确认编号 000001→000023 连续无跳跃。同时修正脚本 Down 空判定阈值 bug
+  （`<=1` → `<1`）——原阈值会把只有一条 SQL 的 Down 段误判为空。后续接入 CI 由 R-107 跟进。
+- **复盘**：初版脚本误报 000001 / 000021 "Down 空"，诊断后确认两者 Down 段完整
+  （分别 DROP FUNCTION / DROP TABLE），误报源于脚本阈值 bug，已修正（见 R-108 Closed）
 
 ---
 
@@ -150,17 +150,19 @@
 - **缓解**：Sprint 1 补 compose 文件 + 基础 dashboard
 - **下次复盘**：Sprint-01
 
-### R-108 个别迁移 Down 段缺失
-- **描述**：`000001_extensions_functions.sql`（CREATE EXTENSION + 自定义 update 函数）
-  与 `000021_notifications.sql`（通知模块表）的 Down 段为空，无可执行回滚 SQL
-- **等级**：P1
-- **概率**：中
-- **影响**：若需回滚到 000000 / 000020，无法自动化；需手工 DROP
-- **Owner**：数据与存储专家
-- **状态**：Open
-- **缓解**：为 000001 补 `DROP EXTENSION ...`（或注明"保留 extensions，不回滚"的理由）；
-  为 000021 补 `DROP TABLE notifications;` 等；`check-migrations.sh` 已告警不遗漏
-- **下次复盘**：Sprint-02
+### R-108 个别迁移 Down 段缺失（误报，已撤销）
+- **描述**（初版）：`000001_extensions_functions.sql` 与 `000021_notifications.sql`
+  的 Down 段被脚本标记为空
+- **等级**：P1 → **撤销**
+- **状态**：**Closed（2026-04-20，误报）**
+- **复盘**：验证原文件后确认两者 Down 段实际完整：
+  · 000001：`DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;`
+    （extensions `uuid-ossp`/`timescaledb` 为项目级共享基础设施，按 `omcgo/CLAUDE.md
+    §5.5.8 "仅限迁移专属扩展"` 规则不应在 Down 中 DROP，刻意保留）
+  · 000021：`DROP TABLE IF EXISTS notifications;`
+- **根因**：`check-migrations.sh` 阈值 bug——`grep -v '^\s*--'` 已剥掉 `-- +goose Down`
+  标记行，但判定仍用 `<=1`，导致只含一条 SQL 的 Down 段被误判为空。已修正为 `<1`
+- **教训**：新工具投产前需用 golden sample（含代表性正确/错误样本）校准阈值
 
 ---
 

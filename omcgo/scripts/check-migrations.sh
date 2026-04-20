@@ -102,20 +102,16 @@ else
   echo ""
 fi
 
-# ── 检查 Down 段是否疑似空白 ────────────────────────────────────
-# 占位/noop 迁移（文件名含 reserved_placeholder）本就无 schema 变更，跳过
+# ── 检查 Down 段是否真空（无任何 SQL 语句） ─────────────────────
+# 统计 Down 段内的"非注释非空行"数：grep -v 已剥掉 `-- +goose Down` 标记，
+# 所以 0 行 = 真空；>= 1 行 = 至少有一条 SQL（包括占位的 `SELECT 1;`）
 EMPTY_DOWN=()
 for f in "${FILES[@]}"; do
-  if [[ "$f" == *reserved_placeholder* ]]; then
-    continue
-  fi
-  # 取 Down 段到文件尾，去除空白/注释，统计有效行
   DOWN_BODY=$(awk '/-- \+goose Down/,0' "$f" | \
               grep -v '^\s*--' | \
               grep -v '^\s*$' | \
               wc -l)
-  # -- +goose Down 自身占 1 行，所以 <=1 视为空
-  if [[ "$DOWN_BODY" -le 1 ]]; then
+  if [[ "$DOWN_BODY" -lt 1 ]]; then
     EMPTY_DOWN+=("$f")
   fi
 done
