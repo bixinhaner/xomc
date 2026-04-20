@@ -125,7 +125,7 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 	if dirs := migratePaths(cmd); dirs != nil {
 		for _, dir := range dirs {
 			fmt.Printf("Migrating directory: %s\n", dir)
-			if err := goose.Up(db, dir); err != nil {
+			if err := goose.Up(db, dir, goose.WithAllowMissing()); err != nil {
 				return fmt.Errorf("migrate up %s: %w", dir, err)
 			}
 		}
@@ -137,7 +137,7 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if err := goose.Up(db, migrateDir(cmd)); err != nil {
+	if err := goose.Up(db, migrateDir(cmd), goose.WithAllowMissing()); err != nil {
 		return fmt.Errorf("migrate up: %w", err)
 	}
 
