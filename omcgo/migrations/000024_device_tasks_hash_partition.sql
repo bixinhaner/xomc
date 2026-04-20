@@ -55,7 +55,10 @@ CREATE TABLE device_tasks_p15 PARTITION OF device_tasks FOR VALUES WITH (MODULUS
 -- 4. Migrate data from legacy table
 INSERT INTO device_tasks SELECT * FROM device_tasks_legacy;
 
--- 5. Recreate indexes (partition-local)
+-- 5. Drop legacy table (and its indexes) before creating new indexes
+DROP TABLE device_tasks_legacy;
+
+-- 6. Create indexes (partition-local)
 CREATE INDEX idx_device_tasks_status ON device_tasks (status);
 CREATE INDEX idx_device_tasks_created_at ON device_tasks (created_at);
 CREATE INDEX idx_device_tasks_cwmp_id ON device_tasks (cwmp_id) WHERE cwmp_id IS NOT NULL;
@@ -63,9 +66,6 @@ CREATE INDEX idx_device_tasks_pending ON device_tasks (device_sn, status, priori
 CREATE INDEX idx_device_tasks_parent ON device_tasks (parent_task_id) WHERE parent_task_id IS NOT NULL;
 CREATE INDEX idx_device_tasks_params_gin ON device_tasks USING GIN (params jsonb_path_ops);
 CREATE INDEX idx_device_tasks_result_gin ON device_tasks USING GIN (result jsonb_path_ops);
-
--- 6. Drop legacy table
-DROP TABLE device_tasks_legacy;
 
 -- +goose Down
 -- Reverse: recreate as non-partitioned table (data loss acceptable in down migration for dev)
