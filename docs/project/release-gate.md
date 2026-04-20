@@ -14,6 +14,13 @@
 - [ ] 发布范围未超过 milestone 承诺（避免夹带）
 - [ ] 所有合入的 PR 均已过 DoD（`docs/project/dod.md`）
 
+### Backlog 收敛（`docs/project/backlog.md`）
+- [ ] **P0 Backlog 关闭数达 milestone 目标**（当前 RC 目标：5/5 — T-0002/T-0007/T-0010/T-0013/T-0017 等 P0 全 done）
+- [ ] `blocked` 任务数 ≤ 3；若 ≥ 3 → 评估是否阻塞本次发布
+- [ ] `in_dev` 任务均在本次发布范围内；逾期（Updated > 10 天）者必须触发 3 次失败重评（CLAUDE.md §9）
+- [ ] 累计型任务（§3.1）的 Progress 达到下游声明阈值（如 T-0006 ≥ 150 以放行 T-0025）
+- [ ] Sprint 承诺完成率近 3 个 Sprint 平均 > 75%
+
 ### 测试就绪
 - [ ] 单元测试覆盖率 ≥ 当前阈值（初始 60%，每月递增）
 - [ ] E2E 核心冒烟用例集（~20 条）全绿

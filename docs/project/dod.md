@@ -39,9 +39,20 @@
 
 ### 文档
 - [ ] PR 说明填写了 **Why**（为什么做），不只是 **What**
-- [ ] 关联 Issue（feature/bug/tech-debt）或 PRD（`docs/project/prd/*.md`）
+- [ ] **关联 Backlog Task（`T-NNNN`，见 `docs/project/backlog.md`）必填**；无对应 Task → 先用 `/dev-pipeline backlog add "<title>"` 登记再提交
+- [ ] 关联 PRD（如为 feat/P0/P1）：`docs/project/prd/F{NN}-*.md`
 - [ ] 如涉及约定变更，`CLAUDE.md` 或 `omcgo/CLAUDE.md` 已同步更新
 - [ ] 如涉及对外接口变更，Swagger/API 文档已更新
+
+### 流水线闭环（S6/S7 硬门）
+- [ ] commit footer **四元组齐全**（见 `.claude/commands/dev-pipeline.md §D3`）：
+  - `PRD:` 路径 或 `N/A (type=<bugfix|docs|...>)`（必填一项）
+  - `Sprint:` `sprint-NN`（必填，无则 `N/A (out-of-sprint hotfix)`）
+  - `Risk:` `R-NNN` 或 `-`（必填，`-` 表示无关联风险）
+  - `Backlog:` `T-NNNN`（**必填，不允许空**）
+  - `Review:` 审查报告路径 或 `N/A (skipped per §C <type>)`
+- [ ] backlog.md Task 状态已回写（`in_review → done` / 填 `Closed` / §6 追加 Evidence）
+- [ ] 如走快速通道（hotfix/bugfix 裁剪 S0-S2）→ postmortem 或裁剪说明已补
 
 ### 安全
 - [ ] 新增 API 端点有 JWT 验证中间件

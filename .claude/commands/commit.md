@@ -91,12 +91,36 @@
 | `omcmb/webcode/src/pages/<name>/` | 使用 `<name>` |
 | `omcmb/webcode/src/components/` | components |
 | `omcmb/webcode/src/store/` | store |
-| 根目录 `*.md` / `docs/` | docs |
+| `docs/project/` / `.claude/commands/` / 根目录流程制品（CLAUDE.md / settings.json） | process |
+| 根目录 `*.md` / `docs/`（非流程类） | docs |
 
 **组合规则**：
 - 单一 scope → 直接使用
 - 2-3 个 scope → 用主要 scope
 - 超过 3 个 → 省略 scope 或使用最主要的那个
+
+### Step 4.5: 识别关联 Backlog Task（流水线硬门）
+
+**背景**：commit 必须引用 `docs/project/backlog.md` 中的具体 Task，否则流水线脱节。
+
+按以下顺序推断 `T-NNNN`，首次命中即止：
+
+1. `$ARGUMENTS` 含 `--task=T-NNNN` → 采用
+2. 当前分支名含 `T-NNNN`（如 `feature/T-0007-alarm-email`）→ 采用
+3. `git log -10 --format=%B` 最近 commit 引用过同一 T-NNNN 且本次变更延续其范围 → 采用
+4. `docs/project/backlog.md` 存在 State=`in_dev` 的唯一 Task → 采用并提示用户确认
+5. 以上都无 → **阻塞提交**，输出：
+   ```
+   ❌ 未识别 Backlog Task。请任选：
+     a) 重试：/commit --task=T-NNNN
+     b) 登记新 Task：/dev-pipeline backlog add "<title>" → triage → 再提交
+     c) 快速通道（hotfix/临时修复）：/commit --task=HOTFIX 并在 body 说明原因，S7 补登记
+   ```
+
+获取 T-NNNN 后：
+- 读 `docs/project/backlog.md` 主表验证其存在且 State ∈ {in_dev, in_review, planned}
+- 自动抓取 Task 行的 `Sprint` / `Risk/PRD` 字段供 Step 7 Footer 使用
+- 若 Task.State = `planned` → 同步更新为 `in_dev`（且记入本轮 commit 的 backlog.md diff 中）
 
 ### Step 5: 执行代码审查（核心步骤）
 
@@ -152,12 +176,37 @@ Why: [变更原因/背景]
 Impact: [对其他模块或用户的影响，如无则写"无"]
 ```
 
-**Footer（尾部）**：
+**Footer（尾部）— 四元组硬约束 + 扩展**：
+
+> 规则源：`.claude/commands/dev-pipeline.md §D3` + `docs/project/dod.md §流水线闭环`
+
+**五字段硬约束（S6 硬门，缺 Backlog 则阻塞提交）**：
+
 ```
-Review: <审查报告相对路径>
-[BREAKING CHANGE: <如有破坏性变更则说明>]
-[Related: <关联的功能域编号或 issue，如 F06, #123>]
+PRD: <docs/project/prd/F{NN}-*.md>   或   N/A (type=<bugfix|docs|hotfix|proc|refactor>)
+Sprint: sprint-NN                      或   N/A (out-of-sprint hotfix)
+Risk: R-NNN                            或   -（无关联风险）
+Backlog: T-NNNN                        ← 必填，不允许空或 N/A
+Review: <审查报告相对路径>             或   N/A (skipped per §C <type>)
 ```
+
+**可选扩展**：
+
+```
+[BREAKING CHANGE: <破坏性变更说明>]
+[Related: <功能域编号或 issue，如 F06, #123>]
+[Skip: S0,S1]                          # 快速通道裁剪阶段（见 dev-pipeline §C）
+```
+
+**字段来源**（Step 4.5 + Step 5 自动填入）：
+
+| 字段 | 来源 |
+|------|------|
+| `PRD` | backlog.md Task 行 `Risk/PRD` 列中 PRD 路径；无则按 Task.Type 填 N/A |
+| `Sprint` | backlog.md Task 行 `Sprint` 列 |
+| `Risk` | backlog.md Task 行 `Risk/PRD` 列中 R-NNN；无则 `-` |
+| `Backlog` | Step 4.5 识别结果 |
+| `Review` | Step 5 生成报告路径；快速通道跳过则 `N/A (skipped per §C <type>)` |
 
 ### Step 8: 执行提交
 
@@ -171,7 +220,13 @@ What: <what>
 Why: <why>
 Impact: <impact>
 
-Review: docs/review-report/YYYYMMDD/REVIEW_<short_hash>_<author>_<scope>.md
+PRD: <docs/project/prd/F{NN}-*.md 或 N/A (type=<...>)>
+Sprint: <sprint-NN 或 N/A (out-of-sprint hotfix)>
+Risk: <R-NNN 或 ->
+Backlog: <T-NNNN>
+Review: <docs/review-report/YYYYMMDD/REVIEW_*.md 或 N/A (skipped per §C <type>)>
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -198,8 +253,14 @@ What: 新增 device handler 的 List/BatchDelete 接口，支持按 carrier/tech
 Why: Sprint 1 设备管理基础功能需求，前端设备列表页面需要对接后端接口
 Impact: 新增 GET /api/v1/devices 和 DELETE /api/v1/devices/batch 端点
 
+PRD: docs/project/prd/F06-device-management.md
+Sprint: sprint-01
+Risk: -
+Backlog: T-0042
 Review: docs/review-report/20260312/REVIEW_abc1234_watermelon_device.md
 Related: F06
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ```
 
 ---
@@ -211,3 +272,5 @@ Related: F06
 - 每个子仓库独立提交，不要混合 omcgo 和 omcmb 的变更
 - 如果是纯文档变更（`docs` type），审查可以简化，仅检查格式和内容
 - 使用 HEREDOC 传递提交消息以确保格式正确
+- **Footer 硬门**：`Backlog: T-NNNN` 缺失 → 直接拒绝提交，不退化为警告（与 `dev-pipeline §D3/§D4` 一致）
+- **四元组验证**：提交前最后一步，用正则 `^PRD:|^Sprint:|^Risk:|^Backlog:|^Review:` 逐项核对，任一缺失即停
