@@ -135,7 +135,7 @@
 | T-0002 | 补 5 个 `reserved_placeholder` 迁移（闭合版本号跳跃） | td | infra | 2026-04-20 | commit `6a6560e1`；`scripts/check-migrations.sh` 通过；**关闭 R-005** |
 | T-0003 | 修正 `check-migrations.sh` Down 空判定阈值（撤销 R-108 误报） | bug | infra | 2026-04-20 | commit `36907a36`；**关闭 R-108**（误报） |
 | T-0004 | 重构 Claude git 权限（软约束行为准则 + 硬约束 settings.json） | proc | process | 2026-04-20 | commit `7d212ce2`；`.claude/settings.json` 分层 allow/ask/deny |
-| T-0005 | 开发流水线 skill 设计 + L0 Backlog | proc | process | 2026-04-20 | commit `b59811e4`（L0 + skill + 设计文档 + CLAUDE.md）+ commit `04781919`（既有制品联通：/commit 四元组 / DoD / Gate / Risk / Milestone）；设计 `docs/project/dev-pipeline-design-20260420.md`；skill `.claude/commands/dev-pipeline.md`；**首次 dogfooding**：本三连 commit 自身全部走四元组 footer |
+| T-0005 | 开发流水线 skill 设计 + L0 Backlog | proc | process | 2026-04-20 | commit `eba378d0`（L0 + skill + 设计文档 + CLAUDE.md）+ commit `64607009`（既有制品联通：/commit 四元组 / DoD / Gate / Risk / Milestone）+ commit `1dae3b31`（S7 回写）；设计 `docs/project/dev-pipeline-design-20260420.md`；skill `.claude/commands/dev-pipeline.md`；**首次 dogfooding**：本三连 commit 自身全部走四元组 footer |
 
 ---
 
@@ -202,7 +202,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-20 | in_dev | T-0006 | E2E 补齐正式启动，Sprint-01 目标首批 20 条 |
 | 2026-04-20 | schema 调整 | T-0025 | Deps 由 `T-0006` 改为 `T-0006@累计≥150`（累计型依赖语法，设计 §11.7.1） |
 | 2026-04-20 | Owner 补齐 | T-0007..T-0026 | 按 risk-register 角色映射填入（电信/Go/PM/架构/运维/前端/QA），Sprint Planning 时替换为人名 |
-| 2026-04-20 | done | T-0005 | S7 回写：commit `b59811e4` + `04781919`；L0 Backlog + 流水线 skill + 既有制品联通全部完成，首次 dogfooding 成功 |
+| 2026-04-20 | done | T-0005 | S7 回写：commit `eba378d0` + `64607009` + `1dae3b31`（rebase 后 hash）；L0 Backlog + 流水线 skill + 既有制品联通全部完成，首次 dogfooding 成功 |
 
 ---
 
