@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { App, Button, Card, Drawer, Dropdown, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -123,6 +123,8 @@ export default function DeviceList() {
     return params;
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   // 同步 URL 参数到 filterParams（解决返回时 state 未恢复的问题）
   useEffect(() => {
@@ -177,6 +179,32 @@ export default function DeviceList() {
       }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!exportMenuOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!exportMenuRef.current?.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [exportMenuOpen]);
 
   // 本地任务面板状态
   type TaskStatus = 'pending' | 'running' | 'success' | 'failed';
@@ -561,10 +589,11 @@ export default function DeviceList() {
 
   // 导出 — 直接选择格式后触发
   const handleExport = useCallback(
-    (format: string) => {
+    (format: 'xlsx' | 'csv') => {
       // TODO: 根据 format 选择 API 端点
       // CSV: POST /cell/cpeinfos/exportCellsToCsv.action
       // XLSX: POST /cell/cpeinfos/exportCellsToExcel.action
+      setExportMenuOpen(false);
       console.log('export:', format);
       void message.info(t('common.exportInProgress'));
     },
@@ -1200,20 +1229,83 @@ export default function DeviceList() {
           title={t('nav.device.list')}
           extra={
             <Space>
-              <Dropdown
-                menu={{
-                  items: [
-                    { key: 'xlsx', label: 'XLSX' },
-                    { key: 'csv', label: 'CSV' },
-                  ],
-                  onClick: ({ key }) => handleExport(key),
-                }}
-                trigger={['click']}
+              <div
+                ref={exportMenuRef}
+                style={{ position: 'relative', display: 'inline-flex' }}
               >
-                <Button type="primary" icon={<ExportOutlined />}>
+                <Button
+                  type="primary"
+                  icon={<ExportOutlined />}
+                  aria-haspopup="menu"
+                  aria-expanded={exportMenuOpen}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setExportMenuOpen((open) => !open);
+                  }}
+                >
                   {t('common.export')}
                 </Button>
-              </Dropdown>
+
+                {exportMenuOpen && (
+                  <div
+                    role="menu"
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 8px)',
+                      right: 0,
+                      minWidth: 96,
+                      padding: 6,
+                      borderRadius: 8,
+                      border: '1px solid var(--color-border-secondary, #303030)',
+                      background: 'var(--color-bg-elevated, #1f1f1f)',
+                      boxShadow: '0 12px 32px rgba(0, 0, 0, 0.28)',
+                      zIndex: 40,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => handleExport('xlsx')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: 'none',
+                        borderRadius: 6,
+                        background: 'transparent',
+                        color: 'var(--color-text, rgba(255,255,255,0.88))',
+                        cursor: 'pointer',
+                        font: 'inherit',
+                        textAlign: 'left',
+                      }}
+                    >
+                      XLSX
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => handleExport('csv')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: 'none',
+                        borderRadius: 6,
+                        background: 'transparent',
+                        color: 'var(--color-text, rgba(255,255,255,0.88))',
+                        cursor: 'pointer',
+                        font: 'inherit',
+                        textAlign: 'left',
+                      }}
+                    >
+                      CSV
+                    </button>
+                  </div>
+                )}
+              </div>
             </Space>
           }
         >

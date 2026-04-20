@@ -104,6 +104,8 @@
 /* Area assignments — grid-template-areas controls positioning */
 .header {
   grid-area: header;
+  position: relative;
+  z-index: 20;
 }
 
 .sidebar {
