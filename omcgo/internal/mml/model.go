@@ -106,7 +106,7 @@ type MMLTask struct {
 	TotalDevices int       `json:"total_devices"`
 	SuccessCount int       `json:"success_count"`
 	FailedCount  int       `json:"failed_count"`
-	Result       TaskResult `json:"result,omitempty"`
+	Result       *TaskResult `json:"result,omitempty"`
 }
 
 // CommandFilter specifies criteria for listing MML commands.

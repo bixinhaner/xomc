@@ -289,7 +289,7 @@ export default function CommandInput({
         {!isParamPathTab && (
           <Space size={8}>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              <span style={{ color: token.colorPrimary }}>{selectedDevices.length}</span> {t('mml.console.deviceUnit', { count: selectedDevices.length })}
+              <span style={{ color: token.colorPrimary }}>{t('mml.console.deviceUnit', { count: selectedDevices.length })}</span>
               <span style={{ margin: '0 4px', color: token.colorBorder }}>·</span>
               {currentCommandLabel || <span style={{ color: '#bfbfbf' }}>{t('mml.console.noCommandSelected')}</span>}
               <span style={{ margin: '0 4px', color: token.colorBorder }}>·</span>

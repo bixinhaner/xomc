@@ -86,7 +86,7 @@ func (a *ResultAggregator) finalizeIfComplete(ctx context.Context, mmlID uuid.UU
 
 	now := time.Now()
 	mmlTask.Status = finalStatus
-	mmlTask.Result = finalResult
+	mmlTask.Result = &finalResult
 	mmlTask.FinishedAt = &now
 	if err := a.taskRepo.Update(ctx, mmlTask); err != nil {
 		a.logger.Error("finalize mml task", zap.Error(err))
@@ -105,7 +105,7 @@ func (a *ResultAggregator) finalizeIfComplete(ctx context.Context, mmlID uuid.UU
 		data, _ := json.Marshal(map[string]interface{}{
 			"task_id":       mmlTask.ID.String(),
 			"status":        string(mmlTask.Status),
-			"result":        string(mmlTask.Result),
+			"result":        string(*mmlTask.Result),
 			"success_count": mmlTask.SuccessCount,
 			"failed_count":  mmlTask.FailedCount,
 		})
