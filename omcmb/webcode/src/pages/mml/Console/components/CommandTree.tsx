@@ -66,6 +66,40 @@ export default function CommandTree({
     );
   };
 
+  const renderCommandLeaf = (node: CommandTreeNode) => ({
+    key: node.key,
+    isLeaf: true,
+    title: (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+          paddingRight: 8,
+          gap: 8,
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <CodeOutlined style={{ marginRight: 6, color: node.template ? '#722ed1' : '#52c41a' }} />
+          <span style={{ fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {node.label}
+          </span>
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            color: '#8c8c8c',
+            fontFamily: 'monospace',
+            flexShrink: 0,
+          }}
+        >
+          {node.commandCode}
+        </span>
+      </div>
+    ),
+  });
+
   const renderedTreeData = useMemo<TreeProps['treeData']>(() => {
     return treeData.map((topNode) => {
       // Custom template root node
@@ -139,40 +173,6 @@ export default function CommandTree({
       };
     });
   }, [token.colorPrimary, treeData, onAddPublicTemplate, onAddPrivateTemplate]);
-
-  const renderCommandLeaf = (node: CommandTreeNode) => ({
-    key: node.key,
-    isLeaf: true,
-    title: (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          width: '100%',
-          paddingRight: 8,
-          gap: 8,
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
-          <CodeOutlined style={{ marginRight: 6, color: node.template ? '#722ed1' : '#52c41a' }} />
-          <span style={{ fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {node.label}
-          </span>
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            color: '#8c8c8c',
-            fontFamily: 'monospace',
-            flexShrink: 0,
-          }}
-        >
-          {node.commandCode}
-        </span>
-      </div>
-    ),
-  });
 
   const commandMap = useMemo(() => {
     function flatten(nodes: CommandTreeNode[]): CommandTreeNode[] {

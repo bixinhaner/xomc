@@ -452,14 +452,16 @@ export const mmlApi = {
   },
 
   async createTask(
-    data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>
+    data: Partial<Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>> &
+    Pick<MMLTask, 'taskName' | 'deviceSns' | 'commands'>
   ): Promise<MMLTask> {
     const payload: Record<string, unknown> = {
       task_name: data.taskName,
       script_id: data.scriptId,
       device_sns: data.deviceSns,
       commands: data.commands.map((cmd) => ({ command_code: cmd })),
-      creator: data.creator,
+      total_devices: data.deviceSns?.length ?? 0,
+      creator: data.creator || '',
       execute_type: data.executeType || 'immediate',
       offline_retry: data.offlineRetry || false,
       offline_retry_wait: data.offlineRetryWait || 60,

@@ -5,7 +5,7 @@
 > **更新日期**: 2026-04-17
 > **适用项目**: OMC（基站网络运营管理系统）
 > **技术栈**: Go + Gin + Squirrel + PostgreSQL + React 19 + Ant Design 5 + TanStack Query
-> **变更说明**: v4.0 基于 4/15-17 三天迭代实现全面更新：模板 CRUD 已实现（20 个 API 端点）、任务状态扩展至 6 种、命令种子更新至 25 条/7 分类、新增参数库表结构、产品类型改为字典驱动、新增 ParamFormRenderer/ParamPathPanel/AddTemplateModal 组件
+> **变更说明**: v4.1 参数库后端模块已完成（4 个 API 端点 + 种子数据 24 版本/1919 分组/7226 参数）；前端 createTask 参数类型修复；其余待实现项不变
 
 ---
 
@@ -639,7 +639,7 @@ useDeviceSelection               useCommandSelection
 
 ### 3.7 API 接口设计
 
-> **当前已注册 20 个 API 端点**，全部在 `omcgo/internal/mml/handler.go` 中实现，通过 `h.RegisterRoutes(permGroup("devices"))` 注册到 `/api/v1/mml/` 路径下。
+> **当前已注册 24 个 API 端点**（MML 主模块 20 个 + 参数库 4 个），MML 主模块在 `omcgo/internal/mml/handler.go` 中实现，参数库在 `omcgo/internal/mml/param_handler.go` 中实现，均通过 `permGroup("devices")` 注册到 `/api/v1/mml/` 路径下。
 
 #### 3.7.0 完整 API 端点一览
 
@@ -668,6 +668,10 @@ useDeviceSelection               useCommandSelection
 | PUT | `/mml/templates/:id` | 更新模板 |
 | DELETE | `/mml/templates/:id` | 删除模板 |
 | POST | `/mml/templates/:id/clone` | 克隆模板为私有副本 |
+| GET | `/mml/param-versions` | 获取参数库版本列表 |
+| GET | `/mml/param-versions/:version/groups` | 获取版本的参数分组树 |
+| GET | `/mml/param-versions/:version/groups/:groupId/params` | 获取分组的参数列表 |
+| GET | `/mml/param-versions/:version/params` | 搜索参数（支持 search/tr069_path 过滤） |
 
 #### 3.7.1 获取命令列表
 
@@ -1532,54 +1536,91 @@ CREATE INDEX idx_mml_audit_creator ON mml_audit_log(creator);
 CREATE INDEX idx_mml_audit_executed_at ON mml_audit_log(executed_at DESC);
 ```
 
-#### 4.9.5 参数库表结构（已建表，仓储/服务代码待实现）
+#### 4.9.5 参数库表结构（已建表 + 后端模块已实现）
 
-> 参数库用于管理 TR-069 设备参数的版本化定义，支持按产品型号和软件版本匹配参数集。迁移文件：`migrations/000022_mml_param_library.sql`。
+> 参数库用于管理 TR-069 设备参数的版本化定义，支持按产品型号和软件版本匹配参数集。迁移文件：`migrations/000022_mml_param_library.sql`，种子数据：`migrations/seed/000005_seed_mml_param_library.sql`（24 个版本、1919 个分组、7226 条参数）。
+>
+> **后端已实现**：`param_model.go`、`param_service.go`、`param_pg_repository.go`、`param_handler.go`，4 个 API 端点已注册（`GET /mml/param-versions`、`GET /mml/param-versions/:version/groups`、`GET /mml/param-versions/:version/groups/:groupId/params`、`GET /mml/param-versions/:version/params`）。
 
 ```sql
 -- 参数版本
 CREATE TABLE mml_param_versions (
-    version_code    VARCHAR(100) PRIMARY KEY,
-    product_models  TEXT[] DEFAULT '{}',
+    version_code      VARCHAR(100) PRIMARY KEY,
+    version_name      VARCHAR(200),           -- 版本名称（如 Qcells B1.0）
+    description       TEXT DEFAULT '',
+    release_date      TIMESTAMPTZ,            -- 发布日期
+    product_models    TEXT[] DEFAULT '{}',
     software_versions TEXT[] DEFAULT '{}',
-    description     TEXT DEFAULT '',
-    group_count     INT DEFAULT 0,
-    param_count     INT DEFAULT 0,
-    status          VARCHAR(20) DEFAULT 'draft',
-    creator         VARCHAR(100),
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
+    is_active         BOOLEAN DEFAULT true,
+    is_deprecated     BOOLEAN DEFAULT false,
+    group_count       INT DEFAULT 0,
+    param_count       INT DEFAULT 0,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 参数分组（LTREE 层级路径）
+-- 参数分组（层级树结构）
 CREATE TABLE mml_param_groups (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    version_code    VARCHAR(100) REFERENCES mml_param_versions(version_code),
-    group_code      VARCHAR(100) NOT NULL,
-    group_name      VARCHAR(200) NOT NULL,
-    parent_id       UUID REFERENCES mml_param_groups(id),
-    path            LTREE,
-    platform_support TEXT[] DEFAULT '{}',
-    cell_config     BOOLEAN DEFAULT false,
-    second_confirm  BOOLEAN DEFAULT false,
-    sort_order      INT DEFAULT 0,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_code              VARCHAR(100) NOT NULL,
+    group_name_zh           VARCHAR(200) NOT NULL,
+    group_name_en           VARCHAR(200),
+    parent_id               UUID REFERENCES mml_param_groups(id),
+    level                   INT DEFAULT 0,
+    is_listable             BOOLEAN DEFAULT false,
+    is_modifiable           BOOLEAN DEFAULT false,
+    is_addable              BOOLEAN DEFAULT false,
+    is_removable            BOOLEAN DEFAULT false,
+    add_object_path         TEXT,
+    delete_object_path      TEXT,
+    param_version           VARCHAR(100) REFERENCES mml_param_versions(version_code),
+    platform_support        TEXT[] DEFAULT '{}',
+    mobile_support          BOOLEAN DEFAULT false,
+    broadband_support       BOOLEAN DEFAULT false,
+    cell_number             INT DEFAULT 0,
+    cell_index_location     INT DEFAULT 0,
+    require_second_confirm  BOOLEAN DEFAULT false,
+    confirm_message_zh      TEXT,
+    confirm_message_en      TEXT,
+    display_order           INT DEFAULT 0,
+    is_active               BOOLEAN DEFAULT true,
+    created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 参数定义
 CREATE TABLE mml_params (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    param_code      VARCHAR(200) NOT NULL,
-    param_name      VARCHAR(200) NOT NULL,
-    tr069_path      TEXT NOT NULL,
-    value_type      VARCHAR(20) CHECK (value_type IN ('INTEGER','UNSIGNED_INT','STRING','BOOLEAN','ENUM','IP_ADDRESS','LIST','HEX_BINARY')),
-    value_constraint JSONB DEFAULT '{}',
-    unit            VARCHAR(50),
-    default_value   TEXT,
-    description     TEXT,
-    writable        BOOLEAN DEFAULT true,
-    restart_required BOOLEAN DEFAULT false,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    param_code             VARCHAR(200) NOT NULL,
+    param_name_zh          VARCHAR(200) NOT NULL,
+    param_name_en          VARCHAR(200),
+    tr069_path             TEXT NOT NULL,
+    value_type             VARCHAR(20) CHECK (value_type IN ('INTEGER','UNSIGNED_INT','STRING','BOOLEAN','ENUM','IP_ADDRESS','LIST','HEX_BINARY')),
+    value_constraint       JSONB DEFAULT '{}',
+    default_value          TEXT,
+    js_regex               TEXT,               -- 前端校验正则
+    is_writable            BOOLEAN DEFAULT true,
+    is_listable            BOOLEAN DEFAULT false,
+    is_modifiable          BOOLEAN DEFAULT false,
+    is_addable             BOOLEAN DEFAULT false,
+    is_removable           BOOLEAN DEFAULT false,
+    is_leaf                BOOLEAN DEFAULT true,
+    is_dynamic             BOOLEAN DEFAULT false,
+    display_order          INT DEFAULT 0,
+    param_version          VARCHAR(100) REFERENCES mml_param_versions(version_code),
+    software_version       VARCHAR(100),
+    platform_support       TEXT[] DEFAULT '{}',
+    mobile_support         BOOLEAN DEFAULT false,
+    broadband_support      BOOLEAN DEFAULT false,
+    memo                   TEXT,
+    explanation_zh         TEXT,
+    explanation_en         TEXT,
+    title_zh               TEXT,
+    title_en               TEXT,
+    require_second_confirm BOOLEAN DEFAULT false,
+    confirm_message_zh     TEXT,
+    confirm_message_en     TEXT,
+    is_active              BOOLEAN DEFAULT true,
+    created_at             TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 分组-参数关联
@@ -1587,8 +1628,7 @@ CREATE TABLE mml_group_param_rel (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id    UUID REFERENCES mml_param_groups(id),
     param_id    UUID REFERENCES mml_params(id),
-    sort_order  INT DEFAULT 0,
-    matched_by  VARCHAR(50) DEFAULT 'manual'
+    sort_order  INT DEFAULT 0
 );
 ```
 
@@ -2417,15 +2457,16 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 10. ✅ 危险命令检测端点 `GET /mml/dangerous-check`
 11. ✅ 命令参数路径端点 `GET /mml/commands/:id/param-paths`
 12. ✅ 字典种子数据（产品类型、命令分类）
+13. ✅ 参数库模块（`param_handler.go`/`param_service.go`/`param_pg_repository.go`/`param_model.go`）— 4 个 API 端点 + 种子数据（24 版本/1919 分组/7226 参数）
+14. ✅ 参数库种子数据迁移（`000005_seed_mml_param_library.sql`）
 
 ### 12.3 后端待实现清单
 
 1. ACS Worker 消费 `mml_tasks` 中 `pending/running` 任务并下发 TR-069 SOAP 请求
 2. `AddObject`、`DeleteObject` 的完整执行逻辑
 3. 定时/周期任务的调度器（当前 `scheduled/periodic` 创建后不会自动触发）
-4. 参数库模块（`mml_param_versions/groups/params/group_param_rel` 表已建，仓储/服务代码待实现）
-5. 审计日志写入逻辑（表已建，service 层需在任务执行链路中写入）
-6. 批量执行并发控制（当前逐台串行，建议并发 10 台）
+4. 审计日志写入逻辑（表已建，service 层需在任务执行链路中写入）
+5. 批量执行并发控制（当前逐台串行，建议并发 10 台）
 
 ### 12.4 前端已完善清单
 
@@ -2448,6 +2489,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 4. 独立 `CommandTree` 页面（`/mml/CommandTree/index.tsx`）仍使用 Mock 数据和硬编码中文
 5. 脚本任务页中少量 `t('key') || '中文回退'` 模式需清理
 6. 设备列表仍使用本地 Mock 数据（`DEVICE_LIST`），需替换为真实设备查询接口
+7. 参数库前端集成：`mmlApi.ts` 中需新增参数库 API 调用（`getParamVersions`/`getParamGroupTree`/`getGroupParams`/`queryParams`），`CommandTree` 或独立面板中需接入参数库数据展示
 
 ### 12.6 分阶段实施建议
 
@@ -2463,8 +2505,9 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 - ⬜ ACS Worker 异步执行结果写回 `results`（Worker 待实现）
 - ⬜ 脚本任务页查看单任务结果明细（前端已对接，后端数据待 Worker 填充）
 
-#### 第三阶段：高级能力 ⬜ 待开始
-- ⬜ 参数库模块（表已建，仓储/服务代码待实现）
+#### 第三阶段：高级能力 🔄 进行中
+- ✅ 参数库模块后端（表已建 + 仓储/服务/Handler 已实现 + 种子数据已入库）
+- ⬜ 参数库前端集成（API 调用 + UI 展示）
 - ⬜ 脚本上传解析与语法校验
 - ⬜ 大批量设备并发、分批、失败重试策略
 - ⬜ 定时/周期任务调度器
@@ -2477,7 +2520,9 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | Console 页面 | 能完成设备选择、命令选择、参数配置、任务创建、结果轮询 | ✅ 已实现（设备列表仍为 Mock） |
 | ScriptTask 页面 | 能新建、查看、筛选、启动、暂停、取消、终止任务 | ✅ 已实现 |
 | 数据模型 | `mml_commands`、`mml_scripts`、`mml_tasks`、`mml_templates`、`mml_audit_log`、参数库 4 表结构完整 | ✅ 已落库 |
-| API 端点 | 20 个端点全部注册并可用 | ✅ 已实现 |
+| 参数库后端 | 4 个 API 端点 + 种子数据（24 版本/1919 分组/7226 参数） | ✅ 已实现 |
+| 参数库前端 | API 调用 + UI 展示集成到 CommandTree | ⬜ 待实现 |
+| API 端点 | 24 个端点全部注册并可用（MML 主模块 20 + 参数库 4） | ✅ 已实现 |
 | 模板系统 | 模板 CRUD + 克隆 + public/private 可见性隔离 | ✅ 已实现 |
 | 任务状态机 | 6 种状态 + 合法转换校验 | ✅ 已实现 |
 | 权限 | 只读/写操作/模板公共管理权限隔离正确 | ⬜ 待 Casbin 策略配置 |
