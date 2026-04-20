@@ -10,6 +10,7 @@ Thumbs.db
 omcgo/bin/
 omcgo/app
 omcmb/webcode/node_modules/
+omcmb/webcode/dist/
 
 # Claude (keep commands/ tracked for team sharing)
 .claude/*
