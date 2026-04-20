@@ -68,9 +68,13 @@
 - **概率**：高（已存在）
 - **影响**：新环境首次迁移可能失败；团队认知混乱
 - **Owner**：数据与存储专家
-- **状态**：Open
-- **缓解**：(a) 评估是补占位 up/down 还是重编号；(b) `scripts/check-migrations.sh` 接入 CI 防复发
-- **下次复盘**：Sprint-01
+- **状态**：**Closed（2026-04-20）**
+- **关闭依据**：采用方案 (a) 补占位——创建 5 个 `000010/000015-000018_reserved_placeholder.sql`
+  （Up/Down 均为 `SELECT 1;` noop + 注释说明占位用途）。`scripts/check-migrations.sh`
+  运行确认编号 000001→000023 连续无跳跃。`check-migrations.sh` 同时排除占位文件
+  的 Down 空告警，避免 CI 噪声。后续接入 CI 由 R-107 跟进。
+- **衍生风险**：000001_extensions_functions.sql 和 000021_notifications.sql 的 Down 段
+  为空（非占位迁移，是真实回滚逻辑缺失），已在下方 R-108 登记
 
 ---
 
@@ -146,6 +150,18 @@
 - **缓解**：Sprint 1 补 compose 文件 + 基础 dashboard
 - **下次复盘**：Sprint-01
 
+### R-108 个别迁移 Down 段缺失
+- **描述**：`000001_extensions_functions.sql`（CREATE EXTENSION + 自定义 update 函数）
+  与 `000021_notifications.sql`（通知模块表）的 Down 段为空，无可执行回滚 SQL
+- **等级**：P1
+- **概率**：中
+- **影响**：若需回滚到 000000 / 000020，无法自动化；需手工 DROP
+- **Owner**：数据与存储专家
+- **状态**：Open
+- **缓解**：为 000001 补 `DROP EXTENSION ...`（或注明"保留 extensions，不回滚"的理由）；
+  为 000021 补 `DROP TABLE notifications;` 等；`check-migrations.sh` 已告警不遗漏
+- **下次复盘**：Sprint-02
+
 ---
 
 ## P2 风险（优化项）
@@ -180,7 +196,9 @@
 
 ## 关闭的风险
 
-（首次初始化，暂无）
+| ID | 关闭日期 | 关闭摘要 |
+|----|---------|---------|
+| R-005 | 2026-04-20 | 数据库迁移版本号跳跃。补 5 个 `reserved_placeholder` 占位迁移，`check-migrations.sh` 检查通过。衍生风险 R-108（个别 Down 段缺失）已登记 |
 
 ---
 

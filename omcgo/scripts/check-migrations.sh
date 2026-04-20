@@ -103,8 +103,12 @@ else
 fi
 
 # ── 检查 Down 段是否疑似空白 ────────────────────────────────────
+# 占位/noop 迁移（文件名含 reserved_placeholder）本就无 schema 变更，跳过
 EMPTY_DOWN=()
 for f in "${FILES[@]}"; do
+  if [[ "$f" == *reserved_placeholder* ]]; then
+    continue
+  fi
   # 取 Down 段到文件尾，去除空白/注释，统计有效行
   DOWN_BODY=$(awk '/-- \+goose Down/,0' "$f" | \
               grep -v '^\s*--' | \
