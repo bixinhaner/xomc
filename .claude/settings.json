@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git diff)",
+      "Bash(git diff:*)",
+      "Bash(git log)",
+      "Bash(git log:*)",
+      "Bash(git show)",
+      "Bash(git show:*)",
+      "Bash(git branch)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git rm:*)",
+      "Bash(git mv:*)",
+      "Bash(git stash:*)",
+      "Bash(git worktree list)",
+      "Bash(git config --get:*)",
+      "Bash(bash omcgo/scripts/check-migrations.sh)",
+      "Bash(make build)",
+      "Bash(make test)",
+      "Bash(make lint)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)"
+    ],
+    "ask": [
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git rebase:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git worktree remove:*)"
+    ],
+    "deny": [
+      "Bash(git push -f:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push:* -f)",
+      "Bash(git push:* --force)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit:* --no-verify)",
+      "Bash(rm -rf:*)",
+      "Bash(git config --global:*)"
+    ]
+  }
+}

@@ -12,9 +12,11 @@ omcgo/app
 omcmb/webcode/node_modules/
 omcmb/webcode/dist/
 
-# Claude (keep commands/ tracked for team sharing)
+# Claude (keep commands/ and settings.json tracked for team sharing)
 .claude/*
 !.claude/commands/
+!.claude/settings.json
+.claude/settings.local.json
 
 # Qoder (AI tool generated files)
 .qoder/
