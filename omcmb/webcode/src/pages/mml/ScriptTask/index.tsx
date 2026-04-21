@@ -14,6 +14,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Upload,
@@ -40,8 +41,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, DeviceTaskResultItem } from '@/types/mml';
-import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask } from '@/hooks/api/useMML';
+import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, MMLScript, DeviceTaskResultItem } from '@/types/mml';
+import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLScripts } from '@/hooks/api/useMML';
 import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
@@ -113,6 +114,9 @@ export default function ScriptTask() {
   const executeType = Form.useWatch('executeType', addForm);
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [parsedCommands, setParsedCommands] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState('tasks');
+  const [scriptPage, setScriptPage] = useState(1);
+  const [scriptPageSize, setScriptPageSize] = useState(50);
 
   const { data: productTypeDict } = useDictionary('product_type');
   const productTypeOptions = useMemo(() => {
@@ -136,6 +140,7 @@ export default function ScriptTask() {
   const pauseTaskMutation = usePauseMMLTask();
   const cancelTaskMutation = useCancelMMLTask();
   const deleteTaskMutation = useDeleteMMLTask();
+  const { data: scriptData, isLoading: scriptLoading, refetch: refetchScripts } = useMMLScripts({ page: scriptPage, pageSize: scriptPageSize });
 
   // Per-task results cache (keyed by task ID)
   const [resultCache, setResultCache] = useState<Record<string, { items: DeviceTaskResultItem[]; total: number }>>({});
@@ -386,16 +391,41 @@ export default function ScriptTask() {
     { key: 'finishedAt', title: t('mml.endTime'), dataIndex: 'finishedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
   ], [t, getActionMenu]);
 
+  const scriptColumns: DataTableColumn<MMLScript>[] = useMemo(() => [
+    { key: 'scriptName', title: t('mml.scriptName') || '脚本名称', dataIndex: 'scriptName', ellipsis: true },
+    { key: 'description', title: t('common.description') || '描述', dataIndex: 'description', ellipsis: true, render: (v: string) => v || '-' },
+    { key: 'deviceType', title: t('mml.productType') || '产品类型', dataIndex: 'deviceType', width: 120, render: (v: string) => v || '-' },
+    { key: 'creator', title: t('mml.creator') || '创建者', dataIndex: 'creator', width: 100 },
+    {
+      key: 'content', title: t('mml.scriptContent') || '脚本内容', dataIndex: 'content', width: 200, ellipsis: true,
+      render: (v: string) => v ? <Tooltip title={v}><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</span></Tooltip> : '-',
+    },
+    { key: 'createTime', title: t('mml.createTime') || '创建时间', dataIndex: 'createTime', width: 160, render: (v: string) => formatTime(v) },
+  ], [t]);
+
+  const scripts = useMemo(() => scriptData?.items ?? [], [scriptData?.items]);
+
   return (
     <ListPageLayout
       title={t('nav.mml.script')}
       extra={
         <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>{t('common.add')}</Button>
+          {activeTab === 'tasks' && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>{t('common.add')}</Button>
+          )}
         </Space>
       }
     >
-      <FilterBar filterId="mml-script-task" fields={filterFields} onSearch={handleSearch} onReset={handleReset} />
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'tasks',
+            label: t('mml.taskList') || '任务列表',
+            children: (
+              <>
+                <FilterBar filterId="mml-script-task" fields={filterFields} onSearch={handleSearch} onReset={handleReset} />
 
       <DataTable<MMLTask>
         tableId="script-task" columns={columns} dataSource={tasks} loading={isLoading} rowKey="id"
@@ -513,6 +543,30 @@ export default function ScriptTask() {
             );
           },
         }}
+      />
+              </>
+            ),
+          },
+          {
+            key: 'scripts',
+            label: t('mml.scriptLibrary') || '脚本库',
+            children: (
+              <DataTable<MMLScript>
+                tableId="mml-scripts"
+                columns={scriptColumns}
+                dataSource={scripts}
+                loading={scriptLoading}
+                rowKey="id"
+                total={scriptData?.total ?? 0}
+                currentPage={scriptPage}
+                pageSize={scriptPageSize}
+                onPageChange={(p, s) => { setScriptPage(p); setScriptPageSize(s); }}
+                onRefresh={() => void refetchScripts()}
+                scroll={{ x: 900 }}
+              />
+            ),
+          },
+        ]}
       />
 
       {/* 任务详情弹窗 */}

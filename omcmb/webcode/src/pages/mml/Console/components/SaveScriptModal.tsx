@@ -38,8 +38,13 @@ export default function SaveScriptModal({ open, defaultName, defaultContent, onC
   }, [defaultContent, defaultName, form, open]);
 
   const handleSubmit = async () => {
+    let values;
     try {
-      const values = await form.validateFields();
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    try {
       await createMutation.mutateAsync({
         scriptName: values.scriptName,
         description: values.description || '',
@@ -48,10 +53,10 @@ export default function SaveScriptModal({ open, defaultName, defaultContent, onC
         creator: '',
         tags: values.tags || [],
       });
-      void message.success(t('mml.scriptSaved'));
+      message.success(t('mml.scriptSaved'));
       onClose();
-    } catch {
-      // validation errors shown inline
+    } catch (err) {
+      message.error(t('mml.scriptSaveFailed', { error: err instanceof Error ? err.message : 'Unknown' }));
     }
   };
 
