@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Card, Tag, Typography, message } from 'antd';
-import { AppstoreOutlined } from '@ant-design/icons';
+import { Card, message } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   DeviceTree,
@@ -8,6 +7,7 @@ import {
   TerminalPanel,
   CommandInput,
   BatchSnModal,
+  SaveScriptModal,
 } from './components';
 import AddTemplateModal from './components/AddTemplateModal';
 import {
@@ -18,7 +18,6 @@ import {
 import type { MMLCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import { useCreateMMLScript } from '@/hooks/api/useMML';
 import { resolveOperationType } from './utils/resolveOperationType';
 
 type CommandInputTab = 'control' | 'paramPath';
@@ -44,7 +43,7 @@ export default function MMLConsole() {
   const deviceSelection = useDeviceSelection();
   const commandSelection = useCommandSelection();
   const commandExecution = useCommandExecution();
-  const createScriptMutation = useCreateMMLScript();
+  const [saveScriptModalOpen, setSaveScriptModalOpen] = useState(false);
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
@@ -177,22 +176,13 @@ export default function MMLConsole() {
       void message.warning(t('mml.selectCommandFirst'));
       return;
     }
-    const lines = [commandLineText.trim()];
-    createScriptMutation.mutate(
-      {
-        scriptName: `${cmd.commandName}_${new Date().toISOString().slice(0, 10)}`,
-        description: `Saved from MML console: ${cmd.commandCode}`,
-        content: lines.join('\n'),
-        deviceType: '',
-        creator: '',
-        tags: [],
-      },
-      {
-        onSuccess: () => void message.success(t('mml.scriptSaved')),
-        onError: (err) => void message.error(t('mml.scriptSaveFailed', { error: err instanceof Error ? err.message : 'Unknown' })),
-      },
-    );
-  }, [commandSelection.selectedCommand, commandLineText, createScriptMutation, t]);
+    setSaveScriptModalOpen(true);
+  }, [commandSelection.selectedCommand, t]);
+
+  const saveScriptDefaultName = commandSelection.selectedCommand
+    ? `${commandSelection.selectedCommand.commandName}_${new Date().toISOString().slice(0, 10)}`
+    : '';
+  const saveScriptDefaultContent = commandLineText.trim();
 
   const canExecute = deviceSelection.selectedDevices.length > 0 && commandLineText.trim().length > 0;
   const executeButtonText = `${t('mml.console.deviceUnit', { count: deviceSelection.selectedDevices.length })} · ${currentCommandLabel || t('mml.console.noCommandSelected')}`;
@@ -208,66 +198,6 @@ export default function MMLConsole() {
         gap: 12,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 16px',
-          background: token.colorBgContainer,
-          borderRadius: 8,
-          border: `1px solid ${token.colorBorderSecondary}`,
-          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.04)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 6,
-              background: token.colorPrimaryBg,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <AppstoreOutlined style={{ fontSize: 18, color: token.colorPrimary }} />
-          </div>
-          <Typography.Title level={5} style={{ margin: 0 }}>
-            {t('nav.mml.console')}
-          </Typography.Title>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Tag
-            style={{
-              background: token.colorPrimaryBg,
-              border: `1px solid ${token.colorPrimaryBorder}`,
-              color: token.colorPrimary,
-              borderRadius: 12,
-              padding: '2px 10px',
-            }}
-          >
-            {t('mml.console.deviceCount', { count: deviceSelection.selectedDevices.length })}
-          </Tag>
-          {commandSelection.selectedCommand && (
-            <Tag
-              style={{
-                background: token.colorPrimaryBg,
-                border: `1px solid ${token.colorPrimaryBorder}`,
-                color: token.colorPrimary,
-                fontFamily: 'monospace',
-                borderRadius: 12,
-                padding: '2px 10px',
-              }}
-            >
-              {commandSelection.selectedCommand.commandCode}
-            </Tag>
-          )}
-        </div>
-      </div>
-
       <div
         style={{
           display: 'grid',
@@ -429,6 +359,13 @@ export default function MMLConsole() {
             selectedFields: [],
           });
         }}
+      />
+
+      <SaveScriptModal
+        open={saveScriptModalOpen}
+        defaultName={saveScriptDefaultName}
+        defaultContent={saveScriptDefaultContent}
+        onClose={() => setSaveScriptModalOpen(false)}
       />
     </div>
   );

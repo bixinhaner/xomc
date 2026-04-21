@@ -180,7 +180,7 @@ export default function CommandInput({
           background: `linear-gradient(180deg, ${token.colorBgLayout} 0%, ${token.colorBgContainer} 100%)`,
         }}
       >
-        <Descriptions column={2} size="small">
+        <Descriptions column={1} size="small">
           <Descriptions.Item
             label={<span style={{ fontSize: 11, color: token.colorTextSecondary }}>{t('mml.console.currentCommand')}</span>}
           >
@@ -200,19 +200,6 @@ export default function CommandInput({
             ) : (
               <span style={{ color: '#bfbfbf', fontSize: 11 }}>{t('mml.console.notSelected')}</span>
             )}
-          </Descriptions.Item>
-          <Descriptions.Item
-            label={<span style={{ fontSize: 11, color: token.colorTextSecondary }}>{t('mml.console.targetDevice')}</span>}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                color: selectedDevices.length > 0 ? token.colorPrimary : '#bfbfbf',
-                fontWeight: selectedDevices.length > 0 ? 500 : 400,
-              }}
-            >
-              {selectedDevices.length > 0 ? t('mml.console.deviceUnit', { count: selectedDevices.length }) : t('mml.console.notSelected')}
-            </span>
           </Descriptions.Item>
         </Descriptions>
       </div>
