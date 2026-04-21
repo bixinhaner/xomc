@@ -158,11 +158,10 @@ http.interceptors.response.use(
       | undefined;
 
     if (responseData) {
-      // Unify error message extraction
       const message =
         responseData.message || responseData.error || responseData.details;
       if (message) {
-        (error as AxiosError & { userMessage?: string }).userMessage = message;
+        error.message = message;
       }
     }
 

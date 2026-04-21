@@ -34,6 +34,7 @@ export default function MMLConsole() {
   const [isManualEdit, setIsManualEdit] = useState(false);
   const [currentCommandLabel, setCurrentCommandLabel] = useState('');
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [selectedSubCommands, setSelectedSubCommands] = useState<string[]>([]);
   const [parameters, setParameters] = useState<CommandParameters>({});
   const [operationType, setOperationType] = useState('');
   const [paramPaths, setParamPaths] = useState<string[]>(['']);
@@ -54,6 +55,7 @@ export default function MMLConsole() {
       setIsManualEdit(false);
       setCurrentCommandLabel('');
       setSelectedFields([]);
+      setSelectedSubCommands([]);
       setParameters({});
       setOperationType('');
       setParamPaths(['']);
@@ -62,6 +64,7 @@ export default function MMLConsole() {
 
     setIsManualEdit(false);
     setSelectedFields([]);
+    setSelectedSubCommands([]);
     setParameters({});
 
     if (subCmd) {
@@ -94,6 +97,14 @@ export default function MMLConsole() {
       return;
     }
 
+    // Sub-commands format: CMD:paramId={code1,code2,...};
+    if (selectedSubCommands.length > 0 && selectedCommand.subCommands && selectedCommand.subCommands.length > 0) {
+      const paramId = nextOperationType === 'MOD' ? 'modId' : 'lstId';
+      const cmdText = `${code}:${paramId}={${selectedSubCommands.join(',')}};`;
+      setCommandLineText(cmdText);
+      return;
+    }
+
     if (nextOperationType === 'LST' || nextOperationType === 'DSP') {
       setCommandLineText(selectedFields.length > 0 ? `${code}:${selectedFields.join(',')}` : code);
       return;
@@ -110,7 +121,7 @@ export default function MMLConsole() {
     }
 
     setCommandLineText(code);
-  }, [activeTab, commandSelection.selectedCommand, isManualEdit, parameters, selectedFields]);
+  }, [activeTab, commandSelection.selectedCommand, isManualEdit, parameters, selectedFields, selectedSubCommands]);
 
   const handleCommandSelect = useCallback(async (command: MMLCommand | null, subCommand?: SubCommand | null) => {
     await commandSelection.selectCommand(command, subCommand);
@@ -119,6 +130,7 @@ export default function MMLConsole() {
   const handleParamChange = useCallback((values: Record<string, unknown>) => {
     if (activeTab === 'control') {
       setSelectedFields(Array.isArray(values.selectedFields) ? values.selectedFields.map(String) : []);
+      setSelectedSubCommands(Array.isArray(values.selectedSubCommands) ? values.selectedSubCommands.map(String) : []);
       setParameters(
         values.parameters && typeof values.parameters === 'object'
           ? values.parameters as CommandParameters
@@ -171,6 +183,7 @@ export default function MMLConsole() {
     setIsManualEdit(false);
     setCurrentCommandLabel('');
     setSelectedFields([]);
+    setSelectedSubCommands([]);
     setParameters({});
     setOperationType('');
     setParamPaths(['']);

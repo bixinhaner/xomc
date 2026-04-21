@@ -19,6 +19,7 @@ type ExecuteCommandParams = {
   paramPaths: string[];
   parameters: Record<string, string | number | boolean>;
   selectedFields: string[];
+  taskName?: string;
 };
 
 export function useCommandExecution() {
@@ -117,6 +118,7 @@ export function useCommandExecution() {
     paramPaths,
     parameters,
     selectedFields,
+    taskName,
   }: ExecuteCommandParams) => {
     if (devices.length === 0) {
       addOutput({
@@ -156,6 +158,7 @@ export function useCommandExecution() {
       paramPaths,
       parameters,
       selectedFields,
+      taskName: taskName || command?.commandCode || trimmedCommandLineText,
     });
 
     setIsExecuting(true);
@@ -247,6 +250,7 @@ function buildExecutePayload({
   paramPaths,
   parameters,
   selectedFields,
+  taskName,
 }: ExecuteCommandParams): ExecutePayload {
   const deviceSns = devices.map((device) => device.sn);
   const manualCommands = commandLineText
@@ -257,6 +261,7 @@ function buildExecutePayload({
 
   if (isManualEdit || !command) {
     return {
+      task_name: taskName || commandLineText,
       device_sns: deviceSns,
       commands: manualCommands,
     };
@@ -264,6 +269,7 @@ function buildExecutePayload({
 
   if (activeTab === 'control') {
     return {
+      task_name: taskName || command.commandCode,
       command_code: command.commandCode,
       parameters,
       device_sns: deviceSns,
@@ -272,6 +278,7 @@ function buildExecutePayload({
   }
 
   return {
+    task_name: taskName || command.commandCode,
     command_code: command.commandCode,
     param_paths: paramPaths.filter((path) => path.trim()),
     operation_type: operationType,

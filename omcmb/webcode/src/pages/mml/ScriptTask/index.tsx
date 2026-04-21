@@ -14,6 +14,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Upload,
@@ -32,6 +33,8 @@ import {
   DownloadOutlined,
   CloseOutlined,
   SearchOutlined,
+  FileTextOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import type { MenuProps, UploadFile } from 'antd';
 import type { Dayjs } from 'dayjs';
@@ -41,8 +44,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, DeviceTaskResultItem } from '@/types/mml';
-import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask } from '@/hooks/api/useMML';
+import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, DeviceTaskResultItem, MMLScript } from '@/types/mml';
+import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLScripts, useDeleteMMLScripts } from '@/hooks/api/useMML';
 import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
@@ -98,6 +101,7 @@ function computeProgress(task: MMLTask): string {
 
 export default function ScriptTask() {
   const t = useT();
+  const [activeTab, setActiveTab] = useState('tasks');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [detailVisible, setDetailVisible] = useState(false);
@@ -186,6 +190,46 @@ export default function ScriptTask() {
   }, [resultCache, t]);
 
   const tasks = useMemo(() => data?.items ?? [], [data?.items]);
+
+  // ---- Script library state ----
+  const [scriptPage, setScriptPage] = useState(1);
+  const [scriptPageSize, setScriptPageSize] = useState(50);
+  const [scriptSearch, setScriptSearch] = useState('');
+  const { data: scriptsData, isLoading: scriptsLoading, refetch: refetchScripts } = useMMLScripts({
+    page: scriptPage,
+    pageSize: scriptPageSize,
+    keyword: scriptSearch.trim() || undefined,
+  });
+  const deleteScriptsMutation = useDeleteMMLScripts();
+  const [scriptViewVisible, setScriptViewVisible] = useState(false);
+  const [viewingScript, setViewingScript] = useState<MMLScript | null>(null);
+
+  const scripts = useMemo(() => scriptsData?.items ?? [], [scriptsData]);
+
+  const handleDeleteScripts = useCallback((ids: string[]) => {
+    deleteScriptsMutation.mutate(ids, {
+      onSuccess: () => void message.success(t('common.deleteSuccess')),
+      onError: (err) => void message.error(err instanceof Error ? err.message : 'Unknown'),
+    });
+  }, [deleteScriptsMutation, t]);
+
+  const scriptColumns: DataTableColumn<MMLScript>[] = useMemo(() => [
+    {
+      key: 'operation', title: t('table.operation'), dataIndex: 'id', width: 120, fixed: 'right',
+      render: (_, record) => (
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => { setViewingScript(record); setScriptViewVisible(true); }}>{t('mml.info')}</Button>
+          <Button type="link" size="small" danger onClick={() => handleDeleteScripts([record.id])}>{t('common.delete')}</Button>
+        </Space>
+      ),
+    },
+    { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
+    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: string) => v || '-' },
+    { key: 'deviceType', title: t('mml.deviceType'), dataIndex: 'deviceType', width: 120, render: (v: string) => v || '-' },
+    { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
+    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: string[]) => tags?.length ? tags.map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
+    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: string) => formatTime(val) },
+  ], [t, handleDeleteScripts]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'taskName', label: t('mml.taskName'), type: 'input', placeholder: t('mml.inputTaskNameRequired') },
@@ -400,10 +444,175 @@ export default function ScriptTask() {
     <ListPageLayout
       title={t('nav.mml.script')}
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer}>{t('common.add')}</Button>
+        activeTab === 'tasks' ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer}>{t('common.add')}</Button>
+        ) : null
       }
     >
-      <FilterBar filterId="mml-script-task" fields={filterFields} onSearch={handleSearch} onReset={handleReset} />
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'tasks',
+            label: (
+              <span>
+                <UnorderedListOutlined style={{ marginRight: 6 }} />
+                {t('mml.taskManagement')}
+              </span>
+            ),
+            children: (
+              <>
+                <FilterBar filterId="mml-script-task" fields={filterFields} onSearch={handleSearch} onReset={handleReset} />
+                <DataTable<MMLTask>
+                  tableId="script-task" columns={columns} dataSource={tasks} loading={isLoading} rowKey="id"
+                  total={data?.total ?? 0} currentPage={page} pageSize={pageSize}
+                  onPageChange={(p, s) => { setPage(p); setPageSize(s); }} onRefresh={() => void refetch()} scroll={{ x: 1400 }}
+                  expandable={{
+                    expandedRowKeys,
+                    onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as string[]),
+                    onExpand: handleExpand,
+                    expandedRowRender: (record) => {
+                      const cached = resultCache[record.id];
+                      const allItems = cached?.items ?? [];
+                      const search = resultSearch[record.id] || '';
+                      const currentPage = resultPage[record.id] || 1;
+                      const pageSize = 10;
+
+                      if (!cached) return <div style={{ padding: 16, color: '#999' }}>{t('common.loading')}</div>;
+
+                      const filtered = search
+                        ? allItems.filter(item =>
+                            item.deviceSn.toLowerCase().includes(search.toLowerCase()) ||
+                            (item.deviceName || '').toLowerCase().includes(search.toLowerCase())
+                          )
+                        : allItems;
+
+                      const total = filtered.length;
+                      const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+                      const resultColumns = [
+                        { title: t('mml.deviceSn'), dataIndex: 'deviceSn' as const, width: 180, render: (v: string) => <span style={{ fontFamily: 'monospace' }}>{v}</span> },
+                        { title: t('mml.deviceName'), dataIndex: 'deviceName' as const, width: 140, render: (v?: string) => v || '-' },
+                        { title: `MML${t('mml.scriptName')}`, dataIndex: 'mmlScript' as const, width: 200, ellipsis: true, render: (v?: string) => v ? <Tooltip title={v}><span>{v}</span></Tooltip> : '-' },
+                        {
+                          title: t('mml.status'), dataIndex: 'status' as const, width: 80, align: 'center' as const,
+                          render: (v?: string) => {
+                            if (v === 'running') return <Tag color="processing">{t('mml.runningStatus')}</Tag>;
+                            if (v === 'pending') return <Tag color="default">{t('mml.pendingStatus')}</Tag>;
+                            return <Tag color="success">{t('mml.completedStatus')}</Tag>;
+                          },
+                        },
+                        {
+                          title: t('mml.result'), width: 80, align: 'center' as const,
+                          render: (_: unknown, item: DeviceTaskResultItem) => (
+                            <Tag color={item.result.success ? 'success' : 'error'}>{item.result.success ? t('status.success') : t('status.failed')}</Tag>
+                          ),
+                        },
+                        { title: t('mml.failReason'), dataIndex: 'failReason' as const, width: 160, ellipsis: true, render: (v?: string) => v ? <Tooltip title={v}><span style={{ color: '#ff4d4f' }}>{v}</span></Tooltip> : '-' },
+                        {
+                          title: t('mml.detail'), width: 160, ellipsis: true,
+                          render: (_: unknown, item: DeviceTaskResultItem) => item.result.rawOutput
+                            ? <Tooltip title={item.result.rawOutput}><span>{item.result.rawOutput}</span></Tooltip>
+                            : '-',
+                        },
+                        { title: t('mml.startTime'), dataIndex: 'startedAt' as const, width: 150, render: (v?: string) => v ? formatTime(v) : '-' },
+                        {
+                          title: t('mml.endTime'), width: 150,
+                          render: (_: unknown, item: DeviceTaskResultItem) => {
+                            if (item.finishedAt) return formatTime(item.finishedAt);
+                            if (item.result.timestamp) return formatTime(item.result.timestamp);
+                            return '-';
+                          },
+                        },
+                      ];
+
+                      return (
+                        <div style={{ padding: '8px 0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <span style={{ fontWeight: 500, fontSize: 14 }}>
+                              {t('mml.result')}（{record.taskName}）
+                            </span>
+                            <Space>
+                              <Input
+                                prefix={<SearchOutlined />}
+                                placeholder={t('mml.searchDeviceSn')}
+                                size="small"
+                                allowClear
+                                value={search}
+                                onChange={(e) => {
+                                  setResultSearch(prev => ({ ...prev, [record.id]: e.target.value }));
+                                  setResultPage(prev => ({ ...prev, [record.id]: 1 }));
+                                }}
+                                style={{ width: 220 }}
+                              />
+                              <Button size="small" icon={<DownloadOutlined />} onClick={() => handleExportResults(record)}>
+                                {t('mml.exportResult')}
+                              </Button>
+                              <Button size="small" icon={<CloseOutlined />} onClick={() => {
+                                setExpandedRowKeys(prev => prev.filter(k => k !== record.id));
+                              }} />
+                            </Space>
+                          </div>
+
+                          {total === 0 ? (
+                            <div style={{ padding: 16, color: '#999', textAlign: 'center' }}>
+                              {search ? t('mml.noMatchResult') : t('mml.noExecutionResult')}
+                            </div>
+                          ) : (
+                            <Table
+                              columns={resultColumns}
+                              dataSource={paged}
+                              rowKey={(_, idx) => String(idx)}
+                              size="small"
+                              pagination={{
+                                current: currentPage,
+                                pageSize,
+                                total,
+                                size: 'small',
+                                showTotal: (tot) => t('mml.totalCount', { count: tot }),
+                                onChange: (p) => setResultPage(prev => ({ ...prev, [record.id]: p })),
+                              }}
+                              scroll={{ x: 1200 }}
+                            />
+                          )}
+                        </div>
+                      );
+                    },
+                  }}
+                />
+              </>
+            ),
+          },
+          {
+            key: 'scripts',
+            label: (
+              <span>
+                <FileTextOutlined style={{ marginRight: 6 }} />
+                {t('mml.scriptLibrary')}
+              </span>
+            ),
+            children: (
+              <>
+                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Input.Search
+                    placeholder={t('common.search')}
+                    allowClear
+                    style={{ width: 300 }}
+                    onSearch={(val) => { setScriptSearch(val); setScriptPage(1); }}
+                  />
+                  <Button icon={<DownloadOutlined />} onClick={() => void refetchScripts()}>{t('common.refresh')}</Button>
+                </div>
+                <DataTable<MMLScript>
+                  tableId="mml-scripts" columns={scriptColumns} dataSource={scripts} loading={scriptsLoading} rowKey="id"
+                  total={scriptsData?.total ?? 0} currentPage={scriptPage} pageSize={scriptPageSize}
+                  onPageChange={(p, s) => { setScriptPage(p); setScriptPageSize(s); }} onRefresh={() => void refetchScripts()} scroll={{ x: 1000 }}
+                />
+              </>
+            ),
+          },
+        ]}
+      />
 
       <DataTable<MMLTask>
         tableId="script-task" columns={columns} dataSource={tasks} loading={isLoading} rowKey="id"
@@ -686,6 +895,24 @@ export default function ScriptTask() {
           </div>
         </Form>
       </Drawer>
+
+      <Modal title={t('mml.scriptDetail')} open={scriptViewVisible} onCancel={() => setScriptViewVisible(false)} footer={null} width={600}>
+        {viewingScript && (
+          <div style={{ padding: '16px 0' }}>
+            <p><strong>{t('mml.scriptNameLabel')}</strong>{viewingScript.scriptName}</p>
+            <p><strong>{t('mml.description')}</strong>{viewingScript.description || '-'}</p>
+            <p><strong>{t('mml.deviceType')}</strong>{viewingScript.deviceType || '-'}</p>
+            <p><strong>{t('mml.creatorLabel')}</strong>{viewingScript.creator}</p>
+            <p><strong>{t('mml.updateTime')}</strong>{formatTime(viewingScript.updateTime)}</p>
+            <div style={{ marginTop: 12 }}>
+              <strong>{t('mml.scriptContent')}</strong>
+              <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, maxHeight: 300, overflow: 'auto', fontSize: 13, fontFamily: 'monospace' }}>
+                {viewingScript.content}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Modal>
     </ListPageLayout>
   );
 }

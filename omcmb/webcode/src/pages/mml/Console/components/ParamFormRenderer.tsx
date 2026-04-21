@@ -13,7 +13,7 @@ import {
   Typography,
 } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
-import type { MMLCommand, MMLParam, MMLOperationType } from '@/types/mml';
+import type { MMLCommand, MMLParam, MMLOperationType, SubCommand } from '@/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
 import { useT } from '@/hooks/useT';
 
@@ -21,6 +21,7 @@ export type ParamFormPrimitive = string | number | boolean;
 
 export interface ParamFormChangePayload {
   selectedFields?: string[];
+  selectedSubCommands?: string[];
   parameters?: Record<string, ParamFormPrimitive>;
 }
 
@@ -94,6 +95,7 @@ export default function ParamFormRenderer({
   }, [operationType, sortedParams]);
 
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [selectedSubCommands, setSelectedSubCommands] = useState<string[]>([]);
   const [formValues, setFormValues] = useState<Record<string, ParamFormPrimitive>>({});
 
   // Stabilize onChange/value with refs to avoid stale closure in useEffect
@@ -105,13 +107,24 @@ export default function ParamFormRenderer({
   useEffect(() => {
     if (!command) {
       setSelectedFields([]);
+      setSelectedSubCommands([]);
       setFormValues({});
       onChangeRef.current?.({});
       return;
     }
 
+    if (command.subCommands && command.subCommands.length > 0) {
+      const allCodes = command.subCommands.map((sc) => sc.code);
+      setSelectedFields([]);
+      setSelectedSubCommands(allCodes);
+      setFormValues({});
+      onChangeRef.current?.({ selectedSubCommands: allCodes });
+      return;
+    }
+
     if (QUERY_OPERATIONS.has(operationType)) {
       setSelectedFields([]);
+      setSelectedSubCommands([]);
       setFormValues({});
       onChangeRef.current?.({ selectedFields: [] });
       return;
@@ -119,6 +132,7 @@ export default function ParamFormRenderer({
 
     const initialValues = buildInitialValues(visibleParams, valueRef.current);
     setSelectedFields([]);
+    setSelectedSubCommands([]);
     setFormValues(initialValues);
 
     if (ACTION_OPERATIONS.has(operationType) && Object.keys(initialValues).length === 0) {
@@ -154,6 +168,12 @@ export default function ParamFormRenderer({
     const values = nextFields.map(String);
     setSelectedFields(values);
     onChangeRef.current?.({ selectedFields: values });
+  };
+
+  const handleSubCommandsChange = (nextFields: Array<string | number>) => {
+    const values = nextFields.map(String);
+    setSelectedSubCommands(values);
+    onChangeRef.current?.({ selectedSubCommands: values });
   };
 
   const renderControl = (param: MMLParam) => {
@@ -207,6 +227,37 @@ export default function ParamFormRenderer({
 
   if (!command) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.selectCommandFirst')} />;
+  }
+
+  if (command.subCommands && command.subCommands.length > 0) {
+    return (
+      <div>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t('mml.console.queryFieldsHint')}
+        </Typography.Text>
+        <Checkbox.Group
+          value={selectedSubCommands}
+          onChange={handleSubCommandsChange}
+          style={{ width: '100%', marginTop: 12 }}
+        >
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            {command.subCommands.map((sc: SubCommand) => (
+              <Checkbox key={sc.code} value={sc.code}>
+                <span style={{ fontWeight: 500 }}>{sc.name}</span>
+                <span style={{ color: 'rgba(0,0,0,0.35)', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>
+                  {sc.code}
+                </span>
+                {sc.tr069Path ? (
+                  <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: 10, marginLeft: 4 }}>
+                    ({sc.tr069Path})
+                  </span>
+                ) : null}
+              </Checkbox>
+            ))}
+          </Space>
+        </Checkbox.Group>
+      </div>
+    );
   }
 
   if (QUERY_OPERATIONS.has(operationType)) {
