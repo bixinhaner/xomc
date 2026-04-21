@@ -132,21 +132,17 @@ npx playwright install chromium
 
 ## 五、配置 Claude Code 的 Playwright MCP
 
-编辑 `~/.claude.json`，在对应项目的 `mcpServers` 中添加 playwright 配置：
+编辑 `~/.claude.json`，在根级 `mcpServers` 中添加 playwright 配置（全局生效，所有项目可用）：
 
 ```json
 {
-  "projects": {
-    "/home/你的用户名/你的项目目录": {
-      "mcpServers": {
-        "playwright": {
-          "type": "stdio",
-          "command": "playwright-mcp",
-          "args": [],
-          "env": {
-            "DISPLAY": ":1"
-          }
-        }
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "playwright-mcp",
+      "args": [],
+      "env": {
+        "DISPLAY": ":1"
       }
     }
   }
@@ -154,6 +150,7 @@ npx playwright install chromium
 ```
 
 **关键点**：
+- 放在根级 `mcpServers`（与 `projects` 同级），而非某个项目下 — 这样所有项目都能使用 Playwright
 - `"DISPLAY": ":1"` — 必须与 VNC 启动的显示器号一致，否则浏览器窗口不会显示在 VNC 桌面中
 - `headed 模式`是默认行为，**不需要**传 `--headed` 参数；如需无头模式才传 `--headless`
 - `args` 留空即可，playwright-mcp 默认启动 Chromium 有头模式
@@ -246,10 +243,10 @@ Claude Code 的 MCP 配置有多个层级：
 
 | 配置位置 | 作用域 | 说明 |
 |---------|--------|------|
-| `~/.claude.json` → 根级 `mcpServers` | 全局 | 所有项目共享的 MCP 服务器 |
-| `~/.claude.json` → `projects[path].mcpServers` | 项目级 | 仅特定项目加载（playwright 放这里） |
+| `~/.claude.json` → 根级 `mcpServers` | 全局 | 所有项目共享的 MCP 服务器（**playwright 放这里**） |
+| `~/.claude.json` → `projects[path].mcpServers` | 项目级 | 仅特定项目加载 |
 | 项目根目录 `.mcp.json` | 项目级 | 需 Claude Code 识别启用 |
 
 ---
 
-*最后验证：2026-04-21，环境 Ubuntu 24.04 + TightVNC + XFCE4 + playwright-mcp 0.0.70 + Chromium 1217*
+*最后验证：2026-04-21，环境 Ubuntu 24.04 + TightVNC + XFCE4 + playwright-mcp 0.0.70 + Chromium 1217，全局 mcpServers 配置已验证通过*
