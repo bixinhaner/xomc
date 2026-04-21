@@ -124,7 +124,7 @@ export default function CommandInput({
   const tabItems = [
     {
       key: 'control',
-      label: 'Control Panel',
+      label: t('mml.console.controlPanel'),
       children: (
         <div
           className="no-scrollbar"
@@ -144,7 +144,7 @@ export default function CommandInput({
     },
     {
       key: 'paramPath',
-      label: 'ParameterPath Command',
+      label: t('mml.console.parameterPathCommand'),
       children: (
         <div
           className="no-scrollbar"

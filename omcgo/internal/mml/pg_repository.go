@@ -927,7 +927,7 @@ var templateAllowedSortColumns = map[string]bool{
 
 var templateColumns = []string{
 	"id", "template_name", "command_code", "operation_type",
-	"template_scope", "parameters", "param_paths",
+	"template_scope", "category_group", "parameters", "param_paths",
 	"description", "product_types", "creator",
 	"created_at", "updated_at",
 }
@@ -1279,4 +1279,69 @@ func (r *PgAuditRepository) CreateBatch(ctx context.Context, entries []*MMLAudit
 	}
 
 	return tx.Commit(ctx)
+}
+
+// PgSubCommandRepository is a PostgreSQL implementation of SubCommandRepository.
+type PgSubCommandRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewPgSubCommandRepository(pool *pgxpool.Pool) *PgSubCommandRepository {
+	return &PgSubCommandRepository{pool: pool}
+}
+
+func (r *PgSubCommandRepository) ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]SubCommand, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT s.id, s.name, s.code, s.tr069_path, s.description, s.value_type, s.is_writable, s.options, s.unit, s.created_at
+		 FROM mml_sub_commands s
+		 JOIN mml_command_subcommand_rel r ON r.subcommand_id = s.id
+		 WHERE r.command_id = $1
+		 ORDER BY r.sort_order`, commandID)
+	if err != nil {
+		return nil, fmt.Errorf("list sub-commands by command: %w", err)
+	}
+	defer rows.Close()
+
+	var result []SubCommand
+	for rows.Next() {
+		var sc SubCommand
+		var optionsJSON []byte
+		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Code, &sc.Tr069Path, &sc.Description, &sc.ValueType, &sc.IsWritable, &optionsJSON, &sc.Unit, &sc.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan sub-command: %w", err)
+		}
+		_ = json.Unmarshal(optionsJSON, &sc.Options)
+		result = append(result, sc)
+	}
+	return result, nil
+}
+
+func (r *PgSubCommandRepository) ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]SubCommand, error) {
+	result := make(map[uuid.UUID][]SubCommand, len(commandIDs))
+	if len(commandIDs) == 0 {
+		return result, nil
+	}
+
+	query := `SELECT r.command_id, s.id, s.name, s.code, s.tr069_path, s.description, s.value_type, s.is_writable, s.options, s.unit, s.created_at
+			  FROM mml_sub_commands s
+			  JOIN mml_command_subcommand_rel r ON r.subcommand_id = s.id
+			  WHERE r.command_id = ANY($1)
+			  ORDER BY r.command_id, r.sort_order`
+
+	rows, err := r.pool.Query(ctx, query, commandIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list sub-commands by command IDs: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cmdID uuid.UUID
+		var sc SubCommand
+		var optionsJSON []byte
+		if err := rows.Scan(&cmdID, &sc.ID, &sc.Name, &sc.Code, &sc.Tr069Path, &sc.Description, &sc.ValueType, &sc.IsWritable, &optionsJSON, &sc.Unit, &sc.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan sub-command: %w", err)
+		}
+		_ = json.Unmarshal(optionsJSON, &sc.Options)
+		result[cmdID] = append(result[cmdID], sc)
+	}
+	return result, nil
 }

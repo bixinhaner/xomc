@@ -28,6 +28,23 @@ export interface ParamPath {
 
 export type MMLOperationType = 'LST' | 'MOD' | 'ADD' | 'RMV' | 'DSP' | 'ACT' | 'DEA' | 'RST' | 'CLR' | 'UPG';
 
+export interface SubCommandOption {
+  label: string;
+  value: string | number;
+}
+
+export interface SubCommand {
+  id: string;
+  name: string;
+  code: string;
+  tr069Path: string;
+  description: string;
+  valueType: 'string' | 'number' | 'boolean' | 'enum';
+  isWritable: boolean;
+  options: SubCommandOption[];
+  unit?: string;
+}
+
 export interface MMLCommand {
   id: string;
   commandName: string;
@@ -42,6 +59,7 @@ export interface MMLCommand {
   supportedOperations?: string[];
   helpDoc?: string;
   notes?: string;
+  subCommands?: SubCommand[];
 }
 
 export interface MMLResult {

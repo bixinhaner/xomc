@@ -21,6 +21,7 @@ type Service struct {
 	taskRepo     TaskRepository
 	templateRepo TemplateRepository
 	auditRepo    AuditRepository
+	subCmdRepo   SubCommandRepository
 	fanouter     *Fanouter
 	hub          SSEPublisher
 	logger       *zap.Logger
@@ -63,6 +64,11 @@ func (s *Service) SetFanouter(f *Fanouter) {
 	s.fanouter = f
 }
 
+// SetSubCmdRepo sets the sub-command repository.
+func (s *Service) SetSubCmdRepo(repo SubCommandRepository) {
+	s.subCmdRepo = repo
+}
+
 // publishTaskStatus pushes a task status change event via SSE.
 func (s *Service) publishTaskStatus(executor, taskID, oldStatus, newStatus string) {
 	data, _ := json.Marshal(map[string]string{
@@ -76,9 +82,31 @@ func (s *Service) publishTaskStatus(executor, taskID, oldStatus, newStatus strin
 
 // ---- Command operations (read-only) ----
 
-// ListCommands returns a paginated list of predefined MML commands.
+// ListCommands returns a paginated list of predefined MML commands, enriched with sub-commands.
 func (s *Service) ListCommands(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error) {
-	return s.cmdRepo.List(ctx, filter)
+	resp, err := s.cmdRepo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.subCmdRepo != nil && len(resp.Items) > 0 {
+		ids := make([]uuid.UUID, len(resp.Items))
+		for i, cmd := range resp.Items {
+			ids[i] = cmd.ID
+		}
+		subMap, err := s.subCmdRepo.ListByCommandIDs(ctx, ids)
+		if err != nil {
+			s.logger.Warn("failed to load sub-commands, skipping enrichment", zap.Error(err))
+		} else {
+			for i := range resp.Items {
+				if subs, ok := subMap[resp.Items[i].ID]; ok {
+					resp.Items[i].SubCommands = subs
+				}
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 // GetCommand retrieves a predefined MML command by ID.

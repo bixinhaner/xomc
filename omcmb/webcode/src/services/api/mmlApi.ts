@@ -1,10 +1,23 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate, ParamPath, MMLOperationType, DeviceTaskResultItem } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate, ParamPath, MMLOperationType, DeviceTaskResultItem, SubCommand } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
 // Backend response types  (snake_case, matching omcgo/internal/omcr/mml/model.go)
 // ---------------------------------------------------------------------------
+
+interface BackendSubCommand {
+  id: string;
+  name: string;
+  code: string;
+  tr069_path: string;
+  description: string;
+  value_type: string;
+  is_writable: boolean;
+  options: Array<{ label: string; value: string | number }> | null;
+  unit?: string;
+  created_at: string;
+}
 
 interface BackendMMLCommand {
   id: string;
@@ -22,6 +35,7 @@ interface BackendMMLCommand {
   supported_operations?: string[] | null;
   help_doc?: string;
   notes?: string;
+  sub_commands?: BackendSubCommand[] | null;
 }
 
 interface BackendMMLScript {
@@ -140,6 +154,20 @@ function mapParamTemplate(
   });
 }
 
+function mapBackendSubCommand(bsc: BackendSubCommand): SubCommand {
+  return {
+    id: bsc.id,
+    name: bsc.name,
+    code: bsc.code,
+    tr069Path: bsc.tr069_path,
+    description: bsc.description,
+    valueType: bsc.value_type as SubCommand['valueType'],
+    isWritable: bsc.is_writable,
+    options: bsc.options ?? [],
+    unit: bsc.unit || undefined,
+  };
+}
+
 function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
   let paramPaths: ParamPath[] | undefined;
   if (Array.isArray(bc.param_paths)) {
@@ -173,6 +201,7 @@ function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
     supportedOperations: bc.supported_operations || undefined,
     helpDoc: bc.help_doc || undefined,
     notes: bc.notes || undefined,
+    subCommands: bc.sub_commands?.map(mapBackendSubCommand) || undefined,
   };
 }
 

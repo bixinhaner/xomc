@@ -1,8 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Input, Tree, Typography, Empty, Spin, Button } from 'antd';
-import { SearchOutlined, FolderOutlined, CodeOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
+import { SearchOutlined, FolderOutlined, CodeOutlined, PlusOutlined, UserOutlined, RightOutlined } from '@ant-design/icons';
 import type { TreeProps } from 'antd';
-import type { MMLCommand } from '@/types/mml';
+import type { MMLCommand, SubCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import type { CommandTreeNode, CustomNodeType } from '../hooks/useCommandSelection';
@@ -14,7 +14,7 @@ interface CommandTreeProps {
   searchText: string;
   isLoading?: boolean;
   onSearchChange: (text: string) => void;
-  onSelectCommand: (command: MMLCommand | null) => void | Promise<void>;
+  onSelectCommand: (command: MMLCommand | null, subCommand?: SubCommand | null) => void | Promise<void>;
   onAddPublicTemplate?: () => void;
   onAddPrivateTemplate?: () => void;
 }
@@ -50,6 +50,40 @@ export default function CommandTree({
       />
     );
   };
+
+  const renderSubCommandLeaf = (node: CommandTreeNode) => ({
+    key: node.key,
+    isLeaf: true,
+    title: (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+          paddingRight: 8,
+          gap: 6,
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <RightOutlined style={{ marginRight: 4, fontSize: 9, color: '#8c8c8c' }} />
+          <span style={{ fontSize: 11, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {node.label}
+          </span>
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            color: '#bfbfbf',
+            fontFamily: 'monospace',
+            flexShrink: 0,
+          }}
+        >
+          {(node.command?.subCommands?.find((sc) => sc.id === node.subCommandId)?.code) ?? ''}
+        </span>
+      </div>
+    ),
+  });
 
   const renderCommandLeaf = (node: CommandTreeNode) => ({
     key: node.key,
@@ -154,7 +188,46 @@ export default function CommandTree({
             </span>
           </span>
         ),
-        children: (topNode.children ?? []).map(renderCommandLeaf),
+        children: (topNode.children ?? []).map((cmdNode) => {
+          const subChildren = cmdNode.children;
+          if (subChildren && subChildren.length > 0) {
+            return {
+              key: cmdNode.key,
+              selectable: false,
+              title: (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    paddingRight: 8,
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                    <CodeOutlined style={{ marginRight: 6, color: cmdNode.template ? '#722ed1' : '#52c41a' }} />
+                    <span style={{ fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {cmdNode.label}
+                    </span>
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: '#8c8c8c',
+                      fontFamily: 'monospace',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {cmdNode.commandCode}
+                  </span>
+                </div>
+              ),
+              children: subChildren.map(renderSubCommandLeaf),
+            };
+          }
+          return renderCommandLeaf(cmdNode);
+        }),
       };
     });
   }, [token.colorPrimary, treeData, onAddPublicTemplate, onAddPrivateTemplate]);
@@ -164,9 +237,22 @@ export default function CommandTree({
       return nodes.flatMap((n) => [n, ...flatten(n.children ?? [])]);
     }
     const allNodes = flatten(treeData);
-    const entries = allNodes
-      .filter((node): node is CommandTreeNode & { command: MMLCommand } => Boolean(node.command))
-      .map((node) => [String(node.key), node.command] as const);
+
+    // Map for all selectable nodes: key → { command, subCommand? }
+    type CommandEntry = { command: MMLCommand; subCommand?: SubCommand };
+    const entries: Array<[string, CommandEntry]> = [];
+
+    for (const node of allNodes) {
+      if (!node.command) continue;
+      if (node.nodeType === 'sub_command' && node.subCommandId) {
+        const sc = node.command.subCommands?.find((s) => s.id === node.subCommandId);
+        if (sc) {
+          entries.push([String(node.key), { command: node.command, subCommand: sc }]);
+        }
+      } else if (node.nodeType === 'command') {
+        entries.push([String(node.key), { command: node.command }]);
+      }
+    }
 
     // Build a lookup from commandCode to command definition for metadata inheritance
     const commandByCode = new Map<string, MMLCommand>();
@@ -214,10 +300,10 @@ export default function CommandTree({
           helpDoc: matchedCmd?.helpDoc,
           notes: matchedCmd?.notes,
         };
-        return [String(node.key), syntheticCommand] as const;
+        return [String(node.key), { command: syntheticCommand } as CommandEntry] as const;
       });
 
-    return new Map<string, MMLCommand>([...entries, ...templateEntries]);
+    return new Map<string, CommandEntry>([...entries, ...templateEntries]);
   }, [commands, treeData]);
 
   const handleSelect: TreeProps['onSelect'] = useCallback(
@@ -226,9 +312,9 @@ export default function CommandTree({
         return;
       }
 
-      const command = commandMap.get(String(selectedKeys[0]));
-      if (command) {
-        void onSelectCommand(command);
+      const entry = commandMap.get(String(selectedKeys[0]));
+      if (entry) {
+        void onSelectCommand(entry.command, entry.subCommand);
       }
     },
     [commandMap, onSelectCommand]

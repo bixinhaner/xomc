@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { ConsoleDevice } from '../types';
 import { DEVICE_PAGE_SIZE } from '../constants';
 import { deviceApi } from '@/services/api/deviceApi';
@@ -9,15 +9,18 @@ export function useDeviceSelection() {
   const [productTypeFilter, setProductTypeFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [devices, setDevices] = useState<ConsoleDevice[]>([]);
+  const [total, setTotal] = useState(0);
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // Fetch devices from API — productType 作为服务端筛选条件
-  const fetchDevices = useCallback(async (productType?: string) => {
+  // Fetch devices from API — server-side pagination + filter
+  const fetchDevices = useCallback(async (page: number, search?: string, productType?: string) => {
     setIsLoadingDevices(true);
     try {
       const result = await deviceApi.getList({
-        page: 1,
-        pageSize: 100,
+        page,
+        pageSize: DEVICE_PAGE_SIZE,
+        ...(search ? { searchText: search } : {}),
         ...(productType ? { productType } : {}),
       });
       const mapped: ConsoleDevice[] = result.items.map((d) => ({
@@ -28,46 +31,50 @@ export function useDeviceSelection() {
         status: (d.connStatus === 'online' ? 'online' : d.connStatus === 'alarm' ? 'alarm' : 'offline') as ConsoleDevice['status'],
       }));
       setDevices(mapped);
+      setTotal(result.total);
     } catch {
       setDevices([]);
+      setTotal(0);
     } finally {
       setIsLoadingDevices(false);
     }
   }, []);
 
-  // 首次加载 & 产品类型切换时触发 API 调用
+  // 首次加载
   useEffect(() => {
+    void fetchDevices(1, undefined, productTypeFilter || undefined);
+  }, []);
+
+  // 产品类型切换时重置到第 1 页并请求
+  const handleFilterChange = useCallback((filter: string) => {
+    setProductTypeFilter(filter);
     setCurrentPage(1);
-    void fetchDevices(productTypeFilter || undefined);
-  }, [productTypeFilter, fetchDevices]);
+    void fetchDevices(1, searchText || undefined, filter || undefined);
+  }, [fetchDevices, searchText]);
 
-  // 按搜索文本前端过滤（产品类型已由后端筛选）
-  const filteredDevices = useMemo(() => {
-    return devices.filter((device) => {
-      const matchSearch = !searchText ||
-        device.sn.toLowerCase().includes(searchText.toLowerCase()) ||
-        device.name.includes(searchText);
-      return matchSearch;
-    });
-  }, [devices, searchText]);
+  // 搜索文本变化时重置到第 1 页并请求（防抖在组件层处理）
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchText(text);
+    setCurrentPage(1);
+    void fetchDevices(1, text || undefined, productTypeFilter || undefined);
+  }, [fetchDevices, productTypeFilter]);
 
-  // 分页后的设备列表
-  const paginatedDevices = useMemo(() => {
-    const start = (currentPage - 1) * DEVICE_PAGE_SIZE;
-    return filteredDevices.slice(start, start + DEVICE_PAGE_SIZE);
-  }, [filteredDevices, currentPage]);
+  // 翻页时请求真实数据
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page);
+    void fetchDevices(page, searchText || undefined, productTypeFilter || undefined);
+  }, [fetchDevices, searchText, productTypeFilter]);
 
-  // 全选状态计算
-  const filteredDeviceSns = useMemo(
-    () => new Set(filteredDevices.map((d) => d.sn)),
-    [filteredDevices]
+  // 全选状态计算（基于当前页）
+  const deviceSns = useMemo(() => new Set(devices.map((d) => d.sn)), [devices]);
+  const selectedInPage = useMemo(
+    () => selectedDevices.filter((d) => deviceSns.has(d.sn)).length,
+    [selectedDevices, deviceSns],
   );
-  const selectedInFiltered = useMemo(
-    () => selectedDevices.filter((d) => filteredDeviceSns.has(d.sn)).length,
-    [selectedDevices, filteredDeviceSns]
-  );
-  const isAllSelected = filteredDevices.length > 0 && selectedInFiltered === filteredDevices.length;
-  const isIndeterminate = selectedInFiltered > 0 && selectedInFiltered < filteredDevices.length;
+  const isAllSelected = devices.length > 0 && selectedInPage === devices.length;
+  const isIndeterminate = selectedInPage > 0 && selectedInPage < devices.length;
+
+  const totalPages = Math.ceil(total / DEVICE_PAGE_SIZE);
 
   // 选择/取消选择单个设备
   const toggleDevice = useCallback((device: ConsoleDevice, selected: boolean) => {
@@ -80,17 +87,17 @@ export function useDeviceSelection() {
     });
   }, []);
 
-  // 全选/取消全选当前过滤结果
+  // 全选/取消全选当前页
   const toggleSelectAll = useCallback((checked: boolean) => {
     setSelectedDevices((prev) => {
       if (checked) {
-        const devicesToAdd = filteredDevices.filter((d) => !prev.some((p) => p.sn === d.sn));
+        const devicesToAdd = devices.filter((d) => !prev.some((p) => p.sn === d.sn));
         return [...prev, ...devicesToAdd];
       }
-      const filteredSns = new Set(filteredDevices.map((d) => d.sn));
-      return prev.filter((d) => !filteredSns.has(d.sn));
+      const pageSns = new Set(devices.map((d) => d.sn));
+      return prev.filter((d) => !pageSns.has(d.sn));
     });
-  }, [filteredDevices]);
+  }, [devices]);
 
   // 从已选列表移除设备
   const removeDevice = useCallback((sn: string) => {
@@ -113,10 +120,10 @@ export function useDeviceSelection() {
     });
   }, [devices]);
 
-  // 所有设备SN的Set（用于批量输入验证）
+  // 所有设备SN的Set（用于批量输入验证 — 基于当前页）
   const allDeviceSns = useMemo(
     () => new Set(devices.map((d) => d.sn)),
-    [devices]
+    [devices],
   );
 
   return {
@@ -125,20 +132,20 @@ export function useDeviceSelection() {
     searchText,
     productTypeFilter,
     currentPage,
-    filteredDevices,
-    paginatedDevices,
+    filteredDevices: devices,
+    paginatedDevices: devices,
     isAllSelected,
     isIndeterminate,
-    selectedInFiltered,
-    totalFiltered: filteredDevices.length,
-    totalPages: Math.ceil(filteredDevices.length / DEVICE_PAGE_SIZE),
+    selectedInFiltered: selectedInPage,
+    totalFiltered: total,
+    totalPages,
     allDeviceSns,
     isLoadingDevices,
 
     // 操作
-    setSearchText,
-    setProductTypeFilter,
-    setCurrentPage,
+    setSearchText: handleSearchChange,
+    setProductTypeFilter: handleFilterChange,
+    setCurrentPage: handlePageChange,
     toggleDevice,
     toggleSelectAll,
     removeDevice,

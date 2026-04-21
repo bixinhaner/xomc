@@ -106,7 +106,7 @@ export default function DeviceList() {
   });
   const [pageSize, setPageSize] = useState(() => {
     const size = searchParams.get('pageSize');
-    return size ? parseInt(size, 10) : 20;
+    return size ? parseInt(size, 10) : 100;
   });
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>(() => {
     const params: Record<string, unknown> = {};
@@ -1346,7 +1346,7 @@ export default function DeviceList() {
               batchActions={batchActions}
               onRefresh={() => void refetch()}
               defaultDensity="default"
-              scroll={{ x: true, y: 'calc(100% + 50px - 56px)' }}
+              scroll={{ x: true, y: 470 }}
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />

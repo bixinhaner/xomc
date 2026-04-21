@@ -88,7 +88,7 @@ export default function BatchSnModal({
 
   return (
     <Modal
-      title={showResult ? t('mml.console.batchAddResult') : '批量输入设备SN'}
+      title={showResult ? t('mml.console.batchAddResult') : t('common.batchInputDeviceSN')}
       open={open}
       onOk={showResult ? handleFinish : handleConfirm}
       onCancel={showResult ? handleContinue : handleClose}

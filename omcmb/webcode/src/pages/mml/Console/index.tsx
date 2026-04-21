@@ -15,7 +15,7 @@ import {
   useCommandSelection,
   useCommandExecution,
 } from './hooks';
-import type { MMLCommand } from '@/types/mml';
+import type { MMLCommand, SubCommand } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import { resolveOperationType } from './utils/resolveOperationType';
@@ -47,6 +47,7 @@ export default function MMLConsole() {
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
+    const subCmd = commandSelection.selectedSubCommand;
 
     if (!selectedCommand) {
       setCommandLineText('');
@@ -59,15 +60,25 @@ export default function MMLConsole() {
       return;
     }
 
-    setActiveTab('control');
-    setCommandLineText(selectedCommand.commandCode);
     setIsManualEdit(false);
     setSelectedFields([]);
     setParameters({});
-    setOperationType(resolveOperationType(selectedCommand));
-    setParamPaths(['']);
-    setCurrentCommandLabel(selectedCommand.commandCode);
-  }, [commandSelection.selectedCommand]);
+
+    if (subCmd) {
+      // Sub-command selected: auto-switch to paramPath tab with tr069_path
+      setActiveTab('paramPath');
+      setCommandLineText(`${selectedCommand.commandCode}:${subCmd.code}`);
+      setOperationType(subCmd.isWritable ? 'MOD' : 'LST');
+      setParamPaths([subCmd.tr069Path]);
+      setCurrentCommandLabel(`${selectedCommand.commandCode}:${subCmd.name}`);
+    } else {
+      setActiveTab('control');
+      setCommandLineText(selectedCommand.commandCode);
+      setOperationType(resolveOperationType(selectedCommand));
+      setParamPaths(['']);
+      setCurrentCommandLabel(selectedCommand.commandCode);
+    }
+  }, [commandSelection.selectedCommand, commandSelection.selectedSubCommand]);
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
@@ -101,8 +112,8 @@ export default function MMLConsole() {
     setCommandLineText(code);
   }, [activeTab, commandSelection.selectedCommand, isManualEdit, parameters, selectedFields]);
 
-  const handleCommandSelect = useCallback(async (command: MMLCommand | null) => {
-    await commandSelection.selectCommand(command);
+  const handleCommandSelect = useCallback(async (command: MMLCommand | null, subCommand?: SubCommand | null) => {
+    await commandSelection.selectCommand(command, subCommand);
   }, [commandSelection]);
 
   const handleParamChange = useCallback((values: Record<string, unknown>) => {

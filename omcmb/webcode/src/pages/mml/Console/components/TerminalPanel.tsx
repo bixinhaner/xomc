@@ -58,9 +58,9 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
       const text = lines.map((l) => l.text).join('\n');
       try {
         await navigator.clipboard.writeText(text);
-        void message.success('已复制到剪贴板');
+        void message.success(t('common.copiedToClipboard'));
       } catch {
-        void message.error('复制失败');
+        void message.error(t('common.copyFailed'));
       }
     };
 
@@ -101,11 +101,11 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
               strong
               style={{ fontSize: 12, color: '#c9d1d9', letterSpacing: '0.5px' }}
             >
-              终端输出
+              {t('mml.console.terminalOutput')}
             </Typography.Text>
           </div>
           <Space size={4}>
-            <Tooltip title="复制输出">
+            <Tooltip title={t('mml.console.copyOutput')}>
               <Button
                 size="small"
                 icon={<CopyOutlined />}
@@ -119,7 +119,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
                 className="terminal-btn"
               />
             </Tooltip>
-            <Tooltip title="清空">
+            <Tooltip title={t('common.clear')}>
               <Button
                 size="small"
                 icon={<ClearOutlined />}
@@ -133,7 +133,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
               />
             </Tooltip>
             {onDownload && (
-              <Tooltip title="下载">
+              <Tooltip title={t('common.download')}>
                 <Button
                   size="small"
                   icon={<DownloadOutlined />}
@@ -168,7 +168,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
           {lines.length === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#484f58' }}>
               <span style={{ color: '#7ee787' }}>&gt;</span>
-              <span>等待命令输出...</span>
+              <span>{t('mml.console.waitingForOutput')}</span>
             </div>
           ) : (
             lines.map((line, i) => (

@@ -55,6 +55,7 @@ type MMLCommand struct {
 	Notes               string                 `json:"notes" db:"notes"`
 	ProductTypes        []string               `json:"product_types"`
 	CreatedAt           time.Time              `json:"created_at"`
+	SubCommands         []SubCommand           `json:"sub_commands,omitempty"`
 }
 
 // MMLScript represents a user-defined MML command script.
@@ -157,6 +158,26 @@ type TemplateFilter struct {
 	CategoryGroup *string
 	Creator       *string
 	model.ListRequest
+}
+
+// SubCommand represents a sub-command bound to an MML command (N:M relationship).
+type SubCommand struct {
+	ID          uuid.UUID       `json:"id"`
+	Name        string          `json:"name"`
+	Code        string          `json:"code"`
+	Tr069Path   string          `json:"tr069_path"`
+	Description string          `json:"description"`
+	ValueType   string          `json:"value_type"`
+	IsWritable  bool            `json:"is_writable"`
+	Options     []SubCmdOption  `json:"options"`
+	Unit        string          `json:"unit,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
+// SubCmdOption represents an option for enum-type sub-commands.
+type SubCmdOption struct {
+	Label string      `json:"label"`
+	Value interface{} `json:"value"`
 }
 
 // MMLAuditLog records a single command execution for compliance auditing.

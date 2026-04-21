@@ -105,7 +105,7 @@ export default function DeviceTree({
           onClick={onBatchInput}
           style={{ fontSize: 11, borderRadius: 4 }}
         >
-          批量输入
+          {t('mml.console.batchInput')}
         </Button>
       </div>
 
@@ -114,7 +114,7 @@ export default function DeviceTree({
         <Input
           size="small"
           style={{ marginBottom: 8, borderRadius: 4 }}
-          placeholder="设备SN,设备名称"
+          placeholder={t('mml.console.deviceSearchPlaceholder')}
           prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
           value={searchText}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -123,7 +123,7 @@ export default function DeviceTree({
         <Select
           size="small"
           style={{ width: '100%', borderRadius: 4 }}
-          placeholder="产品类型"
+          placeholder={t('mml.productType')}
           allowClear
           options={productTypeOptions}
           value={productTypeOptions.find((o) => o.label === productTypeFilter)?.value || undefined}
@@ -151,7 +151,7 @@ export default function DeviceTree({
           disabled={totalFiltered === 0}
         >
           <span style={{ fontSize: 11, color: token.colorTextSecondary }}>
-            {t('common.selectAll')} ({selectedDevices.filter((d) => paginatedDevices.some((p) => p.sn === d.sn)).length}/{totalFiltered})
+            {t('common.selectAll')} ({selectedDevices.filter((d) => paginatedDevices.some((p) => p.sn === d.sn)).length}/{paginatedDevices.length})
           </span>
         </Checkbox>
       </div>
@@ -244,7 +244,7 @@ export default function DeviceTree({
           <Pagination
             size="small"
             current={currentPage}
-            pageSize={8}
+            pageSize={50}
             total={totalFiltered}
             onChange={onPageChange}
             showSizeChanger={false}
@@ -274,7 +274,7 @@ export default function DeviceTree({
               strong
               style={{ fontSize: 11, color: token.colorPrimary }}
             >
-              已选设备 ({selectedDevices.length})
+              {t('mml.console.selectedDevices')} ({selectedDevices.length})
             </Typography.Text>
             <Button
               size="small"

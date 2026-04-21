@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { TreeDataNode } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import type { MMLCommand, MMLTemplate } from '@/types/mml';
+import type { MMLCommand, MMLTemplate, SubCommand } from '@/types/mml';
 import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
@@ -10,12 +10,13 @@ import { COMMAND_PAGE_SIZE } from '../constants';
 export type CustomNodeType = 'custom_root' | 'custom_public' | 'custom_private' | 'user_dir';
 
 export interface CommandTreeNode extends TreeDataNode {
-  nodeType: 'category' | 'command' | CustomNodeType;
+  nodeType: 'category' | 'command' | 'sub_command' | CustomNodeType;
   label: string;
   category?: string;
   count?: number;
   commandCode?: string;
   command?: MMLCommand;
+  subCommandId?: string;
   template?: MMLTemplate;
   children?: CommandTreeNode[];
 }
@@ -23,6 +24,7 @@ export interface CommandTreeNode extends TreeDataNode {
 export function useCommandSelection() {
   const t = useT();
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
+  const [selectedSubCommand, setSelectedSubCommand] = useState<SubCommand | null>(null);
   const [searchText, setSearchText] = useState('');
 
   const keyword = searchText.trim() || undefined;
@@ -88,16 +90,32 @@ export function useCommandSelection() {
         count: categoryCommands.length,
         nodeType: 'category',
         selectable: false,
-        children: categoryCommands.map((command) => ({
-          key: command.id,
-          title: `${command.commandName} ${command.commandCode}`,
-          label: command.commandName,
-          commandCode: command.commandCode,
-          category: command.category,
-          command,
-          nodeType: 'command',
-          isLeaf: true,
-        })),
+        children: categoryCommands.map((command) => {
+          const hasSubCommands = command.subCommands && command.subCommands.length > 0;
+          return {
+            key: command.id,
+            title: `${command.commandName} ${command.commandCode}`,
+            label: command.commandName,
+            commandCode: command.commandCode,
+            category: command.category,
+            command,
+            nodeType: 'command',
+            isLeaf: !hasSubCommands,
+            children: hasSubCommands
+              ? command.subCommands!.map((sc) => ({
+                  key: `sub-${command.id}-${sc.id}`,
+                  title: `${sc.name} ${sc.code}`,
+                  label: sc.name,
+                  commandCode: command.commandCode,
+                  subCommandId: sc.id,
+                  category: command.category,
+                  command,
+                  nodeType: 'sub_command' as const,
+                  isLeaf: true,
+                }))
+              : undefined,
+          };
+        }),
       };
     });
   }, [categoryOptions, commands]);
@@ -178,25 +196,30 @@ export function useCommandSelection() {
   useEffect(() => {
     if (selectedCommand && !commands.some((command) => command.id === selectedCommand.id)) {
       setSelectedCommand(null);
+      setSelectedSubCommand(null);
     }
   }, [commands, selectedCommand]);
 
-  const selectCommand = useCallback(async (command: MMLCommand | null) => {
+  const selectCommand = useCallback(async (command: MMLCommand | null, subCommand?: SubCommand | null) => {
     if (!command) {
       setSelectedCommand(null);
+      setSelectedSubCommand(null);
       return;
     }
 
     const detail = await mmlApi.getCommandById(command.id);
     setSelectedCommand(detail ?? command);
+    setSelectedSubCommand(subCommand ?? null);
   }, []);
 
   const clearSelection = useCallback(() => {
     setSelectedCommand(null);
+    setSelectedSubCommand(null);
   }, []);
 
   return {
     selectedCommand,
+    selectedSubCommand,
     searchText,
     commands,
     treeData: fullTreeData,

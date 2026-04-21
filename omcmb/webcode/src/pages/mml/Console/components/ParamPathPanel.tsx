@@ -107,7 +107,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
-        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>Operation Type</Typography.Text>
+        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>{t('mml.console.operationType')}</Typography.Text>
         <Select
           value={operationType}
           onChange={handleOperationChange}
@@ -120,7 +120,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
       </div>
 
       <div>
-        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>Parameter Path</Typography.Text>
+        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>{t('mml.console.parameterPath')}</Typography.Text>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           {paths.map((path, index) => (
             <Space key={`${index}-${path}`} style={{ width: '100%' }} align="start">

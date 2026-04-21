@@ -250,7 +250,7 @@ export default function ParamFormRenderer({
   }
 
   if (visibleParams.length === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该命令无需配置参数" />;
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.noParamsNeeded')} />;
   }
 
   return (

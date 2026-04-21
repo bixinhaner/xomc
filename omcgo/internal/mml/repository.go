@@ -48,3 +48,9 @@ type AuditRepository interface {
 	Create(ctx context.Context, entry *MMLAuditLog) error
 	CreateBatch(ctx context.Context, entries []*MMLAuditLog) error
 }
+
+// SubCommandRepository provides access to MML sub-commands.
+type SubCommandRepository interface {
+	ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]SubCommand, error)
+	ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]SubCommand, error)
+}
