@@ -52,6 +52,19 @@ export interface MMLResult {
   timestamp: string;
 }
 
+export type DeviceResultStatus = 'completed' | 'running' | 'pending';
+
+export interface DeviceTaskResultItem {
+  deviceSn: string;
+  deviceName?: string;
+  mmlScript?: string;
+  status?: DeviceResultStatus;
+  result: MMLResult;
+  failReason?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
 export interface MMLScript {
   id: string;
   scriptName: string;

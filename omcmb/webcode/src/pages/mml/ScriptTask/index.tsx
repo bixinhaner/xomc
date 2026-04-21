@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import {
   Button,
   Checkbox,
@@ -13,7 +13,9 @@ import {
   Radio,
   Select,
   Space,
+  Table,
   Tag,
+  Tooltip,
   Upload,
   message,
 } from 'antd';
@@ -27,6 +29,8 @@ import {
   InfoCircleOutlined,
   UploadOutlined,
   DownloadOutlined,
+  CloseOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import type { MenuProps, UploadFile } from 'antd';
 import type { Dayjs } from 'dayjs';
@@ -36,10 +40,12 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult } from '@/types/mml';
-import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLTaskResults } from '@/hooks/api/useMML';
+import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, DeviceTaskResultItem } from '@/types/mml';
+import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask } from '@/hooks/api/useMML';
+import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
+import { useUserStore } from '@/store/userStore';
 
 // 任务类型映射 - use i18n keys
 const CREATE_STATUS_KEYS: Record<MMLExecuteType, { color: string; key: string }> = {
@@ -89,19 +95,17 @@ function formatTime(iso?: string): string {
 }
 
 function computeProgress(task: MMLTask): string {
-  if (task.totalDevices === 0) return '0%';
-  return `${Math.round(((task.successCount + task.failedCount) / task.totalDevices) * 100)}%`;
+  const done = task.successCount + task.failedCount;
+  return `${done}/${task.totalDevices}`;
 }
 
 export default function ScriptTask() {
   const t = useT();
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(50);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<MMLTask | null>(null);
-  const [resultModalVisible, setResultModalVisible] = useState(false);
-  const [resultTaskName, setResultTaskName] = useState<string>('');
-  const [resultTaskId, setResultTaskId] = useState<string | null>(null);
+  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -133,8 +137,58 @@ export default function ScriptTask() {
   const cancelTaskMutation = useCancelMMLTask();
   const deleteTaskMutation = useDeleteMMLTask();
 
-  // Task results for the result modal
-  const { data: resultData, isLoading: resultLoading } = useMMLTaskResults(resultTaskId);
+  // Per-task results cache (keyed by task ID)
+  const [resultCache, setResultCache] = useState<Record<string, { items: DeviceTaskResultItem[]; total: number }>>({});
+  const [resultSearch, setResultSearch] = useState<Record<string, string>>({});
+  const [resultPage, setResultPage] = useState<Record<string, number>>({});
+  const fetchedRef = useRef<Set<string>>(new Set());
+
+  const fetchResults = useCallback(async (taskId: string) => {
+    if (fetchedRef.current.has(taskId)) return;
+    fetchedRef.current.add(taskId);
+    try {
+      const resp = await mmlApi.getTaskResults(taskId, 1, 999);
+      setResultCache(prev => ({ ...prev, [taskId]: resp }));
+    } catch {
+      fetchedRef.current.delete(taskId);
+    }
+  }, []);
+
+  const handleExpand = useCallback((expanded: boolean, record: MMLTask) => {
+    if (expanded) {
+      setExpandedRowKeys(prev => [...prev, record.id]);
+      void fetchResults(record.id);
+    } else {
+      setExpandedRowKeys(prev => prev.filter(k => k !== record.id));
+    }
+  }, [fetchResults]);
+
+  const handleExportResults = useCallback((task: MMLTask) => {
+    const cached = resultCache[task.id];
+    if (!cached?.items.length) return;
+    const header = '基站编码,基站名称,MML脚本,状态,结果,失败原因,详情,开始时间,结束时间\n';
+    const rows = cached.items.map(item =>
+      [
+        item.deviceSn,
+        item.deviceName || '',
+        item.mmlScript || '',
+        item.status || 'completed',
+        item.result.success ? '成功' : '失败',
+        item.failReason || '',
+        `"${(item.result.rawOutput || '').replace(/"/g, '""')}"`,
+        item.startedAt ? formatTime(item.startedAt) : '',
+        item.finishedAt ? formatTime(item.finishedAt) : item.result.timestamp ? formatTime(item.result.timestamp) : '',
+      ].join(',')
+    ).join('\n');
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + header + rows], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${task.taskName}_结果.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [resultCache]);
 
   // Map API tasks to display rows (server-side filtering)
   const tasks = useMemo(() => data?.items ?? [], [data?.items]);
@@ -176,11 +230,9 @@ export default function ScriptTask() {
     setPage(1);
   }, []);
 
-  const showResult = (task: MMLTask) => {
-    setResultTaskName(task.taskName);
-    setResultTaskId(task.id);
-    setResultModalVisible(true);
-  };
+  const handleExportAllResults = useCallback((task: MMLTask) => {
+    handleExportResults(task);
+  }, [handleExportResults]);
 
   const handleStartTask = (task: MMLTask) => {
     startTaskMutation.mutate(task.id, {
@@ -217,7 +269,10 @@ export default function ScriptTask() {
 
   const openAddModal = () => {
     addForm.resetFields();
+    const userName = useUserStore.getState().currentUser?.userName ?? 'unknown';
+    const defaultName = `MML任务_${userName}_${dayjs().format('YYYY-MM-DD HH:mm:ss')}`;
     addForm.setFieldsValue({
+      taskName: defaultName,
       executeType: 'immediate',
       offlineRetryEnable: false,
       offlineRetryWaitTime: 60,
@@ -307,19 +362,17 @@ export default function ScriptTask() {
       { key: 'wait', icon: <PauseCircleOutlined />, label: t('common.pause'), disabled: status !== 'running', onClick: () => handlePauseTask(task) },
       { key: 'end', icon: <StopOutlined />, label: t('mml.terminateTask'), disabled: !['running', 'pending', 'paused'].includes(status), onClick: () => handleCancelTask(task) },
       { key: 'del', icon: <DeleteOutlined />, label: t('common.delete'), danger: true, disabled: status === 'running', onClick: () => handleDeleteTask(task) },
+      { key: 'export', icon: <DownloadOutlined />, label: t('mml.exportResult') || '导出结果', onClick: () => handleExportAllResults(task) },
     ];
   }, [t, viewTaskInfo, handleStartTask, handlePauseTask, handleCancelTask, handleDeleteTask]);
 
   const columns: DataTableColumn<MMLTask>[] = useMemo(() => [
     {
-      key: 'operation', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
+      key: 'operation', title: t('table.operation'), dataIndex: 'id', width: 80, fixed: 'right',
       render: (_, record) => (
-        <Space size={4}>
-          <Button type="link" size="small" onClick={() => showResult(record)}>{t('common.view')}</Button>
-          <Dropdown menu={{ items: getActionMenu(record) }} trigger={['click']}>
-            <Button type="link" size="small" icon={<MoreOutlined />} />
-          </Dropdown>
-        </Space>
+        <Dropdown menu={{ items: getActionMenu(record) }} trigger={['click']}>
+          <Button type="link" size="small" icon={<MoreOutlined />} />
+        </Dropdown>
       ),
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
@@ -348,6 +401,118 @@ export default function ScriptTask() {
         tableId="script-task" columns={columns} dataSource={tasks} loading={isLoading} rowKey="id"
         total={data?.total ?? 0} currentPage={page} pageSize={pageSize}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }} onRefresh={() => void refetch()} scroll={{ x: 1400 }}
+        expandable={{
+          expandedRowKeys,
+          onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as string[]),
+          onExpand: handleExpand,
+          expandedRowRender: (record) => {
+            const cached = resultCache[record.id];
+            const allItems = cached?.items ?? [];
+            const search = resultSearch[record.id] || '';
+            const currentPage = resultPage[record.id] || 1;
+            const pageSize = 10;
+
+            if (!cached) return <div style={{ padding: 16, color: '#999' }}>加载中...</div>;
+
+            const filtered = search
+              ? allItems.filter(item =>
+                  item.deviceSn.toLowerCase().includes(search.toLowerCase()) ||
+                  (item.deviceName || '').toLowerCase().includes(search.toLowerCase())
+                )
+              : allItems;
+
+            const total = filtered.length;
+            const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+            const resultColumns = [
+              { title: '基站编码', dataIndex: 'deviceSn' as const, width: 180, render: (v: string) => <span style={{ fontFamily: 'monospace' }}>{v}</span> },
+              { title: '基站名称', dataIndex: 'deviceName' as const, width: 140, render: (v?: string) => v || '-' },
+              { title: 'MML脚本', dataIndex: 'mmlScript' as const, width: 200, ellipsis: true, render: (v?: string) => v ? <Tooltip title={v}><span>{v}</span></Tooltip> : '-' },
+              {
+                title: '状态', dataIndex: 'status' as const, width: 80, align: 'center' as const,
+                render: (v?: string) => {
+                  if (v === 'running') return <Tag color="processing">执行中</Tag>;
+                  if (v === 'pending') return <Tag color="default">待执行</Tag>;
+                  return <Tag color="success">已结束</Tag>;
+                },
+              },
+              {
+                title: '结果', width: 80, align: 'center' as const,
+                render: (_: unknown, item: DeviceTaskResultItem) => (
+                  <Tag color={item.result.success ? 'success' : 'error'}>{item.result.success ? '成功' : '失败'}</Tag>
+                ),
+              },
+              { title: '失败原因', dataIndex: 'failReason' as const, width: 160, ellipsis: true, render: (v?: string) => v ? <Tooltip title={v}><span style={{ color: '#ff4d4f' }}>{v}</span></Tooltip> : '-' },
+              {
+                title: '详情', width: 160, ellipsis: true,
+                render: (_: unknown, item: DeviceTaskResultItem) => item.result.rawOutput
+                  ? <Tooltip title={item.result.rawOutput}><span>{item.result.rawOutput}</span></Tooltip>
+                  : '-',
+              },
+              { title: '开始时间', dataIndex: 'startedAt' as const, width: 150, render: (v?: string) => v ? formatTime(v) : '-' },
+              {
+                title: '结束时间', width: 150,
+                render: (_: unknown, item: DeviceTaskResultItem) => {
+                  if (item.finishedAt) return formatTime(item.finishedAt);
+                  if (item.result.timestamp) return formatTime(item.result.timestamp);
+                  return '-';
+                },
+              },
+            ];
+
+            return (
+              <div style={{ padding: '8px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <span style={{ fontWeight: 500, fontSize: 14 }}>
+                    {t('mml.result')}（{record.taskName}）
+                  </span>
+                  <Space>
+                    <Input
+                      prefix={<SearchOutlined />}
+                      placeholder="搜索基站编码/名称"
+                      size="small"
+                      allowClear
+                      value={search}
+                      onChange={(e) => {
+                        setResultSearch(prev => ({ ...prev, [record.id]: e.target.value }));
+                        setResultPage(prev => ({ ...prev, [record.id]: 1 }));
+                      }}
+                      style={{ width: 220 }}
+                    />
+                    <Button size="small" icon={<DownloadOutlined />} onClick={() => handleExportResults(record)}>
+                      {t('mml.exportResult') || '导出'}
+                    </Button>
+                    <Button size="small" icon={<CloseOutlined />} onClick={() => {
+                      setExpandedRowKeys(prev => prev.filter(k => k !== record.id));
+                    }} />
+                  </Space>
+                </div>
+
+                {total === 0 ? (
+                  <div style={{ padding: 16, color: '#999', textAlign: 'center' }}>
+                    {search ? '未找到匹配结果' : '暂无执行结果'}
+                  </div>
+                ) : (
+                  <Table
+                    columns={resultColumns}
+                    dataSource={paged}
+                    rowKey={(_, idx) => String(idx)}
+                    size="small"
+                    pagination={{
+                      current: currentPage,
+                      pageSize,
+                      total,
+                      size: 'small',
+                      showTotal: (tot) => `共 ${tot} 条`,
+                      onChange: (p) => setResultPage(prev => ({ ...prev, [record.id]: p })),
+                    }}
+                    scroll={{ x: 1200 }}
+                  />
+                )}
+              </div>
+            );
+          },
+        }}
       />
 
       {/* 任务详情弹窗 */}
@@ -367,44 +532,6 @@ export default function ScriptTask() {
             <p><strong>{t('mml.endTimeLabel')}</strong>{formatTime(editingTask.finishedAt) || '-'}</p>
           </div>
         )}
-      </Modal>
-
-      {/* 查看结果弹窗 */}
-      <Modal title={t('mml.executionResult', { name: resultTaskName })} open={resultModalVisible} onCancel={() => { setResultModalVisible(false); setResultTaskId(null); }} footer={null} width={900}>
-        <div style={{ padding: '16px 0' }}>
-          {resultLoading && <p style={{ color: '#999' }}>{t('common.loading') || 'Loading...'}</p>}
-          {!resultLoading && resultData && resultData.items.length === 0 && (
-            <p style={{ color: '#999' }}>{t('mml.resultPlaceholder')}</p>
-          )}
-          {resultData && resultData.items.length > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>{t('mml.deviceSn') || 'Device SN'}</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'center' }}>{t('mml.status') || 'Status'}</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'right' }}>{t('mml.executionTime') || 'Time (ms)'}</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>{t('mml.output') || 'Output'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resultData.items.map((item, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '8px 12px', fontFamily: 'monospace' }}>{item.deviceSn}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                      <Tag color={item.result.success ? 'success' : 'error'}>
-                        {item.result.success ? (t('status.success') || 'Success') : (t('status.failed') || 'Failed')}
-                      </Tag>
-                    </td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{item.result.executionTime}</td>
-                    <td style={{ padding: '8px 12px', maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.result.rawOutput}>
-                      {item.result.rawOutput || '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
       </Modal>
 
       {/* 新建任务抽屉 */}

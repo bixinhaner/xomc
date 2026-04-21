@@ -1,5 +1,5 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate, ParamPath, MMLOperationType } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate, ParamPath, MMLOperationType, DeviceTaskResultItem } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
@@ -190,12 +190,12 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
   };
 }
 
-function mapBackendResult(br: Record<string, unknown>): {
-  deviceSn: string;
-  result: MMLResult;
-} {
+function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   return {
     deviceSn: (br.device_sn as string) || '',
+    deviceName: (br.device_name as string) || undefined,
+    mmlScript: (br.mml_script as string) || (br.command as string) || undefined,
+    status: (br.status as DeviceTaskResultItem['status']) || undefined,
     result: {
       success: Boolean(br.success),
       rawOutput: (br.raw_output as string) || '',
@@ -203,6 +203,9 @@ function mapBackendResult(br: Record<string, unknown>): {
       executionTime: (br.execution_time as number) || 0,
       timestamp: (br.timestamp as string) || '',
     },
+    failReason: (br.fail_reason as string) || (br.error_message as string) || undefined,
+    startedAt: (br.started_at as string) || undefined,
+    finishedAt: (br.finished_at as string) || undefined,
   };
 }
 
@@ -523,7 +526,7 @@ export const mmlApi = {
     id: string,
     page = 1,
     pageSize = 20
-  ): Promise<PageResponse<{ deviceSn: string; result: MMLResult }>> {
+  ): Promise<PageResponse<DeviceTaskResultItem>> {
     const { data } = await http.get<BackendListResponse<Record<string, unknown>>>(
       `/mml/tasks/${id}/results`,
       { params: { page, page_size: pageSize } }
