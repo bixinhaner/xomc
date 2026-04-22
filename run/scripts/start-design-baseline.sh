@@ -57,7 +57,7 @@ fi
 mkdir -p "$LOG_DIR/frontend"
 
 cd "$DESIGN_WEBCODE"
-VITE_USE_MOCK=false npx vite --port 3001 --host 0.0.0.0 > "$LOG_FILE" 2>&1 &
+VITE_USE_MOCK=true npx vite --port 3001 --host 0.0.0.0 > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 sleep 3
 

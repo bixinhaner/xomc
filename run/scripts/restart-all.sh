@@ -52,19 +52,37 @@ else
 fi
 echo ""
 
-# 4. 执行数据库迁移
+# 4. 启动基础依赖（迁移需要 PG 就绪；start-deps.sh 幂等，后续 start-all.sh 再调一次无副作用）
+bash "$SCRIPT_DIR/start-deps.sh"
+echo ""
+
+# 5. 执行数据库迁移
 echo "========== 数据库迁移 =========="
 APP_CFG="$OMCGO_DIR/cmd/app/etc/config.local.yaml"
 [ ! -f "$APP_CFG" ] && APP_CFG="$OMCGO_DIR/cmd/app/etc/config.dev.yaml"
 DB_DSN=$(grep -A1 '^db:' "$APP_CFG" | grep 'dsn:' | sed 's/.*dsn: *"\(.*\)"/\1/')
-if [ -n "$DB_DSN" ]; then
-    MIGRATE_OUTPUT=$("$OMCGO_DIR/bin/omcgo-migrate" --dsn "$DB_DSN" --path "$OMCGO_DIR/migrations" up 2>&1) && \
-        echo -e "${GREEN}[✓]${NC} $MIGRATE_OUTPUT" || \
-        echo -e "${YELLOW}[!]${NC} 迁移跳过: $MIGRATE_OUTPUT"
+if [ -z "$DB_DSN" ]; then
+    echo -e "${RED}[✗]${NC} 未找到数据库 DSN ($APP_CFG)"
+    exit 1
+fi
+# 等待 PG 真正接受连接（pg_ctl start -w 之后极少数情况仍需短暂等待）
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if pg_isready -h localhost -q 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+if ! pg_isready -h localhost -q 2>/dev/null; then
+    echo -e "${RED}[✗]${NC} PostgreSQL 未就绪，无法执行迁移"
+    exit 1
+fi
+if MIGRATE_OUTPUT=$("$OMCGO_DIR/bin/omcgo-migrate" --dsn "$DB_DSN" --path "$OMCGO_DIR/migrations" up 2>&1); then
+    echo -e "${GREEN}[✓]${NC} $MIGRATE_OUTPUT"
 else
-    echo -e "${YELLOW}[!]${NC} 未找到数据库 DSN，跳过迁移"
+    echo -e "${RED}[✗]${NC} 迁移失败: $MIGRATE_OUTPUT"
+    exit 1
 fi
 echo ""
 
-# 5. 启动所有服务
+# 6. 启动所有服务
 bash "$SCRIPT_DIR/start-all.sh"
