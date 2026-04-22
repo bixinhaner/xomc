@@ -5,6 +5,7 @@ import axios, {
   type AxiosError,
 } from 'axios';
 import { useUserStore } from '@/store/userStore';
+import { useMock } from './apiSwitch';
 
 // --- Parameter name conversion (camelCase → snake_case) ---
 
@@ -99,6 +100,10 @@ http.interceptors.response.use(
 
     // Handle 401 — attempt token refresh
     if (error.response?.status === 401) {
+      // Mock 模式下 401 意味着某端点缺 mock 适配；跳 /login 会在 mock 登录→导航→401 间死循环
+      if (useMock) {
+        return Promise.reject(error);
+      }
       const { refreshToken, clearAuth } = useUserStore.getState();
 
       // No refresh token or this was already a refresh attempt → logout
