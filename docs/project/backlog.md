@@ -140,6 +140,7 @@
 | T-0035-P1 | 前端多皮肤架构 Phase 1：抽取 `@omc/frontend-core` + 建立 npm workspaces + `@core/*` 路径别名 | ref | frontend | 2026-04-22 | 方案 `docs/project/frontend-multi-skin-plan-20260422.md`；`omcmb/frontend-core/src/{services,hooks/api,store,types,i18n,mock}`；workspace-level lint（`omcmb/eslint.config.js`）；`tsc --noEmit` / `npm run build` 通过；test/lint 前置失败与迁移无关（baseline 一致） |
 | T-0035-P1.5 | 修复 Phase 1 发现的 pre-existing test/lint 问题 | bug | frontend | 2026-04-22 | commit `22365022`；`.env.test` + vitest.config 固化 mock=false；setup.ts 加 localStorage polyfill；eslint-plugin-unused-imports + 规则降级；47 文件 95 处 unused vars 脚本化加 `_` 前缀；test 12/12 passed、lint 0 errors / 145 warnings（baseline 342/69）|
 | T-0035-P3 | 前端多皮肤架构 Phase 3：v2 皮肤脚手架（shadcn/ui + Tailwind + Radix）| feat | frontend | 2026-04-22 | `omcmb/webcode-v2/` 加入 workspaces；登录页 + dashboard 壳；接入 @core authApi/userStore/appStore/i18n；tsc 0 / dev 启动 / prod build 705 KB；18 模块补齐按 T-0035 逐个立项 |
+| T-0035-P4-Device | v2 首个复杂页面：Device 模块（AppShell + TanStack Table + @core/useDeviceList 端到端）| feat | frontend | 2026-04-22 | 新增 shadcn Table/Badge/Select + AppShell 侧栏布局；`pages/devices` 完备交互（搜索/状态过滤/分页/stats/loading-empty-error）；证实 @core/hooks/api/useDevices 在 v2 无代理工作；build 882 KB / gzip 262 KB；下一模块 Alarm |
 
 ---
 
@@ -211,6 +212,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-22 | 登记 | T-0035 | 前端多皮肤架构 Phase 3-7（v2 皮肤）母任务，Triaged 等 Sprint 规划 |
 | 2026-04-22 | done | T-0035-P1.5 | 清理 Phase 1 发现的 pre-existing test/lint 前置问题（11 test + 284 lint errors → 0）|
 | 2026-04-22 | done | T-0035-P3 | v2 皮肤脚手架：shadcn/ui + Tailwind + Radix；登录 + dashboard 壳；18 模块补齐仍待 Sprint 规划 |
+| 2026-04-22 | done | T-0035-P4-Device | v2 首个复杂页面 Device：AppShell + TanStack Table + @core/useDeviceList 全链路验证通过；shadcn 新增 Table/Badge/Select |
 
 ---
 

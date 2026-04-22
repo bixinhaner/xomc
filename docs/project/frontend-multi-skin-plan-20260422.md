@@ -578,3 +578,42 @@ omcmb/webcode-v2/
 - 18 模块补齐按 backlog T-0035 逐个立项
 - UI 风格差异策略：shadcn/ui 极简 + Radix 可访问性，Tailwind 工具类直写，不采用 Antd 组件风格
 
+---
+
+## Phase 4 首个复杂页面：Device 模块（2026-04-22）
+
+### 目的
+验证 v2 皮肤完整吃通 `@omc/frontend-core`：React Query hook + Axios + Zustand + 字段映射全链路。
+
+### 交付
+- **AppShell 布局**：`components/layout/AppShell.tsx`，侧栏导航（控制台 / 设备管理 / 告警中心 TBD / 配置 TBD）+ 顶栏（当前用户 + 退出）
+- **Devices 页面**：`pages/devices/index.tsx`
+  - 调用 `@core/hooks/api/useDevices.useDeviceList`（直接消费 @core，不 proxy）
+  - @tanstack/react-table 渲染表格（8 列：SN / 名称 / 厂商 / 产品型号 / 制式 / 连接状态 / 告警 / 最近在线）
+  - 关键字搜索（`searchText` 参数）+ 连接状态 Select 过滤
+  - 分页（上一页 / 下一页 + 页码提示）
+  - 统计卡片（总计 / 在线 / 离线 / 有告警）读 `response.stats`
+  - loading / empty / error 三态完备
+- **shadcn 原语补齐**：Table、Badge（含 success/warning/destructive/muted 变体）、Select（基于 @radix-ui/react-select + tailwindcss-animate）
+- **新增 v2 依赖**：`@tanstack/react-table`、`@radix-ui/react-select`、`tailwindcss-animate`
+- **Router 改造**：Protected 路由外套 AppShell，`/dashboard` 和 `/devices` 共享布局；登录页独立
+
+### 验证
+| 检查 | 结果 |
+|---|---|
+| `tsc --noEmit` | 0 errors ✅ |
+| `npm run build` v2 | 1912 modules → 882 KB JS / 21 KB CSS / gzip 262 KB ✅ |
+| `npm run dev` v2 | HTTP 200；`useDeviceList` 正确解析为 `/@fs/.../frontend-core/src/hooks/api/useDevices.ts` ✅ |
+| workspace `npm run lint` | 0 errors / 149 warnings（v2 新增 4 条 React Compiler 提示，不阻塞）✅ |
+| `npm run test` | 12/12 passed ✅ |
+
+### 架构意义
+- 证实"v2 皮肤 = UI 层；业务层 = `@core` 共享"的分层有效
+- 同一份 `userStore`：v1 登录 / v2 登录，localStorage key 相同，可互相识别认证状态
+- 同一个 Axios 实例：`@core/services/http.ts` 的拦截器（camelCase↔snake_case + Bearer Token + 401 跳登录）对 v2 自动生效
+- Mock 开关（`VITE_USE_MOCK`）各皮肤独立 .env，互不干扰
+
+### 下一模块候选
+优先补 **Alarm 告警中心**：实时数据 + Alarm 列表 + 严重度筛选。验证 @core/hooks/api/useAlarms 集成。
+
+
