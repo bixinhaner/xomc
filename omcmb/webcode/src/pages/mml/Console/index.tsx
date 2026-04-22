@@ -15,7 +15,7 @@ import {
   useCommandSelection,
   useCommandExecution,
 } from './hooks';
-import type { MMLCommand, SubCommand } from '@/types/mml';
+import type { MMLCommand, MMLParamRef } from '@/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import { resolveOperationType } from './utils/resolveOperationType';
@@ -34,7 +34,7 @@ export default function MMLConsole() {
   const [isManualEdit, setIsManualEdit] = useState(false);
   const [currentCommandLabel, setCurrentCommandLabel] = useState('');
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
-  const [selectedSubCommands, setSelectedSubCommands] = useState<string[]>([]);
+  const [selectedParams, setSelectedParams] = useState<string[]>([]);
   const [parameters, setParameters] = useState<CommandParameters>({});
   const [operationType, setOperationType] = useState('');
   const [paramPaths, setParamPaths] = useState<string[]>(['']);
@@ -48,40 +48,44 @@ export default function MMLConsole() {
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
-    const subCmd = commandSelection.selectedSubCommand;
 
     if (!selectedCommand) {
       setCommandLineText('');
       setIsManualEdit(false);
       setCurrentCommandLabel('');
       setSelectedFields([]);
-      setSelectedSubCommands([]);
+      setSelectedParams([]);
       setParameters({});
       setOperationType('');
       setParamPaths(['']);
+      commandExecution.clearOutput();
       return;
     }
 
     setIsManualEdit(false);
+    commandExecution.clearOutput();
     setSelectedFields([]);
-    setSelectedSubCommands([]);
     setParameters({});
 
-    if (subCmd) {
-      // Sub-command selected: auto-switch to paramPath tab with tr069_path
-      setActiveTab('paramPath');
-      setCommandLineText(`${selectedCommand.commandCode}:${subCmd.code}`);
-      setOperationType(subCmd.isWritable ? 'MOD' : 'LST');
-      setParamPaths([subCmd.tr069Path]);
-      setCurrentCommandLabel(`${selectedCommand.commandCode}:${subCmd.name}`);
+    const opType = resolveOperationType(selectedCommand);
+    setOperationType(opType);
+    setParamPaths(['']);
+
+    // Auto-populate selectedParams with all paramRef codes when available
+    const allParamCodes = selectedCommand.paramRefs?.map((p) => p.paramCode) ?? [];
+    setSelectedParams(allParamCodes);
+
+    // Assemble command line text with param string
+    if (allParamCodes.length > 0) {
+      const paramId = opType === 'MOD' ? 'modId' : 'lstId';
+      setCommandLineText(`${selectedCommand.commandCode}:${paramId}={${allParamCodes.join(',')}};`);
     } else {
-      setActiveTab('control');
       setCommandLineText(selectedCommand.commandCode);
-      setOperationType(resolveOperationType(selectedCommand));
-      setParamPaths(['']);
-      setCurrentCommandLabel(selectedCommand.commandCode);
     }
-  }, [commandSelection.selectedCommand, commandSelection.selectedSubCommand]);
+
+    setActiveTab('control');
+    setCurrentCommandLabel(selectedCommand.commandCode);
+  }, [commandSelection.selectedCommand]);
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
@@ -97,10 +101,10 @@ export default function MMLConsole() {
       return;
     }
 
-    // Sub-commands format: CMD:paramId={code1,code2,...};
-    if (selectedSubCommands.length > 0 && selectedCommand.subCommands && selectedCommand.subCommands.length > 0) {
+    // Params format: CMD:paramId={code1,code2,...};
+    if (selectedParams.length > 0 && selectedCommand.paramRefs && selectedCommand.paramRefs.length > 0) {
       const paramId = nextOperationType === 'MOD' ? 'modId' : 'lstId';
-      const cmdText = `${code}:${paramId}={${selectedSubCommands.join(',')}};`;
+      const cmdText = `${code}:${paramId}={${selectedParams.join(',')}};`;
       setCommandLineText(cmdText);
       return;
     }
@@ -121,16 +125,16 @@ export default function MMLConsole() {
     }
 
     setCommandLineText(code);
-  }, [activeTab, commandSelection.selectedCommand, isManualEdit, parameters, selectedFields, selectedSubCommands]);
+  }, [activeTab, commandSelection.selectedCommand, isManualEdit, parameters, selectedFields, selectedParams]);
 
-  const handleCommandSelect = useCallback(async (command: MMLCommand | null, subCommand?: SubCommand | null) => {
-    await commandSelection.selectCommand(command, subCommand);
+  const handleCommandSelect = useCallback(async (command: MMLCommand | null, _param?: MMLParamRef | null) => {
+    await commandSelection.selectCommand(command);
   }, [commandSelection]);
 
   const handleParamChange = useCallback((values: Record<string, unknown>) => {
     if (activeTab === 'control') {
       setSelectedFields(Array.isArray(values.selectedFields) ? values.selectedFields.map(String) : []);
-      setSelectedSubCommands(Array.isArray(values.selectedSubCommands) ? values.selectedSubCommands.map(String) : []);
+      setSelectedParams(Array.isArray(values.selectedParams) ? values.selectedParams.map(String) : []);
       setParameters(
         values.parameters && typeof values.parameters === 'object'
           ? values.parameters as CommandParameters
@@ -183,7 +187,7 @@ export default function MMLConsole() {
     setIsManualEdit(false);
     setCurrentCommandLabel('');
     setSelectedFields([]);
-    setSelectedSubCommands([]);
+    setSelectedParams([]);
     setParameters({});
     setOperationType('');
     setParamPaths(['']);
@@ -362,7 +366,7 @@ export default function MMLConsole() {
 
           const syntheticCommand: MMLCommand = {
             id: `tmpl-${Date.now()}`,
-            commandName: template.templateName,
+            commandName: template.commandName,
             commandCode: template.commandCode,
             category: template.categoryGroup || '',
             description: template.description,

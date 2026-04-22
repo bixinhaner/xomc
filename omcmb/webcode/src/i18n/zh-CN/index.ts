@@ -3502,19 +3502,23 @@ const messages: Record<string, string> = {
   'mml.taskList':                            '任务列表',
   'mml.scriptLibrary':                       '脚本库',
   'mml.taskManagement':                       '任务管理',
+  'mml.taskRecord':                           '任务记录',
   'mml.scriptDetail':                         '脚本详情',
   'mml.scriptNameLabel':                      '脚本名称：',
   'mml.newScript':                           '新增脚本',
   'mml.editScript':                          '编辑脚本',
   'mml.copyScript':                          '复制',
   'mml.deviceName':                          '基站名称',
+  'mml.deviceType':                          '设备类型',
   'mml.failReason':                          '失败原因',
   'mml.detail':                              '详情',
+  'mml.description':                         '描述',
   'mml.searchDeviceSn':                      '搜索基站编码/名称',
   'mml.noMatchResult':                       '未找到匹配结果',
   'mml.noExecutionResult':                   '暂无执行结果',
   'mml.totalCount':                          '共 {count} 条',
   'mml.updateTask':                          '更新',
+  'mml.updateTime':                          '更新时间',
   'mml.taskUpdated':                         '任务更新成功',
 
   // MML Console
@@ -3621,7 +3625,7 @@ const messages: Record<string, string> = {
   'mml.console.saveOnly':                    '仅保存',
 
   // MML Console - Command tree
-  'mml.console.customTemplates':             '自定义模板',
+  'mml.console.customTemplates':             '自定义命令',
   'mml.console.publicCommands':              '公有命令',
   'mml.console.privateCommands':             '私有命令',
   'mml.console.commandType':                 '命令类型',

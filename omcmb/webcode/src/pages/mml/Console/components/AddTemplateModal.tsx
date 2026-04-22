@@ -3,7 +3,7 @@ import { Modal, Form, Input, Select, Button, message, Space, InputNumber, Switch
 import { useCreateMMLTemplate } from '@/hooks/api/useMML';
 import { useAllMMLCommands } from '@/hooks/api/useMML';
 import { useDictionary } from '@/hooks/api/useSystem';
-import type { MMLTemplate, MMLCommand, MMLParam } from '@/types/mml';
+import type { MMLCustomCommand, MMLCommand, MMLParam } from '@/types/mml';
 import { useT } from '@/hooks/useT';
 
 interface AddTemplateModalProps {
@@ -11,7 +11,7 @@ interface AddTemplateModalProps {
   scope: 'public' | 'private';
   onClose: () => void;
   onSuccess: () => void;
-  onSaveAndExecute?: (template: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) => void;
+  onSaveAndExecute?: (template: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) => void;
 }
 
 export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSaveAndExecute }: AddTemplateModalProps) {
@@ -104,11 +104,11 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSa
     try {
       const values = await form.validateFields();
 
-      const template: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'> = {
-        templateName: values.templateName,
+      const template: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'> = {
+        commandName: values.templateName,
         commandCode: values.commandCode,
         operationType: values.operationType,
-        templateScope: scope,
+        commandScope: scope,
         categoryGroup: values.categoryGroup ?? '',
         parameters: paramValues,
         paramPaths: matchedCommand?.paramPaths?.map((p) => p.path) ?? [],

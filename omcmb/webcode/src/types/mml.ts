@@ -28,21 +28,18 @@ export interface ParamPath {
 
 export type MMLOperationType = 'LST' | 'MOD' | 'ADD' | 'RMV' | 'DSP' | 'ACT' | 'DEA' | 'RST' | 'CLR' | 'UPG';
 
-export interface SubCommandOption {
-  label: string;
-  value: string | number;
-}
-
-export interface SubCommand {
+/**
+ * MMLParamRef represents a parameter reference bound to a command.
+ * Maps to backend MMLParamRef (mml_params table).
+ */
+export interface MMLParamRef {
   id: string;
-  name: string;
-  code: string;
+  paramCode: string;
+  paramNameZh: string;
   tr069Path: string;
-  description: string;
   valueType: 'string' | 'number' | 'boolean' | 'enum';
   isWritable: boolean;
-  options: SubCommandOption[];
-  unit?: string;
+  valueConstraint: Record<string, unknown>;
 }
 
 export interface MMLCommand {
@@ -59,7 +56,7 @@ export interface MMLCommand {
   supportedOperations?: string[];
   helpDoc?: string;
   notes?: string;
-  subCommands?: SubCommand[];
+  paramRefs?: MMLParamRef[];
 }
 
 export interface MMLResult {
@@ -83,6 +80,9 @@ export interface DeviceTaskResultItem {
   finishedAt?: string;
 }
 
+export type MMLScriptStatus = 'active' | 'archived';
+export type MMLScriptType = 'manual' | 'batch';
+
 export interface MMLScript {
   id: string;
   scriptName: string;
@@ -93,6 +93,13 @@ export interface MMLScript {
   createTime: string;
   updateTime: string;
   tags: string[];
+  // New fields from mml_scripts restructure
+  status: MMLScriptStatus;
+  startTime?: string;
+  endTime?: string;
+  type: MMLScriptType;
+  progress: number;
+  result?: Record<string, unknown>;
 }
 
 export type MMLTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
@@ -138,12 +145,17 @@ export interface MMLTask {
   result?: MMLTaskResult;
 }
 
-export interface MMLTemplate {
+/**
+ * MMLCustomCommand represents a user-defined custom command.
+ * Renamed from MMLTemplate; maps to mml_custom_command table.
+ * Backend route paths remain /mml/templates for backward compat.
+ */
+export interface MMLCustomCommand {
   id: string;
-  templateName: string;
+  commandName: string;
   commandCode: string;
   operationType: MMLOperationType;
-  templateScope: 'private' | 'public';
+  commandScope: 'private' | 'public';
   categoryGroup: string;
   parameters: Record<string, string | number | boolean>;
   paramPaths: string[];

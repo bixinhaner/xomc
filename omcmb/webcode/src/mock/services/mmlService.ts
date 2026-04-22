@@ -1,4 +1,4 @@
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLTemplate } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLCustomCommand } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 import { mockMMLCommands, mockMMLScripts, mockMMLTasks } from '../data/mml';
 import { delay, paginate, generateId } from '../utils';
@@ -279,7 +279,7 @@ export const mmlService = {
 
   async getTemplates(
     params?: { commandCode?: string; operationType?: string; templateScope?: string } & PageRequest
-  ): Promise<PageResponse<MMLTemplate>> {
+  ): Promise<PageResponse<MMLCustomCommand>> {
     await delay(80, 150);
     return {
       items: [],
@@ -290,8 +290,8 @@ export const mmlService = {
   },
 
   async createTemplate(
-    _tmpl: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
-  ): Promise<MMLTemplate> {
+    _tmpl: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
+  ): Promise<MMLCustomCommand> {
     await delay(100, 200);
     return {
       id: generateId(),
@@ -304,15 +304,16 @@ export const mmlService = {
 
   async updateTemplate(
     _id: string,
-    _tmpl: Partial<MMLTemplate>
-  ): Promise<MMLTemplate> {
+    _tmpl: Partial<MMLCustomCommand>
+  ): Promise<MMLCustomCommand> {
     await delay(100, 200);
     return {
       id: _id,
-      templateName: _tmpl.templateName ?? '',
+      commandName: _tmpl.commandName ?? '',
       commandCode: _tmpl.commandCode ?? '',
       operationType: _tmpl.operationType ?? 'LST',
-      templateScope: _tmpl.templateScope ?? 'private',
+      commandScope: _tmpl.commandScope ?? 'private',
+      categoryGroup: _tmpl.categoryGroup ?? '',
       parameters: _tmpl.parameters ?? {},
       paramPaths: _tmpl.paramPaths ?? [],
       description: _tmpl.description ?? '',
@@ -327,14 +328,15 @@ export const mmlService = {
     await delay(100, 200);
   },
 
-  async cloneTemplate(_id: string): Promise<MMLTemplate> {
+  async cloneTemplate(_id: string): Promise<MMLCustomCommand> {
     await delay(100, 200);
     return {
       id: generateId(),
-      templateName: 'Cloned Template',
+      commandName: 'Cloned Command',
       commandCode: 'LST CELL',
       operationType: 'LST',
-      templateScope: 'private',
+      commandScope: 'private',
+      categoryGroup: '',
       parameters: {},
       paramPaths: [],
       description: '',

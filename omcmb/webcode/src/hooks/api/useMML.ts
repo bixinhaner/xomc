@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLTask, MMLTemplate, DeviceTaskResultItem } from '@/types/mml';
+import type { MMLScript, MMLTask, MMLCustomCommand, DeviceTaskResultItem } from '@/types/mml';
 import type { PageRequest } from '@/types/pagination';
 import { mmlService } from '@/mock/services/mmlService';
 import { mmlApi } from '@/services/api/mmlApi';
@@ -202,7 +202,7 @@ export function useMMLTemplates(
 export function useCreateMMLTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) =>
+    mutationFn: (data: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'>) =>
       api.createTemplate(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });
@@ -213,7 +213,7 @@ export function useCreateMMLTemplate() {
 export function useUpdateMMLTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<MMLTemplate> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<MMLCustomCommand> }) =>
       api.updateTemplate(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mml', 'templates'] });

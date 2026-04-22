@@ -34,13 +34,13 @@ type TaskRepository interface {
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
 }
 
-// TemplateRepository provides CRUD operations for MML command templates.
-type TemplateRepository interface {
-	Create(ctx context.Context, tmpl *MMLTemplate) error
-	GetByID(ctx context.Context, id uuid.UUID) (*MMLTemplate, error)
-	Update(ctx context.Context, tmpl *MMLTemplate) error
+// CustomCommandRepository provides CRUD operations for user-defined custom commands.
+type CustomCommandRepository interface {
+	Create(ctx context.Context, cmd *MMLCustomCommand) error
+	GetByID(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	Update(ctx context.Context, cmd *MMLCustomCommand) error
 	Delete(ctx context.Context, id uuid.UUID) error
-	List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error)
+	List(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
 }
 
 // AuditRepository writes MML command execution audit records.
@@ -49,8 +49,9 @@ type AuditRepository interface {
 	CreateBatch(ctx context.Context, entries []*MMLAuditLog) error
 }
 
-// SubCommandRepository provides access to MML sub-commands.
-type SubCommandRepository interface {
-	ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]SubCommand, error)
-	ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]SubCommand, error)
+// CommandParamRepository provides access to MML command-parameter relationships.
+// Replaces the old SubCommandRepository — commands now directly reference mml_params.
+type CommandParamRepository interface {
+	ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error)
+	ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]MMLParamRef, error)
 }

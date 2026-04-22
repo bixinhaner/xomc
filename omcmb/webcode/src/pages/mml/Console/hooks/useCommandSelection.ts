@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { TreeDataNode } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import type { MMLCommand, MMLTemplate, SubCommand } from '@/types/mml';
+import type { MMLCommand, MMLCustomCommand, MMLParamRef } from '@/types/mml';
 import { mmlApi } from '@/services/api/mmlApi';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
@@ -10,21 +10,21 @@ import { COMMAND_PAGE_SIZE } from '../constants';
 export type CustomNodeType = 'custom_root' | 'custom_public' | 'custom_private' | 'user_dir';
 
 export interface CommandTreeNode extends TreeDataNode {
-  nodeType: 'category' | 'command' | 'sub_command' | CustomNodeType;
+  nodeType: 'category' | 'command' | 'param' | CustomNodeType;
   label: string;
   category?: string;
   count?: number;
   commandCode?: string;
   command?: MMLCommand;
-  subCommandId?: string;
-  template?: MMLTemplate;
+  /** @deprecated Kept for backward compatibility; always undefined in new tree. */
+  paramId?: string;
+  template?: MMLCustomCommand;
   children?: CommandTreeNode[];
 }
 
 export function useCommandSelection() {
   const t = useT();
   const [selectedCommand, setSelectedCommand] = useState<MMLCommand | null>(null);
-  const [selectedSubCommand, setSelectedSubCommand] = useState<SubCommand | null>(null);
   const [searchText, setSearchText] = useState('');
 
   const keyword = searchText.trim() || undefined;
@@ -90,32 +90,16 @@ export function useCommandSelection() {
         count: categoryCommands.length,
         nodeType: 'category',
         selectable: false,
-        children: categoryCommands.map((command) => {
-          const hasSubCommands = command.subCommands && command.subCommands.length > 0;
-          return {
-            key: command.id,
-            title: `${command.commandName} ${command.commandCode}`,
-            label: command.commandName,
-            commandCode: command.commandCode,
-            category: command.category,
-            command,
-            nodeType: 'command',
-            isLeaf: !hasSubCommands,
-            children: hasSubCommands
-              ? command.subCommands!.map((sc) => ({
-                  key: `sub-${command.id}-${sc.id}`,
-                  title: `${sc.name} ${sc.code}`,
-                  label: sc.name,
-                  commandCode: command.commandCode,
-                  subCommandId: sc.id,
-                  category: command.category,
-                  command,
-                  nodeType: 'sub_command' as const,
-                  isLeaf: true,
-                }))
-              : undefined,
-          };
-        }),
+        children: categoryCommands.map((command) => ({
+          key: command.id,
+          title: `${command.commandName} ${command.commandCode}`,
+          label: command.commandName,
+          commandCode: command.commandCode,
+          category: command.category,
+          command,
+          nodeType: 'command' as const,
+          isLeaf: true,
+        })),
       };
     });
   }, [categoryOptions, commands]);
@@ -132,22 +116,22 @@ export function useCommandSelection() {
   const fullTreeData = useMemo((): CommandTreeNode[] => {
     const baseTree = treeData;
 
-    const publicTemplates = templates.filter((t) => t.templateScope === 'public');
-    const privateTemplates = templates.filter((t) => t.templateScope === 'private');
+    const publicTemplates = templates.filter((t) => t.commandScope === 'public');
+    const privateTemplates = templates.filter((t) => t.commandScope === 'private');
 
     // Group private templates by creator
-    const privateByCreator = new Map<string, MMLTemplate[]>();
+    const privateByCreator = new Map<string, MMLCustomCommand[]>();
     for (const t of privateTemplates) {
       const list = privateByCreator.get(t.creator) ?? [];
       list.push(t);
       privateByCreator.set(t.creator, list);
     }
 
-    // Helper: convert template to command-like tree node
-    const templateToNode = (t: MMLTemplate): CommandTreeNode => ({
+    // Helper: convert custom command to command-like tree node
+    const templateToNode = (t: MMLCustomCommand): CommandTreeNode => ({
       key: `tmpl-${t.id}`,
-      title: `${t.templateName} ${t.commandCode}`,
-      label: t.templateName,
+      title: `${t.commandName} ${t.commandCode}`,
+      label: t.commandName,
       commandCode: t.commandCode,
       template: t,
       nodeType: 'command',
@@ -196,30 +180,34 @@ export function useCommandSelection() {
   useEffect(() => {
     if (selectedCommand && !commands.some((command) => command.id === selectedCommand.id)) {
       setSelectedCommand(null);
-      setSelectedSubCommand(null);
     }
   }, [commands, selectedCommand]);
 
-  const selectCommand = useCallback(async (command: MMLCommand | null, subCommand?: SubCommand | null) => {
+  const selectCommand = useCallback(async (command: MMLCommand | null, _param?: MMLParamRef | null) => {
     if (!command) {
       setSelectedCommand(null);
-      setSelectedSubCommand(null);
+      return;
+    }
+
+    // Template commands have synthetic IDs (tmpl-*) that are not valid UUIDs;
+    // they already carry full parameter data from the tree node, so skip the API call.
+    if (command.id.startsWith('tmpl-')) {
+      setSelectedCommand(command);
       return;
     }
 
     const detail = await mmlApi.getCommandById(command.id);
     setSelectedCommand(detail ?? command);
-    setSelectedSubCommand(subCommand ?? null);
   }, []);
 
   const clearSelection = useCallback(() => {
     setSelectedCommand(null);
-    setSelectedSubCommand(null);
   }, []);
 
   return {
     selectedCommand,
-    selectedSubCommand,
+    /** @deprecated Always null. Kept for backward compatibility. */
+    selectedParam: null as MMLParamRef | null,
     searchText,
     commands,
     treeData: fullTreeData,

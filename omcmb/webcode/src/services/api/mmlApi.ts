@@ -1,22 +1,19 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLTemplate, ParamPath, MMLOperationType, DeviceTaskResultItem, SubCommand } from '@/types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '@/types/mml';
 import type { PageRequest, PageResponse } from '@/types/pagination';
 
 // ---------------------------------------------------------------------------
 // Backend response types  (snake_case, matching omcgo/internal/omcr/mml/model.go)
 // ---------------------------------------------------------------------------
 
-interface BackendSubCommand {
+interface BackendMMLParamRef {
   id: string;
-  name: string;
-  code: string;
+  param_code: string;
+  param_name_zh: string;
   tr069_path: string;
-  description: string;
   value_type: string;
   is_writable: boolean;
-  options: Array<{ label: string; value: string | number }> | null;
-  unit?: string;
-  created_at: string;
+  value_constraint: Record<string, unknown> | null;
 }
 
 interface BackendMMLCommand {
@@ -35,7 +32,7 @@ interface BackendMMLCommand {
   supported_operations?: string[] | null;
   help_doc?: string;
   notes?: string;
-  sub_commands?: BackendSubCommand[] | null;
+  params?: BackendMMLParamRef[] | null;
 }
 
 interface BackendMMLScript {
@@ -48,6 +45,13 @@ interface BackendMMLScript {
   tags: string[] | null;
   created_at: string;
   updated_at: string;
+  // New fields from mml_scripts restructure
+  status?: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  type?: string;
+  progress?: number;
+  result?: Record<string, unknown> | null;
 }
 
 interface BackendMMLTask {
@@ -91,12 +95,12 @@ interface BackendListResponse<T> {
   total_pages: number;
 }
 
-interface BackendMMLTemplate {
+interface BackendMMLCustomCommand {
   id: string;
-  template_name: string;
+  command_name: string;
   command_code: string;
   operation_type: string;
-  template_scope: string;
+  command_scope: string;
   category_group?: string;
   parameters: Record<string, unknown> | null;
   param_paths: string[] | null;
@@ -154,17 +158,15 @@ function mapParamTemplate(
   });
 }
 
-function mapBackendSubCommand(bsc: BackendSubCommand): SubCommand {
+function mapBackendParamRef(bp: BackendMMLParamRef): MMLParamRef {
   return {
-    id: bsc.id,
-    name: bsc.name,
-    code: bsc.code,
-    tr069Path: bsc.tr069_path,
-    description: bsc.description,
-    valueType: bsc.value_type as SubCommand['valueType'],
-    isWritable: bsc.is_writable,
-    options: bsc.options ?? [],
-    unit: bsc.unit || undefined,
+    id: bp.id,
+    paramCode: bp.param_code,
+    paramNameZh: bp.param_name_zh,
+    tr069Path: bp.tr069_path,
+    valueType: bp.value_type as MMLParamRef['valueType'],
+    isWritable: bp.is_writable,
+    valueConstraint: bp.value_constraint ?? {},
   };
 }
 
@@ -201,7 +203,7 @@ function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
     supportedOperations: bc.supported_operations || undefined,
     helpDoc: bc.help_doc || undefined,
     notes: bc.notes || undefined,
-    subCommands: bc.sub_commands?.map(mapBackendSubCommand) || undefined,
+    paramRefs: bc.params?.map(mapBackendParamRef) || undefined,
   };
 }
 
@@ -216,6 +218,13 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
     tags: bs.tags || [],
     createTime: bs.created_at,
     updateTime: bs.updated_at,
+    // New fields from mml_scripts restructure
+    status: (bs.status || 'active') as MMLScript['status'],
+    startTime: bs.start_time || undefined,
+    endTime: bs.end_time || undefined,
+    type: (bs.type || 'manual') as MMLScript['type'],
+    progress: bs.progress ?? 0,
+    result: bs.result ?? undefined,
   };
 }
 
@@ -278,21 +287,21 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
   };
 }
 
-function mapBackendTemplate(bt: BackendMMLTemplate): MMLTemplate {
+function mapBackendCustomCommand(bc: BackendMMLCustomCommand): MMLCustomCommand {
   return {
-    id: bt.id,
-    templateName: bt.template_name,
-    commandCode: bt.command_code,
-    operationType: bt.operation_type as MMLTemplate['operationType'],
-    templateScope: bt.template_scope as MMLTemplate['templateScope'],
-    categoryGroup: bt.category_group || '',
-    parameters: (bt.parameters as Record<string, string | number | boolean>) || {},
-    paramPaths: bt.param_paths || [],
-    description: bt.description || '',
-    productTypes: bt.product_types || [],
-    creator: bt.creator,
-    createdAt: bt.created_at,
-    updatedAt: bt.updated_at,
+    id: bc.id,
+    commandName: bc.command_name,
+    commandCode: bc.command_code,
+    operationType: bc.operation_type as MMLCustomCommand['operationType'],
+    commandScope: bc.command_scope as MMLCustomCommand['commandScope'],
+    categoryGroup: bc.category_group || '',
+    parameters: (bc.parameters as Record<string, string | number | boolean>) || {},
+    paramPaths: bc.param_paths || [],
+    description: bc.description || '',
+    productTypes: bc.product_types || [],
+    creator: bc.creator,
+    createdAt: bc.created_at,
+    updatedAt: bc.updated_at,
   };
 }
 
@@ -579,7 +588,8 @@ export const mmlApi = {
     return data;
   },
 
-  // --- Templates ---
+  // --- Custom Commands (templates) ---
+  // Note: Backend routes still use /mml/templates path for backward compat.
 
   async getTemplates(
     params?: {
@@ -587,21 +597,22 @@ export const mmlApi = {
       operationType?: string;
       templateScope?: string;
     } & PageRequest
-  ): Promise<PageResponse<MMLTemplate>> {
+  ): Promise<PageResponse<MMLCustomCommand>> {
     const query: Record<string, unknown> = {
       page: params?.page ?? 1,
       page_size: params?.pageSize ?? 20,
     };
     if (params?.commandCode) query.command_code = params.commandCode;
     if (params?.operationType) query.operation_type = params.operationType;
+    // Backend query param name stays template_scope for backward compat
     if (params?.templateScope) query.template_scope = params.templateScope;
 
-    const { data } = await http.get<BackendListResponse<BackendMMLTemplate>>(
+    const { data } = await http.get<BackendListResponse<BackendMMLCustomCommand>>(
       '/mml/templates',
       { params: query }
     );
     return {
-      items: (data.items || []).map(mapBackendTemplate),
+      items: (data.items || []).map(mapBackendCustomCommand),
       total: data.total,
       page: data.page,
       pageSize: data.page_size,
@@ -609,55 +620,55 @@ export const mmlApi = {
   },
 
   async createTemplate(
-    tmpl: Omit<MMLTemplate, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
-  ): Promise<MMLTemplate> {
+    tmpl: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'>
+  ): Promise<MMLCustomCommand> {
     const payload = {
-      template_name: tmpl.templateName,
+      command_name: tmpl.commandName,
       command_code: tmpl.commandCode,
       operation_type: tmpl.operationType,
-      template_scope: tmpl.templateScope,
+      command_scope: tmpl.commandScope,
       category_group: tmpl.categoryGroup,
       parameters: tmpl.parameters,
       param_paths: tmpl.paramPaths,
       description: tmpl.description,
       product_types: tmpl.productTypes,
     };
-    const { data } = await http.post<BackendMMLTemplate>(
+    const { data } = await http.post<BackendMMLCustomCommand>(
       '/mml/templates',
       payload
     );
-    return mapBackendTemplate(data);
+    return mapBackendCustomCommand(data);
   },
 
   async updateTemplate(
     id: string,
-    tmpl: Partial<MMLTemplate>
-  ): Promise<MMLTemplate> {
+    tmpl: Partial<MMLCustomCommand>
+  ): Promise<MMLCustomCommand> {
     const payload: Record<string, unknown> = {};
-    if (tmpl.templateName !== undefined) payload.template_name = tmpl.templateName;
+    if (tmpl.commandName !== undefined) payload.command_name = tmpl.commandName;
     if (tmpl.commandCode !== undefined) payload.command_code = tmpl.commandCode;
     if (tmpl.operationType !== undefined) payload.operation_type = tmpl.operationType;
-    if (tmpl.templateScope !== undefined) payload.template_scope = tmpl.templateScope;
+    if (tmpl.commandScope !== undefined) payload.command_scope = tmpl.commandScope;
     if (tmpl.parameters !== undefined) payload.parameters = tmpl.parameters;
     if (tmpl.paramPaths !== undefined) payload.param_paths = tmpl.paramPaths;
     if (tmpl.description !== undefined) payload.description = tmpl.description;
     if (tmpl.productTypes !== undefined) payload.product_types = tmpl.productTypes;
 
-    const { data } = await http.put<BackendMMLTemplate>(
+    const { data } = await http.put<BackendMMLCustomCommand>(
       `/mml/templates/${id}`,
       payload
     );
-    return mapBackendTemplate(data);
+    return mapBackendCustomCommand(data);
   },
 
   async deleteTemplate(id: string): Promise<void> {
     await http.delete(`/mml/templates/${id}`);
   },
 
-  async cloneTemplate(id: string): Promise<MMLTemplate> {
-    const { data } = await http.post<BackendMMLTemplate>(
+  async cloneTemplate(id: string): Promise<MMLCustomCommand> {
+    const { data } = await http.post<BackendMMLCustomCommand>(
       `/mml/templates/${id}/clone`
     );
-    return mapBackendTemplate(data);
+    return mapBackendCustomCommand(data);
   },
 };

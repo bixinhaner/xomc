@@ -244,12 +244,12 @@ func initMiscModules(c *Container) error {
 	mmlCmdRepo := mml.NewPgCommandRepository(c.PgPool)
 	mmlScriptRepo := mml.NewPgScriptRepository(c.PgPool)
 	mmlTaskRepo := mml.NewPgTaskRepository(c.PgPool)
-	mmlTemplateRepo := mml.NewPgTemplateRepository(c.PgPool)
+	mmlCustomCmdRepo := mml.NewPgCustomCommandRepository(c.PgPool)
 	mmlAuditRepo := mml.NewPgAuditRepository(c.PgPool)
-	mmlSubCmdRepo := mml.NewPgSubCommandRepository(c.PgPool)
-	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlTemplateRepo, messageHub, logger)
+	mmlCmdParamRepo := mml.NewPgCommandParamRepository(c.PgPool)
+	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
 	mmlService.SetAuditRepo(mmlAuditRepo)
-	mmlService.SetSubCmdRepo(mmlSubCmdRepo)
+	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService
 

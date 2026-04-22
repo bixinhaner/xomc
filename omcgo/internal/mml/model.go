@@ -55,21 +55,46 @@ type MMLCommand struct {
 	Notes               string                 `json:"notes" db:"notes"`
 	ProductTypes        []string               `json:"product_types"`
 	CreatedAt           time.Time              `json:"created_at"`
-	SubCommands         []SubCommand           `json:"sub_commands,omitempty"`
+	Params              []MMLParamRef          `json:"params,omitempty"`
 }
+
+// ScriptStatus represents the current state of an MML script.
+type ScriptStatus string
+
+const (
+	ScriptActive   ScriptStatus = "active"
+	ScriptArchived ScriptStatus = "archived"
+)
+
+// ScriptType defines how a script is categorized.
+type ScriptType string
+
+const (
+	ScriptTypeManual ScriptType = "manual"
+	ScriptTypeBatch  ScriptType = "batch"
+)
 
 // MMLScript represents a user-defined MML command script.
 type MMLScript struct {
-	ID          uuid.UUID `json:"id"`
-	ScriptName  string    `json:"script_name"`
-	Description string    `json:"description"`
-	Content     string    `json:"content"`
-	DeviceType  string    `json:"device_type"`
-	Creator     string    `json:"creator"`
-	Tags        []string  `json:"tags"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uuid.UUID    `json:"id"`
+	ScriptName  string       `json:"script_name"`
+	Description string       `json:"description"`
+	Content     string       `json:"content"`
+	DeviceType  string       `json:"device_type"`
+	Creator     string       `json:"creator"`
+	Tags        []string     `json:"tags"`
+	Status      ScriptStatus `json:"status"`
+	StartTime   *time.Time   `json:"start_time,omitempty"`
+	EndTime     *time.Time   `json:"end_time,omitempty"`
+	Type        ScriptType   `json:"type"`
+	Progress    float64      `json:"progress"`
+	Result      JSONMap      `json:"result,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
+
+// JSONMap is a helper type for nullable JSONB map fields.
+type JSONMap map[string]interface{}
 
 // MMLTask represents an MML command execution task.
 type MMLTask struct {
@@ -133,13 +158,13 @@ type TaskFilter struct {
 	model.ListRequest
 }
 
-// MMLTemplate represents a user-defined command parameter template.
-type MMLTemplate struct {
+// MMLCustomCommand represents a user-defined custom command (renamed from MMLTemplate).
+type MMLCustomCommand struct {
 	ID            uuid.UUID              `json:"id"`
-	TemplateName  string                 `json:"template_name"`
+	CommandName   string                 `json:"command_name"`
 	CommandCode   string                 `json:"command_code"`
 	OperationType string                 `json:"operation_type"`
-	TemplateScope string                 `json:"template_scope"` // private or public
+	CommandScope  string                 `json:"command_scope"` // private or public
 	CategoryGroup string                 `json:"category_group,omitempty"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
@@ -150,34 +175,26 @@ type MMLTemplate struct {
 	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
-// TemplateFilter specifies criteria for listing MML templates.
-type TemplateFilter struct {
+// CustomCommandFilter specifies criteria for listing MML custom commands.
+type CustomCommandFilter struct {
 	CommandCode   *string
 	OperationType *string
-	TemplateScope *string
+	CommandScope  *string
 	CategoryGroup *string
 	Creator       *string
 	model.ListRequest
 }
 
-// SubCommand represents a sub-command bound to an MML command (N:M relationship).
-type SubCommand struct {
-	ID          uuid.UUID       `json:"id"`
-	Name        string          `json:"name"`
-	Code        string          `json:"code"`
-	Tr069Path   string          `json:"tr069_path"`
-	Description string          `json:"description"`
-	ValueType   string          `json:"value_type"`
-	IsWritable  bool            `json:"is_writable"`
-	Options     []SubCmdOption  `json:"options"`
-	Unit        string          `json:"unit,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-}
-
-// SubCmdOption represents an option for enum-type sub-commands.
-type SubCmdOption struct {
-	Label string      `json:"label"`
-	Value interface{} `json:"value"`
+// MMLParamRef represents a lightweight reference to an mml_param bound to a command.
+// Replaces the old SubCommand concept — commands now directly reference mml_params.
+type MMLParamRef struct {
+	ID           uuid.UUID              `json:"id"`
+	ParamCode    string                 `json:"param_code"`
+	ParamNameZh  string                 `json:"param_name_zh"`
+	Tr069Path    string                 `json:"tr069_path"`
+	ValueType    string                 `json:"value_type"`
+	IsWritable   bool                   `json:"is_writable"`
+	ValueConstraint map[string]interface{} `json:"value_constraint,omitempty"`
 }
 
 // MMLAuditLog records a single command execution for compliance auditing.

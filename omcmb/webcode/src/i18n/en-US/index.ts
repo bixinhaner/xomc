@@ -3495,19 +3495,23 @@ const messages: Record<string, string> = {
   'mml.taskList':                            'Task List',
   'mml.scriptLibrary':                       'Script Library',
   'mml.taskManagement':                       'Task Management',
+  'mml.taskRecord':                           'Task Record',
   'mml.scriptDetail':                         'Script Detail',
   'mml.scriptNameLabel':                      'Script Name: ',
   'mml.newScript':                           'New Script',
   'mml.editScript':                          'Edit Script',
   'mml.copyScript':                          'Copy',
   'mml.deviceName':                          'Device Name',
+  'mml.deviceType':                          'Device Type',
   'mml.failReason':                          'Fail Reason',
   'mml.detail':                              'Detail',
+  'mml.description':                         'Description',
   'mml.searchDeviceSn':                      'Search device SN/name',
   'mml.noMatchResult':                       'No matching results',
   'mml.noExecutionResult':                   'No execution results',
   'mml.totalCount':                          '{count} items',
   'mml.updateTask':                          'Update',
+  'mml.updateTime':                          'Update Time',
   'mml.taskUpdated':                         'Task updated successfully',
 
   // MML Console
@@ -3614,7 +3618,7 @@ const messages: Record<string, string> = {
   'mml.console.saveOnly':                    'Save Only',
 
   // MML Console - Command tree
-  'mml.console.customTemplates':             'Custom Templates',
+  'mml.console.customTemplates':             'Custom Commands',
   'mml.console.publicCommands':              'Public Commands',
   'mml.console.privateCommands':             'Private Commands',
   'mml.console.commandType':                 'Command Type',

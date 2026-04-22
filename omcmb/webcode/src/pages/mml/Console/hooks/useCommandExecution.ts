@@ -40,6 +40,7 @@ export function useCommandExecution() {
   const clearOutput = useCallback(() => {
     setOutputLines([]);
     setPollingTaskId(null);
+    setIsExecuting(false);
     lastPolledStatus.current = '';
   }, []);
 

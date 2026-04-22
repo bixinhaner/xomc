@@ -1,11 +1,11 @@
 # OMC MML 维护命令功能需求设计文档
 
-> **文档版本**: v4.0
+> **文档版本**: v5.0
 > **创建日期**: 2026-04-14
-> **更新日期**: 2026-04-17
+> **更新日期**: 2026-04-21
 > **适用项目**: OMC（基站网络运营管理系统）
 > **技术栈**: Go + Gin + Squirrel + PostgreSQL + React 19 + Ant Design 5 + TanStack Query
-> **变更说明**: v4.1 参数库后端模块已完成（4 个 API 端点 + 种子数据 24 版本/1919 分组/7226 参数）；前端 createTask 参数类型修复；其余待实现项不变
+> **变更说明**: v5.0 新增第 2 章"数据库结构设计"；mml_templates → mml_custom_command；mml_sub_commands → mml_params + mml_command_params_rel；mml_scripts 新增 status/start_time/end_time/type/progress/result；后端/前端代码同步更新
 
 ---
 
@@ -60,9 +60,234 @@
 
 ---
 
-## 2. 功能总览
+## 2. 数据库结构设计
 
-### 2.1 模块架构图
+MML 模块共 **10 张表**、2 个辅助函数，分为四个功能域。
+
+### 2.1 命令执行域（Command Execution）
+
+#### `mml_commands` — 预定义命令目录
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| command_name | VARCHAR(200) | 显示名称，如"查询小区信息" |
+| command_code | VARCHAR(100) UNIQUE | 命令码，如"LST CELL"、"MOD CELL" |
+| category | VARCHAR(50) | 分类编号，引用 sys_dictionary_details |
+| rpc_method | VARCHAR(50) | TR-069 RPC：GetParameterValues / SetParameterValues / Reboot / Download |
+| operation_type | TEXT DEFAULT 'LST' | 操作类型：LST/MOD/ADD/RMV/ACT/DEA/RST/UPG/CLR/DSP |
+| param_template | JSONB | 参数 Schema：键为参数名，值描述类型/范围/默认值 |
+| param_paths | JSONB | TR-069 参数路径数组 |
+| supported_operations | JSONB | 支持的操作类型数组 |
+| help_doc / notes | TEXT | 帮助文档和备注 |
+| product_types | JSONB | 适用产品类型，如 ["eNB","gNB"] |
+
+**功能**：定义 MML 控制台可选的命令集合，每条命令绑定 TR-069 RPC 方法和参数模板。
+
+#### `mml_command_params_rel` — 命令-参数 N:M 关联
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| command_id | UUID FK → mml_commands (CASCADE) | 命令 ID |
+| param_id | UUID FK → mml_params (CASCADE) | 参数 ID |
+| sort_order | INT | 显示排序 |
+| PK | (command_id, param_id) | |
+
+**关系**：命令直接关联 mml_params，通过此关联表实现 N:M 关系。如 LST DEVICE_INFO 关联 14 个参数；MOD DEVICE_INFO 关联 7 个可写参数。
+
+---
+
+### 2.2 脚本与任务域（Script & Task）
+
+#### `mml_scripts` — 用户脚本库
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| script_name | VARCHAR(200) | 脚本名称 |
+| content | TEXT | 脚本正文（每行一条命令） |
+| device_type | VARCHAR(50) | 适用设备类型 |
+| creator | VARCHAR(100) | 创建者 |
+| tags | JSONB | 标签数组 |
+| status | VARCHAR(20) NOT NULL DEFAULT 'active' | 脚本状态：active / archived |
+| start_time | TIMESTAMPTZ | 开始执行时间 |
+| end_time | TIMESTAMPTZ | 结束执行时间 |
+| type | VARCHAR(20) NOT NULL DEFAULT 'manual' | 脚本类型：manual / batch |
+| progress | NUMERIC(5,2) NOT NULL DEFAULT 0 | 执行进度百分比 |
+| result | JSONB DEFAULT '{}' | 执行结果 |
+
+**功能**：保存用户编写的 MML 命令脚本，可被任务引用。支持执行状态追踪、进度和结果记录。
+
+#### `mml_tasks` — 批量执行任务
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| task_name | VARCHAR(200) | 任务名称 |
+| script_id | UUID FK → mml_scripts (SET NULL) | 关联脚本 |
+| device_sns | JSONB | 目标设备 SN 列表 |
+| commands | JSONB | 待执行命令对象数组 |
+| status | VARCHAR(20) | pending / running / completed / failed / paused / cancelled |
+| results | JSONB | 每设备执行结果 |
+| executor | VARCHAR(100) | SSE 推送目标用户 |
+| execute_type | VARCHAR(20) | immediate / scheduled / periodic / suspended |
+| scheduled_at / period_start / period_end / period_time | | 调度参数 |
+| offline_retry / failed_retry | | 重试策略 |
+| total_devices / success_count / failed_count / result | | 执行统计 |
+
+**关系**：
+- `script_id` → `mml_scripts`：一个脚本可触发多个任务
+- `device_tasks.parent_task_id` → `mml_tasks`：Fan-out 到设备级子任务（逻辑引用，分区表无 FK）
+- 执行完成后 `mml_tasks.results` 记录结果，`mml_audit_log` 记录审计日志
+
+#### `mml_audit_log` — 命令执行审计
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| task_id | UUID FK → mml_tasks (SET NULL) | 关联任务 |
+| command_code | VARCHAR(100) | 执行的命令码 |
+| operation_type | VARCHAR(20) | 操作类型 |
+| device_sn | VARCHAR(100) | 目标设备 |
+| parameters / param_paths | JSONB | 实际发送的参数 |
+| result_status / result_message | | 执行结果 |
+| duration_ms | INT | 耗时 |
+
+**功能**：每个设备+命令组合生成一条审计记录，用于合规审计和问题追溯。
+
+---
+
+### 2.3 自定义命令域（Custom Command）
+
+#### `mml_custom_command` — 用户自定义命令
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| command_name | VARCHAR(200) | 自定义命令名称 |
+| command_code | VARCHAR(100) | 关联命令码（逻辑引用，无 FK） |
+| operation_type | VARCHAR(20) CHECK | LST / MOD / ADD / RMV |
+| command_scope | VARCHAR(20) CHECK | 'private' 或 'public' |
+| category_group | VARCHAR(50) | 自定义分类目录 |
+| parameters | JSONB | 预填参数值 |
+| param_paths | JSONB | 参数路径 |
+| description | TEXT | 描述 |
+| product_types | JSONB | 适用产品类型 |
+| creator | VARCHAR(100) | 创建者 |
+
+**功能**：用户可将常用参数组合保存为自定义命令（公开/私有），方便快速执行。公开命令所有人可见，私有命令仅创建者可见。
+
+---
+
+### 2.4 参数库域（Parameter Library）
+
+#### `mml_param_versions` — 参数版本注册表
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| version_code | VARCHAR(50) PK | 版本码，如"QB1.0" |
+| version_name | VARCHAR(200) | 版本名 |
+| product_models | VARCHAR(200)[] | 适用产品型号 |
+| software_versions | VARCHAR(100)[] | 适用软件版本 |
+| group_count / param_count | INT | 缓存统计 |
+
+**功能**：管理参数库版本，支持多产品多版本并行。
+
+#### `mml_param_groups` — 层级参数分组（自引用树）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| group_code | VARCHAR(100) | 分组编码 |
+| group_name_zh / group_name_en | | 中英文名称 |
+| parent_id | UUID FK → 自身 (CASCADE) | 父分组，自引用树 |
+| path | LTREE | 路径（GiST 索引） |
+| level | INT CHECK >= 0 | 层级深度 |
+| is_listable / is_modifiable / is_addable / is_removable | BOOLEAN | 操作权限标记 |
+| param_version | VARCHAR(50) FK → mml_param_versions | 所属版本 |
+
+**功能**：以树形结构组织参数，如"基本信息 → 设备信息 → 设备类型"。LTREE 支持高效的层级查询。
+
+#### `mml_params` — TR-069 参数定义
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| param_code | VARCHAR(200) | MIB 标识 |
+| param_name_zh / param_name_en | | 中英文名称 |
+| tr069_path | VARCHAR(1000) | 完整 TR-069 数据模型路径 |
+| tr069_path_parts | TEXT[] GENERATED | 自动拆分路径段（GIN 索引） |
+| value_type | VARCHAR(50) CHECK | string / enum / unsignedInt / boolean / int 等 |
+| value_constraint | JSONB | 范围约束、枚举值 |
+| is_writable / is_listable / is_modifiable / is_addable / is_removable | | 操作权限 |
+| param_version | VARCHAR(50) FK → mml_param_versions | 所属版本 |
+
+**功能**：TR-069 参数的完整定义，包含类型、约束、路径、权限等元数据。同时作为命令的参数来源（通过 mml_command_params_rel 关联）。
+
+#### `mml_group_param_rel` — 分组-参数 N:M 关联
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | |
+| group_id | UUID FK → mml_param_groups (CASCADE) | |
+| param_id | UUID FK → mml_params (CASCADE) | |
+| sort_order | INT | 排序 |
+| matched_by | VARCHAR(20) | 关联方式：'manual' 或自动匹配规则 |
+
+**功能**：将参数挂载到分组树的叶节点，一个参数可属于多个分组。
+
+---
+
+### 2.5 实体关系总图
+
+```
+mml_param_versions (version_code PK)
+    │
+    ├─ 1:N ── mml_param_groups (param_version FK)
+    │             │
+    │             ├─ self-ref (parent_id → 自身, LTREE 层级树)
+    │             │
+    │             └─ N:M ── mml_group_param_rel ── mml_params (param_version FK)
+    │                        (group_id, param_id)    │
+    │                                                  └─ tr069_path_parts (GENERATED, GIN)
+    │
+    └─ 1:N ── mml_params (param_version FK)
+
+mml_commands (id PK, command_code UNIQUE)
+    │
+    ├─ N:M ── mml_command_params_rel ── mml_params (id PK)
+    │          (command_id, param_id)
+    │
+    └─ logical ref ← mml_custom_command.command_code (无 FK)
+
+mml_custom_command (id PK)
+    └─ command_scope: private(仅创建者可见) / public(所有人可见)
+
+mml_scripts (id PK)
+    │
+    └─ 1:N ── mml_tasks (script_id FK, SET NULL)
+                  │
+                  ├─ 1:N ── mml_audit_log (task_id FK, SET NULL)
+                  │
+                  └─ logical ref → device_tasks.parent_task_id (分区表, 无 FK)
+```
+
+### 2.6 功能映射
+
+| 表 | 实现的功能 |
+|----|-----------|
+| mml_commands + mml_params + mml_command_params_rel | **命令树**：控制台左侧命令选择，三级（分类→命令→参数） |
+| mml_params + mml_param_groups + mml_param_versions + mml_group_param_rel | **参数库**：TR-069 参数的版本化管理，树形浏览，用于"参数路径指定"标签页 |
+| mml_scripts | **脚本库**：用户保存的命令脚本，可被任务引用或独立执行 |
+| mml_tasks | **任务管理**：批量执行记录，含调度、重试、进度统计 |
+| mml_audit_log | **审计日志**：每条命令+设备的执行记录 |
+| mml_custom_command | **自定义命令**：用户保存的参数组合，公开/私有 |
+
+---
+
+## 3. 功能总览
+
+### 3.1 模块架构图
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -83,7 +308,7 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 页面路由结构
+### 3.2 页面路由结构
 
 ```
 /mml
@@ -95,7 +320,7 @@
 
 ![登录后主页 - 左侧导航 MML 管理菜单](/tmp/mml_v2_01_home.png)
 
-### 2.3 与 TR-069/LMT 的关系说明
+### 3.3 与 TR-069/LMT 的关系说明
 
 | 协议 | 端口 | 使用场景 | 特点 |
 |------|------|----------|------|
@@ -115,9 +340,9 @@ MML 命令通过 ACS Worker 封装为 TR-069 SOAP 消息下发到设备：
 
 ---
 
-## 3. MML 命令控制台（/mml/console）
+## 4. MML 命令控制台（/mml/console）
 
-### 3.1 页面布局（三栏布局）
+### 4.1 页面布局（三栏布局）
 
 控制台采用三栏弹性布局，列宽比例为 **1fr : 1fr : 2fr**，右栏内部纵向分为终端输出（上 50%）和执行面板（下 50%）。
 
@@ -160,20 +385,20 @@ flex: 1         // 执行面板区（占剩余空间）
 
 ---
 
-### 3.2 左栏：设备选择面板（DeviceTree）
+### 4.2 左栏：设备选择面板（DeviceTree）
 
 **组件文件**：`Console/components/DeviceTree.tsx`
 
 **状态管理 Hook**：`Console/hooks/useDeviceSelection.ts`
 
-#### 3.2.1 面板头部
+#### 4.2.1 面板头部
 
 | 元素 | 规格 |
 |------|------|
 | 标题 | "设备名称" + 已选数量 Badge（蓝色 Tag，数字为 `selectedDevices.length`） |
 | 批量输入按钮 | `Button` size="small" type="primary" ghost，图标 `UserAddOutlined`，文本"批量输入"，点击触发 `setBatchSnModalOpen(true)` |
 
-#### 3.2.2 搜索框
+#### 4.2.2 搜索框
 
 | 属性 | 值 |
 |------|-----|
@@ -182,7 +407,7 @@ flex: 1         // 执行面板区（占剩余空间）
 | 前缀图标 | `SearchOutlined` |
 | 功能 | `allowClear`，`onChange` → `onSearchChange`，支持 SN/名称模糊搜索 |
 
-#### 3.2.3 产品类型筛选下拉框
+#### 4.2.3 产品类型筛选下拉框
 
 | 属性 | 值 |
 |------|-----|
@@ -204,7 +429,7 @@ flex: 1         // 执行面板区（占剩余空间）
 
 ![设备类型筛选下拉框](/tmp/mml_v2_06_device_filter.png)
 
-#### 3.2.4 全选复选框
+#### 4.2.4 全选复选框
 
 | 属性 | 值 |
 |------|-----|
@@ -215,7 +440,7 @@ flex: 1         // 执行面板区（占剩余空间）
 | 文本 | "全选 (当前页已选/全部过滤数)" |
 | disabled | `totalFiltered === 0` 时禁用 |
 
-#### 3.2.5 设备列表
+#### 4.2.5 设备列表
 
 | 属性 | 值 |
 |------|-----|
@@ -233,7 +458,7 @@ flex: 1         // 执行面板区（占剩余空间）
 | 设备名称（副行） | `colorTextSecondary`，fontSize: 10，超长省略 |
 | 类型 Tag | `device.type`（eNB/gNB/GSM 等），背景 `colorBgLayout` |
 
-#### 3.2.6 分页
+#### 4.2.6 分页
 
 | 属性 | 值 |
 |------|-----|
@@ -241,7 +466,7 @@ flex: 1         // 执行面板区（占剩余空间）
 | 每页条数 | 8（`DEVICE_PAGE_SIZE`） |
 | 显示条件 | `totalPages > 1` 时显示 |
 
-#### 3.2.7 已选设备 Tag 展示区
+#### 4.2.7 已选设备 Tag 展示区
 
 仅当 `selectedDevices.length > 0` 时显示：
 
@@ -252,7 +477,7 @@ flex: 1         // 执行面板区（占剩余空间）
 
 ![设备选择左栏](/tmp/mml_v2_03_device_panel.png)
 
-#### 3.2.8 Mock 设备数据（`DEVICE_LIST`）
+#### 4.2.8 Mock 设备数据（`DEVICE_LIST`）
 
 当前前端使用 Mock 数据（`Console/constants.ts`），共 16 台设备：
 
@@ -277,7 +502,7 @@ flex: 1         // 执行面板区（占剩余空间）
 
 ---
 
-### 3.3 批量输入弹窗（BatchSnModal）
+### 4.3 批量输入弹窗（BatchSnModal）
 
 **组件文件**：`Console/components/BatchSnModal.tsx`
 
@@ -319,27 +544,27 @@ inputValue.split(/[\n,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
 
 ---
 
-### 3.4 中栏：命令树面板（CommandTree）
+### 4.4 中栏：命令树面板（CommandTree）
 
 **组件文件**：`Console/components/CommandTree.tsx`
 
 **状态管理 Hook**：`Console/hooks/useCommandSelection.ts`
 
-#### 3.4.1 面板头部
+#### 4.4.1 面板头部
 
 | 元素 | 说明 |
 |------|------|
 | 标题 | "命令树"（来自 i18n `nav.mml.commands`） |
 | 已选命令 Badge | 仅有选中命令时显示，展示 `commandCode`，monospace 字体，蓝色边框圆角 Tag |
 
-#### 3.4.2 搜索框
+#### 4.4.2 搜索框
 
 | 属性 | 值 |
 |------|-----|
 | placeholder | 搜索（i18n） |
 | 功能 | allowClear，过滤 `commandName` 和 `commandCode` |
 
-#### 3.4.3 分类筛选下拉框
+#### 4.4.3 分类筛选下拉框
 
 | 属性 | 值 |
 |------|-----|
@@ -347,7 +572,7 @@ inputValue.split(/[\n,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
 | 选项 | 动态生成自 `categories`（来自 `MOCK_COMMANDS` 的 category 字段集合） |
 | allowClear | true |
 
-#### 3.4.4 命令树结构
+#### 4.4.4 命令树结构
 
 使用 Ant Design `Tree` 组件，`showLine={{ showLeafIcon: false }}`，默认展开所有分类节点。
 
@@ -382,7 +607,7 @@ inputValue.split(/[\n,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
 
 ![命令树展开状态（选中高亮）](/tmp/mml_v2_08_cmd_tree_expanded.png)
 
-#### 3.4.5 命令树交互
+#### 4.4.5 命令树交互
 
 - 点击命令节点 → 调用 `onSelectCommand(cmd)`，更新 `selectedCommand`
 - 已选中命令的节点背景高亮（蓝色）
@@ -390,11 +615,11 @@ inputValue.split(/[\n,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
 
 ---
 
-### 3.5 右栏：执行面板
+### 4.5 右栏：执行面板
 
 右栏由两个子区域组成，均封装在独立组件中。
 
-#### 3.5.1 终端输出区（TerminalPanel）
+#### 4.5.1 终端输出区（TerminalPanel）
 
 **组件文件**：`Console/components/TerminalPanel.tsx`
 
@@ -442,7 +667,7 @@ interface TerminalLine {
 
 **自动滚动**：每次 `lines` 变化时，`containerRef.current.scrollTop = scrollHeight`。
 
-#### 3.5.2 执行面板（CommandInput）
+#### 4.5.2 执行面板（CommandInput）
 
 **组件文件**：`Console/components/CommandInput.tsx`
 
@@ -462,7 +687,7 @@ interface TerminalLine {
 
 ---
 
-#### 3.5.3 控制面板 Tab（参数动态表单）
+#### 4.5.3 控制面板 Tab（参数动态表单）
 
 **组件**：`Form` layout="vertical" size="small"
 
@@ -487,7 +712,7 @@ interface TerminalLine {
 
 ---
 
-#### 3.5.4 参数路径指定 Tab
+#### 4.5.4 参数路径指定 Tab
 
 **操作类型下拉框**：
 
@@ -528,7 +753,7 @@ interface TerminalLine {
 
 ---
 
-#### 3.5.5 命令输入栏（控制面板 Tab 专属）
+#### 4.5.5 命令输入栏（控制面板 Tab 专属）
 
 | 元素 | 说明 |
 |------|------|
@@ -539,7 +764,7 @@ interface TerminalLine {
 | 执行按钮 | `Button` type="primary" icon=`PlayCircleOutlined` "执行" |
 | 禁用条件 | `selectedDevices.length === 0 || !selectedCommand` |
 
-#### 3.5.6 底部操作栏
+#### 4.5.6 底部操作栏
 
 | 元素 | 说明 |
 |------|------|
@@ -548,7 +773,7 @@ interface TerminalLine {
 | 重置按钮 | `ReloadOutlined`，调用 `onReset`（清空设备/命令/输出/参数） |
 | 保存脚本按钮 | `SaveOutlined`，仅控制面板 Tab 显示，`onSaveScript` 回调 |
 
-#### 3.5.7 危险命令确认弹窗
+#### 4.5.7 危险命令确认弹窗
 
 当执行以下命令前，弹出二次确认 `Modal`：
 
@@ -564,9 +789,9 @@ interface TerminalLine {
 
 ---
 
-### 3.6 组件层次与数据流
+### 4.6 组件层次与数据流
 
-#### 3.6.1 React 组件树
+#### 4.6.1 React 组件树
 
 ```
 MMLConsole (index.tsx)
@@ -600,7 +825,7 @@ MMLConsole (index.tsx)
     └── props: open, onClose, onConfirm, existingSns, allDeviceSns
 ```
 
-#### 3.6.2 状态管理（Hooks）
+#### 4.6.2 状态管理（Hooks）
 
 | Hook | 文件 | 管理的状态 |
 |------|------|---------|
@@ -609,7 +834,7 @@ MMLConsole (index.tsx)
 | `useCommandExecution` | `hooks/useCommandExecution.ts` | 命令执行、输出行、loading 状态 |
 | `useState` | `index.tsx` | `batchSnModalOpen`、`paramValues` |
 
-#### 3.6.3 数据流向图
+#### 4.6.3 数据流向图
 
 ```
 用户选择设备                     用户选择命令
@@ -637,11 +862,11 @@ useDeviceSelection               useCommandSelection
 
 ---
 
-### 3.7 API 接口设计
+### 4.7 API 接口设计
 
 > **当前已注册 24 个 API 端点**（MML 主模块 20 个 + 参数库 4 个），MML 主模块在 `omcgo/internal/mml/handler.go` 中实现，参数库在 `omcgo/internal/mml/param_handler.go` 中实现，均通过 `permGroup("devices")` 注册到 `/api/v1/mml/` 路径下。
 
-#### 3.7.0 完整 API 端点一览
+#### 4.7.0 完整 API 端点一览
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -673,7 +898,7 @@ useDeviceSelection               useCommandSelection
 | GET | `/mml/param-versions/:version/groups/:groupId/params` | 获取分组的参数列表 |
 | GET | `/mml/param-versions/:version/params` | 搜索参数（支持 search/tr069_path 过滤） |
 
-#### 3.7.1 获取命令列表
+#### 4.7.1 获取命令列表
 
 ```
 GET /api/v1/mml/commands
@@ -722,7 +947,7 @@ param_template（JSONB）→ MMLParam[]（通过 mapParamTemplate 函数解析�
 product_types（null 时取 []）→ productTypes
 ```
 
-#### 3.7.2 获取单个命令详情
+#### 4.7.2 获取单个命令详情
 
 ```
 GET /api/v1/mml/commands/:id
@@ -730,7 +955,7 @@ GET /api/v1/mml/commands/:id
 
 响应体：同列表中单条命令结构（`BackendMMLCommand`）。
 
-#### 3.7.3 执行 MML 命令
+#### 4.7.3 执行 MML 命令
 
 ```
 POST /api/v1/mml/execute
@@ -811,9 +1036,9 @@ POST /api/v1/mml/execute
 
 ---
 
-### 3.8 数据模型
+### 4.8 数据模型
 
-#### 3.8.1 mml_commands 表
+#### 4.8.1 mml_commands 表
 
 ```sql
 CREATE TABLE mml_commands (
@@ -865,7 +1090,7 @@ CREATE INDEX IF NOT EXISTS idx_mml_commands_product_types_gin
 }
 ```
 
-#### 3.8.2 前端类型定义（`src/types/mml.ts`）
+#### 4.8.2 前端类型定义（`src/types/mml.ts`）
 
 ```typescript
 export type MMLParamType = 'string' | 'number' | 'boolean' | 'enum' | 'range' | 'ipAddress' | 'list' | 'unsignedInt';
@@ -905,7 +1130,7 @@ export interface MMLCommand {
 }
 ```
 
-#### 3.8.3 控制台本地类型（`Console/types.ts`）
+#### 4.8.3 控制台本地类型（`Console/types.ts`）
 
 ```typescript
 // 设备状态颜色
@@ -925,9 +1150,9 @@ export interface TerminalLine {
 
 ---
 
-## 4. MML 脚本任务（/mml/script）
+## 5. MML 脚本任务（/mml/script）
 
-### 4.1 页面布局
+### 5.1 页面布局
 
 采用 `ListPageLayout` 组件（标准列表页布局）：
 
@@ -951,7 +1176,7 @@ export interface TerminalLine {
 
 ---
 
-### 4.2 搜索筛选区域
+### 5.2 搜索筛选区域
 
 使用 `FilterBar` 组件，`filterId="mml-script-task"`。
 
@@ -985,7 +1210,7 @@ export interface TerminalLine {
 
 ---
 
-### 4.3 工具栏
+### 5.3 工具栏
 
 | 元素 | 说明 |
 |------|------|
@@ -995,11 +1220,11 @@ export interface TerminalLine {
 
 ---
 
-### 4.4 任务列表表格
+### 5.4 任务列表表格
 
 使用 `DataTable<ScriptRow>` 组件，`tableId="script-task"`，`scroll={{ x: 1400 }}`。
 
-#### 4.4.1 列定义
+#### 5.4.1 列定义
 
 | key | 标题 | dataIndex | 宽度 | 说明 |
 |-----|------|-----------|------|------|
@@ -1014,7 +1239,7 @@ export interface TerminalLine {
 | START_TIME | 开始时间 | START_TIME | 140px | - |
 | END_TIME | 结束时间 | END_TIME | 140px | - |
 
-#### 4.4.2 类型 Tag（CREATE_STATUS_MAP）
+#### 5.4.2 类型 Tag（CREATE_STATUS_MAP）
 
 | value | text | color |
 |-------|------|-------|
@@ -1023,7 +1248,7 @@ export interface TerminalLine {
 | timing | 定时执行 | blue |
 | period | 周期任务 | purple |
 
-#### 4.4.3 状态 Tag（TASK_STATUS_MAP）
+#### 5.4.3 状态 Tag（TASK_STATUS_MAP）
 
 | value | text | color |
 |-------|------|-------|
@@ -1034,7 +1259,7 @@ export interface TerminalLine {
 | terminated | 已终止 | error |
 | exception | 异常 | error |
 
-#### 4.4.4 结果 Tag（TASK_RESULT_MAP）
+#### 5.4.4 结果 Tag（TASK_RESULT_MAP）
 
 | value | text | color |
 |-------|------|-------|
@@ -1044,7 +1269,7 @@ export interface TerminalLine {
 
 ![任务列表表格](/tmp/mml_v2_14_task_table.png)
 
-#### 4.4.5 操作列按钮
+#### 5.4.5 操作列按钮
 
 操作列渲染两个按钮：
 
@@ -1065,13 +1290,13 @@ export interface TerminalLine {
 
 ---
 
-### 4.5 新建任务 Drawer
+### 5.5 新建任务 Drawer
 
 **组件**：`Drawer` 宽度 560px，`destroyOnClose`，标题"新建MML脚本任务"
 
 ![新建任务表单](/tmp/mml_v2_15_new_task.png)
 
-#### 4.5.1 基本信息分区
+#### 5.5.1 基本信息分区
 
 **标识**：蓝色竖条 + "基本信息" 文字
 
@@ -1095,7 +1320,7 @@ beforeUpload: (file) => {
 }
 ```
 
-#### 4.5.2 执行方式分区
+#### 5.5.2 执行方式分区
 
 **标识**：蓝色竖条 + "选择执行方式" 文字
 
@@ -1110,7 +1335,7 @@ beforeUpload: (file) => {
 
 > 周期任务的 Radio 使用独立 `Form.Item`（使用受控模式 `checked={executeType === 'period'}`）
 
-#### 4.5.3 执行策略分区
+#### 5.5.3 执行策略分区
 
 **标识**：蓝色竖条 + "执行策略" 文字
 
@@ -1151,7 +1376,7 @@ addForm.setFieldsValue({
 - "取消"：关闭 Drawer
 - "确定"：`addForm.validateFields()` → `handleAddTask()`
 
-#### 4.5.4 AddTaskForm 接口定义
+#### 5.5.4 AddTaskForm 接口定义
 
 ```typescript
 interface AddTaskForm {
@@ -1172,7 +1397,7 @@ interface AddTaskForm {
 
 ---
 
-### 4.6 任务详情弹窗
+### 5.6 任务详情弹窗
 
 | 属性 | 值 |
 |------|-----|
@@ -1184,7 +1409,7 @@ interface AddTaskForm {
 
 ---
 
-### 4.7 任务状态流转
+### 5.7 任务状态流转
 
 ```
                           ┌───────────────┐
@@ -1231,9 +1456,9 @@ interface AddTaskForm {
 
 ---
 
-### 4.8 API 接口设计
+### 5.8 API 接口设计
 
-#### 4.8.1 获取脚本列表（实际用于脚本任务数据查询）
+#### 5.8.1 获取脚本列表（实际用于脚本任务数据查询）
 
 ```
 GET /api/v1/mml/scripts
@@ -1271,7 +1496,7 @@ GET /api/v1/mml/scripts
 }
 ```
 
-#### 4.8.2 获取任务列表
+#### 5.8.2 获取任务列表
 
 ```
 GET /api/v1/mml/tasks
@@ -1285,7 +1510,7 @@ GET /api/v1/mml/tasks
 
 **响应体**（同脚本列表格式，`items` 为 `MMLTask[]`）
 
-#### 4.8.3 创建脚本
+#### 5.8.3 创建脚本
 
 ```
 POST /api/v1/mml/scripts
@@ -1303,7 +1528,7 @@ POST /api/v1/mml/scripts
 }
 ```
 
-#### 4.8.4 更新脚本
+#### 5.8.4 更新脚本
 
 ```
 PUT /api/v1/mml/scripts/:id
@@ -1311,7 +1536,7 @@ PUT /api/v1/mml/scripts/:id
 
 请求体同创建接口（`script_name` + `content` 必填）。
 
-#### 4.8.5 删除脚本
+#### 5.8.5 删除脚本
 
 ```
 DELETE /api/v1/mml/scripts/:id
@@ -1319,7 +1544,7 @@ DELETE /api/v1/mml/scripts/:id
 
 返回 `204 No Content`。
 
-#### 4.8.6 任务控制接口（已实现）
+#### 5.8.6 任务控制接口（已实现）
 
 ```
 POST /api/v1/mml/tasks/:id/start      启动挂起/暂停的任务（pending/paused → running）
@@ -1340,9 +1565,9 @@ GET /api/v1/mml/tasks/:id/results     获取任务结果明细（支持分页）
 
 ---
 
-### 4.9 数据模型
+### 5.9 数据模型
 
-#### 4.9.1 mml_scripts 表
+#### 5.9.1 mml_scripts 表
 
 ```sql
 CREATE TABLE mml_scripts (
@@ -1364,7 +1589,7 @@ CREATE TRIGGER trigger_mml_scripts_updated_at
 CREATE INDEX IF NOT EXISTS idx_mml_scripts_tags_gin ON mml_scripts USING GIN (tags);
 ```
 
-#### 4.9.2 mml_tasks 表
+#### 5.9.2 mml_tasks 表
 
 ```sql
 CREATE TABLE mml_tasks (
@@ -1485,7 +1710,7 @@ type MMLTask struct {
 }
 ```
 
-#### 4.9.3 mml_templates 表（已实现）
+#### 5.9.3 mml_templates 表（已实现）
 
 ```sql
 CREATE TABLE mml_templates (
@@ -1512,7 +1737,7 @@ CREATE INDEX idx_mml_templates_product_types_gin ON mml_templates USING GIN (pro
 CREATE INDEX idx_mml_templates_parameters_gin ON mml_templates USING GIN (parameters);
 ```
 
-#### 4.9.4 mml_audit_log 表（已建表，写入逻辑待实现）
+#### 5.9.4 mml_audit_log 表（已建表，写入逻辑待实现）
 
 ```sql
 CREATE TABLE mml_audit_log (
@@ -1536,7 +1761,7 @@ CREATE INDEX idx_mml_audit_creator ON mml_audit_log(creator);
 CREATE INDEX idx_mml_audit_executed_at ON mml_audit_log(executed_at DESC);
 ```
 
-#### 4.9.5 参数库表结构（已建表 + 后端模块已实现）
+#### 5.9.5 参数库表结构（已建表 + 后端模块已实现）
 
 > 参数库用于管理 TR-069 设备参数的版本化定义，支持按产品型号和软件版本匹配参数集。迁移文件：`migrations/000022_mml_param_library.sql`，种子数据：`migrations/seed/000005_seed_mml_param_library.sql`（24 个版本、1919 个分组、7226 条参数）。
 >
@@ -1634,9 +1859,9 @@ CREATE TABLE mml_group_param_rel (
 
 ---
 
-## 5. 命令执行引擎
+## 6. 命令执行引擎
 
-### 5.1 完整执行流程图
+### 6.1 完整执行流程图
 
 ```
 前端用户操作（MML 控制台）
@@ -1695,7 +1920,7 @@ TR-069 SOAP 请求发送到设备
 GET /api/v1/mml/tasks/:id
 ```
 
-### 5.2 RPC 方法映射
+### 6.2 RPC 方法映射
 
 | 操作类型 | rpc_method | TR-069 SOAP Action | 说明 |
 |---------|-----------|-------------------|------|
@@ -1718,7 +1943,7 @@ GET /api/v1/mml/tasks/:id
 | DeleteObject | ❌ 待实现 |
 | GetParameterNames | ⚠️ 部分支持 |
 
-### 5.3 参数验证规则
+### 6.3 参数验证规则
 
 | 参数类型 | 前端验证 |
 |---------|---------|
@@ -1730,7 +1955,7 @@ GET /api/v1/mml/tasks/:id
 | ipAddress | IPv4/IPv6 格式正则 |
 | list | 逗号分隔，每项独立校验 |
 
-### 5.4 结果解析与展示
+### 6.4 结果解析与展示
 
 **results JSONB 中每条记录结构**：
 
@@ -1760,7 +1985,7 @@ GET /api/v1/mml/tasks/:id
 [HH:mm:ss] ✓ 命令执行完成，共处理 N 台设备  → type: success（#B7EB8F）
 ```
 
-### 5.5 错误处理
+### 6.5 错误处理
 
 | 错误类型 | 前端处理 |
 |---------|---------|
@@ -1771,7 +1996,7 @@ GET /api/v1/mml/tasks/:id
 | 设备离线 | 根据 offline_retry 策略（后端），前端展示结果状态 |
 | RPC 超时 | 默认 60s，超时后标记 success=false |
 
-### 5.6 批量执行策略
+### 6.6 批量执行策略
 
 | 维度 | 当前实现 | 建议目标 |
 |------|---------|---------|
@@ -1782,9 +2007,9 @@ GET /api/v1/mml/tasks/:id
 
 ---
 
-## 6. 操作类型详解
+## 7. 操作类型详解
 
-### 6.1 操作类型总表
+### 7.1 操作类型总表
 
 | 操作类型 | 中文含义 | TR-069 RPC | 典型命令模式 | 是否改变设备配置 | 是否要求危险确认 |
 |---------|----------|------------|--------------|------------------|------------------|
@@ -1799,9 +2024,9 @@ GET /api/v1/mml/tasks/:id
 | CLR | 清除 | `SetParameterValues` | `CLR ALM` | 是 | 否 |
 | UPG | 升级 | `Download` | `UPG PKG` | 是 | 是 |
 
-### 6.2 LST（查询）
+### 7.2 LST（查询）
 
-#### 6.2.1 含义与适用场景
+#### 7.2.1 含义与适用场景
 
 LST 用于读取设备当前配置、运行状态、告警、性能等只读信息，不修改设备配置。适合以下场景：
 
@@ -1809,13 +2034,13 @@ LST 用于读取设备当前配置、运行状态、告警、性能等只读信�
 - 故障定位：查询告警、参数、链路状态。
 - 批量核查：对大量设备统一读取相同参数。
 
-#### 6.2.2 RPC 映射
+#### 7.2.2 RPC 映射
 
 ```text
 MML LST → TR-069 GetParameterValues → 返回参数树当前值
 ```
 
-#### 6.2.3 参数规则
+#### 7.2.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1824,16 +2049,16 @@ MML LST → TR-069 GetParameterValues → 返回参数树当前值
 | 参数路径 | 支持在“参数路径指定”Tab 中录入 TR-069 完整路径 |
 | 返回结果 | 可能为表格型、键值型、纯文本型 |
 
-#### 6.2.4 UI 行为
+#### 7.2.4 UI 行为
 
 - 默认操作类型为 `LST`。
 - 动态参数表单中通常仅显示查询条件。
 - 执行后优先在 [CommandInput](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandInput.tsx) 和 [TerminalPanel](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/TerminalPanel.tsx) 展示结果摘要。
 - 结果明细应通过任务详情接口轮询补全。
 
-### 6.3 MOD（修改）
+### 7.3 MOD（修改）
 
-#### 6.3.1 含义与适用场景
+#### 7.3.1 含义与适用场景
 
 MOD 用于修改已存在参数值，如开关状态、频点、功率、阈值等。属于高风险操作。
 
@@ -1842,13 +2067,13 @@ MOD 用于修改已存在参数值，如开关状态、频点、功率、阈值�
 - 调整小区参数。
 - 清除告警标志、改变设备状态。
 
-#### 6.3.2 RPC 映射
+#### 7.3.2 RPC 映射
 
 ```text
 MML MOD → TR-069 SetParameterValues → 写入参数值
 ```
 
-#### 6.3.3 参数规则
+#### 7.3.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1857,25 +2082,25 @@ MML MOD → TR-069 SetParameterValues → 写入参数值
 | enum 校验 | 值必须在 `options` 集合中 |
 | 批量执行 | 建议按设备逐台记录结果，避免整体回滚语义不清 |
 
-#### 6.3.4 安全要求
+#### 7.3.4 安全要求
 
 - 命令码命中危险模式时必须二次确认。
 - 审计日志需记录操作者、旧值（如可取）、新值、设备 SN、时间戳。
 - 默认仅管理员或具备 `mml.console.execute.write` 权限的角色可执行。
 
-### 6.4 ADD（增加）
+### 7.4 ADD（增加）
 
-#### 6.4.1 含义与适用场景
+#### 7.4.1 含义与适用场景
 
 ADD 用于在 TR-069 对象树中增加实例，例如新增邻区、端口、规则项、路由项等。
 
-#### 6.4.2 RPC 映射
+#### 7.4.2 RPC 映射
 
 ```text
 MML ADD → TR-069 AddObject → 返回 instance number / status
 ```
 
-#### 6.4.3 参数规则
+#### 7.4.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1883,23 +2108,23 @@ MML ADD → TR-069 AddObject → 返回 instance number / status
 | 新建后补写参数 | 如返回对象实例号，系统应串接后续 `SetParameterValues` |
 | 结果处理 | 响应需保存新实例号，便于后续显示和回滚 |
 
-#### 6.4.4 实施注意
+#### 7.4.4 实施注意
 
 当前后端模型和执行引擎仅完成 `ExecuteCommand` 框架，[service.go](file:///Users/cb/code/baicells/goomc/omcgo/internal/mml/service.go) 与 [handler.go](file:///Users/cb/code/baicells/goomc/omcgo/internal/mml/handler.go) 尚未体现 `AddObject` 的完整执行逻辑，因此本类型属于待实现项。
 
-### 6.5 RMV（删除）
+### 7.5 RMV（删除）
 
-#### 6.5.1 含义与适用场景
+#### 7.5.1 含义与适用场景
 
 RMV 用于删除对象实例，如删除邻区、规则项、临时策略等。
 
-#### 6.5.2 RPC 映射
+#### 7.5.2 RPC 映射
 
 ```text
 MML RMV → TR-069 DeleteObject → 删除目标实例
 ```
 
-#### 6.5.3 参数规则
+#### 7.5.3 参数规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1907,7 +2132,7 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 | 删除前确认 | 必须弹出危险操作确认框 |
 | 删除后刷新 | 建议自动触发一次 LST 校验对象是否已删除 |
 
-### 6.6 操作类型与参数路径联动规则
+### 7.6 操作类型与参数路径联动规则
 
 | 场景 | UI 行为 | 后端要求 |
 |------|---------|---------|
@@ -1918,9 +2143,9 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 
 ---
 
-## 7. 自定义命令模板
+## 8. 自定义命令模板
 
-### 7.1 模板目标与范围
+### 8.1 模板目标与范围
 
 自定义命令模板用于沉淀常用参数组合，减少重复录入，提高批量维护效率。模板与脚本不同：
 
@@ -1934,7 +2159,7 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 | PrivateTemplate | 私有模板 | 仅创建者本人 |
 | PublicTemplate | 公共模板 | 有读取权限的全部用户 |
 
-### 7.2 业务规则
+### 8.2 业务规则
 
 | 规则 | 说明 |
 |------|------|
@@ -1946,9 +2171,9 @@ MML RMV → TR-069 DeleteObject → 删除目标实例
 | 产品类型限制 | 可选绑定 `product_types`，仅在匹配设备型号时显示 |
 | 删除规则 | PublicTemplate 仅创建者或管理员可删除 |
 
-### 7.3 推荐数据模型
+### 8.3 推荐数据模型
 
-#### 7.3.1 mml_templates 表 DDL
+#### 8.3.1 mml_templates 表 DDL
 
 ```sql
 CREATE TABLE mml_templates (
@@ -1974,7 +2199,7 @@ CREATE INDEX idx_mml_templates_product_types_gin ON mml_templates USING GIN (pro
 CREATE INDEX idx_mml_templates_parameters_gin ON mml_templates USING GIN (parameters);
 ```
 
-#### 7.3.2 前端类型建议
+#### 8.3.2 前端类型建议
 
 ```typescript
 interface MMLTemplate {
@@ -1993,11 +2218,11 @@ interface MMLTemplate {
 }
 ```
 
-### 7.4 API 设计（已实现）
+### 8.4 API 设计（已实现）
 
 > 模板 CRUD 已在 `omcgo/internal/mml/handler.go` 和 `service.go` 中完整实现，包含 6 个端点。
 
-#### 7.4.1 查询模板列表
+#### 8.4.1 查询模板列表
 
 ```text
 GET /api/v1/mml/templates
@@ -2040,7 +2265,7 @@ GET /api/v1/mml/templates
 }
 ```
 
-#### 7.4.2 创建模板
+#### 8.4.2 创建模板
 
 ```text
 POST /api/v1/mml/templates
@@ -2063,25 +2288,25 @@ POST /api/v1/mml/templates
 }
 ```
 
-#### 7.4.3 更新模板
+#### 8.4.3 更新模板
 
 ```text
 PUT /api/v1/mml/templates/:id
 ```
 
-#### 7.4.4 删除模板
+#### 8.4.4 删除模板
 
 ```text
 DELETE /api/v1/mml/templates/:id
 ```
 
-#### 7.4.5 复制公共模板为私有模板
+#### 8.4.5 复制公共模板为私有模板
 
 ```text
 POST /api/v1/mml/templates/:id/clone
 ```
 
-### 7.5 前端交互实现
+### 8.5 前端交互实现
 
 | 位置 | 行为 | 状态 |
 |------|------|------|
@@ -2098,7 +2323,7 @@ POST /api/v1/mml/templates/:id/clone
 | 控制面板 Tab | 增加“从模板加载”下拉 |
 | 参数路径 Tab | 加载模板时同步恢复 `operationType` 与 `paramPaths` |
 
-### 7.6 权限规则
+### 8.6 权限规则
 
 | 动作 | 普通用户 | 运维管理员 | 系统管理员 |
 |------|----------|------------|------------|
@@ -2110,9 +2335,9 @@ POST /api/v1/mml/templates/:id/clone
 
 ---
 
-## 8. 内置命令种子数据
+## 9. 内置命令种子数据
 
-### 8.1 当前命令分类树（已落库）
+### 9.1 当前命令分类树（已落库）
 
 以下分类树基于种子数据 `migrations/seed/000018_mml_enhance.sql`，共 **25 条命令** 跨 **7 个分类**，分类使用字典编码（`mml_command_category`）。
 
@@ -2157,7 +2382,7 @@ POST /api/v1/mml/templates/:id/clone
 └── UPG PKG          升级软件包          UPG
 ```
 
-### 8.2 种子数据设计原则
+### 9.2 种子数据设计原则
 
 | 原则 | 说明 |
 |------|------|
@@ -2167,7 +2392,7 @@ POST /api/v1/mml/templates/:id/clone
 | param_template 为 JSONB | 直接驱动动态表单渲染 |
 | product_types 精确 | 前端根据设备型号过滤可用命令 |
 
-### 8.3 内置命令种子 SQL
+### 9.3 内置命令种子 SQL
 
 > 完整种子数据见 `omcgo/migrations/seed/000018_mml_enhance.sql`，共 25 条命令，使用 `ON CONFLICT (command_code) DO UPDATE` 实现幂等写入。下方展示关键结构示例：
 
@@ -2238,7 +2463,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 ('版本管理', '7', 7, ...);
 ```
 
-### 8.4 初始化与刷新策略
+### 9.4 初始化与刷新策略
 
 | 场景 | 建议 |
 |------|------|
@@ -2249,9 +2474,9 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 
 ---
 
-## 9. 前端技术方案
+## 10. 前端技术方案
 
-### 9.1 组件架构图
+### 10.1 组件架构图
 
 ```text
 页面层
@@ -2282,7 +2507,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 └── mmlApi / mmlService(apiSwitch)
 ```
 
-### 9.2 状态管理
+### 10.2 状态管理
 
 | 层次 | 实现方式 | 说明 |
 |------|----------|------|
@@ -2291,7 +2516,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 服务端缓存 | TanStack Query | 命令、脚本、任务列表查询 |
 | 主题与国际化 | `useThemeToken`、`useT` | 统一颜色 Token 与文案翻译 |
 
-### 9.3 API 接入层
+### 10.3 API 接入层
 
 当前接入通过 [useMML](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/hooks/api/useMML.ts) 中的 `createApiSwitch(mmlService, mmlApi)` 实现 Mock / Real API 可切换。
 
@@ -2301,13 +2526,13 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | API 层 | [mmlApi.ts](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/services/api/mmlApi.ts) | HTTP 调用、snake_case → camelCase 映射 |
 | Mock 层 | [mmlService.ts](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/mock/services/mmlService.ts) | 本地假数据与延时模拟 |
 
-### 9.4 i18n 方案
+### 10.4 i18n 方案
 
 - 控制台标题、搜索框、命令树标题等已使用 `useT()` 获取国际化文案。
 - 命令分类在 [zh-CN 词条](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/i18n/zh-CN/index.ts) 与 [en-US 词条](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/i18n/en-US/index.ts) 中已有基础定义。
 - 建议将脚本任务页当前硬编码中文文案也迁移至 i18n，以支持国际版本。
 
-### 9.5 Mock 数据策略
+### 10.5 Mock 数据策略
 
 | 模块 | 当前策略 | 后续要求 |
 |------|---------|---------|
@@ -2316,13 +2541,13 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 执行结果 | Mock 服务直接返回 `MMLResult[]` | 真实接口返回任务对象 + 轮询 |
 | 脚本任务页 | 本地表格数据 + 前端过滤 | 切换为服务端分页与过滤 |
 
-### 9.6 推荐前端改造步骤
+### 10.6 推荐前端改造步骤
 
 1. 先完成命令树与脚本/任务列表的真实接口接入。
 2. 再补齐控制台执行结果轮询和任务详情展示。
 3. 最后实现模板系统、脚本上传解析、结果导出。
 
-### 9.7 页面级错误与空状态规范
+### 10.7 页面级错误与空状态规范
 
 | 场景 | 组件表现 |
 |------|---------|
@@ -2333,9 +2558,9 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 
 ---
 
-## 10. 权限与安全
+## 11. 权限与安全
 
-### 10.1 权限矩阵
+### 11.1 权限矩阵
 
 | 功能 | 权限编码建议 | 说明 |
 |------|--------------|------|
@@ -2347,14 +2572,14 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 控制任务 | `mml.script.control` | 启动/暂停/终止/删除 |
 | 管理公共模板 | `mml.template.public.manage` | 创建/编辑/删除公共模板 |
 
-### 10.2 前端安全控制
+### 11.2 前端安全控制
 
 - 页面路由需按权限控制菜单显隐。
 - 写操作按钮无权限时直接禁用，并显示 Tooltip 提示。
 - 危险命令必须弹出二次确认，确认信息中展示命令名、设备数、影响说明。
 - 文件上传仅允许 `.txt`，并限制大小与 MIME。
 
-### 10.3 后端安全控制
+### 11.3 后端安全控制
 
 | 项目 | 设计要求 |
 |------|---------|
@@ -2365,20 +2590,20 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | SQL 安全 | 使用参数化查询 / Query Builder |
 | 数据隔离 | 私有模板与私有脚本需按 creator 过滤 |
 
-### 10.4 危险命令防护
+### 11.4 危险命令防护
 
 当前前端已在 [CommandInput](file:///Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/mml/Console/components/CommandInput.tsx) 内置危险命令正则。后端还需增加同等校验，避免绕过前端直接调用接口。
 
-### 10.5 数据脱敏与导出控制
+### 11.5 数据脱敏与导出控制
 
 - 终端导出结果中如包含 IP、认证信息、密钥参数，应支持脱敏导出。
 - 公共模板与公共脚本导出时不得包含用户私有标签与备注。
 
 ---
 
-## 11. 非功能需求
+## 12. 非功能需求
 
-### 11.1 性能要求
+### 12.1 性能要求
 
 | 指标 | 目标值 |
 |------|--------|
@@ -2388,7 +2613,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 单批次执行任务创建 | ≤ 500ms 返回 task id |
 | 100 台设备批量执行调度启动 | ≤ 5s 完成任务入队 |
 
-### 11.2 可用性要求
+### 12.2 可用性要求
 
 | 项目 | 要求 |
 |------|------|
@@ -2396,13 +2621,13 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 失败恢复 | ACS Worker 重启后可继续消费 `pending/running` 任务 |
 | 幂等性 | 重试提交时通过业务 key 避免重复创建相同任务 |
 
-### 11.3 可观测性要求
+### 12.3 可观测性要求
 
 - 为 MML 执行链路增加 trace id。
 - 记录任务创建、出队、下发、回执、完成五个阶段日志。
 - 暴露 Prometheus 指标：任务创建数、成功率、平均耗时、超时数、失败原因分布。
 
-### 11.4 兼容性要求
+### 12.4 兼容性要求
 
 | 维度 | 要求 |
 |------|------|
@@ -2410,13 +2635,13 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 设备类型 | eNB、gNB、GSM（按 `product_types` 过滤能力） |
 | 响应格式 | 兼容纯文本结果与结构化 JSON 结果 |
 
-### 11.5 易用性要求
+### 12.5 易用性要求
 
 - 三栏布局在 1440px 宽度下不应出现水平滚动。
 - 参数过多时执行面板内部滚动，不影响终端输出区。
 - 常用操作支持键盘快捷键：执行 `Ctrl/Cmd+Enter`，保存 `Ctrl/Cmd+S`。
 
-### 11.6 可维护性要求
+### 12.6 可维护性要求
 
 - 命令参数模板必须来源于数据库 JSONB，不得在前端硬编码多份。
 - 任务状态枚举必须前后端统一并集中维护。
@@ -2424,9 +2649,9 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 
 ---
 
-## 12. 待完善事项与实施建议
+## 13. 待完善事项与实施建议
 
-### 12.1 当前 Mock vs 真实 API 对照
+### 13.1 当前 Mock vs 真实 API 对照
 
 | 项目 | Mock/前端现状 | 真实后端现状 | 对齐状态 |
 |------|---------------|--------------|---------|
@@ -2443,7 +2668,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 | 危险命令检测 | 前端正则 + `useDangerousCheck` | `GET /mml/dangerous-check` | ✅ 已实现 |
 | 任务轮询 | `useMMLTaskPolling` 2s 轮询 | `GET /mml/tasks/:id` | ✅ 已实现 |
 
-### 12.2 后端已实现清单
+### 13.2 后端已实现清单
 
 1. ✅ `GET /mml/scripts/:id` 脚本详情
 2. ✅ 任务启动 `start`、暂停 `pause`、取消 `cancel`、删除 `delete`、结果明细 `results` 接口
@@ -2460,7 +2685,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 13. ✅ 参数库模块（`param_handler.go`/`param_service.go`/`param_pg_repository.go`/`param_model.go`）— 4 个 API 端点 + 种子数据（24 版本/1919 分组/7226 参数）
 14. ✅ 参数库种子数据迁移（`000005_seed_mml_param_library.sql`）
 
-### 12.3 后端待实现清单
+### 13.3 后端待实现清单
 
 1. ACS Worker 消费 `mml_tasks` 中 `pending/running` 任务并下发 TR-069 SOAP 请求
 2. `AddObject`、`DeleteObject` 的完整执行逻辑
@@ -2468,7 +2693,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 4. 审计日志写入逻辑（表已建，service 层需在任务执行链路中写入）
 5. 批量执行并发控制（当前逐台串行，建议并发 10 台）
 
-### 12.4 前端已完善清单
+### 13.4 前端已完善清单
 
 1. ✅ 命令树已从 `MOCK_COMMANDS` 切换到真实接口 `useAllMMLCommands`
 2. ✅ `mmlApi.ts` 中 `pageSize`/`page_size`、`params`/`parameters` 通过 Axios 拦截器自动转换
@@ -2481,7 +2706,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 9. ✅ 产品类型和命令分类改为字典驱动（数字编码）
 10. ✅ Console 页面 i18n 基本完成（~110+ keys）
 
-### 12.5 前端待完善清单
+### 13.5 前端待完善清单
 
 1. 终端输出 `TerminalPanel` 中残留部分硬编码中文（”已复制到剪贴板”、”复制失败”、”等待命令输出...”等）
 2. `DeviceTree` 中部分 placeholder 和按钮文本仍为中文硬编码
@@ -2491,7 +2716,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 6. 设备列表仍使用本地 Mock 数据（`DEVICE_LIST`），需替换为真实设备查询接口
 7. 参数库前端集成：`mmlApi.ts` 中需新增参数库 API 调用（`getParamVersions`/`getParamGroupTree`/`getGroupParams`/`queryParams`），`CommandTree` 或独立面板中需接入参数库数据展示
 
-### 12.6 分阶段实施建议
+### 13.6 分阶段实施建议
 
 #### 第一阶段：接口对齐 ✅ 已完成
 - ✅ 统一任务状态枚举（6 种：pending/running/completed/failed/paused/cancelled）
@@ -2513,7 +2738,7 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 - ⬜ 定时/周期任务调度器
 - ⬜ 审计日志自动写入
 
-### 12.7 验收要点
+### 13.7 验收要点
 
 | 验收项 | 标准 | 状态 |
 |------|------|------|

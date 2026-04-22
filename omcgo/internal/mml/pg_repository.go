@@ -57,6 +57,7 @@ var commandColumns = []string{
 var scriptColumns = []string{
 	"id", "script_name", "description", "content",
 	"device_type", "creator", "tags",
+	"status", "start_time", "end_time", "type", "progress", "result",
 	"created_at", "updated_at",
 }
 
@@ -487,11 +488,12 @@ func (r *PgScriptRepository) List(ctx context.Context, filter ScriptFilter) (*mo
 
 func scanScript(row pgx.Row) (*MMLScript, error) {
 	var s MMLScript
-	var tagsJSON []byte
+	var tagsJSON, resultJSON []byte
 
 	err := row.Scan(
 		&s.ID, &s.ScriptName, &s.Description, &s.Content,
 		&s.DeviceType, &s.Creator, &tagsJSON,
+		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -504,17 +506,21 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
+	}
+	if resultJSON != nil && len(resultJSON) > 2 {
+		_ = json.Unmarshal(resultJSON, &s.Result)
 	}
 	return &s, nil
 }
 
 func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 	var s MMLScript
-	var tagsJSON []byte
+	var tagsJSON, resultJSON []byte
 
 	err := rows.Scan(
 		&s.ID, &s.ScriptName, &s.Description, &s.Content,
 		&s.DeviceType, &s.Creator, &tagsJSON,
+		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -527,6 +533,9 @@ func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 	}
 	if s.Tags == nil {
 		s.Tags = []string{}
+	}
+	if resultJSON != nil && len(resultJSON) > 2 {
+		_ = json.Unmarshal(resultJSON, &s.Result)
 	}
 	return &s, nil
 }
@@ -910,126 +919,126 @@ func joinColumns(cols []string) string {
 }
 
 // ======================================================================
-// PgTemplateRepository
+// PgCustomCommandRepository
 // ======================================================================
 
-var _ TemplateRepository = (*PgTemplateRepository)(nil)
+var _ CustomCommandRepository = (*PgCustomCommandRepository)(nil)
 
-var templateAllowedSortColumns = map[string]bool{
-	"template_name": true,
+var customCommandAllowedSortColumns = map[string]bool{
+	"command_name":  true,
 	"command_code":  true,
 	"operation_type": true,
-	"template_scope": true,
+	"command_scope": true,
 	"creator":       true,
 	"created_at":    true,
 	"updated_at":    true,
 }
 
-var templateColumns = []string{
-	"id", "template_name", "command_code", "operation_type",
-	"template_scope", "category_group", "parameters", "param_paths",
+var customCommandColumns = []string{
+	"id", "command_name", "command_code", "operation_type",
+	"command_scope", "category_group", "parameters", "param_paths",
 	"description", "product_types", "creator",
 	"created_at", "updated_at",
 }
 
-// PgTemplateRepository is a PostgreSQL implementation of TemplateRepository.
-type PgTemplateRepository struct {
+// PgCustomCommandRepository is a PostgreSQL implementation of CustomCommandRepository.
+type PgCustomCommandRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewPgTemplateRepository creates a new PgTemplateRepository.
-func NewPgTemplateRepository(pool *pgxpool.Pool) *PgTemplateRepository {
-	return &PgTemplateRepository{pool: pool}
+// NewPgCustomCommandRepository creates a new PgCustomCommandRepository.
+func NewPgCustomCommandRepository(pool *pgxpool.Pool) *PgCustomCommandRepository {
+	return &PgCustomCommandRepository{pool: pool}
 }
 
-func (r *PgTemplateRepository) Create(ctx context.Context, tmpl *MMLTemplate) error {
-	parametersJSON, err := json.Marshal(tmpl.Parameters)
+func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCommand) error {
+	parametersJSON, err := json.Marshal(cmd.Parameters)
 	if err != nil {
 		return fmt.Errorf("marshal parameters: %w", err)
 	}
-	paramPathsJSON, err := json.Marshal(tmpl.ParamPaths)
+	paramPathsJSON, err := json.Marshal(cmd.ParamPaths)
 	if err != nil {
 		return fmt.Errorf("marshal param_paths: %w", err)
 	}
-	productTypesJSON, err := json.Marshal(tmpl.ProductTypes)
+	productTypesJSON, err := json.Marshal(cmd.ProductTypes)
 	if err != nil {
 		return fmt.Errorf("marshal product_types: %w", err)
 	}
 
-	query, args, err := storage.Psql.Insert("mml_templates").
-		Columns("template_name", "command_code", "operation_type",
-			"template_scope", "category_group", "parameters", "param_paths",
+	query, args, err := storage.Psql.Insert("mml_custom_command").
+		Columns("command_name", "command_code", "operation_type",
+			"command_scope", "category_group", "parameters", "param_paths",
 			"description", "product_types", "creator").
-		Values(tmpl.TemplateName, tmpl.CommandCode, tmpl.OperationType,
-			tmpl.TemplateScope, tmpl.CategoryGroup, parametersJSON, paramPathsJSON,
-			tmpl.Description, productTypesJSON, tmpl.Creator).
-		Suffix("RETURNING " + joinColumns(templateColumns)).
+		Values(cmd.CommandName, cmd.CommandCode, cmd.OperationType,
+			cmd.CommandScope, cmd.CategoryGroup, parametersJSON, paramPathsJSON,
+			cmd.Description, productTypesJSON, cmd.Creator).
+		Suffix("RETURNING " + joinColumns(customCommandColumns)).
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("build insert mml_template SQL: %w", err)
+		return fmt.Errorf("build insert mml_custom_command SQL: %w", err)
 	}
 
 	row := r.pool.QueryRow(ctx, query, args...)
-	created, err := scanTemplate(row)
+	created, err := scanCustomCommand(row)
 	if err != nil {
-		return fmt.Errorf("create mml_template: %w", err)
+		return fmt.Errorf("create mml_custom_command: %w", err)
 	}
-	*tmpl = *created
+	*cmd = *created
 	return nil
 }
 
-func (r *PgTemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLTemplate, error) {
-	query, args, err := storage.Psql.Select(templateColumns...).
-		From("mml_templates").
+func (r *PgCustomCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error) {
+	query, args, err := storage.Psql.Select(customCommandColumns...).
+		From("mml_custom_command").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build get mml_template SQL: %w", err)
+		return nil, fmt.Errorf("build get mml_custom_command SQL: %w", err)
 	}
 
-	tmpl, err := scanTemplate(r.pool.QueryRow(ctx, query, args...))
+	cmd, err := scanCustomCommand(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("get mml_template: %w", err)
+		return nil, fmt.Errorf("get mml_custom_command: %w", err)
 	}
-	return tmpl, nil
+	return cmd, nil
 }
 
-func (r *PgTemplateRepository) Update(ctx context.Context, tmpl *MMLTemplate) error {
-	parametersJSON, err := json.Marshal(tmpl.Parameters)
+func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCommand) error {
+	parametersJSON, err := json.Marshal(cmd.Parameters)
 	if err != nil {
 		return fmt.Errorf("marshal parameters: %w", err)
 	}
-	paramPathsJSON, err := json.Marshal(tmpl.ParamPaths)
+	paramPathsJSON, err := json.Marshal(cmd.ParamPaths)
 	if err != nil {
 		return fmt.Errorf("marshal param_paths: %w", err)
 	}
-	productTypesJSON, err := json.Marshal(tmpl.ProductTypes)
+	productTypesJSON, err := json.Marshal(cmd.ProductTypes)
 	if err != nil {
 		return fmt.Errorf("marshal product_types: %w", err)
 	}
 
-	query, args, err := storage.Psql.Update("mml_templates").
-		Set("template_name", tmpl.TemplateName).
-		Set("command_code", tmpl.CommandCode).
-		Set("operation_type", tmpl.OperationType).
-		Set("template_scope", tmpl.TemplateScope).
-		Set("category_group", tmpl.CategoryGroup).
+	query, args, err := storage.Psql.Update("mml_custom_command").
+		Set("command_name", cmd.CommandName).
+		Set("command_code", cmd.CommandCode).
+		Set("operation_type", cmd.OperationType).
+		Set("command_scope", cmd.CommandScope).
+		Set("category_group", cmd.CategoryGroup).
 		Set("parameters", parametersJSON).
 		Set("param_paths", paramPathsJSON).
-		Set("description", tmpl.Description).
+		Set("description", cmd.Description).
 		Set("product_types", productTypesJSON).
-		Where(sq.Eq{"id": tmpl.ID}).
+		Where(sq.Eq{"id": cmd.ID}).
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("build update mml_template SQL: %w", err)
+		return fmt.Errorf("build update mml_custom_command SQL: %w", err)
 	}
 
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("update mml_template: %w", err)
+		return fmt.Errorf("update mml_custom_command: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
@@ -1037,17 +1046,17 @@ func (r *PgTemplateRepository) Update(ctx context.Context, tmpl *MMLTemplate) er
 	return nil
 }
 
-func (r *PgTemplateRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query, args, err := storage.Psql.Delete("mml_templates").
+func (r *PgCustomCommandRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("mml_custom_command").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("build delete mml_template SQL: %w", err)
+		return fmt.Errorf("build delete mml_custom_command SQL: %w", err)
 	}
 
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("delete mml_template: %w", err)
+		return fmt.Errorf("delete mml_custom_command: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
@@ -1055,15 +1064,15 @@ func (r *PgTemplateRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error) {
-	base := storage.Psql.Select(templateColumns...).From("mml_templates")
-	countBase := storage.Psql.Select("COUNT(*)").From("mml_templates")
+func (r *PgCustomCommandRepository) List(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+	base := storage.Psql.Select(customCommandColumns...).From("mml_custom_command")
+	countBase := storage.Psql.Select("COUNT(*)").From("mml_custom_command")
 
-	// Visibility rules: public templates + user's own private templates
+	// Visibility rules: public commands + user's own private commands
 	if filter.Creator != nil && *filter.Creator != "" {
 		cond := sq.Or{
-			sq.Eq{"template_scope": "public"},
-			sq.And{sq.Eq{"template_scope": "private"}, sq.Eq{"creator": *filter.Creator}},
+			sq.Eq{"command_scope": "public"},
+			sq.And{sq.Eq{"command_scope": "private"}, sq.Eq{"creator": *filter.Creator}},
 		}
 		base = base.Where(cond)
 		countBase = countBase.Where(cond)
@@ -1077,9 +1086,9 @@ func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) 
 		base = base.Where(sq.Eq{"operation_type": *filter.OperationType})
 		countBase = countBase.Where(sq.Eq{"operation_type": *filter.OperationType})
 	}
-	if filter.TemplateScope != nil {
-		base = base.Where(sq.Eq{"template_scope": *filter.TemplateScope})
-		countBase = countBase.Where(sq.Eq{"template_scope": *filter.TemplateScope})
+	if filter.CommandScope != nil {
+		base = base.Where(sq.Eq{"command_scope": *filter.CommandScope})
+		countBase = countBase.Where(sq.Eq{"command_scope": *filter.CommandScope})
 	}
 	if filter.CategoryGroup != nil {
 		base = base.Where(sq.Eq{"category_group": *filter.CategoryGroup})
@@ -1089,16 +1098,16 @@ func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build count mml_template SQL: %w", err)
+		return nil, fmt.Errorf("build count mml_custom_command SQL: %w", err)
 	}
 	var total int64
 	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-		return nil, fmt.Errorf("count mml_templates: %w", err)
+		return nil, fmt.Errorf("count mml_custom_commands: %w", err)
 	}
 
 	// Pagination
 	sortBy := "created_at"
-	if filter.SortBy != "" && templateAllowedSortColumns[filter.SortBy] {
+	if filter.SortBy != "" && customCommandAllowedSortColumns[filter.SortBy] {
 		sortBy = filter.SortBy
 	}
 	sortDir := "DESC"
@@ -1112,111 +1121,111 @@ func (r *PgTemplateRepository) List(ctx context.Context, filter TemplateFilter) 
 
 	query, args, err := base.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build list mml_template SQL: %w", err)
+		return nil, fmt.Errorf("build list mml_custom_command SQL: %w", err)
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list mml_templates: %w", err)
+		return nil, fmt.Errorf("list mml_custom_commands: %w", err)
 	}
 	defer rows.Close()
 
-	var items []MMLTemplate
+	var items []MMLCustomCommand
 	for rows.Next() {
-		tmpl, err := scanTemplateRow(rows)
+		cmd, err := scanCustomCommandRow(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan mml_template row: %w", err)
+			return nil, fmt.Errorf("scan mml_custom_command row: %w", err)
 		}
-		items = append(items, *tmpl)
+		items = append(items, *cmd)
 	}
 
 	if items == nil {
-		items = []MMLTemplate{}
+		items = []MMLCustomCommand{}
 	}
 
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
 
-// ---- template scanning helpers ----
+// ---- custom command scanning helpers ----
 
-func scanTemplate(row pgx.Row) (*MMLTemplate, error) {
-	var t MMLTemplate
+func scanCustomCommand(row pgx.Row) (*MMLCustomCommand, error) {
+	var c MMLCustomCommand
 	var parametersJSON, paramPathsJSON, productTypesJSON []byte
 
 	err := row.Scan(
-		&t.ID, &t.TemplateName, &t.CommandCode, &t.OperationType,
-		&t.TemplateScope, &t.CategoryGroup, &parametersJSON, &paramPathsJSON,
-		&t.Description, &productTypesJSON, &t.Creator,
-		&t.CreatedAt, &t.UpdatedAt,
+		&c.ID, &c.CommandName, &c.CommandCode, &c.OperationType,
+		&c.CommandScope, &c.CategoryGroup, &parametersJSON, &paramPathsJSON,
+		&c.Description, &productTypesJSON, &c.Creator,
+		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if parametersJSON != nil {
-		if err := json.Unmarshal(parametersJSON, &t.Parameters); err != nil {
+		if err := json.Unmarshal(parametersJSON, &c.Parameters); err != nil {
 			return nil, fmt.Errorf("unmarshal parameters: %w", err)
 		}
 	}
-	if t.Parameters == nil {
-		t.Parameters = map[string]interface{}{}
+	if c.Parameters == nil {
+		c.Parameters = map[string]interface{}{}
 	}
 	if paramPathsJSON != nil {
-		if err := json.Unmarshal(paramPathsJSON, &t.ParamPaths); err != nil {
+		if err := json.Unmarshal(paramPathsJSON, &c.ParamPaths); err != nil {
 			return nil, fmt.Errorf("unmarshal param_paths: %w", err)
 		}
 	}
-	if t.ParamPaths == nil {
-		t.ParamPaths = []string{}
+	if c.ParamPaths == nil {
+		c.ParamPaths = []string{}
 	}
 	if productTypesJSON != nil {
-		if err := json.Unmarshal(productTypesJSON, &t.ProductTypes); err != nil {
+		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
 			return nil, fmt.Errorf("unmarshal product_types: %w", err)
 		}
 	}
-	if t.ProductTypes == nil {
-		t.ProductTypes = []string{}
+	if c.ProductTypes == nil {
+		c.ProductTypes = []string{}
 	}
-	return &t, nil
+	return &c, nil
 }
 
-func scanTemplateRow(rows pgx.Rows) (*MMLTemplate, error) {
-	var t MMLTemplate
+func scanCustomCommandRow(rows pgx.Rows) (*MMLCustomCommand, error) {
+	var c MMLCustomCommand
 	var parametersJSON, paramPathsJSON, productTypesJSON []byte
 
 	err := rows.Scan(
-		&t.ID, &t.TemplateName, &t.CommandCode, &t.OperationType,
-		&t.TemplateScope, &t.CategoryGroup, &parametersJSON, &paramPathsJSON,
-		&t.Description, &productTypesJSON, &t.Creator,
-		&t.CreatedAt, &t.UpdatedAt,
+		&c.ID, &c.CommandName, &c.CommandCode, &c.OperationType,
+		&c.CommandScope, &c.CategoryGroup, &parametersJSON, &paramPathsJSON,
+		&c.Description, &productTypesJSON, &c.Creator,
+		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if parametersJSON != nil {
-		if err := json.Unmarshal(parametersJSON, &t.Parameters); err != nil {
+		if err := json.Unmarshal(parametersJSON, &c.Parameters); err != nil {
 			return nil, fmt.Errorf("unmarshal parameters: %w", err)
 		}
 	}
-	if t.Parameters == nil {
-		t.Parameters = map[string]interface{}{}
+	if c.Parameters == nil {
+		c.Parameters = map[string]interface{}{}
 	}
 	if paramPathsJSON != nil {
-		if err := json.Unmarshal(paramPathsJSON, &t.ParamPaths); err != nil {
+		if err := json.Unmarshal(paramPathsJSON, &c.ParamPaths); err != nil {
 			return nil, fmt.Errorf("unmarshal param_paths: %w", err)
 		}
 	}
-	if t.ParamPaths == nil {
-		t.ParamPaths = []string{}
+	if c.ParamPaths == nil {
+		c.ParamPaths = []string{}
 	}
 	if productTypesJSON != nil {
-		if err := json.Unmarshal(productTypesJSON, &t.ProductTypes); err != nil {
+		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
 			return nil, fmt.Errorf("unmarshal product_types: %w", err)
 		}
 	}
-	if t.ProductTypes == nil {
-		t.ProductTypes = []string{}
+	if c.ProductTypes == nil {
+		c.ProductTypes = []string{}
 	}
-	return &t, nil
+	return &c, nil
 }
 
 
@@ -1281,67 +1290,72 @@ func (r *PgAuditRepository) CreateBatch(ctx context.Context, entries []*MMLAudit
 	return tx.Commit(ctx)
 }
 
-// PgSubCommandRepository is a PostgreSQL implementation of SubCommandRepository.
-type PgSubCommandRepository struct {
+// PgCommandParamRepository is a PostgreSQL implementation of CommandParamRepository.
+// Commands reference mml_params directly via mml_command_params_rel.
+type PgCommandParamRepository struct {
 	pool *pgxpool.Pool
 }
 
-func NewPgSubCommandRepository(pool *pgxpool.Pool) *PgSubCommandRepository {
-	return &PgSubCommandRepository{pool: pool}
+func NewPgCommandParamRepository(pool *pgxpool.Pool) *PgCommandParamRepository {
+	return &PgCommandParamRepository{pool: pool}
 }
 
-func (r *PgSubCommandRepository) ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]SubCommand, error) {
+func (r *PgCommandParamRepository) ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT s.id, s.name, s.code, s.tr069_path, s.description, s.value_type, s.is_writable, s.options, s.unit, s.created_at
-		 FROM mml_sub_commands s
-		 JOIN mml_command_subcommand_rel r ON r.subcommand_id = s.id
+		`SELECT p.id, p.param_code, p.param_name_zh, p.tr069_path, p.value_type, p.is_writable, p.value_constraint
+		 FROM mml_params p
+		 JOIN mml_command_params_rel r ON r.param_id = p.id
 		 WHERE r.command_id = $1
 		 ORDER BY r.sort_order`, commandID)
 	if err != nil {
-		return nil, fmt.Errorf("list sub-commands by command: %w", err)
+		return nil, fmt.Errorf("list params by command: %w", err)
 	}
 	defer rows.Close()
 
-	var result []SubCommand
+	var result []MMLParamRef
 	for rows.Next() {
-		var sc SubCommand
-		var optionsJSON []byte
-		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Code, &sc.Tr069Path, &sc.Description, &sc.ValueType, &sc.IsWritable, &optionsJSON, &sc.Unit, &sc.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan sub-command: %w", err)
+		var pr MMLParamRef
+		var constraintJSON []byte
+		if err := rows.Scan(&pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path, &pr.ValueType, &pr.IsWritable, &constraintJSON); err != nil {
+			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
-		_ = json.Unmarshal(optionsJSON, &sc.Options)
-		result = append(result, sc)
+		if constraintJSON != nil && len(constraintJSON) > 2 {
+			_ = json.Unmarshal(constraintJSON, &pr.ValueConstraint)
+		}
+		result = append(result, pr)
 	}
 	return result, nil
 }
 
-func (r *PgSubCommandRepository) ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]SubCommand, error) {
-	result := make(map[uuid.UUID][]SubCommand, len(commandIDs))
+func (r *PgCommandParamRepository) ListByCommandIDs(ctx context.Context, commandIDs []uuid.UUID) (map[uuid.UUID][]MMLParamRef, error) {
+	result := make(map[uuid.UUID][]MMLParamRef, len(commandIDs))
 	if len(commandIDs) == 0 {
 		return result, nil
 	}
 
-	query := `SELECT r.command_id, s.id, s.name, s.code, s.tr069_path, s.description, s.value_type, s.is_writable, s.options, s.unit, s.created_at
-			  FROM mml_sub_commands s
-			  JOIN mml_command_subcommand_rel r ON r.subcommand_id = s.id
+	query := `SELECT r.command_id, p.id, p.param_code, p.param_name_zh, p.tr069_path, p.value_type, p.is_writable, p.value_constraint
+			  FROM mml_params p
+			  JOIN mml_command_params_rel r ON r.param_id = p.id
 			  WHERE r.command_id = ANY($1)
 			  ORDER BY r.command_id, r.sort_order`
 
 	rows, err := r.pool.Query(ctx, query, commandIDs)
 	if err != nil {
-		return nil, fmt.Errorf("list sub-commands by command IDs: %w", err)
+		return nil, fmt.Errorf("list params by command IDs: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var cmdID uuid.UUID
-		var sc SubCommand
-		var optionsJSON []byte
-		if err := rows.Scan(&cmdID, &sc.ID, &sc.Name, &sc.Code, &sc.Tr069Path, &sc.Description, &sc.ValueType, &sc.IsWritable, &optionsJSON, &sc.Unit, &sc.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan sub-command: %w", err)
+		var pr MMLParamRef
+		var constraintJSON []byte
+		if err := rows.Scan(&cmdID, &pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path, &pr.ValueType, &pr.IsWritable, &constraintJSON); err != nil {
+			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
-		_ = json.Unmarshal(optionsJSON, &sc.Options)
-		result[cmdID] = append(result[cmdID], sc)
+		if constraintJSON != nil && len(constraintJSON) > 2 {
+			_ = json.Unmarshal(constraintJSON, &pr.ValueConstraint)
+		}
+		result[cmdID] = append(result[cmdID], pr)
 	}
 	return result, nil
 }

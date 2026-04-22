@@ -16,15 +16,15 @@ import (
 
 // Service provides business logic for the MML console module.
 type Service struct {
-	cmdRepo      CommandRepository
-	scriptRepo   ScriptRepository
-	taskRepo     TaskRepository
-	templateRepo TemplateRepository
-	auditRepo    AuditRepository
-	subCmdRepo   SubCommandRepository
-	fanouter     *Fanouter
-	hub          SSEPublisher
-	logger       *zap.Logger
+	cmdRepo          CommandRepository
+	scriptRepo       ScriptRepository
+	taskRepo         TaskRepository
+	customCommandRepo CustomCommandRepository
+	auditRepo        AuditRepository
+	cmdParamRepo     CommandParamRepository
+	fanouter         *Fanouter
+	hub              SSEPublisher
+	logger           *zap.Logger
 }
 
 // SSEPublisher defines the interface for publishing SSE events.
@@ -40,17 +40,17 @@ func NewService(
 	cmdRepo CommandRepository,
 	scriptRepo ScriptRepository,
 	taskRepo TaskRepository,
-	templateRepo TemplateRepository,
+	customCommandRepo CustomCommandRepository,
 	hub SSEPublisher,
 	logger *zap.Logger,
 ) *Service {
 	return &Service{
-		cmdRepo:      cmdRepo,
-		scriptRepo:   scriptRepo,
-		taskRepo:     taskRepo,
-		templateRepo: templateRepo,
-		hub:          hub,
-		logger:       logger.Named("mml"),
+		cmdRepo:          cmdRepo,
+		scriptRepo:       scriptRepo,
+		taskRepo:         taskRepo,
+		customCommandRepo: customCommandRepo,
+		hub:              hub,
+		logger:           logger.Named("mml"),
 	}
 }
 
@@ -64,9 +64,9 @@ func (s *Service) SetFanouter(f *Fanouter) {
 	s.fanouter = f
 }
 
-// SetSubCmdRepo sets the sub-command repository.
-func (s *Service) SetSubCmdRepo(repo SubCommandRepository) {
-	s.subCmdRepo = repo
+// SetCmdParamRepo sets the command-param relationship repository.
+func (s *Service) SetCmdParamRepo(repo CommandParamRepository) {
+	s.cmdParamRepo = repo
 }
 
 // publishTaskStatus pushes a task status change event via SSE.
@@ -82,25 +82,25 @@ func (s *Service) publishTaskStatus(executor, taskID, oldStatus, newStatus strin
 
 // ---- Command operations (read-only) ----
 
-// ListCommands returns a paginated list of predefined MML commands, enriched with sub-commands.
+// ListCommands returns a paginated list of predefined MML commands, enriched with params.
 func (s *Service) ListCommands(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error) {
 	resp, err := s.cmdRepo.List(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	if s.subCmdRepo != nil && len(resp.Items) > 0 {
+	if s.cmdParamRepo != nil && len(resp.Items) > 0 {
 		ids := make([]uuid.UUID, len(resp.Items))
 		for i, cmd := range resp.Items {
 			ids[i] = cmd.ID
 		}
-		subMap, err := s.subCmdRepo.ListByCommandIDs(ctx, ids)
+		paramMap, err := s.cmdParamRepo.ListByCommandIDs(ctx, ids)
 		if err != nil {
-			s.logger.Warn("failed to load sub-commands, skipping enrichment", zap.Error(err))
+			s.logger.Warn("failed to load command params, skipping enrichment", zap.Error(err))
 		} else {
 			for i := range resp.Items {
-				if subs, ok := subMap[resp.Items[i].ID]; ok {
-					resp.Items[i].SubCommands = subs
+				if params, ok := paramMap[resp.Items[i].ID]; ok {
+					resp.Items[i].Params = params
 				}
 			}
 		}
@@ -109,14 +109,42 @@ func (s *Service) ListCommands(ctx context.Context, filter CommandFilter) (*mode
 	return resp, nil
 }
 
-// GetCommand retrieves a predefined MML command by ID.
+// GetCommand retrieves a predefined MML command by ID, enriched with params.
 func (s *Service) GetCommand(ctx context.Context, id uuid.UUID) (*MMLCommand, error) {
-	return s.cmdRepo.GetByID(ctx, id)
+	cmd, err := s.cmdRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.cmdParamRepo != nil {
+		paramMap, err := s.cmdParamRepo.ListByCommandIDs(ctx, []uuid.UUID{id})
+		if err != nil {
+			s.logger.Warn("failed to load command params, skipping enrichment", zap.Error(err))
+		} else if params, ok := paramMap[id]; ok {
+			cmd.Params = params
+		}
+	}
+
+	return cmd, nil
 }
 
-// GetCommandByCode retrieves a predefined MML command by its command code.
+// GetCommandByCode retrieves a predefined MML command by its command code, enriched with params.
 func (s *Service) GetCommandByCode(ctx context.Context, code string) (*MMLCommand, error) {
-	return s.cmdRepo.GetByCode(ctx, code)
+	cmd, err := s.cmdRepo.GetByCode(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.cmdParamRepo != nil {
+		paramMap, err := s.cmdParamRepo.ListByCommandIDs(ctx, []uuid.UUID{cmd.ID})
+		if err != nil {
+			s.logger.Warn("failed to load command params, skipping enrichment", zap.Error(err))
+		} else if params, ok := paramMap[cmd.ID]; ok {
+			cmd.Params = params
+		}
+	}
+
+	return cmd, nil
 }
 
 // CommandParamPath represents a TR-069 parameter path bound to an MML command.
@@ -651,105 +679,105 @@ func splitScriptLines(content string) []string {
 	return lines
 }
 
-// ---- Template operations (Phase 3) ----
+// ---- Custom Command operations (Phase 3) ----
 
-// ListTemplates returns a paginated list of MML templates.
-// For private templates, only the creator's templates are shown.
-func (s *Service) ListTemplates(ctx context.Context, filter TemplateFilter) (*model.ListResponse[MMLTemplate], error) {
-	return s.templateRepo.List(ctx, filter)
+// ListCustomCommands returns a paginated list of MML custom commands.
+// For private commands, only the creator's commands are shown.
+func (s *Service) ListCustomCommands(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+	return s.customCommandRepo.List(ctx, filter)
 }
 
-// GetTemplate retrieves an MML template by ID.
-func (s *Service) GetTemplate(ctx context.Context, id uuid.UUID) (*MMLTemplate, error) {
-	return s.templateRepo.GetByID(ctx, id)
+// GetCustomCommand retrieves an MML custom command by ID.
+func (s *Service) GetCustomCommand(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error) {
+	return s.customCommandRepo.GetByID(ctx, id)
 }
 
-// CreateTemplate creates a new MML command template.
-func (s *Service) CreateTemplate(ctx context.Context, tmpl *MMLTemplate) (*MMLTemplate, error) {
-	if tmpl.Parameters == nil {
-		tmpl.Parameters = map[string]interface{}{}
+// CreateCustomCommand creates a new user-defined custom command.
+func (s *Service) CreateCustomCommand(ctx context.Context, cmd *MMLCustomCommand) (*MMLCustomCommand, error) {
+	if cmd.Parameters == nil {
+		cmd.Parameters = map[string]interface{}{}
 	}
-	if tmpl.ParamPaths == nil {
-		tmpl.ParamPaths = []string{}
+	if cmd.ParamPaths == nil {
+		cmd.ParamPaths = []string{}
 	}
-	if tmpl.ProductTypes == nil {
-		tmpl.ProductTypes = []string{}
-	}
-
-	if err := s.templateRepo.Create(ctx, tmpl); err != nil {
-		return nil, fmt.Errorf("create mml template: %w", err)
+	if cmd.ProductTypes == nil {
+		cmd.ProductTypes = []string{}
 	}
 
-	s.logger.Info("mml template created",
-		zap.String("template_id", tmpl.ID.String()),
-		zap.String("template_name", tmpl.TemplateName),
+	if err := s.customCommandRepo.Create(ctx, cmd); err != nil {
+		return nil, fmt.Errorf("create mml custom command: %w", err)
+	}
+
+	s.logger.Info("mml custom command created",
+		zap.String("command_id", cmd.ID.String()),
+		zap.String("command_name", cmd.CommandName),
 	)
-	return tmpl, nil
+	return cmd, nil
 }
 
-// UpdateTemplate updates an existing MML template.
-func (s *Service) UpdateTemplate(ctx context.Context, id uuid.UUID, tmpl *MMLTemplate) (*MMLTemplate, error) {
-	existing, err := s.templateRepo.GetByID(ctx, id)
+// UpdateCustomCommand updates an existing user-defined custom command.
+func (s *Service) UpdateCustomCommand(ctx context.Context, id uuid.UUID, cmd *MMLCustomCommand) (*MMLCustomCommand, error) {
+	existing, err := s.customCommandRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("get mml template: %w", err)
+		return nil, fmt.Errorf("get mml custom command: %w", err)
 	}
 
-	existing.TemplateName = tmpl.TemplateName
-	existing.CommandCode = tmpl.CommandCode
-	existing.OperationType = tmpl.OperationType
-	existing.TemplateScope = tmpl.TemplateScope
-	existing.CategoryGroup = tmpl.CategoryGroup
-	existing.Description = tmpl.Description
-	if tmpl.Parameters != nil {
-		existing.Parameters = tmpl.Parameters
+	existing.CommandName = cmd.CommandName
+	existing.CommandCode = cmd.CommandCode
+	existing.OperationType = cmd.OperationType
+	existing.CommandScope = cmd.CommandScope
+	existing.CategoryGroup = cmd.CategoryGroup
+	existing.Description = cmd.Description
+	if cmd.Parameters != nil {
+		existing.Parameters = cmd.Parameters
 	}
-	if tmpl.ParamPaths != nil {
-		existing.ParamPaths = tmpl.ParamPaths
+	if cmd.ParamPaths != nil {
+		existing.ParamPaths = cmd.ParamPaths
 	}
-	if tmpl.ProductTypes != nil {
-		existing.ProductTypes = tmpl.ProductTypes
-	}
-
-	if err := s.templateRepo.Update(ctx, existing); err != nil {
-		return nil, fmt.Errorf("update mml template: %w", err)
+	if cmd.ProductTypes != nil {
+		existing.ProductTypes = cmd.ProductTypes
 	}
 
-	s.logger.Info("mml template updated", zap.String("template_id", id.String()))
+	if err := s.customCommandRepo.Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("update mml custom command: %w", err)
+	}
+
+	s.logger.Info("mml custom command updated", zap.String("command_id", id.String()))
 	return existing, nil
 }
 
-// DeleteTemplate deletes an MML template.
-// Only the creator or an admin can delete public templates.
-func (s *Service) DeleteTemplate(ctx context.Context, id uuid.UUID, currentUser string) error {
-	tmpl, err := s.templateRepo.GetByID(ctx, id)
+// DeleteCustomCommand deletes an MML custom command.
+// Only the creator or an admin can delete public commands.
+func (s *Service) DeleteCustomCommand(ctx context.Context, id uuid.UUID, currentUser string) error {
+	cmd, err := s.customCommandRepo.GetByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("get mml template: %w", err)
+		return fmt.Errorf("get mml custom command: %w", err)
 	}
 
-	if tmpl.TemplateScope == "public" && tmpl.Creator != currentUser {
-		return fmt.Errorf("only creator can delete public templates: %w", ErrForbidden)
+	if cmd.CommandScope == "public" && cmd.Creator != currentUser {
+		return fmt.Errorf("only creator can delete public commands: %w", ErrForbidden)
 	}
 
-	if err := s.templateRepo.Delete(ctx, id); err != nil {
-		return fmt.Errorf("delete mml template: %w", err)
+	if err := s.customCommandRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete mml custom command: %w", err)
 	}
 
-	s.logger.Info("mml template deleted", zap.String("template_id", id.String()))
+	s.logger.Info("mml custom command deleted", zap.String("command_id", id.String()))
 	return nil
 }
 
-// CloneTemplate clones a public template as a private copy for the current user.
-func (s *Service) CloneTemplate(ctx context.Context, id uuid.UUID, currentUser string) (*MMLTemplate, error) {
-	source, err := s.templateRepo.GetByID(ctx, id)
+// CloneCustomCommand clones a public custom command as a private copy for the current user.
+func (s *Service) CloneCustomCommand(ctx context.Context, id uuid.UUID, currentUser string) (*MMLCustomCommand, error) {
+	source, err := s.customCommandRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("get mml template: %w", err)
+		return nil, fmt.Errorf("get mml custom command: %w", err)
 	}
 
-	clone := &MMLTemplate{
-		TemplateName:  source.TemplateName + " (副本)",
+	clone := &MMLCustomCommand{
+		CommandName:   source.CommandName + " (副本)",
 		CommandCode:   source.CommandCode,
 		OperationType: source.OperationType,
-		TemplateScope: "private",
+		CommandScope:  "private",
 		CategoryGroup: source.CategoryGroup,
 		Parameters:    source.Parameters,
 		ParamPaths:    source.ParamPaths,
@@ -758,11 +786,11 @@ func (s *Service) CloneTemplate(ctx context.Context, id uuid.UUID, currentUser s
 		Creator:       currentUser,
 	}
 
-	if err := s.templateRepo.Create(ctx, clone); err != nil {
-		return nil, fmt.Errorf("clone mml template: %w", err)
+	if err := s.customCommandRepo.Create(ctx, clone); err != nil {
+		return nil, fmt.Errorf("clone mml custom command: %w", err)
 	}
 
-	s.logger.Info("mml template cloned",
+	s.logger.Info("mml custom command cloned",
 		zap.String("source_id", id.String()),
 		zap.String("clone_id", clone.ID.String()),
 	)

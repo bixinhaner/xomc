@@ -538,7 +538,7 @@ func (h *Handler) GetTaskResults(c *gin.Context) {
 
 // ListTemplates handles GET /api/v1/mml/templates.
 func (h *Handler) ListTemplates(c *gin.Context) {
-	filter := TemplateFilter{
+	filter := CustomCommandFilter{
 		ListRequest: model.DefaultListRequest(),
 	}
 
@@ -553,8 +553,8 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 	if operationType := c.Query("operation_type"); operationType != "" {
 		filter.OperationType = &operationType
 	}
-	if templateScope := c.Query("template_scope"); templateScope != "" {
-		filter.TemplateScope = &templateScope
+	if commandScope := c.Query("command_scope"); commandScope != "" {
+		filter.CommandScope = &commandScope
 	}
 	if categoryGroup := c.Query("category_group"); categoryGroup != "" {
 		filter.CategoryGroup = &categoryGroup
@@ -565,7 +565,7 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 	creatorStr, _ := creator.(string)
 	filter.Creator = &creatorStr
 
-	result, err := h.service.ListTemplates(c.Request.Context(), filter)
+	result, err := h.service.ListCustomCommands(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -582,7 +582,7 @@ func (h *Handler) GetTemplate(c *gin.Context) {
 		return
 	}
 
-	tmpl, err := h.service.GetTemplate(c.Request.Context(), id)
+	tmpl, err := h.service.GetCustomCommand(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -591,12 +591,12 @@ func (h *Handler) GetTemplate(c *gin.Context) {
 	c.JSON(http.StatusOK, tmpl)
 }
 
-// CreateTemplateRequest defines the request body for creating an MML template.
-type CreateTemplateRequest struct {
-	TemplateName  string                 `json:"template_name" binding:"required"`
+// CreateCustomCommandRequest defines the request body for creating a custom command.
+type CreateCustomCommandRequest struct {
+	CommandName   string                 `json:"command_name" binding:"required"`
 	CommandCode   string                 `json:"command_code" binding:"required"`
 	OperationType string                 `json:"operation_type" binding:"required"`
-	TemplateScope string                 `json:"template_scope" binding:"required"`
+	CommandScope  string                 `json:"command_scope" binding:"required"`
 	CategoryGroup string                 `json:"category_group"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
@@ -606,7 +606,7 @@ type CreateTemplateRequest struct {
 
 // CreateTemplate handles POST /api/v1/mml/templates.
 func (h *Handler) CreateTemplate(c *gin.Context) {
-	var req CreateTemplateRequest
+	var req CreateCustomCommandRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
@@ -615,11 +615,11 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
 
-	tmpl := &MMLTemplate{
-		TemplateName:  req.TemplateName,
+	tmpl := &MMLCustomCommand{
+		CommandName:   req.CommandName,
 		CommandCode:   req.CommandCode,
 		OperationType: req.OperationType,
-		TemplateScope: req.TemplateScope,
+		CommandScope:  req.CommandScope,
 		CategoryGroup: req.CategoryGroup,
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
@@ -628,7 +628,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		Creator:       creatorStr,
 	}
 
-	created, err := h.service.CreateTemplate(c.Request.Context(), tmpl)
+	created, err := h.service.CreateCustomCommand(c.Request.Context(), tmpl)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -637,12 +637,12 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 	c.JSON(http.StatusCreated, created)
 }
 
-// UpdateTemplateRequest defines the request body for updating an MML template.
-type UpdateTemplateRequest struct {
-	TemplateName  string                 `json:"template_name" binding:"required"`
+// UpdateCustomCommandRequest defines the request body for updating a custom command.
+type UpdateCustomCommandRequest struct {
+	CommandName   string                 `json:"command_name" binding:"required"`
 	CommandCode   string                 `json:"command_code" binding:"required"`
 	OperationType string                 `json:"operation_type" binding:"required"`
-	TemplateScope string                 `json:"template_scope" binding:"required"`
+	CommandScope  string                 `json:"command_scope" binding:"required"`
 	CategoryGroup string                 `json:"category_group"`
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
@@ -658,17 +658,17 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
-	var req UpdateTemplateRequest
+	var req UpdateCustomCommandRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	tmpl := &MMLTemplate{
-		TemplateName:  req.TemplateName,
+	tmpl := &MMLCustomCommand{
+		CommandName:   req.CommandName,
 		CommandCode:   req.CommandCode,
 		OperationType: req.OperationType,
-		TemplateScope: req.TemplateScope,
+		CommandScope:  req.CommandScope,
 		CategoryGroup: req.CategoryGroup,
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
@@ -676,7 +676,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		ProductTypes:  req.ProductTypes,
 	}
 
-	updated, err := h.service.UpdateTemplate(c.Request.Context(), id, tmpl)
+	updated, err := h.service.UpdateCustomCommand(c.Request.Context(), id, tmpl)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -696,7 +696,7 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
 
-	if err := h.service.DeleteTemplate(c.Request.Context(), id, creatorStr); err != nil {
+	if err := h.service.DeleteCustomCommand(c.Request.Context(), id, creatorStr); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -715,7 +715,7 @@ func (h *Handler) CloneTemplate(c *gin.Context) {
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
 
-	cloned, err := h.service.CloneTemplate(c.Request.Context(), id, creatorStr)
+	cloned, err := h.service.CloneCustomCommand(c.Request.Context(), id, creatorStr)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
