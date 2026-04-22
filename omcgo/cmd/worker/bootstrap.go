@@ -19,6 +19,8 @@ type workerInfra struct {
 	*components.Infra
 	Carriers *carrier.CarrierRegistry
 	CmdQueue cmdqueue.CommandQueue
+	TaskRepo *task.PgTaskRepository
+	TaskSvc  *task.TaskService
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -56,7 +58,14 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskSvc := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	// Worker 可能通过 RebootCloser 等路径写终态，与 ACS 保持一致，终态通过 NATS
+	// 广播由订阅者聚合，避免和回调重复计数。
+	if inf.EventBus != nil {
+		taskSvc.SetEventBus(inf.EventBus)
+	}
 	w.CmdQueue = task.NewBridgeQueue(taskSvc)
+	w.TaskRepo = taskRepo
+	w.TaskSvc = taskSvc
 
 	return w, nil
 }

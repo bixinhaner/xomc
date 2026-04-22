@@ -18,6 +18,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/report"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/transfer"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -51,12 +52,20 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		cfg.Log.OutputPaths = parseStringSlice(outputPaths)
 	}
 
-	w, err := initWorker(context.Background(), &cfg)
+	ctx := context.Background()
+	w, err := initWorker(ctx, &cfg)
 	if err != nil {
 		return err
 	}
 	defer w.Logger.Sync()
 	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
+
+	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
+	// ZScore 去重保证多 Worker/多次重启都不会重复入队；sent 任务不在此路径，
+	// 由 CPE 重连时的 RecoverPendingTasks 走陈旧阈值恢复。
+	if _, err := w.TaskSvc.RestorePendingQueues(ctx, 0); err != nil {
+		w.Logger.Warn("restore pending task queues failed", zap.Error(err))
+	}
 
 	// Register all event subscribers
 	registerSubscribers(w, &cfg)
@@ -93,6 +102,20 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
 	}
 	logger.Info("alarm receiver started")
+
+	// Frequent abnormal reboot monitor (F04)：滑动窗口内异常重启 >=阈值抬升告警。
+	rebootMonitor := alarm.NewRebootMonitor(alarmEngine, w.Redis, logger)
+	if err := rebootMonitor.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe reboot monitor", zap.Error(err))
+	}
+	logger.Info("reboot monitor started")
+
+	// Reboot Task Closer (F01/F06)：M Reboot Inform 兜底收敛未 ACK 的 Reboot/FactoryReset 任务。
+	rebootCloser := task.NewRebootCloser(w.TaskRepo, w.TaskSvc, logger)
+	if err := rebootCloser.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe reboot task closer", zap.Error(err))
+	}
+	logger.Info("reboot task closer started")
 
 	// MR Collector
 	mrStore := mr.NewPgMRStore(w.PgPool, w.TsPool)

@@ -29,14 +29,14 @@ func NewResultAggregator(taskRepo TaskRepository, hub SSEPublisher, logger *zap.
 
 // OnTaskCompleted is called when a device_task reaches a terminal state.
 func (a *ResultAggregator) OnTaskCompleted(ctx context.Context, dt *task.Task) {
-	parentID := dt.ParentTaskID
-	if parentID == "" {
+	sourceID := dt.SourceID
+	if sourceID == "" {
 		return
 	}
 
-	mmlID, err := uuid.Parse(parentID)
+	mmlID, err := uuid.Parse(sourceID)
 	if err != nil {
-		a.logger.Error("parse parent_task_id", zap.Error(err))
+		a.logger.Error("parse source_id", zap.Error(err))
 		return
 	}
 

@@ -240,6 +240,19 @@ func (q *RedisTaskQueue) Delete(ctx context.Context, taskID string) error {
 	return err
 }
 
+// Exists 判断某任务是否已经在该设备的任务队列 Sorted Set 内。
+// 基于 ZScore：存在返回 true；不存在（redis.Nil）返回 false。用于启动恢复时去重。
+func (q *RedisTaskQueue) Exists(ctx context.Context, deviceSN, taskID string) (bool, error) {
+	_, err := q.client.ZScore(ctx, q.queueKey(deviceSN), taskID).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("zscore: %w", err)
+	}
+	return true, nil
+}
+
 // GetStaleSentTasks 获取 sent 状态超过指定时间的任务
 func (q *RedisTaskQueue) GetStaleSentTasks(ctx context.Context, deviceSN string, staleDuration string) ([]*Task, error) {
 	// 解析过期时间

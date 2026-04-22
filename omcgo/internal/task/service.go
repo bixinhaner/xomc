@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
@@ -38,6 +39,7 @@ type TaskService struct {
 	deviceLookup DeviceLookup
 	connReq      ConnectionRequestSender
 	callbacks    []TaskCompletionCallback
+	eventBus     event.EventBus
 	logger       *zap.Logger
 }
 
@@ -64,6 +66,14 @@ func (s *TaskService) SetConnectionRequester(dl DeviceLookup, cr ConnectionReque
 // AddCompletionCallback registers a callback invoked when tasks reach terminal states.
 func (s *TaskService) AddCompletionCallback(cb TaskCompletionCallback) {
 	s.callbacks = append(s.callbacks, cb)
+}
+
+// SetEventBus enables cross-process task terminal-state broadcasting via NATS.
+// ACS writes terminal states then publishes task.completed / task.failed so
+// APP/Worker subscribers (e.g. MML ResultAggregator) can react without being
+// in the same process.
+func (s *TaskService) SetEventBus(bus event.EventBus) {
+	s.eventBus = bus
 }
 
 // CreateTask 创建新任务
@@ -363,6 +373,82 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 	return nil
 }
 
+// RestoreStats 汇报 RestorePendingQueues 的处理结果。
+type RestoreStats struct {
+	Scanned int // 从 PG 查出的 pending 任务数
+	Pushed  int // 实际推送到 Redis 的任务数（Redis 中不存在）
+	Skipped int // Redis 中已存在跳过的任务数
+	Failed  int // 推送或检查失败的任务数
+}
+
+// pendingTaskLister 抽象 RestorePendingQueues 依赖的 PG 查询能力（便于单测 mock）。
+type pendingTaskLister interface {
+	ListPendingAllDevices(ctx context.Context, limit int) ([]*Task, error)
+}
+
+// taskEnqueuer 抽象 RestorePendingQueues 依赖的 Redis 队列能力（便于单测 mock）。
+type taskEnqueuer interface {
+	Exists(ctx context.Context, deviceSN, taskID string) (bool, error)
+	Push(ctx context.Context, task *Task) error
+}
+
+// RestorePendingQueues 在进程启动时把 PostgreSQL 中仍为 pending 的任务重新灌入
+// Redis 设备队列。对每个任务先用 ZScore 检查对应设备队列里是否已有该任务 ID，
+// 已存在则跳过（Redis 重启持久化 / 其它实例并发启动都可能导致队列非空）。
+// 只处理 pending 状态：sent 状态任务已在 CPE 在途，重新入队会引起重复下发，
+// 由设备重连时的 RecoverPendingTasks 按 sent_at 陈旧阈值走正常恢复路径。
+func (s *TaskService) RestorePendingQueues(ctx context.Context, limit int) (RestoreStats, error) {
+	return restorePendingQueues(ctx, s.repo, s.queue, s.logger, limit)
+}
+
+// restorePendingQueues 是 RestorePendingQueues 的可测试实现，接受小接口。
+func restorePendingQueues(
+	ctx context.Context,
+	lister pendingTaskLister,
+	enq taskEnqueuer,
+	log *zap.Logger,
+	limit int,
+) (RestoreStats, error) {
+	tasks, err := lister.ListPendingAllDevices(ctx, limit)
+	if err != nil {
+		return RestoreStats{}, fmt.Errorf("list pending tasks: %w", err)
+	}
+
+	stats := RestoreStats{Scanned: len(tasks)}
+	for _, t := range tasks {
+		exists, err := enq.Exists(ctx, t.DeviceSN, t.ID)
+		if err != nil {
+			log.Warn("check queue existence",
+				zap.String("task_id", t.ID),
+				zap.String("device_sn", t.DeviceSN),
+				zap.Error(err))
+			stats.Failed++
+			continue
+		}
+		if exists {
+			stats.Skipped++
+			continue
+		}
+		if err := enq.Push(ctx, t); err != nil {
+			log.Warn("push pending task to queue",
+				zap.String("task_id", t.ID),
+				zap.String("device_sn", t.DeviceSN),
+				zap.Error(err))
+			stats.Failed++
+			continue
+		}
+		stats.Pushed++
+	}
+
+	log.Info("restore pending task queues done",
+		zap.Int("scanned", stats.Scanned),
+		zap.Int("pushed", stats.Pushed),
+		zap.Int("skipped", stats.Skipped),
+		zap.Int("failed", stats.Failed))
+
+	return stats, nil
+}
+
 // GetTaskStats 获取任务统计
 func (s *TaskService) GetTaskStats(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error) {
 	return s.repo.CountByStatus(ctx, deviceSN)
@@ -460,14 +546,54 @@ func (s *TaskService) wakeDevice(deviceSN string) {
 	}()
 }
 
-// notifyCompletion invokes registered callbacks for a task reaching terminal state.
-// Only notifies for MML-sourced tasks that have a parent_task_id.
+// notifyCompletion broadcasts a terminal task state.
+//
+// 二选一：注入了 EventBus 则只广播（跨进程由订阅者调用聚合器）；否则 fallback
+// 到同进程 callbacks（单进程部署、单测）。避免同一 TaskService 既发事件又回
+// 调导致下游聚合器（如 mml_tasks 统计）重复计数。
+// 过滤规则：仅对 MML 来源且带 source_id 的任务发射，避免普通 API 任务占用广播带宽。
 func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
-	if task.Source != TaskSourceMML || task.ParentTaskID == "" || len(s.callbacks) == 0 {
+	if task.Source != TaskSourceMML || task.SourceID == "" {
 		return
 	}
+
+	if s.eventBus != nil {
+		subject := SubjectForStatus(task.Status)
+		if subject == "" {
+			return
+		}
+		evt, err := event.NewEvent(subject, task)
+		if err != nil {
+			s.logger.Warn("build task event",
+				zap.String("task_id", task.ID),
+				zap.String("status", string(task.Status)),
+				zap.Error(err))
+			return
+		}
+		if err := s.eventBus.Publish(ctx, subject, evt); err != nil {
+			s.logger.Warn("publish task event",
+				zap.String("subject", subject),
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+		}
+		return
+	}
+
 	for _, cb := range s.callbacks {
 		cb.OnTaskCompleted(ctx, task)
+	}
+}
+
+// SubjectForStatus maps a terminal TaskStatus to its event subject.
+// Returns "" for non-terminal statuses so callers can skip publishing.
+func SubjectForStatus(status TaskStatus) string {
+	switch status {
+	case TaskStatusCompleted:
+		return event.SubjectTaskCompleted
+	case TaskStatusFailed, TaskStatusExpired:
+		return event.SubjectTaskFailed
+	default:
+		return ""
 	}
 }
 

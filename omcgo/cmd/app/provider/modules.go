@@ -258,8 +258,19 @@ func initMiscModules(c *Container) error {
 		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
 		mmlService.SetFanouter(fanouter)
 
+		// device_tasks 终态通过 NATS 跨进程事件投递到聚合器：
+		// ACS 在 MarkTaskCompleted/Failed 后发布 task.completed/task.failed，
+		// 本进程的 bridge 订阅后驱动 ResultAggregator 更新 mml_tasks 统计并推送 SSE。
 		aggregator := mml.NewResultAggregator(mmlTaskRepo, messageHub, logger)
-		c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
+		if c.EventBus != nil {
+			bridge := task.NewCompletionEventBridge(logger, aggregator)
+			if err := bridge.Subscribe(c.EventBus); err != nil {
+				logger.Warn("subscribe task completion bridge", zap.Error(err))
+			}
+		} else {
+			// 单进程部署（单测/无 NATS）下退化为同进程回调
+			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
+		}
 
 		logger.Info("MML fan-out bridge enabled")
 	}

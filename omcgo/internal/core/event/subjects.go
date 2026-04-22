@@ -35,8 +35,17 @@ const (
 	SubjectDeviceAutonomousTransferComplete = "device.inform.autonomous_transfer_complete"
 
 	// SubjectDeviceRebootComplete 是设备重启完成后再次接入时发布。
-	// Inform 事件码包含 "1 BOOT"。
-	// 发布者：acs/handler.go，订阅者：暂无（可用于重启结果追踪）
+	// Inform 事件码包含 "1 BOOT"（自主重启）或 "M Reboot"（ACS 主动下发 Reboot
+	// 后的回包），且不含 "0 BOOTSTRAP"（首次入网走 bootstrap 主题）。
+	// 发布者：acs/handler.go；
+	// 订阅者：
+	//   - device.InformHandler.handleRebootComplete：更新 last_inform_at / 状态 /
+	//     IP / ConnectionRequestURL，原子递增 boot_count 并写入 last_boot_at；
+	//     当事件不含 "M Reboot" 时发布 SubjectDeviceRebootAbnormal（异常重启）。
+	//   - task.RebootCloser：收到含 "M Reboot" 的 Inform 时，兜底收敛 device_tasks
+	//     里仍为 pending/sent 的 Reboot / FactoryReset 任务（覆盖 RebootResponse
+	//     丢包、CPE 跳 ACK 直接重启等边界）。
+	//   - northbound.push.Engine：透传给 DataTypes 含 "device_event" 的 OSS 目标。
 	SubjectDeviceRebootComplete = "device.inform.reboot_complete"
 
 	// SubjectDeviceConnectionRequest 是收到设备发起的 ConnectionRequest Inform 时发布。
@@ -51,28 +60,18 @@ const (
 	// 发布者：device.Service.RegisterDevice，订阅者：provision.Engine（触发自动开站流程）
 	SubjectDeviceRegistered = "device.registered"
 
-	// SubjectDeviceRebootAbnormal 是检测到设备异常重启（上一次入网不是正常关机）时发布。
-	// 发布者：device.InformHandler（处理 Bootstrap Inform 时判断），订阅者：暂无（可用于异常重启日志入库）
+	// SubjectDeviceRebootAbnormal 是检测到设备异常重启（"1 BOOT" 不伴随 "M Reboot"）时发布。
+	// 发布者：device.DeviceService.RecordBootFromInform；
+	// 订阅者：alarm.RebootMonitor — 滑动窗口内累计 >=阈值触发 FREQUENT_ABNORMAL_REBOOT 告警。
 	SubjectDeviceRebootAbnormal = "device.reboot.abnormal"
 )
 
-// Command events
-//
-// 这类事件为【主动下发】类 RPC 命令的请求触发，目前实际代码中尚未见到明确的订阅者，预留供展层扩展使用。
-const (
-	// SubjectCommandGetParams 主动下发 GetParameterValues RPC 时使用（暂未使用）
-	SubjectCommandGetParams = "command.get_parameters"
-	// SubjectCommandSetParams 主动下发 SetParameterValues RPC 时使用（暂未使用）
-	SubjectCommandSetParams = "command.set_parameters"
-	// SubjectCommandDownload 主动下发 Download RPC（暂未使用）
-	SubjectCommandDownload = "command.download"
-	// SubjectCommandUpload 主动下发 Upload RPC（暂未使用）
-	SubjectCommandUpload = "command.upload"
-	// SubjectCommandReboot 主动下发 Reboot RPC（暂未使用）
-	SubjectCommandReboot = "command.reboot"
-	// SubjectCommandReset 主动下发 FactoryReset RPC（暂未使用）
-	SubjectCommandReset = "command.factory_reset"
-)
+// Command 请求型事件的 Subject 常量已移除（2026-04-22）：
+// 原先保留的 command.get_parameters / command.set_parameters / command.download /
+// command.upload / command.reboot / command.factory_reset 属于早期设计残留，
+// 实际 RPC 下发一律通过 Redis 任务队列（acs:taskq:{sn}）完成，ACS 在会话中 Pop
+// 组装 SOAP 响应，无需 NATS 层的请求事件。响应事件仍保留（见下方 Command
+// response events 分组）。
 
 // PM events
 //
@@ -208,6 +207,25 @@ const (
 	// SubjectCommandSetAttrsResponse 是收到 SetParameterAttributesResponse 时发布。
 	// 发布者：acs/handler.go，订阅者：暂无
 	SubjectCommandSetAttrsResponse = "command.set_attrs.response"
+)
+
+// Device task lifecycle events
+//
+// 统一任务队列（device_tasks + acs:taskq Redis）跨进程通知主题。
+// ACS 进程在 RPC 响应匹配到任务后调用 TaskService.MarkTaskCompleted/Failed，
+// 两者在更新完 Redis + PostgreSQL 后发布下列事件，APP/Worker 进程订阅事件把
+// 终态推送给上层聚合器（如 MML ResultAggregator 更新 mml_tasks 统计）。
+// 载荷即 task.Task JSON，消费者自行 DecodePayload。
+const (
+	// SubjectTaskCompleted 是 device_tasks 任务成功完成时发布（status=completed）。
+	// 发布者：internal/task.TaskService.MarkTaskCompleted；
+	// 订阅者：worker.taskEventBridge → mml.ResultAggregator.OnTaskCompleted。
+	SubjectTaskCompleted = "task.completed"
+
+	// SubjectTaskFailed 是 device_tasks 任务失败或过期时发布（status=failed/expired）。
+	// 发布者：internal/task.TaskService.MarkTaskFailed；
+	// 订阅者：worker.taskEventBridge → mml.ResultAggregator.OnTaskCompleted。
+	SubjectTaskFailed = "task.failed"
 )
 
 // Software/Firmware events

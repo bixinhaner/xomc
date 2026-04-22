@@ -92,7 +92,7 @@ func buildDeviceTaskRequests(mmlTask *MMLTask) []*task.CreateTaskRequest {
 				CreatorID:   mmlTask.Creator,
 				Description: description,
 
-				ParentTaskID: parentID,
+				SourceID:     parentID,
 				CommandIndex: cmdIdx,
 				DeviceIndex:  devIdx,
 			})

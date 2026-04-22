@@ -23,17 +23,25 @@ type StreamDef struct {
 	Subjects []string
 }
 
-// DefaultStreams returns the 6 standard JetStream streams.
+// DefaultStreams 列出所有 JetStream 流。每条流以一个点分前缀吸纳一类事件，
+// 保留策略统一为 WorkQueuePolicy（消费完删除），最大存活 72 小时。
+// 扩展新事件前缀时，务必在此注册对应 Stream，否则发布的消息不会落盘、
+// 订阅者掉线就丢失。
 func DefaultStreams() []StreamDef {
 	return []StreamDef{
 		{Name: "DEVICE", Subjects: []string{"device.>"}},
 		{Name: "COMMAND", Subjects: []string{"command.>"}},
+		{Name: "TASK", Subjects: []string{"task.>"}},
 		{Name: "PM", Subjects: []string{"pm.>"}},
 		{Name: "MR", Subjects: []string{"mr.>"}},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}},
 		{Name: "OSS", Subjects: []string{"oss.>"}},
 		{Name: "PROVISION", Subjects: []string{"provision.>"}},
 		{Name: "DATAMODEL", Subjects: []string{"datamodel.>"}},
+		{Name: "SOFTWARE", Subjects: []string{"firmware.>", "upgrade.>"}},
+		{Name: "BACKUP", Subjects: []string{"backup.>"}},
+		{Name: "REPORT", Subjects: []string{"report.>"}},
+		{Name: "NEDIRECT", Subjects: []string{"nedirect.>"}},
 	}
 }
 

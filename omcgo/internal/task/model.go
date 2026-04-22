@@ -61,10 +61,10 @@ type Task struct {
 	CreatorID   string     `json:"creator_id,omitempty"`  // 创建者 ID
 	Description string     `json:"description,omitempty"` // 任务描述
 
-	// 父任务关联（MML 批量扇出时使用）
-	ParentTaskID string `json:"parent_task_id,omitempty"` // 关联的 MML 任务 ID
-	CommandIndex int    `json:"command_index"`            // 在父任务 commands[] 中的索引
-	DeviceIndex  int    `json:"device_index"`             // 在父任务 device_sns[] 中的索引
+	// 任务来源外键（Source='mml' 时为 mml_tasks.id；其它来源按需扩展语义）
+	SourceID     string `json:"source_id,omitempty"`
+	CommandIndex int    `json:"command_index"` // MML 扇出时在 commands[] 中的索引
+	DeviceIndex  int    `json:"device_index"`  // MML 扇出时在 device_sns[] 中的索引
 }
 
 // CreateTaskRequest 创建任务请求
@@ -82,8 +82,8 @@ type CreateTaskRequest struct {
 	// TR069 CommandKey（预设的命令标识）
 	CommandKey string `json:"command_key,omitempty"`
 
-	// 父任务关联（MML 扇出时使用）
-	ParentTaskID string `json:"parent_task_id"`
+	// 任务来源外键（对应 device_tasks.source_id；Source='mml' 时为 mml_tasks.id）
+	SourceID     string `json:"source_id"`
 	CommandIndex int    `json:"command_index"`
 	DeviceIndex  int    `json:"device_index"`
 }
@@ -121,7 +121,7 @@ func NewTask(req *CreateTaskRequest) *Task {
 		Source:       TaskSourceAPI,
 		CreatorID:    req.CreatorID,
 		Description:  req.Description,
-		ParentTaskID: req.ParentTaskID,
+		SourceID:     req.SourceID,
 		CommandIndex: req.CommandIndex,
 		DeviceIndex:  req.DeviceIndex,
 	}

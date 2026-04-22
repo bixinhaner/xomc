@@ -69,6 +69,11 @@ func runACS(cmd *cobra.Command, args []string) error {
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskService := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	// Broadcast terminal task states so APP/Worker subscribers (MML ResultAggregator)
+	// can update mml_tasks without being in the ACS process.
+	if inf.EventBus != nil {
+		taskService.SetEventBus(inf.EventBus)
+	}
 	inf.Logger.Info("task service initialized")
 
 	// Get request ID prefix from config, default to "acs"

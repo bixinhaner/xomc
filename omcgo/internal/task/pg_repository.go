@@ -32,7 +32,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			"created_at", "sent_at", "completed_at", "expires_at",
 			"result", "error_code", "error_message",
 			"source", "creator_id", "description",
-			"parent_task_id", "command_index", "device_index",
+			"source_id", "command_index", "device_index",
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
@@ -40,7 +40,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
-			task.ParentTaskID, task.CommandIndex, task.DeviceIndex,
+			task.SourceID, task.CommandIndex, task.DeviceIndex,
 		).
 		ToSql()
 	if err != nil {
@@ -221,6 +221,78 @@ func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN stri
 	return tasks, nil
 }
 
+// ListOpenByDeviceAndMethods 返回指定设备上仍处于 pending/sent 状态的任务，
+// 可选按方法白名单过滤。用于 Inform 事件驱动的任务闭环（如 M Reboot 上报时收敛
+// 尚未 ACK 的 Reboot 任务）。methods 为空时返回所有开放任务。
+func (r *PgTaskRepository) ListOpenByDeviceAndMethods(ctx context.Context, deviceSN string, methods []string) ([]*Task, error) {
+	openStatuses := []TaskStatus{TaskStatusPending, TaskStatusSent}
+	builder := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"device_sn": deviceSN}).
+		Where(sq.Eq{"status": openStatuses}).
+		OrderBy("created_at ASC")
+
+	if len(methods) > 0 {
+		builder = builder.Where(sq.Eq{"method": methods})
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query open tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		task, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+// ListPendingAllDevices 返回所有设备仍处于 pending 状态的任务，按设备与优先级排序。
+// 用于 Worker 启动时把待下发任务重灌回 Redis 队列。只选 pending 是因为 sent 状态
+// 的任务已经在 CPE 那边在途，重新入队会导致重复下发；sent 任务由设备重连时的
+// RecoverPendingTasks（基于 sent_at 陈旧阈值）走标准恢复流程。
+func (r *PgTaskRepository) ListPendingAllDevices(ctx context.Context, limit int) ([]*Task, error) {
+	builder := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"status": TaskStatusPending}).
+		OrderBy("device_sn ASC", "priority ASC", "created_at ASC")
+	if limit > 0 {
+		builder = builder.Limit(uint64(limit))
+	}
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query pending tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		task, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
 // Delete 删除任务
 func (r *PgTaskRepository) Delete(ctx context.Context, id string) error {
 	query, args, err := storage.Psql.Delete("device_tasks").
@@ -250,7 +322,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		"created_at", "sent_at", "completed_at", "expires_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
-		"parent_task_id", "command_index", "device_index",
+		"source_id", "command_index", "device_index",
 	}
 
 	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
@@ -262,7 +334,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
-			task.ParentTaskID, task.CommandIndex, task.DeviceIndex,
+			task.SourceID, task.CommandIndex, task.DeviceIndex,
 		)
 	}
 
@@ -340,7 +412,7 @@ func taskColumns() []string {
 		"created_at", "sent_at", "completed_at", "expires_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
-		"parent_task_id", "command_index", "device_index",
+		"source_id", "command_index", "device_index",
 	}
 }
 
@@ -361,7 +433,7 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
 		&result, &task.ErrorCode, &task.ErrorMessage,
 		&task.Source, &task.CreatorID, &task.Description,
-		&task.ParentTaskID, &task.CommandIndex, &task.DeviceIndex,
+		&task.SourceID, &task.CommandIndex, &task.DeviceIndex,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
