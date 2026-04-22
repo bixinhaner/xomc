@@ -348,7 +348,7 @@ export default function RestoreData() {
   };
 
   // ========== 表单校验 ==========
-  const canSubmit = useMemo(() => {
+  const _canSubmit = useMemo(() => {
     if (!drawerTaskName.trim()) return false;
     if (!selectAllDevices && drawerDevices.length === 0) return false;
     if (drawerExecutionMethod === 'scheduled' && !drawerScheduledTime) return false;

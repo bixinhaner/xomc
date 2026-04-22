@@ -3,7 +3,7 @@ import type { MRIndicator, MRDeviceMapping, MRRecord } from '../data/mr';
 import { mockMRIndicators, mockMRDeviceMappings, mockMRRecords } from '../data/mr';
 import { delay, paginate, generateId } from '../utils';
 
-let mappings = [...mockMRDeviceMappings];
+const mappings = [...mockMRDeviceMappings];
 
 export const mrService = {
   async getIndicators(params: PageRequest): Promise<PageResponse<MRIndicator>> {

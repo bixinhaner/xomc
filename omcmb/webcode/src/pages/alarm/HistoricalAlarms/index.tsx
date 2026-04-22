@@ -192,7 +192,7 @@ export default function HistoricalAlarms() {
     setActiveQuickFilter(key);
     if (key === 'all') {
       setFilterParams((prev) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+         
         const { severity, ...rest } = prev;
         return rest;
       });
@@ -317,7 +317,7 @@ export default function HistoricalAlarms() {
   }, []);
 
   const alarmRowStyle = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     (_record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
       return null;
     },

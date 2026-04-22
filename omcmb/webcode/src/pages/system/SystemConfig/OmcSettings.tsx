@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Switch, Select, Button, Card, Space, message } from 'antd';
+import { Form, Input, Switch, Select, Button, Card, Space, message } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;

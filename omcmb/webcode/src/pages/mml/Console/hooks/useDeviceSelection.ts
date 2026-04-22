@@ -11,7 +11,7 @@ export function useDeviceSelection() {
   const [devices, setDevices] = useState<ConsoleDevice[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const _abortRef = useRef<AbortController | null>(null);
 
   // Fetch devices from API — server-side pagination + filter
   const fetchDevices = useCallback(async (page: number, search?: string, productType?: string) => {

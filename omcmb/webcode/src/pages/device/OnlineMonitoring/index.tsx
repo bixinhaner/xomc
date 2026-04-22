@@ -7,7 +7,6 @@ import {
   SearchOutlined,
   WifiOutlined,
 } from '@ant-design/icons';
-import StatusIndicator from '@/components/StatusIndicator';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@core/types/device';

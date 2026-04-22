@@ -32,7 +32,7 @@ const MapControls: React.FC<MapControlsProps> = ({
   zoomInDisabled = false,
   zoomOutDisabled = false,
 }) => {
-  const token = useThemeToken();
+  const _token = useThemeToken();
 
   const containerStyle: React.CSSProperties = {
     position: 'absolute',

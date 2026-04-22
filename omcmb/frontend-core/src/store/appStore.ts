@@ -85,7 +85,7 @@ export const useAppStore = create<AppState>()(
       name: 'omc-app-store',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+         
         const { isMobileOverlayOpen, ...rest } = state;
         return rest;
       },

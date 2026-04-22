@@ -32,7 +32,7 @@ export default function TreeListPageLayout({
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
-  const handleDividerMouseDown = useCallback(
+  const _handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       isDragging.current = true;

@@ -14,7 +14,6 @@ import {
   Switch,
   Table,
   Tag,
-  Tree,
   Typography,
   Radio,
   Divider,
@@ -23,7 +22,6 @@ import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   DeleteOutlined,
-  EditOutlined,
   ExportOutlined,
   PlusOutlined,
   SyncOutlined,
@@ -47,12 +45,10 @@ import {
   useToggleRule,
   useApplyRule,
   useBatchSortRules,
-  useRuleTasks,
 } from '@core/hooks/api/useDeviceRules';
 import type {
   DeviceRule,
   NameRule,
-  RuleTask,
   CreateRuleRequest,
   UpdateRuleRequest,
 } from '@core/services/api/deviceRulesApi';
@@ -70,7 +66,7 @@ interface NameFilterItem {
 }
 
 // 设备组选项（扁平化）
-interface DeviceGroupOption {
+interface _DeviceGroupOption {
   id: string;
   name: string;
   level: number;
@@ -176,7 +172,7 @@ export default function DeviceRules() {
   const [nameFilters, setNameFilters] = useState<NameFilterItem[]>([
     { id: generateId(), condition: 'contain', value: '' },
   ]);
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [_selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [currentEditingRule, setCurrentEditingRule] = useState<DeviceRule | null>(null);
   const [migrationDrawerOpen, setMigrationDrawerOpen] = useState(false);
   const [migrationTasks, setMigrationTasks] = useState<MigrationTask[]>([]);
@@ -192,7 +188,7 @@ export default function DeviceRules() {
     name: filterParams.operators as string | undefined,
   }), [filterParams]);
 
-  const { data: rulesData, isLoading: rulesLoading, refetch: refetchRules } = useRules(listParams);
+  const { data: rulesData, isLoading: rulesLoading, refetch: _refetchRules } = useRules(listParams);
   const rules = rulesData?.items || [];
 
   // 获取设备分组树（使用树形结构避免重复数据）

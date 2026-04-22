@@ -4,7 +4,7 @@ import { mockReportDefinitions, mockReportRecords, mockReportSampleData } from '
 import { delay, paginate, generateId } from '../utils';
 
 let reportDefs = [...mockReportDefinitions];
-let reportRecords = [...mockReportRecords];
+const reportRecords = [...mockReportRecords];
 
 export const reportService = {
   async getDefinitions(

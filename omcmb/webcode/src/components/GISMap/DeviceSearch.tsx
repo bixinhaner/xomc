@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Input, List, Spin, Empty, Typography } from 'antd';
-import { SearchOutlined, CloseOutlined, DownOutlined } from '@ant-design/icons';
+import { Spin, Empty, Typography } from 'antd';
+import { CloseOutlined, DownOutlined } from '@ant-design/icons';
 import { useDebounce } from 'ahooks';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';

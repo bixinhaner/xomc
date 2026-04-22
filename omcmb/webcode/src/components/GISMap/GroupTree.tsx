@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Input, Checkbox, Tree, Typography, Spin, Empty } from 'antd';
+import { Input, Checkbox, Typography, Spin, Empty } from 'antd';
 import { SearchOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
@@ -79,7 +79,7 @@ const GroupTree: React.FC<GroupTreeProps> = ({
   };
 
   // 处理复选框变化
-  const handleCheck = (checked: React.Key[], info: any) => {
+  const _handleCheck = (checked: React.Key[], _info: any) => {
     onSelect(checked as string[]);
   };
 

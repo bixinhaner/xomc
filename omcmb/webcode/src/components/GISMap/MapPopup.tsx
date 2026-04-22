@@ -35,9 +35,9 @@ const MapPopup: React.FC<MapPopupProps> = ({
   device,
   visible = true,
   position,
-  onClose,
+  _onClose,
 }) => {
-  const t = useT();
+  const _t = useT();
   const token = useThemeToken();
 
   if (!visible || !device) return null;

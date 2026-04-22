@@ -82,7 +82,7 @@ function mapBackendCounter(c: BackendPMCounter): Measurement {
   };
 }
 
-function mapBackendKPIValue(v: BackendKPIValue): Measurement {
+function _mapBackendKPIValue(v: BackendKPIValue): Measurement {
   return {
     id: `${v.device_id}-${v.kpi_name}-${v.time}`,
     measurementName: v.kpi_name,

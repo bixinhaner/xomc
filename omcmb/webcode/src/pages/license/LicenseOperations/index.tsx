@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Card, Upload, Input, Tag, Space, message, Tabs, Form, Modal } from 'antd';
+import { Button, Card, Upload, Input, Tag, message, Tabs, Form, Modal } from 'antd';
 import { InboxOutlined, CheckCircleOutlined, StopOutlined, UploadOutlined } from '@ant-design/icons';
 import type { UploadFile, RcFile } from 'antd/es/upload';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -51,12 +51,12 @@ export default function LicenseOperations() {
   const [activateCode, setActivateCode] = useState('');
   const [revokeId, setRevokeId] = useState('');
   const [history, setHistory] = useState<LicenseOperationRecord[]>(mockOperationHistory);
-  const [importForm] = Form.useForm();
+  const [_importForm] = Form.useForm();
   const [importLoading, setImportLoading] = useState(false);
 
   const activateLicense = useActivateLicense();
   const revokeLicense = useRevokeLicense();
-  const importLicense = useImportLicense();
+  const _importLicense = useImportLicense();
 
   const opTypeLabelMap: Record<OperationType, string> = useMemo(() => ({
     import: t('common.import'),

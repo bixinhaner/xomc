@@ -5,7 +5,6 @@ import {
   CheckCircleOutlined,
   CloudSyncOutlined,
   DeleteOutlined,
-  EditOutlined,
   MoreOutlined,
   PlusOutlined,
   StopOutlined,

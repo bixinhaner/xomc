@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Button, Input, List, Select, Space, Tag, Tooltip, Typography, message } from 'antd';
 import {
   SearchOutlined,
@@ -48,7 +48,7 @@ export default function TopologyCanvasPage() {
   const [nodeTypeFilter, setNodeTypeFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [showLabels, setShowLabels] = useState(true);
-  const [zoomLevel, setZoomLevel] = useState(1);
+  const [_zoomLevel, setZoomLevel] = useState(1);
 
   const { data: graphData, refetch } = useTopoGraph();
 

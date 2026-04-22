@@ -26,7 +26,6 @@ import {
   DEVICE_STATUS_CONFIG,
 } from './constants';
 import {
-  deviceStyleFunction,
   clusterStyleFunction,
   createSpiderfyLineStyle,
   createSpiderfyPointStyle,
@@ -120,7 +119,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     onDeviceHover,
     onViewportChange,
     onClusterClick,
-    onZoomChange,
+    _onZoomChange,
     onMapClick,
   } = options;
 
@@ -376,7 +375,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   }, []);
 
   // 展开 Spiderfy（扇形方式）
-  const spiderfy = useCallback((clusterFeature: Feature, center: number[], features: Feature[]) => {
+  const spiderfy = useCallback((_clusterFeature: Feature, center: number[], features: Feature[]) => {
     if (!mapInstanceRef.current || !spiderfySourceRef.current) return;
 
     // 如果已经展开，先收起
@@ -883,8 +882,8 @@ function spiderfyStyleFunction(feature: Feature): Style | Style[] {
  */
 function bindMapEvents(
   map: Map,
-  deviceSource: VectorSource,
-  clusterSource: Cluster,
+  _deviceSource: VectorSource,
+  _clusterSource: Cluster,
   callbacks: {
     onDeviceClick?: (device: MapDevice) => void;
     onDeviceHover?: (device: MapDevice | null, pixel?: { x: number; y: number }) => void;

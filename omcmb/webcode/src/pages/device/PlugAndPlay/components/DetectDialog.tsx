@@ -7,7 +7,6 @@ import {
   DeleteOutlined,
   ClearOutlined,
   EditOutlined,
-  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 
@@ -47,7 +46,7 @@ const MOCK_DEVICES: Device[] = [
   { serialNumber: 'ENB00008', cellName: '成都武侯基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '成都区域', connectionStatus: 'online' },
 ];
 
-export default function DetectDialog({ open, policy, onClose, onSuccess }: Props) {
+export default function DetectDialog({ open, _policy, onClose, onSuccess }: Props) {
   const t = useT();
   const { message } = App.useApp();
 

@@ -3,7 +3,6 @@ import { App, Button, Card, Dropdown, Space, Switch, Tag, Typography, message } 
 import type { MenuProps } from 'antd';
 import {
   DeleteOutlined,
-  EditOutlined,
   EyeOutlined,
   MoreOutlined,
   PlusOutlined,

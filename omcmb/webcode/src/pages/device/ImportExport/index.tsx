@@ -5,7 +5,6 @@ import {
   Card,
   Col,
   Divider,
-  Form,
   Progress,
   Row,
   Select,
@@ -23,7 +22,6 @@ import {
   DownloadOutlined,
   FileExcelOutlined,
   InboxOutlined,
-  ReloadOutlined,
 } from '@ant-design/icons';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -31,7 +29,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;
-const { Text, Title, Paragraph } = Typography;
+const { Text, Title, _Paragraph } = Typography;
 
 interface ImportRecord {
   fileName: string;

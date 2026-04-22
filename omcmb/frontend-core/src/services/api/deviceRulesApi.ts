@@ -89,7 +89,7 @@ export interface RuleListRequest {
   name?: string;
 }
 
-export interface RuleListResponse extends PageResponse<DeviceRule> {}
+export type RuleListResponse = PageResponse<DeviceRule>;
 
 export interface RuleTaskListResponse {
   items: RuleTask[];

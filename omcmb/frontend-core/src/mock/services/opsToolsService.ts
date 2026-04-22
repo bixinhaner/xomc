@@ -4,8 +4,8 @@ import { mockOpsTemplates, mockOpsCommandRecords, mockOpsTasks } from '../data/o
 import { delay, paginate, generateId } from '../utils';
 
 let templates = [...mockOpsTemplates];
-let commandRecords = [...mockOpsCommandRecords];
-let tasks = [...mockOpsTasks];
+const commandRecords = [...mockOpsCommandRecords];
+const tasks = [...mockOpsTasks];
 
 export const opsToolsService = {
   async getTemplates(

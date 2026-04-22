@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Input, Switch, Space, Table, Button, Modal, Tag, Card, message } from 'antd';
+import { Form, Input, Switch, Table, Button, Modal, Tag, Card, message } from 'antd';
 import { PlusOutlined, MoreOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
@@ -23,7 +23,7 @@ const mockUsers: NorthboundUser[] = [
 ];
 
 // 设置行样式
-const settingRowStyle: React.CSSProperties = {
+const _settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
 
@@ -57,7 +57,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
     setModalVisible(true);
   };
 
-  const handleDeleteUser = (id: string) => {
+  const _handleDeleteUser = (id: string) => {
     setUsers(users.filter(u => u.id !== id));
     void message.success(t('common.deleteSuccess'));
   };

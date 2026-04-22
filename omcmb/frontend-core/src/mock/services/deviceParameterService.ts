@@ -18,7 +18,7 @@ import { delay, paginate } from '../utils';
 // ============================================================
 const PERF_TEST_MODE = true;
 const PERF_PARAM_COUNT = 30000;
-const PERF_OBJECT_COUNT = 30000; // 对象树节点数量
+const _PERF_OBJECT_COUNT = 30000; // 对象树节点数量
 
 // 基础参数模板（用于生成大量数据）
 const baseParamTemplates = [

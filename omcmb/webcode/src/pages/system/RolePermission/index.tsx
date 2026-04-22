@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   App,
   Button,
@@ -17,12 +17,10 @@ import {
   Spin,
   Empty,
   Tabs,
-  Table,
 } from 'antd';
 import type { MenuProps, TreeDataNode, TreeProps } from 'antd';
 import {
   PlusOutlined,
-  EditOutlined,
   DeleteOutlined,
   EyeOutlined,
   MoreOutlined,

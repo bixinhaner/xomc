@@ -269,7 +269,7 @@ function DataTable<T>(
         fixed: true,
         ...(selectable ? { selectedRowKeys, onChange: handleSelectionChange } : {}),
         columnWidth: showRowNumber ? (selectable ? 90 : 60) : 40,
-        renderCell: (checked, record, index, originNode) => {
+        renderCell: (_checked, _record, index, originNode) => {
           const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
           if (showRowNumber && selectable) {
             return (

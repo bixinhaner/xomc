@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import { Button, Tabs, Tree, Tag, Space, message, Tooltip } from 'antd';
 import {
   DownloadOutlined,
-  DeleteOutlined,
   ReloadOutlined,
   MinusCircleOutlined,
   ClearOutlined,

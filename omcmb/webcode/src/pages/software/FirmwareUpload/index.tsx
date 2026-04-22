@@ -24,7 +24,6 @@ import {
   StarFilled,
   MoreOutlined,
   EditOutlined,
-  InfoCircleOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import type { UploadFile, RcFile } from 'antd/es/upload';

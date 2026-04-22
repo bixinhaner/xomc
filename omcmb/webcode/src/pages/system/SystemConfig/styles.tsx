@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Divider } from 'antd';
+import { Card } from 'antd';
 
 /**
  * 系统设置页面统一样式组件

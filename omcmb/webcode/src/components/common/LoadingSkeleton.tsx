@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Skeleton } from 'antd';
+import { Card } from 'antd';
 
 export type SkeletonType = 'table' | 'card' | 'chart' | 'form';
 

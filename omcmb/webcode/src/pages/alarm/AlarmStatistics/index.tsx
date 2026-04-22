@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import BarChart from '@/components/Charts/BarChart';
 import { useT } from '@/hooks/useT';
 
-const { Title, Text } = Typography;
+const { Title, _Text } = Typography;
 
 // 告警级别颜色 - 专业配色方案
 export const SEVERITY_COLORS = {

@@ -6,17 +6,13 @@ import {
   Select,
   Radio,
   Button,
-  Space,
   Divider,
   Card,
   InputNumber,
   App,
-  Upload,
   Typography,
 } from 'antd';
 import {
-  UploadOutlined,
-  DownloadOutlined,
   PlusOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
@@ -70,7 +66,7 @@ const initial4GValues = {
 };
 
 // 5G表单初始值
-const initial5GValues = {
+const _initial5GValues = {
   wanIp: '',
   gnbId: '',
   frequency: '',
@@ -79,7 +75,7 @@ const initial5GValues = {
 };
 
 // 2G表单初始值
-const initial2GValues = {
+const _initial2GValues = {
   ipaUnit: '',
   bscIp: '',
   wanIp: '',

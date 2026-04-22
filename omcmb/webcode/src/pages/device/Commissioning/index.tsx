@@ -1,10 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { App, Button, Dropdown, Modal, Space, Steps, Tag, Typography } from 'antd';
+import { App, Button, Dropdown, Modal, Space, Tag, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  EditOutlined,
   LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
@@ -19,7 +18,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import AddDrawer from './AddDrawer';
 
-const { Text } = Typography;
+const { _Text } = Typography;
 
 type StationType = 'eNB' | 'gNB' | 'GSM';
 type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Button, Checkbox, Input, List, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { SearchOutlined, UserAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
@@ -58,7 +58,7 @@ export default function DeviceTree({
   );
 
   // 按类型分组设备
-  const devicesByType = useMemo(() => {
+  const _devicesByType = useMemo(() => {
     const map = new Map<string, ConsoleDevice[]>();
     paginatedDevices.forEach((device) => {
       const devices = map.get(device.type) || [];

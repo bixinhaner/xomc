@@ -177,7 +177,7 @@ export default function ActivationPlan() {
       title: t('software.upgrade.executeTime'),
       dataIndex: 'scheduledTime',
       width: 160,
-      render: (val, record) => {
+      render: (_val, record) => {
         const r = record as ActivationPlanRecord;
         const time = r.executedTime ?? r.scheduledTime;
         return time ? new Date(time).toLocaleString('zh-CN') : '—';

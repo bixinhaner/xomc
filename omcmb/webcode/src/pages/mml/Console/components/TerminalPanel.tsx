@@ -28,7 +28,7 @@ interface TerminalPanelProps {
 const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
   ({ lines, onClear, onDownload }, ref) => {
     const t = useT();
-    const token = useThemeToken();
+    const _token = useThemeToken();
     const containerRef = useRef<HTMLDivElement>(null);
 
     // 暴露方法

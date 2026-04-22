@@ -19,7 +19,7 @@ import { useDeviceList, useDeviceGroups } from '@core/hooks/api/useDevices';
 import type { AlarmRule } from '@core/types/alarm';
 import type { AlarmSeverity } from '@core/types/common';
 import type { Device, DeviceGroup } from '@core/types/device';
-import dayjs, { Dayjs } from 'dayjs';
+import { Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;
 

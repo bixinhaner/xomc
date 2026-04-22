@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { topologyService } from '../../mock/services/topologyService';
 import { topologyApi } from '../../services/api/topologyApi';
 import { useMock } from '../../services/apiSwitch';
-import type { MapFilterParams, MapBounds, MapStats, DeviceGeo, DeviceCluster, DeviceSearchResult } from '../../types/map';
+import type { MapFilterParams, MapBounds } from '../../types/map';
 
 export function useDomains() {
   return useQuery({

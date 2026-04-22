@@ -7,8 +7,6 @@ import {
   EyeOutlined,
   MinusCircleOutlined,
   SyncOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
 } from '@ant-design/icons';
 
 import DataTable from '@/components/DataTable';
@@ -260,7 +258,7 @@ export default function CurrentAlarms() {
       }));
     } else {
       setFilterParams((prev) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+         
         const { severity, dealState, unread, ...rest } = prev;
         return rest;
       });
@@ -385,7 +383,7 @@ export default function CurrentAlarms() {
   }, []);
 
   const alarmRowStyle = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     (_record: Alarm): 'critical' | 'major' | 'minor' | 'warning' | null => {
       return null;
     },

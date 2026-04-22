@@ -62,7 +62,7 @@ const JSONNode: React.FC<JSONNodeProps> = ({
       ? (data as unknown[]).map((v, i) => [String(i), v] as [string, unknown])
       : [];
 
-  const renderValue = (val: unknown, keyStr?: string, isLastItem = true, itemDepth = depth): React.ReactNode => {
+  const renderValue = (val: unknown, _keyStr?: string, isLastItem = true, _itemDepth = depth): React.ReactNode => {
     if (val === null) return <span style={{ color: colors.null, fontFamily: 'monospace', fontSize: 13 }}>null{isLastItem ? '' : ','}</span>;
     if (typeof val === 'boolean')
       return (

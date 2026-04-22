@@ -46,7 +46,7 @@ const LICENSE_SUPPORTED_TYPES = ['QAFA', 'QAFB', 'QAFC'];
 export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: Props) {
   const t = useT();
   const [form] = Form.useForm();
-  const { message } = App.useApp();
+  const { _message } = App.useApp();
 
   const isView = mode === 'view';
   const title = useMemo(() => {
@@ -90,7 +90,7 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
         selfConfigEnable: values.selfConfigEnable ? '1' : '0',
         targetVersion: values.targetVersion ? [values.targetVersion] : [],
       });
-    } catch (error) {
+    } catch (_error) {
       // Form validation error
     }
   };

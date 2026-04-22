@@ -13,6 +13,10 @@ export default defineConfig({
       'src/**/*.{test,spec}.{ts,tsx}',
       '../frontend-core/src/**/*.{test,spec}.{ts,tsx}',
     ],
+    env: {
+      VITE_USE_MOCK: 'false',
+      VITE_API_BASE_URL: '/api/v1',
+    },
   },
   resolve: {
     alias: {

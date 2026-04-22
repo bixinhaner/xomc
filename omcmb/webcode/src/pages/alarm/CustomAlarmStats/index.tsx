@@ -418,7 +418,7 @@ export default function CustomAlarmStats() {
       }));
     } else {
       setFilterParams((prev) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+         
         const { severity, dealState, unread, ...rest } = prev;
         return rest;
       });

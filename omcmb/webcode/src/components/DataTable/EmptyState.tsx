@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Empty } from 'antd';
+import { Button } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import styles from './DataTable.module.css';
 

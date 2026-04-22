@@ -3,10 +3,10 @@ import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mockConfigParams, mockConfigTemplates, mockBaselineConfigs, mockConfigTasks } from '../data/config';
 import { delay, paginate, generateId } from '../utils';
 
-let params = [...mockConfigParams];
+const params = [...mockConfigParams];
 let templates = [...mockConfigTemplates];
 let baselines = [...mockBaselineConfigs];
-let tasks = [...mockConfigTasks];
+const tasks = [...mockConfigTasks];
 
 export const configService = {
   async getParams(

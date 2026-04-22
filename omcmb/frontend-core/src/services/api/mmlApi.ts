@@ -1,5 +1,5 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLResult, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // ---------------------------------------------------------------------------

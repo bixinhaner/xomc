@@ -20,7 +20,6 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  EyeOutlined,
   MoreOutlined,
   CopyOutlined,
   StopOutlined,
@@ -748,7 +747,7 @@ export default function UserManagement() {
               label={t('user.userName')}
               rules={[
                 { required: true, message: t('user.pleaseInputUserName') },
-                { pattern: /^[a-zA-Z0-9_\-]{3,32}$/, message: t('user.userNameRule') },
+                { pattern: /^[a-zA-Z0-9_-]{3,32}$/, message: t('user.userNameRule') },
               ]}
             >
               <Input placeholder={t('user.userName')} maxLength={32} />

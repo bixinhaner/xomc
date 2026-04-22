@@ -12,10 +12,7 @@ import {
   App,
   Row,
   Col,
-  Tree,
   Typography,
-  Tooltip,
-  Empty,
   Tag,
   Pagination,
   Modal,
@@ -24,14 +21,12 @@ import {
   Alert,
 } from 'antd';
 import {
-  InfoCircleOutlined,
   SearchOutlined,
   FolderOutlined,
   ClearOutlined,
   DeleteOutlined,
   PlusOutlined,
   EditOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
 import type { DataNode, TreeProps } from 'antd/es/tree';
 import { useT } from '@/hooks/useT';
@@ -269,11 +264,11 @@ export default function TemplateDrawer({
   // 设备选择状态
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
-  const [deviceSearchText, setDeviceSearchText] = useState('');
-  const [deviceProductType, setDeviceProductType] = useState<string>('all');
-  const [groupDeviceType, setGroupDeviceType] = useState<string>('all');
-  const [deviceCurrentPage, setDeviceCurrentPage] = useState(1);
-  const [devicePageSize, setDevicePageSize] = useState(10);
+  const [deviceSearchText, _setDeviceSearchText] = useState('');
+  const [deviceProductType, _setDeviceProductType] = useState<string>('all');
+  const [groupDeviceType, _setGroupDeviceType] = useState<string>('all');
+  const [deviceCurrentPage, _setDeviceCurrentPage] = useState(1);
+  const [devicePageSize, _setDevicePageSize] = useState(10);
   const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
   const [modalSearchText, setModalSearchText] = useState('');
   const [modalProductType, setModalProductType] = useState<string>('all');
@@ -288,8 +283,8 @@ export default function TemplateDrawer({
   const [batchInputValue, setBatchInputValue] = useState('');
 
   // KPI 选择状态
-  const [kpiSearchText, setKpiSearchText] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string[]>([]);
+  const [kpiSearchText, _setKpiSearchText] = useState('');
+  const [_selectedCategory, _setSelectedCategory] = useState<string[]>([]);
   const [addKpiModalVisible, setAddKpiModalVisible] = useState(false);
   const [kpiModalSearchText, setKpiModalSearchText] = useState('');
   const [kpiModalPrimaryCategory, setKpiModalPrimaryCategory] = useState<string>('all');
@@ -399,7 +394,7 @@ export default function TemplateDrawer({
   };
 
   // KPI 树选择
-  const handleKpiTreeCheck: TreeProps['onCheck'] = (checkedKeys) => {
+  const _handleKpiTreeCheck: TreeProps['onCheck'] = (checkedKeys) => {
     const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
     setSelectedKpis(keys as string[]);
   };
@@ -516,7 +511,7 @@ export default function TemplateDrawer({
   const timeConfigDisabled = checkAll === '1' || reportPeriod === '1440';
 
   // 过滤后的 KPI 列表
-  const filteredKpiCategories = useMemo(() => {
+  const _filteredKpiCategories = useMemo(() => {
     if (!kpiSearchText) return MOCK_KPI_CATEGORIES;
 
     const filterTree = (nodes: DataNode[]): DataNode[] => {
@@ -595,14 +590,14 @@ export default function TemplateDrawer({
   }, [deviceSearchText, groupDeviceType]);
 
   // 分页后的设备列表
-  const paginatedDevices = useMemo(() => {
+  const _paginatedDevices = useMemo(() => {
     const start = (deviceCurrentPage - 1) * devicePageSize;
     const end = start + devicePageSize;
     return filteredDevices.slice(start, end);
   }, [filteredDevices, deviceCurrentPage, devicePageSize]);
 
   // 分页后的设备组列表
-  const paginatedGroups = useMemo(() => {
+  const _paginatedGroups = useMemo(() => {
     const start = (deviceCurrentPage - 1) * devicePageSize;
     const end = start + devicePageSize;
     return filteredGroups.slice(start, end);

@@ -161,7 +161,7 @@ function flattenTree(
 }
 
 // Collect all keys for expansion
-function collectAllKeys(nodes: ParameterTreeNode[]): string[] {
+function _collectAllKeys(nodes: ParameterTreeNode[]): string[] {
   const keys: string[] = [];
   for (const node of nodes) {
     if (node.isObject) {
@@ -428,7 +428,7 @@ export default function ObjectTreePanel({
       <div className="tree-panel-body">
         <Virtuoso
           data={flatNodes}
-          itemContent={(index, node) => (
+          itemContent={(_index, node) => (
             <TreeNodeItem
               key={node.key}
               node={node}

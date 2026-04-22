@@ -13,7 +13,6 @@ import {
   Tabs,
   Tag,
 } from 'antd';
-import type { AlarmFilter } from '@core/types/alarm';
 import type { AlarmSeverity } from '@core/types/common';
 import { useT } from '@/hooks/useT';
 

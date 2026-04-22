@@ -131,7 +131,7 @@ const ImportPanel = forwardRef<ImportPanelRef, ImportPanelProps>(function Import
       link.click();
       document.body.removeChild(link);
       message.success(t('import.downloadSuccess'));
-    } catch (error) {
+    } catch (_error) {
       message.error(t('import.downloadFailed'));
     }
   }, [onDownloadTemplate, templateUrl, message, t]);

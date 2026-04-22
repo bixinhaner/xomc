@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MMLScript, MMLTask, MMLCustomCommand, DeviceTaskResultItem } from '../../types/mml';
+import type { MMLScript, MMLTask, MMLCustomCommand } from '../../types/mml';
 import type { PageRequest } from '../../types/pagination';
 import { mmlService } from '../../mock/services/mmlService';
 import { mmlApi } from '../../services/api/mmlApi';

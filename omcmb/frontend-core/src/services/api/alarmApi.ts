@@ -111,7 +111,7 @@ function mapBackendLibrary(bl: BackendAlarmLibrary): AlarmLibraryItem {
   };
 }
 
-interface BackendAlarmLibraryI18n {
+interface _BackendAlarmLibraryI18n {
   id: string;
   library_id: string;
   locale: string;

@@ -3,7 +3,6 @@ import { Button, Modal, Space, Tag, Typography, message } from 'antd';
 import {
   PlusOutlined,
   ReloadOutlined,
-  SyncOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';

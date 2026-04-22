@@ -1,14 +1,11 @@
 import { Card, Tag, Timeline, Statistic, Row, Col, Badge } from 'antd';
 import {
-  CheckCircleOutlined,
   ExclamationCircleOutlined,
-  CloseCircleOutlined,
   UserOutlined,
   ApiOutlined,
   DatabaseOutlined,
   CloudServerOutlined,
 } from '@ant-design/icons';
-import DashboardPageLayout from '@/components/Layout/DashboardPageLayout';
 import GaugeChart from '@/components/Charts/GaugeChart';
 import StatusIndicator from '@/components/StatusIndicator';
 import { useSystemInfo } from '@core/hooks/api/useSystem';

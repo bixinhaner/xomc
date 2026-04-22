@@ -102,8 +102,8 @@ export default function ScriptTask() {
   const [pageSize, setPageSize] = useState(50);
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailTask, setDetailTask] = useState<MMLTask | null>(null);
-  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
-  const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
+  const [_expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
+  const [_filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<MMLTask | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -133,8 +133,8 @@ export default function ScriptTask() {
 
   // Per-task results cache
   const [resultCache, setResultCache] = useState<Record<string, { items: DeviceTaskResultItem[]; total: number }>>({});
-  const [resultSearch, setResultSearch] = useState<Record<string, string>>({});
-  const [resultPage, setResultPage] = useState<Record<string, number>>({});
+  const [_resultSearch, _setResultSearch] = useState<Record<string, string>>({});
+  const [_resultPage, _setResultPage] = useState<Record<string, number>>({});
   const fetchedRef = useRef<Set<string>>(new Set());
 
   const fetchResults = useCallback(async (taskId: string) => {
@@ -148,7 +148,7 @@ export default function ScriptTask() {
     }
   }, []);
 
-  const handleExpand = useCallback((expanded: boolean, record: MMLTask) => {
+  const _handleExpand = useCallback((expanded: boolean, record: MMLTask) => {
     if (expanded) {
       setExpandedRowKeys(prev => [...prev, record.id]);
       void fetchResults(record.id);

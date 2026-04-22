@@ -12,7 +12,6 @@ import {
   Space,
   Modal,
   message,
-  Divider,
   Checkbox,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SaveOutlined } from '@ant-design/icons';

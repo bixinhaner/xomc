@@ -15,7 +15,7 @@ import type { DataNode } from 'antd/es/tree';
 import type { GroupItem } from './types';
 import styles from './DeviceGrouping.module.css';
 
-const { Text } = Typography;
+const { _Text } = Typography;
 
 export interface GroupTreePanelProps {
   groups: GroupItem[];
@@ -32,7 +32,7 @@ export interface GroupTreePanelProps {
 
 function buildTreeData(
   groups: GroupItem[],
-  selectedId: string | null,
+  _selectedId: string | null,
   onContextMenu: (groupId: string) => void,
   t: (id: string, values?: Record<string, unknown>) => string
 ): DataNode[] {
@@ -40,7 +40,7 @@ function buildTreeData(
 
   function buildNode(group: GroupItem, isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
-    const isLevel1 = !group.parentId;
+    const _isLevel1 = !group.parentId;
     const isDefaultGroup = group.builtIn === 1;
 
     let menuItems: MenuProps['items'];

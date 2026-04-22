@@ -3,7 +3,7 @@ import type { License } from '../data/license';
 import { mockLicenses } from '../data/license';
 import { delay, paginate, generateId } from '../utils';
 
-let licenses = [...mockLicenses];
+const licenses = [...mockLicenses];
 
 export const licenseService = {
   async getList(

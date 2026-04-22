@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Tabs, Tag, Space, Switch, InputNumber, Form, message } from 'antd';
+import { Button, Tabs, Tag, Space, Switch, message } from 'antd';
 import { DownloadOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -64,7 +64,7 @@ const mockDeviceLogFiles: DeviceLogFile[] = [
   { id: 'dlf-003', fileName: 'GNB00001_runtime_20240601.log', deviceSn: 'GNB00001', deviceName: '北京-gNB-0001', fileSize: 1024 * 1024 * 8, logType: '运行日志', collectTime: '2024-06-01T00:00:00.000Z', uploadTime: '2024-06-01T01:00:00.000Z' },
 ];
 
-const sourceColorMap: Record<string, string> = { device: 'blue', user: 'green', nms: 'orange' };
+const _sourceColorMap: Record<string, string> = { device: 'blue', user: 'green', nms: 'orange' };
 const sourceLabelMap: Record<string, string> = { device: 'device', user: 'user', nms: 'NMS' };
 const statusColorMap: Record<string, string> = { active: 'green', backup: 'default', deprecated: 'red' };
 const statusLabelKeyMap: Record<string, string> = { active: 'status.online', backup: 'status.disabled', deprecated: 'status.failed' };

@@ -16,19 +16,14 @@ import {
   Table,
   Tag,
   Upload,
-  Popconfirm,
   InputNumber,
   message,
   Modal,
-  Tooltip,
   Drawer,
   Collapse,
   Descriptions,
-  Row,
-  Col,
   Dropdown,
   type UploadFile,
-  type UploadProps,
   type MenuProps,
 } from 'antd';
 import {
@@ -38,7 +33,6 @@ import {
   DeleteOutlined,
   SearchOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
   DownloadOutlined,
   EyeOutlined,
   EditOutlined,
@@ -48,13 +42,13 @@ import {
 import { useT } from '@/hooks/useT';
 
 const { Text, Title } = Typography;
-const { Dragger } = Upload;
+const { _Dragger } = Upload;
 
 // Types
 type ExecuteType = '0' | '1';
 type EnableType = '0' | '1';
 
-interface PolicyForm {
+interface _PolicyForm {
   selfStartEnable: EnableType;
   policyName: string;
   productType: string;
@@ -126,7 +120,7 @@ interface WanBindingItem {
 }
 
 // eNB WAN固定分组类型
-type EnbWanGroup = 'wanOamTr069' | 'wanS1c' | 'wanS1u' | 'wanX2ap';
+type _EnbWanGroup = 'wanOamTr069' | 'wanS1c' | 'wanS1u' | 'wanX2ap';
 
 // 自定义参数项
 interface CustomParam {
@@ -579,7 +573,7 @@ const MOCK_PARAM_CONFIGS: ParamConfig[] = [
 ];
 
 // Bandwidth options
-const BANDWIDTH_OPTIONS_DXDF = [
+const _BANDWIDTH_OPTIONS_DXDF = [
   { label: '6', value: '6' },
   { label: '15', value: '15' },
   { label: '25', value: '25' },
@@ -651,7 +645,7 @@ export default function AddPolicyPage() {
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
-  const { modal } = App.useApp();
+  const { _modal } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -666,11 +660,11 @@ export default function AddPolicyPage() {
   // Get mode from URL path
   const pathParts = location.pathname.split('/');
   const lastPart = pathParts[pathParts.length - 2];
-  const policyId = pathParts[pathParts.length - 1];
+  const _policyId = pathParts[pathParts.length - 1];
   const isAdd = lastPart === 'add';
   const isEdit = lastPart === 'edit';
   const isView = lastPart === 'view';
-  const mode = isAdd ? 'add' : isEdit ? 'edit' : 'view';
+  const _mode = isAdd ? 'add' : isEdit ? 'edit' : 'view';
 
   // State for software upgrade
   const [selectedOriginalVersions, setSelectedOriginalVersions] = useState<OriginalVersion[]>([]);
@@ -944,7 +938,7 @@ export default function AddPolicyPage() {
   }, [currentConfig, configForm, t]);
 
   // Handle import
-  const handleImportConfig = useCallback((file: File) => {
+  const handleImportConfig = useCallback((_file: File) => {
     // Simulate import
     const newConfig: ParamConfig = {
       id: Date.now().toString(),

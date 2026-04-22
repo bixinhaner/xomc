@@ -3,7 +3,7 @@
  * @module components/GISMap/styleUtils
  */
 
-import { Style, Circle, Fill, Stroke, Text, Icon } from 'ol/style';
+import { Style, Circle, Fill, Stroke, Text } from 'ol/style';
 import type Feature from 'ol/Feature';
 import type { MapDevice, DeviceStatus } from '@core/types/map';
 import {
@@ -368,7 +368,7 @@ export function createSpiderfyLineStyle(): Style {
 /**
  * 创建 Spiderfy 展开点样式
  */
-export function createSpiderfyPointStyle(device: MapDevice, index: number, total: number): Style {
+export function createSpiderfyPointStyle(device: MapDevice, index: number, _total: number): Style {
   const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
 
   return new Style({
@@ -393,7 +393,7 @@ export function createSpiderfyPointStyle(device: MapDevice, index: number, total
 /**
  * 创建 Spiderfy 展开点悬停样式
  */
-export function createSpiderfyPointHoverStyle(device: MapDevice, index: number, total: number): Style {
+export function createSpiderfyPointHoverStyle(device: MapDevice, index: number, _total: number): Style {
   const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
 
   return new Style({

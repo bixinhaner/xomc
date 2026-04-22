@@ -10,7 +10,7 @@ import { useThemeToken } from '@/hooks/useThemeToken';
 export default function SingleTaskTab() {
   const singleTasks = useTaskStore((s) => s.singleTasks);
   const t = useT();
-  const token = useThemeToken();
+  const _token = useThemeToken();
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [currentTask, setCurrentTask] = useState<SingleTask | null>(null);
 

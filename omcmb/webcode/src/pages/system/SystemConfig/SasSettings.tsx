@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Form, Switch, Space, Table, Button, Modal, Input, Radio, Card, Upload, Dropdown, App } from 'antd';
-import { PlusOutlined, MoreOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, MoreOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { MenuProps } from 'antd';
 import { useT } from '@/hooks/useT';

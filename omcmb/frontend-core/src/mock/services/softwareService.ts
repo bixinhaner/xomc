@@ -4,7 +4,7 @@ import { mockSoftwareVersions, mockUpgradePlans } from '../data/software';
 import { delay, paginate, generateId } from '../utils';
 
 let versions = [...mockSoftwareVersions];
-let upgradePlans = [...mockUpgradePlans];
+const upgradePlans = [...mockUpgradePlans];
 
 export const softwareService = {
   async getVersions(

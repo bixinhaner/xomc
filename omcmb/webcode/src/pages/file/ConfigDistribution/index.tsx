@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Tabs, Tree, Tag, Space, message, Radio, Upload } from 'antd';
+import { Button, Tabs, Tree, Tag, message, Radio, Upload } from 'antd';
 import {
   UploadOutlined,
   MinusCircleOutlined,
@@ -7,7 +7,6 @@ import {
   SendOutlined,
   DownloadOutlined,
   ReloadOutlined,
-  InboxOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import type { UploadFile, RcFile } from 'antd/es/upload';

@@ -255,7 +255,7 @@ export default function TaskManagement() {
     },
     {
       key: 'result', title: '执行结果', dataIndex: 'successCount', width: 140,
-      render: (val, record) => {
+      render: (_val, record) => {
         const r = record as (typeof mockBatchParamTasks)[0];
         if (r.status === 'pending' || r.status === 'running') {
           return <Progress percent={Math.round((r.successCount / r.deviceCount) * 100)} size="small" status="active" />;

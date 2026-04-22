@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Checkbox, Space, Typography, App } from 'antd';
+import { Modal, Checkbox, Typography } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -11,7 +11,7 @@ interface Props {
   onConfirm: (includeSuccess: boolean) => void;
 }
 
-export default function BatchRetryDialog({ open, taskCount, onClose, onConfirm }: Props) {
+export default function BatchRetryDialog({ open, _taskCount, onClose, onConfirm }: Props) {
   const t = useT();
   const [includeSuccess, setIncludeSuccess] = useState(false);
 

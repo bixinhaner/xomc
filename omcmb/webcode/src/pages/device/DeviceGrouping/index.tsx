@@ -12,7 +12,7 @@ import { useDeviceGroups, useDeviceList, useCreateGroup, useUpdateGroup, useDele
 import { useT } from '@/hooks/useT';
 import type { Device, EngStatus } from '@core/types/device';
 import type { NameFilterItem } from './types';
-import { generateId, generateOperators, parseRangeString } from './types';
+import { generateId, parseRangeString } from './types';
 import GroupTreePanel from './GroupTreePanel';
 import DeviceListPanel from './DeviceListPanel';
 import GroupDialogs from './GroupDialogs';

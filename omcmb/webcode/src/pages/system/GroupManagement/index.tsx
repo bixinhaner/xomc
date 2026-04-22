@@ -13,7 +13,6 @@ import {
 import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
-  EditOutlined,
   DeleteOutlined,
   EyeOutlined,
   MoreOutlined,

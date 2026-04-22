@@ -1,5 +1,4 @@
-import { Form, Input, InputNumber, Switch, Checkbox, Space, Button, Card, message } from 'antd';
-import { ApiOutlined } from '@ant-design/icons';
+import { Form, Input, Switch, Checkbox, Space, Button, Card, message } from 'antd';
 import { useT } from '@/hooks/useT';
 
 interface LdapSettingsProps {

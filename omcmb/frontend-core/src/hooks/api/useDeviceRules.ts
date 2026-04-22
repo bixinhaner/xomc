@@ -1,8 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { deviceRulesApi } from '../../services/api/deviceRulesApi';
 import type {
-  DeviceRule,
-  RuleTask,
   RuleListRequest,
   CreateRuleRequest,
   UpdateRuleRequest,

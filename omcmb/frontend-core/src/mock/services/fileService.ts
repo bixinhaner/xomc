@@ -53,7 +53,7 @@ export const fileService = {
     return { url: file.downloadUrl, fileName: file.fileName };
   },
 
-  async distribute(fileId: string, deviceSns: string[]): Promise<{ taskId: string }> {
+  async distribute(_fileId: string, _deviceSns: string[]): Promise<{ taskId: string }> {
     await delay(300, 600);
     return { taskId: generateId('dist') };
   },

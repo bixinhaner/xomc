@@ -33,7 +33,7 @@ function buildTreeData(
 
   function buildNode(group: DeviceGroup): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
-    const isChecked = checkedKeys.includes(group.id);
+    const _isChecked = checkedKeys.includes(group.id);
 
     return {
       key: group.id,
@@ -74,7 +74,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
     }
   }, [open]);
 
-  const handleCheck: TreeProps['onCheck'] = useCallback((checked, info) => {
+  const handleCheck: TreeProps['onCheck'] = useCallback((checked, _info) => {
     // checked 可能是字符串数组或 { checked: string[], halfChecked: string[] }
     if (Array.isArray(checked)) {
       setCheckedKeys(checked as string[]);

@@ -25,7 +25,7 @@ import { useCreateDevice } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 
 const { Title, Text } = Typography;
-const { TextArea } = Input;
+const { _TextArea } = Input;
 
 interface BasicInfoFormValues {
   sn: string;

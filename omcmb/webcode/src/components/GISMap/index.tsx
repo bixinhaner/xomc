@@ -9,7 +9,7 @@ import { Spin } from 'antd';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
-import { MAP_CONFIG, ANIMATION_CONFIG } from './constants';
+import { MAP_CONFIG } from './constants';
 import { useOLMap } from './useOLMap';
 import MapPopup from './MapPopup';
 import MapControls from './MapControls';
@@ -46,11 +46,11 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   className,
   style,
 }, ref) => {
-  const t = useT();
+  const _t = useT();
   const token = useThemeToken();
   const [hoveredDevice, setHoveredDevice] = useState<MapDevice | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [_highlightedId, setHighlightedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<MapViewport | null>(null);
 
   // 使用 OpenLayers Hook
@@ -59,12 +59,12 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     updateDevices,
     getViewport,
     flyTo,
-    highlightDevice,
+    _highlightDevice,
     clearHighlight,
     isReady,
     updateSize,
-    getZoom,
-    fitBounds,
+    _getZoom,
+    _fitBounds,
     highlightAndSpiderfyIfNeeded,
   } = useOLMap({
     center: defaultCenter,

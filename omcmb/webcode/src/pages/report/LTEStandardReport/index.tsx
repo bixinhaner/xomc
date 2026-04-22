@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react';
-import { Button, Tree, Tag, Space, Tooltip, message, Dropdown } from 'antd';
+import { Button, Tree, Tag, Space, message, Dropdown } from 'antd';
 import { EyeOutlined, DownloadOutlined, ExportOutlined, PlusOutlined, MoreOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useReportRecords, useDownloadReport } from '@core/hooks/api/useReports';
+import { useDownloadReport } from '@core/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
 
 const REPORT_CATEGORY_KEYS = [

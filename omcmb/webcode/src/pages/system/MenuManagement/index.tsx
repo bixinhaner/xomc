@@ -631,7 +631,7 @@ export default function MenuManagement() {
               upIcon: <UpOutlined style={{ fontSize: 10 }} />,
               downIcon: <DownOutlined style={{ fontSize: 10 }} />,
             }}
-            onStep={(value, info) => {
+            onStep={(_value, info) => {
               if (info.type === 'up') {
                 handleMoveUp(record);
               } else {

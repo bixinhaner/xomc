@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Button, Tag, Space, Tooltip, Modal, Descriptions, Progress } from 'antd';
+import { Button, Tag, Space, Tooltip, Modal, Descriptions } from 'antd';
 import { DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';

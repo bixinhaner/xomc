@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo } from 'react';
+import { useEffect, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
@@ -22,7 +22,7 @@ export default function AppShell() {
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
-  const location = useLocation();
+  const _location = useLocation();
 
   // 隐藏任务面板
   const hideTaskPanel = true;

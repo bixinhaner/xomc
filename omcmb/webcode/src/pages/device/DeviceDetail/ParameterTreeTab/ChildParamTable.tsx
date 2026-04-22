@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo, useRef, useEffect } from 'react';
+import React, { useCallback, useState, useMemo, useRef } from 'react';
 import {
   Table,
   Tag,
@@ -10,13 +10,11 @@ import {
   Select,
   Button,
   message,
-  Spin,
 } from 'antd';
 import {
   CheckOutlined,
   CloseOutlined,
   FolderOpenOutlined,
-  ExclamationCircleOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType, TableProps } from 'antd/es/table';
@@ -129,7 +127,7 @@ function getParamName(fullPath: string): string {
 
 // Virtual table row height constant
 const ROW_HEIGHT = 40;
-const HEADER_HEIGHT = 39;
+const _HEADER_HEIGHT = 39;
 // Max visible rows for virtual scroll area
 const MAX_VISIBLE_ROWS = 15;
 const VIRTUAL_SCROLL_HEIGHT = ROW_HEIGHT * MAX_VISIBLE_ROWS;

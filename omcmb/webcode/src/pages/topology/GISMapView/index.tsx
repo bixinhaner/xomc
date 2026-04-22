@@ -4,10 +4,10 @@
  * 使用真实 API 接口获取数据
  */
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Checkbox, Spin, Empty, message } from 'antd';
+import { Checkbox, Spin, Empty } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 import GISMap, { MAP_CONFIG } from '@/components/GISMap';
-import type { MapDevice, DeviceGroupNode, MapBounds, DeviceGeo, DeviceSearchResult } from '@core/types/map';
+import type { MapDevice, DeviceGroupNode, DeviceGeo, DeviceSearchResult } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import {
@@ -879,7 +879,7 @@ export default function GISMapView() {
                     <div style={searchResultsListStyle}>
                       {deviceSearchResults.map((result, index) => {
                         // onlineActive 和 onlineInactive 都算在线
-                        const isOnline = result.status === 'onlineActive' || result.status === 'onlineInactive';
+                        const _isOnline = result.status === 'onlineActive' || result.status === 'onlineInactive';
                         // 状态颜色：在线激活=绿色，在线未激活=黄色，离线=红色
                         const statusColor = result.status === 'onlineActive'
                           ? 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)'
