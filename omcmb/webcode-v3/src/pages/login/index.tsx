@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Lock, ScanLine, Loader2, ChevronRight } from 'lucide-react'
+import { Lock, ScanLine, Loader2, ChevronRight, Rocket } from 'lucide-react'
 
 import { NeonButton } from '@/components/ui/NeonButton'
 import { authApi } from '@core/services/api/authApi'
 import { useUserStore } from '@core/store/userStore'
+import type { User } from '@core/types/system'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -32,6 +33,29 @@ export function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  /** DEMO 模式：注入虚拟凭据，直接登舰桥（无需后端） */
+  const onDemo = () => {
+    setTokenPair({
+      access_token: 'demo-access-token',
+      refresh_token: 'demo-refresh-token',
+      expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    })
+    const fakeUser: User = {
+      id: 'demo',
+      username: 'demo',
+      displayName: 'COMMANDER',
+      email: 'demo@starforge.local',
+      phone: '',
+      role: 'admin',
+      status: 'active',
+      lastLoginTime: new Date().toISOString(),
+      createTime: new Date().toISOString(),
+      updateTime: new Date().toISOString(),
+    }
+    login(fakeUser)
+    navigate('/bridge')
   }
 
   return (
@@ -122,6 +146,15 @@ export function LoginPage() {
             >
               {loading ? 'LINKING…' : '登入指挥舰桥'}
             </NeonButton>
+
+            <button
+              type="button"
+              onClick={onDemo}
+              className="group flex w-full items-center justify-center gap-2 border border-cyan-500/15 bg-cyan-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-cyan-300/65 transition-all hover:border-cyan-400/45 hover:bg-cyan-500/10 hover:text-cyan-200"
+            >
+              <Rocket className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+              DEMO · 无需后端 · 直接进入舰桥
+            </button>
           </form>
 
           <div className="relative mt-5 flex items-center justify-between font-mono text-[10px] tracking-[0.18em] text-cyan-300/45">
