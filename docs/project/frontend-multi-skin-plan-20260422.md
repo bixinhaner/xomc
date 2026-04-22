@@ -533,3 +533,48 @@ npm run typecheck     # tsc --noEmit
 - 运行时 workspace 共享 `@core/services/http.ts`，同一个 Axios 实例、同一套 Zustand store、同一份 i18n
 - UI 栈选型待确认（建议 shadcn/ui + Tailwind）
 
+---
+
+## Phase 3 执行记录（2026-04-22）
+
+UI 栈锁定：**shadcn/ui + TailwindCSS + Radix + lucide-react**。
+
+### 创建结构
+```
+omcmb/webcode-v2/
+├── package.json            # workspace 成员，依赖 @omc/frontend-core
+├── index.html
+├── tsconfig.{json,app.json,node.json}
+├── vite.config.ts          # :3002，代理 /api → :8081，@core alias
+├── tailwind.config.js      # shadcn CSS var 设计令牌
+├── postcss.config.js
+├── .env / .env.development
+└── src/
+    ├── env.d.ts
+    ├── main.tsx / App.tsx
+    ├── styles/globals.css  # Tailwind + CSS var（亮/暗双主题）
+    ├── lib/utils.ts        # cn helper
+    ├── components/ui/      # shadcn primitives (button/input/label/card)
+    ├── providers/{QueryProvider,IntlProvider}
+    ├── router/             # React Router，Protected 路由
+    └── pages/
+        ├── login/          # 真实接入 @core authApi（login + getMe）
+        └── dashboard/      # 空壳，验证退出跳转
+```
+
+### 关键 @core 集成点
+- `@core/services/api/authApi` — 登录 + getMe
+- `@core/store/userStore` — setTokenPair / login / clearAuth / isAuthenticated
+- `@core/store/appStore` — locale（IntlProvider 订阅）
+- `@core/i18n` — getMessages(locale)
+
+### 验证
+- `npx tsc --noEmit`：0 errors ✅
+- `npm run dev`：Vite ready（:3002 被占用时自动降 :3003）；HTTP 200；login/dashboard 模块可解析
+- `npm run build`：1821 modules → 705 KB / 13.5 KB CSS / gzip 210 KB ✅
+
+### 约束
+- v2 首版页面仅 login + dashboard 壳，不承诺功能覆盖
+- 18 模块补齐按 backlog T-0035 逐个立项
+- UI 风格差异策略：shadcn/ui 极简 + Radix 可访问性，Tailwind 工具类直写，不采用 Antd 组件风格
+

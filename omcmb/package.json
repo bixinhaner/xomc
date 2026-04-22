@@ -4,12 +4,13 @@
   "type": "module",
   "workspaces": [
     "frontend-core",
-    "webcode"
+    "webcode",
+    "webcode-v2"
   ],
   "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + webcode (v1 皮肤) + 未来 webcode-vN (其他皮肤)",
   "scripts": {
-    "lint": "eslint webcode/src frontend-core/src",
-    "lint:fix": "eslint webcode/src frontend-core/src --fix",
+    "lint": "eslint webcode/src webcode-v2/src frontend-core/src",
+    "lint:fix": "eslint webcode/src webcode-v2/src frontend-core/src --fix",
     "typecheck": "npm run typecheck --workspace webcode"
   },
   "devDependencies": {

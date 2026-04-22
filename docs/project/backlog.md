@@ -138,6 +138,8 @@
 | T-0004 | 重构 Claude git 权限（软约束行为准则 + 硬约束 settings.json） | proc | process | 2026-04-20 | commit `7d212ce2`；`.claude/settings.json` 分层 allow/ask/deny |
 | T-0005 | 开发流水线 skill 设计 + L0 Backlog | proc | process | 2026-04-20 | commit `eba378d0`（L0 + skill + 设计文档 + CLAUDE.md）+ commit `64607009`（既有制品联通：/commit 四元组 / DoD / Gate / Risk / Milestone）+ commit `1dae3b31`（S7 回写）；设计 `docs/project/dev-pipeline-design-20260420.md`；skill `.claude/commands/dev-pipeline.md`；**首次 dogfooding**：本三连 commit 自身全部走四元组 footer |
 | T-0035-P1 | 前端多皮肤架构 Phase 1：抽取 `@omc/frontend-core` + 建立 npm workspaces + `@core/*` 路径别名 | ref | frontend | 2026-04-22 | 方案 `docs/project/frontend-multi-skin-plan-20260422.md`；`omcmb/frontend-core/src/{services,hooks/api,store,types,i18n,mock}`；workspace-level lint（`omcmb/eslint.config.js`）；`tsc --noEmit` / `npm run build` 通过；test/lint 前置失败与迁移无关（baseline 一致） |
+| T-0035-P1.5 | 修复 Phase 1 发现的 pre-existing test/lint 问题 | bug | frontend | 2026-04-22 | commit `22365022`；`.env.test` + vitest.config 固化 mock=false；setup.ts 加 localStorage polyfill；eslint-plugin-unused-imports + 规则降级；47 文件 95 处 unused vars 脚本化加 `_` 前缀；test 12/12 passed、lint 0 errors / 145 warnings（baseline 342/69）|
+| T-0035-P3 | 前端多皮肤架构 Phase 3：v2 皮肤脚手架（shadcn/ui + Tailwind + Radix）| feat | frontend | 2026-04-22 | `omcmb/webcode-v2/` 加入 workspaces；登录页 + dashboard 壳；接入 @core authApi/userStore/appStore/i18n；tsc 0 / dev 启动 / prod build 705 KB；18 模块补齐按 T-0035 逐个立项 |
 
 ---
 
@@ -207,6 +209,8 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-20 | done | T-0005 | S7 回写：commit `eba378d0` + `64607009` + `1dae3b31`（rebase 后 hash）；L0 Backlog + 流水线 skill + 既有制品联通全部完成，首次 dogfooding 成功 |
 | 2026-04-22 | 登记 + done | T-0035-P1 | 前端多皮肤架构 Phase 1：抽取 `@omc/frontend-core`（6 业务层目录 `git mv`，141 文件 `@/→@core/*`），建立 npm workspaces + workspace-level ESLint；`tsc`/`build` 通过 |
 | 2026-04-22 | 登记 | T-0035 | 前端多皮肤架构 Phase 3-7（v2 皮肤）母任务，Triaged 等 Sprint 规划 |
+| 2026-04-22 | done | T-0035-P1.5 | 清理 Phase 1 发现的 pre-existing test/lint 前置问题（11 test + 284 lint errors → 0）|
+| 2026-04-22 | done | T-0035-P3 | v2 皮肤脚手架：shadcn/ui + Tailwind + Radix；登录 + dashboard 壳；18 模块补齐仍待 Sprint 规划 |
 
 ---
 
