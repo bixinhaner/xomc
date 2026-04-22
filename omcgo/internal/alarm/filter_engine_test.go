@@ -40,15 +40,34 @@ func (m *mockStoreForEngine) Archive(ctx context.Context, alarm *model.Alarm) er
 func (m *mockStoreForEngine) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
 	return nil, nil
 }
-func (m *mockStoreForEngine) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) { return nil, nil }
-func (m *mockStoreForEngine) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string) error  { return nil }
-func (m *mockStoreForEngine) BatchClear(ctx context.Context, ids []uuid.UUID) error                  { return nil }
-func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error                      { return nil }
+func (m *mockStoreForEngine) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
+	return nil, nil
+}
+func (m *mockStoreForEngine) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
+	return nil, nil
+}
+func (m *mockStoreForEngine) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error { return nil }
+func (m *mockStoreForEngine) BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error {
+	return nil
+}
+func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error { return nil }
 
 func TestMatch_IgnoreAction(t *testing.T) {
 	engine := NewFilterEngine(&mockFilterRuleRepo{}, &mockStoreForEngine{}, zap.NewNop())
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmSource, AlarmSources: []string{"Device"}, Action: FilterActionIgnore}
-	alarm := &model.Alarm{AlarmSource: "Device", AlarmCode: "CPU_OVERLOAD"}
+	alarm := &model.Alarm{AlarmSource: strPtr("Device"), AlarmCode: "CPU_OVERLOAD"}
 	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
 }
 

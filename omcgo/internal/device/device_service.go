@@ -769,6 +769,77 @@ func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *mod
 	}
 }
 
+// RecordBootFromInform handles the data updates triggered by a reboot-complete
+// Inform (event codes "1 BOOT" or "M Reboot"). It:
+//   - atomically increments devices.boot_count and stamps last_boot_at;
+//   - refreshes the Redis device cache so the incremented counter is visible;
+//   - publishes SubjectDeviceRebootAbnormal when the reboot was not initiated by
+//     the ACS (i.e. "1 BOOT" without "M Reboot"), so downstream listeners
+//     (alarm engine, audit log) can react.
+//
+// The caller is expected to have already ensured the device row exists (via
+// UpdateFromInform or RegisterFromInform). Returns the updated boot_count; 0
+// with no error means the device could not be found and the boot was ignored.
+func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.Device, events []string) (int, error) {
+	if device == nil {
+		return 0, nil
+	}
+	now := time.Now()
+	bootCount, err := s.deviceRepo.RecordBoot(ctx, device.SerialNumber, now)
+	if err != nil {
+		return 0, fmt.Errorf("record boot: %w", err)
+	}
+	if bootCount == 0 {
+		// Device row vanished between lookup and update — nothing to do.
+		return 0, nil
+	}
+
+	// Refresh the cached device so subsequent reads see the new counter.
+	device.LastBootAt = &now
+	device.BootCount = bootCount
+	s.cacheDevice(ctx, device)
+
+	// Abnormal reboot = "1 BOOT" without "M Reboot" (and without "0 BOOTSTRAP",
+	// which the caller routes through handleBootstrap instead). ACS-initiated
+	// reboots include "M Reboot"; anything else is watchdog, crash or power cycle.
+	abnormal := hasEventCode(events, tr069.EventBoot) && !hasEventCode(events, tr069.EventMReboot)
+
+	s.logger.Info("device boot recorded",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber),
+		zap.Int("boot_count", bootCount),
+		zap.Bool("abnormal", abnormal),
+		zap.Strings("events", events),
+	)
+
+	if abnormal && s.eventBus != nil {
+		payload := map[string]interface{}{
+			"device_id":     device.ID.String(),
+			"serial_number": device.SerialNumber,
+			"carrier":       string(device.Carrier),
+			"boot_count":    bootCount,
+			"last_boot_at":  now,
+			"events":        events,
+		}
+		if evt, evtErr := event.NewEvent(event.SubjectDeviceRebootAbnormal, payload); evtErr == nil {
+			if pubErr := s.eventBus.Publish(ctx, event.SubjectDeviceRebootAbnormal, evt); pubErr != nil {
+				s.logger.Warn("publish device.reboot.abnormal event", zap.Error(pubErr))
+			}
+		}
+	}
+
+	return bootCount, nil
+}
+
+func hasEventCode(events []string, target string) bool {
+	for _, e := range events {
+		if e == target {
+			return true
+		}
+	}
+	return false
+}
+
 // detectTechnology tries to determine the radio technology from Inform parameters.
 func detectTechnology(params []tr069.ParameterValueStruct) model.Technology {
 	for _, p := range params {

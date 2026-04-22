@@ -40,6 +40,9 @@ func (m *mockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
 	return nil
 }
+func (m *mockDeviceRepo) RecordBoot(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
 func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return nil, nil
 }

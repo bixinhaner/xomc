@@ -307,6 +307,10 @@ func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at tim
 	return nil
 }
 
+func (m *mockDeviceRepo) RecordBoot(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
+
 func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	if m.CountByStatusFn != nil {
 		return m.CountByStatusFn(ctx, carrier)

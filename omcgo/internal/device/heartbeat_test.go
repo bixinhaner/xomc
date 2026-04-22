@@ -78,6 +78,9 @@ func (m *hbMockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, statu
 	}
 	return nil
 }
+func (m *hbMockDeviceRepo) RecordBoot(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
 func (m *hbMockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
 	if m.updateLastInformFn != nil {
 		return m.updateLastInformFn(ctx, sn, at, events)

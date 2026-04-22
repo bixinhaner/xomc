@@ -91,9 +91,24 @@ func (m *mockAlarmStore) Statistics(_ context.Context, _ AlarmFilter) (*AlarmSta
 	return stats, nil
 }
 
-func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string) error { return nil }
-func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID) error                { return nil }
-func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error                  { return nil }
+func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
+func (m *mockAlarmStore) BatchHistoryDelete(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ AlarmFilter) (*AlarmStatistics, error) {
+	return &AlarmStatistics{}, nil
+}
+func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error { return nil }
 
 func newTestEngine(store AlarmStore) *AlarmEngine {
 	return &AlarmEngine{
@@ -182,7 +197,8 @@ func TestAcknowledgeAlarm(t *testing.T) {
 
 	stored := store.active[alarm.ID]
 	assert.Equal(t, model.AlarmAcknowledged, stored.Status)
-	assert.Equal(t, "admin@test.com", stored.AcknowledgedBy)
+	require.NotNil(t, stored.AcknowledgedBy)
+	assert.Equal(t, "admin@test.com", *stored.AcknowledgedBy)
 	assert.NotNil(t, stored.AcknowledgedAt)
 }
 

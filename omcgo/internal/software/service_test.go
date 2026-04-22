@@ -108,6 +108,9 @@ func (m *svcMockDeviceRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ model
 func (m *svcMockDeviceRepo) UpdateLastInform(_ context.Context, _ string, _ time.Time, _ []string) error {
 	return nil
 }
+func (m *svcMockDeviceRepo) RecordBoot(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
 func (m *svcMockDeviceRepo) CountByStatus(_ context.Context, _ *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return map[model.DeviceStatus]int64{}, nil
 }

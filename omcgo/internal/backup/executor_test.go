@@ -68,6 +68,9 @@ func (m *execDeviceRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ model.De
 func (m *execDeviceRepo) UpdateLastInform(_ context.Context, _ string, _ time.Time, _ []string) error {
 	return nil
 }
+func (m *execDeviceRepo) RecordBoot(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
 func (m *execDeviceRepo) CountByStatus(_ context.Context, _ *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return nil, nil
 }

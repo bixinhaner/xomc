@@ -239,7 +239,8 @@ func TestHandler_Acknowledge_OK(t *testing.T) {
 
 	stored := store.active[alarm.ID]
 	assert.Equal(t, model.AlarmAcknowledged, stored.Status)
-	assert.Equal(t, "admin@test.com", stored.AcknowledgedBy)
+	require.NotNil(t, stored.AcknowledgedBy)
+	assert.Equal(t, "admin@test.com", *stored.AcknowledgedBy)
 	assert.NotNil(t, stored.AcknowledgedAt)
 }
 

@@ -1151,13 +1151,16 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 	}
 
 	// 根据事件码确定主事件主题（按优先级排序）。
+	// BOOTSTRAP 优先于 BOOT：首次入网/出厂复位伴随 BOOT 也归类为 bootstrap，
+	// 触发设备注册与自动开站流程；仅 BOOT（无 BOOTSTRAP）或 M Reboot 归类为
+	// reboot_complete，触发重启统计与状态恢复。
 	var subject string
 	switch {
-	case tr069.IsBootstrap(inform.Event), tr069.IsBoot(inform.Event):
+	case tr069.IsBootstrap(inform.Event):
 		subject = event.SubjectDeviceBootstrap
 	case tr069.IsAlarm(inform.Event):
 		subject = event.SubjectDeviceAlarm
-	case tr069.IsRebootComplete(inform.Event):
+	case tr069.IsRebootComplete(inform.Event), tr069.IsBoot(inform.Event):
 		subject = event.SubjectDeviceRebootComplete
 	case tr069.IsConnectionRequest(inform.Event):
 		subject = event.SubjectDeviceConnectionRequest

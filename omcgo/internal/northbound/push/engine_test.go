@@ -158,6 +158,65 @@ func TestEngine_Deliver_Success(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&receivedCount))
 }
 
+func TestEngine_Deliver_RebootComplete_DeviceEvent(t *testing.T) {
+	var receivedCount int32
+	var receivedSubject string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&receivedCount, 1)
+		var body map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if s, ok := body["subject"].(string); ok {
+			receivedSubject = s
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	engine := NewEngine(nil, testLogger())
+	engine.AddTarget(&Target{
+		ID:         "oss-device-events",
+		URL:        server.URL,
+		AuthType:   "bearer",
+		AuthToken:  "oss-token",
+		DataTypes:  []string{"device_event"},
+		RetryCount: 1,
+		Enabled:    true,
+	})
+
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, map[string]interface{}{
+		"device_id": map[string]string{"SerialNumber": "SN-OSS-REBOOT-1"},
+		"events":    []string{"1 BOOT", "M Reboot"},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, engine.handleEvent(context.Background(), evt))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&receivedCount))
+	assert.Equal(t, event.SubjectDeviceRebootComplete, receivedSubject)
+}
+
+func TestEngine_Deliver_RebootComplete_IgnoredByAlarmOnlyTarget(t *testing.T) {
+	var called int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&called, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	engine := NewEngine(nil, testLogger())
+	engine.AddTarget(&Target{
+		ID:        "oss-alarm-only",
+		URL:       server.URL,
+		DataTypes: []string{"alarm"}, // opt-out of device_event
+		Enabled:   true,
+	})
+
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, map[string]string{"test": "data"})
+	require.NoError(t, err)
+
+	require.NoError(t, engine.handleEvent(context.Background(), evt))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&called), "alarm-only target must not receive device_event")
+}
+
 func TestEngine_Deliver_DisabledTarget(t *testing.T) {
 	var called int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +354,7 @@ func TestDataTypeFromSubject(t *testing.T) {
 		{event.SubjectOSSAlarmForward, "alarm"},
 		{event.SubjectOSSPMExport, "pm"},
 		{event.SubjectOSSConfigSnapshot, "config"},
+		{event.SubjectDeviceRebootComplete, "device_event"},
 		{"unknown.subject", ""},
 	}
 

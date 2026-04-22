@@ -135,6 +135,10 @@ type DeviceWriter interface {
 	BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
 	UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error
+	// RecordBoot atomically increments boot_count and sets last_boot_at for the device
+	// identified by serial number. Invoked when the ACS receives a "1 BOOT" or
+	// "M Reboot" Inform. Returns the updated boot_count.
+	RecordBoot(ctx context.Context, sn string, at time.Time) (int, error)
 	// RecycleBin operations
 	// ListRecycleBin returns soft-deleted devices with filtering.
 	ListRecycleBin(ctx context.Context, filter RecycleBinFilter) (*model.ListResponse[model.Device], error)
@@ -211,6 +215,7 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 			"carrier", "technology", "status", "firmware_version", "ip_address",
 			"connection_request_url", "nat_detected", "udp_connection_request_address",
 			"last_inform_at", "last_inform_events",
+			"last_boot_at", "boot_count",
 			"inform_interval", "site_name", "site_id", "latitude", "longitude",
 			"extension_data", "created_at", "updated_at").
 		Values(device.ID, device.SerialNumber, device.OUI, device.ProductClass,
@@ -218,6 +223,7 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 			device.Status, device.FirmwareVersion, ipAddr,
 			device.ConnectionRequestURL, device.NatDetected, udpAddr,
 			device.LastInformAt, eventsData,
+			device.LastBootAt, device.BootCount,
 			device.InformInterval, device.SiteName, device.SiteID,
 			device.Latitude, device.Longitude, extData, device.CreatedAt, device.UpdatedAt).
 		ToSql()
@@ -512,6 +518,28 @@ func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at
 	return nil
 }
 
+// RecordBoot atomically increments boot_count and stamps last_boot_at for the
+// device identified by serial number. Used when the ACS receives a 1 BOOT /
+// M Reboot Inform. The atomic UPDATE prevents concurrent Informs from racing
+// on the counter. Returns the new boot_count, or 0 with no error if the
+// device row does not exist (caller decides whether to auto-register).
+func (r *PgDeviceRepository) RecordBoot(ctx context.Context, sn string, at time.Time) (int, error) {
+	const q = `UPDATE devices
+	   SET last_boot_at = $1,
+	       boot_count = COALESCE(boot_count, 0) + 1
+	   WHERE serial_number = $2 AND deleted_at IS NULL
+	   RETURNING boot_count`
+	var bootCount int
+	err := r.pool.QueryRow(ctx, q, at, sn).Scan(&bootCount)
+	if err == pgx.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("record boot: %w", err)
+	}
+	return bootCount, nil
+}
+
 func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	builder := storage.Psql.Select("d.status", "COUNT(*)").From("devices d").Where(notDeleted).GroupBy("d.status")
 	if carrier != nil {
@@ -592,6 +620,7 @@ func deviceColumns() []string {
 		"host(d.ip_address) as ip_address", "d.connection_request_url",
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
+		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 	}
@@ -615,6 +644,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
+		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 	)
@@ -684,6 +714,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
+		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 	)

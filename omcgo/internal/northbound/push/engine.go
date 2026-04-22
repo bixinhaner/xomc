@@ -81,6 +81,9 @@ func (e *Engine) Subscribe(eventBus event.EventBus) error {
 		event.SubjectOSSAlarmForward,
 		event.SubjectOSSPMExport,
 		event.SubjectOSSConfigSnapshot,
+		// 设备重启事件直接透传给订阅 "device_event" 数据类型的 OSS 目标。
+		// 运营商 OSS 若无重启事件需求，可通过 DataTypes 过滤不接收。
+		event.SubjectDeviceRebootComplete,
 	}
 
 	for _, subject := range subjects {
@@ -293,6 +296,8 @@ func dataTypeFromSubject(subject string) string {
 		return "pm"
 	case event.SubjectOSSConfigSnapshot:
 		return "config"
+	case event.SubjectDeviceRebootComplete:
+		return "device_event"
 	default:
 		return ""
 	}

@@ -28,6 +28,7 @@ type infMockDeviceRepo struct {
 	listFn              func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
 	updateStatusFn      func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
 	updateLastInformFn  func(ctx context.Context, sn string, at time.Time, events []string) error
+	recordBootFn        func(ctx context.Context, sn string, at time.Time) (int, error)
 	countByStatusFn     func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
 }
 
@@ -82,6 +83,12 @@ func (m *infMockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at 
 		return m.updateLastInformFn(ctx, sn, at, events)
 	}
 	return nil
+}
+func (m *infMockDeviceRepo) RecordBoot(ctx context.Context, sn string, at time.Time) (int, error) {
+	if m.recordBootFn != nil {
+		return m.recordBootFn(ctx, sn, at)
+	}
+	return 0, nil
 }
 func (m *infMockDeviceRepo) CountByStatus(ctx context.Context, c *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	if m.countByStatusFn != nil {
@@ -329,6 +336,114 @@ func TestHandleBootstrap_Success(t *testing.T) {
 	assert.Equal(t, "AABBCC", createdDevice.OUI)
 	assert.Equal(t, model.CarrierCMCC, createdDevice.Carrier)
 	assert.Equal(t, model.DeviceActive, createdDevice.Status)
+}
+
+func TestHandleRebootComplete_NormalReboot(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+	var recordedSN string
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				OUI:            "AABBCC",
+				Carrier:        model.CarrierCMCC,
+				Status:         model.DeviceActive,
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+		recordBootFn: func(_ context.Context, sn string, _ time.Time) (int, error) {
+			recordedSN = sn
+			return 3, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-REBOOT-001")
+	payload.Events = []string{tr069.EventBoot, tr069.EventMReboot}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+	require.NotNil(t, updatedDevice)
+	assert.Equal(t, "SN-REBOOT-001", recordedSN)
+}
+
+func TestHandleRebootComplete_AbnormalReboot_PublishesAbnormalEvent(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				OUI:            "AABBCC",
+				Carrier:        model.CarrierCMCC,
+				Status:         model.DeviceActive,
+				InformInterval: 300,
+			}, nil
+		},
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 7, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	abnormalReceived := make(chan event.Event, 1)
+	_, subErr := bus.Subscribe(event.SubjectDeviceRebootAbnormal, func(_ context.Context, evt event.Event) error {
+		abnormalReceived <- evt
+		return nil
+	})
+	require.NoError(t, subErr)
+
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-REBOOT-ABN-001")
+	payload.Events = []string{tr069.EventBoot} // only "1 BOOT", no "M Reboot"
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	select {
+	case got := <-abnormalReceived:
+		assert.Equal(t, event.SubjectDeviceRebootAbnormal, got.Subject)
+	case <-time.After(time.Second):
+		t.Fatal("expected device.reboot.abnormal event, got none")
+	}
+}
+
+func TestHandleRebootComplete_AutoRegisterWhenMissing(t *testing.T) {
+	var created bool
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
+			return nil, nil // device missing
+		},
+		createFn: func(_ context.Context, _ *model.Device) error {
+			created = true
+			return nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-REBOOT-ORPHAN-001")
+	payload.Events = []string{tr069.EventBoot}
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+	assert.True(t, created, "expected auto-register to call Create")
 }
 
 func TestHandlePeriodic_Success(t *testing.T) {

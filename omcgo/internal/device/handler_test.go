@@ -100,6 +100,10 @@ func (m *fakeDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at tim
 	return nil
 }
 
+func (m *fakeDeviceRepo) RecordBoot(ctx context.Context, sn string, at time.Time) (int, error) {
+	return 0, nil
+}
+
 func (m *fakeDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	counts := make(map[model.DeviceStatus]int64)
 	for _, d := range m.devices {

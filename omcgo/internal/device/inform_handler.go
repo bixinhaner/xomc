@@ -68,6 +68,11 @@ func (h *InformHandler) Subscribe(bus event.EventBus) error {
 	}
 	h.logger.Info("subscribed to value_change events", zap.String("subject", event.SubjectDeviceValueChange))
 
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceRebootComplete, "device-mgr-reboot", h.handleRebootComplete); err != nil {
+		return fmt.Errorf("subscribe reboot_complete: %w", err)
+	}
+	h.logger.Info("subscribed to reboot_complete events", zap.String("subject", event.SubjectDeviceRebootComplete))
+
 	h.logger.Info("inform handler subscribed to device events successfully")
 	return nil
 }
@@ -117,13 +122,75 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 		zap.String("carrier", string(carrierCode)),
 	)
 
-	// Always publish device.registered on BOOTSTRAP/BOOT events,
+	// Always publish device.registered on BOOTSTRAP events,
 	// so that provisioning engine triggers auto-discovery/sync
 	// for both new and existing devices.
 	h.service.PublishDeviceRegistered(ctx, device)
 
-	// Detect abnormal reboot: "1 BOOT" without "0 BOOTSTRAP"
-	h.detectAbnormalReboot(ctx, payload, device)
+	return nil
+}
+
+// handleRebootComplete handles Inform events that indicate a device has
+// rebooted and re-attached (event codes "1 BOOT" and/or "M Reboot") but is
+// NOT a fresh bootstrap. Responsibilities:
+//   - Ensure the device row exists (auto-register on the rare case a reboot
+//     Inform arrives before bootstrap, e.g. ACS cache miss after restart);
+//   - Update last_inform_at / status / IP / ConnectionRequestURL / firmware
+//     via UpdateFromInform;
+//   - Atomically increment boot_count and stamp last_boot_at;
+//   - Publish device.reboot.abnormal for watchdog/crash reboots (no M Reboot).
+//
+// Unlike bootstrap it does NOT re-trigger the provisioning engine: a rebooted
+// device keeps its previous configuration identity.
+func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Event) error {
+	h.logger.Info("handleRebootComplete: received reboot event",
+		zap.String("event_id", evt.ID),
+		zap.String("subject", evt.Subject))
+
+	var payload InformEventPayload
+	if err := evt.DecodePayload(&payload); err != nil {
+		h.logger.Error("handleRebootComplete: decode payload failed", zap.Error(err))
+		return fmt.Errorf("decode reboot_complete payload: %w", err)
+	}
+
+	inform := payloadToInform(payload)
+	sn := payload.DeviceId.SerialNumber
+
+	device, err := h.service.GetBySerialNumber(ctx, sn)
+	if err != nil {
+		h.logger.Error("handleRebootComplete: device lookup failed",
+			zap.Error(err), zap.String("serial_number", sn))
+		return err
+	}
+
+	if device == nil {
+		h.logger.Info("handleRebootComplete: device not found, auto-registering",
+			zap.String("serial_number", sn))
+		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
+		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		if regErr != nil {
+			h.logger.Error("handleRebootComplete: auto-register failed",
+				zap.Error(regErr), zap.String("serial_number", sn))
+			return regErr
+		}
+		device = registered
+	} else {
+		updated, updErr := h.service.UpdateFromInform(ctx, inform)
+		if updErr != nil {
+			h.logger.Error("handleRebootComplete: UpdateFromInform failed",
+				zap.Error(updErr), zap.String("serial_number", sn))
+			return updErr
+		}
+		if updated != nil {
+			device = updated
+		}
+	}
+
+	if _, err := h.service.RecordBootFromInform(ctx, device, payload.Events); err != nil {
+		h.logger.Error("handleRebootComplete: RecordBootFromInform failed",
+			zap.Error(err), zap.String("serial_number", sn))
+		return err
+	}
 
 	return nil
 }
@@ -207,42 +274,6 @@ func (h *InformHandler) resolveCarrier(oui string) model.CarrierCode {
 		}
 	}
 	return h.defaultCarrier
-}
-
-// detectAbnormalReboot checks whether the Inform events contain "1 BOOT"
-// without "0 BOOTSTRAP", which indicates an unexpected device reboot.
-func (h *InformHandler) detectAbnormalReboot(ctx context.Context, payload InformEventPayload, device *model.Device) {
-	hasBoot := false
-	hasBootstrap := false
-	for _, e := range payload.Events {
-		switch e {
-		case "1 BOOT":
-			hasBoot = true
-		case "0 BOOTSTRAP":
-			hasBootstrap = true
-		}
-	}
-
-	if hasBoot && !hasBootstrap {
-		h.logger.Warn("abnormal reboot detected",
-			zap.String("serial_number", device.SerialNumber),
-			zap.String("device_id", device.ID.String()),
-			zap.Strings("events", payload.Events))
-
-		if h.service.eventBus != nil {
-			evtPayload := map[string]interface{}{
-				"device_id":     device.ID.String(),
-				"serial_number": device.SerialNumber,
-				"carrier":       string(device.Carrier),
-				"events":        payload.Events,
-			}
-			if evt, err := event.NewEvent(event.SubjectDeviceRebootAbnormal, evtPayload); err == nil {
-				if pubErr := h.service.eventBus.Publish(ctx, event.SubjectDeviceRebootAbnormal, evt); pubErr != nil {
-					h.logger.Warn("publish device.reboot.abnormal event", zap.Error(pubErr))
-				}
-			}
-		}
-	}
 }
 
 func payloadToInform(p InformEventPayload) *tr069.InformMessage {

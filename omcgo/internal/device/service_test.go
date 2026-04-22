@@ -28,6 +28,7 @@ type mockDeviceRepo struct {
 	listFn              func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
 	updateStatusFn      func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
 	updateLastInformFn  func(ctx context.Context, sn string, at time.Time, events []string) error
+	recordBootFn        func(ctx context.Context, sn string, at time.Time) (int, error)
 	countByStatusFn     func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
 }
 
@@ -89,6 +90,13 @@ func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at tim
 		return m.updateLastInformFn(ctx, sn, at, events)
 	}
 	return nil
+}
+
+func (m *mockDeviceRepo) RecordBoot(ctx context.Context, sn string, at time.Time) (int, error) {
+	if m.recordBootFn != nil {
+		return m.recordBootFn(ctx, sn, at)
+	}
+	return 0, nil
 }
 
 func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {

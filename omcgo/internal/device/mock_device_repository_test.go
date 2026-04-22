@@ -295,6 +295,21 @@ func (mr *MockDeviceRepositoryMockRecorder) UpdateLastInform(ctx, sn, at, events
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastInform", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateLastInform), ctx, sn, at, events)
 }
 
+// RecordBoot mocks base method.
+func (m *MockDeviceRepository) RecordBoot(ctx context.Context, sn string, at time.Time) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordBoot", ctx, sn, at)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecordBoot indicates an expected call of RecordBoot.
+func (mr *MockDeviceRepositoryMockRecorder) RecordBoot(ctx, sn, at any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordBoot", reflect.TypeOf((*MockDeviceRepository)(nil).RecordBoot), ctx, sn, at)
+}
+
 // UpdateStatus mocks base method.
 func (m *MockDeviceRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error {
 	m.ctrl.T.Helper()

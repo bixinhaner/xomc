@@ -30,6 +30,8 @@ type Device struct {
 	UDPConnectionRequestAddress string                 `json:"udp_connection_request_address,omitempty" db:"udp_connection_request_address"`
 	LastInformAt                *time.Time             `json:"last_inform_at,omitempty" db:"last_inform_at"`
 	LastInformEvents            []string               `json:"last_inform_events,omitempty" db:"last_inform_events"`
+	LastBootAt                  *time.Time             `json:"last_boot_at,omitempty" db:"last_boot_at"`
+	BootCount                   int                    `json:"boot_count" db:"boot_count"`
 	InformInterval              int                    `json:"inform_interval" db:"inform_interval"`
 	SiteName                    string                 `json:"site_name" db:"site_name"`
 	SiteID                      string                 `json:"site_id" db:"site_id"`
