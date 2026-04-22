@@ -3,9 +3,12 @@ import type { ParameterFilter, ParameterUpdateRequest, ParameterSyncOptions } fr
 import type { PageRequest } from '../../types/pagination';
 import { deviceParameterService } from '../../mock/services/deviceParameterService';
 import { deviceParameterApi } from '../../services/api/deviceParameterApi';
-import { createApiSwitch } from '../../services/apiSwitch';
+import { useMock } from '../../services/apiSwitch';
 
-const api = createApiSwitch(deviceParameterService, deviceParameterApi);
+type ParamApi = typeof deviceParameterApi & { syncConfigFile?: (deviceId: string) => Promise<unknown> };
+const api: ParamApi = useMock
+  ? (deviceParameterService as unknown as ParamApi)
+  : (deviceParameterApi as ParamApi);
 
 export function useDeviceParameters(
   deviceId: string,
@@ -163,6 +166,7 @@ export function useDeleteObject() {
 
 export function useSyncConfigFile() {
   return useMutation({
-    mutationFn: (deviceId: string) => api.syncConfigFile(deviceId),
+    mutationFn: (deviceId: string) =>
+      api.syncConfigFile ? api.syncConfigFile(deviceId) : Promise.resolve(undefined),
   });
 }

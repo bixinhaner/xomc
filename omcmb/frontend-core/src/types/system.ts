@@ -1,42 +1,40 @@
 export type UserOnlineStatus = 'online' | 'offline';
-export type UserStatus = 'enabled' | 'disabled'; // 启用/禁用
+export type UserStatus = 'active' | 'inactive' | 'locked';
+export type UserRole = 'admin' | 'operator' | 'viewer' | 'auditor';
 
 export interface User {
   id: string;
-  userName: string;
+  username: string;
+  displayName: string;
   email: string;
-  phone?: string; // 手机号（可选）
-  groupNames: string[]; // 所属用户组列表（角色）
-  department?: string; // 部门
-  lastLoginTime?: string; // 登录时间
-  source: string; // 登录来源
-  onlineStatus: UserOnlineStatus; // 在线状态
-  status: UserStatus; // 状态：启用/禁用
-  expireTime?: string; // 过期时间
-  builtIn: number; // 内置用户标识
-  description?: string; // 备注
-  createTime: string; // 创建时间
-  updateTime?: string; // 更新时间
-  createUser?: string; // 创建人
-  updateUser?: string; // 更新人
+  role: UserRole;
+  status: UserStatus;
+  phone?: string;
+  carrier?: string;
+  lastLoginTime?: string;
+  createTime: string;
+  updateTime?: string;
+  department?: string;
+  description?: string;
 }
 
 export interface Role {
   id: string;
   roleName: string;
-  roleCode: string; // 角色标识（系统内唯一编码）
-  batchOperation: number; // 1=是, 0=否
+  roleCode: string;
+  batchOperation: number;
   description: string;
   permissions: string[];
-  apiPermissions?: ApiPermission[]; // API权限
-  deviceGroupIds?: string[]; // 数据权限（设备组）
-  networkTypes?: string[]; // 数据权限（网络类型）
+  apiPermissions?: ApiPermission[];
+  deviceGroupIds?: string[];
+  networkTypes?: string[];
+  menuIds?: string[];
   userCount: number;
-  builtIn: number; // 内置角色标识
-  createUser?: string; // 创建人
-  updateUser?: string; // 更新人
-  createTime?: string; // 创建时间
-  updateTime?: string; // 更新时间
+  builtIn: number;
+  createUser?: string;
+  updateUser?: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
 export interface Group {
@@ -45,7 +43,7 @@ export interface Group {
   description: string;
   userCount: number;
   roleCount: number;
-  builtIn: number; // 1,2 = built-in, others = custom
+  builtIn: number;
   updUser: string;
   updTime: string;
 }
@@ -58,20 +56,18 @@ export interface Permission {
   description: string;
 }
 
-// API接口权限
 export interface ApiEndpoint {
   id: string;
-  path: string;           // API路径，如 /api/v1/users
-  method: string;         // HTTP方法: GET, POST, PUT, DELETE
-  name: string;           // API名称
-  apiGroup?: string;      // API分组
-  module: string;         // 所属模块
-  description: string;    // 描述
+  path: string;
+  method: string;
+  name: string;
+  apiGroup?: string;
+  module: string;
+  description: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
-// API端点列表查询参数
 export interface ApiEndpointListParams {
   page?: number;
   pageSize?: number;
@@ -81,7 +77,6 @@ export interface ApiEndpointListParams {
   name?: string;
 }
 
-// API端点创建/更新数据
 export interface ApiEndpointPayload {
   path: string;
   method: string;
@@ -90,14 +85,12 @@ export interface ApiEndpointPayload {
   apiGroup?: string;
 }
 
-// 同步API结果
 export interface SyncApiResult {
   created: number;
   updated: number;
   total: number;
 }
 
-// API权限项(角色分配的API权限)
 export interface ApiPermission {
   path: string;
   method: string;
@@ -119,19 +112,92 @@ export type OperationType =
 
 export interface OperationLog {
   id: string;
-  operator: string;         // 用户名称
-  clientIp: string;         // IP地址
-  logName: string;          // 日志名称
-  detail: string;           // 详细记录
-  result: '1' | '0';        // 结果：1-成功，0-失败
-  reason: string;           // 失败原因
-  startTime: string;        // 操作开始时间
-  endTime: string;          // 操作结束时间
-  // 兼容旧字段
-  module?: string;
-  operationType?: OperationType;
-  target?: string;
-  content?: string;
-  message?: string;
-  operationTime?: string;
+  operator: string;
+  clientIp: string;
+  module: string;
+  operationType: OperationType;
+  target: string;
+  content: string;
+  result: OperationResult;
+  message: string;
+  operationTime: string;
+  // Optional fields for richer audit-log style backends
+  logName?: string;
+  detail?: string;
+  reason?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+// ---- Menu types (admin RBAC) ----
+export type MenuType = 'menu' | 'button' | 'link';
+export type MenuStatus = 'active' | 'disabled';
+
+export interface MenuItem {
+  id: string;
+  name: string;
+  title: string;
+  icon?: string;
+  path?: string;
+  component?: string;
+  type: MenuType;
+  parentId?: string;
+  sortOrder: number;
+  status: MenuStatus;
+  visible: boolean;
+  children?: MenuItem[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MenuFilter {
+  page?: number;
+  pageSize?: number;
+  type?: MenuType;
+  status?: MenuStatus;
+  parentId?: string;
+}
+
+export interface MenuListResponse {
+  items: MenuItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface CreateMenuRequest {
+  name: string;
+  title: string;
+  icon?: string;
+  path?: string;
+  component?: string;
+  type: MenuType;
+  parentId?: string;
+  sortOrder?: number;
+  status?: MenuStatus;
+  visible?: boolean;
+}
+
+export interface UpdateMenuRequest {
+  name?: string;
+  title?: string;
+  icon?: string;
+  path?: string;
+  component?: string;
+  type?: MenuType;
+  parentId?: string;
+  sortOrder?: number;
+  status?: MenuStatus;
+  visible?: boolean;
+}
+
+export interface SetRoleMenusRequest {
+  menuIds: string[];
+}
+
+export interface RoleWithMenus {
+  id: string;
+  name: string;
+  description: string;
+  menus: MenuItem[];
 }

@@ -22,7 +22,7 @@ import { useSites } from '@core/hooks/api/useTopology'
 
 export function TopologyPage() {
   const { data, isLoading, isError, error, isFetching, refetch } = useSites()
-  const rows = Array.isArray(data) ? data : []
+  const rows = data?.items ?? []
 
   const cols = ['站点', '地址', '设备数', '状态', '坐标']
 
@@ -62,16 +62,14 @@ export function TopologyPage() {
                   <TableCell>
                     <Badge
                       variant={
-                        s.status === 'normal'
+                        s.status === 'active'
                           ? 'success'
-                          : s.status === 'warning'
+                          : s.status === 'maintenance'
                             ? 'warning'
-                            : s.status === 'critical'
-                              ? 'destructive'
-                              : 'muted'
+                            : 'muted'
                       }
                     >
-                      {s.status}
+                      {s.status === 'active' ? '正常' : s.status === 'maintenance' ? '维护' : '停用'}
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">

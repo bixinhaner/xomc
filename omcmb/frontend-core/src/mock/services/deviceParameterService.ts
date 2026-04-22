@@ -1,6 +1,7 @@
 import type {
   DeviceParameter,
   ParameterTreeNode,
+  ParameterType,
   ParameterSyncStatus,
   ParameterFilter,
   ParameterUpdateRequest,
@@ -18,7 +19,6 @@ import { delay, paginate } from '../utils';
 // ============================================================
 const PERF_TEST_MODE = true;
 const PERF_PARAM_COUNT = 30000;
-const _PERF_OBJECT_COUNT = 30000; // 对象树节点数量
 
 // 基础参数模板（用于生成大量数据）
 const baseParamTemplates = [
@@ -150,7 +150,7 @@ function generateMockParameters(): DeviceParameter[] {
         deviceId: '',
         parameterPath: t.path,
         parameterValue: t.value,
-        parameterType: t.type,
+        parameterType: t.type as ParameterType,
         writable: t.writable,
         lastUpdatedAt: now,
       });
@@ -191,7 +191,7 @@ function generateMockParameters(): DeviceParameter[] {
           deviceId: '',
           parameterPath: `Device.IP.Interface.${iface}.${t.path}`,
           parameterValue: t.value,
-          parameterType: t.type,
+          parameterType: t.type as ParameterType,
           writable: t.writable,
           lastUpdatedAt: now,
         });
@@ -218,7 +218,7 @@ function generateMockParameters(): DeviceParameter[] {
           deviceId: '',
           parameterPath: `Device.WiFi.SSID.${ssid}.${t.path}`,
           parameterValue: t.value,
-          parameterType: t.type,
+          parameterType: t.type as ParameterType,
           writable: t.writable,
           lastUpdatedAt: now,
         });
@@ -245,7 +245,7 @@ function generateMockParameters(): DeviceParameter[] {
           deviceId: '',
           parameterPath: `Device.Services.FAPService.${fap}.${t.path}`,
           parameterValue: t.value,
-          parameterType: t.type,
+          parameterType: t.type as ParameterType,
           writable: t.writable,
           lastUpdatedAt: now,
         });
@@ -307,7 +307,7 @@ function generateMockParameters(): DeviceParameter[] {
           deviceId: '',
           parameterPath: `Device.Services.FAPService.${2 + nr}.CellConfig.NR.${t.path}`,
           parameterValue: t.value,
-          parameterType: t.type,
+          parameterType: t.type as ParameterType,
           writable: t.writable,
           lastUpdatedAt: now,
         });
@@ -494,15 +494,14 @@ function generateObjectTree(): ParameterTreeNode[] {
           },
         ],
       },
-      objectCount += 4,
       {
         name: 'Stats',
         fullPath: `Device.IP.Interface.${i}.Stats.`,
         isObject: true,
         children: [],
       },
-      objectCount++,
     ];
+    objectCount += 5;
 
     interfacesNode.children!.push(ifaceNode);
   }

@@ -160,7 +160,7 @@ function mapBackendRule(br: BackendDeviceRule): DeviceRule {
     targetGroupName: br.target_group_name,
     enabled: br.enabled,
     matchingMode: br.matching_mode as DeviceRule['matchingMode'],
-    nameRuleList: br.name_rule_list?.map(mapBackendNameRule),
+    nameRuleList: br.name_rule_list?.map(mapBackendNameRule) ?? null,
     lacList: br.lac_list,
     tacList: br.tac_list,
     description: br.description || '',

@@ -23,6 +23,9 @@ interface AlarmState {
 
 export const useAlarmStore = create<AlarmState>()((set, get) => ({
   counts: {
+    total_active: 0,
+    unacknowledged: 0,
+    unread: 0,
     critical: 0,
     major: 0,
     minor: 0,

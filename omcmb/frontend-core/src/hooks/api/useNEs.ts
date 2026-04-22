@@ -16,7 +16,10 @@ export function useNEList(
 export function useNEById(id: string) {
   return useQuery({
     queryKey: ['nes', 'detail', id],
-    queryFn: () => useMock ? neService.getById(id) : deviceApi.getById(id),
+    queryFn: () =>
+      useMock
+        ? (neService.getById(id) as unknown as ReturnType<typeof deviceApi.getById>)
+        : deviceApi.getById(id),
     enabled: Boolean(id),
   });
 }

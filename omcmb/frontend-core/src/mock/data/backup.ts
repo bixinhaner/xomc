@@ -3,7 +3,7 @@ export interface BackupTask {
   taskName: string;
   taskType: 'manual' | 'scheduled';
   deviceSns: string[];
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'partial';
   progress: number;
   successCount: number;
   failCount: number;

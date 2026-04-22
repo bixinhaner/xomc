@@ -27,7 +27,9 @@ export function useCounters(params: PageRequest) {
   return useQuery({
     queryKey: ['performance', 'counters', params],
     queryFn: () =>
-      useMock ? performanceService.getCounters(params) : pmApi.getCounters(params),
+      useMock
+        ? (performanceService.getCounters(params) as unknown as ReturnType<typeof pmApi.getCounters>)
+        : pmApi.getCounters(params),
     staleTime: 5 * 60 * 1000,
   });
 }

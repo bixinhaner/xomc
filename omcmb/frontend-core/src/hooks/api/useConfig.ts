@@ -15,7 +15,7 @@ export function useConfigParams(
     queryKey: ['config', 'params', params],
     queryFn: () =>
       useMock
-        ? configService.getParams(params)
+        ? (configService.getParams(params) as unknown as ReturnType<typeof deviceApi.getParameters>)
         : deviceApi.getParameters(params.deviceId ?? ''),
   });
 }
@@ -33,10 +33,10 @@ export function useUpdateConfigParam() {
       deviceId?: string;
     }) =>
       useMock
-        ? configService.updateParam(id, value)
-        : configSyncApi.pushConfig(deviceId ?? '', [
+        ? (configService.updateParam(id, value) as unknown as Promise<ConfigParam>)
+        : (configSyncApi.pushConfig(deviceId ?? '', [
             { name: id, value: String(value) },
-          ]),
+          ]) as unknown as Promise<ConfigParam>),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['config', 'params'] });
     },

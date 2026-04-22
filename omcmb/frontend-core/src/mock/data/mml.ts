@@ -309,6 +309,9 @@ export const mockMMLScripts: MMLScript[] = [
     createTime: '2024-01-10T08:00:00.000Z',
     updateTime: '2024-05-15T10:00:00.000Z',
     tags: ['巡检', '日常运维'],
+    status: 'active',
+    type: 'manual',
+    progress: 100,
   },
   {
     id: 'script-002',
@@ -320,6 +323,9 @@ export const mockMMLScripts: MMLScript[] = [
     createTime: '2024-02-20T09:00:00.000Z',
     updateTime: '2024-06-01T11:00:00.000Z',
     tags: ['故障排查', '小区', '紧急'],
+    status: 'active',
+    type: 'manual',
+    progress: 100,
   },
   {
     id: 'script-003',
@@ -331,6 +337,9 @@ export const mockMMLScripts: MMLScript[] = [
     createTime: '2024-03-05T14:00:00.000Z',
     updateTime: '2024-03-05T14:00:00.000Z',
     tags: ['优化', '切换'],
+    status: 'active',
+    type: 'batch',
+    progress: 100,
   },
   {
     id: 'script-004',
@@ -342,6 +351,9 @@ export const mockMMLScripts: MMLScript[] = [
     createTime: '2024-04-01T08:00:00.000Z',
     updateTime: '2024-06-10T12:00:00.000Z',
     tags: ['5G', '巡检', 'gNB'],
+    status: 'active',
+    type: 'manual',
+    progress: 100,
   },
   {
     id: 'script-005',
@@ -353,6 +365,9 @@ export const mockMMLScripts: MMLScript[] = [
     createTime: '2024-05-10T16:00:00.000Z',
     updateTime: '2024-05-10T16:00:00.000Z',
     tags: ['传输', '故障排查', 'S1', 'X2'],
+    status: 'archived',
+    type: 'manual',
+    progress: 100,
   },
 ];
 

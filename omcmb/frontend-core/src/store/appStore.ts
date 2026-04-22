@@ -102,7 +102,7 @@ export const useAppStore = create<AppState>()(
         if (version < 2) {
           state.theme = 'tech';
         }
-        return state as AppState;
+        return state as unknown as AppState;
       },
     }
   )

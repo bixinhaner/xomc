@@ -10,7 +10,7 @@
     "build": "vite build",
     "build:mock": "vite build --mode mock",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
     "@omc/frontend-core": "*",

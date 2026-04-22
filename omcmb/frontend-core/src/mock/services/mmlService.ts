@@ -294,7 +294,7 @@ export const mmlService = {
   ): Promise<MMLCustomCommand> {
     await delay(100, 200);
     return {
-      id: generateId(),
+      id: generateId('mmltmpl'),
       ..._tmpl,
       creator: 'admin',
       createdAt: new Date().toISOString(),
@@ -331,7 +331,7 @@ export const mmlService = {
   async cloneTemplate(_id: string): Promise<MMLCustomCommand> {
     await delay(100, 200);
     return {
-      id: generateId(),
+      id: generateId('mmltmpl'),
       commandName: 'Cloned Command',
       commandCode: 'LST CELL',
       operationType: 'LST',

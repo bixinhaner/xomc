@@ -2,11 +2,6 @@ import type { OperationLog, OperationType, OperationResult } from '../../types/s
 
 const operators = ['admin', 'operator01', 'operator02', 'operator03', 'auditor01'];
 const clientIPs = ['192.168.1.100', '192.168.1.101', '10.0.0.50', '10.0.0.51', '172.16.0.10'];
-const _modules = ['设备管理', '告警管理', '性能管理', '配置管理', 'MML执行', '用户管理', '软件管理', '备份管理', '报表', '系统设置'];
-const _targets = [
-  'ENB00001', 'ENB00002', 'GNB00001', 'GNB00010', 'CPE00001',
-  '告警规则-001', '配置模板-001', '用户-operator03', '备份任务-001', 'MML脚本-001',
-];
 
 const opTypeMappings: Array<{ type: OperationType; modules: string[]; targets: string[]; contents: string[]; results: Array<OperationResult> }> = [
   {

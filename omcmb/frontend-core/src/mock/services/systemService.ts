@@ -18,7 +18,8 @@ export const systemService = {
       const kw = params.userName.toLowerCase();
       filtered = filtered.filter(
         (u) =>
-          u.userName.toLowerCase().includes(kw) ||
+          u.username.toLowerCase().includes(kw) ||
+          u.displayName.toLowerCase().includes(kw) ||
           u.email.toLowerCase().includes(kw)
       );
     }
@@ -57,8 +58,7 @@ export const systemService = {
 
   async deleteUsers(ids: string[]): Promise<void> {
     await delay(150, 300);
-    // Cannot delete built-in users
-    users = users.filter((u) => !ids.includes(u.id) || u.builtIn === 1);
+    users = users.filter((u) => !ids.includes(u.id));
   },
 
   async resetPassword(id: string, _newPassword: string): Promise<void> {
@@ -70,36 +70,24 @@ export const systemService = {
   async lockUser(id: string): Promise<void> {
     await delay(150, 300);
     const idx = users.findIndex((u) => u.id === id);
-    if (idx !== -1) users[idx] = { ...users[idx], lockStatus: 1 };
+    if (idx !== -1) users[idx] = { ...users[idx], status: 'locked' };
   },
 
   async unlockUser(id: string): Promise<void> {
     await delay(150, 300);
     const idx = users.findIndex((u) => u.id === id);
-    if (idx !== -1) users[idx] = { ...users[idx], lockStatus: 0 };
+    if (idx !== -1) users[idx] = { ...users[idx], status: 'active' };
   },
 
   async forceLogout(ids: string[]): Promise<void> {
     await delay(150, 300);
-    ids.forEach((id) => {
-      const idx = users.findIndex((u) => u.id === id);
-      if (idx !== -1) users[idx] = { ...users[idx], onlineStatus: 'offline' };
-    });
+    void ids;
   },
 
   async moveUsersToGroup(userIds: string[], groupId: string): Promise<void> {
     await delay(150, 300);
-    const group = groups.find((g) => g.id === groupId);
-    if (group) {
-      userIds.forEach((id) => {
-        const idx = users.findIndex((u) => u.id === id);
-        if (idx !== -1) {
-          if (!users[idx].groupNames.includes(group.groupName)) {
-            users[idx].groupNames.push(group.groupName);
-          }
-        }
-      });
-    }
+    void userIds;
+    void groupId;
   },
 
   async copyUser(id: string): Promise<User> {
@@ -109,7 +97,7 @@ export const systemService = {
     const newUser: User = {
       ...user,
       id: generateId('user'),
-      userName: `${user.userName}_copy`,
+      username: `${user.username}_copy`,
       createTime: new Date().toISOString(),
       lastLoginTime: new Date().toISOString(),
     };
@@ -138,14 +126,17 @@ export const systemService = {
     return roles.find((r) => r.id === id) ?? null;
   },
 
-  async createRole(data: Omit<Role, 'id' | 'userCount' | 'updUser' | 'updTime'>): Promise<Role> {
+  async createRole(data: Omit<Role, 'id' | 'userCount' | 'createUser' | 'updateUser' | 'createTime' | 'updateTime'>): Promise<Role> {
     await delay(200, 400);
+    const now = new Date().toISOString();
     const newRole: Role = {
       ...data,
       id: generateId('role'),
       userCount: 0,
-      updUser: 'admin',
-      updTime: new Date().toISOString(),
+      createUser: 'admin',
+      updateUser: 'admin',
+      createTime: now,
+      updateTime: now,
     };
     roles.push(newRole);
     return newRole;
@@ -155,7 +146,7 @@ export const systemService = {
     await delay(150, 300);
     const idx = roles.findIndex((r) => r.id === id);
     if (idx === -1) throw new Error(`Role ${id} not found`);
-    roles[idx] = { ...roles[idx], ...data, updTime: new Date().toISOString() };
+    roles[idx] = { ...roles[idx], ...data, updateTime: new Date().toISOString() };
     return roles[idx];
   },
 

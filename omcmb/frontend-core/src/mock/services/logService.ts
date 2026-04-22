@@ -30,7 +30,7 @@ export const logService = {
       const kw = params.keyword.toLowerCase();
       filtered = filtered.filter(
         (l) =>
-          l.operator.includes(kw) ||
+          l.operator.toLowerCase().includes(kw) ||
           l.content.toLowerCase().includes(kw) ||
           l.target.toLowerCase().includes(kw)
       );

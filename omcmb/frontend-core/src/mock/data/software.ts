@@ -1,5 +1,5 @@
 export type VersionStatus = 'current' | 'deprecated' | 'beta' | 'archived';
-export type UpgradePlanStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'scheduled';
+export type UpgradePlanStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'scheduled' | 'partial';
 
 export interface SoftwareVersion {
   id: string;

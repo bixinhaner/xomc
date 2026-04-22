@@ -26,7 +26,9 @@ export function useSites(params?: { domainId?: string }) {
   return useQuery({
     queryKey: ['topology', 'sites', params],
     queryFn: () =>
-      useMock ? topologyService.getSites(params) : topologyApi.getSites(params),
+      useMock
+        ? topologyService.getSites(params).then((items) => ({ items, total: items.length, page: 1, pageSize: items.length }))
+        : topologyApi.getSites(params),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -44,7 +46,9 @@ export function useTopoNodes(params?: { domainId?: string }) {
   return useQuery({
     queryKey: ['topology', 'nodes', params],
     queryFn: () =>
-      useMock ? topologyService.getTopoNodes(params) : topologyApi.getTopoNodes(params),
+      useMock
+        ? topologyService.getTopoNodes(params).then((items) => ({ items, total: items.length, page: 1, pageSize: items.length }))
+        : topologyApi.getTopoNodes(params),
     refetchInterval: 30000,
   });
 }
@@ -53,7 +57,9 @@ export function useTopoEdges() {
   return useQuery({
     queryKey: ['topology', 'edges'],
     queryFn: () =>
-      useMock ? topologyService.getTopoEdges() : topologyApi.getTopoEdges(),
+      useMock
+        ? topologyService.getTopoEdges().then((items) => ({ items, total: items.length, page: 1, pageSize: items.length }))
+        : topologyApi.getTopoEdges(),
     refetchInterval: 30000,
   });
 }

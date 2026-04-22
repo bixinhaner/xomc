@@ -77,13 +77,7 @@ export function AppShell() {
     navigate('/login')
   }
 
-  const userLabel =
-    (user as { displayName?: string; username?: string; userName?: string } | null)
-      ?.displayName ||
-    (user as { displayName?: string; username?: string; userName?: string } | null)
-      ?.username ||
-    user?.userName ||
-    '未登录'
+  const userLabel = user?.displayName || user?.username || '未登录'
 
   return (
     <div className="flex min-h-screen bg-background">

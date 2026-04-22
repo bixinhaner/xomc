@@ -27,6 +27,7 @@ interface BackendAlarm {
   acknowledged_at?: string;
   acknowledged_by?: string;
   ack_note?: string;
+  cleared_at?: string;
   cleared_by?: string;
   clear_note?: string;
   device_name?: string;
@@ -53,6 +54,8 @@ interface BackendListResponse<T> {
 
 interface BackendAlarmStatistics {
   total_active: number;
+  unacknowledged?: number;
+  unread?: number;
   by_severity: Record<string, number>;
   by_type: Record<string, number>;
 }
@@ -109,16 +112,6 @@ function mapBackendLibrary(bl: BackendAlarmLibrary): AlarmLibraryItem {
     createdAt: bl.created_at,
     updatedAt: bl.updated_at,
   };
-}
-
-interface _BackendAlarmLibraryI18n {
-  id: string;
-  library_id: string;
-  locale: string;
-  probable_cause: string;
-  explanation?: string;
-  created_at: string;
-  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +190,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     clearTime: ba.cleared_at,
     clearUser: ba.cleared_by,
     clearMemo: ba.clear_note,
-    dealMemo: (ba as Record<string, unknown>).ack_note || undefined,
+    dealMemo: ba.ack_note || undefined,
     alarmType: ba.status === 'cleared' ? 'history' : 'active',
     alarmCount: ba.ack_count || 1,
     unread: ba.is_read ? '0' : '1',

@@ -19,13 +19,14 @@ function mapBackendUserToFrontend(bu: BackendUser): User {
   return {
     id: bu.id,
     username: bu.username,
-    displayName: bu.display_name,
+    displayName: bu.display_name || bu.username,
     email: bu.email || '',
     phone: '',
-    role: (bu.roles && bu.roles.length > 0 ? bu.roles[0].name : 'viewer') as User['role'],
-    status: bu.status as User['status'],
+    role: ((bu.roles && bu.roles.length > 0 ? bu.roles[0].name : 'viewer') as User['role']),
+    status: (bu.status as User['status']) || 'active',
     lastLoginTime: bu.last_login_at || '',
     createTime: bu.created_at,
+    updateTime: bu.updated_at,
   };
 }
 

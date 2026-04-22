@@ -3,9 +3,12 @@ import type { AlarmFilter } from '../../types/alarm';
 import type { PageRequest } from '../../types/pagination';
 import { alarmService } from '../../mock/services/alarmService';
 import { alarmApi } from '../../services/api/alarmApi';
-import { createApiSwitch } from '../../services/apiSwitch';
+import { useMock } from '../../services/apiSwitch';
 
-const api = createApiSwitch(alarmService, alarmApi);
+// Real API is the canonical surface; mock is best-effort and adapted at runtime.
+const api: typeof alarmApi = useMock
+  ? (alarmService as unknown as typeof alarmApi)
+  : alarmApi;
 
 export function useCurrentAlarms(params: AlarmFilter & PageRequest) {
   return useQuery({

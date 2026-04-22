@@ -67,7 +67,7 @@ export interface AlarmRule {
 export interface AlarmRuleCondition {
   field: string;
   operator: 'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains' | 'startsWith' | 'endsWith';
-  value: string | number | boolean;
+  value: string | number | boolean | string[];
 }
 
 export interface AlarmRuleAction {

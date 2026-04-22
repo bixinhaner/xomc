@@ -43,7 +43,7 @@ export const useTabStore = create<TabState>()(
           return;
         }
         // Enforce max tabs — remove the oldest non-dashboard, non-active tab if at limit
-        const newTabs = [...tabs, { closable: true, ...tab }];
+        const newTabs = [...tabs, { ...tab, closable: tab.closable ?? true }];
         if (newTabs.length > MAX_TABS) {
           const removeIdx = newTabs.findIndex(
             (t) => t.key !== 'dashboard' && t.key !== get().activeTabKey

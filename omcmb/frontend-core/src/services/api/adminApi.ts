@@ -1,5 +1,26 @@
 import http from '../http';
-import type { User, Role, Permission, OperationLog, OperationType, Group, ApiEndpoint, ApiPermission, ApiEndpointListParams, ApiEndpointPayload, SyncApiResult } from '../../types/system';
+import type {
+  User,
+  UserRole,
+  UserStatus,
+  Role,
+  Permission,
+  OperationLog,
+  OperationType,
+  Group,
+  ApiEndpoint,
+  ApiPermission,
+  ApiEndpointListParams,
+  ApiEndpointPayload,
+  SyncApiResult,
+  MenuItem,
+  MenuFilter,
+  MenuListResponse,
+  CreateMenuRequest,
+  UpdateMenuRequest,
+  SetRoleMenusRequest,
+  RoleWithMenus,
+} from '../../types/system';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // ---- Dictionary types ----
@@ -224,42 +245,32 @@ interface BackendListResponse<T> {
 }
 
 function mapBackendUser(bu: BackendUser): User {
-  // Map status: active -> enabled, disabled -> disabled
-  const status: UserStatus = bu.status === 'active' ? 'enabled' : 'disabled';
-
-  // Get role names
-  const groupNames = (bu.roles || []).map(r => r.name);
+  const validStatuses: readonly UserStatus[] = ['active', 'inactive', 'locked'];
+  const status: UserStatus = (validStatuses as readonly string[]).includes(bu.status)
+    ? (bu.status as UserStatus)
+    : 'inactive';
+  const role: UserRole = ((bu.roles && bu.roles.length > 0 ? bu.roles[0].name : 'viewer') as UserRole);
 
   return {
     id: bu.id,
-    userName: bu.username,
+    username: bu.username,
+    displayName: bu.displayName || bu.username,
     email: bu.email || '',
-    phone: '', // Backend doesn't have phone field yet
-    groupNames,
-    department: '', // Backend doesn't have department field yet
-    lastLoginTime: bu.lastLoginAt || undefined,
-    source: bu.carrier || '本地',
-    onlineStatus: 'offline', // Backend doesn't have online status yet, default to offline
+    role,
     status,
-    expireTime: bu.lockedUntil || undefined,
-    builtIn: 0, // Backend doesn't have builtIn field for users
-    description: bu.displayName || '',
+    carrier: bu.carrier,
+    lastLoginTime: bu.lastLoginAt || undefined,
     createTime: bu.createdAt,
     updateTime: bu.updatedAt,
-    createUser: undefined,
-    updateUser: undefined,
   };
 }
 
 function mapFrontendUser(user: Partial<User>): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
-  if (user.userName !== undefined) payload.username = user.userName;
+  if (user.username !== undefined) payload.username = user.username;
   if (user.email !== undefined) payload.email = user.email;
-  if (user.description !== undefined) payload.displayName = user.description;
-  if (user.status !== undefined) {
-    // Map 'enabled' -> 'active', 'disabled' -> 'disabled'
-    payload.status = user.status === 'enabled' ? 'active' : 'disabled';
-  }
+  if (user.displayName !== undefined) payload.displayName = user.displayName;
+  if (user.status !== undefined) payload.status = user.status;
   return payload;
 }
 
@@ -301,6 +312,11 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
     result: 'success',
     message: '',
     operationTime: ba.createdAt,
+    logName: `${ba.action} ${ba.resource}`.trim(),
+    detail: ba.details ? JSON.stringify(ba.details) : '',
+    reason: '',
+    startTime: ba.createdAt,
+    endTime: ba.createdAt,
   };
 }
 
@@ -364,11 +380,11 @@ export const adminApi = {
     data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & { password: string }
   ): Promise<User> {
     const { data: bu } = await http.post<BackendUser>('/admin/users', {
-      username: data.userName,
+      username: data.username,
       password: data.password,
       email: data.email || undefined,
-      displayName: data.description || '',
-      status: data.status === 'enabled' ? 'active' : 'disabled',
+      displayName: data.displayName || '',
+      status: data.status,
     });
     return mapBackendUser(bu);
   },

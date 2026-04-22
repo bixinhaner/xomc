@@ -39,7 +39,7 @@ export function SystemPage() {
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const cols = ['用户名', '邮箱', '用户组', '状态', '在线', '最近登录']
+  const cols = ['用户名', '邮箱', '角色', '状态', '最近登录']
 
   return (
     <PageShell
@@ -86,27 +86,18 @@ export function SystemPage() {
               rows.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell>
-                    <div className="font-medium">{u.userName}</div>
-                    {u.department ? (
-                      <div className="text-xs text-muted-foreground">{u.department}</div>
+                    <div className="font-medium">{u.username}</div>
+                    {u.displayName ? (
+                      <div className="text-xs text-muted-foreground">{u.displayName}</div>
                     ) : null}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{u.email}</TableCell>
                   <TableCell className="text-xs">
-                    {(u.groupNames || []).slice(0, 2).map((g) => (
-                      <Badge key={g} variant="outline" className="mr-1">
-                        {g}
-                      </Badge>
-                    ))}
+                    <Badge variant="outline">{u.role}</Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={u.status === 'enabled' ? 'success' : 'muted'}>
-                      {u.status === 'enabled' ? '启用' : '禁用'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={u.onlineStatus === 'online' ? 'success' : 'muted'}>
-                      {u.onlineStatus === 'online' ? '在线' : '离线'}
+                    <Badge variant={u.status === 'active' ? 'success' : 'muted'}>
+                      {u.status === 'active' ? '启用' : u.status === 'locked' ? '已锁定' : '禁用'}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

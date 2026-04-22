@@ -153,7 +153,7 @@ export function useApplyRule() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, dryRun }: { id: string; dryRun?: boolean }) =>
-      deviceRulesApi.apply(id, { dry_run: dryRun }),
+      deviceRulesApi.apply(id, { dryRun }),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ruleKeys.tasks(variables.id) });
     },

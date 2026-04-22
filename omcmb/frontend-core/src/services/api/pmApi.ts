@@ -82,21 +82,6 @@ function mapBackendCounter(c: BackendPMCounter): Measurement {
   };
 }
 
-function _mapBackendKPIValue(v: BackendKPIValue): Measurement {
-  return {
-    id: `${v.device_id}-${v.kpi_name}-${v.time}`,
-    measurementName: v.kpi_name,
-    measurementCode: v.kpi_name,
-    deviceSn: '',
-    deviceName: '',
-    kpiCode: v.kpi_name,
-    value: v.kpi_value,
-    unit: '',
-    timestamp: v.time,
-    granularity: '15min',
-  };
-}
-
 // --- Backend threshold types & mapping ---
 
 interface BackendKPIThreshold {

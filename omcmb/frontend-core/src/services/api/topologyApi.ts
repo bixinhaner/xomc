@@ -10,6 +10,7 @@ import type {
   MapBounds,
   DeviceStatus,
   DeviceType,
+  RawDeviceStatus,
   BackendDeviceGeo,
   BackendDeviceCluster,
   BackendMapStats,
@@ -335,7 +336,7 @@ function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
   // Workaround: 后端返回的status字段可能有错误
   // 如果数据库中实际是active但API返回offline，需要修正
   // 临时解决方案：基于设备序列名的hash值来确定是否为active
-  let correctedStatus = bd.status;
+  let correctedStatus: RawDeviceStatus = bd.status as RawDeviceStatus;
 
   // 检查后端是否错误地返回了offline状态
   // 如果设备名称中包含特定模式，或基于hash值，推断是否为active
@@ -387,14 +388,16 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
   // 旧格式：{ online: number, offline: number } (后端统计不完整)
   let statusCount: Record<DeviceStatus, number>;
 
-  if ('onlineActive' in bs.status_count) {
+  const rawCount = bs.status_count as Record<string, number>;
+  if ('onlineActive' in rawCount) {
     // 新格式：直接使用
-    statusCount = bs.status_count as Record<DeviceStatus, number>;
-  } else if ('online' in bs.status_count) {
+    statusCount = rawCount as unknown as Record<DeviceStatus, number>;
+  } else if ('online' in rawCount) {
     // 旧格式：后端统计不完整，需要计算
-    const onlineCount = bs.status_count.online as number || 0;
-    const offlineCount = bs.status_count.offline as number || 0;
+    const onlineCount = rawCount.online || 0;
+    const offlineCount = rawCount.offline || 0;
     const total = bs.total;
+    const sum = onlineCount + offlineCount;
 
     // 临时workaround：当后端返回的数据明显不正确时，使用硬编码的正确值
     // 这是因为运行的后端是旧版本（4月1日编译），无法正确统计设备状态
@@ -456,7 +459,7 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     id: bs.id,
     name: bs.name,
     sn: bs.sn,
-    status: toDisplayStatus(bs.status),
+    status: toDisplayStatus(bs.status as RawDeviceStatus),
     longitude: bs.longitude,
     latitude: bs.latitude,
     groupName: bs.group_name,
