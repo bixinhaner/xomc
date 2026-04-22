@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Tooltip } from 'antd';
-import type { TopoNode, TopoEdge } from '@/types/topology';
+import type { TopoNode, TopoEdge } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 import { useThemeToken, useIsDark } from '@/hooks/useThemeToken';
 

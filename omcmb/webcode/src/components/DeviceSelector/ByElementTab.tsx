@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Input, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import type { Device } from '@/types/device';
+import type { Device } from '@core/types/device';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
 interface ByElementTabProps {

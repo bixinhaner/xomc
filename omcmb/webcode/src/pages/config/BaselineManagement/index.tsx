@@ -5,7 +5,7 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useBaselineConfigs, useBaselineConfigById } from '@/hooks/api/useConfig';
+import { useBaselineConfigs, useBaselineConfigById } from '@core/hooks/api/useConfig';
 import { useT } from '@/hooks/useT';
 
 interface BaselineParamRow extends Record<string, unknown> {

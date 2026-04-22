@@ -26,8 +26,8 @@ import type {
   ParameterConstraints,
   DirectChildrenResponse,
   SubObjectSummary,
-} from '@/types/deviceParameter';
-import { useUpdateParameters } from '@/hooks/api/useDeviceParameters';
+} from '@core/types/deviceParameter';
+import { useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 
 const { Text } = Typography;
 

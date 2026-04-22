@@ -1,5 +1,5 @@
 import { GlobalOutlined } from '@ant-design/icons';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { useT } from '@/hooks/useT';
 import styles from './Header.module.css';
 

@@ -16,9 +16,9 @@ import {
   horizontalListSortingStrategy,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { useAppStore } from '@/store/appStore';
-import { useTabStore } from '@/store/tabStore';
-import type { TabItem as TabItemType } from '@/store/tabStore';
+import { useAppStore } from '@core/store/appStore';
+import { useTabStore } from '@core/store/tabStore';
+import type { TabItem as TabItemType } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
 import TabItem from './TabItem';
 import styles from './TabBar.module.css';

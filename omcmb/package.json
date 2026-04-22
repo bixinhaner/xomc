@@ -1,0 +1,23 @@
+{
+  "name": "omcmb",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend-core",
+    "webcode"
+  ],
+  "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + webcode (v1 皮肤) + 未来 webcode-vN (其他皮肤)",
+  "scripts": {
+    "lint": "eslint webcode/src frontend-core/src",
+    "lint:fix": "eslint webcode/src frontend-core/src --fix",
+    "typecheck": "npm run typecheck --workspace webcode"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript-eslint": "^8.48.0"
+  }
+}

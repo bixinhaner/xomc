@@ -13,8 +13,8 @@ import {
   useProvisioningTasks,
   useCreateProvisioningTask,
   useRetryProvisioningTask,
-} from '@/hooks/api/useProvisioning';
-import type { ProvisioningTask } from '@/services/api/provisionApi';
+} from '@core/hooks/api/useProvisioning';
+import type { ProvisioningTask } from '@core/services/api/provisionApi';
 
 const STATUS_COLOR: Record<string, string> = {
   discovered: 'default',

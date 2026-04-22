@@ -1,5 +1,5 @@
 import { Drawer, Descriptions, Tag, Space, Button } from 'antd';
-import type { OperationLog } from '@/types/system';
+import type { OperationLog } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 
 interface LogDetailDrawerProps {

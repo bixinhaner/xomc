@@ -4,7 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { usePerformanceTasks, useCreatePerformanceTask } from '@/hooks/api/usePerformance';
+import { usePerformanceTasks, useCreatePerformanceTask } from '@core/hooks/api/usePerformance';
 import { useT } from '@/hooks/useT';
 
 interface PerfTaskRow extends Record<string, unknown> {

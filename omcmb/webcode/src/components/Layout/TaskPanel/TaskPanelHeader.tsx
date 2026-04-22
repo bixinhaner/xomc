@@ -1,6 +1,6 @@
 import { Badge } from 'antd';
 import { UpOutlined, DownOutlined } from '@ant-design/icons';
-import { useTaskStore } from '@/store/taskStore';
+import { useTaskStore } from '@core/store/taskStore';
 import { useT } from '@/hooks/useT';
 import styles from './TaskPanel.module.css';
 

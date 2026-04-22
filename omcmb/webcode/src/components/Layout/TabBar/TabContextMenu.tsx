@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
-import type { TabItem } from '@/store/tabStore';
-import { useTabStore } from '@/store/tabStore';
+import type { TabItem } from '@core/store/tabStore';
+import { useTabStore } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
 
 interface Props {

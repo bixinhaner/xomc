@@ -6,7 +6,7 @@
 import React from 'react';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import type { MapStats, DeviceStatus } from '@/types/map';
+import type { MapStats, DeviceStatus } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, COLORS } from './constants';
 import styles from './styles.module.css';
 

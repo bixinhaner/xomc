@@ -46,8 +46,8 @@ import {
   useCopyUser,
   useMoveUsersToGroup,
   useAllGroups,
-} from '@/hooks/api/useSystem';
-import type { User } from '@/types/system';
+} from '@core/hooks/api/useSystem';
+import type { User } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import dayjs from 'dayjs';
 

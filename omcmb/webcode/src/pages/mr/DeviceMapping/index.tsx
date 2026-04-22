@@ -5,8 +5,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useMRMappings, useToggleMRMapping } from '@/hooks/api/useMR';
-import type { MRDeviceMapping } from '@/mock/data/mr';
+import { useMRMappings, useToggleMRMapping } from '@core/hooks/api/useMR';
+import type { MRDeviceMapping } from '@core/mock/data/mr';
 
 const filterFields: FilterField[] = [
   { name: 'deviceSn', label: '设备SN', type: 'input', placeholder: '请输入设备SN' },

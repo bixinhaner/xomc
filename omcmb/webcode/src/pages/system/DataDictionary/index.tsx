@@ -25,7 +25,7 @@ import {
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
-import { adminApi } from '@/services/api/adminApi';
+import { adminApi } from '@core/services/api/adminApi';
 import type {
   Dictionary,
   DictionaryDetail,
@@ -33,7 +33,7 @@ import type {
   UpdateDictionaryPayload,
   CreateDictionaryDetailPayload,
   UpdateDictionaryDetailPayload,
-} from '@/services/api/adminApi';
+} from '@core/services/api/adminApi';
 
 // ---- Dictionary List (Left Panel) ----
 interface DictListPanelProps {

@@ -7,7 +7,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
 import AlarmBadges from './AlarmBadges';

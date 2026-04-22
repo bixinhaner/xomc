@@ -6,8 +6,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useLicenses, useRevokeLicense } from '@/hooks/api/useLicense';
-import type { License, LicenseStatus, LicenseType } from '@/mock/data/license';
+import { useLicenses, useRevokeLicense } from '@core/hooks/api/useLicense';
+import type { License, LicenseStatus, LicenseType } from '@core/mock/data/license';
 import { message } from 'antd';
 import { useT } from '@/hooks/useT';
 

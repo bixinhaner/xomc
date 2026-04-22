@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { getThemeEffects } from './themeEffectConfig';
 
 /**

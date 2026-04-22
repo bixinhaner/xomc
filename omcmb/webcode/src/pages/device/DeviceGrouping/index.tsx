@@ -8,9 +8,9 @@ import {
 import type { UploadFile } from 'antd';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import type { BatchAction } from '@/components/DataTable';
-import { useDeviceGroups, useDeviceList, useCreateGroup, useUpdateGroup, useDeleteGroup, useMoveDevices, useAddDevicesToGroup, useDeleteDevices, useBatchRebootDevices, useUpdateDevice } from '@/hooks/api/useDevices';
+import { useDeviceGroups, useDeviceList, useCreateGroup, useUpdateGroup, useDeleteGroup, useMoveDevices, useAddDevicesToGroup, useDeleteDevices, useBatchRebootDevices, useUpdateDevice } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
-import type { Device, EngStatus } from '@/types/device';
+import type { Device, EngStatus } from '@core/types/device';
 import type { NameFilterItem } from './types';
 import { generateId, generateOperators, parseRangeString } from './types';
 import GroupTreePanel from './GroupTreePanel';

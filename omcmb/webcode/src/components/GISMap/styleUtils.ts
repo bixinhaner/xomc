@@ -5,7 +5,7 @@
 
 import { Style, Circle, Fill, Stroke, Text, Icon } from 'ol/style';
 import type Feature from 'ol/Feature';
-import type { MapDevice, DeviceStatus } from '@/types/map';
+import type { MapDevice, DeviceStatus } from '@core/types/map';
 import {
   DEVICE_STATUS_CONFIG,
   CLUSTER_CONFIG,

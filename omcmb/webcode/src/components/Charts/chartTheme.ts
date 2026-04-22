@@ -1,5 +1,5 @@
 import type { EChartsOption } from 'echarts';
-import type { Theme } from '@/types/common';
+import type { Theme } from '@core/types/common';
 
 const CHART_PALETTES: Record<Theme, string[]> = {
   classic: ['#1677FF', '#52C41A', '#FA8C16', '#F5222D', '#722ED1', '#13C2C2', '#EB2F96', '#FAAD14'],

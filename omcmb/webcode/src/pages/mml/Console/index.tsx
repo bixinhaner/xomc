@@ -15,7 +15,7 @@ import {
   useCommandSelection,
   useCommandExecution,
 } from './hooks';
-import type { MMLCommand, MMLParamRef } from '@/types/mml';
+import type { MMLCommand, MMLParamRef } from '@core/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import { resolveOperationType } from './utils/resolveOperationType';

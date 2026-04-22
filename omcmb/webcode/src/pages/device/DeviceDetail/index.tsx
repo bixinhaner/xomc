@@ -24,11 +24,11 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import StatusIndicator from '@/components/StatusIndicator';
-import { useDeviceBySn } from '@/hooks/api/useDevices';
-import { useCurrentAlarms } from '@/hooks/api/useAlarms';
+import { useDeviceBySn } from '@core/hooks/api/useDevices';
+import { useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
-import type { Alarm } from '@/types/alarm';
-import type { Device } from '@/types/device';
+import type { Alarm } from '@core/types/alarm';
+import type { Device } from '@core/types/device';
 import ParameterTreeTab from './ParameterTreeTab';
 
 const { Title, Text } = Typography;

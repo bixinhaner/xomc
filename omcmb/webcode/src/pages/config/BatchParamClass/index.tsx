@@ -5,7 +5,7 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useConfigParams } from '@/hooks/api/useConfig';
+import { useConfigParams } from '@core/hooks/api/useConfig';
 import { useT } from '@/hooks/useT';
 
 interface ParamClassRow extends Record<string, unknown> {

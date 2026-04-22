@@ -116,6 +116,7 @@
 | T-0030 | F10 互操作用例库扩充 | feat | F10 | P2 | L | — | R-202 | GA 级质量补强 |
 | T-0031 | CAPTCHA 图形生成实现 | feat | admin | P2 | S | — | R-203 | 当前仅端点占位 |
 | T-0032 | FTP 连接测试端点实现 | feat | backup | P2 | S | — | R-204 | 当前返回 "not implemented" |
+| T-0035 | 前端多皮肤架构（Phase 3-7：v2 皮肤脚手架 → 18 模块补齐 → 双皮肤部署） | feat | frontend | P2 | XL | T-0035-P1 | — | 方案 `frontend-multi-skin-plan-20260422.md`；Phase 1（`@omc/frontend-core` 抽取 + workspaces）已完成；Phase 3+ 需 Sprint 规划 |
 
 ---
 
@@ -136,6 +137,7 @@
 | T-0003 | 修正 `check-migrations.sh` Down 空判定阈值（撤销 R-108 误报） | bug | infra | 2026-04-20 | commit `36907a36`；**关闭 R-108**（误报） |
 | T-0004 | 重构 Claude git 权限（软约束行为准则 + 硬约束 settings.json） | proc | process | 2026-04-20 | commit `7d212ce2`；`.claude/settings.json` 分层 allow/ask/deny |
 | T-0005 | 开发流水线 skill 设计 + L0 Backlog | proc | process | 2026-04-20 | commit `eba378d0`（L0 + skill + 设计文档 + CLAUDE.md）+ commit `64607009`（既有制品联通：/commit 四元组 / DoD / Gate / Risk / Milestone）+ commit `1dae3b31`（S7 回写）；设计 `docs/project/dev-pipeline-design-20260420.md`；skill `.claude/commands/dev-pipeline.md`；**首次 dogfooding**：本三连 commit 自身全部走四元组 footer |
+| T-0035-P1 | 前端多皮肤架构 Phase 1：抽取 `@omc/frontend-core` + 建立 npm workspaces + `@core/*` 路径别名 | ref | frontend | 2026-04-22 | 方案 `docs/project/frontend-multi-skin-plan-20260422.md`；`omcmb/frontend-core/src/{services,hooks/api,store,types,i18n,mock}`；workspace-level lint（`omcmb/eslint.config.js`）；`tsc --noEmit` / `npm run build` 通过；test/lint 前置失败与迁移无关（baseline 一致） |
 
 ---
 
@@ -203,6 +205,8 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-20 | schema 调整 | T-0025 | Deps 由 `T-0006` 改为 `T-0006@累计≥150`（累计型依赖语法，设计 §11.7.1） |
 | 2026-04-20 | Owner 补齐 | T-0007..T-0026 | 按 risk-register 角色映射填入（电信/Go/PM/架构/运维/前端/QA），Sprint Planning 时替换为人名 |
 | 2026-04-20 | done | T-0005 | S7 回写：commit `eba378d0` + `64607009` + `1dae3b31`（rebase 后 hash）；L0 Backlog + 流水线 skill + 既有制品联通全部完成，首次 dogfooding 成功 |
+| 2026-04-22 | 登记 + done | T-0035-P1 | 前端多皮肤架构 Phase 1：抽取 `@omc/frontend-core`（6 业务层目录 `git mv`，141 文件 `@/→@core/*`），建立 npm workspaces + workspace-level ESLint；`tsc`/`build` 通过 |
+| 2026-04-22 | 登记 | T-0035 | 前端多皮肤架构 Phase 3-7（v2 皮肤）母任务，Triaged 等 Sprint 规划 |
 
 ---
 

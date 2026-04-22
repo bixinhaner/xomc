@@ -5,8 +5,8 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useDomainTree } from '@/hooks/api/useTopology';
-import type { Domain } from '@/types/topology';
+import { useDomainTree } from '@core/hooks/api/useTopology';
+import type { Domain } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
 interface DomainNode {

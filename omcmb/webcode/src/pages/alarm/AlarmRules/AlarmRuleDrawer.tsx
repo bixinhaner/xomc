@@ -15,10 +15,10 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import { useT } from '@/hooks/useT';
-import { useDeviceList, useDeviceGroups } from '@/hooks/api/useDevices';
-import type { AlarmRule } from '@/types/alarm';
-import type { AlarmSeverity } from '@/types/common';
-import type { Device, DeviceGroup } from '@/types/device';
+import { useDeviceList, useDeviceGroups } from '@core/hooks/api/useDevices';
+import type { AlarmRule } from '@core/types/alarm';
+import type { AlarmSeverity } from '@core/types/common';
+import type { Device, DeviceGroup } from '@core/types/device';
 import dayjs, { Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;

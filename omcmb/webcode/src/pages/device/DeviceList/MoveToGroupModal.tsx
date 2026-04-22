@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Empty, Input, Modal, Tree, Typography } from 'antd';
 import { FolderOutlined, SearchOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { useDeviceGroups } from '@/hooks/api/useDevices';
+import { useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;

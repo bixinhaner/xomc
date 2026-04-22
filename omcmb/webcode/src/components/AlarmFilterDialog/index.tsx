@@ -13,8 +13,8 @@ import {
   Tabs,
   Tag,
 } from 'antd';
-import type { AlarmFilter } from '@/types/alarm';
-import type { AlarmSeverity } from '@/types/common';
+import type { AlarmFilter } from '@core/types/alarm';
+import type { AlarmSeverity } from '@core/types/common';
 import { useT } from '@/hooks/useT';
 
 const { RangePicker } = DatePicker;

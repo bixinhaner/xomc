@@ -1,5 +1,5 @@
 import { Tabs } from 'antd';
-import { useTaskStore } from '@/store/taskStore';
+import { useTaskStore } from '@core/store/taskStore';
 import { useT } from '@/hooks/useT';
 import TaskPanelHeader from './TaskPanelHeader';
 import SingleTaskTab from './SingleTaskTab';

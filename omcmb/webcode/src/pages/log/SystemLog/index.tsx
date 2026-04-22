@@ -5,8 +5,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useSystemLogs } from '@/hooks/api/useLogs';
-import type { SystemLog } from '@/mock/data/logs';
+import { useSystemLogs } from '@core/hooks/api/useLogs';
+import type { SystemLog } from '@core/mock/data/logs';
 import { useT } from '@/hooks/useT';
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';

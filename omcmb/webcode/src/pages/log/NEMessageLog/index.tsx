@@ -6,7 +6,7 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import JSONViewer from '@/components/JSONViewer';
-import { useNEMessageLogs } from '@/hooks/api/useLogs';
+import { useNEMessageLogs } from '@core/hooks/api/useLogs';
 import { useT } from '@/hooks/useT';
 
 const messageTypeColorMap: Record<string, string> = {

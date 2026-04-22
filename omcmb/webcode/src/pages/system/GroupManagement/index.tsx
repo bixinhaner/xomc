@@ -30,8 +30,8 @@ import {
   useDeleteGroups,
   useAllRoles,
   useAllUsers,
-} from '@/hooks/api/useSystem';
-import type { Group } from '@/types/system';
+} from '@core/hooks/api/useSystem';
+import type { Group } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 
 export default function GroupManagement() {

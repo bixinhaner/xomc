@@ -1,5 +1,5 @@
 import { theme } from 'antd';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 
 /**
  * Returns whether the current theme is a dark variant (tech or cyberpunk style).

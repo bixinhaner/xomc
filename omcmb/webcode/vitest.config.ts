@@ -9,11 +9,15 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     css: true,
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      '../frontend-core/src/**/*.{test,spec}.{ts,tsx}',
+    ],
   },
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
+      '@core': resolve(__dirname, '../frontend-core/src'),
     },
   },
 })

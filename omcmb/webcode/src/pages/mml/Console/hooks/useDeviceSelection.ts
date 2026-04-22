@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { ConsoleDevice } from '../types';
 import { DEVICE_PAGE_SIZE } from '../constants';
-import { deviceApi } from '@/services/api/deviceApi';
+import { deviceApi } from '@core/services/api/deviceApi';
 
 export function useDeviceSelection() {
   const [selectedDevices, setSelectedDevices] = useState<ConsoleDevice[]>([]);

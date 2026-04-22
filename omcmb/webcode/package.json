@@ -10,6 +10,7 @@
     "build": "vite build",
     "build:mock": "vite build --mode mock",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { Input, Tree, Typography, Empty, Spin, Button } from 'antd';
 import { SearchOutlined, FolderOutlined, CodeOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
 import type { TreeProps } from 'antd';
-import type { MMLCommand, MMLParamRef } from '@/types/mml';
+import type { MMLCommand, MMLParamRef } from '@core/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import type { CommandTreeNode } from '../hooks/useCommandSelection';

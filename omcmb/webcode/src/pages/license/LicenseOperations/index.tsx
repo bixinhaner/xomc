@@ -5,7 +5,7 @@ import type { UploadFile, RcFile } from 'antd/es/upload';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useActivateLicense, useRevokeLicense, useImportLicense } from '@/hooks/api/useLicense';
+import { useActivateLicense, useRevokeLicense, useImportLicense } from '@core/hooks/api/useLicense';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;

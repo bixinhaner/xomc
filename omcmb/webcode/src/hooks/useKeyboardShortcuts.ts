@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useTabStore } from '@/store/tabStore';
+import { useTabStore } from '@core/store/tabStore';
 
 export function useKeyboardShortcuts() {
   const tabStore = useTabStore();

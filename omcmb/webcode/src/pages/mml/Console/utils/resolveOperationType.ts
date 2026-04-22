@@ -1,4 +1,4 @@
-import type { MMLCommand, MMLOperationType } from '@/types/mml';
+import type { MMLCommand, MMLOperationType } from '@core/types/mml';
 
 /**
  * Resolve the operation type from a command.

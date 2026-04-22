@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Button, Drawer, Form, Input, InputNumber, message, Modal, Radio, Select, Typography, Upload } from 'antd';
 import { DownloadOutlined, InboxOutlined } from '@ant-design/icons';
 import type { FormInstance, UploadFile, UploadProps } from 'antd';
-import type { Device, EngStatus } from '@/types/device';
+import type { Device, EngStatus } from '@core/types/device';
 
 const { Dragger } = Upload;
 const { Text } = Typography;

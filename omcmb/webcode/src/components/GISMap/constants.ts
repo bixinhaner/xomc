@@ -3,7 +3,7 @@
  * @module components/GISMap/constants
  */
 
-import type { DeviceStatus } from '@/types/map';
+import type { DeviceStatus } from '@core/types/map';
 
 /**
  * 设备状态配置

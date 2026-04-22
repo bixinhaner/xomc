@@ -5,7 +5,7 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import type { Device } from '@/types/device';
+import type { Device } from '@core/types/device';
 import { useT } from '@/hooks/useT';
 
 const classificationTree: DataNode[] = [

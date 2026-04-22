@@ -7,7 +7,7 @@ import SchedulePicker from '@/components/SchedulePicker';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
-import { useAllKPIs, useMultipleKPISeries } from '@/hooks/api/usePerformance';
+import { useAllKPIs, useMultipleKPISeries } from '@core/hooks/api/usePerformance';
 import { useT } from '@/hooks/useT';
 
 const { RangePicker } = DatePicker;

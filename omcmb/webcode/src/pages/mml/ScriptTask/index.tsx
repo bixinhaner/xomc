@@ -40,12 +40,12 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, DeviceTaskResultItem, MMLScript } from '@/types/mml';
-import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLScripts, useDeleteMMLScripts } from '@/hooks/api/useMML';
-import { mmlApi } from '@/services/api/mmlApi';
-import { useDictionary } from '@/hooks/api/useSystem';
+import type { MMLTask, MMLTaskStatus, MMLExecuteType, MMLTaskResult, DeviceTaskResultItem, MMLScript } from '@core/types/mml';
+import { useMMLTasks, useCreateMMLTask, useStartMMLTask, usePauseMMLTask, useCancelMMLTask, useDeleteMMLTask, useMMLScripts, useDeleteMMLScripts } from '@core/hooks/api/useMML';
+import { mmlApi } from '@core/services/api/mmlApi';
+import { useDictionary } from '@core/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
-import { useUserStore } from '@/store/userStore';
+import { useUserStore } from '@core/store/userStore';
 
 const EXECUTE_TYPE_KEYS: Record<MMLExecuteType, { color: string; key: string }> = {
   immediate: { color: 'green', key: 'mml.immediateExecute' },

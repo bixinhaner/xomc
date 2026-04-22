@@ -8,7 +8,7 @@ import {
   useSyncStatus,
   useAddObject,
   useDeleteObject,
-} from '@/hooks/api/useDeviceParameters';
+} from '@core/hooks/api/useDeviceParameters';
 import ObjectTreePanel from './ObjectTreePanel';
 import ChildParamTable from './ChildParamTable';
 import SyncStatusBar from './SyncStatusBar';

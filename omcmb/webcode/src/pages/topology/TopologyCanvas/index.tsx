@@ -12,8 +12,8 @@ import {
 } from '@ant-design/icons';
 import MapPageLayout from '@/components/Layout/MapPageLayout';
 import TopologyCanvas from '@/components/TopologyCanvas';
-import { useTopoGraph } from '@/hooks/api/useTopology';
-import type { TopoNode } from '@/types/topology';
+import { useTopoGraph } from '@core/hooks/api/useTopology';
+import type { TopoNode } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
 const LAYOUT_OPTIONS_KEYS = [

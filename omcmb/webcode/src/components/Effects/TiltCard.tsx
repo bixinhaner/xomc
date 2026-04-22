@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { use3DTilt } from '@/hooks/use3DTilt';
 import { getThemeEffects } from './themeEffectConfig';
 

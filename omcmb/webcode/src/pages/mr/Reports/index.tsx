@@ -6,7 +6,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useDownloadReport } from '@/hooks/api/useReports';
+import { useDownloadReport } from '@core/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
 
 type ReportStatus = 'generated' | 'generating' | 'failed';

@@ -17,8 +17,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useOperationLogs, useExportLogs } from '@/hooks/api/useLogs';
-import type { OperationLog } from '@/types/system';
+import { useOperationLogs, useExportLogs } from '@core/hooks/api/useLogs';
+import type { OperationLog } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 
 // 日志类型

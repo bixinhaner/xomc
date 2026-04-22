@@ -6,7 +6,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useConfigParams, useUpdateConfigParam } from '@/hooks/api/useConfig';
+import { useConfigParams, useUpdateConfigParam } from '@core/hooks/api/useConfig';
 import { useT } from '@/hooks/useT';
 
 interface LiveParamRow extends Record<string, unknown> {

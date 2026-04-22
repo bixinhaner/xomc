@@ -4,8 +4,8 @@ import { PlayCircleOutlined, SaveOutlined, SearchOutlined } from '@ant-design/ic
 import CommandConsoleLayout from '@/components/Layout/CommandConsoleLayout';
 import TerminalOutput from '@/components/TerminalOutput';
 import type { TerminalLine } from '@/components/TerminalOutput';
-import { useMMLCommands, useExecuteMMLCommand } from '@/hooks/api/useMML';
-import type { MMLCommand } from '@/types/mml';
+import { useMMLCommands, useExecuteMMLCommand } from '@core/hooks/api/useMML';
+import type { MMLCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 
 const COMMAND_CATEGORY_KEYS = [

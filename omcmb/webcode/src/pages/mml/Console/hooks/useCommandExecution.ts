@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { TerminalLine } from '../types';
 import type { ConsoleDevice } from '../types';
-import type { MMLCommand, MMLTask } from '@/types/mml';
-import { useExecuteMMLCommand, useMMLTaskPolling } from '@/hooks/api/useMML';
+import type { MMLCommand, MMLTask } from '@core/types/mml';
+import { useExecuteMMLCommand, useMMLTaskPolling } from '@core/hooks/api/useMML';
 import { useT } from '@/hooks/useT';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);

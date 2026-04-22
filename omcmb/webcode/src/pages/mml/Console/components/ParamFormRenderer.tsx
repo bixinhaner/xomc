@@ -13,7 +13,7 @@ import {
   Typography,
 } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
-import type { MMLCommand, MMLParam, MMLOperationType, MMLParamRef } from '@/types/mml';
+import type { MMLCommand, MMLParam, MMLOperationType, MMLParamRef } from '@core/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
 import { useT } from '@/hooks/useT';
 

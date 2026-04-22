@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 
 /**
  * Adds the 'omc-visible' class to elements with 'omc-scroll-reveal' class

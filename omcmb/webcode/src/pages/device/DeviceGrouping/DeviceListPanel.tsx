@@ -5,7 +5,7 @@ import { CheckCircleOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, Ed
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import StatusIndicator from '@/components/StatusIndicator';
-import type { Device, EngStatus } from '@/types/device';
+import type { Device, EngStatus } from '@core/types/device';
 
 const { Dragger } = Upload;
 const { Title, Text } = Typography;

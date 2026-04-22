@@ -5,8 +5,8 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import LineChart from '@/components/Charts/LineChart';
-import { useMultipleKPISeries } from '@/hooks/api/usePerformance';
-import { useMock } from '@/services/apiSwitch';
+import { useMultipleKPISeries } from '@core/hooks/api/usePerformance';
+import { useMock } from '@core/services/apiSwitch';
 import { useT } from '@/hooks/useT';
 
 function formatTimestamp(ts: string): string {

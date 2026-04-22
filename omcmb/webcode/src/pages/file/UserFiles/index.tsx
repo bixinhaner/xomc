@@ -7,8 +7,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useFileList, useDeleteFiles } from '@/hooks/api/useFiles';
-import type { ManagedFile, FileType } from '@/mock/data/fileManagement';
+import { useFileList, useDeleteFiles } from '@core/hooks/api/useFiles';
+import type { ManagedFile, FileType } from '@core/mock/data/fileManagement';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;

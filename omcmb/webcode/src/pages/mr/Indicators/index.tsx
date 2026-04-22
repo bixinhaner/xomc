@@ -5,7 +5,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useMRIndicators } from '@/hooks/api/useMR';
+import { useMRIndicators } from '@core/hooks/api/useMR';
 import { useT } from '@/hooks/useT';
 
 interface MRIndicator {

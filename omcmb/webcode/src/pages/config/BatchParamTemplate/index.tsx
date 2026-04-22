@@ -5,8 +5,8 @@ import type { MenuProps } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useConfigTemplates, useCreateConfigTemplate, useUpdateConfigTemplate, useDeleteConfigTemplates } from '@/hooks/api/useConfig';
-import type { ConfigTemplate } from '@/types/config';
+import { useConfigTemplates, useCreateConfigTemplate, useUpdateConfigTemplate, useDeleteConfigTemplates } from '@core/hooks/api/useConfig';
+import type { ConfigTemplate } from '@core/types/config';
 import { useT } from '@/hooks/useT';
 
 interface TemplateRow extends Record<string, unknown> {

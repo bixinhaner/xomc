@@ -8,7 +8,7 @@ import React, { useState, useEffect, useMemo, useCallback, forwardRef, useImpera
 import { Spin } from 'antd';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@/types/map';
+import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
 import { MAP_CONFIG, ANIMATION_CONFIG } from './constants';
 import { useOLMap } from './useOLMap';
 import MapPopup from './MapPopup';
@@ -244,7 +244,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
 // 导出组件和类型
 export default GISMap;
-export type { GISMapProps, GISMapRef, MapDevice, MapViewport, MapStats } from '@/types/map';
+export type { GISMapProps, GISMapRef, MapDevice, MapViewport, MapStats } from '@core/types/map';
 
 // 导出子组件（可选）
 export { default as MapPopup } from './MapPopup';

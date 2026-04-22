@@ -1,9 +1,6 @@
-export interface NameFilterItem {
-  id: string;
-  condition: 'contain' | 'notContain' | 'startWith' | 'endWith';
-  value: string;
-  andOr?: 'and' | 'or';
-}
+import type { NameFilterItem } from '@core/types/device';
+// NameFilterItem 已提升到 @core/types/device 作为全局类型，此处重新导出保持向后兼容
+export type { NameFilterItem };
 
 /** Group data from the API */
 export interface GroupItem {

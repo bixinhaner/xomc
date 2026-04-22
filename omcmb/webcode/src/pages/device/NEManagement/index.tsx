@@ -8,9 +8,9 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import StatusIndicator from '@/components/StatusIndicator';
-import { useNEList } from '@/hooks/api/useDevices';
+import { useNEList } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
-import type { NE } from '@/types/device';
+import type { NE } from '@core/types/device';
 
 const SEVERITY_COLOR: Record<string, string> = {
   critical: 'red', major: 'orange', minor: 'gold', warning: 'blue', none: 'default',

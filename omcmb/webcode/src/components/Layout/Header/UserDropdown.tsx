@@ -8,11 +8,11 @@ import {
   DownOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
-import { useUserStore } from '@/store/userStore';
-import { useAppStore } from '@/store/appStore';
+import { useUserStore } from '@core/store/userStore';
+import { useAppStore } from '@core/store/appStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import { adminApi } from '@/services/api/adminApi';
+import { adminApi } from '@core/services/api/adminApi';
 import styles from './Header.module.css';
 
 export default function UserDropdown() {

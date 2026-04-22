@@ -1,4 +1,4 @@
-import type { Theme } from '@/types/common';
+import type { Theme } from '@core/types/common';
 
 export interface TiltConfig {
   maxTilt: number;

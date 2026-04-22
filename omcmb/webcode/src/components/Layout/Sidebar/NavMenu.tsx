@@ -28,8 +28,8 @@ import {
   ExperimentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useTabStore } from '@/store/tabStore';
-import { useAppStore } from '@/store/appStore';
+import { useTabStore } from '@core/store/tabStore';
+import { useAppStore } from '@core/store/appStore';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
 import { NAV_CONFIG } from './navConfig';

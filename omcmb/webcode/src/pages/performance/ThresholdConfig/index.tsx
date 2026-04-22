@@ -4,8 +4,8 @@ import { PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useThresholds, useCreateThreshold, useUpdateThreshold, useDeleteThresholds } from '@/hooks/api/usePerformance';
-import type { PerformanceThreshold } from '@/types/performance';
+import { useThresholds, useCreateThreshold, useUpdateThreshold, useDeleteThresholds } from '@core/hooks/api/usePerformance';
+import type { PerformanceThreshold } from '@core/types/performance';
 import { useT } from '@/hooks/useT';
 
 interface ThresholdRow extends Record<string, unknown> {

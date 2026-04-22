@@ -8,7 +8,7 @@ import {
   CaretRightOutlined,
 } from '@ant-design/icons';
 import { Virtuoso } from 'react-virtuoso';
-import type { ParameterTreeNode } from '@/types/deviceParameter';
+import type { ParameterTreeNode } from '@core/types/deviceParameter';
 import './ObjectTreePanel.css';
 
 const { Text } = Typography;

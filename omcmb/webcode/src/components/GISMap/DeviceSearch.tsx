@@ -9,7 +9,7 @@ import { SearchOutlined, CloseOutlined, DownOutlined } from '@ant-design/icons';
 import { useDebounce } from 'ahooks';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import type { DeviceSearchResult } from '@/types/map';
+import type { DeviceSearchResult } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG } from './constants';
 import styles from './styles.module.css';
 

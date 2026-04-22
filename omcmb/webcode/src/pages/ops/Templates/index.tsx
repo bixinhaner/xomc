@@ -7,8 +7,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { mockOpsTemplates } from '@/mock/data/opsTools';
-import type { OpsTemplate, OpsStep } from '@/mock/data/opsTools';
+import { mockOpsTemplates } from '@core/mock/data/opsTools';
+import type { OpsTemplate, OpsStep } from '@core/mock/data/opsTools';
 import { useT } from '@/hooks/useT';
 
 const stepTypeColorMap: Record<OpsStep['stepType'], string> = {

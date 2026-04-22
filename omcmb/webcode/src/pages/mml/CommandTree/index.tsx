@@ -5,8 +5,8 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useMMLCommands } from '@/hooks/api/useMML';
-import type { MMLCommand } from '@/types/mml';
+import { useMMLCommands } from '@core/hooks/api/useMML';
+import type { MMLCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 
 interface CommandRow extends Record<string, unknown> {

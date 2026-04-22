@@ -6,7 +6,7 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useReportRecords, useDownloadReport } from '@/hooks/api/useReports';
+import { useReportRecords, useDownloadReport } from '@core/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
 
 const REPORT_CATEGORY_KEYS = [

@@ -3,7 +3,7 @@ import type { ThemeConfig } from 'antd';
 import { App, ConfigProvider } from 'antd';
 import antdZhCN from 'antd/locale/zh_CN';
 import antdEnUS from 'antd/locale/en_US';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { antdClassicTheme } from '@/theme/classicTheme';
 import { antdTechTheme } from '@/theme/techTheme';
 import { antdFreshTheme } from '@/theme/freshTheme';
@@ -11,7 +11,7 @@ import { antdCyberpunkTheme } from '@/theme/cyberpunkTheme';
 import { antdMinionsTheme } from '@/theme/minionsTheme';
 import { antdTiffanyTheme } from '@/theme/tiffanyTheme';
 import { antdRmbTheme } from '@/theme/rmbTheme';
-import type { Theme, Locale } from '@/types/common';
+import type { Theme, Locale } from '@core/types/common';
 import type { Locale as AntdLocale } from 'antd/es/locale';
 
 interface ThemeProviderProps {

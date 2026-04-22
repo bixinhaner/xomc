@@ -5,8 +5,8 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined, MoreOutlined }
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useFTPConfigs, useCreateFTPConfig, useUpdateFTPConfig, useDeleteFTPConfigs, useTestFTPConnection } from '@/hooks/api/useBackup';
-import type { FTPConfig } from '@/mock/data/backup';
+import { useFTPConfigs, useCreateFTPConfig, useUpdateFTPConfig, useDeleteFTPConfigs, useTestFTPConnection } from '@core/hooks/api/useBackup';
+import type { FTPConfig } from '@core/mock/data/backup';
 import { useT } from '@/hooks/useT';
 
 interface FTPRow extends Record<string, unknown> {

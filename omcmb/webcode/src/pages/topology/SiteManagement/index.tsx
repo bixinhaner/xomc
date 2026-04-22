@@ -7,8 +7,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useSites } from '@/hooks/api/useTopology';
-import type { Site } from '@/types/topology';
+import { useSites } from '@core/hooks/api/useTopology';
+import type { Site } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
 interface SiteRow extends Record<string, unknown> {

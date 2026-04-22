@@ -7,8 +7,8 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import JSONViewer from '@/components/JSONViewer';
-import { mockOpsCommandRecords } from '@/mock/data/opsTools';
-import type { OpsCommandRecord } from '@/mock/data/opsTools';
+import { mockOpsCommandRecords } from '@core/mock/data/opsTools';
+import type { OpsCommandRecord } from '@core/mock/data/opsTools';
 import { useT } from '@/hooks/useT';
 
 function formatDuration(ms: number): string {

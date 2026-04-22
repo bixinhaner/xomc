@@ -22,8 +22,8 @@ import {
   useActivateDataModel,
   useDeprecateDataModel,
   useRefreshDataModelCache,
-} from '@/hooks/api/useDataModels';
-import type { DataModel, CreateDataModelRequest, UpdateDataModelRequest } from '@/services/api/datamodelApi';
+} from '@core/hooks/api/useDataModels';
+import type { DataModel, CreateDataModelRequest, UpdateDataModelRequest } from '@core/services/api/datamodelApi';
 import OUIPanel from './OUIPanel';
 
 const STATUS_COLOR: Record<string, string> = {

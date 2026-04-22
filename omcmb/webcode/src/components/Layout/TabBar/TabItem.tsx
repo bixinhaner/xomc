@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { TabItem as TabItemType } from '@/store/tabStore';
+import type { TabItem as TabItemType } from '@core/store/tabStore';
 import { useT } from '@/hooks/useT';
 import TabContextMenu from './TabContextMenu';
 import styles from './TabBar.module.css';

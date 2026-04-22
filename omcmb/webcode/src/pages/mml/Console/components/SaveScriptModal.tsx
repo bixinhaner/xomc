@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Form, Input, Select, Button, message } from 'antd';
-import { useCreateMMLScript } from '@/hooks/api/useMML';
-import { useDictionary } from '@/hooks/api/useSystem';
+import { useCreateMMLScript } from '@core/hooks/api/useMML';
+import { useDictionary } from '@core/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 
 interface SaveScriptModalProps {

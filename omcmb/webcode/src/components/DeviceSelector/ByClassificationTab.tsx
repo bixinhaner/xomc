@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button, Col, Row, Tree, Typography } from 'antd';
 import type { DataNode } from 'antd/es/tree';
-import type { Device } from '@/types/device';
+import type { Device } from '@core/types/device';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
 interface Dimension {

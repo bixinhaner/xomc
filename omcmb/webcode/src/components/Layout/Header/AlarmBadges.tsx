@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { useAlarmStore } from '@/store/alarmStore';
-import type { AlarmSeverity } from '@/store/alarmStore';
+import { useAlarmStore } from '@core/store/alarmStore';
+import type { AlarmSeverity } from '@core/store/alarmStore';
 import { useT } from '@/hooks/useT';
 import styles from './Header.module.css';
 

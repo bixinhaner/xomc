@@ -2,8 +2,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { Button, Form, Input, Modal, Space, Table, message } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useOUIList, useCreateOUI } from '@/hooks/api/useDataModels';
-import type { OUIEntry, CreateOUIRequest } from '@/services/api/datamodelApi';
+import { useOUIList, useCreateOUI } from '@core/hooks/api/useDataModels';
+import type { OUIEntry, CreateOUIRequest } from '@core/services/api/datamodelApi';
 
 export default function OUIPanel() {
   const [modalOpen, setModalOpen] = useState(false);

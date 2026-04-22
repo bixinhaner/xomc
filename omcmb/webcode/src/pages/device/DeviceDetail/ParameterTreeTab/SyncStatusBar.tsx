@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, Progress, Space, Typography } from 'antd';
 import { SyncOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import type { ParameterSyncStatus } from '@/types/deviceParameter';
+import type { ParameterSyncStatus } from '@core/types/deviceParameter';
 
 const { Text } = Typography;
 

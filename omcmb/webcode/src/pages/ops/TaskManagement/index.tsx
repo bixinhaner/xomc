@@ -7,9 +7,9 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { mockOpsTasks, mockOpsTemplates } from '@/mock/data/opsTools';
-import type { OpsTask } from '@/mock/data/opsTools';
-import { useCreateOpsTask, usePauseOpsTask, useResumeOpsTask, useCancelOpsTask } from '@/hooks/api/useOpsTools';
+import { mockOpsTasks, mockOpsTemplates } from '@core/mock/data/opsTools';
+import type { OpsTask } from '@core/mock/data/opsTools';
+import { useCreateOpsTask, usePauseOpsTask, useResumeOpsTask, useCancelOpsTask } from '@core/hooks/api/useOpsTools';
 
 const filterFields: FilterField[] = [
   { name: 'keyword', label: '任务名称', type: 'input', placeholder: '请输入任务名称' },

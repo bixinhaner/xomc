@@ -15,8 +15,10 @@ omcgo/migrate
 omcgo/omcctl
 omcgo/loadtest
 run/app
-omcmb/webcode/node_modules/
+omcmb/node_modules/
+omcmb/*/node_modules/
 omcmb/webcode/dist/
+omcmb/frontend-core/dist/
 
 # Claude (keep commands/ and settings.json tracked for team sharing)
 .claude/*
@@ -28,4 +30,3 @@ omcmb/webcode/dist/
 .qoder/
 
 run/logs
-omcmb/webcode/dist

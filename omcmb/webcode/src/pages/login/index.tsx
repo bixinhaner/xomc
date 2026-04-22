@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Form, Input, Button, Checkbox, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { useUserStore } from '@/store/userStore';
+import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
-import { useMock } from '@/services/apiSwitch';
-import { authApi } from '@/services/api/authApi';
-import type { User } from '@/types/system';
+import { useMock } from '@core/services/apiSwitch';
+import { authApi } from '@core/services/api/authApi';
+import type { User } from '@core/types/system';
 import type { AxiosError } from 'axios';
 import styles from './Login.module.css';
 

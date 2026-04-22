@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useIsTouchDevice } from '@/hooks/useIsTouchDevice';

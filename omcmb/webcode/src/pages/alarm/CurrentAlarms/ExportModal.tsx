@@ -5,8 +5,8 @@ import dayjs from 'dayjs';
 import { FolderOutlined } from '@ant-design/icons';
 import type { DataNode, TreeProps } from 'antd/es/tree';
 import { useT } from '@/hooks/useT';
-import { useDeviceGroups } from '@/hooks/api/useDevices';
-import type { DeviceGroup } from '@/types/device';
+import { useDeviceGroups } from '@core/hooks/api/useDevices';
+import type { DeviceGroup } from '@core/types/device';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;

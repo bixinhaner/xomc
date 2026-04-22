@@ -2,8 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Table, Tag, Typography, Button, Empty } from 'antd';
 import { EditOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { ColumnsType, TableProps } from 'antd/es/table';
-import type { DeviceParameter, ParameterType } from '@/types/deviceParameter';
-import type { PageResponse } from '@/types/pagination';
+import type { DeviceParameter, ParameterType } from '@core/types/deviceParameter';
+import type { PageResponse } from '@core/types/pagination';
 import ParameterEditModal from './ParameterEditModal';
 
 const { Text } = Typography;

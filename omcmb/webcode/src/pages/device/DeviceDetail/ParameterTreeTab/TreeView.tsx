@@ -9,8 +9,8 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import type { ParameterTreeNode, ParameterType } from '@/types/deviceParameter';
-import { useAddObject, useDeleteObject } from '@/hooks/api/useDeviceParameters';
+import type { ParameterTreeNode, ParameterType } from '@core/types/deviceParameter';
+import { useAddObject, useDeleteObject } from '@core/hooks/api/useDeviceParameters';
 import ParameterEditModal from './ParameterEditModal';
 
 const { Text } = Typography;

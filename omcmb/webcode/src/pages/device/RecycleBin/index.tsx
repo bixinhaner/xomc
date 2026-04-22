@@ -11,9 +11,9 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices } from '@/hooks/api/useDevices';
-import { useDomainTree } from '@/hooks/api/useTopology';
-import type { Device } from '@/types/device';
+import { useRecycleBinList, useRestoreDevices, usePermanentDeleteDevices } from '@core/hooks/api/useDevices';
+import { useDomainTree } from '@core/hooks/api/useTopology';
+import type { Device } from '@core/types/device';
 import ImportModal from './ImportModal';
 
 // 设备类型

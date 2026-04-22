@@ -13,9 +13,9 @@ import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule, useToggleAlarmRule } from '@/hooks/api/useAlarms';
+import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule, useToggleAlarmRule } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
-import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@/types/alarm';
+import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@core/types/alarm';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
 
 const { Text } = Typography;

@@ -21,7 +21,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useCreateDevice } from '@/hooks/api/useDevices';
+import { useCreateDevice } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
 
 const { Title, Text } = Typography;

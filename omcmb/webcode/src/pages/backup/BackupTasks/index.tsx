@@ -39,7 +39,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useBackupTasks } from '@/hooks/api/useBackup';
+import { useBackupTasks } from '@core/hooks/api/useBackup';
 import { useT } from '@/hooks/useT';
 
 // 备份任务状态

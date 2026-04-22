@@ -9,7 +9,7 @@ import {
 import PieChart from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
 import LineChart from '@/components/Charts/LineChart';
-import { useDashboardData } from '@/hooks/api/useDashboard';
+import { useDashboardData } from '@core/hooks/api/useDashboard';
 import { useT } from '@/hooks/useT';
 
 const { Title, Text } = Typography;

@@ -6,8 +6,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useNeighborParams } from '@/hooks/api/useConfig';
-import type { NeighborParam } from '@/types/config';
+import { useNeighborParams } from '@core/hooks/api/useConfig';
+import type { NeighborParam } from '@core/types/config';
 import { useT } from '@/hooks/useT';
 
 interface NeighborRow extends Record<string, unknown> {

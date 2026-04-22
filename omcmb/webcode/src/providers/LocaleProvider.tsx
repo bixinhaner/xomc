@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react';
 import { IntlProvider } from 'react-intl';
-import { useAppStore } from '@/store/appStore';
-import { getMessages } from '@/i18n';
+import { useAppStore } from '@core/store/appStore';
+import { getMessages } from '@core/i18n';
 
 interface LocaleProviderProps {
   children: ReactNode;

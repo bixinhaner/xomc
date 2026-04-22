@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 
 export interface FloatingElementProps {
   children: React.ReactNode;

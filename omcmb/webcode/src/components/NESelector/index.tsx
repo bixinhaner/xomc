@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Input, Modal, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import type { NE } from '@/types/device';
+import type { NE } from '@core/types/device';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
 export interface NESelectorProps {

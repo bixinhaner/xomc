@@ -6,8 +6,8 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useSoftwareVersions } from '@/hooks/api/useSoftware';
-import type { SoftwareVersion, VersionStatus } from '@/mock/data/software';
+import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
+import type { SoftwareVersion, VersionStatus } from '@core/mock/data/software';
 import { useT } from '@/hooks/useT';
 
 const statusColorMap: Record<VersionStatus, string> = {

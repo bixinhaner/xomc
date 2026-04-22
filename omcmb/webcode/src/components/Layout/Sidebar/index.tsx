@@ -1,4 +1,4 @@
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import NavMenu from './NavMenu';
 import { useT } from '@/hooks/useT';

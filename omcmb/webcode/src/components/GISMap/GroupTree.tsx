@@ -8,7 +8,7 @@ import { Input, Checkbox, Tree, Typography, Spin, Empty } from 'antd';
 import { SearchOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import type { DeviceGroupNode } from '@/types/map';
+import type { DeviceGroupNode } from '@core/types/map';
 import styles from './styles.module.css';
 
 const { Text } = Typography;

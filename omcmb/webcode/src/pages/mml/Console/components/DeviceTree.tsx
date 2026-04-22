@@ -5,7 +5,7 @@ import type { ConsoleDevice } from '../types';
 import { STATUS_COLORS } from '../types';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import { useDictionary } from '@/hooks/api/useSystem';
+import { useDictionary } from '@core/hooks/api/useSystem';
 
 interface DeviceTreeProps {
   selectedDevices: ConsoleDevice[];

@@ -3,7 +3,7 @@ import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { getBaseOption, getChartPalette } from './chartTheme';
 import { useIsDark } from '@/hooks/useThemeToken';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 
 export interface CombinedBarSeries {
   name: string;

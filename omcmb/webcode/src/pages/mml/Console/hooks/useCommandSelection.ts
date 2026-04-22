@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { TreeDataNode } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import type { MMLCommand, MMLCustomCommand, MMLParamRef } from '@/types/mml';
-import { mmlApi } from '@/services/api/mmlApi';
-import { useDictionary } from '@/hooks/api/useSystem';
+import type { MMLCommand, MMLCustomCommand, MMLParamRef } from '@core/types/mml';
+import { mmlApi } from '@core/services/api/mmlApi';
+import { useDictionary } from '@core/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 import { COMMAND_PAGE_SIZE } from '../constants';
 

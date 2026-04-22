@@ -9,9 +9,9 @@ import {
   DollarOutlined,
   CheckCircleFilled,
 } from '@ant-design/icons';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { useT } from '@/hooks/useT';
-import type { SidebarPosition, TabBarPosition, Theme } from '@/types/common';
+import type { SidebarPosition, TabBarPosition, Theme } from '@core/types/common';
 import styles from './LayoutPicker.module.css';
 
 const STYLE_OPTIONS: {

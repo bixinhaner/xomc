@@ -8,9 +8,9 @@ import {
   WifiOutlined,
 } from '@ant-design/icons';
 import StatusIndicator from '@/components/StatusIndicator';
-import { useDeviceList } from '@/hooks/api/useDevices';
+import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
-import type { Device } from '@/types/device';
+import type { Device } from '@core/types/device';
 
 const { Text, Title } = Typography;
 

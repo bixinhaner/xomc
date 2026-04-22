@@ -7,7 +7,7 @@
 import React from 'react';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
-import type { MapDevice } from '@/types/map';
+import type { MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, COLORS } from './constants';
 
 interface MapPopupProps {

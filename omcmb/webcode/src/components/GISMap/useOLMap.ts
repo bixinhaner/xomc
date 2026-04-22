@@ -17,7 +17,7 @@ import LineString from 'ol/geom/LineString';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { defaults as defaultControls } from 'ol/control';
 import { Style, Stroke, Circle, Fill, Text } from 'ol/style';
-import type { MapDevice, MapViewport, MapBounds } from '@/types/map';
+import type { MapDevice, MapViewport, MapBounds } from '@core/types/map';
 import {
   MAP_CONFIG,
   ANIMATION_CONFIG,

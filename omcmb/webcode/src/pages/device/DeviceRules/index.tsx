@@ -48,16 +48,16 @@ import {
   useApplyRule,
   useBatchSortRules,
   useRuleTasks,
-} from '@/hooks/api/useDeviceRules';
+} from '@core/hooks/api/useDeviceRules';
 import type {
   DeviceRule,
   NameRule,
   RuleTask,
   CreateRuleRequest,
   UpdateRuleRequest,
-} from '@/services/api/deviceRulesApi';
-import { deviceRulesApi } from '@/services/api/deviceRulesApi';
-import { useDomainTree } from '@/hooks/api/useTopology';
+} from '@core/services/api/deviceRulesApi';
+import { deviceRulesApi } from '@core/services/api/deviceRulesApi';
+import { useDomainTree } from '@core/hooks/api/useTopology';
 
 const { Text } = Typography;
 

@@ -5,7 +5,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useConfigParams } from '@/hooks/api/useConfig';
+import { useConfigParams } from '@core/hooks/api/useConfig';
 import { useT } from '@/hooks/useT';
 
 interface ParamListRow extends Record<string, unknown> {

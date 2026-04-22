@@ -31,8 +31,8 @@ import {
   useRunTests,
   useRunTestsByCategory,
   useValidateDevice,
-} from '@/hooks/api/useInterop';
-import type { TestCase, TestResult, RunTestsResponse } from '@/services/api/interopApi';
+} from '@core/hooks/api/useInterop';
+import type { TestCase, TestResult, RunTestsResponse } from '@core/services/api/interopApi';
 
 const CATEGORY_COLOR: Record<string, string> = {
   protocol: 'blue',

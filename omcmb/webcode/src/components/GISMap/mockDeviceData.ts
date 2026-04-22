@@ -7,7 +7,7 @@
  * 扩展后总数: 40000 (增加 36280 条)
  */
 
-import type { MapDevice } from '@/types/map';
+import type { MapDevice } from '@core/types/map';
 
 // 需要生成的额外设备数量 (40000 - 3720 = 36280)
 const ADDITIONAL_DEVICE_COUNT = 36280;

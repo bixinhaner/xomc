@@ -30,8 +30,8 @@ import {
   useDeleteApiEndpoint,
   useBatchDeleteApiEndpoints,
   useSyncApiEndpoints,
-} from '@/hooks/api/useSystem';
-import type { ApiEndpoint, ApiEndpointPayload } from '@/types/system';
+} from '@core/hooks/api/useSystem';
+import type { ApiEndpoint, ApiEndpointPayload } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Form, Input, Select, Button, message, Space, InputNumber, Switch } from 'antd';
-import { useCreateMMLTemplate } from '@/hooks/api/useMML';
-import { useAllMMLCommands } from '@/hooks/api/useMML';
-import { useDictionary } from '@/hooks/api/useSystem';
-import type { MMLCustomCommand, MMLCommand, MMLParam } from '@/types/mml';
+import { useCreateMMLTemplate } from '@core/hooks/api/useMML';
+import { useAllMMLCommands } from '@core/hooks/api/useMML';
+import { useDictionary } from '@core/hooks/api/useSystem';
+import type { MMLCustomCommand, MMLCommand, MMLParam } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 
 interface AddTemplateModalProps {

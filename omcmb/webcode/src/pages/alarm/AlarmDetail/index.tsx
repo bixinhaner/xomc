@@ -9,7 +9,7 @@ import {
 import {
   UserOutlined,
 } from '@ant-design/icons';
-import type { Alarm, DealState, EventType } from '@/types/alarm';
+import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import { useT } from '@/hooks/useT';
 
 const { Text, Paragraph } = Typography;

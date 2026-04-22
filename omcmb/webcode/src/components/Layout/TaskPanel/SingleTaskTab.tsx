@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { Button, Descriptions, Modal, Table, Tag } from 'antd';
 import { EyeOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useTaskStore } from '@/store/taskStore';
-import type { SingleTask, TaskStatus } from '@/store/taskStore';
+import { useTaskStore } from '@core/store/taskStore';
+import type { SingleTask, TaskStatus } from '@core/store/taskStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 

@@ -11,7 +11,7 @@ import {
 import DashboardPageLayout from '@/components/Layout/DashboardPageLayout';
 import GaugeChart from '@/components/Charts/GaugeChart';
 import StatusIndicator from '@/components/StatusIndicator';
-import { useSystemInfo } from '@/hooks/api/useSystem';
+import { useSystemInfo } from '@core/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 
 const serviceStatuses = [

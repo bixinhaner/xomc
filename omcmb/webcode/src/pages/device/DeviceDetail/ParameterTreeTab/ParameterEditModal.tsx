@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Form, Input, Select, Typography, Alert, Space, Tag } from 'antd';
-import type { ParameterType, ParameterConstraints } from '@/types/deviceParameter';
-import { useUpdateParameters } from '@/hooks/api/useDeviceParameters';
+import type { ParameterType, ParameterConstraints } from '@core/types/deviceParameter';
+import { useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 
 const { Text } = Typography;
 

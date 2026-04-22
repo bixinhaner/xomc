@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
 import { getThemeEffects } from './themeEffectConfig';
 import { getParticlePreset, type Particle } from './particlePresets';
 

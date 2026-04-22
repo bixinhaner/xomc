@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Select } from 'antd';
-import { useAppStore } from '@/store/appStore';
-import type { DeviceType } from '@/store/appStore';
+import { useAppStore } from '@core/store/appStore';
+import type { DeviceType } from '@core/store/appStore';
 import { useT } from '@/hooks/useT';
 
 interface Props {

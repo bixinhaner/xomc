@@ -38,11 +38,11 @@ import {
   useUpdateRole,
   useDeleteRoles,
   useAllDeviceGroups,
-} from '@/hooks/api/useSystem';
-import type { Role, ApiEndpoint } from '@/types/system';
-import type { DeviceGroup } from '@/types/device';
+} from '@core/hooks/api/useSystem';
+import type { Role, ApiEndpoint } from '@core/types/system';
+import type { DeviceGroup } from '@core/types/device';
 import { useT } from '@/hooks/useT';
-import { apiPermissionApi } from '@/services/api/apiPermissionApi';
+import { apiPermissionApi } from '@core/services/api/apiPermissionApi';
 
 // 操作权限类型
 interface OperationItem {

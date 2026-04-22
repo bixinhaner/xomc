@@ -21,9 +21,9 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useDeviceList, useBatchRebootDevices } from '@/hooks/api/useDevices';
+import { useDeviceList, useBatchRebootDevices } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
-import type { Device } from '@/types/device';
+import type { Device } from '@core/types/device';
 
 const { Link } = Typography;
 

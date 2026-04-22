@@ -1,4 +1,4 @@
-import type { MMLCommand } from '@/types/mml';
+import type { MMLCommand } from '@core/types/mml';
 
 // 设备类型
 export interface ConsoleDevice {

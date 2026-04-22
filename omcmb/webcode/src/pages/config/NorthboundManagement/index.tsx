@@ -28,8 +28,8 @@ import {
   useRemovePushTarget,
   useFullSync,
   useIncrementalSync,
-} from '@/hooks/api/useNorthbound';
-import type { PushTarget, AddPushTargetRequest } from '@/services/api/northboundApi';
+} from '@core/hooks/api/useNorthbound';
+import type { PushTarget, AddPushTargetRequest } from '@core/services/api/northboundApi';
 
 const AUTH_TYPE_OPTIONS = [
   { label: 'None', value: 'none' },

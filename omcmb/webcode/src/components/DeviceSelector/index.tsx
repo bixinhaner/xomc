@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Button, Modal, Space, Tabs, Tag, Typography } from 'antd';
-import type { Device } from '@/types/device';
+import type { Device } from '@core/types/device';
 import ByElementTab from './ByElementTab';
 import ByClassificationTab from './ByClassificationTab';
 import ByTemplateTab from './ByTemplateTab';

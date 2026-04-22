@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AutoComplete, Button, Empty, Select, Space, Typography } from 'antd';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
-import type { MMLCommand } from '@/types/mml';
+import type { MMLCommand } from '@core/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
 import { useT } from '@/hooks/useT';
 
