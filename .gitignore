@@ -18,6 +18,8 @@ run/app
 omcmb/node_modules/
 omcmb/*/node_modules/
 omcmb/webcode/dist/
+omcmb/webcode-v2/dist/
+omcmb/webcode-v3/dist/
 omcmb/frontend-core/dist/
 
 # Claude (keep commands/ and settings.json tracked for team sharing)

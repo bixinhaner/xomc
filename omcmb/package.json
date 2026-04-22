@@ -5,13 +5,16 @@
   "workspaces": [
     "frontend-core",
     "webcode",
-    "webcode-v2"
+    "webcode-v2",
+    "webcode-v3"
   ],
-  "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + webcode (v1 皮肤) + 未来 webcode-vN (其他皮肤)",
+  "description": "OMC 前端 workspace 根：frontend-core (共享业务层) + webcode (v1 经典皮肤) + webcode-v2 (shadcn 极简皮肤) + webcode-v3 (STARFORGE 沉浸式 HUD 皮肤)",
   "scripts": {
-    "lint": "eslint webcode/src webcode-v2/src frontend-core/src",
-    "lint:fix": "eslint webcode/src webcode-v2/src frontend-core/src --fix",
-    "typecheck": "npm run typecheck --workspace webcode"
+    "lint": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src",
+    "lint:fix": "eslint webcode/src webcode-v2/src webcode-v3/src frontend-core/src --fix",
+    "typecheck": "npm run typecheck --workspace webcode",
+    "typecheck:v3": "npm run typecheck --workspace webcode-v3",
+    "dev:v3": "npm run dev --workspace webcode-v3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
