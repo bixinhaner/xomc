@@ -616,4 +616,67 @@ omcmb/webcode-v2/
 ### 下一模块候选
 优先补 **Alarm 告警中心**：实时数据 + Alarm 列表 + 严重度筛选。验证 @core/hooks/api/useAlarms 集成。
 
+---
+
+## Phase 5 一次性铺满 15 个模块（2026-04-22）
+
+### 目的
+一次性铺完 v2 的 15 个模块导航，让用户看到完整面貌；每个页面都接真实 `@core` hook，证明架构在广度上成立。
+
+### 交付
+**AppShell 分组侧栏**：监控 / 运维 / 数据 / 系统 四分区，16 个入口（含 Login）。
+
+**真数据列表页 8 个**（接 `@core/hooks/api`）：
+- `/dashboard` — 控制台（scaffold）
+- `/devices` — 设备管理（TanStack Table，搜索+状态过滤+stats+分页）
+- `/alarms` — 告警中心（严重度徽章，关键字+severity 过滤，30s 自动刷新）
+- `/software` — 软件版本（状态徽章，文件大小/发布日期）
+- `/backup` — 备份任务（状态/进度/设备数/文件大小）
+- `/license` — 许可证（容量进度条，到期提醒）
+- `/files` — 文件管理（类型/状态/大小/设备/上传者）
+- `/reports` — 报表定义（类型/周期/自动生成/状态）
+- `/logs` — 系统日志（级别徽章，关键字+级别过滤）
+- `/system` — 系统管理（用户列表，用户名搜索）
+
+**骨架列表页 6 个**（接 `@core` hook，暂只展示列表，不做详情/图表）：
+- `/topology` — 站点列表（地图视图待补）
+- `/config` — 配置模板（下发流程待补）
+- `/mml` — MML 脚本（执行界面待补）
+- `/performance` — KPI 列表（趋势图表待补）
+- `/mr` — MR 指标列表
+- `/ops` — 运维模板库
+
+**共享基础设施**：
+- `components/layout/PageShell.tsx` — 页面容器（标题 + 描述 + 工具栏 + isFetching 指示）
+- `Pagination` / `LoadingRow` / `ErrorRow` / `EmptyRow` 统一三态 helper
+- `formatTime` / `formatBytes` 纯函数工具
+
+**新增 shadcn 原语**：Table、Badge、Select（都支持亮/暗主题 + CSS variables）
+
+### 验证
+| 检查 | 结果 |
+|---|---|
+| v2 src `tsc --noEmit -p tsconfig.app.json` | 0 errors ✅（@core 层 108 个既有错误已知待治理，不在本次范围）|
+| `npm run build` v2 | 1093 KB JS / 22 KB CSS / gzip 310 KB ✅ |
+| workspace `npm run lint` | 0 errors / 152 warnings ✅ |
+| `npm run test` | 12/12 passed ✅ |
+
+### 质量线
+- **广度覆盖**：16 个侧栏入口全部接通 @core 真数据
+- **深度**：Devices 模块（Phase 4）和 8 个"真数据"页完整；6 个"骨架"页只展示列表，详情/图表/下发流程标注 TBD
+- **已知 debt**（独立治理，不在当前任务范围）：
+  - @core 类型不一致（`authApi` 返回字段 vs `User` 类型定义）
+  - @core `useAlarms` / `useConfig` 等 hooks 在 `createApiSwitch` 上有 TS2345 类型不匹配（`mock` 和 `real` 的 service 函数签名需对齐）
+  - `package.json` 的 `typecheck` 目前是 bare `tsc --noEmit`，`tsconfig.json` 的 `files: []` 让它 trivially pass，需升级为 `tsc --noEmit -p tsconfig.app.json`
+
+### 仍待补齐的深度能力（按优先级）
+1. Device 详情（参数树、实时 KPI 图表、历史日志）
+2. 各页面的"创建/编辑/删除/执行"Action 集合（目前只读）
+3. Topology 地图视图（openlayers 或 leaflet）
+4. Performance KPI 趋势图（recharts 或 echarts）
+5. MML 命令执行界面
+6. Config 下发流程
+7. 主题切换 + 用户偏好持久化
+
+
 

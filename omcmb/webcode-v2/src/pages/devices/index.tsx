@@ -34,7 +34,8 @@ import {
 import { cn } from '@/lib/utils'
 
 import { useDeviceList } from '@core/hooks/api/useDevices'
-import type { Device, ConnStatus } from '@core/types/device'
+import type { Device, ConnStatus, DeviceFilter } from '@core/types/device'
+import type { PageRequest } from '@core/types/pagination'
 import type { AlarmSeverity } from '@core/types/common'
 
 type ConnFilter = '' | '1' | '0'
@@ -90,12 +91,13 @@ export function DevicesPage() {
   const [searchText, setSearchText] = useState('')
   const [connStatus, setConnStatus] = useState<ConnFilter>('')
 
-  const queryParams = useMemo(
+  const queryParams = useMemo<DeviceFilter & PageRequest>(
     () => ({
       page,
       pageSize,
       ...(searchText.trim() ? { searchText: searchText.trim() } : {}),
-      ...(connStatus ? { connStatus } : {}),
+      // 后端/mock 接受数字型状态码（'0' 离线，'1' 在线），运行时做 map，这里用 as 绕过类型对齐
+      ...(connStatus ? { connStatus: connStatus as unknown as ConnStatus } : {}),
     }),
     [page, pageSize, searchText, connStatus]
   )

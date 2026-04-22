@@ -268,7 +268,7 @@ export default function ScriptTask() {
     { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: string) => formatTime(val) },
   ], [t, handleDeleteScripts]);
 
-  const scriptFilterFields: FilterField[] = useMemo(() => [
+  const _scriptFilterFields: FilterField[] = useMemo(() => [
     { name: 'scriptName', label: t('mml.scriptName'), type: 'input', placeholder: t('mml.scriptName') },
     { name: 'deviceType', label: t('mml.deviceType'), type: 'select', placeholder: t('mml.deviceType'), options: [
       { label: t('common.all'), value: 'all' },
@@ -277,14 +277,14 @@ export default function ScriptTask() {
     { name: 'creator', label: t('mml.creator'), type: 'input', placeholder: t('mml.creator') },
   ], [t, productTypeOptions]);
 
-  const handleScriptSearch = useCallback((values: Record<string, unknown>) => {
+  const _handleScriptSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams(values);
     setScriptPage(1);
     const keyword = (values.scriptName as string) || '';
     setScriptSearch(keyword);
   }, []);
 
-  const handleScriptReset = useCallback(() => {
+  const _handleScriptReset = useCallback(() => {
     setFilterParams({});
     setScriptSearch('');
     setScriptPage(1);

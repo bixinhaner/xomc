@@ -1,15 +1,12 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
   Button,
-  Input,
   Modal,
   Space,
-  Table,
   Tag,
   message,
 } from 'antd';
 import {
-  DeleteOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';

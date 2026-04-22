@@ -141,6 +141,7 @@
 | T-0035-P1.5 | 修复 Phase 1 发现的 pre-existing test/lint 问题 | bug | frontend | 2026-04-22 | commit `22365022`；`.env.test` + vitest.config 固化 mock=false；setup.ts 加 localStorage polyfill；eslint-plugin-unused-imports + 规则降级；47 文件 95 处 unused vars 脚本化加 `_` 前缀；test 12/12 passed、lint 0 errors / 145 warnings（baseline 342/69）|
 | T-0035-P3 | 前端多皮肤架构 Phase 3：v2 皮肤脚手架（shadcn/ui + Tailwind + Radix）| feat | frontend | 2026-04-22 | `omcmb/webcode-v2/` 加入 workspaces；登录页 + dashboard 壳；接入 @core authApi/userStore/appStore/i18n；tsc 0 / dev 启动 / prod build 705 KB；18 模块补齐按 T-0035 逐个立项 |
 | T-0035-P4-Device | v2 首个复杂页面：Device 模块（AppShell + TanStack Table + @core/useDeviceList 端到端）| feat | frontend | 2026-04-22 | 新增 shadcn Table/Badge/Select + AppShell 侧栏布局；`pages/devices` 完备交互（搜索/状态过滤/分页/stats/loading-empty-error）；证实 @core/hooks/api/useDevices 在 v2 无代理工作；build 882 KB / gzip 262 KB；下一模块 Alarm |
+| T-0035-P5-Breadth | v2 一次性铺满 14 个模块页面 + 分组侧栏 | feat | frontend | 2026-04-22 | 8 真数据列表（alarm/software/backup/license/files/reports/logs/system）+ 6 骨架列表（topology/config/mml/performance/mr/ops）+ 统一 PageShell / Pagination 工具；v2 src 0 tsc errors；build 1093 KB / gzip 310 KB；workspace lint 0/152；详情/图表/执行等深度能力独立立项 |
 
 ---
 
@@ -213,6 +214,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-22 | done | T-0035-P1.5 | 清理 Phase 1 发现的 pre-existing test/lint 前置问题（11 test + 284 lint errors → 0）|
 | 2026-04-22 | done | T-0035-P3 | v2 皮肤脚手架：shadcn/ui + Tailwind + Radix；登录 + dashboard 壳；18 模块补齐仍待 Sprint 规划 |
 | 2026-04-22 | done | T-0035-P4-Device | v2 首个复杂页面 Device：AppShell + TanStack Table + @core/useDeviceList 全链路验证通过；shadcn 新增 Table/Badge/Select |
+| 2026-04-22 | done | T-0035-P5-Breadth | v2 一次铺满 14 模块页面 + 分组侧栏（8 真数据 + 6 骨架）|
 
 ---
 
