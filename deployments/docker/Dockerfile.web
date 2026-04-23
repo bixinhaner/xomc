@@ -1,4 +1,6 @@
 # 阶段1: 安装依赖（利用 Docker 层缓存，package.json 不变时跳过）
+# node_modules 安装在 /app 层（父目录），这样 frontend-core 里 `import 'zustand'`
+# 之类的模块解析能按 Node 标准行为向上查找到 /app/node_modules。
 FROM node:20-alpine AS deps
 
 WORKDIR /app
@@ -13,17 +15,24 @@ RUN npm install --legacy-peer-deps
 # 阶段2: 构建前端
 FROM node:20-alpine AS builder
 
+# 保留 webcode / frontend-core 同级目录结构：vite.config.ts 中的 `@core` alias
+# 指向 `../frontend-core/src`，必须把 frontend-core 也拷入构建上下文。node_modules
+# 放在共同父目录 /app 使 frontend-core 源文件也能解析到 webcode 声明的依赖。
 WORKDIR /app
 
-# 仅复制构建所需源码（.dockerignore 已排除 node_modules 和 dist）
-COPY omcmb/webcode/ .
-
-# 清除可能残留的旧构建产物，确保全新构建
-RUN rm -rf dist
-
-# 从 deps 阶段覆盖正确的 node_modules（确保是 Linux 平台二进制）
+# 先放置 node_modules（在 /app 层），再拷贝 webcode / frontend-core 源码。
 COPY --from=deps /app/node_modules ./node_modules
 
+# 复制 webcode 源码到 /app/webcode（.dockerignore 已排除 node_modules / dist）
+COPY omcmb/webcode/       ./webcode/
+# 复制 frontend-core 源码到 /app/frontend-core（@core alias 依赖）
+COPY omcmb/frontend-core/ ./frontend-core/
+
+# 清除可能残留的旧构建产物与 webcode 内已有的 node_modules（避免覆盖 /app 层）
+RUN rm -rf webcode/dist webcode/node_modules
+
+# 在 webcode 目录里跑 build；vite 通过 Node 的模块向上查找命中 /app/node_modules。
+WORKDIR /app/webcode
 RUN npm run build
 
 # 验证构建产物完整性：index.html 引用的主入口文件必须存在
@@ -33,7 +42,7 @@ RUN grep -oP 'src="/assets/[^"]+\.js"' dist/index.html | grep -oP '/assets/[^"]+
 
 # 阶段3: Nginx 静态服务
 FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/webcode/dist /usr/share/nginx/html
 COPY deployments/docker/nginx.conf /etc/nginx/nginx.conf
 COPY deployments/docker/default.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080 8081
