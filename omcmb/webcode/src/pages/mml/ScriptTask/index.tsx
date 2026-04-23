@@ -34,7 +34,6 @@ import {
   usePauseMMLScript,
   useCancelMMLScript,
 } from '@core/hooks/api/useMML';
-import { useDictionary } from '@core/hooks/api/useSystem';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_scripts columns
@@ -167,12 +166,6 @@ export default function ScriptTask() {
     result?: string;
   }>({});
 
-  const { data: productTypeDict } = useDictionary('product_type');
-  const productTypeOptions = useMemo(() => {
-    const details = productTypeDict?.sysDictionaryDetails;
-    return details?.length ? details.map((d) => ({ label: d.label, value: d.value })) : [];
-  }, [productTypeDict]);
-
   const { data, isLoading, refetch } = useMMLScripts({
     page,
     pageSize,
@@ -223,6 +216,7 @@ export default function ScriptTask() {
       label: t('mml.type'),
       type: 'select',
       placeholder: t('mml.type'),
+      minWidth: 110,
       options: [
         { label: t('common.all'),          value: 'all' },
         { label: t('mml.immediateExecute'), value: 'manual' },
@@ -234,6 +228,7 @@ export default function ScriptTask() {
       label: t('mml.status'),
       type: 'select',
       placeholder: t('mml.status'),
+      minWidth: 110,
       options: [
         { label: t('common.all'),           value: 'all' },
         { label: t('mml.pendingStatus'),    value: 'pending' },
@@ -249,6 +244,7 @@ export default function ScriptTask() {
       label: t('mml.result'),
       type: 'select',
       placeholder: t('mml.result'),
+      minWidth: 110,
       options: [
         { label: t('common.all'),         value: 'all' },
         { label: t('status.success'),     value: 'success' },
@@ -479,19 +475,22 @@ export default function ScriptTask() {
   ], [t]);
 
   return (
-    <ListPageLayout
-      title={t('nav.mml.script')}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          {t('common.add')}
-        </Button>
-      }
-    >
+    <ListPageLayout>
       <FilterBar
         filterId="mml-script-task"
         fields={filterFields}
         onSearch={handleSearch}
         onReset={handleReset}
+        extra={
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => setCreateOpen(true)}
+          >
+            {t('common.add')}
+          </Button>
+        }
       />
       <DataTable<MMLScript>
         tableId="mml-script-task"
@@ -549,7 +548,6 @@ export default function ScriptTask() {
           <div style={{ padding: '8px 0' }}>
             <p><strong>{t('mml.scriptNameLabel')}</strong>{info.scriptName}</p>
             <p><strong>{t('mml.description')}: </strong>{info.description || '-'}</p>
-            <p><strong>{t('mml.deviceType')}: </strong>{info.deviceType || '-'}</p>
             <p>
               <strong>{t('mml.type')}: </strong>
               {SCRIPT_TYPE_TAGS[info.type] ? t(SCRIPT_TYPE_TAGS[info.type].key) : info.type ?? '-'}
@@ -585,9 +583,11 @@ export default function ScriptTask() {
         )}
       </Modal>
 
-      {/* 新增 MML 脚本任务（布局对齐 docs/design/image-8.png） */}
+      {/* to-do-list 本轮 #1b：mode="script" 让 drawer 提交走 POST /mml/scripts，
+          落到 mml_scripts 表；同时隐藏执行策略/重试策略字段。 */}
       <ScriptTaskDrawer
         open={createOpen}
+        mode="script"
         onClose={() => setCreateOpen(false)}
         onSuccess={() => void refetch()}
       />

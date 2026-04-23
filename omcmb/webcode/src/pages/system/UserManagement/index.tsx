@@ -48,6 +48,7 @@ import {
 } from '@core/hooks/api/useSystem';
 import type { User } from '@core/types/system';
 import { useT } from '@/hooks/useT';
+import { toast } from '@/utils/toast';
 import dayjs from 'dayjs';
 
 type CreateMode = 'add' | 'import';
@@ -148,8 +149,10 @@ export default function UserManagement() {
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
+      // 与后端 admin.CreateUserRequest 对齐：必须送 username（原先误写为 userName
+      // 导致 400：Field validation for 'Username' failed on the 'required' tag）。
       const userData = {
-        userName: vals.userName as string,
+        username: vals.username as string,
         password: vals.password as string,
         email: vals.email as string,
         phone: vals.phone as string,
@@ -163,10 +166,11 @@ export default function UserManagement() {
       };
       createUser.mutate(userData, {
         onSuccess: () => {
-          message.success(t('common.save'));
+          toast.success(t('common.save'));
           setCreateVisible(false);
           form.resetFields();
         },
+        onError: (err) => toast.error(err, t('user.createFailed')),
       });
     });
   };
@@ -739,11 +743,14 @@ export default function UserManagement() {
           <Radio value="import">{t('user.importUser')}</Radio>
         </Radio.Group>
 
-        {/* 添加用户表单 */}
+        {/* 添加用户表单 —— to-do-list 本轮 系统管理#1：
+            · 字段名 userName → username，与后端 CreateUserRequest.Username 对齐（修复 400）
+            · 必填字段（用户名/密码/确认密码/角色）排列在前，非必填（邮箱/手机/到期时间/描述）在后
+            · 角色选择紧跟在"确认密码"之后 */}
         {createMode === 'add' && (
           <Form form={form} layout="vertical">
             <Form.Item
-              name="userName"
+              name="username"
               label={t('user.userName')}
               rules={[
                 { required: true, message: t('user.pleaseInputUserName') },
@@ -778,6 +785,17 @@ export default function UserManagement() {
             >
               <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
             </Form.Item>
+            <Form.Item
+              name="groupNames"
+              label="角色"
+              rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
+            >
+              <Select
+                mode="multiple"
+                placeholder={t('common.pleaseSelect')}
+                options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
+              />
+            </Form.Item>
             <Form.Item name="status" label="状态" initialValue="enabled">
               <Radio.Group>
                 <Radio value="enabled">启用</Radio>
@@ -799,17 +817,6 @@ export default function UserManagement() {
               ]}
             >
               <Input placeholder={t('user.phone')} maxLength={11} />
-            </Form.Item>
-            <Form.Item
-              name="groupNames"
-              label="角色"
-              rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
-            >
-              <Select
-                mode="multiple"
-                placeholder={t('common.pleaseSelect')}
-                options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
-              />
             </Form.Item>
             <Form.Item
               name="expireTime"
@@ -870,6 +877,8 @@ export default function UserManagement() {
         }
       >
         <Form form={form} layout="vertical">
+          {/* 编辑 Drawer 暂保持 userName 旧键以兼容已有 setFieldsValue 调用；
+              修复"新增 400"只需改创建表单，详见 handleCreate 注释。 */}
           <Form.Item name="userName" label={t('user.userName')}>
             <Input readOnly />
           </Form.Item>

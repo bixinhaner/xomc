@@ -40,7 +40,6 @@ interface BackendMMLScript {
   script_name: string;
   description: string;
   content: string;
-  device_type: string;
   creator: string;
   tags: string[] | null;
   created_at: string;
@@ -213,7 +212,6 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
     scriptName: bs.script_name,
     description: bs.description,
     content: bs.content,
-    deviceType: bs.device_type,
     creator: bs.creator,
     tags: bs.tags || [],
     createTime: bs.created_at,
@@ -387,14 +385,13 @@ export const mmlApi = {
   // --- Scripts ---
 
   async getScripts(
-    p: PageRequest & { search?: string; deviceType?: string; creator?: string }
+    p: PageRequest & { search?: string; creator?: string }
   ): Promise<PageResponse<MMLScript>> {
     const query: Record<string, unknown> = {
       page: p.page,
       page_size: p.pageSize,
     };
     if (p.search) query.search = p.search;
-    if (p.deviceType) query.device_type = p.deviceType;
     if (p.creator) query.creator = p.creator;
 
     const { data } = await http.get<BackendListResponse<BackendMMLScript>>(
@@ -428,7 +425,6 @@ export const mmlApi = {
       script_name: data.scriptName,
       description: data.description,
       content: data.content,
-      device_type: data.deviceType,
       creator: data.creator,
       tags: data.tags,
     };
@@ -444,7 +440,6 @@ export const mmlApi = {
     if (data.scriptName !== undefined) payload.script_name = data.scriptName;
     if (data.description !== undefined) payload.description = data.description;
     if (data.content !== undefined) payload.content = data.content;
-    if (data.deviceType !== undefined) payload.device_type = data.deviceType;
     if (data.creator !== undefined) payload.creator = data.creator;
     if (data.tags !== undefined) payload.tags = data.tags;
 
@@ -537,8 +532,10 @@ export const mmlApi = {
     if (data.periodEnd) payload.period_end = data.periodEnd;
     if (data.periodTime) payload.period_time = data.periodTime;
 
+    // 新建脚本任务走 /mml/tasks（to-do-list #7），与"临时执行命令"
+    // 的 /mml/execute 区分。两者后端共享实现。
     const { data: bt } = await http.post<BackendMMLTask>(
-      '/mml/execute',
+      '/mml/tasks',
       payload
     );
     return mapBackendTask(bt);

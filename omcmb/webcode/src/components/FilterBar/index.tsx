@@ -22,6 +22,8 @@ export interface FilterField {
   options?: { label: string; value: string | number }[];
   treeData?: { title: string; value: string; children?: unknown[] }[];
   span?: number;
+  /** 覆盖默认 min-width（140px）。传较小数值可让筛选框更紧凑（如类型/状态筛选） */
+  minWidth?: number;
   defaultValue?: unknown;
 }
 
@@ -199,7 +201,10 @@ const FilterBar: React.FC<FilterBarProps> = ({
             <div
               key={field.name}
               className={styles.fieldItem}
-              style={{ flex: field.span ?? 1 }}
+              style={{
+                flex: field.span ?? 1,
+                ...(field.minWidth !== undefined ? { minWidth: field.minWidth } : {}),
+              }}
             >
               <Form.Item
                 name={field.name}
@@ -224,7 +229,6 @@ const FilterBar: React.FC<FilterBarProps> = ({
                 {expanded ? t('filter.collapse') : t('filter.expand')}
               </Button>
             )}
-            {extra && <span className={styles.extraWrapper}>{extra}</span>}
             <a className={styles.resetLink} onClick={handleReset}>
               {t('common.reset')}
             </a>
@@ -236,6 +240,8 @@ const FilterBar: React.FC<FilterBarProps> = ({
             >
               <SearchOutlined />
             </button>
+            {/* extra 放在搜索按钮之后（to-do-list #4：+新增 按钮紧贴搜索按钮） */}
+            {extra && <span className={styles.extraWrapper}>{extra}</span>}
           </div>
         </div>
       </Form>

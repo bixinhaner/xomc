@@ -38,6 +38,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml.POST("/execute", h.Execute)
 	mml.GET("/dangerous-check", h.DangerousCheck)
 
+	// 脚本任务创建走 /mml/tasks（to-do-list #7）。与 /mml/execute 共享 service
+	// 层逻辑，但 URL 更语义化，便于前端区分"新建脚本任务"与"临时执行命令"。
+	mml.POST("/tasks", h.CreateTask)
+
 	scripts := mml.Group("/scripts")
 	scripts.GET("", h.ListScripts)
 	scripts.POST("", h.CreateScript)
@@ -180,7 +184,15 @@ func (h *Handler) GetCommandParamPaths(c *gin.Context) {
 	})
 }
 
-// ---- Execute handler ----
+// ---- Execute / Task creation handlers ----
+
+// CreateTask handles POST /api/v1/mml/tasks（to-do-list #7）。
+// 面向"新建脚本任务"页面的语义入口，内部与 Execute 共享实现——
+// 两者都落盘到 mml_tasks 并通过 Fanouter 驱动 device_tasks 下发，
+// 仅 URL 语义不同：Execute 侧重"临时执行命令"，CreateTask 侧重"登记任务"。
+func (h *Handler) CreateTask(c *gin.Context) {
+	h.Execute(c)
+}
 
 // Execute handles POST /api/v1/mml/execute.
 func (h *Handler) Execute(c *gin.Context) {

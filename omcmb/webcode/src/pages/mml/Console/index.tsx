@@ -7,9 +7,9 @@ import {
   TerminalPanel,
   CommandInput,
   BatchSnModal,
+  SaveScriptModal,
 } from './components';
 import AddTemplateModal from './components/AddTemplateModal';
-import ScriptTaskDrawer from '@/pages/mml/components/ScriptTaskDrawer';
 import {
   useDeviceSelection,
   useCommandSelection,
@@ -77,8 +77,13 @@ export default function MMLConsole() {
 
     // Assemble command line text with param string
     if (allParamCodes.length > 0) {
-      const paramId = opType === 'MOD' ? 'modId' : 'lstId';
-      setCommandLineText(`${selectedCommand.commandCode}:${paramId}={${allParamCodes.join(',')}};`);
+      if (opType === 'MOD' || opType === 'ADD') {
+        // MOD/ADD 需要值：首次选中命令时值为空，给 <value> 占位提示。
+        const pairs = allParamCodes.map((codeName) => `${codeName}=<value>`);
+        setCommandLineText(`${selectedCommand.commandCode}:modId={${pairs.join(',')}};`);
+      } else {
+        setCommandLineText(`${selectedCommand.commandCode}:lstId={${allParamCodes.join(',')}};`);
+      }
     } else {
       setCommandLineText(selectedCommand.commandCode);
     }
@@ -101,7 +106,9 @@ export default function MMLConsole() {
       return;
     }
 
-    // Params format: CMD:paramId={code1,code2,...};
+    // Params format:
+    //   LST/DSP: CMD:lstId={code1,code2,...};            —— 仅列字段，GetParameterValues
+    //   MOD/ADD: CMD:modId={code1=val1,code2=val2,...};  —— 带值，SetParameterValues
     //
     // 初次选择命令时可能出现 selectedParams 尚未通过 ParamFormRenderer.onChange
     // 回传给父层，但 selectedCommand.paramRefs 已就绪的情况——此时直接把
@@ -114,9 +121,17 @@ export default function MMLConsole() {
         : paramRefs.map((p) => p.paramCode);
 
     if (effectiveParams.length > 0 && paramRefs.length > 0) {
-      const paramId = nextOperationType === 'MOD' ? 'modId' : 'lstId';
-      const cmdText = `${code}:${paramId}={${effectiveParams.join(',')}};`;
-      setCommandLineText(cmdText);
+      if (nextOperationType === 'MOD' || nextOperationType === 'ADD') {
+        // MOD/ADD 拼接 code=val；未填值的参数用占位符 <value> 提示用户补值。
+        const pairs = effectiveParams.map((codeName) => {
+          const raw = parameters[codeName];
+          if (raw === undefined || raw === '') return `${codeName}=<value>`;
+          return `${codeName}=${raw}`;
+        });
+        setCommandLineText(`${code}:modId={${pairs.join(',')}};`);
+        return;
+      }
+      setCommandLineText(`${code}:lstId={${effectiveParams.join(',')}};`);
       return;
     }
 
@@ -144,13 +159,17 @@ export default function MMLConsole() {
 
   const handleParamChange = useCallback((values: Record<string, unknown>) => {
     if (activeTab === 'control') {
-      setSelectedFields(Array.isArray(values.selectedFields) ? values.selectedFields.map(String) : []);
-      setSelectedParams(Array.isArray(values.selectedParams) ? values.selectedParams.map(String) : []);
-      setParameters(
-        values.parameters && typeof values.parameters === 'object'
-          ? values.parameters as CommandParameters
-          : {}
-      );
+      // 只更新 payload 中出现的字段，避免 ParamFormRenderer 发 {parameters: ...} 时
+      // 把 selectedParams 误清空（MOD 场景下两者需要并存）。
+      if (Array.isArray(values.selectedFields)) {
+        setSelectedFields(values.selectedFields.map(String));
+      }
+      if (Array.isArray(values.selectedParams)) {
+        setSelectedParams(values.selectedParams.map(String));
+      }
+      if (values.parameters && typeof values.parameters === 'object') {
+        setParameters(values.parameters as CommandParameters);
+      }
       setOperationType(resolveOperationType(commandSelection.selectedCommand));
       return;
     }
@@ -400,16 +419,14 @@ export default function MMLConsole() {
         }}
       />
 
-      {/* 保存脚本：复用 ScriptTaskDrawer（image-8），命令行内容预填，
-          不再需要文件上传。未选中命令时按钮在 CommandInput 内已置灰，
-          handleSaveScript 的 guard 只作为防御性兜底。
-          左侧已勾选的设备 SN 同步带入 Drawer（to-do-list #7）。*/}
-      <ScriptTaskDrawer
+      {/* 保存脚本 → mml_scripts 表（to-do-list #3）。历史上复用过 ScriptTaskDrawer，
+          但 Drawer 面向 mml_tasks 执行实例，语义不符。SaveScriptModal 只采集
+          脚本名 + 描述 + 只读内容预览，提交走 useCreateMMLScript。*/}
+      <SaveScriptModal
         open={saveScriptModalOpen}
         onClose={() => setSaveScriptModalOpen(false)}
-        prefillTaskName={saveScriptDefaultName}
-        prefillContent={saveScriptDefaultContent}
-        prefillDeviceSns={deviceSelection.selectedDevices.map((d) => d.sn)}
+        defaultName={saveScriptDefaultName}
+        content={saveScriptDefaultContent}
       />
     </div>
   );

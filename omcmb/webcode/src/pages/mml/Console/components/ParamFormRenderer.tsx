@@ -31,6 +31,13 @@ interface ParamFormRendererProps {
   onChange?: (payload: ParamFormChangePayload) => void;
 }
 
+// TR-069 RPC 方法与操作类型对应：
+//   QUERY   → GetParameterValues（仅需路径；勾选要 GET 的参数）
+//   EDIT    → SetParameterValues（每个参数都要带值；MOD 选中并编辑）
+//   CREATE  → AddObject（ADD，通常也需要一组初始值）
+//   REMOVE  → DeleteObject（RMV/DEL，仅需对象路径）
+//   ACTION  → Reboot / FactoryReset / 以及通过 SetParameterValues 实现的启停开关
+// 每类对应控制面板的不同渲染策略。
 const QUERY_OPERATIONS = new Set<MMLOperationType>(['LST', 'DSP']);
 const EDIT_OPERATIONS = new Set<MMLOperationType>(['MOD', 'ADD']);
 const REMOVE_OPERATIONS = new Set<MMLOperationType>(['RMV']);
@@ -114,11 +121,15 @@ export default function ParamFormRenderer({
     }
 
     if (command.paramRefs && command.paramRefs.length > 0) {
-      const allCodes = command.paramRefs.map((p) => p.paramCode);
+      // 对可写操作，默认只勾选"可写"的参数，便于用户编辑值；
+      // 查询操作则勾选全部，方便一次性 GET。
+      const writable = command.paramRefs.filter((p) => p.isWritable).map((p) => p.paramCode);
+      const all = command.paramRefs.map((p) => p.paramCode);
+      const nextSelected = EDIT_OPERATIONS.has(operationType) && writable.length > 0 ? writable : all;
       setSelectedFields([]);
-      setSelectedParams(allCodes);
+      setSelectedParams(nextSelected);
       setFormValues({});
-      onChangeRef.current?.({ selectedParams: allCodes });
+      onChangeRef.current?.({ selectedParams: nextSelected, parameters: {} });
       return;
     }
 
@@ -161,7 +172,7 @@ export default function ParamFormRenderer({
     }
 
     setFormValues(nextValues);
-    onChangeRef.current?.({ parameters: nextValues });
+    onChangeRef.current?.({ parameters: nextValues, selectedParams });
   };
 
   const handleFieldsChange = (nextFields: Array<string | number>) => {
@@ -173,7 +184,7 @@ export default function ParamFormRenderer({
   const handleParamsChange = (nextFields: Array<string | number>) => {
     const values = nextFields.map(String);
     setSelectedParams(values);
-    onChangeRef.current?.({ selectedParams: values });
+    onChangeRef.current?.({ selectedParams: values, parameters: formValues });
   };
 
   const renderControl = (param: MMLParam) => {
@@ -225,41 +236,285 @@ export default function ParamFormRenderer({
     }
   };
 
+  // 单个 paramRef 按 valueType 渲染输入控件；checked 决定是否纳入命令串。
+  // 未勾选时输入仍允许编辑（便于用户先填值再勾选），但不加入最终命令字符串。
+  const renderParamRefControl = (ref: MMLParamRef) => {
+    const valueType = ref.valueType;
+    const isLocked = !ref.isWritable;
+    const placeholder = isLocked ? t('mml.console.readOnlyParam') : t('mml.console.inputValue');
+    const currentVal = formValues[ref.paramCode];
+
+    if (valueType === 'boolean') {
+      return (
+        <Switch
+          disabled={isLocked}
+          checked={Boolean(currentVal)}
+          onChange={(checked) => updateParameters(ref.paramCode, checked)}
+        />
+      );
+    }
+
+    if (valueType === 'number') {
+      return (
+        <InputNumber
+          style={{ width: '100%' }}
+          disabled={isLocked}
+          value={typeof currentVal === 'number' ? currentVal : undefined}
+          placeholder={placeholder}
+          onChange={(nextValue) => updateParameters(ref.paramCode, nextValue ?? undefined)}
+        />
+      );
+    }
+
+    if (valueType === 'enum') {
+      const constraintOptions = Array.isArray(ref.valueConstraint?.options)
+        ? (ref.valueConstraint.options as Array<{ label: string; value: string | number }>)
+        : Array.isArray(ref.valueConstraint?.values)
+        ? (ref.valueConstraint.values as Array<string | number>).map((v) => ({ label: String(v), value: v }))
+        : [];
+      return (
+        <Select
+          disabled={isLocked}
+          allowClear
+          value={currentVal as string | number | undefined}
+          options={constraintOptions}
+          placeholder={placeholder}
+          onChange={(nextValue) => updateParameters(ref.paramCode, nextValue)}
+          onClear={() => updateParameters(ref.paramCode, undefined)}
+          style={{ width: '100%' }}
+        />
+      );
+    }
+
+    return (
+      <Input
+        disabled={isLocked}
+        value={typeof currentVal === 'string' ? currentVal : currentVal != null ? String(currentVal) : ''}
+        placeholder={placeholder}
+        onChange={(event) => updateParameters(ref.paramCode, event.target.value)}
+      />
+    );
+  };
+
   if (!command) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.selectCommandFirst')} />;
   }
 
+  // --- 基于 paramRefs 的渲染路径：按操作类型走不同策略 ---------------------
   if (command.paramRefs && command.paramRefs.length > 0) {
-    return (
-      <div>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {t('mml.console.queryFieldsHint')}
-        </Typography.Text>
-        <Checkbox.Group
-          value={selectedParams}
-          onChange={handleParamsChange}
-          style={{ width: '100%', marginTop: 12 }}
-        >
-          <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            {command.paramRefs.map((p: MMLParamRef) => (
-              <Checkbox key={p.paramCode} value={p.paramCode}>
-                <span style={{ fontWeight: 500 }}>{p.paramNameZh}</span>
-                <span style={{ color: 'rgba(0,0,0,0.35)', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>
-                  {p.paramCode}
-                </span>
-                {p.tr069Path ? (
-                  <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: 10, marginLeft: 4 }}>
-                    ({p.tr069Path})
+    const refs = command.paramRefs;
+
+    // 纯查询：勾选即可，不需要值输入。
+    if (QUERY_OPERATIONS.has(operationType)) {
+      return (
+        <div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('mml.console.queryFieldsHint')}
+          </Typography.Text>
+          <Checkbox.Group
+            value={selectedParams}
+            onChange={handleParamsChange}
+            style={{ width: '100%', marginTop: 12 }}
+          >
+            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              {refs.map((p) => (
+                <Checkbox key={p.paramCode} value={p.paramCode}>
+                  <span style={{ fontWeight: 500 }}>{p.paramNameZh}</span>
+                  <span style={{ color: 'rgba(0,0,0,0.35)', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>
+                    {p.paramCode}
                   </span>
-                ) : null}
-              </Checkbox>
-            ))}
-          </Space>
-        </Checkbox.Group>
-      </div>
+                  {p.tr069Path ? (
+                    <span style={{ color: 'rgba(0,0,0,0.25)', fontSize: 10, marginLeft: 4 }}>
+                      ({p.tr069Path})
+                    </span>
+                  ) : null}
+                </Checkbox>
+              ))}
+            </Space>
+          </Checkbox.Group>
+        </div>
+      );
+    }
+
+    // 编辑类（MOD / ADD）：每个参数 checkbox + 输入框；TR-069 SetParameterValues 语义。
+    if (EDIT_OPERATIONS.has(operationType)) {
+      const selectedSet = new Set(selectedParams);
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message={t('mml.console.editParamsHint')}
+            description={t('mml.console.editParamsDesc')}
+          />
+          <div>
+            {refs.map((p) => {
+              const checked = selectedSet.has(p.paramCode);
+              return (
+                <div
+                  key={p.paramCode}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 8,
+                    padding: '8px 0',
+                    borderBottom: '1px dashed rgba(0,0,0,0.06)',
+                  }}
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={!p.isWritable}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                        ? Array.from(new Set([...selectedParams, p.paramCode]))
+                        : selectedParams.filter((c) => c !== p.paramCode);
+                      handleParamsChange(next);
+                    }}
+                    style={{ marginTop: 6, flexShrink: 0 }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ marginBottom: 4 }}>
+                      <span style={{ fontWeight: 500 }}>{p.paramNameZh}</span>
+                      <span
+                        style={{
+                          color: 'rgba(0,0,0,0.35)',
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          marginLeft: 6,
+                        }}
+                      >
+                        {p.paramCode}
+                      </span>
+                      {!p.isWritable && (
+                        <Tooltip title={t('mml.console.readOnlyParamHint')}>
+                          <Typography.Text type="warning" style={{ marginLeft: 6, fontSize: 11 }}>
+                            {t('mml.console.readOnly')}
+                          </Typography.Text>
+                        </Tooltip>
+                      )}
+                      {p.tr069Path && (
+                        <div
+                          style={{
+                            color: 'rgba(0,0,0,0.25)',
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            marginTop: 2,
+                          }}
+                        >
+                          {p.tr069Path}
+                        </div>
+                      )}
+                    </div>
+                    {renderParamRefControl(p)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Space>
+      );
+    }
+
+    // 删除 / 执行类：只展示警示 + 勾选关键参数。不提供值编辑（TR-069 DeleteObject /
+    // Reboot / FactoryReset 均不接受自由参数值）。
+    if (REMOVE_OPERATIONS.has(operationType)) {
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message={t('mml.console.removeParamsHint')}
+            description={command.description || t('mml.console.confirmBeforeExecute')}
+          />
+          <Checkbox.Group
+            value={selectedParams}
+            onChange={handleParamsChange}
+            style={{ width: '100%' }}
+          >
+            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              {refs.map((p) => (
+                <Checkbox key={p.paramCode} value={p.paramCode}>
+                  <span style={{ fontWeight: 500 }}>{p.paramNameZh}</span>
+                  <span
+                    style={{
+                      color: 'rgba(0,0,0,0.35)',
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      marginLeft: 6,
+                    }}
+                  >
+                    {p.paramCode}
+                  </span>
+                </Checkbox>
+              ))}
+            </Space>
+          </Checkbox.Group>
+        </Space>
+      );
+    }
+
+    // ACT / DEA / RST / CLR：直接执行操作，通常不需要选择参数；仅保留兜底勾选框
+    // 以防后端把必要参数（如重启模式 rebootMode）放在 paramRefs 中。
+    if (ACTION_OPERATIONS.has(operationType)) {
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message={t('mml.console.directExecuteWarning')}
+            description={command.description || command.helpDoc || t('mml.console.directExecuteDesc')}
+          />
+          {refs.length > 0 && (
+            <Checkbox.Group
+              value={selectedParams}
+              onChange={handleParamsChange}
+              style={{ width: '100%' }}
+            >
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                {refs.map((p) => (
+                  <Checkbox key={p.paramCode} value={p.paramCode}>
+                    <span style={{ fontWeight: 500 }}>{p.paramNameZh}</span>
+                    <span
+                      style={{
+                        color: 'rgba(0,0,0,0.35)',
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        marginLeft: 6,
+                      }}
+                    >
+                      {p.paramCode}
+                    </span>
+                  </Checkbox>
+                ))}
+              </Space>
+            </Checkbox.Group>
+          )}
+        </Space>
+      );
+    }
+
+    // UPG 或未列明的操作：fallback 走勾选视图。
+    return (
+      <Checkbox.Group
+        value={selectedParams}
+        onChange={handleParamsChange}
+        style={{ width: '100%' }}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {refs.map((p) => (
+            <Checkbox key={p.paramCode} value={p.paramCode}>
+              <span style={{ fontWeight: 500 }}>{p.paramNameZh}</span>
+              <span style={{ color: 'rgba(0,0,0,0.35)', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>
+                {p.paramCode}
+              </span>
+            </Checkbox>
+          ))}
+        </Space>
+      </Checkbox.Group>
     );
   }
 
+  // --- 基于 params（legacy）的渲染路径 ------------------------------------
   if (QUERY_OPERATIONS.has(operationType)) {
     if (visibleParams.length === 0) {
       return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.noParamsNeeded')} />;

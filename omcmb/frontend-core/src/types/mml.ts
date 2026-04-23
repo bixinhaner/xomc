@@ -103,7 +103,6 @@ export interface MMLScript {
   scriptName: string;
   description: string;
   content: string;
-  deviceType: string;
   creator: string;
   createTime: string;
   updateTime: string;
