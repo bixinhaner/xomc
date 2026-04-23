@@ -8,6 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -151,7 +152,7 @@ func TestRefreshHeartbeat_Success(t *testing.T) {
 
 	hm.RefreshHeartbeat(context.Background(), "SN-HB-001", 300)
 
-	key := heartbeatKeyPrefix + "SN-HB-001"
+	key := redisx.Keys.ACSHeartbeat("SN-HB-001")
 	assert.True(t, mr.Exists(key))
 	assert.Equal(t, 600*time.Second, mr.TTL(key))
 }
@@ -162,7 +163,7 @@ func TestRefreshHeartbeat_MinTTL(t *testing.T) {
 	// 10*2=20s < 60s → should clamp to 600s
 	hm.RefreshHeartbeat(context.Background(), "SN-HB-MIN", 10)
 
-	key := heartbeatKeyPrefix + "SN-HB-MIN"
+	key := redisx.Keys.ACSHeartbeat("SN-HB-MIN")
 	assert.True(t, mr.Exists(key))
 	assert.Equal(t, 600*time.Second, mr.TTL(key))
 }
@@ -200,7 +201,7 @@ func TestCheckHeartbeats_HeartbeatExists(t *testing.T) {
 	}
 
 	hm, mr := newHBTestMonitor(t, repo)
-	mr.Set(heartbeatKeyPrefix+"SN-ALIVE", "1")
+	mr.Set(redisx.Keys.ACSHeartbeat("SN-ALIVE"), "1")
 
 	hm.CheckHeartbeats(context.Background())
 	assert.False(t, updateCalled, "should not mark device offline when heartbeat exists")

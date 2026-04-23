@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 )
@@ -18,14 +19,8 @@ const (
 	// resolveTTL is the TTL for cached resolution results.
 	resolveTTL = 1 * time.Hour
 
-	// cacheVersionKey is the Redis key for the global cache version counter.
-	cacheVersionKey = "datamodel:cache_version"
-
 	// scanBatchSize is the number of keys to return per SCAN iteration.
 	scanBatchSize = 100
-
-	// keyPrefix is the common prefix for all data model cache keys.
-	keyPrefix = "datamodel:*"
 )
 
 // DataModelCache provides Redis L2 caching for data model resolution.
@@ -83,19 +78,19 @@ func (c *DataModelCache) SetModel(ctx context.Context, key string, dm *DataModel
 func ModelKey(scope, carrier, tech, oui, productClass string) string {
 	switch model.DataModelScope(scope) {
 	case model.ScopeProduct:
-		return fmt.Sprintf("datamodel:product:%s:%s:%s:%s", carrier, tech, oui, productClass)
+		return redisx.Keys.DataModelProduct(carrier, tech, oui, productClass)
 	case model.ScopeOUI:
-		return fmt.Sprintf("datamodel:oui:%s:%s:%s", carrier, tech, oui)
+		return redisx.Keys.DataModelOUI(carrier, tech, oui)
 	case model.ScopeCarrierDefault:
-		return fmt.Sprintf("datamodel:default:%s:%s", carrier, tech)
+		return redisx.Keys.DataModelDefault(carrier, tech)
 	default:
-		return fmt.Sprintf("datamodel:unknown:%s:%s:%s:%s:%s", scope, carrier, tech, oui, productClass)
+		return redisx.Keys.DataModelUnknown(scope, carrier, tech, oui, productClass)
 	}
 }
 
 // resolveKey builds the Redis key for a cached resolution result.
 func resolveKey(carrier, tech, oui, productClass string) string {
-	return fmt.Sprintf("datamodel:resolve:%s:%s:%s:%s", carrier, tech, oui, productClass)
+	return redisx.Keys.DataModelResolve(carrier, tech, oui, productClass)
 }
 
 // GetResolveResult retrieves a cached data model resolution result.
@@ -133,7 +128,7 @@ func (c *DataModelCache) SetResolveResult(ctx context.Context, carrier, tech, ou
 // GetCacheVersion returns the current global cache version counter.
 // Returns 0 if the key does not exist.
 func (c *DataModelCache) GetCacheVersion(ctx context.Context) (int64, error) {
-	val, err := c.client.Get(ctx, cacheVersionKey).Int64()
+	val, err := c.client.Get(ctx, redisx.Keys.DataModelCacheVersion()).Int64()
 	if err != nil {
 		if err == redis.Nil {
 			return 0, nil
@@ -148,7 +143,7 @@ func (c *DataModelCache) GetCacheVersion(ctx context.Context) (int64, error) {
 // and returns the new value. This is used to signal all ACS instances that
 // cached data models may be stale.
 func (c *DataModelCache) IncrCacheVersion(ctx context.Context) (int64, error) {
-	val, err := c.client.Incr(ctx, cacheVersionKey).Result()
+	val, err := c.client.Incr(ctx, redisx.Keys.DataModelCacheVersion()).Result()
 	if err != nil {
 		return 0, fmt.Errorf("incr cache version: %w", err)
 	}
@@ -177,7 +172,7 @@ func (c *DataModelCache) InvalidateModel(ctx context.Context, dm *DataModel) err
 	pipe := c.client.Pipeline()
 	pipe.Del(ctx, modelCacheKey)
 	pipe.Del(ctx, resolveCacheKey)
-	pipe.Incr(ctx, cacheVersionKey)
+	pipe.Incr(ctx, redisx.Keys.DataModelCacheVersion())
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("invalidate model %s: %w", dm.ID, err)
@@ -192,7 +187,7 @@ func (c *DataModelCache) InvalidateAll(ctx context.Context) error {
 	var cursor uint64
 
 	for {
-		keys, nextCursor, err := c.client.Scan(ctx, cursor, keyPrefix, scanBatchSize).Result()
+		keys, nextCursor, err := c.client.Scan(ctx, cursor, redisx.Keys.DataModelPattern(), scanBatchSize).Result()
 		if err != nil {
 			return fmt.Errorf("scan datamodel keys: %w", err)
 		}

@@ -9,16 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
-const (
-	// Redis key prefix for STUN address cache.
-	redisKeyPrefix = "acs:stun:"
-	// Default TTL for cached STUN address entries.
-	defaultTTL = 30 * time.Minute
-)
+// Default TTL for cached STUN address entries.
+const defaultTTL = 30 * time.Minute
 
 // StunInfo holds a device's public (NAT-mapped) address discovered via STUN.
 type StunInfo struct {
@@ -70,7 +67,7 @@ func (s *Store) Set(ctx context.Context, deviceSN string, info *StunInfo) error 
 
 	// L2: Redis
 	if s.rdb != nil {
-		key := redisKeyPrefix + deviceSN
+		key := redisx.Keys.ACSSTUN(deviceSN)
 		err := s.rdb.HSet(ctx, key, map[string]interface{}{
 			"ip":         info.IP,
 			"port":       info.Port,
@@ -102,7 +99,7 @@ func (s *Store) Get(ctx context.Context, deviceSN string) (*StunInfo, error) {
 		return nil, nil
 	}
 
-	key := redisKeyPrefix + deviceSN
+	key := redisx.Keys.ACSSTUN(deviceSN)
 	vals, err := s.rdb.HGetAll(ctx, key).Result()
 	if err != nil {
 		return nil, fmt.Errorf("redis hgetall stun info: %w", err)
@@ -164,7 +161,7 @@ func (s *Store) Delete(ctx context.Context, deviceSN string) {
 	s.mu.Unlock()
 
 	if s.rdb != nil {
-		s.rdb.Del(ctx, redisKeyPrefix+deviceSN)
+		s.rdb.Del(ctx, redisx.Keys.ACSSTUN(deviceSN))
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -67,5 +68,5 @@ func (s *SessionStore) Delete(ctx context.Context, deviceSN, commandKey string) 
 }
 
 func (s *SessionStore) key(deviceSN, commandKey string) string {
-	return fmt.Sprintf("upload:session:%s:%s", deviceSN, commandKey)
+	return redisx.Keys.UploadSession(deviceSN, commandKey)
 }

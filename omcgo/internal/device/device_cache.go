@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
-const (
-	deviceCacheKeyPrefix = "device:sn:"
-	deviceCacheTTL       = 10 * time.Minute
-)
+const deviceCacheTTL = 10 * time.Minute
 
 // DeviceCache provides Redis-backed caching for device lookups by serial number.
 // Cache-aside pattern: check Redis → miss → query PostgreSQL → set Redis.
@@ -29,7 +27,7 @@ func NewDeviceCache(redis redis.UniversalClient, logger *zap.Logger) *DeviceCach
 }
 
 func deviceCacheKey(sn string) string {
-	return deviceCacheKeyPrefix + sn
+	return redisx.Keys.DeviceSN(sn)
 }
 
 // Get retrieves a device from the cache by serial number.

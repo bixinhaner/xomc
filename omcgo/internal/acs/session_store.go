@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,8 +23,6 @@ type SessionStore interface {
 	DeleteByID(ctx context.Context, sessionID string) error
 }
 
-const sessionByIDKeyPrefix = "acs:session:id:"
-
 // RedisSessionStore 使用 Redis 实现 SessionStore。
 type RedisSessionStore struct {
 	client redis.UniversalClient
@@ -39,7 +38,7 @@ func NewRedisSessionStore(client redis.UniversalClient, ttl time.Duration) *Redi
 }
 
 func sessionByIDKey(sessionID string) string {
-	return sessionByIDKeyPrefix + sessionID
+	return redisx.Keys.ACSSession(sessionID)
 }
 
 // GetByID 通过 Session ID（Cookie 值）获取会话。

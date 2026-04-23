@@ -7,15 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
-const (
-	permCacheTTL    = 5 * time.Minute
-	permCachePrefix = "perm:visible_groups:"
-)
+const permCacheTTL = 5 * time.Minute
 
 // PermissionService provides data-permission logic for device group visibility.
 type PermissionService struct {
@@ -56,7 +54,7 @@ func (s *PermissionService) GetUserVisibleGroupIDs(ctx context.Context, userID u
 	}
 
 	// Try Redis cache.
-	cacheKey := permCachePrefix + userID.String()
+	cacheKey := redisx.Keys.PermVisibleGroups(userID.String())
 	cached, err := s.redis.Get(ctx, cacheKey).Bytes()
 	if err == nil {
 		var ids []uuid.UUID
@@ -110,7 +108,7 @@ func (s *PermissionService) GetUserVisibleGroupIDs(ctx context.Context, userID u
 
 // InvalidateUserCache removes the cached visible groups for a user.
 func (s *PermissionService) InvalidateUserCache(ctx context.Context, userID uuid.UUID) {
-	s.redis.Del(ctx, permCachePrefix+userID.String())
+	s.redis.Del(ctx, redisx.Keys.PermVisibleGroups(userID.String()))
 }
 
 // InvalidateRoleCache invalidates cache for all users with the given role.

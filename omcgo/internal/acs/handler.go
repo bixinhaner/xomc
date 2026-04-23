@@ -20,6 +20,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/tracing"
@@ -867,7 +868,7 @@ func (h *Handler) postSessionWake(deviceSN string) {
 		cooldownTTL = 5 * time.Minute
 	}
 
-	counterKey := "acs:continuous_wake:" + deviceSN
+	counterKey := redisx.Keys.ACSContinuousWake(deviceSN)
 	count, err := h.redisClient.Incr(ctx, counterKey).Result()
 	if err != nil {
 		h.logger.Warn("post-session wake: incr counter failed",
@@ -916,7 +917,7 @@ func (h *Handler) resetContinuousWake(ctx context.Context, deviceSN string) {
 	if h.redisClient == nil || !h.postSessionWakeCfg.Enabled {
 		return
 	}
-	h.redisClient.Del(ctx, "acs:continuous_wake:"+deviceSN)
+	h.redisClient.Del(ctx, redisx.Keys.ACSContinuousWake(deviceSN))
 }
 
 // handleSOAPFault 处理 CPE 返回的 SOAP Fault 响应。

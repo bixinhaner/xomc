@@ -8,13 +8,11 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
-const (
-	captchaKeyPrefix = "auth:captcha:"
-	captchaTTL       = 5 * time.Minute
-)
+const captchaTTL = 5 * time.Minute
 
 // CaptchaService generates and validates CAPTCHA challenges using Redis.
 type CaptchaService struct {
@@ -44,7 +42,7 @@ func (s *CaptchaService) Generate(ctx context.Context) (*CaptchaChallenge, error
 	answer := fmt.Sprintf("%d", a.Int64()+b.Int64())
 	question := fmt.Sprintf("%d + %d = ?", a.Int64(), b.Int64())
 
-	key := captchaKeyPrefix + id
+	key := redisx.Keys.AuthCaptcha(id)
 	if err := s.redis.Set(ctx, key, answer, captchaTTL).Err(); err != nil {
 		return nil, fmt.Errorf("store captcha answer: %w", err)
 	}
@@ -61,7 +59,7 @@ func (s *CaptchaService) Verify(ctx context.Context, captchaID, answer string) b
 		return false
 	}
 
-	key := captchaKeyPrefix + captchaID
+	key := redisx.Keys.AuthCaptcha(captchaID)
 	stored, err := s.redis.GetDel(ctx, key).Result()
 	if err != nil {
 		return false

@@ -2,9 +2,9 @@ package alarm
 
 import (
 	"context"
-	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -21,7 +21,7 @@ func NewRedisAlarmStore(client redis.UniversalClient) *RedisAlarmStore {
 }
 
 func alarmKey(deviceSN string) string {
-	return fmt.Sprintf("alarm:active:%s", deviceSN)
+	return redisx.Keys.AlarmActive(deviceSN)
 }
 
 // Exists checks if an active alarm with the given code exists for the device.

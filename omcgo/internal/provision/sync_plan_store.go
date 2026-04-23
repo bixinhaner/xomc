@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -18,10 +19,7 @@ type SyncPlanStore struct {
 	ttl    time.Duration
 }
 
-const (
-	syncPlanKeyPrefix = "provision:sync_plan:"
-	defaultSyncPlanTTL = time.Hour
-)
+const defaultSyncPlanTTL = time.Hour
 
 // NewSyncPlanStore creates a new SyncPlanStore.
 func NewSyncPlanStore(client redis.UniversalClient) *SyncPlanStore {
@@ -35,7 +33,7 @@ func (s *SyncPlanStore) WithTTL(ttl time.Duration) *SyncPlanStore {
 }
 
 func (s *SyncPlanStore) key(deviceSN string) string {
-	return syncPlanKeyPrefix + deviceSN
+	return redisx.Keys.ProvisionSyncPlan(deviceSN)
 }
 
 // Save stores the serialized plan state for a device.

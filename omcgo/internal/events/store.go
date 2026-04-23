@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -41,7 +42,7 @@ func (s *RedisMessageStore) SetLogger(logger *zap.Logger) {
 
 // Store persists an SSE message to the user's pending queue.
 func (s *RedisMessageStore) Store(ctx context.Context, userID string, msg *SSEMessage) error {
-	key := fmt.Sprintf("sse:pending:%s", userID)
+	key := redisx.Keys.SSEPending(userID)
 
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -63,7 +64,7 @@ func (s *RedisMessageStore) Store(ctx context.Context, userID string, msg *SSEMe
 // GetSince replays messages after the given ID for reconnection.
 // It retrieves up to `limit` messages sorted by timestamp.
 func (s *RedisMessageStore) GetSince(ctx context.Context, userID string, afterID string, limit int) ([]*SSEMessage, error) {
-	key := fmt.Sprintf("sse:pending:%s", userID)
+	key := redisx.Keys.SSEPending(userID)
 
 	// Fetch all recent messages (sorted by score = timestamp)
 	results, err := s.client.ZRevRange(ctx, key, 0, int64(limit-1)).Result()

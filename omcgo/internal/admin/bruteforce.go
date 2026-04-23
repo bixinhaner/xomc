@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	failedKeyPrefix    = "auth:failed:"
-	failedKeyTTL       = 30 * time.Minute
-	captchaThreshold   = 3          // require CAPTCHA after this many failures
-	lockThreshold      = 10         // lock account after this many failures
-	lockDuration       = 30 * time.Minute
+	failedKeyTTL     = 30 * time.Minute
+	captchaThreshold = 3                // require CAPTCHA after this many failures
+	lockThreshold    = 10               // lock account after this many failures
+	lockDuration     = 30 * time.Minute
 )
 
 // LoginGuard tracks failed login attempts and enforces brute-force protections.
@@ -28,7 +28,7 @@ func NewLoginGuard(client redis.UniversalClient) *LoginGuard {
 
 // RecordFailure increments the failed attempt counter for a username.
 func (g *LoginGuard) RecordFailure(ctx context.Context, username string) (int64, error) {
-	key := failedKeyPrefix + username
+	key := redisx.Keys.AuthFailed(username)
 	count, err := g.redis.Incr(ctx, key).Result()
 	if err != nil {
 		return 0, fmt.Errorf("increment failed count: %w", err)
@@ -40,7 +40,7 @@ func (g *LoginGuard) RecordFailure(ctx context.Context, username string) (int64,
 
 // GetFailedCount returns the current failed attempt count for a username.
 func (g *LoginGuard) GetFailedCount(ctx context.Context, username string) int64 {
-	count, err := g.redis.Get(ctx, failedKeyPrefix+username).Int64()
+	count, err := g.redis.Get(ctx, redisx.Keys.AuthFailed(username)).Int64()
 	if err != nil {
 		return 0
 	}
@@ -49,7 +49,7 @@ func (g *LoginGuard) GetFailedCount(ctx context.Context, username string) int64 
 
 // Reset clears the failed attempt counter on successful login.
 func (g *LoginGuard) Reset(ctx context.Context, username string) {
-	g.redis.Del(ctx, failedKeyPrefix+username)
+	g.redis.Del(ctx, redisx.Keys.AuthFailed(username))
 }
 
 // RequiresCaptcha returns true if the user has exceeded the CAPTCHA threshold.

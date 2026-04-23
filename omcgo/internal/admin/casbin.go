@@ -13,10 +13,13 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 )
 
-const casbinPolicyChannel = "casbin:policy:reload"
+// casbinPolicyChannel 保留一个文件内私有的别名，方便测试代码继续引用；
+// 真正的字符串字面量统一归集到 redisx/keys.go。
+var casbinPolicyChannel = redisx.Keys.CasbinPolicyChannel()
 
 // --- Adapter ---
 

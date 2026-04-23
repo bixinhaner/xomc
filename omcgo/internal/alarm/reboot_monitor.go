@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
@@ -31,7 +32,7 @@ const (
 )
 
 func rebootWindowKey(sn string) string {
-	return fmt.Sprintf("reboot:abnormal:%s", sn)
+	return redisx.Keys.RebootAbnormal(sn)
 }
 
 // RebootMonitorOption 用函数式选项覆盖滑动窗口配置。

@@ -1,43 +1,26 @@
+// Package redis 保留作为向后兼容的 shim。实际实现已收口到
+// internal/core/components/redisx，新代码请直接使用 redisx.NewClient /
+// redisx.HealthCheck。
 package redis
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
-// NewRedisClient creates a Redis UniversalClient that auto-detects
-// Cluster mode (multiple addrs) vs Standalone mode (single addr).
+// NewRedisClient 历史入口，保持签名不变；内部直接委托给 redisx.NewClient。
+//
+// Deprecated: 请使用 redisx.NewClient。
 func NewRedisClient(cfg appconfig.RedisConfig) (redis.UniversalClient, error) {
-	opts := &redis.UniversalOptions{
-		Addrs:    cfg.Addrs,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	}
-
-	if cfg.PoolSize > 0 {
-		opts.PoolSize = cfg.PoolSize
-	}
-
-	client := redis.NewUniversalClient(opts)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		client.Close()
-		return nil, fmt.Errorf("ping redis: %w", err)
-	}
-
-	return client, nil
+	return redisx.NewClient(cfg)
 }
 
-// RedisHealthCheck verifies the Redis connection is alive.
+// RedisHealthCheck 历史入口，保持签名不变；内部委托给 redisx.HealthCheck。
+//
+// Deprecated: 请使用 redisx.HealthCheck。
 func RedisHealthCheck(ctx context.Context, client redis.UniversalClient) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	return client.Ping(ctx).Err()
+	return redisx.HealthCheck(ctx, client)
 }

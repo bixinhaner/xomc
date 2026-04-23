@@ -1,0 +1,199 @@
+package redisx
+
+import "fmt"
+
+// Keys 是全项目 Redis 键的唯一构造来源。任何形如 "acs:foo:bar" 的字符串字面量
+// 禁止出现在本文件之外；业务侧统一通过 `redisx.Keys.XXX(...)` 获取，便于：
+//   - 搜索/审计（一个文件就能看清所有 key 命名空间）
+//   - 迁移（改前缀只需改本文件）
+//   - 防手写错别字
+//
+// 命名约定：
+//   - ACS 会话/任务相关         → acs:*
+//   - 数据模型缓存             → datamodel:*
+//   - 告警相关                 → alarm:*
+//   - 设备相关                 → device:*
+//   - 自动开站 sync plan       → provision:*
+//   - 异常重启滑动窗口         → reboot:*
+//   - 认证 / 登录 / 验证码     → auth:*
+//   - 权限 / 可见设备组        → perm:*
+//   - Casbin 策略热更（历史） → casbin:*
+//   - SSE 推送离线缓存         → sse:*
+//   - 系统运行期开关           → system:*
+//   - 文件上传会话             → upload:*
+var Keys KeyBuilder
+
+// KeyBuilder 是 Redis 键构造器。所有方法返回具体的 key；以 Pattern 结尾的返回
+// SCAN/KEYS 用的通配符；以 Prefix 结尾的返回不带终止符的前缀（用于 TrimPrefix）。
+type KeyBuilder struct{}
+
+// ===== ACS: TR-069 会话 / 心跳 / 命令唤醒 / STUN =====
+
+// ACSSession 根据 session_id 定位一条 TR069 会话 Hash。
+func (KeyBuilder) ACSSession(sessionID string) string { return acsSessionPrefix + sessionID }
+
+// ACSSessionPrefix 返回会话键前缀，供扫描/迁移代码使用。
+func (KeyBuilder) ACSSessionPrefix() string { return acsSessionPrefix }
+
+// ACSHeartbeat 设备最近一次 Inform 的心跳时间戳。
+func (KeyBuilder) ACSHeartbeat(deviceSN string) string { return acsHeartbeatPrefix + deviceSN }
+
+// ACSHeartbeatPrefix 返回心跳键前缀。
+func (KeyBuilder) ACSHeartbeatPrefix() string { return acsHeartbeatPrefix }
+
+// ACSConnReqPending Connection Request 去重键（30s TTL）。
+func (KeyBuilder) ACSConnReqPending(deviceSN string) string { return acsConnReqPendingPrefix + deviceSN }
+
+// ACSContinuousWake 连续唤醒计数器（反抖动 / 抑制重复 CR）。
+func (KeyBuilder) ACSContinuousWake(deviceSN string) string { return acsContinuousWakePrefix + deviceSN }
+
+// ACSSTUN 按设备 SN 维护 UDP Connection Request 的 STUN 地址。
+func (KeyBuilder) ACSSTUN(deviceSN string) string { return acsSTUNPrefix + deviceSN }
+
+// ACSSTUNPrefix STUN 地址键前缀。
+func (KeyBuilder) ACSSTUNPrefix() string { return acsSTUNPrefix }
+
+// ===== ACS: 统一任务队列（taskq / task / cwmp2task） =====
+
+// ACSTaskQueue 设备级任务队列 Sorted Set。
+func (KeyBuilder) ACSTaskQueue(deviceSN string) string { return acsTaskQueuePrefix + deviceSN }
+
+// ACSTaskQueuePrefix 队列键前缀。
+func (KeyBuilder) ACSTaskQueuePrefix() string { return acsTaskQueuePrefix }
+
+// ACSTaskQueuePattern 队列扫描通配符（供 KEYS/SCAN 使用）。
+func (KeyBuilder) ACSTaskQueuePattern() string { return acsTaskQueuePrefix + "*" }
+
+// ACSTaskDetail 任务详情 Hash（24h TTL）。
+func (KeyBuilder) ACSTaskDetail(taskID string) string { return acsTaskDetailPrefix + taskID }
+
+// ACSTaskDetailPrefix 任务详情键前缀。
+func (KeyBuilder) ACSTaskDetailPrefix() string { return acsTaskDetailPrefix }
+
+// ACSCWMP2Task CWMP ID → Task ID 反查（24h TTL）。传入已哈希后的 CWMP ID。
+func (KeyBuilder) ACSCWMP2Task(hashed string) string { return acsCWMP2TaskPrefix + hashed }
+
+// ACSCWMP2TaskPrefix CWMP 反查键前缀。
+func (KeyBuilder) ACSCWMP2TaskPrefix() string { return acsCWMP2TaskPrefix }
+
+// ===== 数据模型缓存（L2） =====
+
+// DataModelCacheVersion 跨实例通知的缓存版本号。
+func (KeyBuilder) DataModelCacheVersion() string { return datamodelCacheVersionKey }
+
+// DataModelPattern 扫描所有 datamodel:* 键。
+func (KeyBuilder) DataModelPattern() string { return datamodelPattern }
+
+// DataModelProduct product 级（最精确）缓存键。
+func (KeyBuilder) DataModelProduct(carrier, tech, oui, productClass string) string {
+	return fmt.Sprintf("datamodel:product:%s:%s:%s:%s", carrier, tech, oui, productClass)
+}
+
+// DataModelOUI 厂商级缓存键。
+func (KeyBuilder) DataModelOUI(carrier, tech, oui string) string {
+	return fmt.Sprintf("datamodel:oui:%s:%s:%s", carrier, tech, oui)
+}
+
+// DataModelDefault 运营商默认级缓存键。
+func (KeyBuilder) DataModelDefault(carrier, tech string) string {
+	return fmt.Sprintf("datamodel:default:%s:%s", carrier, tech)
+}
+
+// DataModelUnknown 非法 scope 的 fallback（仅用于日志/审计）。
+func (KeyBuilder) DataModelUnknown(scope, carrier, tech, oui, productClass string) string {
+	return fmt.Sprintf("datamodel:unknown:%s:%s:%s:%s:%s", scope, carrier, tech, oui, productClass)
+}
+
+// DataModelResolve 三级回退解析结果缓存（1h TTL）。
+func (KeyBuilder) DataModelResolve(carrier, tech, oui, productClass string) string {
+	return fmt.Sprintf("datamodel:resolve:%s:%s:%s:%s", carrier, tech, oui, productClass)
+}
+
+// ===== 告警 / 异常重启 =====
+
+// AlarmActive 活跃告警 Hash（每设备一个）。
+func (KeyBuilder) AlarmActive(deviceSN string) string {
+	return fmt.Sprintf("alarm:active:%s", deviceSN)
+}
+
+// RebootAbnormal 异常重启滑动窗口 ZSET。
+func (KeyBuilder) RebootAbnormal(deviceSN string) string {
+	return fmt.Sprintf("reboot:abnormal:%s", deviceSN)
+}
+
+// ===== Device / Provision / Upload =====
+
+// DeviceSN 按 SN 缓存 Device 对象（read-through）。
+func (KeyBuilder) DeviceSN(deviceSN string) string { return deviceSNPrefix + deviceSN }
+
+// ProvisionSyncPlan 两阶段 sync plan 状态（Redis STRING + TTL）。
+func (KeyBuilder) ProvisionSyncPlan(deviceSN string) string { return provisionSyncPlanPrefix + deviceSN }
+
+// ProvisionSyncPlanPrefix sync plan 键前缀。
+func (KeyBuilder) ProvisionSyncPlanPrefix() string { return provisionSyncPlanPrefix }
+
+// UploadSession 上传会话（按 deviceSN + cwmpID 定位）。
+func (KeyBuilder) UploadSession(deviceSN, cwmpID string) string {
+	return fmt.Sprintf("upload:session:%s:%s", deviceSN, cwmpID)
+}
+
+// ===== Admin: 认证 / 暴力破解 / 权限 / Casbin =====
+
+// AuthCaptcha 验证码 Hash。
+func (KeyBuilder) AuthCaptcha(captchaID string) string { return authCaptchaPrefix + captchaID }
+
+// AuthCaptchaPrefix 验证码键前缀。
+func (KeyBuilder) AuthCaptchaPrefix() string { return authCaptchaPrefix }
+
+// AuthFailed 登录失败计数（暴力破解防护）。
+func (KeyBuilder) AuthFailed(usernameOrIP string) string { return authFailedPrefix + usernameOrIP }
+
+// AuthFailedPrefix 登录失败计数键前缀。
+func (KeyBuilder) AuthFailedPrefix() string { return authFailedPrefix }
+
+// PermVisibleGroups 缓存用户的可见设备分组列表。
+func (KeyBuilder) PermVisibleGroups(userID string) string { return permVisibleGroupsPrefix + userID }
+
+// PermVisibleGroupsPrefix 可见分组缓存键前缀。
+func (KeyBuilder) PermVisibleGroupsPrefix() string { return permVisibleGroupsPrefix }
+
+// CasbinPolicyChannel Casbin 策略热更新的 Pub/Sub 频道
+// （历史兼容：生产广播已迁到 NATS sys.casbin.policy.reload）。
+func (KeyBuilder) CasbinPolicyChannel() string { return casbinPolicyChannel }
+
+// ===== SSE / System =====
+
+// SSEPending 用户离线消息缓冲队列。
+func (KeyBuilder) SSEPending(userID string) string {
+	return fmt.Sprintf("sse:pending:%s", userID)
+}
+
+// ---------------------------------------------------------------------------
+// private constants（对外不暴露；所有公共 API 均从本文件拼装）
+// ---------------------------------------------------------------------------
+
+const (
+	// ACS
+	acsSessionPrefix        = "acs:session:id:"
+	acsHeartbeatPrefix      = "acs:heartbeat:"
+	acsConnReqPendingPrefix = "acs:connreq:pending:"
+	acsContinuousWakePrefix = "acs:continuous_wake:"
+	acsSTUNPrefix           = "acs:stun:"
+	acsTaskQueuePrefix      = "acs:taskq:"
+	acsTaskDetailPrefix     = "acs:task:"
+	acsCWMP2TaskPrefix      = "acs:cwmp2task:"
+
+	// datamodel
+	datamodelCacheVersionKey = "datamodel:cache_version"
+	datamodelPattern         = "datamodel:*"
+
+	// device / provision / upload
+	deviceSNPrefix          = "device:sn:"
+	provisionSyncPlanPrefix = "provision:sync_plan:"
+
+	// admin
+	authCaptchaPrefix       = "auth:captcha:"
+	authFailedPrefix        = "auth:failed:"
+	permVisibleGroupsPrefix = "perm:visible_groups:"
+	casbinPolicyChannel     = "casbin:policy:reload"
+)

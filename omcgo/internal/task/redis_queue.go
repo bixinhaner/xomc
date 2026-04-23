@@ -7,16 +7,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	// Redis key 前缀
-	taskQueuePrefix   = "acs:taskq:"   // 设备任务队列 Sorted Set
-	taskDetailPrefix  = "acs:task:"     // 任务详情 Hash
-	cwmp2taskPrefix   = "acs:cwmp2task:" // CWMP ID -> Task ID 映射
-	taskDetailTTL     = 24 * time.Hour  // 任务详情 TTL
-	cwmpMappingTTL    = 24 * time.Hour  // CWMP 映射 TTL
+	taskDetailTTL  = 24 * time.Hour // 任务详情 TTL
+	cwmpMappingTTL = 24 * time.Hour // CWMP 映射 TTL
 )
 
 // RedisTaskQueue 实现 TaskQueue 接口
@@ -31,17 +28,17 @@ func NewRedisTaskQueue(client redis.UniversalClient) *RedisTaskQueue {
 
 // queueKey 返回设备队列的 Redis key
 func (q *RedisTaskQueue) queueKey(deviceSN string) string {
-	return taskQueuePrefix + deviceSN
+	return redisx.Keys.ACSTaskQueue(deviceSN)
 }
 
 // taskKey 返回任务详情的 Redis key
 func (q *RedisTaskQueue) taskKey(taskID string) string {
-	return taskDetailPrefix + taskID
+	return redisx.Keys.ACSTaskDetail(taskID)
 }
 
 // cwmpKey 返回 CWMP ID 映射的 Redis key
 func (q *RedisTaskQueue) cwmpKey(cwmpID string) string {
-	return cwmp2taskPrefix + CWMPIDHash(cwmpID)
+	return redisx.Keys.ACSCWMP2Task(CWMPIDHash(cwmpID))
 }
 
 // Push 推送任务到队列
@@ -376,14 +373,15 @@ func (q *RedisTaskQueue) MarkTaskFailed(ctx context.Context, taskID string, erro
 // GetQueueLengths 获取所有设备的队列长度（用于监控）
 func (q *RedisTaskQueue) GetQueueLengths(ctx context.Context) (map[string]int64, error) {
 	// 扫描所有任务队列 key
-	keys, err := q.client.Keys(ctx, taskQueuePrefix+"*").Result()
+	keys, err := q.client.Keys(ctx, redisx.Keys.ACSTaskQueuePattern()).Result()
 	if err != nil {
 		return nil, err
 	}
 
 	lengths := make(map[string]int64)
+	prefix := redisx.Keys.ACSTaskQueuePrefix()
 	for _, key := range keys {
-		deviceSN := key[len(taskQueuePrefix):]
+		deviceSN := key[len(prefix):]
 		length, err := q.client.ZCard(ctx, key).Result()
 		if err != nil {
 			continue

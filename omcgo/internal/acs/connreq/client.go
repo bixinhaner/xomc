@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 const (
-	connReqKeyPrefix = "acs:connreq:pending:"
-	dedupTTL         = 30 * time.Second
-	maxRetries       = 3
+	dedupTTL   = 30 * time.Second
+	maxRetries = 3
 )
 
 // DigestCredentials holds optional HTTP Digest credentials for Connection Request.
@@ -79,7 +79,7 @@ func (c *Client) Send(ctx context.Context, deviceSN, url string) error {
 	}
 
 	// Dedup check
-	dedupKey := connReqKeyPrefix + deviceSN
+	dedupKey := redisx.Keys.ACSConnReqPending(deviceSN)
 	set, err := c.redis.SetNX(ctx, dedupKey, "1", dedupTTL).Result()
 	if err != nil {
 		return fmt.Errorf("dedup check: %w", err)

@@ -5,13 +5,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
-
-const heartbeatKeyPrefix = "acs:heartbeat:"
 
 // HeartbeatMonitor tracks device liveness via Redis TTL keys and marks
 // expired devices as offline.
@@ -59,7 +58,7 @@ func (m *HeartbeatMonitor) Stop() {
 
 // RefreshHeartbeat sets/refreshes a Redis key with TTL = 2 * informInterval.
 func (m *HeartbeatMonitor) RefreshHeartbeat(ctx context.Context, deviceSN string, informInterval int) {
-	key := heartbeatKeyPrefix + deviceSN
+	key := redisx.Keys.ACSHeartbeat(deviceSN)
 	ttl := time.Duration(informInterval*2) * time.Second
 	if ttl < 60*time.Second {
 		ttl = 600 * time.Second // minimum 10 minutes
@@ -91,7 +90,7 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 		}
 
 		for _, device := range devices {
-			key := heartbeatKeyPrefix + device.SerialNumber
+			key := redisx.Keys.ACSHeartbeat(device.SerialNumber)
 			exists, err := m.redis.Exists(ctx, key).Result()
 			if err != nil {
 				m.logger.Error("check heartbeat key",

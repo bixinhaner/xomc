@@ -22,7 +22,7 @@ import (
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
 	natscomp "github.com/omcgo/omcgo/internal/core/components/nats"
 	"github.com/omcgo/omcgo/internal/core/components/postgres"
-	rediscomp "github.com/omcgo/omcgo/internal/core/components/redis"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 )
 
@@ -115,7 +115,7 @@ func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresCo
 // ConnectRedis 初始化 Redis 客户端，并注册健康检查和优雅关机回调。
 // 结果存入 Infra.Redis，封装为 redis.UniversalClient，支持单机和集群模式。
 func (inf *Infra) ConnectRedis(cfg appconfig.RedisConfig) error {
-	client, err := rediscomp.NewRedisClient(cfg)
+	client, err := redisx.NewClient(cfg)
 	if err != nil {
 		return fmt.Errorf("connect to Redis: %w", err)
 	}
