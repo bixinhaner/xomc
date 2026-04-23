@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
@@ -16,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
@@ -28,7 +28,7 @@ type ProvisioningEngine struct {
 	dmRegistry         *datamodel.DataModelRegistry
 	templateService    *template.ConfigTemplateService
 	carrierRegistry    *carrier.CarrierRegistry
-	cmdQueue           cmdqueue.CommandQueue
+	taskSvc            task.Enqueuer
 	eventBus           event.EventBus
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
@@ -43,7 +43,7 @@ func NewProvisioningEngine(
 	dmRegistry *datamodel.DataModelRegistry,
 	templateService *template.ConfigTemplateService,
 	carrierRegistry *carrier.CarrierRegistry,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc task.Enqueuer,
 	eventBus event.EventBus,
 	config appconfig.ProvisionConfig,
 	logger *zap.Logger,
@@ -54,7 +54,7 @@ func NewProvisioningEngine(
 		dmRegistry:      dmRegistry,
 		templateService: templateService,
 		carrierRegistry: carrierRegistry,
-		cmdQueue:        cmdQueue,
+		taskSvc:         taskSvc,
 		eventBus:        eventBus,
 		config:          config,
 		logger:          logger,
@@ -262,7 +262,7 @@ func (e *ProvisioningEngine) handleTemplateProvisioning(ctx context.Context, tas
 		return e.failTask(ctx, task, fmt.Errorf("update task steps: %w", err))
 	}
 
-	if err := EnqueueSteps(ctx, deviceSN, steps, e.cmdQueue); err != nil {
+	if err := EnqueueSteps(ctx, deviceSN, steps, e.taskSvc); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("enqueue steps: %w", err))
 	}
 

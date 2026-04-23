@@ -67,7 +67,6 @@ func runApp(cmd *cobra.Command, args []string) error {
 		Redis:      app.Redis,
 		MinIO:      app.MinIO,
 		EventBus:   app.EventBus,
-		CmdQueue:   app.CmdQueue,
 		TaskSvc:    app.TaskSvc,
 		Carriers:   app.Carriers,
 		Cfg:        &cfg,

@@ -36,7 +36,7 @@ func initDeviceModule(c *Container) error {
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, c.EventBus, logger)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
-	deviceService.SetCommandQueue(c.CmdQueue)
+	deviceService.SetTaskService(c.TaskSvc)
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)

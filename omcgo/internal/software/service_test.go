@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	devtask "github.com/omcgo/omcgo/internal/task"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -143,23 +143,19 @@ func (m *svcMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (i
 }
 
 type svcMockCmdQueue struct {
-	pushFn func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error
+	createFn func(ctx context.Context, req *devtask.CreateTaskRequest) (*devtask.Task, error)
 }
 
-func (m *svcMockCmdQueue) Push(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-	if m.pushFn != nil {
-		return m.pushFn(ctx, deviceSN, cmd)
+func (m *svcMockCmdQueue) CreateTask(ctx context.Context, req *devtask.CreateTaskRequest) (*devtask.Task, error) {
+	if m.createFn != nil {
+		return m.createFn(ctx, req)
 	}
-	return nil
+	return devtask.NewTask(req), nil
 }
-func (m *svcMockCmdQueue) Pop(_ context.Context, _ string) (*cmdqueue.Command, error) {
-	return nil, nil
+
+func (m *svcMockCmdQueue) GetQueueLength(_ context.Context, _ string) (int64, error) {
+	return 0, nil
 }
-func (m *svcMockCmdQueue) Peek(_ context.Context, _ string) (*cmdqueue.Command, error) {
-	return nil, nil
-}
-func (m *svcMockCmdQueue) Len(_ context.Context, _ string) (int64, error) { return 0, nil }
-func (m *svcMockCmdQueue) Clear(_ context.Context, _ string) error        { return nil }
 
 type svcMockEventBus struct {
 	publishFn func(ctx context.Context, subject string, evt event.Event) error
@@ -213,12 +209,12 @@ func TestService_StartUpgrade_Success(t *testing.T) {
 		},
 	}
 
-	var pushedCmd *cmdqueue.Command
+	var pushedReq *devtask.CreateTaskRequest
 	cmdQueue := &svcMockCmdQueue{
-		pushFn: func(_ context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-			assert.Equal(t, "SN-UPGRADE-001", deviceSN)
-			pushedCmd = cmd
-			return nil
+		createFn: func(_ context.Context, req *devtask.CreateTaskRequest) (*devtask.Task, error) {
+			assert.Equal(t, "SN-UPGRADE-001", req.DeviceSN)
+			pushedReq = req
+			return devtask.NewTask(req), nil
 		},
 	}
 
@@ -248,8 +244,8 @@ func TestService_StartUpgrade_Success(t *testing.T) {
 	assert.Equal(t, UpgradeDownloading, task.Status)
 	assert.Equal(t, deviceID, task.DeviceID)
 	assert.Equal(t, firmwareID, task.FirmwareID)
-	assert.NotNil(t, pushedCmd)
-	assert.Equal(t, "Download", pushedCmd.Method)
+	assert.NotNil(t, pushedReq)
+	assert.Equal(t, "Download", pushedReq.Method)
 	assert.Equal(t, event.SubjectUpgradeStarted, publishedSubject)
 }
 

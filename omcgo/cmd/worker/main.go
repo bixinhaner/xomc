@@ -141,7 +141,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	backupTaskRepo := backup.NewPgTaskRepository(w.PgPool)
 	connReqClient := connreq.NewClient(w.Redis, logger)
 	backupExecutor := backup.NewBackupExecutor(
-		backupTaskRepo, deviceRepo, w.CmdQueue, connReqClient,
+		backupTaskRepo, deviceRepo, w.TaskSvc, connReqClient,
 		w.EventBus, logger,
 	)
 	if err := backupExecutor.Subscribe(w.EventBus); err != nil {

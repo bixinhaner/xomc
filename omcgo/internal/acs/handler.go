@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/rpclog"
 	"github.com/omcgo/omcgo/internal/acs/stun"
@@ -570,7 +569,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
 		// 使用 CWMP ID 构建 RPC 请求
-		cmd := &cmdqueue.Command{
+		cmd := &rpc.Command{
 			ID:         taskItem.ID,
 			Method:     taskItem.Method,
 			Params:     taskItem.Params,
@@ -735,7 +734,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
-		cmd := &cmdqueue.Command{
+		cmd := &rpc.Command{
 			ID:         nextTask.ID,
 			Method:     nextTask.Method,
 			Params:     nextTask.Params,
@@ -983,7 +982,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
-		cmd := &cmdqueue.Command{
+		cmd := &rpc.Command{
 			ID:         nextTask.ID,
 			Method:     nextTask.Method,
 			Params:     nextTask.Params,

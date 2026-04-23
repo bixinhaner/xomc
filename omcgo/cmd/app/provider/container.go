@@ -7,7 +7,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
@@ -41,7 +40,6 @@ type Container struct {
 	Redis      redis.UniversalClient
 	MinIO      *minio.Client
 	EventBus   event.EventBus
-	CmdQueue   cmdqueue.CommandQueue
 	TaskSvc    *task.TaskService
 	Carriers   *carrier.CarrierRegistry
 	Cfg        *appconfig.AppConfig

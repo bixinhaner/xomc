@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
@@ -93,50 +93,26 @@ func (m *mockTaskRepo) FailStale(ctx context.Context, maxAge time.Duration) (int
 }
 
 // ---------------------------------------------------------------------------
-// Mock: CommandQueue
+// Mock: task.Enqueuer
 // ---------------------------------------------------------------------------
 
 type mockCommandQueue struct {
-	PushFn  func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error
-	PopFn   func(ctx context.Context, deviceSN string) (*cmdqueue.Command, error)
-	PeekFn  func(ctx context.Context, deviceSN string) (*cmdqueue.Command, error)
-	LenFn   func(ctx context.Context, deviceSN string) (int64, error)
-	ClearFn func(ctx context.Context, deviceSN string) error
+	CreateFn func(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error)
+	LenFn    func(ctx context.Context, deviceSN string) (int64, error)
 }
 
-func (m *mockCommandQueue) Push(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-	if m.PushFn != nil {
-		return m.PushFn(ctx, deviceSN, cmd)
+func (m *mockCommandQueue) CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	if m.CreateFn != nil {
+		return m.CreateFn(ctx, req)
 	}
-	return nil
+	return task.NewTask(req), nil
 }
 
-func (m *mockCommandQueue) Pop(ctx context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	if m.PopFn != nil {
-		return m.PopFn(ctx, deviceSN)
-	}
-	return nil, nil
-}
-
-func (m *mockCommandQueue) Peek(ctx context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	if m.PeekFn != nil {
-		return m.PeekFn(ctx, deviceSN)
-	}
-	return nil, nil
-}
-
-func (m *mockCommandQueue) Len(ctx context.Context, deviceSN string) (int64, error) {
+func (m *mockCommandQueue) GetQueueLength(ctx context.Context, deviceSN string) (int64, error) {
 	if m.LenFn != nil {
 		return m.LenFn(ctx, deviceSN)
 	}
 	return 0, nil
-}
-
-func (m *mockCommandQueue) Clear(ctx context.Context, deviceSN string) error {
-	if m.ClearFn != nil {
-		return m.ClearFn(ctx, deviceSN)
-	}
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,9 +992,9 @@ func TestHandleBootstrap_FullSuccessPath(t *testing.T) {
 
 	// Track pushed commands.
 	var pushedMethods []string
-	h.cmdQueue.PushFn = func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-		pushedMethods = append(pushedMethods, cmd.Method)
-		return nil
+	h.cmdQueue.CreateFn = func(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+		pushedMethods = append(pushedMethods, req.Method)
+		return task.NewTask(req), nil
 	}
 
 	evt := bootstrapEvent{
@@ -1080,8 +1056,8 @@ func TestHandleBootstrap_EnqueueStepsError(t *testing.T) {
 		}, nil
 	}
 
-	h.cmdQueue.PushFn = func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-		return errors.New("redis unavailable")
+	h.cmdQueue.CreateFn = func(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+		return nil, errors.New("redis unavailable")
 	}
 
 	var failedStatus ProvisioningState

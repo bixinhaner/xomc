@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +34,7 @@ func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 
 func TestDispatcher_BuildRequest_UnknownMethod(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "NonExistentMethod",
 		CommandKey: "key-1",
 		Params:     json.RawMessage(`{}`),
@@ -49,7 +48,7 @@ func TestDispatcher_BuildRequest_UnknownMethod(t *testing.T) {
 
 func TestGetParameterValuesHandler(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "GetParameterValues",
 		CommandKey: "test-key-1",
 		Params:     json.RawMessage(`{"names":["Device.DeviceInfo.ModelName","Device.DeviceInfo.SerialNumber"]}`),
@@ -68,7 +67,7 @@ func TestGetParameterValuesHandler(t *testing.T) {
 
 func TestSetParameterValuesHandler(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "SetParameterValues",
 		CommandKey: "test-key-2",
 		Params:     json.RawMessage(`{"values":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300"}]}`),
@@ -87,7 +86,7 @@ func TestSetParameterValuesHandler(t *testing.T) {
 
 func TestSetParameterValuesHandler_WithType(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "SetParameterValues",
 		CommandKey: "test-key-3",
 		Params:     json.RawMessage(`{"values":[{"name":"Device.ManagementServer.PeriodicInformInterval","value":"300","type":"xsd:unsignedInt"}]}`),
@@ -103,7 +102,7 @@ func TestSetParameterValuesHandler_WithType(t *testing.T) {
 
 func TestGetParameterNamesHandler(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "GetParameterNames",
 		CommandKey: "test-key-4",
 		Params:     json.RawMessage(`{"path":"Device.DeviceInfo.","next_level":true}`),
@@ -120,7 +119,7 @@ func TestGetParameterNamesHandler(t *testing.T) {
 
 func TestRebootHandler(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "Reboot",
 		CommandKey: "reboot-key-1",
 		Params:     json.RawMessage(`{}`),
@@ -136,7 +135,7 @@ func TestRebootHandler(t *testing.T) {
 
 func TestFactoryResetHandler(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "FactoryReset",
 		CommandKey: "reset-key-1",
 		Params:     json.RawMessage(`{}`),
@@ -151,7 +150,7 @@ func TestFactoryResetHandler(t *testing.T) {
 
 func TestDownloadHandler(t *testing.T) {
 	d := NewDispatcher()
-	cmd := &cmdqueue.Command{
+	cmd := &Command{
 		Method:     "Download",
 		CommandKey: "dl-key-1",
 		Params: json.RawMessage(`{

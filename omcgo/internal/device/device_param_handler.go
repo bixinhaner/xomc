@@ -12,10 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
 
@@ -322,20 +322,20 @@ func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 		"names": paths,
 	})
 
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	taskSvc := h.deviceService.GetTaskService()
+	if taskSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
+		return
+	}
+
+	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     "GetParameterValues",
 		Params:     gpvParams,
 		Priority:   5,
 		CommandKey: fmt.Sprintf("manual-sync-%s", uuid.New().String()[:8]),
-	}
-
-	if h.deviceService.GetCommandQueue() == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
-		return
-	}
-
-	if err := h.deviceService.GetCommandQueue().Push(c.Request.Context(), dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -371,20 +371,20 @@ func (h *ParameterTreeHandler) TriggerDiscover(c *gin.Context) {
 		"next_level": false,
 	})
 
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	taskSvc := h.deviceService.GetTaskService()
+	if taskSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
+		return
+	}
+
+	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     "GetParameterNames",
 		Params:     gpnParams,
 		Priority:   1,
 		CommandKey: fmt.Sprintf("manual-discover-%s", uuid.New().String()[:8]),
-	}
-
-	if h.deviceService.GetCommandQueue() == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
-		return
-	}
-
-	if err := h.deviceService.GetCommandQueue().Push(c.Request.Context(), dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -410,14 +410,10 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 
 	// Check pending commands in queue.
 	var pendingCommands int64
-	if h.deviceService.GetCommandQueue() != nil {
+	if taskSvc := h.deviceService.GetTaskService(); taskSvc != nil {
 		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
 		if devErr == nil && dev != nil {
-			if lenQueue, ok := h.deviceService.GetCommandQueue().(interface {
-				Len(ctx context.Context, deviceSN string) (int64, error)
-			}); ok {
-				pendingCommands, _ = lenQueue.Len(c.Request.Context(), dev.SerialNumber)
-			}
+			pendingCommands, _ = taskSvc.GetQueueLength(c.Request.Context(), dev.SerialNumber)
 		}
 	}
 
@@ -452,9 +448,9 @@ func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
 		return
 	}
 
-	// 检查命令队列是否可用
-	if h.deviceService.GetCommandQueue() == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
+	// 检查任务服务是否可用
+	if h.deviceService.GetTaskService() == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
 		return
 	}
 
@@ -469,15 +465,21 @@ func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
 		"no_more_requests": 1, // 这是最后一个请求
 	})
 
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	taskSvc := h.deviceService.GetTaskService()
+	if taskSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
+		return
+	}
+
+	created, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     "Upload",
 		Params:     uploadParams,
 		Priority:   5,
 		CommandKey: fmt.Sprintf("config-sync-%s-%d", dev.SerialNumber, time.Now().Unix()),
-	}
-
-	if err := h.deviceService.GetCommandQueue().Push(c.Request.Context(), dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceAPI,
+	})
+	if err != nil {
 		h.logger.Error("failed to queue config sync command",
 			zap.String("device_id", id.String()),
 			zap.String("serial_number", dev.SerialNumber),
@@ -489,11 +491,11 @@ func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
 	h.logger.Info("config sync command queued",
 		zap.String("device_id", id.String()),
 		zap.String("serial_number", dev.SerialNumber),
-		zap.String("command_id", cmd.ID))
+		zap.String("command_id", created.ID))
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":    "configuration file sync command queued",
-		"command_id": cmd.ID,
+		"command_id": created.ID,
 		"file_type":  "11",
 	})
 }
@@ -965,20 +967,20 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 	addParams, _ := json.Marshal(map[string]interface{}{
 		"object_name": req.ObjectPath,
 	})
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	taskSvc := h.deviceService.GetTaskService()
+	if taskSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
+		return
+	}
+
+	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     "AddObject",
 		Params:     addParams,
 		Priority:   3,
 		CommandKey: fmt.Sprintf("add-object-%s", uuid.New().String()[:8]),
-	}
-
-	if h.deviceService.GetCommandQueue() == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
-		return
-	}
-
-	if err := h.deviceService.GetCommandQueue().Push(c.Request.Context(), dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -1040,20 +1042,20 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 	delParams, _ := json.Marshal(map[string]interface{}{
 		"object_name": req.ObjectPath,
 	})
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	taskSvc := h.deviceService.GetTaskService()
+	if taskSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
+		return
+	}
+
+	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     "DeleteObject",
 		Params:     delParams,
 		Priority:   3,
 		CommandKey: fmt.Sprintf("del-object-%s", uuid.New().String()[:8]),
-	}
-
-	if h.deviceService.GetCommandQueue() == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("command queue not configured"))
-		return
-	}
-
-	if err := h.deviceService.GetCommandQueue().Push(c.Request.Context(), dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}

@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // ConformanceTestRunner executes predefined interop conformance test cases
@@ -22,7 +21,7 @@ type ConformanceTestRunner struct {
 	deviceRepo   device.DeviceRepository
 	paramRepo    device.DeviceParameterRepository
 	dataModelReg *datamodel.DataModelRegistry
-	cmdQueue     cmdqueue.CommandQueue
+	taskSvc      task.Enqueuer
 	logger       *zap.Logger
 }
 
@@ -31,7 +30,7 @@ func NewConformanceTestRunner(
 	deviceRepo device.DeviceRepository,
 	paramRepo device.DeviceParameterRepository,
 	dataModelReg *datamodel.DataModelRegistry,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc task.Enqueuer,
 	logger *zap.Logger,
 ) *ConformanceTestRunner {
 	return &ConformanceTestRunner{
@@ -39,7 +38,7 @@ func NewConformanceTestRunner(
 		deviceRepo:   deviceRepo,
 		paramRepo:    paramRepo,
 		dataModelReg: dataModelReg,
-		cmdQueue:     cmdQueue,
+		taskSvc:      taskSvc,
 		logger:       logger.Named("conformance-runner"),
 	}
 }
@@ -305,23 +304,22 @@ func (r *ConformanceTestRunner) executeSendRPC(ctx context.Context, dev *model.D
 		return fmt.Errorf("marshal rpc params: %w", err)
 	}
 
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	created, err := r.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     method,
 		Params:     paramsJSON,
 		Priority:   5,
-		CreatedAt:  time.Now(),
 		CommandKey: fmt.Sprintf("interop-%s-%s", dev.SerialNumber, method),
-	}
-
-	if err := r.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceSystem,
+	})
+	if err != nil {
 		return fmt.Errorf("enqueue %s command: %w", method, err)
 	}
 
 	r.logger.Info("interop RPC command enqueued",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("method", method),
-		zap.String("command_id", cmd.ID),
+		zap.String("command_id", created.ID),
 	)
 	return nil
 }
@@ -332,7 +330,7 @@ func (r *ConformanceTestRunner) executeVerifyResponse(ctx context.Context, dev *
 
 	switch check {
 	case "command_queued":
-		qLen, err := r.cmdQueue.Len(ctx, dev.SerialNumber)
+		qLen, err := r.taskSvc.GetQueueLength(ctx, dev.SerialNumber)
 		if err != nil {
 			return fmt.Errorf("check command queue length: %w", err)
 		}

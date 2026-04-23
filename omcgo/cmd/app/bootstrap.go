@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
@@ -18,7 +17,6 @@ import (
 type appInfra struct {
 	*components.Infra
 	Carriers *carrier.CarrierRegistry
-	CmdQueue cmdqueue.CommandQueue
 	TaskSvc  *task.TaskService
 }
 
@@ -53,11 +51,11 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	app := &appInfra{Infra: inf}
 	app.registerCarriers()
 
-	// 创建统一任务队列：TaskService（Redis + PG） + BridgeQueue 适配器
+	// 创建统一任务队列：TaskService（Redis + PG 双写）。
+	// 业务模块直连 TaskService.CreateTask；旧的 cmdqueue 兼容适配层已下线。
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
-	app.CmdQueue = task.NewBridgeQueue(app.TaskSvc)
 
 	return app, nil
 }

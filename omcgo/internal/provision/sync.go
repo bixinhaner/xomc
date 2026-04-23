@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
+
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +23,8 @@ import (
 type SyncService struct {
 	paramRepo     device.DeviceParameterRepository
 	discoveryRepo ParameterDiscoveryLogRepository
-	cmdQueue      cmdqueue.CommandQueue
+	taskSvc       task.Enqueuer
+	planStore     *SyncPlanStore
 	config        appconfig.AutoSyncConfig
 	batchSize     int
 	logger        *zap.Logger
@@ -32,7 +34,8 @@ type SyncService struct {
 func NewSyncService(
 	paramRepo device.DeviceParameterRepository,
 	discoveryRepo ParameterDiscoveryLogRepository,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc task.Enqueuer,
+	planStore *SyncPlanStore,
 	config appconfig.AutoSyncConfig,
 	batchSize int,
 	logger *zap.Logger,
@@ -43,7 +46,8 @@ func NewSyncService(
 	return &SyncService{
 		paramRepo:     paramRepo,
 		discoveryRepo: discoveryRepo,
-		cmdQueue:      cmdQueue,
+		taskSvc:       taskSvc,
+		planStore:     planStore,
 		config:        config,
 		batchSize:     batchSize,
 		logger:        logger,
@@ -69,15 +73,14 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 			return fmt.Errorf("marshal GPV batch %d: %w", i, err)
 		}
 
-		cmd := &cmdqueue.Command{
-			ID:         uuid.New().String(),
+		if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   dev.SerialNumber,
 			Method:     MethodGetParameterValues,
 			Params:     gpvParams,
 			Priority:   10 + i, // Lower priority than discovery commands.
 			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", dev.SerialNumber, i),
-		}
-
-		if err := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+			Source:     task.TaskSourceSystem,
+		}); err != nil {
 			return fmt.Errorf("enqueue GPV batch %d: %w", i, err)
 		}
 	}
@@ -151,14 +154,14 @@ func (s *SyncService) StartTwoPhaseSync(ctx context.Context, dev *model.Device, 
 			return fmt.Errorf("marshal GPN %d: %w", i, err)
 		}
 
-		cmd := &cmdqueue.Command{
-			ID:         uuid.New().String(),
+		if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   dev.SerialNumber,
 			Method:     "GetParameterNames",
 			Params:     gpnParams,
 			Priority:   5 + i,
 			CommandKey: fmt.Sprintf("sync-gpn-%s-%d", dev.SerialNumber, i),
-		}
-		if err := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+			Source:     task.TaskSourceSystem,
+		}); err != nil {
 			return fmt.Errorf("enqueue GPN %d: %w", i, err)
 		}
 	}
@@ -242,14 +245,14 @@ func (s *SyncService) HandleGPNResult(ctx context.Context, dev *model.Device,
 					"path":       gpn.BasePath,
 					"next_level": true,
 				})
-				cmd := &cmdqueue.Command{
-					ID:         uuid.New().String(),
+				if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+					DeviceSN:   dev.SerialNumber,
 					Method:     "GetParameterNames",
 					Params:     gpnParams,
 					Priority:   5 + i,
 					CommandKey: fmt.Sprintf("sync-gpn-%s-d%d-%d", dev.SerialNumber, state.CurrentDepth, i),
-				}
-				if err := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+					Source:     task.TaskSourceSystem,
+				}); err != nil {
 					s.logger.Error("enqueue depth GPN", zap.Error(err))
 				}
 			}
@@ -298,14 +301,14 @@ func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device,
 			return fmt.Errorf("marshal GPV prefix batch %d: %w", i, err)
 		}
 
-		cmd := &cmdqueue.Command{
-			ID:         uuid.New().String(),
+		if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   dev.SerialNumber,
 			Method:     MethodGetParameterValues,
 			Params:     gpvParams,
 			Priority:   10 + i,
 			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", dev.SerialNumber, i),
-		}
-		if err := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+			Source:     task.TaskSourceSystem,
+		}); err != nil {
 			return fmt.Errorf("enqueue GPV batch %d: %w", i, err)
 		}
 	}
@@ -408,38 +411,31 @@ func buildGPVPrefixesFromState(state syncPlanState) []string {
 	return prefixes
 }
 
-// Redis key helpers for sync plan state.
-func syncPlanKey(deviceSN string) string {
-	return fmt.Sprintf("provision:sync_plan:%s", deviceSN)
-}
+// Sync plan state helpers delegate to SyncPlanStore (plain Redis STRING + TTL).
 
 func (s *SyncService) saveSyncPlan(ctx context.Context, deviceSN string, data []byte) {
-	// Clear old entries first — Redis Sorted Set members are keyed by their
-	// JSON content, so updating Params creates a new member instead of
-	// replacing the old one. Without clearing, Peek always returns the
-	// stale original plan.
-	_ = s.cmdQueue.Clear(ctx, syncPlanKey(deviceSN))
-
-	planCmd := &cmdqueue.Command{
-		ID:         "sync-plan",
-		Method:     "__sync_plan__",
-		Params:     data,
-		Priority:   -1, // Won't be popped by normal processing.
-		CommandKey: syncPlanKey(deviceSN),
+	if s.planStore == nil {
+		return
 	}
-	_ = s.cmdQueue.Push(ctx, syncPlanKey(deviceSN), planCmd)
+	if err := s.planStore.Save(ctx, deviceSN, data); err != nil {
+		s.logger.Warn("save sync plan", zap.String("device_sn", deviceSN), zap.Error(err))
+	}
 }
 
 func (s *SyncService) loadSyncPlan(ctx context.Context, deviceSN string) []byte {
-	cmd, _ := s.cmdQueue.Peek(ctx, syncPlanKey(deviceSN))
-	if cmd != nil && cmd.Method == "__sync_plan__" {
-		return cmd.Params
+	if s.planStore == nil {
+		return nil
 	}
-	return nil
+	return s.planStore.Load(ctx, deviceSN)
 }
 
 func (s *SyncService) clearSyncPlan(ctx context.Context, deviceSN string) {
-	_ = s.cmdQueue.Clear(ctx, syncPlanKey(deviceSN))
+	if s.planStore == nil {
+		return
+	}
+	if err := s.planStore.Clear(ctx, deviceSN); err != nil {
+		s.logger.Warn("clear sync plan", zap.String("device_sn", deviceSN), zap.Error(err))
+	}
 }
 
 // CompleteSyncLog marks the discovery log as completed after all sync batches finish.

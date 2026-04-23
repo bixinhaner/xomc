@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/task"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -144,42 +144,24 @@ func (m *mockParamRepo) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID,
 	return []model.DeviceParameter{}, nil
 }
 
-// --- Mock CommandQueue ---
+// --- Mock task.Enqueuer ---
 
 type mockCmdQueue struct {
-	queues map[string][]*cmdqueue.Command
+	queues map[string][]*task.Task
 }
 
 func newMockCmdQueue() *mockCmdQueue {
-	return &mockCmdQueue{queues: make(map[string][]*cmdqueue.Command)}
+	return &mockCmdQueue{queues: make(map[string][]*task.Task)}
 }
 
-func (m *mockCmdQueue) Push(_ context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-	m.queues[deviceSN] = append(m.queues[deviceSN], cmd)
-	return nil
+func (m *mockCmdQueue) CreateTask(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	t := task.NewTask(req)
+	m.queues[req.DeviceSN] = append(m.queues[req.DeviceSN], t)
+	return t, nil
 }
-func (m *mockCmdQueue) Pop(_ context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	q := m.queues[deviceSN]
-	if len(q) == 0 {
-		return nil, nil
-	}
-	cmd := q[0]
-	m.queues[deviceSN] = q[1:]
-	return cmd, nil
-}
-func (m *mockCmdQueue) Peek(_ context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	q := m.queues[deviceSN]
-	if len(q) == 0 {
-		return nil, nil
-	}
-	return q[0], nil
-}
-func (m *mockCmdQueue) Len(_ context.Context, deviceSN string) (int64, error) {
+
+func (m *mockCmdQueue) GetQueueLength(_ context.Context, deviceSN string) (int64, error) {
 	return int64(len(m.queues[deviceSN])), nil
-}
-func (m *mockCmdQueue) Clear(_ context.Context, deviceSN string) error {
-	delete(m.queues, deviceSN)
-	return nil
 }
 
 // --- Tests ---
@@ -327,7 +309,7 @@ func TestRunByCategory_RPC(t *testing.T) {
 	}
 
 	// Verify commands were actually enqueued.
-	qLen, err := cmdQ.Len(context.Background(), dev.SerialNumber)
+	qLen, err := cmdQ.GetQueueLength(context.Background(), dev.SerialNumber)
 	require.NoError(t, err)
 	assert.Equal(t, int64(9), qLen, "should have 9 commands in the queue")
 }

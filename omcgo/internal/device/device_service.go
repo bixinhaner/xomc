@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/tracing"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
@@ -33,17 +33,12 @@ type DeviceService struct {
 	infoSyncer     *InfoSyncer
 	heartbeat      *HeartbeatMonitor
 	eventBus       event.EventBus
-	cmdQueue       CommandQueue
+	taskSvc        task.Enqueuer
 	connReq        ConnectionRequester
 	stunUpdater    StunAddressUpdater
 	cache          *DeviceCache
 	metrics        *DeviceMetrics
 	logger         *zap.Logger
-}
-
-// CommandQueue defines the interface for queuing RPC commands to devices.
-type CommandQueue interface {
-	Push(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error
 }
 
 // ConnectionRequester sends Connection Request to wake a CPE device.
@@ -73,9 +68,9 @@ func NewDeviceService(
 	}
 }
 
-// SetCommandQueue sets the ACS command queue for device operations.
-func (s *DeviceService) SetCommandQueue(q CommandQueue) {
-	s.cmdQueue = q
+// SetTaskService sets the unified task service used to enqueue RPC commands.
+func (s *DeviceService) SetTaskService(t task.Enqueuer) {
+	s.taskSvc = t
 }
 
 // SetConnectionRequester sets the connection request client.
@@ -124,25 +119,26 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 		return commonerrors.ErrNotFound
 	}
 
-	if s.cmdQueue == nil {
-		return fmt.Errorf("command queue not configured")
+	if s.taskSvc == nil {
+		return fmt.Errorf("task service not configured")
 	}
 
-	cmd := &cmdqueue.Command{
-		ID:       uuid.New().String(),
-		Method:   "Reboot",
-		Priority: 0, // highest priority
-	}
-	cmd.CommandKey = cmd.ID
-
-	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+	commandKey := uuid.New().String()
+	created, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   device.SerialNumber,
+		Method:     "Reboot",
+		Priority:   0, // highest priority
+		CommandKey: commandKey,
+		Source:     task.TaskSourceAPI,
+	})
+	if err != nil {
 		return fmt.Errorf("queue reboot command: %w", err)
 	}
 
 	s.logger.Info("reboot command queued",
 		zap.String("device_id", id.String()),
 		zap.String("serial_number", device.SerialNumber),
-		zap.String("command_id", cmd.ID),
+		zap.String("command_id", created.ID),
 	)
 
 	// Optionally trigger Connection Request to wake the device immediately
@@ -169,21 +165,21 @@ func (s *DeviceService) TriggerParamSync(ctx context.Context, deviceID uuid.UUID
 	if device == nil {
 		return commonerrors.ErrNotFound
 	}
-	if s.cmdQueue == nil {
-		return fmt.Errorf("command queue not configured")
+	if s.taskSvc == nil {
+		return fmt.Errorf("task service not configured")
 	}
 
 	paramsJSON, _ := json.Marshal(map[string]interface{}{
 		"ParameterNames": []string{"Device."},
 	})
-	cmd := &cmdqueue.Command{
-		ID:     uuid.New().String(),
-		Method: "GetParameterValues",
-		Params: paramsJSON,
-	}
-	cmd.CommandKey = cmd.ID
-
-	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+	commandKey := uuid.New().String()
+	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   device.SerialNumber,
+		Method:     "GetParameterValues",
+		Params:     paramsJSON,
+		CommandKey: commandKey,
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		return fmt.Errorf("queue param sync command: %w", err)
 	}
 
@@ -213,8 +209,8 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 	if device == nil {
 		return commonerrors.ErrNotFound
 	}
-	if s.cmdQueue == nil {
-		return fmt.Errorf("command queue not configured")
+	if s.taskSvc == nil {
+		return fmt.Errorf("task service not configured")
 	}
 
 	// RF switch value: "1" for enabled, "0" for disabled.
@@ -228,14 +224,14 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 			{"Name": "Device.Services.FAPService.1.FAPControl.LTE.AdminState", "Value": value},
 		},
 	})
-	cmd := &cmdqueue.Command{
-		ID:     uuid.New().String(),
-		Method: "SetParameterValues",
-		Params: rfParamsJSON,
-	}
-	cmd.CommandKey = cmd.ID
-
-	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+	commandKey := uuid.New().String()
+	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   device.SerialNumber,
+		Method:     "SetParameterValues",
+		Params:     rfParamsJSON,
+		CommandKey: commandKey,
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		return fmt.Errorf("queue RF switch command: %w", err)
 	}
 
@@ -263,8 +259,8 @@ func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, p
 		return commonerrors.ErrNotFound
 	}
 
-	if s.cmdQueue == nil {
-		return fmt.Errorf("command queue not configured")
+	if s.taskSvc == nil {
+		return fmt.Errorf("task service not configured")
 	}
 
 	// Build SPV parameter list.
@@ -289,15 +285,14 @@ func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, p
 		return fmt.Errorf("marshal SPV params: %w", err)
 	}
 
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   device.SerialNumber,
 		Method:     "SetParameterValues",
 		Params:     paramsJSON,
 		Priority:   5,
 		CommandKey: fmt.Sprintf("ui-spv-%s", uuid.New().String()[:8]),
-	}
-
-	if err := s.cmdQueue.Push(ctx, device.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceAPI,
+	}); err != nil {
 		return fmt.Errorf("queue SPV command: %w", err)
 	}
 
@@ -317,9 +312,9 @@ type ParameterValueItem struct {
 	Type  string `json:"type"`
 }
 
-// GetCommandQueue returns the command queue, or nil if not configured.
-func (s *DeviceService) GetCommandQueue() CommandQueue {
-	return s.cmdQueue
+// GetTaskService returns the task service, or nil if not configured.
+func (s *DeviceService) GetTaskService() task.Enqueuer {
+	return s.taskSvc
 }
 
 // SetMetrics attaches Prometheus metrics to the service.

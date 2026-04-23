@@ -9,18 +9,18 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
-	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/device"
+	devtask "github.com/omcgo/omcgo/internal/task"
 )
 
 // BackupExecutor subscribes to backup.task.created events and executes
-// backup tasks by pushing Upload commands to the device command queues.
+// backup tasks by pushing Upload commands to the unified device task queue.
 type BackupExecutor struct {
 	taskRepo   TaskRepository
 	deviceRepo device.DeviceRepository
-	cmdQueue   cmdqueue.CommandQueue
+	taskSvc    devtask.Enqueuer
 	connReq    *connreq.Client
 	eventBus   event.EventBus
 	logger     *zap.Logger
@@ -30,7 +30,7 @@ type BackupExecutor struct {
 func NewBackupExecutor(
 	taskRepo TaskRepository,
 	deviceRepo device.DeviceRepository,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc devtask.Enqueuer,
 	connReq *connreq.Client,
 	eventBus event.EventBus,
 	logger *zap.Logger,
@@ -38,7 +38,7 @@ func NewBackupExecutor(
 	return &BackupExecutor{
 		taskRepo:   taskRepo,
 		deviceRepo: deviceRepo,
-		cmdQueue:   cmdQueue,
+		taskSvc:    taskSvc,
 		connReq:    connReq,
 		eventBus:   eventBus,
 		logger:     logger.Named("backup-executor"),
@@ -124,12 +124,12 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 			e.logger.Warn("marshal upload params", zap.String("device_sn", targetSN), zap.Error(marshalErr))
 			continue
 		}
-		cmd := &cmdqueue.Command{
-			Method: "Upload",
-			Params: paramsJSON,
-		}
-
-		if err := e.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+		if _, err := e.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
+			DeviceSN: dev.SerialNumber,
+			Method:   "Upload",
+			Params:   paramsJSON,
+			Source:   devtask.TaskSourceSystem,
+		}); err != nil {
 			e.logger.Warn("push upload command",
 				zap.String("device_sn", dev.SerialNumber),
 				zap.Error(err))

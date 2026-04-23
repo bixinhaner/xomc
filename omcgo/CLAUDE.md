@@ -145,7 +145,7 @@ omcgo/
 │   │   ├── soap/                   #   SOAP 编解码
 │   │   ├── rpc/                    #   RPC 方法
 │   │   ├── connreq/                #   Connection Request
-│   │   ├── cmdqueue/               #   Redis 命令队列
+│   │   ├── rpc/                    #   RPC 方法与 Command（SOAP 渲染入参）
 │   │   └── auth/                   #   CPE 认证
 │   │
 │   ├── config/                     # F02: 数据模型与配置管理（业务域）
@@ -632,7 +632,7 @@ chore(deploy): 添加 ACS 引擎的 Dockerfile 和 K8s deployment
 | 阶段 | 目标 | 核心模块 |
 |------|------|---------|
 | **一：基础建设** | ACS 引擎能接收 Inform 并注册设备 | 项目脚手架, components 层, pkg/tr069, acs 基础, device 注册 |
-| **二：核心功能** | 完整设备管理和自动开站流程 | acs/rpc 全量方法, cmdqueue, connreq, datamodel, carrier(cmcc), provision |
+| **二：核心功能** | 完整设备管理和自动开站流程 | acs/rpc 全量方法, task 统一队列, connreq, datamodel, carrier(cmcc), provision |
 | **三：数据管线** | PM/告警/MR 数据全链路 | pm, kpi, alarm, mr, carrier(ctcc/cucc) |
 | **四：北向与规模化** | OSS 对接、10 万级验证、生产加固 | northbound, omcr 完整功能, 负载测试, TLS/认证/监控 |
 

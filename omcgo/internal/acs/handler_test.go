@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
@@ -81,35 +80,6 @@ func (m *acsHSessionStore) DeleteByID(ctx context.Context, sessionID string) err
 	delete(m.sessionsByID, sessionID)
 	return nil
 }
-
-type acsHCmdQueue struct {
-	mu    sync.Mutex
-	queue []*cmdqueue.Command
-	popFn func(ctx context.Context, deviceSN string) (*cmdqueue.Command, error)
-}
-
-func (m *acsHCmdQueue) Push(_ context.Context, _ string, cmd *cmdqueue.Command) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.queue = append(m.queue, cmd)
-	return nil
-}
-func (m *acsHCmdQueue) Pop(ctx context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	if m.popFn != nil {
-		return m.popFn(ctx, deviceSN)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.queue) == 0 {
-		return nil, nil
-	}
-	cmd := m.queue[0]
-	m.queue = m.queue[1:]
-	return cmd, nil
-}
-func (m *acsHCmdQueue) Peek(_ context.Context, _ string) (*cmdqueue.Command, error) { return nil, nil }
-func (m *acsHCmdQueue) Len(_ context.Context, _ string) (int64, error)              { return 0, nil }
-func (m *acsHCmdQueue) Clear(_ context.Context, _ string) error                     { return nil }
 
 type acsHEventBus struct {
 	mu        sync.Mutex

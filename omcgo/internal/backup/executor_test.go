@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	devtask "github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -102,24 +102,26 @@ func (m *execDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int6
 	return 0, nil
 }
 
+// execCmdQueue is the test stand-in for task.Enqueuer: it captures
+// CreateTask calls so assertions can inspect what was enqueued.
 type execCmdQueue struct {
 	pushed []struct {
 		DeviceSN string
-		Cmd      *cmdqueue.Command
+		Req      *devtask.CreateTaskRequest
 	}
 }
 
-func (m *execCmdQueue) Push(_ context.Context, deviceSN string, cmd *cmdqueue.Command) error {
+func (m *execCmdQueue) CreateTask(_ context.Context, req *devtask.CreateTaskRequest) (*devtask.Task, error) {
 	m.pushed = append(m.pushed, struct {
 		DeviceSN string
-		Cmd      *cmdqueue.Command
-	}{deviceSN, cmd})
-	return nil
+		Req      *devtask.CreateTaskRequest
+	}{req.DeviceSN, req})
+	return devtask.NewTask(req), nil
 }
-func (m *execCmdQueue) Pop(_ context.Context, _ string) (*cmdqueue.Command, error)  { return nil, nil }
-func (m *execCmdQueue) Peek(_ context.Context, _ string) (*cmdqueue.Command, error) { return nil, nil }
-func (m *execCmdQueue) Len(_ context.Context, _ string) (int64, error)              { return 0, nil }
-func (m *execCmdQueue) Clear(_ context.Context, _ string) error                     { return nil }
+
+func (m *execCmdQueue) GetQueueLength(_ context.Context, _ string) (int64, error) {
+	return int64(len(m.pushed)), nil
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -129,7 +131,7 @@ func newTestExecutor(taskRepo *execTaskRepo, deviceRepo *execDeviceRepo, cmdQ *e
 	return &BackupExecutor{
 		taskRepo:   taskRepo,
 		deviceRepo: deviceRepo,
-		cmdQueue:   cmdQ,
+		taskSvc:    cmdQ,
 		connReq:    nil,
 		eventBus:   event.NewChannelEventBus(16, zap.NewNop()),
 		logger:     zap.NewNop(),
@@ -212,13 +214,13 @@ func TestHandleTask_PushUploadCommand(t *testing.T) {
 	// Should have pushed 2 Upload commands
 	require.Len(t, cmdQ.pushed, 2)
 	assert.Equal(t, "SN001", cmdQ.pushed[0].DeviceSN)
-	assert.Equal(t, "Upload", cmdQ.pushed[0].Cmd.Method)
+	assert.Equal(t, "Upload", cmdQ.pushed[0].Req.Method)
 	assert.Equal(t, "SN002", cmdQ.pushed[1].DeviceSN)
-	assert.Equal(t, "Upload", cmdQ.pushed[1].Cmd.Method)
+	assert.Equal(t, "Upload", cmdQ.pushed[1].Req.Method)
 
 	// Verify file_type in params
 	var params map[string]interface{}
-	_ = json.Unmarshal(cmdQ.pushed[0].Cmd.Params, &params)
+	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
 	assert.Equal(t, "2", params["file_type"])
 }
 

@@ -59,7 +59,7 @@ func initSoftwareModule(c *Container) error {
 	firmwareRepo := software.NewPgFirmwareRepository(c.PgPool)
 	upgradeRepo := software.NewPgUpgradeTaskRepository(c.PgPool)
 	softwareService := software.NewSoftwareService(
-		firmwareRepo, upgradeRepo, c.DeviceRepo, c.CmdQueue, c.ConnReqClient,
+		firmwareRepo, upgradeRepo, c.DeviceRepo, c.TaskSvc, c.ConnReqClient,
 		c.MinIO, c.Cfg.MinIO.Buckets.Firmware, c.EventBus, logger,
 	)
 	if err := softwareService.Subscribe(c.EventBus); err != nil {
@@ -81,12 +81,12 @@ func initProvisionModule(c *Container) error {
 	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(c.PgPool)
 	provisionEngine := provision.NewProvisioningEngine(
 		provisionRepo, c.DeviceService, c.DMRegistry, c.TemplateService,
-		c.Carriers, c.CmdQueue, c.EventBus, c.Cfg.Provision, logger,
+		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 
 	if c.Cfg.Provision.ModelUpload.Enabled {
 		modelUploadSvc := provision.NewModelUploadService(
-			discoveryLogRepo, c.DMImporter, c.DMRegistry, c.CmdQueue,
+			discoveryLogRepo, c.DMImporter, c.DMRegistry, c.TaskSvc,
 			c.MinIO, c.Cfg.Provision.ModelUpload, logger,
 		)
 		provisionEngine.SetModelUploadService(modelUploadSvc)
@@ -94,8 +94,9 @@ func initProvisionModule(c *Container) error {
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
 	}
 	if c.Cfg.Provision.AutoSync.Enabled {
+		syncPlanStore := provision.NewSyncPlanStore(c.Redis)
 		syncSvc := provision.NewSyncService(
-			c.ParamRepo, discoveryLogRepo, c.CmdQueue,
+			c.ParamRepo, discoveryLogRepo, c.TaskSvc, syncPlanStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
 		)
 		provisionEngine.SetSyncService(syncSvc)
@@ -119,8 +120,8 @@ func initProvisionModule(c *Container) error {
 }
 
 // initTaskModule 初始化 F06 任务队列模块。
-// TaskService 核心已在 bootstrap 中创建（供 BridgeQueue 使用），
-// 此处仅添加运行时增强（指标、Connection Request）并注册 handler。
+// TaskService 核心已在 bootstrap 中创建，此处仅添加运行时增强
+// （指标、Connection Request）并注册 handler。
 func initTaskModule(c *Container) error {
 	logger := c.Logger.Named("task")
 
@@ -196,7 +197,7 @@ func initNorthboundModule(c *Container) error {
 func initInteropModule(c *Container) error {
 	logger := c.Logger.Named("interop")
 
-	testRunner := interop.NewConformanceTestRunner(c.DeviceRepo, c.ParamRepo, c.DMRegistry, c.CmdQueue, logger)
+	testRunner := interop.NewConformanceTestRunner(c.DeviceRepo, c.ParamRepo, c.DMRegistry, c.TaskSvc, logger)
 	testRunner.RegisterCases(cases.ProtocolCases())
 	testRunner.RegisterCases(cases.DataModelCases())
 	testRunner.RegisterCases(cases.RPCCases())
@@ -218,11 +219,11 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.syslogHandler = syslog.NewHandler(syslogRepo, logger)
 
 	// Config sync
-	c.miscDeps.syncHandler = config.NewSyncHandler(c.CmdQueue, logger)
+	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, logger)
 
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(c.PgPool)
-	fileService := filemanager.NewFileService(fileRepo, c.MinIO, c.Cfg.MinIO.Buckets.ConfigBackup, c.CmdQueue, logger)
+	fileService := filemanager.NewFileService(fileRepo, c.MinIO, c.Cfg.MinIO.Buckets.ConfigBackup, c.TaskSvc, logger)
 	c.miscDeps.fileHandler = filemanager.NewHandler(fileService, logger)
 	logger.Info("file manager module initialized")
 

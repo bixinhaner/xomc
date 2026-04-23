@@ -11,8 +11,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // FileService provides business logic for file management operations.
@@ -20,7 +20,7 @@ type FileService struct {
 	repo        FileRepository
 	minioClient *minio.Client
 	bucket      string
-	cmdQueue    cmdqueue.CommandQueue
+	taskSvc     task.Enqueuer
 	logger      *zap.Logger
 }
 
@@ -29,14 +29,14 @@ func NewFileService(
 	repo FileRepository,
 	minioClient *minio.Client,
 	bucket string,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc task.Enqueuer,
 	logger *zap.Logger,
 ) *FileService {
 	return &FileService{
 		repo:        repo,
 		minioClient: minioClient,
 		bucket:      bucket,
-		cmdQueue:    cmdQueue,
+		taskSvc:     taskSvc,
 		logger:      logger.Named("filemanager"),
 	}
 }
@@ -120,8 +120,8 @@ func (s *FileService) DeleteFile(ctx context.Context, id uuid.UUID) error {
 // DistributeFile queues download commands for the given devices.
 // Returns (succeeded, failed, error).
 func (s *FileService) DistributeFile(ctx context.Context, id uuid.UUID, deviceSNs []string) (int, int, error) {
-	if s.cmdQueue == nil {
-		return 0, 0, fmt.Errorf("command queue not configured")
+	if s.taskSvc == nil {
+		return 0, 0, fmt.Errorf("task service not configured")
 	}
 
 	mf, err := s.repo.GetByID(ctx, id)
@@ -129,25 +129,26 @@ func (s *FileService) DistributeFile(ctx context.Context, id uuid.UUID, deviceSN
 		return 0, 0, err
 	}
 
-	taskID := uuid.New().String()
+	distID := uuid.New().String()
 	downloadURL := fmt.Sprintf("%s/%s", s.bucket, mf.MinIOPath)
 	tr069FileType := mapFileTypeToTR069(mf.FileType)
 
 	var succeeded, failed int
 	for _, deviceSN := range deviceSNs {
 		params, _ := json.Marshal(map[string]string{
-			"CommandKey":     taskID,
+			"CommandKey":     distID,
 			"FileType":       tr069FileType,
 			"URL":            downloadURL,
 			"TargetFileName": mf.FileName,
 		})
-		cmd := &cmdqueue.Command{
+		if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   deviceSN,
 			Method:     "Download",
 			Params:     params,
 			Priority:   5,
-			CommandKey: fmt.Sprintf("dist-%s-%s", taskID, deviceSN),
-		}
-		if err := s.cmdQueue.Push(ctx, deviceSN, cmd); err != nil {
+			CommandKey: fmt.Sprintf("dist-%s-%s", distID, deviceSN),
+			Source:     task.TaskSourceAPI,
+		}); err != nil {
 			s.logger.Warn("push download command failed",
 				zap.String("device_sn", deviceSN),
 				zap.Error(err),
@@ -159,7 +160,7 @@ func (s *FileService) DistributeFile(ctx context.Context, id uuid.UUID, deviceSN
 	}
 
 	s.logger.Info("file distribution queued",
-		zap.String("task_id", taskID),
+		zap.String("dist_id", distID),
 		zap.String("file_id", mf.ID.String()),
 		zap.Int("succeeded", succeeded),
 		zap.Int("failed", failed),

@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +24,7 @@ type ModelUploadService struct {
 	discoveryRepo ParameterDiscoveryLogRepository
 	dmImporter    *datamodel.DataModelImporter
 	dmRegistry    *datamodel.DataModelRegistry
-	cmdQueue      cmdqueue.CommandQueue
+	taskSvc       task.Enqueuer
 	minioClient   *minio.Client
 	config        appconfig.ModelUploadConfig
 	logger        *zap.Logger
@@ -35,7 +35,7 @@ func NewModelUploadService(
 	discoveryRepo ParameterDiscoveryLogRepository,
 	dmImporter *datamodel.DataModelImporter,
 	dmRegistry *datamodel.DataModelRegistry,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc task.Enqueuer,
 	minioClient *minio.Client,
 	config appconfig.ModelUploadConfig,
 	logger *zap.Logger,
@@ -44,7 +44,7 @@ func NewModelUploadService(
 		discoveryRepo: discoveryRepo,
 		dmImporter:    dmImporter,
 		dmRegistry:    dmRegistry,
-		cmdQueue:      cmdQueue,
+		taskSvc:       taskSvc,
 		minioClient:   minioClient,
 		config:        config,
 		logger:        logger.Named("model-upload"),
@@ -79,15 +79,14 @@ func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.
 		return nil, fmt.Errorf("marshal upload params: %w", err)
 	}
 
-	cmd := &cmdqueue.Command{
-		ID:         uuid.New().String(),
+	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
 		Method:     "Upload",
 		Params:     uploadParams,
 		Priority:   1,
 		CommandKey: fmt.Sprintf("model-upload-%s", dev.SerialNumber),
-	}
-
-	if err := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+		Source:     task.TaskSourceSystem,
+	}); err != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, err.Error())
 		return nil, fmt.Errorf("enqueue Upload command: %w", err)
 	}

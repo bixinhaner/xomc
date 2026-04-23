@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
 // RPCHandler handles building requests and processing responses for a specific RPC method.
 type RPCHandler interface {
-	BuildRequest(cmd *cmdqueue.Command) ([]byte, error)
+	BuildRequest(cmd *Command) ([]byte, error)
 }
 
 // Dispatcher routes commands to the appropriate RPC handler and builds SOAP requests.
@@ -65,7 +64,7 @@ func (d *Dispatcher) Register(method string, handler RPCHandler) {
 
 // BuildRequest builds a SOAP request for the given command.
 // cwmpID is used as the SOAP Header cwmp:ID (distinct from CommandKey which is the RPC-level key).
-func (d *Dispatcher) BuildRequest(cmd *cmdqueue.Command, cwmpID string) ([]byte, error) {
+func (d *Dispatcher) BuildRequest(cmd *Command, cwmpID string) ([]byte, error) {
 	handler, ok := d.handlers[cmd.Method]
 	if !ok {
 		return nil, fmt.Errorf("unknown RPC method: %s", cmd.Method)
@@ -79,7 +78,7 @@ func (d *Dispatcher) BuildRequest(cmd *cmdqueue.Command, cwmpID string) ([]byte,
 
 type GetParameterValuesHandler struct{}
 
-func (h *GetParameterValuesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *GetParameterValuesHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		Names []string `json:"names"`
 	}
@@ -96,7 +95,7 @@ func (h *GetParameterValuesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte,
 
 type SetParameterValuesHandler struct{}
 
-func (h *SetParameterValuesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *SetParameterValuesHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		Values []struct {
 			Name  string `json:"name"`
@@ -126,7 +125,7 @@ func (h *SetParameterValuesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte,
 
 type GetParameterNamesHandler struct{}
 
-func (h *GetParameterNamesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *GetParameterNamesHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		Path      string `json:"path"`
 		NextLevel bool   `json:"next_level"`
@@ -143,7 +142,7 @@ func (h *GetParameterNamesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, 
 
 type AddObjectHandler struct{}
 
-func (h *AddObjectHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *AddObjectHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		ObjectName string `json:"object_name"`
 	}
@@ -156,7 +155,7 @@ func (h *AddObjectHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 
 type DeleteObjectHandler struct{}
 
-func (h *DeleteObjectHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *DeleteObjectHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		ObjectName string `json:"object_name"`
 	}
@@ -179,7 +178,7 @@ type DownloadHandler struct {
 	DownloadPass    string
 }
 
-func (h *DownloadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params soap.DownloadData
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse Download params: %w", err)
@@ -207,7 +206,7 @@ func (h *DownloadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 
 type UploadHandler struct{}
 
-func (h *UploadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *UploadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params soap.UploadData
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse Upload params: %w", err)
@@ -219,21 +218,21 @@ func (h *UploadHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
 
 type RebootHandler struct{}
 
-func (h *RebootHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *RebootHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	data := soap.RebootData{ID: cmd.CWMPID, CommandKey: cmd.CommandKey}
 	return soap.RenderResponse(soap.RebootTmpl, data)
 }
 
 type FactoryResetHandler struct{}
 
-func (h *FactoryResetHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *FactoryResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	data := soap.FactoryResetData{ID: cmd.CWMPID}
 	return soap.RenderResponse(soap.FactoryResetTmpl, data)
 }
 
 type GetParameterAttributesHandler struct{}
 
-func (h *GetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *GetParameterAttributesHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		Names []string `json:"names"`
 	}
@@ -250,7 +249,7 @@ func (h *GetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]b
 
 type SetParameterAttributesHandler struct{}
 
-func (h *SetParameterAttributesHandler) BuildRequest(cmd *cmdqueue.Command) ([]byte, error) {
+func (h *SetParameterAttributesHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	var params struct {
 		Attributes []struct {
 			Name               string   `json:"name"`

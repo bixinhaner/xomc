@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/stretchr/testify/assert"
@@ -151,12 +151,12 @@ func TestEnqueueSteps_Success(t *testing.T) {
 		{Order: 3, Method: MethodReboot, Params: json.RawMessage(`{"command_key": "provision-12345"}`)},
 	}
 
-	var pushed []*cmdqueue.Command
+	var pushed []*task.CreateTaskRequest
 	queue := &mockCommandQueue{
-		PushFn: func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-			assert.Equal(t, "TEST-DEVICE-SN", deviceSN)
-			pushed = append(pushed, cmd)
-			return nil
+		CreateFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+			assert.Equal(t, "TEST-DEVICE-SN", req.DeviceSN)
+			pushed = append(pushed, req)
+			return task.NewTask(req), nil
 		},
 	}
 
@@ -187,12 +187,12 @@ func TestEnqueueSteps_ErrorOnSecondStep(t *testing.T) {
 
 	callCount := 0
 	queue := &mockCommandQueue{
-		PushFn: func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
+		CreateFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
 			callCount++
 			if callCount == 2 {
-				return errors.New("redis CLUSTERDOWN")
+				return nil, errors.New("redis CLUSTERDOWN")
 			}
-			return nil
+			return task.NewTask(req), nil
 		},
 	}
 
@@ -206,9 +206,9 @@ func TestEnqueueSteps_ErrorOnSecondStep(t *testing.T) {
 
 func TestEnqueueSteps_EmptySteps(t *testing.T) {
 	queue := &mockCommandQueue{
-		PushFn: func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-			t.Fatal("Push should not be called for empty steps")
-			return nil
+		CreateFn: func(_ context.Context, _ *task.CreateTaskRequest) (*task.Task, error) {
+			t.Fatal("CreateTask should not be called for empty steps")
+			return nil, nil
 		},
 	}
 

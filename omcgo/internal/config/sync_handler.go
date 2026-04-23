@@ -7,22 +7,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // SyncHandler provides HTTP endpoints for configuration parameter sync operations.
 type SyncHandler struct {
-	cmdQueue cmdqueue.CommandQueue
-	logger   *zap.Logger
+	taskSvc task.Enqueuer
+	logger  *zap.Logger
 }
 
 // NewSyncHandler creates a new SyncHandler.
-func NewSyncHandler(cmdQueue cmdqueue.CommandQueue, logger *zap.Logger) *SyncHandler {
+func NewSyncHandler(taskSvc task.Enqueuer, logger *zap.Logger) *SyncHandler {
 	return &SyncHandler{
-		cmdQueue: cmdQueue,
-		logger:   logger.Named("config-sync"),
+		taskSvc: taskSvc,
+		logger:  logger.Named("config-sync"),
 	}
 }
 
@@ -79,12 +79,13 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 		return
 	}
 
-	cmd := &cmdqueue.Command{
-		Method: "SetParameterValues",
-		Params: params,
-	}
-
-	if err := h.cmdQueue.Push(c.Request.Context(), deviceID, cmd); err != nil {
+	created, err := h.taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN: deviceID,
+		Method:   "SetParameterValues",
+		Params:   params,
+		Source:   task.TaskSourceAPI,
+	})
+	if err != nil {
 		logger.L(c.Request.Context()).Error("push config command", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -93,7 +94,7 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "configuration push queued",
 		"device_id":  deviceID,
-		"command_id": cmd.ID,
+		"command_id": created.ID,
 	})
 }
 
@@ -117,12 +118,13 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 		return
 	}
 
-	cmd := &cmdqueue.Command{
-		Method: "GetParameterValues",
-		Params: params,
-	}
-
-	if err := h.cmdQueue.Push(c.Request.Context(), deviceID, cmd); err != nil {
+	created, err := h.taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+		DeviceSN: deviceID,
+		Method:   "GetParameterValues",
+		Params:   params,
+		Source:   task.TaskSourceAPI,
+	})
+	if err != nil {
 		logger.L(c.Request.Context()).Error("pull config command", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -131,7 +133,7 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "configuration pull queued",
 		"device_id":  deviceID,
-		"command_id": cmd.ID,
+		"command_id": created.ID,
 	})
 }
 
@@ -143,7 +145,7 @@ func (h *SyncHandler) GetSyncStatus(c *gin.Context) {
 		return
 	}
 
-	count, err := h.cmdQueue.Len(c.Request.Context(), deviceID)
+	count, err := h.taskSvc.GetQueueLength(c.Request.Context(), deviceID)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("get sync status", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)

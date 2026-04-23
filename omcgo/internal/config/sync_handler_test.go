@@ -13,59 +13,35 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
-// --- mock command queue ---
-
-type mockCommandQueue struct {
-	pushFn  func(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error
-	popFn   func(ctx context.Context, deviceSN string) (*cmdqueue.Command, error)
-	peekFn  func(ctx context.Context, deviceSN string) (*cmdqueue.Command, error)
-	lenFn   func(ctx context.Context, deviceSN string) (int64, error)
-	clearFn func(ctx context.Context, deviceSN string) error
+// fakeEnqueuer is an in-memory stand-in for task.TaskService suitable for
+// handler tests: it captures CreateTask calls and reports a configurable
+// queue depth. Only what task.Enqueuer requires is implemented.
+type fakeEnqueuer struct {
+	createFn func(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error)
+	lenFn    func(ctx context.Context, deviceSN string) (int64, error)
 }
 
-func (m *mockCommandQueue) Push(ctx context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-	if m.pushFn != nil {
-		return m.pushFn(ctx, deviceSN, cmd)
+func (f *fakeEnqueuer) CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	if f.createFn != nil {
+		return f.createFn(ctx, req)
 	}
-	return nil
+	return task.NewTask(req), nil
 }
 
-func (m *mockCommandQueue) Pop(ctx context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	if m.popFn != nil {
-		return m.popFn(ctx, deviceSN)
-	}
-	return nil, nil
-}
-
-func (m *mockCommandQueue) Peek(ctx context.Context, deviceSN string) (*cmdqueue.Command, error) {
-	if m.peekFn != nil {
-		return m.peekFn(ctx, deviceSN)
-	}
-	return nil, nil
-}
-
-func (m *mockCommandQueue) Len(ctx context.Context, deviceSN string) (int64, error) {
-	if m.lenFn != nil {
-		return m.lenFn(ctx, deviceSN)
+func (f *fakeEnqueuer) GetQueueLength(ctx context.Context, deviceSN string) (int64, error) {
+	if f.lenFn != nil {
+		return f.lenFn(ctx, deviceSN)
 	}
 	return 0, nil
 }
 
-func (m *mockCommandQueue) Clear(ctx context.Context, deviceSN string) error {
-	if m.clearFn != nil {
-		return m.clearFn(ctx, deviceSN)
-	}
-	return nil
-}
-
-// helper: creates a gin engine with the sync handler routes registered.
-func setupRouter(queue cmdqueue.CommandQueue) *gin.Engine {
+func setupRouter(enq task.Enqueuer) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	handler := NewSyncHandler(queue, zap.NewNop())
+	handler := NewSyncHandler(enq, zap.NewNop())
 	handler.RegisterRoutes(&r.RouterGroup)
 	return r
 }
@@ -73,18 +49,16 @@ func setupRouter(queue cmdqueue.CommandQueue) *gin.Engine {
 // --- push config tests ---
 
 func TestSyncHandler_PushConfig_Success(t *testing.T) {
-	var capturedDeviceSN string
-	var capturedCmd *cmdqueue.Command
+	var capturedReq *task.CreateTaskRequest
 
-	queue := &mockCommandQueue{
-		pushFn: func(_ context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-			capturedDeviceSN = deviceSN
-			capturedCmd = cmd
-			return nil
+	enq := &fakeEnqueuer{
+		createFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+			capturedReq = req
+			return task.NewTask(req), nil
 		},
 	}
 
-	router := setupRouter(queue)
+	router := setupRouter(enq)
 
 	body := PushConfigRequest{
 		Parameters: []ParameterValue{
@@ -100,9 +74,9 @@ func TestSyncHandler_PushConfig_Success(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "DEV001", capturedDeviceSN)
-	require.NotNil(t, capturedCmd)
-	assert.Equal(t, "SetParameterValues", capturedCmd.Method)
+	require.NotNil(t, capturedReq)
+	assert.Equal(t, "DEV001", capturedReq.DeviceSN)
+	assert.Equal(t, "SetParameterValues", capturedReq.Method)
 
 	var respBody map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &respBody)
@@ -112,8 +86,7 @@ func TestSyncHandler_PushConfig_Success(t *testing.T) {
 }
 
 func TestSyncHandler_PushConfig_MissingDevice(t *testing.T) {
-	queue := &mockCommandQueue{}
-	router := setupRouter(queue)
+	router := setupRouter(&fakeEnqueuer{})
 
 	body := PushConfigRequest{
 		Parameters: []ParameterValue{
@@ -122,7 +95,6 @@ func TestSyncHandler_PushConfig_MissingDevice(t *testing.T) {
 	}
 	bodyBytes, _ := json.Marshal(body)
 
-	// POST to /config/sync/push/ without device ID -- the router won't match this route
 	req := httptest.NewRequest(http.MethodPost, "/config/sync/push/", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -134,10 +106,8 @@ func TestSyncHandler_PushConfig_MissingDevice(t *testing.T) {
 }
 
 func TestSyncHandler_PushConfig_InvalidBody(t *testing.T) {
-	queue := &mockCommandQueue{}
-	router := setupRouter(queue)
+	router := setupRouter(&fakeEnqueuer{})
 
-	// Send invalid JSON
 	req := httptest.NewRequest(http.MethodPost, "/config/sync/push/DEV001", bytes.NewReader([]byte(`{invalid`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -150,18 +120,16 @@ func TestSyncHandler_PushConfig_InvalidBody(t *testing.T) {
 // --- pull config tests ---
 
 func TestSyncHandler_PullConfig_Success(t *testing.T) {
-	var capturedDeviceSN string
-	var capturedCmd *cmdqueue.Command
+	var capturedReq *task.CreateTaskRequest
 
-	queue := &mockCommandQueue{
-		pushFn: func(_ context.Context, deviceSN string, cmd *cmdqueue.Command) error {
-			capturedDeviceSN = deviceSN
-			capturedCmd = cmd
-			return nil
+	enq := &fakeEnqueuer{
+		createFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+			capturedReq = req
+			return task.NewTask(req), nil
 		},
 	}
 
-	router := setupRouter(queue)
+	router := setupRouter(enq)
 
 	body := PullConfigRequest{
 		ParameterNames: []string{
@@ -178,9 +146,9 @@ func TestSyncHandler_PullConfig_Success(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "DEV001", capturedDeviceSN)
-	require.NotNil(t, capturedCmd)
-	assert.Equal(t, "GetParameterValues", capturedCmd.Method)
+	require.NotNil(t, capturedReq)
+	assert.Equal(t, "DEV001", capturedReq.DeviceSN)
+	assert.Equal(t, "GetParameterValues", capturedReq.Method)
 
 	var respBody map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &respBody)
@@ -190,10 +158,8 @@ func TestSyncHandler_PullConfig_Success(t *testing.T) {
 }
 
 func TestSyncHandler_PullConfig_InvalidBody(t *testing.T) {
-	queue := &mockCommandQueue{}
-	router := setupRouter(queue)
+	router := setupRouter(&fakeEnqueuer{})
 
-	// Send invalid JSON
 	req := httptest.NewRequest(http.MethodPost, "/config/sync/pull/DEV001", bytes.NewReader([]byte(`not-json`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -206,14 +172,14 @@ func TestSyncHandler_PullConfig_InvalidBody(t *testing.T) {
 // --- get sync status tests ---
 
 func TestSyncHandler_GetSyncStatus_Success(t *testing.T) {
-	queue := &mockCommandQueue{
+	enq := &fakeEnqueuer{
 		lenFn: func(_ context.Context, deviceSN string) (int64, error) {
 			assert.Equal(t, "DEV001", deviceSN)
 			return 5, nil
 		},
 	}
 
-	router := setupRouter(queue)
+	router := setupRouter(enq)
 
 	req := httptest.NewRequest(http.MethodGet, "/config/sync/status/DEV001", nil)
 	w := httptest.NewRecorder()

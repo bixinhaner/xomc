@@ -10,12 +10,12 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	devtask "github.com/omcgo/omcgo/internal/task"
 )
 
 // SoftwareService provides firmware upload and device upgrade functionality.
@@ -23,7 +23,7 @@ type SoftwareService struct {
 	firmwareRepo FirmwareRepository
 	upgradeRepo  UpgradeTaskRepository
 	deviceRepo   device.DeviceRepository
-	cmdQueue     cmdqueue.CommandQueue
+	taskSvc      devtask.Enqueuer
 	connReq      *connreq.Client
 	minioClient  *minio.Client
 	firmwareBkt  string
@@ -36,7 +36,7 @@ func NewSoftwareService(
 	firmwareRepo FirmwareRepository,
 	upgradeRepo UpgradeTaskRepository,
 	deviceRepo device.DeviceRepository,
-	cmdQueue cmdqueue.CommandQueue,
+	taskSvc devtask.Enqueuer,
 	connReq *connreq.Client,
 	minioClient *minio.Client,
 	firmwareBucket string,
@@ -47,7 +47,7 @@ func NewSoftwareService(
 		firmwareRepo: firmwareRepo,
 		upgradeRepo:  upgradeRepo,
 		deviceRepo:   deviceRepo,
-		cmdQueue:     cmdQueue,
+		taskSvc:      taskSvc,
 		connReq:      connReq,
 		minioClient:  minioClient,
 		firmwareBkt:  firmwareBucket,
@@ -139,12 +139,12 @@ func (s *SoftwareService) StartUpgrade(ctx context.Context, deviceID, firmwareID
 	if marshalErr != nil {
 		return nil, fmt.Errorf("marshal download params: %w", marshalErr)
 	}
-	cmd := &cmdqueue.Command{
-		Method: "Download",
-		Params: paramsJSON,
-	}
-
-	if err := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); err != nil {
+	if _, err := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
+		DeviceSN: dev.SerialNumber,
+		Method:   "Download",
+		Params:   paramsJSON,
+		Source:   devtask.TaskSourceSystem,
+	}); err != nil {
 		s.logger.Error("push download command", zap.Error(err))
 	}
 
@@ -227,11 +227,12 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, deviceIDs []uuid.UUI
 				if marshalErr != nil {
 					s.logger.Error("marshal batch download params", zap.Error(marshalErr))
 				} else {
-					cmd := &cmdqueue.Command{
-						Method: "Download",
-						Params: batchParamsJSON,
-					}
-					if pushErr := s.cmdQueue.Push(ctx, dev.SerialNumber, cmd); pushErr != nil {
+					if _, pushErr := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
+						DeviceSN: dev.SerialNumber,
+						Method:   "Download",
+						Params:   batchParamsJSON,
+						Source:   devtask.TaskSourceSystem,
+					}); pushErr != nil {
 						s.logger.Error("push batch download command", zap.String("device_sn", dev.SerialNumber), zap.Error(pushErr))
 					}
 				}

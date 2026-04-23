@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/config/template"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 const (
@@ -74,17 +74,17 @@ func BuildProvisioningSteps(tmpl *template.ConfigTemplate) ([]ProvisioningStep, 
 	return steps, nil
 }
 
-// EnqueueSteps pushes provisioning steps into the device's Redis command queue.
-func EnqueueSteps(ctx context.Context, deviceSN string, steps []ProvisioningStep, queue cmdqueue.CommandQueue) error {
+// EnqueueSteps pushes provisioning steps into the unified device task queue.
+func EnqueueSteps(ctx context.Context, deviceSN string, steps []ProvisioningStep, taskSvc task.Enqueuer) error {
 	for _, step := range steps {
-		cmd := &cmdqueue.Command{
+		if _, err := taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   deviceSN,
 			Method:     step.Method,
 			Params:     step.Params,
 			Priority:   step.Order,
 			CommandKey: fmt.Sprintf("provision-%s-%d", step.Method, step.Order),
-		}
-
-		if err := queue.Push(ctx, deviceSN, cmd); err != nil {
+			Source:     task.TaskSourceSystem,
+		}); err != nil {
 			return fmt.Errorf("enqueue step %d (%s) for %s: %w", step.Order, step.Method, deviceSN, err)
 		}
 	}
