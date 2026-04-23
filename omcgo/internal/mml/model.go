@@ -155,6 +155,7 @@ type TaskFilter struct {
 	Status      *TaskStatus
 	ExecuteType *ExecuteType
 	Result      *TaskResult
+	TaskName    *string // case-insensitive substring match on task_name
 	model.ListRequest
 }
 

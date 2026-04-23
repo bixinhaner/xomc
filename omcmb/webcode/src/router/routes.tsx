@@ -66,6 +66,7 @@ const PerfTaskConfig     = React.lazy(() => import('@/pages/performance/Performa
 // MML Management
 const MMLConsole         = React.lazy(() => import('@/pages/mml/Console'));
 const MMLScript          = React.lazy(() => import('@/pages/mml/ScriptTask'));
+const MMLTaskRecord      = React.lazy(() => import('@/pages/mml/TaskRecord'));
 const MMLCommands        = React.lazy(() => import('@/pages/mml/CommandTree'));
 
 // Topology Management
@@ -238,9 +239,10 @@ export const routes: RouteObject[] = [
       { path: 'performance/task-config',   element: withSuspense(PerfTaskConfig) },
 
       // MML Management
-      { path: 'mml/console',   element: withSuspense(MMLConsole) },
-      { path: 'mml/script',    element: withSuspense(MMLScript) },
-      { path: 'mml/commands',  element: withSuspense(MMLCommands) },
+      { path: 'mml/console',      element: withSuspense(MMLConsole) },
+      { path: 'mml/script',       element: withSuspense(MMLScript) },
+      { path: 'mml/task-records', element: withSuspense(MMLTaskRecord) },
+      { path: 'mml/commands',     element: withSuspense(MMLCommands) },
 
       // Topology Management
       { path: 'topology/gis-map',  element: withSuspense(GISMapView) },

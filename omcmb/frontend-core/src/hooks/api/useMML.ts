@@ -23,7 +23,9 @@ export function useAllMMLCommands() {
   });
 }
 
-export function useMMLScripts(params: PageRequest) {
+export function useMMLScripts(
+  params: PageRequest & { search?: string; deviceType?: string; creator?: string }
+) {
   return useQuery({
     queryKey: ['mml', 'scripts', params],
     queryFn: () => api.getScripts(params),

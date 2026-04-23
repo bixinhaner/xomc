@@ -23,6 +23,8 @@ const messages: Record<string, string> = {
   'common.finish':         '完成',
   'common.view':           '查看',
   'common.detail':         '详情',
+  'common.expand':         '展开',
+  'common.collapse':       '收起',
   'common.description':    '描述',
   'common.copy':           '复制',
   'common.copyFailed':     '复制失败',
@@ -223,9 +225,10 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: MML
   // -------------------------------------------------------------------------
-  'nav.mml.console':   'MML控制台',
-  'nav.mml.script':    '脚本任务',
-  'nav.mml.commands':  '命令树',
+  'nav.mml.console':    'MML控制台',
+  'nav.mml.script':     '脚本任务',
+  'nav.mml.taskRecord': '任务记录',
+  'nav.mml.commands':   '命令树',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Topology

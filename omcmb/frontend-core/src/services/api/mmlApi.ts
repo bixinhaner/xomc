@@ -386,11 +386,16 @@ export const mmlApi = {
 
   // --- Scripts ---
 
-  async getScripts(p: PageRequest): Promise<PageResponse<MMLScript>> {
+  async getScripts(
+    p: PageRequest & { search?: string; deviceType?: string; creator?: string }
+  ): Promise<PageResponse<MMLScript>> {
     const query: Record<string, unknown> = {
       page: p.page,
       page_size: p.pageSize,
     };
+    if (p.search) query.search = p.search;
+    if (p.deviceType) query.device_type = p.deviceType;
+    if (p.creator) query.creator = p.creator;
 
     const { data } = await http.get<BackendListResponse<BackendMMLScript>>(
       '/mml/scripts',

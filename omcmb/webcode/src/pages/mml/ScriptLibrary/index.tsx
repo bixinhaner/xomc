@@ -44,7 +44,7 @@ export default function ScriptLibrary() {
   const { data: scriptsData, isLoading: scriptsLoading, refetch: refetchScripts } = useMMLScripts({
     page: scriptPage,
     pageSize: scriptPageSize,
-    keyword: scriptSearch.trim() || undefined,
+    search: scriptSearch.trim() || undefined,
   });
   const deleteScriptsMutation = useDeleteMMLScripts();
 

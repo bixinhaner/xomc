@@ -23,6 +23,8 @@ const messages: Record<string, string> = {
   'common.finish':         'Finish',
   'common.view':           'View',
   'common.detail':         'Detail',
+  'common.expand':         'Expand',
+  'common.collapse':       'Collapse',
   'common.description':    'Description',
   'common.copy':           'Copy',
   'common.copyFailed':     'Copy failed',
@@ -222,9 +224,10 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: MML
   // -------------------------------------------------------------------------
-  'nav.mml.console':   'MML Console',
-  'nav.mml.script':    'Script Task',
-  'nav.mml.commands':  'Command Tree',
+  'nav.mml.console':    'MML Console',
+  'nav.mml.script':     'Script Task',
+  'nav.mml.taskRecord': 'Task Records',
+  'nav.mml.commands':   'Command Tree',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Topology

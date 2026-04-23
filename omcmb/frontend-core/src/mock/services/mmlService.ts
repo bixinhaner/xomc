@@ -121,9 +121,22 @@ export const mmlService = {
     return newItem;
   },
 
-  async getScripts(p: PageRequest): Promise<PageResponse<MMLScript>> {
+  async getScripts(
+    p: PageRequest & { search?: string; deviceType?: string; creator?: string }
+  ): Promise<PageResponse<MMLScript>> {
     await delay(80, 150);
-    return paginate(scripts, p.page, p.pageSize);
+    let filtered = scripts;
+    if (p.search) {
+      const kw = p.search.toLowerCase();
+      filtered = filtered.filter(
+        (s) =>
+          s.scriptName.toLowerCase().includes(kw) ||
+          (s.description ?? '').toLowerCase().includes(kw)
+      );
+    }
+    if (p.deviceType) filtered = filtered.filter((s) => s.deviceType === p.deviceType);
+    if (p.creator) filtered = filtered.filter((s) => s.creator === p.creator);
+    return paginate(filtered, p.page, p.pageSize);
   },
 
   async getScriptById(id: string): Promise<MMLScript | null> {
@@ -156,9 +169,19 @@ export const mmlService = {
     scripts = scripts.filter((s) => !ids.includes(s.id));
   },
 
-  async getTasks(p: PageRequest): Promise<PageResponse<MMLTask>> {
+  async getTasks(
+    p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
+  ): Promise<PageResponse<MMLTask>> {
     await delay(80, 150);
-    return paginate(tasks, p.page, p.pageSize);
+    let filtered = tasks;
+    if (p.status) filtered = filtered.filter((t) => t.status === p.status);
+    if (p.executeType) filtered = filtered.filter((t) => t.executeType === p.executeType);
+    if (p.result) filtered = filtered.filter((t) => t.result === p.result);
+    if (p.taskName) {
+      const kw = p.taskName.toLowerCase();
+      filtered = filtered.filter((t) => t.taskName.toLowerCase().includes(kw));
+    }
+    return paginate(filtered, p.page, p.pageSize);
   },
 
   async createTask(data: Omit<MMLTask, 'id' | 'status' | 'results' | 'createdAt' | 'updatedAt'>): Promise<MMLTask> {

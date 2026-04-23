@@ -689,6 +689,11 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 		base = base.Where(sq.Eq{"result": *filter.Result})
 		countBase = countBase.Where(sq.Eq{"result": *filter.Result})
 	}
+	if filter.TaskName != nil && *filter.TaskName != "" {
+		like := "%" + *filter.TaskName + "%"
+		base = base.Where(sq.ILike{"task_name": like})
+		countBase = countBase.Where(sq.ILike{"task_name": like})
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
