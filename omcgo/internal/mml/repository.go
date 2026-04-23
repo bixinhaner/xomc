@@ -19,6 +19,7 @@ type ScriptRepository interface {
 	Create(ctx context.Context, script *MMLScript) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error)
 	Update(ctx context.Context, script *MMLScript) error
+	UpdateLifecycle(ctx context.Context, script *MMLScript) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }

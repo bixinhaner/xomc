@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -316,6 +317,93 @@ func (s *Service) UpdateScript(ctx context.Context, id uuid.UUID, script *MMLScr
 // DeleteScript deletes an MML script by ID.
 func (s *Service) DeleteScript(ctx context.Context, id uuid.UUID) error {
 	return s.scriptRepo.Delete(ctx, id)
+}
+
+// ---- Script lifecycle (status machine) ----
+//
+// 合法迁移（仅脚本级生命周期域，不涉及 mml_tasks 创建）：
+//   active / archived / pending / paused / failed / cancelled  --Start-->  running
+//   running                                                   --Pause-->  paused
+//   pending / running / paused                                --Cancel-> cancelled
+// 已是 completed 的脚本不允许再 Start/Pause/Cancel；调用方应视作终态。
+
+func canTransition(from ScriptStatus, to ScriptStatus) bool {
+	switch to {
+	case ScriptRunning: // Start
+		switch from {
+		case ScriptActive, ScriptArchived, ScriptPending, ScriptPaused, ScriptFailed, ScriptCancelled:
+			return true
+		default: // running / completed 不能再 start
+			return false
+		}
+	case ScriptPaused: // Pause
+		return from == ScriptRunning
+	case ScriptCancelled: // Cancel
+		switch from {
+		case ScriptPending, ScriptRunning, ScriptPaused:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// StartScript 将脚本置为 running，并刷新 start_time / end_time / progress。
+func (s *Service) StartScript(ctx context.Context, id uuid.UUID) (*MMLScript, error) {
+	script, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml script: %w", err)
+	}
+	if !canTransition(script.Status, ScriptRunning) {
+		return nil, fmt.Errorf("cannot start script in status %q", script.Status)
+	}
+	now := time.Now()
+	script.Status = ScriptRunning
+	script.StartTime = &now
+	script.EndTime = nil
+	script.Progress = 0
+	if err := s.scriptRepo.UpdateLifecycle(ctx, script); err != nil {
+		return nil, fmt.Errorf("persist script start: %w", err)
+	}
+	s.logger.Info("mml script started", zap.String("script_id", id.String()))
+	return script, nil
+}
+
+// PauseScript 将 running 脚本置为 paused。
+func (s *Service) PauseScript(ctx context.Context, id uuid.UUID) (*MMLScript, error) {
+	script, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml script: %w", err)
+	}
+	if !canTransition(script.Status, ScriptPaused) {
+		return nil, fmt.Errorf("cannot pause script in status %q", script.Status)
+	}
+	script.Status = ScriptPaused
+	if err := s.scriptRepo.UpdateLifecycle(ctx, script); err != nil {
+		return nil, fmt.Errorf("persist script pause: %w", err)
+	}
+	s.logger.Info("mml script paused", zap.String("script_id", id.String()))
+	return script, nil
+}
+
+// CancelScript 将 pending/running/paused 脚本置为 cancelled，落 end_time。
+func (s *Service) CancelScript(ctx context.Context, id uuid.UUID) (*MMLScript, error) {
+	script, err := s.scriptRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml script: %w", err)
+	}
+	if !canTransition(script.Status, ScriptCancelled) {
+		return nil, fmt.Errorf("cannot cancel script in status %q", script.Status)
+	}
+	now := time.Now()
+	script.Status = ScriptCancelled
+	script.EndTime = &now
+	if err := s.scriptRepo.UpdateLifecycle(ctx, script); err != nil {
+		return nil, fmt.Errorf("persist script cancel: %w", err)
+	}
+	s.logger.Info("mml script cancelled", zap.String("script_id", id.String()))
+	return script, nil
 }
 
 // ListScripts returns a paginated list of MML scripts.

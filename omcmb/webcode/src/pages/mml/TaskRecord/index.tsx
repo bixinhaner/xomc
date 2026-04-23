@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Button, Modal, Space, Table, Tag, message } from 'antd';
-import { EyeOutlined, DownloadOutlined } from '@ant-design/icons';
+import { DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -158,12 +158,29 @@ export default function TaskRecord() {
     setPage(1);
   }, []);
 
+  // 删除任务：敏感操作，走 Modal.confirm 二次确认。
   const handleDelete = useCallback((task: MMLTask) => {
-    deleteTaskMutation.mutate(task.id, {
-      onSuccess: () => void message.success(t('mml.taskDeleted', { name: task.taskName })),
-      onError: (err) => void message.error(
-        t('mml.deleteFailed', { error: err instanceof Error ? err.message : 'Unknown' })
-      ),
+    Modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('mml.confirmDeleteTask', { name: task.taskName }),
+      okText: t('common.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: () =>
+        new Promise<void>((resolve, reject) => {
+          deleteTaskMutation.mutate(task.id, {
+            onSuccess: () => {
+              void message.success(t('mml.taskDeleted', { name: task.taskName }));
+              resolve();
+            },
+            onError: (err) => {
+              void message.error(
+                t('mml.deleteFailed', { error: err instanceof Error ? err.message : 'Unknown' })
+              );
+              reject(err);
+            },
+          });
+        }),
     });
   }, [deleteTaskMutation, t]);
 
@@ -214,7 +231,6 @@ export default function TaskRecord() {
           <Button
             type="link"
             size="small"
-            icon={<EyeOutlined />}
             onClick={() => setViewing(record)}
           >
             {t('common.view')}
@@ -328,7 +344,7 @@ export default function TaskRecord() {
   ], [t]);
 
   return (
-    <ListPageLayout title={t('nav.mml.taskRecord')}>
+    <ListPageLayout>
       <FilterBar
         filterId="mml-task-record"
         fields={filterFields}

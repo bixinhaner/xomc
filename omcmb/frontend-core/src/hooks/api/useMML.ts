@@ -105,6 +105,36 @@ export function useDeleteMMLScripts() {
   });
 }
 
+export function useStartMMLScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.startScript(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] });
+    },
+  });
+}
+
+export function usePauseMMLScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.pauseScript(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] });
+    },
+  });
+}
+
+export function useCancelMMLScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.cancelScript(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'scripts'] });
+    },
+  });
+}
+
 export function useCreateMMLTask() {
   const queryClient = useQueryClient();
   return useMutation({

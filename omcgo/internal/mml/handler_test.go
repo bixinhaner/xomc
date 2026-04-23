@@ -39,11 +39,12 @@ func (m *hCmdRepo) GetByCode(ctx context.Context, code string) (*MMLCommand, err
 }
 
 type hScriptRepo struct {
-	CreateFn  func(ctx context.Context, script *MMLScript) error
-	GetByIDFn func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
-	UpdateFn  func(ctx context.Context, script *MMLScript) error
-	DeleteFn  func(ctx context.Context, id uuid.UUID) error
-	ListFn    func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
+	CreateFn           func(ctx context.Context, script *MMLScript) error
+	GetByIDFn          func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
+	UpdateFn           func(ctx context.Context, script *MMLScript) error
+	UpdateLifecycleFn  func(ctx context.Context, script *MMLScript) error
+	DeleteFn           func(ctx context.Context, id uuid.UUID) error
+	ListFn             func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }
 
 func (m *hScriptRepo) Create(ctx context.Context, script *MMLScript) error {
@@ -54,6 +55,12 @@ func (m *hScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, er
 }
 func (m *hScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	return m.UpdateFn(ctx, script)
+}
+func (m *hScriptRepo) UpdateLifecycle(ctx context.Context, script *MMLScript) error {
+	if m.UpdateLifecycleFn != nil {
+		return m.UpdateLifecycleFn(ctx, script)
+	}
+	return nil
 }
 func (m *hScriptRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return m.DeleteFn(ctx, id)

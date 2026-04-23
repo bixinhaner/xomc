@@ -393,6 +393,45 @@ func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) erro
 	return nil
 }
 
+// UpdateLifecycle 只写生命周期相关列：status / start_time / end_time / progress / result。
+// 不动描述性字段（script_name / content / tags），避免生命周期变更意外覆盖人工编辑。
+func (r *PgScriptRepository) UpdateLifecycle(ctx context.Context, script *MMLScript) error {
+	resultJSON, err := json.Marshal(script.Result)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+	q := storage.Psql.Update("mml_scripts").
+		Set("status", script.Status).
+		Set("progress", script.Progress).
+		Set("result", resultJSON)
+
+	// start_time / end_time 允许 null，分别显式处理。
+	if script.StartTime != nil {
+		q = q.Set("start_time", *script.StartTime)
+	} else {
+		q = q.Set("start_time", nil)
+	}
+	if script.EndTime != nil {
+		q = q.Set("end_time", *script.EndTime)
+	} else {
+		q = q.Set("end_time", nil)
+	}
+
+	query, args, err := q.Where(sq.Eq{"id": script.ID}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_script lifecycle SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_script lifecycle: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgScriptRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query, args, err := storage.Psql.Delete("mml_scripts").
 		Where(sq.Eq{"id": id}).

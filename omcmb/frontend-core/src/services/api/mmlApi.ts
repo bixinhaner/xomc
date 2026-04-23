@@ -461,6 +461,23 @@ export const mmlApi = {
     }
   },
 
+  // --- Script lifecycle ---
+
+  async startScript(id: string): Promise<MMLScript> {
+    const { data } = await http.post<BackendMMLScript>(`/mml/scripts/${id}/start`);
+    return mapBackendScript(data);
+  },
+
+  async pauseScript(id: string): Promise<MMLScript> {
+    const { data } = await http.post<BackendMMLScript>(`/mml/scripts/${id}/pause`);
+    return mapBackendScript(data);
+  },
+
+  async cancelScript(id: string): Promise<MMLScript> {
+    const { data } = await http.post<BackendMMLScript>(`/mml/scripts/${id}/cancel`);
+    return mapBackendScript(data);
+  },
+
   // --- Tasks ---
 
   async getTasks(

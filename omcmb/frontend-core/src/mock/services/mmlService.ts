@@ -169,6 +169,40 @@ export const mmlService = {
     scripts = scripts.filter((s) => !ids.includes(s.id));
   },
 
+  async startScript(id: string): Promise<MMLScript> {
+    await delay(80, 150);
+    const idx = scripts.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error(`Script ${id} not found`);
+    scripts[idx] = {
+      ...scripts[idx],
+      status: 'running',
+      startTime: new Date().toISOString(),
+      endTime: undefined,
+      progress: 0,
+    };
+    return scripts[idx];
+  },
+
+  async pauseScript(id: string): Promise<MMLScript> {
+    await delay(80, 150);
+    const idx = scripts.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error(`Script ${id} not found`);
+    scripts[idx] = { ...scripts[idx], status: 'paused' };
+    return scripts[idx];
+  },
+
+  async cancelScript(id: string): Promise<MMLScript> {
+    await delay(80, 150);
+    const idx = scripts.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error(`Script ${id} not found`);
+    scripts[idx] = {
+      ...scripts[idx],
+      status: 'cancelled',
+      endTime: new Date().toISOString(),
+    };
+    return scripts[idx];
+  },
+
   async getTasks(
     p: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string }
   ): Promise<PageResponse<MMLTask>> {

@@ -43,11 +43,12 @@ func (m *mockCommandRepo) GetByCode(ctx context.Context, code string) (*MMLComma
 }
 
 type mockScriptRepo struct {
-	createFn  func(ctx context.Context, script *MMLScript) error
-	getByIDFn func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
-	updateFn  func(ctx context.Context, script *MMLScript) error
-	deleteFn  func(ctx context.Context, id uuid.UUID) error
-	listFn    func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
+	createFn          func(ctx context.Context, script *MMLScript) error
+	getByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
+	updateFn          func(ctx context.Context, script *MMLScript) error
+	updateLifecycleFn func(ctx context.Context, script *MMLScript) error
+	deleteFn          func(ctx context.Context, id uuid.UUID) error
+	listFn            func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }
 
 func (m *mockScriptRepo) Create(ctx context.Context, script *MMLScript) error {
@@ -67,6 +68,13 @@ func (m *mockScriptRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLScript,
 func (m *mockScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, script)
+	}
+	return nil
+}
+
+func (m *mockScriptRepo) UpdateLifecycle(ctx context.Context, script *MMLScript) error {
+	if m.updateLifecycleFn != nil {
+		return m.updateLifecycleFn(ctx, script)
 	}
 	return nil
 }

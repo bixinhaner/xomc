@@ -44,6 +44,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	scripts.GET("/:id", h.GetScript)
 	scripts.PUT("/:id", h.UpdateScript)
 	scripts.DELETE("/:id", h.DeleteScript)
+	scripts.POST("/:id/start", h.StartScript)
+	scripts.POST("/:id/pause", h.PauseScript)
+	scripts.POST("/:id/cancel", h.CancelScript)
 
 	tasks := mml.Group("/tasks")
 	tasks.GET("", h.ListTasks)
@@ -341,6 +344,51 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, updated)
+}
+
+// StartScript handles POST /api/v1/mml/scripts/:id/start.
+func (h *Handler) StartScript(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	script, err := h.service.StartScript(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, script)
+}
+
+// PauseScript handles POST /api/v1/mml/scripts/:id/pause.
+func (h *Handler) PauseScript(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	script, err := h.service.PauseScript(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, script)
+}
+
+// CancelScript handles POST /api/v1/mml/scripts/:id/cancel.
+func (h *Handler) CancelScript(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	script, err := h.service.CancelScript(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, script)
 }
 
 // DeleteScript handles DELETE /api/v1/mml/scripts/:id.

@@ -59,11 +59,23 @@ type MMLCommand struct {
 }
 
 // ScriptStatus represents the current state of an MML script.
+//
+// Two families of values:
+//   - 定义态: active / archived（脚本本身是否启用）
+//   - 执行态: pending / running / paused / completed / failed / cancelled
+//     （脚本最近一次执行的生命周期阶段，与 TaskStatus 对齐）
+// mml_scripts.status 列无 CHECK 约束，允许跨族流转。
 type ScriptStatus string
 
 const (
-	ScriptActive   ScriptStatus = "active"
-	ScriptArchived ScriptStatus = "archived"
+	ScriptActive    ScriptStatus = "active"
+	ScriptArchived  ScriptStatus = "archived"
+	ScriptPending   ScriptStatus = "pending"
+	ScriptRunning   ScriptStatus = "running"
+	ScriptPaused    ScriptStatus = "paused"
+	ScriptCompleted ScriptStatus = "completed"
+	ScriptFailed    ScriptStatus = "failed"
+	ScriptCancelled ScriptStatus = "cancelled"
 )
 
 // ScriptType defines how a script is categorized.

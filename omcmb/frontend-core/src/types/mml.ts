@@ -80,8 +80,23 @@ export interface DeviceTaskResultItem {
   finishedAt?: string;
 }
 
-export type MMLScriptStatus = 'active' | 'archived';
+// mml_scripts.status —— 数据库层面无 CHECK 约束，实际取值取决于脚本执行生命周期：
+//   active / archived 为"定义态"；pending / running / paused / completed /
+//   failed / cancelled 为"执行态"。UI 需按值渲染对应 Tag。
+export type MMLScriptStatus =
+  | 'active'
+  | 'archived'
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 export type MMLScriptType = 'manual' | 'batch';
+
+// mml_scripts.result 的聚合结果标识（前端显示用）。
+export type MMLScriptResult = 'success' | 'partial' | 'failed';
 
 export interface MMLScript {
   id: string;
