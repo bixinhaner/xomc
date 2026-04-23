@@ -42,8 +42,10 @@ func initAdminModule(c *Container) error {
 	apiKeySvc := admin.NewAPIKeyService(apiKeyRepo, userRepo, logger)
 	apiKeyHandler := admin.NewAPIKeyHandler(apiKeySvc)
 
-	// Casbin RBAC engine — in-memory permission evaluation
-	authorizer, err := admin.NewCasbinAuthorizer(c.PgPool, c.Redis, "configs/casbin_model.conf", logger)
+	// Casbin RBAC engine — in-memory permission evaluation.
+	// 策略变更广播走 NATS JetStream（sys.casbin.policy.reload），替代原
+	// Redis Pub/Sub，获得持久化 + 订阅者断线重连回放。
+	authorizer, err := admin.NewCasbinAuthorizer(c.PgPool, c.EventBus, "configs/casbin_model.conf", logger)
 	if err != nil {
 		logger.Warn("casbin init failed, falling back to SQL permission checks", zap.Error(err))
 	} else {

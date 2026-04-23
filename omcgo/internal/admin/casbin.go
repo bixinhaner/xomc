@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/event"
 )
 
 const casbinPolicyChannel = "casbin:policy:reload"
@@ -167,35 +169,33 @@ func (w *redisWatcher) Notify() error {
 // --- Enforcer ---
 
 // CasbinAuthorizer provides Casbin-based permission checking.
+// Watcher 接口化允许在 NATS（生产）和 Redis（历史兼容 / 测试）之间切换。
 type CasbinAuthorizer struct {
 	enforcer *casbin.Enforcer
 	adapter  *pgAdapter
-	watcher  *redisWatcher
+	watcher  persist.Watcher
 	logger   *zap.Logger
 }
 
-// NewCasbinAuthorizer creates and initializes the Casbin permission engine.
-func NewCasbinAuthorizer(pool *pgxpool.Pool, redisClient redis.UniversalClient, modelPath string, logger *zap.Logger) (*CasbinAuthorizer, error) {
-	// Load model from file
+// NewCasbinAuthorizer 通过 NATS JetStream（项目统一事件总线）广播策略变更。
+// bus 为 nil 时降级为 no-op watcher，策略同步退化为 StartPeriodicRefresh 的
+// 周期性全量刷新（单实例部署 / 单测场景可接受）。
+func NewCasbinAuthorizer(pool *pgxpool.Pool, bus event.EventBus, modelPath string, logger *zap.Logger) (*CasbinAuthorizer, error) {
 	m, err := casbinModel.NewModelFromFile(modelPath)
 	if err != nil {
 		return nil, fmt.Errorf("load casbin model: %w", err)
 	}
 
-	// Create adapter
 	adapter := newPgAdapter(pool)
 
-	// Create enforcer
 	enforcer, err := casbin.NewEnforcer(m, adapter)
 	if err != nil {
 		return nil, fmt.Errorf("create casbin enforcer: %w", err)
 	}
 
-	// Create watcher
-	watcher := newRedisWatcher(redisClient)
+	watcher := newNATSCasbinWatcher(bus, logger)
 	enforcer.SetWatcher(watcher)
 
-	// Set up reload callback
 	watcher.SetUpdateCallback(func(_ string) {
 		if err := enforcer.LoadPolicy(); err != nil {
 			logger.Error("casbin policy reload failed", zap.Error(err))
@@ -204,7 +204,6 @@ func NewCasbinAuthorizer(pool *pgxpool.Pool, redisClient redis.UniversalClient, 
 		}
 	})
 
-	// Start listening for updates
 	watcher.StartListener()
 
 	return &CasbinAuthorizer{
@@ -231,8 +230,9 @@ func (a *CasbinAuthorizer) ReloadPolicy() error {
 }
 
 // NotifyPolicyChange notifies all instances to reload policies.
+// Uses the standard persist.Watcher.Update() which maps to a broadcast publish.
 func (a *CasbinAuthorizer) NotifyPolicyChange() error {
-	return a.watcher.Notify()
+	return a.watcher.Update()
 }
 
 // Stop closes the watcher.

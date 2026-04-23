@@ -1,3 +1,16 @@
+// Package cmdqueue is Deprecated. 保留作为向后兼容层。
+//
+// 自 2026-04-22 起，所有生产 Push/Pop 路径通过 task.TaskService 写入 Redis
+// `acs:taskq:*` 族（Redis + PostgreSQL 双写，带任务状态机与 CWMP 反查），
+// 由 task.BridgeQueue 适配本接口透明转发；底层不再写入 `acs:cmdq:*`。
+//
+// 本包仍为若干 ACS 组件（rpc.Dispatcher 的 BuildRequest 族签名、provision /
+// software / backup / device 等模块的字段类型）提供 Command 数据结构与
+// CommandQueue 接口的类型锚。移除将随 docs/消息队列业务流转详细说明-20260422.md
+// §10 Roadmap "Phase 3 — 下线 cmdq" 一并执行（需把 Command 类型搬家到
+// task 或 acs 包，并改动 50+ 文件 import）。
+//
+// 新代码请直接使用 task.TaskService.CreateTask / PopTask。
 package cmdqueue
 
 import (
@@ -11,6 +24,9 @@ import (
 )
 
 // Command represents a queued RPC command for a device.
+//
+// Deprecated: 新代码请使用 task.Task。该类型保留仅为向下兼容，数据实际由
+// task.BridgeQueue 转换成 task.Task 写入统一队列。
 type Command struct {
 	ID         string          `json:"id"`
 	Method     string          `json:"method"`
@@ -23,6 +39,10 @@ type Command struct {
 }
 
 // CommandQueue defines the interface for device command queues.
+//
+// Deprecated: 新代码请使用 task.TaskService。当前生产实现是 task.BridgeQueue
+// 转发到 task.TaskService（Redis acs:taskq:* + PG device_tasks 双写）。
+// RedisCommandQueue 仅保留单测与历史回退入口，未在生产链路装配。
 type CommandQueue interface {
 	Push(ctx context.Context, deviceSN string, cmd *Command) error
 	Pop(ctx context.Context, deviceSN string) (*Command, error)

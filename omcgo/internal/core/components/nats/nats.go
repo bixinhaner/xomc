@@ -42,6 +42,7 @@ func DefaultStreams() []StreamDef {
 		{Name: "BACKUP", Subjects: []string{"backup.>"}},
 		{Name: "REPORT", Subjects: []string{"report.>"}},
 		{Name: "NEDIRECT", Subjects: []string{"nedirect.>"}},
+		{Name: "SYS", Subjects: []string{"sys.>"}},
 	}
 }
 

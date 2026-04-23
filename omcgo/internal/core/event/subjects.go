@@ -66,6 +66,23 @@ const (
 	SubjectDeviceRebootAbnormal = "device.reboot.abnormal"
 )
 
+// System-wide control-plane events
+//
+// sys.> 系统级控制通知事件。这些事件影响所有部署单元的全局状态（权限、
+// 配置热重载等），需要跨 app/acs/worker 广播。
+const (
+	// SubjectSysCasbinPolicyReload 是 Casbin RBAC 策略变更时发布。
+	// 各进程的 CasbinAuthorizer 订阅后调用 Enforcer.LoadPolicy() 从 PG
+	// 全量重载策略，实现多实例权限变更实时同步（取代原 Redis Pub/Sub
+	// casbin:policy:reload 通道，获得 JetStream 持久化 + 重连回放保证）。
+	//
+	// 发布者：admin.CasbinAuthorizer.NotifyPolicyChange（管理员通过 API
+	// 修改角色/权限/用户角色关系后）。
+	// 订阅者：所有运行 CasbinAuthorizer 的进程（app / 未来拆分到 acs/worker
+	// 的 RBAC 实例）。
+	SubjectSysCasbinPolicyReload = "sys.casbin.policy.reload"
+)
+
 // Command 请求型事件的 Subject 常量已移除（2026-04-22）：
 // 原先保留的 command.get_parameters / command.set_parameters / command.download /
 // command.upload / command.reboot / command.factory_reset 属于早期设计残留，
