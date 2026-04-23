@@ -1881,7 +1881,7 @@ const messages: Record<string, string> = {
   'alarm.filter.type.performance': 'Performance Alarm',
   'alarm.filter.type.security':'Security Alarm',
   'alarm.filter.type.environment': 'Environment Alarm',
-  'alarm.filter.alarmCode':    'Alarm Code',
+  'alarm.filter.alarmIdentifier':    'Alarm Code',
   'alarm.filter.countItems':   '{count} items',
   'alarm.filter.noLimit':      'No Limit',
 

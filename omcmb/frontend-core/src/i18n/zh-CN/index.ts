@@ -1888,7 +1888,7 @@ const messages: Record<string, string> = {
   'alarm.filter.type.performance': '性能告警',
   'alarm.filter.type.security':'安全告警',
   'alarm.filter.type.environment': '环境告警',
-  'alarm.filter.alarmCode':    '告警码',
+  'alarm.filter.alarmIdentifier':    '告警码',
   'alarm.filter.countItems':   '{count} 条',
   'alarm.filter.noLimit':      '不限',
 

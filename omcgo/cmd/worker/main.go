@@ -91,17 +91,30 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("PM collector started")
 
-	// Alarm Receiver
+	// Alarm Receiver + Sync
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)
 	alarmRedisStore := alarm.NewRedisAlarmStore(w.Redis)
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, w.Carriers, w.EventBus, logger)
 	alarmMetrics := alarm.NewAlarmMetrics(w.MetricsReg)
 	alarmEngine.SetMetrics(alarmMetrics)
-	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, logger)
+
+	// Alarm Sync Service (creates GPV tasks to query device alarms)
+	alarmSyncService := alarm.NewAlarmSyncService(w.TaskService, w.Redis, w.EventBus, logger)
+	if err := alarmSyncService.Subscribe(); err != nil {
+		logger.Warn("subscribe alarm sync service", zap.Error(err))
+	}
+
+	// Alarm Sync Processor (handles GPV responses, applies diff)
+	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, w.EventBus, logger)
+	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
+		logger.Warn("start alarm sync processor", zap.Error(err))
+	}
+
+	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, w.EventBus, logger)
 	if err := alarmReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
 	}
-	logger.Info("alarm receiver started")
+	logger.Info("alarm receiver + sync started")
 
 	// Frequent abnormal reboot monitor (F04)：滑动窗口内异常重启 >=阈值抬升告警。
 	rebootMonitor := alarm.NewRebootMonitor(alarmEngine, w.Redis, logger)

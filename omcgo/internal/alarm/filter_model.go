@@ -17,7 +17,7 @@ const (
 // 过滤类型常量
 const (
 	FilterTypeAlarmSource = "alarm_source"
-	FilterTypeAlarmCode   = "alarm_code"
+	FilterTypeAlarmIdentifier   = "alarm_identifier"
 	FilterTypeDeviceGroup = "device_group"
 	FilterTypeDevice      = "device"
 )
@@ -28,7 +28,7 @@ type AlarmFilterRule struct {
 	Name            string      `json:"name" db:"name"`
 	FilterType      string      `json:"filter_type" db:"filter_type"`
 	AlarmSources    []string    `json:"alarm_sources" db:"alarm_sources"`
-	AlarmCodes      []string    `json:"alarm_codes" db:"alarm_codes"`
+	AlarmIdentifiers      []string    `json:"alarm_identifiers" db:"alarm_identifiers"`
 	DeviceIDs       []uuid.UUID `json:"device_ids" db:"device_ids"`
 	DeviceGroupIDs  []uuid.UUID `json:"device_group_ids" db:"device_group_ids"`
 	Action          string      `json:"action" db:"action"`
@@ -54,7 +54,7 @@ type CreateAlarmFilterRuleRequest struct {
 	Name            string      `json:"name" binding:"required"`
 	FilterType      string      `json:"filter_type" binding:"required"`
 	AlarmSources    []string    `json:"alarm_sources"`
-	AlarmCodes      []string    `json:"alarm_codes"`
+	AlarmIdentifiers      []string    `json:"alarm_identifiers"`
 	DeviceIDs       []uuid.UUID `json:"device_ids"`
 	DeviceGroupIDs  []uuid.UUID `json:"device_group_ids"`
 	Action          string      `json:"action" binding:"required,oneof=default ignore auto_acknowledge auto_clear"`
@@ -68,7 +68,7 @@ type UpdateAlarmFilterRuleRequest struct {
 	Name            *string      `json:"name"`
 	FilterType      *string      `json:"filter_type"`
 	AlarmSources    []string     `json:"alarm_sources"`
-	AlarmCodes      []string     `json:"alarm_codes"`
+	AlarmIdentifiers      []string     `json:"alarm_identifiers"`
 	DeviceIDs       []uuid.UUID  `json:"device_ids"`
 	DeviceGroupIDs  []uuid.UUID  `json:"device_group_ids"`
 	Action          *string      `json:"action" binding:"omitempty,oneof=default ignore auto_acknowledge auto_clear"`

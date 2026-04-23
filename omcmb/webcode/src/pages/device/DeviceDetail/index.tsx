@@ -521,7 +521,7 @@ export default function DeviceDetail() {
           </Tag>
         ),
       },
-      { key: 'alarmCode', title: t('alarm.code'), dataIndex: 'alarmCode', width: 100, mono: true },
+      { key: 'alarmIdentifier', title: t('alarm.code'), dataIndex: 'alarmIdentifier', width: 100, mono: true },
       { key: 'alarmName', title: t('alarm.name'), dataIndex: 'alarmName', width: 180, ellipsis: true },
       { key: 'description', title: t('alarm.possibleCause'), dataIndex: 'description', width: 220, ellipsis: true },
       {

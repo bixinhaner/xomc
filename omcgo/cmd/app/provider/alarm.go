@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/omcgo/omcgo/internal/alarm"
+	"go.uber.org/zap"
 )
 
 // initAlarmModule 初始化 F04 告警管理模块。
@@ -16,6 +17,18 @@ func initAlarmModule(c *Container) error {
 	alarmPgStore := alarm.NewPgAlarmStore(c.PgPool, c.TsPool)
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, c.Carriers, c.EventBus, logger)
 	alarmEngine.SetMetrics(alarm.NewAlarmMetrics(c.MetricsReg))
+
+	// 告警同步服务
+	alarmSyncService := alarm.NewAlarmSyncService(c.TaskSvc, c.Redis, c.EventBus, logger)
+	if err := alarmSyncService.Subscribe(); err != nil {
+		logger.Warn("subscribe alarm sync service", zap.NamedError("err", err))
+	}
+
+	// 告警同步处理器
+	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, c.EventBus, logger)
+	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
+		logger.Warn("start alarm sync processor", zap.NamedError("err", err))
+	}
 
 	// 告警库仓储
 	alarmLibraryRepo := alarm.NewPgAlarmLibraryRepository(c.PgPool)
@@ -45,6 +58,7 @@ func initAlarmModule(c *Container) error {
 		alarmLibraryService:    alarmLibraryService,
 		alarmFilterRuleRepo:    alarmFilterRuleRepo,
 		dataPermissionChecker:  dataPermissionChecker,
+		alarmSyncService:       alarmSyncService,
 	}
 
 	logger.Info("alarm module initialized")
@@ -56,4 +70,5 @@ type alarmHandlerDeps struct {
 	alarmLibraryService   *alarm.LibraryService
 	alarmFilterRuleRepo   *alarm.PgAlarmFilterRuleRepository
 	dataPermissionChecker *alarm.DataPermissionChecker
+	alarmSyncService      *alarm.AlarmSyncService
 }

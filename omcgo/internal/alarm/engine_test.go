@@ -36,13 +36,23 @@ func (m *mockAlarmStore) GetActiveByID(_ context.Context, id uuid.UUID) (*model.
 	return a, nil
 }
 
-func (m *mockAlarmStore) GetActiveByDeviceAndCode(_ context.Context, deviceSN, alarmCode string) (*model.Alarm, error) {
+func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(_ context.Context, deviceSN, alarmIdentifier string) (*model.Alarm, error) {
 	for _, a := range m.active {
-		if a.DeviceSN == deviceSN && a.AlarmCode == alarmCode && a.Status != model.AlarmCleared {
+		if a.DeviceSN == deviceSN && a.AlarmIdentifier == alarmIdentifier && a.Status != model.AlarmCleared {
 			return a, nil
 		}
 	}
 	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockAlarmStore) GetActiveByDeviceSN(_ context.Context, deviceSN string) ([]*model.Alarm, error) {
+	var result []*model.Alarm
+	for _, a := range m.active {
+		if a.DeviceSN == deviceSN && a.Status != model.AlarmCleared {
+			result = append(result, a)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockAlarmStore) UpdateActive(_ context.Context, alarm *model.Alarm) error {
@@ -91,24 +101,14 @@ func (m *mockAlarmStore) Statistics(_ context.Context, _ AlarmFilter) (*AlarmSta
 	return stats, nil
 }
 
-func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
-	return nil
-}
-func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
-	return nil
-}
-func (m *mockAlarmStore) BatchUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error {
-	return nil
-}
-func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error {
-	return nil
-}
-func (m *mockAlarmStore) BatchHistoryDelete(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ AlarmFilter) (*AlarmStatistics, error) {
-	return &AlarmStatistics{}, nil
-}
-func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
+func (m *mockAlarmStore) BatchUnacknowledge(_ context.Context, _ []uuid.UUID) error                      { return nil }
+func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error         { return nil }
+func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
+func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error                { return nil }
+func (m *mockAlarmStore) BatchHistoryDelete(_ context.Context, _ []uuid.UUID) error                       { return nil }
+func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error                                    { return nil }
+func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ AlarmFilter) (*AlarmStatistics, error)     { return nil, nil }
 
 func newTestEngine(store AlarmStore) *AlarmEngine {
 	return &AlarmEngine{
@@ -125,7 +125,7 @@ func TestProcessNewAlarm(t *testing.T) {
 		DeviceSN:  "TEST001",
 		DeviceID:  uuid.New(),
 		Carrier:   model.CarrierCMCC,
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		AlarmType: "equipment",
 		Severity:  model.AlarmMajor,
 		RaisedAt:  time.Now(),
@@ -148,7 +148,7 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 		DeviceSN:  "TEST001",
 		DeviceID:  uuid.New(),
 		Carrier:   model.CarrierCMCC,
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		AlarmType: "equipment",
 		Severity:  model.AlarmMajor,
 		RaisedAt:  time.Now().Add(-10 * time.Minute),
@@ -159,7 +159,7 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 		DeviceSN:    "TEST001",
 		DeviceID:    alarm1.DeviceID,
 		Carrier:     model.CarrierCMCC,
-		AlarmCode:   "ALM001",
+		AlarmIdentifier:   "ALM001",
 		AlarmType:   "equipment",
 		Severity:    model.AlarmCritical,
 		RaisedAt:    time.Now(),
@@ -186,7 +186,7 @@ func TestAcknowledgeAlarm(t *testing.T) {
 		DeviceSN:  "TEST001",
 		DeviceID:  uuid.New(),
 		Carrier:   model.CarrierCMCC,
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		Severity:  model.AlarmMajor,
 		RaisedAt:  time.Now(),
 	}
@@ -197,8 +197,7 @@ func TestAcknowledgeAlarm(t *testing.T) {
 
 	stored := store.active[alarm.ID]
 	assert.Equal(t, model.AlarmAcknowledged, stored.Status)
-	require.NotNil(t, stored.AcknowledgedBy)
-	assert.Equal(t, "admin@test.com", *stored.AcknowledgedBy)
+	assert.Equal(t, "admin@test.com", stored.AcknowledgedBy)
 	assert.NotNil(t, stored.AcknowledgedAt)
 }
 
@@ -211,7 +210,7 @@ func TestAcknowledgeNonActiveAlarm(t *testing.T) {
 		DeviceSN:  "TEST001",
 		DeviceID:  uuid.New(),
 		Carrier:   model.CarrierCMCC,
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		Severity:  model.AlarmMajor,
 		RaisedAt:  time.Now(),
 	}
@@ -233,7 +232,7 @@ func TestClearAlarm(t *testing.T) {
 		DeviceSN:  "TEST001",
 		DeviceID:  uuid.New(),
 		Carrier:   model.CarrierCMCC,
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		Severity:  model.AlarmMajor,
 		RaisedAt:  time.Now(),
 	}
@@ -257,7 +256,7 @@ func TestAlarmFullLifecycle(t *testing.T) {
 		DeviceSN:  "TEST001",
 		DeviceID:  uuid.New(),
 		Carrier:   model.CarrierCMCC,
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		Severity:  model.AlarmMajor,
 		RaisedAt:  time.Now(),
 	}
@@ -283,7 +282,7 @@ func TestMultipleAlarmsDifferentCodes(t *testing.T) {
 			DeviceSN:  "TEST001",
 			DeviceID:  deviceID,
 			Carrier:   model.CarrierCMCC,
-			AlarmCode: code,
+			AlarmIdentifier: code,
 			Severity:  model.AlarmMajor,
 			RaisedAt:  time.Now(),
 		}

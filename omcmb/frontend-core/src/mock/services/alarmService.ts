@@ -32,7 +32,7 @@ let alarmRules: import('../../types/alarm').AlarmRule[] = [
     enabled: true,
     isDefault: false,
     userCode: 'admin',
-    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0002' }],
+    conditions: [{ field: 'alarmIdentifier', operator: 'eq', value: 'A0002' }],
     actions: [{ type: 'notify', target: '传输组' }],
     createTime: '2024-01-01T00:00:00.000Z',
     updateTime: '2024-04-01T00:00:00.000Z',
@@ -46,7 +46,7 @@ let alarmRules: import('../../types/alarm').AlarmRule[] = [
     enabled: false,
     isDefault: false,
     userCode: 'admin',
-    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0004' }, { field: 'description', operator: 'contains', value: '温度' }],
+    conditions: [{ field: 'alarmIdentifier', operator: 'eq', value: 'A0004' }, { field: 'description', operator: 'contains', value: '温度' }],
     actions: [{ type: 'suppress' }],
     createTime: '2024-03-01T00:00:00.000Z',
     updateTime: '2024-03-01T00:00:00.000Z',
@@ -60,7 +60,7 @@ let alarmRules: import('../../types/alarm').AlarmRule[] = [
     enabled: true,
     isDefault: false,
     userCode: 'admin',
-    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0010' }],
+    conditions: [{ field: 'alarmIdentifier', operator: 'eq', value: 'A0010' }],
     actions: [{ type: 'suppress' }],
     createTime: '2024-04-10T08:00:00.000Z',
     updateTime: '2024-05-12T10:30:00.000Z',
@@ -88,7 +88,7 @@ let alarmRules: import('../../types/alarm').AlarmRule[] = [
     enabled: false,
     isDefault: false,
     userCode: 'admin',
-    conditions: [{ field: 'alarmCode', operator: 'eq', value: 'A0020' }],
+    conditions: [{ field: 'alarmIdentifier', operator: 'eq', value: 'A0020' }],
     actions: [{ type: 'suppress' }],
     createTime: '2024-04-20T10:00:00.000Z',
     updateTime: '2024-04-20T10:00:00.000Z',
@@ -360,13 +360,13 @@ function applyAlarmFilter(items: Alarm[], filter: AlarmFilter): Alarm[] {
   }
 
   if (filter.deviceSn) result = result.filter((a) => a.deviceSn.includes(filter.deviceSn!));
-  if (filter.alarmCode) result = result.filter((a) => a.alarmCode.includes(filter.alarmCode!));
+  if (filter.alarmIdentifier) result = result.filter((a) => a.alarmIdentifier.includes(filter.alarmIdentifier!));
   if (filter.neType) result = result.filter((a) => a.neType === filter.neType);
 
   // 告警标识 - 精确查询
   if (filter.alarmIdentifier) {
     const identifier = filter.alarmIdentifier.toLowerCase();
-    result = result.filter((a) => a.alarmCode.toLowerCase() === identifier);
+    result = result.filter((a) => a.alarmIdentifier.toLowerCase() === identifier);
   }
 
   // 可能原因 - 模糊查询
@@ -585,9 +585,9 @@ export const alarmService = {
   async getAlarmLibraries(params: Record<string, unknown> & { page: number; pageSize: number }) {
     await delay(100, 200);
     const mockItems = [
-      { id: 'lib-001', alarmCode: 'ALM-0001', alarmSource: 'ENB', eventType: '30003', severity: 2, enabled: true, probableCause: 'CPU占用率超阈值', explanation: '可能导致系统性能下降', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-      { id: 'lib-002', alarmCode: 'ALM-0002', alarmSource: 'GNB', eventType: '30000', severity: 1, enabled: true, probableCause: '设备断连', explanation: '设备与网管系统失去连接', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-      { id: 'lib-003', alarmCode: 'ALM-0003', alarmSource: 'CPE', eventType: '30004', severity: 2, enabled: true, probableCause: '温度过高', explanation: '设备运行温度超过安全阈值', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+      { id: 'lib-001', alarmIdentifier: 'ALM-0001', alarmSource: 'ENB', eventType: '30003', severity: 2, enabled: true, probableCause: 'CPU占用率超阈值', explanation: '可能导致系统性能下降', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+      { id: 'lib-002', alarmIdentifier: 'ALM-0002', alarmSource: 'GNB', eventType: '30000', severity: 1, enabled: true, probableCause: '设备断连', explanation: '设备与网管系统失去连接', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+      { id: 'lib-003', alarmIdentifier: 'ALM-0003', alarmSource: 'CPE', eventType: '30004', severity: 2, enabled: true, probableCause: '温度过高', explanation: '设备运行温度超过安全阈值', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
     ];
     return { items: mockItems, total: mockItems.length, page: params.page, pageSize: params.pageSize };
   },

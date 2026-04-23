@@ -68,12 +68,12 @@ func (e *FilterEngine) match(alarm *model.Alarm, deviceID uuid.UUID, rule *Alarm
 		}
 		return false
 
-	case FilterTypeAlarmCode:
-		if len(rule.AlarmCodes) == 0 {
+	case FilterTypeAlarmIdentifier:
+		if len(rule.AlarmIdentifiers) == 0 {
 			return true
 		}
-		for _, code := range rule.AlarmCodes {
-			if code == alarm.AlarmCode {
+		for _, code := range rule.AlarmIdentifiers {
+			if code == alarm.AlarmIdentifier {
 				return true
 			}
 		}
@@ -106,7 +106,7 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 	switch rule.Action {
 	case FilterActionIgnore:
 		e.logger.Debug("alarm ignored by filter rule",
-			zap.String("alarm_code", alarm.AlarmCode),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
 			zap.String("rule_name", rule.Name))
 		return &ProcessResult{Handled: true, Action: FilterActionIgnore}, nil
 
@@ -116,14 +116,14 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 		alarm.AcknowledgedAt = &now
 		alarm.AcknowledgedBy = strPtr("system:auto_filter:" + rule.Name)
 		e.logger.Info("alarm auto-acknowledged by filter",
-			zap.String("alarm_code", alarm.AlarmCode),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
 			zap.String("rule_name", rule.Name),
 			zap.String("desc", rule.AcknowledgeDesc))
 		return &ProcessResult{Handled: true, Action: FilterActionAutoAcknowledge}, nil
 
 	case FilterActionAutoClear:
 		e.logger.Info("alarm auto-cleared by filter",
-			zap.String("alarm_code", alarm.AlarmCode),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
 			zap.String("rule_name", rule.Name))
 		return &ProcessResult{Handled: true, Action: FilterActionAutoClear}, nil
 

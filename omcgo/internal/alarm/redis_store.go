@@ -24,23 +24,23 @@ func alarmKey(deviceSN string) string {
 	return redisx.Keys.AlarmActive(deviceSN)
 }
 
-// Exists checks if an active alarm with the given code exists for the device.
-func (s *RedisAlarmStore) Exists(ctx context.Context, deviceSN, alarmCode string) (bool, error) {
-	return s.client.HExists(ctx, alarmKey(deviceSN), alarmCode).Result()
+// Exists checks if an active alarm with the given identifier exists for the device.
+func (s *RedisAlarmStore) Exists(ctx context.Context, deviceSN, alarmIdentifier string) (bool, error) {
+	return s.client.HExists(ctx, alarmKey(deviceSN), alarmIdentifier).Result()
 }
 
 // Set records an active alarm in Redis and refreshes the key TTL.
-func (s *RedisAlarmStore) Set(ctx context.Context, deviceSN, alarmCode, alarmID string) error {
+func (s *RedisAlarmStore) Set(ctx context.Context, deviceSN, alarmIdentifier, alarmID string) error {
 	key := alarmKey(deviceSN)
-	if err := s.client.HSet(ctx, key, alarmCode, alarmID).Err(); err != nil {
+	if err := s.client.HSet(ctx, key, alarmIdentifier, alarmID).Err(); err != nil {
 		return err
 	}
 	return s.client.Expire(ctx, key, alarmKeyTTL).Err()
 }
 
-// Get returns the alarm ID for a given device and alarm code.
-func (s *RedisAlarmStore) Get(ctx context.Context, deviceSN, alarmCode string) (string, error) {
-	val, err := s.client.HGet(ctx, alarmKey(deviceSN), alarmCode).Result()
+// Get returns the alarm ID for a given device and alarm identifier.
+func (s *RedisAlarmStore) Get(ctx context.Context, deviceSN, alarmIdentifier string) (string, error) {
+	val, err := s.client.HGet(ctx, alarmKey(deviceSN), alarmIdentifier).Result()
 	if err == redis.Nil {
 		return "", nil
 	}
@@ -48,8 +48,8 @@ func (s *RedisAlarmStore) Get(ctx context.Context, deviceSN, alarmCode string) (
 }
 
 // Delete removes an active alarm entry from Redis.
-func (s *RedisAlarmStore) Delete(ctx context.Context, deviceSN, alarmCode string) error {
-	return s.client.HDel(ctx, alarmKey(deviceSN), alarmCode).Err()
+func (s *RedisAlarmStore) Delete(ctx context.Context, deviceSN, alarmIdentifier string) error {
+	return s.client.HDel(ctx, alarmKey(deviceSN), alarmIdentifier).Err()
 }
 
 // GetAll returns all active alarm codes and IDs for a device.

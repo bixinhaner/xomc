@@ -90,7 +90,7 @@ func (h *FilterHandler) Create(c *gin.Context) {
 		Name:            req.Name,
 		FilterType:      req.FilterType,
 		AlarmSources:    req.AlarmSources,
-		AlarmCodes:      req.AlarmCodes,
+		AlarmIdentifiers:      req.AlarmIdentifiers,
 		DeviceIDs:       req.DeviceIDs,
 		DeviceGroupIDs:  req.DeviceGroupIDs,
 		Action:          req.Action,
@@ -104,8 +104,8 @@ func (h *FilterHandler) Create(c *gin.Context) {
 	if rule.AlarmSources == nil {
 		rule.AlarmSources = []string{}
 	}
-	if rule.AlarmCodes == nil {
-		rule.AlarmCodes = []string{}
+	if rule.AlarmIdentifiers == nil {
+		rule.AlarmIdentifiers = []string{}
 	}
 	if rule.DeviceIDs == nil {
 		rule.DeviceIDs = []uuid.UUID{}
@@ -146,8 +146,8 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	if req.AlarmSources != nil {
 		rule.AlarmSources = req.AlarmSources
 	}
-	if req.AlarmCodes != nil {
-		rule.AlarmCodes = req.AlarmCodes
+	if req.AlarmIdentifiers != nil {
+		rule.AlarmIdentifiers = req.AlarmIdentifiers
 	}
 	if req.DeviceIDs != nil {
 		rule.DeviceIDs = req.DeviceIDs

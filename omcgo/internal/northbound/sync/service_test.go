@@ -82,7 +82,7 @@ func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error {
 func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
 	return nil, nil
 }
-func (m *mockAlarmStore) GetActiveByDeviceAndCode(ctx context.Context, deviceSN, alarmCode string) (*model.Alarm, error) {
+func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN, alarmIdentifier string) (*model.Alarm, error) {
 	return nil, nil
 }
 func (m *mockAlarmStore) UpdateActive(ctx context.Context, a *model.Alarm) error { return nil }
@@ -97,6 +97,14 @@ func (m *mockAlarmStore) ListHistory(ctx context.Context, filter alarm.AlarmFilt
 func (m *mockAlarmStore) Statistics(ctx context.Context, filter alarm.AlarmFilter) (*alarm.AlarmStatistics, error) {
 	return &alarm.AlarmStatistics{}, nil
 }
+func (m *mockAlarmStore) BatchAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
+func (m *mockAlarmStore) BatchClear(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
+func (m *mockAlarmStore) HistoryStatistics(_ context.Context, _ alarm.AlarmFilter) (*alarm.AlarmStatistics, error) { return nil, nil }
+func (m *mockAlarmStore) BatchUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) BatchHistoryAcknowledge(_ context.Context, _ []uuid.UUID, _ string, _ string) error { return nil }
+func (m *mockAlarmStore) BatchHistoryUnacknowledge(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) BatchHistoryDelete(_ context.Context, _ []uuid.UUID) error { return nil }
+func (m *mockAlarmStore) MarkRead(_ context.Context, _ uuid.UUID) error { return nil }
 
 type mockCounterRepo struct {
 	counters []model.PMCounter
@@ -214,7 +222,7 @@ func TestFullSync_Alarm(t *testing.T) {
 		{
 			ID:        uuid.New(),
 			DeviceSN:  "SN001",
-			AlarmCode: "A001",
+			AlarmIdentifier: "A001",
 			Severity:  model.AlarmCritical,
 			Status:    model.AlarmActive,
 		},
@@ -280,7 +288,7 @@ func TestIncrementalSync_Alarm(t *testing.T) {
 		{
 			ID:        uuid.New(),
 			DeviceSN:  "SN001",
-			AlarmCode: "A002",
+			AlarmIdentifier: "A002",
 			Status:    model.AlarmActive,
 		},
 	}

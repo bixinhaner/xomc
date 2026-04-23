@@ -36,12 +36,12 @@ func (r *PgAlarmFilterRuleRepository) Create(ctx context.Context, rule *AlarmFil
 	query := storage.Psql.
 		Insert("alarm_filters").
 		Columns(
-			"id", "name", "filter_type", "alarm_sources", "alarm_codes",
+			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		Values(
-			rule.ID, rule.Name, rule.FilterType, rule.AlarmSources, rule.AlarmCodes,
+			rule.ID, rule.Name, rule.FilterType, rule.AlarmSources, rule.AlarmIdentifiers,
 			rule.DeviceIDs, rule.DeviceGroupIDs, rule.Action, rule.AcknowledgeDesc,
 			rule.Priority, rule.Enabled, rule.CreatedBy, rule.CreatedAt, rule.UpdatedBy, rule.UpdatedAt,
 		).
@@ -58,7 +58,7 @@ func (r *PgAlarmFilterRuleRepository) Create(ctx context.Context, rule *AlarmFil
 func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*AlarmFilterRule, error) {
 	query := storage.Psql.
 		Select(
-			"id", "name", "filter_type", "alarm_sources", "alarm_codes",
+			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
@@ -72,7 +72,7 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 
 	rule := &AlarmFilterRule{}
 	err = r.db.QueryRow(ctx, sql, args...).Scan(
-		&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmCodes,
+		&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
 		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc,
 		&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 	)
@@ -95,7 +95,7 @@ func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFil
 		Set("name", rule.Name).
 		Set("filter_type", rule.FilterType).
 		Set("alarm_sources", rule.AlarmSources).
-		Set("alarm_codes", rule.AlarmCodes).
+		Set("alarm_identifiers", rule.AlarmIdentifiers).
 		Set("device_ids", rule.DeviceIDs).
 		Set("device_group_ids", rule.DeviceGroupIDs).
 		Set("action", rule.Action).
@@ -148,7 +148,7 @@ func (r *PgAlarmFilterRuleRepository) Delete(ctx context.Context, id uuid.UUID) 
 func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilterRuleFilter) (*model.ListResponse[AlarmFilterRule], error) {
 	query := storage.Psql.
 		Select(
-			"id", "name", "filter_type", "alarm_sources", "alarm_codes",
+			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
@@ -185,7 +185,7 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 	for rows.Next() {
 		rule := AlarmFilterRule{}
 		err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmCodes,
+			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
 			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc,
 			&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 		)
@@ -258,7 +258,7 @@ func (r *PgAlarmFilterRuleRepository) Toggle(ctx context.Context, id uuid.UUID) 
 func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmFilterRule, error) {
 	query := storage.Psql.
 		Select(
-			"id", "name", "filter_type", "alarm_sources", "alarm_codes",
+			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
 			"device_ids", "device_group_ids", "action", "acknowledge_desc",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
@@ -281,7 +281,7 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 	for rows.Next() {
 		rule := AlarmFilterRule{}
 		err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmCodes,
+			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
 			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc,
 			&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 		)

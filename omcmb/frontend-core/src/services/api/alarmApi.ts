@@ -20,7 +20,7 @@ interface BackendAlarm {
   carrier: string;
   severity: number; // 1=Critical, 2=Major, 3=Minor, 4=Warning
   alarm_type: string;
-  alarm_code: string;
+  alarm_identifier: string;
   description: string;
   status: string; // active, acknowledged, cleared
   raised_at: string;
@@ -66,7 +66,7 @@ interface BackendAlarmStatistics {
 
 interface BackendAlarmLibrary {
   id: string;
-  alarm_code: string;
+  alarm_identifier: string;
   alarm_source: string;
   event_type: string;
   severity: number;
@@ -82,7 +82,7 @@ interface BackendAlarmLibrary {
 
 interface AlarmLibraryItem {
   id: string;
-  alarmCode: string;
+  alarmIdentifier: string;
   alarmSource: string;
   eventType: string;
   severity: number;
@@ -99,7 +99,7 @@ interface AlarmLibraryItem {
 function mapBackendLibrary(bl: BackendAlarmLibrary): AlarmLibraryItem {
   return {
     id: bl.id,
-    alarmCode: bl.alarm_code,
+    alarmIdentifier: bl.alarm_identifier,
     alarmSource: bl.alarm_source,
     eventType: bl.event_type,
     severity: bl.severity,
@@ -121,9 +121,9 @@ function mapBackendLibrary(bl: BackendAlarmLibrary): AlarmLibraryItem {
 interface BackendAlarmRule {
   id: string;
   name: string;
-  filter_type: string; // alarm_code | alarm_source | device | device_group
+  filter_type: string; // alarm_identifier | alarm_source | device | device_group
   alarm_sources: string[];
-  alarm_codes: string[];
+  alarm_identifiers: string[];
   device_ids: string[];
   device_group_ids: string[];
   action: string; // default | ignore | auto_acknowledge | auto_clear
@@ -153,6 +153,31 @@ const severityStrToNum: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Event type normalization: TR-069 raw values → frontend enum
+// ---------------------------------------------------------------------------
+
+const EVENT_TYPE_MAP: Record<string, Alarm['eventType']> = {
+  'communicationsalarm': 'communication',
+  'communications alarm': 'communication',
+  'qualityofservicealarm': 'qualityOfService',
+  'quality of service alarm': 'qualityOfService',
+  'processingerroralarm': 'processingError',
+  'processing error alarm': 'processingError',
+  'equipmentalarm': 'device',
+  'equipment alarm': 'device',
+  'environmentalarm': 'environment',
+  'environment alarm': 'environment',
+  'servicealarm': 'performance',
+  'service alarm': 'performance',
+};
+
+function normalizeEventType(raw: string | undefined): Alarm['eventType'] {
+  if (!raw) return 'communication';
+  const key = raw.toLowerCase().replace(/[\s-]/g, '');
+  return EVENT_TYPE_MAP[key] || 'communication';
+}
+
+// ---------------------------------------------------------------------------
 // Mappers
 // ---------------------------------------------------------------------------
 
@@ -172,8 +197,8 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
 
   return {
     id: ba.id,
-    alarmCode: ba.alarm_code,
-    alarmName: ba.probable_cause || ba.description || ba.alarm_code,
+    alarmIdentifier: ba.alarm_identifier,
+    alarmName: ba.probable_cause || ba.description || ba.alarm_identifier,
     specificProblem: ba.probable_cause || '',
     severity: (severityNumToStr[ba.severity] || 'warning') as Alarm['severity'],
     deviceSn: ba.device_sn,
@@ -181,7 +206,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     description: ba.description,
     neType: ba.technology || '',
     equipInfo: ba.device_name ? `${ba.device_name}(${ba.device_sn})` : ba.device_sn,
-    eventType: (ba.event_type || ba.alarm_type || '') as Alarm['eventType'],
+    eventType: normalizeEventType(ba.event_type || ba.alarm_type),
     dealState,
     eventTime: ba.raised_at,
     updTime: ba.updated_at,
@@ -224,11 +249,11 @@ function mapBackendAlarmRule(br: BackendAlarmRule): AlarmRule {
   // Derive frontend conditions from backend filter fields
   const conditions: AlarmRuleCondition[] = [];
 
-  if (br.alarm_codes.length > 0) {
+  if (br.alarm_identifiers.length > 0) {
     conditions.push({
-      field: 'alarm_code',
+      field: 'alarm_identifier',
       operator: 'contains',
-      value: br.alarm_codes,
+      value: br.alarm_identifiers,
     });
   }
 
@@ -321,8 +346,8 @@ function ruleToBackendPayload(
 
   // Extract conditions into backend fields
   const conditions = data.conditions || [];
-  const alarmCodes = conditions
-    .filter((c) => c.field === 'alarm_code')
+  const alarmIdentifiers = conditions
+    .filter((c) => c.field === 'alarm_identifier')
     .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]));
   const alarmSources = conditions
     .filter((c) => c.field === 'alarm_source')
@@ -334,7 +359,7 @@ function ruleToBackendPayload(
     .filter((c) => c.field === 'device_group_id')
     .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]));
 
-  if (alarmCodes.length > 0) payload.alarm_codes = alarmCodes;
+  if (alarmIdentifiers.length > 0) payload.alarm_identifiers = alarmIdentifiers;
   if (alarmSources.length > 0) payload.alarm_sources = alarmSources;
   if (deviceIds.length > 0) payload.device_ids = deviceIds;
   if (deviceGroupIds.length > 0) payload.device_group_ids = deviceGroupIds;
@@ -347,8 +372,8 @@ function ruleToBackendPayload(
   }
 
   // Determine filter_type from conditions
-  if (alarmCodes.length > 0) {
-    payload.filter_type = 'alarm_code';
+  if (alarmIdentifiers.length > 0) {
+    payload.filter_type = 'alarm_identifier';
   } else if (alarmSources.length > 0) {
     payload.filter_type = 'alarm_source';
   } else if (deviceGroupIds.length > 0) {
@@ -356,7 +381,7 @@ function ruleToBackendPayload(
   } else if (deviceIds.length > 0) {
     payload.filter_type = 'device';
   } else {
-    payload.filter_type = 'alarm_code';
+    payload.filter_type = 'alarm_identifier';
   }
 
   return payload;
@@ -557,12 +582,12 @@ export const alarmApi = {
 
   // -- Alarm libraries ----------------------------------------------------
 
-  async getAlarmLibraries(params: PageRequest & { alarmCode?: string; alarmSource?: string; severity?: string; eventType?: string; keyword?: string }): Promise<PageResponse<AlarmLibraryItem>> {
+  async getAlarmLibraries(params: PageRequest & { alarmIdentifier?: string; alarmSource?: string; severity?: string; eventType?: string; keyword?: string }): Promise<PageResponse<AlarmLibraryItem>> {
     const query: Record<string, unknown> = {
       page: params.page,
       pageSize: params.pageSize,
     };
-    if (params.alarmCode) query.alarm_code = params.alarmCode;
+    if (params.alarmIdentifier) query.alarm_identifier = params.alarmIdentifier;
     if (params.alarmSource) query.alarm_source = params.alarmSource;
     if (params.severity) query.severity = params.severity;
     if (params.eventType) query.event_type = params.eventType;
@@ -580,7 +605,7 @@ export const alarmApi = {
   },
 
   async createAlarmLibrary(payload: {
-    alarm_code: string;
+    alarm_identifier: string;
     alarm_source: string;
     event_type: string;
     severity: number;
@@ -614,5 +639,11 @@ export const alarmApi = {
 
   async deleteAlarmLibrary(id: string): Promise<void> {
     await http.delete(`/alarms/alarm-libraries/${id}`);
+  },
+
+  // -- Alarm sync ----------------------------------------------------------
+
+  async triggerAlarmSync(deviceSN: string): Promise<void> {
+    await http.post(`/alarms/sync/${deviceSN}`);
   },
 };

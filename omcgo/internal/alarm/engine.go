@@ -58,9 +58,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 		if err != nil {
 			e.logger.Warn("carrier not found, using original severity",
 				zap.String("carrier", string(alarm.Carrier)),
-				zap.String("alarm_code", alarm.AlarmCode))
+				zap.String("alarm_identifier", alarm.AlarmIdentifier))
 		} else {
-			mapped := c.AlarmSeverityMapping(alarm.AlarmCode)
+			mapped := c.AlarmSeverityMapping(alarm.AlarmIdentifier)
 			if mapped != 0 {
 				alarm.Severity = mapped
 			}
@@ -69,12 +69,12 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 
 	// 2. Deduplication check via Redis
 	if e.redisStore != nil {
-		exists, err := e.redisStore.Exists(ctx, alarm.DeviceSN, alarm.AlarmCode)
+		exists, err := e.redisStore.Exists(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
 		if err != nil {
 			e.logger.Warn("redis dedup check failed, falling back to DB",
 				zap.Error(err))
 		} else if exists {
-			existingIDStr, _ := e.redisStore.Get(ctx, alarm.DeviceSN, alarm.AlarmCode)
+			existingIDStr, _ := e.redisStore.Get(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
 			if existingIDStr != "" {
 				existingID, parseErr := uuid.Parse(existingIDStr)
 				if parseErr == nil {
@@ -88,7 +88,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 					}
 					e.logger.Debug("deduplicated alarm updated",
 							zap.String("device_sn", alarm.DeviceSN),
-							zap.String("alarm_code", alarm.AlarmCode))
+							zap.String("alarm_identifier", alarm.AlarmIdentifier))
 						return nil
 					}
 				}
@@ -97,7 +97,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	}
 
 	// 3. Also check DB in case Redis missed it
-	existing, err := e.store.GetActiveByDeviceAndCode(ctx, alarm.DeviceSN, alarm.AlarmCode)
+	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
 	if err == nil && existing != nil {
 		existing.RaisedAt = alarm.RaisedAt
 		existing.Severity = alarm.Severity
@@ -106,7 +106,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
 		if e.redisStore != nil {
-			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmCode, existing.ID.String()); redisErr != nil {
+			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmIdentifier, existing.ID.String()); redisErr != nil {
 				e.logger.Warn("redis set alarm dedup key", zap.Error(redisErr))
 			}
 		}
@@ -132,7 +132,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	}
 
 	if e.redisStore != nil {
-		if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmCode, alarm.ID.String()); redisErr != nil {
+		if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmIdentifier, alarm.ID.String()); redisErr != nil {
 			e.logger.Warn("redis set new alarm dedup key", zap.Error(redisErr))
 		}
 	}
@@ -150,7 +150,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	e.logger.Info("new alarm raised",
 		zap.String("alarm_id", alarm.ID.String()),
 		zap.String("device_sn", alarm.DeviceSN),
-		zap.String("alarm_code", alarm.AlarmCode),
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
 		zap.Int("severity", int(alarm.Severity)))
 
 	return nil
@@ -223,8 +223,10 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 	}
 
 	// Remove from Redis
+
+	// Remove from Redis
 	if e.redisStore != nil {
-		if redisErr := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmCode); redisErr != nil {
+		if redisErr := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); redisErr != nil {
 			e.logger.Warn("redis delete alarm dedup key", zap.Error(redisErr))
 		}
 	}
@@ -245,16 +247,55 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 	return nil
 }
 
-// AutoClear clears an alarm by device serial and alarm code (device-initiated).
-func (e *AlarmEngine) AutoClear(ctx context.Context, deviceSN, alarmCode string) error {
-	alarm, err := e.store.GetActiveByDeviceAndCode(ctx, deviceSN, alarmCode)
+// AutoClear clears an alarm by device serial and alarm identifier (device-initiated).
+func (e *AlarmEngine) AutoClear(ctx context.Context, deviceSN, alarmIdentifier string) error {
+	alarm, err := e.store.GetActiveByDeviceAndIdentifier(ctx, deviceSN, alarmIdentifier)
 	if err != nil {
-		return fmt.Errorf("get alarm by device and code: %w", err)
+		return fmt.Errorf("get alarm by device and identifier: %w", err)
 	}
 	if alarm == nil {
 		return nil // No active alarm to clear
 	}
 	return e.Clear(ctx, alarm.ID)
+}
+
+// UpdateFromSync updates an existing alarm's attributes during sync without publishing events.
+// Used by the sync processor when remote alarm properties have changed.
+func (e *AlarmEngine) UpdateFromSync(ctx context.Context, alarm *model.Alarm) error {
+	alarm.LastUpdatedAt = time.Now()
+	if err := e.store.UpdateActive(ctx, alarm); err != nil {
+		return fmt.Errorf("sync update alarm: %w", err)
+	}
+	e.logger.Debug("alarm updated from sync",
+		zap.String("alarm_id", alarm.ID.String()),
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
+		zap.String("device_sn", alarm.DeviceSN))
+	return nil
+}
+
+// ClearBySync clears an alarm during sync (device no longer reports it) without publishing events.
+// The sync processor will publish a batch event after processing all diffs.
+func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) error {
+	now := time.Now()
+	alarm.Status = model.AlarmCleared
+	alarm.ClearedAt = &now
+	if err := e.store.Archive(ctx, alarm); err != nil {
+		return fmt.Errorf("sync archive alarm: %w", err)
+	}
+	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
+		return fmt.Errorf("sync remove active alarm: %w", err)
+	}
+	if err := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); err != nil {
+		e.logger.Warn("redis delete alarm on sync clear", zap.Error(err))
+	}
+	if e.metrics != nil {
+		e.metrics.ActiveTotal.WithLabelValues(severityLabel(alarm.Severity), string(alarm.Carrier)).Dec()
+	}
+	e.logger.Debug("alarm cleared from sync",
+		zap.String("alarm_id", alarm.ID.String()),
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
+		zap.String("device_sn", alarm.DeviceSN))
+	return nil
 }
 
 // Store returns the underlying AlarmStore.

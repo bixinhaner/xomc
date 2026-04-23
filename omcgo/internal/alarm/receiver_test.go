@@ -64,7 +64,7 @@ func makeRcvEvent(t *testing.T, payload interface{}) event.Event {
 func TestNewAlarmReceiver(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
-	receiver := NewAlarmReceiver(engine, zap.NewNop())
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
 
 	require.NotNil(t, receiver)
 	assert.Equal(t, engine, receiver.engine)
@@ -73,7 +73,7 @@ func TestNewAlarmReceiver(t *testing.T) {
 func TestSubscribe_Success(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
-	receiver := NewAlarmReceiver(engine, zap.NewNop())
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
 
 	bus := &rcvMockEventBus{}
 	err := receiver.Subscribe(bus)
@@ -86,7 +86,7 @@ func TestSubscribe_Success(t *testing.T) {
 func TestSubscribe_Error(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
-	receiver := NewAlarmReceiver(engine, zap.NewNop())
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
 
 	bus := &rcvMockEventBus{subscribeErr: errors.New("connection refused")}
 	err := receiver.Subscribe(bus)
@@ -96,7 +96,7 @@ func TestSubscribe_Error(t *testing.T) {
 func TestHandleAlarmEvent_Success(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
-	receiver := NewAlarmReceiver(engine, zap.NewNop())
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
 
 	deviceID := uuid.New()
 	now := time.Now().Truncate(time.Second)
@@ -105,7 +105,7 @@ func TestHandleAlarmEvent_Success(t *testing.T) {
 		DeviceID:    deviceID.String(),
 		DeviceSN:    "SN-RCV-001",
 		Carrier:     "cmcc",
-		AlarmCode:   "ALM_TEST_01",
+		AlarmIdentifier:   "ALM_TEST_01",
 		AlarmType:   "equipment",
 		Description: "test alarm from receiver",
 		Severity:    2,
@@ -122,19 +122,19 @@ func TestHandleAlarmEvent_Success(t *testing.T) {
 		assert.Equal(t, deviceID, alarm.DeviceID)
 		assert.Equal(t, "SN-RCV-001", alarm.DeviceSN)
 		assert.Equal(t, model.CarrierCode("cmcc"), alarm.Carrier)
-		assert.Equal(t, "ALM_TEST_01", alarm.AlarmCode)
+		assert.Equal(t, "ALM_TEST_01", alarm.AlarmIdentifier)
 	}
 }
 
 func TestHandleAlarmEvent_InvalidDeviceID(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
-	receiver := NewAlarmReceiver(engine, zap.NewNop())
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop())
 
 	payload := AlarmPayload{
 		DeviceID:  "not-a-valid-uuid",
 		DeviceSN:  "SN-RCV-002",
-		AlarmCode: "ALM_TEST_02",
+		AlarmIdentifier: "ALM_TEST_02",
 		Severity:  1,
 		RaisedAt:  time.Now(),
 	}

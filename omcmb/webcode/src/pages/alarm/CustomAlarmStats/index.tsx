@@ -813,9 +813,9 @@ export default function CustomAlarmStats() {
       },
     },
     {
-      key: 'alarmCode',
+      key: 'alarmIdentifier',
       title: t('alarm.alarmIdentifier'),
-      dataIndex: 'alarmCode',
+      dataIndex: 'alarmIdentifier',
       width: 130,
       mono: true,
     },

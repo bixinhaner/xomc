@@ -27,11 +27,11 @@ func NewPgAlarmStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgAlarmStore {
 func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error {
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_code, description, status, raised_at, additional_info, created_at, updated_at,
-		 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, additional_info, created_at, updated_at,
+			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
 		alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier, alarm.Severity,
-		alarm.AlarmType, alarm.AlarmCode, alarm.Description, alarm.Status,
+		alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description, alarm.Status,
 		alarm.RaisedAt, additionalJSON, alarm.CreatedAt, alarm.UpdatedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.IsRead, alarm.AckCount,
@@ -47,19 +47,47 @@ func (s *PgAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.
 	return s.scanActiveAlarm(ctx, storage.Psql.Select(activeColumns...).From("alarms_active").Where(squirrel.Eq{"id": id}))
 }
 
-func (s *PgAlarmStore) GetActiveByDeviceAndCode(ctx context.Context, deviceSN string, alarmCode string) (*model.Alarm, error) {
+func (s *PgAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
 	return s.scanActiveAlarm(ctx, storage.Psql.Select(activeColumns...).From("alarms_active").
-		Where(squirrel.Eq{"device_sn": deviceSN, "alarm_code": alarmCode}).
+		Where(squirrel.Eq{"device_sn": deviceSN, "alarm_identifier": alarmIdentifier}).
 		Where(squirrel.NotEq{"status": "cleared"}))
+}
+
+func (s *PgAlarmStore) GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error) {
+	q := storage.Psql.Select(activeColumns...).From("alarms_active").
+		Where(squirrel.Eq{"device_sn": deviceSN}).
+		Where(squirrel.NotEq{"status": "cleared"})
+
+	query, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build GetActiveByDeviceSN query: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query GetActiveByDeviceSN: %w", err)
+	}
+	defer rows.Close()
+
+	var alarms []*model.Alarm
+	for rows.Next() {
+		a, err := scanAlarmRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		alarms = append(alarms, a)
+	}
+
+	return alarms, nil
 }
 
 func (s *PgAlarmStore) UpdateActive(ctx context.Context, alarm *model.Alarm) error {
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
 		`UPDATE alarms_active SET severity=$1, status=$2, raised_at=$3, acknowledged_at=$4,
-		 acknowledged_by=$5, additional_info=$6, updated_at=$7, device_name=$8, technology=$9,
-		 alarm_source=$10, event_type=$11, network_location=$12, explicit_cause=$13,
-		 is_read=$14, ack_count=$15, last_updated_at=$16, probable_cause=$17 WHERE id=$18`,
+			 acknowledged_by=$5, additional_info=$6, updated_at=$7, device_name=$8, technology=$9,
+			 alarm_source=$10, event_type=$11, network_location=$12, explicit_cause=$13,
+			 is_read=$14, ack_count=$15, last_updated_at=$16, probable_cause=$17 WHERE id=$18`,
 		alarm.Severity, alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt,
 		alarm.AcknowledgedBy, additionalJSON, time.Now(),
 		alarm.DeviceName, alarm.Technology,
@@ -120,15 +148,16 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 
 func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 	_, err := s.tsPool.Exec(ctx,
-		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_code, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, updated_at, cleared_by, clear_note)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, updated_at, cleared_by, clear_note, probable_cause)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
 		time.Now(), alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier,
-		alarm.Severity, alarm.AlarmType, alarm.AlarmCode, alarm.Description,
+		alarm.Severity, alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description,
 		alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt, alarm.ClearedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.AckCount,
 		alarm.AcknowledgedBy, alarm.AckNote, time.Now(),
 		alarm.ClearedBy, alarm.ClearNote,
+		alarm.ProbableCause,
 	)
 	if err != nil {
 		return fmt.Errorf("insert alarms_history: %w", err)
@@ -137,14 +166,14 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 }
 
 func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	// historyColumns mirrors alarms_history table columns (time is partition key, scanned but not stored)
 	qb := storage.Psql.Select(
 		"time", "alarm_id", "device_id", "device_sn", "carrier", "severity",
-		"alarm_type", "alarm_code", "description", "status", "raised_at",
+		"alarm_type", "alarm_identifier", "description", "status", "raised_at",
 		"acknowledged_at", "cleared_at", "acknowledged_by", "ack_note",
 		"device_name", "technology", "alarm_source", "event_type",
-			"ack_count", "updated_at",
-				"cleared_by", "clear_note",
+		"ack_count", "updated_at",
+		"cleared_by", "clear_note",
+		"probable_cause",
 	).From("alarms_history")
 	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history")
 
@@ -172,11 +201,12 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 		if err := rows.Scan(
 			&timeVal,
 			&a.ID, &a.DeviceID, &a.DeviceSN, &a.Carrier, &a.Severity,
-			&a.AlarmType, &a.AlarmCode, &a.Description, &a.Status, &a.RaisedAt,
+			&a.AlarmType, &a.AlarmIdentifier, &a.Description, &a.Status, &a.RaisedAt,
 			&a.AcknowledgedAt, &a.ClearedAt, &a.AcknowledgedBy, &a.AckNote,
 			&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
-				&a.AckCount, &a.UpdatedAt,
-					&a.ClearedBy, &a.ClearNote,
+			&a.AckCount, &a.UpdatedAt,
+			&a.ClearedBy, &a.ClearNote,
+			&a.ProbableCause,
 		); err != nil {
 			return nil, fmt.Errorf("scan alarms_history: %w", err)
 		}
@@ -187,27 +217,24 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 	}
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
+
 func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
 	stats := &AlarmStatistics{BySeverity: make(map[model.AlarmSeverity]int64), ByType: make(map[string]int64)}
 
-	// Total active
 	var total int64
 	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_active").Scan(&total); err != nil {
 		return nil, fmt.Errorf("count active: %w", err)
 	}
 	stats.TotalActive = total
 
-	// Unacknowledged
 	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_active WHERE status = 'active'").Scan(&stats.Unacknowledged); err != nil {
 		return nil, fmt.Errorf("count unacknowledged: %w", err)
 	}
 
-	// Unread
 	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_active WHERE is_read = false").Scan(&stats.Unread); err != nil {
 		return nil, fmt.Errorf("count unread: %w", err)
 	}
 
-	// By severity
 	rows, err := s.pool.Query(ctx, "SELECT severity, COUNT(*) FROM alarms_active GROUP BY severity")
 	if err != nil {
 		return nil, fmt.Errorf("stats by severity: %w", err)
@@ -221,7 +248,6 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 		}
 	}
 
-	// By type
 	rows2, err := s.pool.Query(ctx, "SELECT alarm_type, COUNT(*) FROM alarms_active WHERE alarm_type != '' GROUP BY alarm_type")
 	if err != nil {
 		return nil, fmt.Errorf("stats by type: %w", err)
@@ -241,7 +267,7 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 // helpers
 
 var activeColumns = []string{
-	"id", "device_id", "device_sn", "carrier", "severity", "alarm_type", "alarm_code",
+	"id", "device_id", "device_sn", "carrier", "severity", "alarm_type", "alarm_identifier",
 	"description", "status", "raised_at", "acknowledged_at", "acknowledged_by", "ack_note",
 	"additional_info", "created_at", "updated_at",
 	// 增强字段
@@ -310,7 +336,6 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if f.EndTime != nil {
 		qb = qb.Where(squirrel.LtOrEq{"raised_at": *f.EndTime})
 	}
-	// 新增过滤字段
 	if f.AlarmType != nil {
 		qb = qb.Where(squirrel.Eq{"alarm_type": *f.AlarmType})
 	}
@@ -323,14 +348,14 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if f.Keyword != nil {
 		kw := "%" + *f.Keyword + "%"
 		qb = qb.Where(squirrel.Or{
-			squirrel.Like{"alarm_code": kw},
+			squirrel.Like{"alarm_identifier": kw},
 			squirrel.Like{"device_sn": kw},
 			squirrel.Like{"device_name": kw},
 			squirrel.Like{"description": kw},
 		})
 	}
-	if len(f.AlarmCodes) > 0 {
-		qb = qb.Where(squirrel.Eq{"alarm_code": f.AlarmCodes})
+	if len(f.AlarmIdentifiers) > 0 {
+		qb = qb.Where(squirrel.Eq{"alarm_identifier": f.AlarmIdentifiers})
 	}
 	if len(f.AlarmSources) > 0 {
 		qb = qb.Where(squirrel.Eq{"alarm_source": f.AlarmSources})
@@ -363,7 +388,7 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 	if f.Keyword != nil {
 		kw := "%" + *f.Keyword + "%"
 		qb = qb.Where(squirrel.Or{
-			squirrel.Like{"alarm_code": kw},
+			squirrel.Like{"alarm_identifier": kw},
 			squirrel.Like{"device_sn": kw},
 			squirrel.Like{"description": kw},
 		})
@@ -379,7 +404,7 @@ func scanAlarmRow(row scannable) (*model.Alarm, error) {
 	var a model.Alarm
 	var additionalJSON []byte
 	if err := row.Scan(&a.ID, &a.DeviceID, &a.DeviceSN, &a.Carrier, &a.Severity,
-		&a.AlarmType, &a.AlarmCode, &a.Description, &a.Status, &a.RaisedAt,
+		&a.AlarmType, &a.AlarmIdentifier, &a.Description, &a.Status, &a.RaisedAt,
 		&a.AcknowledgedAt, &a.AcknowledgedBy, &a.AckNote, &additionalJSON, &a.CreatedAt, &a.UpdatedAt,
 		&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
 		&a.NetworkLocation, &a.ExplicitCause, &a.IsRead, &a.AckCount,
@@ -437,11 +462,10 @@ func (s *PgAlarmStore) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) 
 }
 
 func (s *PgAlarmStore) BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error {
-	// 逐条归档到历史表后从活动表删除
 	for _, id := range ids {
 		alarm, err := s.GetActiveByID(ctx, id)
 		if err != nil {
-			continue // 不存在的跳过
+			continue
 		}
 		now := time.Now()
 		alarm.Status = model.AlarmCleared

@@ -60,9 +60,9 @@ const mockNEMessages: NEMessageRecord[] = [
     deviceSn: 'ENB00001',
     deviceName: '北京-eNB-0001',
     requestIp: '10.1.0.101',
-    requestContent: '{"msgType":"alarm","alarmCode":"ALM-001","severity":"major","description":"Board temperature high"}',
+    requestContent: '{"msgType":"alarm","alarmIdentifier":"ALM-001","severity":"major","description":"Board temperature high"}',
     responseContent: '{"code":0,"msg":"alarm received"}',
-    requestJson: { msgType: 'alarm', alarmCode: 'ALM-001', severity: 'major', description: 'Board temperature high', timestamp: '2024-06-01T08:00:55.000Z' },
+    requestJson: { msgType: 'alarm', alarmIdentifier: 'ALM-001', severity: 'major', description: 'Board temperature high', timestamp: '2024-06-01T08:00:55.000Z' },
     responseJson: { code: 0, msg: 'alarm received', alarmId: 'ai-001' },
   },
   {

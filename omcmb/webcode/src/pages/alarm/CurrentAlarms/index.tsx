@@ -432,9 +432,9 @@ export default function CurrentAlarms() {
         },
       },
       {
-        key: 'alarmCode',
+        key: 'alarmIdentifier',
         title: t('alarm.alarmIdentifier'),
-        dataIndex: 'alarmCode',
+        dataIndex: 'alarmIdentifier',
         width: 130,
         mono: true,
       },
@@ -499,7 +499,7 @@ export default function CurrentAlarms() {
       {
         key: 'specificProblem',
         title: t('alarm.specificProblem'),
-        dataIndex: 'specificProblem',
+        dataIndex: 'description',
         width: 150,
         ellipsis: true,
       },

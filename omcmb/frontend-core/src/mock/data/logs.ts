@@ -176,7 +176,7 @@ export const mockNEMessageLogs: NEMessageLog[] = Array.from({ length: 30 }, (_, 
     content: msgType === 'heartbeat'
       ? `{"type":"heartbeat","deviceSn":"${device.sn}","timestamp":"${new Date().toISOString()}"}`
       : msgType === 'alarm'
-      ? `{"type":"alarm","alarmCode":"A000${(i % 10) + 1}","severity":"major","deviceSn":"${device.sn}"}`
+      ? `{"type":"alarm","alarmIdentifier":"A000${(i % 10) + 1}","severity":"major","deviceSn":"${device.sn}"}`
       : msgType === 'perf_data'
       ? `{"type":"perf","kpiCode":"RRC_SUCC_RATE","value":${(Math.random() * 5 + 95).toFixed(2)},"deviceSn":"${device.sn}"}`
       : `{"type":"${msgType}","deviceSn":"${device.sn}","status":"ok"}`,

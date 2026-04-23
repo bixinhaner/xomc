@@ -34,7 +34,7 @@ func (h *LibraryHandler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 type libraryQuery struct {
-	AlarmCode   string `form:"alarm_code"`
+	AlarmIdentifier   string `form:"alarm_identifier"`
 	AlarmSource string `form:"alarm_source"`
 	Severity    int    `form:"severity"`
 	Enabled     string `form:"enabled"`
@@ -52,8 +52,8 @@ func (h *LibraryHandler) List(c *gin.Context) {
 		return
 	}
 	filter := AlarmLibraryFilter{ListRequest: q.ListRequest}
-	if q.AlarmCode != "" {
-		filter.AlarmCode = &q.AlarmCode
+	if q.AlarmIdentifier != "" {
+		filter.AlarmIdentifier = &q.AlarmIdentifier
 	}
 	if q.AlarmSource != "" {
 		filter.AlarmSource = &q.AlarmSource

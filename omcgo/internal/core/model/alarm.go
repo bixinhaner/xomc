@@ -16,7 +16,7 @@ type Alarm struct {
 	Carrier        CarrierCode       `json:"carrier" db:"carrier"`
 	Severity       AlarmSeverity     `json:"severity" db:"severity"`
 	AlarmType      string            `json:"alarm_type" db:"alarm_type"`
-	AlarmCode      string            `json:"alarm_code" db:"alarm_code"`
+	AlarmIdentifier string            `json:"alarm_identifier" db:"alarm_identifier"`
 	Description    string            `json:"description" db:"description"`
 	Status         AlarmStatus       `json:"status" db:"status"`
 	RaisedAt       time.Time         `json:"raised_at" db:"raised_at"`

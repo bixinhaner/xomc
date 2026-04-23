@@ -30,7 +30,7 @@ func NewLibraryService(repo AlarmLibraryRepository, logger *zap.Logger) *Library
 func (s *LibraryService) Create(ctx context.Context, req *CreateAlarmLibraryRequest) (*AlarmLibrary, error) {
 	lib := &AlarmLibrary{
 		ID:            uuid.New(),
-		AlarmCode:     req.AlarmCode,
+		AlarmIdentifier:     req.AlarmIdentifier,
 		AlarmSource:   req.AlarmSource,
 		EventType:     req.EventType,
 		Severity:      req.Severity,

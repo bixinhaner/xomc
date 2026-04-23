@@ -10,6 +10,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
+import { useTriggerAlarmSync } from '@/hooks/api/useAlarms';
 
 const { Text } = Typography;
 
@@ -68,6 +69,7 @@ const SYNC_TYPE_COLOR: Record<AlarmSyncTask['syncType'], string> = {
 
 export default function AlarmSync() {
   const t = useT();
+  const triggerSync = useTriggerAlarmSync();
   const [tasks, setTasks] = useState<AlarmSyncTask[]>(MOCK_SYNC_TASKS);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [currentPage, setCurrentPage] = useState(1);
@@ -175,7 +177,7 @@ export default function AlarmSync() {
     }
     const newTask: AlarmSyncTask = {
       id: String(Date.now()),
-      syncId: `SYNC-2024-${String(tasks.length + 1).padStart(3, '0')}`,
+      syncId: `SYNC-${String(tasks.length + 1).padStart(3, '0')}`,
       deviceSn: newSyncSn,
       deviceName: `Device-${newSyncSn}`,
       syncType: newSyncType,
@@ -189,8 +191,31 @@ export default function AlarmSync() {
     setTasks((prev) => [newTask, ...prev]);
     setCreateModalOpen(false);
     setNewSyncSn('');
-    void message.success(t('status.success'));
-  }, [newSyncSn, newSyncType, tasks.length, t]);
+
+    // Call real API to trigger alarm sync
+    triggerSync.mutate(newSyncSn, {
+      onSuccess: () => {
+        void message.success(t('status.success'));
+        setTasks((prev) =>
+          prev.map((tk) =>
+            tk.id === newTask.id
+              ? { ...tk, status: 'success', endTime: new Date().toLocaleString('zh-CN'), syncCount: 1 }
+              : tk
+          )
+        );
+      },
+      onError: () => {
+        void message.error(t('status.failed'));
+        setTasks((prev) =>
+          prev.map((tk) =>
+            tk.id === newTask.id
+              ? { ...tk, status: 'failed', endTime: new Date().toLocaleString('zh-CN'), failCount: 1 }
+              : tk
+          )
+        );
+      },
+    });
+  }, [newSyncSn, newSyncType, tasks.length, t, triggerSync]);
 
   const columns = useMemo(
     (): DataTableColumn<AlarmSyncTask>[] => [

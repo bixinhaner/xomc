@@ -13,30 +13,31 @@ import (
 
 // AlarmPayload is the event payload for device alarm events.
 type AlarmPayload struct {
-	DeviceID    string            `json:"device_id"`
-	DeviceSN    string            `json:"device_sn"`
-	DeviceName  string            `json:"device_name,omitempty"`
-	Carrier     string            `json:"carrier"`
-	Technology  string            `json:"technology,omitempty"`
-	AlarmCode   string            `json:"alarm_code"`
-	AlarmType   string            `json:"alarm_type"`
-	AlarmSource string            `json:"alarm_source,omitempty"`
-	EventType   string            `json:"event_type,omitempty"`
-	Description string            `json:"description"`
-	Severity    int               `json:"severity"`
-	RaisedAt    time.Time         `json:"raised_at"`
-	Additional  map[string]string `json:"additional,omitempty"`
+	DeviceID        string            `json:"device_id"`
+	DeviceSN        string            `json:"device_sn"`
+	DeviceName      string            `json:"device_name,omitempty"`
+	Carrier         string            `json:"carrier"`
+	Technology      string            `json:"technology,omitempty"`
+	AlarmIdentifier string            `json:"alarm_identifier"`
+	AlarmType       string            `json:"alarm_type"`
+	AlarmSource     string            `json:"alarm_source,omitempty"`
+	EventType       string            `json:"event_type,omitempty"`
+	Description     string            `json:"description"`
+	Severity        int               `json:"severity"`
+	RaisedAt        time.Time         `json:"raised_at"`
+	Additional      map[string]string `json:"additional,omitempty"`
 }
 
 // AlarmReceiver subscribes to device alarm events and processes them.
 type AlarmReceiver struct {
-	engine *AlarmEngine
-	logger *zap.Logger
+	engine   *AlarmEngine
+	eventBus event.EventBus
+	logger   *zap.Logger
 }
 
 // NewAlarmReceiver creates a new AlarmReceiver.
-func NewAlarmReceiver(engine *AlarmEngine, logger *zap.Logger) *AlarmReceiver {
-	return &AlarmReceiver{engine: engine, logger: logger}
+func NewAlarmReceiver(engine *AlarmEngine, eventBus event.EventBus, logger *zap.Logger) *AlarmReceiver {
+	return &AlarmReceiver{engine: engine, eventBus: eventBus, logger: logger}
 }
 
 // Subscribe registers the receiver for device alarm events.
@@ -72,7 +73,7 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		DeviceName:     strPtr(payload.DeviceName),
 		Carrier:        model.CarrierCode(payload.Carrier),
 		Technology:     strPtr(payload.Technology),
-		AlarmCode:      payload.AlarmCode,
+		AlarmIdentifier: payload.AlarmIdentifier,
 		AlarmType:      payload.AlarmType,
 		AlarmSource:    strPtr(payload.AlarmSource),
 		EventType:      strPtr(payload.EventType),
@@ -86,8 +87,18 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		r.logger.Error("process alarm",
 			zap.Error(err),
 			zap.String("device_sn", payload.DeviceSN),
-			zap.String("alarm_code", payload.AlarmCode))
+			zap.String("alarm_identifier", payload.AlarmIdentifier))
 		return fmt.Errorf("process alarm: %w", err)
+	}
+
+	// Publish alarm.sync.requested to trigger a full alarm sync via GPV
+	if r.eventBus != nil {
+		syncPayload := map[string]string{"device_sn": payload.DeviceSN}
+		if syncEvt, err := event.NewEvent(event.SubjectAlarmSyncRequested, syncPayload); err == nil {
+			if pubErr := r.eventBus.Publish(ctx, event.SubjectAlarmSyncRequested, syncEvt); pubErr != nil {
+				r.logger.Warn("publish alarm sync request", zap.Error(pubErr))
+			}
+		}
 	}
 
 	return nil

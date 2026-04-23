@@ -220,7 +220,7 @@ const AlarmFilterDialog: React.FC<AlarmFilterDialogProps> = ({
                   options={[
                     { label: t('alarm.filter.alarmTime'), value: 'eventTime' },
                     { label: t('alarm.filter.severity'), value: 'severity' },
-                    { label: t('alarm.filter.alarmCode'), value: 'alarmCode' },
+                    { label: t('alarm.filter.alarmIdentifier'), value: 'alarmIdentifier' },
                   ]}
                 />
               </Form.Item>

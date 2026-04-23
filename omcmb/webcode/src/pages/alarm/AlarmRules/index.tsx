@@ -134,7 +134,7 @@ export default function AlarmRules() {
     // 构造 conditions 从表单数据
     const conditions: AlarmRuleCondition[] = [];
     if (formData.selectedAlarms.length > 0) {
-      conditions.push({ field: 'alarm_code', operator: 'contains', value: formData.selectedAlarms });
+      conditions.push({ field: 'alarm_identifier', operator: 'contains', value: formData.selectedAlarms });
     }
     if (formData.deviceSelectionMode === 'devices' && formData.selectedDevices.length > 0) {
       conditions.push({ field: 'device_id', operator: 'contains', value: formData.selectedDevices });

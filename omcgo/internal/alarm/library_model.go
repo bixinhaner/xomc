@@ -9,7 +9,7 @@ import (
 // AlarmLibrary 告警库条目
 type AlarmLibrary struct {
 	ID            uuid.UUID       `json:"id" db:"id"`
-	AlarmCode     string          `json:"alarm_code" db:"alarm_code"`
+	AlarmIdentifier string          `json:"alarm_identifier" db:"alarm_identifier"`
 	AlarmSource   string          `json:"alarm_source" db:"alarm_source"`
 	EventType     string          `json:"event_type" db:"event_type"`
 	Severity      int             `json:"severity" db:"severity"`
@@ -36,7 +36,7 @@ type AlarmLibraryI18n struct {
 
 // AlarmLibraryFilter 告警库查询过滤
 type AlarmLibraryFilter struct {
-	AlarmCode   *string
+	AlarmIdentifier   *string
 	AlarmSource *string
 	Severity    *int
 	Enabled     *bool
@@ -48,7 +48,7 @@ type AlarmLibraryFilter struct {
 
 // CreateAlarmLibraryRequest 创建告警库请求
 type CreateAlarmLibraryRequest struct {
-	AlarmCode     string          `json:"alarm_code" binding:"required"`
+	AlarmIdentifier     string          `json:"alarm_identifier" binding:"required"`
 	AlarmSource   string          `json:"alarm_source" binding:"required"`
 	EventType     string          `json:"event_type" binding:"required"`
 	Severity      int             `json:"severity" binding:"required,min=1,max=4"`

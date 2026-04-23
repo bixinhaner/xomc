@@ -27,7 +27,7 @@ func setupHandlerTest() (*Handler, *mockAlarmStore, *AlarmEngine, *gin.Engine) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)
 	logger := zap.NewNop()
-	handler := NewHandler(engine, store, logger)
+	handler := NewHandler(engine, store, nil, logger)
 
 	router := gin.New()
 	handler.RegisterRoutes(router.Group(""))
@@ -44,7 +44,7 @@ func seedActiveAlarm(store *mockAlarmStore, opts ...func(*model.Alarm)) *model.A
 		Carrier:   model.CarrierCMCC,
 		Severity:  model.AlarmMajor,
 		AlarmType: "equipment",
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		Status:    model.AlarmActive,
 		RaisedAt:  now,
 		CreatedAt: now,
@@ -64,7 +64,7 @@ func TestHandler_ListActive_OK(t *testing.T) {
 
 	seedActiveAlarm(store)
 	seedActiveAlarm(store, func(a *model.Alarm) {
-		a.AlarmCode = "ALM002"
+		a.AlarmIdentifier = "ALM002"
 		a.DeviceSN = "SN-TEST-002"
 	})
 
@@ -114,7 +114,7 @@ func TestHandler_ListHistory_OK(t *testing.T) {
 	cleared := &model.Alarm{
 		ID:        uuid.New(),
 		DeviceSN:  "SN-TEST-001",
-		AlarmCode: "ALM001",
+		AlarmIdentifier: "ALM001",
 		Status:    model.AlarmCleared,
 		ClearedAt: &now,
 	}
@@ -196,7 +196,7 @@ func TestHandler_GetByID_Found(t *testing.T) {
 	var got model.Alarm
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, alarm.ID, got.ID)
-	assert.Equal(t, alarm.AlarmCode, got.AlarmCode)
+	assert.Equal(t, alarm.AlarmIdentifier, got.AlarmIdentifier)
 }
 
 func TestHandler_GetByID_NotFound(t *testing.T) {

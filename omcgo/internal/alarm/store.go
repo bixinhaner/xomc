@@ -19,7 +19,7 @@ type AlarmFilter struct {
 	EndTime   *time.Time
 	model.ListRequest
 	// 新增过滤字段
-	AlarmCodes     []string           `form:"alarm_codes"`
+	AlarmIdentifiers []string           `form:"alarm_identifiers"`
 	AlarmSources   []string           `form:"alarm_sources"`
 	AlarmType      *string            `form:"alarm_type"`
 	IsRead         *bool              `form:"is_read"`
@@ -43,7 +43,8 @@ type AlarmStatistics struct {
 type AlarmStore interface {
 	SaveActive(ctx context.Context, alarm *model.Alarm) error
 	GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error)
-	GetActiveByDeviceAndCode(ctx context.Context, deviceSN string, alarmCode string) (*model.Alarm, error)
+	GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error)
+	GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error)
 	UpdateActive(ctx context.Context, alarm *model.Alarm) error
 	RemoveActive(ctx context.Context, id uuid.UUID) error
 	ListActive(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error)

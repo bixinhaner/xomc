@@ -95,7 +95,7 @@ function generateAlarm(isActive: boolean, index: number, unread: '0' | '1' = '0'
 
   return {
     id,
-    alarmCode: def.code,
+    alarmIdentifier: def.code,
     alarmName: def.name,
     severity,
     deviceSn: device.sn,

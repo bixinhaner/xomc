@@ -132,6 +132,14 @@ const (
 	// SubjectAlarmAcknowledged 是告警被确认时发布。
 	// 发布者：alarm.AlarmEngine，订阅者：暂无
 	SubjectAlarmAcknowledged = "alarm.acknowledged"
+
+	// SubjectAlarmSyncRequested 是请求同步设备告警时发布。
+	// 发布者：alarm.AlarmReceiver，订阅者：alarm.AlarmSyncService
+	SubjectAlarmSyncRequested = "alarm.sync.requested"
+
+	// SubjectAlarmSyncCompleted 是告警同步完成时发布。
+	// 发布者：alarm.AlarmSyncProcessor，订阅者：暂无
+	SubjectAlarmSyncCompleted = "alarm.sync.completed"
 )
 
 // Provisioning events

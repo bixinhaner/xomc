@@ -48,7 +48,7 @@ function generateNewAlarm(): Alarm {
 
   return {
     id,
-    alarmCode: `A${codeNum}`,
+    alarmIdentifier: `A${codeNum}`,
     alarmName,
     severity,
     deviceSn: device.sn,

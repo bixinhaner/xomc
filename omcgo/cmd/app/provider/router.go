@@ -290,7 +290,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Alarm routes → resource "alarms" -----
 	ah := c.alarmHandlerDeps
-	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, c.Logger)
+	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, ah.alarmSyncService, c.Logger)
 	alarmHandler.RegisterRoutes(permGroup("alarms"))
 
 	// ----- Alarm library routes → resource "alarms" -----

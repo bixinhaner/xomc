@@ -13,14 +13,15 @@ import (
 
 // Handler provides REST API endpoints for alarm management.
 type Handler struct {
-	engine *AlarmEngine
-	store  AlarmStore
-	logger *zap.Logger
+	engine      *AlarmEngine
+	store       AlarmStore
+	syncService *AlarmSyncService
+	logger      *zap.Logger
 }
 
 // NewHandler creates a new alarm handler.
-func NewHandler(engine *AlarmEngine, store AlarmStore, logger *zap.Logger) *Handler {
-	return &Handler{engine: engine, store: store, logger: logger}
+func NewHandler(engine *AlarmEngine, store AlarmStore, syncService *AlarmSyncService, logger *zap.Logger) *Handler {
+	return &Handler{engine: engine, store: store, syncService: syncService, logger: logger}
 }
 
 // RegisterRoutes registers alarm API routes.
@@ -42,6 +43,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		alarms.POST("/active/batch/clear", h.BatchClear)
 		alarms.POST("/active/batch/unacknowledge", h.BatchUnacknowledge)
 		alarms.POST("/active/:id/read", h.MarkRead)
+			// 告警同步
+			alarms.POST("/sync/:device_sn", h.TriggerSync)
 	}
 }
 
@@ -379,4 +382,30 @@ func parseSeverity(s string) model.AlarmSeverity {
 	default:
 		return 0
 	}
+}
+
+// TriggerSync handles POST /alarms/sync/:device_sn.
+// It triggers an alarm synchronization for the specified device.
+func (h *Handler) TriggerSync(c *gin.Context) {
+	deviceSN := c.Param("device_sn")
+	if deviceSN == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if h.syncService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "alarm sync service not available"})
+		return
+	}
+
+	if err := h.syncService.TriggerSync(c.Request.Context(), deviceSN); err != nil {
+		h.logger.Error("trigger alarm sync", zap.Error(err), zap.String("device_sn", deviceSN))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "alarm sync triggered",
+		"device_sn": deviceSN,
+	})
 }

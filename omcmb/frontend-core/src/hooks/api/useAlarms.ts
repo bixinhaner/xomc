@@ -217,3 +217,13 @@ export function useDeleteAlarmLibrary() {
     },
   });
 }
+
+export function useTriggerAlarmSync() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (deviceSN: string) => api.triggerAlarmSync(deviceSN),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    },
+  });
+}

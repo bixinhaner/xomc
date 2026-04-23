@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
@@ -16,9 +17,9 @@ import (
 // workerInfra extends components.Infra with worker-specific dependencies.
 type workerInfra struct {
 	*components.Infra
-	Carriers *carrier.CarrierRegistry
-	TaskRepo *task.PgTaskRepository
-	TaskSvc  *task.TaskService
+	Carriers   *carrier.CarrierRegistry
+	CmdQueue   cmdqueue.CommandQueue
+	TaskService *task.TaskService
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -52,18 +53,12 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	w := &workerInfra{Infra: inf}
 	w.registerCarriers()
 
-	// 创建统一任务队列：TaskService（Redis + PG 双写）。
-	// 旧的 cmdqueue 兼容适配层已下线，业务模块直连 TaskService.CreateTask。
+	// 创建统一任务队列：TaskService（Redis + PG） + BridgeQueue 适配器
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskSvc := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
-	// Worker 可能通过 RebootCloser 等路径写终态，与 ACS 保持一致，终态通过 NATS
-	// 广播由订阅者聚合，避免和回调重复计数。
-	if inf.EventBus != nil {
-		taskSvc.SetEventBus(inf.EventBus)
-	}
-	w.TaskRepo = taskRepo
-	w.TaskSvc = taskSvc
+	w.CmdQueue = task.NewBridgeQueue(taskSvc)
+	w.TaskService = taskSvc
 
 	return w, nil
 }

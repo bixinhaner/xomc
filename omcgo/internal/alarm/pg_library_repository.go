@@ -41,10 +41,10 @@ func (r *PgAlarmLibraryRepository) Create(ctx context.Context, lib *AlarmLibrary
 	}
 
 	sql, args, err := storage.Psql.Insert("alarm_libraries").
-		Columns("id", "alarm_code", "alarm_source", "event_type", "severity",
+		Columns("id", "alarm_identifier", "alarm_source", "event_type", "severity",
 			"enabled", "probable_cause", "explanation", "additional_info",
 			"carrier", "technology", "created_at", "updated_at").
-		Values(lib.ID, lib.AlarmCode, lib.AlarmSource, lib.EventType, lib.Severity,
+		Values(lib.ID, lib.AlarmIdentifier, lib.AlarmSource, lib.EventType, lib.Severity,
 			lib.Enabled, lib.ProbableCause, lib.Explanation, additionalInfoJSON,
 			lib.Carrier, lib.Technology, lib.CreatedAt, lib.UpdatedAt).
 		ToSql()
@@ -62,7 +62,7 @@ func (r *PgAlarmLibraryRepository) Create(ctx context.Context, lib *AlarmLibrary
 
 func (r *PgAlarmLibraryRepository) GetByID(ctx context.Context, id uuid.UUID) (*AlarmLibrary, error) {
 	sql, args, err := storage.Psql.Select(
-		"id", "alarm_code", "alarm_source", "event_type", "severity",
+		"id", "alarm_identifier", "alarm_source", "event_type", "severity",
 		"enabled", "probable_cause", "explanation", "additional_info",
 		"carrier", "technology", "created_at", "updated_at").
 		From("alarm_libraries").
@@ -76,7 +76,7 @@ func (r *PgAlarmLibraryRepository) GetByID(ctx context.Context, id uuid.UUID) (*
 	var additionalInfoJSON []byte
 
 	err = r.pool.QueryRow(ctx, sql, args...).Scan(
-		&lib.ID, &lib.AlarmCode, &lib.AlarmSource, &lib.EventType, &lib.Severity,
+		&lib.ID, &lib.AlarmIdentifier, &lib.AlarmSource, &lib.EventType, &lib.Severity,
 		&lib.Enabled, &lib.ProbableCause, &lib.Explanation, &additionalInfoJSON,
 		&lib.Carrier, &lib.Technology, &lib.CreatedAt, &lib.UpdatedAt,
 	)
@@ -98,11 +98,11 @@ func (r *PgAlarmLibraryRepository) GetByID(ctx context.Context, id uuid.UUID) (*
 
 func (r *PgAlarmLibraryRepository) GetByCode(ctx context.Context, code string) (*AlarmLibrary, error) {
 	sql, args, err := storage.Psql.Select(
-		"id", "alarm_code", "alarm_source", "event_type", "severity",
+		"id", "alarm_identifier", "alarm_source", "event_type", "severity",
 		"enabled", "probable_cause", "explanation", "additional_info",
 		"carrier", "technology", "created_at", "updated_at").
 		From("alarm_libraries").
-		Where(squirrel.Eq{"alarm_code": code}).
+		Where(squirrel.Eq{"alarm_identifier": code}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build select sql: %w", err)
@@ -112,7 +112,7 @@ func (r *PgAlarmLibraryRepository) GetByCode(ctx context.Context, code string) (
 	var additionalInfoJSON []byte
 
 	err = r.pool.QueryRow(ctx, sql, args...).Scan(
-		&lib.ID, &lib.AlarmCode, &lib.AlarmSource, &lib.EventType, &lib.Severity,
+		&lib.ID, &lib.AlarmIdentifier, &lib.AlarmSource, &lib.EventType, &lib.Severity,
 		&lib.Enabled, &lib.ProbableCause, &lib.Explanation, &additionalInfoJSON,
 		&lib.Carrier, &lib.Technology, &lib.CreatedAt, &lib.UpdatedAt,
 	)
@@ -141,7 +141,7 @@ func (r *PgAlarmLibraryRepository) Update(ctx context.Context, lib *AlarmLibrary
 	}
 
 	query, args, err := storage.Psql.Update("alarm_libraries").
-		Set("alarm_code", lib.AlarmCode).
+		Set("alarm_identifier", lib.AlarmIdentifier).
 		Set("alarm_source", lib.AlarmSource).
 		Set("event_type", lib.EventType).
 		Set("severity", lib.Severity).
@@ -192,7 +192,7 @@ func (r *PgAlarmLibraryRepository) Delete(ctx context.Context, id uuid.UUID) err
 
 func (r *PgAlarmLibraryRepository) List(ctx context.Context, filter AlarmLibraryFilter) (*model.ListResponse[AlarmLibrary], error) {
 	builder := storage.Psql.Select(
-		"id", "alarm_code", "alarm_source", "event_type", "severity",
+		"id", "alarm_identifier", "alarm_source", "event_type", "severity",
 		"enabled", "probable_cause", "explanation", "additional_info",
 		"carrier", "technology", "created_at", "updated_at").
 		From("alarm_libraries")
@@ -357,8 +357,8 @@ func (r *PgAlarmLibraryRepository) ListI18n(ctx context.Context, libraryID uuid.
 }
 
 func applyLibraryFilters(qb squirrel.SelectBuilder, f AlarmLibraryFilter) squirrel.SelectBuilder {
-	if f.AlarmCode != nil && *f.AlarmCode != "" {
-		qb = qb.Where(squirrel.Eq{"alarm_code": *f.AlarmCode})
+	if f.AlarmIdentifier != nil && *f.AlarmIdentifier != "" {
+		qb = qb.Where(squirrel.Eq{"alarm_identifier": *f.AlarmIdentifier})
 	}
 	if f.AlarmSource != nil && *f.AlarmSource != "" {
 		qb = qb.Where(squirrel.Like{"alarm_source": "%" + *f.AlarmSource + "%"})
@@ -378,7 +378,7 @@ func applyLibraryFilters(qb squirrel.SelectBuilder, f AlarmLibraryFilter) squirr
 	if f.Keyword != nil && *f.Keyword != "" {
 		kw := "%" + *f.Keyword + "%"
 		qb = qb.Where(squirrel.Or{
-			squirrel.Like{"alarm_code": kw},
+			squirrel.Like{"alarm_identifier": kw},
 			squirrel.Like{"alarm_source": kw},
 			squirrel.Like{"probable_cause": kw},
 		})
@@ -390,7 +390,7 @@ func scanAlarmLibraryRow(rows pgx.Rows) (*AlarmLibrary, error) {
 	var lib AlarmLibrary
 	var additionalInfoJSON []byte
 	err := rows.Scan(
-		&lib.ID, &lib.AlarmCode, &lib.AlarmSource, &lib.EventType, &lib.Severity,
+		&lib.ID, &lib.AlarmIdentifier, &lib.AlarmSource, &lib.EventType, &lib.Severity,
 		&lib.Enabled, &lib.ProbableCause, &lib.Explanation, &additionalInfoJSON,
 		&lib.Carrier, &lib.Technology, &lib.CreatedAt, &lib.UpdatedAt,
 	)

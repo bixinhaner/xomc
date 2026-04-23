@@ -39,17 +39,15 @@ func TestDashboardSummaryJSONFields(t *testing.T) {
 	}
 }
 
-// TestAlarmRuleResponseFormat verifies the AlarmRule JSON structure
-// matches frontend alarmApi.ts BackendAlarmRule expectations.
-func TestAlarmRuleResponseFormat(t *testing.T) {
-	rule := alarm.AlarmRule{
-		Name:          "Test Rule",
-		AlarmCode:     "ALM001",
-		Severity:      1,
-		ConditionType: "threshold",
-		Carrier:       "cmcc",
-		Technology:    "lte",
-		Enabled:       true,
+// TestAlarmFilterRuleResponseFormat verifies the AlarmFilterRule JSON structure
+// matches frontend alarmApi.ts BackendAlarmFilterRule expectations.
+func TestAlarmFilterRuleResponseFormat(t *testing.T) {
+	rule := alarm.AlarmFilterRule{
+		Name:       "Test Rule",
+		FilterType: "alarm_identifier",
+		Action:     "default",
+		Priority:   1,
+		Enabled:    true,
 	}
 
 	data, err := json.Marshal(rule)
@@ -59,9 +57,9 @@ func TestAlarmRuleResponseFormat(t *testing.T) {
 	err = json.Unmarshal(data, &result)
 	require.NoError(t, err)
 
-	requiredFields := []string{"name", "alarm_code", "severity", "condition_type", "carrier", "technology", "enabled"}
+	requiredFields := []string{"name", "filter_type", "action", "priority", "enabled"}
 	for _, field := range requiredFields {
-		assert.Contains(t, result, field, "AlarmRule must have field: %s", field)
+		assert.Contains(t, result, field, "AlarmFilterRule must have field: %s", field)
 	}
 }
 

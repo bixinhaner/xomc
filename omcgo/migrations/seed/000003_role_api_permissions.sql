@@ -7,8 +7,8 @@ CREATE TABLE IF NOT EXISTS role_api_permissions (
     PRIMARY KEY (role_id, endpoint_id)
 );
 
-CREATE INDEX idx_role_api_permissions_role     ON role_api_permissions(role_id);
-CREATE INDEX idx_role_api_permissions_endpoint ON role_api_permissions(endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_role_api_permissions_role     ON role_api_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_role_api_permissions_endpoint ON role_api_permissions(endpoint_id);
 
 COMMENT ON TABLE  role_api_permissions            IS '角色-API端点权限关联表';
 COMMENT ON COLUMN role_api_permissions.role_id     IS '角色 ID';

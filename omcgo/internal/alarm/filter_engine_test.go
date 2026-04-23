@@ -28,7 +28,10 @@ type mockStoreForEngine struct{}
 
 func (m *mockStoreForEngine) SaveActive(ctx context.Context, alarm *model.Alarm) error       { return nil }
 func (m *mockStoreForEngine) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) { return nil, nil }
-func (m *mockStoreForEngine) GetActiveByDeviceAndCode(ctx context.Context, deviceSN string, alarmCode string) (*model.Alarm, error) {
+func (m *mockStoreForEngine) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
+	return nil, nil
+}
+func (m *mockStoreForEngine) GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error) {
 	return nil, nil
 }
 func (m *mockStoreForEngine) UpdateActive(ctx context.Context, alarm *model.Alarm) error          { return nil }
@@ -40,62 +43,48 @@ func (m *mockStoreForEngine) Archive(ctx context.Context, alarm *model.Alarm) er
 func (m *mockStoreForEngine) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
 	return nil, nil
 }
-func (m *mockStoreForEngine) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
-	return nil, nil
-}
-func (m *mockStoreForEngine) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
-	return nil, nil
-}
-func (m *mockStoreForEngine) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
-	return nil
-}
-func (m *mockStoreForEngine) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error { return nil }
-func (m *mockStoreForEngine) BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error {
-	return nil
-}
-func (m *mockStoreForEngine) BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
-	return nil
-}
-func (m *mockStoreForEngine) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error {
-	return nil
-}
-func (m *mockStoreForEngine) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error {
-	return nil
-}
-func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *mockStoreForEngine) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) { return nil, nil }
+func (m *mockStoreForEngine) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) { return nil, nil }
+func (m *mockStoreForEngine) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error { return nil }
+func (m *mockStoreForEngine) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error                { return nil }
+func (m *mockStoreForEngine) BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error       { return nil }
+func (m *mockStoreForEngine) BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error { return nil }
+func (m *mockStoreForEngine) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error                { return nil }
+func (m *mockStoreForEngine) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error                       { return nil }
+func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error                                    { return nil }
 
 func TestMatch_IgnoreAction(t *testing.T) {
 	engine := NewFilterEngine(&mockFilterRuleRepo{}, &mockStoreForEngine{}, zap.NewNop())
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmSource, AlarmSources: []string{"Device"}, Action: FilterActionIgnore}
-	alarm := &model.Alarm{AlarmSource: strPtr("Device"), AlarmCode: "CPU_OVERLOAD"}
+	alarm := &model.Alarm{AlarmSource: strPtr("Device"), AlarmIdentifier: "CPU_OVERLOAD"}
 	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
 }
 
 func TestMatch_AutoAcknowledge(t *testing.T) {
 	engine := NewFilterEngine(&mockFilterRuleRepo{}, &mockStoreForEngine{}, zap.NewNop())
-	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmCode, AlarmCodes: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge}
-	alarm := &model.Alarm{AlarmCode: "CPU_OVERLOAD"}
+	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge}
+	alarm := &model.Alarm{AlarmIdentifier: "CPU_OVERLOAD"}
 	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
 }
 
 func TestMatch_AutoClear(t *testing.T) {
 	engine := NewFilterEngine(&mockFilterRuleRepo{}, &mockStoreForEngine{}, zap.NewNop())
-	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmCode, AlarmCodes: []string{"TEMP_HIGH"}, Action: FilterActionAutoClear}
-	alarm := &model.Alarm{AlarmCode: "TEMP_HIGH"}
+	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"TEMP_HIGH"}, Action: FilterActionAutoClear}
+	alarm := &model.Alarm{AlarmIdentifier: "TEMP_HIGH"}
 	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
 }
 
 func TestMatch_NoMatch(t *testing.T) {
 	engine := NewFilterEngine(&mockFilterRuleRepo{}, &mockStoreForEngine{}, zap.NewNop())
-	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmCode, AlarmCodes: []string{"CPU_OVERLOAD"}, Action: FilterActionIgnore}
-	alarm := &model.Alarm{AlarmCode: "GPS_LOSS"}
+	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionIgnore}
+	alarm := &model.Alarm{AlarmIdentifier: "GPS_LOSS"}
 	assert.False(t, engine.match(alarm, uuid.UUID{}, rule))
 }
 
 func TestProcessAlarm_Default(t *testing.T) {
 	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{}}
 	engine := NewFilterEngine(repo, &mockStoreForEngine{}, zap.NewNop())
-	alarm := &model.Alarm{AlarmCode: "DEVICE_OFFLINE"}
+	alarm := &model.Alarm{AlarmIdentifier: "DEVICE_OFFLINE"}
 	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.UUID{})
 	assert.NoError(t, err)
 	assert.False(t, result.Handled)
@@ -104,10 +93,10 @@ func TestProcessAlarm_Default(t *testing.T) {
 
 func TestProcessAlarm_IgnoreAction(t *testing.T) {
 	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
-		{FilterType: FilterTypeAlarmCode, AlarmCodes: []string{"DEVICE_OFFLINE"}, Action: FilterActionIgnore},
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"DEVICE_OFFLINE"}, Action: FilterActionIgnore},
 	}}
 	engine := NewFilterEngine(repo, &mockStoreForEngine{}, zap.NewNop())
-	alarm := &model.Alarm{AlarmCode: "DEVICE_OFFLINE"}
+	alarm := &model.Alarm{AlarmIdentifier: "DEVICE_OFFLINE"}
 	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.UUID{})
 	assert.NoError(t, err)
 	assert.True(t, result.Handled)
@@ -116,10 +105,10 @@ func TestProcessAlarm_IgnoreAction(t *testing.T) {
 
 func TestProcessAlarm_AutoAck(t *testing.T) {
 	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
-		{FilterType: FilterTypeAlarmCode, AlarmCodes: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge, Name: "auto-ack-cpu"},
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge, Name: "auto-ack-cpu"},
 	}}
 	engine := NewFilterEngine(repo, &mockStoreForEngine{}, zap.NewNop())
-	alarm := &model.Alarm{AlarmCode: "CPU_OVERLOAD"}
+	alarm := &model.Alarm{AlarmIdentifier: "CPU_OVERLOAD"}
 	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.UUID{})
 	assert.NoError(t, err)
 	assert.True(t, result.Handled)
@@ -129,10 +118,10 @@ func TestProcessAlarm_AutoAck(t *testing.T) {
 
 func TestProcessAlarm_AutoClear(t *testing.T) {
 	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
-		{FilterType: FilterTypeAlarmCode, AlarmCodes: []string{"GPS_LOSS"}, Action: FilterActionAutoClear, Name: "auto-clear-gps"},
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"GPS_LOSS"}, Action: FilterActionAutoClear, Name: "auto-clear-gps"},
 	}}
 	engine := NewFilterEngine(repo, &mockStoreForEngine{}, zap.NewNop())
-	alarm := &model.Alarm{AlarmCode: "GPS_LOSS"}
+	alarm := &model.Alarm{AlarmIdentifier: "GPS_LOSS"}
 	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.UUID{})
 	assert.NoError(t, err)
 	assert.True(t, result.Handled)

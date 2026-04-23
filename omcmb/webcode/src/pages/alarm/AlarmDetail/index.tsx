@@ -92,7 +92,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           >
             {SEVERITY_LABEL[alarm.severity] ?? alarm.severity}
           </Tag>
-          <span>{alarm.alarmCode || t('alarm.detail')}</span>
+          <span>{alarm.alarmIdentifier || t('alarm.detail')}</span>
         </Space>
       }
       open={open}
@@ -116,15 +116,15 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             </Descriptions.Item>
             {/* 2. 告警编码 */}
             <Descriptions.Item label={t('alarm.alarmIdentifier')}>
-              <Text style={{ fontFamily: 'monospace' }}>{alarm.alarmCode}</Text>
+              <Text style={{ fontFamily: 'monospace' }}>{alarm.alarmIdentifier}</Text>
             </Descriptions.Item>
             {/* 3. 可能原因 */}
             <Descriptions.Item label={t('alarm.possibleCause')}>
-              {alarm.alarmName}
+              {alarm.probableCause || '-'}
             </Descriptions.Item>
             {/* 4. 具体故障 */}
             <Descriptions.Item label={t('alarm.specificProblem')}>
-              {alarm.specificProblem || '-'}
+              {alarm.description || '-'}
             </Descriptions.Item>
             {/* 5. 严重程度 */}
             <Descriptions.Item label={t('alarm.severity')}>

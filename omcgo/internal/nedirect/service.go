@@ -281,7 +281,7 @@ func (s *Service) ReportFault(ctx context.Context, report FaultReport) error {
 		Carrier:     model.CarrierCMCC, // NE Direct is CMCC-specific
 		Severity:    model.AlarmSeverity(report.Severity),
 		AlarmType:   "ne_direct",
-		AlarmCode:   report.AlarmCode,
+		AlarmIdentifier:   report.AlarmCode,
 		Description: report.Description,
 		Status:      model.AlarmActive,
 		RaisedAt:    time.Now(),
@@ -299,7 +299,7 @@ func (s *Service) ReportFault(ctx context.Context, report FaultReport) error {
 
 	s.logger.Info("ne-direct fault reported",
 		zap.String("serial_number", report.SerialNumber),
-		zap.String("alarm_code", report.AlarmCode),
+		zap.String("alarm_identifier", report.AlarmCode),
 	)
 
 	s.publishEvent(ctx, event.SubjectNEDirectFault, report)

@@ -14,7 +14,7 @@ interface AlarmLogRecord {
   operationTime: string;
   operator: string;
   operationType: AlarmOperationType;
-  alarmCode: string;
+  alarmIdentifier: string;
   alarmName: string;
   deviceSn: string;
   severity: 'critical' | 'major' | 'minor' | 'warning';
@@ -22,13 +22,13 @@ interface AlarmLogRecord {
 }
 
 const mockAlarmLogs: AlarmLogRecord[] = [
-  { id: 'al-001', operationTime: '2024-06-01T09:00:00.000Z', operator: 'admin', operationType: 'confirm', alarmCode: 'ALM-001', alarmName: '板卡温度过高', deviceSn: 'ENB00001', severity: 'major', remark: '已通知运维人员' },
-  { id: 'al-002', operationTime: '2024-06-01T09:30:00.000Z', operator: 'operator1', operationType: 'clear', alarmCode: 'ALM-001', alarmName: '板卡温度过高', deviceSn: 'ENB00001', severity: 'major', remark: '设备已恢复正常' },
-  { id: 'al-003', operationTime: '2024-06-01T10:00:00.000Z', operator: 'admin', operationType: 'sync', alarmCode: 'ALL', alarmName: '全量同步', deviceSn: 'ENB00002', severity: 'minor' },
-  { id: 'al-004', operationTime: '2024-06-01T10:15:00.000Z', operator: 'operator2', operationType: 'confirm', alarmCode: 'ALM-055', alarmName: 'GPS时钟丢失', deviceSn: 'GNB00001', severity: 'critical', remark: '已上报紧急处理' },
-  { id: 'al-005', operationTime: '2024-06-01T11:00:00.000Z', operator: 'admin', operationType: 'suppress', alarmCode: 'ALM-100', alarmName: '主备切换告警', deviceSn: 'ENB00003', severity: 'warning', remark: '计划维护期间屏蔽' },
-  { id: 'al-006', operationTime: '2024-06-01T12:00:00.000Z', operator: 'admin', operationType: 'unsuppress', alarmCode: 'ALM-100', alarmName: '主备切换告警', deviceSn: 'ENB00003', severity: 'warning', remark: '维护结束' },
-  { id: 'al-007', operationTime: '2024-06-01T13:30:00.000Z', operator: 'operator1', operationType: 'clear', alarmCode: 'ALM-055', alarmName: 'GPS时钟丢失', deviceSn: 'GNB00001', severity: 'critical', remark: 'GPS信号恢复' },
+  { id: 'al-001', operationTime: '2024-06-01T09:00:00.000Z', operator: 'admin', operationType: 'confirm', alarmIdentifier: 'ALM-001', alarmName: '板卡温度过高', deviceSn: 'ENB00001', severity: 'major', remark: '已通知运维人员' },
+  { id: 'al-002', operationTime: '2024-06-01T09:30:00.000Z', operator: 'operator1', operationType: 'clear', alarmIdentifier: 'ALM-001', alarmName: '板卡温度过高', deviceSn: 'ENB00001', severity: 'major', remark: '设备已恢复正常' },
+  { id: 'al-003', operationTime: '2024-06-01T10:00:00.000Z', operator: 'admin', operationType: 'sync', alarmIdentifier: 'ALL', alarmName: '全量同步', deviceSn: 'ENB00002', severity: 'minor' },
+  { id: 'al-004', operationTime: '2024-06-01T10:15:00.000Z', operator: 'operator2', operationType: 'confirm', alarmIdentifier: 'ALM-055', alarmName: 'GPS时钟丢失', deviceSn: 'GNB00001', severity: 'critical', remark: '已上报紧急处理' },
+  { id: 'al-005', operationTime: '2024-06-01T11:00:00.000Z', operator: 'admin', operationType: 'suppress', alarmIdentifier: 'ALM-100', alarmName: '主备切换告警', deviceSn: 'ENB00003', severity: 'warning', remark: '计划维护期间屏蔽' },
+  { id: 'al-006', operationTime: '2024-06-01T12:00:00.000Z', operator: 'admin', operationType: 'unsuppress', alarmIdentifier: 'ALM-100', alarmName: '主备切换告警', deviceSn: 'ENB00003', severity: 'warning', remark: '维护结束' },
+  { id: 'al-007', operationTime: '2024-06-01T13:30:00.000Z', operator: 'operator1', operationType: 'clear', alarmIdentifier: 'ALM-055', alarmName: 'GPS时钟丢失', deviceSn: 'GNB00001', severity: 'critical', remark: 'GPS信号恢复' },
 ];
 
 const opTypeColorMap: Record<AlarmOperationType, string> = {
@@ -63,7 +63,7 @@ export default function AlarmLog() {
   const filtered = mockAlarmLogs.filter((r) => {
     if (filters.keyword) {
       const kw = String(filters.keyword).toLowerCase();
-      if (!r.alarmCode.toLowerCase().includes(kw) && !r.alarmName.toLowerCase().includes(kw) && !r.deviceSn.toLowerCase().includes(kw)) return false;
+      if (!r.alarmIdentifier.toLowerCase().includes(kw) && !r.alarmName.toLowerCase().includes(kw) && !r.deviceSn.toLowerCase().includes(kw)) return false;
     }
     if (filters.operationType && r.operationType !== filters.operationType) return false;
     if (filters.operator && !r.operator.includes(String(filters.operator))) return false;
@@ -111,9 +111,9 @@ export default function AlarmLog() {
       },
     },
     {
-      key: 'alarmCode',
+      key: 'alarmIdentifier',
       title: t('alarm.code'),
-      dataIndex: 'alarmCode',
+      dataIndex: 'alarmIdentifier',
       width: 100,
       render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span>,
     },
