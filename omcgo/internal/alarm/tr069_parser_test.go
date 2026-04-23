@@ -200,7 +200,7 @@ func TestToModel(t *testing.T) {
 
 func TestFormatAlarmParamsForGPV(t *testing.T) {
 	result := FormatAlarmParamsForGPV()
-	assert.JSONEq(t, `{"parameter_names":["Device.FaultMgmt.CurrentAlarm."]}`, string(result))
+	assert.JSONEq(t, `{"names":["Device.FaultMgmt.CurrentAlarm."]}`, string(result))
 }
 
 func TestComputeDiff(t *testing.T) {

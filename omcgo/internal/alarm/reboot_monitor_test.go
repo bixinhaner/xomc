@@ -44,6 +44,12 @@ func (s *capturingStore) GetActiveByID(_ context.Context, _ uuid.UUID) (*model.A
 func (s *capturingStore) GetActiveByDeviceAndCode(_ context.Context, _, _ string) (*model.Alarm, error) {
 	return nil, nil
 }
+func (s *capturingStore) GetActiveByDeviceAndIdentifier(_ context.Context, _, _ string) (*model.Alarm, error) {
+	return nil, nil
+}
+func (s *capturingStore) GetActiveByDeviceSN(_ context.Context, _ string) ([]*model.Alarm, error) {
+	return nil, nil
+}
 func (s *capturingStore) UpdateActive(_ context.Context, _ *model.Alarm) error { return nil }
 func (s *capturingStore) RemoveActive(_ context.Context, _ uuid.UUID) error    { return nil }
 func (s *capturingStore) ListActive(_ context.Context, _ AlarmFilter) (*model.ListResponse[model.Alarm], error) {
@@ -125,7 +131,7 @@ func TestRebootMonitor_AtThreshold_RaisesAlarm(t *testing.T) {
 
 	saved := store.saved()
 	require.Len(t, saved, 1)
-	assert.Equal(t, AlarmCodeFrequentReboot, saved[0].AlarmCode)
+	assert.Equal(t, AlarmCodeFrequentReboot, saved[0].AlarmIdentifier)
 	assert.Equal(t, "SN-B", saved[0].DeviceSN)
 	assert.Equal(t, model.AlarmMajor, saved[0].Severity)
 }

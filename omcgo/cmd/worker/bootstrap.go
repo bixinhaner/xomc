@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/omcgo/omcgo/internal/acs/cmdqueue"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
@@ -17,9 +16,9 @@ import (
 // workerInfra extends components.Infra with worker-specific dependencies.
 type workerInfra struct {
 	*components.Infra
-	Carriers   *carrier.CarrierRegistry
-	CmdQueue   cmdqueue.CommandQueue
-	TaskService *task.TaskService
+	Carriers     *carrier.CarrierRegistry
+	TaskService  *task.TaskService
+	TaskRepo     *task.PgTaskRepository
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -53,12 +52,12 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	w := &workerInfra{Infra: inf}
 	w.registerCarriers()
 
-	// 创建统一任务队列：TaskService（Redis + PG） + BridgeQueue 适配器
+	// 创建统一任务队列：TaskService（Redis + PG）
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskSvc := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
-	w.CmdQueue = task.NewBridgeQueue(taskSvc)
 	w.TaskService = taskSvc
+	w.TaskRepo = taskRepo
 
 	return w, nil
 }

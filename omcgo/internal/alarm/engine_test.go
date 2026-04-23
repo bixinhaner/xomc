@@ -197,7 +197,7 @@ func TestAcknowledgeAlarm(t *testing.T) {
 
 	stored := store.active[alarm.ID]
 	assert.Equal(t, model.AlarmAcknowledged, stored.Status)
-	assert.Equal(t, "admin@test.com", stored.AcknowledgedBy)
+	assert.Equal(t, "admin@test.com", *stored.AcknowledgedBy)
 	assert.NotNil(t, stored.AcknowledgedAt)
 }
 

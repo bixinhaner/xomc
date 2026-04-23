@@ -145,7 +145,7 @@ func (m *RebootMonitor) handle(ctx context.Context, evt event.Event) error {
 		DeviceID:    deviceID,
 		DeviceSN:    payload.SerialNumber,
 		Carrier:     model.CarrierCode(payload.Carrier),
-		AlarmCode:   AlarmCodeFrequentReboot,
+		AlarmIdentifier: AlarmCodeFrequentReboot,
 		AlarmType:   "device",
 		AlarmSource: strPtr("acs"),
 		EventType:   strPtr("abnormal_reboot"),

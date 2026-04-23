@@ -63,7 +63,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
 	// ZScore 去重保证多 Worker/多次重启都不会重复入队；sent 任务不在此路径，
 	// 由 CPE 重连时的 RecoverPendingTasks 走陈旧阈值恢复。
-	if _, err := w.TaskSvc.RestorePendingQueues(ctx, 0); err != nil {
+	if _, err := w.TaskService.RestorePendingQueues(ctx, 0); err != nil {
 		w.Logger.Warn("restore pending task queues failed", zap.Error(err))
 	}
 
@@ -124,7 +124,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	logger.Info("reboot monitor started")
 
 	// Reboot Task Closer (F01/F06)：M Reboot Inform 兜底收敛未 ACK 的 Reboot/FactoryReset 任务。
-	rebootCloser := task.NewRebootCloser(w.TaskRepo, w.TaskSvc, logger)
+	rebootCloser := task.NewRebootCloser(w.TaskRepo, w.TaskService, logger)
 	if err := rebootCloser.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe reboot task closer", zap.Error(err))
 	}
@@ -154,7 +154,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	backupTaskRepo := backup.NewPgTaskRepository(w.PgPool)
 	connReqClient := connreq.NewClient(w.Redis, logger)
 	backupExecutor := backup.NewBackupExecutor(
-		backupTaskRepo, deviceRepo, w.TaskSvc, connReqClient,
+		backupTaskRepo, deviceRepo, w.TaskService, connReqClient,
 		w.EventBus, logger,
 	)
 	if err := backupExecutor.Subscribe(w.EventBus); err != nil {

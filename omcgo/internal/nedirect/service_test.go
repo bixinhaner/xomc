@@ -158,6 +158,9 @@ func (m *mockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
 	return nil
 }
+func (m *mockDeviceRepo) RecordBoot(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
 func (m *mockDeviceRepo) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
 	return nil, nil
 }
@@ -240,6 +243,12 @@ func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*mode
 	return nil, nil
 }
 func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN, alarmIdentifier string) (*model.Alarm, error) {
+	return nil, nil
+}
+func (m *mockAlarmStore) GetActiveByDeviceSN(_ context.Context, _ string) ([]*model.Alarm, error) {
+	return nil, nil
+}
+func (m *mockAlarmStore) GetActiveByDeviceAndCode(_ context.Context, _, _ string) (*model.Alarm, error) {
 	return nil, nil
 }
 func (m *mockAlarmStore) UpdateActive(ctx context.Context, a *model.Alarm) error { return nil }

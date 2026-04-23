@@ -85,6 +85,12 @@ func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*mode
 func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN, alarmIdentifier string) (*model.Alarm, error) {
 	return nil, nil
 }
+func (m *mockAlarmStore) GetActiveByDeviceSN(_ context.Context, _ string) ([]*model.Alarm, error) {
+	return nil, nil
+}
+func (m *mockAlarmStore) GetActiveByDeviceAndCode(_ context.Context, _, _ string) (*model.Alarm, error) {
+	return nil, nil
+}
 func (m *mockAlarmStore) UpdateActive(ctx context.Context, a *model.Alarm) error { return nil }
 func (m *mockAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error   { return nil }
 func (m *mockAlarmStore) ListActive(ctx context.Context, filter alarm.AlarmFilter) (*model.ListResponse[model.Alarm], error) {

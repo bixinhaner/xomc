@@ -40,7 +40,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			"created_at", "sent_at", "completed_at", "expires_at",
 			"result", "error_code", "error_message",
 			"source", "creator_id", "description",
-			"parent_task_id", "command_index", "device_index",
+			"source_id", "command_index", "device_index",
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
@@ -48,7 +48,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
-			nilUUID(task.ParentTaskID), task.CommandIndex, task.DeviceIndex,
+			nilUUID(task.SourceID), task.CommandIndex, task.DeviceIndex,
 		).
 		ToSql()
 	if err != nil {
@@ -229,6 +229,69 @@ func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN stri
 	return tasks, nil
 }
 
+// ListOpenByDeviceAndMethods 列出指定设备的 pending/sent 状态任务（用于 RebootCloser）。
+func (r *PgTaskRepository) ListOpenByDeviceAndMethods(ctx context.Context, deviceSN string, methods []string) ([]*Task, error) {
+	q := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.And{
+			sq.Eq{"device_sn": deviceSN},
+			sq.Eq{"method": methods},
+			sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}},
+		}).
+		OrderBy("created_at ASC")
+	query, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list open tasks query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query open tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
+}
+
+// ListPendingAllDevices 列出所有 pending 状态的任务（用于 RestorePendingQueues）。
+func (r *PgTaskRepository) ListPendingAllDevices(ctx context.Context, limit int) ([]*Task, error) {
+	q := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"status": TaskStatusPending}).
+		OrderBy("created_at ASC")
+	if limit > 0 {
+		q = q.Limit(uint64(limit))
+	}
+	query, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list pending query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query pending tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
+}
+
 // Delete 删除任务
 func (r *PgTaskRepository) Delete(ctx context.Context, id string) error {
 	query, args, err := storage.Psql.Delete("device_tasks").
@@ -258,7 +321,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		"created_at", "sent_at", "completed_at", "expires_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
-		"parent_task_id", "command_index", "device_index",
+		"source_id", "command_index", "device_index",
 	}
 
 	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
@@ -270,7 +333,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 			task.CreatedAt, task.SentAt, task.CompletedAt, task.ExpiresAt,
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
-			task.ParentTaskID, task.CommandIndex, task.DeviceIndex,
+			task.SourceID, task.CommandIndex, task.DeviceIndex,
 		)
 	}
 
@@ -348,7 +411,7 @@ func taskColumns() []string {
 		"created_at", "sent_at", "completed_at", "expires_at",
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
-		"parent_task_id", "command_index", "device_index",
+		"source_id", "command_index", "device_index",
 	}
 }
 
@@ -369,7 +432,7 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
 		&result, &task.ErrorCode, &task.ErrorMessage,
 		&task.Source, &task.CreatorID, &task.Description,
-		&task.ParentTaskID, &task.CommandIndex, &task.DeviceIndex,
+		&task.SourceID, &task.CommandIndex, &task.DeviceIndex,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
