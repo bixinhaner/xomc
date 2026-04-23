@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "description": "OMC 前端共享业务层：services / hooks / store / types / i18n / mock。通过 @core/* 路径别名被各皮肤（webcode、webcode-v2…）消费。",
+  "dependencies": {
+    "zustand": "^5.0.0"
+  },
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",
     "axios": "^1.0.0",
     "dayjs": "^1.11.0",
     "react": "^19.0.0",
-    "react-intl": "^8.0.0",
-    "zustand": "^5.0.0"
+    "react-intl": "^8.0.0"
   }
 }

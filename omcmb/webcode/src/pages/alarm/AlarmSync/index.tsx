@@ -10,7 +10,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
-import { useTriggerAlarmSync } from '@/hooks/api/useAlarms';
+import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 
 const { Text } = Typography;
 

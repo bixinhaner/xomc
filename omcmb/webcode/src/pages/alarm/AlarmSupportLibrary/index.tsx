@@ -12,7 +12,7 @@ import {
   useCreateAlarmLibrary,
   useUpdateAlarmLibrary,
   useDeleteAlarmLibrary,
-} from '@/hooks/api/useAlarms';
+} from '@core/hooks/api/useAlarms';
 
 // 告警库项类型（与 alarmApi.ts 中 AlarmLibraryItem 对齐）
 interface AlarmLibrary {
