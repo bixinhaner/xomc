@@ -41,7 +41,17 @@ export function useCommandSelection() {
 
   const { data: categoryDict } = useDictionary('mml_command_category');
 
-  const commands = useMemo(() => commandsResponse?.items ?? [], [commandsResponse]);
+  // 后端返回偶发会带重复（同一 id 出现两次），按 id 排重后再展平到分类树，
+  // 避免同一命令在树中渲染两次（to-do-list #6）。
+  const commands = useMemo(() => {
+    const raw = commandsResponse?.items ?? [];
+    const seen = new Set<string>();
+    return raw.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+  }, [commandsResponse]);
 
   const categoryOptions = useMemo(() => {
     const dictDetails = categoryDict?.sysDictionaryDetails;
@@ -110,7 +120,16 @@ export function useCommandSelection() {
     queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 1000 }),
   });
 
-  const templates = useMemo(() => templatesResponse?.items ?? [], [templatesResponse]);
+  // 自定义命令同样按 id 排重（to-do-list #6）。
+  const templates = useMemo(() => {
+    const raw = templatesResponse?.items ?? [];
+    const seen = new Set<string>();
+    return raw.filter((t) => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
+  }, [templatesResponse]);
 
   // Build the full tree including custom template directory
   const fullTreeData = useMemo((): CommandTreeNode[] => {

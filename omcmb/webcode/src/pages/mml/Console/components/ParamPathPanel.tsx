@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AutoComplete, Button, Empty, Select, Space, Typography } from 'antd';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
-import type { MMLCommand } from '@core/types/mml';
+import type { MMLCommand, MMLOperationType } from '@core/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
 import { useT } from '@/hooks/useT';
 
@@ -15,6 +15,8 @@ interface ParamPathPanelProps {
   onChange?: (payload: ParamPathChangePayload) => void;
 }
 
+// 全量 MML OperationType → TR-069 RPC 方法映射。命令未声明 supportedOperations
+// 时 fallback 到这份全集，保证下拉始终可选其他 RPC 类型（to-do-list #1）。
 const OP_LABELS: Record<string, string> = {
   LST: 'GetParameterValues',
   DSP: 'GetParameterValues',
@@ -24,26 +26,39 @@ const OP_LABELS: Record<string, string> = {
   DEL: 'DeleteObject',
   ACT: 'SetParameterValues',
   DEA: 'SetParameterValues',
-  RST: 'SetParameterValues',
+  RST: 'Reboot',
   CLR: 'SetParameterValues',
+  UPG: 'Download',
 };
+
+// 默认展示顺序：从高频到低频，便于用户快速扫读。
+const DEFAULT_OPERATIONS: MMLOperationType[] = [
+  'LST', 'DSP', 'MOD', 'ADD', 'RMV', 'ACT', 'DEA', 'RST', 'CLR', 'UPG',
+];
+
+// 用"稳定 id + path"模型描述每一行；避免像以前用 `${index}-${path}` 做 key
+// 导致输入 path 时键变化 → 组件重挂载 → 光标丢失 → 看起来像"不能输入"
+// （to-do-list #2）。
+interface PathRow {
+  id: number;
+  path: string;
+}
+
+let rowIdSeq = 1;
+const newRow = (path = ''): PathRow => ({ id: rowIdSeq++, path });
 
 export default function ParamPathPanel({ command, onChange }: ParamPathPanelProps) {
   const t = useT();
   const defaultOperation = useMemo(() => resolveOperationType(command), [command]);
-  const operationOptions = useMemo(() => {
-    const operations = command?.supportedOperations?.length
-      ? command.supportedOperations
-      : [defaultOperation];
 
-    return operations.map((item) => item.toUpperCase());
-  }, [command, defaultOperation]);
+  const operationOptions = useMemo(() => {
+    const declared = command?.supportedOperations?.map((o) => o.toUpperCase()) ?? [];
+    if (declared.length > 0) return declared;
+    return DEFAULT_OPERATIONS.slice();
+  }, [command]);
 
   const suggestedPaths = useMemo(() => {
-    if (!command?.paramPaths) {
-      return [];
-    }
-
+    if (!command?.paramPaths) return [];
     return command.paramPaths.map((item) => ({
       value: item.path,
       label: item.label ? `${item.label} (${item.path})` : item.path,
@@ -51,53 +66,63 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   }, [command]);
 
   const [operationType, setOperationType] = useState<string>(defaultOperation);
-  const [paths, setPaths] = useState<string[]>(['']);
+  const [rows, setRows] = useState<PathRow[]>([newRow()]);
 
+  // onChange 通过 ref 读取，避免 useEffect 依赖它导致父组件每次 render
+  // 都重置行状态。
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // 命令切换时重置：操作类型回默认、路径清空或预填第一个建议路径。
   useEffect(() => {
-    const nextOperation = operationOptions[0] || defaultOperation;
-    const nextPaths = command?.paramPaths?.length
-      ? [command.paramPaths[0].path]
-      : [''];
-
+    const nextOperation = (operationOptions[0] || defaultOperation).toUpperCase();
+    const firstSuggested = command?.paramPaths?.[0]?.path;
+    const nextRows = firstSuggested ? [newRow(firstSuggested)] : [newRow()];
     setOperationType(nextOperation);
-    setPaths(nextPaths);
-    onChange?.({ operationType: nextOperation, paramPaths: nextPaths.filter((item) => item.trim()) });
-  }, [command, defaultOperation, onChange, operationOptions]);
-
-  const emitChange = (nextOperation: string, nextPaths: string[]) => {
-    onChange?.({
+    setRows(nextRows);
+    onChangeRef.current?.({
       operationType: nextOperation,
-      paramPaths: nextPaths.map((item) => item.trim()).filter(Boolean),
+      paramPaths: nextRows.map((r) => r.path.trim()).filter(Boolean),
+    });
+  }, [command, defaultOperation, operationOptions]);
+
+  const emitChange = (nextOperation: string, nextRows: PathRow[]) => {
+    onChangeRef.current?.({
+      operationType: nextOperation,
+      paramPaths: nextRows.map((r) => r.path.trim()).filter(Boolean),
     });
   };
 
   const handleOperationChange = (nextOperation: string) => {
     setOperationType(nextOperation);
-    emitChange(nextOperation, paths);
+    emitChange(nextOperation, rows);
   };
 
-  const updatePath = (index: number, value: string) => {
-    const nextPaths = [...paths];
-    nextPaths[index] = value;
-    setPaths(nextPaths);
-    emitChange(operationType, nextPaths);
+  const updatePath = (id: number, value: string) => {
+    setRows((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, path: value } : r));
+      emitChange(operationType, next);
+      return next;
+    });
   };
 
-  const addPath = (index: number) => {
-    const nextPaths = [...paths];
-    nextPaths.splice(index + 1, 0, '');
-    setPaths(nextPaths);
-    emitChange(operationType, nextPaths);
+  const addPath = (id: number) => {
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.id === id);
+      if (idx < 0) return prev;
+      const next = [...prev.slice(0, idx + 1), newRow(), ...prev.slice(idx + 1)];
+      emitChange(operationType, next);
+      return next;
+    });
   };
 
-  const removePath = (index: number) => {
-    if (paths.length <= 1) {
-      return;
-    }
-
-    const nextPaths = paths.filter((_, currentIndex) => currentIndex !== index);
-    setPaths(nextPaths);
-    emitChange(operationType, nextPaths);
+  const removePath = (id: number) => {
+    setRows((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((r) => r.id !== id);
+      emitChange(operationType, next);
+      return next;
+    });
   };
 
   if (!command) {
@@ -107,7 +132,9 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div>
-        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>{t('mml.console.operationType')}</Typography.Text>
+        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>
+          {t('mml.console.operationType')}
+        </Typography.Text>
         <Select
           value={operationType}
           onChange={handleOperationChange}
@@ -120,30 +147,30 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
       </div>
 
       <div>
-        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>{t('mml.console.parameterPath')}</Typography.Text>
+        <Typography.Text style={{ display: 'block', marginBottom: 8 }}>
+          {t('mml.console.parameterPath')}
+        </Typography.Text>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          {paths.map((path, index) => (
-            <Space key={`${index}-${path}`} style={{ width: '100%' }} align="start">
-              <span style={{ width: 20, lineHeight: '32px', color: 'rgba(0, 0, 0, 0.45)' }}>{index + 1}.</span>
+          {rows.map((row, index) => (
+            <Space key={row.id} style={{ width: '100%' }} align="start">
+              <span style={{ width: 20, lineHeight: '32px', color: 'rgba(0, 0, 0, 0.45)' }}>
+                {index + 1}.
+              </span>
               <AutoComplete
-                value={path}
+                value={row.path}
                 options={suggestedPaths}
-                onChange={(value) => updatePath(index, value)}
+                onChange={(value) => updatePath(row.id, value)}
                 placeholder="Device.Services.FAPService.{i}..."
                 style={{ flex: 1 }}
                 filterOption={(inputValue, option) =>
                   String(option?.value ?? '').toLowerCase().includes(inputValue.toLowerCase())
                 }
               />
-              <Button
-                icon={<PlusOutlined />}
-                onClick={() => addPath(index)}
-                size="small"
-              />
+              <Button icon={<PlusOutlined />} onClick={() => addPath(row.id)} size="small" />
               <Button
                 icon={<MinusOutlined />}
-                onClick={() => removePath(index)}
-                disabled={paths.length <= 1}
+                onClick={() => removePath(row.id)}
+                disabled={rows.length <= 1}
                 size="small"
               />
             </Space>

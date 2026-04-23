@@ -309,10 +309,14 @@ export default function CommandInput({
             </Button>
           )}
           {onSaveScript && !isParamPathTab && (
+            // 未选择命令时按钮置灰：此处"命令"泛指左侧命令树选中项；由父层通过
+            // 把 selectedCommand 作为可选依据。无选中命令时没有内容可保存，
+            // 必须禁用以避免 message.warning('请先选择命令') 这类空操作。
             <Button
               size="small"
               icon={<SaveOutlined />}
               onClick={onSaveScript}
+              disabled={!selectedCommand}
               style={{ borderRadius: 4 }}
             >
               {t('mml.console.saveScript')}

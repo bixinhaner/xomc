@@ -7,9 +7,9 @@ import {
   TerminalPanel,
   CommandInput,
   BatchSnModal,
-  SaveScriptModal,
 } from './components';
 import AddTemplateModal from './components/AddTemplateModal';
+import ScriptTaskDrawer from '@/pages/mml/components/ScriptTaskDrawer';
 import {
   useDeviceSelection,
   useCommandSelection,
@@ -102,9 +102,20 @@ export default function MMLConsole() {
     }
 
     // Params format: CMD:paramId={code1,code2,...};
-    if (selectedParams.length > 0 && selectedCommand.paramRefs && selectedCommand.paramRefs.length > 0) {
+    //
+    // 初次选择命令时可能出现 selectedParams 尚未通过 ParamFormRenderer.onChange
+    // 回传给父层，但 selectedCommand.paramRefs 已就绪的情况——此时直接把
+    // paramRefs 的全集装配进命令行，避免用户第一次看到的只是"LST DEVICE_INFO"
+    // 不带参数（to-do-list #5）。
+    const paramRefs = selectedCommand.paramRefs ?? [];
+    const effectiveParams =
+      selectedParams.length > 0
+        ? selectedParams
+        : paramRefs.map((p) => p.paramCode);
+
+    if (effectiveParams.length > 0 && paramRefs.length > 0) {
       const paramId = nextOperationType === 'MOD' ? 'modId' : 'lstId';
-      const cmdText = `${code}:${paramId}={${selectedParams.join(',')}};`;
+      const cmdText = `${code}:${paramId}={${effectiveParams.join(',')}};`;
       setCommandLineText(cmdText);
       return;
     }
@@ -389,11 +400,16 @@ export default function MMLConsole() {
         }}
       />
 
-      <SaveScriptModal
+      {/* 保存脚本：复用 ScriptTaskDrawer（image-8），命令行内容预填，
+          不再需要文件上传。未选中命令时按钮在 CommandInput 内已置灰，
+          handleSaveScript 的 guard 只作为防御性兜底。
+          左侧已勾选的设备 SN 同步带入 Drawer（to-do-list #7）。*/}
+      <ScriptTaskDrawer
         open={saveScriptModalOpen}
-        defaultName={saveScriptDefaultName}
-        defaultContent={saveScriptDefaultContent}
         onClose={() => setSaveScriptModalOpen(false)}
+        prefillTaskName={saveScriptDefaultName}
+        prefillContent={saveScriptDefaultContent}
+        prefillDeviceSns={deviceSelection.selectedDevices.map((d) => d.sn)}
       />
     </div>
   );

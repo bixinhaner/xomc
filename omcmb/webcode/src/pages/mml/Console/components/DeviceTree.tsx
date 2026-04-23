@@ -82,7 +82,7 @@ export default function DeviceTree({
         }}
       >
         <Space size={6}>
-          <Typography.Text strong style={{ fontSize: 13 }}>{t('device.name')}</Typography.Text>
+          <Typography.Text strong style={{ fontSize: 13 }}>{t('nav.device.list')}</Typography.Text>
           <Tag
             style={{
               fontSize: 10,

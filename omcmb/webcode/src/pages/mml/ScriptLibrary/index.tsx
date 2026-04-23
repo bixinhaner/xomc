@@ -50,10 +50,28 @@ export default function ScriptLibrary() {
 
   const scripts = useMemo(() => scriptsData?.items ?? [], [scriptsData]);
 
-  const handleDeleteScripts = useCallback((ids: string[]) => {
-    deleteScriptsMutation.mutate(ids, {
-      onSuccess: () => void message.success(t('common.deleteSuccess')),
-      onError: (err) => void message.error(err instanceof Error ? err.message : 'Unknown'),
+  const handleDeleteScripts = useCallback((record: MMLScript) => {
+    Modal.confirm({
+      title: t('common.confirmDelete'),
+      content: t('mml.confirmDeleteScript', { name: record.scriptName }),
+      okText: t('common.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: () =>
+        new Promise<void>((resolve, reject) => {
+          deleteScriptsMutation.mutate([record.id], {
+            onSuccess: () => {
+              void message.success(t('common.deleteSuccess'));
+              resolve();
+            },
+            onError: (err) => {
+              void message.error(
+                err instanceof Error ? err.message : String(err ?? 'Unknown')
+              );
+              reject(err);
+            },
+          });
+        }),
     });
   }, [deleteScriptsMutation, t]);
 
@@ -63,7 +81,7 @@ export default function ScriptLibrary() {
       render: (_, record) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => { setViewingScript(record); setScriptViewVisible(true); }}>{t('mml.info')}</Button>
-          <Button type="link" size="small" danger onClick={() => handleDeleteScripts([record.id])}>{t('common.delete')}</Button>
+          <Button type="link" size="small" danger onClick={() => handleDeleteScripts(record)}>{t('common.delete')}</Button>
         </Space>
       ),
     },

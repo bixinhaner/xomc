@@ -103,7 +103,6 @@ type CreateScriptRequest struct {
 	ScriptName  string   `json:"script_name" binding:"required"`
 	Description string   `json:"description"`
 	Content     string   `json:"content" binding:"required"`
-	DeviceType  string   `json:"device_type"`
 	Tags        []string `json:"tags"`
 }
 
@@ -112,7 +111,6 @@ type UpdateScriptRequest struct {
 	ScriptName  string   `json:"script_name" binding:"required"`
 	Description string   `json:"description"`
 	Content     string   `json:"content" binding:"required"`
-	DeviceType  string   `json:"device_type"`
 	Tags        []string `json:"tags"`
 }
 
@@ -249,9 +247,6 @@ func (h *Handler) ListScripts(c *gin.Context) {
 		return
 	}
 
-	if deviceType := c.Query("device_type"); deviceType != "" {
-		filter.DeviceType = &deviceType
-	}
 	if creator := c.Query("creator"); creator != "" {
 		filter.Creator = &creator
 	}
@@ -301,7 +296,6 @@ func (h *Handler) CreateScript(c *gin.Context) {
 		ScriptName:  req.ScriptName,
 		Description: req.Description,
 		Content:     req.Content,
-		DeviceType:  req.DeviceType,
 		Creator:     creatorStr,
 		Tags:        req.Tags,
 	}
@@ -333,7 +327,6 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 		ScriptName:  req.ScriptName,
 		Description: req.Description,
 		Content:     req.Content,
-		DeviceType:  req.DeviceType,
 		Tags:        req.Tags,
 	}
 

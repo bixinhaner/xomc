@@ -92,7 +92,6 @@ type MMLScript struct {
 	ScriptName  string       `json:"script_name"`
 	Description string       `json:"description"`
 	Content     string       `json:"content"`
-	DeviceType  string       `json:"device_type"`
 	Creator     string       `json:"creator"`
 	Tags        []string     `json:"tags"`
 	Status      ScriptStatus `json:"status"`
@@ -156,9 +155,8 @@ type CommandFilter struct {
 
 // ScriptFilter specifies criteria for listing MML scripts.
 type ScriptFilter struct {
-	DeviceType *string
-	Creator    *string
-	Search     *string
+	Creator *string
+	Search  *string
 	model.ListRequest
 }
 

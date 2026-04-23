@@ -30,7 +30,15 @@ export function useDeviceSelection() {
         productType: d.productType || '',
         status: (d.connStatus === 'online' ? 'online' : d.connStatus === 'alarm' ? 'alarm' : 'offline') as ConsoleDevice['status'],
       }));
-      setDevices(mapped);
+      // 后端分页边界或缓存异常偶发会带回同 SN 重复项；此处按 SN 排重，
+      // 避免 Checkbox/Tag 渲染两条相同设备（to-do-list #6）。
+      const seen = new Set<string>();
+      const deduped = mapped.filter((d) => {
+        if (seen.has(d.sn)) return false;
+        seen.add(d.sn);
+        return true;
+      });
+      setDevices(deduped);
       setTotal(result.total);
     } catch {
       setDevices([]);

@@ -298,7 +298,6 @@ func (s *Service) UpdateScript(ctx context.Context, id uuid.UUID, script *MMLScr
 	existing.ScriptName = script.ScriptName
 	existing.Description = script.Description
 	existing.Content = script.Content
-	existing.DeviceType = script.DeviceType
 	if script.Tags != nil {
 		existing.Tags = script.Tags
 	}
@@ -498,6 +497,13 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		commands = append(commands, entry)
 	}
 
+	// rpc_method 补齐：前端或脚本入口的 commands 可能只带 command_code，
+	// 没有 rpc_method。Fanouter 依据 rpc_method 决定 device_task 的 Method 字段，
+	// 缺失则该条 command 在 fanout 时被跳过，整个 task 对那些设备没有实际效果。
+	// 此处按 command_code 逐条查库补齐，无法解析的（比如纯原始 MML 行）至少
+	// 保留 command_code 供后续手工诊断（to-do-list #4）。
+	commands = s.resolveRPCMethods(ctx, commands)
+
 	task := &MMLTask{
 		TaskName:  req.TaskName,
 		ScriptID:  scriptID,
@@ -559,6 +565,43 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	}
 
 	return task, nil
+}
+
+// resolveRPCMethods 为缺少 rpc_method 的 command 条目按 command_code 查库补齐。
+// 调用方保证 commands 为 []map[string]interface{}。查不到或 command_code 是
+// 裸 MML 行（例如 "LST DEVICE_INFO:lstId={ver};"）时会先尝试提取首 token 再查，
+// 都失败时保留条目原样，由 Fanouter 决定是否跳过。
+func (s *Service) resolveRPCMethods(ctx context.Context, commands []map[string]interface{}) []map[string]interface{} {
+	for _, entry := range commands {
+		if method, _ := entry["rpc_method"].(string); method != "" {
+			continue
+		}
+		rawCode, _ := entry["command_code"].(string)
+		code := strings.TrimSpace(rawCode)
+		if code == "" {
+			continue
+		}
+
+		// 先用完整字符串查；查不到再取首段（分隔符 `:`/空格）再试。
+		candidates := []string{code}
+		if idx := strings.IndexAny(code, ": "); idx > 0 {
+			candidates = append(candidates, strings.TrimSpace(code[:idx]))
+		}
+		for _, c := range candidates {
+			cmd, err := s.cmdRepo.GetByCode(ctx, c)
+			if err != nil || cmd == nil {
+				continue
+			}
+			entry["rpc_method"] = cmd.RPCMethod
+			// 命中后把 command_code 统一为数据库里的规范形式，方便后续审计。
+			entry["command_code"] = cmd.CommandCode
+			if _, hasCat := entry["category"]; !hasCat && cmd.Category != "" {
+				entry["category"] = cmd.Category
+			}
+			break
+		}
+	}
+	return commands
 }
 
 // writeAuditLogs creates audit log entries for a newly created task.

@@ -360,7 +360,6 @@ func TestService_CreateScript(t *testing.T) {
 		ScriptName:  "Test Script",
 		Description: "A test script",
 		Content:     "GET_PARAM Device.Info",
-		DeviceType:  "femto",
 		Creator:     "admin",
 		Tags:        nil, // should default to []
 	}
@@ -388,7 +387,6 @@ func TestService_CreateScript_WithTags(t *testing.T) {
 		ScriptName:  "Tagged Script",
 		Description: "A script with tags",
 		Content:     "SET_PARAM Device.Config",
-		DeviceType:  "pico",
 		Creator:     "admin",
 		Tags:        tags,
 	}
@@ -409,7 +407,6 @@ func TestService_UpdateScript(t *testing.T) {
 		ScriptName:  "Old Name",
 		Description: "Old description",
 		Content:     "OLD_COMMAND",
-		DeviceType:  "femto",
 		Creator:     "admin",
 		Tags:        []string{"original"},
 	}
@@ -432,7 +429,6 @@ func TestService_UpdateScript(t *testing.T) {
 		ScriptName:  "New Name",
 		Description: "New description",
 		Content:     "NEW_COMMAND",
-		DeviceType:  "pico",
 		Tags:        []string{"updated", "v2"},
 	}
 
@@ -443,7 +439,6 @@ func TestService_UpdateScript(t *testing.T) {
 	assert.Equal(t, "New Name", updatedScript.ScriptName)
 	assert.Equal(t, "New description", updatedScript.Description)
 	assert.Equal(t, "NEW_COMMAND", updatedScript.Content)
-	assert.Equal(t, "pico", updatedScript.DeviceType)
 	assert.Equal(t, []string{"updated", "v2"}, updatedScript.Tags)
 }
 
@@ -454,7 +449,6 @@ func TestService_UpdateScript_NilTagsPreservesExisting(t *testing.T) {
 		ScriptName:  "Old Name",
 		Description: "Old description",
 		Content:     "OLD_COMMAND",
-		DeviceType:  "femto",
 		Creator:     "admin",
 		Tags:        []string{"keep-me"},
 	}
@@ -476,7 +470,6 @@ func TestService_UpdateScript_NilTagsPreservesExisting(t *testing.T) {
 		ScriptName:  "Updated Name",
 		Description: "Updated description",
 		Content:     "UPDATED_CMD",
-		DeviceType:  "micro",
 		Tags:        nil, // should preserve existing
 	}
 

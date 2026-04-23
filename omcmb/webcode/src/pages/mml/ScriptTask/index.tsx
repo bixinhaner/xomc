@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Dropdown, Drawer, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd';
+import { Button, Dropdown, Modal, Space, Table, Tag, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
@@ -18,6 +18,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
+import ScriptTaskDrawer from '@/pages/mml/components/ScriptTaskDrawer';
 import { useT } from '@/hooks/useT';
 
 import type {
@@ -29,7 +30,6 @@ import type {
 import {
   useMMLScripts,
   useDeleteMMLScripts,
-  useCreateMMLScript,
   useStartMMLScript,
   usePauseMMLScript,
   useCancelMMLScript,
@@ -149,16 +149,6 @@ function lifecycleEnable(status: MMLScriptStatus | string | undefined): {
   }
 }
 
-// ---- 新增脚本表单 --------------------------------------------------------
-
-interface CreateScriptForm {
-  scriptName: string;
-  description?: string;
-  content: string;
-  deviceType?: string;
-  tagsText?: string; // 逗号分隔
-}
-
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -189,7 +179,6 @@ export default function ScriptTask() {
     search: filters.taskName,
   });
   const deleteScriptsMutation = useDeleteMMLScripts();
-  const createScriptMutation = useCreateMMLScript();
   const startScriptMutation = useStartMMLScript();
   const pauseScriptMutation = usePauseMMLScript();
   const cancelScriptMutation = useCancelMMLScript();
@@ -292,42 +281,8 @@ export default function ScriptTask() {
   const [info, setInfo] = useState<MMLScript | null>(null);
   const executionRows = useMemo(() => parseExecutionRows(viewing?.result), [viewing]);
 
-  // ---- 新增 drawer ------------------------------------------------------
+  // ---- 新增：共享 Drawer（布局见 ScriptTaskDrawer / docs/design/image-8.png）
   const [createOpen, setCreateOpen] = useState(false);
-  const [form] = Form.useForm<CreateScriptForm>();
-
-  const openCreate = useCallback(() => {
-    form.resetFields();
-    setCreateOpen(true);
-  }, [form]);
-
-  const submitCreate = useCallback(() => {
-    form.validateFields().then((values) => {
-      createScriptMutation.mutate(
-        {
-          scriptName: values.scriptName.trim(),
-          description: values.description?.trim() ?? '',
-          content: values.content,
-          deviceType: values.deviceType ?? '',
-          creator: '', // 后端从 JWT 用户回填
-          tags: values.tagsText
-            ? values.tagsText.split(',').map((s) => s.trim()).filter(Boolean)
-            : [],
-          // 下列字段默认值与 mml_scripts 默认列对齐（防止 TS 类型报错）：
-          status: 'active',
-          type: 'manual',
-          progress: 0,
-        },
-        {
-          onSuccess: () => {
-            void message.success(t('common.addSuccess'));
-            setCreateOpen(false);
-          },
-          onError: (err) => void message.error(err instanceof Error ? err.message : 'Unknown'),
-        }
-      );
-    }).catch(() => undefined);
-  }, [form, createScriptMutation, t]);
 
   // ---- 行操作 -----------------------------------------------------------
   const runMutation = useCallback(
@@ -527,7 +482,7 @@ export default function ScriptTask() {
     <ListPageLayout
       title={t('nav.mml.script')}
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
           {t('common.add')}
         </Button>
       }
@@ -630,55 +585,12 @@ export default function ScriptTask() {
         )}
       </Modal>
 
-      {/* 新增脚本 */}
-      <Drawer
-        title={t('mml.newScript')}
+      {/* 新增 MML 脚本任务（布局对齐 docs/design/image-8.png） */}
+      <ScriptTaskDrawer
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        width={560}
-        destroyOnClose
-        footer={
-          <div style={{ textAlign: 'right' }}>
-            <Button onClick={() => setCreateOpen(false)} style={{ marginRight: 8 }}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              type="primary"
-              onClick={submitCreate}
-              loading={createScriptMutation.isPending}
-            >
-              {t('common.confirm')}
-            </Button>
-          </div>
-        }
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item
-            label={t('mml.scriptName')}
-            name="scriptName"
-            rules={[{ required: true, message: t('mml.inputScriptName') }]}
-          >
-            <Input maxLength={100} placeholder={t('mml.inputScriptName')} />
-          </Form.Item>
-          <Form.Item label={t('mml.scriptDescription')} name="description">
-            <Input.TextArea rows={2} maxLength={500} placeholder={t('mml.inputScriptDescription')} />
-          </Form.Item>
-          <Form.Item
-            label={t('mml.scriptContent')}
-            name="content"
-            rules={[{ required: true, message: t('mml.contentRequired') }]}
-            extra={t('mml.inputScriptContent')}
-          >
-            <Input.TextArea rows={8} placeholder={t('mml.inputScriptContent')} />
-          </Form.Item>
-          <Form.Item label={t('mml.deviceType')} name="deviceType">
-            <Select placeholder={t('mml.selectProductType')} allowClear options={productTypeOptions} />
-          </Form.Item>
-          <Form.Item label={t('mml.tags')} name="tagsText" extra={t('mml.inputTags')}>
-            <Input placeholder={t('mml.inputTags')} />
-          </Form.Item>
-        </Form>
-      </Drawer>
+        onSuccess={() => void refetch()}
+      />
     </ListPageLayout>
   );
 }

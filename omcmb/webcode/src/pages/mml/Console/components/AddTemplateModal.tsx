@@ -116,7 +116,17 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSa
         productTypes: values.productTypes ?? [],
       };
 
-      await createMutation.mutateAsync(template);
+      try {
+        await createMutation.mutateAsync(template);
+      } catch (err) {
+        // API 调用失败：必须显式告知用户，不能吞错（否则界面静默关闭看起来成功）
+        void message.error(
+          t('common.addFailed', {
+            error: err instanceof Error ? err.message : String(err ?? 'Unknown'),
+          })
+        );
+        return;
+      }
       message.success(scope === 'public' ? t('mml.console.publicTemplateCreated') : t('mml.console.privateTemplateCreated'));
       onSuccess();
 
@@ -126,7 +136,7 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSa
 
       onClose();
     } catch {
-      // validation errors are shown inline
+      // 表单 validateFields 失败：inline 错误已展示在各字段下方
     }
   };
 

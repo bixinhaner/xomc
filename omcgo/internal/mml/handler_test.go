@@ -359,7 +359,6 @@ func TestHandler_ListScripts(t *testing.T) {
 					ScriptName:  "Batch Query Script",
 					Description: "Batch cell query",
 					Content:     "LST CELL;\nDSP CELLALGO;",
-					DeviceType:  "eNB",
 					Creator:     "admin",
 					Tags:        []string{"batch", "query"},
 					CreatedAt:   now,
@@ -388,7 +387,6 @@ func TestHandler_ListScripts(t *testing.T) {
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Batch Query Script", resp.Items[0].ScriptName)
-	assert.Equal(t, "eNB", resp.Items[0].DeviceType)
 }
 
 func TestHandler_CreateScript(t *testing.T) {
@@ -412,7 +410,6 @@ func TestHandler_CreateScript(t *testing.T) {
 		ScriptName:  "New Script",
 		Description: "A new MML script",
 		Content:     "LST CELL;",
-		DeviceType:  "gNB",
 		Tags:        []string{"5g", "cell"},
 	}
 
@@ -429,7 +426,6 @@ func TestHandler_CreateScript(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "New Script", resp.ScriptName)
 	assert.Equal(t, "LST CELL;", resp.Content)
-	assert.Equal(t, "gNB", resp.DeviceType)
 	assert.Equal(t, []string{"5g", "cell"}, resp.Tags)
 }
 

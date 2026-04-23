@@ -27,7 +27,6 @@ var commandAllowedSortColumns = map[string]bool{
 
 var scriptAllowedSortColumns = map[string]bool{
 	"script_name": true,
-	"device_type": true,
 	"creator":     true,
 	"created_at":  true,
 	"updated_at":  true,
@@ -56,7 +55,7 @@ var commandColumns = []string{
 
 var scriptColumns = []string{
 	"id", "script_name", "description", "content",
-	"device_type", "creator", "tags",
+	"creator", "tags",
 	"status", "start_time", "end_time", "type", "progress", "result",
 	"created_at", "updated_at",
 }
@@ -327,9 +326,9 @@ func (r *PgScriptRepository) Create(ctx context.Context, script *MMLScript) erro
 
 	query, args, err := storage.Psql.Insert("mml_scripts").
 		Columns("script_name", "description", "content",
-			"device_type", "creator", "tags").
+			"creator", "tags").
 		Values(script.ScriptName, script.Description, script.Content,
-			script.DeviceType, script.Creator, tagsJSON).
+			script.Creator, tagsJSON).
 		Suffix("RETURNING " + joinColumns(scriptColumns)).
 		ToSql()
 	if err != nil {
@@ -374,7 +373,6 @@ func (r *PgScriptRepository) Update(ctx context.Context, script *MMLScript) erro
 		Set("script_name", script.ScriptName).
 		Set("description", script.Description).
 		Set("content", script.Content).
-		Set("device_type", script.DeviceType).
 		Set("creator", script.Creator).
 		Set("tags", tagsJSON).
 		Where(sq.Eq{"id": script.ID}).
@@ -454,10 +452,6 @@ func (r *PgScriptRepository) List(ctx context.Context, filter ScriptFilter) (*mo
 	base := storage.Psql.Select(scriptColumns...).From("mml_scripts")
 	countBase := storage.Psql.Select("COUNT(*)").From("mml_scripts")
 
-	if filter.DeviceType != nil {
-		base = base.Where(sq.Eq{"device_type": *filter.DeviceType})
-		countBase = countBase.Where(sq.Eq{"device_type": *filter.DeviceType})
-	}
 	if filter.Creator != nil {
 		base = base.Where(sq.Eq{"creator": *filter.Creator})
 		countBase = countBase.Where(sq.Eq{"creator": *filter.Creator})
@@ -531,7 +525,7 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 
 	err := row.Scan(
 		&s.ID, &s.ScriptName, &s.Description, &s.Content,
-		&s.DeviceType, &s.Creator, &tagsJSON,
+		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
@@ -558,7 +552,7 @@ func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 
 	err := rows.Scan(
 		&s.ID, &s.ScriptName, &s.Description, &s.Content,
-		&s.DeviceType, &s.Creator, &tagsJSON,
+		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
