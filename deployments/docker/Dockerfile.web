@@ -47,6 +47,12 @@ RUN rm -rf webcode/dist webcode/node_modules
 
 # 在 webcode 目录里跑 build；vite 通过 Node 的模块向上查找命中 /app/node_modules。
 WORKDIR /app/webcode
+
+# npm 只会把"项目根"下的 node_modules/.bin 加入 PATH（不会向上回溯父目录的
+# node_modules/.bin）。而依赖安装在 /app/node_modules，所以必须显式把 /app
+# 层的 .bin 注入 PATH，否则 `npm run build` 会报 `sh: vite: not found`。
+ENV PATH=/app/node_modules/.bin:$PATH
+
 RUN npm run build
 
 # 验证构建产物完整性：index.html 引用的主入口文件必须存在
