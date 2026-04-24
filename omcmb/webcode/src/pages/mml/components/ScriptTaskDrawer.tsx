@@ -20,7 +20,6 @@ import dayjs from 'dayjs';
 
 import { useCreateMMLTask } from '@core/hooks/api/useMML';
 import type { MMLExecuteType } from '@core/types/mml';
-import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 
@@ -29,7 +28,7 @@ import { toast } from '@/utils/toast';
 // 布局对齐 docs/design/image-10.png。
 //
 // 一律提交到 mml_tasks（POST /api/v1/mml/tasks），包含：
-//   基本信息（任务名 + 产品类型 + 设备 SN + 脚本）
+//   基本信息（任务名 + 设备 SN + 脚本）
 // + 执行方式（立即 / 挂起 / 定时 / 周期）
 // + 执行策略（离线/在线重试）
 // -----------------------------------------------------------------------------
@@ -55,7 +54,6 @@ export interface ScriptTaskDrawerProps {
 
 interface TaskForm {
   taskName: string;
-  productType?: string;
   fileName?: string;
   executeType: MMLExecuteType;
   scheduledAt?: Dayjs;
@@ -99,11 +97,6 @@ export default function ScriptTaskDrawer({
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [parsedCommands, setParsedCommands] = useState<string[]>([]);
-
-  const { data: productTypeDict } = useDictionary('product_type');
-  const productTypeOptions = (productTypeDict?.sysDictionaryDetails ?? []).map(
-    (d) => ({ label: d.label, value: d.value })
-  );
 
   const createTaskMutation = useCreateMMLTask();
   const submitting = createTaskMutation.isPending;
@@ -226,9 +219,6 @@ export default function ScriptTaskDrawer({
             values.executeType === 'periodic' && values.periodTime
               ? values.periodTime.format('HH:mm:ss')
               : undefined,
-          // 产品类型单值存入 productTypes 数组（后端字段 product_types JSONB）；
-          // 空字符串不下发，避免污染未填场景的默认空数组。
-          ...(values.productType ? { productTypes: [values.productType] } : {}),
         };
         await createTaskMutation.mutateAsync(payload);
         toast.success(t('mml.taskCreated'));
@@ -285,21 +275,6 @@ export default function ScriptTaskDrawer({
           style={{ marginLeft: 12 }}
         >
           <Input maxLength={50} placeholder={t('mml.inputTaskName')} style={{ width: '100%' }} />
-        </Form.Item>
-
-        {/* 产品类型（image-10）：非必填；来自字典 product_type，统一与
-            脚本库/设备选择器口径一致。提交时转为 product_types 数组。 */}
-        <Form.Item
-          label={t('mml.productType')}
-          name="productType"
-          style={{ marginLeft: 12 }}
-        >
-          <Select
-            allowClear
-            placeholder={t('mml.selectProductType')}
-            options={productTypeOptions}
-            style={{ width: '100%' }}
-          />
         </Form.Item>
 
         <div style={{ marginLeft: 12, marginBottom: 16 }}>
