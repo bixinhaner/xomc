@@ -100,8 +100,9 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initInteropModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
-		Name: "misc",
-		Init: func() error { return initMiscModules(c) },
+		Name:    "misc",
+		Depends: []string{"task"},
+		Init:    func() error { return initMiscModules(c) },
 	})
 
 	totalStart := time.Now()

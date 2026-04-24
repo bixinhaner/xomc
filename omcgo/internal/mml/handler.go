@@ -74,9 +74,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 // ---- Request types ----
 
-// ExecuteHTTPRequest defines the request body for executing an MML command.
+// ExecuteHTTPRequest defines the request body for POST /api/v1/mml/execute
+// （临时执行命令）。command_code 必填。
 type ExecuteHTTPRequest struct {
-	CommandCode string                 `json:"command_code"`
+	CommandCode string                 `json:"command_code" binding:"required"`
 	DeviceSNs   []string               `json:"device_sns" binding:"required"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
@@ -100,6 +101,35 @@ type ExecuteHTTPRequest struct {
 	FailedRetryInterval int  `json:"failed_retry_interval"`
 
 	// Parameter path command support
+	ParamPaths    []string `json:"param_paths"`
+	OperationType string   `json:"operation_type"`
+}
+
+// CreateTaskHTTPRequest defines the request body for POST /api/v1/mml/tasks
+// （脚本任务登记）。command_code 可选，但必须提供 script_id / commands / command_code
+// 三者至少其一，否则没有任何命令可下发。字段集与 ExecuteHTTPRequest 完全一致，
+// 仅 binding 规则不同；CreateTask handler 通过显式类型转换复用 runExecute。
+type CreateTaskHTTPRequest struct {
+	CommandCode string                 `json:"command_code"`
+	DeviceSNs   []string               `json:"device_sns" binding:"required"`
+	Parameters  map[string]interface{} `json:"parameters"`
+	TaskName    string                 `json:"task_name"`
+
+	ScriptID string                   `json:"script_id"`
+	Commands []map[string]interface{} `json:"commands"`
+
+	ExecuteType string `json:"execute_type"`
+	ScheduledAt string `json:"scheduled_at"`
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
+	PeriodTime  string `json:"period_time"`
+
+	OfflineRetry        bool `json:"offline_retry"`
+	OfflineRetryWait    int  `json:"offline_retry_wait"`
+	FailedRetry         bool `json:"failed_retry"`
+	FailedRetryCount    int  `json:"failed_retry_count"`
+	FailedRetryInterval int  `json:"failed_retry_interval"`
+
 	ParamPaths    []string `json:"param_paths"`
 	OperationType string   `json:"operation_type"`
 }
@@ -188,20 +218,55 @@ func (h *Handler) GetCommandParamPaths(c *gin.Context) {
 
 // ---- Execute / Task creation handlers ----
 
-// CreateTask handles POST /api/v1/mml/tasks（to-do-list #7）。
-// 面向"新建脚本任务"页面的语义入口，内部与 Execute 共享实现——
-// 两者都落盘到 mml_tasks 并通过 Fanouter 驱动 device_tasks 下发，
-// 仅 URL 语义不同：Execute 侧重"临时执行命令"，CreateTask 侧重"登记任务"。
-func (h *Handler) CreateTask(c *gin.Context) {
-	h.Execute(c)
-}
-
 // Execute handles POST /api/v1/mml/execute.
+// command_code 必填，面向「临时执行命令」场景。
 func (h *Handler) Execute(c *gin.Context) {
 	var req ExecuteHTTPRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("mml execute request validation failed",
+			zap.String("client_ip", c.ClientIP()),
+			zap.Error(err),
+		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
+	}
+	h.runExecute(c, req)
+}
+
+// CreateTask handles POST /api/v1/mml/tasks（脚本任务登记）。
+// command_code 不强制，但 script_id / commands / command_code 三者至少其一；
+// 否则任务没有任何命令可下发，device_tasks 无法派生。
+func (h *Handler) CreateTask(c *gin.Context) {
+	var raw CreateTaskHTTPRequest
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		h.logger.Warn("mml task create request validation failed",
+			zap.String("client_ip", c.ClientIP()),
+			zap.Error(err),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 {
+		h.logger.Warn("mml task create rejected: no command source provided",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("task_name", raw.TaskName),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("one of script_id, commands, command_code is required"))
+		return
+	}
+	// 两个结构体字段序列与类型一致（仅 binding 标签不同），
+	// Go 规范允许在「忽略 tag」意义下显式转换。
+	h.runExecute(c, ExecuteHTTPRequest(raw))
+}
+
+// runExecute 封装 Execute / CreateTask 共用的归一化、映射到 service 层
+// ExecuteRequest 以及下发流程。
+func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
+	// 归一化 parameters：前端未传或传 null 时，Gin 反序列化得到 nil map。
+	// 置为空 map，避免下游 json.Marshal(nil) 产出 "null" 写进 device_tasks.params。
+	if req.Parameters == nil {
+		req.Parameters = map[string]interface{}{}
 	}
 
 	// Extract creator from context (set by auth middleware); fallback to empty.

@@ -257,7 +257,8 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService
 
-	// Wire MML fan-out to device tasks (TaskService must be initialized first)
+	// Wire MML fan-out to device tasks. misc 模块在 router.go 声明 Depends=["task"]，
+	// 保证此处 c.miscDeps.taskSvc 一定已就绪。
 	if c.miscDeps.taskSvc != nil {
 		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
 		mmlService.SetFanouter(fanouter)
