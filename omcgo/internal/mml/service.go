@@ -519,6 +519,13 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	// 保留 command_code 供后续手工诊断（to-do-list #4）。
 	commands = s.resolveRPCMethods(ctx, commands)
 
+	// Service 层兜底：ExecuteType 为空时默认立即执行（handler 已有默认值，
+	// 这里防其他内部调用方漏传）。否则下面扇出判据
+	// `ExecuteType == ExecuteImmediate` 失败 → device_tasks 无法派生。
+	if req.ExecuteType == "" {
+		req.ExecuteType = ExecuteImmediate
+	}
+
 	task := &MMLTask{
 		TaskName:  req.TaskName,
 		ScriptID:  scriptID,

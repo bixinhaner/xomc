@@ -208,6 +208,13 @@ func (h *Handler) Execute(c *gin.Context) {
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
 
+	// 前端不传 execute_type 时默认「立即执行」，避免 ExecuteType 为空串导致
+	// service 层扇出条件判断失败，device_tasks 无法派生（to-do-list.md 报告场景）。
+	executeType := req.ExecuteType
+	if executeType == "" {
+		executeType = string(ExecuteImmediate)
+	}
+
 	execReq := ExecuteRequest{
 		CommandCode:         req.CommandCode,
 		DeviceSNs:           req.DeviceSNs,
@@ -216,7 +223,7 @@ func (h *Handler) Execute(c *gin.Context) {
 		Creator:             creatorStr,
 		Executor:            creatorStr,
 		Commands:            req.Commands,
-		ExecuteType:         ExecuteType(req.ExecuteType),
+		ExecuteType:         ExecuteType(executeType),
 		OfflineRetry:        req.OfflineRetry,
 		OfflineRetryWait:    req.OfflineRetryWait,
 		FailedRetry:         req.FailedRetry,

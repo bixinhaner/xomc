@@ -12,7 +12,22 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/task"
 )
+
+// stubDeviceTaskCreator captures fan-out invocations for assertion.
+type stubDeviceTaskCreator struct {
+	calls [][]*task.CreateTaskRequest
+}
+
+func (s *stubDeviceTaskCreator) BatchCreateTasks(_ context.Context, reqs []*task.CreateTaskRequest) ([]*task.Task, error) {
+	s.calls = append(s.calls, reqs)
+	out := make([]*task.Task, len(reqs))
+	for i := range reqs {
+		out[i] = &task.Task{ID: uuid.New().String()}
+	}
+	return out, nil
+}
 
 // --- Mock Repositories ---
 
@@ -659,6 +674,66 @@ func TestService_ExecuteCommand_TotalDevicesSet(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, 3, capturedTask.TotalDevices, "TotalDevices should match device count")
+}
+
+// --- Tests: ExecuteCommand defaults ExecuteType to "immediate" when empty ---
+//
+// 回归测试 to-do-list.md #1：前端调 /api/v1/mml/execute 不带 execute_type
+// 时，handler 补默认；这里验证 service 层的兜底也生效，确保 Fanouter 被触发、
+// device_tasks 正确派生、mml_tasks 状态迁移到 running。
+
+func TestService_ExecuteCommand_EmptyExecuteType_DefaultsToImmediateAndFansOut(t *testing.T) {
+	resolvedCmd := &MMLCommand{
+		ID:          uuid.New(),
+		CommandCode: "LST DEVICE_INFO",
+		RPCMethod:   "GetParameterValues",
+	}
+	cmdRepo := &mockCommandRepo{
+		getByCodeFn: func(_ context.Context, _ string) (*MMLCommand, error) {
+			return resolvedCmd, nil
+		},
+	}
+
+	var capturedTask *MMLTask
+	var updatedStatus TaskStatus
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, s TaskStatus) error {
+			updatedStatus = s
+			return nil
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+
+	req := ExecuteRequest{
+		CommandCode: "LST DEVICE_INFO",
+		DeviceSNs:   []string{"SN-001", "SN-002"},
+		Parameters:  map[string]interface{}{},
+		TaskName:    "LST DEVICE_INFO",
+		Creator:     "admin",
+		// ExecuteType intentionally empty (前端默认场景)
+	}
+
+	result, err := svc.ExecuteCommand(context.Background(), req)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+
+	assert.Equal(t, ExecuteImmediate, capturedTask.ExecuteType,
+		"empty ExecuteType 必须被兜底补齐为 immediate")
+	assert.Len(t, stub.calls, 1, "Fanouter 必须被调用")
+	assert.Len(t, stub.calls[0], 2, "每个设备产生一条 device_task (2 devices × 1 cmd)")
+	assert.Equal(t, TaskRunning, updatedStatus,
+		"Fanout 成功后 mml_task 状态必须迁移到 running")
 }
 
 // --- Tests: Task control methods ---
