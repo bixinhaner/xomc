@@ -1,6 +1,17 @@
 export type VersionStatus = 'current' | 'deprecated' | 'beta' | 'archived';
 export type UpgradePlanStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'scheduled' | 'partial';
 
+// Main task status (maps to backend TaskStatus)
+export type TaskStatusType = 'pending' | 'in_progress' | 'suspended' | 'ended';
+// Main task result
+export type TaskResultType = 'success' | 'partial' | 'failed' | 'terminated';
+// Sub-task status (maps to backend UpgradeState)
+export type SubTaskStatusType = 'pending' | 'downloading' | 'rebooting' | 'verifying' | 'completed' | 'failed' | 'suspended' | 'terminated';
+// Task type (maps to backend TaskType)
+export type TaskTypeValue = 1 | 2 | 4 | 6 | 8;
+// File type (maps to backend FileType)
+export type FileTypeValue = 0 | 1 | 6;
+
 export interface SoftwareVersion {
   id: string;
   versionName: string;
@@ -17,6 +28,12 @@ export interface SoftwareVersion {
   features: string[];
   bugFixes: string[];
   known_issues?: string[];
+  // New fields for backend alignment
+  fileType?: FileTypeValue;
+  recommend?: boolean;
+  uploader?: string;
+  manufacturer?: string;
+  description?: string;
 }
 
 export interface UpgradePlan {
@@ -39,6 +56,53 @@ export interface UpgradePlan {
   preCheckRequired: boolean;
   rollbackEnabled: boolean;
   message?: string;
+}
+
+// UpgradeTaskInfo — frontend model for main upgrade task (upgrade_tasks table)
+export interface UpgradeTaskInfo {
+  id: string;
+  taskName: string;
+  taskType: TaskTypeValue;
+  firmwareId?: string;
+  fileName?: string;
+  fileMd5?: string;
+  status: TaskStatusType;
+  result?: TaskResultType;
+  operatorCode: string;
+  productClass: string;
+  isKeepConfig: boolean;
+  createStatus: string;
+  createUser: string;
+  totalCount: number;
+  successCount: number;
+  failCount: number;
+  maxConcurrent: number;
+  startedAt?: string;
+  endedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// UpgradeSubTaskInfo — frontend model for sub-task (upgrade_sub_tasks table)
+export interface UpgradeSubTaskInfo {
+  id: string;
+  taskId: string;
+  deviceId: string;
+  firmwareId?: string;
+  status: SubTaskStatusType;
+  errorMessage?: string;
+  retryCount: number;
+  maxRetries: number;
+  deviceSn?: string;
+  oriVersion?: string;
+  destVersion?: string;
+  commandKey?: string;
+  failureReason?: string;
+  preSuspendStatus?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const mockSoftwareVersions: SoftwareVersion[] = [

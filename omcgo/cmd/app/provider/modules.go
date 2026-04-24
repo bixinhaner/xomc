@@ -57,15 +57,18 @@ func initSoftwareModule(c *Container) error {
 	logger := c.Logger.Named("software")
 
 	firmwareRepo := software.NewPgFirmwareRepository(c.PgPool)
-	upgradeRepo := software.NewPgUpgradeTaskRepository(c.PgPool)
+	taskRepo := software.NewPgTaskRepository(c.PgPool)
+	subTaskRepo := software.NewPgSubTaskRepository(c.PgPool)
 	softwareService := software.NewSoftwareService(
-		firmwareRepo, upgradeRepo, c.DeviceRepo, c.TaskSvc, c.ConnReqClient,
-		c.MinIO, c.Cfg.MinIO.Buckets.Firmware, c.EventBus, logger,
+		firmwareRepo, taskRepo, subTaskRepo, c.DeviceRepo, c.TaskSvc, c.ConnReqClient,
+		c.MinIO, c.Cfg.MinIO.Buckets.Firmware, c.EventBus, c.Redis, logger,
 	)
 	if err := softwareService.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe software service", zap.Error(err))
 	}
-	softwareHandler := software.NewHandler(softwareService, firmwareRepo, upgradeRepo, logger)
+	softwareService.RestorePendingUpgrades(context.Background())
+	softwareService.StartTaskReaper()
+	softwareHandler := software.NewHandler(softwareService, firmwareRepo, taskRepo, subTaskRepo, logger)
 
 	c.miscDeps.softwareHandler = softwareHandler
 
@@ -94,9 +97,9 @@ func initProvisionModule(c *Container) error {
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
 	}
 	if c.Cfg.Provision.AutoSync.Enabled {
-		syncPlanStore := provision.NewSyncPlanStore(c.Redis)
+			planStore := provision.NewSyncPlanStore(c.Redis)
 		syncSvc := provision.NewSyncService(
-			c.ParamRepo, discoveryLogRepo, c.TaskSvc, syncPlanStore,
+			c.ParamRepo, discoveryLogRepo, c.TaskSvc, planStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
 		)
 		provisionEngine.SetSyncService(syncSvc)
@@ -120,8 +123,8 @@ func initProvisionModule(c *Container) error {
 }
 
 // initTaskModule 初始化 F06 任务队列模块。
-// TaskService 核心已在 bootstrap 中创建，此处仅添加运行时增强
-// （指标、Connection Request）并注册 handler。
+// TaskService 核心已在 bootstrap 中创建（供 BridgeQueue 使用），
+// 此处仅添加运行时增强（指标、Connection Request）并注册 handler。
 func initTaskModule(c *Container) error {
 	logger := c.Logger.Named("task")
 
@@ -259,45 +262,23 @@ func initMiscModules(c *Container) error {
 		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
 		mmlService.SetFanouter(fanouter)
 
-		// P1 重构（docs/design/mml-task-flow-design-20260424.md §4.1）：
-		// device_tasks 终态经 CompletionRouter 按 Task.Source 分发。
-		// 新建 router，注册 MML 聚合器；将来其它上游（provision/backup/...）
-		// 在自己的装配代码里调 router.Register 即可加入，无需改 bridge。
-		// ResultAggregator 同时收到 scriptRepo，任务关联脚本时回写 last_run_*。
+		// device_tasks 终态通过 NATS 跨进程事件投递到聚合器：
+		// ACS 在 MarkTaskCompleted/Failed 后发布 task.completed/task.failed，
+		// 本进程的 bridge 订阅后驱动 ResultAggregator 更新 mml_tasks 统计并推送 SSE。
 		aggregator := mml.NewResultAggregator(mmlTaskRepo, mmlScriptRepo, messageHub, logger)
-		router := task.NewCompletionRouter(logger)
-		router.Register(task.TaskSourceMML, aggregator)
-		// P4 指标接入（docs/design/mml-task-flow-design-20260424.md §3.3 C10）。
-		// TaskService 的 metrics 由 initTaskModule 先创建；这里复用同一个实例，
-		// 让 mml_task_total / mml_task_duration_seconds / completion_no_handler_total
-		// 都挂在同一 registry 下。
-		if m := c.TaskSvc.Metrics(); m != nil {
-			router.SetMetrics(m)
-		}
 		if c.EventBus != nil {
-			bridge := task.NewCompletionEventBridge(logger, router)
+			completionRouter := task.NewCompletionRouter(logger)
+			completionRouter.Register(task.TaskSourceMML, aggregator)
+			bridge := task.NewCompletionEventBridge(logger, completionRouter)
 			if err := bridge.Subscribe(c.EventBus); err != nil {
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
 			}
 		} else {
-			// 单进程部署（单测/无 NATS）下退化为同进程回调，
-			// TaskService 直接调 callback，不经过 router/bridge。
+			// 单进程部署（单测/无 NATS）下退化为同进程回调
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
 		}
 
 		logger.Info("MML fan-out bridge enabled")
-
-		// P2/P3（docs/design/mml-task-flow-design-20260424.md §4.2/§4.3）：
-		// 启动 Scheduler —— 每 30s 扫 scheduled/periodic 到期任务；启动时先做
-		// 一次补触发（Q2）。Start 用 Background ctx 作后台循环父 ctx；进程
-		// 关停由 GS 调用 Stop()/Wait() 让 goroutine 干净退出（不依赖 ctx 取消）。
-		scheduler := mml.NewScheduler(mmlService, mmlTaskRepo, nil, 0, logger)
-		scheduler.Start(context.Background())
-		c.GS.Register("mml-scheduler", 2, func(_ context.Context) error {
-			scheduler.Stop()
-			scheduler.Wait()
-			return nil
-		})
 	}
 
 	// Parameter Library module

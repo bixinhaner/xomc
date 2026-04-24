@@ -139,6 +139,7 @@ type AppConfig struct {
 	Northbound      NorthboundConfig      `mapstructure:"northbound"`
 	NEDirect        NEDirectConfig        `mapstructure:"ne_direct"`
 	Provision       ProvisionConfig       `mapstructure:"provision"`
+	Upgrade         UpgradeConfig         `mapstructure:"upgrade"`
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
@@ -199,6 +200,19 @@ type ProvisionConfig struct {
 	TaskTimeout   time.Duration     `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
 	ModelUpload   ModelUploadConfig `mapstructure:"model_upload"`
 	AutoSync      AutoSyncConfig    `mapstructure:"auto_sync"`
+}
+
+// UpgradeConfig 配置固件升级/回退的超时和并发策略。
+// 参照 ProvisionConfig 模式，控制升级执行器的超时断线恢复和并发批次大小。
+type UpgradeConfig struct {
+	TaskTimeout           time.Duration `mapstructure:"task_timeout"`             // 单设备升级超时，默认 30min
+	WaitDeviceReconnect   time.Duration `mapstructure:"wait_device_reconnect"`    // 等待离线设备重连，默认 1h
+	WaitDownloadComplete  time.Duration `mapstructure:"wait_download_complete"`   // 等待文件下载完成，默认 10min
+	WaitTransferComplete  time.Duration `mapstructure:"wait_transfer_complete"`   // 等待 TC，默认 30min
+	WaitRebootComplete    time.Duration `mapstructure:"wait_reboot_complete"`     // 回退等待重启，默认 5min
+	MaxConcurrentPerBatch int           `mapstructure:"max_concurrent_per_batch"` // 每批最大并发，默认 5
+	ReaperInterval        time.Duration `mapstructure:"reaper_interval"`          // 超时扫描间隔，默认 2min
+	UpgradeLockTTL        time.Duration `mapstructure:"upgrade_lock_ttl"`         // Redis 升级锁 TTL，默认 1h
 }
 
 // ModelUploadConfig 配置数据模型上传流程（FileType=11）。

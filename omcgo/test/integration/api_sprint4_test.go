@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/alarm"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/syslog"
@@ -43,9 +44,10 @@ func TestDashboardSummaryJSONFields(t *testing.T) {
 // matches frontend alarmApi.ts BackendAlarmFilterRule expectations.
 func TestAlarmFilterRuleResponseFormat(t *testing.T) {
 	rule := alarm.AlarmFilterRule{
-		Name:       "Test Rule",
-		FilterType: "alarm_identifier",
-		Action:     "default",
+		ID:         uuid.New(),
+		Name:       "Test Filter Rule",
+		FilterType: "suppress",
+		Action:     "suppress",
 		Priority:   1,
 		Enabled:    true,
 	}
@@ -57,7 +59,7 @@ func TestAlarmFilterRuleResponseFormat(t *testing.T) {
 	err = json.Unmarshal(data, &result)
 	require.NoError(t, err)
 
-	requiredFields := []string{"name", "filter_type", "action", "priority", "enabled"}
+	requiredFields := []string{"id", "name", "filter_type", "action", "priority", "enabled"}
 	for _, field := range requiredFields {
 		assert.Contains(t, result, field, "AlarmFilterRule must have field: %s", field)
 	}

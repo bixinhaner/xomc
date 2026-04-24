@@ -26,6 +26,7 @@ type swHFirmwareRepo struct {
 	getByIDFn func(ctx context.Context, id uuid.UUID) (*FirmwareVersion, error)
 	createFn  func(ctx context.Context, fw *FirmwareVersion) error
 	deleteFn  func(ctx context.Context, id uuid.UUID) error
+	updateFn  func(ctx context.Context, fw *FirmwareVersion) error
 }
 
 func (m *swHFirmwareRepo) Create(ctx context.Context, fw *FirmwareVersion) error {
@@ -47,6 +48,12 @@ func (m *swHFirmwareRepo) List(ctx context.Context, filter FirmwareFilter) (*mod
 	}
 	return model.NewListResponse([]FirmwareVersion{}, 0, 1, 20), nil
 }
+func (m *swHFirmwareRepo) Update(ctx context.Context, fw *FirmwareVersion) error {
+	if m.updateFn != nil {
+		return m.updateFn(ctx, fw)
+	}
+	return nil
+}
 func (m *swHFirmwareRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	if m.deleteFn != nil {
 		return m.deleteFn(ctx, id)
@@ -54,46 +61,78 @@ func (m *swHFirmwareRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-type swHUpgradeRepo struct {
+type swHTaskRepo struct {
 	listFn    func(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error)
 	getByIDFn func(ctx context.Context, id uuid.UUID) (*UpgradeTask, error)
 }
 
-func (m *swHUpgradeRepo) Create(_ context.Context, task *UpgradeTask) error {
+func (m *swHTaskRepo) Create(_ context.Context, task *UpgradeTask) error {
 	task.ID = uuid.New()
 	return nil
 }
-func (m *swHUpgradeRepo) GetByID(ctx context.Context, id uuid.UUID) (*UpgradeTask, error) {
+func (m *swHTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*UpgradeTask, error) {
 	if m.getByIDFn != nil {
 		return m.getByIDFn(ctx, id)
 	}
 	return nil, commonerrors.ErrNotFound
 }
-func (m *swHUpgradeRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ UpgradeState, _ string) error {
+func (m *swHTaskRepo) Update(_ context.Context, _ *UpgradeTask) error { return nil }
+func (m *swHTaskRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ TaskStatus, _ TaskResult) error {
 	return nil
 }
-func (m *swHUpgradeRepo) List(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
+func (m *swHTaskRepo) List(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
 	if m.listFn != nil {
 		return m.listFn(ctx, filter)
 	}
 	return model.NewListResponse([]UpgradeTask{}, 0, 1, 20), nil
 }
-func (m *swHUpgradeRepo) GetActiveByDeviceID(_ context.Context, _ uuid.UUID) (*UpgradeTask, error) {
+func (m *swHTaskRepo) IncrementCounts(_ context.Context, _ uuid.UUID, _, _ int) error {
+	return nil
+}
+
+type swHSubTaskRepo struct{}
+
+func (m *swHSubTaskRepo) Create(_ context.Context, task *UpgradeSubTask) error {
+	task.ID = uuid.New()
+	return nil
+}
+func (m *swHSubTaskRepo) GetByID(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
 	return nil, commonerrors.ErrNotFound
 }
-func (m *swHUpgradeRepo) CountByBatchStatus(_ context.Context, _ uuid.UUID) (map[UpgradeState]int64, error) {
-	return nil, nil
+func (m *swHSubTaskRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ UpgradeState, _ string) error {
+	return nil
+}
+func (m *swHSubTaskRepo) Update(_ context.Context, _ *UpgradeSubTask) error { return nil }
+func (m *swHSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
+	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
+}
+func (m *swHSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
+	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
+}
+func (m *swHSubTaskRepo) GetActiveByDeviceID(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
+func (m *swHSubTaskRepo) GetByCommandKey(_ context.Context, _ string) (*UpgradeSubTask, error) {
+	return nil, commonerrors.ErrNotFound
+}
+func (m *swHSubTaskRepo) BatchCreate(_ context.Context, tasks []*UpgradeSubTask) error {
+	for _, t := range tasks {
+		t.ID = uuid.New()
+	}
+	return nil
+}
+func (m *swHSubTaskRepo) FailStale(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-func swHSetupRouter(fwRepo FirmwareRepository, upgradeRepo UpgradeTaskRepository) *gin.Engine {
+func swHSetupRouter(fwRepo FirmwareRepository, taskRepo TaskRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	// Pass nil service — only test endpoints that use repos directly
-	h := NewHandler(nil, fwRepo, upgradeRepo, zap.NewNop())
+	h := NewHandler(nil, fwRepo, taskRepo, &swHSubTaskRepo{}, zap.NewNop())
 	h.RegisterRoutes(r.Group(""))
 	return r
 }
@@ -125,7 +164,7 @@ func TestSwHandler_ListFirmware_Default(t *testing.T) {
 			}, 2, 1, 20), nil
 		},
 	}
-	router := swHSetupRouter(fwRepo, &swHUpgradeRepo{})
+	router := swHSetupRouter(fwRepo, &swHTaskRepo{})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/firmware?page=1&page_size=20", nil)
@@ -145,7 +184,7 @@ func TestSwHandler_GetFirmware_Success(t *testing.T) {
 			return swHSampleFirmware(id), nil
 		},
 	}
-	router := swHSetupRouter(fwRepo, &swHUpgradeRepo{})
+	router := swHSetupRouter(fwRepo, &swHTaskRepo{})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/firmware/"+id.String(), nil)
@@ -158,7 +197,7 @@ func TestSwHandler_GetFirmware_Success(t *testing.T) {
 }
 
 func TestSwHandler_GetFirmware_NotFound(t *testing.T) {
-	router := swHSetupRouter(&swHFirmwareRepo{}, &swHUpgradeRepo{})
+	router := swHSetupRouter(&swHFirmwareRepo{}, &swHTaskRepo{})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/firmware/"+uuid.New().String(), nil)
@@ -175,7 +214,7 @@ func TestSwHandler_DeleteFirmware_Success(t *testing.T) {
 			return nil
 		},
 	}
-	router := swHSetupRouter(fwRepo, &swHUpgradeRepo{})
+	router := swHSetupRouter(fwRepo, &swHTaskRepo{})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodDelete, "/firmware/"+uuid.New().String(), nil)
@@ -186,14 +225,14 @@ func TestSwHandler_DeleteFirmware_Success(t *testing.T) {
 }
 
 func TestSwHandler_ListUpgradeTasks_Default(t *testing.T) {
-	upgradeRepo := &swHUpgradeRepo{
+	taskRepo := &swHTaskRepo{
 		listFn: func(_ context.Context, _ UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
 			return model.NewListResponse([]UpgradeTask{
-				{ID: uuid.New(), Status: UpgradePending},
+				{ID: uuid.New(), Status: TaskPending, TaskName: "test-task"},
 			}, 1, 1, 20), nil
 		},
 	}
-	router := swHSetupRouter(&swHFirmwareRepo{}, upgradeRepo)
+	router := swHSetupRouter(&swHFirmwareRepo{}, taskRepo)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/upgrade-tasks?page=1&page_size=20", nil)
@@ -207,12 +246,12 @@ func TestSwHandler_ListUpgradeTasks_Default(t *testing.T) {
 
 func TestSwHandler_GetUpgradeTask_Success(t *testing.T) {
 	id := uuid.New()
-	upgradeRepo := &swHUpgradeRepo{
+	taskRepo := &swHTaskRepo{
 		getByIDFn: func(_ context.Context, gotID uuid.UUID) (*UpgradeTask, error) {
-			return &UpgradeTask{ID: gotID, Status: UpgradeDownloading}, nil
+			return &UpgradeTask{ID: gotID, Status: TaskInProgress, TaskName: "test"}, nil
 		},
 	}
-	router := swHSetupRouter(&swHFirmwareRepo{}, upgradeRepo)
+	router := swHSetupRouter(&swHFirmwareRepo{}, taskRepo)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/upgrade-tasks/"+id.String(), nil)
@@ -225,7 +264,7 @@ func TestSwHandler_GetUpgradeTask_Success(t *testing.T) {
 }
 
 func TestSwHandler_GetUpgradeTask_NotFound(t *testing.T) {
-	router := swHSetupRouter(&swHFirmwareRepo{}, &swHUpgradeRepo{})
+	router := swHSetupRouter(&swHFirmwareRepo{}, &swHTaskRepo{})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/upgrade-tasks/"+uuid.New().String(), nil)

@@ -17,7 +17,8 @@ import (
 
 var firmwareColumns = []string{
 	"id", "carrier", "product_class", "version", "file_name", "file_size",
-	"minio_path", "compatible_oui", "release_notes", "status",
+	"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
+	"uploader", "manufacturer", "release_notes", "description", "status",
 	"created_at", "updated_at",
 }
 
@@ -36,10 +37,15 @@ func NewPgFirmwareRepository(pool *pgxpool.Pool) *PgFirmwareRepository {
 func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	var fw FirmwareVersion
 	var ouiJSON []byte
+	var md5Val, uploader, manufacturer, description sqlNilString
+	var recommend sqlNilBool
+
 	err := row.Scan(
 		&fw.ID, &fw.Carrier, &fw.ProductClass, &fw.Version,
-		&fw.FileName, &fw.FileSize, &fw.MinIOPath, &ouiJSON,
-		&fw.ReleaseNotes, &fw.Status, &fw.CreatedAt, &fw.UpdatedAt,
+		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
+		&ouiJSON, &md5Val, &recommend, &uploader,
+		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
+		&fw.CreatedAt, &fw.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -47,6 +53,11 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	if ouiJSON != nil {
 		_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
 	}
+	fw.MD5Val = md5Val.string
+	fw.Recommend = recommend.bool
+	fw.Uploader = uploader.string
+	fw.Manufacturer = manufacturer.string
+	fw.Description = description.string
 	return &fw, nil
 }
 
@@ -55,9 +66,11 @@ func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) 
 
 	query, args, err := storage.Psql.Insert("firmware_versions").
 		Columns("carrier", "product_class", "version", "file_name", "file_size",
-			"minio_path", "compatible_oui", "release_notes", "status").
+			"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
+			"uploader", "manufacturer", "release_notes", "description", "status").
 		Values(fw.Carrier, fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
-			fw.MinIOPath, ouiJSON, fw.ReleaseNotes, fw.Status).
+			fw.FileType, fw.MinIOPath, ouiJSON, fw.MD5Val, fw.Recommend,
+			fw.Uploader, fw.Manufacturer, fw.ReleaseNotes, fw.Description, fw.Status).
 		Suffix("RETURNING " + joinColumns(firmwareColumns)).
 		ToSql()
 	if err != nil {
@@ -104,6 +117,10 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 		base = base.Where(sq.Eq{"product_class": *filter.ProductClass})
 		countBase = countBase.Where(sq.Eq{"product_class": *filter.ProductClass})
 	}
+	if filter.FileType != nil {
+		base = base.Where(sq.Eq{"file_type": *filter.FileType})
+		countBase = countBase.Where(sq.Eq{"file_type": *filter.FileType})
+	}
 
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {
@@ -144,20 +161,11 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 
 	var items []FirmwareVersion
 	for rows.Next() {
-		var fw FirmwareVersion
-		var ouiJSON []byte
-		err := rows.Scan(
-			&fw.ID, &fw.Carrier, &fw.ProductClass, &fw.Version,
-			&fw.FileName, &fw.FileSize, &fw.MinIOPath, &ouiJSON,
-			&fw.ReleaseNotes, &fw.Status, &fw.CreatedAt, &fw.UpdatedAt,
-		)
+		fw, err := scanFirmwareRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan firmware row: %w", err)
 		}
-		if ouiJSON != nil {
-			_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
-		}
-		items = append(items, fw)
+		items = append(items, *fw)
 	}
 
 	totalPages := int(total) / pageSize
@@ -172,6 +180,29 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
+}
+
+func (r *PgFirmwareRepository) Update(ctx context.Context, fw *FirmwareVersion) error {
+	builder := storage.Psql.Update("firmware_versions").
+		Set("recommend", fw.Recommend).
+		Set("description", fw.Description).
+		Set("manufacturer", fw.Manufacturer).
+		Set("status", fw.Status).
+		Where(sq.Eq{"id": fw.ID})
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build update firmware SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update firmware: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
 }
 
 func (r *PgFirmwareRepository) Delete(ctx context.Context, id uuid.UUID) error {
@@ -192,6 +223,33 @@ func (r *PgFirmwareRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
+	var fw FirmwareVersion
+	var ouiJSON []byte
+	var md5Val, uploader, manufacturer, description sqlNilString
+	var recommend sqlNilBool
+
+	err := rows.Scan(
+		&fw.ID, &fw.Carrier, &fw.ProductClass, &fw.Version,
+		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
+		&ouiJSON, &md5Val, &recommend, &uploader,
+		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
+		&fw.CreatedAt, &fw.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if ouiJSON != nil {
+		_ = json.Unmarshal(ouiJSON, &fw.CompatibleOUI)
+	}
+	fw.MD5Val = md5Val.string
+	fw.Recommend = recommend.bool
+	fw.Uploader = uploader.string
+	fw.Manufacturer = manufacturer.string
+	fw.Description = description.string
+	return &fw, nil
+}
+
 func joinColumns(cols []string) string {
 	result := ""
 	for i, c := range cols {
@@ -201,4 +259,40 @@ func joinColumns(cols []string) string {
 		result += c
 	}
 	return result
+}
+
+// sqlNilString wraps nullable string scanning for firmware fields.
+type sqlNilString struct {
+	string
+}
+
+func (s *sqlNilString) Scan(value interface{}) error {
+	if value == nil {
+		s.string = ""
+		return nil
+	}
+	switch v := value.(type) {
+	case string:
+		s.string = v
+	case []byte:
+		s.string = string(v)
+	}
+	return nil
+}
+
+// sqlNilBool wraps nullable bool scanning.
+type sqlNilBool struct {
+	bool
+}
+
+func (b *sqlNilBool) Scan(value interface{}) error {
+	if value == nil {
+		b.bool = false
+		return nil
+	}
+	switch v := value.(type) {
+	case bool:
+		b.bool = v
+	}
+	return nil
 }

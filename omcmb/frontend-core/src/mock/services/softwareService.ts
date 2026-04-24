@@ -1,20 +1,49 @@
 import type { PageRequest, PageResponse } from '../../types/pagination';
-import type { SoftwareVersion, UpgradePlan } from '../data/software';
+import type { SoftwareVersion, UpgradePlan, UpgradeTaskInfo, UpgradeSubTaskInfo } from '../data/software';
 import { mockSoftwareVersions, mockUpgradePlans } from '../data/software';
 import { delay, paginate, generateId } from '../utils';
 
 let versions = [...mockSoftwareVersions];
 const upgradePlans = [...mockUpgradePlans];
 
+// Mock upgrade tasks (simulates upgrade_tasks table)
+let taskIdCounter = 100;
+const mockUpgradeTasks: UpgradeTaskInfo[] = [];
+
+// Helper: create a mock UpgradeTaskInfo
+function createMockTask(overrides: Partial<UpgradeTaskInfo> & { taskName: string; productClass: string }): UpgradeTaskInfo {
+  const total = Math.floor(Math.random() * 10) + 1;
+  const success = Math.floor(Math.random() * total);
+  const fail = total - success;
+  return {
+    id: generateId('task'),
+    taskType: 1,
+    status: 'ended',
+    result: fail === 0 ? 'success' : success === 0 ? 'failed' : 'partial',
+    operatorCode: 'cmcc',
+    isKeepConfig: true,
+    createStatus: 'active',
+    createUser: 'admin',
+    totalCount: total,
+    successCount: success,
+    failCount: fail,
+    maxConcurrent: 5,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 export const softwareService = {
   async getVersions(
-    params: { deviceType?: string; status?: string; vendor?: string } & PageRequest
+    params: { deviceType?: string; status?: string; vendor?: string; fileType?: number } & PageRequest
   ): Promise<PageResponse<SoftwareVersion>> {
     await delay(100, 200);
     let filtered = [...versions];
     if (params.deviceType) filtered = filtered.filter((v) => v.deviceType === params.deviceType);
     if (params.status) filtered = filtered.filter((v) => v.status === params.status);
     if (params.vendor) filtered = filtered.filter((v) => v.vendor === params.vendor);
+    if (params.fileType !== undefined) filtered = filtered.filter((v) => v.fileType === params.fileType);
     return paginate(filtered, params.page, params.pageSize);
   },
 
@@ -38,6 +67,123 @@ export const softwareService = {
     await delay(150, 300);
     versions = versions.filter((v) => !ids.includes(v.id));
   },
+
+  async toggleRecommend(id: string): Promise<SoftwareVersion> {
+    await delay(100, 200);
+    const ver = versions.find((v) => v.id === id);
+    if (ver) ver.recommend = !ver.recommend;
+    return ver!;
+  },
+
+  async getUpgradeTasks(
+    params: { taskType?: number; status?: string; productClass?: string; createUser?: string } & PageRequest
+  ): Promise<PageResponse<UpgradeTaskInfo>> {
+    await delay(100, 200);
+    let filtered = [...mockUpgradeTasks];
+    if (params.taskType !== undefined) filtered = filtered.filter((t) => t.taskType === params.taskType);
+    if (params.status) filtered = filtered.filter((t) => t.status === params.status);
+    if (params.productClass) filtered = filtered.filter((t) => t.productClass === params.productClass);
+    return paginate(filtered, params.page, params.pageSize);
+  },
+
+  async getUpgradeTaskById(id: string): Promise<UpgradeTaskInfo | null> {
+    await delay(80, 150);
+    return mockUpgradeTasks.find((t) => t.id === id) ?? null;
+  },
+
+  async createUpgradeTask(req: {
+    deviceIds: string[];
+    firmwareId: string;
+    taskName: string;
+    taskType?: number;
+    isKeepConfig?: boolean;
+    concurrency?: number;
+  }): Promise<UpgradeTaskInfo> {
+    await delay(200, 400);
+    const task = createMockTask({
+      taskName: req.taskName,
+      productClass: 'PM-B4860',
+      taskType: (req.taskType ?? 1) as UpgradeTaskInfo['taskType'],
+      isKeepConfig: req.isKeepConfig ?? true,
+      status: 'in_progress',
+      totalCount: req.deviceIds.length,
+      successCount: 0,
+      failCount: 0,
+      maxConcurrent: req.concurrency ?? 5,
+    });
+    mockUpgradeTasks.unshift(task);
+    return task;
+  },
+
+  async suspendTask(id: string): Promise<void> {
+    await delay(100, 200);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task) task.status = 'suspended';
+  },
+
+  async resumeTask(id: string): Promise<void> {
+    await delay(100, 200);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task) task.status = 'in_progress';
+  },
+
+  async terminateTask(id: string): Promise<void> {
+    await delay(100, 200);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task) {
+      task.status = 'ended';
+      task.result = 'terminated';
+    }
+  },
+
+  async retryTask(id: string): Promise<void> {
+    await delay(100, 200);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task) {
+      task.status = 'in_progress';
+      task.failCount = 0;
+    }
+  },
+
+  async createRollback(req: {
+    deviceIds: string[];
+    taskName: string;
+    operatorCode: string;
+    createUser: string;
+  }): Promise<UpgradeTaskInfo> {
+    await delay(200, 400);
+    const task = createMockTask({
+      taskName: req.taskName,
+      productClass: 'PM-B4860',
+      taskType: 2,
+      status: 'in_progress',
+      totalCount: req.deviceIds.length,
+      successCount: 0,
+      failCount: 0,
+      operatorCode: req.operatorCode,
+      createUser: req.createUser,
+    });
+    mockUpgradeTasks.unshift(task);
+    return task;
+  },
+
+  async getSubTasks(
+    taskId: string,
+    params: { status?: string } & PageRequest
+  ): Promise<PageResponse<UpgradeSubTaskInfo>> {
+    await delay(100, 200);
+    void taskId;
+    const subTasks: UpgradeSubTaskInfo[] = [];
+    return paginate(subTasks, params.page, params.pageSize);
+  },
+
+  async getSubTaskById(id: string): Promise<UpgradeSubTaskInfo | null> {
+    await delay(80, 150);
+    void id;
+    return null;
+  },
+
+  // Legacy functions (kept for backwards compatibility)
 
   async getUpgradePlans(
     params: { status?: string } & PageRequest

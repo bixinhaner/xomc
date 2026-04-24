@@ -16,109 +16,177 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
-var upgradeColumns = []string{
-	"id", "device_id", "firmware_id", "batch_id", "status",
+var subTaskColumns = []string{
+	"id", "task_id", "device_id", "firmware_id", "status",
 	"error_message", "retry_count", "max_retries",
+	"device_sn", "ori_version", "dest_version",
+	"command_key", "failure_reason", "pre_suspend_status",
 	"started_at", "completed_at", "created_at", "updated_at",
 }
 
-var _ UpgradeTaskRepository = (*PgUpgradeTaskRepository)(nil)
+var _ SubTaskRepository = (*PgSubTaskRepository)(nil)
 
-// PgUpgradeTaskRepository is a PostgreSQL implementation of UpgradeTaskRepository.
-type PgUpgradeTaskRepository struct {
+// PgSubTaskRepository is a PostgreSQL implementation of SubTaskRepository.
+type PgSubTaskRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewPgUpgradeTaskRepository creates a new PgUpgradeTaskRepository.
-func NewPgUpgradeTaskRepository(pool *pgxpool.Pool) *PgUpgradeTaskRepository {
-	return &PgUpgradeTaskRepository{pool: pool}
+// NewPgSubTaskRepository creates a new PgSubTaskRepository.
+func NewPgSubTaskRepository(pool *pgxpool.Pool) *PgSubTaskRepository {
+	return &PgSubTaskRepository{pool: pool}
 }
 
-func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
-	var task UpgradeTask
-	var batchID sql.NullString
-	var errorMsg sql.NullString
+func scanSubTask(row pgx.Row) (*UpgradeSubTask, error) {
+	var t UpgradeSubTask
+	var firmwareID sql.NullString
+	var errorMsg, deviceSN, oriVer, destVer, cmdKey, failReason, preSuspend sql.NullString
 	var startedAt, completedAt sql.NullTime
 
 	err := row.Scan(
-		&task.ID, &task.DeviceID, &task.FirmwareID, &batchID, &task.Status,
-		&errorMsg, &task.RetryCount, &task.MaxRetries,
-		&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt,
+		&t.ID, &t.TaskID, &t.DeviceID, &firmwareID, &t.Status,
+		&errorMsg, &t.RetryCount, &t.MaxRetries,
+		&deviceSN, &oriVer, &destVer,
+		&cmdKey, &failReason, &preSuspend,
+		&startedAt, &completedAt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if batchID.Valid {
-		bid, _ := uuid.Parse(batchID.String)
-		task.BatchID = &bid
+	if firmwareID.Valid {
+		fid, _ := uuid.Parse(firmwareID.String)
+		t.FirmwareID = &fid
 	}
 	if errorMsg.Valid {
-		task.ErrorMessage = errorMsg.String
+		t.ErrorMessage = errorMsg.String
+	}
+	if deviceSN.Valid {
+		t.DeviceSN = deviceSN.String
+	}
+	if oriVer.Valid {
+		t.OriVersion = oriVer.String
+	}
+	if destVer.Valid {
+		t.DestVersion = destVer.String
+	}
+	if cmdKey.Valid {
+		t.CommandKey = cmdKey.String
+	}
+	if failReason.Valid {
+		t.FailureReason = failReason.String
+	}
+	if preSuspend.Valid {
+		t.PreSuspendStatus = preSuspend.String
 	}
 	if startedAt.Valid {
-		task.StartedAt = &startedAt.Time
+		t.StartedAt = &startedAt.Time
 	}
 	if completedAt.Valid {
-		task.CompletedAt = &completedAt.Time
+		t.CompletedAt = &completedAt.Time
 	}
-	return &task, nil
+	return &t, nil
 }
 
-func (r *PgUpgradeTaskRepository) Create(ctx context.Context, task *UpgradeTask) error {
-	builder := storage.Psql.Insert("upgrade_tasks").
-		Columns("device_id", "firmware_id", "batch_id", "status", "max_retries")
+func scanSubTaskRow(rows pgx.Rows) (*UpgradeSubTask, error) {
+	var t UpgradeSubTask
+	var firmwareID sql.NullString
+	var errorMsg, deviceSN, oriVer, destVer, cmdKey, failReason, preSuspend sql.NullString
+	var startedAt, completedAt sql.NullTime
 
-	var batchID interface{}
-	if task.BatchID != nil {
-		batchID = *task.BatchID
+	err := rows.Scan(
+		&t.ID, &t.TaskID, &t.DeviceID, &firmwareID, &t.Status,
+		&errorMsg, &t.RetryCount, &t.MaxRetries,
+		&deviceSN, &oriVer, &destVer,
+		&cmdKey, &failReason, &preSuspend,
+		&startedAt, &completedAt, &t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	builder = builder.Values(task.DeviceID, task.FirmwareID, batchID, task.Status, task.MaxRetries).
-		Suffix("RETURNING " + joinColumns(upgradeColumns))
+	if firmwareID.Valid {
+		fid, _ := uuid.Parse(firmwareID.String)
+		t.FirmwareID = &fid
+	}
+	if errorMsg.Valid {
+		t.ErrorMessage = errorMsg.String
+	}
+	if deviceSN.Valid {
+		t.DeviceSN = deviceSN.String
+	}
+	if oriVer.Valid {
+		t.OriVersion = oriVer.String
+	}
+	if destVer.Valid {
+		t.DestVersion = destVer.String
+	}
+	if cmdKey.Valid {
+		t.CommandKey = cmdKey.String
+	}
+	if failReason.Valid {
+		t.FailureReason = failReason.String
+	}
+	if preSuspend.Valid {
+		t.PreSuspendStatus = preSuspend.String
+	}
+	if startedAt.Valid {
+		t.StartedAt = &startedAt.Time
+	}
+	if completedAt.Valid {
+		t.CompletedAt = &completedAt.Time
+	}
+	return &t, nil
+}
+
+func (r *PgSubTaskRepository) Create(ctx context.Context, task *UpgradeSubTask) error {
+	builder := storage.Psql.Insert("upgrade_sub_tasks").
+		Columns("task_id", "device_id", "firmware_id", "status", "max_retries",
+			"device_sn", "ori_version", "dest_version").
+		Values(task.TaskID, task.DeviceID, task.FirmwareID, task.Status, task.MaxRetries,
+			task.DeviceSN, task.OriVersion, task.DestVersion).
+		Suffix("RETURNING " + joinColumns(subTaskColumns))
 
 	query, args, err := builder.ToSql()
 	if err != nil {
-		return fmt.Errorf("build insert upgrade task SQL: %w", err)
+		return fmt.Errorf("build insert sub-task SQL: %w", err)
 	}
 
 	row := r.pool.QueryRow(ctx, query, args...)
-	created, err := scanUpgradeTask(row)
+	created, err := scanSubTask(row)
 	if err != nil {
-		return fmt.Errorf("create upgrade task: %w", err)
+		return fmt.Errorf("create sub-task: %w", err)
 	}
 	*task = *created
 	return nil
 }
 
-func (r *PgUpgradeTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*UpgradeTask, error) {
-	query, args, err := storage.Psql.Select(upgradeColumns...).
-		From("upgrade_tasks").
+func (r *PgSubTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error) {
+	query, args, err := storage.Psql.Select(subTaskColumns...).
+		From("upgrade_sub_tasks").
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build get upgrade task SQL: %w", err)
+		return nil, fmt.Errorf("build get sub-task SQL: %w", err)
 	}
 
-	task, err := scanUpgradeTask(r.pool.QueryRow(ctx, query, args...))
+	task, err := scanSubTask(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("get upgrade task: %w", err)
+		return nil, fmt.Errorf("get sub-task: %w", err)
 	}
 	return task, nil
 }
 
-func (r *PgUpgradeTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error {
-	builder := storage.Psql.Update("upgrade_tasks").
+func (r *PgSubTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error {
+	builder := storage.Psql.Update("upgrade_sub_tasks").
 		Set("status", status).
 		Where(sq.Eq{"id": id})
 
 	if errorMsg != "" {
 		builder = builder.Set("error_message", errorMsg)
 	}
-
 	if status == UpgradeDownloading {
 		builder = builder.Set("started_at", time.Now())
 	}
@@ -128,12 +196,12 @@ func (r *PgUpgradeTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID
 
 	query, args, err := builder.ToSql()
 	if err != nil {
-		return fmt.Errorf("build update upgrade task SQL: %w", err)
+		return fmt.Errorf("build update sub-task status SQL: %w", err)
 	}
 
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("update upgrade task status: %w", err)
+		return fmt.Errorf("update sub-task status: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
@@ -141,22 +209,42 @@ func (r *PgUpgradeTaskRepository) UpdateStatus(ctx context.Context, id uuid.UUID
 	return nil
 }
 
-func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error) {
-	base := storage.Psql.Select(upgradeColumns...).From("upgrade_tasks")
-	countBase := storage.Psql.Select("COUNT(*)").From("upgrade_tasks")
+func (r *PgSubTaskRepository) Update(ctx context.Context, task *UpgradeSubTask) error {
+	builder := storage.Psql.Update("upgrade_sub_tasks").
+		Set("status", task.Status).
+		Set("error_message", task.ErrorMessage).
+		Set("retry_count", task.RetryCount).
+		Set("command_key", task.CommandKey).
+		Set("failure_reason", task.FailureReason).
+		Set("pre_suspend_status", task.PreSuspendStatus).
+		Where(sq.Eq{"id": task.ID})
 
-	if filter.DeviceID != nil {
-		base = base.Where(sq.Eq{"device_id": *filter.DeviceID})
-		countBase = countBase.Where(sq.Eq{"device_id": *filter.DeviceID})
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build update sub-task SQL: %w", err)
 	}
-	if filter.FirmwareID != nil {
-		base = base.Where(sq.Eq{"firmware_id": *filter.FirmwareID})
-		countBase = countBase.Where(sq.Eq{"firmware_id": *filter.FirmwareID})
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update sub-task: %w", err)
 	}
-	if filter.BatchID != nil {
-		base = base.Where(sq.Eq{"batch_id": *filter.BatchID})
-		countBase = countBase.Where(sq.Eq{"batch_id": *filter.BatchID})
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
 	}
+	return nil
+}
+
+func (r *PgSubTaskRepository) List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
+	return r.ListByTaskID(ctx, filter.TaskID, filter)
+}
+
+func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
+	base := storage.Psql.Select(subTaskColumns...).From("upgrade_sub_tasks")
+	countBase := storage.Psql.Select("COUNT(*)").From("upgrade_sub_tasks")
+
+	base = base.Where(sq.Eq{"task_id": taskID})
+	countBase = countBase.Where(sq.Eq{"task_id": taskID})
+
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})
 		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
@@ -164,11 +252,11 @@ func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFi
 
 	countSQL, countArgs, err := countBase.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build count upgrade tasks SQL: %w", err)
+		return nil, fmt.Errorf("build count sub-tasks SQL: %w", err)
 	}
 	var total int64
 	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-		return nil, fmt.Errorf("count upgrade tasks: %w", err)
+		return nil, fmt.Errorf("count sub-tasks: %w", err)
 	}
 
 	pageSize := filter.PageSize
@@ -190,45 +278,22 @@ func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFi
 		Offset(uint64(offset)).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build list upgrade tasks SQL: %w", err)
+		return nil, fmt.Errorf("build list sub-tasks SQL: %w", err)
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list upgrade tasks: %w", err)
+		return nil, fmt.Errorf("list sub-tasks: %w", err)
 	}
 	defer rows.Close()
 
-	var items []UpgradeTask
+	var items []UpgradeSubTask
 	for rows.Next() {
-		var task UpgradeTask
-		var batchID sql.NullString
-		var errorMsgN sql.NullString
-		var startedAt, completedAt sql.NullTime
-
-		err := rows.Scan(
-			&task.ID, &task.DeviceID, &task.FirmwareID, &batchID, &task.Status,
-			&errorMsgN, &task.RetryCount, &task.MaxRetries,
-			&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt,
-		)
+		t, err := scanSubTaskRow(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan upgrade task row: %w", err)
+			return nil, fmt.Errorf("scan sub-task row: %w", err)
 		}
-
-		if batchID.Valid {
-			bid, _ := uuid.Parse(batchID.String)
-			task.BatchID = &bid
-		}
-		if errorMsgN.Valid {
-			task.ErrorMessage = errorMsgN.String
-		}
-		if startedAt.Valid {
-			task.StartedAt = &startedAt.Time
-		}
-		if completedAt.Valid {
-			task.CompletedAt = &completedAt.Time
-		}
-		items = append(items, task)
+		items = append(items, *t)
 	}
 
 	totalPages := int(total) / pageSize
@@ -236,7 +301,7 @@ func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFi
 		totalPages++
 	}
 
-	return &model.ListResponse[UpgradeTask]{
+	return &model.ListResponse[UpgradeSubTask]{
 		Items:      items,
 		Total:      total,
 		Page:       page,
@@ -245,9 +310,9 @@ func (r *PgUpgradeTaskRepository) List(ctx context.Context, filter UpgradeTaskFi
 	}, nil
 }
 
-func (r *PgUpgradeTaskRepository) GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeTask, error) {
-	query, args, err := storage.Psql.Select(upgradeColumns...).
-		From("upgrade_tasks").
+func (r *PgSubTaskRepository) GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error) {
+	query, args, err := storage.Psql.Select(subTaskColumns...).
+		From("upgrade_sub_tasks").
 		Where(sq.And{
 			sq.Eq{"device_id": deviceID},
 			sq.NotEq{"status": []UpgradeState{UpgradeCompleted, UpgradeFailed, UpgradeTerminated}},
@@ -256,43 +321,99 @@ func (r *PgUpgradeTaskRepository) GetActiveByDeviceID(ctx context.Context, devic
 		Limit(1).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build get active upgrade SQL: %w", err)
+		return nil, fmt.Errorf("build get active sub-task SQL: %w", err)
 	}
 
-	task, err := scanUpgradeTask(r.pool.QueryRow(ctx, query, args...))
+	task, err := scanSubTask(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
-		return nil, fmt.Errorf("get active upgrade task: %w", err)
+		return nil, fmt.Errorf("get active sub-task: %w", err)
 	}
 	return task, nil
 }
 
-func (r *PgUpgradeTaskRepository) CountByBatchStatus(ctx context.Context, batchID uuid.UUID) (map[UpgradeState]int64, error) {
-	query, args, err := storage.Psql.Select("status", "COUNT(*)").
-		From("upgrade_tasks").
-		Where(sq.Eq{"batch_id": batchID}).
-		GroupBy("status").
+func (r *PgSubTaskRepository) GetByCommandKey(ctx context.Context, commandKey string) (*UpgradeSubTask, error) {
+	query, args, err := storage.Psql.Select(subTaskColumns...).
+		From("upgrade_sub_tasks").
+		Where(sq.Eq{"command_key": commandKey}).
+		Limit(1).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build count by batch status SQL: %w", err)
+		return nil, fmt.Errorf("build get by command key SQL: %w", err)
+	}
+
+	task, err := scanSubTask(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get sub-task by command key: %w", err)
+	}
+	return task, nil
+}
+
+func (r *PgSubTaskRepository) BatchCreate(ctx context.Context, tasks []*UpgradeSubTask) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	builder := storage.Psql.Insert("upgrade_sub_tasks").
+		Columns("task_id", "device_id", "firmware_id", "status", "max_retries",
+			"device_sn", "ori_version", "dest_version")
+
+	for _, t := range tasks {
+		builder = builder.Values(
+			t.TaskID, t.DeviceID, t.FirmwareID, t.Status, t.MaxRetries,
+			t.DeviceSN, t.OriVersion, t.DestVersion,
+		)
+	}
+
+	builder = builder.Suffix("RETURNING " + joinColumns(subTaskColumns))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return fmt.Errorf("build batch insert sub-tasks SQL: %w", err)
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("count by batch status: %w", err)
+		return fmt.Errorf("batch create sub-tasks: %w", err)
 	}
 	defer rows.Close()
 
-	result := make(map[UpgradeState]int64)
+	idx := 0
 	for rows.Next() {
-		var status UpgradeState
-		var count int64
-		if err := rows.Scan(&status, &count); err != nil {
-			return nil, fmt.Errorf("scan batch status count: %w", err)
+		created, err := scanSubTaskRow(rows)
+		if err != nil {
+			return fmt.Errorf("scan batch created sub-task: %w", err)
 		}
-		result[status] = count
+		if idx < len(tasks) {
+			*tasks[idx] = *created
+		}
+		idx++
 	}
-	return result, nil
+	return nil
+}
+
+func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoff time.Time) (int64, error) {
+	query, args, err := storage.Psql.Update("upgrade_sub_tasks").
+		Set("status", UpgradeFailed).
+		Set("error_message", "task timeout").
+		Set("completed_at", time.Now()).
+		Where(sq.And{
+			sq.NotEq{"status": []UpgradeState{UpgradeCompleted, UpgradeFailed, UpgradeTerminated}},
+			sq.Lt{"updated_at": cutoff},
+		}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build fail stale sub-tasks SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("fail stale sub-tasks: %w", err)
+	}
+	return result.RowsAffected(), nil
 }

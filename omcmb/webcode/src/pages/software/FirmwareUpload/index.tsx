@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Button,
   Card,
@@ -34,47 +34,27 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import {
+  useSoftwareVersions,
+  useUploadFirmware,
+  useDeleteSoftwareVersions,
+  useToggleRecommend,
+} from '@core/hooks/api/useSoftware';
+import type { SoftwareVersion } from '@core/mock/data/software';
 
 const { Dragger } = Upload;
 const { TextArea } = Input;
 
 // 文件类型枚举
 type FileType = 'upgrade' | 'ca' | 'fpga' | 'ap';
-// 版本类型枚举
-type VersionType = 'all' | 'none' | 'beta';
 
-interface FirmwareFile {
-  id: string;
-  version: string;
-  product?: string; // AP类型没有产品类型
-  size: number;
-  toWho?: VersionType;
-  uploadTime: string;
-  recommend: boolean; // 是否推荐
-  fileName: string;
-  description?: string;
-}
-
-// Mock 数据
-const mockUpgradeFiles: FirmwareFile[] = [
-  { id: '1', version: 'V1.3.0', product: 'PM-B4860,QAFA,QATA', size: 512 * 1024 * 1024, toWho: 'all', uploadTime: '2026-03-25 10:00:00', recommend: true, fileName: 'eNB_V1.3.0_full.tar.gz', description: 'eNB主版本升级包' },
-  { id: '2', version: 'V2.1.0', product: 'BaiBNX,BaiBNQ', size: 768 * 1024 * 1024, toWho: 'all', uploadTime: '2026-03-24 14:30:00', recommend: true, fileName: 'gNB_V2.1.0_full.tar.gz', description: 'gNB 5G版本升级包' },
-  { id: '3', version: 'V1.2.5', product: 'PM-B4860', size: 128 * 1024 * 1024, toWho: 'none', uploadTime: '2026-03-20 09:15:00', recommend: false, fileName: 'PM-B4860_V1.2.5.img', description: '测试版本' },
-];
-
-const mockCaFiles: FirmwareFile[] = [
-  { id: '4', version: 'CA-V1.0.2', product: 'PM-B4860', size: 32 * 1024 * 1024, toWho: 'all', uploadTime: '2026-03-22 11:00:00', recommend: false, fileName: 'CA_V1.0.2.patch', description: 'CA补丁包' },
-  { id: '5', version: 'CA-V1.0.1', product: 'QAFA', size: 28 * 1024 * 1024, toWho: 'all', uploadTime: '2026-03-18 16:20:00', recommend: true, fileName: 'CA_V1.0.1.patch', description: 'CA补丁包' },
-];
-
-const mockFpgaFiles: FirmwareFile[] = [
-  { id: '6', version: 'FPGA-V2.0', product: 'BaiBNX', size: 16 * 1024 * 1024, toWho: 'all', uploadTime: '2026-03-21 08:45:00', recommend: true, fileName: 'FPGA_V2.0.img', description: 'FPGA固件升级' },
-];
-
-const mockApFiles: FirmwareFile[] = [
-  { id: '7', version: 'AP-V3.0', size: 24 * 1024 * 1024, toWho: 'all', uploadTime: '2026-03-23 13:30:00', recommend: true, fileName: 'AP_V3.0.img', description: 'AP无线升级包' },
-  { id: '8', version: 'AP-V2.5', size: 20 * 1024 * 1024, toWho: 'beta', uploadTime: '2026-03-15 10:00:00', recommend: false, fileName: 'AP_V2.5.img', description: 'AP测试版本' },
-];
+// 文件类型 tab 到后端 fileType 的映射
+const fileTypeParamMap: Record<FileType, 0 | 1 | 6> = {
+  upgrade: 0,
+  ca: 1,
+  fpga: 6,
+  ap: 0,
+};
 
 // 产品类型列表
 const productTypeOptions = [
@@ -98,43 +78,45 @@ export default function FirmwareUpload() {
   const [form] = Form.useForm();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploading, setUploading] = useState(false);
 
   // 文件类型状态
   const [fileType, setFileType] = useState<FileType>('upgrade');
+  // 分页
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   // 搜索条件
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   // 导入文件抽屉
   const [importDrawerVisible, setImportDrawerVisible] = useState(false);
   const [importMode, setImportMode] = useState<'add' | 'view' | 'modify'>('add');
-  const [selectedFile, setSelectedFile] = useState<FirmwareFile | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SoftwareVersion | null>(null);
   // 删除确认
-  const [deleteFile, setDeleteFile] = useState<FirmwareFile | null>(null);
+  const [deleteFile, setDeleteFile] = useState<SoftwareVersion | null>(null);
 
+  // API hooks
+  const { data, isLoading, refetch } = useSoftwareVersions({
+    fileType: fileTypeParamMap[fileType],
+    page,
+    pageSize,
+  });
 
-  // 获取当前文件类型的数据
-  const fileData = useMemo(() => {
-    const dataMap: Record<FileType, FirmwareFile[]> = {
-      upgrade: mockUpgradeFiles,
-      ca: mockCaFiles,
-      fpga: mockFpgaFiles,
-      ap: mockApFiles,
-    };
-    return dataMap[fileType];
-  }, [fileType]);
+  const uploadMutation = useUploadFirmware();
+  const deleteMutation = useDeleteSoftwareVersions();
+  const toggleRecommendMutation = useToggleRecommend();
 
-  // 过滤后的数据
-  const filteredData = useMemo(() => {
-    return fileData.filter((row) => {
-      if (filters.keyword && typeof filters.keyword === 'string') {
-        const keyword = filters.keyword.toLowerCase();
-        if (!row.version.toLowerCase().includes(keyword)) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [fileData, filters]);
+  // 获取列表数据
+  const tableData = useMemo(() => {
+    const items = data?.items ?? [];
+    if (filters.keyword && typeof filters.keyword === 'string') {
+      const keyword = (filters.keyword as string).toLowerCase();
+      return items.filter(
+        (item: SoftwareVersion) =>
+          item.versionCode?.toLowerCase().includes(keyword) ||
+          item.versionName?.toLowerCase().includes(keyword),
+      );
+    }
+    return items;
+  }, [data?.items, filters.keyword]);
 
   // 搜索字段
   const filterFields: FilterField[] = useMemo(() => [
@@ -142,14 +124,13 @@ export default function FirmwareUpload() {
   ], [t]);
 
   // 打开导入抽屉
-  const handleOpenImportDrawer = (mode: 'add' | 'view' | 'modify', file?: FirmwareFile) => {
+  const handleOpenImportDrawer = useCallback((mode: 'add' | 'view' | 'modify', file?: SoftwareVersion) => {
     setImportMode(mode);
     setSelectedFile(file ?? null);
     if (file) {
       form.setFieldsValue({
-        product: file.product?.split(',') ?? [],
-        version: file.version,
-        toWho: file.toWho ?? 'all',
+        product: file.deviceType?.split(',') ?? [],
+        version: file.versionCode,
         recommend: file.recommend ? '1' : '0',
         description: file.description ?? '',
       });
@@ -158,99 +139,140 @@ export default function FirmwareUpload() {
     }
     setFileList([]);
     setImportDrawerVisible(true);
-  };
+  }, [form]);
 
   // 关闭导入抽屉
-  const handleCloseImportDrawer = () => {
+  const handleCloseImportDrawer = useCallback(() => {
     setImportDrawerVisible(false);
     setSelectedFile(null);
     form.resetFields();
     setFileList([]);
-  };
+    setUploadProgress(0);
+  }, [form]);
 
   // 提交导入
-  const handleImportSubmit = () => {
+  const handleImportSubmit = useCallback(() => {
     if (importMode === 'view') {
       handleCloseImportDrawer();
       return;
     }
 
-    form.validateFields().then(() => {
+    form.validateFields().then((values) => {
       if (fileList.length === 0 && importMode === 'add') {
         void message.warning(t('software.firmware.selectFile'));
         return;
       }
 
-      setUploading(true);
-      setUploadProgress(0);
+      const rawFile = fileList[0]?.originFileObj as File | undefined;
+      if (!rawFile && importMode === 'add') {
+        void message.warning(t('software.firmware.selectFile'));
+        return;
+      }
 
-      const timer = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(timer);
-            setUploading(false);
-            void message.success(importMode === 'add' ? t('software.firmware.importSuccess') : t('software.firmware.modifySuccess'));
-            handleCloseImportDrawer();
-            return 100;
-          }
-          return prev + 10;
-        });
-      }, 150);
+      if (rawFile) {
+        setUploadProgress(0);
+        uploadMutation.mutate(
+          {
+            file: rawFile,
+            metadata: {
+              carrier: '',
+              version: values.version ?? '',
+              productClass: Array.isArray(values.product) ? values.product.join(',') : values.product,
+              releaseNotes: values.description ?? '',
+              fileType: fileTypeParamMap[fileType],
+              recommend: values.recommend === '1',
+              description: values.description ?? '',
+            },
+          },
+          {
+            onUploadProgress: (event) => {
+              if (event.total) {
+                setUploadProgress(Math.round((event.loaded * 100) / event.total));
+              }
+            },
+            onSuccess: () => {
+              void message.success(importMode === 'add' ? t('software.firmware.importSuccess') : t('software.firmware.modifySuccess'));
+              handleCloseImportDrawer();
+            },
+            onError: () => {
+              void message.error(t('software.firmware.importSuccess'));
+              setUploadProgress(0);
+            },
+          },
+        );
+      }
     });
-  };
+  }, [importMode, fileList, fileType, uploadMutation, form, t, handleCloseImportDrawer]);
 
   // 删除文件
-  const handleDeleteFile = () => {
+  const handleDeleteFile = useCallback(() => {
     if (deleteFile) {
-      void message.success(t('software.firmware.deleted', { name: deleteFile.fileName }));
-      setDeleteFile(null);
+      deleteMutation.mutate([deleteFile.id], {
+        onSuccess: () => {
+          void message.success(t('software.firmware.deleted', { name: deleteFile.versionCode }));
+          setDeleteFile(null);
+        },
+      });
     }
-  };
+  }, [deleteFile, deleteMutation, t]);
 
   // 切换推荐状态
-  const handleToggleRecommend = (file: FirmwareFile) => {
-    void message.success(file.recommend ? t('software.firmware.recommendUnset', { version: file.version }) : t('software.firmware.recommendSet', { version: file.version }));
-  };
+  const handleToggleRecommend = useCallback((file: SoftwareVersion) => {
+    toggleRecommendMutation.mutate(file.id, {
+      onSuccess: () => {
+        void message.success(
+          file.recommend
+            ? t('software.firmware.recommendUnset', { version: file.versionCode })
+            : t('software.firmware.recommendSet', { version: file.versionCode }),
+        );
+      },
+    });
+  }, [toggleRecommendMutation, t]);
 
   // 表格列定义
-  const columns: DataTableColumn<FirmwareFile>[] = [
+  const columns: DataTableColumn<SoftwareVersion & Record<string, unknown>>[] = useMemo(() => [
     {
       key: 'operation',
       title: t('common.operation'),
       width: 100,
       fixed: 'right',
-      render: (_: unknown, record: FirmwareFile) => {
+      render: (_: unknown, record: SoftwareVersion & Record<string, unknown>) => {
+        const sv = record as SoftwareVersion;
         const items: MenuProps['items'] = [
           {
             key: 'download',
             label: t('common.download'),
             icon: <DownloadOutlined />,
-            onClick: () => void message.success(t('software.firmware.deleted', { name: record.fileName })),
+            onClick: () => {
+              if (sv.downloadUrl) {
+                window.open(sv.downloadUrl);
+              }
+            },
           },
           {
             key: 'modify',
             label: t('common.edit'),
             icon: <EditOutlined />,
-            onClick: () => handleOpenImportDrawer('modify', record),
+            onClick: () => handleOpenImportDrawer('modify', sv),
           },
           {
             key: 'delete',
             label: t('common.delete'),
             icon: <DeleteOutlined />,
             danger: true,
-            onClick: () => setDeleteFile(record),
+            onClick: () => setDeleteFile(sv),
           },
           { type: 'divider' },
           {
             key: 'recommend',
-            label: record.recommend ? t('software.firmware.cancelRecommend') : t('software.firmware.setRecommend'),
-            icon: record.recommend ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />,
-            onClick: () => handleToggleRecommend(record),
+            label: sv.recommend ? t('software.firmware.cancelRecommend') : t('software.firmware.setRecommend'),
+            icon: sv.recommend ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />,
+            onClick: () => handleToggleRecommend(sv),
           },
         ];
         return (
           <Space size={4}>
-            <Button type="link" size="small" onClick={() => handleOpenImportDrawer('view', record)}>{t('common.info')}</Button>
+            <Button type="link" size="small" onClick={() => handleOpenImportDrawer('view', sv)}>{t('common.info')}</Button>
             <Dropdown menu={{ items }} trigger={['click']}>
               <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
             </Dropdown>
@@ -261,38 +283,42 @@ export default function FirmwareUpload() {
     {
       key: 'version',
       title: t('software.firmware.version'),
-      dataIndex: 'version',
+      dataIndex: 'versionCode',
       width: 300,
       ellipsis: true,
-      render: (val: string, record: FirmwareFile) => (
-        <Space>
-          <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }}>{val}</Typography.Text>
-          {record.recommend && <StarFilled style={{ color: '#faad14' }} />}
-        </Space>
-      ),
+      render: (val: unknown, record: SoftwareVersion & Record<string, unknown>) => {
+        const sv = record as SoftwareVersion;
+        return (
+          <Space>
+            <Typography.Text style={{ fontFamily: 'monospace', fontSize: 13 }}>{String(val)}</Typography.Text>
+            {sv.recommend && <StarFilled style={{ color: '#faad14' }} />}
+          </Space>
+        );
+      },
     },
     {
       key: 'product',
       title: t('software.firmware.productType'),
-      dataIndex: 'product',
+      dataIndex: 'deviceType',
       width: 250,
       ellipsis: true,
-      render: (val: string | undefined) => val ?? '-',
+      render: (val: unknown) => val ? String(val) : '-',
     },
     {
       key: 'size',
       title: t('table.fileSize') ?? '文件大小',
-      dataIndex: 'size',
+      dataIndex: 'fileSize',
       width: 120,
-      render: (val: number) => formatFileSize(val),
+      render: (val: unknown) => formatFileSize(Number(val)),
     },
     {
       key: 'uploadTime',
       title: t('table.uploadTime') ?? '上传时间',
-      dataIndex: 'uploadTime',
+      dataIndex: 'releaseDate',
       width: 180,
+      render: (val: unknown) => val ? String(val) : '-',
     },
-  ];
+  ], [t, handleOpenImportDrawer, handleToggleRecommend]);
 
   // 获取当前文件类型的中文名称
   const fileTypeName = useMemo(() => {
@@ -305,16 +331,19 @@ export default function FirmwareUpload() {
     return nameMap[fileType];
   }, [fileType, t]);
 
+  const handleFileTypeChange = useCallback((newType: FileType) => {
+    setFileType(newType);
+    setFilters({});
+    setPage(1);
+  }, []);
+
   return (
     <ListPageLayout title={t('software.firmware.title')}>
       {/* 文件类型选择 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Radio.Group
           value={fileType}
-          onChange={(e) => {
-            setFileType(e.target.value);
-            setFilters({});
-          }}
+          onChange={(e) => handleFileTypeChange(e.target.value)}
           optionType="button"
           buttonStyle="solid"
         >
@@ -332,8 +361,8 @@ export default function FirmwareUpload() {
       <FilterBar
         filterId="firmware-filter"
         fields={filterFields}
-        onSearch={(vals) => setFilters(vals)}
-        onReset={() => setFilters({})}
+        onSearch={(vals) => { setFilters(vals); setPage(1); }}
+        onReset={() => { setFilters({}); setPage(1); }}
       />
 
       {/* 文件列表 */}
@@ -343,15 +372,17 @@ export default function FirmwareUpload() {
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
-        <DataTable<FirmwareFile>
+        <DataTable<SoftwareVersion & Record<string, unknown>>
           tableId="firmware-list"
           columns={columns}
-          dataSource={filteredData}
+          dataSource={tableData as (SoftwareVersion & Record<string, unknown>)[]}
+          loading={isLoading}
           rowKey="id"
-          total={filteredData.length}
-          currentPage={1}
-          pageSize={20}
-          onPageChange={() => {}}
+          total={data?.total ?? 0}
+          currentPage={page}
+          pageSize={pageSize}
+          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+          onRefresh={() => void refetch()}
           scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
           showRowNumber
           rowNumberTitle={t('table.rowNumber')}
@@ -375,7 +406,7 @@ export default function FirmwareUpload() {
               <Button
                 type="primary"
                 onClick={handleImportSubmit}
-                loading={uploading}
+                loading={uploadMutation.isPending}
               >
                 {t('common.confirm')}
               </Button>
@@ -442,7 +473,7 @@ export default function FirmwareUpload() {
                   </p>
                   <p className="ant-upload-text">{t('software.firmware.clickOrDrag')}</p>
                 </Dragger>
-                {uploading && (
+                {uploadMutation.isPending && (
                   <Progress
                     percent={uploadProgress}
                     status={uploadProgress < 100 ? 'active' : 'success'}
@@ -451,7 +482,7 @@ export default function FirmwareUpload() {
                 )}
               </>
             ) : (
-              <Input value={selectedFile?.fileName} disabled />
+              <Input value={selectedFile?.versionName} disabled />
             )}
           </Form.Item>
 
@@ -493,7 +524,7 @@ export default function FirmwareUpload() {
         onOk={handleDeleteFile}
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, loading: deleteMutation.isPending }}
       >
         <Alert
           type="warning"
@@ -505,9 +536,9 @@ export default function FirmwareUpload() {
                 {t('software.firmware.confirmDeleteMsg')}
               </p>
               <p style={{ marginBottom: 0 }}>
-                <strong>{t('software.firmware.versionLabel')}</strong>{deleteFile?.version}<br />
-                <strong>{t('software.firmware.fileNameLabel')}</strong>{deleteFile?.fileName}<br />
-                <strong>{t('software.firmware.fileSizeLabel')}</strong>{deleteFile ? formatFileSize(deleteFile.size) : '-'}
+                <strong>{t('software.firmware.versionLabel')}</strong>{deleteFile?.versionCode}<br />
+                <strong>{t('software.firmware.fileNameLabel')}</strong>{deleteFile?.versionName}<br />
+                <strong>{t('software.firmware.fileSizeLabel')}</strong>{deleteFile ? formatFileSize(deleteFile.fileSize) : '-'}
               </p>
             </div>
           }

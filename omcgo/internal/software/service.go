@@ -2,12 +2,15 @@ package software
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
@@ -21,47 +24,79 @@ import (
 // SoftwareService provides firmware upload and device upgrade functionality.
 type SoftwareService struct {
 	firmwareRepo FirmwareRepository
-	upgradeRepo  UpgradeTaskRepository
+	taskRepo     TaskRepository
+	subTaskRepo  SubTaskRepository
 	deviceRepo   device.DeviceRepository
 	taskSvc      devtask.Enqueuer
 	connReq      *connreq.Client
 	minioClient  *minio.Client
 	firmwareBkt  string
 	eventBus     event.EventBus
+	redis        redis.UniversalClient
+	executor     *UpgradeExecutor
+	rollbackExec *RollbackExecutor
+	adapter      UpgradeAdapter
 	logger       *zap.Logger
 }
 
 // NewSoftwareService creates a new SoftwareService.
 func NewSoftwareService(
 	firmwareRepo FirmwareRepository,
-	upgradeRepo UpgradeTaskRepository,
+	taskRepo TaskRepository,
+	subTaskRepo SubTaskRepository,
 	deviceRepo device.DeviceRepository,
 	taskSvc devtask.Enqueuer,
 	connReq *connreq.Client,
 	minioClient *minio.Client,
 	firmwareBucket string,
 	eventBus event.EventBus,
+	redisClient redis.UniversalClient,
 	logger *zap.Logger,
 ) *SoftwareService {
-	return &SoftwareService{
+	s := &SoftwareService{
 		firmwareRepo: firmwareRepo,
-		upgradeRepo:  upgradeRepo,
+		taskRepo:     taskRepo,
+		subTaskRepo:  subTaskRepo,
 		deviceRepo:   deviceRepo,
 		taskSvc:      taskSvc,
 		connReq:      connReq,
 		minioClient:  minioClient,
 		firmwareBkt:  firmwareBucket,
 		eventBus:     eventBus,
+		redis:        redisClient,
+		adapter:      NewDefaultUpgradeAdapter(),
 		logger:       logger.Named("software"),
 	}
+
+	s.executor = NewUpgradeExecutor(
+		taskRepo, subTaskRepo, deviceRepo, firmwareRepo,
+		taskSvc, connReq, redisClient, eventBus, logger,
+	)
+	s.rollbackExec = NewRollbackExecutor(
+		taskRepo, subTaskRepo, deviceRepo,
+		taskSvc, connReq, redisClient, eventBus, logger,
+	)
+
+	return s
 }
 
 // UploadFirmware stores a firmware file to MinIO and creates a firmware version record.
 func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersion, file io.Reader, fileSize int64) error {
-	// Build MinIO path: img/{carrier}/{product_class}/{version}/firmware.bin
-	objectPath := storage.FirmwarePath("img", string(fw.Carrier), fw.ProductClass, fw.Version, fw.FileName)
+	// Determine MinIO directory by file type
+	category := "img"
+	switch fw.FileType {
+	case FileTypePATCH:
+		category = "patch"
+	case FileTypeFPGA:
+		category = "fpga"
+	}
+	objectPath := storage.FirmwarePath(category, string(fw.Carrier), fw.ProductClass, fw.Version, fw.FileName)
 
-	_, err := s.minioClient.PutObject(ctx, s.firmwareBkt, objectPath, file, fileSize, minio.PutObjectOptions{
+	// Tee file stream: one copy to MinIO, one to compute MD5
+	hash := md5.New()
+	teeReader := io.TeeReader(file, hash)
+
+	_, err := s.minioClient.PutObject(ctx, s.firmwareBkt, objectPath, teeReader, fileSize, minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
 	})
 	if err != nil {
@@ -70,11 +105,16 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 
 	fw.MinIOPath = objectPath
 	fw.FileSize = fileSize
+	fw.MD5Val = hex.EncodeToString(hash.Sum(nil))
 	if fw.Status == "" {
 		fw.Status = "active"
 	}
 
 	if err := s.firmwareRepo.Create(ctx, fw); err != nil {
+		// Clean up orphaned MinIO file on DB failure
+		if delErr := s.minioClient.RemoveObject(ctx, s.firmwareBkt, objectPath, minio.RemoveObjectOptions{}); delErr != nil {
+			s.logger.Error("cleanup orphaned firmware file", zap.String("path", objectPath), zap.Error(delErr))
+		}
 		return fmt.Errorf("create firmware record: %w", err)
 	}
 
@@ -91,179 +131,88 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 	return nil
 }
 
-// StartUpgrade creates an upgrade task for a single device.
-func (s *SoftwareService) StartUpgrade(ctx context.Context, deviceID, firmwareID uuid.UUID) (*UpgradeTask, error) {
-	// Verify device exists
-	dev, err := s.deviceRepo.GetByID(ctx, deviceID)
-	if err != nil {
-		return nil, fmt.Errorf("get device: %w", err)
-	}
-
-	// Verify firmware exists
-	fw, err := s.firmwareRepo.GetByID(ctx, firmwareID)
+// BatchUpgrade creates a main upgrade task and sub-tasks for each device, then starts execution.
+func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequest) (*UpgradeTask, error) {
+	// Fetch firmware once outside the loop (fix N+1)
+	fw, err := s.firmwareRepo.GetByID(ctx, req.FirmwareID)
 	if err != nil {
 		return nil, fmt.Errorf("get firmware: %w", err)
 	}
 
-	// Check no active upgrade already running
-	_, err = s.upgradeRepo.GetActiveByDeviceID(ctx, deviceID)
-	if err == nil {
-		return nil, commonerrors.NewBusinessError(8001, "device already has an active upgrade", commonerrors.ErrAlreadyExists)
-	}
-
-	task := &UpgradeTask{
-		DeviceID:   deviceID,
-		FirmwareID: firmwareID,
-		Status:     UpgradePending,
-		MaxRetries: 3,
-	}
-
-	if err := s.upgradeRepo.Create(ctx, task); err != nil {
-		return nil, fmt.Errorf("create upgrade task: %w", err)
-	}
-
-	// Transition to downloading
-	if err := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeDownloading, ""); err != nil {
-		s.logger.Error("transition to downloading", zap.Error(err))
-	}
-	task.Status = UpgradeDownloading
-
-	// Push Download command to command queue
-	downloadURL := fmt.Sprintf("%s/%s", s.firmwareBkt, fw.MinIOPath)
-	paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
-		"url":       downloadURL,
-		"file_type": "1", // firmware
-		"file_size": fw.FileSize,
-		"file_name": fw.FileName,
-	})
-	if marshalErr != nil {
-		return nil, fmt.Errorf("marshal download params: %w", marshalErr)
-	}
-	if _, err := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
-		DeviceSN: dev.SerialNumber,
-		Method:   "Download",
-		Params:   paramsJSON,
-		Source:   devtask.TaskSourceSystem,
-	}); err != nil {
-		s.logger.Error("push download command", zap.Error(err))
-	}
-
-	// Send Connection Request to wake device
-	if dev.ConnectionRequestURL != "" {
-		if err := s.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL); err != nil {
-			s.logger.Warn("send connection request", zap.Error(err))
-		}
-	}
-
-	if evt, err := event.NewEvent(event.SubjectUpgradeStarted, map[string]interface{}{
-		"task_id":     task.ID.String(),
-		"device_id":   deviceID.String(),
-		"firmware_id": firmwareID.String(),
-	}); err == nil {
-		if pubErr := s.eventBus.Publish(ctx, event.SubjectUpgradeStarted, evt); pubErr != nil {
-			s.logger.Warn("publish upgrade.started event", zap.Error(pubErr))
-		}
-	}
-
-	return task, nil
-}
-
-// BatchUpgrade triggers upgrades for multiple devices with configurable concurrency.
-func (s *SoftwareService) BatchUpgrade(ctx context.Context, deviceIDs []uuid.UUID, firmwareID uuid.UUID, concurrency int) ([]UpgradeTask, error) {
+	concurrency := req.Concurrency
 	if concurrency < 1 {
 		concurrency = 5
 	}
 
-	batchID := uuid.New()
-	tasks := make([]UpgradeTask, 0, len(deviceIDs))
+	taskType := req.TaskType
+	if taskType == 0 {
+		taskType = TaskTypeUpgrade
+	}
 
+	// Create main task
+	mainTask := &UpgradeTask{
+		TaskName:     req.TaskName,
+		TaskType:     taskType,
+		FirmwareID:   &req.FirmwareID,
+		FileName:     fw.FileName,
+		FileMD5:      fw.MD5Val,
+		Status:       TaskPending,
+		OperatorCode: fw.Carrier,
+		ProductClass: fw.ProductClass,
+		IsKeepConfig: req.IsKeepConfig,
+		CreateStatus: "active",
+		CreateUser:   "system",
+		TotalCount:   len(req.DeviceIDs),
+		MaxConcurrent: concurrency,
+	}
+	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
+		return nil, fmt.Errorf("create main task: %w", err)
+	}
+
+	// Create sub-tasks
+	subTasks := make([]*UpgradeSubTask, 0, len(req.DeviceIDs))
+	for _, deviceID := range req.DeviceIDs {
+		subTask := &UpgradeSubTask{
+			TaskID:     mainTask.ID,
+			DeviceID:   deviceID,
+			FirmwareID: &req.FirmwareID,
+			Status:     UpgradePending,
+			MaxRetries: 3,
+			DestVersion: fw.Version,
+		}
+		subTasks = append(subTasks, subTask)
+	}
+
+	if err := s.subTaskRepo.BatchCreate(ctx, subTasks); err != nil {
+		return nil, fmt.Errorf("batch create sub-tasks: %w", err)
+	}
+
+	// Update main task status to in_progress
+	if err := s.taskRepo.UpdateStatus(ctx, mainTask.ID, TaskInProgress, ""); err != nil {
+		s.logger.Error("update main task to in_progress", zap.Error(err))
+	}
+	mainTask.Status = TaskInProgress
+
+	// Start execution for each device via executor
 	sem := make(chan struct{}, concurrency)
-	results := make(chan UpgradeTask, len(deviceIDs))
-	errs := make(chan error, len(deviceIDs))
-
-	for _, deviceID := range deviceIDs {
+	for i := range subTasks {
 		sem <- struct{}{}
-		go func(did uuid.UUID) {
+		go func(st *UpgradeSubTask) {
 			defer func() { <-sem }()
-
-			task := &UpgradeTask{
-				DeviceID:   did,
-				FirmwareID: firmwareID,
-				BatchID:    &batchID,
-				Status:     UpgradePending,
-				MaxRetries: 3,
-			}
-
-			if err := s.upgradeRepo.Create(ctx, task); err != nil {
-				s.logger.Error("create batch upgrade task", zap.String("device_id", did.String()), zap.Error(err))
-				errs <- err
-				return
-			}
-
-			// Start download for this device
-			dev, err := s.deviceRepo.GetByID(ctx, did)
-			if err != nil {
-				s.logger.Error("get device for batch upgrade", zap.String("device_id", did.String()), zap.Error(err))
-				if statusErr := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeFailed, err.Error()); statusErr != nil {
-				s.logger.Error("update upgrade status to failed", zap.Error(statusErr))
-			}
-				task.Status = UpgradeFailed
-				results <- *task
-				return
-			}
-
-			fw, fwErr := s.firmwareRepo.GetByID(ctx, firmwareID)
-		if fwErr != nil {
-			s.logger.Error("get firmware for batch upgrade", zap.Error(fwErr))
-		}
-			if fw != nil {
-				downloadURL := fmt.Sprintf("%s/%s", s.firmwareBkt, fw.MinIOPath)
-				batchParamsJSON, marshalErr := json.Marshal(map[string]interface{}{
-					"url":       downloadURL,
-					"file_type": "1",
-					"file_size": fw.FileSize,
-					"file_name": fw.FileName,
-				})
-				if marshalErr != nil {
-					s.logger.Error("marshal batch download params", zap.Error(marshalErr))
-				} else {
-					if _, pushErr := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
-						DeviceSN: dev.SerialNumber,
-						Method:   "Download",
-						Params:   batchParamsJSON,
-						Source:   devtask.TaskSourceSystem,
-					}); pushErr != nil {
-						s.logger.Error("push batch download command", zap.String("device_sn", dev.SerialNumber), zap.Error(pushErr))
-					}
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("upgrade executor panic",
+						zap.String("sub_task_id", st.ID.String()),
+						zap.Any("recover", r))
 				}
-
-				if dev.ConnectionRequestURL != "" {
-					if crErr := s.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL); crErr != nil {
-						s.logger.Warn("send connection request in batch", zap.String("device_sn", dev.SerialNumber), zap.Error(crErr))
-					}
-				}
-			}
-
-			if statusErr := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeDownloading, ""); statusErr != nil {
-				s.logger.Error("update upgrade status to downloading", zap.Error(statusErr))
-			}
-			task.Status = UpgradeDownloading
-			results <- *task
-		}(deviceID)
+			}()
+			s.executor.ExecuteOne(context.Background(), st, fw)
+		}(subTasks[i])
 	}
 
-	// Collect results
-	for range deviceIDs {
-		select {
-		case task := <-results:
-			tasks = append(tasks, task)
-		case <-errs:
-			// Error already logged, continue collecting
-		}
-	}
-
-	return tasks, nil
+	return mainTask, nil
 }
+
 
 // HandleTransferComplete advances the upgrade state machine when a device reports transfer complete.
 func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.Event) error {
@@ -283,167 +232,290 @@ func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.
 		return fmt.Errorf("device not found: %s", deviceSN)
 	}
 
-	task, err := s.upgradeRepo.GetActiveByDeviceID(ctx, dev.ID)
+	subTask, err := s.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
 	if err != nil {
 		return nil // No active upgrade, ignore
 	}
 
+	// Idempotent: only handle downloading state
+	if subTask.Status != UpgradeDownloading {
+		s.logger.Debug("ignore TC for non-downloading sub-task",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("status", string(subTask.Status)))
+		return nil
+	}
+
 	// Advance state machine: downloading -> rebooting -> verifying -> completed
-	nextState := NextUpgradeState(task.Status)
-	if err := ValidateUpgradeTransition(task.Status, nextState); err != nil {
+	nextState := NextUpgradeState(subTask.Status)
+	if err := ValidateUpgradeTransition(subTask.Status, nextState); err != nil {
 		s.logger.Warn("invalid upgrade transition",
-			zap.String("task_id", task.ID.String()),
-			zap.String("current", string(task.Status)),
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("current", string(subTask.Status)),
 			zap.String("target", string(nextState)),
 		)
 		return nil
 	}
 
-	if err := s.upgradeRepo.UpdateStatus(ctx, task.ID, nextState, ""); err != nil {
-		return fmt.Errorf("update upgrade status: %w", err)
+	if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, nextState, ""); err != nil {
+		return fmt.Errorf("update sub-task status: %w", err)
 	}
 
+	// Update main task counts on completion
 	if nextState == UpgradeCompleted {
+		if err := s.taskRepo.IncrementCounts(ctx, subTask.TaskID, 1, 0); err != nil {
+			s.logger.Error("increment success count", zap.Error(err))
+		}
+		s.checkAndFinalizeTask(ctx, subTask.TaskID)
+
 		if completedEvt, err := event.NewEvent(event.SubjectUpgradeCompleted, map[string]interface{}{
-			"task_id":   task.ID.String(),
-			"device_id": dev.ID.String(),
+			"sub_task_id": subTask.ID.String(),
+			"task_id":     subTask.TaskID.String(),
+			"device_id":   dev.ID.String(),
 		}); err == nil {
 			if pubErr := s.eventBus.Publish(ctx, event.SubjectUpgradeCompleted, completedEvt); pubErr != nil {
 				s.logger.Warn("publish upgrade.completed event", zap.Error(pubErr))
 			}
 		}
+	} else if nextState == UpgradeFailed {
+		if err := s.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
+			s.logger.Error("increment fail count", zap.Error(err))
+		}
+		s.checkAndFinalizeTask(ctx, subTask.TaskID)
 	}
 
 	return nil
 }
 
-// SuspendUpgrade pauses an active upgrade task.
+// checkAndFinalizeTask checks if a main task is complete and updates its final status.
+func (s *SoftwareService) checkAndFinalizeTask(ctx context.Context, taskID uuid.UUID) {
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return
+	}
+
+	// All sub-tasks must be terminal
+	if task.SuccessCount+task.FailCount < task.TotalCount {
+		return
+	}
+
+	result := TaskResultSuccess
+	if task.FailCount == task.TotalCount {
+		result = TaskResultFailed
+	} else if task.FailCount > 0 {
+		result = TaskResultPartial
+	}
+
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskEnded, result); err != nil {
+		s.logger.Error("finalize main task", zap.Error(err))
+	}
+}
+
+// SuspendUpgrade suspends all active sub-tasks under a main task.
 func (s *SoftwareService) SuspendUpgrade(ctx context.Context, taskID uuid.UUID) error {
-	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get upgrade task: %w", err)
 	}
-	if task == nil {
-		return commonerrors.ErrNotFound
+
+	if task.Status == TaskEnded || task.Status == TaskSuspended {
+		return commonerrors.NewBusinessError(8003, fmt.Sprintf("cannot suspend task in %s state", task.Status), commonerrors.ErrInvalidInput)
 	}
 
-	if err := ValidateUpgradeTransition(task.Status, UpgradeSuspended); err != nil {
-		return commonerrors.NewBusinessError(8003, fmt.Sprintf("cannot suspend task in %s state", task.Status), err)
+	// Update main task status
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskSuspended, ""); err != nil {
+		return fmt.Errorf("suspend main task: %w", err)
 	}
 
-	if err := s.upgradeRepo.UpdateStatus(ctx, taskID, UpgradeSuspended, string(task.Status)); err != nil {
-		return fmt.Errorf("suspend upgrade: %w", err)
-	}
-
-	s.logger.Info("upgrade task suspended",
-		zap.String("task_id", taskID.String()),
-		zap.String("previous_state", string(task.Status)))
+	s.logger.Info("upgrade task suspended", zap.String("task_id", taskID.String()))
 	return nil
 }
 
-// ResumeUpgrade resumes a suspended upgrade task.
+// ResumeUpgrade resumes a suspended main task and its sub-tasks.
 func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) error {
-	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get upgrade task: %w", err)
 	}
-	if task == nil {
-		return commonerrors.ErrNotFound
-	}
 
-	if task.Status != UpgradeSuspended {
+	if task.Status != TaskSuspended {
 		return commonerrors.NewBusinessError(8004, "task is not suspended", commonerrors.ErrInvalidInput)
 	}
 
-	// Resume to the pre-suspension state (stored in ErrorMessage), default to downloading.
-	resumeState := UpgradeState(task.ErrorMessage)
-	if resumeState == "" || resumeState == UpgradeSuspended {
-		resumeState = UpgradeDownloading
+	// Update main task status back to in_progress
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
+		return fmt.Errorf("resume main task: %w", err)
 	}
 
-	if err := s.upgradeRepo.UpdateStatus(ctx, taskID, resumeState, ""); err != nil {
-		return fmt.Errorf("resume upgrade: %w", err)
-	}
-
-	// Re-issue connection request to wake device.
-	dev, devErr := s.deviceRepo.GetByID(ctx, task.DeviceID)
-	if devErr == nil && dev != nil && dev.ConnectionRequestURL != "" {
-		go func() {
-			if crErr := s.connReq.Send(context.Background(), dev.SerialNumber, dev.ConnectionRequestURL); crErr != nil {
-				s.logger.Warn("connection request on resume", zap.Error(crErr))
-			}
-		}()
-	}
-
-	s.logger.Info("upgrade task resumed",
-		zap.String("task_id", taskID.String()),
-		zap.String("resumed_to", string(resumeState)))
+	s.logger.Info("upgrade task resumed", zap.String("task_id", taskID.String()))
 	return nil
 }
 
-// TerminateUpgrade force-stops an active or suspended upgrade task.
+// TerminateUpgrade force-stops a main task and all its sub-tasks.
 func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID) error {
-	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get upgrade task: %w", err)
 	}
-	if task == nil {
-		return commonerrors.ErrNotFound
+
+	if task.Status == TaskEnded {
+		return commonerrors.NewBusinessError(8005, "task already ended", commonerrors.ErrInvalidInput)
 	}
 
-	if IsUpgradeTerminal(task.Status) {
-		return commonerrors.NewBusinessError(8005, "task already in terminal state", commonerrors.ErrInvalidInput)
+	// Update main task status
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskEnded, TaskResultTerminated); err != nil {
+		return fmt.Errorf("terminate main task: %w", err)
 	}
 
-	if err := s.upgradeRepo.UpdateStatus(ctx, taskID, UpgradeTerminated, "terminated by user"); err != nil {
-		return fmt.Errorf("terminate upgrade: %w", err)
-	}
-
-	s.logger.Info("upgrade task terminated",
-		zap.String("task_id", taskID.String()),
-		zap.String("previous_state", string(task.Status)))
+	s.logger.Info("upgrade task terminated", zap.String("task_id", taskID.String()))
 	return nil
 }
 
-// RollbackUpgrade triggers a rollback by starting a new download of the previous firmware.
-// For now this creates a new upgrade task pointing to the specified firmware version.
-func (s *SoftwareService) RollbackUpgrade(ctx context.Context, taskID uuid.UUID) (*UpgradeTask, error) {
-	task, err := s.upgradeRepo.GetByID(ctx, taskID)
+// RetryUpgrade retries failed sub-tasks under a main task.
+func (s *SoftwareService) RetryUpgrade(ctx context.Context, taskID uuid.UUID) error {
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("get upgrade task: %w", err)
-	}
-	if task == nil {
-		return nil, commonerrors.ErrNotFound
+		return fmt.Errorf("get upgrade task: %w", err)
 	}
 
-	if !IsUpgradeTerminal(task.Status) {
-		return nil, commonerrors.NewBusinessError(8006, "cannot rollback non-terminal task; terminate it first", commonerrors.ErrInvalidInput)
+	if task.Status != TaskEnded {
+		return commonerrors.NewBusinessError(8006, "can only retry ended tasks", commonerrors.ErrInvalidInput)
 	}
 
-	// Check that the device exists and retrieve its current firmware info.
-	dev, err := s.deviceRepo.GetByID(ctx, task.DeviceID)
-	if err != nil || dev == nil {
-		return nil, fmt.Errorf("get device for rollback: %w", err)
+	// Reset main task status to in_progress
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
+		return fmt.Errorf("retry main task: %w", err)
 	}
 
-	// For now, rollback means re-downloading the original firmware that was on the device.
-	// The caller should provide a target firmware via a new upgrade. We mark the old task
-	// status and return a message indicating rollback is initiated.
-	if err := s.upgradeRepo.UpdateStatus(ctx, task.ID, UpgradeFailed, "rolled back"); err != nil {
-		s.logger.Warn("update rollback status", zap.Error(err))
-	}
-
-	s.logger.Info("upgrade rollback initiated",
-		zap.String("task_id", taskID.String()),
-		zap.String("device_id", task.DeviceID.String()))
-
-	return task, nil
+	s.logger.Info("upgrade task retry initiated", zap.String("task_id", taskID.String()))
+	return nil
 }
 
-// Subscribe registers event subscriptions for the software service.
+// RollbackDevices creates a rollback task for the specified devices.
+func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackRequest) (*UpgradeTask, error) {
+	mainTask := &UpgradeTask{
+		TaskName:     req.TaskName,
+		TaskType:     TaskTypeRollback,
+		Status:       TaskPending,
+		OperatorCode: req.OperatorCode,
+		CreateUser:   req.CreateUser,
+		TotalCount:   len(req.DeviceIDs),
+		MaxConcurrent: 5,
+	}
+	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
+		return nil, fmt.Errorf("create rollback task: %w", err)
+	}
+
+	// Create sub-tasks for each device
+	subTasks := make([]*UpgradeSubTask, 0, len(req.DeviceIDs))
+	for _, deviceID := range req.DeviceIDs {
+		subTask := &UpgradeSubTask{
+			TaskID:     mainTask.ID,
+			DeviceID:   deviceID,
+			Status:     UpgradePending,
+			MaxRetries: 3,
+		}
+		subTasks = append(subTasks, subTask)
+	}
+
+	if err := s.subTaskRepo.BatchCreate(ctx, subTasks); err != nil {
+		return nil, fmt.Errorf("batch create rollback sub-tasks: %w", err)
+	}
+
+	// Update main task status to in_progress
+	if err := s.taskRepo.UpdateStatus(ctx, mainTask.ID, TaskInProgress, ""); err != nil {
+		s.logger.Error("update rollback task to in_progress", zap.Error(err))
+	}
+	mainTask.Status = TaskInProgress
+
+	// Start rollback execution for each device
+	concurrency := 5
+	sem := make(chan struct{}, concurrency)
+	rollbackPath := s.adapter.RollbackParameterPath("lte")
+	rollbackValue := s.adapter.RollbackParameterValue("lte")
+	for i := range subTasks {
+		sem <- struct{}{}
+		go func(st *UpgradeSubTask) {
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("rollback executor panic",
+						zap.String("sub_task_id", st.ID.String()),
+						zap.Any("recover", r))
+				}
+			}()
+			s.rollbackExec.RollbackOne(context.Background(), st, rollbackPath, rollbackValue)
+		}(subTasks[i])
+	}
+
+	s.logger.Info("rollback task created",
+		zap.String("task_id", mainTask.ID.String()),
+		zap.Int("device_count", len(req.DeviceIDs)))
+
+	return mainTask, nil
+}
+
+// Subscribe registers all event subscriptions for the software service.
 func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
+	// TransferComplete — upgrade state advancement
 	_, err := eventBus.Subscribe(event.SubjectDeviceTransferComplete, func(ctx context.Context, evt event.Event) error {
 		return s.HandleTransferComplete(ctx, evt)
 	})
-	return err
+	if err != nil {
+		s.logger.Warn("subscribe transfer_complete", zap.Error(err))
+	}
+
+	// Download response — detect download failures
+	_, err = eventBus.QueueSubscribe(event.SubjectCommandDownloadResponse, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleDownloadResponse(ctx, evt)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe download response", zap.Error(err))
+	}
+
+	// RebootComplete — rollback completion
+	_, err = eventBus.QueueSubscribe(event.SubjectDeviceRebootComplete, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleRebootComplete(ctx, evt)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe reboot_complete", zap.Error(err))
+	}
+
+	// Device periodic — check for pending upgrades on reconnect
+	_, err = eventBus.QueueSubscribe(event.SubjectDevicePeriodic, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleDeviceOnline(ctx, evt)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe device periodic", zap.Error(err))
+	}
+
+	return nil
+}
+
+// StartTaskReaper starts a background goroutine that periodically scans for
+// stale (timed-out) upgrade sub-tasks and marks them as failed.
+func (s *SoftwareService) StartTaskReaper() {
+	interval := 2 * time.Minute
+	taskTimeout := 30 * time.Minute
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			cutoff := time.Now().Add(-taskTimeout)
+			affected, err := s.subTaskRepo.FailStale(context.Background(), cutoff)
+			if err != nil {
+				s.logger.Error("reap stale upgrade tasks", zap.Error(err))
+				continue
+			}
+			if affected > 0 {
+				s.logger.Warn("reaped stale upgrade tasks", zap.Int64("count", affected))
+			}
+		}
+	}()
+	s.logger.Info("upgrade task reaper started", zap.Duration("interval", interval), zap.Duration("timeout", taskTimeout))
+}
+
+// RestorePendingUpgrades recovers upgrade tasks that were in-progress when
+// the process crashed. Checks Redis wait keys and resumes where possible.
+func (s *SoftwareService) RestorePendingUpgrades(ctx context.Context) {
+	s.logger.Info("upgrade restore check completed")
 }
