@@ -150,9 +150,23 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
         <Typography.Text style={{ display: 'block', marginBottom: 8 }}>
           {t('mml.console.parameterPath')}
         </Typography.Text>
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        {/* 使用原生 flex 容器而非 <Space>：antd Space 会把每个子项再包一层
+            .ant-space-item（无 flex-grow），导致设在 AutoComplete 上的
+            `flex:1` 不生效——AutoComplete 会按内部 rc-select 的 search-input
+            长度自收缩，表现为"输入时输入框变小、输入无法正常赋值"。
+            见 to-do-list 本轮 MML#1。 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           {rows.map((row, index) => (
-            <Space key={row.id} style={{ width: '100%' }} align="start">
+            <div
+              key={row.id}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                width: '100%',
+                minWidth: 0, // 让 flex:1 在溢出时能压缩而非撑开父容器
+              }}
+            >
               <span style={{ width: 20, lineHeight: '32px', color: 'rgba(0, 0, 0, 0.45)' }}>
                 {index + 1}.
               </span>
@@ -161,7 +175,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
                 options={suggestedPaths}
                 onChange={(value) => updatePath(row.id, value)}
                 placeholder="Device.Services.FAPService.{i}..."
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 0 }}
                 filterOption={(inputValue, option) =>
                   String(option?.value ?? '').toLowerCase().includes(inputValue.toLowerCase())
                 }
@@ -173,9 +187,9 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
                 disabled={rows.length <= 1}
                 size="small"
               />
-            </Space>
+            </div>
           ))}
-        </Space>
+        </div>
       </div>
 
       <Typography.Text type="secondary">

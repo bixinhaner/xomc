@@ -49,6 +49,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	scripts.PUT("/:id", h.UpdateScript)
 	scripts.DELETE("/:id", h.DeleteScript)
 	scripts.POST("/:id/start", h.StartScript)
+	// P4 C11: 历史执行列表，用于脚本详情页"历史执行"tab。
+	scripts.GET("/:id/runs", h.ListScriptRuns)
 	scripts.POST("/:id/pause", h.PauseScript)
 	scripts.POST("/:id/cancel", h.CancelScript)
 
@@ -349,6 +351,28 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, updated)
+}
+
+// ListScriptRuns handles GET /api/v1/mml/scripts/:id/runs.
+// 返回该脚本关联的全部 mml_tasks（模板 + periodic 子实例），倒序分页。
+// 前端脚本详情页"历史执行"tab 消费该接口（P4 C11）。
+func (h *Handler) ListScriptRuns(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	req := model.DefaultListRequest()
+	if err := c.ShouldBindQuery(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	resp, err := h.service.ListRunsByScript(c.Request.Context(), id, req)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // StartScript handles POST /api/v1/mml/scripts/:id/start.

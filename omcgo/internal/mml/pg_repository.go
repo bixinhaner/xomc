@@ -57,6 +57,7 @@ var scriptColumns = []string{
 	"id", "script_name", "description", "content",
 	"creator", "tags",
 	"status", "start_time", "end_time", "type", "progress", "result",
+	"last_run_status", "last_run_at",
 	"created_at", "updated_at",
 }
 
@@ -70,6 +71,7 @@ var taskColumns = []string{
 	"failed_retry", "failed_retry_count", "failed_retry_interval",
 	"started_at", "finished_at",
 	"total_devices", "success_count", "failed_count", "result",
+	"next_trigger_at", "parent_task_id",
 }
 
 // ======================================================================
@@ -430,6 +432,28 @@ func (r *PgScriptRepository) UpdateLifecycle(ctx context.Context, script *MMLScr
 	return nil
 }
 
+// UpdateLastRun 只写 last_run_status / last_run_at 两列。P1 新增，供
+// MMLAggregator 在 mml_task 收敛为终态时回写脚本最近一次执行指针。
+func (r *PgScriptRepository) UpdateLastRun(ctx context.Context, id uuid.UUID, status string, at time.Time) error {
+	query, args, err := storage.Psql.Update("mml_scripts").
+		Set("last_run_status", status).
+		Set("last_run_at", at).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update mml_script last_run SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update mml_script last_run: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgScriptRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query, args, err := storage.Psql.Delete("mml_scripts").
 		Where(sq.Eq{"id": id}).
@@ -527,6 +551,7 @@ func scanScript(row pgx.Row) (*MMLScript, error) {
 		&s.ID, &s.ScriptName, &s.Description, &s.Content,
 		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
+		&s.LastRunStatus, &s.LastRunAt,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -554,6 +579,7 @@ func scanScriptRow(rows pgx.Rows) (*MMLScript, error) {
 		&s.ID, &s.ScriptName, &s.Description, &s.Content,
 		&s.Creator, &tagsJSON,
 		&s.Status, &s.StartTime, &s.EndTime, &s.Type, &s.Progress, &resultJSON,
+		&s.LastRunStatus, &s.LastRunAt,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -610,14 +636,16 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			"period_start", "period_end", "period_time",
 			"offline_retry", "offline_retry_wait",
 			"failed_retry", "failed_retry_count", "failed_retry_interval",
-			"total_devices").
+			"total_devices",
+			"next_trigger_at", "parent_task_id").
 		Values(task.TaskName, task.ScriptID, deviceSNsJSON,
 			commandsJSON, task.Status, resultsJSON, task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
 			task.OfflineRetry, task.OfflineRetryWait,
 			task.FailedRetry, task.FailedRetryCount, task.FailedRetryInterval,
-			task.TotalDevices).
+			task.TotalDevices,
+			task.NextTriggerAt, task.PeriodicParentID).
 		Suffix("RETURNING " + joinColumns(taskColumns)).
 		ToSql()
 	if err != nil {
@@ -795,6 +823,7 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 		&t.FailedRetry, &t.FailedRetryCount, &t.FailedRetryInterval,
 		&t.StartedAt, &t.FinishedAt,
 		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
+		&t.NextTriggerAt, &t.PeriodicParentID,
 	)
 	if err != nil {
 		return nil, err
@@ -840,6 +869,7 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 		&t.FailedRetry, &t.FailedRetryCount, &t.FailedRetryInterval,
 		&t.StartedAt, &t.FinishedAt,
 		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
+		&t.NextTriggerAt, &t.PeriodicParentID,
 	)
 	if err != nil {
 		return nil, err
@@ -941,6 +971,252 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return commonerrors.ErrNotFound
 	}
 	return nil
+}
+
+// ListByScriptID 返回指定脚本关联的全部执行记录（模板 + 子实例），
+// 按 created_at 倒序分页。P4 C11：脚本详情页"历史执行"tab 用。
+func (r *PgTaskRepository) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
+	base := storage.Psql.Select(taskColumns...).
+		From("mml_tasks").
+		Where(sq.Eq{"script_id": scriptID})
+	countBase := storage.Psql.Select("COUNT(*)").
+		From("mml_tasks").
+		Where(sq.Eq{"script_id": scriptID})
+
+	countSQL, countArgs, err := countBase.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build count runs SQL: %w", err)
+	}
+	var total int64
+	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count runs: %w", err)
+	}
+
+	base = base.
+		OrderBy("created_at DESC").
+		Limit(uint64(req.Limit())).
+		Offset(uint64(req.Offset()))
+
+	query, args, err := base.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list runs SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+
+	var items []MMLTask
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan run row: %w", err)
+		}
+		items = append(items, *t)
+	}
+	if items == nil {
+		items = []MMLTask{}
+	}
+	return model.NewListResponse(items, total, req.Page, req.PageSize), nil
+}
+
+// -------- Scheduler 支持方法（P2/P3） --------
+// 独立实现 ScheduledTaskRepository 接口；与 Scheduler 包对等。
+
+var _ ScheduledTaskRepository = (*PgTaskRepository)(nil)
+
+// ClaimDueTasks 在事务内认领到期 (scheduled / periodic) 任务。
+//
+// P2 范围：仅处理 execute_type='scheduled' ——
+//   · SELECT FOR UPDATE SKIP LOCKED LIMIT N 挑出到期行
+//   · UPDATE mml_tasks SET status='running', started_at=now, next_trigger_at=NULL
+//   · 返回被更新的行（包括 periodic 模板行，留给 P3 阶段在 Scheduler 侧处理）
+//
+// 多副本部署下同一行不会被多 Scheduler 重复认领；事务提交后才对其它副本可见。
+func (r *PgTaskRepository) ClaimDueTasks(ctx context.Context, now time.Time, limit int) ([]*MMLTask, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// 1) 认领 scheduled（一次性任务）——立刻置 running、清 next_trigger_at。
+	selectSQL := `
+		SELECT id FROM mml_tasks
+		WHERE status = 'pending'
+		  AND execute_type = 'scheduled'
+		  AND next_trigger_at IS NOT NULL
+		  AND next_trigger_at <= $1
+		ORDER BY next_trigger_at ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT $2`
+	rows, err := tx.Query(ctx, selectSQL, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select scheduled tasks: %w", err)
+	}
+	var scheduledIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan scheduled id: %w", err)
+		}
+		scheduledIDs = append(scheduledIDs, id)
+	}
+	rows.Close()
+
+	var claimed []*MMLTask
+	for _, id := range scheduledIDs {
+		updateSQL := `
+			UPDATE mml_tasks
+			SET status = 'running',
+			    started_at = $1,
+			    next_trigger_at = NULL,
+			    updated_at = $1
+			WHERE id = $2
+			RETURNING ` + joinColumns(taskColumns)
+		row := tx.QueryRow(ctx, updateSQL, now, id)
+		t, err := scanTask(row)
+		if err != nil {
+			return nil, fmt.Errorf("claim scheduled task %s: %w", id, err)
+		}
+		claimed = append(claimed, t)
+	}
+
+	// 2) 认领 periodic 模板到期命中 —— 在同一事务内：
+	//    · 克隆出子实例（execute_type='immediate'，status='running'）
+	//    · 推进模板 next_trigger_at 到下一次 period_time 命中（若已过 period_end 则清空）
+	//    返回子实例给 Scheduler 去 fanout。
+	//
+	// 仅 P3 范围启用；P2 阶段此块依然按设计运行（因为 scheduled / periodic 共用
+	// next_trigger_at）——periodic 任务首次被认领即生成子实例，最大化 P2/P3 实现重用。
+	periodicSQL := `
+		SELECT id FROM mml_tasks
+		WHERE status = 'pending'
+		  AND execute_type = 'periodic'
+		  AND next_trigger_at IS NOT NULL
+		  AND next_trigger_at <= $1
+		ORDER BY next_trigger_at ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT $2`
+	rows2, err := tx.Query(ctx, periodicSQL, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select periodic templates: %w", err)
+	}
+	var periodicIDs []uuid.UUID
+	for rows2.Next() {
+		var id uuid.UUID
+		if err := rows2.Scan(&id); err != nil {
+			rows2.Close()
+			return nil, fmt.Errorf("scan periodic id: %w", err)
+		}
+		periodicIDs = append(periodicIDs, id)
+	}
+	rows2.Close()
+
+	for _, id := range periodicIDs {
+		// 读模板完整字段
+		parent, err := scanTask(tx.QueryRow(ctx,
+			`SELECT `+joinColumns(taskColumns)+` FROM mml_tasks WHERE id=$1`, id))
+		if err != nil {
+			return nil, fmt.Errorf("load periodic parent %s: %w", id, err)
+		}
+
+		// 克隆子实例：继承大多数字段，但 execute_type=immediate、status=running、
+		// parent_task_id 指回模板、清空调度相关时间字段。
+		child := cloneAsPeriodicChild(parent, now)
+		childBytes, _ := json.Marshal(child.DeviceSNs)
+		cmdBytes, _ := json.Marshal(child.Commands)
+		resultBytes, _ := json.Marshal(child.Results)
+
+		insertSQL := `
+			INSERT INTO mml_tasks (
+				task_name, script_id, device_sns, commands, status, results, creator, executor,
+				execute_type, scheduled_at, period_start, period_end, period_time,
+				offline_retry, offline_retry_wait, failed_retry, failed_retry_count, failed_retry_interval,
+				total_devices, next_trigger_at, parent_task_id, started_at
+			) VALUES (
+				$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+			) RETURNING ` + joinColumns(taskColumns)
+		row := tx.QueryRow(ctx, insertSQL,
+			child.TaskName, child.ScriptID, childBytes,
+			cmdBytes, child.Status, resultBytes, child.Creator, child.Executor,
+			child.ExecuteType, child.ScheduledAt,
+			child.PeriodStart, child.PeriodEnd, child.PeriodTime,
+			child.OfflineRetry, child.OfflineRetryWait,
+			child.FailedRetry, child.FailedRetryCount, child.FailedRetryInterval,
+			child.TotalDevices, child.NextTriggerAt, child.PeriodicParentID, child.StartedAt,
+		)
+		childRow, err := scanTask(row)
+		if err != nil {
+			return nil, fmt.Errorf("insert periodic child: %w", err)
+		}
+
+		// 推进模板 next_trigger_at；若已过 period_end 则清空 + 置 completed。
+		next := computeNextPeriodicTrigger(parent, now.Add(1*time.Second))
+		if next == nil {
+			_, err = tx.Exec(ctx,
+				`UPDATE mml_tasks SET status='completed', next_trigger_at=NULL, finished_at=$1, updated_at=$1 WHERE id=$2`,
+				now, id)
+		} else {
+			_, err = tx.Exec(ctx,
+				`UPDATE mml_tasks SET next_trigger_at=$1, updated_at=$2 WHERE id=$3`,
+				*next, now, id)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("advance periodic parent %s: %w", id, err)
+		}
+
+		claimed = append(claimed, childRow)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit claim tx: %w", err)
+	}
+	return claimed, nil
+}
+
+// RecordPeriodicChild 保留签名以满足 ScheduledTaskRepository 接口。
+// 由于 ClaimDueTasks 内部已在同事务里完成子实例插入+模板推进，本方法无额外工作。
+func (r *PgTaskRepository) RecordPeriodicChild(ctx context.Context, parent, child *MMLTask, parentNext *time.Time) error {
+	return nil
+}
+
+// FinalizePeriodicParent 如果 period_end 已过，把模板置 completed。
+// 与 ClaimDueTasks 的 period_end 自动收敛逻辑等价，这里留作兜底（比如模板
+// 从未被命中过就过期的极端情形）。
+func (r *PgTaskRepository) FinalizePeriodicParent(ctx context.Context, id uuid.UUID, finishedAt time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE mml_tasks
+		SET status='completed', next_trigger_at=NULL, finished_at=$1, updated_at=$1
+		WHERE id=$2
+		  AND execute_type='periodic'
+		  AND status='pending'
+		  AND period_end IS NOT NULL
+		  AND period_end < $1`, finishedAt, id)
+	if err != nil {
+		return fmt.Errorf("finalize periodic parent %s: %w", id, err)
+	}
+	return nil
+}
+
+// cloneAsPeriodicChild 从 periodic 模板生成一个子实例，用于立即 fanout。
+func cloneAsPeriodicChild(parent *MMLTask, now time.Time) *MMLTask {
+	parentID := parent.ID
+	child := *parent
+	child.ID = uuid.Nil // DB 自动分配
+	child.ExecuteType = ExecuteImmediate
+	child.Status = TaskRunning
+	child.NextTriggerAt = nil
+	child.PeriodicParentID = &parentID
+	child.StartedAt = &now
+	child.FinishedAt = nil
+	child.SuccessCount = 0
+	child.FailedCount = 0
+	child.Results = []map[string]interface{}{}
+	// 子实例保留 script_id（若模板有），以便 ResultAggregator 回写 last_run_status
+	return &child
 }
 
 // ---- shared helpers ----

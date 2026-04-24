@@ -259,21 +259,45 @@ func initMiscModules(c *Container) error {
 		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
 		mmlService.SetFanouter(fanouter)
 
-		// device_tasks 终态通过 NATS 跨进程事件投递到聚合器：
-		// ACS 在 MarkTaskCompleted/Failed 后发布 task.completed/task.failed，
-		// 本进程的 bridge 订阅后驱动 ResultAggregator 更新 mml_tasks 统计并推送 SSE。
-		aggregator := mml.NewResultAggregator(mmlTaskRepo, messageHub, logger)
+		// P1 重构（docs/design/mml-task-flow-design-20260424.md §4.1）：
+		// device_tasks 终态经 CompletionRouter 按 Task.Source 分发。
+		// 新建 router，注册 MML 聚合器；将来其它上游（provision/backup/...）
+		// 在自己的装配代码里调 router.Register 即可加入，无需改 bridge。
+		// ResultAggregator 同时收到 scriptRepo，任务关联脚本时回写 last_run_*。
+		aggregator := mml.NewResultAggregator(mmlTaskRepo, mmlScriptRepo, messageHub, logger)
+		router := task.NewCompletionRouter(logger)
+		router.Register(task.TaskSourceMML, aggregator)
+		// P4 指标接入（docs/design/mml-task-flow-design-20260424.md §3.3 C10）。
+		// TaskService 的 metrics 由 initTaskModule 先创建；这里复用同一个实例，
+		// 让 mml_task_total / mml_task_duration_seconds / completion_no_handler_total
+		// 都挂在同一 registry 下。
+		if m := c.TaskSvc.Metrics(); m != nil {
+			router.SetMetrics(m)
+		}
 		if c.EventBus != nil {
-			bridge := task.NewCompletionEventBridge(logger, aggregator)
+			bridge := task.NewCompletionEventBridge(logger, router)
 			if err := bridge.Subscribe(c.EventBus); err != nil {
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
 			}
 		} else {
-			// 单进程部署（单测/无 NATS）下退化为同进程回调
+			// 单进程部署（单测/无 NATS）下退化为同进程回调，
+			// TaskService 直接调 callback，不经过 router/bridge。
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
 		}
 
 		logger.Info("MML fan-out bridge enabled")
+
+		// P2/P3（docs/design/mml-task-flow-design-20260424.md §4.2/§4.3）：
+		// 启动 Scheduler —— 每 30s 扫 scheduled/periodic 到期任务；启动时先做
+		// 一次补触发（Q2）。Start 用 Background ctx 作后台循环父 ctx；进程
+		// 关停由 GS 调用 Stop()/Wait() 让 goroutine 干净退出（不依赖 ctx 取消）。
+		scheduler := mml.NewScheduler(mmlService, mmlTaskRepo, nil, 0, logger)
+		scheduler.Start(context.Background())
+		c.GS.Register("mml-scheduler", 2, func(_ context.Context) error {
+			scheduler.Stop()
+			scheduler.Wait()
+			return nil
+		})
 	}
 
 	// Parameter Library module

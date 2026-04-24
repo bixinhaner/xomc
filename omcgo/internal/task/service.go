@@ -57,6 +57,13 @@ func (s *TaskService) SetMetrics(m *TaskMetrics) {
 	s.metrics = m
 }
 
+// Metrics returns the registered TaskMetrics; other subsystems (CompletionRouter,
+// Scheduler) share the same metric instance so "mml_task_total" stays unified.
+// Returns nil if SetMetrics hasn't been called (e.g. unit tests).
+func (s *TaskService) Metrics() *TaskMetrics {
+	return s.metrics
+}
+
 // SetConnectionRequester enables automatic device wake-up on task creation.
 func (s *TaskService) SetConnectionRequester(dl DeviceLookup, cr ConnectionRequestSender) {
 	s.deviceLookup = dl
@@ -551,9 +558,15 @@ func (s *TaskService) wakeDevice(deviceSN string) {
 // 二选一：注入了 EventBus 则只广播（跨进程由订阅者调用聚合器）；否则 fallback
 // 到同进程 callbacks（单进程部署、单测）。避免同一 TaskService 既发事件又回
 // 调导致下游聚合器（如 mml_tasks 统计）重复计数。
-// 过滤规则：仅对 MML 来源且带 source_id 的任务发射，避免普通 API 任务占用广播带宽。
+//
+// P1 重构（docs/design/mml-task-flow-design-20260424.md §3.3 C2）：
+// 去掉 source == TaskSourceMML 硬编码过滤。任何带 source_id 的任务终态都会
+// 广播，由 APP 侧 CompletionRouter 按 source 分发到对应聚合器；未注册的
+// source 走 router 的 unknownHandler（记 warn 日志，不中断）。
+// 仍保留 source_id 非空判断——匿名 / 临时任务（如 Console 执行命令按钮
+// 产生的 api-source 任务）没有回流目标，不必占用广播带宽。
 func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
-	if task.Source != TaskSourceMML || task.SourceID == "" {
+	if task.SourceID == "" {
 		return
 	}
 

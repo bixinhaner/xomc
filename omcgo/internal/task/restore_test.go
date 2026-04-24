@@ -207,20 +207,40 @@ func Test_NotifyCompletion_FallbacksToCallbackWhenBusNil(t *testing.T) {
 	assert.Equal(t, "t1", cb.tasks[0].ID)
 }
 
-func Test_NotifyCompletion_SkipsNonMMLOrMissingSourceID(t *testing.T) {
+// P1 重构后（docs/design/mml-task-flow-design-20260424.md §3.3 C2）：
+// source 过滤取消，任何带 source_id 的终态都发事件；由 APP 侧 CompletionRouter
+// 按 source 分发。仅当 source_id 为空（匿名 / 临时任务）时才跳过。
+func Test_NotifyCompletion_PublishesForAnySourceWithSourceID(t *testing.T) {
 	bus := &capturingEventBus{}
 	cb := &recordingCallback{}
 	svc := &TaskService{logger: zap.NewNop(), callbacks: []TaskCompletionCallback{cb}, eventBus: bus}
 
-	cases := []*Task{
-		{ID: "t1", Source: TaskSourceAPI, SourceID: "x", Status: TaskStatusCompleted},
-		{ID: "t2", Source: TaskSourceMML, SourceID: "", Status: TaskStatusCompleted},
-	}
-	for _, task := range cases {
-		svc.notifyCompletion(context.Background(), task)
-	}
+	// API 来源 + 非空 source_id：应发事件（让未来 API 聚合器可接入）
+	svc.notifyCompletion(context.Background(), &Task{
+		ID: "t1", Source: TaskSourceAPI, SourceID: "x", Status: TaskStatusCompleted,
+	})
+	// MML 来源 + 空 source_id：跳过
+	svc.notifyCompletion(context.Background(), &Task{
+		ID: "t2", Source: TaskSourceMML, SourceID: "", Status: TaskStatusCompleted,
+	})
 
-	assert.Len(t, bus.published, 0, "非 MML 或无 source_id 不应发事件")
+	require.Len(t, bus.published, 1, "有 source_id 即发事件（无论 source 类型）")
+	var decoded Task
+	require.NoError(t, bus.published[0].DecodePayload(&decoded))
+	assert.Equal(t, "t1", decoded.ID)
+	assert.Len(t, cb.tasks, 0, "eventBus 存在时不重复触发本地 callback")
+}
+
+func Test_NotifyCompletion_SkipsWhenSourceIDEmpty(t *testing.T) {
+	bus := &capturingEventBus{}
+	cb := &recordingCallback{}
+	svc := &TaskService{logger: zap.NewNop(), callbacks: []TaskCompletionCallback{cb}, eventBus: bus}
+
+	svc.notifyCompletion(context.Background(), &Task{
+		ID: "t1", Source: TaskSourceAPI, SourceID: "", Status: TaskStatusCompleted,
+	})
+
+	assert.Len(t, bus.published, 0, "source_id 为空时不发事件")
 	assert.Len(t, cb.tasks, 0)
 }
 

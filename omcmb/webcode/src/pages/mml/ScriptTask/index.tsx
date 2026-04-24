@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Dropdown, Modal, Space, Table, Tag, message } from 'antd';
+import { Button, Dropdown, Modal, Space, Table, Tabs, Tag, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   PlusOutlined,
@@ -26,6 +26,7 @@ import type {
   MMLScriptStatus,
   MMLScriptType,
   MMLScriptResult,
+  MMLTask,
 } from '@core/types/mml';
 import {
   useMMLScripts,
@@ -33,6 +34,7 @@ import {
   useStartMMLScript,
   usePauseMMLScript,
   useCancelMMLScript,
+  useMMLScriptRuns,
 } from '@core/hooks/api/useMML';
 
 // -------------------------------------------------------------------------
@@ -146,6 +148,131 @@ function lifecycleEnable(status: MMLScriptStatus | string | undefined): {
       // completed / failed / cancelled / archived / active / unknown
       return { canStart: false, canPause: false, canCancel: false, canDelete: true };
   }
+}
+
+// ---------------------------------------------------------------------------
+// ScriptInfoTabs —— 脚本详情 Modal 内的 Tabs（基本信息 + 历史执行）。
+// docs/design/mml-task-flow-design-20260424.md §4.4（P4 C11）。
+// ---------------------------------------------------------------------------
+
+function ScriptInfoTabs({ script }: { script: MMLScript }) {
+  const t = useT();
+  const [runsPage, setRunsPage] = useState(1);
+  const [runsPageSize, setRunsPageSize] = useState(10);
+  const { data: runsData, isLoading: runsLoading } = useMMLScriptRuns(script.id, {
+    page: runsPage,
+    pageSize: runsPageSize,
+  });
+
+  const runs = runsData?.items ?? [];
+
+  // 基本信息按钮
+  const basic = (
+    <div style={{ padding: '8px 0' }}>
+      <p><strong>{t('mml.scriptNameLabel')}</strong>{script.scriptName}</p>
+      <p><strong>{t('mml.description')}: </strong>{script.description || '-'}</p>
+      <p>
+        <strong>{t('mml.type')}: </strong>
+        {SCRIPT_TYPE_TAGS[script.type] ? t(SCRIPT_TYPE_TAGS[script.type].key) : script.type ?? '-'}
+      </p>
+      <p>
+        <strong>{t('mml.status')}: </strong>
+        {SCRIPT_STATUS_TAGS[script.status] ? t(SCRIPT_STATUS_TAGS[script.status].key) : script.status ?? '-'}
+      </p>
+      <p><strong>{t('mml.creatorLabel')}</strong>{script.creator || '-'}</p>
+      <p><strong>{t('mml.startTime')}: </strong>{formatTime(script.startTime)}</p>
+      <p><strong>{t('mml.endTime')}: </strong>{formatTime(script.endTime)}</p>
+      <p><strong>{t('mml.updateTime')}: </strong>{formatTime(script.updateTime)}</p>
+      <p><strong>{t('mml.lastRunStatus')}: </strong>{script.lastRunStatus ?? '-'}</p>
+      <p><strong>{t('mml.lastRunAt')}: </strong>{formatTime(script.lastRunAt)}</p>
+      {script.content && (
+        <div style={{ marginTop: 12 }}>
+          <strong>{t('mml.scriptContent')}</strong>
+          <pre
+            style={{
+              background: '#f5f5f5',
+              padding: 12,
+              borderRadius: 4,
+              maxHeight: 260,
+              overflow: 'auto',
+              fontSize: 13,
+              fontFamily: 'monospace',
+              marginTop: 4,
+            }}
+          >
+            {script.content}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+
+  // 历史执行
+  const history = (
+    <Table<MMLTask>
+      size="small"
+      rowKey="id"
+      loading={runsLoading}
+      dataSource={runs}
+      pagination={{
+        current: runsPage,
+        pageSize: runsPageSize,
+        total: runsData?.total ?? 0,
+        onChange: (p, ps) => { setRunsPage(p); setRunsPageSize(ps); },
+      }}
+      columns={[
+        { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
+        {
+          key: 'executeType',
+          title: t('mml.type'),
+          dataIndex: 'executeType',
+          width: 100,
+          render: (v: string, r: MMLTask) =>
+            r.parentTaskId
+              ? <Tag color="geekblue">{t('mml.periodicChild')}</Tag>
+              : <Tag>{v}</Tag>,
+        },
+        {
+          key: 'status',
+          title: t('mml.status'),
+          dataIndex: 'status',
+          width: 100,
+          render: (v: string) => <Tag>{v}</Tag>,
+        },
+        {
+          key: 'nextTriggerAt',
+          title: t('mml.nextTriggerAt'),
+          dataIndex: 'nextTriggerAt',
+          width: 170,
+          render: (v?: string) => formatTime(v),
+        },
+        {
+          key: 'createdAt',
+          title: t('mml.createTime'),
+          dataIndex: 'createdAt',
+          width: 170,
+          render: (v: string) => formatTime(v),
+        },
+        {
+          key: 'finishedAt',
+          title: t('mml.endTime'),
+          dataIndex: 'finishedAt',
+          width: 170,
+          render: (v?: string) => formatTime(v),
+        },
+      ]}
+      scroll={{ y: 360 }}
+    />
+  );
+
+  return (
+    <Tabs
+      items={[
+        { key: 'basic', label: t('mml.basicInfo'), children: basic },
+        { key: 'runs', label: t('mml.runsHistory'), children: history },
+      ]}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -535,52 +662,16 @@ export default function ScriptTask() {
         )}
       </Modal>
 
-      {/* 信息：脚本基本信息（对应 image-6.png 三点菜单的首项"信息"） */}
+      {/* 信息：脚本基本信息 + 历史执行 tab（P4 C11） */}
       <Modal
         title={t('mml.scriptDetail')}
         open={Boolean(info)}
         onCancel={() => setInfo(null)}
         footer={null}
-        width={600}
+        width={760}
         destroyOnClose
       >
-        {info && (
-          <div style={{ padding: '8px 0' }}>
-            <p><strong>{t('mml.scriptNameLabel')}</strong>{info.scriptName}</p>
-            <p><strong>{t('mml.description')}: </strong>{info.description || '-'}</p>
-            <p>
-              <strong>{t('mml.type')}: </strong>
-              {SCRIPT_TYPE_TAGS[info.type] ? t(SCRIPT_TYPE_TAGS[info.type].key) : info.type ?? '-'}
-            </p>
-            <p>
-              <strong>{t('mml.status')}: </strong>
-              {SCRIPT_STATUS_TAGS[info.status] ? t(SCRIPT_STATUS_TAGS[info.status].key) : info.status ?? '-'}
-            </p>
-            <p><strong>{t('mml.creatorLabel')}</strong>{info.creator || '-'}</p>
-            <p><strong>{t('mml.startTime')}: </strong>{formatTime(info.startTime)}</p>
-            <p><strong>{t('mml.endTime')}: </strong>{formatTime(info.endTime)}</p>
-            <p><strong>{t('mml.updateTime')}: </strong>{formatTime(info.updateTime)}</p>
-            {info.content && (
-              <div style={{ marginTop: 12 }}>
-                <strong>{t('mml.scriptContent')}</strong>
-                <pre
-                  style={{
-                    background: '#f5f5f5',
-                    padding: 12,
-                    borderRadius: 4,
-                    maxHeight: 300,
-                    overflow: 'auto',
-                    fontSize: 13,
-                    fontFamily: 'monospace',
-                    marginTop: 4,
-                  }}
-                >
-                  {info.content}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
+        {info && <ScriptInfoTabs script={info} />}
       </Modal>
 
       {/* to-do-list 本轮 #1b：mode="script" 让 drawer 提交走 POST /mml/scripts，

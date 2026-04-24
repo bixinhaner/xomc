@@ -114,6 +114,9 @@ export interface MMLScript {
   type: MMLScriptType;
   progress: number;
   result?: Record<string, unknown>;
+  // P1 扩展：最近一次执行态。每次执行详情查 mml_tasks。
+  lastRunStatus?: string;
+  lastRunAt?: string;
 }
 
 export type MMLTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
@@ -157,6 +160,12 @@ export interface MMLTask {
   successCount: number;
   failedCount: number;
   result?: MMLTaskResult;
+
+  // Scheduler fields (P2/P3, docs/design/mml-task-flow-design-20260424.md)
+  // nextTriggerAt: 下次触发时刻（scheduled 一次性；periodic 滚动更新）
+  // parentTaskId: periodic 子实例指向模板；模板行为 null
+  nextTriggerAt?: string;
+  parentTaskId?: string;
 }
 
 /**

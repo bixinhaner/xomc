@@ -51,6 +51,9 @@ interface BackendMMLScript {
   type?: string;
   progress?: number;
   result?: Record<string, unknown> | null;
+  // P1 last_run snapshot
+  last_run_status?: string | null;
+  last_run_at?: string | null;
 }
 
 interface BackendMMLTask {
@@ -84,6 +87,9 @@ interface BackendMMLTask {
   success_count: number;
   failed_count: number;
   result: string | null;
+  // P2/P3 Scheduler fields
+  next_trigger_at?: string | null;
+  parent_task_id?: string | null;
 }
 
 interface BackendListResponse<T> {
@@ -223,6 +229,8 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
     type: (bs.type || 'manual') as MMLScript['type'],
     progress: bs.progress ?? 0,
     result: bs.result ?? undefined,
+    lastRunStatus: bs.last_run_status || undefined,
+    lastRunAt: bs.last_run_at || undefined,
   };
 }
 
@@ -282,6 +290,9 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     successCount: bt.success_count ?? 0,
     failedCount: bt.failed_count ?? 0,
     result: (bt.result || undefined) as MMLTask['result'],
+    // Scheduler fields (P2/P3)
+    nextTriggerAt: bt.next_trigger_at || undefined,
+    parentTaskId: bt.parent_task_id || undefined,
   };
 }
 
@@ -507,6 +518,24 @@ export const mmlApi = {
     } catch {
       return null;
     }
+  },
+
+  // P4 C11：历史执行列表（脚本详情页"历史执行"tab 消费）。
+  // 返回同一 script_id 下全部 mml_tasks（模板行 + periodic 子实例），倒序分页。
+  async getScriptRuns(
+    scriptId: string,
+    p: PageRequest
+  ): Promise<PageResponse<MMLTask>> {
+    const { data } = await http.get<BackendListResponse<BackendMMLTask>>(
+      `/mml/scripts/${scriptId}/runs`,
+      { params: { page: p.page, page_size: p.pageSize } }
+    );
+    return {
+      items: (data.items || []).map(mapBackendTask),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
   },
 
   async createTask(

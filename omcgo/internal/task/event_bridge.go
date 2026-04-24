@@ -9,24 +9,25 @@ import (
 )
 
 // CompletionEventBridge subscribes to task.completed / task.failed NATS subjects
-// and dispatches the decoded Task to registered TaskCompletionCallback handlers.
-// 使跨进程部署下的聚合器（如 MML ResultAggregator）能收到 ACS/Worker 发来的终态。
+// and dispatches the decoded Task through a CompletionRouter. 使跨进程部署下的
+// 聚合器（如 MML ResultAggregator）能收到 ACS / Worker 发来的终态事件。
+//
+// P1 重构（docs/design/mml-task-flow-design-20260424.md §3.3 C3/C4）：
+// 原实现持有 `callbacks []TaskCompletionCallback` 且假定所有订阅者同等对待
+// 每个 Task，这对多上游（mml / provision / backup / ...）不友好。现改为
+// 持有一个 CompletionRouter，由 router 按 `Task.Source` 分发；装配阶段
+// `router.Register(TaskSourceMML, mmlAggregator)` 等完成上下游绑定。
 type CompletionEventBridge struct {
-	callbacks []TaskCompletionCallback
-	logger    *zap.Logger
+	router *CompletionRouter
+	logger *zap.Logger
 }
 
-// NewCompletionEventBridge 构造事件桥接。
-func NewCompletionEventBridge(logger *zap.Logger, callbacks ...TaskCompletionCallback) *CompletionEventBridge {
+// NewCompletionEventBridge 构造事件桥接。router 不能为 nil。
+func NewCompletionEventBridge(logger *zap.Logger, router *CompletionRouter) *CompletionEventBridge {
 	return &CompletionEventBridge{
-		callbacks: callbacks,
-		logger:    logger.Named("task-event-bridge"),
+		router: router,
+		logger: logger.Named("task-event-bridge"),
 	}
-}
-
-// AddCallback 注册额外回调。
-func (b *CompletionEventBridge) AddCallback(cb TaskCompletionCallback) {
-	b.callbacks = append(b.callbacks, cb)
 }
 
 // Subscribe 注册到 EventBus 的 task.completed / task.failed 主题。
@@ -34,6 +35,9 @@ func (b *CompletionEventBridge) AddCallback(cb TaskCompletionCallback) {
 func (b *CompletionEventBridge) Subscribe(bus event.EventBus) error {
 	if bus == nil {
 		return fmt.Errorf("event bus is nil")
+	}
+	if b.router == nil {
+		return fmt.Errorf("completion router is nil")
 	}
 	subs := []string{event.SubjectTaskCompleted, event.SubjectTaskFailed}
 	for _, subject := range subs {
@@ -55,8 +59,6 @@ func (b *CompletionEventBridge) handle(ctx context.Context, evt event.Event) err
 			zap.Error(err))
 		return nil
 	}
-	for _, cb := range b.callbacks {
-		cb.OnTaskCompleted(ctx, &t)
-	}
+	b.router.Dispatch(ctx, &t)
 	return nil
 }

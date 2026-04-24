@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -47,6 +48,7 @@ type mockScriptRepo struct {
 	getByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
 	updateFn          func(ctx context.Context, script *MMLScript) error
 	updateLifecycleFn func(ctx context.Context, script *MMLScript) error
+	updateLastRunFn   func(ctx context.Context, id uuid.UUID, status string, at time.Time) error
 	deleteFn          func(ctx context.Context, id uuid.UUID) error
 	listFn            func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }
@@ -75,6 +77,13 @@ func (m *mockScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 func (m *mockScriptRepo) UpdateLifecycle(ctx context.Context, script *MMLScript) error {
 	if m.updateLifecycleFn != nil {
 		return m.updateLifecycleFn(ctx, script)
+	}
+	return nil
+}
+
+func (m *mockScriptRepo) UpdateLastRun(ctx context.Context, id uuid.UUID, status string, at time.Time) error {
+	if m.updateLastRunFn != nil {
+		return m.updateLastRunFn(ctx, id, status, at)
 	}
 	return nil
 }
@@ -146,6 +155,10 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 
 func (m *mockTaskRepo) IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error {
 	return nil
+}
+
+func (m *mockTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
+	return model.NewListResponse([]MMLTask{}, 0, req.Page, req.PageSize), nil
 }
 
 type mockCustomCommandRepo struct {

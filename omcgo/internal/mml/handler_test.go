@@ -39,12 +39,13 @@ func (m *hCmdRepo) GetByCode(ctx context.Context, code string) (*MMLCommand, err
 }
 
 type hScriptRepo struct {
-	CreateFn           func(ctx context.Context, script *MMLScript) error
-	GetByIDFn          func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
-	UpdateFn           func(ctx context.Context, script *MMLScript) error
-	UpdateLifecycleFn  func(ctx context.Context, script *MMLScript) error
-	DeleteFn           func(ctx context.Context, id uuid.UUID) error
-	ListFn             func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
+	CreateFn          func(ctx context.Context, script *MMLScript) error
+	GetByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLScript, error)
+	UpdateFn          func(ctx context.Context, script *MMLScript) error
+	UpdateLifecycleFn func(ctx context.Context, script *MMLScript) error
+	UpdateLastRunFn   func(ctx context.Context, id uuid.UUID, status string, at time.Time) error
+	DeleteFn          func(ctx context.Context, id uuid.UUID) error
+	ListFn            func(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }
 
 func (m *hScriptRepo) Create(ctx context.Context, script *MMLScript) error {
@@ -59,6 +60,12 @@ func (m *hScriptRepo) Update(ctx context.Context, script *MMLScript) error {
 func (m *hScriptRepo) UpdateLifecycle(ctx context.Context, script *MMLScript) error {
 	if m.UpdateLifecycleFn != nil {
 		return m.UpdateLifecycleFn(ctx, script)
+	}
+	return nil
+}
+func (m *hScriptRepo) UpdateLastRun(ctx context.Context, id uuid.UUID, status string, at time.Time) error {
+	if m.UpdateLastRunFn != nil {
+		return m.UpdateLastRunFn(ctx, id, status, at)
 	}
 	return nil
 }
@@ -105,6 +112,10 @@ func (m *hTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.ListRes
 
 func (m *hTaskRepo) IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error {
 	return nil
+}
+
+func (m *hTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
+	return model.NewListResponse([]MMLTask{}, 0, req.Page, req.PageSize), nil
 }
 
 type hCustomCommandRepo struct {

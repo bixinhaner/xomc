@@ -34,6 +34,21 @@ type SSEPublisher interface {
 	PublishSimple(userID, eventType string, data []byte)
 }
 
+// SSEGranularity 标识推送颗粒度。
+// docs/design/mml-task-flow-design-20260424.md §6 Q6：
+//   - task    —— mml_task 级推送，节流 ≤1/s（当前实现的唯一粒度）
+//   - deviceTask —— device_task 级推送（粒度更细），P4 阶段先占位，实现延后
+//
+// Aggregator 发 SSE 时统一经 sseGranularityForExecutor(userID) 判定，
+// 当前一律返回 SSEGranularityTask。未来加入 device_task 级推送时，在此处
+// 改规则（例如按用户偏好查询缓存），下游 Aggregator 无需改动。
+type SSEGranularity string
+
+const (
+	SSEGranularityTask       SSEGranularity = "task"
+	SSEGranularityDeviceTask SSEGranularity = "device_task"
+)
+
 // NewService creates a new MML Service.
 // hub may be nil if SSE is not configured.
 // auditRepo may be nil if audit logging is not configured.
@@ -523,12 +538,23 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		TotalDevices:        len(req.DeviceSNs),
 	}
 
-	// Map execute_type to initial status
+	// Map execute_type to initial status + next_trigger_at.
+	// P2/P3（docs/design/mml-task-flow-design-20260424.md）：scheduled/periodic
+	// 不再在 CreateTask 里立刻 fanout，而是留在 pending + 写 next_trigger_at，
+	// 等 Scheduler 按时唤醒。suspended 保持 paused，不 fanout。
 	switch req.ExecuteType {
 	case ExecuteSuspended:
 		task.Status = TaskPaused
-	case ExecuteScheduled, ExecutePeriodic:
+	case ExecuteScheduled:
 		task.Status = TaskPending
+		if task.ScheduledAt != nil {
+			task.NextTriggerAt = task.ScheduledAt
+		}
+	case ExecutePeriodic:
+		task.Status = TaskPending
+		if next := computeNextPeriodicTrigger(task, time.Now()); next != nil {
+			task.NextTriggerAt = next
+		}
 	default:
 		task.Status = TaskPending
 	}
@@ -540,14 +566,16 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	s.logger.Info("mml task created",
 		zap.String("task_id", task.ID.String()),
 		zap.String("task_name", task.TaskName),
+		zap.String("execute_type", string(task.ExecuteType)),
 		zap.Int("device_count", len(task.DeviceSNs)),
 	)
 
 	// Write audit log entries for each command+device combination
 	s.writeAuditLogs(ctx, task)
 
-	// Fan-out to device_tasks for immediate execution
-	if task.Status == TaskPending && s.fanouter != nil {
+	// Fan-out to device_tasks only for immediate execution.
+	// scheduled/periodic 由 Scheduler 唤醒；suspended 需用户显式 StartTask。
+	if task.Status == TaskPending && task.ExecuteType == ExecuteImmediate && s.fanouter != nil {
 		created, err := s.fanouter.Fanout(ctx, task)
 		if err != nil {
 			s.logger.Error("fanout mml task failed", zap.Error(err))
@@ -565,6 +593,29 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	}
 
 	return task, nil
+}
+
+// fanoutClaimed 在 Scheduler 认领并把 status 改为 running 之后被调用，
+// 只负责写 device_tasks。不做状态机转换（认领阶段已完成）。
+// 失败时记 error 日志，不改回 pending——Scheduler 再次循环时会重试，且
+// RecoverPendingTasks / RebootCloser 会兜底残留。
+func (s *Service) fanoutClaimed(ctx context.Context, task *MMLTask) error {
+	if s.fanouter == nil {
+		return fmt.Errorf("fanouter not wired")
+	}
+	created, err := s.fanouter.Fanout(ctx, task)
+	if err != nil {
+		return fmt.Errorf("fanout mml task: %w", err)
+	}
+	s.logger.Info("scheduler fanned out mml task",
+		zap.String("task_id", task.ID.String()),
+		zap.String("execute_type", string(task.ExecuteType)),
+		zap.Int("device_tasks", created),
+	)
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), string(TaskPending), string(task.Status))
+	}
+	return nil
 }
 
 // resolveRPCMethods 为缺少 rpc_method 的 command 条目按 command_code 查库补齐。
@@ -665,6 +716,12 @@ func (s *Service) writeAuditLogs(ctx context.Context, task *MMLTask) {
 // GetTask retrieves an MML task by ID.
 func (s *Service) GetTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
 	return s.taskRepo.GetByID(ctx, id)
+}
+
+// ListRunsByScript 返回脚本关联的全部执行实例（模板 + 子实例），分页倒序。
+// P4 C11：脚本详情页"历史执行"tab 的后端入口。
+func (s *Service) ListRunsByScript(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
+	return s.taskRepo.ListByScriptID(ctx, scriptID, req)
 }
 
 // ListTasks returns a paginated list of MML tasks.

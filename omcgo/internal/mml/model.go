@@ -100,8 +100,12 @@ type MMLScript struct {
 	Type        ScriptType   `json:"type"`
 	Progress    float64      `json:"progress"`
 	Result      JSONMap      `json:"result,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	// 最近一次执行终态（由 MMLAggregator 在对应 mml_task 收敛后回写）。
+	// per-execution 详情查 mml_tasks，脚本层只持有"最近一次"指针。
+	LastRunStatus *string    `json:"last_run_status,omitempty"`
+	LastRunAt     *time.Time `json:"last_run_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // JSONMap is a helper type for nullable JSONB map fields.
@@ -140,10 +144,15 @@ type MMLTask struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	// Statistics
-	TotalDevices int       `json:"total_devices"`
-	SuccessCount int       `json:"success_count"`
-	FailedCount  int       `json:"failed_count"`
+	TotalDevices int         `json:"total_devices"`
+	SuccessCount int         `json:"success_count"`
+	FailedCount  int         `json:"failed_count"`
 	Result       *TaskResult `json:"result,omitempty"`
+
+	// Scheduler 调度字段（P2/P3，docs/design/mml-task-flow-design-20260424.md）
+	// NextTriggerAt: 下次触发时刻；PeriodicParentID: periodic 子实例指向模板。
+	NextTriggerAt    *time.Time `json:"next_trigger_at,omitempty"`
+	PeriodicParentID *uuid.UUID `json:"parent_task_id,omitempty"`
 }
 
 // CommandFilter specifies criteria for listing MML commands.

@@ -264,6 +264,23 @@ export const mmlService = {
     return tasks.find((t) => t.id === id) ?? null;
   },
 
+  // P4 C11 mock：按 scriptId 过滤 tasks。mock 场景下 task.scriptId 可能为空，
+  // 返回空结构便于前端渲染空状态。
+  async getScriptRuns(
+    scriptId: string,
+    p: PageRequest
+  ): Promise<PageResponse<MMLTask>> {
+    await delay(60, 120);
+    const matched = tasks.filter((t) => t.scriptId === scriptId);
+    const start = (p.page - 1) * p.pageSize;
+    return {
+      items: matched.slice(start, start + p.pageSize),
+      total: matched.length,
+      page: p.page,
+      pageSize: p.pageSize,
+    };
+  },
+
   async startTask(id: string): Promise<MMLTask> {
     await delay(100, 200);
     const task = tasks.find((t) => t.id === id);

@@ -2,6 +2,7 @@ package mml
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -20,6 +21,9 @@ type ScriptRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLScript, error)
 	Update(ctx context.Context, script *MMLScript) error
 	UpdateLifecycle(ctx context.Context, script *MMLScript) error
+	// UpdateLastRun 只写 last_run_status / last_run_at 两列，避免与 Update / UpdateLifecycle
+	// 发生字段级覆盖（P1 新增，供 MMLAggregator 回写脚本最近一次执行态）。
+	UpdateLastRun(ctx context.Context, id uuid.UUID, status string, at time.Time) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter ScriptFilter) (*model.ListResponse[MMLScript], error)
 }
@@ -33,6 +37,10 @@ type TaskRepository interface {
 	IncrementStats(ctx context.Context, id uuid.UUID, successDelta, failedDelta int) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[MMLTask], error)
+	// ListByScriptID 返回某 mml_script 相关的全部执行实例（模板 + 子实例），
+	// 按 created_at 倒序、分页。供脚本详情页 "历史执行" tab 使用
+	// （P4 docs/design/mml-task-flow-design-20260424.md §3.3 C11）。
+	ListByScriptID(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error)
 }
 
 // CustomCommandRepository provides CRUD operations for user-defined custom commands.

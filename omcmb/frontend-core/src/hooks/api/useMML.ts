@@ -57,6 +57,16 @@ export function useMMLTaskById(id: string) {
   });
 }
 
+// P4 C11：脚本关联的历史执行列表（模板 + periodic 子实例）。
+// 仅 Real API 支持（mock 暂缺，调用时会直接走 mmlApi.getScriptRuns）。
+export function useMMLScriptRuns(scriptId: string, params: PageRequest) {
+  return useQuery({
+    queryKey: ['mml', 'scripts', 'runs', scriptId, params],
+    queryFn: () => api.getScriptRuns(scriptId, params),
+    enabled: Boolean(scriptId),
+  });
+}
+
 export function useExecuteMMLCommand() {
   return useMutation({
     mutationFn: ({
