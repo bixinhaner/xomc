@@ -18,30 +18,25 @@ import type { UploadFile } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
-import { useCreateMMLTask, useCreateMMLScript } from '@core/hooks/api/useMML';
+import { useCreateMMLTask } from '@core/hooks/api/useMML';
 import type { MMLExecuteType } from '@core/types/mml';
+import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 
 // -----------------------------------------------------------------------------
-// "新建 MML 脚本任务" Drawer —— 被 ScriptTask / MML Console 两个入口复用，
-// 布局严格对齐 docs/design/image-8.png。
+// "新建 MML 脚本任务" Drawer —— ScriptTask / MML Console 两个入口复用，
+// 布局对齐 docs/design/image-10.png。
 //
-// mode：
-//   "task"   —— 提交到 mml_tasks（POST /api/v1/mml/tasks），用于 MML 控制台
-//              保存脚本的"立即执行"以及一次性任务场景。
-//   "script" —— 提交到 mml_scripts（POST /api/v1/mml/scripts），用于脚本任务
-//              页面"+新增"（to-do-list 本轮 #1b）。执行策略/重试策略字段
-//              不显示，只保留任务名 + 设备 SN + 文件。
+// 一律提交到 mml_tasks（POST /api/v1/mml/tasks），包含：
+//   基本信息（任务名 + 产品类型 + 设备 SN + 脚本）
+// + 执行方式（立即 / 挂起 / 定时 / 周期）
+// + 执行策略（离线/在线重试）
 // -----------------------------------------------------------------------------
-
-export type ScriptTaskDrawerMode = 'task' | 'script';
 
 export interface ScriptTaskDrawerProps {
   open: boolean;
   onClose: () => void;
-  /** 决定确认按钮落到哪个表；默认 "task"（历史行为）。 */
-  mode?: ScriptTaskDrawerMode;
   /**
    * MML Console 入口：直接把选中命令组装的命令行作为脚本内容。
    * 为 true 时不显示文件上传，内容只读展示并直接随任务提交。
@@ -60,6 +55,7 @@ export interface ScriptTaskDrawerProps {
 
 interface TaskForm {
   taskName: string;
+  productType?: string;
   fileName?: string;
   executeType: MMLExecuteType;
   scheduledAt?: Dayjs;
@@ -91,7 +87,6 @@ const SECTION_HEADER: React.CSSProperties = {
 export default function ScriptTaskDrawer({
   open,
   onClose,
-  mode = 'task',
   prefillContent,
   prefillTaskName,
   prefillDeviceSns,
@@ -100,15 +95,18 @@ export default function ScriptTaskDrawer({
   const t = useT();
   const [form] = Form.useForm<TaskForm>();
   const executeType = Form.useWatch('executeType', form);
-  const isScriptMode = mode === 'script';
 
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [parsedCommands, setParsedCommands] = useState<string[]>([]);
 
+  const { data: productTypeDict } = useDictionary('product_type');
+  const productTypeOptions = (productTypeDict?.sysDictionaryDetails ?? []).map(
+    (d) => ({ label: d.label, value: d.value })
+  );
+
   const createTaskMutation = useCreateMMLTask();
-  const createScriptMutation = useCreateMMLScript();
-  const submitting = isScriptMode ? createScriptMutation.isPending : createTaskMutation.isPending;
+  const submitting = createTaskMutation.isPending;
 
   // 打开时初始化表单；Console 入口直接把 prefillContent 拆成命令数组。
   useEffect(() => {
@@ -142,39 +140,40 @@ export default function ScriptTaskDrawer({
     reader.readAsText(file);
   }, []);
 
+  // 模板内容同步自 docs/design 附带的 MMLTemplate.txt（to-do-list 本轮 #2），
+  // 覆盖内建与自定义 MML 命令的书写格式，与 ACS 解析一致。
   const handleDownloadTemplate = useCallback(() => {
-    const templateContent = `# ============================================================
-# MML 脚本任务模板 (to-do-list #6)
-# ============================================================
-#
-# 【设备 SN 格式】
-#   表单中的"设备 SN"字段支持批量输入，多个 SN 使用 "," 或 ";" 或
-#   换行分隔，输入后自动识别为多个 Tag。示例：
-#     CPE000001,CPE000002,CPE000003
-#     或
-#     CPE000001; CPE000002
-#     或
-#     CPE000001
-#     CPE000002
-#
-# 【脚本命令格式】
-#   - 一行一条 MML 命令
-#   - 以 '#' 开头的行视为注释，不会被执行
-#   - 空行将被忽略
-#
-# 【命令示例】
-#   LST CELL                                # 查询小区列表
-#   DSP EQUIPMENT                           # 显示设备信息
-#   MOD CELL:modId={CellId=1,CellName=Foo}  # 修改小区参数
-#   ACT CELL:CellId=1                       # 激活小区
-#   RST DEVICE                              # 重启设备（慎用）
-#
-# ============================================================
-# 在下方编写你的命令（删除本说明前的所有注释不会影响执行）：
-# ============================================================
-
-LST CELL
-DSP EQUIPMENT
+    const templateContent = `# This is a MML script example,'#' defines a comment line, if you need to excute the command please delete the character '#', and specify the parameter values.
+# You need to pay attention that one mml script must be on the same line and best not begin with blank.
+# CELL_INDEX is a cell number,can be removed,the default is 1.
+# Supports built-in commands and custom commands.
+#### The following are examples of the built-in MML command formats.
+# LST EUTRANNFREQ;{Serial Number}
+# ADD EUTRANNFREQ:LTE_INTER_FREQ_DL_EARFCN={41390};{Serial Number}
+# MOD EUTRANNFREQ:CELL_INDEX={1},i={2},LTE_INTER_FREQ_DL_EARFCN={41390};{Serial Number}
+# RMV EUTRANNFREQ:CELL_INDEX={1},i={1};{Serial Number}
+# MOD REMOTE_DEVICE:i={1},CRAN_EU_RU_RFTxStatus={true};{Serial Number}
+# REBOOT CELL;{Serial Number}
+# REBOOT_STK CELL;{Serial Number}
+# REBOOT_RU CELL:i={15};{Serial Number}
+# RESET CELL;{Serial Number}
+# COLD_REBOOT CELL;{Serial Number}
+# CLEAR IMSI;{Serial Number}
+# RADIO_OPEN CELL;{Serial Number}
+# RADIO_CLOSE CELL;{Serial Number}
+#### The following is an example of the custom MML command formats.
+## Example of a custom LST-type MML: Suppose the MML command group is named test_lst and contains three parameters named path1,path2, and path3.
+## You can execute this custom MML using either of the following methods,where v1 and v3 represent path1 and path3 respectively.
+# test_lst;{Serial Number}
+# test_lst:v1,v3;{Serial Number}
+## Example of a custom MOD type MML: Suppose the MML command group is named test_mod, containing two parameters path1 and path2, with corresponding modification values value1 and value2.
+## You can execute this command in the following three ways, where value1 and value2 can be non-custom built-in modification parameters.
+# test_mod;{Serial Numbner}
+# test_mod:v1=name,v2=3;{Serial Numbner}
+# test_mod:v1={name,name2},v2={3};{Serial Number}
+## The following are custom ADD and RMV MML commands.
+# test_add;{Serial Number}
+# test_rmv;{Serial Number}
 `;
     const blob = new Blob([templateContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -200,53 +199,39 @@ DSP EQUIPMENT
           throw new Error('SN_REQUIRED');
         }
 
-        if (isScriptMode) {
-          // to-do-list 本轮 #1b：写 mml_scripts 表。执行策略字段不适用，保留
-          // 最小集：script_name / description / content / tags(SNs) / status / type。
-          await createScriptMutation.mutateAsync({
-            scriptName: values.taskName.trim(),
-            description: '',
-            content: parsedCommands.join('\n'),
-            creator: '',
-            // 设备 SN 作为脚本标签附着，便于后续一键下发时复用。
-            tags: deviceSns.map((sn) => `sn:${sn}`),
-            status: 'active',
-            type: 'manual',
-            progress: 0,
-          });
-          toast.success(t('mml.scriptSaved'));
-        } else {
-          const payload = {
-            taskName: values.taskName.trim(),
-            deviceSns,
-            commands: parsedCommands,
-            creator: '',
-            executeType: values.executeType,
-            offlineRetry: values.offlineRetryEnable,
-            offlineRetryWait: values.offlineRetryWaitTime,
-            failedRetry: values.failedRetryEnable,
-            failedRetryCount: values.failedRetryCount,
-            failedRetryInterval: values.failedRetryWaitTime,
-            scheduledAt:
-              values.executeType === 'scheduled' && values.scheduledAt
-                ? values.scheduledAt.toISOString()
-                : undefined,
-            periodStart:
-              values.executeType === 'periodic' && values.periodRange?.[0]
-                ? values.periodRange[0].toISOString()
-                : undefined,
-            periodEnd:
-              values.executeType === 'periodic' && values.periodRange?.[1]
-                ? values.periodRange[1].toISOString()
-                : undefined,
-            periodTime:
-              values.executeType === 'periodic' && values.periodTime
-                ? values.periodTime.format('HH:mm:ss')
-                : undefined,
-          };
-          await createTaskMutation.mutateAsync(payload);
-          toast.success(t('mml.taskCreated'));
-        }
+        const payload = {
+          taskName: values.taskName.trim(),
+          deviceSns,
+          commands: parsedCommands,
+          creator: '',
+          executeType: values.executeType,
+          offlineRetry: values.offlineRetryEnable,
+          offlineRetryWait: values.offlineRetryWaitTime,
+          failedRetry: values.failedRetryEnable,
+          failedRetryCount: values.failedRetryCount,
+          failedRetryInterval: values.failedRetryWaitTime,
+          scheduledAt:
+            values.executeType === 'scheduled' && values.scheduledAt
+              ? values.scheduledAt.toISOString()
+              : undefined,
+          periodStart:
+            values.executeType === 'periodic' && values.periodRange?.[0]
+              ? values.periodRange[0].toISOString()
+              : undefined,
+          periodEnd:
+            values.executeType === 'periodic' && values.periodRange?.[1]
+              ? values.periodRange[1].toISOString()
+              : undefined,
+          periodTime:
+            values.executeType === 'periodic' && values.periodTime
+              ? values.periodTime.format('HH:mm:ss')
+              : undefined,
+          // 产品类型单值存入 productTypes 数组（后端字段 product_types JSONB）；
+          // 空字符串不下发，避免污染未填场景的默认空数组。
+          ...(values.productType ? { productTypes: [values.productType] } : {}),
+        };
+        await createTaskMutation.mutateAsync(payload);
+        toast.success(t('mml.taskCreated'));
 
         onSuccess?.();
         onClose();
@@ -256,15 +241,13 @@ DSP EQUIPMENT
         // 校验错误 err 没有 message，静默即可；其它错误统一通过 toast 暴露。
         if (err && (err as { errorFields?: unknown }).errorFields) return;
         if (err instanceof Error && err.message === 'SN_REQUIRED') return;
-        toast.error(err, t(isScriptMode ? 'mml.scriptSaveFailed' : 'mml.taskCreateFailedPrefix'));
+        toast.error(err, t('mml.taskCreateFailedPrefix'));
       });
   }, [
     form,
     deviceSns,
     parsedCommands,
-    isScriptMode,
     createTaskMutation,
-    createScriptMutation,
     onSuccess,
     onClose,
     t,
@@ -272,7 +255,7 @@ DSP EQUIPMENT
 
   return (
     <Drawer
-      title={t(isScriptMode ? 'mml.newMmlScript' : 'mml.newMmlTask')}
+      title={t('mml.newMmlTask')}
       open={open}
       onClose={onClose}
       width={560}
@@ -304,6 +287,21 @@ DSP EQUIPMENT
           <Input maxLength={50} placeholder={t('mml.inputTaskName')} style={{ width: '100%' }} />
         </Form.Item>
 
+        {/* 产品类型（image-10）：非必填；来自字典 product_type，统一与
+            脚本库/设备选择器口径一致。提交时转为 product_types 数组。 */}
+        <Form.Item
+          label={t('mml.productType')}
+          name="productType"
+          style={{ marginLeft: 12 }}
+        >
+          <Select
+            allowClear
+            placeholder={t('mml.selectProductType')}
+            options={productTypeOptions}
+            style={{ width: '100%' }}
+          />
+        </Form.Item>
+
         <div style={{ marginLeft: 12, marginBottom: 16 }}>
           <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
             {t('mml.deviceSn')}
@@ -322,7 +320,7 @@ DSP EQUIPMENT
 
         {prefillContent !== undefined ? (
           // MML Console 入口：直接展示内容，不支持文件上传（命令已经在面板上选定）。
-          <Form.Item label={t('mml.selectFile')} style={{ marginLeft: 12 }}>
+          <Form.Item label={t('mml.selectScript')} style={{ marginLeft: 12 }}>
             <Input.TextArea
               readOnly
               rows={5}
@@ -334,11 +332,10 @@ DSP EQUIPMENT
             </span>
           </Form.Item>
         ) : (
-          // ScriptTask 入口：文件上传
-          // to-do-list #5：不再强制必填，用户可只输入 SN 提交空命令任务。
-          // to-do-list #6：标签由"选择脚本"改为"选择文件"。
+          // ScriptTask 入口：文件上传（标签文案 "选择脚本"，image-10）。
+          // 不强制必填，用户可只输入 SN 提交空命令任务。
           <Form.Item
-            label={t('mml.selectFile')}
+            label={t('mml.selectScript')}
             name="fileName"
             style={{ marginLeft: 12 }}
           >
@@ -384,9 +381,6 @@ DSP EQUIPMENT
           </Form.Item>
         )}
 
-        {/* script 模式下不展示执行策略/重试策略，mml_scripts 表不持有这些字段 */}
-        {!isScriptMode && (
-        <>
         <Divider />
 
         {/* ---- 选择执行方式 ---- */}
@@ -498,8 +492,6 @@ DSP EQUIPMENT
           </Form.Item>
           {t('mml.minutes')}
         </div>
-        </>
-        )}
       </Form>
     </Drawer>
   );

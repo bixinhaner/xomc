@@ -674,11 +674,10 @@ export default function ScriptTask() {
         {info && <ScriptInfoTabs script={info} />}
       </Modal>
 
-      {/* to-do-list 本轮 #1b：mode="script" 让 drawer 提交走 POST /mml/scripts，
-          落到 mml_scripts 表；同时隐藏执行策略/重试策略字段。 */}
+      {/* 新建 MML 脚本任务（image-10）：走 POST /mml/tasks，带执行策略 + 产品类型。
+          mml_scripts 的脚本库用 /mml/script-library 入口管理，不再共用此 drawer。 */}
       <ScriptTaskDrawer
         open={createOpen}
-        mode="script"
         onClose={() => setCreateOpen(false)}
         onSuccess={() => void refetch()}
       />
