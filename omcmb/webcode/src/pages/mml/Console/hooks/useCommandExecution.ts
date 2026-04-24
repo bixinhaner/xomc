@@ -19,6 +19,7 @@ type ExecuteCommandParams = {
   paramPaths: string[];
   parameters: Record<string, string | number | boolean>;
   selectedFields: string[];
+  selectedParams: string[];
   taskName?: string;
 };
 
@@ -119,6 +120,7 @@ export function useCommandExecution() {
     paramPaths,
     parameters,
     selectedFields,
+    selectedParams,
     taskName,
   }: ExecuteCommandParams) => {
     if (devices.length === 0) {
@@ -159,6 +161,7 @@ export function useCommandExecution() {
       paramPaths,
       parameters,
       selectedFields,
+      selectedParams,
       taskName: taskName || command?.commandCode || trimmedCommandLineText,
     });
 
@@ -251,6 +254,7 @@ function buildExecutePayload({
   paramPaths,
   parameters,
   selectedFields,
+  selectedParams,
   taskName,
 }: ExecuteCommandParams): ExecutePayload {
   const deviceSns = devices.map((device) => device.sn);
@@ -269,12 +273,30 @@ function buildExecutePayload({
   }
 
   if (activeTab === 'control') {
+    // 把用户在控制面板选中的参数码（selectedParams）+ 填写的值（parameters）
+    // 合并成 commands[0].parameters，交给后端保存到 mml_tasks.commands 并扇出到
+    // device_tasks。LST/DSP 只选不填值，value 置 ""；MOD/ADD 用用户填的值，
+    // 未填的留 "" 占位便于后端校验（to-do-list.md #1）。
+    const selectedCodes =
+      selectedParams.length > 0 ? selectedParams : Object.keys(parameters);
+
+    const mergedParameters: Record<string, string | number | boolean> = {};
+    for (const code of selectedCodes) {
+      mergedParameters[code] = parameters[code] ?? '';
+    }
+
+    const commandEntry: Record<string, unknown> = {
+      command_code: command.commandCode,
+      parameters: mergedParameters,
+    };
+    if (selectedFields.length > 0) {
+      commandEntry.selected_fields = selectedFields;
+    }
+
     return {
       task_name: taskName || command.commandCode,
-      command_code: command.commandCode,
-      parameters,
       device_sns: deviceSns,
-      ...(selectedFields.length > 0 ? { selected_fields: selectedFields } : {}),
+      commands: [commandEntry],
     };
   }
 

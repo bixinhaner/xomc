@@ -194,6 +194,7 @@ export default function MMLConsole() {
       paramPaths,
       parameters,
       selectedFields,
+      selectedParams,
     });
   }, [
     activeTab,
@@ -206,6 +207,7 @@ export default function MMLConsole() {
     paramPaths,
     parameters,
     selectedFields,
+    selectedParams,
   ]);
 
   const handleReset = useCallback(() => {
@@ -415,6 +417,9 @@ export default function MMLConsole() {
             paramPaths: template.paramPaths,
             parameters: template.parameters as Record<string, string | number | boolean>,
             selectedFields: [],
+            // 模板没有单独的 selectedParams 概念；buildExecutePayload 会在
+            // selectedParams 为空时自动使用 Object.keys(parameters) 作为兜底。
+            selectedParams: [],
           });
         }}
       />
