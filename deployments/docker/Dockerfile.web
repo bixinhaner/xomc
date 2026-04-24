@@ -3,17 +3,31 @@
 # 之类的模块解析能按 Node 标准行为向上查找到 /app/node_modules。
 FROM node:20-alpine AS deps
 
+# 显式声明为 development，避免宿主机 / CI / buildx 把 NODE_ENV=production 传入，
+# 导致 `npm ci` 跳过 devDependencies——本项目的 vite / typescript / vitest
+# 等构建工具都在 devDependencies，一旦被跳过下一 stage 就会 `sh: vite: not found`
+# （参见本轮 to-do-list 报告的服务器报错）。
+ENV NODE_ENV=development
+
 WORKDIR /app
 
 RUN npm config set registry https://registry.npmmirror.com
 
 COPY omcmb/webcode/package.json omcmb/webcode/package-lock.json ./
 
-# --legacy-peer-deps 跳过 peer dependency 版本冲突检查
-RUN npm install --legacy-peer-deps
+# --include=dev：进一步兜底强制安装 devDependencies（即使 NODE_ENV 意外被改）
+# --legacy-peer-deps：跳过 peer dependency 版本冲突检查
+# 用 npm ci 而非 npm install：严格遵循 package-lock.json，保证不同机器 / CI
+# 上解析到完全一致的依赖树和 .bin 符号链接，避免"本机 OK 服务器报错"。
+RUN npm ci --include=dev --legacy-peer-deps
 
 # 阶段2: 构建前端
 FROM node:20-alpine AS builder
+
+# 与 deps 阶段对齐：NODE_ENV 固定 development，防止 vite build 时误判为 prod-only
+# 环境导致的行为差异（某些插件会在 production 时跳过某些构建步骤）。
+# vite build 本身会把产物里的 process.env.NODE_ENV 写为 production，不受本 ENV 影响。
+ENV NODE_ENV=development
 
 # 保留 webcode / frontend-core 同级目录结构：vite.config.ts 中的 `@core` alias
 # 指向 `../frontend-core/src`，必须把 frontend-core 也拷入构建上下文。node_modules
