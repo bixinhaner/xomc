@@ -92,6 +92,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.app
+      network: host
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
@@ -110,6 +111,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.app
+      network: host
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
@@ -129,6 +131,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.acs
+      network: host
     ports:
       - "9090:9090"
       - "7557:7557"
@@ -151,6 +154,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.app
+      network: host
     ports:
       - "9091:9091"
     environment:
@@ -173,6 +177,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.worker
+      network: host
     ports:
       - "9092:9092"
     environment:
@@ -194,6 +199,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.web
+      network: host
     ports:
       - "8081:8081"
       - "8080:8080"
