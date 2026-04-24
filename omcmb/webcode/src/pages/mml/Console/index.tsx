@@ -7,9 +7,9 @@ import {
   TerminalPanel,
   CommandInput,
   BatchSnModal,
-  SaveScriptModal,
 } from './components';
 import AddTemplateModal from './components/AddTemplateModal';
+import ScriptTaskDrawer from '@/pages/mml/components/ScriptTaskDrawer';
 import {
   useDeviceSelection,
   useCommandSelection,
@@ -44,7 +44,7 @@ export default function MMLConsole() {
   const deviceSelection = useDeviceSelection();
   const commandSelection = useCommandSelection();
   const commandExecution = useCommandExecution();
-  const [saveScriptModalOpen, setSaveScriptModalOpen] = useState(false);
+  const [saveTaskDrawerOpen, setSaveTaskDrawerOpen] = useState(false);
 
   useEffect(() => {
     const selectedCommand = commandSelection.selectedCommand;
@@ -236,13 +236,13 @@ export default function MMLConsole() {
       void message.warning(t('mml.selectCommandFirst'));
       return;
     }
-    setSaveScriptModalOpen(true);
+    setSaveTaskDrawerOpen(true);
   }, [commandSelection.selectedCommand, t]);
 
-  const saveScriptDefaultName = commandSelection.selectedCommand
+  const saveTaskDefaultName = commandSelection.selectedCommand
     ? `${commandSelection.selectedCommand.commandName}_${new Date().toISOString().slice(0, 10)}`
     : '';
-  const saveScriptDefaultContent = commandLineText.trim();
+  const saveTaskDefaultContent = commandLineText.trim();
 
   const canExecute = deviceSelection.selectedDevices.length > 0 && commandLineText.trim().length > 0;
   const executeButtonText = `${t('mml.console.deviceUnit', { count: deviceSelection.selectedDevices.length })} · ${currentCommandLabel || t('mml.console.noCommandSelected')}`;
@@ -424,14 +424,14 @@ export default function MMLConsole() {
         }}
       />
 
-      {/* 保存脚本 → mml_scripts 表（to-do-list #3）。历史上复用过 ScriptTaskDrawer，
-          但 Drawer 面向 mml_tasks 执行实例，语义不符。SaveScriptModal 只采集
-          脚本名 + 描述 + 只读内容预览，提交走 useCreateMMLScript。*/}
-      <SaveScriptModal
-        open={saveScriptModalOpen}
-        onClose={() => setSaveScriptModalOpen(false)}
-        defaultName={saveScriptDefaultName}
-        content={saveScriptDefaultContent}
+      {/* 保存脚本 —— 与 /mml/script 的"+新增"共用同一个 drawer（image-10），
+          prefillContent 让命令行只读展示，不出现文件上传。提交走 POST /mml/tasks。*/}
+      <ScriptTaskDrawer
+        open={saveTaskDrawerOpen}
+        onClose={() => setSaveTaskDrawerOpen(false)}
+        prefillContent={saveTaskDefaultContent}
+        prefillTaskName={saveTaskDefaultName}
+        prefillDeviceSns={deviceSelection.selectedDevices.map((d) => d.sn)}
       />
     </div>
   );
