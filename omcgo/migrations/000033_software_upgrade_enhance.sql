@@ -46,30 +46,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_upgrade_sub_tasks_device_active_uniq
     WHERE status NOT IN ('completed', 'failed', 'terminated');
 
 -- 子任务 status CHECK 约束
-ALTER TABLE upgrade_sub_tasks ADD CONSTRAINT chk_upgrade_sub_tasks_status
-    CHECK (status IN ('pending', 'downloading', 'rebooting', 'verifying',
-                       'completed', 'failed', 'suspended', 'terminated'));
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_upgrade_sub_tasks_status') THEN
+        ALTER TABLE upgrade_sub_tasks ADD CONSTRAINT chk_upgrade_sub_tasks_status
+            CHECK (status IN ('pending', 'downloading', 'rebooting', 'verifying',
+                               'completed', 'failed', 'suspended', 'terminated'));
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- updated_at 触发器
+DROP TRIGGER IF EXISTS trigger_upgrade_sub_tasks_updated_at ON upgrade_sub_tasks;
 CREATE TRIGGER trigger_upgrade_sub_tasks_updated_at
     BEFORE UPDATE ON upgrade_sub_tasks FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
 -- Step 2: 迁移已有设备级数据到 upgrade_sub_tasks
+-- 仅在 upgrade_tasks 仍有 device_id 列时执行（幂等安全）
 -- ============================================================
-INSERT INTO upgrade_sub_tasks (id, task_id, device_id, firmware_id, status, error_message,
-    retry_count, max_retries, started_at, completed_at, created_at, updated_at)
-SELECT id,
-    COALESCE(batch_id, gen_random_uuid()),
-    device_id, firmware_id, status, error_message,
-    retry_count, max_retries, started_at, completed_at, created_at, updated_at
-FROM upgrade_tasks
-WHERE device_id IS NOT NULL
-ON CONFLICT DO NOTHING;
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'upgrade_tasks' AND column_name = 'device_id'
+    ) THEN
+        INSERT INTO upgrade_sub_tasks (id, task_id, device_id, firmware_id, status, error_message,
+            retry_count, max_retries, started_at, completed_at, created_at, updated_at)
+        SELECT id,
+            COALESCE(batch_id, gen_random_uuid()),
+            device_id, firmware_id, status, error_message,
+            retry_count, max_retries, started_at, completed_at, created_at, updated_at
+        FROM upgrade_tasks
+        WHERE device_id IS NOT NULL
+        ON CONFLICT DO NOTHING;
 
--- 删除已迁移的设备级行
-DELETE FROM upgrade_tasks WHERE device_id IS NOT NULL;
+        DELETE FROM upgrade_tasks WHERE device_id IS NOT NULL;
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- ============================================================
 -- Step 3: ALTER upgrade_tasks 添加主任务级新列
@@ -108,14 +126,27 @@ CREATE INDEX IF NOT EXISTS idx_upgrade_tasks_task_created_at ON upgrade_tasks (c
 -- ============================================================
 -- Step 6: upgrade_tasks CHECK 约束
 -- ============================================================
-ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_status
-    CHECK (status IN ('pending', 'in_progress', 'suspended', 'ended'));
-ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_result
-    CHECK (result IS NULL OR result IN ('success', 'partial', 'failed', 'terminated'));
-ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_task_type
-    CHECK (task_type IN (1, 2, 4, 6, 8));
-ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_create_status
-    CHECK (create_status IN ('active', 'suspend', 'timing'));
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_upgrade_tasks_status') THEN
+        ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_status
+            CHECK (status IN ('pending', 'in_progress', 'suspended', 'ended'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_upgrade_tasks_result') THEN
+        ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_result
+            CHECK (result IS NULL OR result IN ('success', 'partial', 'failed', 'terminated'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_upgrade_tasks_task_type') THEN
+        ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_task_type
+            CHECK (task_type IN (1, 2, 4, 6, 8));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_upgrade_tasks_create_status') THEN
+        ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_create_status
+            CHECK (create_status IN ('active', 'suspend', 'timing'));
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- ============================================================
 -- Step 7: 修复 upgrade_tasks FK（固件删除时解除引用）
@@ -134,20 +165,30 @@ ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS uploader VARCHAR(64);
 ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(128);
 ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS description TEXT;
 
--- 唯一约束：使用 COALESCE 处理 NULL product_class，加入 file_type
+-- 唯一约束：使用 COALESCE 处理 NULL product_class 和空 carrier，加入 file_type
+ALTER TABLE firmware_versions ALTER COLUMN carrier SET DEFAULT 'n/a';
 DROP INDEX IF EXISTS idx_firmware_unique_version;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_firmware_unique_version
-    ON firmware_versions (carrier, COALESCE(product_class, ''), version, file_type);
+    ON firmware_versions (COALESCE(NULLIF(carrier, ''), 'n/a'), COALESCE(product_class, ''), version, file_type);
 
 -- 文件类型 + 状态 复合索引
 CREATE INDEX IF NOT EXISTS idx_firmware_file_type_status
     ON firmware_versions (file_type, status);
 
 -- firmware_versions CHECK 约束
-ALTER TABLE firmware_versions ADD CONSTRAINT chk_firmware_versions_file_type
-    CHECK (file_type IN (0, 1, 6));
-ALTER TABLE firmware_versions ADD CONSTRAINT chk_firmware_versions_status
-    CHECK (status IN ('active', 'deprecated', 'archived'));
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_firmware_versions_file_type') THEN
+        ALTER TABLE firmware_versions ADD CONSTRAINT chk_firmware_versions_file_type
+            CHECK (file_type IN (0, 1, 6));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_firmware_versions_status') THEN
+        ALTER TABLE firmware_versions ADD CONSTRAINT chk_firmware_versions_status
+            CHECK (status IN ('active', 'deprecated', 'archived'));
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 -- ============================================================
