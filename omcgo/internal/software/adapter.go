@@ -3,7 +3,7 @@ package software
 import "github.com/omcgo/omcgo/internal/core/model"
 
 // UpgradeAdapter isolates 4G/5G upgrade and rollback parameter differences
-// from the executor logic. Each carrier+technology combination may have
+// from the executor logic. Each technology combination may have
 // different rollback parameter paths and download file types.
 //
 // This is a separate interface from carrier.Carrier to avoid modifying
@@ -11,7 +11,7 @@ import "github.com/omcgo/omcgo/internal/core/model"
 // In the future these methods could be migrated into carrier.Carrier.
 type UpgradeAdapter interface {
 	// RollbackParameterPath returns the TR-069 parameter path to trigger a rollback.
-	// For 4G/LTE: typically "ROLLBACK_CONTROL" (mapped by carrier adapter).
+	// For 4G/LTE: typically "ROLLBACK_CONTROL".
 	// For 5G/NR: typically "Device.SoftwareCtrl.ActivateEnable".
 	RollbackParameterPath(tech model.Technology) string
 
@@ -25,7 +25,7 @@ type UpgradeAdapter interface {
 }
 
 // DefaultUpgradeAdapter provides default 4G/5G upgrade behavior.
-// Carrier-specific differences can be implemented by creating custom adapters.
+// Technology-specific differences can be implemented by creating custom adapters.
 type DefaultUpgradeAdapter struct{}
 
 // NewDefaultUpgradeAdapter creates a new DefaultUpgradeAdapter.

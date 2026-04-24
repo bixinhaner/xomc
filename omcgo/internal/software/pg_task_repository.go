@@ -18,7 +18,7 @@ import (
 
 var taskColumns = []string{
 	"id", "task_name", "task_type", "firmware_id", "file_name", "file_md5",
-	"status", "result", "operator_code", "product_class", "is_keep_config",
+	"status", "result", "product_class", "is_keep_config",
 	"create_status", "create_user", "total_count", "success_count", "fail_count",
 	"max_concurrent", "started_at", "ended_at", "created_at", "updated_at",
 }
@@ -40,12 +40,13 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	var firmwareID sql.NullString
 	var fileName, fileMD5, result sql.NullString
 	var startedAt, endedAt sql.NullTime
+	var createdAt, updatedAt time.Time
 
 	err := row.Scan(
 		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &fileName, &fileMD5,
-		&task.Status, &result, &task.OperatorCode, &task.ProductClass, &task.IsKeepConfig,
+		&task.Status, &result, &task.ProductClass, &task.IsKeepConfig,
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
-		&task.MaxConcurrent, &startedAt, &endedAt, &task.CreatedAt, &task.UpdatedAt,
+		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -65,21 +66,25 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 		task.Result = TaskResult(result.String)
 	}
 	if startedAt.Valid {
-		task.StartedAt = &startedAt.Time
+		t := JSONTime(startedAt.Time)
+		task.StartedAt = &t
 	}
 	if endedAt.Valid {
-		task.EndedAt = &endedAt.Time
+		t := JSONTime(endedAt.Time)
+		task.EndedAt = &t
 	}
+	task.CreatedAt = JSONTime(createdAt)
+	task.UpdatedAt = JSONTime(updatedAt)
 	return &task, nil
 }
 
 func (r *PgTaskRepository) Create(ctx context.Context, task *UpgradeTask) error {
 	builder := storage.Psql.Insert("upgrade_tasks").
 		Columns("task_name", "task_type", "firmware_id", "file_name", "file_md5",
-			"status", "operator_code", "product_class", "is_keep_config",
+			"status", "product_class", "is_keep_config",
 			"create_status", "create_user", "total_count", "max_concurrent").
 		Values(task.TaskName, task.TaskType, task.FirmwareID, task.FileName, task.FileMD5,
-			task.Status, task.OperatorCode, task.ProductClass, task.IsKeepConfig,
+			task.Status, task.ProductClass, task.IsKeepConfig,
 			task.CreateStatus, task.CreateUser, task.TotalCount, task.MaxConcurrent).
 		Suffix("RETURNING " + joinColumns(taskColumns))
 
@@ -125,7 +130,6 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *UpgradeTask) error 
 		Set("file_md5", task.FileMD5).
 		Set("status", task.Status).
 		Set("result", task.Result).
-		Set("operator_code", task.OperatorCode).
 		Set("product_class", task.ProductClass).
 		Set("is_keep_config", task.IsKeepConfig).
 		Set("create_status", task.CreateStatus).
@@ -193,10 +197,6 @@ func (r *PgTaskRepository) List(ctx context.Context, filter UpgradeTaskFilter) (
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})
 		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
-	}
-	if filter.OperatorCode != nil {
-		base = base.Where(sq.Eq{"operator_code": *filter.OperatorCode})
-		countBase = countBase.Where(sq.Eq{"operator_code": *filter.OperatorCode})
 	}
 	if filter.ProductClass != nil {
 		base = base.Where(sq.Eq{"product_class": *filter.ProductClass})
@@ -285,12 +285,13 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	var firmwareID sql.NullString
 	var fileName, fileMD5, result sql.NullString
 	var startedAt, endedAt sql.NullTime
+	var createdAt, updatedAt time.Time
 
 	err := rows.Scan(
 		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &fileName, &fileMD5,
-		&task.Status, &result, &task.OperatorCode, &task.ProductClass, &task.IsKeepConfig,
+		&task.Status, &result, &task.ProductClass, &task.IsKeepConfig,
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
-		&task.MaxConcurrent, &startedAt, &endedAt, &task.CreatedAt, &task.UpdatedAt,
+		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -310,10 +311,14 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 		task.Result = TaskResult(result.String)
 	}
 	if startedAt.Valid {
-		task.StartedAt = &startedAt.Time
+		t := JSONTime(startedAt.Time)
+		task.StartedAt = &t
 	}
 	if endedAt.Valid {
-		task.EndedAt = &endedAt.Time
+		t := JSONTime(endedAt.Time)
+		task.EndedAt = &t
 	}
+	task.CreatedAt = JSONTime(createdAt)
+	task.UpdatedAt = JSONTime(updatedAt)
 	return &task, nil
 }

@@ -20,7 +20,6 @@ import { softwareService } from '../../mock/services/softwareService';
 
 interface BackendFirmwareVersion {
   id: string;
-  carrier: string;
   product_class: string;
   version: string;
   file_name: string;
@@ -48,7 +47,6 @@ interface BackendUpgradeTask {
   file_md5?: string;
   status: string;
   result?: string;
-  operator_code: string;
   product_class: string;
   is_keep_config: boolean;
   create_status: string;
@@ -111,6 +109,7 @@ function mapFirmware(bf: BackendFirmwareVersion): SoftwareVersion {
     id: bf.id,
     versionName: `${bf.product_class || ''} ${bf.version}`.trim(),
     versionCode: bf.version,
+    fileName: bf.file_name,
     deviceType: bf.product_class || '',
     vendor: bf.compatible_oui?.[0] || '',
     releaseDate: bf.created_at,
@@ -151,7 +150,6 @@ function mapUpgradeTask(bt: BackendUpgradeTask): UpgradeTaskInfo {
     fileMd5: bt.file_md5,
     status: bt.status as TaskStatusType,
     result: bt.result as TaskResultType | undefined,
-    operatorCode: bt.operator_code,
     productClass: bt.product_class,
     isKeepConfig: bt.is_keep_config,
     createStatus: bt.create_status,
@@ -250,7 +248,6 @@ export const softwareApi = {
     data: Omit<SoftwareVersion, 'id' | 'releaseDate'>
   ): Promise<SoftwareVersion> {
     const formData = new FormData();
-    formData.append('carrier', 'cmcc');
     formData.append('version', data.versionCode);
     if (data.deviceType) formData.append('product_class', data.deviceType);
     if (data.releaseNotes) formData.append('release_notes', data.releaseNotes);
@@ -269,7 +266,6 @@ export const softwareApi = {
   async uploadFirmware(
     file: File,
     metadata: {
-      carrier: string;
       version: string;
       productClass?: string;
       releaseNotes?: string;
@@ -282,7 +278,6 @@ export const softwareApi = {
   ): Promise<SoftwareVersion> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('carrier', metadata.carrier);
     formData.append('version', metadata.version);
     if (metadata.productClass)
       formData.append('product_class', metadata.productClass);
@@ -318,6 +313,37 @@ export const softwareApi = {
 
   async toggleRecommend(id: string): Promise<SoftwareVersion> {
     const { data } = await http.put<BackendFirmwareVersion>(`/firmware/${id}/recommend`);
+    return mapFirmware(data);
+  },
+
+  async downloadFirmware(id: string, fileName: string): Promise<void> {
+    const response = await http.get(`/firmware/${id}/download`, {
+      responseType: 'blob',
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data as BlobPart]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName || `firmware_${id}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+
+  async updateFirmware(id: string, metadata: {
+    productClass?: string;
+    version?: string;
+    recommend?: boolean;
+    description?: string;
+    releaseNotes?: string;
+  }): Promise<SoftwareVersion> {
+    const { data } = await http.put<BackendFirmwareVersion>(`/firmware/${id}`, {
+      product_class: metadata.productClass,
+      version: metadata.version,
+      recommend: metadata.recommend,
+      description: metadata.description,
+      release_notes: metadata.releaseNotes,
+    });
     return mapFirmware(data);
   },
 
@@ -391,13 +417,11 @@ export const softwareApi = {
   async createRollback(req: {
     deviceIds: string[];
     taskName: string;
-    operatorCode: string;
     createUser: string;
   }): Promise<UpgradeTaskInfo> {
     const { data } = await http.post<BackendUpgradeTask>('/upgrade-tasks/rollback', {
       device_ids: req.deviceIds,
       task_name: req.taskName,
-      operator_code: req.operatorCode,
       create_user: req.createUser,
     });
     return mapUpgradeTask(data);

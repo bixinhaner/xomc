@@ -7,6 +7,12 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// JSONTime converts a time.Time to model.Time (nil-safe).
+// Used in scan functions to bridge database time values to the JSON-serializable model.Time.
+func JSONTime(t time.Time) model.Time {
+	return model.Time(t)
+}
+
 // UpgradeState represents the current state of a firmware upgrade sub-task.
 type UpgradeState string
 
@@ -27,6 +33,7 @@ type FileType int
 const (
 	FileTypeIMG   FileType = 0 // 软件主镜像（默认）
 	FileTypePATCH FileType = 1 // 补丁包
+	FileTypeAP    FileType = 5 // AP 固件
 	FileTypeFPGA  FileType = 6 // FPGA
 )
 
@@ -64,7 +71,6 @@ const (
 // FirmwareVersion represents a firmware image stored in MinIO.
 type FirmwareVersion struct {
 	ID            uuid.UUID         `json:"id"`
-	Carrier       model.CarrierCode `json:"carrier"`
 	ProductClass  string            `json:"product_class"`
 	Version       string            `json:"version"`
 	FileName      string            `json:"file_name"`
@@ -79,8 +85,8 @@ type FirmwareVersion struct {
 	ReleaseNotes  string            `json:"release_notes"`
 	Description   string            `json:"description"`
 	Status        string            `json:"status"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	CreatedAt     model.Time        `json:"created_at"`
+	UpdatedAt     model.Time        `json:"updated_at"`
 }
 
 // UpgradeTask represents a main upgrade task (upgrade_tasks table).
@@ -94,7 +100,6 @@ type UpgradeTask struct {
 	FileMD5      string         `json:"file_md5,omitempty"`
 	Status       TaskStatus     `json:"status"`
 	Result       TaskResult     `json:"result,omitempty"`
-	OperatorCode model.CarrierCode `json:"operator_code"`
 	ProductClass string         `json:"product_class"`
 	IsKeepConfig bool           `json:"is_keep_config"`
 	CreateStatus string         `json:"create_status"`
@@ -103,10 +108,10 @@ type UpgradeTask struct {
 	SuccessCount int            `json:"success_count"`
 	FailCount    int            `json:"fail_count"`
 	MaxConcurrent int           `json:"max_concurrent"`
-	StartedAt    *time.Time     `json:"started_at,omitempty"`
-	EndedAt      *time.Time     `json:"ended_at,omitempty"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	StartedAt    *model.Time    `json:"started_at,omitempty"`
+	EndedAt      *model.Time    `json:"ended_at,omitempty"`
+	CreatedAt    model.Time     `json:"created_at"`
+	UpdatedAt    model.Time     `json:"updated_at"`
 }
 
 // UpgradeSubTask represents a per-device upgrade sub-task (upgrade_sub_tasks table).
@@ -126,34 +131,32 @@ type UpgradeSubTask struct {
 	CommandKey      string       `json:"command_key,omitempty"`
 	FailureReason   string       `json:"failure_reason,omitempty"`
 	PreSuspendStatus string      `json:"pre_suspend_status,omitempty"`
-	StartedAt       *time.Time   `json:"started_at,omitempty"`
-	CompletedAt     *time.Time   `json:"completed_at,omitempty"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
+	StartedAt       *model.Time  `json:"started_at,omitempty"`
+	CompletedAt     *model.Time  `json:"completed_at,omitempty"`
+	CreatedAt       model.Time   `json:"created_at"`
+	UpdatedAt       model.Time   `json:"updated_at"`
 }
 
 // FirmwareFilter specifies criteria for listing firmware versions.
 type FirmwareFilter struct {
-	Carrier      *model.CarrierCode
-	ProductClass *string
-	FileType     *FileType
+	ProductClass *string   `form:"product_class"`
+	FileType     *FileType `form:"file_type"`
 	model.ListRequest
 }
 
 // UpgradeTaskFilter specifies criteria for listing main upgrade tasks.
 type UpgradeTaskFilter struct {
-	TaskType     *TaskType
-	Status       *TaskStatus
-	OperatorCode *model.CarrierCode
-	ProductClass *string
-	CreateUser   *string
+	TaskType     *TaskType  `form:"task_type"`
+	Status       *TaskStatus `form:"status"`
+	ProductClass *string    `form:"product_class"`
+	CreateUser   *string    `form:"create_user"`
 	model.ListRequest
 }
 
 // SubTaskFilter specifies criteria for listing sub-tasks under a main task.
 type SubTaskFilter struct {
 	TaskID uuid.UUID
-	Status *UpgradeState
+	Status *UpgradeState `form:"status"`
 	model.ListRequest
 }
 
@@ -169,10 +172,9 @@ type BatchUpgradeRequest struct {
 
 // RollbackRequest is the JSON body for triggering a batch rollback.
 type RollbackRequest struct {
-	DeviceIDs    []uuid.UUID       `json:"device_ids" binding:"required,min=1"`
-	TaskName     string            `json:"task_name" binding:"required"`
-	OperatorCode model.CarrierCode `json:"operator_code" binding:"required"`
-	CreateUser   string            `json:"create_user" binding:"required"`
+	DeviceIDs  []uuid.UUID `json:"device_ids" binding:"required,min=1"`
+	TaskName   string      `json:"task_name" binding:"required"`
+	CreateUser string      `json:"create_user" binding:"required"`
 }
 
 // BatchActionRequest is the JSON body for batch actions (suspend/resume/terminate).

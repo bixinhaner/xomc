@@ -1,14 +1,15 @@
 package software
 
 import (
+	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
-	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // Handler provides REST API endpoints for software/firmware management.
@@ -39,6 +40,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	fw.GET("/:id", h.GetFirmware)
 	fw.DELETE("/:id", h.DeleteFirmware)
 	fw.PUT("/:id/recommend", h.ToggleFirmwareRecommend)
+	fw.GET("/:id/download", h.DownloadFirmware)
+	fw.PUT("/:id", h.UpdateFirmware)
 
 	upgrade := rg.Group("/upgrade-tasks")
 	upgrade.GET("", h.ListUpgradeTasks)
@@ -79,7 +82,6 @@ func (h *Handler) UploadFirmware(c *gin.Context) {
 	defer file.Close()
 
 	fw := &FirmwareVersion{
-		Carrier:      model.CarrierCode(c.PostForm("carrier")),
 		ProductClass: c.PostForm("product_class"),
 		Version:      c.PostForm("version"),
 		FileName:     header.Filename,
@@ -91,10 +93,15 @@ func (h *Handler) UploadFirmware(c *gin.Context) {
 	if c.PostForm("recommend") == "true" {
 		fw.Recommend = true
 	}
+	if ft := c.PostForm("file_type"); ft != "" {
+		if n, err := strconv.Atoi(ft); err == nil {
+			fw.FileType = FileType(n)
+		}
+	}
 
-	if string(fw.Carrier) == "" || fw.Version == "" {
+	if fw.Version == "" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			commonerrors.NewBusinessError(8002, "carrier and version are required", commonerrors.ErrInvalidInput))
+			commonerrors.NewBusinessError(8002, "version is required", commonerrors.ErrInvalidInput))
 		return
 	}
 
@@ -128,7 +135,7 @@ func (h *Handler) DeleteFirmware(c *gin.Context) {
 		return
 	}
 
-	if err := h.firmwareRepo.Delete(c.Request.Context(), id); err != nil {
+	if err := h.service.DeleteFirmware(c.Request.Context(), id); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -150,6 +157,77 @@ func (h *Handler) ToggleFirmwareRecommend(c *gin.Context) {
 
 	fw.Recommend = !fw.Recommend
 	if err := h.firmwareRepo.Update(c.Request.Context(), fw); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, fw)
+}
+
+func (h *Handler) DownloadFirmware(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// Fetch firmware metadata for filename
+	fw, err := h.firmwareRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	obj, err := h.service.DownloadFirmware(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	defer obj.Close()
+
+	c.Header("Content-Disposition", "attachment; filename=\""+fw.FileName+"\"")
+	c.Header("Content-Type", "application/octet-stream")
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, obj)
+}
+
+func (h *Handler) UpdateFirmware(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	fw, err := h.firmwareRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	var req struct {
+		ProductClass string `json:"product_class"`
+		Version      string `json:"version"`
+		Recommend    *bool  `json:"recommend"`
+		Description  string `json:"description"`
+		ReleaseNotes string `json:"release_notes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if req.ProductClass != "" {
+		fw.ProductClass = req.ProductClass
+	}
+	if req.Version != "" {
+		fw.Version = req.Version
+	}
+	if req.Recommend != nil {
+		fw.Recommend = *req.Recommend
+	}
+	fw.Description = req.Description
+	fw.ReleaseNotes = req.ReleaseNotes
+
+	if err := h.service.UpdateFirmwareMetadata(c.Request.Context(), fw); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}

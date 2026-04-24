@@ -52,12 +52,11 @@ func ObjectPathAt(category, carrier, deviceSN, filename string, t time.Time) str
 }
 
 // FirmwarePath 为固件文件构建对象路径，格式：
-// {category}/{carrier}/{productClass}/{version}/{filename}
+// {category}/{productClass}/{version}/{filename}
 // 使用场景：固件/补丁 入库 MinIO 时生成 key，按产品型号和版本分目录管理。
-func FirmwarePath(category, carrier, productClass, version, filename string) string {
-	return fmt.Sprintf("%s/%s/%s/%s/%s",
+func FirmwarePath(category, productClass, version, filename string) string {
+	return fmt.Sprintf("%s/%s/%s/%s",
 		category,
-		carrier,
 		productClass,
 		version,
 		filename,

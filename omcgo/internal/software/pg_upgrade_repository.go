@@ -41,13 +41,14 @@ func scanSubTask(row pgx.Row) (*UpgradeSubTask, error) {
 	var firmwareID sql.NullString
 	var errorMsg, deviceSN, oriVer, destVer, cmdKey, failReason, preSuspend sql.NullString
 	var startedAt, completedAt sql.NullTime
+	var createdAt, updatedAt time.Time
 
 	err := row.Scan(
 		&t.ID, &t.TaskID, &t.DeviceID, &firmwareID, &t.Status,
 		&errorMsg, &t.RetryCount, &t.MaxRetries,
 		&deviceSN, &oriVer, &destVer,
 		&cmdKey, &failReason, &preSuspend,
-		&startedAt, &completedAt, &t.CreatedAt, &t.UpdatedAt,
+		&startedAt, &completedAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -79,11 +80,15 @@ func scanSubTask(row pgx.Row) (*UpgradeSubTask, error) {
 		t.PreSuspendStatus = preSuspend.String
 	}
 	if startedAt.Valid {
-		t.StartedAt = &startedAt.Time
+		jt := JSONTime(startedAt.Time)
+		t.StartedAt = &jt
 	}
 	if completedAt.Valid {
-		t.CompletedAt = &completedAt.Time
+		jt := JSONTime(completedAt.Time)
+		t.CompletedAt = &jt
 	}
+	t.CreatedAt = JSONTime(createdAt)
+	t.UpdatedAt = JSONTime(updatedAt)
 	return &t, nil
 }
 
@@ -92,13 +97,14 @@ func scanSubTaskRow(rows pgx.Rows) (*UpgradeSubTask, error) {
 	var firmwareID sql.NullString
 	var errorMsg, deviceSN, oriVer, destVer, cmdKey, failReason, preSuspend sql.NullString
 	var startedAt, completedAt sql.NullTime
+	var createdAt, updatedAt time.Time
 
 	err := rows.Scan(
 		&t.ID, &t.TaskID, &t.DeviceID, &firmwareID, &t.Status,
 		&errorMsg, &t.RetryCount, &t.MaxRetries,
 		&deviceSN, &oriVer, &destVer,
 		&cmdKey, &failReason, &preSuspend,
-		&startedAt, &completedAt, &t.CreatedAt, &t.UpdatedAt,
+		&startedAt, &completedAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -130,11 +136,15 @@ func scanSubTaskRow(rows pgx.Rows) (*UpgradeSubTask, error) {
 		t.PreSuspendStatus = preSuspend.String
 	}
 	if startedAt.Valid {
-		t.StartedAt = &startedAt.Time
+		jt := JSONTime(startedAt.Time)
+		t.StartedAt = &jt
 	}
 	if completedAt.Valid {
-		t.CompletedAt = &completedAt.Time
+		jt := JSONTime(completedAt.Time)
+		t.CompletedAt = &jt
 	}
+	t.CreatedAt = JSONTime(createdAt)
+	t.UpdatedAt = JSONTime(updatedAt)
 	return &t, nil
 }
 

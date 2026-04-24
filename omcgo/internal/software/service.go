@@ -87,10 +87,12 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 	switch fw.FileType {
 	case FileTypePATCH:
 		category = "patch"
+	case FileTypeAP:
+		category = "ap"
 	case FileTypeFPGA:
 		category = "fpga"
 	}
-	objectPath := storage.FirmwarePath(category, string(fw.Carrier), fw.ProductClass, fw.Version, fw.FileName)
+	objectPath := storage.FirmwarePath(category, fw.ProductClass, fw.Version, fw.FileName)
 
 	// Tee file stream: one copy to MinIO, one to compute MD5
 	hash := md5.New()
@@ -120,7 +122,6 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 
 	if evt, err := event.NewEvent(event.SubjectFirmwareUploaded, map[string]interface{}{
 		"firmware_id": fw.ID.String(),
-		"carrier":     string(fw.Carrier),
 		"version":     fw.Version,
 	}); err == nil {
 		if pubErr := s.eventBus.Publish(ctx, event.SubjectFirmwareUploaded, evt); pubErr != nil {
@@ -157,7 +158,6 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		FileName:     fw.FileName,
 		FileMD5:      fw.MD5Val,
 		Status:       TaskPending,
-		OperatorCode: fw.Carrier,
 		ProductClass: fw.ProductClass,
 		IsKeepConfig: req.IsKeepConfig,
 		CreateStatus: "active",
@@ -396,7 +396,6 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		TaskName:     req.TaskName,
 		TaskType:     TaskTypeRollback,
 		Status:       TaskPending,
-		OperatorCode: req.OperatorCode,
 		CreateUser:   req.CreateUser,
 		TotalCount:   len(req.DeviceIDs),
 		MaxConcurrent: 5,
@@ -452,6 +451,47 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		zap.Int("device_count", len(req.DeviceIDs)))
 
 	return mainTask, nil
+}
+
+// DownloadFirmware streams a firmware file from MinIO, returning an io.ReadCloser and the object info.
+func (s *SoftwareService) DownloadFirmware(ctx context.Context, id uuid.UUID) (*minio.Object, error) {
+	fw, err := s.firmwareRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get firmware: %w", err)
+	}
+
+	obj, err := s.minioClient.GetObject(ctx, s.firmwareBkt, fw.MinIOPath, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get object from MinIO: %w", err)
+	}
+	return obj, nil
+}
+
+// DeleteFirmware removes a firmware record from the database and deletes the file from MinIO.
+func (s *SoftwareService) DeleteFirmware(ctx context.Context, id uuid.UUID) error {
+	fw, err := s.firmwareRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get firmware for delete: %w", err)
+	}
+
+	if err := s.firmwareRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("delete firmware record: %w", err)
+	}
+
+	if fw.MinIOPath != "" {
+		if err := s.minioClient.RemoveObject(ctx, s.firmwareBkt, fw.MinIOPath, minio.RemoveObjectOptions{}); err != nil {
+			s.logger.Warn("failed to delete firmware file from MinIO, orphaned object",
+				zap.String("minio_path", fw.MinIOPath),
+				zap.Error(err))
+		}
+	}
+
+	return nil
+}
+
+// UpdateFirmwareMetadata updates a firmware version's metadata (version, product_class, etc.).
+func (s *SoftwareService) UpdateFirmwareMetadata(ctx context.Context, fw *FirmwareVersion) error {
+	return s.firmwareRepo.Update(ctx, fw)
 }
 
 // Subscribe registers all event subscriptions for the software service.

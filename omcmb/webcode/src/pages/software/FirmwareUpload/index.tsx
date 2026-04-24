@@ -39,6 +39,8 @@ import {
   useUploadFirmware,
   useDeleteSoftwareVersions,
   useToggleRecommend,
+  useDownloadFirmware,
+  useUpdateFirmware,
 } from '@core/hooks/api/useSoftware';
 import type { SoftwareVersion } from '@core/mock/data/software';
 
@@ -49,11 +51,11 @@ const { TextArea } = Input;
 type FileType = 'upgrade' | 'ca' | 'fpga' | 'ap';
 
 // 文件类型 tab 到后端 fileType 的映射
-const fileTypeParamMap: Record<FileType, 0 | 1 | 6> = {
+const fileTypeParamMap: Record<FileType, 0 | 1 | 5 | 6> = {
   upgrade: 0,
   ca: 1,
   fpga: 6,
-  ap: 0,
+  ap: 5,
 };
 
 // 产品类型列表
@@ -103,6 +105,8 @@ export default function FirmwareUpload() {
   const uploadMutation = useUploadFirmware();
   const deleteMutation = useDeleteSoftwareVersions();
   const toggleRecommendMutation = useToggleRecommend();
+  const downloadMutation = useDownloadFirmware();
+  const updateMutation = useUpdateFirmware();
 
   // 获取列表数据
   const tableData = useMemo(() => {
@@ -158,51 +162,75 @@ export default function FirmwareUpload() {
     }
 
     form.validateFields().then((values) => {
-      if (fileList.length === 0 && importMode === 'add') {
-        void message.warning(t('software.firmware.selectFile'));
-        return;
-      }
-
-      const rawFile = fileList[0]?.originFileObj as File | undefined;
-      if (!rawFile && importMode === 'add') {
-        void message.warning(t('software.firmware.selectFile'));
-        return;
-      }
-
-      if (rawFile) {
-        setUploadProgress(0);
-        uploadMutation.mutate(
+      if (importMode === 'modify') {
+        // 编辑模式：只更新元数据
+        if (!selectedFile) return;
+        updateMutation.mutate(
           {
-            file: rawFile,
+            id: selectedFile.id,
             metadata: {
-              carrier: '',
-              version: values.version ?? '',
               productClass: Array.isArray(values.product) ? values.product.join(',') : values.product,
-              releaseNotes: values.description ?? '',
-              fileType: fileTypeParamMap[fileType],
+              version: values.version ?? '',
               recommend: values.recommend === '1',
               description: values.description ?? '',
             },
           },
           {
-            onUploadProgress: (event) => {
-              if (event.total) {
-                setUploadProgress(Math.round((event.loaded * 100) / event.total));
-              }
-            },
             onSuccess: () => {
-              void message.success(importMode === 'add' ? t('software.firmware.importSuccess') : t('software.firmware.modifySuccess'));
+              void message.success(t('software.firmware.modifySuccess'));
               handleCloseImportDrawer();
             },
             onError: () => {
-              void message.error(t('software.firmware.importSuccess'));
-              setUploadProgress(0);
+              void message.error(t('software.firmware.modifyFailed'));
             },
           },
         );
+        return;
       }
+
+      // 新增模式：上传文件
+      if (fileList.length === 0) {
+        void message.warning(t('software.firmware.selectFile'));
+        return;
+      }
+
+      const rawFile = fileList[0]?.originFileObj as File | undefined;
+      if (!rawFile) {
+        void message.warning(t('software.firmware.selectFile'));
+        return;
+      }
+
+      setUploadProgress(0);
+      uploadMutation.mutate(
+        {
+          file: rawFile,
+          metadata: {
+            version: values.version ?? '',
+            productClass: Array.isArray(values.product) ? values.product.join(',') : values.product,
+            releaseNotes: values.description ?? '',
+            fileType: fileTypeParamMap[fileType],
+            recommend: values.recommend === '1',
+            description: values.description ?? '',
+          },
+        },
+        {
+          onUploadProgress: (event) => {
+            if (event.total) {
+              setUploadProgress(Math.round((event.loaded * 100) / event.total));
+            }
+          },
+          onSuccess: () => {
+            void message.success(t('software.firmware.importSuccess'));
+            handleCloseImportDrawer();
+          },
+          onError: () => {
+            void message.error(t('software.firmware.importFailed'));
+            setUploadProgress(0);
+          },
+        },
+      );
     });
-  }, [importMode, fileList, fileType, uploadMutation, form, t, handleCloseImportDrawer]);
+  }, [importMode, selectedFile, fileList, fileType, uploadMutation, updateMutation, form, t, handleCloseImportDrawer]);
 
   // 删除文件
   const handleDeleteFile = useCallback(() => {
@@ -244,9 +272,7 @@ export default function FirmwareUpload() {
             label: t('common.download'),
             icon: <DownloadOutlined />,
             onClick: () => {
-              if (sv.downloadUrl) {
-                window.open(sv.downloadUrl);
-              }
+              downloadMutation.mutate({ id: sv.id, fileName: sv.fileName });
             },
           },
           {
@@ -462,7 +488,12 @@ export default function FirmwareUpload() {
                 <Dragger
                   fileList={fileList}
                   beforeUpload={(file: RcFile) => {
-                    setFileList([file]);
+                    setFileList([{
+                      uid: file.uid || '-1',
+                      name: file.name,
+                      status: 'done',
+                      originFileObj: file,
+                    }]);
                     return false;
                   }}
                   onRemove={() => setFileList([])}
@@ -482,7 +513,7 @@ export default function FirmwareUpload() {
                 )}
               </>
             ) : (
-              <Input value={selectedFile?.versionName} disabled />
+              <Input value={selectedFile?.fileName} disabled />
             )}
           </Form.Item>
 
@@ -537,7 +568,7 @@ export default function FirmwareUpload() {
               </p>
               <p style={{ marginBottom: 0 }}>
                 <strong>{t('software.firmware.versionLabel')}</strong>{deleteFile?.versionCode}<br />
-                <strong>{t('software.firmware.fileNameLabel')}</strong>{deleteFile?.versionName}<br />
+                <strong>{t('software.firmware.fileNameLabel')}</strong>{deleteFile?.fileName}<br />
                 <strong>{t('software.firmware.fileSizeLabel')}</strong>{deleteFile ? formatFileSize(deleteFile.fileSize) : '-'}
               </p>
             </div>

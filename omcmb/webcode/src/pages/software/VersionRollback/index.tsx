@@ -427,7 +427,6 @@ export default function VersionRollback() {
       {
         deviceIds,
         taskName,
-        operatorCode: 'admin',
         createUser: 'admin',
       },
       {

@@ -132,7 +132,8 @@ func (m *swHSubTaskRepo) FailStale(_ context.Context, _ time.Time) (int64, error
 func swHSetupRouter(fwRepo FirmwareRepository, taskRepo TaskRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(nil, fwRepo, taskRepo, &swHSubTaskRepo{}, zap.NewNop())
+	svc := &SoftwareService{firmwareRepo: fwRepo, logger: zap.NewNop()}
+	h := NewHandler(svc, fwRepo, taskRepo, &swHSubTaskRepo{}, zap.NewNop())
 	h.RegisterRoutes(r.Group(""))
 	return r
 }
@@ -140,14 +141,13 @@ func swHSetupRouter(fwRepo FirmwareRepository, taskRepo TaskRepository) *gin.Eng
 func swHSampleFirmware(id uuid.UUID) *FirmwareVersion {
 	return &FirmwareVersion{
 		ID:        id,
-		Carrier:   "cmcc",
 		Version:   "V1.0.0",
 		FileName:  "firmware.bin",
 		FileSize:  1024000,
-		MinIOPath: "firmware/cmcc/SmallCell/V1.0.0/firmware.bin",
+		MinIOPath: "firmware/SmallCell/V1.0.0/firmware.bin",
 		Status:    "active",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: JSONTime(time.Now()),
+		UpdatedAt: JSONTime(time.Now()),
 	}
 }
 
@@ -207,9 +207,14 @@ func TestSwHandler_GetFirmware_NotFound(t *testing.T) {
 }
 
 func TestSwHandler_DeleteFirmware_Success(t *testing.T) {
+	id := uuid.New()
 	deleteCalled := false
 	fwRepo := &swHFirmwareRepo{
-		deleteFn: func(_ context.Context, _ uuid.UUID) error {
+		getByIDFn: func(_ context.Context, gotID uuid.UUID) (*FirmwareVersion, error) {
+			return swHSampleFirmware(gotID), nil
+		},
+		deleteFn: func(_ context.Context, gotID uuid.UUID) error {
+			assert.Equal(t, id, gotID)
 			deleteCalled = true
 			return nil
 		},
@@ -217,7 +222,7 @@ func TestSwHandler_DeleteFirmware_Success(t *testing.T) {
 	router := swHSetupRouter(fwRepo, &swHTaskRepo{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodDelete, "/firmware/"+uuid.New().String(), nil)
+	req, _ := http.NewRequest(http.MethodDelete, "/firmware/"+id.String(), nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)

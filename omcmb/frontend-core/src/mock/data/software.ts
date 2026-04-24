@@ -16,6 +16,7 @@ export interface SoftwareVersion {
   id: string;
   versionName: string;
   versionCode: string;
+  fileName: string;
   deviceType: string;
   vendor: string;
   releaseDate: string;
@@ -68,7 +69,6 @@ export interface UpgradeTaskInfo {
   fileMd5?: string;
   status: TaskStatusType;
   result?: TaskResultType;
-  operatorCode: string;
   productClass: string;
   isKeepConfig: boolean;
   createStatus: string;

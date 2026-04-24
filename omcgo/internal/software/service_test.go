@@ -265,7 +265,6 @@ func TestService_BatchUpgrade_Success(t *testing.T) {
 				FileName:     "fw.bin",
 				MinIOPath:    "firmware/cmcc/SC/V1.0.0/fw.bin",
 				FileSize:     1024,
-				Carrier:      "cmcc",
 				ProductClass: "SmallCell-LTE",
 			}, nil
 		},
@@ -300,7 +299,6 @@ func TestService_BatchUpgrade_Success(t *testing.T) {
 	assert.Equal(t, TaskInProgress, task.Status)
 	assert.Equal(t, "test-upgrade", task.TaskName)
 	assert.Equal(t, 1, task.TotalCount)
-	assert.Equal(t, "cmcc", string(task.OperatorCode))
 	assert.Equal(t, "SmallCell-LTE", task.ProductClass)
 }
 
@@ -635,7 +633,6 @@ func TestService_BatchUpgrade_CreatesMainTask(t *testing.T) {
 				FileName:     "fw-v2.bin",
 				MinIOPath:    "firmware/cmcc/SC/V2.0.0/fw-v2.bin",
 				FileSize:     2048,
-				Carrier:      "cmcc",
 				ProductClass: "SmallCell-NR",
 				MD5Val:       "abc123",
 			}, nil
@@ -667,7 +664,6 @@ func TestService_BatchUpgrade_CreatesMainTask(t *testing.T) {
 	assert.Equal(t, TaskTypePatch, capturedTask.TaskType)
 	assert.Equal(t, 1, capturedTask.TotalCount)
 	assert.Equal(t, "SmallCell-NR", capturedTask.ProductClass)
-	assert.Equal(t, model.CarrierCode("cmcc"), capturedTask.OperatorCode)
 	assert.Equal(t, "fw-v2.bin", capturedTask.FileName)
 	assert.Equal(t, "abc123", capturedTask.FileMD5)
 
@@ -690,7 +686,6 @@ func TestService_BatchUpgrade_CreatesSubTasks(t *testing.T) {
 				FileName:     "fw-v3.bin",
 				MinIOPath:    "firmware/cmcc/SC/V3.0.0/fw-v3.bin",
 				FileSize:     4096,
-				Carrier:      "cmcc",
 				ProductClass: "SmallCell-LTE",
 			}, nil
 		},
@@ -803,7 +798,6 @@ func TestService_RollbackDevices_CreatesTask(t *testing.T) {
 	req := RollbackRequest{
 		DeviceIDs:    []uuid.UUID{deviceID1, deviceID2},
 		TaskName:     "rollback-test",
-		OperatorCode: "cmcc",
 		CreateUser:   "admin",
 	}
 
@@ -814,7 +808,6 @@ func TestService_RollbackDevices_CreatesTask(t *testing.T) {
 	assert.Equal(t, TaskTypeRollback, capturedTask.TaskType, "rollback task type should be 2")
 	assert.Equal(t, "rollback-test", capturedTask.TaskName)
 	assert.Equal(t, 2, capturedTask.TotalCount)
-	assert.Equal(t, model.CarrierCode("cmcc"), capturedTask.OperatorCode)
 	assert.Equal(t, "admin", capturedTask.CreateUser)
 
 	// After RollbackDevices returns, status should be updated to in_progress

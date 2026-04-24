@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -16,7 +17,7 @@ import (
 )
 
 var firmwareColumns = []string{
-	"id", "carrier", "product_class", "version", "file_name", "file_size",
+	"id", "product_class", "version", "file_name", "file_size",
 	"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 	"uploader", "manufacturer", "release_notes", "description", "status",
 	"created_at", "updated_at",
@@ -39,13 +40,14 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	var ouiJSON []byte
 	var md5Val, uploader, manufacturer, description sqlNilString
 	var recommend sqlNilBool
+	var createdAt, updatedAt time.Time
 
 	err := row.Scan(
-		&fw.ID, &fw.Carrier, &fw.ProductClass, &fw.Version,
+		&fw.ID, &fw.ProductClass, &fw.Version,
 		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
-		&fw.CreatedAt, &fw.UpdatedAt,
+		&createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -58,6 +60,8 @@ func scanFirmware(row pgx.Row) (*FirmwareVersion, error) {
 	fw.Uploader = uploader.string
 	fw.Manufacturer = manufacturer.string
 	fw.Description = description.string
+	fw.CreatedAt = JSONTime(createdAt)
+	fw.UpdatedAt = JSONTime(updatedAt)
 	return &fw, nil
 }
 
@@ -65,10 +69,10 @@ func (r *PgFirmwareRepository) Create(ctx context.Context, fw *FirmwareVersion) 
 	ouiJSON, _ := json.Marshal(fw.CompatibleOUI)
 
 	query, args, err := storage.Psql.Insert("firmware_versions").
-		Columns("carrier", "product_class", "version", "file_name", "file_size",
+		Columns("product_class", "version", "file_name", "file_size",
 			"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 			"uploader", "manufacturer", "release_notes", "description", "status").
-		Values(fw.Carrier, fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
+		Values(fw.ProductClass, fw.Version, fw.FileName, fw.FileSize,
 			fw.FileType, fw.MinIOPath, ouiJSON, fw.MD5Val, fw.Recommend,
 			fw.Uploader, fw.Manufacturer, fw.ReleaseNotes, fw.Description, fw.Status).
 		Suffix("RETURNING " + joinColumns(firmwareColumns)).
@@ -109,10 +113,6 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 	base := storage.Psql.Select(firmwareColumns...).From("firmware_versions")
 	countBase := storage.Psql.Select("COUNT(*)").From("firmware_versions")
 
-	if filter.Carrier != nil {
-		base = base.Where(sq.Eq{"carrier": *filter.Carrier})
-		countBase = countBase.Where(sq.Eq{"carrier": *filter.Carrier})
-	}
 	if filter.ProductClass != nil {
 		base = base.Where(sq.Eq{"product_class": *filter.ProductClass})
 		countBase = countBase.Where(sq.Eq{"product_class": *filter.ProductClass})
@@ -184,8 +184,11 @@ func (r *PgFirmwareRepository) List(ctx context.Context, filter FirmwareFilter) 
 
 func (r *PgFirmwareRepository) Update(ctx context.Context, fw *FirmwareVersion) error {
 	builder := storage.Psql.Update("firmware_versions").
+		Set("product_class", fw.ProductClass).
+		Set("version", fw.Version).
 		Set("recommend", fw.Recommend).
 		Set("description", fw.Description).
+		Set("release_notes", fw.ReleaseNotes).
 		Set("manufacturer", fw.Manufacturer).
 		Set("status", fw.Status).
 		Where(sq.Eq{"id": fw.ID})
@@ -228,13 +231,14 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	var ouiJSON []byte
 	var md5Val, uploader, manufacturer, description sqlNilString
 	var recommend sqlNilBool
+	var createdAt, updatedAt time.Time
 
 	err := rows.Scan(
-		&fw.ID, &fw.Carrier, &fw.ProductClass, &fw.Version,
+		&fw.ID, &fw.ProductClass, &fw.Version,
 		&fw.FileName, &fw.FileSize, &fw.FileType, &fw.MinIOPath,
 		&ouiJSON, &md5Val, &recommend, &uploader,
 		&manufacturer, &fw.ReleaseNotes, &description, &fw.Status,
-		&fw.CreatedAt, &fw.UpdatedAt,
+		&createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -247,6 +251,8 @@ func scanFirmwareRow(rows pgx.Rows) (*FirmwareVersion, error) {
 	fw.Uploader = uploader.string
 	fw.Manufacturer = manufacturer.string
 	fw.Description = description.string
+	fw.CreatedAt = JSONTime(createdAt)
+	fw.UpdatedAt = JSONTime(updatedAt)
 	return &fw, nil
 }
 

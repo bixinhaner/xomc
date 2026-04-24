@@ -45,7 +45,6 @@ export function useUploadFirmware() {
     mutationFn: (params: {
       file: File;
       metadata: {
-        carrier: string;
         version: string;
         productClass?: string;
         releaseNotes?: string;
@@ -76,6 +75,32 @@ export function useToggleRecommend() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.toggleRecommend(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['software', 'versions'] });
+    },
+  });
+}
+
+export function useDownloadFirmware() {
+  return useMutation({
+    mutationFn: (params: { id: string; fileName: string }) =>
+      api.downloadFirmware(params.id, params.fileName),
+  });
+}
+
+export function useUpdateFirmware() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: {
+      id: string;
+      metadata: {
+        productClass?: string;
+        version?: string;
+        recommend?: boolean;
+        description?: string;
+        releaseNotes?: string;
+      };
+    }) => api.updateFirmware(params.id, params.metadata),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['software', 'versions'] });
     },
@@ -170,7 +195,6 @@ export function useCreateRollback() {
     mutationFn: (req: {
       deviceIds: string[];
       taskName: string;
-      operatorCode: string;
       createUser: string;
     }) => api.createRollback(req),
     onSuccess: () => {
