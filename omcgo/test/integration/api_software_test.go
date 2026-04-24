@@ -24,7 +24,6 @@ import (
 func TestFirmwareVersionJSONFields(t *testing.T) {
 	fw := software.FirmwareVersion{
 		ID:            uuid.New(),
-		Carrier:       "cmcc",
 		ProductClass:  "SmallCell-LTE",
 		Version:       "V1.0.0",
 		FileName:      "fw.bin",
@@ -39,8 +38,8 @@ func TestFirmwareVersionJSONFields(t *testing.T) {
 		ReleaseNotes:  "Bug fixes",
 		Description:   "Main firmware image",
 		Status:        "active",
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		CreatedAt:     software.JSONTime(time.Now()),
+		UpdatedAt:     software.JSONTime(time.Now()),
 	}
 
 	data, err := json.Marshal(fw)
@@ -51,7 +50,7 @@ func TestFirmwareVersionJSONFields(t *testing.T) {
 	require.NoError(t, err)
 
 	requiredFields := []string{
-		"id", "carrier", "product_class", "version", "file_name", "file_size",
+		"id", "product_class", "version", "file_name", "file_size",
 		"file_type", "minio_path", "compatible_oui", "md5_val", "recommend",
 		"uploader", "manufacturer", "release_notes", "description", "status",
 		"created_at", "updated_at",
@@ -83,7 +82,6 @@ func TestUpgradeTaskJSONFields(t *testing.T) {
 		TaskType:      software.TaskTypeUpgrade,
 		Status:        software.TaskInProgress,
 		Result:        "",
-		OperatorCode:  "cmcc",
 		ProductClass:  "SmallCell-LTE",
 		IsKeepConfig:  true,
 		CreateStatus:  "active",
@@ -92,8 +90,8 @@ func TestUpgradeTaskJSONFields(t *testing.T) {
 		SuccessCount:  3,
 		FailCount:     1,
 		MaxConcurrent: 5,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		CreatedAt:     software.JSONTime(time.Now()),
+		UpdatedAt:     software.JSONTime(time.Now()),
 	}
 
 	data, err := json.Marshal(task)
@@ -104,7 +102,7 @@ func TestUpgradeTaskJSONFields(t *testing.T) {
 	require.NoError(t, err)
 
 	requiredFields := []string{
-		"id", "task_name", "task_type", "status", "operator_code",
+		"id", "task_name", "task_type", "status",
 		"product_class", "is_keep_config", "create_status", "create_user",
 		"total_count", "success_count", "fail_count", "max_concurrent",
 		"created_at", "updated_at",
@@ -138,8 +136,8 @@ func TestUpgradeSubTaskJSONFields(t *testing.T) {
 		PreSuspendStatus: "downloading",
 		RetryCount:      0,
 		MaxRetries:      3,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		CreatedAt:       software.JSONTime(time.Now()),
+		UpdatedAt:       software.JSONTime(time.Now()),
 	}
 
 	data, err := json.Marshal(subTask)
@@ -191,7 +189,6 @@ func TestRollbackRequestJSON(t *testing.T) {
 	body := `{
 		"device_ids": ["00000000-0000-0000-0000-000000000001"],
 		"task_name": "Rollback test",
-		"operator_code": "cmcc",
 		"create_user": "admin"
 	}`
 
@@ -201,7 +198,6 @@ func TestRollbackRequestJSON(t *testing.T) {
 
 	assert.Equal(t, 1, len(req.DeviceIDs))
 	assert.Equal(t, "Rollback test", req.TaskName)
-	assert.Equal(t, model.CarrierCode("cmcc"), req.OperatorCode)
 	assert.Equal(t, "admin", req.CreateUser)
 }
 
