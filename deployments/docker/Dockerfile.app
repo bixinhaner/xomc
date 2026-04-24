@@ -1,6 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.25-alpine AS builder
 
+# 国内环境加速 apk 源（dl-cdn.alpinelinux.org 国内常被墙），可通过 --build-arg
+# APK_MIRROR=dl-cdn.alpinelinux.org 切回官方源。
+ARG APK_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR}|g" /etc/apk/repositories
+
 RUN apk add --no-cache git
 
 ARG GOPROXY=https://mirrors.aliyun.com/goproxy/,https://goproxy.cn,https://proxy.golang.org,direct
@@ -18,6 +23,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ---
 
 FROM alpine:3.19
+
+ARG APK_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR}|g" /etc/apk/repositories
+
 
 RUN apk add --no-cache ca-certificates tzdata
 

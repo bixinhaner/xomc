@@ -1,5 +1,10 @@
 FROM golang:1.25-alpine AS builder
 
+# 国内环境加速 apk 源（dl-cdn.alpinelinux.org 国内常被墙），可通过 --build-arg
+# APK_MIRROR=dl-cdn.alpinelinux.org 切回官方源。
+ARG APK_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR}|g" /etc/apk/repositories
+
 # 安装 git (添加重试逻辑解决 DNS 不稳定问题)
 RUN for i in 1 2 3; do \
       apk add --no-cache git && break || \
@@ -21,6 +26,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-acs .
 # ---
 
 FROM alpine:3.19
+
+ARG APK_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|dl-cdn.alpinelinux.org|${APK_MIRROR}|g" /etc/apk/repositories
 
 RUN apk add --no-cache ca-certificates tzdata
 
