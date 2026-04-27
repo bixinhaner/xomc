@@ -18,6 +18,9 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/components"
+	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
+	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -94,6 +97,11 @@ func runACS(cmd *cobra.Command, args []string) error {
 		requestIDPrefix,
 		cfg.EnableTestTaskInjection,
 	)
+
+	// 装配 /readyz 依赖检查器：仅勾选实际连接成功的基础设施，避免在精简部署
+	// （未配 PG/MinIO）下误报。检查列表与 components.HealthChecker.Register 同源，
+	// 但这里独立组装是为了让 ACS HTTP server（非 metrics 端口）也能直接探测。
+	deps.ReadinessCheckers = buildACSReadinessCheckers(inf)
 
 	// Override dispatcher with download config for MinIO path → HTTP URL translation.
 	if cfg.Download.BaseURL != "" {
@@ -211,6 +219,37 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}
 
 	return inf.WaitAndShutdown(errCh)
+}
+
+// buildACSReadinessCheckers 收集 ACS 进程实际依赖的基础设施，构造 /readyz 检查列表。
+// 任一依赖未配置（如未连 MinIO）即不加入，避免在精简部署下误报 503。
+func buildACSReadinessCheckers(inf *components.Infra) []health.Checker {
+	var checkers []health.Checker
+	if inf.Redis != nil {
+		client := inf.Redis
+		checkers = append(checkers, health.NewChecker("redis", func(ctx context.Context) error {
+			return client.Ping(ctx).Err()
+		}))
+	}
+	if inf.PgPool != nil {
+		pool := inf.PgPool
+		checkers = append(checkers, health.NewChecker("postgres", func(ctx context.Context) error {
+			return pool.Ping(ctx)
+		}))
+	}
+	if inf.NATS != nil {
+		nc := inf.NATS
+		checkers = append(checkers, health.NewChecker("nats", func(ctx context.Context) error {
+			return nc.HealthCheck()
+		}))
+	}
+	if inf.MinIO != nil {
+		client := inf.MinIO
+		checkers = append(checkers, health.NewChecker("minio", func(ctx context.Context) error {
+			return miniocomp.MinIOHealthCheck(ctx, client)
+		}))
+	}
+	return checkers
 }
 
 // acsConnReqSender adapts connreq.Dispatcher to the acs.ConnectionRequester interface.

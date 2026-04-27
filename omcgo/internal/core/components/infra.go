@@ -2,7 +2,6 @@ package components
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -24,6 +23,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/components/postgres"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
+	healthpkg "github.com/omcgo/omcgo/internal/core/health"
 )
 
 // Infra 持有服务启动期间初始化的所有基础设施连接。
@@ -164,6 +164,24 @@ func (inf *Infra) ConnectMinIO(ctx context.Context, cfg appconfig.MinIOConfig) e
 	return nil
 }
 
+// readinessCheckers 把 HealthChecker 已注册的检查项适配为 health.Checker 列表，
+// 供 /readyz 处理器使用。注册行为仍保留在 Connect* 方法内，保证依赖建模的单一来源。
+func (inf *Infra) readinessCheckers() []healthpkg.Checker {
+	if inf.Health == nil {
+		return nil
+	}
+	inf.Health.mu.RLock()
+	defer inf.Health.mu.RUnlock()
+	checkers := make([]healthpkg.Checker, 0, len(inf.Health.checks))
+	for _, c := range inf.Health.checks {
+		// 闭包捕获循环变量；这里复制一份以保证后续 goroutine 看到正确的项。
+		name := c.name
+		fn := c.fn
+		checkers = append(checkers, healthpkg.NewChecker(name, fn))
+	}
+	return checkers
+}
+
 // CreateEventBus 创建基于 NATS JetStream 的 EventBus，并注册优雅关机回调。
 // 必须在 ConnectNATS 之后调用，结果存入 Infra.EventBus。
 func (inf *Infra) CreateEventBus() {
@@ -209,23 +227,11 @@ func (inf *Infra) WaitAndShutdown(errCh <-chan error) error {
 func (inf *Infra) startMetrics() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(inf.MetricsReg, promhttp.HandlerOpts{}))
-	metricsMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		results := inf.Health.CheckAll(r.Context())
-		w.Header().Set("Content-Type", "application/json")
-		code := 200
-		for _, result := range results {
-			if result.Status != "healthy" {
-				code = 503
-				break
-			}
-		}
-		w.WriteHeader(code)
-		data, _ := json.Marshal(map[string]interface{}{
-			"status":     map[bool]string{true: "ok", false: "degraded"}[code == 200],
-			"components": results,
-		})
-		w.Write(data)
-	})
+	// /healthz — liveness：进程存活即 200，不关心依赖。
+	// /readyz  — readiness：聚合 HealthChecker 中已注册的依赖检查，任一失败 503。
+	// 两者职责严格分离，与 Kubernetes 探针语义对齐，避免错误重启正在恢复的实例。
+	metricsMux.Handle("/healthz", healthpkg.LivenessHandler())
+	metricsMux.Handle("/readyz", healthpkg.ReadinessHandler(5*time.Second, inf.readinessCheckers()...))
 	metricsServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", inf.metricsPort),
 		Handler: metricsMux,

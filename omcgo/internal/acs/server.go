@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -50,6 +51,9 @@ type ServerDeps struct {
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
+	// ReadinessCheckers 提供 /readyz 探测时的依赖检查列表（DB/Redis/NATS 等）。
+	// 为 nil 时 /readyz 退化为恒 200，但 /healthz 始终独立存在。
+	ReadinessCheckers []health.Checker
 }
 
 // NewACSServer creates a new ACS server with all dependencies wired.
@@ -80,10 +84,10 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	mux := http.NewServeMux()
 	// TR069 ACS endpoint - /smallcell/AcsService
 	mux.HandleFunc("/smallcell/AcsService", h.ServeHTTP)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+	// /healthz — liveness 探针：进程存活即 200，不依赖外部组件。
+	// /readyz  — readiness 探针：DB/Redis/NATS 任一不可用返 503，否则 200。
+	mux.Handle("/healthz", health.LivenessHandler())
+	mux.Handle("/readyz", health.ReadinessHandler(5*time.Second, deps.ReadinessCheckers...))
 
 	// CPE file upload handler (CPE -> ACS -> MinIO proxy)
 	// Endpoint: POST /smallcell/FileUploadService?fileType=PM&filename=xxx
