@@ -3680,6 +3680,7 @@ const messages: Record<string, string> = {
   'mml.console.errorParamValueRequired':     'MOD requires a non-empty value for each parameter path',
   'mml.console.parameterValue':              'Parameter Value',
   'mml.console.parameterValuePlaceholder':   'Enter parameter value',
+  'mml.console.singleRowOpHint':             'ADD / RMV target a single object path per call (TR-069 protocol); locked to one row',
   'mml.console.noParamsNeeded':              'No parameters required for this command',
   'mml.console.queryFieldsHint':             'Select fields to query. Default scope applies if none selected.',
   'mml.console.directExecuteWarning':        'This command will execute directly, please confirm',

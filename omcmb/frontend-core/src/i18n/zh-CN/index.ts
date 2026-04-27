@@ -3685,6 +3685,7 @@ const messages: Record<string, string> = {
   'mml.console.errorParamValueRequired':     'MOD 操作需为每个参数路径填写非空的参数值',
   'mml.console.parameterValue':              '参数值',
   'mml.console.parameterValuePlaceholder':   '请输入参数值',
+  'mml.console.singleRowOpHint':             'ADD / RMV 协议规定单次仅作用于一个对象路径，已锁定为单行',
   'mml.console.noParamsNeeded':              '该命令无需配置参数',
   'mml.console.queryFieldsHint':             '勾选需要查询的字段，未勾选时由后续执行逻辑决定默认查询范围。',
   'mml.console.directExecuteWarning':        '该命令将直接执行，请确认',

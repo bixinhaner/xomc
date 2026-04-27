@@ -51,6 +51,7 @@ export default function CommandInput({
   const [paramPathPayload, setParamPathPayload] = useState<ParamPathChangePayload>({
     operationType: 'LST',
     paramPaths: [],
+    paramValues: [],
   });
 
   const { data: dangerousResult } = useDangerousCheck(selectedCommand?.commandCode ?? '');
@@ -64,6 +65,7 @@ export default function CommandInput({
     setParamPathPayload({
       operationType: currentOperationType,
       paramPaths: [],
+      paramValues: [],
     });
   }, [currentOperationType, onActiveTabChange, selectedCommand?.id]);
 

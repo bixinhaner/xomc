@@ -914,7 +914,7 @@ func TestService_ExecuteCommand_RawParamPaths_ADD(t *testing.T) {
 
 	req := ExecuteRequest{
 		DeviceSNs:     []string{"SN-A"},
-		ParamPaths:    []string{"Device.WiFi.SSID.", "Device.WiFi.AccessPoint."},
+		ParamPaths:    []string{"Device.WiFi.SSID."},
 		OperationType: "ADD",
 		Creator:       "admin",
 	}
@@ -922,16 +922,40 @@ func TestService_ExecuteCommand_RawParamPaths_ADD(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, stub.calls, 1)
-	require.Len(t, stub.calls[0], 2, "ADD 每个 path 一条 command → 2 个 device_tasks")
-	for _, dt := range stub.calls[0] {
-		assert.Equal(t, "AddObject", dt.Method)
-		var got struct {
-			ObjectName string `json:"object_name"`
-		}
-		require.NoError(t, json.Unmarshal(dt.Params, &got))
-		assert.True(t, len(got.ObjectName) > 0 && got.ObjectName[len(got.ObjectName)-1] == '.',
-			"object_name 必须以 . 结尾，got=%q", got.ObjectName)
+	require.Len(t, stub.calls[0], 1, "ADD 单 path → 1 个 AddObject device_task")
+	dt := stub.calls[0][0]
+	assert.Equal(t, "AddObject", dt.Method)
+	var got struct {
+		ObjectName string `json:"object_name"`
 	}
+	require.NoError(t, json.Unmarshal(dt.Params, &got))
+	assert.True(t, len(got.ObjectName) > 0 && got.ObjectName[len(got.ObjectName)-1] == '.',
+		"object_name 必须以 . 结尾，got=%q", got.ObjectName)
+}
+
+func TestService_ExecuteCommand_RawParamPaths_ADD_RejectsMultiPath(t *testing.T) {
+	// AddObject 协议规定单次仅一个 object_name，多 path 在协议层无意义。
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.WiFi.SSID.", "Device.WiFi.AccessPoint."},
+		OperationType: "ADD",
+		Creator:       "admin",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AddObject only accepts one object path")
+}
+
+func TestService_ExecuteCommand_RawParamPaths_RMV_RejectsMultiPath(t *testing.T) {
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.WiFi.SSID.1.", "Device.WiFi.SSID.2."},
+		OperationType: "RMV",
+		Creator:       "admin",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DeleteObject only accepts one object path")
 }
 
 func TestService_ExecuteCommand_RawParamPaths_RMV(t *testing.T) {

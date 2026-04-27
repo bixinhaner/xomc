@@ -74,6 +74,12 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   // 以便用户切换 op 时不丢已经填的值。
   const showValueColumn = operationType === 'MOD';
 
+  // TR-069 协议里 AddObject / DeleteObject 单次仅携带 ONE object_name，
+  // 因此 ADD/RMV 在裸路径模式下锁成单行；切换到这两种 op 时把已存在的多行
+  // 截断为首行，避免用户在 N 行场景下误以为能批量执行。LST/MOD 协议天然支持
+  // 多 names / 多 (name,value) 对，多行保留。
+  const singleRowOnly = operationType === 'ADD' || operationType === 'RMV' || operationType === 'DEL';
+
   useEffect(() => {
     const nextOperation = (operationOptions[0] || defaultOperation).toUpperCase();
     const firstSuggested = command?.paramPaths?.[0]?.path;
@@ -99,6 +105,15 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
 
   const handleOperationChange = (nextOperation: string) => {
     setOperationType(nextOperation);
+    // 切到 ADD/RMV 时把已经存在的多行截断为首行，并把过剩的 row 抛弃；
+    // value 字段一并保留首行的，避免用户切回 MOD 后值丢失。
+    const truncatesToOne = nextOperation === 'ADD' || nextOperation === 'RMV' || nextOperation === 'DEL';
+    if (truncatesToOne && rows.length > 1) {
+      const trimmed = rows.slice(0, 1);
+      setRows(trimmed);
+      emitChange(nextOperation, trimmed);
+      return;
+    }
     emitChange(nextOperation, rows);
   };
 
@@ -201,7 +216,13 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
                   style={{ flex: 1, minWidth: 0 }}
                 />
               )}
-              <Button icon={<PlusOutlined />} onClick={() => addPath(row.id)} size="small" />
+              <Button
+                icon={<PlusOutlined />}
+                onClick={() => addPath(row.id)}
+                size="small"
+                disabled={singleRowOnly}
+                title={singleRowOnly ? t('mml.console.singleRowOpHint') : undefined}
+              />
               <Button
                 icon={<MinusOutlined />}
                 onClick={() => removePath(row.id)}
@@ -216,6 +237,11 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
       <Typography.Text type="secondary">
         {t('mml.console.paramPathFormatHint')}
       </Typography.Text>
+      {singleRowOnly && (
+        <Typography.Text type="warning" style={{ fontSize: 12 }}>
+          {t('mml.console.singleRowOpHint')}
+        </Typography.Text>
+      )}
     </Space>
   );
 }

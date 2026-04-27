@@ -576,27 +576,30 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 				"parameters":     formValues,
 			})
 		case "ADD":
-			// AddObject 每次仅一个 object_name；N 个路径 → N 条 command。
-			// buildObjectName 会自动补尾点。
-			for _, p := range paths {
-				commands = append(commands, map[string]interface{}{
-					"command_code":   "RAW ADD",
-					"rpc_method":     "AddObject",
-					"operation_type": op,
-					"param_paths":    []string{p},
-					"parameters":     map[string]interface{}{"object_name": p},
-				})
+			// TR-069 AddObject 单次仅作用于 ONE object_name，多 path 在协议层
+			// 没有"批量"语义。前端已锁单行，这里再做一次防御以拒绝来自脚本/
+			// 直接 API 调用的异常输入。buildObjectName 会自动补尾点。
+			if len(paths) > 1 {
+				return nil, fmt.Errorf("raw param_paths ADD: TR-069 AddObject only accepts one object path per call, got %d", len(paths))
 			}
+			commands = append(commands, map[string]interface{}{
+				"command_code":   "RAW ADD",
+				"rpc_method":     "AddObject",
+				"operation_type": op,
+				"param_paths":    paths,
+				"parameters":     map[string]interface{}{"object_name": paths[0]},
+			})
 		case "RMV", "DEL":
-			for _, p := range paths {
-				commands = append(commands, map[string]interface{}{
-					"command_code":   "RAW " + op,
-					"rpc_method":     "DeleteObject",
-					"operation_type": op,
-					"param_paths":    []string{p},
-					"parameters":     map[string]interface{}{"object_name": p},
-				})
+			if len(paths) > 1 {
+				return nil, fmt.Errorf("raw param_paths %s: TR-069 DeleteObject only accepts one object path per call, got %d", op, len(paths))
 			}
+			commands = append(commands, map[string]interface{}{
+				"command_code":   "RAW " + op,
+				"rpc_method":     "DeleteObject",
+				"operation_type": op,
+				"param_paths":    paths,
+				"parameters":     map[string]interface{}{"object_name": paths[0]},
+			})
 		default:
 			return nil, fmt.Errorf("raw param_paths mode: unsupported operation_type %q (allowed: LST/DSP/MOD/ADD/RMV)", req.OperationType)
 		}

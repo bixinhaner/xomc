@@ -317,7 +317,11 @@ function buildExecutePayload({
     .filter(Boolean)
     .map((item) => ({ command_code: item }));
 
-  if (isManualEdit || !command) {
+  // 走 commands[] 命令字符串分支的两种情况：
+  //   - control tab + 用户手敲了命令行（isManualEdit）
+  //   - control tab + 没选命令也没手敲（manualCommands 为空 → 后端会拒）
+  // paramPath tab 永远不走这里：即便没选命令，也应当走下面的"裸路径" param_paths 分支。
+  if (activeTab !== 'paramPath' && (isManualEdit || !command)) {
     return {
       task_name: taskName || commandLineText,
       device_sns: deviceSns,
