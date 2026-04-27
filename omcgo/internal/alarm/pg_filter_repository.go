@@ -73,7 +73,7 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 	rule := &AlarmFilterRule{}
 	err = r.db.QueryRow(ctx, sql, args...).Scan(
 		&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc,
+		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL,
 		&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 	)
 	if err != nil {
