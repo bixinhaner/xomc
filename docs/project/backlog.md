@@ -98,11 +98,20 @@
 | **W1.3** | **T-0040** | **acs/worker 加 `/healthz` + `/readyz`** | 🟡 next | TBD | 三进程 `curl /healthz` 200 |
 | W1.4 | T-0041 | `internal/core/middleware/ratelimit` 落地 | 🟡 ready | TBD | 文件存在 + router.go 引用 |
 | W1.5 | T-0007 + T-0011 | F04 告警 webhook 端到端 | 🟡 ready | 电信+Go | 触发规则 → webhook.site 收真实 POST |
-| W1.6 | T-0006 | E2E 累计用例 @≥20 | 🟡 in_dev | QA | `grep -c check_status` ≥ 20 |
+| W1.6 | T-0006 | E2E 累计用例 @≥20 | 🟡 in_dev | QA | 实跑 `bash e2e_verify.sh` Pass≥20 + 五域各≥1（详见下方决策） |
 | W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | 🟡 ready | 运维 | docker-compose up 三服务 healthy |
 | W1.8 | T-0042 | 数据库定时备份 + 恢复演练 | 🟡 ready | 运维 | RTO 数字 + 演练记录文档 |
 
 **Wave 1 退出（2026-05-11 对峙）**：≥ 6/8 ✅ + 用户尽责 → 进 Wave 2；< 4/8 + 用户尽责 → AI 嘴炮认账（见 `docs/methodology/AI承诺对峙清单.md` 第二章）
+
+**📌 W1.6 spec 决策（2026-04-27）**：
+- 现状：`scripts/e2e_verify.sh` 已含 226 处 `check_status`（多为框架骨架 / 占位），R-002 描述实际可跑用例数为 0（grep `claim` = 0）
+- 字面规则 `grep -c check_status ≥ 20` 已天然满足，无效
+- **采纳口径（与 `AI承诺对峙清单.md §W1.6` 一致）**：
+  1. 实跑 `bash omcgo/scripts/e2e_verify.sh http://localhost:8081 2>&1 | tail -5` 的 `Pass:` 计数 ≥ 20
+  2. 覆盖五域：登录/设备/告警/KPI/模板，每域 ≥ 1 条
+  3. 新增用例必须用 `claim "<测试名>"` 起头，便于后续 `grep -c claim` 自动核销
+- 仪表盘 `E2E 累计用例 0/200` 改读"实跑 Pass 数"（待 T-0006 推进时累加更新）
 
 #### 🟡 Wave 2 · 收尾冲刺（W3-W8，2026-05-12 ~ 2026-06-22）
 
@@ -346,6 +355,8 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-27 | 登记 + planned | T-0041 | W1.4 ratelimit 中间件 |
 | 2026-04-27 | 登记 + planned | T-0042 | W1.8 数据库定时备份 + 恢复演练 |
 | 2026-04-27 | FREEZE 冲突标记 | T-0027 | F03 KPI 与 FREEZE 冲突，PgM 在 2026-04-28 周一规划会前必决（A 暂停 / B Grandfather / C Wave 内消化） |
+| 2026-04-27 | W1.6 spec 决策 | T-0006 | 字面 `grep check_status ≥20` 已被 226 基线自然满足；改判以"实跑 Pass≥20 + 五域各≥1 + `claim` 标记"为准（详见 §3 Wave 1 队列下方决策块） |
+| 2026-04-27 | wave-batched 裁剪生效 | W1.3/W1.7/W1.8 | 三 task 并行 worktree（T-0040/T-0008/T-0042），跳 S0/S1，保留 S2 简+S3-S7；footer 引用 `AI承诺对峙清单.md#W1.X` |
 
 ---
 
