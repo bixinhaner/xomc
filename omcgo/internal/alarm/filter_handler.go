@@ -95,6 +95,7 @@ func (h *FilterHandler) Create(c *gin.Context) {
 		DeviceGroupIDs:  req.DeviceGroupIDs,
 		Action:          req.Action,
 		AcknowledgeDesc: req.AcknowledgeDesc,
+		WebhookURL:      req.WebhookURL,
 		Priority:        req.Priority,
 		Enabled:         true,
 	}
@@ -160,6 +161,9 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	}
 	if req.AcknowledgeDesc != nil {
 		rule.AcknowledgeDesc = *req.AcknowledgeDesc
+	}
+	if req.WebhookURL != nil {
+		rule.WebhookURL = req.WebhookURL
 	}
 	if req.Priority != nil {
 		rule.Priority = *req.Priority

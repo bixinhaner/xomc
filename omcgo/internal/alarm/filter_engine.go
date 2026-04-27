@@ -2,6 +2,7 @@ package alarm
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,12 +14,36 @@ import (
 type FilterEngine struct {
 	filterRepo AlarmFilterRuleRepository
 	store      AlarmStore
+	dispatcher WebhookDispatcher
+	metrics    *WebhookMetrics
 	logger     *zap.Logger
 }
 
 // NewFilterEngine 创建告警过滤引擎。
-func NewFilterEngine(filterRepo AlarmFilterRuleRepository, store AlarmStore, logger *zap.Logger) *FilterEngine {
-	return &FilterEngine{filterRepo: filterRepo, store: store, logger: logger}
+//
+// dispatcher / metrics 可为 nil：
+//   - dispatcher == nil → 回退到 noopWebhookDispatcher，notify_webhook 动作记 skipped 计数；
+//   - metrics == nil    → 不记 Prometheus 指标。
+func NewFilterEngine(
+	filterRepo AlarmFilterRuleRepository,
+	store AlarmStore,
+	dispatcher WebhookDispatcher,
+	metrics *WebhookMetrics,
+	logger *zap.Logger,
+) *FilterEngine {
+	if dispatcher == nil {
+		dispatcher = noopWebhookDispatcher{}
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &FilterEngine{
+		filterRepo: filterRepo,
+		store:      store,
+		dispatcher: dispatcher,
+		metrics:    metrics,
+		logger:     logger,
+	}
 }
 
 // ProcessResult 过滤处理结果。
@@ -127,9 +152,86 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 			zap.String("rule_name", rule.Name))
 		return &ProcessResult{Handled: true, Action: FilterActionAutoClear}, nil
 
+	case FilterActionNotifyWebhook:
+		e.dispatchWebhook(ctx, alarm, rule)
+		// 不阻塞：dispatch 错误已在 dispatchWebhook 内部 log + 计数，调用方仍视为已处理
+		return &ProcessResult{Handled: true, Action: FilterActionNotifyWebhook}, nil
+
 	default:
 		return &ProcessResult{Handled: false, Action: FilterActionDefault}, nil
 	}
+}
+
+// dispatchWebhook 构建 alarm payload 并交给 dispatcher 发送。
+// 失败仅 log + 计数，不向调用方传播。
+func (e *FilterEngine) dispatchWebhook(ctx context.Context, alarm *model.Alarm, rule *AlarmFilterRule) {
+	if rule.WebhookURL == nil || *rule.WebhookURL == "" {
+		// DB CHECK 约束理论上拒绝此情况，留作运行时兜底。
+		e.logger.Warn("notify_webhook rule missing webhook_url",
+			zap.String("rule_name", rule.Name),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier))
+		if e.metrics != nil {
+			e.metrics.DispatchTotal.WithLabelValues("skipped").Inc()
+		}
+		return
+	}
+
+	payload := buildWebhookPayload(alarm)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		e.logger.Warn("marshal webhook payload failed",
+			zap.String("rule_name", rule.Name),
+			zap.Error(err))
+		if e.metrics != nil {
+			e.metrics.DispatchTotal.WithLabelValues("failure").Inc()
+		}
+		return
+	}
+
+	if err := e.dispatcher.Dispatch(ctx, *rule.WebhookURL, body); err != nil {
+		// dispatcher 内部已经记 metric + warn，这里再附 rule 上下文
+		e.logger.Warn("webhook dispatch returned error",
+			zap.String("rule_name", rule.Name),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
+			zap.Error(err))
+		return
+	}
+
+	e.logger.Info("alarm notify_webhook dispatched",
+		zap.String("rule_name", rule.Name),
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
+		zap.String("webhook_url", *rule.WebhookURL))
+}
+
+// webhookPayload 是 W1.5 冒烟版本的 alarm webhook 负载结构。
+// Wave 2 T-0011 将引入用户可配模板渲染，届时此结构可作为默认模板的字段集。
+type webhookPayload struct {
+	AlarmIdentifier string    `json:"alarm_identifier"`
+	Severity        int       `json:"severity"` // 1=Critical/2=Major/3=Minor/4=Warning，与 global.AlarmSeverity 对齐
+	AlarmSource     string    `json:"alarm_source,omitempty"`
+	DeviceID        string    `json:"device_id"`
+	DeviceSN        string    `json:"device_sn,omitempty"`
+	RaisedAt        time.Time `json:"raised_at"`
+	Status          string    `json:"status"`
+	ProbableCause   string    `json:"probable_cause,omitempty"`
+}
+
+func buildWebhookPayload(alarm *model.Alarm) webhookPayload {
+	p := webhookPayload{
+		AlarmIdentifier: alarm.AlarmIdentifier,
+		Severity:        int(alarm.Severity),
+		DeviceID:        alarm.DeviceID.String(),
+		DeviceSN:        alarm.DeviceSN,
+		RaisedAt:        alarm.RaisedAt,
+		Status:          string(alarm.Status),
+	}
+	if alarm.AlarmSource != nil {
+		p.AlarmSource = *alarm.AlarmSource
+	}
+	if alarm.ProbableCause != nil {
+		p.ProbableCause = *alarm.ProbableCause
+	}
+	return p
 }
 
 // enrichFromLibrary 从告警库补充告警信息。

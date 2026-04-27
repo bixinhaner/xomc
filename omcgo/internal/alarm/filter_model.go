@@ -8,10 +8,13 @@ import (
 
 // 过滤动作常量
 const (
-	FilterActionDefault        = "default"
-	FilterActionIgnore         = "ignore"
+	FilterActionDefault         = "default"
+	FilterActionIgnore          = "ignore"
 	FilterActionAutoAcknowledge = "auto_acknowledge"
-	FilterActionAutoClear      = "auto_clear"
+	FilterActionAutoClear       = "auto_clear"
+	// FilterActionNotifyWebhook W1.5 冒烟：匹配规则即向 WebhookURL 发送 HTTP POST。
+	// retry/dead-letter/HMAC/header/template 留 Wave 2 T-0011 扩展。
+	FilterActionNotifyWebhook = "notify_webhook"
 )
 
 // 过滤类型常量
@@ -33,6 +36,7 @@ type AlarmFilterRule struct {
 	DeviceGroupIDs  []uuid.UUID `json:"device_group_ids" db:"device_group_ids"`
 	Action          string      `json:"action" db:"action"`
 	AcknowledgeDesc string      `json:"acknowledge_desc,omitempty" db:"acknowledge_desc"`
+	WebhookURL      *string     `json:"webhook_url,omitempty" db:"webhook_url"`
 	Priority        int         `json:"priority" db:"priority"`
 	Enabled         bool        `json:"enabled" db:"enabled"`
 	CreatedBy       string      `json:"created_by,omitempty" db:"created_by"`
@@ -57,8 +61,9 @@ type CreateAlarmFilterRuleRequest struct {
 	AlarmIdentifiers      []string    `json:"alarm_identifiers"`
 	DeviceIDs       []uuid.UUID `json:"device_ids"`
 	DeviceGroupIDs  []uuid.UUID `json:"device_group_ids"`
-	Action          string      `json:"action" binding:"required,oneof=default ignore auto_acknowledge auto_clear"`
+	Action          string      `json:"action" binding:"required,oneof=default ignore auto_acknowledge auto_clear notify_webhook"`
 	AcknowledgeDesc string      `json:"acknowledge_desc"`
+	WebhookURL      *string     `json:"webhook_url"`
 	Priority        int         `json:"priority"`
 	Enabled         *bool       `json:"enabled"`
 }
@@ -71,8 +76,9 @@ type UpdateAlarmFilterRuleRequest struct {
 	AlarmIdentifiers      []string     `json:"alarm_identifiers"`
 	DeviceIDs       []uuid.UUID  `json:"device_ids"`
 	DeviceGroupIDs  []uuid.UUID  `json:"device_group_ids"`
-	Action          *string      `json:"action" binding:"omitempty,oneof=default ignore auto_acknowledge auto_clear"`
+	Action          *string      `json:"action" binding:"omitempty,oneof=default ignore auto_acknowledge auto_clear notify_webhook"`
 	AcknowledgeDesc *string      `json:"acknowledge_desc"`
+	WebhookURL      *string      `json:"webhook_url"`
 	Priority        *int         `json:"priority"`
 	Enabled         *bool        `json:"enabled"`
 }
