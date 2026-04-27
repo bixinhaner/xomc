@@ -14,11 +14,13 @@ API="${BASE_URL}/api/v1"
 PASS=0
 FAIL=0
 TOTAL=0
+CLAIM_COUNT=0
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 pass() {
@@ -39,6 +41,14 @@ fail() {
 section() {
     echo ""
     echo -e "${YELLOW}=== $1 ===${NC}"
+}
+
+# claim — W1.6 用例标注：每条新增 E2E 用例先 claim 标题，
+# 便于 `grep -c '^claim ' scripts/e2e_verify.sh` 自动核销最低覆盖。
+# 用法： claim "auth: login with valid creds returns 200 + token"
+claim() {
+    CLAIM_COUNT=$((CLAIM_COUNT + 1))
+    echo -e "  ${CYAN}[CLAIM ${CLAIM_COUNT}]${NC} $1"
 }
 
 # Helper: check HTTP status code
@@ -4442,12 +4452,223 @@ else
 fi
 
 # ============================================================
+# W1.6 — Wave 1 minimum coverage (login / device / alarm / kpi / template)
+# 每条用例以 claim 标注，便于 grep -c 自动核销 ≥ 20。
+# 五域各 ≥ 4 条，使用稳定端点（list 200 / 不存在 ID 404 / 创建后回查）
+# 不依赖 seed 列表非空，避免与背景数据耦合。
+# ============================================================
+
+section "W1.6 Wave 1 — Auth Domain (claim ≥ 4)"
+
+claim "auth: login with valid admin/admin123 returns 200"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"admin123"}')
+check_status "W1.6 auth-1: POST /auth/login valid creds" "200" "$HTTP_CODE"
+
+claim "auth: login with wrong password returns 401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"definitely-wrong-pwd-w16"}')
+check_status "W1.6 auth-2: POST /auth/login wrong password" "401" "$HTTP_CODE"
+
+claim "auth: protected resource without token returns 401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/devices")
+check_status "W1.6 auth-3: GET /devices without token" "401" "$HTTP_CODE"
+
+claim "auth: protected resource with invalid token returns 401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/devices" \
+    -H "Authorization: Bearer not-a-real-token-w16")
+check_status "W1.6 auth-4: GET /devices with bogus token" "401" "$HTTP_CODE"
+
+# Refresh ACCESS_TOKEN locally to be safe (Token from earlier sections may have expired)
+W16_LOGIN_RESP=$(curl -s -X POST "$API/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"admin123"}')
+W16_TOKEN=$(echo "$W16_LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
+W16_AUTH="Authorization: Bearer ${W16_TOKEN}"
+
+claim "auth: /auth/me with valid token returns 200 and username field"
+RESP=$(curl -s -w "\n%{http_code}" "$API/auth/me" -H "$W16_AUTH")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+check_status "W1.6 auth-5: GET /auth/me" "200" "$HTTP_CODE"
+if [ "$HTTP_CODE" = "200" ]; then
+    check_json_field "W1.6 auth-5b: /auth/me has username" "$BODY" "username"
+fi
+
+# ------------------------------------------------------------
+section "W1.6 Wave 1 — Device Domain (claim ≥ 4)"
+
+if [ -n "$W16_TOKEN" ]; then
+claim "device: list devices with token returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/devices" -H "$W16_AUTH")
+    check_status "W1.6 device-1: GET /devices" "200" "$HTTP_CODE"
+
+claim "device: list with pagination params returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/devices?page=1&page_size=5" -H "$W16_AUTH")
+    check_status "W1.6 device-2: GET /devices?page=1&page_size=5" "200" "$HTTP_CODE"
+
+claim "device: filter by carrier=cmcc returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/devices?carrier=cmcc&page=1&page_size=5" -H "$W16_AUTH")
+    check_status "W1.6 device-3: GET /devices?carrier=cmcc" "200" "$HTTP_CODE"
+
+claim "device: get nonexistent device id returns 404"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/devices/00000000-0000-0000-0000-000000000999" -H "$W16_AUTH")
+    check_status "W1.6 device-4: GET /devices/<not-found>" "404" "$HTTP_CODE"
+
+claim "device: get with malformed uuid returns 400"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/devices/not-a-uuid" -H "$W16_AUTH")
+    check_status "W1.6 device-5: GET /devices/<bad-uuid>" "400" "$HTTP_CODE"
+
+claim "device: stats endpoint returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/devices/stats" -H "$W16_AUTH")
+    check_status "W1.6 device-6: GET /devices/stats" "200" "$HTTP_CODE"
+else
+    fail "W1.6 device suite" "skipped — no W1.6 token"
+fi
+
+# ------------------------------------------------------------
+section "W1.6 Wave 1 — Alarm Domain (claim ≥ 4)"
+
+if [ -n "$W16_TOKEN" ]; then
+claim "alarm: list active alarms (default) returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/active" -H "$W16_AUTH")
+    check_status "W1.6 alarm-1: GET /alarms/active" "200" "$HTTP_CODE"
+
+claim "alarm: list active alarms with pagination returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/active?page=1&page_size=5" -H "$W16_AUTH")
+    check_status "W1.6 alarm-2: GET /alarms/active?page=1&page_size=5" "200" "$HTTP_CODE"
+
+claim "alarm: active alarms filtered by severity returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/active?severity=critical&page=1&page_size=5" -H "$W16_AUTH")
+    check_status "W1.6 alarm-3: GET /alarms/active?severity=critical" "200" "$HTTP_CODE"
+
+claim "alarm: get nonexistent alarm id returns 404"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/00000000-0000-0000-0000-000000000999" -H "$W16_AUTH")
+    check_status "W1.6 alarm-4: GET /alarms/<not-found>" "404" "$HTTP_CODE"
+
+claim "alarm: statistics endpoint returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/statistics" -H "$W16_AUTH")
+    check_status "W1.6 alarm-5: GET /alarms/statistics" "200" "$HTTP_CODE"
+else
+    fail "W1.6 alarm suite" "skipped — no W1.6 token"
+fi
+
+# ------------------------------------------------------------
+section "W1.6 Wave 1 — KPI / PM Domain (claim ≥ 4)"
+
+if [ -n "$W16_TOKEN" ]; then
+claim "kpi: list KPI values returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/pm/kpi?page=1&page_size=5" -H "$W16_AUTH")
+    check_status "W1.6 kpi-1: GET /pm/kpi" "200" "$HTTP_CODE"
+
+claim "kpi: list KPI definitions returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/pm/kpi/definitions" -H "$W16_AUTH")
+    check_status "W1.6 kpi-2: GET /pm/kpi/definitions" "200" "$HTTP_CODE"
+
+claim "pm: list counters returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/pm/counters?page=1&page_size=5" -H "$W16_AUTH")
+    check_status "W1.6 kpi-3: GET /pm/counters" "200" "$HTTP_CODE"
+
+claim "pm: counters with time range filter returns 200"
+    W16_END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    W16_START=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+                date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+                echo "2026-04-01T00:00:00Z")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/pm/counters?start_time=${W16_START}&end_time=${W16_END}&page=1&page_size=5" \
+        -H "$W16_AUTH")
+    check_status "W1.6 kpi-4: GET /pm/counters with time range" "200" "$HTTP_CODE"
+
+claim "pm: list thresholds returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/pm/thresholds" -H "$W16_AUTH")
+    check_status "W1.6 kpi-5: GET /pm/thresholds" "200" "$HTTP_CODE"
+else
+    fail "W1.6 kpi suite" "skipped — no W1.6 token"
+fi
+
+# ------------------------------------------------------------
+section "W1.6 Wave 1 — Template / Config Domain (claim ≥ 4)"
+
+if [ -n "$W16_TOKEN" ]; then
+claim "template: list config templates returns 200"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/templates?limit=10&offset=0" -H "$W16_AUTH")
+    check_status "W1.6 template-1: GET /templates" "200" "$HTTP_CODE"
+
+claim "template: create config template returns 201 with id"
+    W16_TMPL_BODY=$(curl -s -X POST "$API/templates" \
+        -H "$W16_AUTH" -H "Content-Type: application/json" \
+        -d '{
+            "name": "W1.6 Coverage Template",
+            "carrier": "cmcc",
+            "technology": "lte",
+            "product_class": "FAP-LTE-W16",
+            "template_type": "batch_config",
+            "parameters": {"w16": "ok"},
+            "active": true,
+            "description": "Created by W1.6 E2E"
+        }')
+    W16_TMPL_ID=$(echo "$W16_TMPL_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+    if [ -n "$W16_TMPL_ID" ]; then
+        pass "W1.6 template-2: POST /templates created id=$W16_TMPL_ID"
+    else
+        fail "W1.6 template-2: POST /templates" "no id in response: $W16_TMPL_BODY"
+    fi
+
+claim "template: fetch created template by id returns 200"
+    if [ -n "$W16_TMPL_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$API/templates/$W16_TMPL_ID" -H "$W16_AUTH")
+        check_status "W1.6 template-3: GET /templates/<just-created>" "200" "$HTTP_CODE"
+    else
+        fail "W1.6 template-3: GET /templates/<just-created>" "skipped — no template id"
+    fi
+
+claim "template: get nonexistent template id returns 404"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/templates/00000000-0000-0000-0000-000000000999" -H "$W16_AUTH")
+    check_status "W1.6 template-4: GET /templates/<not-found>" "404" "$HTTP_CODE"
+
+claim "template: cleanup created template via DELETE returns 204"
+    if [ -n "$W16_TMPL_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+            "$API/templates/$W16_TMPL_ID" -H "$W16_AUTH")
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            pass "W1.6 template-5: DELETE /templates/<just-created> (HTTP $HTTP_CODE)"
+        else
+            fail "W1.6 template-5: DELETE /templates/<just-created>" "got $HTTP_CODE"
+        fi
+    else
+        fail "W1.6 template-5: DELETE /templates/<just-created>" "skipped — no template id"
+    fi
+else
+    fail "W1.6 template suite" "skipped — no W1.6 token"
+fi
+
+# ============================================================
 # Summary
 # ============================================================
 
 echo ""
 echo "============================================"
 echo -e "  Results: ${GREEN}$PASS PASS${NC} / ${RED}$FAIL FAIL${NC} / $TOTAL TOTAL"
+echo -e "  W1.6 Claims: ${CYAN}${CLAIM_COUNT}${NC}"
 echo "============================================"
 
 if [ "$FAIL" -gt 0 ]; then
