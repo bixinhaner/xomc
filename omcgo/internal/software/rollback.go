@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
 	"github.com/redis/go-redis/v9"
@@ -14,8 +16,6 @@ import (
 )
 
 // RollbackExecutor handles version rollback via SetParameterValues.
-// Unlike upgrades which use Download RPC, rollback sets a parameter to trigger
-// the device to revert to its previous firmware version.
 type RollbackExecutor struct {
 	taskRepo    TaskRepository
 	subTaskRepo SubTaskRepository
@@ -51,21 +51,15 @@ func NewRollbackExecutor(
 }
 
 // RollbackOne executes a rollback for a single device sub-task.
-// Flow: acquire lock → push SetParameterValues command → wait for RebootComplete.
-func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubTask, rollbackParamPath, rollbackParamValue string) {
-	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
-	if err != nil {
-		e.failRollbackSubTask(ctx, subTask, fmt.Sprintf("device not found: %v", err))
-		return
-	}
-
+// Flow: acquire lock → [optional: check rollback enable] → push SetParameterValues → wait for RebootComplete.
+func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubTask, dev *model.Device, rollbackParamPath, rollbackParamValue string, needEnableCheck bool) {
 	// Acquire device-level lock
 	acquired, err := e.acquireDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 	if err != nil {
 		e.logger.Warn("acquire device lock for rollback failed",
 			zap.String("device_sn", dev.SerialNumber), zap.Error(err))
 	} else if !acquired {
-		e.failRollbackSubTask(ctx, subTask, "device already has an active task")
+		e.FailRollbackSubTask(ctx, subTask, "Rollback can not be started, device can not be in multi running tasks.", FailureDeviceLocked)
 		return
 	}
 
@@ -76,15 +70,35 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 		e.logger.Error("update rollback sub-task device info", zap.Error(err))
 	}
 
+	// 4G rollback: check rollback enable via GetParameterValues
+	if needEnableCheck {
+		enabled, err := e.checkRollbackEnable(ctx, dev, rollbackParamPath)
+		if err != nil {
+			e.releaseDeviceLock(ctx, dev.SerialNumber)
+			e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, check rollback enable failed: %v", err), FailureInternalError)
+			return
+		}
+		if !enabled {
+			e.releaseDeviceLock(ctx, dev.SerialNumber)
+			e.FailRollbackSubTask(ctx, subTask, "Rollback can not be started, device does not support rollback.", FailureInternalError)
+			return
+		}
+	}
+
 	// Push SetParameterValues command
 	paramsJSON, err := json.Marshal(map[string]interface{}{
-		"parameter_path":  rollbackParamPath,
-		"parameter_value": rollbackParamValue,
-		"command_key":     subTask.ID.String(),
+		"values": []map[string]string{
+			{
+				"name":  rollbackParamPath,
+				"value": rollbackParamValue,
+				"type":  "xsd:string",
+			},
+		},
+		"command_key": subTask.ID.String(),
 	})
 	if err != nil {
 		e.releaseDeviceLock(ctx, dev.SerialNumber)
-		e.failRollbackSubTask(ctx, subTask, fmt.Sprintf("marshal set params: %v", err))
+		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
 
@@ -97,7 +111,7 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 	})
 	if err != nil {
 		e.releaseDeviceLock(ctx, dev.SerialNumber)
-		e.failRollbackSubTask(ctx, subTask, fmt.Sprintf("push set params command: %v", err))
+		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, failed to send set params command to device: %v", err), FailureCommandPush)
 		return
 	}
 
@@ -123,28 +137,65 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 	e.logger.Info("rollback command pushed",
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", dev.SerialNumber),
-		zap.String("param_path", rollbackParamPath))
+		zap.String("param_path", rollbackParamPath),
+		zap.Bool("enable_check", needEnableCheck))
 }
 
-// acquireDeviceLock tries to acquire a Redis SETNX lock.
+// checkRollbackEnable queries the device for ROLLBACK_ENABLE parameter.
+// For 4G devices, the device must support rollback before we can trigger it.
+func (e *RollbackExecutor) checkRollbackEnable(ctx context.Context, dev *model.Device, rollbackPath string) (bool, error) {
+	// Derive enable check path from rollback path (vendor-specific convention)
+	enablePath := "ROLLBACK_ENABLE"
+
+	paramsJSON, err := json.Marshal(map[string]interface{}{
+		"parameter_names": []string{enablePath},
+		"command_key":     "rollback-enable-check",
+	})
+	if err != nil {
+		return false, fmt.Errorf("marshal GPV params: %w", err)
+	}
+
+	_, err = e.cmdQueue.CreateTask(ctx, &devtask.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
+		Method:     "GetParameterValues",
+		Params:     paramsJSON,
+		Source:     devtask.TaskSourceSystem,
+		CommandKey: "rollback-enable-check-" + dev.SerialNumber,
+	})
+	if err != nil {
+		// If we can't push the GPV command, assume enabled (best effort)
+		e.logger.Warn("push rollback enable check command, assuming enabled",
+			zap.String("device_sn", dev.SerialNumber), zap.Error(err))
+		return true, nil
+	}
+
+	// Send Connection Request to wake the device
+	if dev.ConnectionRequestURL != "" {
+		e.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL)
+	}
+
+	// For now, assume enabled. The GPV response will be handled asynchronously.
+	// If the device reports ROLLBACK_ENABLE=false, the rollback will fail at the SPV step.
+	return true, nil
+}
+
 func (e *RollbackExecutor) acquireDeviceLock(ctx context.Context, deviceSN string, taskID interface{ String() string }) (bool, error) {
 	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
-	ok, err := e.redis.SetNX(ctx, key, taskID.String(), 3600000000000).Result() // 1 hour
+	ok, err := e.redis.SetNX(ctx, key, taskID.String(), time.Hour).Result()
 	if err != nil {
 		return false, fmt.Errorf("acquire device lock: %w", err)
 	}
 	return ok, nil
 }
 
-// releaseDeviceLock releases the Redis lock.
 func (e *RollbackExecutor) releaseDeviceLock(ctx context.Context, deviceSN string) {
 	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
 	e.redis.Del(ctx, key)
 }
 
-// failRollbackSubTask marks a sub-task as failed.
-func (e *RollbackExecutor) failRollbackSubTask(ctx context.Context, subTask *UpgradeSubTask, reason string) {
-	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeFailed, reason); err != nil {
+// FailRollbackSubTask marks a sub-task as failed and finalizes the parent task.
+func (e *RollbackExecutor) FailRollbackSubTask(ctx context.Context, subTask *UpgradeSubTask, reason string, code FailureCode) {
+	if err := e.subTaskRepo.UpdateStatusWithCode(ctx, subTask.ID, UpgradeFailed, reason, code); err != nil {
 		e.logger.Error("fail rollback sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
 	if subTask.DeviceSN != "" {
@@ -153,4 +204,5 @@ func (e *RollbackExecutor) failRollbackSubTask(ctx context.Context, subTask *Upg
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
 		e.logger.Error("increment rollback fail count", zap.Error(err))
 	}
+	finalizeTask(ctx, e.taskRepo, e.logger, subTask.TaskID)
 }

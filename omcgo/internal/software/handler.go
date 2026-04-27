@@ -50,12 +50,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	upgrade.PUT("/:id/suspend", h.SuspendUpgradeTask)
 	upgrade.PUT("/:id/resume", h.ResumeUpgradeTask)
 	upgrade.PUT("/:id/terminate", h.TerminateUpgradeTask)
+	upgrade.DELETE("/:id", h.DeleteUpgradeTask)
 	upgrade.POST("/:id/retry", h.RetryUpgradeTask)
 	upgrade.POST("/rollback", h.CreateRollback)
 	upgrade.GET("/:id/tasks", h.ListSubTasks)
 
 	subTasks := rg.Group("/upgrade-sub-tasks")
 	subTasks.GET("/:id", h.GetSubTask)
+	subTasks.GET("", h.ListAllSubTasks)
 }
 
 func (h *Handler) ListFirmware(c *gin.Context) {
@@ -335,6 +337,20 @@ func (h *Handler) RetryUpgradeTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "retry initiated"})
 }
 
+func (h *Handler) DeleteUpgradeTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.DeleteUpgrade(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "upgrade task deleted"})
+}
+
 func (h *Handler) CreateRollback(c *gin.Context) {
 	var req RollbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -365,6 +381,21 @@ func (h *Handler) ListSubTasks(c *gin.Context) {
 	filter.TaskID = taskID
 
 	result, err := h.subTaskRepo.ListByTaskID(c.Request.Context(), taskID, filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) ListAllSubTasks(c *gin.Context) {
+	var filter AllSubTaskFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	result, err := h.subTaskRepo.ListAll(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

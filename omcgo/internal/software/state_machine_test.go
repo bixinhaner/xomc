@@ -25,7 +25,7 @@ func TestValidateUpgradeTransition(t *testing.T) {
 		// Invalid transitions
 		{"pending to completed", UpgradePending, UpgradeCompleted, true},
 		{"pending to verifying", UpgradePending, UpgradeVerifying, true},
-		{"downloading to completed", UpgradeDownloading, UpgradeCompleted, true},
+		{"downloading to completed", UpgradeDownloading, UpgradeCompleted, false},
 		{"completed to pending", UpgradeCompleted, UpgradePending, true},
 		{"failed to pending", UpgradeFailed, UpgradePending, true},
 		{"completed to downloading", UpgradeCompleted, UpgradeDownloading, true},
@@ -76,4 +76,9 @@ func TestValidateUpgradeTransition_UnknownState(t *testing.T) {
 	err := ValidateUpgradeTransition(UpgradeState("unknown"), UpgradePending)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown upgrade state")
+}
+
+func TestNextStateAfterTC(t *testing.T) {
+	assert.Equal(t, UpgradeCompleted, NextStateAfterTC(false), "4G should complete on TC")
+	assert.Equal(t, UpgradeRebooting, NextStateAfterTC(true), "5G should enter rebooting on TC")
 }

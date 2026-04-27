@@ -1,6 +1,10 @@
 package software
 
-import "github.com/omcgo/omcgo/internal/core/model"
+import (
+	"fmt"
+
+	"github.com/omcgo/omcgo/internal/core/model"
+)
 
 // UpgradeAdapter isolates 4G/5G upgrade and rollback parameter differences
 // from the executor logic. Each technology combination may have
@@ -22,6 +26,12 @@ type UpgradeAdapter interface {
 	// to verify rollback is available before setting the rollback parameter.
 	// 4G/LTE typically requires this check; 5G/NR does not.
 	RollbackNeedsEnableCheck(tech model.Technology) bool
+
+	// DownloadFileType returns the TR-069 FileType string for a given firmware file type.
+	DownloadFileType(fileType FileType) string
+
+	// DownloadCommandKey returns the command key for a Download RPC.
+	DownloadCommandKey(subTaskID string) string
 }
 
 // DefaultUpgradeAdapter provides default 4G/5G upgrade behavior.
@@ -48,4 +58,31 @@ func (a *DefaultUpgradeAdapter) RollbackParameterValue(tech model.Technology) st
 
 func (a *DefaultUpgradeAdapter) RollbackNeedsEnableCheck(tech model.Technology) bool {
 	return tech == model.TechLTE
+}
+
+// DownloadFileType returns the TR-069 FileType string for a given firmware file type.
+func (a *DefaultUpgradeAdapter) DownloadFileType(fileType FileType) string {
+	switch fileType {
+	case FileTypeIMG:
+		return "1 Firmware Upgrade Image"
+	case FileTypePATCH:
+		return "1 Firmware Upgrade Image"
+	case FileTypeFPGA:
+		return "1 Firmware Upgrade Image"
+	default:
+		return "1 Firmware Upgrade Image"
+	}
+}
+
+// DownloadCommandKey returns the command key for a Download RPC.
+func (a *DefaultUpgradeAdapter) DownloadCommandKey(subTaskID string) string {
+	return fmt.Sprintf("Download Upgrade,%s", subTaskID)
+}
+
+// Is5G returns true if the device is a 5G/NR device.
+// Determined by Technology field or ProductClass being BNQ/BNX.
+func Is5G(dev *model.Device) bool {
+	return dev.Technology == model.TechNR ||
+		dev.ProductClass == "BNQ" ||
+		dev.ProductClass == "BNX"
 }

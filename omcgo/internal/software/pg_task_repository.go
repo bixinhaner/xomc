@@ -280,6 +280,18 @@ func (r *PgTaskRepository) IncrementCounts(ctx context.Context, taskID uuid.UUID
 	return nil
 }
 
+func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("upgrade_tasks").Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete task SQL: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete upgrade task: %w", err)
+	}
+	return nil
+}
+
 func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	var task UpgradeTask
 	var firmwareID sql.NullString

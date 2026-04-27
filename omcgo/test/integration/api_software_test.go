@@ -325,6 +325,7 @@ func (s *swHTaskRepoStub) List(_ context.Context, _ software.UpgradeTaskFilter) 
 func (s *swHTaskRepoStub) IncrementCounts(_ context.Context, _ uuid.UUID, _, _ int) error {
 	return nil
 }
+func (s *swHTaskRepoStub) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 
 type swHSubTaskRepoStub struct{}
 
@@ -357,8 +358,18 @@ func (s *swHSubTaskRepoStub) BatchCreate(_ context.Context, tasks []*software.Up
 	}
 	return nil
 }
-func (s *swHSubTaskRepoStub) FailStale(_ context.Context, _ time.Time) (int64, error) {
-	return 0, nil
+func (s *swHSubTaskRepoStub) FailStale(_ context.Context, _ time.Time) (map[uuid.UUID]int64, error) {
+	return nil, nil
+}
+func (s *swHSubTaskRepoStub) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
+func (s *swHSubTaskRepoStub) ListAll(_ context.Context, _ software.AllSubTaskFilter) (*model.ListResponse[software.UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]software.UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
+}
+func (s *swHSubTaskRepoStub) UpdateStatusWithCode(_ context.Context, _ uuid.UUID, _ software.UpgradeState, _ string, _ software.FailureCode) error {
+	return nil
+}
+func (s *swHSubTaskRepoStub) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ software.FailureCode) error {
+	return nil
 }
 
 type swHFirmwareRepoStub struct{}

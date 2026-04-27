@@ -590,6 +590,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				zap.String("cwmp_id", cwmpID),
 				zap.Int("soap_size", len(respData)),
 				zap.String("soap_body", string(respData)),
+				zap.String("command_key", taskItem.CommandKey),
 			)
 			if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
 				entry.Method = taskItem.Method
@@ -757,6 +758,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 				zap.Int("soap_size", len(respData)),
 				zap.String("soap_body", string(respData)),
 				zap.String("trigger", "after_rpc_response"),
+				zap.String("command_key", nextTask.CommandKey),
 			)
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
@@ -1014,6 +1016,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 				zap.Int("soap_size", len(respData)),
 				zap.String("soap_body", string(respData)),
 				zap.String("trigger", "after_soap_fault"),
+				zap.String("command_key", nextTask.CommandKey),
 			)
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
@@ -1051,7 +1054,11 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 
 	log.Info("TransferComplete received",
 		zap.String("device_sn", deviceSN),
-		zap.String("command_key", tc.CommandKey))
+		zap.String("command_key", tc.CommandKey),
+		zap.String("cwmp_id", cwmpID),
+		zap.Any("fault", tc.FaultStruct),
+		zap.String("start_time", tc.StartTime.Format(time.RFC3339)),
+		zap.String("complete_time", tc.CompleteTime.Format(time.RFC3339)))
 
 	// 协议日志元数据
 	if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
@@ -1182,6 +1189,8 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		subject = event.SubjectDeviceAlarm
 	case tr069.IsRebootComplete(inform.Event), tr069.IsBoot(inform.Event):
 		subject = event.SubjectDeviceRebootComplete
+	case tr069.IsUpgradeFinish(inform.Event):
+		subject = event.SubjectDeviceUpgradeFinish
 	case tr069.IsConnectionRequest(inform.Event):
 		subject = event.SubjectDeviceConnectionRequest
 	case tr069.HasEvent(inform.Event, tr069.EventTransferComplete):
@@ -1397,14 +1406,11 @@ func generateSessionID() string {
 	return hex.EncodeToString(uuidBytes)
 }
 
-// ============================================================================
-// 测试功能：随机任务注入
-// ============================================================================
-// 以下方法仅用于测试目的。
+// =====================================================================// 测试功能：随机任务注入
+// =====================================================================// 以下方法仅用于测试目的。
 // CPE 发送 Inform 时注入随机 RPC 任务。
 // 禁用方法：注释掉 handleInform 中对 injectRandomTestTasks 的调用。
-// ============================================================================
-
+// =====================================================================
 // rpcTaskTemplate 定义随机 RPC 任务生成模板
 type rpcTaskTemplate struct {
 	method   string
@@ -1572,10 +1578,8 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 	}
 }
 
-// ============================================================================
-// 测试功能结束
-// ============================================================================
-
+// =====================================================================// 测试功能结束
+// =====================================================================
 // detectSOAPFault 检查 SOAP 响应中是否包含 Fault
 // 返回: (isFault, faultCode, faultString)
 func detectSOAPFault(body []byte) (bool, int, string) {

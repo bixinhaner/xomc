@@ -64,6 +64,7 @@ interface BackendUpgradeTask {
 interface BackendUpgradeSubTask {
   id: string;
   task_id: string;
+  task_name?: string;
   device_id: string;
   firmware_id?: string;
   status: string;
@@ -180,6 +181,7 @@ function mapUpgradeSubTask(bs: BackendUpgradeSubTask): UpgradeSubTaskInfo {
   return {
     id: bs.id,
     taskId: bs.task_id,
+    taskName: bs.task_name,
     deviceId: bs.device_id,
     firmwareId: bs.firmware_id,
     status: bs.status as SubTaskStatusType,
@@ -384,15 +386,20 @@ export const softwareApi = {
     taskType?: number;
     isKeepConfig?: boolean;
     concurrency?: number;
+    createSuspended?: boolean;
   }): Promise<UpgradeTaskInfo> {
-    const { data } = await http.post<BackendUpgradeTask>('/upgrade-tasks', {
+    const payload: Record<string, unknown> = {
       device_ids: req.deviceIds,
       firmware_id: req.firmwareId,
       task_name: req.taskName,
       task_type: req.taskType ?? 1,
       is_keep_config: req.isKeepConfig ?? true,
       concurrency: req.concurrency ?? 5,
-    });
+    };
+    if (req.createSuspended) {
+      payload.create_suspended = true;
+    }
+    const { data } = await http.post<BackendUpgradeTask>('/upgrade-tasks', payload);
     return mapUpgradeTask(data);
   },
 
@@ -406,6 +413,10 @@ export const softwareApi = {
 
   async terminateTask(id: string): Promise<void> {
     await http.put(`/upgrade-tasks/${id}/terminate`);
+  },
+
+  async deleteTask(id: string): Promise<void> {
+    await http.delete(`/upgrade-tasks/${id}`);
   },
 
   async retryTask(id: string): Promise<void> {
@@ -453,6 +464,26 @@ export const softwareApi = {
     } catch {
       return null;
     }
+  },
+
+  // ---- All Sub Tasks (跨任务设备列表) ----
+
+  async getAllSubTasks(
+    params: { taskName?: string; deviceSn?: string; status?: string } & PageRequest
+  ): Promise<PageResponse<UpgradeSubTaskInfo>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      page_size: params.pageSize,
+    };
+    if (params.taskName) query.task_name = params.taskName;
+    if (params.deviceSn) query.device_sn = params.deviceSn;
+    if (params.status) query.status = params.status;
+
+    const { data } = await http.get<BackendListResponse<BackendUpgradeSubTask>>(
+      '/upgrade-sub-tasks',
+      { params: query }
+    );
+    return mapSubTaskListResponse(data);
   },
 
   // ---- Legacy compatibility (delegated to mock) ----

@@ -37,6 +37,36 @@ const (
 	FileTypeFPGA  FileType = 6 // FPGA
 )
 
+// FailureCode identifies why an upgrade sub-task failed.
+// Format: {STAGE}_{TYPE} — stage tells which step, type tells device/system/timeout.
+type FailureCode string
+
+const (
+	// Stage: device check
+	FailureDeviceNotFound FailureCode = "DEVICE_NOT_FOUND" // system — device record missing
+	FailureDeviceLocked   FailureCode = "DEVICE_LOCKED"    // system — concurrent upgrade conflict
+	FailureDeviceOffline  FailureCode = "DEVICE_OFFLINE"   // system — device not active
+
+	// Stage: command push
+	FailureCommandPush FailureCode = "COMMAND_PUSH_FAILED" // system — failed to enqueue Download command
+
+	// Stage: download
+	FailureDownloadTimeout FailureCode = "DOWNLOAD_TIMEOUT"  // timeout — download progress timed out
+	FailureDownloadFile    FailureCode = "DOWNLOAD_FILE_ERROR" // system — firmware file not found
+	FailureDownloadFault   FailureCode = "DOWNLOAD_FAULT"     // device — CPE rejected Download RPC
+
+	// Stage: transfer complete
+	FailureTCFault FailureCode = "TC_FAULT" // device — CPE returned TransferComplete with fault
+
+	// Stage: install/reboot
+	Failure5GInstall FailureCode = "UPGRADE_5G_FAILED" // device — 5G UpgradeStatus = 2 or 3
+
+	// Stage: general
+	FailureTaskTimeout   FailureCode = "TASK_TIMEOUT"     // timeout — reaper marked stale task
+	FailureFirmwareGone  FailureCode = "FIRMWARE_NOT_FOUND" // system — firmware record missing
+	FailureInternalError FailureCode = "INTERNAL_ERROR"    // system — unexpected error
+)
+
 // TaskType 任务类型
 type TaskType int
 
@@ -137,6 +167,12 @@ type UpgradeSubTask struct {
 	UpdatedAt       model.Time   `json:"updated_at"`
 }
 
+// UpgradeSubTaskWithTaskName extends UpgradeSubTask with the parent task's name (via JOIN).
+type UpgradeSubTaskWithTaskName struct {
+	UpgradeSubTask
+	TaskName string `json:"task_name,omitempty"`
+}
+
 // FirmwareFilter specifies criteria for listing firmware versions.
 type FirmwareFilter struct {
 	ProductClass *string   `form:"product_class"`
@@ -160,14 +196,23 @@ type SubTaskFilter struct {
 	model.ListRequest
 }
 
+// AllSubTaskFilter specifies criteria for listing sub-tasks across all tasks.
+type AllSubTaskFilter struct {
+	TaskName *string       `form:"task_name"`
+	DeviceSN *string       `form:"device_sn"`
+	Status   *UpgradeState `form:"status"`
+	model.ListRequest
+}
+
 // BatchUpgradeRequest is the JSON body for triggering a batch upgrade.
 type BatchUpgradeRequest struct {
-	DeviceIDs    []uuid.UUID `json:"device_ids" binding:"required,min=1"`
-	FirmwareID   uuid.UUID   `json:"firmware_id" binding:"required"`
-	Concurrency  int         `json:"concurrency"`
-	TaskName     string      `json:"task_name" binding:"required"`
-	TaskType     TaskType    `json:"task_type"`
-	IsKeepConfig bool        `json:"is_keep_config"`
+	DeviceIDs        []uuid.UUID `json:"device_ids" binding:"required,min=1"`
+	FirmwareID       uuid.UUID   `json:"firmware_id" binding:"required"`
+	Concurrency      int         `json:"concurrency"`
+	TaskName         string      `json:"task_name" binding:"required"`
+	TaskType         TaskType    `json:"task_type"`
+	IsKeepConfig     bool        `json:"is_keep_config"`
+	CreateSuspended  bool        `json:"create_suspended"`
 }
 
 // RollbackRequest is the JSON body for triggering a batch rollback.

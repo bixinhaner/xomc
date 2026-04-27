@@ -83,6 +83,7 @@ func (m *svcMockTaskRepo) IncrementCounts(ctx context.Context, taskID uuid.UUID,
 	}
 	return nil
 }
+func (m *svcMockTaskRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 
 type svcMockSubTaskRepo struct {
 	createFn            func(ctx context.Context, task *UpgradeSubTask) error
@@ -115,6 +116,18 @@ func (m *svcMockSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.Li
 func (m *svcMockSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
 	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
 }
+func (m *svcMockSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
+}
+func (m *svcMockSubTaskRepo) UpdateStatusWithCode(_ context.Context, id uuid.UUID, status UpgradeState, msg string, _ FailureCode) error {
+	if m.updateStatusFn != nil {
+		return m.updateStatusFn(context.Background(), id, status, msg)
+	}
+	return nil
+}
+func (m *svcMockSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ FailureCode) error {
+	return nil
+}
 func (m *svcMockSubTaskRepo) GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error) {
 	if m.getActiveByDeviceFn != nil {
 		return m.getActiveByDeviceFn(ctx, deviceID)
@@ -136,9 +149,10 @@ func (m *svcMockSubTaskRepo) BatchCreate(ctx context.Context, tasks []*UpgradeSu
 	}
 	return nil
 }
-func (m *svcMockSubTaskRepo) FailStale(_ context.Context, _ time.Time) (int64, error) {
-	return 0, nil
+func (m *svcMockSubTaskRepo) FailStale(_ context.Context, _ time.Time) (map[uuid.UUID]int64, error) {
+	return nil, nil
 }
+func (m *svcMockSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
 
 type svcMockDeviceRepo struct {
 	getByIDFn           func(ctx context.Context, id uuid.UUID) (*model.Device, error)
@@ -330,10 +344,14 @@ func TestService_HandleTransferComplete_Success(t *testing.T) {
 	deviceID := uuid.New()
 	taskID := uuid.New()
 
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer redisClient.Close()
+
 	deviceRepo := &svcMockDeviceRepo{
 		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
 			assert.Equal(t, "SN-TC-001", sn)
-			return &model.Device{ID: deviceID, SerialNumber: sn}, nil
+			return &model.Device{ID: deviceID, SerialNumber: sn, Technology: model.TechLTE}, nil
 		},
 	}
 
@@ -358,16 +376,19 @@ func TestService_HandleTransferComplete_Success(t *testing.T) {
 		subTaskRepo,
 		deviceRepo,
 		&svcMockCmdQueue{}, nil, nil, "test-bucket",
-		&svcMockEventBus{}, nil, zap.NewNop(),
+		&svcMockEventBus{}, redisClient, zap.NewNop(),
 	)
 
-	evt, _ := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]string{
-		"device_sn": "SN-TC-001",
+	// Simulate Inform-level TC event (from publishInformEvents)
+	evt, _ := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]interface{}{
+		"device_id": map[string]string{"SerialNumber": "SN-TC-001"},
+		"events":    []string{"7 TRANSFER COMPLETE"},
 	})
 
 	err := svc.HandleTransferComplete(context.Background(), evt)
 	require.NoError(t, err)
-	assert.Equal(t, UpgradeRebooting, updatedStatus) // downloading → rebooting
+	// 4G (LTE) device: downloading → completed directly
+	assert.Equal(t, UpgradeCompleted, updatedStatus)
 }
 
 func TestService_HandleTransferComplete_NoActiveUpgrade(t *testing.T) {
@@ -475,7 +496,7 @@ func TestService_HandleDownloadResponse_FaultCode(t *testing.T) {
 	err = svc.executor.HandleDownloadResponse(context.Background(), evt)
 	require.NoError(t, err)
 	assert.Equal(t, UpgradeFailed, capturedStatus)
-	assert.Contains(t, capturedMsg, "download fault 9001")
+	assert.Contains(t, capturedMsg, "FaultCode: 9001")
 	assert.Contains(t, capturedMsg, "device busy")
 	assert.True(t, incrementCalled, "IncrementCounts should have been called")
 }

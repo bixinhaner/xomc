@@ -122,6 +122,8 @@ type DownloadData struct {
 	FileSize       int64  `json:"file_size"`
 	TargetFileName string `json:"target_file_name"`
 	DelaySeconds   int    `json:"delay_seconds"`
+	Md5            string `json:"md5"`
+	RawMode        string `json:"raw_mode"`
 	NoMoreRequests int    `json:"no_more_requests"` // 0=more requests coming, 1=last request
 }
 
@@ -133,6 +135,8 @@ type UploadData struct {
 	Username       string `json:"username"`
 	Password       string `json:"password"`
 	DelaySeconds   int    `json:"delay_seconds"`
+	Md5            string `json:"md5"`
+	RawMode        string `json:"raw_mode"`
 	NoMoreRequests int    `json:"no_more_requests"` // 0=more requests coming, 1=last request
 }
 
@@ -242,16 +246,18 @@ const deleteObjectXML = soapEnvelopeOpen +
 
 const downloadXML = soapEnvelopeOpen +
 	`<cwmp:Download>` +
-	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
-	`<cwmp:FileType>{{.FileType}}</cwmp:FileType>` +
-	`<cwmp:URL>{{.URL}}</cwmp:URL>` +
-	`<cwmp:Username>{{.Username}}</cwmp:Username>` +
-	`<cwmp:Password>{{.Password}}</cwmp:Password>` +
-	`<cwmp:FileSize>{{.FileSize}}</cwmp:FileSize>` +
-	`<cwmp:TargetFileName>{{.TargetFileName}}</cwmp:TargetFileName>` +
-	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
-	`<cwmp:SuccessURL></cwmp:SuccessURL>` +
-	`<cwmp:FailureURL></cwmp:FailureURL>` +
+	`<CommandKey>{{.CommandKey}}</CommandKey>` +
+	`<FileType>{{.FileType}}</FileType>` +
+	`<URL>{{.URL}}</URL>` +
+	`<Username>{{.Username}}</Username>` +
+	`<Password>{{.Password}}</Password>` +
+	`<FileSize>{{.FileSize}}</FileSize>` +
+	`<TargetFileName>{{.TargetFileName}}</TargetFileName>` +
+	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
+	`<Md5>{{.Md5}}</Md5>` +
+	`<RawMode>{{.RawMode}}</RawMode>` +
+	`<SuccessURL></SuccessURL>` +
+	`<FailureURL></FailureURL>` +
 	`</cwmp:Download>` + soapEnvelopeClose
 
 const uploadXML = soapEnvelopeOpen +

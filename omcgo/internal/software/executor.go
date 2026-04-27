@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
 	"github.com/redis/go-redis/v9"
@@ -16,7 +17,6 @@ import (
 )
 
 // UpgradeExecutor handles the event-driven upgrade lifecycle for individual devices.
-// It follows the same pattern as provision/Engine: cmdqueue.Push → wait for EventBus callbacks.
 type UpgradeExecutor struct {
 	taskRepo     TaskRepository
 	subTaskRepo  SubTaskRepository
@@ -26,6 +26,7 @@ type UpgradeExecutor struct {
 	connReq      *connreq.Client
 	redis        redis.UniversalClient
 	eventBus     event.EventBus
+	adapter      UpgradeAdapter
 	logger       *zap.Logger
 }
 
@@ -50,16 +51,35 @@ func NewUpgradeExecutor(
 		connReq:      connReq,
 		redis:        redisClient,
 		eventBus:     eventBus,
+		adapter:      NewDefaultUpgradeAdapter(),
 		logger:       logger.Named("upgrade-executor"),
 	}
 }
 
-// ExecuteOne runs the upgrade flow for a single sub-task:
-// conflict check (Redis SETNX) → record ori_version → push Download Command → update status.
-func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion) {
+// ExecuteOne runs the upgrade flow for a single sub-task.
+// Flow: Step 1 (online check) → Step 2 (send Download cmd) → Step 3 (monitor download) → wait for events.
+func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool) {
 	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
 	if err != nil {
-		e.failSubTask(ctx, subTask, fmt.Sprintf("device not found: %v", err))
+		e.failSubTask(ctx, subTask, "Upgrade can not be started, device not found.", FailureDeviceNotFound)
+		return
+	}
+
+	// Step 1: Device online check
+	if dev.Status != model.DeviceActive {
+		e.logger.Info("device offline, entering wait state",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("sub_task_id", subTask.ID.String()))
+
+		// Set Redis wait key for HandleDeviceOnline to resume
+		waitKey := fmt.Sprintf("software:upgrade:wait:%s", dev.SerialNumber)
+		e.redis.Set(ctx, waitKey, subTask.ID.String(), time.Hour)
+
+		// Record device info and mark as suspended (waiting for device)
+		subTask.DeviceSN = dev.SerialNumber
+		subTask.OriVersion = dev.FirmwareVersion
+		e.subTaskRepo.Update(ctx, subTask)
+		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeSuspended, "waiting for device online")
 		return
 	}
 
@@ -68,9 +88,8 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	if err != nil {
 		e.logger.Warn("acquire device lock failed, proceeding without lock",
 			zap.String("device_sn", dev.SerialNumber), zap.Error(err))
-		// Continue without lock — degraded but functional
 	} else if !acquired {
-		e.failSubTask(ctx, subTask, "device already has an active upgrade")
+		e.failLockedSubTask(ctx, subTask, dev.SerialNumber)
 		return
 	}
 
@@ -81,19 +100,28 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 		e.logger.Error("update sub-task device info", zap.Error(err))
 	}
 
-	// Push Download command
-	downloadURL := fmt.Sprintf("/firmware/%s/download", fw.ID.String())
+	// Step 2: Build and push Download command
+	commandKey := e.adapter.DownloadCommandKey(subTask.ID.String())
+	downloadURL := "firmware/" + fw.MinIOPath
+
+	rawMode := "true"
+	if isKeepConfig {
+		rawMode = "false"
+	}
+
 	paramsJSON, err := json.Marshal(map[string]interface{}{
-		"url":       downloadURL,
-		"file_type": "1", // firmware
-		"file_size": fw.FileSize,
-		"file_name": fw.FileName,
+		"command_key":     commandKey,
+		"file_type":       e.adapter.DownloadFileType(fw.FileType),
+		"url":             downloadURL,
+		"file_size":       fw.FileSize,
+		"file_name":       fw.FileName,
 		"target_filename": fw.FileName,
-		"command_key": subTask.ID.String(),
+		"md5":             fw.MD5Val,
+		"raw_mode":        rawMode,
 	})
 	if err != nil {
 		e.releaseDeviceLock(ctx, dev.SerialNumber)
-		e.failSubTask(ctx, subTask, fmt.Sprintf("marshal download params: %v", err))
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Upgrade can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
 
@@ -106,7 +134,7 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	})
 	if err != nil {
 		e.releaseDeviceLock(ctx, dev.SerialNumber)
-		e.failSubTask(ctx, subTask, fmt.Sprintf("push download command: %v", err))
+		e.failSubTask(ctx, subTask, "Upgrade can not be started, failed to send download command to device.", FailureCommandPush)
 		return
 	}
 
@@ -124,6 +152,13 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 		}
 	}
 
+	// Set Redis flags for download monitoring and TC matching
+	tcKey := fmt.Sprintf("TransferCompleteReq_%s", subTask.ID.String())
+	e.redis.Set(ctx, tcKey, "0", 30*time.Minute)
+
+	dlKey := fmt.Sprintf("DownloadingFlag_%s_%s", subTask.TaskID.String(), dev.SerialNumber)
+	e.redis.Set(ctx, dlKey, "0", 10*time.Minute)
+
 	// Transition to downloading
 	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeDownloading, ""); err != nil {
 		e.logger.Error("update sub-task to downloading", zap.Error(err))
@@ -132,7 +167,67 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	e.logger.Info("upgrade download pushed",
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", dev.SerialNumber),
-		zap.String("firmware_version", fw.Version))
+		zap.String("command_key", commandKey),
+		zap.String("download_url", downloadURL),
+		zap.String("file_type", e.adapter.DownloadFileType(fw.FileType)),
+		zap.String("file_name", fw.FileName),
+		zap.Int64("file_size", fw.FileSize),
+		zap.String("md5", fw.MD5Val),
+		zap.Bool("is_keep_config", isKeepConfig),
+		zap.String("firmware_version", fw.Version),
+		zap.Bool("is_5g", Is5G(dev)))
+
+	// Step 3: Start download progress monitor in background
+	go e.monitorDownloadProgress(context.Background(), subTask, dev.SerialNumber)
+}
+
+// monitorDownloadProgress polls the DownloadingFlag Redis key to track download progress.
+// Values: null=not started, "0"=downloading, "2"=interrupted, "3"=file not found, other=complete.
+func (e *UpgradeExecutor) monitorDownloadProgress(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
+	key := fmt.Sprintf("DownloadingFlag_%s_%s", subTask.TaskID.String(), deviceSN)
+	deadline := time.Now().Add(10 * time.Minute)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			if t.After(deadline) {
+				// Check if sub-task is still in downloading state before failing
+				current, err := e.subTaskRepo.GetByID(ctx, subTask.ID)
+				if err != nil || current.Status != UpgradeDownloading {
+					return
+				}
+				e.failSubTask(ctx, subTask, "Download can not be started, there is no DownloadResponse msg from device.", FailureDownloadTimeout)
+				return
+			}
+
+			val, err := e.redis.Get(ctx, key).Result()
+			if err == redis.Nil {
+				// Not started yet, keep waiting
+				continue
+			}
+			if err != nil {
+				e.logger.Error("check download flag", zap.Error(err))
+				continue
+			}
+
+			switch val {
+			case "0": // downloading
+				continue
+			case "2": // interrupted (resume)
+				continue
+			case "3": // file not found
+				e.failSubTask(ctx, subTask, "Download failed, target version file can not be found.", FailureDownloadFile)
+				return
+			default: // download complete — clear flag and stop monitoring
+				e.redis.Del(ctx, key)
+				return
+			}
+		}
+	}
 }
 
 // HandleDownloadResponse handles command.download.response events.
@@ -150,16 +245,15 @@ func (e *UpgradeExecutor) HandleDownloadResponse(ctx context.Context, evt event.
 
 	subTask, err := e.subTaskRepo.GetByCommandKey(ctx, payload.CommandKey)
 	if err != nil {
-		return nil // Not our task
+		return nil
 	}
 
-	// Only handle downloading state
 	if subTask.Status != UpgradeDownloading {
 		return nil
 	}
 
 	if payload.FaultCode != 0 {
-		e.failSubTask(ctx, subTask, fmt.Sprintf("download fault %d: %s", payload.FaultCode, payload.FaultStr))
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Download failed, device rejected download. FaultCode: %d, FaultString: %s", payload.FaultCode, payload.FaultStr), FailureDownloadFault)
 		return nil
 	}
 
@@ -170,7 +264,7 @@ func (e *UpgradeExecutor) HandleDownloadResponse(ctx context.Context, evt event.
 }
 
 // HandleRebootComplete handles device.inform.reboot_complete events.
-// Used for rollback completion detection.
+// Used for rollback completion detection and 4G upgrade completion.
 func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Event) error {
 	var payload struct {
 		DeviceSN string `json:"device_sn"`
@@ -184,7 +278,6 @@ func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	// Find active sub-task for this device that is in rebooting state
 	subTask, err := e.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
 	if err != nil {
 		return nil
@@ -194,13 +287,89 @@ func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	// Reboot complete → verify version
+	// For 5G upgrade: skip — HandleUpgradeFinish handles the 102 event
+	task, err := e.taskRepo.GetByID(ctx, subTask.TaskID)
+	if err != nil {
+		return nil
+	}
+	if task.TaskType == TaskTypeUpgrade && Is5G(dev) {
+		e.logger.Debug("skip reboot_complete for 5G upgrade, waiting for 102 event",
+			zap.String("sub_task_id", subTask.ID.String()))
+		return nil
+	}
+
+	// Reboot complete → finalize (rollback or 4G upgrade)
 	e.completeSubTask(ctx, subTask, dev.SerialNumber)
 
-	e.logger.Info("reboot complete, upgrade finalized",
+	e.logger.Info("reboot complete, task finalized",
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", payload.DeviceSN))
 	return nil
+}
+
+// HandleUpgradeFinish handles the 5G 102 UPGRADE FINISH event.
+// Only processes sub-tasks in rebooting state for 5G devices.
+func (e *UpgradeExecutor) HandleUpgradeFinish(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		DeviceID struct {
+			SerialNumber string `json:"SerialNumber"`
+		} `json:"device_id"`
+		Events        []string                   `json:"events"`
+		ParameterList []map[string]interface{} `json:"parameter_list"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil || payload.DeviceID.SerialNumber == "" {
+		return nil
+	}
+
+	deviceSN := payload.DeviceID.SerialNumber
+	dev, err := e.deviceRepo.GetBySerialNumber(ctx, deviceSN)
+	if err != nil || dev == nil {
+		return nil
+	}
+
+	subTask, err := e.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
+	if err != nil {
+		return nil
+	}
+
+	if subTask.Status != UpgradeRebooting {
+		return nil
+	}
+
+	// Extract upgradeStatus from Inform parameter list
+	upgradeStatus := extractParamValue(payload.ParameterList, "UpgradeStatus")
+
+	e.logger.Info("5G upgrade finish received",
+		zap.String("sub_task_id", subTask.ID.String()),
+		zap.String("device_sn", deviceSN),
+		zap.String("command_key", subTask.CommandKey),
+		zap.String("upgrade_status", upgradeStatus))
+
+	// Per design doc: "2" or "3" → failed, other (including "1") → success
+	if upgradeStatus == "2" || upgradeStatus == "3" {
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Upgrade failed, 5G upgrade status: %s", upgradeStatus), Failure5GInstall)
+	} else {
+		e.completeSubTask(ctx, subTask, deviceSN)
+	}
+
+	return nil
+}
+
+// extractParamValue searches a TR-069 parameter list for a parameter whose name
+// contains the given suffix and returns its value.
+func extractParamValue(params []map[string]interface{}, nameSuffix string) string {
+	for _, p := range params {
+		name, _ := p["name"].(string)
+		if name == "" {
+			continue
+		}
+		// Match parameter names ending with the suffix (e.g., "...UpgradeStatus]")
+		if len(name) >= len(nameSuffix) && name[len(name)-len(nameSuffix):] == nameSuffix {
+			val, _ := p["value"].(string)
+			return val
+		}
+	}
+	return ""
 }
 
 // HandleDeviceOnline checks for pending upgrade wait keys when a device comes online.
@@ -215,14 +384,13 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 	waitKey := fmt.Sprintf("software:upgrade:wait:%s", payload.DeviceSN)
 	val, err := e.redis.Get(ctx, waitKey).Result()
 	if err == redis.Nil {
-		return nil // No pending upgrade
+		return nil
 	}
 	if err != nil {
 		e.logger.Error("check upgrade wait key", zap.Error(err))
 		return nil
 	}
 
-	// Delete the wait key
 	e.redis.Del(ctx, waitKey)
 
 	subTaskID, err := uuid.Parse(val)
@@ -236,7 +404,6 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 		return nil
 	}
 
-	// Only resume suspended or pending tasks
 	if subTask.Status != UpgradeSuspended && subTask.Status != UpgradePending {
 		return nil
 	}
@@ -245,20 +412,27 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", payload.DeviceSN))
 
-	// Get firmware and resume execution
 	if subTask.FirmwareID != nil {
 		fw, err := e.firmwareRepo.GetByID(ctx, *subTask.FirmwareID)
 		if err != nil {
-			e.failSubTask(ctx, subTask, fmt.Sprintf("get firmware for resume: %v", err))
+			e.failSubTask(ctx, subTask, fmt.Sprintf("Upgrade can not be started, the target version file can not be found: %v", err), FailureFirmwareGone)
 			return nil
 		}
-		go e.ExecuteOne(context.Background(), subTask, fw)
+
+		// Get isKeepConfig from parent task
+		isKeepConfig := true
+		if task, err := e.taskRepo.GetByID(ctx, subTask.TaskID); err == nil {
+			isKeepConfig = task.IsKeepConfig
+		}
+
+		// Reset status to pending for re-execution
+		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradePending, "")
+		go e.ExecuteOne(context.Background(), subTask, fw, isKeepConfig)
 	}
 
 	return nil
 }
 
-// acquireDeviceLock tries to acquire a Redis SETNX lock for a device upgrade.
 func (e *UpgradeExecutor) acquireDeviceLock(ctx context.Context, deviceSN string, taskID uuid.UUID) (bool, error) {
 	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
 	ok, err := e.redis.SetNX(ctx, key, taskID.String(), time.Hour).Result()
@@ -268,15 +442,13 @@ func (e *UpgradeExecutor) acquireDeviceLock(ctx context.Context, deviceSN string
 	return ok, nil
 }
 
-// releaseDeviceLock releases the Redis lock for a device upgrade.
 func (e *UpgradeExecutor) releaseDeviceLock(ctx context.Context, deviceSN string) {
 	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
 	e.redis.Del(ctx, key)
 }
 
-// failSubTask marks a sub-task as failed and updates the main task counts.
-func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTask, reason string) {
-	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeFailed, reason); err != nil {
+func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTask, reason string, code FailureCode) {
+	if err := e.subTaskRepo.UpdateStatusWithCode(ctx, subTask.ID, UpgradeFailed, reason, code); err != nil {
 		e.logger.Error("fail sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
 	if subTask.DeviceSN != "" {
@@ -285,15 +457,32 @@ func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTa
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
 		e.logger.Error("increment fail count", zap.Error(err))
 	}
+	finalizeTask(ctx, e.taskRepo, e.logger, subTask.TaskID)
 }
 
-// completeSubTask marks a sub-task as completed and updates main task counts.
+// failLockedSubTask handles the DEVICE_LOCKED case by looking up the blocking task name.
+func (e *UpgradeExecutor) failLockedSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
+	reason := "Upgrade can not be started, device can not be in multi running tasks."
+
+	e.failSubTask(ctx, subTask, reason, FailureDeviceLocked)
+}
+
 func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
 	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeCompleted, ""); err != nil {
 		e.logger.Error("complete sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
 	e.releaseDeviceLock(ctx, deviceSN)
+
+	// Clean up Redis flags
+	tcKey := fmt.Sprintf("TransferCompleteReq_%s", subTask.ID.String())
+	e.redis.Del(ctx, tcKey)
+	if subTask.DeviceSN != "" {
+		dlKey := fmt.Sprintf("DownloadingFlag_%s_%s", subTask.TaskID.String(), subTask.DeviceSN)
+		e.redis.Del(ctx, dlKey)
+	}
+
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 1, 0); err != nil {
 		e.logger.Error("increment success count", zap.Error(err))
 	}
+	finalizeTask(ctx, e.taskRepo, e.logger, subTask.TaskID)
 }

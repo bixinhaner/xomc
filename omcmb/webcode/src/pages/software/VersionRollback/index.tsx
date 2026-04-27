@@ -37,6 +37,7 @@ import {
   useSuspendTask,
   useResumeTask,
   useTerminateTask,
+  useDeleteTask,
   useRetryTask,
 } from '@core/hooks/api/useSoftware';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
@@ -119,6 +120,7 @@ export default function VersionRollback() {
   const suspendMutation = useSuspendTask();
   const resumeMutation = useResumeTask();
   const terminateMutation = useTerminateTask();
+  const deleteMutation = useDeleteTask();
   const retryMutation = useRetryTask();
 
   // ---- Task status config with i18n ----
@@ -274,6 +276,7 @@ export default function VersionRollback() {
         { label: 'BaiBNQ', value: 'BaiBNQ' },
         { label: 'BSC', value: 'BSC' },
         { label: 'BTS', value: 'BTS' },
+        { label: 'FAP/BU1810', value: 'FAP/BU1810' },
       ],
     },
     {
@@ -491,8 +494,17 @@ export default function VersionRollback() {
 
   const handleDeleteTaskConfirm = () => {
     if (deleteTaskRecord) {
-      void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
-      setDeleteTaskRecord(null);
+      const statusCode = mapTaskStatusToCode(deleteTaskRecord.status);
+      const mutation = statusCode === 4 ? deleteMutation : terminateMutation;
+      mutation.mutate(deleteTaskRecord.id, {
+        onSuccess: () => {
+          void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
+          setDeleteTaskRecord(null);
+        },
+        onError: (err) => {
+          void message.error(t('common.operationFailed') + ': ' + String(err));
+        },
+      });
     }
   };
 
@@ -686,7 +698,10 @@ export default function VersionRollback() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'failureReason', width: 150, ellipsis: true, render: (val: string) => val ? <span style={{ color: '#ff4d4f' }}>{val}</span> : '-' },
+    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'errorMessage', width: 150, ellipsis: true, render: (val: string, record: UpgradeSubTaskInfo) => {
+      const text = record.failureReason || val;
+      return text ? <span style={{ color: '#ff4d4f' }}>{text}</span> : '-';
+    }},
     { key: 'operator', title: t('table.operator'), width: 100, render: () => '-' },
     { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
     { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
@@ -988,6 +1003,7 @@ export default function VersionRollback() {
                 { label: 'RTD', value: 'RTD' },
                 { label: 'BaiBNX', value: 'BaiBNX' },
                 { label: 'BaiBNQ', value: 'BaiBNQ' },
+                { label: 'FAP/BU1810', value: 'FAP/BU1810' },
               ]}
               style={{ width: '100%' }}
             />
@@ -1196,13 +1212,14 @@ export default function VersionRollback() {
               </Card>
 
               {/* Device list (sub-tasks) */}
-              <Card title={`${t('software.upgrade.deviceListTitle', { count: totalDevices })}`} size="small">
+              <Card title={`${t('software.upgrade.deviceListTitle', { count: subTaskList.length })}`} size="small">
                 <Table
                   size="small"
                   dataSource={subTaskList}
                   rowKey="id"
                   loading={subTasksLoading}
-                  pagination={totalDevices > 10 ? { pageSize: 10 } : false}
+                  pagination={subTaskList.length > 10 ? { pageSize: 10 } : false}
+                  locale={{ emptyText: subTasksLoading ? undefined : t('software.upgrade.noSubTasks') ?? '暂无设备数据' }}
                   scroll={{ y: 300 }}
                   columns={[
                     {
@@ -1246,10 +1263,13 @@ export default function VersionRollback() {
                     },
                     {
                       title: t('software.failureReason'),
-                      dataIndex: 'failureReason',
+                      dataIndex: 'errorMessage',
                       width: 120,
                       ellipsis: true,
-                      render: (val: string) => val ? <span style={{ color: '#ff4d4f' }}>{val}</span> : '-',
+                      render: (val: string, record: UpgradeSubTaskInfo) => {
+                        const text = record.failureReason || val;
+                        return text ? <span style={{ color: '#ff4d4f' }}>{text}</span> : '-';
+                      },
                     },
                   ]}
                 />

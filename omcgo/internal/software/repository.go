@@ -25,6 +25,7 @@ type TaskRepository interface {
 	List(ctx context.Context, filter UpgradeTaskFilter) (*model.ListResponse[UpgradeTask], error)
 	IncrementCounts(ctx context.Context, taskID uuid.UUID, successDelta, failDelta int) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus, result TaskResult) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // SubTaskRepository provides persistence for per-device upgrade sub-tasks (upgrade_sub_tasks table).
@@ -32,11 +33,15 @@ type SubTaskRepository interface {
 	Create(ctx context.Context, task *UpgradeSubTask) error
 	GetByID(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error
+	UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error
 	Update(ctx context.Context, task *UpgradeSubTask) error
 	List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error)
 	ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error)
+	ListAll(ctx context.Context, filter AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
 	GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
 	GetByCommandKey(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	BatchCreate(ctx context.Context, tasks []*UpgradeSubTask) error
-	FailStale(ctx context.Context, cutoff time.Time) (int64, error)
+	DeleteByTaskID(ctx context.Context, taskID uuid.UUID) error
+	FailStale(ctx context.Context, cutoff time.Time) (map[uuid.UUID]int64, error)
+	UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error
 }

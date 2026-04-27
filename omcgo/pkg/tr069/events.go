@@ -24,6 +24,11 @@ const (
 	EventMUpload   = "M Upload"
 )
 
+// 5G upgrade finish event code (vendor-specific).
+const (
+	EventUpgradeFinish = "102 UPGRADE FINISH"
+)
+
 // CMCC extended event codes.
 const (
 	EventAddObject    = "103 ADD OBJECT"
@@ -94,6 +99,11 @@ func IsRequestDownload(events []EventStruct) bool {
 // IsAutonomousTransferComplete returns true if the event list contains an AUTONOMOUS TRANSFER COMPLETE event.
 func IsAutonomousTransferComplete(events []EventStruct) bool {
 	return HasEvent(events, EventAutonomousTransferComplete)
+}
+
+// IsUpgradeFinish returns true if the event list contains a 102 UPGRADE FINISH event.
+func IsUpgradeFinish(events []EventStruct) bool {
+	return HasEvent(events, EventUpgradeFinish)
 }
 
 // EventCodes extracts just the event codes from an event list.

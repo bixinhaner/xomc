@@ -111,12 +111,20 @@ export function useUpdateFirmware() {
 // Upgrade Task hooks (main tasks)
 // ============================================================================
 
+const SUB_TASK_TERMINAL = new Set(['completed', 'failed', 'terminated']);
+
 export function useUpgradeTasks(
   params: { taskType?: number; status?: string; productClass?: string; createUser?: string } & PageRequest
 ) {
   return useQuery({
     queryKey: ['software', 'upgrade-tasks', params],
     queryFn: () => api.getUpgradeTasks(params),
+    refetchInterval: (query) => {
+      const items = query.state.data?.items;
+      if (!items || items.length === 0) return false;
+      const hasActive = items.some((t) => t.status !== 'ended');
+      return hasActive ? 5000 : false;
+    },
   });
 }
 
@@ -138,6 +146,7 @@ export function useCreateUpgradeTask() {
       taskType?: number;
       isKeepConfig?: boolean;
       concurrency?: number;
+      createSuspended?: boolean;
     }) => api.createUpgradeTask(req),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
@@ -169,6 +178,16 @@ export function useTerminateTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.terminateTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
+    },
+  });
+}
+
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTask(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
     },
@@ -215,6 +234,12 @@ export function useSubTasks(
     queryKey: ['software', 'upgrade-tasks', taskId, 'sub-tasks', params],
     queryFn: () => api.getSubTasks(taskId, params),
     enabled: Boolean(taskId),
+    refetchInterval: (query) => {
+      const items = query.state.data?.items;
+      if (!items || items.length === 0) return false;
+      const hasActive = items.some((t) => !SUB_TASK_TERMINAL.has(t.status));
+      return hasActive ? 3000 : false;
+    },
   });
 }
 
@@ -223,6 +248,21 @@ export function useSubTaskById(id: string) {
     queryKey: ['software', 'sub-tasks', 'detail', id],
     queryFn: () => api.getSubTaskById(id),
     enabled: Boolean(id),
+  });
+}
+
+export function useAllSubTasks(
+  params: { taskName?: string; deviceSn?: string; status?: string } & PageRequest
+) {
+  return useQuery({
+    queryKey: ['software', 'all-sub-tasks', params],
+    queryFn: () => api.getAllSubTasks(params),
+    refetchInterval: (query) => {
+      const items = query.state.data?.items;
+      if (!items || items.length === 0) return false;
+      const hasActive = items.some((t) => !SUB_TASK_TERMINAL.has(t.status));
+      return hasActive ? 5000 : false;
+    },
   });
 }
 

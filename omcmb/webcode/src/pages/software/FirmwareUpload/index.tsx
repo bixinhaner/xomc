@@ -67,6 +67,7 @@ const productTypeOptions = [
   { label: 'RTD', value: 'RTD' },
   { label: 'BaiBNX', value: 'BaiBNX' },
   { label: 'BaiBNQ', value: 'BaiBNQ' },
+  { label: 'FAP/BU1810', value: 'FAP/BU1810' },
 ];
 
 function formatFileSize(bytes: number): string {

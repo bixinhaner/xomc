@@ -87,6 +87,7 @@ export interface UpgradeTaskInfo {
 export interface UpgradeSubTaskInfo {
   id: string;
   taskId: string;
+  taskName?: string;
   deviceId: string;
   firmwareId?: string;
   status: SubTaskStatusType;

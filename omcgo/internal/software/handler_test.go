@@ -89,6 +89,7 @@ func (m *swHTaskRepo) List(ctx context.Context, filter UpgradeTaskFilter) (*mode
 func (m *swHTaskRepo) IncrementCounts(_ context.Context, _ uuid.UUID, _, _ int) error {
 	return nil
 }
+func (m *swHTaskRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 
 type swHSubTaskRepo struct{}
 
@@ -109,6 +110,15 @@ func (m *swHSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListRe
 func (m *swHSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
 	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
 }
+func (m *swHSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
+}
+func (m *swHSubTaskRepo) UpdateStatusWithCode(_ context.Context, _ uuid.UUID, _ UpgradeState, _ string, _ FailureCode) error {
+	return nil
+}
+func (m *swHSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ FailureCode) error {
+	return nil
+}
 func (m *swHSubTaskRepo) GetActiveByDeviceID(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
 	return nil, commonerrors.ErrNotFound
 }
@@ -121,9 +131,10 @@ func (m *swHSubTaskRepo) BatchCreate(_ context.Context, tasks []*UpgradeSubTask)
 	}
 	return nil
 }
-func (m *swHSubTaskRepo) FailStale(_ context.Context, _ time.Time) (int64, error) {
-	return 0, nil
+func (m *swHSubTaskRepo) FailStale(_ context.Context, _ time.Time) (map[uuid.UUID]int64, error) {
+	return nil, nil
 }
+func (m *swHSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Helpers

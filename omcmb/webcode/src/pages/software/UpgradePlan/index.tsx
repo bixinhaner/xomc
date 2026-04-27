@@ -24,7 +24,7 @@ import {
 import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, DesktopOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -37,10 +37,13 @@ import {
   useSuspendTask,
   useResumeTask,
   useTerminateTask,
+  useDeleteTask,
   useRetryTask,
   useSubTasks,
+  useAllSubTasks,
   useSoftwareVersions,
 } from '@core/hooks/api/useSoftware';
+import { useDeviceList } from '@core/hooks/api/useDevices';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
 
 // Upgrade category enum
@@ -113,13 +116,17 @@ export default function UpgradePlan() {
     taskType: 1, // Only show upgrade tasks (not rollback)
   });
 
-  // ---- Selected task for device list tab ----
-  const [deviceListTaskId, setDeviceListTaskId] = useState<string>('');
-  const [deviceListTaskName, setDeviceListTaskName] = useState<string>('');
-  const { data: deviceSubTasksData, isLoading: deviceSubTasksLoading } = useSubTasks(
-    deviceListTaskId,
-    { page: 1, pageSize: 100 },
-  );
+  // ---- Device list tab: pagination & filter ----
+  const [devicePage, setDevicePage] = useState(1);
+  const [devicePageSize, setDevicePageSize] = useState(20);
+  const [deviceFilters, setDeviceFilters] = useState<Record<string, unknown>>({});
+  const { data: deviceSubTasksData, isLoading: deviceSubTasksLoading } = useAllSubTasks({
+    page: devicePage,
+    pageSize: devicePageSize,
+    taskName: (deviceFilters.keyword as string) || undefined,
+    deviceSn: (deviceFilters.stationCode as string) || undefined,
+    status: (deviceFilters.status as string) || undefined,
+  });
 
   // ---- Fetch sub-tasks for the detail drawer ----
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
@@ -133,6 +140,7 @@ export default function UpgradePlan() {
   const suspendMutation = useSuspendTask();
   const resumeMutation = useResumeTask();
   const terminateMutation = useTerminateTask();
+  const deleteMutation = useDeleteTask();
   const retryMutation = useRetryTask();
 
   // ---- Task status config with i18n ----
@@ -225,7 +233,11 @@ export default function UpgradePlan() {
   const firmwareList = useMemo(() => {
     const allFiles = firmwareData?.items ?? [];
     return allFiles.filter((f) => {
-      if (drawerProductType && f.deviceType !== drawerProductType) return false;
+      // Support comma-separated multi-product-type: match if selected type is in the list
+      if (drawerProductType && f.deviceType) {
+        const supportedTypes = f.deviceType.split(',').map((s) => s.trim()).filter(Boolean);
+        if (!supportedTypes.includes(drawerProductType)) return false;
+      }
       if (upgradeCategory === 'software') return f.fileType === 0 || f.fileType === undefined;
       if (upgradeCategory === 'patch') return f.fileType === 1;
       if (upgradeCategory === 'fpga') return f.fileType === 6;
@@ -236,7 +248,7 @@ export default function UpgradePlan() {
   // Filtered firmware options for select
   const filteredFiles = useMemo(() =>
     firmwareList.map((f) => ({
-      label: `${f.versionName} (${f.versionCode})`,
+      label: `${f.versionCode} [${f.deviceType}]`,
       value: f.id,
     })),
   [firmwareList]);
@@ -282,100 +294,6 @@ export default function UpgradePlan() {
 
   // ---- Filter definitions ----
 
-  const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: t('software.stationCodeOrName'), type: 'input', placeholder: t('software.inputStationCodeOrName') },
-    {
-      name: 'productType',
-      label: t('software.upgrade.productType'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: 'PM-B4860', value: 'PM-B4860' },
-        { label: 'QAFA', value: 'QAFA' },
-        { label: 'QATA', value: 'QATA' },
-        { label: 'QAFB', value: 'QAFB' },
-        { label: 'RTD', value: 'RTD' },
-        { label: 'BaiBNX', value: 'BaiBNX' },
-        { label: 'BaiBNQ', value: 'BaiBNQ' },
-        { label: 'BSC', value: 'BSC' },
-        { label: 'BTS', value: 'BTS' },
-      ],
-    },
-    {
-      name: 'sourceVersion',
-      label: t('software.upgrade.sourceVersion'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: 'V1.1.5', value: 'V1.1.5' },
-        { label: 'V1.2.0', value: 'V1.2.0' },
-        { label: 'V2.0.0', value: 'V2.0.0' },
-      ],
-    },
-    {
-      name: 'targetVersion',
-      label: t('software.upgrade.targetVersion'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: 'V1.3.0', value: 'V1.3.0' },
-        { label: 'V2.1.0', value: 'V2.1.0' },
-      ],
-    },
-    {
-      name: 'deviceGroup',
-      label: t('software.deviceGroup'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: '北京移动', value: '北京移动' },
-        { label: '上海移动', value: '上海移动' },
-        { label: '广东移动', value: '广东移动' },
-        { label: '浙江移动', value: '浙江移动' },
-        { label: '江苏移动', value: '江苏移动' },
-        { label: '四川移动', value: '四川移动' },
-        { label: '湖北移动', value: '湖北移动' },
-        { label: '陕西移动', value: '陕西移动' },
-      ],
-    },
-    {
-      name: 'upgradeType',
-      label: t('software.upgrade.upgradeType'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: t('software.upgrade.immediateUpgrade'), value: 'immediate' },
-        { label: t('software.upgrade.scheduledUpgrade'), value: 'scheduled' },
-        { label: t('software.upgrade.manualUpgrade'), value: 'manual' },
-      ],
-    },
-    {
-      name: 'result',
-      label: t('table.result'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: t('status.success'), value: 'success' },
-        { label: t('status.failed'), value: 'failed' },
-        { label: t('software.status.partialSuccess'), value: 'partial' },
-        { label: t('software.status.upgrading'), value: 'running' },
-        { label: t('software.status.pendingStatus'), value: 'pending' },
-      ],
-    },
-    {
-      name: 'timeRange',
-      label: t('common.timeRange') ?? '时间范围',
-      type: 'date-range',
-      placeholder: t('common.selectTimeRange') ?? '请选择时间范围',
-    },
-  ], [t]);
-
   // Task list filter fields (only task name and time)
   const taskFilterFields: FilterField[] = useMemo(() => [
     { name: 'keyword', label: t('software.taskName'), type: 'input', placeholder: t('software.upgrade.inputTaskName') },
@@ -384,6 +302,29 @@ export default function UpgradePlan() {
       label: t('common.timeRange') ?? '时间范围',
       type: 'date-range',
       placeholder: t('common.selectTimeRange') ?? '请选择时间范围',
+    },
+  ], [t]);
+
+  // Device list filter fields
+  const deviceFilterFields: FilterField[] = useMemo(() => [
+    { name: 'keyword', label: t('software.taskName'), type: 'input', placeholder: t('software.upgrade.inputTaskName') },
+    { name: 'stationCode', label: t('software.stationCode'), type: 'input', placeholder: t('software.inputStationCodeOrName') },
+    {
+      name: 'status',
+      label: t('table.result'),
+      type: 'select',
+      placeholder: t('common.pleaseSelect'),
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('software.status.waiting'), value: 'pending' },
+        { label: t('software.status.downloading'), value: 'downloading' },
+        { label: t('software.status.rebooting'), value: 'rebooting' },
+        { label: t('software.status.verifying'), value: 'verifying' },
+        { label: t('status.success'), value: 'completed' },
+        { label: t('status.failed'), value: 'failed' },
+        { label: t('software.status.paused'), value: 'suspended' },
+        { label: t('common.terminate'), value: 'terminated' },
+      ],
     },
   ], [t]);
 
@@ -415,21 +356,30 @@ export default function UpgradePlan() {
     setAddDeviceModalVisible(true);
   };
 
-  // Mock available devices for add device modal (in real implementation, this would come from a device API)
+  // Fetch real devices from API by product_class
+  const { data: deviceListData } = useDeviceList(
+    {
+      productType: drawerProductType,
+      page: 1,
+      pageSize: 500,
+    },
+    { refetchInterval: 0 },
+  );
+
+  // Available devices: real data from API, excluding already added ones
   const availableDevices = useMemo(() => {
-    if (!drawerProductType) return [];
-    // In a real implementation, this would fetch from a device API
-    return [
-      { id: 'dev-001', deviceSn: 'ENB00001', deviceName: '华北-基站001', sourceVersion: 'V1.1.5', productType: 'PM-B4860', deviceGroup: '北京移动' },
-      { id: 'dev-002', deviceSn: 'ENB00002', deviceName: '华北-基站002', sourceVersion: 'V1.1.5', productType: 'PM-B4860', deviceGroup: '北京移动' },
-      { id: 'dev-003', deviceSn: 'ENB00003', deviceName: '华东-基站001', sourceVersion: 'V1.2.0', productType: 'QAFA', deviceGroup: '上海移动' },
-      { id: 'dev-004', deviceSn: 'ENB00004', deviceName: '华东-基站002', sourceVersion: 'V1.2.0', productType: 'QAFA', deviceGroup: '上海移动' },
-      { id: 'dev-005', deviceSn: 'GNB00001', deviceName: '华南-基站001', sourceVersion: 'V2.0.0', productType: 'QATA', deviceGroup: '广东移动' },
-    ].filter((d) => {
-      if (drawerProductType && d.productType !== drawerProductType) return false;
-      return !drawerDevices.some((existing) => existing.id === d.id);
-    });
-  }, [drawerProductType, drawerDevices]);
+    if (!drawerProductType || !deviceListData?.items) return [];
+    return deviceListData.items
+      .filter((d) => !drawerDevices.some((existing) => existing.id === d.id))
+      .map((d) => ({
+        id: d.id,
+        deviceSn: d.sn,
+        deviceName: d.name,
+        sourceVersion: d.firmwareVersion || d.softwareVersion || '',
+        productType: d.productType,
+        deviceGroup: d.groupName || '',
+      }));
+  }, [drawerProductType, deviceListData, drawerDevices]);
 
   const filteredAvailableDevices = useMemo(() => {
     if (!addDeviceKeyword) return availableDevices;
@@ -439,12 +389,8 @@ export default function UpgradePlan() {
     );
   }, [availableDevices, addDeviceKeyword]);
 
-  // All devices count for selected product type
-  const allDevicesCountOfType = useMemo(() => {
-    // In real implementation, this would come from a device count API
-    if (!drawerProductType) return 0;
-    return availableDevices.length + drawerDevices.length;
-  }, [drawerProductType, availableDevices, drawerDevices]);
+  // Total devices count for selected product type (from API)
+  const allDevicesCountOfType = deviceListData?.total ?? 0;
 
   // Select all filtered devices
   const handleSelectAllDevices = (checked: boolean) => {
@@ -542,7 +488,7 @@ export default function UpgradePlan() {
     }
 
     const deviceIds = selectAllOfType
-      ? availableDevices.map((d) => d.id)
+      ? (deviceListData?.items ?? []).map((d) => d.id)
       : drawerDevices.map((d) => d.id);
 
     createTaskMutation.mutate(
@@ -553,6 +499,7 @@ export default function UpgradePlan() {
         taskType: upgradeCategory === 'software' ? 1 : upgradeCategory === 'patch' ? 4 : 6,
         isKeepConfig: drawerKeepConfig,
         concurrency: batchSize,
+        createSuspended: executionMethod === 'suspend',
       },
       {
         onSuccess: () => {
@@ -621,9 +568,30 @@ export default function UpgradePlan() {
 
   const handleDeleteTaskConfirm = () => {
     if (deleteTaskRecord) {
-      // Delete task is not yet a separate API; terminate handles cleanup
-      void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
-      setDeleteTaskRecord(null);
+      const statusCode = mapTaskStatusToCode(deleteTaskRecord.status);
+      if (statusCode === 4) {
+        // Ended task: use delete API to permanently remove
+        deleteMutation.mutate(deleteTaskRecord.id, {
+          onSuccess: () => {
+            void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
+            setDeleteTaskRecord(null);
+          },
+          onError: (err) => {
+            void message.error(t('common.operationFailed') + ': ' + String(err));
+          },
+        });
+      } else {
+        // Active task: use terminate API to stop first
+        terminateMutation.mutate(deleteTaskRecord.id, {
+          onSuccess: () => {
+            void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
+            setDeleteTaskRecord(null);
+          },
+          onError: (err) => {
+            void message.error(t('common.operationFailed') + ': ' + String(err));
+          },
+        });
+      }
     }
   };
 
@@ -755,7 +723,17 @@ export default function UpgradePlan() {
       width: 120,
       render: (_: unknown, record: UpgradeTaskInfo) => {
         const val = computeProgress(record);
-        return <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />;
+        const statusCode = mapTaskStatusToCode(record.status);
+        // Pending (1) or suspended (3): show normal style, not animated
+        // Ended (4): green success or red exception based on result
+        // In progress (2): animated
+        let progressStatus: 'success' | 'exception' | 'active' | 'normal' = 'normal';
+        if (statusCode === 4) {
+          progressStatus = (record.result === 'failed' || record.result === 'terminated') ? 'exception' : 'success';
+        } else if (statusCode === 2) {
+          progressStatus = 'active';
+        }
+        return <Progress percent={val} size="small" status={progressStatus} />;
       },
     },
     {
@@ -797,7 +775,7 @@ export default function UpgradePlan() {
       },
     },
     { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120, render: (val: string) => val || '-' },
-    { key: 'deviceName', title: t('software.stationName'), dataIndex: 'deviceSn', width: 150, render: (val: string) => val || '-' },
+    { key: 'taskName', title: t('software.taskName'), dataIndex: 'taskName', width: 150, ellipsis: true, render: (val: string) => val || '-' },
     { key: 'sourceVersion', title: t('software.upgrade.sourceVersion'), dataIndex: 'oriVersion', width: 100, render: (val: string) => val || '-' },
     { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'destVersion', width: 100, render: (val: string) => val || '-' },
     {
@@ -810,7 +788,7 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'productType', title: t('software.upgrade.productType'), width: 100, render: () => deviceListTaskId ? '-' : '-' },
+    { key: 'productType', title: t('software.upgrade.productType'), width: 100, render: () => '-' },
     {
       key: 'keepConfig',
       title: t('software.upgrade.keepConfig'),
@@ -833,7 +811,12 @@ export default function UpgradePlan() {
           terminated: 100,
         };
         const val = statusProgress[record.status] ?? 0;
-        return <Progress percent={val} size="small" status={record.status === 'completed' ? 'success' : record.status === 'failed' ? 'exception' : 'active'} />;
+        let progressStatus: 'success' | 'exception' | 'active' | 'normal' = 'normal';
+        if (record.status === 'completed') progressStatus = 'success';
+        else if (record.status === 'failed') progressStatus = 'exception';
+        else if (record.status === 'pending' || record.status === 'suspended') progressStatus = 'normal';
+        else progressStatus = 'active';
+        return <Progress percent={val} size="small" status={progressStatus} />;
       },
     },
     {
@@ -846,12 +829,52 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'failureReason', width: 150, ellipsis: true, render: (val: string) => val ? <span style={{ color: '#ff4d4f' }}>{val}</span> : '-' },
+    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'failureReason', width: 200, render: (_: unknown, record: UpgradeSubTaskInfo) => renderFailureReason(record) },
     { key: 'operator', title: t('table.operator'), dataIndex: 'taskId', width: 100, render: () => '-' },
     { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
     { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
     { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-  ], [t, SUB_TASK_STATUS_MAP, TASK_TYPE_MAP, deviceListTaskId]);
+  ], [t, SUB_TASK_STATUS_MAP, TASK_TYPE_MAP]);
+
+  // Failure reason renderer with i18n and source classification
+  const DEVICE_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED']);
+  const TIMEOUT_CODES = new Set(['DOWNLOAD_TIMEOUT', 'TASK_TIMEOUT']);
+  // These codes carry dynamic details (FaultCode/FaultString etc.) worth showing
+  const DYNAMIC_DETAIL_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED', 'INTERNAL_ERROR', 'FIRMWARE_NOT_FOUND']);
+
+  function renderFailureReason(record: UpgradeSubTaskInfo) {
+    const code: string | undefined = record.failureReason;
+    const detail: string | undefined = record.errorMessage;
+    if (!code && !detail) return '-';
+
+    let sourceTag = '';
+    if (code) {
+      if (DEVICE_CODES.has(code)) {
+        sourceTag = t('software.failureSource.device');
+      } else if (TIMEOUT_CODES.has(code)) {
+        sourceTag = t('software.failureSource.timeout');
+      } else {
+        sourceTag = t('software.failureSource.system');
+      }
+    }
+
+    const i18nLabel = code ? t(`software.failureCode.${code}` as Parameters<typeof t>[0]) : '';
+
+    if (i18nLabel && i18nLabel !== `software.failureCode.${code}`) {
+      const showDetail = detail && detail !== code && code && DYNAMIC_DETAIL_CODES.has(code);
+      return (
+        <div style={{ color: '#ff4d4f', lineHeight: '20px' }}>
+          {sourceTag && <Tag color="default" style={{ marginRight: 4, fontSize: 11 }}>{sourceTag}</Tag>}
+          <span>{i18nLabel}</span>
+          {showDetail && (
+            <div style={{ fontSize: 11, color: '#999', marginTop: 2 }} title={detail}>{detail}</div>
+          )}
+        </div>
+      );
+    }
+
+    return <span style={{ color: '#ff4d4f' }}>{detail || code}</span>;
+  }
 
   // ---- Header buttons ----
   const headerExtra = (
@@ -874,6 +897,8 @@ export default function UpgradePlan() {
           setActiveTab(e.target.value);
           setFilters({});
           setPage(1);
+          setDeviceFilters({});
+          setDevicePage(1);
         }}
         optionType="button"
         buttonStyle="solid"
@@ -886,9 +911,15 @@ export default function UpgradePlan() {
       {/* Search form */}
       <FilterBar
         filterId={`upgrade-plan-filter-${activeTab}`}
-        fields={activeTab === 'task' ? taskFilterFields : filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
+        fields={activeTab === 'task' ? taskFilterFields : deviceFilterFields}
+        onSearch={(vals) => {
+          if (activeTab === 'task') { setFilters(vals); setPage(1); }
+          else { setDeviceFilters(vals); setDevicePage(1); }
+        }}
+        onReset={() => {
+          if (activeTab === 'task') { setFilters({}); setPage(1); }
+          else { setDeviceFilters({}); setDevicePage(1); }
+        }}
       />
 
       {/* Task list tab */}
@@ -915,49 +946,27 @@ export default function UpgradePlan() {
           />
         </Card>
       ) : (
-        // Device list tab - sub-tasks for a selected main task
+        // Device list tab - all sub-tasks across all tasks
         <Card
           size="small"
           bordered
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
-          {!deviceListTaskId ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
-              <DesktopOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-              <div>{t('software.upgrade.selectTaskToViewDevices') ?? '请在任务列表中选择一个任务查看设备列表'}</div>
-              <div style={{ marginTop: 8 }}>
-                <Button type="link" onClick={() => setActiveTab('task')}>
-                  {t('software.upgrade.goToTaskList') ?? '前往任务列表'}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Space>
-                  <span>{t('software.taskName')}: <strong>{deviceListTaskName}</strong></span>
-                </Space>
-                <Button size="small" onClick={() => { setDeviceListTaskId(''); setDeviceListTaskName(''); }}>
-                  {t('common.close') ?? '关闭'}
-                </Button>
-              </div>
-              <DataTable<UpgradeSubTaskInfo>
-                tableId="upgrade-plan-list-device"
-                columns={deviceColumns}
-                dataSource={deviceSubTaskList}
-                rowKey="id"
-                total={deviceSubTaskTotal}
-                currentPage={1}
-                pageSize={100}
-                onPageChange={() => {}}
-                loading={deviceSubTasksLoading}
-                scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
-                showRowNumber
-                rowNumberTitle={t('table.rowNumber')}
-              />
-            </>
-          )}
+          <DataTable<UpgradeSubTaskInfo>
+            tableId="upgrade-plan-list-device"
+            columns={deviceColumns}
+            dataSource={deviceSubTaskList}
+            rowKey="id"
+            total={deviceSubTaskTotal}
+            currentPage={devicePage}
+            pageSize={devicePageSize}
+            onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
+            loading={deviceSubTasksLoading}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
+          />
         </Card>
       )}
 
@@ -1111,7 +1120,7 @@ export default function UpgradePlan() {
             <Button
               type="primary"
               onClick={handleSubmitUpgrade}
-              disabled={(!selectAllOfType && drawerDevices.length === 0) || !upgradeFile}
+              disabled={(!selectAllOfType && drawerDevices.length === 0) || !upgradeFile || createTaskMutation.isPending}
               loading={createTaskMutation.isPending}
             >
               {t('software.upgrade.confirmUpgrade')}
@@ -1149,6 +1158,7 @@ export default function UpgradePlan() {
                 { label: 'RTD', value: 'RTD' },
                 { label: 'BaiBNX', value: 'BaiBNX' },
                 { label: 'BaiBNQ', value: 'BaiBNQ' },
+                { label: 'FAP/BU1810', value: 'FAP/BU1810' },
               ]}
               style={{ width: '100%' }}
             />
@@ -1385,7 +1395,7 @@ export default function UpgradePlan() {
                       type="circle"
                       percent={progress}
                       size={80}
-                      status={progress === 100 ? 'success' : 'active'}
+                      status={resultCode === 1 || resultCode === 3 ? 'normal' : progress === 100 ? 'success' : 'active'}
                     />
                     <div style={{ marginTop: 8, color: '#666' }}>{t('software.upgrade.totalProgress') ?? '总体进度'}</div>
                   </div>
@@ -1422,13 +1432,14 @@ export default function UpgradePlan() {
               </Card>
 
               {/* Device list (sub-tasks) */}
-              <Card title={`${t('software.upgrade.deviceList') ?? '设备列表'} (${totalDevices} ${t('software.upgrade.units') ?? '台'})`} size="small">
+              <Card title={`${t('software.upgrade.deviceList') ?? '设备列表'} (${subTaskList.length} ${t('software.upgrade.units') ?? '台'})`} size="small">
                 <Table
                   size="small"
                   dataSource={subTaskList}
                   rowKey="id"
                   loading={subTasksLoading}
-                  pagination={totalDevices > 10 ? { pageSize: 10 } : false}
+                  pagination={subTaskList.length > 10 ? { pageSize: 10 } : false}
+                  locale={{ emptyText: subTasksLoading ? undefined : t('software.upgrade.noSubTasks') ?? '暂无设备数据' }}
                   scroll={{ y: 300 }}
                   columns={[
                     {
@@ -1438,27 +1449,32 @@ export default function UpgradePlan() {
                       render: (val: string) => val || '-',
                     },
                     {
-                      title: t('software.stationName'),
-                      dataIndex: 'deviceSn',
-                      ellipsis: true,
+                      title: t('software.upgrade.targetVersion'),
+                      dataIndex: 'destVersion',
+                      width: 100,
                       render: (val: string) => val || '-',
                     },
                     {
                       title: t('software.upgrade.sourceVersion'),
                       dataIndex: 'oriVersion',
-                      width: 80,
+                      width: 100,
                       render: (val: string) => val || '-',
                     },
                     {
                       title: t('software.upgrade.upgradeProgress'),
-                      width: 100,
+                      width: 120,
                       render: (_: unknown, record: UpgradeSubTaskInfo) => {
                         const statusProgress: Record<string, number> = {
                           pending: 0, downloading: 25, rebooting: 60, verifying: 85,
                           completed: 100, failed: 100, suspended: 0, terminated: 100,
                         };
                         const val = statusProgress[record.status] ?? 0;
-                        return <Progress percent={val} size="small" status={record.status === 'completed' ? 'success' : record.status === 'failed' ? 'exception' : 'active'} />;
+                        let progressStatus: 'success' | 'exception' | 'active' | 'normal' = 'normal';
+                        if (record.status === 'completed') progressStatus = 'success';
+                        else if (record.status === 'failed') progressStatus = 'exception';
+                        else if (record.status === 'pending' || record.status === 'suspended') progressStatus = 'normal';
+                        else progressStatus = 'active';
+                        return <Progress percent={val} size="small" status={progressStatus} />;
                       },
                     },
                     {
@@ -1473,9 +1489,8 @@ export default function UpgradePlan() {
                     {
                       title: t('software.failureReason'),
                       dataIndex: 'failureReason',
-                      width: 120,
-                      ellipsis: true,
-                      render: (val: string) => val ? <span style={{ color: '#ff4d4f' }}>{val}</span> : '-',
+                      width: 200,
+                      render: (_: unknown, record: UpgradeSubTaskInfo) => renderFailureReason(record),
                     },
                   ]}
                 />

@@ -48,6 +48,11 @@ const (
 	//   - northbound.push.Engine：透传给 DataTypes 含 "device_event" 的 OSS 目标。
 	SubjectDeviceRebootComplete = "device.inform.reboot_complete"
 
+	// SubjectDeviceUpgradeFinish 是 5G 设备上报 102 UPGRADE FINISH 事件时发布。
+	// 表示 5G 设备固件升级流程结束（TransferComplete 仅表示下载完成，5G 需额外等此事件）。
+	// 发布者：acs/handler.go，订阅者：software.UpgradeExecutor（5G 升级终态判定）
+	SubjectDeviceUpgradeFinish = "device.inform.upgrade_finish"
+
 	// SubjectDeviceConnectionRequest 是收到设备发起的 ConnectionRequest Inform 时发布。
 	// 发布者：acs/handler.go，订阅者：暂无
 	SubjectDeviceConnectionRequest = "device.inform.connection_request"

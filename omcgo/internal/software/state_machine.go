@@ -5,7 +5,7 @@ import "fmt"
 // validUpgradeTransitions defines the allowed state transitions for upgrade tasks.
 var validUpgradeTransitions = map[UpgradeState][]UpgradeState{
 	UpgradePending:     {UpgradeDownloading, UpgradeFailed, UpgradeTerminated},
-	UpgradeDownloading: {UpgradeRebooting, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
+	UpgradeDownloading: {UpgradeRebooting, UpgradeCompleted, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
 	UpgradeRebooting:   {UpgradeVerifying, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
 	UpgradeVerifying:   {UpgradeCompleted, UpgradeFailed, UpgradeTerminated},
 	UpgradeSuspended:   {UpgradeDownloading, UpgradeRebooting, UpgradeTerminated},
@@ -50,4 +50,13 @@ func NextUpgradeState(current UpgradeState) UpgradeState {
 	default:
 		return current
 	}
+}
+
+// NextStateAfterTC returns the target state after receiving TransferComplete.
+// 4G devices complete immediately; 5G devices enter rebooting (wait for 102 UPGRADE FINISH).
+func NextStateAfterTC(is5G bool) UpgradeState {
+	if is5G {
+		return UpgradeRebooting
+	}
+	return UpgradeCompleted
 }
