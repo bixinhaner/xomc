@@ -282,75 +282,160 @@ CREATE TABLE IF NOT EXISTS perf_alarm_threshold (
 CREATE INDEX IF NOT EXISTS idx_perf_alarm_threshold_temp_id ON perf_alarm_threshold(temp_id);
 
 -- ============================================================
--- Triggers: updated_at auto-update
+-- Triggers: updated_at auto-update (idempotent)
 -- ============================================================
-CREATE TRIGGER trigger_indicator_unit_updated_at
-    BEFORE UPDATE ON indicator_unit
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_indicator_unit_updated_at
+        BEFORE UPDATE ON indicator_unit
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_indicator_group_enb_updated_at
-    BEFORE UPDATE ON indicator_group_enb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_indicator_group_enb_updated_at
+        BEFORE UPDATE ON indicator_group_enb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_indicator_group_gsm_updated_at
-    BEFORE UPDATE ON indicator_group_gsm
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_indicator_group_gsm_updated_at
+        BEFORE UPDATE ON indicator_group_gsm
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_indicator_group_gnb_updated_at
-    BEFORE UPDATE ON indicator_group_gnb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_indicator_group_gnb_updated_at
+        BEFORE UPDATE ON indicator_group_gnb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_perf_indicators_enb_updated_at
-    BEFORE UPDATE ON perf_indicators_enb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_perf_indicators_enb_updated_at
+        BEFORE UPDATE ON perf_indicators_enb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_perf_indicators_gsm_updated_at
-    BEFORE UPDATE ON perf_indicators_gsm
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_perf_indicators_gsm_updated_at
+        BEFORE UPDATE ON perf_indicators_gsm
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_perf_indicators_gnb_updated_at
-    BEFORE UPDATE ON perf_indicators_gnb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_perf_indicators_gnb_updated_at
+        BEFORE UPDATE ON perf_indicators_gnb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_rela_platform_indicator_formula_enb_updated_at
-    BEFORE UPDATE ON rela_platform_indicator_formula_enb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_rela_platform_indicator_formula_enb_updated_at
+        BEFORE UPDATE ON rela_platform_indicator_formula_enb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_rela_platform_indicator_formula_gsm_updated_at
-    BEFORE UPDATE ON rela_platform_indicator_formula_gsm
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_rela_platform_indicator_formula_gsm_updated_at
+        BEFORE UPDATE ON rela_platform_indicator_formula_gsm
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_rela_platform_indicator_formula_gnb_updated_at
-    BEFORE UPDATE ON rela_platform_indicator_formula_gnb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_rela_platform_indicator_formula_gnb_updated_at
+        BEFORE UPDATE ON rela_platform_indicator_formula_gnb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_enabled_pm_indicators_enb_updated_at
-    BEFORE UPDATE ON enabled_pm_indicators_enb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_enabled_pm_indicators_enb_updated_at
+        BEFORE UPDATE ON enabled_pm_indicators_enb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_enabled_pm_indicators_gsm_updated_at
-    BEFORE UPDATE ON enabled_pm_indicators_gsm
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_enabled_pm_indicators_gsm_updated_at
+        BEFORE UPDATE ON enabled_pm_indicators_gsm
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_enabled_pm_indicators_gnb_updated_at
-    BEFORE UPDATE ON enabled_pm_indicators_gnb
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_enabled_pm_indicators_gnb_updated_at
+        BEFORE UPDATE ON enabled_pm_indicators_gnb
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_perf_template_rel_arithmetic_updated_at
-    BEFORE UPDATE ON perf_template_rel_arithmetic
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_perf_template_rel_arithmetic_updated_at
+        BEFORE UPDATE ON perf_template_rel_arithmetic
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_perf_cust_name_updated_at
-    BEFORE UPDATE ON perf_cust_name
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_perf_cust_name_updated_at
+        BEFORE UPDATE ON perf_cust_name
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_indicator_threshold_updated_at
-    BEFORE UPDATE ON indicator_threshold
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_indicator_threshold_updated_at
+        BEFORE UPDATE ON indicator_threshold
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
-CREATE TRIGGER trigger_perf_alarm_threshold_updated_at
-    BEFORE UPDATE ON perf_alarm_threshold
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- +goose StatementBegin
+DO $$ BEGIN
+    CREATE OR REPLACE TRIGGER trigger_perf_alarm_threshold_updated_at
+        BEFORE UPDATE ON perf_alarm_threshold
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN others THEN NULL;
+END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 -- Drop in reverse dependency order
