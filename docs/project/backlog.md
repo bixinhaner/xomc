@@ -51,7 +51,7 @@
 |------|------|------|------|
 | Total tasks | 37 | — | 初始化 |
 | `done` | 5 | — | 含 R-005 / R-108 关闭 + 流程体系搭建 + L0 Backlog/流水线落地 |
-| `in_dev` | 1 | — | T-0006 贯穿 Sprint-01..07 |
+| `in_dev` | 2 | — | T-0006 贯穿 Sprint-01..07；T-0027 KPI 指标管理 |
 | `planned` | 20 | — | Sprint-01 ~ 07 全量切分 |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
@@ -89,6 +89,7 @@
 | T-0024 | Release Gate 完整演练 1 次（staging） | proc | process | P0 | planned | QA | M | T-0023 | `release-gate.md` | sprint-06 | 2026-04-20 |
 | T-0025 | RC 冻结 + 冒烟用例集（~20 条） | td | infra | P0 | planned | QA | M | T-0006@累计≥150 | — | sprint-07 | 2026-04-20 |
 | T-0026 | Runbook ≥ 5 场景 | docs | ops | P0 | planned | 运维 | M | — | `release-gate.md §3.4` | sprint-07 | 2026-04-20 |
+| T-0027 | F03 KPI 指标管理（标准报表 + 站点报表） | feat | F03 | P1 | in_dev | 电信+前端 | XL | — | — | sprint-01 | 2026-04-26 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。

@@ -307,6 +307,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	pmGroup := permGroup("pm").Group("/pm")
 	thresholdHandler.RegisterRoutes(pmGroup)
 
+	// ----- Indicator management routes → resource "pm" -----
+	ph.indicatorHandler.RegisterRoutes(permGroup("pm"))
+
 	// ----- Dashboard routes → resource "devices" -----
 	md.dashboardHandler.RegisterRoutes(permGroup("devices"))
 

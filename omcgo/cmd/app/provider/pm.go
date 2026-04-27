@@ -6,6 +6,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 )
 
@@ -32,13 +33,38 @@ func initPMModule(c *Container) error {
 		return nil
 	})
 
+	// Initialize indicator management sub-module
+	indicatorGroupRepo := indicator.NewPgGroupRepository(c.PgPool)
+	indicatorRepo := indicator.NewPgIndicatorRepository(c.PgPool)
+	platformFormulaRepo := indicator.NewPgPlatformFormulaRepository(c.PgPool)
+	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
+	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
+	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
+	thresholdRepo := indicator.NewPgIndicatorThresholdRepository(c.PgPool)
+
+	indicatorSvc := indicator.NewIndicatorManagementService(
+		indicatorGroupRepo,
+		indicatorRepo,
+		platformFormulaRepo,
+		enabledRepo,
+		templateRelRepo,
+		custNameRepo,
+		thresholdRepo,
+		c.PgPool,
+		c.Redis,
+		logger.Named("indicator"),
+	)
+
+	indicatorHandler := indicator.NewIndicatorHandler(indicatorSvc, logger.Named("indicator"))
+
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{
-		pmCounterRepo: pmCounterRepo,
-		pmKPIRepo:     pmKPIRepo,
-		pmKPIEngine:   pmKPIEngine,
-		pmTaskRepo:    pmTaskRepo,
-		pmFileStore:   pmFileStore,
+		pmCounterRepo:     pmCounterRepo,
+		pmKPIRepo:         pmKPIRepo,
+		pmKPIEngine:       pmKPIEngine,
+		pmTaskRepo:        pmTaskRepo,
+		pmFileStore:       pmFileStore,
+		indicatorHandler:  indicatorHandler,
 	}
 
 	logger.Info("PM module initialized")
@@ -51,4 +77,7 @@ type pmHandlerDeps struct {
 	pmKPIEngine   *kpi.KPIEngine
 	pmTaskRepo    *pm.PgTaskRepository
 	pmFileStore   *pm.PgPMFileStore
+
+	// Indicator management handler
+	indicatorHandler *indicator.IndicatorHandler
 }
