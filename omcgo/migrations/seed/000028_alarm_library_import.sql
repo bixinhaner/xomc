@@ -1,8 +1,10 @@
 -- Import alarm library from CSV
 -- +goose Up
 
-TRUNCATE alarm_library_i18n;
-TRUNCATE alarm_libraries;
+-- 同一条语句 truncate 两张有 FK 关系的表（alarm_library_i18n.library_id →
+-- alarm_libraries.id ON DELETE CASCADE）。两条独立 TRUNCATE 会被 PG 拒绝：
+-- 被 FK 引用的表必须与所有引用方同时 truncate，否则要 CASCADE。
+TRUNCATE alarm_library_i18n, alarm_libraries RESTART IDENTITY;
 
 INSERT INTO alarm_libraries (alarm_identifier, alarm_source, event_type, severity, enabled, probable_cause, explanation) VALUES
 ('10', 'omc', 'communicationsAlarm', 1, true, '主机切换告警', '主机系统发生故障，导致主备系统切换'),
@@ -401,5 +403,4 @@ ON CONFLICT (alarm_identifier) DO UPDATE SET
 
 -- +goose Down
 
-TRUNCATE alarm_library_i18n;
-TRUNCATE alarm_libraries;
+TRUNCATE alarm_library_i18n, alarm_libraries RESTART IDENTITY;
