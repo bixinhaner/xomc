@@ -3144,6 +3144,7 @@ const messages: Record<string, string> = {
   'software.upgrade.totalProgress':          '总体进度',
   'software.upgrade.batchExecSize':          '每次批量执行设备数：',
   'software.upgrade.noDevicesToAdd':         '没有可添加的设备',
+  'software.upgrade.noSubTasks':             '暂无子任务',
   'software.upgrade.allDevicesAdded':        '的设备已全部在列表中',
   'software.upgrade.availableCount':         '共',
   'software.upgrade.devicesAvailable':       '台设备可选',
@@ -3519,9 +3520,7 @@ const messages: Record<string, string> = {
   'mml.taskDeleted':                         '任务 {name} 已删除',
   'mml.taskCreated':                         '任务创建成功',
   'mml.taskCreateFailed':                    '创建失败: {error}',
-  'mml.startFailed':                         '启动失败: {error}',
-  'mml.pauseFailed':                         '暂停失败: {error}',
-  'mml.cancelFailed':                        '终止失败: {error}',
+
   'mml.deleteFailed':                        '删除失败: {error}',
   'mml.templateDownloading':                 '模板下载功能开发中...',
   'mml.taskNameLabel':                       '任务名称：',

@@ -144,7 +144,7 @@ export default function UpgradePlan() {
   const retryMutation = useRetryTask();
 
   // ---- Task status config with i18n ----
-  const TASK_STATUS_CONFIG = useMemo(() => ({
+  const TASK_STATUS_CONFIG = useMemo((): Record<number, { color: string; text: string }> => ({
     1: { color: TASK_STATUS_COLORS[1], text: t('software.status.waiting') },
     2: { color: TASK_STATUS_COLORS[2], text: t('software.status.inProgress') },
     3: { color: TASK_STATUS_COLORS[3], text: t('software.status.paused') },
@@ -160,7 +160,7 @@ export default function UpgradePlan() {
   }), [t]);
 
   // Task type config with i18n
-  const TASK_TYPE_MAP = useMemo(() => ({
+  const TASK_TYPE_MAP = useMemo((): Record<number, { color: string; text: string }> => ({
     1: { color: TASK_TYPE_COLORS[1], text: t('software.upgrade.softwareUpgrade') },
     2: { color: TASK_TYPE_COLORS[2], text: t('software.rollback.rollback') },
     4: { color: TASK_TYPE_COLORS[4], text: t('software.upgrade.patchUpgrade') },
@@ -1426,7 +1426,7 @@ export default function UpgradePlan() {
                   <Divider type="vertical" style={{ height: 120 }} />
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 32, fontWeight: 'bold', color: '#1890ff' }}>{totalDevices}</div>
-                    <div style={{ color: '#666' }}>{t('software.upgrade.totalDevices') ?? '设备总数'}</div>
+                    <div style={{ color: '#666' }}>{t('software.upgrade.deviceTotal')}</div>
                   </div>
                 </div>
               </Card>

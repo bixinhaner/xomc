@@ -3137,6 +3137,7 @@ const messages: Record<string, string> = {
   'software.upgrade.totalProgress':          'Overall Progress',
   'software.upgrade.batchExecSize':          'Batch execution size:',
   'software.upgrade.noDevicesToAdd':         'No devices to add',
+  'software.upgrade.noSubTasks':             'No sub-tasks',
   'software.upgrade.allDevicesAdded':        'devices are already in the list',
   'software.upgrade.availableCount':         'total',
   'software.upgrade.devicesAvailable':       'devices available',
