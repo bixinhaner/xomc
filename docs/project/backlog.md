@@ -68,9 +68,9 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 42 | — | +5 (T-0038~T-0042 整改启动) |
-| `done` | 7 | — | +T-0038 CI / T-0039 PR 模板 (Wave 1.1/1.2) |
+| `done` | 10 | — | +T-0040 W1.3 / +T-0042 W1.8 / +T-0008 W1.7(DoD-partial 0.5) |
 | `in_dev` | 2 | — | T-0006 贯穿；T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 23 | — | +3 (T-0040 W1.3 / T-0041 W1.4 / T-0042 W1.8) |
+| `planned` | 20 | — | -3 (T-0040 / T-0008 / T-0042 已 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -95,14 +95,16 @@
 |----|------|------|------|-------|-----------|
 | W1.1 | T-0038 | GitHub Actions CI workflow | ✅ 2026-04-27 | — | commit `aaffef29`；GH Actions 触发 |
 | W1.2 | T-0039 | PR 模板 Wave 1 约束 | ✅ 2026-04-27 | — | commit `aaffef29` |
-| **W1.3** | **T-0040** | **acs/worker 加 `/healthz` + `/readyz`** | 🟡 next | TBD | 三进程 `curl /healthz` 200 |
-| W1.4 | T-0041 | `internal/core/middleware/ratelimit` 落地 | 🟡 ready | TBD | 文件存在 + router.go 引用 |
+| W1.3 | T-0040 | acs/worker 加 `/healthz` + `/readyz` | ✅ 2026-04-27 | Claude | commit `d4019f9a`；6/6 health 单元测试 PASS / 100% 覆盖率；httptest 模拟 GET /healthz→200 + GET /readyz（依赖故障）→503 |
+| **W1.4** | **T-0041** | **`internal/core/middleware/ratelimit` 落地** | 🟡 next | TBD | 文件存在 + router.go 引用 |
 | W1.5 | T-0007 + T-0011 | F04 告警 webhook 端到端 | 🟡 ready | 电信+Go | 触发规则 → webhook.site 收真实 POST |
 | W1.6 | T-0006 | E2E 累计用例 @≥20 | 🟡 in_dev | QA | 实跑 `bash e2e_verify.sh` Pass≥20 + 五域各≥1（详见下方决策） |
-| W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | 🟡 ready | 运维 | docker-compose up 三服务 healthy |
-| W1.8 | T-0042 | 数据库定时备份 + 恢复演练 | 🟡 ready | 运维 | RTO 数字 + 演练记录文档 |
+| W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | 🟢 0.5 (DoD-partial) 2026-04-27 | Claude | commit `e878d5e0`；yaml 严格解析 + grep 命中三 service；三 curl 未实测（worktree 无 docker），复现脚本在 verify-T-0008.md §4.2，docker 环境跑后回填 §4.3 即转 ✅ |
+| W1.8 | T-0042 | 数据库定时备份 + 恢复演练 | ✅ 2026-04-27 | Claude | commit `27fa743a`；DoD 三 grep 全过；真跑 backup + restore drill：6 项校验全 OK，**RTO 实测 1.034s**（44MB / 30,030 设备 / 138 表，本机 PG16） |
 
 **Wave 1 退出（2026-05-11 对峙）**：≥ 6/8 ✅ + 用户尽责 → 进 Wave 2；< 4/8 + 用户尽责 → AI 嘴炮认账（见 `docs/methodology/AI承诺对峙清单.md` 第二章）
+
+**📊 当前阶段计分（2026-04-27）**：**4.5 / 8 ✅** = W1.1 + W1.2 + W1.3 + W1.7×0.5 + W1.8 = 2 + 1 + 1 + 0.5 + 1 = 4.5；距退出门槛 6/8 还差 **1.5**。下一步建议：**(A)** 拉起 W1.4 (T-0041 ratelimit) → +1 → 5.5；**(B)** 在带 docker 的环境跑 verify-T-0008.md §4.2 三 curl 把 W1.7 转满 → +0.5 → 5.0；**(A)+(B)** 两条都做即过门 6/8。
 
 **📌 W1.6 spec 决策（2026-04-27）**：
 - 现状：`scripts/e2e_verify.sh` 已含 226 处 `check_status`（多为框架骨架 / 占位），R-002 描述实际可跑用例数为 0（grep `claim` = 0）
@@ -197,7 +199,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 |----|-------|------|--------|------|-------|-------|-----|------|----------|--------|---------|
 | T-0006 | E2E 用例补齐（贯穿 01→07 累计 ≥200） | td | infra | P0 | in_dev | QA | XL | — | R-002 | sprint-01..07 | 2026-04-20 |
 | T-0007 | F04 告警邮件通道 | feat | F04 | P0 | planned | 电信+Go | M | — | R-001 / `prd/F04-alarm-notification.md` | sprint-01 | 2026-04-20 |
-| T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | planned | 运维 | M | — | R-107 | sprint-01 | 2026-04-20 |
+| T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | done(0.5) | Claude | M | — | R-107 | wave-1 | 2026-04-27 |
 | T-0009 | 短信服务商凭据申请启动（外部动作） | td | F04 | P0 | planned | PM | S | — | R-001 | sprint-01 | 2026-04-20 |
 | T-0010 | NATS JetStream 事件总线改造 | feat | infra | P0 | planned | 架构+运维 | XL | — | R-004 / `prd/infra-event-bus.md`（待产出） | sprint-02..04 | 2026-04-20 |
 | T-0011 | F04 告警 Webhook 通道 | feat | F04 | P0 | planned | 电信+Go | M | T-0010 | R-001 / `prd/F04-alarm-notification.md` | sprint-02 | 2026-04-20 |
@@ -217,9 +219,9 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0025 | RC 冻结 + 冒烟用例集（~20 条） | td | infra | P0 | planned | QA | M | T-0006@累计≥150 | — | sprint-07 | 2026-04-20 |
 | T-0026 | Runbook ≥ 5 场景 | docs | ops | P0 | planned | 运维 | M | — | `release-gate.md §3.4` | sprint-07 | 2026-04-20 |
 | T-0027 | F03 KPI 指标管理（标准报表 + 站点报表） | feat | F03 | P1 | in_dev | 电信+前端 | XL | — | — | sprint-01 | 2026-04-26 |
-| T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | P0 | planned | TBD | S | — | `AI承诺对峙清单.md` W1.3 | wave-1 | 2026-04-27 |
+| T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.3 | wave-1 | 2026-04-27 |
 | T-0041 | `internal/core/middleware/ratelimit` 中间件（W1.4） | feat | infra | P0 | planned | TBD | M | — | `AI承诺对峙清单.md` W1.4 | wave-1 | 2026-04-27 |
-| T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | P0 | planned | TBD | S | — | `AI承诺对峙清单.md` W1.8 | wave-1 | 2026-04-27 |
+| T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.8 | wave-1 | 2026-04-27 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -275,6 +277,9 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0035-P5-Breadth | v2 一次性铺满 14 个模块页面 + 分组侧栏 | feat | frontend | 2026-04-22 | 8 真数据列表（alarm/software/backup/license/files/reports/logs/system）+ 6 骨架列表（topology/config/mml/performance/mr/ops）+ 统一 PageShell / Pagination 工具；v2 src 0 tsc errors；build 1093 KB / gzip 310 KB；workspace lint 0/152；详情/图表/执行等深度能力独立立项 |
 | T-0038 | GitHub Actions CI workflow（W1.1） | proc | infra | 2026-04-27 | commit `aaffef29`；`.github/workflows/ci.yml` gentle gate 起步（backend build+vet, frontend typecheck）；ratchet 计划注释保留；W1 末 (2026-05-11) 全部检查阻塞 merge |
 | T-0039 | PR 模板 Wave 1 整改期约束（W1.2） | proc | process | 2026-04-27 | commit `aaffef29`；`.github/pull_request_template.md` 顶部增 8 行整改期约束（PR 必须挂 W1.X / 覆盖率单调不降 / 禁绕过）；既有 DoD 完整模板保留 |
+| T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | 2026-04-27 | commit `d4019f9a`；新增 `internal/core/health` 包（Liveness/Readiness handler + Checker 接口）；6 单元测试 PASS / 100% 覆盖率；ACS HTTP server + worker metrics + app metrics 三处统一注册；httptest 模拟 GET /healthz→200 / GET /readyz（依赖故障）→503；本地 go build / go test ./internal/core/health/... 复核全过 |
+| T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | 2026-04-27 | commit `27fa743a`；`omcgo/scripts/db_backup.sh`（pg_dump custom + 重试 + sha256）+ `db_restore_drill.sh`（临时库 + 6 项校验 + RTO 计时 + trap 销毁）+ cron 配置 + 5 段 runbook；**RTO 实测 1.034s**（44MB / 30,030 设备 / 138 表）；`.gitignore` 加 `backups/` |
+| T-0008 | Prometheus/Grafana/AlertManager 容器编排（W1.7，DoD-partial 0.5） | feat | ops | 2026-04-27 | commit `e878d5e0`；docker-compose 加 prometheus/grafana/alertmanager + healthcheck + 3 volumes；`deployments/monitoring/` 完整配置（prometheus.yml + 3 starter alerts + grafana auto-provisioning + README）；端口冲突解决（9094/3002/9093）；**三 curl 未实测**（worktree 无 docker），复现脚本 verify §4.2 一行可补；docker 环境补 §4.3 后转满 ✅ |
 
 ---
 
@@ -357,6 +362,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-27 | FREEZE 冲突标记 | T-0027 | F03 KPI 与 FREEZE 冲突，PgM 在 2026-04-28 周一规划会前必决（A 暂停 / B Grandfather / C Wave 内消化） |
 | 2026-04-27 | W1.6 spec 决策 | T-0006 | 字面 `grep check_status ≥20` 已被 226 基线自然满足；改判以"实跑 Pass≥20 + 五域各≥1 + `claim` 标记"为准（详见 §3 Wave 1 队列下方决策块） |
 | 2026-04-27 | wave-batched 裁剪生效 | W1.3/W1.7/W1.8 | 三 task 并行 worktree（T-0040/T-0008/T-0042），跳 S0/S1，保留 S2 简+S3-S7；footer 引用 `AI承诺对峙清单.md#W1.X` |
+| 2026-04-27 | done | T-0040 | commit `d4019f9a`；W1.3 acs/worker /healthz+/readyz；新增 `internal/core/health` 包 + 6 单元测试 100% 覆盖率；本地 build/test 复核全过 |
+| 2026-04-27 | done | T-0042 | commit `27fa743a`；W1.8 DB 备份+恢复演练；RTO 实测 1.034s；6 项校验全 OK |
+| 2026-04-27 | done(0.5) | T-0008 | commit `e878d5e0`；W1.7 Prom/Grafana/AlertManager 编排；yaml/grep DoD 全过；**三 curl 实测留作 docker 环境补齐**（复现脚本在 verify §4.2） |
+| 2026-04-27 | Wave 1 阶段计分 | 4.5 / 8 ✅ | W1.1 + W1.2 + W1.3 + W1.7×0.5 + W1.8 = 4.5；距退出门槛 6/8 还差 1.5；下一步 W1.4 (T-0041) + (W1.7 docker 实测 或 W1.5 webhook) |
+| 2026-04-27 | post-mortem | Agent A | 并行 worktree 模式中 T-0040 执行 agent 把改动写到了主 worktree 而非自己隔离 worktree，未发回完成通知 → 主会话以为崩溃，TaskStop 后才发现产物在主分支齐全，本地复核全过；后续启动 agent 的 prompt 必须显式 `cd <isolation worktree path>` 一次确认，避免再发生 |
 
 ---
 
