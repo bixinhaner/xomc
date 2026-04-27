@@ -31,15 +31,17 @@
       "Bash(make lint)",
       "Bash(go build:*)",
       "Bash(go test:*)",
-      "Bash(go vet:*)"
+      "Bash(go vet:*)",
+      "Bash(git worktree remove:*)",
+      "Bash(git branch -D:*)",
+      "Edit(**/.claude/commands/**)",
+      "Write(**/.claude/commands/**)"
     ],
     "ask": [
       "Bash(git rebase:*)",
       "Bash(git reset --hard)",
       "Bash(git reset --hard:*)",
-      "Bash(git branch -D:*)",
-      "Bash(git clean -f:*)",
-      "Bash(git worktree remove:*)"
+      "Bash(git clean -f:*)"
     ],
     "deny": [
       "Bash(git push -f)",

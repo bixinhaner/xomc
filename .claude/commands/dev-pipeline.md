@@ -357,11 +357,15 @@
 6. 关联 Risk mitigation 完成 → 更新 risk-register
 7. 走快速通道 → **强制**补 postmortem 到 risk-register
 8. E2E 覆盖增量记账到 §2 仪表盘
+9. **若来自 worktree（wave-batched 并行模式）**：按 §C.2.4 自动清理 worktree + 删分支；**不得追问用户**
+10. **next-batch 建议**：按 §C.2.5 格式自动输出下一步建议块；**不得追问用户**
 
 **出口门**：
 - [ ] Sprint 状态更新
 - [ ] Backlog Task 关闭
 - [ ] 快速通道均补 postmortem
+- [ ] worktree 已清理（若来自 worktree 模式）
+- [ ] next-batch 建议已输出
 
 ---
 
@@ -375,10 +379,130 @@
 | docs / config | S0, S1, S2, S4 | S3 适用 + S5 轻 + S6, S7 |
 | hotfix | S0, S1 | S2 简 + S3–S6 + S7（**强制 postmortem**） |
 | proc（流程/工具链） | S0 可省 | S1 登记 + S2 轻 + S3–S7 |
+| **wave-batched** | **S0, S1**（PRD/排期凭据由 wave 章程承担） | **S2 简 + S3–S7** |
 
 判定方式：`pick T-NNNN` 读 Task.Type 自动裁剪；或 `--fast <type>` 显式。
 
 **裁剪的阶段**必须在 S6 commit footer 的 `Skip: S0,S1,...` 字段记录。
+
+### §C.1 wave-batched 模式（Wave 整改专用）
+
+**触发条件**（同时满足）：
+1. 当前处于 backlog 顶部声明的 FREEZE / Wave 期（`docs/project/backlog.md` 顶部 ⛔ 横幅）
+2. 任务在 Wave 队列中（W1.X / W2.X / W3.X 编号），且 Sprint 字段为 `wave-N`
+3. Wave 章程已存在（`docs/methodology/AI承诺对峙清单.md` + `docs/project/整改路线图-2026Q2.md`），含该子任务的"承诺内容 + 验证命令 + Pass 标准"
+
+**Footer 写法**：
+```
+PRD: docs/methodology/AI承诺对峙清单.md#W1.X
+Sprint: wave-1
+Risk: <R-NNN 或 ->
+Backlog: T-NNNN
+Skip: S0,S1 (per §C wave-batched)
+Review: docs/review-report/YYYYMMDD/verify-T-NNNN.md
+```
+
+### §C.2 并行批处理协议（worktree 多路）
+
+Wave 期可一次发起 ≥ 2 个 sub-agent 并行处理独立 task。本节是 2026-04-27 实战 post-mortem 后的硬规范。
+
+#### §C.2.1 启动前的冲突编排
+
+主会话先做冲突分析，按改动路径分组：
+- **必须串行**：同一 `router.go` / 同一 `cmd/<unit>/main.go` / 同一 migrations 编号 / 同一 `internal/<mod>/` 下的 handler|service|repo 文件
+- **可以并行**：不同顶级目录（如 `omcgo/scripts/` vs `deployments/` vs `omcgo/internal/core/health/`）
+
+按"并行组 / 串行组"分批，**用户拍板后**再发车。
+
+#### §C.2.2 Agent prompt 必须包含的硬约束块（防 worktree 漂移）
+
+> **背景**：2026-04-27 T-0040 sub-agent 因 prompt 没有显式钉死工作目录，把所有改动写到了主 worktree 而非 isolated worktree，主会话误判为崩溃，浪费一次会话排查。下面这块是事后强制规范。
+
+每个 sub-agent prompt **必须**包含以下原文（主会话拼 prompt 时复制粘贴）：
+
+```
+## 工作目录硬约束
+
+你在一个 isolated git worktree 内执行。第一动作必须：
+
+1. `pwd` — 记录当前路径（应包含 `.claude/worktrees/agent-`）
+2. `git rev-parse --abbrev-ref HEAD` — 确认在 `worktree-agent-*` 分支
+3. 任何 Write / Edit / Bash 命令前，必须再 `pwd` 确认仍在 worktree 内
+4. 严禁 `cd` 到 worktree 路径之外
+5. 写文件一律用相对路径（不要写绝对路径），由 cwd 决定落地位置
+
+## 心跳协议
+
+- 每 5 次工具调用，向 worktree 根写一行到 `.wave-progress.log`：
+  格式 `<ISO-timestamp> <step-name> <files-touched-so-far>`
+- 完成时写 `.wave-status.txt` 单行：`DONE` 或 `FAILED:<reason>`
+- 主会话据此判断是否还活着；超时无心跳 → 视为死亡
+
+## 不要 commit / push / pull
+
+改动留 staged 或 unstaged；主会话稍后进 worktree 自己 commit。
+```
+
+#### §C.2.3 主会话 watchdog
+
+发车后主会话必做：
+1. 记录每个 agent 启动时间戳
+2. 通常 5-15 分钟内收到完成通知
+3. **超 15 分钟无通知** → 启动诊断：
+   - 读 `<worktree-path>/.wave-progress.log` 最后一行时间戳
+   - 若 > 10 分钟无更新 → 推定死亡
+   - 调 `TaskStop <agent-id>`（返回 "task not found" 也无害，证明已退出）
+   - 检查主 worktree 是否被污染（`git status --short`）
+     - 主 worktree 有意外改动 → agent 写错位置，本地核验后接续 commit（不必重起）
+     - 主 worktree 干净 → agent 真死，主会话亲自完成或重起 agent
+
+#### §C.2.4 收尾自动清理（S6 后立即执行，不询问）
+
+每个 task 的 S6 commit 一旦成功，**S7 必须自动**清理对应 worktree：
+
+```bash
+# 1. 强力删 worktree（双 -f 覆盖 claude agent lock）
+git worktree remove -f -f .claude/worktrees/agent-<id>
+
+# 2. 删分支
+git branch -D worktree-agent-<id>
+
+# 3. 验证
+git worktree list           # 仅余 main + design-baseline
+ls .claude/worktrees/       # 空
+```
+
+**Settings 前置**（`.claude/settings.json` `permissions.allow` 必须含）：
+```json
+"Bash(git worktree remove:*)",
+"Bash(git branch -D worktree-agent-*:*)",
+"Edit(.claude/commands/**)",
+"Write(.claude/commands/**)"
+```
+未配 → 每次都走 ask 弹窗或硬 deny，违背"自动"语义。
+
+#### §C.2.5 next-batch 建议（S7 末尾必输出，不需用户追问）
+
+最后一个 task 的 S7 handoff 完成后，**自动**输出下一步建议块：
+
+```
+下一步建议（Wave-N 当前 X.Y / 门槛 6.0，差 △.△）
+
+并行可发车（路径互斥）:
+  - T-AAAA <title>  est=<S/M/L>  改 <path-summary>
+  - T-BBBB <title>  ...
+
+需串行（冲突或依赖未结）:
+  - T-CCCC after T-AAAA  原因 <conflict-or-dep>
+
+最快过门路径: pick T-AAAA + T-BBBB → 预计 +Z → <过门 / 仍差>
+
+外部待办（不计入并行计算）:
+  - T-XXXX 等 docker 环境补 §X.Y 实测
+  - ...
+```
+
+每次 S7 都做，用户可直接照建议 `pick <ID>` 续推或显式说"停"。
 
 ---
 
