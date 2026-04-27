@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AutoComplete, Button, Select, Space, Typography } from 'antd';
+import { AutoComplete, Button, Input, Select, Space, Typography } from 'antd';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import type { MMLCommand, MMLOperationType } from '@core/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
@@ -8,6 +8,9 @@ import { useT } from '@/hooks/useT';
 export interface ParamPathChangePayload {
   operationType: string;
   paramPaths: string[];
+  // 与 paramPaths 等长，仅 MOD 时使用；其他操作类型回传与路径数等长的空串数组
+  // 以便上层无须做长度对齐。
+  paramValues: string[];
 }
 
 interface ParamPathPanelProps {
@@ -15,8 +18,11 @@ interface ParamPathPanelProps {
   onChange?: (payload: ParamPathChangePayload) => void;
 }
 
-// 全量 MML OperationType → TR-069 RPC 方法映射。命令未声明 supportedOperations
-// 时 fallback 到这份全集，保证下拉始终可选其他 RPC 类型（to-do-list #1）。
+// 裸路径模式仅暴露 MML 控制台需求里明确的四种操作。其他 OP（DSP/ACT/DEA/RST/CLR/UPG）
+// 在没有命令绑定的情况下下发语义不清，且后端 service.go 也只接受 LST/DSP/MOD/ADD/RMV，
+// 这里直接收口避免出现"选了但执行失败"的死路径。
+const RAW_DEFAULT_OPERATIONS: MMLOperationType[] = ['LST', 'MOD', 'ADD', 'RMV'];
+
 const OP_LABELS: Record<string, string> = {
   LST: 'GetParameterValues',
   DSP: 'GetParameterValues',
@@ -31,21 +37,14 @@ const OP_LABELS: Record<string, string> = {
   UPG: 'Download',
 };
 
-// 默认展示顺序：从高频到低频，便于用户快速扫读。
-const DEFAULT_OPERATIONS: MMLOperationType[] = [
-  'LST', 'DSP', 'MOD', 'ADD', 'RMV', 'ACT', 'DEA', 'RST', 'CLR', 'UPG',
-];
-
-// 用"稳定 id + path"模型描述每一行；避免像以前用 `${index}-${path}` 做 key
-// 导致输入 path 时键变化 → 组件重挂载 → 光标丢失 → 看起来像"不能输入"
-// （to-do-list #2）。
 interface PathRow {
   id: number;
   path: string;
+  value: string;
 }
 
 let rowIdSeq = 1;
-const newRow = (path = ''): PathRow => ({ id: rowIdSeq++, path });
+const newRow = (path = '', value = ''): PathRow => ({ id: rowIdSeq++, path, value });
 
 export default function ParamPathPanel({ command, onChange }: ParamPathPanelProps) {
   const t = useT();
@@ -54,7 +53,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   const operationOptions = useMemo(() => {
     const declared = command?.supportedOperations?.map((o) => o.toUpperCase()) ?? [];
     if (declared.length > 0) return declared;
-    return DEFAULT_OPERATIONS.slice();
+    return RAW_DEFAULT_OPERATIONS.slice();
   }, [command]);
 
   const suggestedPaths = useMemo(() => {
@@ -68,12 +67,13 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   const [operationType, setOperationType] = useState<string>(defaultOperation);
   const [rows, setRows] = useState<PathRow[]>([newRow()]);
 
-  // onChange 通过 ref 读取，避免 useEffect 依赖它导致父组件每次 render
-  // 都重置行状态。
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  // 命令切换时重置：操作类型回默认、路径清空或预填第一个建议路径。
+  // MOD 需要每行带值，其他操作类型 value 字段不参与 SOAP body 但仍保留在 row 上，
+  // 以便用户切换 op 时不丢已经填的值。
+  const showValueColumn = operationType === 'MOD';
+
   useEffect(() => {
     const nextOperation = (operationOptions[0] || defaultOperation).toUpperCase();
     const firstSuggested = command?.paramPaths?.[0]?.path;
@@ -83,13 +83,17 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
     onChangeRef.current?.({
       operationType: nextOperation,
       paramPaths: nextRows.map((r) => r.path.trim()).filter(Boolean),
+      paramValues: nextRows.filter((r) => r.path.trim()).map((r) => r.value),
     });
   }, [command, defaultOperation, operationOptions]);
 
   const emitChange = (nextOperation: string, nextRows: PathRow[]) => {
+    // 同时过滤 path 和 value，让两个数组下标严格对齐——后端按下标平行绑定。
+    const trimmed = nextRows.filter((r) => r.path.trim() !== '');
     onChangeRef.current?.({
       operationType: nextOperation,
-      paramPaths: nextRows.map((r) => r.path.trim()).filter(Boolean),
+      paramPaths: trimmed.map((r) => r.path.trim()),
+      paramValues: trimmed.map((r) => r.value),
     });
   };
 
@@ -101,6 +105,14 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
   const updatePath = (id: number, value: string) => {
     setRows((prev) => {
       const next = prev.map((r) => (r.id === id ? { ...r, path: value } : r));
+      emitChange(operationType, next);
+      return next;
+    });
+  };
+
+  const updateValue = (id: number, value: string) => {
+    setRows((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, value } : r));
       emitChange(operationType, next);
       return next;
     });
@@ -124,12 +136,6 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
       return next;
     });
   };
-
-  // 不再要求"先选命令"。无命令时面板进入"裸路径直接执行"模式：
-  //   - 操作类型下拉 fallback 到 DEFAULT_OPERATIONS
-  //   - 路径输入无 AutoComplete 建议（命令树没绑定 → suggestedPaths 为空）
-  //   - 后端仅接受 LST/DSP（其它操作类型在 service 层会拒）
-  // 设计依据：MML 控制台需求 #1。
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -156,12 +162,12 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
       <div>
         <Typography.Text style={{ display: 'block', marginBottom: 8 }}>
           {t('mml.console.parameterPath')}
+          {showValueColumn && (
+            <span style={{ marginLeft: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
+              · {t('mml.console.parameterValue')}
+            </span>
+          )}
         </Typography.Text>
-        {/* 使用原生 flex 容器而非 <Space>：antd Space 会把每个子项再包一层
-            .ant-space-item（无 flex-grow），导致设在 AutoComplete 上的
-            `flex:1` 不生效——AutoComplete 会按内部 rc-select 的 search-input
-            长度自收缩，表现为"输入时输入框变小、输入无法正常赋值"。
-            见 to-do-list 本轮 MML#1。 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
           {rows.map((row, index) => (
             <div
@@ -171,7 +177,7 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
                 alignItems: 'flex-start',
                 gap: 8,
                 width: '100%',
-                minWidth: 0, // 让 flex:1 在溢出时能压缩而非撑开父容器
+                minWidth: 0,
               }}
             >
               <span style={{ width: 20, lineHeight: '32px', color: 'rgba(0, 0, 0, 0.45)' }}>
@@ -182,11 +188,19 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
                 options={suggestedPaths}
                 onChange={(value) => updatePath(row.id, value)}
                 placeholder="Device.Services.FAPService.{i}..."
-                style={{ flex: 1, minWidth: 0 }}
+                style={{ flex: showValueColumn ? 2 : 1, minWidth: 0 }}
                 filterOption={(inputValue, option) =>
                   String(option?.value ?? '').toLowerCase().includes(inputValue.toLowerCase())
                 }
               />
+              {showValueColumn && (
+                <Input
+                  value={row.value}
+                  onChange={(event) => updateValue(row.id, event.target.value)}
+                  placeholder={t('mml.console.parameterValuePlaceholder')}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+              )}
               <Button icon={<PlusOutlined />} onClick={() => addPath(row.id)} size="small" />
               <Button
                 icon={<MinusOutlined />}

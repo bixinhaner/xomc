@@ -104,6 +104,7 @@ type ExecuteHTTPRequest struct {
 
 	// Parameter path command support
 	ParamPaths    []string `json:"param_paths"`
+	ParamValues   []string `json:"param_values"`
 	OperationType string   `json:"operation_type"`
 }
 
@@ -133,6 +134,7 @@ type CreateTaskHTTPRequest struct {
 	FailedRetryInterval int  `json:"failed_retry_interval"`
 
 	ParamPaths    []string `json:"param_paths"`
+	ParamValues   []string `json:"param_values"`
 	OperationType string   `json:"operation_type"`
 }
 
@@ -308,6 +310,7 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 		FailedRetryCount:    req.FailedRetryCount,
 		FailedRetryInterval: req.FailedRetryInterval,
 		ParamPaths:          req.ParamPaths,
+		ParamValues:         req.ParamValues,
 		OperationType:       req.OperationType,
 	}
 	if req.ScriptID != "" {

@@ -38,6 +38,7 @@ export default function MMLConsole() {
   const [parameters, setParameters] = useState<CommandParameters>({});
   const [operationType, setOperationType] = useState('');
   const [paramPaths, setParamPaths] = useState<string[]>(['']);
+  const [paramValues, setParamValues] = useState<string[]>([]);
   const [addTemplateModalOpen, setAddTemplateModalOpen] = useState(false);
   const [addTemplateScope, setAddTemplateScope] = useState<'public' | 'private'>('private');
 
@@ -58,6 +59,7 @@ export default function MMLConsole() {
       setParameters({});
       setOperationType('');
       setParamPaths(['']);
+      setParamValues([]);
       commandExecution.clearOutput();
       return;
     }
@@ -70,6 +72,7 @@ export default function MMLConsole() {
     const opType = resolveOperationType(selectedCommand);
     setOperationType(opType);
     setParamPaths(['']);
+    setParamValues([]);
 
     // Auto-populate selectedParams with all paramRef codes when available
     const allParamCodes = selectedCommand.paramRefs?.map((p) => p.paramCode) ?? [];
@@ -175,6 +178,7 @@ export default function MMLConsole() {
     }
 
     setParamPaths(Array.isArray(values.paramPaths) ? values.paramPaths.map(String) : ['']);
+    setParamValues(Array.isArray(values.paramValues) ? values.paramValues.map(String) : []);
     setOperationType(typeof values.operationType === 'string' ? values.operationType : resolveOperationType(commandSelection.selectedCommand));
   }, [activeTab, commandSelection.selectedCommand]);
 
@@ -192,6 +196,7 @@ export default function MMLConsole() {
       isManualEdit,
       operationType,
       paramPaths,
+      paramValues,
       parameters,
       selectedFields,
       selectedParams,
@@ -205,6 +210,7 @@ export default function MMLConsole() {
     isManualEdit,
     operationType,
     paramPaths,
+    paramValues,
     parameters,
     selectedFields,
     selectedParams,
@@ -223,6 +229,7 @@ export default function MMLConsole() {
     setParameters({});
     setOperationType('');
     setParamPaths(['']);
+    setParamValues([]);
   }, [deviceSelection, commandSelection, commandExecution]);
 
   const handleBatchSnConfirm = useCallback((sns: string[]) => {

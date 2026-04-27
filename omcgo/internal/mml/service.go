@@ -440,6 +440,7 @@ type ExecuteRequest struct {
 
 	// Parameter path command support
 	ParamPaths    []string `json:"param_paths"`
+	ParamValues   []string `json:"param_values"` // 与 ParamPaths 等长，仅 MOD 时使用
 	OperationType string   `json:"operation_type"`
 
 	// Scheduling
@@ -512,42 +513,93 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		s.attachParamRefs(ctx, entry, cmd.ID)
 		commands = append(commands, entry)
 	} else if len(req.ParamPaths) > 0 {
-		// 裸路径模式：用户没在命令树选命令，直接在"参数路径"输入框敲了 N 个 TR-069 路径。
-		// 当前仅支持读类操作（LST/DSP → GetParameterValues），写类需要每个 path 配 value，
-		// UI 还没承载该形态，先拒掉避免"看似执行成功但 SOAP 报文为空"的隐性故障。
-		//
-		// param_refs 是合成的最小集合（仅 tr069_path），下游 BuildTR069Params 只读
-		// Tr069Path 字段构造 {names:[...]}，足够 GetParameterValues。
+		// 裸路径模式：用户没在命令树选命令，直接在"参数路径指定"面板敲了 N 个 TR-069 路径。
+		// 支持 LST/DSP/MOD/ADD/RMV 五种操作类型；param_refs 在此处按 op 合成
+		// 最小集合，下游 BuildTR069Params 据此构造 wire 格式 SOAP body。
 		op := strings.ToUpper(strings.TrimSpace(req.OperationType))
 		if op == "" {
 			op = "LST"
 		}
-		if op != "LST" && op != "DSP" {
-			return nil, fmt.Errorf("raw param_paths mode currently only supports LST/DSP, got %q", req.OperationType)
-		}
 
+		// 过滤空路径并对齐 param_values（按下标平行）。
 		paths := make([]string, 0, len(req.ParamPaths))
-		for _, p := range req.ParamPaths {
-			if t := strings.TrimSpace(p); t != "" {
-				paths = append(paths, t)
+		values := make([]string, 0, len(req.ParamPaths))
+		for i, p := range req.ParamPaths {
+			t := strings.TrimSpace(p)
+			if t == "" {
+				continue
+			}
+			paths = append(paths, t)
+			if i < len(req.ParamValues) {
+				values = append(values, req.ParamValues[i])
+			} else {
+				values = append(values, "")
 			}
 		}
 		if len(paths) == 0 {
 			return nil, fmt.Errorf("raw param_paths mode: all paths empty")
 		}
 
-		synthRefs := make([]MMLParamRef, len(paths))
-		for i, p := range paths {
-			synthRefs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
+		switch op {
+		case "LST", "DSP":
+			synthRefs := make([]MMLParamRef, len(paths))
+			for i, p := range paths {
+				synthRefs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
+			}
+			commands = append(commands, map[string]interface{}{
+				"command_code":   "RAW " + op,
+				"rpc_method":     "GetParameterValues",
+				"operation_type": op,
+				"param_paths":    paths,
+				"param_refs":     synthRefs,
+			})
+		case "MOD":
+			// SetParameterValues 一定要有非空值。让 ParamCode == Tr069Path，
+			// 这样 buildParameterValues 可以按 ParamCode 索引到 Tr069Path。
+			for i, v := range values {
+				if strings.TrimSpace(v) == "" {
+					return nil, fmt.Errorf("raw param_paths MOD: param_values[%d] is empty for path %q", i, paths[i])
+				}
+			}
+			synthRefs := make([]MMLParamRef, len(paths))
+			formValues := make(map[string]interface{}, len(paths))
+			for i, p := range paths {
+				synthRefs[i] = MMLParamRef{ParamCode: p, Tr069Path: p, ValueType: "string"}
+				formValues[p] = values[i]
+			}
+			commands = append(commands, map[string]interface{}{
+				"command_code":   "RAW MOD",
+				"rpc_method":     "SetParameterValues",
+				"operation_type": op,
+				"param_paths":    paths,
+				"param_refs":     synthRefs,
+				"parameters":     formValues,
+			})
+		case "ADD":
+			// AddObject 每次仅一个 object_name；N 个路径 → N 条 command。
+			// buildObjectName 会自动补尾点。
+			for _, p := range paths {
+				commands = append(commands, map[string]interface{}{
+					"command_code":   "RAW ADD",
+					"rpc_method":     "AddObject",
+					"operation_type": op,
+					"param_paths":    []string{p},
+					"parameters":     map[string]interface{}{"object_name": p},
+				})
+			}
+		case "RMV", "DEL":
+			for _, p := range paths {
+				commands = append(commands, map[string]interface{}{
+					"command_code":   "RAW " + op,
+					"rpc_method":     "DeleteObject",
+					"operation_type": op,
+					"param_paths":    []string{p},
+					"parameters":     map[string]interface{}{"object_name": p},
+				})
+			}
+		default:
+			return nil, fmt.Errorf("raw param_paths mode: unsupported operation_type %q (allowed: LST/DSP/MOD/ADD/RMV)", req.OperationType)
 		}
-
-		commands = append(commands, map[string]interface{}{
-			"command_code":   "RAW " + op,
-			"rpc_method":     "GetParameterValues",
-			"operation_type": op,
-			"param_paths":    paths,
-			"param_refs":     synthRefs,
-		})
 	}
 
 	// rpc_method 补齐：前端或脚本入口的 commands 可能只带 command_code，

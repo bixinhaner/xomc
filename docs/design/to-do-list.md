@@ -337,3 +337,24 @@ logger.Info("MML fan-out bridge enabled")
 > - MOD 提交时过滤未填参数 ✅（commit 097477dc）
 > - MOD 智能 placeholder + 默认值提示 ✅（commit 097477dc）
 > 详见 `git show 097477dc`。
+
+
+## MML控制台需求完善
+1、选择设备后，不从命令树下选择命令，“参数路径命令” 改为 “参数路径指定”
+2、支持 LST、MOD、ADD、RMV 四种操作类型
+3、MOD 时，有一直“参数值”的设置输入框
+4、api/v1/mml/execute 调用存在问题，请结合实际情况修复，分析 API 的参数并正确传递
+请求数据：{
+    "task_name": "",
+    "device_sns": [
+        "120200024719AAB0039"
+    ],
+    "commands": []
+}
+响应报错：
+{
+    "code": 400,
+    "message": "Bad Request",
+    "details": "one of command_code, script_id, commands, param_paths is required",
+    "request_id": "app-20260427175540-d92b01de"
+}

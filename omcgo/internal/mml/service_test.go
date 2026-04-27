@@ -844,11 +844,125 @@ func TestService_ExecuteCommand_RawParamPaths_DSP_DefaultsToLST(t *testing.T) {
 	require.Len(t, stub.calls[0], 1)
 }
 
-func TestService_ExecuteCommand_RawParamPaths_RejectsWriteOps(t *testing.T) {
-	// 当前实现只支持 LST/DSP，写类必须显式拒绝
-	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+func TestService_ExecuteCommand_RawParamPaths_MOD(t *testing.T) {
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			task.ID = uuid.New()
+			return nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ TaskStatus) error { return nil },
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
 
-	for _, op := range []string{"MOD", "ADD", "RMV", "RST"} {
+	req := ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.DeviceInfo.X", "Device.DeviceInfo.Y"},
+		ParamValues:   []string{"42", "true"},
+		OperationType: "MOD",
+		Creator:       "admin",
+	}
+	_, err := svc.ExecuteCommand(context.Background(), req)
+	require.NoError(t, err)
+
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 1, "1 device × 1 SetParameterValues command")
+	dt := stub.calls[0][0]
+	assert.Equal(t, "SetParameterValues", dt.Method)
+
+	var got struct {
+		Values []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(dt.Params, &got))
+	require.Len(t, got.Values, 2)
+	pairs := map[string]string{}
+	for _, v := range got.Values {
+		pairs[v.Name] = v.Value
+	}
+	assert.Equal(t, "42", pairs["Device.DeviceInfo.X"])
+	assert.Equal(t, "true", pairs["Device.DeviceInfo.Y"])
+}
+
+func TestService_ExecuteCommand_RawParamPaths_MOD_EmptyValueFails(t *testing.T) {
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.X"},
+		ParamValues:   []string{""}, // 显式空值
+		OperationType: "MOD",
+		Creator:       "admin",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "param_values")
+}
+
+func TestService_ExecuteCommand_RawParamPaths_ADD(t *testing.T) {
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			task.ID = uuid.New()
+			return nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ TaskStatus) error { return nil },
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+
+	req := ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.WiFi.SSID.", "Device.WiFi.AccessPoint."},
+		OperationType: "ADD",
+		Creator:       "admin",
+	}
+	_, err := svc.ExecuteCommand(context.Background(), req)
+	require.NoError(t, err)
+
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 2, "ADD 每个 path 一条 command → 2 个 device_tasks")
+	for _, dt := range stub.calls[0] {
+		assert.Equal(t, "AddObject", dt.Method)
+		var got struct {
+			ObjectName string `json:"object_name"`
+		}
+		require.NoError(t, json.Unmarshal(dt.Params, &got))
+		assert.True(t, len(got.ObjectName) > 0 && got.ObjectName[len(got.ObjectName)-1] == '.',
+			"object_name 必须以 . 结尾，got=%q", got.ObjectName)
+	}
+}
+
+func TestService_ExecuteCommand_RawParamPaths_RMV(t *testing.T) {
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			task.ID = uuid.New()
+			return nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ TaskStatus) error { return nil },
+	}
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+
+	req := ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.WiFi.SSID.1."},
+		OperationType: "RMV",
+		Creator:       "admin",
+	}
+	_, err := svc.ExecuteCommand(context.Background(), req)
+	require.NoError(t, err)
+
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 1)
+	assert.Equal(t, "DeleteObject", stub.calls[0][0].Method)
+}
+
+func TestService_ExecuteCommand_RawParamPaths_RejectsUnsupportedOp(t *testing.T) {
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+	for _, op := range []string{"RST", "ACT", "DEA", "CLR", "UPG"} {
 		t.Run(op, func(t *testing.T) {
 			_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
 				DeviceSNs:     []string{"SN-A"},
@@ -857,7 +971,7 @@ func TestService_ExecuteCommand_RawParamPaths_RejectsWriteOps(t *testing.T) {
 				Creator:       "admin",
 			})
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "LST/DSP")
+			assert.Contains(t, err.Error(), "unsupported operation_type")
 		})
 	}
 }

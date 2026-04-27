@@ -17,6 +17,9 @@ type ExecuteCommandParams = {
   isManualEdit: boolean;
   operationType: string;
   paramPaths: string[];
+  // 与 paramPaths 等长。仅 MOD 时携带非空值；其它操作类型可全为空串，
+  // 后端按 op 决定是否使用。
+  paramValues?: string[];
   parameters: Record<string, string | number | boolean>;
   selectedFields: string[];
   selectedParams: string[];
@@ -118,6 +121,7 @@ export function useCommandExecution() {
     isManualEdit,
     operationType,
     paramPaths,
+    paramValues,
     parameters,
     selectedFields,
     selectedParams,
@@ -147,6 +151,20 @@ export function useCommandExecution() {
         });
         return;
       }
+      // MOD 必须为每个非空路径都填值；空值在后端会直接拒绝（fanout 阶段
+      // ErrNoUsableParams），但前端先校验给出明确提示，避免 task 落库后
+      // 才发现 device_tasks 全部跳过。
+      if ((operationType || 'LST').toUpperCase() === 'MOD') {
+        const filteredValues = filterValuesByPaths(paramPaths, paramValues);
+        if (filteredValues.some((v) => !v.trim())) {
+          addOutput({
+            type: 'stderr',
+            text: t('mml.console.errorParamValueRequired'),
+            timestamp: new Date().toLocaleTimeString(),
+          });
+          return;
+        }
+      }
     } else {
       if (!trimmedCommandLineText) {
         addOutput({
@@ -174,6 +192,7 @@ export function useCommandExecution() {
       isManualEdit,
       operationType,
       paramPaths,
+      paramValues,
       parameters,
       selectedFields,
       selectedParams,
@@ -263,6 +282,20 @@ export function useCommandExecution() {
   };
 }
 
+// 把 paramValues 按"非空路径下标"过滤到与 filteredPaths 等长。
+// ParamPathPanel 已经做了平行裁剪，但脚本/模板入口可能传未对齐的值数组，
+// 这里再防御一次以保证下标对齐。
+function filterValuesByPaths(paths: string[], values: string[] | undefined): string[] {
+  if (!values || values.length === 0) return [];
+  const out: string[] = [];
+  for (let i = 0; i < paths.length; i++) {
+    if (paths[i] && paths[i].trim() !== '') {
+      out.push(values[i] ?? '');
+    }
+  }
+  return out;
+}
+
 function buildExecutePayload({
   activeTab,
   command,
@@ -271,6 +304,7 @@ function buildExecutePayload({
   isManualEdit,
   operationType,
   paramPaths,
+  paramValues,
   parameters,
   selectedFields,
   selectedParams,
@@ -328,10 +362,12 @@ function buildExecutePayload({
   }
 
   // paramPath 模式分两种：
-  //   1) 选了命令 → 带 command_code，service 层会按命令的 RPCMethod 走（含 MOD/ADD 等）
-  //   2) 没选命令 → 后端走"裸路径"分支（service.go ExecuteCommand），仅支持 LST/DSP
-  // 两种都把非空 paths 传上去，后端按上下文决定。
+  //   1) 选了命令 → 带 command_code，service 层会按命令的 RPCMethod 走
+  //   2) 没选命令 → 后端走"裸路径"分支（service.go ExecuteCommand），支持 LST/MOD/ADD/RMV
+  // 两种都把非空 paths 传上去，后端按上下文决定。MOD 时附带 param_values，
+  // 后端按下标平行匹配。
   const filteredPaths = paramPaths.filter((path) => path.trim());
+  const filteredValues = filterValuesByPaths(paramPaths, paramValues);
   const opType = operationType || 'LST';
 
   if (!command) {
@@ -339,21 +375,29 @@ function buildExecutePayload({
     const fallbackName = previewPath
       ? `RAW ${opType} ${previewPath.length > 40 ? previewPath.slice(0, 40) + '...' : previewPath}`
       : `RAW ${opType}`;
-    return {
+    const payload: ExecutePayload = {
       task_name: taskName || fallbackName,
       param_paths: filteredPaths,
       operation_type: opType,
       device_sns: deviceSns,
     };
+    if (filteredValues.length > 0) {
+      payload.param_values = filteredValues;
+    }
+    return payload;
   }
 
-  return {
+  const payload: ExecutePayload = {
     task_name: taskName || command.commandCode,
     command_code: command.commandCode,
     param_paths: filteredPaths,
     operation_type: opType,
     device_sns: deviceSns,
   };
+  if (filteredValues.length > 0) {
+    payload.param_values = filteredValues;
+  }
+  return payload;
 }
 
 function outputTaskResults(t: ReturnType<typeof useT>, task: MMLTask, addOutput: (line: TerminalLine) => void) {
