@@ -588,6 +588,8 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				zap.String("method", taskItem.Method),
 				zap.String("task_id", taskItem.ID),
 				zap.String("cwmp_id", cwmpID),
+				zap.Int("soap_size", len(respData)),
+				zap.String("soap_body", string(respData)),
 			)
 			if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
 				entry.Method = taskItem.Method
@@ -747,6 +749,15 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
 			h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
 		} else {
+			log.Info("ACS sending RPC request from task",
+				zap.String("device_sn", deviceSN),
+				zap.String("method", nextTask.Method),
+				zap.String("task_id", nextTask.ID),
+				zap.String("cwmp_id", newCWMPID),
+				zap.Int("soap_size", len(respData)),
+				zap.String("soap_body", string(respData)),
+				zap.String("trigger", "after_rpc_response"),
+			)
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
@@ -995,6 +1006,15 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 			h.metrics.RPCErrorsTotal.WithLabelValues(nextTask.Method).Inc()
 			h.taskService.MarkTaskFailed(r.Context(), nextTask.ID, 0, err.Error())
 		} else {
+			log.Info("ACS sending RPC request from task",
+				zap.String("device_sn", deviceSN),
+				zap.String("method", nextTask.Method),
+				zap.String("task_id", nextTask.ID),
+				zap.String("cwmp_id", newCWMPID),
+				zap.Int("soap_size", len(respData)),
+				zap.String("soap_body", string(respData)),
+				zap.String("trigger", "after_soap_fault"),
+			)
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
@@ -1301,6 +1321,10 @@ func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *
 }
 
 func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte, log *zap.Logger) {
+	log.Debug("ACS sent SOAP",
+		zap.Int("soap_size", len(data)),
+		zap.String("soap_body", string(data)),
+	)
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)

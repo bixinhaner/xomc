@@ -29,6 +29,26 @@ func (s *stubDeviceTaskCreator) BatchCreateTasks(_ context.Context, reqs []*task
 	return out, nil
 }
 
+// stubCmdParamRepo returns canned MMLParamRef sets keyed by command ID.
+// Used to provide param_refs to Fanouter without touching the real DB.
+type stubCmdParamRepo struct {
+	refs map[uuid.UUID][]MMLParamRef
+}
+
+func (s *stubCmdParamRepo) ListByCommandID(_ context.Context, id uuid.UUID) ([]MMLParamRef, error) {
+	return s.refs[id], nil
+}
+
+func (s *stubCmdParamRepo) ListByCommandIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID][]MMLParamRef, error) {
+	out := make(map[uuid.UUID][]MMLParamRef, len(ids))
+	for _, id := range ids {
+		if r, ok := s.refs[id]; ok {
+			out[id] = r
+		}
+	}
+	return out, nil
+}
+
 // --- Mock Repositories ---
 
 type mockCommandRepo struct {
@@ -709,6 +729,16 @@ func TestService_ExecuteCommand_EmptyExecuteType_DefaultsToImmediateAndFansOut(t
 	}
 
 	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+
+	// Fanouter 现在依赖 param_refs 翻译为 TR-069 wire 格式（fanout.go BuildTR069Params）。
+	// LST 命令没有 refs 时 Fanouter 会跳过 command，这里挂上 stub 仓库提供最小可用 refs。
+	svc.SetCmdParamRepo(&stubCmdParamRepo{
+		refs: map[uuid.UUID][]MMLParamRef{
+			resolvedCmd.ID: {
+				{ParamCode: "DEVICE_INFO_HW", Tr069Path: "Device.DeviceInfo.HardwareVersion", ValueType: "string"},
+			},
+		},
+	})
 
 	stub := &stubDeviceTaskCreator{}
 	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
