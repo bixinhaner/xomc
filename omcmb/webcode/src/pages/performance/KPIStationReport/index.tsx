@@ -10,6 +10,8 @@ import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
+import { useDeviceList } from '@/hooks/api/useDevices';
+import { useEnableIndicators, useDisableIndicators } from '@/hooks/api/useIndicator';
 import MeasurementFileDrawer from './components/MeasurementFileDrawer';
 
 /** 测量维护行数据 */
@@ -34,21 +36,10 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   '2': { label: 'status.damaged', color: 'error' },
 };
 
-// Mock 数据
-const mockData: MeasurementRow[] = [
-  { id: '1', serialNumber: 'ENB00001', hostName: '北京朝阳基站01', cellId: '10001', smallCellCode: 'SC001', reportEnable: '1', reportPeriod: 15, status: '1', needReboot: '0', startTime: '2026-04-01 08:00:00', updateTime: '2026-04-02 10:30:00' },
-  { id: '2', serialNumber: 'ENB00002', hostName: '北京海淀基站01', cellId: '10002', smallCellCode: 'SC002', reportEnable: '1', reportPeriod: 15, status: '1', needReboot: '0', startTime: '2026-04-01 08:00:00', updateTime: '2026-04-02 10:30:00' },
-  { id: '3', serialNumber: 'ENB00003', hostName: '上海浦东基站01', cellId: '20001', smallCellCode: 'SC003', reportEnable: '0', reportPeriod: 30, status: '0', needReboot: '0', startTime: '2026-04-01 08:00:00', updateTime: '2026-04-02 10:30:00' },
-  { id: '4', serialNumber: 'GNB00001', hostName: '北京5G基站01', cellId: '30001', smallCellCode: 'SC004', reportEnable: '1', reportPeriod: 15, status: '2', needReboot: '1', startTime: '2026-04-01 08:00:00', updateTime: '2026-04-02 10:30:00' },
-  { id: '5', serialNumber: 'GNB00002', hostName: '北京5G基站02', cellId: '30002', smallCellCode: 'SC005', reportEnable: '1', reportPeriod: 15, status: '1', needReboot: '0', startTime: '2026-04-01 08:00:00', updateTime: '2026-04-02 10:30:00' },
-  { id: '6', serialNumber: 'ENB00004', hostName: '深圳南山基站01', cellId: '40001', smallCellCode: 'SC006', reportEnable: '0', reportPeriod: 30, status: '0', needReboot: '1', startTime: '2026-04-01 08:00:00', updateTime: '2026-04-02 10:30:00' },
-];
-
 export default function KPIMeasurement() {
   const t = useT();
   const { modal, message } = App.useApp();
-  const [
-    filters, setFilters] = useState<Record<string, unknown>>({});
+  const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -56,6 +47,39 @@ export default function KPIMeasurement() {
   // 测量文件抽屉状态
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
   const [currentDevice, setCurrentDevice] = useState<MeasurementRow | null>(null);
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const enableMutation = useEnableIndicators();
+  const disableMutation = useDisableIndicators();
+
+  // ── 设备列表查询 ────────────────────────────────────────────────────────────
+  const deviceParams = useMemo(() => ({
+    searchText: (filters.searchText as string) || undefined,
+    page,
+    pageSize,
+  }), [filters.searchText, page, pageSize]);
+
+  const { data: devicePage, isLoading: deviceLoading } = useDeviceList(deviceParams);
+
+  // 将设备数据映射为 MeasurementRow
+  const tableData: MeasurementRow[] = useMemo(() => {
+    if (!devicePage?.items) return [];
+    return devicePage.items.map((device) => ({
+      id: device.id,
+      serialNumber: device.sn,
+      hostName: device.hostName || device.name,
+      cellId: device.cellId || '',
+      smallCellCode: device.sn,
+      reportEnable: (device.pmReportStatus === 'enabled' || device.connStatus === 'online') ? '1' as const : '0' as const,
+      reportPeriod: 15,
+      status: device.connStatus === 'online' ? '1' as const : '0' as const,
+      needReboot: '0' as const,
+      startTime: device.createTime || '',
+      updateTime: device.lastOnlineTime || '',
+    }));
+  }, [devicePage]);
+
+  const totalCount = devicePage?.total ?? 0;
 
   // 筛选字段配置
   const filterFields: FilterField[] = useMemo(() => [
@@ -88,6 +112,23 @@ export default function KPIMeasurement() {
       ],
     },
   ], [t]);
+
+  // 过滤数据（前端二次过滤 status / measEnable）
+  const filteredData = useMemo(() => {
+    let data = tableData;
+
+    const status = filters.status as string;
+    if (status) {
+      data = data.filter(item => item.status === status);
+    }
+
+    const measEnable = filters.measEnable as string;
+    if (measEnable) {
+      data = data.filter(item => item.reportEnable === measEnable);
+    }
+
+    return data;
+  }, [tableData, filters.status, filters.measEnable]);
 
   // 表格列配置
   const columns: DataTableColumn<MeasurementRow>[] = useMemo(() => [
@@ -195,11 +236,22 @@ export default function KPIMeasurement() {
       content: confirmMsg,
       okText: t('common.confirm'),
       onOk: async () => {
-        console.log('切换测量开关:', { smallCellCode: record.smallCellCode, activeReport: newEnable });
-        void message.success(t('common.success'));
+        try {
+          const mutation = newEnable === '1' ? enableMutation : disableMutation;
+          await mutation.mutateAsync({
+            deviceType: 'ENB',
+            operatorCode: '',
+            indicatorIds: [record.id],
+            enable: newEnable === '1',
+          });
+          void message.success(t('common.success'));
+        } catch (err) {
+          void message.error(t('common.operationFailed'));
+          console.error('Toggle measurement failed:', err);
+        }
       },
     });
-  }, [t, modal, message]);
+  }, [t, modal, message, enableMutation, disableMutation]);
 
   // 批量启用
   const handleBatchEnable = useCallback((enable: '0' | '1') => {
@@ -209,7 +261,7 @@ export default function KPIMeasurement() {
     }
 
     const actionText = enable === '1' ? t('common.enable') : t('common.disable');
-    const hasReboot = mockData.some(
+    const hasReboot = tableData.some(
       (item) => selectedRowKeys.includes(item.id) && item.needReboot === '1'
     );
     const confirmMsg = hasReboot
@@ -221,15 +273,23 @@ export default function KPIMeasurement() {
       content: confirmMsg,
       okText: t('common.confirm'),
       onOk: async () => {
-        const codes = mockData
-          .filter((item) => selectedRowKeys.includes(item.id))
-          .map((item) => item.smallCellCode);
-        console.log('批量切换测量开关:', { smallCellCodes: codes, activeReport: enable });
-        void message.success(t('common.success'));
-        setSelectedRowKeys([]);
+        try {
+          const mutation = enable === '1' ? enableMutation : disableMutation;
+          await mutation.mutateAsync({
+            deviceType: 'ENB',
+            operatorCode: '',
+            indicatorIds: selectedRowKeys as string[],
+            enable: enable === '1',
+          });
+          void message.success(t('common.success'));
+          setSelectedRowKeys([]);
+        } catch (err) {
+          void message.error(t('common.operationFailed'));
+          console.error('Batch toggle measurement failed:', err);
+        }
       },
     });
-  }, [selectedRowKeys, t, modal, message]);
+  }, [selectedRowKeys, tableData, t, modal, message, enableMutation, disableMutation]);
 
   // 批量操作
   const batchActions = useMemo((): BatchAction[] => [
@@ -246,31 +306,6 @@ export default function KPIMeasurement() {
       onClick: () => handleBatchEnable('0'),
     },
   ], [t, handleBatchEnable]);
-
-  // 过滤数据
-  const filteredData = useMemo(() => {
-    let data = mockData;
-
-    const searchText = (filters.searchText as string)?.toLowerCase() || '';
-    if (searchText) {
-      data = data.filter(item =>
-        item.serialNumber.toLowerCase().includes(searchText) ||
-        item.hostName.toLowerCase().includes(searchText)
-      );
-    }
-
-    const status = filters.status as string;
-    if (status) {
-      data = data.filter(item => item.status === status);
-    }
-
-    const measEnable = filters.measEnable as string;
-    if (measEnable) {
-      data = data.filter(item => item.reportEnable === measEnable);
-    }
-
-    return data;
-  }, [filters]);
 
   // 搜索处理
   const handleSearch = useCallback((vals: Record<string, unknown>) => {
@@ -303,12 +338,12 @@ export default function KPIMeasurement() {
           tableId="kpi-measurement-table"
           columns={columns}
           dataSource={filteredData}
-          loading={false}
+          loading={deviceLoading}
           rowKey="id"
           selectable
           selectedRowKeys={selectedRowKeys}
           onSelectionChange={setSelectedRowKeys}
-          total={filteredData.length}
+          total={totalCount}
           pageSize={pageSize}
           currentPage={page}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}

@@ -8,3 +8,4 @@ export * from './system';
 export * from './task';
 export * from './topology';
 export * from './mml';
+export * from './indicator';

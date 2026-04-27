@@ -163,8 +163,10 @@ http.interceptors.response.use(
       | undefined;
 
     if (responseData) {
+      // Unify error message extraction
+      // Prefer details over message (message is often generic like "Internal Server Error")
       const message =
-        responseData.message || responseData.error || responseData.details;
+        responseData.details || responseData.message || responseData.error;
       if (message) {
         error.message = message;
       }

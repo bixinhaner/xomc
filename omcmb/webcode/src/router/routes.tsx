@@ -56,6 +56,7 @@ const InteropTesting     = React.lazy(() => import('@/pages/config/InteropTestin
 
 // Performance Management
 const KPIStandard        = React.lazy(() => import('@/pages/performance/KPIStandardReport'));
+const KPIIndicatorDetail = React.lazy(() => import('@/pages/performance/KPIStandardReport/IndicatorDetail'));
 const KPIStation         = React.lazy(() => import('@/pages/performance/KPIStationReport'));
 const KPIQuery            = React.lazy(() => import('@/pages/performance/KPIQuery'));
 const PerformanceCharts  = React.lazy(() => import('@/pages/performance/PerformanceCharts'));
@@ -231,6 +232,7 @@ export const routes: RouteObject[] = [
 
       // Performance Management
       { path: 'performance/kpi-standard',  element: withSuspense(KPIStandard) },
+      { path: 'performance/kpi-standard/detail/:deviceType/:indicatorId', element: withSuspense(KPIIndicatorDetail) },
       { path: 'performance/kpi-station',   element: withSuspense(KPIStation) },
       { path: 'performance/query',         element: withSuspense(KPIQuery) },
       { path: 'performance/charts',        element: withSuspense(PerformanceCharts) },

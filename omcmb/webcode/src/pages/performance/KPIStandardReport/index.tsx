@@ -1,119 +1,104 @@
-import { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { App, Button, Drawer, Form, Input, Modal, Radio, Select, Space, Tag, Tree, Typography } from 'antd';
 import { PlusOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import type { AxiosError } from 'axios';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import {
+  useIndicatorGroupTree,
+  useIndicatorList,
+  useCreateIndicator,
+  useUpdateIndicator,
+  useDeleteIndicator,
+  useEnableIndicators,
+  useDisableIndicators,
+  useExportIndicators,
+  useUpdateCustName,
+} from '@/hooks/api/useIndicator';
+import { indicatorApi } from '@/services/api/indicatorApi';
+import { useAppStore } from '@/store/appStore';
+import { useUserStore } from '@/store/userStore';
+import type { IndicatorGroup, PerfIndicator } from '@/types/indicator';
 
-// KPI 指标数据接口
+const { Link } = Typography;
+
+// KPI 指标行数据接口（适配后端 PerfIndicator）
 interface KPIIndicatorRow extends Record<string, unknown> {
-  kpiId: string;                    // 指标ID
-  kpiName: string;                  // 指标名称
-  productType: string;              // 产品类型
-  custName: string;                 // 自定义指标名称
-  indicatorLevel: 'device' | 'plmn'; // 等级
-  unit: string;                     // 单位
-  isCustomize: 0 | 1;               // 是否自定义指标
-  isEnable: 0 | 1;                  // 是否启用测量
-  indicatorType: 'counter' | 'kpi'; // 指标类型
-  networkType: 'eNB' | 'gNB' | 'GSM'; // 网络类型
-  category: string;                 // 所属分类（call, context, data, drb, erab, ho等）
-  updater: string;                  // 更新人
-  updateTime: string;               // 更新时间
+  kpiId: string;
+  kpiName: string;
+  productType: string;
+  custName: string;
+  indicatorLevel: string;
+  unit: string;
+  isCustomize: boolean;
+  isEnable: boolean;
+  indicatorType: string;
+  catagoryId: string;
+  catagoryName: string;
+  updater: string;
+  updateTime: string;
+  arithmetic: string;
+  definition: string;
+  statisType: string;
+  calculatingStatus: string;
 }
 
-// 指标功能集数据
-interface FunctionSetItem {
-  id: string;
-  name: string;
-  networkType: 'eNB' | 'gNB' | 'GSM';
-  description: string;
-  kpiCount: number;
+function getLocalizedIndicatorName(ind: PerfIndicator, locale: string): string {
+  if (locale === 'en-US') return ind.kpiNameEn || ind.kpiName || ind.kpiNameZh || '-';
+  return ind.kpiNameZh || ind.kpiName || ind.kpiNameEn || '-';
 }
 
-const MOCK_FUNCTION_SETS: FunctionSetItem[] = [
-  { id: 'fs-1', name: '接入类指标', networkType: 'eNB', description: 'RRC、ERAB等接入相关KPI', kpiCount: 15 },
-  { id: 'fs-2', name: '切换类指标', networkType: 'eNB', description: '切换成功率相关KPI', kpiCount: 8 },
-  { id: 'fs-3', name: '吞吐量指标', networkType: 'gNB', description: '上下行吞吐量KPI', kpiCount: 12 },
-  { id: 'fs-4', name: '可用性指标', networkType: 'GSM', description: '基站可用性KPI', kpiCount: 6 },
-];
+function getLocalizedDefinition(ind: PerfIndicator, locale: string): string {
+  if (locale === 'en-US') return ind.definitionEn || ind.definition || ind.definitionZh || '';
+  return ind.definitionZh || ind.definition || ind.definitionEn || '';
+}
 
-// Mock KPI 指标数据
-const MOCK_KPI_DATA: KPIIndicatorRow[] = [
-  // ========== eNB 指标 ==========
-  // Call 类
-  { kpiId: 'RRC_CONN_REQ', kpiName: 'RRC连接请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'call', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
-  { kpiId: 'RRC_CONN_SUCC', kpiName: 'RRC连接成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'call', updater: 'admin', updateTime: '2024-03-20 10:30:00' },
-  { kpiId: 'RRC_SR', kpiName: 'RRC连接成功率', productType: 'BBU', custName: '接入成功率', indicatorLevel: 'plmn', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'call', updater: 'user1', updateTime: '2024-03-21 14:20:00' },
-  // ERAB 类
-  { kpiId: 'ERAB_SETUP_REQ', kpiName: 'ERAB建立请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 0, indicatorType: 'counter', networkType: 'eNB', category: 'erab', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
-  { kpiId: 'ERAB_SETUP_SUCC', kpiName: 'ERAB建立成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'erab', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
-  { kpiId: 'ERAB_SR', kpiName: 'ERAB建立成功率', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: '%', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'erab', updater: 'admin', updateTime: '2024-03-19 09:15:00' },
-  // HO 类
-  { kpiId: 'HO_EXEC', kpiName: '切换执行次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'ho', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
-  { kpiId: 'HO_SUCC', kpiName: '切换成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'ho', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
-  { kpiId: 'HO_SR', kpiName: '切换成功率', productType: 'BBU', custName: '', indicatorLevel: 'plmn', unit: '%', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'ho', updater: 'admin', updateTime: '2024-03-18 16:45:00' },
-  // Data 类
-  { kpiId: 'DL_DATA_VOL', kpiName: '下行数据量', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: 'MB', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
-  { kpiId: 'UL_DATA_VOL', kpiName: '上行数据量', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: 'MB', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
-  // DRB 类
-  { kpiId: 'DRB_SETUP_REQ', kpiName: 'DRB建立请求次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'drb', updater: 'admin', updateTime: '2024-03-16 14:30:00' },
-  { kpiId: 'DRB_SETUP_SUCC', kpiName: 'DRB建立成功次数', productType: 'BBU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'eNB', category: 'drb', updater: 'admin', updateTime: '2024-03-16 14:30:00' },
+function getLocalizedGroupName(group: IndicatorGroup, locale: string): string {
+  if (locale === 'en-US') return group.enName || group.cnName || group.id;
+  return group.cnName || group.enName || group.id;
+}
 
-  // ========== gNB 指标 ==========
-  // Call 类
-  { kpiId: 'NR_RRC_CONN_REQ', kpiName: 'NR RRC连接请求次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'call', updater: 'admin', updateTime: '2024-03-15 09:00:00' },
-  { kpiId: 'NR_RRC_CONN_SUCC', kpiName: 'NR RRC连接成功次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'call', updater: 'admin', updateTime: '2024-03-15 09:00:00' },
-  { kpiId: 'NR_RRC_SR', kpiName: 'NR RRC连接成功率', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: '%', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'call', updater: 'admin', updateTime: '2024-03-15 09:00:00' },
-  // Data 类
-  { kpiId: 'DL_THROUGHPUT', kpiName: '下行吞吐量', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
-  { kpiId: 'UL_THROUGHPUT', kpiName: '上行吞吐量', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'data', updater: 'admin', updateTime: '2024-03-17 11:00:00' },
-  { kpiId: 'NR_DL_THROUGHPUT', kpiName: 'NR下行平均吞吐量', productType: 'AAU', custName: '', indicatorLevel: 'plmn', unit: 'Gbps', isCustomize: 0, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'data', updater: 'admin', updateTime: '2024-03-14 16:00:00' },
-  // HO 类
-  { kpiId: 'NR_HO_EXEC', kpiName: 'NR切换执行次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'ho', updater: 'admin', updateTime: '2024-03-13 10:30:00' },
-  { kpiId: 'NR_HO_SUCC', kpiName: 'NR切换成功次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'ho', updater: 'admin', updateTime: '2024-03-13 10:30:00' },
-  // DRB 类
-  { kpiId: 'NR_DRB_SETUP_REQ', kpiName: 'NR DRB建立请求次数', productType: 'AAU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'gNB', category: 'drb', updater: 'admin', updateTime: '2024-03-12 08:00:00' },
+// 将 PerfIndicator 映射为行数据
+function toRow(ind: PerfIndicator, locale: string): KPIIndicatorRow {
+  return {
+    kpiId: ind.kpiId,
+    kpiName: getLocalizedIndicatorName(ind, locale),
+    productType: ind.productType,
+    custName: ind.custName,
+    indicatorLevel: ind.indicatorLevel,
+    unit: ind.unit,
+    isCustomize: ind.isCustomize,
+    isEnable: ind.isEnable,
+    indicatorType: ind.indicatorType,
+    catagoryId: ind.catagoryId,
+    catagoryName: ind.catagoryName,
+    updater: ind.updater,
+    updateTime: ind.updateTime,
+    arithmetic: ind.arithmetic,
+    definition: getLocalizedDefinition(ind, locale),
+    statisType: ind.statisType,
+    calculatingStatus: ind.calculatingStatus,
+  };
+}
 
-  // ========== GSM 指标 ==========
-  { kpiId: 'GSM_CALL_REQ', kpiName: 'GSM呼叫请求次数', productType: 'RRU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'GSM', category: 'call', updater: 'admin', updateTime: '2024-03-11 15:00:00' },
-  { kpiId: 'GSM_CALL_SUCC', kpiName: 'GSM呼叫成功次数', productType: 'RRU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'GSM', category: 'call', updater: 'admin', updateTime: '2024-03-11 15:00:00' },
-  { kpiId: 'GSM_HO_EXEC', kpiName: 'GSM切换执行次数', productType: 'RRU', custName: '', indicatorLevel: 'device', unit: '次', isCustomize: 0, isEnable: 1, indicatorType: 'counter', networkType: 'GSM', category: 'ho', updater: 'admin', updateTime: '2024-03-10 11:00:00' },
+function formatDateTime(value?: string): string {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
-  // ========== 自定义指标 ==========
-  { kpiId: 'CUSTOM_KPI_001', kpiName: '自定义接入指标', productType: 'BBU', custName: '我的接入指标', indicatorLevel: 'device', unit: '%', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', networkType: 'eNB', category: 'custom', updater: 'user1', updateTime: '2024-03-22 08:30:00' },
-  { kpiId: 'CUSTOM_KPI_002', kpiName: '自定义吞吐量指标', productType: 'AAU', custName: '我的吞吐量指标', indicatorLevel: 'plmn', unit: 'Mbps', isCustomize: 1, isEnable: 1, indicatorType: 'kpi', networkType: 'gNB', category: 'custom', updater: 'user1', updateTime: '2024-03-22 09:00:00' },
-];
-
-// 二级节点配置
-const SECOND_LEVEL_NODES = [
-  { key: 'call', labelKey: 'kpi.tree.call' },
-  { key: 'context', labelKey: 'kpi.tree.context' },
-  { key: 'customize', labelKey: 'kpi.tree.customize' },
-  { key: 'data', labelKey: 'kpi.tree.data' },
-  { key: 'drb', labelKey: 'kpi.tree.drb' },
-  { key: 'endc-mn', labelKey: 'kpi.tree.endcMn' },
-  { key: 'eqpt', labelKey: 'kpi.tree.eqpt' },
-  { key: 'erab', labelKey: 'kpi.tree.erab' },
-  { key: 'ho', labelKey: 'kpi.tree.ho' },
-  { key: 'custom', labelKey: 'kpi.tree.custom' },
-];
-
-// 产品类型选项
-const PRODUCT_TYPE_OPTIONS = [
-  { label: '全部', value: '' },
-  { label: 'BBU', value: 'BBU' },
-  { label: 'RRU', value: 'RRU' },
-  { label: 'AAU', value: 'AAU' },
-];
-
-// 等级选项
-const LEVEL_OPTIONS = [
-  { label: '全部', value: '' },
-  { label: 'Device', value: 'device' },
-  { label: 'PLMN', value: 'plmn' },
+// 设备类型标签页映射
+type DeviceTypeTab = 'ENB' | 'GSM' | 'GNB';
+const DEVICE_TABS: { key: DeviceTypeTab; labelKey: string }[] = [
+  { key: 'ENB', labelKey: 'kpi.tree.enbSet' },
+  { key: 'GSM', labelKey: 'kpi.tree.gsmSet' },
+  { key: 'GNB', labelKey: 'kpi.tree.gnbSet' },
 ];
 
 // 树节点带悬停图标的渲染
@@ -179,129 +164,72 @@ function TreeNodeTitle({ title, nodeKey, isCustom, onAdd, onEdit, onDelete }: Tr
   );
 }
 
-function useKPITreeData(
+/**
+ * 将后端 IndicatorGroup 树转换为 antd DataNode 树
+ */
+function useGroupTreeData(
   t: (id: string) => string,
-  customNodes: { key: string; parentKey: string; title: string }[],
+  groups: IndicatorGroup[],
+  _customNodes: { key: string; parentKey: string; title: string }[],
   onAddNode: (parentKey: string) => void,
   onEditNode: (nodeKey: string, title: string) => void,
   onDeleteNode: (nodeKey: string) => void,
-  searchValue: string
+  searchValue: string,
+  locale: string,
+  deviceType: DeviceTypeTab,
 ): DataNode[] {
   return useMemo(() => {
     const lowerSearch = searchValue.toLowerCase();
 
-    // 检查节点是否匹配搜索
     const nodeMatchesSearch = (label: string): boolean => {
       if (!searchValue) return true;
       return label.toLowerCase().includes(lowerSearch);
     };
 
-    // 构建二级节点
-    const buildSecondLevelNodes = (parentKey: string): DataNode[] => {
-      // 预定义节点
-      const predefinedNodes: DataNode[] = SECOND_LEVEL_NODES.map((node) => {
-        const nodeKey = `${parentKey}-${node.key}`;
-        const isCustom = node.key === 'custom';
-        const label = t(node.labelKey);
+    const convertGroup = (group: IndicatorGroup): DataNode | null => {
+      const isRoot = group.parentId === group.id;
+      const rootLabelKey =
+        deviceType === 'ENB' ? 'kpi.tree.enbSet'
+          : deviceType === 'GSM' ? 'kpi.tree.gsmSet'
+            : 'kpi.tree.gnbSet';
+      const label = isRoot ? t(rootLabelKey) : getLocalizedGroupName(group, locale);
+      const isCustom = !group.isBuildIn;
+      const childNodes = (group.children || [])
+        .map(convertGroup)
+        .filter(Boolean) as DataNode[];
 
-        // 查找该节点下的自定义子节点
-        const childCustomNodes = customNodes.filter((cn) => cn.parentKey === nodeKey);
+      const selfMatches = nodeMatchesSearch(label);
+      const hasMatchingChildren = childNodes.length > 0;
 
-        // 过滤子节点
-        const filteredChildren = childCustomNodes.filter((cn) => nodeMatchesSearch(cn.title));
-
-        // 如果有搜索词，检查是否匹配
-        const selfMatches = nodeMatchesSearch(label);
-        const hasMatchingChildren = filteredChildren.length > 0;
-
-        // 如果搜索词存在且节点和子节点都不匹配，则不显示
-        if (searchValue && !selfMatches && !hasMatchingChildren) {
-          return null;
-        }
-
-        return {
-          title: (
-            <TreeNodeTitle
-              title={label}
-              nodeKey={nodeKey}
-              isCustom={isCustom}
-              onAdd={onAddNode}
-              onEdit={isCustom ? onEditNode : undefined}
-              onDelete={isCustom ? onDeleteNode : undefined}
-            />
-          ),
-          key: nodeKey,
-          children: filteredChildren.length > 0 ? filteredChildren.map((cn) => ({
-            title: (
-              <TreeNodeTitle
-                title={cn.title}
-                nodeKey={cn.key}
-                isCustom
-                onAdd={onAddNode}
-                onEdit={onEditNode}
-                onDelete={onDeleteNode}
-              />
-            ),
-            key: cn.key,
-            isLeaf: true,
-          })) : undefined,
-        };
-      }).filter(Boolean) as DataNode[];
-
-      return predefinedNodes;
-    };
-
-    // 构建一级节点
-    const buildFirstLevelNodes = (): DataNode[] => {
-      const nodes = [
-        { key: 'enb-set', labelKey: 'kpi.tree.enbSet' },
-        { key: 'gnb-set', labelKey: 'kpi.tree.gnbSet' },
-        { key: 'gsm-set', labelKey: 'kpi.tree.gsmSet' },
-      ];
-
-      return nodes.map((node) => {
-        const children = buildSecondLevelNodes(node.key);
-        const label = t(node.labelKey);
-
-        // 如果有搜索词，检查一级节点标签或子节点是否匹配
-        if (searchValue) {
-          const labelMatches = nodeMatchesSearch(label);
-          const hasChildren = children.length > 0;
-          if (!labelMatches && !hasChildren) {
-            return null;
-          }
-        }
-
-        return {
-          title: label,
-          key: node.key,
-          children: children.length > 0 ? children : undefined,
-        };
-      }).filter(Boolean) as DataNode[];
-    };
-
-    const firstLevelNodes = buildFirstLevelNodes();
-
-    // 检查根节点是否匹配
-    if (searchValue) {
-      const rootLabel = t('kpi.tree.all');
-      if (!nodeMatchesSearch(rootLabel) && firstLevelNodes.length === 0) {
-        return [];
+      if (searchValue && !selfMatches && !hasMatchingChildren) {
+        return null;
       }
-    }
 
-    return [
-      {
-        title: t('kpi.tree.all'),
-        key: 'all',
-        children: firstLevelNodes,
-      },
-    ];
-  }, [t, customNodes, onAddNode, onEditNode, onDeleteNode, searchValue]);
+      return {
+        title: (
+          <TreeNodeTitle
+            title={label}
+            nodeKey={group.id}
+            isCustom={isCustom}
+            onAdd={onAddNode}
+            onEdit={isCustom ? onEditNode : undefined}
+            onDelete={isCustom ? onDeleteNode : undefined}
+          />
+        ),
+        key: group.id,
+        children: childNodes.length > 0 ? childNodes : undefined,
+      };
+    };
+
+    return groups.map(convertGroup).filter(Boolean) as DataNode[];
+  }, [groups, onAddNode, onEditNode, onDeleteNode, searchValue, locale, t, deviceType]);
 }
 
 export default function KPIStandardReport() {
   const t = useT();
+  const navigate = useNavigate();
+  const locale = useAppStore((s) => s.locale);
+  const currentUser = useUserStore((s) => s.currentUser);
   const { message, modal } = App.useApp();
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [treeSearchValue, setTreeSearchValue] = useState('');
@@ -312,21 +240,78 @@ export default function KPIStandardReport() {
   // 筛选状态
   const [productType, setProductType] = useState<string>('');
   const [indicatorLevel, setIndicatorLevel] = useState<string>('');
+  const [indicatorTypeFilter, setIndicatorTypeFilter] = useState<string>('');
+  const [isEnableFilter, setIsEnableFilter] = useState<string>('');
+
+  // 设备类型标签页
+  const [deviceType, setDeviceType] = useState<DeviceTypeTab>('ENB');
 
   // 已选指标
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
-  // Add function set modal state
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [addForm] = Form.useForm<{ name: string; networkType: 'eNB' | 'gNB' | 'GSM'; description: string }>();
-  const [functionSets, setFunctionSets] = useState<FunctionSetItem[]>(MOCK_FUNCTION_SETS);
+  // Custom tree nodes state
+  const [customNodes, setCustomNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
+
+  const levelOptions = useMemo(() => [
+    { label: t('kpi.all'), value: '' },
+    { label: 'Device', value: 'device' },
+    { label: 'PLMN', value: 'plmn' },
+  ], [t]);
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const createIndicator = useCreateIndicator();
+  const updateIndicator = useUpdateIndicator();
+  const deleteIndicator = useDeleteIndicator();
+  const enableIndicators = useEnableIndicators();
+  const disableIndicators = useDisableIndicators();
+  const updateCustName = useUpdateCustName();
+  const exportIndicators = useExportIndicators();
+
+  // ── Queries: 功能集树 ───────────────────────────────────────────────────────
+  const { data: groupTreeData = [], isLoading: groupTreeLoading, refetch: refetchGroupTree } = useIndicatorGroupTree({
+    deviceType,
+  });
+
+  // ── Queries: 指标列表 ───────────────────────────────────────────────────────
+  // 树节点 key 直接使用 API 返回的 group ID，可直接传给后端
+  const selectedGroupId = useMemo(() => {
+    // 根节点（自引用 parent_id==id）不作为过滤条件
+    if (!selectedCategory) return undefined;
+    const rootGroup = groupTreeData.find(g => g.id === selectedCategory && g.parentId === g.id);
+    if (rootGroup) return undefined;
+    return selectedCategory;
+  }, [selectedCategory, groupTreeData]);
+
+  const indicatorListParams = useMemo(() => ({
+    deviceType,
+    catagoryId: selectedGroupId,
+    searchText: tableSearchValue || undefined,
+    productType: productType || undefined,
+    indicatorType: indicatorTypeFilter || undefined,
+    isEnable: isEnableFilter || undefined,
+    indicatorLevel: indicatorLevel || undefined,
+    page,
+    rows: pageSize,
+  }), [deviceType, selectedGroupId, tableSearchValue, productType, indicatorTypeFilter, isEnableFilter, indicatorLevel, page, pageSize]);
+
+  const { data: indicatorPage, isLoading: indicatorLoading, refetch: refetchIndicatorList } = useIndicatorList(indicatorListParams);
+
+  // 将后端数据转换为行数据
+  const tableData: KPIIndicatorRow[] = useMemo(() => {
+    return (indicatorPage?.items || []).map((indicator) => toRow(indicator, locale));
+  }, [indicatorPage, locale]);
+
+  const totalCount = indicatorPage?.total ?? 0;
+
+  // ── 编辑指标详情查询 ────────────────────────────────────────────────────────
 
   // Add indicator drawer state
   const [addDrawerOpen, setAddDrawerOpen] = useState(false);
   const [addIndicatorForm] = Form.useForm<{
     indicatorType: 'kpi' | 'counter';
-    indicatorLevel: 'device' | 'plmn';
+    indicatorLevel: string;
     kpiName: string;
+    productType: string;
     custName: string;
     catagoryId: string;
     unit: string;
@@ -344,8 +329,9 @@ export default function KPIStandardReport() {
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
   const [editIndicatorForm] = Form.useForm<{
     indicatorType: 'kpi' | 'counter';
-    indicatorLevel: 'device' | 'plmn';
+    indicatorLevel: string;
     kpiName: string;
+    productType: string;
     custName: string;
     catagoryId: string;
     unit: string;
@@ -357,8 +343,9 @@ export default function KPIStandardReport() {
   const [editCalcFormula, setEditCalcFormula] = useState<string>('');
   const [editingIndicator, setEditingIndicator] = useState<KPIIndicatorRow | null>(null);
 
-  // Custom tree nodes state
-  const [customNodes, setCustomNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
+  // Add function set modal state
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addForm] = Form.useForm<{ name: string; description: string }>();
 
   // Add node modal state
   const [addNodeModalOpen, setAddNodeModalOpen] = useState(false);
@@ -372,22 +359,20 @@ export default function KPIStandardReport() {
 
   // 获取树节点名称的辅助函数
   const getTreeNodeName = useCallback((nodeKey: string): string => {
-    // 一级节点
-    if (nodeKey === 'all') return t('kpi.tree.all');
-    if (nodeKey === 'enb-set') return t('kpi.tree.enbSet');
-    if (nodeKey === 'gnb-set') return t('kpi.tree.gnbSet');
-    if (nodeKey === 'gsm-set') return t('kpi.tree.gsmSet');
-
-    // 二级节点
-    const parts = nodeKey.split('-');
-    if (parts.length >= 2) {
-      const secondLevelKey = parts[parts.length - 1];
-      const node = SECOND_LEVEL_NODES.find(n => n.key === secondLevelKey);
-      if (node) return t(node.labelKey);
-    }
-
-    return nodeKey;
-  }, [t]);
+    // 从 API 树数据中查找
+    const findName = (groups: IndicatorGroup[]): string => {
+      for (const g of groups) {
+        if (g.id === nodeKey) return getLocalizedGroupName(g, locale);
+        if (g.children) {
+          const found = findName(g.children);
+          if (found) return found;
+        }
+      }
+      return '';
+    };
+    const name = findName(groupTreeData);
+    return name || nodeKey;
+  }, [groupTreeData, locale]);
 
   // 当前选中的功能集名称
   const selectedFunctionSetName = useMemo(() => {
@@ -398,7 +383,6 @@ export default function KPIStandardReport() {
   // Handle add node to tree - 打开新建指标抽屉
   const handleAddNode = useCallback((parentKey: string) => {
     setCurrentParentKey(parentKey);
-    // 打开新建指标抽屉，而不是简单的 Modal
     setAddDrawerOpen(true);
     addIndicatorForm.resetFields();
     setCurrentIndicatorType('kpi');
@@ -409,92 +393,30 @@ export default function KPIStandardReport() {
     modal.confirm({
       title: t('common.confirm'),
       content: t('common.confirmDelete'),
-      onOk: () => {
-        setCustomNodes((prev) => prev.filter((n) => n.key !== nodeKey));
-        void message.success(t('common.success'));
+      onOk: async () => {
+        try {
+          await indicatorApi.deleteIndicatorGroup(nodeKey, deviceType);
+          void message.success(t('common.success'));
+          await refetchGroupTree();
+        } catch (err) {
+          void message.error(t('common.deleteFailed'));
+          console.error('Delete group failed:', err);
+        }
       },
     });
-  }, [modal, message, t]);
+  }, [modal, message, t, deviceType]);
 
   // Handle edit node from tree
   const handleEditNode = useCallback((nodeKey: string, title: string) => {
-    const node = customNodes.find((n) => n.key === nodeKey);
-    if (node) {
-      setEditingNodeKey(nodeKey);
-      editNodeForm.setFieldsValue({
-        name: title,
-        description: '', // 描述信息可以从扩展字段获取
-      });
-      setEditNodeModalOpen(true);
-    }
-  }, [customNodes, editNodeForm]);
+    setEditingNodeKey(nodeKey);
+    editNodeForm.setFieldsValue({
+      name: title,
+      description: '',
+    });
+    setEditNodeModalOpen(true);
+  }, [editNodeForm]);
 
-  const kpiTreeData = useKPITreeData(t, customNodes, handleAddNode, handleEditNode, handleDeleteNode, treeSearchValue);
-
-  // 过滤数据
-  const filteredData = useMemo(() => {
-    let data = [...MOCK_KPI_DATA];
-
-    // 按选中的树节点过滤
-    if (selectedCategory && selectedCategory !== 'all') {
-      // 解析节点类型
-      const isEnb = selectedCategory.includes('enb');
-      const isGnb = selectedCategory.includes('gnb');
-      const isGsm = selectedCategory.includes('gsm');
-
-      // 按网络类型过滤
-      if (isEnb) {
-        data = data.filter((row) => row.networkType === 'eNB');
-      } else if (isGnb) {
-        data = data.filter((row) => row.networkType === 'gNB');
-      } else if (isGsm) {
-        data = data.filter((row) => row.networkType === 'GSM');
-      }
-
-      // 二级节点进一步过滤（按分类）
-      if (selectedCategory.includes('-')) {
-        const secondLevelKey = selectedCategory.split('-').pop();
-        if (secondLevelKey) {
-          // custom 节点显示自定义指标
-          if (secondLevelKey === 'custom') {
-            data = data.filter((row) => row.isCustomize === 1);
-          } else {
-            // 其他节点按 category 字段过滤
-            data = data.filter((row) => row.category === secondLevelKey);
-          }
-        }
-      }
-    }
-
-    // 按搜索词过滤
-    if (tableSearchValue) {
-      const lowerSearch = tableSearchValue.toLowerCase();
-      data = data.filter(
-        (row) =>
-          row.kpiId.toLowerCase().includes(lowerSearch) ||
-          row.kpiName.toLowerCase().includes(lowerSearch)
-      );
-    }
-
-    // 按产品类型过滤
-    if (productType) {
-      data = data.filter((row) => row.productType === productType);
-    }
-
-    // 按等级过滤
-    if (indicatorLevel) {
-      data = data.filter((row) => row.indicatorLevel === indicatorLevel);
-    }
-
-    return data;
-  }, [selectedCategory, tableSearchValue, productType, indicatorLevel]);
-
-  // 分页数据
-  const paginatedData = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-    return filteredData.slice(start, end);
-  }, [filteredData, page, pageSize]);
+  const kpiTreeData = useGroupTreeData(t, groupTreeData, customNodes, handleAddNode, handleEditNode, handleDeleteNode, treeSearchValue, locale, deviceType);
 
   // 处理选中行变化
   const handleSelectChange = useCallback((newSelectedRowKeys: React.Key[]) => {
@@ -502,15 +424,21 @@ export default function KPIStandardReport() {
   }, []);
 
   // 删除自定义指标
-  const handleDeleteIndicator = useCallback(() => {
+  const handleDeleteIndicator = useCallback((row: KPIIndicatorRow) => {
     modal.confirm({
       title: t('common.confirm'),
       content: t('common.confirmDelete'),
-      onOk: () => {
-        void message.success(t('common.success'));
+      onOk: async () => {
+        try {
+          await deleteIndicator.mutateAsync({ id: row.kpiId, deviceType });
+          void message.success(t('common.success'));
+        } catch (err) {
+          void message.error(t('common.deleteFailed'));
+          console.error('Delete indicator failed:', err);
+        }
       },
     });
-  }, [modal, message, t]);
+  }, [modal, message, t, deleteIndicator, deviceType]);
 
   // 批量操作定义
   const batchActions = useMemo((): BatchAction[] => [
@@ -519,12 +447,27 @@ export default function KPIStandardReport() {
       label: t('kpi.measure'),
       icon: <CheckOutlined />,
       onClick: () => {
+        if (selectedRowKeys.length === 0) {
+          void message.warning(t('common.selectAtLeastOne'));
+          return;
+        }
         modal.confirm({
           title: t('common.confirm'),
           content: t('kpi.confirmEnableMeasure'),
-          onOk: () => {
-            void message.success(t('common.success'));
-            setSelectedRowKeys([]);
+          onOk: async () => {
+            try {
+              await enableIndicators.mutateAsync({
+                deviceType,
+                operatorCode: 'default',
+                indicatorIds: selectedRowKeys as string[],
+                enable: true,
+              });
+              void message.success(t('common.success'));
+              setSelectedRowKeys([]);
+            } catch (err) {
+              void message.error(t('common.operationFailed'));
+              console.error('Enable indicators failed:', err);
+            }
           },
         });
       },
@@ -534,35 +477,32 @@ export default function KPIStandardReport() {
       label: t('kpi.cancelMeasure'),
       icon: <CloseOutlined />,
       onClick: () => {
+        if (selectedRowKeys.length === 0) {
+          void message.warning(t('common.selectAtLeastOne'));
+          return;
+        }
         modal.confirm({
           title: t('common.confirm'),
           content: t('kpi.confirmDisableMeasure'),
-          onOk: () => {
-            void message.success(t('common.success'));
-            setSelectedRowKeys([]);
+          onOk: async () => {
+            try {
+              await disableIndicators.mutateAsync({
+                deviceType,
+                operatorCode: 'default',
+                indicatorIds: selectedRowKeys as string[],
+                enable: false,
+              });
+              void message.success(t('common.success'));
+              setSelectedRowKeys([]);
+            } catch (err) {
+              void message.error(t('common.operationFailed'));
+              console.error('Disable indicators failed:', err);
+            }
           },
         });
       },
     },
-  ], [modal, message, t]);
-
-  // 表格列定义
-  const handleSaveEditIndicator = useCallback(async () => {
-    try {
-      const values = await editIndicatorForm.validateFields();
-      console.log('Edit indicator values:', { ...values, arithmetic: editCalcFormula, id: editingIndicator?.kpiId });
-      // TODO: Call API to update indicator
-      void message.success(t('common.success'));
-      setEditDrawerOpen(false);
-      editIndicatorForm.resetFields();
-      setEditingIndicator(null);
-      setFormulaSearchValue('');
-      setFormulaSelectedCategory('');
-      setFormulaProductType('');
-    } catch {
-      // validation error
-    }
-  }, [editIndicatorForm, editCalcFormula, editingIndicator, message, t]);
+  ], [modal, message, t, enableIndicators, disableIndicators, deviceType, selectedRowKeys]);
 
   // 编辑抽屉公式处理函数
   const handleEditAddOperator = useCallback((op: string) => {
@@ -582,20 +522,106 @@ export default function KPIStandardReport() {
     setEditingIndicator(row);
     const indicatorType = row.indicatorType === 'kpi' ? 'kpi' : 'counter';
     setEditIndicatorType(indicatorType);
-    setEditCalcFormula(''); // TODO: 从后端获取公式
+    setEditCalcFormula(row.arithmetic || '');
     editIndicatorForm.setFieldsValue({
-      indicatorType,
       indicatorLevel: row.indicatorLevel,
       kpiName: row.kpiName,
+      productType: row.productType || '',
       custName: row.custName || '',
       unit: row.unit,
-      isEnable: row.isEnable.toString(),
-      definition: '', // TODO: 从后端获取定义
+      statisType: row.statisType,
+      isEnable: row.isEnable ? '1' : '0',
+      definition: row.definition || '',
     });
     setEditDrawerOpen(true);
   }, [editIndicatorForm]);
 
+  // 保存编辑指标
+  const handleSaveEditIndicator = useCallback(async () => {
+    try {
+      const values = await editIndicatorForm.validateFields();
+
+      if (!editingIndicator?.isCustomize) {
+        // 内置指标：只允许修改自定义名称和测量开关
+        const promises: Promise<unknown>[] = [];
+
+        // 自定义名称
+        const newCustName = values.custName || '';
+        if (newCustName !== (editingIndicator?.custName || '')) {
+          const dt = (deviceType || 'ENB') as 'ENB' | 'GSM' | 'GNB';
+          promises.push(updateCustName.mutateAsync({
+            deviceType: dt,
+            operatorCode: 'default',
+            perfId: editingIndicator?.kpiId || '',
+            custName: newCustName,
+          }));
+        }
+
+        // 测量开关
+        const newEnabled = values.isEnable;
+        const originalEnabled = editingIndicator?.isEnable ? '1' : '0';
+        if (newEnabled !== undefined && newEnabled !== originalEnabled) {
+          const dt = (deviceType || 'ENB') as 'ENB' | 'GSM' | 'GNB';
+          if (newEnabled === '1') {
+            promises.push(enableIndicators.mutateAsync({
+              deviceType: dt,
+              operatorCode: 'default',
+              indicatorIds: [editingIndicator?.kpiId || ''],
+              enable: true,
+            }));
+          } else {
+            promises.push(disableIndicators.mutateAsync({
+              deviceType: dt,
+              operatorCode: 'default',
+              indicatorIds: [editingIndicator?.kpiId || ''],
+              enable: false,
+            }));
+          }
+        }
+
+        if (promises.length > 0) {
+          await Promise.all(promises);
+        }
+      } else {
+        // 自定义指标：走完整 addOrModify 流程
+        if (editIndicatorType === 'kpi' && !editCalcFormula.trim()) {
+          void message.warning(t('kpi.calcFormulaRequired'));
+          return;
+        }
+        await updateIndicator.mutateAsync({
+          kpiId: editingIndicator?.kpiId,
+          indicatorType: editIndicatorType,
+          kpiName: values.kpiName,
+          catagoryId: editingIndicator?.catagoryId || '',
+          productType: values.productType,
+          unit: values.unit,
+          statisType: values.statisType,
+          isEnable: values.isEnable,
+          definition: values.definition,
+          custName: values.custName,
+          indicatorLevel: values.indicatorLevel,
+          arithmetic: editCalcFormula,
+          updater: currentUser?.userName || currentUser?.username || 'system',
+          deviceType,
+        });
+      }
+
+      void message.success(t('common.success'));
+      setEditDrawerOpen(false);
+      editIndicatorForm.resetFields();
+      setEditingIndicator(null);
+      setFormulaSearchValue('');
+      setFormulaSelectedCategory('');
+      setFormulaProductType('');
+    } catch (err) {
+      const axiosErr = err as AxiosError & { userMessage?: string };
+      const errMsg = axiosErr?.userMessage || axiosErr?.message || String(err);
+      void message.error(errMsg);
+    }
+  }, [editIndicatorForm, editCalcFormula, editingIndicator, updateIndicator, updateCustName, enableIndicators, disableIndicators, deviceType, message, t, editIndicatorType, currentUser]);
+
   // 表格列定义
+  const isGNB = deviceType === 'GNB';
   const columns: DataTableColumn<KPIIndicatorRow>[] = useMemo(() => [
     {
       key: 'operation',
@@ -604,7 +630,7 @@ export default function KPIStandardReport() {
       width: 120,
       fixed: 'right',
       render: (_, row) => (
-        <Space size={4}>
+        <Space size={4} style={{ display: 'inline-flex', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
           <Button
             type="link"
             size="small"
@@ -612,12 +638,12 @@ export default function KPIStandardReport() {
           >
             {t('common.edit')}
           </Button>
-          {row.isCustomize === 1 && (
+          {row.isCustomize && (
             <Button
               type="link"
               size="small"
               danger
-              onClick={() => handleDeleteIndicator()}
+              onClick={() => handleDeleteIndicator(row)}
             >
               {t('common.delete')}
             </Button>
@@ -629,150 +655,186 @@ export default function KPIStandardReport() {
       key: 'isEnable',
       title: t('kpi.measure'),
       dataIndex: 'isEnable',
-      width: 60,
+      width: 55,
       render: (val) => (
-        <Tag color={val === 1 ? 'success' : 'default'}>
-          {val === 1 ? t('common.yes') : t('common.no')}
+        <Tag color={val ? 'success' : 'default'}>
+          {val ? t('common.yes') : t('common.no')}
         </Tag>
       ),
     },
     {
       key: 'kpiId',
-      title: t('kpi.counterId'),
+      title: t('kpi.indicatorId'),
       dataIndex: 'kpiId',
-      width: 140,
+      width: 130,
       mono: true,
       copyable: true,
+      render: (val) => (
+        <Link
+          style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 500 }}
+          onClick={() => void navigate(`/performance/kpi-standard/detail/${deviceType}/${String(val)}`)}
+        >
+          {String(val)}
+        </Link>
+      ),
     },
     {
       key: 'kpiName',
-      title: t('kpi.counterName'),
+      title: t('kpi.indicatorName'),
       dataIndex: 'kpiName',
-      width: 180,
-    },
-    {
-      key: 'productType',
-      title: t('kpi.productType'),
-      dataIndex: 'productType',
-      width: 90,
+      ellipsis: true,
     },
     {
       key: 'custName',
       title: t('kpi.customName'),
       dataIndex: 'custName',
-      width: 140,
+      width: 120,
+      ellipsis: true,
       render: (val) => val || '-',
+    },
+    {
+      key: 'productType',
+      title: t('kpi.productType'),
+      dataIndex: 'productType',
+      width: 70,
     },
     {
       key: 'indicatorLevel',
       title: t('kpi.level'),
       dataIndex: 'indicatorLevel',
-      width: 70,
+      width: 65,
       render: (val) => val === 'device' ? 'Device' : 'PLMN',
     },
     {
       key: 'unit',
       title: t('kpi.unit'),
       dataIndex: 'unit',
-      width: 60,
+      width: 55,
     },
     {
       key: 'isCustomize',
       title: t('kpi.indicatorType'),
-      dataIndex: 'isCustomize',
-      width: 90,
-      render: (val) => (
-        <Tag color={val === 1 ? 'blue' : 'default'}>
-          {val === 1 ? t('kpi.customIndicator') : t('kpi.baseIndicator')}
-        </Tag>
+      width: 120,
+      render: (_, row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
+          <Tag style={{ marginRight: 0 }} color={row.indicatorType === 'counter' ? 'green' : 'blue'}>
+            {row.indicatorType === 'counter' ? 'Counter' : 'KPI'}
+          </Tag>
+          <Tag style={{ marginLeft: 2 }} color={row.isCustomize ? 'orange' : 'default'}>
+            {row.isCustomize ? t('kpi.custom') : t('kpi.system')}
+          </Tag>
+        </span>
       ),
     },
     {
       key: 'updater',
       title: t('kpi.updater'),
       dataIndex: 'updater',
-      width: 80,
+      width: 70,
     },
     {
       key: 'updateTime',
       title: t('kpi.updateTime'),
       dataIndex: 'updateTime',
-      width: 150,
+      width: 160,
+      render: (val) => formatDateTime(val),
     },
-  ], [t, handleDeleteIndicator, handleEditIndicator]);
+  ].filter((col) => {
+    if (isGNB && (col.key === 'productType' || col.key === 'indicatorLevel')) return false;
+    return true;
+  }) as DataTableColumn<KPIIndicatorRow>[], [t, handleDeleteIndicator, handleEditIndicator, navigate, deviceType, isGNB]);
 
-  // Handle add function set
-  const handleAddFunctionSet = useCallback(async () => {
-    try {
-      const values = await addForm.validateFields();
-
-      // Check for duplicate name
-      const isDuplicate = functionSets.some(
-        (fs) => fs.name.toLowerCase() === values.name.toLowerCase()
-      );
-      if (isDuplicate) {
-        void message.error(t('perf.functionSetNameDuplicate'));
-        return;
-      }
-
-      // Add new function set
-      const newItem: FunctionSetItem = {
-        id: `fs-${Date.now()}`,
-        name: values.name,
-        networkType: values.networkType,
-        description: values.description || '',
-        kpiCount: 0,
-      };
-      setFunctionSets((prev) => [...prev, newItem]);
-      void message.success(t('common.success'));
-      setAddModalOpen(false);
-      addForm.resetFields();
-    } catch {
-      // validation error
-    }
-  }, [addForm, functionSets, message, t]);
-
-  // Handle add tree node
+  // Handle add tree node (新增功能集)
   const handleAddTreeNode = useCallback(async () => {
     try {
       const values = await addNodeForm.validateFields();
-      const newNode = {
-        key: `node-${Date.now()}`,
-        parentKey: currentParentKey,
-        title: values.name,
-      };
-      setCustomNodes((prev) => [...prev, newNode]);
+      await indicatorApi.addIndicatorGroup({
+        deviceType,
+        enName: values.name,
+        cnName: values.name,
+        parentId: currentParentKey,
+      });
       void message.success(t('common.success'));
+      await refetchGroupTree();
       setAddNodeModalOpen(false);
       addNodeForm.resetFields();
-    } catch {
-      // validation error
+    } catch (err) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        void message.error(String((err as Error).message));
+      }
     }
-  }, [addNodeForm, currentParentKey, message, t]);
+  }, [addNodeForm, currentParentKey, deviceType, message, t]);
+
+  // Handle add function set (top-level "Add" button)
+  const handleAddFunctionSet = useCallback(async () => {
+    try {
+      const values = await addForm.validateFields();
+      const rootGroup = groupTreeData.find(g => g.parentId === g.id);
+      await indicatorApi.addIndicatorGroup({
+        deviceType,
+        enName: values.name,
+        cnName: values.name,
+        parentId: rootGroup?.id || '',
+        operatorCode: '',
+      });
+      void message.success(t('common.success'));
+      await refetchGroupTree();
+      setAddModalOpen(false);
+      addForm.resetFields();
+    } catch (err) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        void message.error(String((err as Error).message));
+      }
+    }
+  }, [addForm, groupTreeData, message, t]);
 
   // Handle edit tree node
   const handleEditTreeNode = useCallback(async () => {
     try {
       const values = await editNodeForm.validateFields();
-      setCustomNodes((prev) =>
-        prev.map((n) =>
-          n.key === editingNodeKey ? { ...n, title: values.name } : n
-        )
+      await indicatorApi.modifyIndicatorGroup(
+        editingNodeKey,
+        {
+          cnName: values.name,
+          enName: values.name,
+          description: values.description,
+        },
+        deviceType,
       );
       void message.success(t('common.success'));
+      await refetchGroupTree();
       setEditNodeModalOpen(false);
       editNodeForm.resetFields();
-    } catch {
-      // validation error
+    } catch (err) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        void message.error(String((err as Error).message));
+      }
     }
-  }, [editNodeForm, editingNodeKey, message, t]);
+  }, [editNodeForm, editingNodeKey, deviceType, message, t]);
 
   // Handle add indicator
   const handleAddIndicator = useCallback(async () => {
     try {
       const values = await addIndicatorForm.validateFields();
-      console.log('Add indicator values:', { ...values, arithmetic: calcFormula });
-      // TODO: Call API to add indicator
+      if (currentIndicatorType === 'kpi' && !calcFormula.trim()) {
+        void message.warning(t('kpi.calcFormulaRequired'));
+        return;
+      }
+      await createIndicator.mutateAsync({
+        indicatorType: values.indicatorType,
+        kpiName: values.kpiName,
+        catagoryId: currentParentKey || selectedGroupId || '',
+        productType: values.productType,
+        unit: values.unit,
+        statisType: values.statisType,
+        isEnable: values.isEnable,
+        definition: values.definition,
+        custName: values.custName,
+        indicatorLevel: values.indicatorLevel,
+        arithmetic: calcFormula,
+        updater: currentUser?.userName || currentUser?.username || 'system',
+        deviceType,
+      });
       void message.success(t('common.success'));
       setAddDrawerOpen(false);
       addIndicatorForm.resetFields();
@@ -781,10 +843,12 @@ export default function KPIStandardReport() {
       setFormulaSearchValue('');
       setFormulaSelectedCategory('');
       setFormulaProductType('');
-    } catch {
-      // validation error
+    } catch (err) {
+      const axiosErr = err as AxiosError & { userMessage?: string };
+      const errMsg = axiosErr?.userMessage || axiosErr?.message || String(err);
+      void message.error(errMsg);
     }
-  }, [addIndicatorForm, message, t, calcFormula]);
+  }, [addIndicatorForm, createIndicator, deviceType, selectedGroupId, calcFormula, currentIndicatorType, message, t, currentUser]);
 
   // Formula handling functions
   const handleAddOperator = useCallback((op: string) => {
@@ -799,59 +863,42 @@ export default function KPIStandardReport() {
     setCalcFormula('');
   }, []);
 
-  // 计算公式区域的功能集树数据
-  const formulaTreeData = useMemo((): DataNode[] => {
-    const nodes = [
-      { key: 'formula-enb-set', labelKey: 'kpi.tree.enbSet' },
-      { key: 'formula-gnb-set', labelKey: 'kpi.tree.gnbSet' },
-      { key: 'formula-gsm-set', labelKey: 'kpi.tree.gsmSet' },
-    ];
-
-    return nodes.map((node) => {
-      const children = SECOND_LEVEL_NODES.map((child) => ({
-        title: t(child.labelKey),
-        key: `${node.key}-${child.key}`,
-        isLeaf: true,
-      }));
-
-      return {
-        title: t(node.labelKey),
-        key: node.key,
-        children,
-      };
-    });
-  }, [t]);
-
-  // 根据功能集筛选的指标数据
-  const formulaFilteredIndicators = useMemo(() => {
-    let data = [...MOCK_KPI_DATA];
-
-    // 按功能集树节点过滤
-    if (formulaSelectedCategory) {
-      // 一级节点：enb-set / gnb-set / gsm-set
-      const isEnb = formulaSelectedCategory.includes('enb');
-      const isGnb = formulaSelectedCategory.includes('gnb');
-      const isGsm = formulaSelectedCategory.includes('gsm');
-
-      if (isEnb) {
-        data = data.filter((row) => row.networkType === 'eNB');
-      } else if (isGnb) {
-        data = data.filter((row) => row.networkType === 'gNB');
-      } else if (isGsm) {
-        data = data.filter((row) => row.networkType === 'GSM');
-      }
-
-      // 二级节点：按 category 过滤
-      const parts = formulaSelectedCategory.split('-');
-      if (parts.length >= 3) {
-        const categoryKey = parts[parts.length - 1];
-        if (categoryKey === 'custom') {
-          data = data.filter((row) => row.isCustomize === 1);
-        } else {
-          data = data.filter((row) => row.category === categoryKey);
-        }
-      }
+  // 导出
+  const handleExport = useCallback(async () => {
+    try {
+      const blob = await exportIndicators.mutateAsync({
+        deviceType,
+        groupId: selectedGroupId,
+      });
+      // 创建下载链接
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `indicators_${deviceType}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      void message.success(t('common.success'));
+    } catch (err) {
+      void message.error(t('common.exportFailed'));
+      console.error('Export failed:', err);
     }
+  }, [exportIndicators, deviceType, selectedGroupId, message, t]);
+
+  // 计算公式区域的功能集树数据（从 API 数据转换）
+  const formulaTreeData = useMemo((): DataNode[] => {
+    const convertGroup = (group: IndicatorGroup): DataNode => ({
+      title: getLocalizedGroupName(group, locale),
+      key: group.id,
+      children: (group.children || []).map(convertGroup),
+    });
+    return groupTreeData.map(convertGroup);
+  }, [groupTreeData, locale]);
+
+  // 公式区域使用的指标列表（复用当前列表数据）
+  const formulaFilteredIndicators = useMemo(() => {
+    let data = tableData;
 
     // 按产品类型过滤
     if (formulaProductType) {
@@ -859,7 +906,7 @@ export default function KPIStandardReport() {
     }
 
     return data;
-  }, [formulaSelectedCategory, formulaProductType]);
+  }, [tableData, formulaProductType]);
 
   // 根据搜索词过滤指标
   const searchedIndicators = useMemo(() => {
@@ -874,8 +921,33 @@ export default function KPIStandardReport() {
     );
   }, [formulaFilteredIndicators, formulaSearchValue]);
 
+  // 设备类型切换时重置选中状态
+  const handleDeviceTypeChange = useCallback((newDeviceType: DeviceTypeTab) => {
+    setDeviceType(newDeviceType);
+    setSelectedCategory('');
+    setPage(1);
+    setSelectedRowKeys([]);
+  }, []);
+
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* 设备类型标签页 */}
+      <div style={{ padding: '8px 8px 0' }}>
+        <Radio.Group
+          value={deviceType}
+          onChange={(e) => handleDeviceTypeChange(e.target.value)}
+          size="small"
+          optionType="button"
+          buttonStyle="solid"
+          style={{ width: '100%', display: 'flex' }}
+        >
+          {DEVICE_TABS.map((tab) => (
+            <Radio.Button key={tab.key} value={tab.key} style={{ flex: 1, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              {t(tab.labelKey)}
+            </Radio.Button>
+          ))}
+        </Radio.Group>
+      </div>
       <div
         style={{
           padding: '12px 12px 8px',
@@ -941,11 +1013,22 @@ export default function KPIStandardReport() {
         <Tree
           className="kpi-tree"
           treeData={kpiTreeData}
+          expandedKeys={useMemo(() => {
+            const allKeys: React.Key[] = [];
+            const collect = (nodes: DataNode[]) => {
+              for (const node of nodes) {
+                allKeys.push(node.key);
+                if (node.children) collect(node.children);
+              }
+            };
+            collect(kpiTreeData);
+            return allKeys;
+          }, [kpiTreeData])}
           onSelect={(keys) => {
             const key = keys[0] as string;
             setSelectedCategory(key ?? '');
+            setPage(1);
           }}
-          defaultExpandAll
           showLine
         />
       </div>
@@ -960,10 +1043,10 @@ export default function KPIStandardReport() {
           <Typography.Title level={5} style={{ margin: 0 }}>
             {selectedFunctionSetName}
             <Typography.Text type="secondary" style={{ fontSize: 13, marginLeft: 8, fontWeight: 400 }}>
-              {t('table.total')} {filteredData.length}
+              {t('table.total')} {totalCount}
             </Typography.Text>
           </Typography.Title>
-          <Button type="primary" icon={<DownloadOutlined />} onClick={() => void message.info(t('common.exportInProgress'))}>
+          <Button type="primary" icon={<DownloadOutlined />} onClick={() => void handleExport()} loading={exportIndicators.isPending}>
             {t('common.export')}
           </Button>
         </div>
@@ -978,7 +1061,7 @@ export default function KPIStandardReport() {
             }
             .kpi-table-wrapper .ant-table-wrapper {
               flex: 1;
-              overflow: hidden;
+              overflow: visible !important;
             }
             .kpi-table-wrapper .ant-table {
               height: 100%;
@@ -988,22 +1071,41 @@ export default function KPIStandardReport() {
               display: flex;
               flex-direction: column;
             }
+            .kpi-table-wrapper [class*="tableContainer"] {
+              overflow: visible !important;
+            }
             .kpi-table-wrapper .ant-table-body {
               flex: 1;
               overflow-y: auto !important;
-              overflow-x: auto !important;
+              overflow-x: scroll !important;
+            }
+            .kpi-table-wrapper .ant-table-body::-webkit-scrollbar {
+              width: 8px;
+              height: 8px;
+            }
+            .kpi-table-wrapper .ant-table-body::-webkit-scrollbar-thumb {
+              background-color: rgba(0, 0, 0, 0.25);
+              border-radius: 4px;
+            }
+            .kpi-table-wrapper .ant-table-body::-webkit-scrollbar-track {
+              background-color: rgba(0, 0, 0, 0.05);
+              border-radius: 4px;
+            }
+            .kpi-table-wrapper .ant-table-body::-webkit-scrollbar-corner {
+              background-color: rgba(0, 0, 0, 0.05);
             }
           `}</style>
           <DataTable<KPIIndicatorRow>
             tableId="kpi-management"
             columns={columns}
-            dataSource={paginatedData}
-            loading={false}
+            dataSource={tableData}
+            loading={indicatorLoading || groupTreeLoading}
             rowKey="kpiId"
-            total={filteredData.length}
+            total={totalCount}
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
+            onRefresh={() => void refetchIndicatorList()}
             scroll={{ x: 1200, y: 'calc(100vh - 320px)' }}
             selectable
             showRowNumber
@@ -1020,25 +1122,50 @@ export default function KPIStandardReport() {
                   placeholder={t('kpi.searchPlaceholder')}
                   prefix={<SearchOutlined />}
                   value={tableSearchValue}
-                  onChange={(e) => setTableSearchValue(e.target.value)}
+                  onChange={(e) => { setTableSearchValue(e.target.value); setPage(1); }}
                   allowClear
                   style={{ width: 200 }}
                 />
-                <Select
+                <Input
                   size="small"
                   placeholder={t('kpi.productType')}
                   value={productType}
-                  onChange={setProductType}
-                  options={PRODUCT_TYPE_OPTIONS}
-                  style={{ width: 100 }}
+                  onChange={(e) => { setProductType(e.target.value); setPage(1); }}
+                  style={{ width: 120 }}
                   allowClear
                 />
                 <Select
                   size="small"
                   placeholder={t('kpi.level')}
                   value={indicatorLevel}
-                  onChange={setIndicatorLevel}
-                  options={LEVEL_OPTIONS}
+                  onChange={(v) => { setIndicatorLevel(v); setPage(1); }}
+                  options={levelOptions}
+                  style={{ width: 100 }}
+                  allowClear
+                />
+                <Select
+                  size="small"
+                  placeholder={t('kpi.indicatorType')}
+                  value={indicatorTypeFilter}
+                  onChange={(v) => { setIndicatorTypeFilter(v); setPage(1); }}
+                  options={[
+                    { label: t('kpi.all'), value: '' },
+                    { label: t('kpi.counter'), value: '1' },
+                    { label: t('kpi.kpi'), value: '0' },
+                  ]}
+                  style={{ width: 110 }}
+                  allowClear
+                />
+                <Select
+                  size="small"
+                  placeholder={t('kpi.enableStatus')}
+                  value={isEnableFilter}
+                  onChange={(v) => { setIsEnableFilter(v); setPage(1); }}
+                  options={[
+                    { label: t('kpi.all'), value: '' },
+                    { label: t('kpi.enabled'), value: '1' },
+                    { label: t('kpi.disabled'), value: '0' },
+                  ]}
                   style={{ width: 100 }}
                   allowClear
                 />
@@ -1080,18 +1207,11 @@ export default function KPIStandardReport() {
               showCount
             />
           </Form.Item>
-          <Form.Item
-            name="networkType"
-            label={t('kpi.belongFunctionSet')}
-            rules={[{ required: true, message: t('common.selectRequired') }]}
-          >
+          <Form.Item label={t('kpi.belongFunctionSet')} required>
             <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: t('kpi.tree.enbSet'), value: 'eNB' },
-                { label: t('kpi.tree.gnbSet'), value: 'gNB' },
-                { label: t('kpi.tree.gsmSet'), value: 'GSM' },
-              ]}
+              disabled
+              value={deviceType}
+              options={DEVICE_TABS.map(dt => ({ label: t(dt.labelKey), value: dt.key }))}
             />
           </Form.Item>
           <Form.Item
@@ -1207,7 +1327,7 @@ export default function KPIStandardReport() {
             }}>
               {t('common.cancel')}
             </Button>
-            <Button type="primary" onClick={() => void handleAddIndicator()}>
+            <Button type="primary" onClick={() => void handleAddIndicator()} loading={createIndicator.isPending}>
               {t('common.confirm')}
             </Button>
           </div>
@@ -1241,12 +1361,14 @@ export default function KPIStandardReport() {
             </Form.Item>
 
             {/* 等级 */}
+            {!isGNB && (
             <Form.Item name="indicatorLevel" label={t('kpi.level')} style={{ marginBottom: 12 }}>
               <Radio.Group>
                 <Radio value="device">{t('kpi.deviceLevel')}</Radio>
                 <Radio value="plmn">{t('kpi.plmnLevel')}</Radio>
               </Radio.Group>
             </Form.Item>
+            )}
 
             {/* 指标名称 */}
             <Form.Item
@@ -1260,6 +1382,17 @@ export default function KPIStandardReport() {
             >
               <Input placeholder={t('kpi.namePlaceholder')} maxLength={50} showCount />
             </Form.Item>
+
+            {!isGNB && (
+            <Form.Item
+              name="productType"
+              label={t('kpi.productType')}
+              rules={[{ max: 50, message: t('kpi.nameMax50') }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input placeholder={t('kpi.productType')} maxLength={50} showCount />
+            </Form.Item>
+            )}
 
             {/* 自定义名称 - 仅Counter类型显示 */}
             {currentIndicatorType === 'counter' && (
@@ -1360,6 +1493,7 @@ export default function KPIStandardReport() {
                   maxHeight: 140,
                   padding: '10px 12px',
                   background: '#fafafa',
+                  color: 'rgba(0, 0, 0, 0.88)',
                   borderRadius: 6,
                   border: '1px solid var(--color-border)',
                   marginBottom: 12,
@@ -1430,12 +1564,11 @@ export default function KPIStandardReport() {
                     allowClear
                     style={{ flex: 1 }}
                   />
-                  <Select
+                  <Input
                     size="small"
                     placeholder={t('kpi.productType')}
                     value={formulaProductType}
-                    onChange={setFormulaProductType}
-                    options={PRODUCT_TYPE_OPTIONS}
+                    onChange={(e) => setFormulaProductType(e.target.value)}
                     style={{ width: 100, flexShrink: 0 }}
                     allowClear
                   />
@@ -1609,7 +1742,7 @@ export default function KPIStandardReport() {
             }}>
               {t('common.cancel')}
             </Button>
-            <Button type="primary" onClick={() => void handleSaveEditIndicator()}>
+            <Button type="primary" onClick={() => void handleSaveEditIndicator()} loading={updateIndicator.isPending}>
               {t('common.confirm')}
             </Button>
           </div>
@@ -1635,20 +1768,26 @@ export default function KPIStandardReport() {
             </div>
 
             {/* 类型 - 只读 */}
-            <Form.Item name="indicatorType" label={t('kpi.type')} style={{ marginBottom: 12 }}>
-              <Radio.Group onChange={(e) => setEditIndicatorType(e.target.value)} disabled>
-                <Radio value="kpi">{t('kpi.customKpi')}</Radio>
-                <Radio value="counter">{t('kpi.customCounter')}</Radio>
-              </Radio.Group>
+            <Form.Item label={t('kpi.type')} style={{ marginBottom: 12 }}>
+              <Space size={4}>
+                <Tag color={editIndicatorType === 'counter' ? 'green' : 'blue'}>
+                  {editIndicatorType === 'counter' ? 'Counter' : 'KPI'}
+                </Tag>
+                <Tag color={editingIndicator?.isCustomize ? 'orange' : 'default'}>
+                  {editingIndicator?.isCustomize ? t('kpi.custom') : t('kpi.system')}
+                </Tag>
+              </Space>
             </Form.Item>
 
             {/* 等级 */}
+            {!isGNB && (
             <Form.Item name="indicatorLevel" label={t('kpi.level')} style={{ marginBottom: 12 }}>
-              <Radio.Group>
+              <Radio.Group disabled={!editingIndicator?.isCustomize}>
                 <Radio value="device">{t('kpi.deviceLevel')}</Radio>
                 <Radio value="plmn">{t('kpi.plmnLevel')}</Radio>
               </Radio.Group>
             </Form.Item>
+            )}
 
             {/* 指标名称 */}
             <Form.Item
@@ -1660,20 +1799,34 @@ export default function KPIStandardReport() {
               ]}
               style={{ marginBottom: 12 }}
             >
-              <Input placeholder={t('kpi.namePlaceholder')} maxLength={50} showCount />
+              <Input placeholder={t('kpi.namePlaceholder')} maxLength={50} showCount disabled={!editingIndicator?.isCustomize} />
             </Form.Item>
 
-            {/* 自定义名称 - 仅Counter类型显示 */}
-            {editIndicatorType === 'counter' && (
-              <Form.Item
-                name="custName"
-                label={t('kpi.customName')}
-                rules={[{ max: 50, message: t('kpi.nameMax50') }]}
-                style={{ marginBottom: 12 }}
-              >
-                <Input placeholder={t('kpi.customNamePlaceholder')} maxLength={50} showCount />
-              </Form.Item>
+            {!isGNB && (
+            <Form.Item
+              name="productType"
+              label={t('kpi.productType')}
+              rules={[{ max: 50, message: t('kpi.nameMax50') }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input
+                placeholder={t('kpi.productType')}
+                maxLength={50}
+                showCount
+                disabled={!editingIndicator?.isCustomize}
+              />
+            </Form.Item>
             )}
+
+            {/* 自定义名称 */}
+            <Form.Item
+              name="custName"
+              label={t('kpi.customName')}
+              rules={[{ max: 50, message: t('kpi.nameMax50') }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input placeholder={t('kpi.customNamePlaceholder')} maxLength={50} showCount />
+            </Form.Item>
 
             {/* 单位 */}
             <Form.Item
@@ -1684,6 +1837,7 @@ export default function KPIStandardReport() {
             >
               <Select
                 placeholder={t('kpi.unitPlaceholder')}
+                disabled={!editingIndicator?.isCustomize}
                 options={[
                   { label: '%', value: '%' },
                   { label: t('kpi.unitTimes'), value: '次' },
@@ -1705,6 +1859,7 @@ export default function KPIStandardReport() {
             >
               <Select
                 placeholder={t('kpi.statisTypePlaceholder')}
+                disabled={!editingIndicator?.isCustomize}
                 options={[
                   { label: t('kpi.statisSum'), value: 'sum' },
                   { label: t('kpi.statisAvg'), value: 'avg' },
@@ -1750,9 +1905,11 @@ export default function KPIStandardReport() {
                     {t('kpi.calcFormulaDesc')}
                   </Typography.Text>
                 </div>
-                <Button size="small" danger onClick={handleEditClearFormula}>
-                  {t('common.clear')}
-                </Button>
+                {editingIndicator?.isCustomize && (
+                  <Button size="small" danger onClick={handleEditClearFormula}>
+                    {t('common.clear')}
+                  </Button>
+                )}
               </div>
 
               {/* 公式显示区域 */}
@@ -1762,6 +1919,7 @@ export default function KPIStandardReport() {
                   maxHeight: 140,
                   padding: '10px 12px',
                   background: '#fafafa',
+                  color: 'rgba(0, 0, 0, 0.88)',
                   borderRadius: 6,
                   border: '1px solid var(--color-border)',
                   marginBottom: 12,
@@ -1790,26 +1948,26 @@ export default function KPIStandardReport() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <Space.Compact size="small">
                       {['+', '-', '*', '/'].map((op) => (
-                        <Button key={op} style={{ width: 36 }} onClick={() => handleEditAddOperator(op)}>
+                        <Button key={op} style={{ width: 36 }} onClick={() => handleEditAddOperator(op)} disabled={!editingIndicator?.isCustomize}>
                           {op}
                         </Button>
                       ))}
                     </Space.Compact>
                     <Space.Compact size="small">
-                      <Button style={{ width: 36 }} onClick={() => handleEditAddOperator('(')}>(</Button>
-                      <Button style={{ width: 36 }} onClick={() => handleEditAddOperator(')')}>)</Button>
+                      <Button style={{ width: 36 }} onClick={() => handleEditAddOperator('(')} disabled={!editingIndicator?.isCustomize}>(</Button>
+                      <Button style={{ width: 36 }} onClick={() => handleEditAddOperator(')')} disabled={!editingIndicator?.isCustomize}>)</Button>
                     </Space.Compact>
                   </div>
                   {/* 第二行：数字 + Duration */}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <Space.Compact size="small">
                       {['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'].map((num) => (
-                        <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleEditAddOperator(num)}>
+                        <Button key={num} style={{ width: 28, padding: '0 4px', fontSize: 12 }} onClick={() => handleEditAddOperator(num)} disabled={!editingIndicator?.isCustomize}>
                           {num}
                         </Button>
                       ))}
                     </Space.Compact>
-                    <Button size="small" onClick={() => handleEditAddOperator('Duration')}>
+                    <Button size="small" onClick={() => handleEditAddOperator('Duration')} disabled={!editingIndicator?.isCustomize}>
                       {t('kpi.duration')}
                     </Button>
                   </div>
@@ -1832,12 +1990,11 @@ export default function KPIStandardReport() {
                     allowClear
                     style={{ flex: 1 }}
                   />
-                  <Select
+                  <Input
                     size="small"
                     placeholder={t('kpi.productType')}
                     value={formulaProductType}
-                    onChange={setFormulaProductType}
-                    options={PRODUCT_TYPE_OPTIONS}
+                    onChange={(e) => setFormulaProductType(e.target.value)}
                     style={{ width: 100, flexShrink: 0 }}
                     allowClear
                   />
@@ -1918,7 +2075,7 @@ export default function KPIStandardReport() {
                               cursor: 'pointer',
                               transition: 'background 0.15s',
                             }}
-                            onClick={() => handleEditAddIndicatorToFormula(indicator.kpiId)}
+                            onClick={() => editingIndicator?.isCustomize && handleEditAddIndicatorToFormula(indicator.kpiId)}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.background = 'var(--color-primary-bg)';
                             }}
@@ -1978,6 +2135,7 @@ export default function KPIStandardReport() {
                 placeholder={t('kpi.definitionPlaceholder')}
                 rows={4}
                 maxLength={2000}
+                disabled={!editingIndicator?.isCustomize}
                 showCount
               />
             </Form.Item>

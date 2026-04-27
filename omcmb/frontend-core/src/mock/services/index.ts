@@ -15,3 +15,4 @@ export { mrService } from './mrService';
 export { systemService } from './systemService';
 export { opsToolsService } from './opsToolsService';
 export { dashboardService } from './dashboardService';
+export { indicatorService } from './indicatorService';
