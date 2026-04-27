@@ -47,6 +47,8 @@
 #   --pg-db DB            默认 omcgo
 #   --no-color            禁用彩色输出
 #   --json                以 JSON 输出（程序消费）
+#   --show-soap           额外打印 ACS 下发给 CPE 的 SOAP XML（取自 [5] 那条日志）
+#                         有 xmllint 时自动格式化；JSON 模式则把 soap_body 加到顶层
 #   -h, --help            显示本说明
 #
 # 退出码：
@@ -91,6 +93,7 @@ APP_LOG="$REPO_ROOT/run/logs/app/app.log"
 
 USE_COLOR=1
 OUTPUT=md
+SHOW_SOAP=0
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -116,8 +119,9 @@ while [[ $# -gt 0 ]]; do
         --app-log) APP_LOG=$2; shift 2 ;;
         --no-color) USE_COLOR=0; shift ;;
         --json) OUTPUT=json; shift ;;
+        --show-soap) SHOW_SOAP=1; shift ;;
         -h|--help)
-            sed -n '2,62p' "$0"
+            sed -n '2,64p' "$0"
             exit 0
             ;;
         *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -370,6 +374,9 @@ if [[ -s "$ACS_LOG" && ${CHECK_STATUS[2]:-} == ok ]]; then
         cwmp=$(echo "$send_log" | jq -r .cwmp_id)
         size=$(echo "$send_log" | jq -r .soap_size)
         body=$(echo "$send_log" | jq -r .soap_body)
+        SOAP_BODY=$body
+        SOAP_SIZE=$size
+        SOAP_SENT_AT=$(echo "$send_log" | jq -r '.ts // empty')
 
         if echo "$body" | grep -qE 'ParameterNames[^>]*arrayType="xsd:string\[0\]"'; then
             record 5 "ACS 下发 SOAP" warn "下发了，但 ParameterNames 为空（Q4 根因！）cwmp_id=$cwmp size=$size"
@@ -484,7 +491,15 @@ if [[ "$OUTPUT" == json ]]; then
             "$(printf '%s' "${CHECK_DETAILS[$i]}" | jq -R .)"
         sep=","
     done
-    printf '],"next_hint":%s}\n' "$(printf '%s' "$NEXT_HINT" | jq -R .)"
+    printf '],"next_hint":%s' "$(printf '%s' "$NEXT_HINT" | jq -R .)"
+    if [[ "$SHOW_SOAP" == 1 && -n "${SOAP_BODY:-}" ]]; then
+        printf ',"soap":{"cwmp_id":%s,"size":%s,"sent_at":%s,"body":%s}' \
+            "$(printf '%s' "${CWMP_ID:-}" | jq -Rs .)" \
+            "${SOAP_SIZE:-0}" \
+            "$(printf '%s' "${SOAP_SENT_AT:-}" | jq -Rs .)" \
+            "$(printf '%s' "$SOAP_BODY" | jq -Rs .)"
+    fi
+    printf '}\n'
 else
     sym() {
         case $1 in
@@ -532,6 +547,27 @@ print(s + ' ' * max(0, target - w))
     fi
     echo "${DIM}详情参见 docs/operations/troubleshoot-mml-rpc.md 对应章节。${RST}"
     echo
+    if [[ "$SHOW_SOAP" == 1 ]]; then
+        if [[ -n "${SOAP_BODY:-}" ]]; then
+            echo "${CYN}===== ACS → CPE SOAP 报文 =====${RST}"
+            echo "  cwmp_id : ${CWMP_ID:-<missing>}"
+            echo "  size    : ${SOAP_SIZE:-?} bytes"
+            [[ -n "${SOAP_SENT_AT:-}" ]] && echo "  sent_at : ${SOAP_SENT_AT}"
+            echo
+            if command -v xmllint >/dev/null 2>&1; then
+                printf '%s' "$SOAP_BODY" | xmllint --format - 2>/dev/null \
+                    || printf '%s\n' "$SOAP_BODY"
+            else
+                printf '%s\n' "$SOAP_BODY"
+                echo "${DIM}（装 xmllint 可自动格式化：apt install libxml2-utils / brew install libxml2）${RST}"
+            fi
+            echo
+        else
+            echo "${YLW}--show-soap 已启用，但 [5] 未找到下发日志（status=${CHECK_STATUS[5]:-na}）。${RST}"
+            echo "${DIM}放宽窗口：--logs-since 1h；或先排查 [3]/[4]/[5]。${RST}"
+            echo
+        fi
+    fi
 fi
 
 # ---- 退出码 ----
