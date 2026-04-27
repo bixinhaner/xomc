@@ -97,6 +97,9 @@ export default function ScriptTaskDrawer({
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [parsedCommands, setParsedCommands] = useState<string[]>([]);
+  // Console 入口预填的命令文本同样允许用户手动调整（to-do-list 当轮 #6）。
+  // 文件入口下，scriptContent 仅在解析完成后用于本地展示，不直接提交。
+  const [scriptContent, setScriptContent] = useState('');
 
   const createTaskMutation = useCreateMMLTask();
   const submitting = createTaskMutation.isPending;
@@ -117,12 +120,16 @@ export default function ScriptTaskDrawer({
     // 预填来自父组件的已选设备 SN；做一次排重避免重复项。
     setDeviceSns(prefillDeviceSns ? Array.from(new Set(prefillDeviceSns.filter(Boolean))) : []);
     setFileList([]);
-    if (prefillContent) {
-      setParsedCommands(splitScriptLines(prefillContent));
-    } else {
-      setParsedCommands([]);
-    }
+    const initial = prefillContent ?? '';
+    setScriptContent(initial);
+    setParsedCommands(initial ? splitScriptLines(initial) : []);
   }, [open, prefillContent, prefillTaskName, prefillDeviceSns, form]);
+
+  // 用户在 Console 入口手动改命令时，实时同步解析结果。
+  const handleScriptContentChange = useCallback((value: string) => {
+    setScriptContent(value);
+    setParsedCommands(splitScriptLines(value));
+  }, []);
 
   const parseUploadedFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -186,8 +193,9 @@ export default function ScriptTaskDrawer({
     return form
       .validateFields()
       .then(async (values) => {
-        // to-do-list 本轮 #1a：SN 与文件同时为空时，明确提示用户先填 SN。
-        if (deviceSns.length === 0 && parsedCommands.length === 0) {
+        // 设备 SN 始终必填（to-do-list 当轮 #2）：哪怕用户已经选了脚本，
+        // 没有目标设备也不能提交任务。
+        if (deviceSns.length === 0) {
           toast.warning(t('mml.snRequired'));
           throw new Error('SN_REQUIRED');
         }
@@ -271,10 +279,18 @@ export default function ScriptTaskDrawer({
         <Form.Item
           label={t('mml.taskName')}
           name="taskName"
-          rules={[{ required: true, message: t('mml.inputTaskNameRequired') }]}
+          rules={[
+            { required: true, message: t('mml.inputTaskNameRequired') },
+            { max: 128, message: t('mml.taskNameMaxLength') },
+          ]}
           style={{ marginLeft: 12 }}
         >
-          <Input maxLength={50} placeholder={t('mml.inputTaskName')} style={{ width: '100%' }} />
+          <Input
+            maxLength={128}
+            showCount
+            placeholder={t('mml.inputTaskName')}
+            style={{ width: '100%' }}
+          />
         </Form.Item>
 
         <div style={{ marginLeft: 12, marginBottom: 16 }}>
@@ -294,17 +310,21 @@ export default function ScriptTaskDrawer({
         </div>
 
         {prefillContent !== undefined ? (
-          // MML Console 入口：直接展示内容，不支持文件上传（命令已经在面板上选定）。
+          // MML Console 入口：预填的命令也允许用户手动微调（to-do-list 当轮 #6）。
           <Form.Item label={t('mml.selectScript')} style={{ marginLeft: 12 }}>
             <Input.TextArea
-              readOnly
               rows={5}
-              value={prefillContent}
+              value={scriptContent}
+              onChange={(e) => handleScriptContentChange(e.target.value)}
+              placeholder={t('mml.scriptDescTip')}
               style={{ fontFamily: "'SFMono-Regular', Consolas, monospace", fontSize: 12 }}
             />
-            <span style={{ color: '#52c41a', fontSize: 12 }}>
+            <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
+              {t('mml.scriptDescTip')}
+            </div>
+            <div style={{ color: '#52c41a', fontSize: 12 }}>
               {t('mml.commandsParsed', { count: parsedCommands.length })}
-            </span>
+            </div>
           </Form.Item>
         ) : (
           // ScriptTask 入口：文件上传（标签文案 "选择脚本"，image-10）。
@@ -336,6 +356,7 @@ export default function ScriptTaskDrawer({
                 </Upload>
                 <span style={{ color: '#999', fontSize: 12 }}>{t('mml.onlyTxtFormat')}</span>
               </Space>
+              <div style={{ color: '#999', fontSize: 12 }}>{t('mml.scriptDescTip')}</div>
               {parsedCommands.length > 0 && (
                 <div style={{ color: '#52c41a', fontSize: 12 }}>
                   {t('mml.commandsParsed', { count: parsedCommands.length })}
@@ -358,10 +379,10 @@ export default function ScriptTaskDrawer({
 
         <Divider />
 
-        {/* ---- 选择执行方式 ---- */}
+        {/* ---- 执行方式 ---- */}
         <div style={SECTION_HEADER}>
           <span style={SECTION_DOT} />
-          {t('mml.selectExecuteMethod')}
+          {t('mml.executeMethod')}
         </div>
 
         <Form.Item name="executeType" style={{ marginBottom: 8, marginLeft: 12 }}>
@@ -445,12 +466,12 @@ export default function ScriptTaskDrawer({
         <div style={{ marginLeft: 12, marginBottom: 16 }}>
           {t('mml.offlineDevice')}
           <Form.Item name="offlineRetryEnable" valuePropName="checked" noStyle>
-            <Checkbox style={{ marginLeft: 8 }}>{t('mml.waitOnlineRetry')}</Checkbox>
+            <Checkbox style={{ marginLeft: 8 }}>{t('common.enable')}</Checkbox>
           </Form.Item>
           <Form.Item name="offlineRetryWaitTime" noStyle>
-            <InputNumber min={20} max={10080} style={{ width: 80, margin: '0 8px' }} />
+            <InputNumber min={1} max={10080} style={{ width: 80, margin: '0 8px' }} />
           </Form.Item>
-          {t('mml.minutes')}
+          {t('mml.minutesOnlineExecute')}
         </div>
 
         <div style={{ marginLeft: 12, marginBottom: 8 }}>
