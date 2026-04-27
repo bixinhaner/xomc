@@ -426,7 +426,7 @@ npm run lint        # ESLint
 | 压力测试 Skill | `.claude/commands/acs-stress-test.md` |
 | 代码审查 Skill | `.claude/commands/review.md` |
 | 智能提交 Skill | `.claude/commands/commit.md` |
-| 前后端整合方案 | `前后端整合方案.md` |
+| 前后端整合方案 | `docs/design/前后端整合方案.md` |
 
 ---
 
