@@ -1,4 +1,12 @@
 <!--
+  ⛔ 整改 Wave 1-3 期间（2026-04-27 ~ 2026-08-03）额外约束：
+    1. 任何"新功能"PR 必须挂在 W1.1~W1.8 / Block A-I 子任务，否则关闭
+    2. 测试覆盖率单调不降；E2E 用例数单调不降
+    3. CI 红灯不绕过（不允许 // nolint:all、--no-verify）
+    4. 详见：docs/project/整改路线图-2026Q2.md / docs/methodology/AI承诺对峙清单.md
+-->
+
+<!--
   PR 模板 — 本文件由 docs/project/process-design-20260420.md §6.1 定义。
   所有 PR 必须填写本模板。留空或略过会被 QA/发布经理退回。
 -->

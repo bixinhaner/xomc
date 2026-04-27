@@ -1,0 +1,152 @@
+name: CI
+
+# 整改 Wave 1.1 落地（2026-04-27 起生效）
+# 配套：docs/methodology/AI承诺对峙清单.md 承诺 W1.1
+# 渐进 ratchet 计划：
+#   启动日   (2026-04-27): 后端 build+vet, 前端 typecheck（gentle gate）
+#   启动+3d  (2026-04-30): + 前端 lint
+#   启动+5d  (2026-05-02): + go test (含 postgres + redis services)
+#   启动+7d  (2026-05-04): + golangci-lint, + 前端 vitest
+#   启动+14d (2026-05-11): 全部检查阻塞 merge（W1 末退出标准）
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-build:
+    name: Backend · build + vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go 1.25
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: omcgo/go.sum
+
+      - name: go vet
+        working-directory: omcgo
+        run: go vet ./...
+
+      - name: go build (all packages)
+        working-directory: omcgo
+        run: go build ./...
+
+  frontend-typecheck:
+    name: Frontend · typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: omcmb/webcode/package-lock.json
+
+      - name: Install dependencies
+        working-directory: omcmb/webcode
+        run: npm ci
+
+      - name: TypeScript check
+        working-directory: omcmb/webcode
+        run: npm run typecheck
+
+  # ============================================================
+  # 以下 Job 在 ratchet 时间点启用，先以 continue-on-error 试运行
+  # 取消注释 + 删除 continue-on-error 即从"宽容"转为"阻塞"
+  # ============================================================
+
+  # backend-test:
+  #   name: Backend · test
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
+  #   services:
+  #     postgres:
+  #       image: postgres:16
+  #       env:
+  #         POSTGRES_PASSWORD: postgres
+  #         POSTGRES_DB: omc_test
+  #       options: >-
+  #         --health-cmd pg_isready
+  #         --health-interval 10s
+  #         --health-timeout 5s
+  #         --health-retries 5
+  #       ports:
+  #         - 5432:5432
+  #     redis:
+  #       image: redis:7
+  #       ports:
+  #         - 6379:6379
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.25'
+  #         cache-dependency-path: omcgo/go.sum
+  #     - name: go test
+  #       working-directory: omcgo
+  #       run: go test -race -timeout=10m ./...
+
+  # backend-lint:
+  #   name: Backend · golangci-lint
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.25'
+  #         cache-dependency-path: omcgo/go.sum
+  #     - uses: golangci/golangci-lint-action@v6
+  #       with:
+  #         version: latest
+  #         working-directory: omcgo
+
+  # frontend-lint:
+  #   name: Frontend · lint
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '20'
+  #         cache: 'npm'
+  #         cache-dependency-path: omcmb/webcode/package-lock.json
+  #     - working-directory: omcmb/webcode
+  #       run: npm ci
+  #     - working-directory: omcmb/webcode
+  #       run: npm run lint
+
+  # frontend-test:
+  #   name: Frontend · vitest
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '20'
+  #         cache: 'npm'
+  #         cache-dependency-path: omcmb/webcode/package-lock.json
+  #     - working-directory: omcmb/webcode
+  #       run: npm ci
+  #     - working-directory: omcmb/webcode
+  #       run: npm test

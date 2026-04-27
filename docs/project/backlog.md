@@ -4,7 +4,25 @@
 > **守护人**：项目经理（`CLAUDE.md §16.11`）+ 产品经理（`§16.10`）+ QA/发布经理（`§16.12`）轮值
 > **设计依据**：`docs/project/dev-pipeline-design-20260420.md §11` L0 Backlog 层
 > **初始化数据**：反向索引自 `docs/project/milestone/2026Q2-to-RC.md` + `risk-register.md` + 近期 commit
-> **最近更新**：2026-04-20
+> **最近更新**：2026-04-27（Wave 1 启动）
+
+---
+
+> ⛔ **[FREEZE 中] 2026-04-27 ~ 2026-05-11 — Wave 1 启动期**
+>
+> 整改路线图（`docs/project/整改路线图-2026Q2.md`）正式启动。**禁止新功能立项**。
+> 期间所有 PR 必须挂在 W1.1 ~ W1.8 整改子任务上：
+> 1. CI/CD 工作流（GH Actions）
+> 2. PR 模板含 DoD 强制清单
+> 3. acs/worker 加 `/healthz` + `/readyz`
+> 4. ratelimit 中间件落地
+> 5. F04 告警 webhook 端到端通
+> 6. E2E 用例 ≥ 20（覆盖登录/设备/告警/KPI/模板）
+> 7. docker-compose 加 Prometheus + Grafana + AlertManager
+> 8. 数据库定时备份 + 一次恢复演练
+>
+> **违反 = PR 直接关闭**。下次解冻评估：2026-05-11（W1 末对峙，按 `docs/methodology/AI承诺对峙清单.md` 第二章 8 条逐条核验）。
+> 配套契约：`docs/methodology/从0到生产可发布完整方法论.md` · `docs/methodology/AI承诺对峙清单.md`
 
 ---
 
