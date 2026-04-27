@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
+  AlertOutlined,
   CheckOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
@@ -22,6 +23,7 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices } from '@core/hooks/api/useDevices';
+import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@core/types/device';
 
@@ -311,6 +313,7 @@ export default function DeviceList() {
     refetchInterval: autoRefresh ? 5000 : undefined,
   });
   const batchReboot = useBatchRebootDevices();
+  const triggerAlarmSync = useTriggerAlarmSync();
   const devices: Device[] = data?.items ?? [];
   const total = data?.total ?? 0;
   const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
@@ -459,6 +462,7 @@ export default function DeviceList() {
             'batch-reboot': t('common.batchReboot'),
             'batch-tr069-collect': t('device.action.tr069Collect'),
             'batch-log-collect': t('device.action.logCollect'),
+            'batch-alarm-sync': t('device.action.alarmSync'),
           };
 
           const newTasks: LocalTask[] = selectedDevices.map((device, index) => ({
@@ -577,6 +581,43 @@ export default function DeviceList() {
             } catch {
               void message.error(t('common.operationFailed'));
             }
+          } else if (actionKey === 'batch-alarm-sync') {
+            const sns = selectedDevices.map((d) => d.sn);
+            for (const sn of sns) {
+              triggerAlarmSync.mutate(sn, {
+                onSuccess: () => {
+                  const timestamp = new Date().toISOString();
+                  const taskId = newTasks.find((t) => t.sn === sn)?.id;
+                  if (taskId) {
+                    setCollectTasks((prev) => prev.map((item) =>
+                      item.id === taskId ? {
+                        ...item,
+                        status: 'success',
+                        progress: 100,
+                        message: t('task.status.completed'),
+                        logContent: `[${timestamp}] INFO: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] INFO: alarm sync triggered\n[${timestamp}] INFO: ${t('task.log.success')}`,
+                      } : item
+                    ));
+                  }
+                },
+                onError: () => {
+                  const timestamp = new Date().toISOString();
+                  const taskId = newTasks.find((t) => t.sn === sn)?.id;
+                  if (taskId) {
+                    setCollectTasks((prev) => prev.map((item) =>
+                      item.id === taskId ? {
+                        ...item,
+                        status: 'failed',
+                        progress: 100,
+                        message: t('common.failed'),
+                        logContent: `[${timestamp}] ERROR: ${t('task.log.start')}\n[${timestamp}] INFO: ${t('task.log.connect')} ${sn}\n[${timestamp}] ERROR: ${t('task.log.failed')}`,
+                      } : item
+                    ));
+                  }
+                },
+              });
+            }
+            void message.success(t('common.commandSent'));
           } else {
             void message.success(t('common.commandSent'));
           }
@@ -584,7 +625,7 @@ export default function DeviceList() {
         },
       });
     },
-    [modal, message, t, batchReboot, devices]
+    [modal, message, t, batchReboot, triggerAlarmSync, devices]
   );
 
   // 导出 — 直接选择格式后触发
@@ -1121,6 +1162,12 @@ export default function DeviceList() {
       label: t('device.action.logCollect'),
       icon: <FileTextOutlined />,
       onClick: (keys) => handleBatchAction(t('device.action.logCollect'), keys, 'batch-log-collect'),
+    },
+    {
+      key: 'batch-alarm-sync',
+      label: t('device.action.alarmSync'),
+      icon: <AlertOutlined />,
+      onClick: (keys) => handleBatchAction(t('device.action.alarmSync'), keys, 'batch-alarm-sync'),
     },
     // 恢复默认配置已隐藏
     // {

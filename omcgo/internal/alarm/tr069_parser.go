@@ -210,3 +210,181 @@ func (t *TR069Alarm) Validate() error {
 	}
 	return nil
 }
+
+// --- ExpeditedEvent parsing ---
+
+// NotificationType constants for Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType.
+const (
+	NotificationNewAlarm      = "NewAlarm"
+	NotificationChangedAlarm  = "ChangedAlarm"
+	NotificationClearedAlarm  = "ClearedAlarm"
+)
+
+// ExpeditedEvent represents a single real-time alarm notification parsed from
+// Device.FaultMgmt.ExpeditedEvent.{i}.* parameters carried in VALUE CHANGE Informs.
+type ExpeditedEvent struct {
+	Index                 int
+	NotificationType      string // NewAlarm, ChangedAlarm, ClearedAlarm
+	AlarmIdentifier       string
+	PerceivedSeverity     string
+	EventType             string
+	ProbableCause         string
+	SpecificProblem       string
+	AdditionalInformation string
+	AdditionalText        string
+	EventTime             time.Time
+	ManagedObjectInstance string
+}
+
+// expeditedEventFieldRE extracts the index and field name from a parameter path
+// like "Device.FaultMgmt.ExpeditedEvent.10.NotificationType".
+var expeditedEventFieldRE = regexp.MustCompile(`^Device\.FaultMgmt\.ExpeditedEvent\.(\d+)\.(.+)$`)
+
+// HasExpeditedEventParams returns true if any parameter in the list belongs to
+// the ExpeditedEvent subtree (Device.FaultMgmt.ExpeditedEvent.*).
+func HasExpeditedEventParams(params []tr069.ParameterValueStruct) bool {
+	for _, p := range params {
+		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+			return true
+		}
+	}
+	return false
+}
+
+// FilterExpeditedEventParams returns only the parameters that belong to the
+// ExpeditedEvent subtree, filtering out unrelated VALUE CHANGE parameters.
+func FilterExpeditedEventParams(params []tr069.ParameterValueStruct) []tr069.ParameterValueStruct {
+	filtered := make([]tr069.ParameterValueStruct, 0, len(params))
+	for _, p := range params {
+		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
+// ParseExpeditedEventParams parses ExpeditedEvent parameters into structured events.
+// Multiple events can appear in a single Inform (different {i} indices).
+func ParseExpeditedEventParams(params []tr069.ParameterValueStruct) ([]ExpeditedEvent, error) {
+	indexMap := make(map[int]*ExpeditedEvent)
+
+	for _, p := range params {
+		m := expeditedEventFieldRE.FindStringSubmatch(p.Name)
+		if m == nil {
+			continue
+		}
+		idx, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		field := m[2]
+
+		ev, ok := indexMap[idx]
+		if !ok {
+			ev = &ExpeditedEvent{Index: idx}
+			indexMap[idx] = ev
+		}
+
+		switch field {
+		case "NotificationType":
+			ev.NotificationType = p.Value
+		case "AlarmIdentifier":
+			ev.AlarmIdentifier = p.Value
+		case "PerceivedSeverity":
+			ev.PerceivedSeverity = p.Value
+		case "EventType":
+			ev.EventType = p.Value
+		case "ProbableCause":
+			ev.ProbableCause = p.Value
+		case "SpecificProblem":
+			ev.SpecificProblem = p.Value
+		case "AdditionalInformation":
+			ev.AdditionalInformation = p.Value
+		case "AdditionalText":
+			ev.AdditionalText = p.Value
+		case "EventTime":
+			ev.EventTime = parseTR069Time(p.Value)
+		case "ManagedObjectInstance":
+			ev.ManagedObjectInstance = p.Value
+		}
+	}
+
+	result := make([]ExpeditedEvent, 0, len(indexMap))
+	for _, ev := range indexMap {
+		if ev.AlarmIdentifier == "" {
+			continue
+		}
+		result = append(result, *ev)
+	}
+
+	// Sort by index
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[j].Index < result[i].Index {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// ToModel converts an ExpeditedEvent to a model.Alarm for persistence.
+// For NewAlarm, this produces a full alarm ready for engine.Process().
+// For ChangedAlarm/ClearedAlarm, only the mutable fields are meaningful.
+func (e *ExpeditedEvent) ToModel(deviceID uuid.UUID, deviceSN string, carrier model.CarrierCode) *model.Alarm {
+	alarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        deviceID,
+		DeviceSN:        deviceSN,
+		Carrier:         carrier,
+		AlarmIdentifier: e.AlarmIdentifier,
+		Description:     e.SpecificProblem,
+		EventType:       strPtr(e.EventType),
+		AlarmSource:     strPtr("TR069"),
+		Severity:        mapSeverity(e.PerceivedSeverity),
+		Status:          model.AlarmActive,
+		AdditionalInfo:  make(map[string]string),
+	}
+
+	if !e.EventTime.IsZero() {
+		alarm.RaisedAt = e.EventTime
+		alarm.LastUpdatedAt = e.EventTime
+	}
+
+	pc := e.ProbableCause
+	if pc == "" {
+		pc = e.SpecificProblem
+	}
+	if pc == "" {
+		pc = e.AlarmIdentifier
+	}
+	alarm.ProbableCause = strPtr(pc)
+
+	if e.AdditionalInformation != "" {
+		alarm.AdditionalInfo["additional_information"] = e.AdditionalInformation
+	}
+	if e.AdditionalText != "" {
+		alarm.AdditionalInfo["additional_text"] = e.AdditionalText
+	}
+	if e.ManagedObjectInstance != "" {
+		alarm.AdditionalInfo["managed_object_instance"] = e.ManagedObjectInstance
+	}
+	alarm.AdditionalInfo["notification_type"] = e.NotificationType
+
+	return alarm
+}
+
+// Validate ensures the ExpeditedEvent has required fields.
+func (e *ExpeditedEvent) Validate() error {
+	if e.AlarmIdentifier == "" {
+		return fmt.Errorf("expedited event at index %d has no AlarmIdentifier", e.Index)
+	}
+	switch e.NotificationType {
+	case NotificationNewAlarm, NotificationChangedAlarm, NotificationClearedAlarm:
+		// valid
+	default:
+		return fmt.Errorf("expedited event at index %d has unknown NotificationType: %q", e.Index, e.NotificationType)
+	}
+	return nil
+}

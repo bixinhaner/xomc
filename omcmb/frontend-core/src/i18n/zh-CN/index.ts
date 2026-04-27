@@ -627,6 +627,7 @@ const messages: Record<string, string> = {
   'device.action.halobOff':      'HaloB 关闭',
   'device.action.logCollect':    '日志收集',
   'device.action.tr069Collect':  '收集报文',
+  'device.action.alarmSync':     '告警同步',
 
   // Action confirm & feedback messages (操作确认和反馈)
   'device.action.rebootConfirm':     '确定重启设备吗？',

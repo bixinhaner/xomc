@@ -9,6 +9,8 @@ DROP INDEX IF EXISTS idx_firmware_carrier;
 DROP INDEX IF EXISTS idx_firmware_carrier_product;
 DROP INDEX IF EXISTS idx_firmware_unique_version;
 ALTER TABLE firmware_versions DROP COLUMN IF EXISTS carrier;
+-- 添加 file_type 列（如果不存在）用于唯一约束
+ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS file_type VARCHAR(32) NOT NULL DEFAULT '';
 -- 重建唯一约束（仅按 product_class + version + file_type）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_firmware_unique_version
     ON firmware_versions (COALESCE(product_class, ''), version, file_type);
@@ -26,9 +28,10 @@ ALTER TABLE upgrade_tasks DROP COLUMN IF EXISTS operator_code;
 ALTER TABLE upgrade_tasks ADD COLUMN IF NOT EXISTS operator_code VARCHAR(8) NOT NULL DEFAULT 'n/a';
 CREATE INDEX IF NOT EXISTS idx_upgrade_tasks_task_operator ON upgrade_tasks (operator_code);
 
--- firmware_versions: 恢复 carrier
+-- firmware_versions: 恢复 carrier，删除 file_type
 ALTER TABLE firmware_versions ADD COLUMN IF NOT EXISTS carrier VARCHAR(4) NOT NULL DEFAULT 'n/a';
 DROP INDEX IF EXISTS idx_firmware_unique_version;
+ALTER TABLE firmware_versions DROP COLUMN IF EXISTS file_type;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_firmware_unique_version
     ON firmware_versions (carrier, product_class, version);
 CREATE INDEX IF NOT EXISTS idx_firmware_carrier ON firmware_versions (carrier);

@@ -116,6 +116,16 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("alarm receiver + sync started")
 
+	// Expedited Alarm Receiver (real-time alarm notifications via VALUE CHANGE ExpeditedEvent)
+	// Uses deviceRepo from below (created early for transfer bridge); create a separate instance
+	// here since deviceRepo is declared later in this function.
+	expeditedDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	expeditedReceiver := alarm.NewExpeditedEventReceiver(alarmEngine, expeditedDeviceRepo, w.EventBus, logger)
+	if err := expeditedReceiver.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe expedited alarm receiver", zap.Error(err))
+	}
+	logger.Info("expedited alarm receiver started")
+
 	// Frequent abnormal reboot monitor (F04)：滑动窗口内异常重启 >=阈值抬升告警。
 	rebootMonitor := alarm.NewRebootMonitor(alarmEngine, w.Redis, logger)
 	if err := rebootMonitor.Subscribe(w.EventBus); err != nil {

@@ -1217,6 +1217,24 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		zap.String("subject", subject),
 		zap.String("event_id", evt.ID),
 		zap.Strings("event_codes", eventCodes))
+
+	// Additional: if VALUE CHANGE contains ExpeditedEvent parameters, publish expedited alarm event.
+	if tr069.IsValueChange(inform.Event) && hasExpeditedEventParams(inform.ParameterList) {
+		expPayload := map[string]interface{}{
+			"device_sn":         inform.DeviceId.SerialNumber,
+			"parameter_values":  filterExpeditedEventParams(inform.ParameterList),
+		}
+		expEvt, err := event.NewEvent(event.SubjectDeviceExpeditedAlarm, expPayload)
+		if err != nil {
+			log.Error("create expedited alarm event failed", zap.Error(err))
+		} else if err := h.eventBus.Publish(ctx, event.SubjectDeviceExpeditedAlarm, expEvt); err != nil {
+			log.Error("publish expedited alarm event failed", zap.Error(err))
+		} else {
+			log.Info("expedited alarm event published",
+				zap.String("device_sn", inform.DeviceId.SerialNumber),
+				zap.String("event_id", expEvt.ID))
+		}
+	}
 }
 
 func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, lastCmdParams json.RawMessage, log *zap.Logger) {
@@ -1595,4 +1613,27 @@ func isLocalhost(url string) bool {
 		strings.Contains(url, "127.0.0.1") ||
 		strings.Contains(url, "[::1]") ||
 		strings.Contains(url, "::1")
+}
+
+// hasExpeditedEventParams returns true if any parameter belongs to the
+// Device.FaultMgmt.ExpeditedEvent.* subtree.
+func hasExpeditedEventParams(params []tr069.ParameterValueStruct) bool {
+	for _, p := range params {
+		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+			return true
+		}
+	}
+	return false
+}
+
+// filterExpeditedEventParams returns only parameters belonging to the
+// Device.FaultMgmt.ExpeditedEvent.* subtree.
+func filterExpeditedEventParams(params []tr069.ParameterValueStruct) []tr069.ParameterValueStruct {
+	filtered := make([]tr069.ParameterValueStruct, 0, len(params))
+	for _, p := range params {
+		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
 }

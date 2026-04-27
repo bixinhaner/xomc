@@ -42,7 +42,7 @@ func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(_ context.Context, devic
 			return a, nil
 		}
 	}
-	return nil, fmt.Errorf("not found")
+	return nil, nil // not found — return nil, nil (like a real store)
 }
 
 func (m *mockAlarmStore) GetActiveByDeviceSN(_ context.Context, deviceSN string) ([]*model.Alarm, error) {
@@ -290,4 +290,86 @@ func TestMultipleAlarmsDifferentCodes(t *testing.T) {
 	}
 
 	assert.Len(t, store.active, 3)
+}
+
+func TestUpdateByEvent_ExistingAlarm(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+
+	// Create initial alarm
+	deviceID := uuid.New()
+	alarm := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		Description:     "original description",
+		EventType:        strPtr("communicationsAlarm"),
+		ProbableCause:   strPtr("originalCause"),
+		RaisedAt:        time.Now(),
+	}
+	require.NoError(t, engine.Process(ctx, alarm))
+
+	// Update via expedited event (ChangedAlarm)
+	updated := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmCritical,
+		Description:     "updated description",
+		EventType:        strPtr("equipmentAlarm"),
+		ProbableCause:   strPtr("newCause"),
+		AdditionalInfo:  map[string]string{"notification_type": "ChangedAlarm"},
+	}
+
+	err := engine.UpdateByEvent(ctx, updated)
+	require.NoError(t, err)
+
+	// Verify the existing alarm was updated in place
+	existing, err := store.GetActiveByDeviceAndIdentifier(ctx, "TEST001", "ALM001")
+	require.NoError(t, err)
+	assert.Equal(t, model.AlarmCritical, existing.Severity)
+	assert.Equal(t, "updated description", existing.Description)
+	assert.Equal(t, "equipmentAlarm", *existing.EventType)
+	assert.Equal(t, "newCause", *existing.ProbableCause)
+	assert.Equal(t, "ChangedAlarm", existing.AdditionalInfo["notification_type"])
+	assert.False(t, existing.LastUpdatedAt.IsZero())
+
+	// Should still have only 1 alarm
+	assert.Len(t, store.active, 1)
+}
+
+func TestUpdateByEvent_NoExistingAlarm_FallbackToProcess(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+
+	deviceID := uuid.New()
+	updated := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		Description:     "race condition alarm",
+		RaisedAt:        time.Now(),
+	}
+
+	// No existing alarm — should fallback to Process() and create a new alarm
+	err := engine.UpdateByEvent(ctx, updated)
+	require.NoError(t, err)
+
+	assert.Len(t, store.active, 1)
+	var found *model.Alarm
+	for _, a := range store.active {
+		if a.AlarmIdentifier == "ALM001" {
+			found = a
+			break
+		}
+	}
+	require.NotNil(t, found)
+	assert.Equal(t, "race condition alarm", found.Description)
 }

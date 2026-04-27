@@ -64,6 +64,12 @@ const (
 	// 发布者：device.DeviceService.RecordBootFromInform；
 	// 订阅者：alarm.RebootMonitor — 滑动窗口内累计 >=阈值触发 FREQUENT_ABNORMAL_REBOOT 告警。
 	SubjectDeviceRebootAbnormal = "device.reboot.abnormal"
+
+	// SubjectDeviceExpeditedAlarm 是 VALUE CHANGE Inform 中包含 ExpeditedEvent 参数时发布。
+	// ExpeditedEvent 携带实时告警通知（NewAlarm / ChangedAlarm / ClearedAlarm）。
+	// 发布者：acs/handler.go（检测到 Device.FaultMgmt.ExpeditedEvent.* 参数时）。
+	// 订阅者：alarm.ExpeditedEventReceiver（解析参数并路由到告警引擎）。
+	SubjectDeviceExpeditedAlarm = "device.inform.expedited_alarm"
 )
 
 // System-wide control-plane events
@@ -140,6 +146,11 @@ const (
 	// SubjectAlarmSyncCompleted 是告警同步完成时发布。
 	// 发布者：alarm.AlarmSyncProcessor，订阅者：暂无
 	SubjectAlarmSyncCompleted = "alarm.sync.completed"
+
+	// SubjectAlarmUpdated 是告警属性变更（如严重程度）时发布。
+	// 发布者：alarm.AlarmEngine.UpdateByEvent（处理 ChangedAlarm 通知）。
+	// 订阅者：北向接口模块（告警推送）
+	SubjectAlarmUpdated = "alarm.updated"
 )
 
 // Provisioning events

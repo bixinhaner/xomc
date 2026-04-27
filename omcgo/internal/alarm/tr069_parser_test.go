@@ -294,3 +294,215 @@ func validUUID(t *testing.T) uuid.UUID {
 	}
 	return id
 }
+
+// --- ExpeditedEvent tests ---
+
+func TestHasExpeditedEventParams(t *testing.T) {
+	t.Run("has expedited event params", func(t *testing.T) {
+		params := []tr069.ParameterValueStruct{
+			makeParam("Device.DeviceInfo.Manufacturer", "Baicells"),
+			makeParam("Device.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+			makeParam("Device.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "11184"),
+		}
+		assert.True(t, HasExpeditedEventParams(params))
+	})
+
+	t.Run("no expedited event params", func(t *testing.T) {
+		params := []tr069.ParameterValueStruct{
+			makeParam("Device.DeviceInfo.Manufacturer", "Baicells"),
+			makeParam("Device.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", "ALM-001"),
+		}
+		assert.False(t, HasExpeditedEventParams(params))
+	})
+
+	t.Run("empty params", func(t *testing.T) {
+		assert.False(t, HasExpeditedEventParams(nil))
+	})
+}
+
+func TestFilterExpeditedEventParams(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		makeParam("Device.DeviceInfo.Manufacturer", "Baicells"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "11184"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.PerceivedSeverity", "Critical"),
+		makeParam("Device.Services.FAPService.1.FAPControl.LTE.CellOpState", "1"),
+	}
+
+	filtered := FilterExpeditedEventParams(params)
+	assert.Len(t, filtered, 3)
+	for _, p := range filtered {
+		assert.True(t, len(p.Name) > len("Device.FaultMgmt.ExpeditedEvent."))
+	}
+}
+
+func TestParseExpeditedEventParams_NewAlarm(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		// ExpeditedEvent.10 — NewAlarm
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "11184"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.PerceivedSeverity", "Critical"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.EventType", "Equipment Alarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.ProbableCause", "Cell unavailable"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.SpecificProblem", "Cell unavailable"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AdditionalText", "LTE0"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.EventTime", "2026-04-23T09:03:01"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.ManagedObjectInstance", "Device.FaultMgmt.ExpeditedEvent."),
+		// Unrelated params should be skipped
+		makeParam("Device.DeviceInfo.Manufacturer", "BAICELLS"),
+		makeParam("Device.DeviceInfo.SoftwareVersion", "BaiBLN_5.1.11.2"),
+	}
+
+	events, err := ParseExpeditedEventParams(params)
+	assert.NoError(t, err)
+	assert.Len(t, events, 1)
+
+	ev := events[0]
+	assert.Equal(t, 10, ev.Index)
+	assert.Equal(t, "NewAlarm", ev.NotificationType)
+	assert.Equal(t, "11184", ev.AlarmIdentifier)
+	assert.Equal(t, "Critical", ev.PerceivedSeverity)
+	assert.Equal(t, "Equipment Alarm", ev.EventType)
+	assert.Equal(t, "Cell unavailable", ev.ProbableCause)
+	assert.Equal(t, "Cell unavailable", ev.SpecificProblem)
+	assert.Equal(t, "LTE0", ev.AdditionalText)
+	assert.False(t, ev.EventTime.IsZero())
+	assert.Equal(t, "Device.FaultMgmt.ExpeditedEvent.", ev.ManagedObjectInstance)
+}
+
+func TestParseExpeditedEventParams_MultipleEvents(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		// Event 1: NewAlarm
+		makeParam("Device.FaultMgmt.ExpeditedEvent.5.NotificationType", "NewAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.5.AlarmIdentifier", "ALM-A"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.5.PerceivedSeverity", "Major"),
+		// Event 2: ChangedAlarm
+		makeParam("Device.FaultMgmt.ExpeditedEvent.8.NotificationType", "ChangedAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.8.AlarmIdentifier", "ALM-B"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.8.PerceivedSeverity", "Warning"),
+		// Event 3: ClearedAlarm
+		makeParam("Device.FaultMgmt.ExpeditedEvent.12.NotificationType", "ClearedAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.12.AlarmIdentifier", "ALM-C"),
+	}
+
+	events, err := ParseExpeditedEventParams(params)
+	assert.NoError(t, err)
+	assert.Len(t, events, 3)
+
+	assert.Equal(t, "NewAlarm", events[0].NotificationType)
+	assert.Equal(t, "ALM-A", events[0].AlarmIdentifier)
+	assert.Equal(t, 5, events[0].Index)
+
+	assert.Equal(t, "ChangedAlarm", events[1].NotificationType)
+	assert.Equal(t, "ALM-B", events[1].AlarmIdentifier)
+	assert.Equal(t, 8, events[1].Index)
+
+	assert.Equal(t, "ClearedAlarm", events[2].NotificationType)
+	assert.Equal(t, "ALM-C", events[2].AlarmIdentifier)
+	assert.Equal(t, 12, events[2].Index)
+}
+
+func TestParseExpeditedEventParams_SkipNoIdentifier(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		makeParam("Device.FaultMgmt.ExpeditedEvent.1.NotificationType", "NewAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.1.PerceivedSeverity", "Critical"),
+		// No AlarmIdentifier — should be skipped
+		makeParam("Device.FaultMgmt.ExpeditedEvent.2.AlarmIdentifier", "ALM-002"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.2.NotificationType", "ChangedAlarm"),
+	}
+
+	events, err := ParseExpeditedEventParams(params)
+	assert.NoError(t, err)
+	assert.Len(t, events, 1)
+	assert.Equal(t, "ALM-002", events[0].AlarmIdentifier)
+}
+
+func TestParseExpeditedEventParams_Empty(t *testing.T) {
+	events, err := ParseExpeditedEventParams(nil)
+	assert.NoError(t, err)
+	assert.Len(t, events, 0)
+}
+
+func TestExpeditedEvent_Validate(t *testing.T) {
+	t.Run("valid NewAlarm", func(t *testing.T) {
+		ev := &ExpeditedEvent{Index: 10, NotificationType: "NewAlarm", AlarmIdentifier: "11184"}
+		assert.NoError(t, ev.Validate())
+	})
+
+	t.Run("valid ChangedAlarm", func(t *testing.T) {
+		ev := &ExpeditedEvent{Index: 10, NotificationType: "ChangedAlarm", AlarmIdentifier: "11184"}
+		assert.NoError(t, ev.Validate())
+	})
+
+	t.Run("valid ClearedAlarm", func(t *testing.T) {
+		ev := &ExpeditedEvent{Index: 10, NotificationType: "ClearedAlarm", AlarmIdentifier: "11184"}
+		assert.NoError(t, ev.Validate())
+	})
+
+	t.Run("missing identifier", func(t *testing.T) {
+		ev := &ExpeditedEvent{Index: 10, NotificationType: "NewAlarm"}
+		assert.Error(t, ev.Validate())
+		assert.Contains(t, ev.Validate().Error(), "no AlarmIdentifier")
+	})
+
+	t.Run("unknown notification type", func(t *testing.T) {
+		ev := &ExpeditedEvent{Index: 10, NotificationType: "UnknownType", AlarmIdentifier: "11184"}
+		assert.Error(t, ev.Validate())
+		assert.Contains(t, ev.Validate().Error(), "unknown NotificationType")
+	})
+}
+
+func TestExpeditedEvent_ToModel(t *testing.T) {
+	eventTime, _ := time.Parse("2006-01-02T15:04:05", "2026-04-23T09:03:01")
+
+	ev := &ExpeditedEvent{
+		Index:                 10,
+		NotificationType:      "NewAlarm",
+		AlarmIdentifier:       "11184",
+		PerceivedSeverity:     "Critical",
+		EventType:             "Equipment Alarm",
+		ProbableCause:         "Cell unavailable",
+		SpecificProblem:       "Cell unavailable",
+		AdditionalText:        "LTE0",
+		EventTime:             eventTime,
+		ManagedObjectInstance: "Device.FaultMgmt.ExpeditedEvent.",
+	}
+
+	deviceID := validUUID(t)
+	alarm := ev.ToModel(deviceID, "SN-TEST", model.CarrierCMCC)
+
+	assert.Equal(t, "11184", alarm.AlarmIdentifier)
+	assert.Equal(t, "SN-TEST", alarm.DeviceSN)
+	assert.Equal(t, model.CarrierCMCC, alarm.Carrier)
+	assert.Equal(t, "Cell unavailable", alarm.Description)
+	assert.Equal(t, "TR069", *alarm.AlarmSource)
+	assert.Equal(t, "Equipment Alarm", *alarm.EventType)
+	assert.Equal(t, "Cell unavailable", *alarm.ProbableCause)
+	assert.Equal(t, "LTE0", alarm.AdditionalInfo["additional_text"])
+	assert.Equal(t, "Device.FaultMgmt.ExpeditedEvent.", alarm.AdditionalInfo["managed_object_instance"])
+	assert.Equal(t, "NewAlarm", alarm.AdditionalInfo["notification_type"])
+	assert.Equal(t, model.AlarmActive, alarm.Status)
+	assert.False(t, alarm.RaisedAt.IsZero())
+	assert.False(t, alarm.LastUpdatedAt.IsZero())
+}
+
+func TestExpeditedEvent_ToModel_ProbableCauseFallback(t *testing.T) {
+	t.Run("no probable cause, falls back to specific problem", func(t *testing.T) {
+		ev := &ExpeditedEvent{
+			AlarmIdentifier:  "ALM-001",
+			SpecificProblem:  "Board failure",
+			PerceivedSeverity: "Major",
+		}
+		alarm := ev.ToModel(uuid.UUID{}, "SN", model.CarrierCMCC)
+		assert.Equal(t, "Board failure", *alarm.ProbableCause)
+	})
+
+	t.Run("no probable cause or specific problem, falls back to identifier", func(t *testing.T) {
+		ev := &ExpeditedEvent{
+			AlarmIdentifier:  "ALM-002",
+			PerceivedSeverity: "Minor",
+		}
+		alarm := ev.ToModel(uuid.UUID{}, "SN", model.CarrierCMCC)
+		assert.Equal(t, "ALM-002", *alarm.ProbableCause)
+	})
+}

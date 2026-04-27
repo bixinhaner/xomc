@@ -625,6 +625,7 @@ const messages: Record<string, string> = {
   'device.action.halobOff':      'HaloB Off',
   'device.action.logCollect':    'Log Collect',
   'device.action.tr069Collect':  'Collect TR069 Msg',
+  'device.action.alarmSync':     'Alarm Sync',
 
   // Action confirm & feedback messages
   'device.action.rebootConfirm':     'Are you sure to reboot this device?',

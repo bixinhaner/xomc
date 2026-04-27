@@ -285,8 +285,10 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) error
 	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
 		return fmt.Errorf("sync remove active alarm: %w", err)
 	}
-	if err := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); err != nil {
-		e.logger.Warn("redis delete alarm on sync clear", zap.Error(err))
+	if e.redisStore != nil {
+		if err := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); err != nil {
+			e.logger.Warn("redis delete alarm on sync clear", zap.Error(err))
+		}
 	}
 	if e.metrics != nil {
 		e.metrics.ActiveTotal.WithLabelValues(severityLabel(alarm.Severity), string(alarm.Carrier)).Dec()
@@ -295,6 +297,70 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) error
 		zap.String("alarm_id", alarm.ID.String()),
 		zap.String("alarm_identifier", alarm.AlarmIdentifier),
 		zap.String("device_sn", alarm.DeviceSN))
+	return nil
+}
+
+// UpdateByEvent handles a ChangedAlarm ExpeditedEvent notification.
+// It updates mutable fields (Severity, Description, EventType, ProbableCause, AdditionalInfo)
+// on the existing active alarm and publishes an alarm.updated event for northbound push.
+// If no matching active alarm is found, it falls back to Process() (race with NewAlarm).
+func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) error {
+	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+	if err != nil {
+		return fmt.Errorf("lookup alarm for update: %w", err)
+	}
+
+	// No matching active alarm — treat as new (race: NewAlarm not yet processed)
+	if existing == nil {
+		e.logger.Warn("UpdateByEvent: no active alarm found, falling back to Process",
+			zap.String("device_sn", alarm.DeviceSN),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier))
+		return e.Process(ctx, alarm)
+	}
+
+	// Update mutable fields
+	oldSeverity := existing.Severity
+	existing.Severity = alarm.Severity
+	existing.Description = alarm.Description
+	existing.EventType = alarm.EventType
+	existing.ProbableCause = alarm.ProbableCause
+	existing.LastUpdatedAt = time.Now()
+	if alarm.AdditionalInfo != nil {
+		if existing.AdditionalInfo == nil {
+			existing.AdditionalInfo = make(map[string]string)
+		}
+		for k, v := range alarm.AdditionalInfo {
+			existing.AdditionalInfo[k] = v
+		}
+	}
+
+	if err := e.store.UpdateActive(ctx, existing); err != nil {
+		return fmt.Errorf("update alarm by event: %w", err)
+	}
+
+	// Adjust metrics if severity changed
+	if e.metrics != nil && oldSeverity != existing.Severity {
+		e.metrics.ActiveTotal.WithLabelValues(severityLabel(oldSeverity), string(existing.Carrier)).Dec()
+		e.metrics.ActiveTotal.WithLabelValues(severityLabel(existing.Severity), string(existing.Carrier)).Inc()
+	}
+
+	// Publish alarm.updated event for northbound push
+	if e.eventBus != nil {
+		evt, err := event.NewEvent(event.SubjectAlarmUpdated, existing)
+		if err == nil {
+			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmUpdated, evt); pubErr != nil {
+				e.logger.Warn("publish alarm.updated event", zap.Error(pubErr))
+			}
+		}
+	}
+
+	e.logger.Info("alarm updated by expedited event",
+		zap.String("alarm_id", existing.ID.String()),
+		zap.String("device_sn", existing.DeviceSN),
+		zap.String("alarm_identifier", existing.AlarmIdentifier),
+		zap.Int("old_severity", int(oldSeverity)),
+		zap.Int("new_severity", int(existing.Severity)))
+
 	return nil
 }
 
