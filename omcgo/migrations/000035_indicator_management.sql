@@ -17,12 +17,12 @@ CREATE TABLE IF NOT EXISTS indicator_unit (
 -- Table: indicator_group_enb (指标功能集树)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS indicator_group_enb (
-    id              VARCHAR(32)  NOT NULL,
+    id              VARCHAR(64)  NOT NULL,
     en_name         VARCHAR(200),
     operator_code   VARCHAR(100),
     is_build_in     CHAR(1)      NOT NULL DEFAULT '0',
     description     TEXT,
-    parent_id       VARCHAR(32)  NOT NULL,
+    parent_id       VARCHAR(64)  NOT NULL,
     cn_name         VARCHAR(200),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
@@ -34,12 +34,12 @@ CREATE INDEX IF NOT EXISTS idx_indicator_group_enb_parent_id ON indicator_group_
 -- Table: indicator_group_gsm (指标功能集树)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS indicator_group_gsm (
-    id              VARCHAR(32)  NOT NULL,
+    id              VARCHAR(64)  NOT NULL,
     en_name         VARCHAR(200),
     operator_code   VARCHAR(100),
     is_build_in     CHAR(1)      NOT NULL DEFAULT '0',
     description     TEXT,
-    parent_id       VARCHAR(32)  NOT NULL,
+    parent_id       VARCHAR(64)  NOT NULL,
     cn_name         VARCHAR(200),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
@@ -51,12 +51,12 @@ CREATE INDEX IF NOT EXISTS idx_indicator_group_gsm_parent_id ON indicator_group_
 -- Table: indicator_group_gnb (指标功能集树)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS indicator_group_gnb (
-    id              VARCHAR(32)  NOT NULL,
+    id              VARCHAR(64)  NOT NULL,
     en_name         VARCHAR(200),
     operator_code   VARCHAR(100),
     is_build_in     CHAR(1)      NOT NULL DEFAULT '0',
     description     TEXT,
-    parent_id       VARCHAR(32)  NOT NULL,
+    parent_id       VARCHAR(64)  NOT NULL,
     cn_name         VARCHAR(200),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS perf_indicators_enb (
     cn_name             VARCHAR(200) NOT NULL,
     en_description      TEXT,
     cn_description      TEXT,
-    group_id            VARCHAR(32)  NOT NULL,
+    group_id            VARCHAR(64)  NOT NULL,
     operator_code       VARCHAR(100),
     data_type           VARCHAR(20),
     unit_id             VARCHAR(50),
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS perf_indicators_gsm (
     cn_name             VARCHAR(200) NOT NULL,
     en_description      TEXT,
     cn_description      TEXT,
-    group_id            VARCHAR(32)  NOT NULL,
+    group_id            VARCHAR(64)  NOT NULL,
     operator_code       VARCHAR(100),
     data_type           VARCHAR(20),
     unit_id             VARCHAR(50),
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS perf_indicators_gnb (
     cn_name             VARCHAR(200) NOT NULL,
     en_description      TEXT,
     cn_description      TEXT,
-    group_id            VARCHAR(32)  NOT NULL,
+    group_id            VARCHAR(64)  NOT NULL,
     operator_code       VARCHAR(100),
     data_type           VARCHAR(20),
     unit_id             VARCHAR(50),
