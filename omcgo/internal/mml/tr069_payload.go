@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -25,6 +26,73 @@ import (
 // ErrNoUsableParams indicates the translation produced an empty payload, which is
 // a strong signal that the command/parameter configuration upstream is broken.
 var ErrNoUsableParams = errors.New("no usable params for tr069 payload")
+
+// 路径合规校验（TR-069 §3.3 / §A.2.2.x）。前置在 BuildTR069Params 之前过滤掉
+// CPE 必拒的路径，避免下发到 ACS 后被静默丢弃。被过滤的路径会通过 Skip 列表
+// 由 fanout 层日志输出，运维侧能立刻看到具体哪条 path 出问题、为什么。
+//
+// 三类不合规：
+//   1. 顶层不是 Device. 或 InternetGatewayDevice.
+//      （TR-069 数据模型唯二合法根；DeviceGSM. / Internal. / 自造前缀都拒）
+//   2. 含 {i} / {n} / {idx} 占位符未替换
+//      （TR-181 写法约定，发 SOAP 必须替换为实际索引）
+//   3. 含非 ASCII 或非 TR-069 合法字符
+//      （只允许字母数字、_ . - [] {} ）
+
+var paramPathLegalRoot = regexp.MustCompile(`^(Device|InternetGatewayDevice)\.`)
+
+// 占位符匹配所有 {<letter>+} 形式：TR-069 spec 标准是 {i}，
+// 但实际项目种子里也出现 {j}（多层实例索引）等同类问题，CPE 同样无法识别。
+// 一律视作"未替换的实例索引"。
+var paramPathPlaceholder = regexp.MustCompile(`\{[A-Za-z]+\}`)
+var paramPathLegalChars = regexp.MustCompile(`^[A-Za-z0-9_.\[\]\-]+$`)
+
+// PathSkipReason 描述路径被过滤的原因（仅用于日志/诊断，不暴露给协议层）。
+type PathSkipReason string
+
+const (
+	PathSkipBadPrefix      PathSkipReason = "bad_prefix"      // 不是 Device. / InternetGatewayDevice.
+	PathSkipPlaceholder    PathSkipReason = "has_placeholder" // 含 {i}/{n}/{idx}
+	PathSkipBadChars       PathSkipReason = "bad_chars"       // 含非法字符
+)
+
+// SkippedPath 是 ValidatePath 返回的不合规条目。
+type SkippedPath struct {
+	Path   string
+	Reason PathSkipReason
+}
+
+// validatePath 单条路径合规校验。返回（合规则空字符串, 不合规则原因）。
+func validatePath(p string) PathSkipReason {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return PathSkipBadPrefix
+	}
+	if !paramPathLegalRoot.MatchString(p) {
+		return PathSkipBadPrefix
+	}
+	if paramPathPlaceholder.MatchString(p) {
+		return PathSkipPlaceholder
+	}
+	if !paramPathLegalChars.MatchString(p) {
+		return PathSkipBadChars
+	}
+	return ""
+}
+
+// filterLegalPaths 把字符串列表过滤为仅包含合规路径，同时返回被跳过的明细。
+// 顺序保留输入顺序；重复路径在调用方按需去重（builder 已有 seen 逻辑）。
+func filterLegalPaths(paths []string) (legal []string, skipped []SkippedPath) {
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if reason := validatePath(p); reason != "" {
+			skipped = append(skipped, SkippedPath{Path: p, Reason: reason})
+			continue
+		}
+		legal = append(legal, p)
+	}
+	return
+}
 
 // BuildTR069Params 把 MML 命令参数翻译为 TR-069 wire 格式 JSON。
 //
@@ -85,20 +153,36 @@ func xsdType(valueType string) string {
 
 // buildParameterNames 收集所有 paramRefs 的 tr069_path → {"names":[...]}。
 // LST/DSP 不依赖 formValues：用户在控制台不填表单，命令的 param_refs 即为读取范围。
+//
+// 路径合规校验：每条 tr069_path 经 validatePath 过滤，不合规的路径（前缀错 /
+// 含 {i} 占位符 / 非法字符）被跳过，避免下发到 CPE 后被静默丢弃。
+// 跳过的明细通过 fanout 层的 Skipped 日志暴露，运维侧能看到具体哪条。
+// 全部不合规时返回 ErrNoUsableParams 让上层跳过整条 command。
 func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
-	names := make([]string, 0, len(paramRefs))
-	seen := make(map[string]struct{}, len(paramRefs))
+	raw := make([]string, 0, len(paramRefs))
 	for _, ref := range paramRefs {
-		if ref.Tr069Path == "" {
-			continue
+		if ref.Tr069Path != "" {
+			raw = append(raw, ref.Tr069Path)
 		}
-		if _, dup := seen[ref.Tr069Path]; dup {
-			continue
-		}
-		seen[ref.Tr069Path] = struct{}{}
-		names = append(names, ref.Tr069Path)
 	}
+	legal, skipped := filterLegalPaths(raw)
+
+	// 去重（保序）
+	names := make([]string, 0, len(legal))
+	seen := make(map[string]struct{}, len(legal))
+	for _, p := range legal {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		names = append(names, p)
+	}
+
 	if len(names) == 0 {
+		if len(skipped) > 0 {
+			return nil, fmt.Errorf("%w: GetParameterValues all %d paths failed validation (first: %s/%s)",
+				ErrNoUsableParams, len(skipped), skipped[0].Path, skipped[0].Reason)
+		}
 		return nil, fmt.Errorf("%w: GetParameterValues found 0 tr069_path in command param_refs", ErrNoUsableParams)
 	}
 	return json.Marshal(map[string]interface{}{"names": names})
@@ -127,6 +211,7 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 	values := make([]valueEntry, 0, len(formValues))
 	var unknown []string
 
+	var skipped []SkippedPath
 	for code, raw := range formValues {
 		strVal, isEmpty := stringifyValue(raw)
 		if isEmpty {
@@ -137,6 +222,11 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 			unknown = append(unknown, code)
 			continue
 		}
+		// 写类参数路径同样必须合规（占位符未替换的 path 写下去 CPE 也会拒）
+		if reason := validatePath(ref.Tr069Path); reason != "" {
+			skipped = append(skipped, SkippedPath{Path: ref.Tr069Path, Reason: reason})
+			continue
+		}
 		values = append(values, valueEntry{
 			Name:  ref.Tr069Path,
 			Value: strVal,
@@ -145,6 +235,10 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 	}
 
 	if len(values) == 0 {
+		if len(skipped) > 0 {
+			return nil, fmt.Errorf("%w: SetParameterValues all %d paths failed validation (first: %s/%s)",
+				ErrNoUsableParams, len(skipped), skipped[0].Path, skipped[0].Reason)
+		}
 		return nil, fmt.Errorf("%w: SetParameterValues mapped 0 values; unknown_codes=%v", ErrNoUsableParams, unknown)
 	}
 	return json.Marshal(map[string]interface{}{"values": values})
@@ -167,10 +261,13 @@ func buildSetAttributes(paramRefs []MMLParamRef, formValues map[string]interface
 		if ref.Tr069Path == "" {
 			continue
 		}
+		if reason := validatePath(ref.Tr069Path); reason != "" {
+			continue // 不合规路径直接跳过
+		}
 		entries = append(entries, attrEntry{Name: ref.Tr069Path})
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("%w: SetParameterAttributes resolved 0 paths", ErrNoUsableParams)
+		return nil, fmt.Errorf("%w: SetParameterAttributes resolved 0 legal paths", ErrNoUsableParams)
 	}
 	return json.Marshal(map[string]interface{}{"attributes": entries})
 }
@@ -186,6 +283,14 @@ func buildGetParameterNames(paramRefs []MMLParamRef, formValues map[string]inter
 	}
 	if path == "" {
 		return nil, fmt.Errorf("%w: GetParameterNames requires path", ErrNoUsableParams)
+	}
+	// GetParameterNames 的 path 允许 partial（以 "." 结尾），所以校验只查前缀和字符集，
+	// 占位符 {i} 同样不允许（CPE 解析失败）。
+	if !paramPathLegalRoot.MatchString(path) {
+		return nil, fmt.Errorf("%w: GetParameterNames path %q does not start with Device. or InternetGatewayDevice.", ErrNoUsableParams, path)
+	}
+	if paramPathPlaceholder.MatchString(path) {
+		return nil, fmt.Errorf("%w: GetParameterNames path %q contains unresolved placeholder {i}/{n}", ErrNoUsableParams, path)
 	}
 	var nextLevel bool
 	switch v := formValues["next_level"].(type) {
@@ -211,6 +316,13 @@ func buildObjectName(paramRefs []MMLParamRef, formValues map[string]interface{})
 	}
 	if name == "" {
 		return nil, fmt.Errorf("%w: AddObject/DeleteObject requires object_name", ErrNoUsableParams)
+	}
+	// 对象名同样必须合规。AddObject 的 object_name 是 partial path（以 . 结尾），
+	// 所以前缀校验和占位符校验都查；字符集校验跳过末尾的 "."。
+	checkName := strings.TrimSuffix(name, ".")
+	if reason := validatePath(checkName); reason != "" {
+		return nil, fmt.Errorf("%w: AddObject/DeleteObject object_name %q failed validation (%s)",
+			ErrNoUsableParams, name, reason)
 	}
 	if !strings.HasSuffix(name, ".") {
 		name += "."

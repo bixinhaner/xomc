@@ -3,6 +3,7 @@ package mml
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -172,6 +173,134 @@ func TestBuildTR069Params_UnknownMethodPassthrough(t *testing.T) {
 	payload, err := BuildTR069Params("CustomMethod", nil, formValues, "")
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"foo":"bar"}`, string(payload))
+}
+
+// 回归 baicell 实测报文："DeviceGSM.*"（前缀非法）+ "{i}"（占位符未替换）+
+// "X_COM_*"（合规字符集）混在一起。校验后只保留合法路径，全非法时报错。
+func TestValidatePath_AllReasons(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want PathSkipReason
+	}{
+		{"empty", "", PathSkipBadPrefix},
+		{"whitespace", "   ", PathSkipBadPrefix},
+		{"missing_root", "DeviceGSM.Mcc", PathSkipBadPrefix},
+		{"internal_namespace", "Internal.X.Y", PathSkipBadPrefix},
+		{"placeholder_i", "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress", PathSkipPlaceholder},
+		{"placeholder_n", "Device.WiFi.SSID.{n}.SSID", PathSkipPlaceholder},
+		{"placeholder_idx", "Device.X.Y.{idx}.Z", PathSkipPlaceholder},
+		{"chinese", "Device.设备信息", PathSkipBadChars},
+		{"space", "Device.Info Foo", PathSkipBadChars},
+		{"legal_tr181", "Device.DeviceInfo.HardwareVersion", ""},
+		{"legal_igd", "InternetGatewayDevice.DeviceInfo.HardwareVersion", ""},
+		{"legal_xvendor", "Device.DeviceInfo.X_COM_MACAddress", ""},
+		{"legal_indexed", "Device.IP.Interface.1.IPv4Address.1.IPAddress", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, validatePath(c.path), c.path)
+		})
+	}
+}
+
+func TestBuildTR069Params_GetParameterValues_FiltersIllegalPaths(t *testing.T) {
+	// 直接复刻 baicell 现场报文的 14 条 path：7 条 DeviceGSM.* 非法、
+	// 1 条带 {i} 占位符、其余合法。校验后应只剩 6 条合法路径。
+	refs := []MMLParamRef{
+		{ParamCode: "GSM_ENC", Tr069Path: "DeviceGSM.Encryption", ValueType: "int"},
+		{ParamCode: "GSM_MCC", Tr069Path: "DeviceGSM.Mcc", ValueType: "string"},
+		{ParamCode: "GSM_MNC", Tr069Path: "DeviceGSM.Mnc", ValueType: "string"},
+		{ParamCode: "GSM_NRI", Tr069Path: "DeviceGSM.NriBitLen", ValueType: "int"},
+		{ParamCode: "GSM_NRINULL", Tr069Path: "DeviceGSM.NriNullAdd", ValueType: "string"},
+		{ParamCode: "GSM_T3212", Tr069Path: "DeviceGSM.TimerNetT3212", ValueType: "int"},
+		{ParamCode: "GSM_BTS", Tr069Path: "DeviceGSM.BtsNum", ValueType: "int"},
+		{ParamCode: "DEV_HW", Tr069Path: "Device.DeviceInfo.HardwareVersion", ValueType: "string"},
+		{ParamCode: "IP_ADDR", Tr069Path: "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress", ValueType: "string"},
+		{ParamCode: "DEV_MAC", Tr069Path: "Device.DeviceInfo.X_COM_MACAddress", ValueType: "string"},
+		{ParamCode: "DEV_MME", Tr069Path: "Device.DeviceInfo.X_COM_MME_Status", ValueType: "string"},
+		{ParamCode: "DEV_MOD", Tr069Path: "Device.DeviceInfo.X_COM_MODULE_TYPE", ValueType: "string"},
+		{ParamCode: "DEV_SW", Tr069Path: "Device.DeviceInfo.SoftwareVersion", ValueType: "string"},
+		{ParamCode: "DEV_RUN", Tr069Path: "Device.DeviceInfo.X_COM_STATION_RUN_Time", ValueType: "string"},
+	}
+	payload, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
+	require.NoError(t, err)
+	var got struct {
+		Names []string `json:"names"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &got))
+	assert.Len(t, got.Names, 6, "应只保留 6 条合法路径（去掉 7 条 DeviceGSM.* + 1 条带 {i}）")
+	// 不应该包含任何非法路径
+	for _, n := range got.Names {
+		assert.False(t, strings.HasPrefix(n, "DeviceGSM."), "DeviceGSM. 前缀必须被过滤")
+		assert.NotContains(t, n, "{i}", "占位符必须被过滤")
+	}
+	// 必须保留这些
+	assert.Contains(t, got.Names, "Device.DeviceInfo.HardwareVersion")
+	assert.Contains(t, got.Names, "Device.DeviceInfo.X_COM_MACAddress")
+}
+
+func TestBuildTR069Params_GetParameterValues_AllIllegalReturnsError(t *testing.T) {
+	refs := []MMLParamRef{
+		{ParamCode: "A", Tr069Path: "DeviceGSM.Mcc"},
+		{ParamCode: "B", Tr069Path: "Internal.X"},
+		{ParamCode: "C", Tr069Path: "Device.X.{i}.Y"},
+	}
+	_, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoUsableParams))
+	assert.Contains(t, err.Error(), "failed validation")
+}
+
+func TestBuildTR069Params_SetParameterValues_FiltersIllegalPaths(t *testing.T) {
+	refs := []MMLParamRef{
+		{ParamCode: "BAD", Tr069Path: "DeviceGSM.Mcc", ValueType: "string"},
+		{ParamCode: "PLACEHOLDER", Tr069Path: "Device.IP.Interface.{i}.X", ValueType: "string"},
+		{ParamCode: "OK", Tr069Path: "Device.DeviceInfo.X_BAICELLS_GsmMcc", ValueType: "string"},
+	}
+	formValues := map[string]interface{}{
+		"BAD":         "460",
+		"PLACEHOLDER": "1.2.3.4",
+		"OK":          "460",
+	}
+	payload, err := BuildTR069Params("SetParameterValues", refs, formValues, "MOD")
+	require.NoError(t, err)
+	var got struct {
+		Values []struct{ Name string } `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &got))
+	require.Len(t, got.Values, 1, "只剩 OK 一条")
+	assert.Equal(t, "Device.DeviceInfo.X_BAICELLS_GsmMcc", got.Values[0].Name)
+}
+
+func TestBuildTR069Params_GetParameterNames_RejectsIllegalPath(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"bad_prefix", "DeviceGSM."},
+		{"placeholder", "Device.WiFi.{i}."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := BuildTR069Params("GetParameterNames", nil,
+				map[string]interface{}{"path": c.path}, "LST")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrNoUsableParams))
+		})
+	}
+}
+
+func TestBuildTR069Params_AddObject_RejectsIllegalPath(t *testing.T) {
+	cases := []string{"DeviceGSM", "Device.IP.{i}"}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			_, err := BuildTR069Params("AddObject", nil,
+				map[string]interface{}{"object_name": p}, "ADD")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrNoUsableParams))
+		})
+	}
 }
 
 func TestXSDType(t *testing.T) {
