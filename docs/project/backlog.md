@@ -378,6 +378,10 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-27 | post-mortem | Agent B (W1.5 sub-agent) | API 403 中断模式与 Agent A（路径漂移）不同：是 anthropic 端 auth 失败（不是 prompt 问题）。复盘：worktree 内文件齐全无污染、心跳协议本次有效（拿到了 implementation-done 时间戳）；主会话接续靠两件事支撑（主 worktree 状态干净 + 心跳进度日志）；后续 prompt 可保持现样，watchdog 保持现样 |
 | 2026-04-27 | Wave 1 阶段计分（三盘） | **7.5 / 8 ✅** | +W1.5 (1.0) → 7.5；剩余 W1.7 docker 三 curl 0.5 为外部待办；满分 8.0 需 docker 环境补齐 |
 | 2026-04-27 | 待 triage | pre-existing race | `TestIntegration_FullPipeline_RaceCondition_NewAlarmNotYetProcessed` 在干净 main 分支同样 -race FAIL（`expedited_receiver.go:48` → `channel_bus.go:133`），与 W1.5 改动无关；登记 PgM 周一 triage（候选 task：`ExpeditedEventReceiver Subscribe race fix`） |
+| 2026-04-27 | live 验证 | W1.5 charter 4 步全过 | 用 `run/scripts/restart-all.sh` 起本地全栈（不依赖 docker）：build + migration 000038 应用 + 三进程起；schema live 验证（webhook_url 列 + CHECK 约束 + 23514 拒非法）；API live CRUD（POST/GET/Toggle/List/Delete 闭环，webhook_url 三处一致）；HTTPWebhookDispatcher live 经临时 `cmd/w15verify/main.go` 真发 POST 到 `127.0.0.1:9999` python receiver，receiver 收到完整 JSON + Content-Type/User-Agent 正确；详 `verify-T-0007-W1.5-live.md` |
+| 2026-04-27 | fix | T-0007/T-0011 接续 | commit `10a214b2`；W1.5 live 验证暴露的 bug：`pg_filter_repository.go` GetByID Scan 漏 `&rule.WebhookURL`（agent 在 Create/Update/List/ListEnabled 都加了，唯独 GetByID 漏），导致 GET by id 404；fix 1 行；Toggle/Update 内部都用 GetByID 取当前 row，本修复同步生效 |
+| 2026-04-27 | docs | W1.5 live | commit `a11ee3ab`；`docs/review-report/20260427/verify-T-0007-W1.5-live.md` 315 行；记录 charter 4 步 live 全过 + 已知边界（FilterEngine 未接入生产 alarm 路径，Wave 2 T-0011 必做） |
+| 2026-04-27 | 待 triage 候选 task | F04 alarm-filters API 改进 | 1) Create handler 加联合校验（action=notify_webhook 时 webhook_url 必填）→ 返回 400 而非 500；2) FilterEngine 装配进生产 alarm 接收路径（pre-existing tech debt，Wave 2 T-0011 全量必做） |
 
 ---
 
