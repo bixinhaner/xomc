@@ -207,13 +207,17 @@ type CustomCommandFilter struct {
 
 // MMLParamRef represents a lightweight reference to an mml_param bound to a command.
 // Replaces the old SubCommand concept — commands now directly reference mml_params.
+//
+// DefaultValue / JsRegex 暴露给前端做 placeholder 与初始值提示（to-do-list MOD 类需求）。
 type MMLParamRef struct {
-	ID           uuid.UUID              `json:"id"`
-	ParamCode    string                 `json:"param_code"`
-	ParamNameZh  string                 `json:"param_name_zh"`
-	Tr069Path    string                 `json:"tr069_path"`
-	ValueType    string                 `json:"value_type"`
-	IsWritable   bool                   `json:"is_writable"`
+	ID              uuid.UUID              `json:"id"`
+	ParamCode       string                 `json:"param_code"`
+	ParamNameZh     string                 `json:"param_name_zh"`
+	Tr069Path       string                 `json:"tr069_path"`
+	ValueType       string                 `json:"value_type"`
+	IsWritable      bool                   `json:"is_writable"`
+	DefaultValue    string                 `json:"default_value,omitempty"`
+	JsRegex         string                 `json:"js_regex,omitempty"`
 	ValueConstraint map[string]interface{} `json:"value_constraint,omitempty"`
 }
 

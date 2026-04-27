@@ -1615,12 +1615,27 @@ func NewPgCommandParamRepository(pool *pgxpool.Pool) *PgCommandParamRepository {
 }
 
 func (r *PgCommandParamRepository) ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error) {
+	// 历史种子数据中，同一 tr069_path 在 mml_params 里会有多个版本行（不同 param_version），
+	// 关联表对每行各插一条 rel，导致 JOIN 出来同一参数返回多次（同 paramCode 多次显示）。
+	// 用窗口函数按 tr069_path 取第一条（sort_order 升序，version 升序作 tiebreak），
+	// 保证 API 永远不返回重复参数；DB 侧的 dedup 见 migrations/000036。
 	rows, err := r.pool.Query(ctx,
-		`SELECT p.id, p.param_code, p.param_name_zh, p.tr069_path, p.value_type, p.is_writable, p.value_constraint
-		 FROM mml_params p
-		 JOIN mml_command_params_rel r ON r.param_id = p.id
-		 WHERE r.command_id = $1
-		 ORDER BY r.sort_order`, commandID)
+		`SELECT id, param_code, param_name_zh, tr069_path, value_type, is_writable,
+		        default_value, js_regex, value_constraint
+		 FROM (
+		   SELECT p.id, p.param_code, p.param_name_zh, p.tr069_path,
+		          p.value_type, p.is_writable,
+		          COALESCE(p.default_value, '') AS default_value,
+		          COALESCE(p.js_regex, '')      AS js_regex,
+		          p.value_constraint, r.sort_order,
+		          ROW_NUMBER() OVER (PARTITION BY p.tr069_path
+		                             ORDER BY r.sort_order, p.param_version) AS rn
+		   FROM mml_params p
+		   JOIN mml_command_params_rel r ON r.param_id = p.id
+		   WHERE r.command_id = $1
+		 ) t
+		 WHERE t.rn = 1
+		 ORDER BY t.sort_order`, commandID)
 	if err != nil {
 		return nil, fmt.Errorf("list params by command: %w", err)
 	}
@@ -1630,7 +1645,8 @@ func (r *PgCommandParamRepository) ListByCommandID(ctx context.Context, commandI
 	for rows.Next() {
 		var pr MMLParamRef
 		var constraintJSON []byte
-		if err := rows.Scan(&pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path, &pr.ValueType, &pr.IsWritable, &constraintJSON); err != nil {
+		if err := rows.Scan(&pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path,
+			&pr.ValueType, &pr.IsWritable, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
 			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
 		if constraintJSON != nil && len(constraintJSON) > 2 {
@@ -1647,11 +1663,23 @@ func (r *PgCommandParamRepository) ListByCommandIDs(ctx context.Context, command
 		return result, nil
 	}
 
-	query := `SELECT r.command_id, p.id, p.param_code, p.param_name_zh, p.tr069_path, p.value_type, p.is_writable, p.value_constraint
-			  FROM mml_params p
-			  JOIN mml_command_params_rel r ON r.param_id = p.id
-			  WHERE r.command_id = ANY($1)
-			  ORDER BY r.command_id, r.sort_order`
+	// 同 ListByCommandID：按 (command_id, tr069_path) 分区取第一条，避免重复。
+	query := `SELECT command_id, id, param_code, param_name_zh, tr069_path,
+	                value_type, is_writable, default_value, js_regex, value_constraint
+	          FROM (
+	            SELECT r.command_id, p.id, p.param_code, p.param_name_zh, p.tr069_path,
+	                   p.value_type, p.is_writable,
+	                   COALESCE(p.default_value, '') AS default_value,
+	                   COALESCE(p.js_regex, '')      AS js_regex,
+	                   p.value_constraint, r.sort_order,
+	                   ROW_NUMBER() OVER (PARTITION BY r.command_id, p.tr069_path
+	                                      ORDER BY r.sort_order, p.param_version) AS rn
+	            FROM mml_params p
+	            JOIN mml_command_params_rel r ON r.param_id = p.id
+	            WHERE r.command_id = ANY($1)
+	          ) t
+	          WHERE t.rn = 1
+	          ORDER BY t.command_id, t.sort_order`
 
 	rows, err := r.pool.Query(ctx, query, commandIDs)
 	if err != nil {
@@ -1663,7 +1691,8 @@ func (r *PgCommandParamRepository) ListByCommandIDs(ctx context.Context, command
 		var cmdID uuid.UUID
 		var pr MMLParamRef
 		var constraintJSON []byte
-		if err := rows.Scan(&cmdID, &pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path, &pr.ValueType, &pr.IsWritable, &constraintJSON); err != nil {
+		if err := rows.Scan(&cmdID, &pr.ID, &pr.ParamCode, &pr.ParamNameZh, &pr.Tr069Path,
+			&pr.ValueType, &pr.IsWritable, &pr.DefaultValue, &pr.JsRegex, &constraintJSON); err != nil {
 			return nil, fmt.Errorf("scan param ref: %w", err)
 		}
 		if constraintJSON != nil && len(constraintJSON) > 2 {

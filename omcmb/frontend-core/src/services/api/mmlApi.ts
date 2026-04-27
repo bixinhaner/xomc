@@ -13,6 +13,8 @@ interface BackendMMLParamRef {
   tr069_path: string;
   value_type: string;
   is_writable: boolean;
+  default_value?: string;
+  js_regex?: string;
   value_constraint: Record<string, unknown> | null;
 }
 
@@ -171,6 +173,8 @@ function mapBackendParamRef(bp: BackendMMLParamRef): MMLParamRef {
     tr069Path: bp.tr069_path,
     valueType: bp.value_type as MMLParamRef['valueType'],
     isWritable: bp.is_writable,
+    defaultValue: bp.default_value || undefined,
+    jsRegex: bp.js_regex || undefined,
     valueConstraint: bp.value_constraint ?? {},
   };
 }
@@ -208,8 +212,22 @@ function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
     supportedOperations: bc.supported_operations || undefined,
     helpDoc: bc.help_doc || undefined,
     notes: bc.notes || undefined,
-    paramRefs: bc.params?.map(mapBackendParamRef) || undefined,
+    paramRefs: dedupeParamRefs(bc.params?.map(mapBackendParamRef)),
   };
+}
+
+// dedupeParamRefs 按 tr069Path（兜底 paramCode）去重，保留首次出现项。
+// 后端在数据层已做去重，此处是防御性保护：兼容历史脏数据 / 老缓存场景。
+function dedupeParamRefs(refs: MMLParamRef[] | undefined): MMLParamRef[] | undefined {
+  if (!refs || refs.length === 0) return refs;
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = ref.tr069Path || ref.paramCode;
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function mapBackendScript(bs: BackendMMLScript): MMLScript {

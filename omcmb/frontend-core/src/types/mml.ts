@@ -39,6 +39,10 @@ export interface MMLParamRef {
   tr069Path: string;
   valueType: 'string' | 'number' | 'boolean' | 'enum';
   isWritable: boolean;
+  /** 参数默认值，用于 MOD 操作输入框 placeholder 提示。空字符串表示无默认。 */
+  defaultValue?: string;
+  /** JavaScript 正则字符串（含 / / 包裹符），用作前端格式校验提示。 */
+  jsRegex?: string;
   valueConstraint: Record<string, unknown>;
 }
 

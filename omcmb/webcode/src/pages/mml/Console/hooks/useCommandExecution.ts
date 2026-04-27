@@ -273,16 +273,24 @@ function buildExecutePayload({
   }
 
   if (activeTab === 'control') {
-    // 把用户在控制面板选中的参数码（selectedParams）+ 填写的值（parameters）
-    // 合并成 commands[0].parameters，交给后端保存到 mml_tasks.commands 并扇出到
-    // device_tasks。LST/DSP 只选不填值，value 置 ""；MOD/ADD 用用户填的值，
-    // 未填的留 "" 占位便于后端校验（to-do-list.md #1）。
+    // 把控制面板上选中的参数码 + 填写的值合并成 commands[0].parameters。
+    //
+    // - LST/DSP/RMV：仅勾选语义，value 占位 ""。
+    // - MOD/ADD：用户未填的参数过滤掉（to-do-list 当轮 #1：避免覆盖未修改的字段）。
+    //   "未填" 判定：undefined / null / 空字符串。0 / false 是合法值，必须保留。
+    const editOps = new Set<string>(['MOD', 'ADD']);
+    const isEdit = editOps.has(command.operationType ?? '');
+
     const selectedCodes =
       selectedParams.length > 0 ? selectedParams : Object.keys(parameters);
 
     const mergedParameters: Record<string, string | number | boolean> = {};
     for (const code of selectedCodes) {
-      mergedParameters[code] = parameters[code] ?? '';
+      const v = parameters[code];
+      if (isEdit) {
+        if (v === undefined || v === null || v === '') continue;
+      }
+      mergedParameters[code] = v ?? '';
     }
 
     const commandEntry: Record<string, unknown> = {

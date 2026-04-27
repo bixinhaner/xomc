@@ -15,6 +15,7 @@ import {
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import type { MMLCommand, MMLParam, MMLOperationType, MMLParamRef } from '@core/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
+import { buildParamPlaceholder } from '../utils/paramHints';
 import { useT } from '@/hooks/useT';
 
 export type ParamFormPrimitive = string | number | boolean;
@@ -238,10 +239,13 @@ export default function ParamFormRenderer({
 
   // 单个 paramRef 按 valueType 渲染输入控件；checked 决定是否纳入命令串。
   // 未勾选时输入仍允许编辑（便于用户先填值再勾选），但不加入最终命令字符串。
+  // placeholder 综合 valueConstraint + jsRegex + defaultValue 生成（to-do-list 当轮 #2）。
   const renderParamRefControl = (ref: MMLParamRef) => {
     const valueType = ref.valueType;
     const isLocked = !ref.isWritable;
-    const placeholder = isLocked ? t('mml.console.readOnlyParam') : t('mml.console.inputValue');
+    const placeholder = isLocked
+      ? t('mml.console.readOnlyParam')
+      : buildParamPlaceholder(ref, t);
     const currentVal = formValues[ref.paramCode];
 
     if (valueType === 'boolean') {

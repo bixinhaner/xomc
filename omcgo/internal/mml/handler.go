@@ -75,9 +75,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ---- Request types ----
 
 // ExecuteHTTPRequest defines the request body for POST /api/v1/mml/execute
-// （临时执行命令）。command_code 必填。
+// （临时执行命令）。command_code、script_id、commands 三者必须至少有一个，
+// 校验逻辑见 Execute handler；不能用 binding 标签强制 command_code，
+// 否则 commands[] 形式的请求会被误拒。
 type ExecuteHTTPRequest struct {
-	CommandCode string                 `json:"command_code" binding:"required"`
+	CommandCode string                 `json:"command_code"`
 	DeviceSNs   []string               `json:"device_sns" binding:"required"`
 	Parameters  map[string]interface{} `json:"parameters"`
 	TaskName    string                 `json:"task_name"`
@@ -219,7 +221,8 @@ func (h *Handler) GetCommandParamPaths(c *gin.Context) {
 // ---- Execute / Task creation handlers ----
 
 // Execute handles POST /api/v1/mml/execute.
-// command_code 必填，面向「临时执行命令」场景。
+// 「临时执行命令」入口；command_code、script_id、commands 三者至少其一，
+// 都缺则 400 + warn 日志。命令源全空意味着 mml_tasks 没有任何东西可下发。
 func (h *Handler) Execute(c *gin.Context) {
 	var req ExecuteHTTPRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -228,6 +231,16 @@ func (h *Handler) Execute(c *gin.Context) {
 			zap.Error(err),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 {
+		h.logger.Warn("mml execute rejected: no command source provided",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("task_name", req.TaskName),
+			zap.Strings("device_sns", req.DeviceSNs),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("one of command_code, script_id, commands is required"))
 		return
 	}
 	h.runExecute(c, req)
