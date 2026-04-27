@@ -233,14 +233,14 @@ func (h *Handler) Execute(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 {
+	if req.CommandCode == "" && req.ScriptID == "" && len(req.Commands) == 0 && len(req.ParamPaths) == 0 {
 		h.logger.Warn("mml execute rejected: no command source provided",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", req.TaskName),
 			zap.Strings("device_sns", req.DeviceSNs),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("one of command_code, script_id, commands is required"))
+			fmt.Errorf("one of command_code, script_id, commands, param_paths is required"))
 		return
 	}
 	h.runExecute(c, req)
@@ -259,13 +259,13 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 {
+	if raw.CommandCode == "" && raw.ScriptID == "" && len(raw.Commands) == 0 && len(raw.ParamPaths) == 0 {
 		h.logger.Warn("mml task create rejected: no command source provided",
 			zap.String("client_ip", c.ClientIP()),
 			zap.String("task_name", raw.TaskName),
 		)
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("one of script_id, commands, command_code is required"))
+			fmt.Errorf("one of script_id, commands, command_code, param_paths is required"))
 		return
 	}
 	// 两个结构体字段序列与类型一致（仅 binding 标签不同），

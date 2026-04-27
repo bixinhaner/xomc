@@ -511,6 +511,43 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 		}
 		s.attachParamRefs(ctx, entry, cmd.ID)
 		commands = append(commands, entry)
+	} else if len(req.ParamPaths) > 0 {
+		// 裸路径模式：用户没在命令树选命令，直接在"参数路径"输入框敲了 N 个 TR-069 路径。
+		// 当前仅支持读类操作（LST/DSP → GetParameterValues），写类需要每个 path 配 value，
+		// UI 还没承载该形态，先拒掉避免"看似执行成功但 SOAP 报文为空"的隐性故障。
+		//
+		// param_refs 是合成的最小集合（仅 tr069_path），下游 BuildTR069Params 只读
+		// Tr069Path 字段构造 {names:[...]}，足够 GetParameterValues。
+		op := strings.ToUpper(strings.TrimSpace(req.OperationType))
+		if op == "" {
+			op = "LST"
+		}
+		if op != "LST" && op != "DSP" {
+			return nil, fmt.Errorf("raw param_paths mode currently only supports LST/DSP, got %q", req.OperationType)
+		}
+
+		paths := make([]string, 0, len(req.ParamPaths))
+		for _, p := range req.ParamPaths {
+			if t := strings.TrimSpace(p); t != "" {
+				paths = append(paths, t)
+			}
+		}
+		if len(paths) == 0 {
+			return nil, fmt.Errorf("raw param_paths mode: all paths empty")
+		}
+
+		synthRefs := make([]MMLParamRef, len(paths))
+		for i, p := range paths {
+			synthRefs[i] = MMLParamRef{Tr069Path: p, ValueType: "string"}
+		}
+
+		commands = append(commands, map[string]interface{}{
+			"command_code":   "RAW " + op,
+			"rpc_method":     "GetParameterValues",
+			"operation_type": op,
+			"param_paths":    paths,
+			"param_refs":     synthRefs,
+		})
 	}
 
 	// rpc_method 补齐：前端或脚本入口的 commands 可能只带 command_code，

@@ -766,6 +766,115 @@ func TestService_ExecuteCommand_EmptyExecuteType_DefaultsToImmediateAndFansOut(t
 		"Fanout 成功后 mml_task 状态必须迁移到 running")
 }
 
+// 回归 MML 控制台"参数路径直接执行"需求：用户没在命令树选命令，
+// 直接给 N 条 TR-069 路径 + LST/DSP，期望走通 fanout 并产出
+// device_task with params={"names": [paths...]}.
+func TestService_ExecuteCommand_RawParamPaths_LST(t *testing.T) {
+	cmdRepo := &mockCommandRepo{}
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ TaskStatus) error { return nil },
+	}
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+
+	req := ExecuteRequest{
+		// CommandCode 故意留空
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"Device.DeviceInfo.HardwareVersion", "Device.DeviceInfo.SoftwareVersion"},
+		OperationType: "LST",
+		Creator:       "admin",
+	}
+
+	result, err := svc.ExecuteCommand(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Len(t, capturedTask.Commands, 1, "应当合成 1 条 command")
+	cmd := capturedTask.Commands[0]
+	assert.Equal(t, "GetParameterValues", cmd["rpc_method"])
+	assert.Equal(t, "LST", cmd["operation_type"])
+	assert.Equal(t, "RAW LST", cmd["command_code"], "无命令时 command_code 给个可识别标记")
+
+	// 关键：fanout 后 device_task.params 应该是 TR-069 wire 格式 {"names":[...]}
+	require.Len(t, stub.calls, 1, "Fanouter 必须被调用")
+	require.Len(t, stub.calls[0], 1, "1 device × 1 cmd = 1 device_task")
+	dt := stub.calls[0][0]
+	assert.Equal(t, "GetParameterValues", dt.Method)
+
+	var got struct {
+		Names []string `json:"names"`
+	}
+	require.NoError(t, json.Unmarshal(dt.Params, &got))
+	assert.Equal(t, []string{
+		"Device.DeviceInfo.HardwareVersion",
+		"Device.DeviceInfo.SoftwareVersion",
+	}, got.Names)
+}
+
+func TestService_ExecuteCommand_RawParamPaths_DSP_DefaultsToLST(t *testing.T) {
+	// 不传 OperationType（默认 LST），仍应走通
+	cmdRepo := &mockCommandRepo{}
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, task *MMLTask) error {
+			task.ID = uuid.New()
+			return nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ TaskStatus) error { return nil },
+	}
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+	stub := &stubDeviceTaskCreator{}
+	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+
+	req := ExecuteRequest{
+		DeviceSNs:  []string{"SN-A"},
+		ParamPaths: []string{"Device.DeviceInfo.SerialNumber"},
+		Creator:    "admin",
+	}
+	_, err := svc.ExecuteCommand(context.Background(), req)
+	require.NoError(t, err)
+	require.Len(t, stub.calls, 1)
+	require.Len(t, stub.calls[0], 1)
+}
+
+func TestService_ExecuteCommand_RawParamPaths_RejectsWriteOps(t *testing.T) {
+	// 当前实现只支持 LST/DSP，写类必须显式拒绝
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+
+	for _, op := range []string{"MOD", "ADD", "RMV", "RST"} {
+		t.Run(op, func(t *testing.T) {
+			_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+				DeviceSNs:     []string{"SN-A"},
+				ParamPaths:    []string{"Device.X"},
+				OperationType: op,
+				Creator:       "admin",
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "LST/DSP")
+		})
+	}
+}
+
+func TestService_ExecuteCommand_RawParamPaths_RejectsAllEmpty(t *testing.T) {
+	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{})
+
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		DeviceSNs:     []string{"SN-A"},
+		ParamPaths:    []string{"", "  ", ""},
+		OperationType: "LST",
+		Creator:       "admin",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "all paths empty")
+}
+
 // --- Tests: Task control methods ---
 
 func TestService_StartTask_PendingToRunning(t *testing.T) {
