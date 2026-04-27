@@ -35,3 +35,6 @@ run/logs
 
 # Local scratch / one-off analysis scripts
 tmp/
+
+# Database backups (T-0042 W1.8) — 备份产物不入库
+backups/

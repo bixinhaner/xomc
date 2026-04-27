@@ -1,0 +1,36 @@
+# OMC PostgreSQL 备份与恢复演练 cron 配置（T-0042 W1.8）
+#
+# 安装：
+#   sudo cp deployments/cron/db-backup.cron /etc/cron.d/omc-db-backup
+#   sudo chown root:root /etc/cron.d/omc-db-backup
+#   sudo chmod 644 /etc/cron.d/omc-db-backup
+#
+# 前置：
+#   - 备份执行账号已在 ~/.pgpass 配置数据库凭据（mode 600），或在 cron 环境变量中设置 PGPASSWORD
+#   - REPO_ROOT 指向 OMC 仓库根（含 omcgo/ 子目录）
+#   - 已建立 backups/ 目录且账号有写权限
+#
+# 输出：
+#   - 备份产物 → ${REPO_ROOT}/backups/<env>/omc-YYYYMMDD-HHMMSS.dump
+#   - 备份日志 → ${REPO_ROOT}/backups/<env>/backup.log
+#   - 演练日志 → /var/log/omc/db-restore-drill.log（追加，需运维 logrotate）
+#
+# 监控：
+#   - 备份失败：cron 邮件 + 让运维加 Prometheus textfile collector 抓 backup.log
+#   - 演练失败：当周必须人工介入处理；连续两周失败 → 升级为 P1
+#
+# crontab 字段：minute  hour  dom  month  dow  user  command
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin
+REPO_ROOT=/opt/omc/goomc
+MAILTO=ops@example.com
+
+# ---------- 每天 03:00 备份 dev 库（生产环境改成实际 env） ----------
+0 3 * * * omcops cd ${REPO_ROOT} && bash omcgo/scripts/db_backup.sh --env dev --retention-days 30 >> /var/log/omc/db-backup.log 2>&1
+
+# ---------- 每周日 04:00 跑恢复演练，使用最新一份备份 ----------
+0 4 * * 0 omcops cd ${REPO_ROOT} && \
+    DUMP=$(ls -t ${REPO_ROOT}/backups/dev/omc-*.dump 2>/dev/null | head -1) && \
+    [ -n "${DUMP}" ] && \
+    bash omcgo/scripts/db_restore_drill.sh "${DUMP}" >> /var/log/omc/db-restore-drill.log 2>&1
