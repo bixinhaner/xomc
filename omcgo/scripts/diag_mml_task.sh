@@ -190,6 +190,9 @@ trap 'rm -rf "$TMPDIR_DIAG"' EXIT
 prepare_logs() {
     case "$MODE" in
         host)
+            # NEXT_HINT 引用的日志路径是宿主上的真实文件
+            ACS_LOG_REF="grep ... $ACS_LOG"
+            APP_LOG_REF="grep ... $APP_LOG"
             ;;
         docker)
             ACS_LOG="$TMPDIR_DIAG/acs.log"
@@ -205,6 +208,10 @@ prepare_logs() {
                     mv "$f.clean" "$f"
                 fi
             done
+            # NEXT_HINT 引用的命令是"实时拉日志再 grep"——脚本临时目录会在
+            # 退出时清掉，给文件路径会让用户复制粘贴失败。
+            ACS_LOG_REF="docker compose -f $COMPOSE_FILE logs --since $LOGS_SINCE $ACS_SVC | grep"
+            APP_LOG_REF="docker compose -f $COMPOSE_FILE logs --since $LOGS_SINCE $APP_SVC | grep"
             ;;
     esac
 }
@@ -299,7 +306,7 @@ if [[ ${CHECK_STATUS[1]:-} == ok ]]; then
 
     if [[ "$dt_count" == "0" ]]; then
         record 2 "device_tasks 派生" fail "0 行（Fanouter 未派生）"
-        NEXT_HINT="grep 'build tr069 params failed|skip command without rpc_method' $APP_LOG"
+        NEXT_HINT="${APP_LOG_REF} -E 'build tr069 params failed|skip command without rpc_method'"
     else
         dt_row=$(psql_q -F$'\t' -c "SELECT id, status, COALESCE(cwmp_id,''), method, COALESCE(sent_at::text,''), (result IS NOT NULL), params FROM device_tasks WHERE source='mml' AND source_id='$MML' AND device_sn='$SN' ORDER BY command_index, device_index LIMIT 1;" 2>/dev/null)
         if [[ -z "$dt_row" ]]; then
@@ -326,7 +333,7 @@ if [[ ${CHECK_STATUS[2]:-} == ok ]]; then
         else
             if [[ "$dt_status" == "pending" ]]; then
                 record 3 "Redis 队列" fail "PG=pending 但 Redis 无队列项也无 task hash（不一致）"
-                NEXT_HINT="grep 'RestorePendingQueues|task recovered' $APP_LOG"
+                NEXT_HINT="${APP_LOG_REF} -E 'RestorePendingQueues|task recovered'"
             else
                 record 3 "Redis 队列" warn "Redis 无队列项；PG status=$dt_status，可能任务已收尾或 task TTL 过期"
             fi
@@ -349,7 +356,7 @@ if [[ -n "$heartbeat" && "$hb_ttl" != "-2" ]]; then
     record 4 "CPE Inform" ok "heartbeat=$heartbeat ttl=${hb_ttl}s"
 else
     record 4 "CPE Inform" fail "heartbeat 不存在（CPE 离线 / 网络隔离 / 未上来）"
-    NEXT_HINT="抓包 'tcp port 7547' 或 grep 'ACS Inform processing' $ACS_LOG | grep $SN"
+    NEXT_HINT="抓包 'tcp port 7547' 或 ${ACS_LOG_REF} 'ACS Inform processing' | grep ${SN}"
 fi
 
 # ---- Checkpoint 5: ACS 下发 SOAP ----
@@ -397,7 +404,7 @@ if [[ -s "$ACS_LOG" && ${CHECK_STATUS[5]:-} == ok && -n "${CWMP_ID:-}" ]]; then
         record 6 "CPE 响应" ok "ACS 收到响应（cwmp_id=${CWMP_ID}）"
     else
         record 6 "CPE 响应" fail "ACS log 未见响应（CPE 没回 / 报文非法 / Cookie 失效）"
-        NEXT_HINT="抓包确认 CPE 是否真的 POST 了响应；grep 'no valid session cookie' $ACS_LOG"
+        NEXT_HINT="抓包确认 CPE 是否真的 POST 了响应；${ACS_LOG_REF} 'no valid session cookie'"
     fi
 else
     record 6 "CPE 响应" na "上游未通过"
@@ -416,7 +423,7 @@ if [[ ${CHECK_STATUS[2]:-} == ok ]]; then
             ;;
         sent)
             record 7 "ACS 标记完成" fail "device_task 持续 status=sent，sent_at=$dt_sent_at"
-            NEXT_HINT="ACS 没收到响应（看 [6]）或 cwmp_id 没匹配；grep 'get task by cwmp_id' $ACS_LOG"
+            NEXT_HINT="ACS 没收到响应（看 [6]）或 cwmp_id 没匹配；${ACS_LOG_REF} 'get task by cwmp_id'"
             ;;
         pending)
             record 7 "ACS 标记完成" na "尚未派发"
