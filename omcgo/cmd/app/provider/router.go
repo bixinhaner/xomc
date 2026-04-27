@@ -173,6 +173,18 @@ func setupMiddleware(r *gin.Engine, c *Container) {
 	r.Use(middleware.Tracing("omcgo-app"))
 	r.Use(middleware.CORS(middleware.CORSConfig{AllowOrigins: corsOrigins}))
 	r.Use(middleware.RequestLogger())
+	// RateLimit: per-IP token bucket，防止单 IP 洪泛拖垮后端。
+	// 默认 100 req/s, burst 200；放行 /healthz、/readyz、/metrics 探针。
+	// 未来如需配置化可在 AppConfig 中新增 ratelimit 段位。
+	r.Use(middleware.RateLimit(middleware.RateLimitConfig{
+		RatePerSecond: 100,
+		Burst:         200,
+		Registerer:    c.MetricsReg,
+		Skipper: func(gc *gin.Context) bool {
+			p := gc.Request.URL.Path
+			return p == "/healthz" || p == "/readyz" || p == "/metrics"
+		},
+	}))
 	r.Use(middleware.PrometheusMetrics(c.MetricsReg))
 	r.Use(middleware.SecurityHeaders())
 
