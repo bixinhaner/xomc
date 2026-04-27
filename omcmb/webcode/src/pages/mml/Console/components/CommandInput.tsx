@@ -78,18 +78,24 @@ export default function CommandInput({
   }, [onExecute]);
 
   const handleExecute = useCallback(() => {
-    if (!canExecute || !selectedCommand) {
+    // paramPath 模式 + 无命令 → 裸路径直接执行，不需要 selectedCommand。
+    // 危险命令二次确认依赖 dangerousCheck（按 commandCode 查），无命令场景跳过。
+    const isRawParamPathMode = activeTab === 'paramPath' && !selectedCommand;
+    if (!canExecute) {
+      return;
+    }
+    if (!isRawParamPathMode && !selectedCommand) {
       return;
     }
 
-    if (dangerousResult?.dangerous && dangerousResult.info) {
+    if (selectedCommand && dangerousResult?.dangerous && dangerousResult.info) {
       setPendingDangerInfo({ name: dangerousResult.info.Name, desc: dangerousResult.info.Desc });
       setConfirmModalOpen(true);
       return;
     }
 
     doExecute();
-  }, [canExecute, dangerousResult, doExecute, selectedCommand]);
+  }, [activeTab, canExecute, dangerousResult, doExecute, selectedCommand]);
 
   const handleConfirmExecute = useCallback(() => {
     doExecute();
