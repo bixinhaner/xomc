@@ -32,3 +32,6 @@ omcmb/frontend-core/dist/
 .qoder/
 
 run/logs
+
+# Local scratch / one-off analysis scripts
+tmp/
