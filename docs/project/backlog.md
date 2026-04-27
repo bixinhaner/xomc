@@ -67,10 +67,10 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 37 | — | 初始化 |
-| `done` | 5 | — | 含 R-005 / R-108 关闭 + 流程体系搭建 + L0 Backlog/流水线落地 |
-| `in_dev` | 2 | — | T-0006 贯穿 Sprint-01..07；T-0027 KPI 指标管理 |
-| `planned` | 20 | — | Sprint-01 ~ 07 全量切分 |
+| Total tasks | 42 | — | +5 (T-0038~T-0042 整改启动) |
+| `done` | 7 | — | +T-0038 CI / T-0039 PR 模板 (Wave 1.1/1.2) |
+| `in_dev` | 2 | — | T-0006 贯穿；T-0027 KPI（FREEZE 冲突，PgM 待决） |
+| `planned` | 23 | — | +3 (T-0040 W1.3 / T-0041 W1.4 / T-0042 W1.8) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -83,6 +83,106 @@
 ---
 
 ## 3. Active — Planned + In-flight（排序：Sprint 升序，同 Sprint 内 Prio 升序）
+
+> 🚨 **Wave 整改期间（2026-04-27 ~ 2026-08-03）：下方 Wave 队列优先于 Sprint 排序**。
+> 从队列上往下挑，每天一次 `/dev-pipeline pick T-NNNN` 出队，做完打勾。
+
+### Wave 整改执行队列（2026-04-27 起 — 唯一执行优先序）
+
+#### 🟢 Wave 1 · 止血（W1-W2，2026-04-27 ~ 2026-05-11）
+
+| 序 | Task | 标题 | 状态 | Owner | DoD verify |
+|----|------|------|------|-------|-----------|
+| W1.1 | T-0038 | GitHub Actions CI workflow | ✅ 2026-04-27 | — | commit `aaffef29`；GH Actions 触发 |
+| W1.2 | T-0039 | PR 模板 Wave 1 约束 | ✅ 2026-04-27 | — | commit `aaffef29` |
+| **W1.3** | **T-0040** | **acs/worker 加 `/healthz` + `/readyz`** | 🟡 next | TBD | 三进程 `curl /healthz` 200 |
+| W1.4 | T-0041 | `internal/core/middleware/ratelimit` 落地 | 🟡 ready | TBD | 文件存在 + router.go 引用 |
+| W1.5 | T-0007 + T-0011 | F04 告警 webhook 端到端 | 🟡 ready | 电信+Go | 触发规则 → webhook.site 收真实 POST |
+| W1.6 | T-0006 | E2E 累计用例 @≥20 | 🟡 in_dev | QA | `grep -c check_status` ≥ 20 |
+| W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | 🟡 ready | 运维 | docker-compose up 三服务 healthy |
+| W1.8 | T-0042 | 数据库定时备份 + 恢复演练 | 🟡 ready | 运维 | RTO 数字 + 演练记录文档 |
+
+**Wave 1 退出（2026-05-11 对峙）**：≥ 6/8 ✅ + 用户尽责 → 进 Wave 2；< 4/8 + 用户尽责 → AI 嘴炮认账（见 `docs/methodology/AI承诺对峙清单.md` 第二章）
+
+#### 🟡 Wave 2 · 收尾冲刺（W3-W8，2026-05-12 ~ 2026-06-22）
+
+**Block A · F04 通知三通道（W3-W4）**
+
+| 序 | Task | 标题 |
+|----|------|------|
+| A.1 | T-0007 | F04 邮件通道 |
+| A.2 | T-0014 | F04 短信通道（依赖 T-0009） |
+| A.3 | T-0011 | F04 Webhook 通道（W1.5 延伸到完整 retry/dead-letter） |
+| A.4 | T-0009 | 短信凭据申请（外部动作） |
+| A.5 | TBD（W3 立项时分配 T-NNNN） | 通知模板/历史 UI |
+| A.6 | TBD | notification/ 测试覆盖率 ≥ 70% |
+
+**Block B · 测试债清零（W5-W6）**
+
+| 序 | Task | 标题 |
+|----|------|------|
+| B.1 | TBD | task/ 测试 ≥ 70% |
+| B.2 | TBD | events/ 测试 + 补 service 层 |
+| B.3 | TBD | core/ 测试覆盖率 16% → 50% |
+| B.4 | TBD | mr/syslog/provision/interop 补 service 层（4 任务） |
+
+**Block C · 前端整改（W7）**
+
+| 序 | Task | 标题 |
+|----|------|------|
+| C.1 | TBD | frontend-core 5 个缺失 hook 配齐 |
+| C.2 | TBD | 11 处 `any` 清零 |
+| C.3 | TBD | DeviceGrouping 1573 行拆分 |
+| C.4 | TBD | 前端 vitest 覆盖率 ≥ 50% |
+
+**Block D · E2E ≥ 100（W8）**：T-0006 累计目标 @≥100
+
+**Wave 2 退出（2026-06-22 对峙）**：≥ 7/10 ✅ → 进 Wave 3
+
+#### 🔴 Wave 3 · 硬化到 GA（W9-W14，2026-06-23 ~ 2026-08-03）
+
+| Block | 周次 | 主要 Task |
+|-------|------|----------|
+| **E · NATS** | W9-W10 | T-0010 + T-0012 + TBD（NATS 故障演练） |
+| **F · 性能** | W11 | T-0023 + TBD（慢查询 / 连接池配额监控） |
+| **G · 安全** | W12 | TBD（安全扫描进 CI / 审计日志 / 渗透测试） |
+| **H · 部署** | W13 | TBD（K8s manifests / 滚动更新 / 异地备份） + T-0026 |
+| **I · GA** | W14 | T-0024 + TBD（灰度 / 回滚演练） + T-0025 |
+
+**Wave 3 退出 = GA（2026-08-03 长对峙）**：≥ 5/7 ✅ + Release Gate 9 章全勾
+
+#### ⚪ Wave 4 · GA 后专项（F08 SNMP/MTOSI 30 天）
+
+T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
+
+---
+
+### ⚠️ 与 FREEZE 冲突的在途任务（PgM 必决）
+
+**T-0027 F03 KPI 指标管理**（in_dev / sprint-01，最近更新 2026-04-26）
+
+- **冲突**：FREEZE 禁止新功能立项；T-0027 是新功能（标准报表 + 站点报表）
+- **PgM 必须在 2026-04-28 周一规划会前决定** 三选一：
+  - **A. 暂停** — 标 `blocked`，等 W1 末再决定（浪费现有进度）
+  - **B. Grandfather** — 限本周收尾，不开新子模块（推荐）
+  - **C. Wave 内消化** — 重新归类到 Block F 性能监控前置
+- **决策记录**：在本节追加一行 `2026-04-28 PgM 决策：选 X，理由 Y`
+
+---
+
+### 任务出队方式
+
+```bash
+# 每个工作日早上做一次:
+/dev-pipeline pick T-0040    # 例: 拉起 W1.3 走 S0-S7
+
+# 或者按队列序号自动出队:
+/dev-pipeline next            # 自动选下一个 🟡 ready 任务
+```
+
+详细生命周期 S0-S7 见 `docs/methodology/整改运行手册-2026Q2.md` 第 3 章。
+
+---
 
 | ID | Title | Type | Domain | Prio | State | Owner | Est | Deps | Risk/PRD | Sprint | Updated |
 |----|-------|------|--------|------|-------|-------|-----|------|----------|--------|---------|
@@ -108,6 +208,9 @@
 | T-0025 | RC 冻结 + 冒烟用例集（~20 条） | td | infra | P0 | planned | QA | M | T-0006@累计≥150 | — | sprint-07 | 2026-04-20 |
 | T-0026 | Runbook ≥ 5 场景 | docs | ops | P0 | planned | 运维 | M | — | `release-gate.md §3.4` | sprint-07 | 2026-04-20 |
 | T-0027 | F03 KPI 指标管理（标准报表 + 站点报表） | feat | F03 | P1 | in_dev | 电信+前端 | XL | — | — | sprint-01 | 2026-04-26 |
+| T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | P0 | planned | TBD | S | — | `AI承诺对峙清单.md` W1.3 | wave-1 | 2026-04-27 |
+| T-0041 | `internal/core/middleware/ratelimit` 中间件（W1.4） | feat | infra | P0 | planned | TBD | M | — | `AI承诺对峙清单.md` W1.4 | wave-1 | 2026-04-27 |
+| T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | P0 | planned | TBD | S | — | `AI承诺对峙清单.md` W1.8 | wave-1 | 2026-04-27 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -161,6 +264,8 @@
 | T-0035-P3 | 前端多皮肤架构 Phase 3：v2 皮肤脚手架（shadcn/ui + Tailwind + Radix）| feat | frontend | 2026-04-22 | `omcmb/webcode-v2/` 加入 workspaces；登录页 + dashboard 壳；接入 @core authApi/userStore/appStore/i18n；tsc 0 / dev 启动 / prod build 705 KB；18 模块补齐按 T-0035 逐个立项 |
 | T-0035-P4-Device | v2 首个复杂页面：Device 模块（AppShell + TanStack Table + @core/useDeviceList 端到端）| feat | frontend | 2026-04-22 | 新增 shadcn Table/Badge/Select + AppShell 侧栏布局；`pages/devices` 完备交互（搜索/状态过滤/分页/stats/loading-empty-error）；证实 @core/hooks/api/useDevices 在 v2 无代理工作；build 882 KB / gzip 262 KB；下一模块 Alarm |
 | T-0035-P5-Breadth | v2 一次性铺满 14 个模块页面 + 分组侧栏 | feat | frontend | 2026-04-22 | 8 真数据列表（alarm/software/backup/license/files/reports/logs/system）+ 6 骨架列表（topology/config/mml/performance/mr/ops）+ 统一 PageShell / Pagination 工具；v2 src 0 tsc errors；build 1093 KB / gzip 310 KB；workspace lint 0/152；详情/图表/执行等深度能力独立立项 |
+| T-0038 | GitHub Actions CI workflow（W1.1） | proc | infra | 2026-04-27 | commit `aaffef29`；`.github/workflows/ci.yml` gentle gate 起步（backend build+vet, frontend typecheck）；ratchet 计划注释保留；W1 末 (2026-05-11) 全部检查阻塞 merge |
+| T-0039 | PR 模板 Wave 1 整改期约束（W1.2） | proc | process | 2026-04-27 | commit `aaffef29`；`.github/pull_request_template.md` 顶部增 8 行整改期约束（PR 必须挂 W1.X / 覆盖率单调不降 / 禁绕过）；既有 DoD 完整模板保留 |
 
 ---
 
@@ -234,6 +339,13 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-22 | done | T-0035-P3 | v2 皮肤脚手架：shadcn/ui + Tailwind + Radix；登录 + dashboard 壳；18 模块补齐仍待 Sprint 规划 |
 | 2026-04-22 | done | T-0035-P4-Device | v2 首个复杂页面 Device：AppShell + TanStack Table + @core/useDeviceList 全链路验证通过；shadcn 新增 Table/Badge/Select |
 | 2026-04-22 | done | T-0035-P5-Breadth | v2 一次铺满 14 模块页面 + 分组侧栏（8 真数据 + 6 骨架）|
+| 2026-04-27 | 装载 Wave 队列 | §3 顶部 | 新增"Wave 整改执行队列"小节，为 Wave 1-3 + Wave 4 装载执行优先序（涵盖 W1.1~W1.8 + Block A-I + 已有 T- 重映射） |
+| 2026-04-27 | 登记 + done | T-0038 | W1.1 GitHub Actions CI workflow（commit `aaffef29`） |
+| 2026-04-27 | 登记 + done | T-0039 | W1.2 PR 模板 Wave 1 整改期约束（commit `aaffef29`） |
+| 2026-04-27 | 登记 + planned | T-0040 | W1.3 acs/worker `/healthz` + `/readyz` |
+| 2026-04-27 | 登记 + planned | T-0041 | W1.4 ratelimit 中间件 |
+| 2026-04-27 | 登记 + planned | T-0042 | W1.8 数据库定时备份 + 恢复演练 |
+| 2026-04-27 | FREEZE 冲突标记 | T-0027 | F03 KPI 与 FREEZE 冲突，PgM 在 2026-04-28 周一规划会前必决（A 暂停 / B Grandfather / C Wave 内消化） |
 
 ---
 
