@@ -9,23 +9,33 @@
 
 ## 0. 环境准备
 
-### 0.1 连接信息（默认 docker-compose）
+### 0.1 部署形态与访问方式
+
+OMC 全部依赖（PostgreSQL / Redis / NATS / MinIO / ACS / APP / Worker / Web）由 [deployments/docker/docker-compose.yml](../../deployments/docker/docker-compose.yml) 编排。所有诊断命令都基于 docker compose 执行，**宿主无需装 psql / redis-cli**，只要有 `docker` + `jq` 即可。
 
 ```bash
-# PostgreSQL（业务库）
-export PGHOST=localhost PGPORT=5432 PGUSER=omcgo PGPASSWORD=omcgo123 PGDATABASE=omcgo
+# 仓库根（任何子目录都能拿到）
+REPO_ROOT=$(git rev-parse --show-toplevel)
+COMPOSE="docker compose -f $REPO_ROOT/deployments/docker/docker-compose.yml"
 
-# Redis（会话/任务队列/CWMP 映射）
-REDIS="redis-cli -h localhost -p 6379"
+# PostgreSQL — 通过 postgres 容器
+psql_run() { $COMPOSE exec -T -e PGPASSWORD=omcgo123 postgres psql -U omcgo -d omcgo "$@"; }
 
-# 日志路径（docker-compose 把容器内 /run/logs 挂到宿主 <repo>/run/logs）
-ACS_LOG=/Users/cb/code/baicells/goomc/run/logs/acs/acs.log
-APP_LOG=/Users/cb/code/baicells/goomc/run/logs/app/app.log
-WORKER_LOG=/Users/cb/code/baicells/goomc/run/logs/worker/worker.log
+# Redis — 通过 redis 容器
+redis_run() { $COMPOSE exec -T redis redis-cli "$@"; }
 
-# 容器跑则用 docker compose logs：
-# docker compose -f deployments/docker/docker-compose.yml logs -f acs > $ACS_LOG
+# 日志拉取（docker-compose 也把容器 /run/logs 挂到宿主 $REPO_ROOT/run/logs，
+# 如果文件存在可直接 grep；否则用 docker compose logs 抓取）
+ACS_LOG=$REPO_ROOT/run/logs/acs/acs.log     # 文件挂载时直接用
+APP_LOG=$REPO_ROOT/run/logs/app/app.log
+# 也可实时抓取最近窗口：
+# $COMPOSE logs --no-color --since 30m acs > /tmp/acs.log
+# $COMPOSE logs --no-color --since 30m app > /tmp/app.log
 ```
+
+> 后续章节示例若用 `psql -c "..."`，请理解为 `psql_run -c "..."`；
+> `$REDIS XXX` 同理换成 `redis_run XXX`。
+> 一键脚本 `omcgo/scripts/diag_mml_task.sh` 默认就是 docker 模式，直接调用即可。
 
 ### 0.2 输入参数
 
@@ -312,12 +322,74 @@ device_tasks.status = ?
 
 ## 11. 一键自动化
 
-所有命令都包在 `omcgo/scripts/diag_mml_task.sh` 里，一行调用：
+所有命令都包在 [omcgo/scripts/diag_mml_task.sh](../../omcgo/scripts/diag_mml_task.sh) 里。**默认 docker 模式**，宿主只需 `docker` + `jq`（用全角宽度对齐表格时另需 `python3`，多数 Mac/Linux 自带）。
+
+### 最简调用
 
 ```bash
+# 自动取最新一条 mml_task + 它的首个 device_sn
+bash omcgo/scripts/diag_mml_task.sh --auto
+
+# 显式指定
 bash omcgo/scripts/diag_mml_task.sh \
   --sn 1202000240194DP0026 \
-  --mml-task <UUID>
+  --mml-task 6e58a13a-4b6d-4c5b-9e9d-83e7a4b1c2f0
 ```
 
-输出 Markdown 格式的 8 项 checkpoint 状态（✓/✗/?），最末给出"应当下一步看哪里"。详见脚本头部 usage。
+### 输出说明
+
+```
+  Step | Status | Checkpoint             | Detail
+  -----+--------+------------------------+---------------------------------
+  [1]  |   ✓    | mml_tasks 写入         | status=running ...
+  [2]  |   ✓    | device_tasks 派生      | total=1 ... shape=names(7)
+  [3]  |   ✓    | Redis 队列             | 队列已派发；status=sent
+  [4]  |   ✓    | CPE Inform             | heartbeat=... ttl=240s
+  [5]  |   !    | ACS 下发 SOAP          | ParameterNames 为空（Q4 根因！）
+  [6]  |   ─    | CPE 响应               | 上游未通过
+  [7]  |   ✗    | ACS 标记完成           | device_task 持续 status=sent
+  [8]  |   ─    | MML 聚合器收尾         | 上游未到收尾阶段
+
+下一步建议：部署 BuildTR069Params 修复版；或检查 mml_command 的 param_refs 是否绑定
+```
+
+| 符号 | 含义 |
+|------|------|
+| ✓ 绿 | 通过 |
+| ! 黄 | 通过但有可疑（如 SOAP 形态不对、CPE 返回 Fault） |
+| ✗ 红 | 卡住，看 detail + 下一步建议 |
+| ─ 灰 | 上游未通过，跳过 |
+
+### 常用选项
+
+```bash
+# 看上一条任务（最新的下一条）
+bash omcgo/scripts/diag_mml_task.sh --auto --offset 1
+
+# 给定 SN 找含它的最新 mml_task
+bash omcgo/scripts/diag_mml_task.sh --auto --sn TEST-SN-001
+
+# 拉更长的日志窗口（默认 30m，发现 ACS 没下发记录时常需要）
+bash omcgo/scripts/diag_mml_task.sh --auto --logs-since 6h
+
+# JSON 输出供程序消费（CI / 监控告警）
+bash omcgo/scripts/diag_mml_task.sh --auto --json | jq
+
+# 服务名定制（项目名不是 docker 时容器名前缀不同；或多套环境）
+bash omcgo/scripts/diag_mml_task.sh --auto \
+  --postgres-svc postgres-prod --redis-svc redis-prod \
+  --acs-svc acs-blue --app-svc app-blue
+
+# 切到 host 模式（宿主直连 5432/6379 端口，需要本地装 psql/redis-cli）
+bash omcgo/scripts/diag_mml_task.sh --auto --mode host
+```
+
+### 退出码
+
+| Code | 含义 |
+|------|------|
+| 0 | 链路完整推进到 [8]（任务已收尾） |
+| 1 | 中途卡住（最后一个 ✓ 之后停滞） |
+| 2 | 参数错 / 工具不可用 / 自动检测未找到 mml_task |
+
+完整选项见 `bash omcgo/scripts/diag_mml_task.sh --help`。
