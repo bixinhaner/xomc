@@ -372,6 +372,16 @@ bash omcgo/scripts/diag_mml_task.sh --auto --sn TEST-SN-001
 # 拉更长的日志窗口（默认 30m，发现 ACS 没下发记录时常需要）
 bash omcgo/scripts/diag_mml_task.sh --auto --logs-since 6h
 
+# 打印实际下发给 CPE 的 SOAP 报文（自动识别 xmllint 美化）
+bash omcgo/scripts/diag_mml_task.sh --auto --show-soap
+
+# RPC 报文装配链深度分析（CPE 不响应、报文形态可疑等场景必开）
+# 输出 D1-D5：用户意图层 / 协议装配层 / 路径合规性 / SOAP 结构 / CPE 拒绝原因清单
+bash omcgo/scripts/diag_mml_task.sh --auto --diagnose-rpc
+
+# 三连套（强烈建议遇到 status=sent 长期不动时直接用）
+bash omcgo/scripts/diag_mml_task.sh --auto --logs-since 2h --show-soap --diagnose-rpc
+
 # JSON 输出供程序消费（CI / 监控告警）
 bash omcgo/scripts/diag_mml_task.sh --auto --json | jq
 

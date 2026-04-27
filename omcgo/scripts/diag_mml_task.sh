@@ -49,6 +49,13 @@
 #   --json                以 JSON 输出（程序消费）
 #   --show-soap           额外打印 ACS 下发给 CPE 的 SOAP XML（取自 [5] 那条日志）
 #                         有 xmllint 时自动格式化；JSON 模式则把 soap_body 加到顶层
+#   --diagnose-rpc        额外做 RPC 报文装配链深度分析（[D1]-[D5]）：
+#                         D1 mml_tasks.commands 用户意图层（命令方式 vs 裸路径方式）
+#                         D2 device_tasks.params 协议装配后形态（names/values 等）
+#                         D3 TR-069 路径合规性（占位符/字符集/前缀）
+#                         D4 SOAP 报文结构校验（关键节点齐全性）
+#                         D5 CPE 不响应时可能原因清单（仅 [6] fail 时）
+#                         适合"CPE 不响应"或"看似下发成功但实际丢弃"的场景。
 #   -h, --help            显示本说明
 #
 # 退出码：
@@ -94,6 +101,7 @@ APP_LOG="$REPO_ROOT/run/logs/app/app.log"
 USE_COLOR=1
 OUTPUT=md
 SHOW_SOAP=0
+RPC_DIAG=0
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -120,8 +128,9 @@ while [[ $# -gt 0 ]]; do
         --no-color) USE_COLOR=0; shift ;;
         --json) OUTPUT=json; shift ;;
         --show-soap) SHOW_SOAP=1; shift ;;
+        --diagnose-rpc) RPC_DIAG=1; shift ;;
         -h|--help)
-            sed -n '2,64p' "$0"
+            sed -n '2,73p' "$0"
             exit 0
             ;;
         *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -218,6 +227,251 @@ prepare_logs() {
             APP_LOG_REF="docker compose -f $COMPOSE_FILE logs --since $LOGS_SINCE $APP_SVC | grep"
             ;;
     esac
+}
+
+# ---- RPC 报文装配链深度分析 ----
+# 输出 D1-D5 五个分析段落，覆盖"用户意图层 → 协议装配层 → 协议结构层 → 拒绝原因"。
+# 仅在 --diagnose-rpc 时调用，需要先跑完常规 8 个 checkpoint（依赖 $MML / $SN /
+# $DT_ID / $dt_params / $SOAP_BODY / $CWMP_ID / CHECK_STATUS[6] 等变量）。
+diagnose_rpc_pipeline() {
+    echo "${CYN}===== [D] RPC 报文装配链分析 =====${RST}"
+    echo "${DIM}两条装配路径：a) 命令方式（命令树选命令 → cmd.RPCMethod + param_refs）${RST}"
+    echo "${DIM}             b) 裸路径方式（直接输入 path → 合成 entry，rpc_method=GetParameterValues）${RST}"
+    echo
+
+    # ---- D1: mml_tasks.commands 用户意图层 ----
+    echo "${CYN}[D1] MML 任务装配（用户意图层）${RST}"
+    local mml_cmd_json cmd0
+    mml_cmd_json=$(psql_q -c "SELECT commands::text FROM mml_tasks WHERE id='$MML';" 2>/dev/null | tr -d '\r')
+    if [[ -z "$mml_cmd_json" || "$mml_cmd_json" == "null" ]]; then
+        echo "  ${RED}✗${RST} mml_tasks.commands 为空或 null（fanout 拿不到任何命令）"
+        echo
+        return
+    fi
+    cmd0=$(echo "$mml_cmd_json" | jq -c '.[0]' 2>/dev/null)
+    if [[ -z "$cmd0" || "$cmd0" == "null" ]]; then
+        echo "  ${RED}✗${RST} commands 数组为空"
+        echo
+        return
+    fi
+
+    local cmd_code rpc_method op_type refs_count parameters_keys param_paths_count
+    cmd_code=$(echo "$cmd0" | jq -r '.command_code // ""')
+    rpc_method=$(echo "$cmd0" | jq -r '.rpc_method // ""')
+    op_type=$(echo "$cmd0" | jq -r '.operation_type // ""')
+    refs_count=$(echo "$cmd0" | jq -r '(.param_refs // []) | length')
+    parameters_keys=$(echo "$cmd0" | jq -r '(.parameters // {}) | keys | length')
+    param_paths_count=$(echo "$cmd0" | jq -r '(.param_paths // []) | length')
+
+    local mode_label
+    if [[ "$cmd_code" == "RAW "* ]]; then
+        mode_label="${YLW}裸路径方式${RST}（直接输入 TR-069 path）"
+    elif [[ -n "$cmd_code" ]]; then
+        mode_label="${GRN}命令方式${RST}（命令树选命令 \"$cmd_code\"）"
+    else
+        mode_label="${RED}未知${RST}（command_code 为空且不是 RAW 标记）"
+    fi
+    echo "  装配路径    : $mode_label"
+    echo "  command_code: $cmd_code"
+    echo "  rpc_method  : $rpc_method"
+    echo "  operation   : $op_type"
+    echo "  param_refs  : $refs_count 条 (来自 mml_command_param_refs JOIN mml_params)"
+    echo "  parameters  : $parameters_keys 个键 (用户填表单的 key=value)"
+    echo "  param_paths : $param_paths_count 条 (裸路径模式独有)"
+    if [[ "$refs_count" -gt 0 ]]; then
+        echo "  ${DIM}param_refs 前 5 条:${RST}"
+        echo "$cmd0" | jq -r '(.param_refs // [])[0:5][] | "    " + (.tr069_path // "?") + "  (" + (.value_type // "?") + ")"' 2>/dev/null
+    fi
+    echo
+
+    # ---- D2: device_tasks.params 协议装配后形态 ----
+    echo "${CYN}[D2] device_tasks.params 形态（协议装配后，BuildTR069Params 输出）${RST}"
+    if [[ -z "${dt_params:-}" ]]; then
+        echo "  ${DIM}（device_task 不存在或上游未通过）${RST}"
+        echo
+    else
+        local dt_schema_keys
+        dt_schema_keys=$(echo "$dt_params" | jq -r 'keys | join(",")' 2>/dev/null)
+        echo "  schema keys : $dt_schema_keys"
+
+        if echo "$dt_params" | jq -e 'has("names")' >/dev/null 2>&1; then
+            local n_count
+            n_count=$(echo "$dt_params" | jq -r '.names | length')
+            echo "  names count : $n_count   ${DIM}(GetParameterValues / GetParameterAttributes)${RST}"
+            echo "  ${DIM}前 5 条:${RST}"
+            echo "$dt_params" | jq -r '.names[0:5][] | "    " + .' 2>/dev/null
+        fi
+        if echo "$dt_params" | jq -e 'has("values")' >/dev/null 2>&1; then
+            local v_count
+            v_count=$(echo "$dt_params" | jq -r '.values | length')
+            echo "  values count: $v_count   ${DIM}(SetParameterValues)${RST}"
+            echo "  ${DIM}前 5 条:${RST}"
+            echo "$dt_params" | jq -r '.values[0:5][] | "    " + .name + " = \"" + (.value|tostring) + "\" (" + .type + ")"' 2>/dev/null
+        fi
+        if echo "$dt_params" | jq -e 'has("object_name")' >/dev/null 2>&1; then
+            local obj_name
+            obj_name=$(echo "$dt_params" | jq -r '.object_name')
+            echo "  object_name : $obj_name   ${DIM}(AddObject / DeleteObject)${RST}"
+        fi
+        echo
+    fi
+
+    # ---- D3: TR-069 路径合规性 ----
+    echo "${CYN}[D3] TR-069 路径合规性${RST}"
+    local all_paths=""
+    if [[ -n "${dt_params:-}" ]]; then
+        all_paths=$(echo "$dt_params" | jq -r '
+            if has("names") then .names[]
+            elif has("values") then .values[].name
+            elif has("object_name") then .object_name
+            else empty end
+        ' 2>/dev/null)
+    fi
+    if [[ -z "$all_paths" ]]; then
+        echo "  ${DIM}无可校验路径${RST}"
+    else
+        local total=0 ok_count=0
+        local -a bad_prefix=() placeholder=() bad_chars=() dup=()
+        local -A seen=()
+        while IFS= read -r p; do
+            [[ -z "$p" ]] && continue
+            ((total++))
+            if ! [[ "$p" =~ ^(Device|InternetGatewayDevice)\. ]]; then
+                bad_prefix+=("$p")
+                continue
+            fi
+            if [[ "$p" == *"{i}"* || "$p" == *"{n}"* || "$p" == *"{idx}"* ]]; then
+                placeholder+=("$p")
+                continue
+            fi
+            if [[ "$p" =~ [^A-Za-z0-9_.\[\]\{\}\-] ]]; then
+                bad_chars+=("$p")
+                continue
+            fi
+            if [[ -n "${seen[$p]:-}" ]]; then
+                dup+=("$p")
+                continue
+            fi
+            seen[$p]=1
+            ((ok_count++))
+        done <<< "$all_paths"
+
+        echo "  总数: $total  合规: ${GRN}${ok_count}${RST}"
+        if (( ${#bad_prefix[@]} > 0 )); then
+            echo "  ${RED}前缀非法（必须 Device. 或 InternetGatewayDevice.）:${RST}"
+            printf '    %s\n' "${bad_prefix[@]}"
+        fi
+        if (( ${#placeholder[@]} > 0 )); then
+            echo "  ${YLW}含 {i}/{n}/{idx} 占位符未替换（CPE 几乎一定丢弃）:${RST}"
+            printf '    %s\n' "${placeholder[@]}"
+        fi
+        if (( ${#bad_chars[@]} > 0 )); then
+            echo "  ${RED}含非 TR-069 合法字符（中文/空白/特殊符号等）:${RST}"
+            printf '    %s\n' "${bad_chars[@]}"
+        fi
+        if (( ${#dup[@]} > 0 )); then
+            echo "  ${YLW}重复路径（影响有限但不规范）:${RST}"
+            printf '    %s\n' "${dup[@]}"
+        fi
+    fi
+    echo
+
+    # ---- D4: SOAP 报文结构校验 ----
+    echo "${CYN}[D4] SOAP 报文结构校验${RST}"
+    if [[ -z "${SOAP_BODY:-}" ]]; then
+        echo "  ${DIM}（[5] ACS 下发 SOAP 未通过；或日志窗口外。先 --logs-since 1h 重跑）${RST}"
+    else
+        check_node() {
+            local label=$1 pattern=$2
+            if echo "$SOAP_BODY" | grep -qE "$pattern"; then
+                echo "    ${GRN}✓${RST} $label"
+            else
+                echo "    ${RED}✗${RST} $label"
+            fi
+        }
+        check_node "<SOAP-ENV:Envelope> 信封" '<(SOAP-ENV|soap):Envelope'
+        check_node "<SOAP-ENV:Header> + cwmp:ID" '<cwmp:ID'
+        check_node "<SOAP-ENV:Body>" '<(SOAP-ENV|soap):Body'
+
+        # 检查 RPC 方法节点
+        local found_method=""
+        for m in GetParameterValues SetParameterValues GetParameterNames AddObject DeleteObject Reboot FactoryReset; do
+            if echo "$SOAP_BODY" | grep -q "<cwmp:$m"; then
+                found_method=$m
+                break
+            fi
+        done
+        if [[ -n "$found_method" ]]; then
+            echo "    ${GRN}✓${RST} RPC 方法节点 <cwmp:$found_method>"
+        else
+            echo "    ${RED}✗${RST} 未找到任何 cwmp:<Method> 节点"
+        fi
+
+        # ParameterNames 节点的 string 子项数量与 D2 names count 比较
+        if echo "$SOAP_BODY" | grep -q "<cwmp:GetParameterValues"; then
+            local string_count expected_count
+            string_count=$(echo "$SOAP_BODY" | grep -oE '<string>[^<]*</string>' | wc -l | tr -d ' ')
+            expected_count=$(echo "${dt_params:-}" | jq -r '(.names // []) | length' 2>/dev/null)
+            if [[ -z "$expected_count" || "$expected_count" == "null" ]]; then
+                expected_count=0
+            fi
+            if [[ "$string_count" == "$expected_count" ]]; then
+                echo "    ${GRN}✓${RST} <ParameterNames> 子项数=$string_count（与 D2 一致）"
+            else
+                echo "    ${RED}✗${RST} <ParameterNames> 子项数=$string_count，但 D2 names count=$expected_count（不一致！）"
+            fi
+            # arrayType="xsd:string[0]" → ParameterNames 空（Q4 历史根因）
+            if echo "$SOAP_BODY" | grep -qE 'ParameterNames[^>]*arrayType="xsd:string\[0\]"'; then
+                echo "    ${RED}!${RST} arrayType=\"xsd:string[0]\" → ParameterNames 空（CPE 必拒）"
+            fi
+        fi
+
+        # cwmp:ID 与 device_task.cwmp_id 对照
+        if [[ -n "${CWMP_ID:-}" ]]; then
+            if echo "$SOAP_BODY" | grep -qF "$CWMP_ID"; then
+                echo "    ${GRN}✓${RST} cwmp:ID 与 device_tasks.cwmp_id 一致"
+            else
+                echo "    ${YLW}!${RST} cwmp:ID 与 device_tasks.cwmp_id 不一致（响应到来时 ACS 可能匹配失败）"
+            fi
+        fi
+    fi
+    echo
+
+    # ---- D5: CPE 不响应时的可能原因 ----
+    if [[ "${CHECK_STATUS[6]:-}" == "fail" ]]; then
+        echo "${CYN}[D5] CPE 没回响应 — 可能原因（按概率从高到低）${RST}"
+        cat <<EOF
+  1. 路径含 {i}/{n} 占位符未替换 → CPE 解析失败丢弃
+     排查: 看 D3 "含占位符未替换" 列表
+     修复: 控制台填路径时改成实际索引（如 Device.Services.FAPService.1.X）
+
+  2. 路径不存在或 X_VENDOR 扩展不被该型号 CPE 识别
+     排查: 拿最简路径单独试 → bash $0 --auto --offset 0 --diagnose-rpc
+       baseline: Device.DeviceInfo.Manufacturer / Device.DeviceInfo.SoftwareVersion
+     修复: 联系厂商索取该型号支持的参数列表
+
+  3. SetParameterValues type 与 CPE 期望不一致（int vs unsignedInt vs string）
+     排查: 看 D2 values 列出的 type 是否符合协议（0/1 用 boolean、计数器用 unsignedInt）
+     修复: mml_params.value_type 字段更正后重新执行
+
+  4. CPE HTTP 处理超时（多并发会话或长链 keepalive）
+     排查: docker compose -f $COMPOSE_FILE logs --since 5m $ACS_SVC | grep -E 'session|timeout|reaped'
+     修复: 减小 acs.max_rpc_per_session；放宽 session timeout
+
+  5. CPE 防火墙/ACL 拒绝从 ACS IP 入向
+     排查: tcpdump -i any -n 'tcp port 7547 and host <CPE_IP>'，看是否仅 ACS→CPE 单向
+     修复: 在 CPE 配置 ACS 白名单
+
+  6. 时钟漂移大于 30 秒（部分厂商对 cwmp:ID 时间戳做严格校验）
+     排查: 比较 ACS 容器与 CPE 时区/NTP
+     修复: 同步 NTP
+
+  7. 报文协议级错（命名空间错乱、SOAP-ENV 与 soap 混用）
+     排查: 看 D4 节点齐全性 + xmllint --noout 校验语法
+     修复: 检查 pkg/soap 模板与 dispatcher 实现
+EOF
+        echo
+    fi
 }
 
 # ---- 自动检测 ----
@@ -447,7 +701,7 @@ fi
 # 仅当上游已经走到"任务有派发且至少一个 device_task 收尾"时才该有 [8] 判断；
 # 否则走 na 避免误报（app 进程长时间没重启时 "subscribed" 启动日志会落在窗口外，
 # 但这跟当前任务卡不卡无关）。
-if [[ "$mml_status" == "completed" || "$mml_status" == "failed" ]]; then
+if [[ "${mml_status:-}" == "completed" || "${mml_status:-}" == "failed" ]]; then
     upstream_finalized=1
 elif [[ "${dt_status:-}" == "completed" || "${dt_status:-}" == "failed" ]]; then
     upstream_finalized=1
@@ -472,9 +726,9 @@ else
     elif [[ -n "$no_handler" ]]; then
         record 8 "MML 聚合器收尾" fail "事件到了但 router 没有 mml handler（modules.go Register 漏调？）"
         NEXT_HINT="检查 cmd/app/provider/modules.go:272 完成路由注册"
-    elif [[ "$mml_status" == "completed" || "$mml_status" == "failed" ]]; then
+    elif [[ "${mml_status:-}" == "completed" || "${mml_status:-}" == "failed" ]]; then
         # mml_tasks 已收尾，但日志没找到 finalized — 多半是日志窗口轮转过了
-        record 8 "MML 聚合器收尾" ok "mml_tasks.status=$mml_status（finalized 日志已不在 --logs-since=${LOGS_SINCE} 窗口内）"
+        record 8 "MML 聚合器收尾" ok "mml_tasks.status=${mml_status}（finalized 日志已不在 --logs-since=${LOGS_SINCE} 窗口内）"
     else
         record 8 "MML 聚合器收尾" fail "device_task 已收尾但 mml task 未 finalize（NATS 事件链断？）"
         NEXT_HINT="docker compose -f $COMPOSE_FILE exec nats nats sub 'task.>' 观察事件；并检查 'task completion event bridge subscribed' 启动日志"
@@ -567,6 +821,10 @@ print(s + ' ' * max(0, target - w))
             echo "${DIM}放宽窗口：--logs-since 1h；或先排查 [3]/[4]/[5]。${RST}"
             echo
         fi
+    fi
+
+    if [[ "$RPC_DIAG" == 1 ]]; then
+        diagnose_rpc_pipeline
     fi
 fi
 
