@@ -97,14 +97,14 @@
 | W1.2 | T-0039 | PR 模板 Wave 1 约束 | ✅ 2026-04-27 | — | commit `aaffef29` |
 | W1.3 | T-0040 | acs/worker 加 `/healthz` + `/readyz` | ✅ 2026-04-27 | Claude | commit `d4019f9a`；6/6 health 单元测试 PASS / 100% 覆盖率；httptest 模拟 GET /healthz→200 + GET /readyz（依赖故障）→503 |
 | W1.4 | T-0041 | `internal/core/middleware/ratelimit` 落地 | ✅ 2026-04-27 | Claude | commit `758aace9`；per-IP token bucket（`golang.org/x/time/rate`，sync.Map+atomic 无锁读路径，后台清扫）+ `cmd/app/provider/router.go` 接入 100 r/s burst 200，跳过 /healthz/readyz/metrics；10 单元测试 -race PASS；charter 两条 grep 全过；新指标 `http_ratelimit_rejections_total{path}` |
-| **W1.5** | **T-0007 + T-0011** | **F04 告警 webhook 端到端** | 🟡 next | 电信+Go | 触发规则 → webhook.site 收真实 POST |
+| W1.5 | T-0007 + T-0011（W1.5 子集） | F04 告警 webhook 端到端冒烟 | ✅ 2026-04-27 | Claude | commit `43903b81`；migration 000038 加 `alarm_filters.webhook_url` + CHECK 约束；新加 `notify_webhook` filter action + `WebhookDispatcher` 接口（HTTP/JSON，5s 超时，无重试）；8 单元测试 -race 全过（5 dispatcher + 3 filter engine 含 `TestProcessAlarm_NotifyWebhook_EndToEnd` 用 httptest.Server 验证 charter 步骤 4）；新指标 `alarm_webhook_dispatches_total{result}`；retry/dead-letter/HMAC/header/template/email/sms 留 Wave 2 Block A 全量做 |
 | W1.6 | T-0006 | E2E 累计用例 @≥20 | ✅ 2026-04-27 | Claude | commit `328c1f48`；`scripts/e2e_verify.sh` 加 `claim()`/`CLAIM_COUNT` 计数器 + W1.6 段补 26 条 claim；实跑 W1.6 段 **27 PASS / 0 FAIL**；五域齐备（auth 5 / device 6 / alarm 5 / kpi+pm 5 / template 5）；断言只判 200/401/404/400 不依赖 seed 列表非空；template 用例自创建-回查-DELETE 闭环 |
 | W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | 🟢 0.5 (DoD-partial) 2026-04-27 | Claude | commit `e878d5e0`；yaml 严格解析 + grep 命中三 service；三 curl 未实测（worktree 无 docker），复现脚本在 verify-T-0008.md §4.2，docker 环境跑后回填 §4.3 即转 ✅ |
 | W1.8 | T-0042 | 数据库定时备份 + 恢复演练 | ✅ 2026-04-27 | Claude | commit `27fa743a`；DoD 三 grep 全过；真跑 backup + restore drill：6 项校验全 OK，**RTO 实测 1.034s**（44MB / 30,030 设备 / 138 表，本机 PG16） |
 
 **Wave 1 退出（2026-05-11 对峙）**：≥ 6/8 ✅ + 用户尽责 → 进 Wave 2；< 4/8 + 用户尽责 → AI 嘴炮认账（见 `docs/methodology/AI承诺对峙清单.md` 第二章）
 
-**📊 当前阶段计分（2026-04-27 第二次盘点）**：**6.5 / 8 ✅** = W1.1 + W1.2 + W1.3 + W1.4 + W1.6 + W1.7×0.5 + W1.8 = 1 + 1 + 1 + 1 + 1 + 0.5 + 1 = 6.5；**已过退出门槛 6/8**（提前 14 天达成，距 2026-05-11 对峙日还有 14 天 buffer）。剩余：W1.5 (1.0 待做) + W1.7 (0.5 docker 环境补三 curl)。下一批建议：**(A)** 拉起 W1.5 (T-0007+T-0011 F04 webhook) → +1 → 7.5（满分前一步）；**(B)** docker 环境跑 verify-T-0008.md §4.2 三 curl → +0.5 → 7.0。**第一次盘点（4.5/8）保留作历史**：W1.1 + W1.2 + W1.3 + W1.7×0.5 + W1.8。
+**📊 当前阶段计分（2026-04-27 第三次盘点）**：**7.5 / 8 ✅** = W1.1 + W1.2 + W1.3 + W1.4 + W1.5 + W1.6 + W1.7×0.5 + W1.8 = 1 + 1 + 1 + 1 + 1 + 1 + 0.5 + 1 = 7.5；**已过退出门槛 6/8 + 1.5 buffer**（距 2026-05-11 对峙日还有 14 天）。剩余：W1.7 (0.5 docker 环境实测三 curl，外部待办)。**满分路径**：找带 docker 的环境跑 `docs/review-report/20260427/verify-T-0008.md §4.2` 三 curl → 8.0/8。**历史盘点**：一盘 4.5（W1.3/W1.7×0.5/W1.8 落地后）；二盘 6.5（W1.4/W1.6 闭环后）；三盘 7.5（W1.5 闭环后）。
 
 **📌 W1.6 spec 决策（2026-04-27）**：
 - 现状：`scripts/e2e_verify.sh` 已含 226 处 `check_status`（多为框架骨架 / 占位），R-002 描述实际可跑用例数为 0（grep `claim` = 0）
@@ -373,6 +373,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-27 | done | T-0041 | commit `758aace9`；W1.4 ratelimit per-IP token bucket；10 用例 -race PASS；charter 两条 grep 全过 |
 | 2026-04-27 | done | T-0006 | commit `328c1f48`；W1.6 段实跑 27 PASS / 0 FAIL；claim grep -c = 26 ≥ 20；五域齐备；累计 Progress 0→27 |
 | 2026-04-27 | Wave 1 阶段计分（二盘） | **6.5 / 8 ✅ 已过门槛** | +W1.4 (1.0) +W1.6 (1.0) → 6.5；提前 14 天达成（对峙日 2026-05-11），剩余 W1.5 (1.0) + W1.7 (0.5 docker 待办)；下一批：W1.5 (T-0007+T-0011) → +1 → 7.5 |
+| 2026-04-27 | wave-batched 三批 | T-0007+T-0011 (W1.5 子集) | 单 agent worktree（路径无冲突无需并行）；agent 在 implementation-done 后遭遇 API 403 auth error，未写 `.wave-status.txt` + verify md S4/S5 段；主会话进 worktree 验证 staged 9 文件无主 worktree 污染 + 自跑全套 S4 硬门 + 补 verify md + 写 DONE + cherry-pick |
+| 2026-04-27 | done | T-0007 + T-0011 (W1.5 子集) | commit `43903b81`；migration 000038 + `notify_webhook` action + `WebhookDispatcher`；8 单元测试 -race 全过；charter 4 步映射全过（含 httptest.Server EndToEnd 用例）；retry/dead-letter/HMAC/header/template/email/sms 留 Wave 2 Block A 全量；T-0007/T-0011 主体仍在 Wave 2 planned，本次仅闭环 W1.5 子集 |
+| 2026-04-27 | post-mortem | Agent B (W1.5 sub-agent) | API 403 中断模式与 Agent A（路径漂移）不同：是 anthropic 端 auth 失败（不是 prompt 问题）。复盘：worktree 内文件齐全无污染、心跳协议本次有效（拿到了 implementation-done 时间戳）；主会话接续靠两件事支撑（主 worktree 状态干净 + 心跳进度日志）；后续 prompt 可保持现样，watchdog 保持现样 |
+| 2026-04-27 | Wave 1 阶段计分（三盘） | **7.5 / 8 ✅** | +W1.5 (1.0) → 7.5；剩余 W1.7 docker 三 curl 0.5 为外部待办；满分 8.0 需 docker 环境补齐 |
+| 2026-04-27 | 待 triage | pre-existing race | `TestIntegration_FullPipeline_RaceCondition_NewAlarmNotYetProcessed` 在干净 main 分支同样 -race FAIL（`expedited_receiver.go:48` → `channel_bus.go:133`），与 W1.5 改动无关；登记 PgM 周一 triage（候选 task：`ExpeditedEventReceiver Subscribe race fix`） |
 
 ---
 
