@@ -533,7 +533,25 @@ Down 迁移必须清除 Up 迁移创建的 **所有** 数据库对象：
 
 **注意**：共享函数（如 `update_updated_at_column()`）在 `000001` 中创建，后续迁移不应重复创建。如需确保存在，用 `CREATE OR REPLACE FUNCTION`。
 
-#### 5.5.9 迁移文件自查清单
+#### 5.5.9 TRUNCATE 与外键约束
+
+PostgreSQL 规定：**被 FK 引用的表不能单独 TRUNCATE**，即使引用方为空、即使 FK 声明了 `ON DELETE CASCADE`。两条独立 `TRUNCATE` 语句会被拒绝（`SQLSTATE 0A000: cannot truncate a table referenced in a foreign key constraint`）。
+
+种子数据 / 测试夹具里如果要清空被 FK 引用的表，必须**两选一**：
+
+```sql
+-- 方案 A（推荐）：同一条语句 truncate 所有相关表
+TRUNCATE alarm_library_i18n, alarm_libraries RESTART IDENTITY;
+
+-- 方案 B：CASCADE 递归 truncate
+TRUNCATE alarm_libraries CASCADE;
+```
+
+**进一步避免 TRUNCATE 的设计建议**：种子数据用 `INSERT ... ON CONFLICT (key) DO UPDATE SET ...` 实现 upsert，不再需要先 truncate。这种 idempotent 写法既不破坏外键关系，又不会清掉运行时由用户产生的关联数据。
+
+> **历史教训**：`seed/000028_alarm_library_import.sql` 用两条独立 TRUNCATE 清空 `alarm_library_i18n` 和 `alarm_libraries`，在已有数据的环境下 migrate-seed 直接 exit 1 → acs/app/worker 因 depends_on 全部起不来（commit `7afc3241`）。
+
+#### 5.5.10 迁移文件自查清单
 
 每次新增迁移文件后，按此清单自查：
 
@@ -549,6 +567,7 @@ Down 迁移必须清除 Up 迁移创建的 **所有** 数据库对象：
 - [ ] Down 段删除 Up 段创建的所有对象（表、函数、索引、触发器）
 - [ ] 无与 `seed/` 目录的重复 INSERT（或均使用 `ON CONFLICT`）
 - [ ] JSON 字符串无尾随逗号
+- [ ] **TRUNCATE 被 FK 引用的表时**：与所有引用方写在同一条语句，或加 `CASCADE`
 
 ---
 
