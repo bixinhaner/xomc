@@ -3674,6 +3674,8 @@ const messages: Record<string, string> = {
   'mml.console.inputNumber':                 'Enter number',
   'mml.console.optional':                    'Optional',
   'mml.console.selectCommandFirst':          'Please select a command from the left',
+  'mml.console.rawParamPathHint':            'Without a selected command only read operations (LST / DSP) are supported. For write operations, pick a command on the left.',
+  'mml.console.errorNoParamPath':            'Please enter at least one parameter path',
   'mml.console.noParamsNeeded':              'No parameters required for this command',
   'mml.console.queryFieldsHint':             'Select fields to query. Default scope applies if none selected.',
   'mml.console.directExecuteWarning':        'This command will execute directly, please confirm',

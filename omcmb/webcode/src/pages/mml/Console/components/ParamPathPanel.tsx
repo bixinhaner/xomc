@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AutoComplete, Button, Empty, Select, Space, Typography } from 'antd';
+import { AutoComplete, Button, Select, Space, Typography } from 'antd';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import type { MMLCommand, MMLOperationType } from '@core/types/mml';
 import { resolveOperationType } from '../utils/resolveOperationType';
@@ -125,12 +125,19 @@ export default function ParamPathPanel({ command, onChange }: ParamPathPanelProp
     });
   };
 
-  if (!command) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('mml.console.selectCommandFirst')} />;
-  }
+  // 不再要求"先选命令"。无命令时面板进入"裸路径直接执行"模式：
+  //   - 操作类型下拉 fallback 到 DEFAULT_OPERATIONS
+  //   - 路径输入无 AutoComplete 建议（命令树没绑定 → suggestedPaths 为空）
+  //   - 后端仅接受 LST/DSP（其它操作类型在 service 层会拒）
+  // 设计依据：MML 控制台需求 #1。
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      {!command && (
+        <Typography.Text type="secondary">
+          {t('mml.console.rawParamPathHint')}
+        </Typography.Text>
+      )}
       <div>
         <Typography.Text style={{ display: 'block', marginBottom: 8 }}>
           {t('mml.console.operationType')}

@@ -133,22 +133,37 @@ export function useCommandExecution() {
     }
 
     const trimmedCommandLineText = commandLineText.trim();
-    if (!trimmedCommandLineText) {
-      addOutput({
-        type: 'stderr',
-        text: t('mml.console.errorNoCommand'),
-        timestamp: new Date().toLocaleTimeString(),
-      });
-      return;
-    }
+    const filteredPaths = paramPaths.filter((p) => p.trim());
 
-    if (!command && !isManualEdit) {
-      addOutput({
-        type: 'stderr',
-        text: t('mml.console.errorSelectCommand'),
-        timestamp: new Date().toLocaleTimeString(),
-      });
-      return;
+    // paramPath 模式 + 无 command：直接看 paramPaths 是否非空，跳过 commandLineText
+    // 校验（commandLineText 是 control 面板专用的命令行字符串，paramPath 模式不渲染）。
+    const isRawParamPathMode = activeTab === 'paramPath' && !command && !isManualEdit;
+    if (isRawParamPathMode) {
+      if (filteredPaths.length === 0) {
+        addOutput({
+          type: 'stderr',
+          text: t('mml.console.errorNoParamPath'),
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        return;
+      }
+    } else {
+      if (!trimmedCommandLineText) {
+        addOutput({
+          type: 'stderr',
+          text: t('mml.console.errorNoCommand'),
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        return;
+      }
+      if (!command && !isManualEdit) {
+        addOutput({
+          type: 'stderr',
+          text: t('mml.console.errorSelectCommand'),
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        return;
+      }
     }
 
     const payload = buildExecutePayload({
@@ -167,9 +182,13 @@ export function useCommandExecution() {
 
     setIsExecuting(true);
 
+    // 显示在终端的命令字符串：paramPath 裸路径模式下用 paths 拼接，否则沿用 commandLineText
+    const displayCommand = isRawParamPathMode
+      ? filteredPaths.join(', ')
+      : trimmedCommandLineText;
     addOutput({
       type: 'info',
-      text: t('mml.console.executingCommand', { command: trimmedCommandLineText }),
+      text: t('mml.console.executingCommand', { command: displayCommand }),
       timestamp: new Date().toLocaleTimeString(),
     });
     addOutput({
@@ -308,11 +327,31 @@ function buildExecutePayload({
     };
   }
 
+  // paramPath 模式分两种：
+  //   1) 选了命令 → 带 command_code，service 层会按命令的 RPCMethod 走（含 MOD/ADD 等）
+  //   2) 没选命令 → 后端走"裸路径"分支（service.go ExecuteCommand），仅支持 LST/DSP
+  // 两种都把非空 paths 传上去，后端按上下文决定。
+  const filteredPaths = paramPaths.filter((path) => path.trim());
+  const opType = operationType || 'LST';
+
+  if (!command) {
+    const previewPath = filteredPaths[0] || '';
+    const fallbackName = previewPath
+      ? `RAW ${opType} ${previewPath.length > 40 ? previewPath.slice(0, 40) + '...' : previewPath}`
+      : `RAW ${opType}`;
+    return {
+      task_name: taskName || fallbackName,
+      param_paths: filteredPaths,
+      operation_type: opType,
+      device_sns: deviceSns,
+    };
+  }
+
   return {
     task_name: taskName || command.commandCode,
     command_code: command.commandCode,
-    param_paths: paramPaths.filter((path) => path.trim()),
-    operation_type: operationType,
+    param_paths: filteredPaths,
+    operation_type: opType,
     device_sns: deviceSns,
   };
 }

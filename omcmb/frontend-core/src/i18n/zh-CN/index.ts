@@ -3681,6 +3681,8 @@ const messages: Record<string, string> = {
   'mml.console.inputNumber':                 '请输入数值',
   'mml.console.optional':                    '选填',
   'mml.console.selectCommandFirst':          '请先从左侧选择命令',
+  'mml.console.rawParamPathHint':            '未选命令时仅支持读取类操作（LST / DSP）；写入类请先在左侧选择命令。',
+  'mml.console.errorNoParamPath':            '请至少输入一条参数路径',
   'mml.console.noParamsNeeded':              '该命令无需配置参数',
   'mml.console.queryFieldsHint':             '勾选需要查询的字段，未勾选时由后续执行逻辑决定默认查询范围。',
   'mml.console.directExecuteWarning':        '该命令将直接执行，请确认',

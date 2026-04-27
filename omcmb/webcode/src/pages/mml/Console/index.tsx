@@ -244,8 +244,17 @@ export default function MMLConsole() {
     : '';
   const saveTaskDefaultContent = commandLineText.trim();
 
-  const canExecute = deviceSelection.selectedDevices.length > 0 && commandLineText.trim().length > 0;
-  const executeButtonText = `${t('mml.console.deviceUnit', { count: deviceSelection.selectedDevices.length })} · ${currentCommandLabel || t('mml.console.noCommandSelected')}`;
+  // paramPath 模式 + 无命令时：用 paramPaths 是否非空作为执行前提（control 面板的
+  // commandLineText 在该模式下不参与渲染）。control 模式仍按原命令行字符串判断。
+  const hasNonEmptyParamPath = paramPaths.some((p) => p.trim().length > 0);
+  const isRawParamPathMode = activeTab === 'paramPath' && !commandSelection.selectedCommand;
+  const canExecute =
+    deviceSelection.selectedDevices.length > 0 &&
+    (isRawParamPathMode ? hasNonEmptyParamPath : commandLineText.trim().length > 0);
+  const rawPathPreview = isRawParamPathMode
+    ? `RAW ${operationType || 'LST'}`
+    : '';
+  const executeButtonText = `${t('mml.console.deviceUnit', { count: deviceSelection.selectedDevices.length })} · ${currentCommandLabel || rawPathPreview || t('mml.console.noCommandSelected')}`;
 
   return (
     <div
