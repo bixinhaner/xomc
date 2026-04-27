@@ -1,0 +1,55 @@
+# OMC starter 告警规则 — 仅覆盖三进程存活，业务级告警在后续 Wave 补
+#
+# 注意：
+#   - 以 up{job="..."} == 0 作为存活信号
+#   - critical: 影响主链路（app / acs）
+#   - warning: 异步 worker，短暂 down 不立即升级
+
+groups:
+  - name: omc.process_liveness
+    interval: 30s
+    rules:
+      - alert: OMCAppDown
+        expr: up{job="omc-app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          deployment_unit: app
+        annotations:
+          summary: "omcgo-app instance {{ $labels.instance }} is down"
+          description: |
+            omcgo-app metrics endpoint has been unreachable for 2 minutes.
+            Affected instance: {{ $labels.instance }}.
+            Impact: 管理面 REST API 与 gRPC 不可用，前端登录/查询/下发全停。
+            Action: 查看 run/logs/app/app.log，确认进程是否退出或端口被占用。
+
+      - alert: OMCACSDown
+        expr: up{job="omc-acs"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          deployment_unit: acs
+        annotations:
+          summary: "omcgo-acs instance {{ $labels.instance }} is down"
+          description: |
+            omcgo-acs metrics endpoint has been unreachable for 2 minutes.
+            Affected instance: {{ $labels.instance }}.
+            Impact: TR-069 南向断开，CPE 无法 Inform / 接收命令。
+            Action: 查看 run/logs/acs/acs.log，确认 :7547 / :7557 监听是否正常。
+
+      - alert: OMCWorkerDown
+        expr: up{job="omc-worker"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          deployment_unit: worker
+        annotations:
+          summary: "omcgo-worker instance {{ $labels.instance }} is down"
+          description: |
+            omcgo-worker metrics endpoint has been unreachable for 5 minutes.
+            Affected instance: {{ $labels.instance }}.
+            Impact: PM/MR 文件处理与 KPI 计算延迟，告警/数据同步不实时。
+            Action: 查看 run/logs/worker/worker.log。

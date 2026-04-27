@@ -1,0 +1,28 @@
+# AlertManager 最小配置 — placeholder webhook
+#
+# 注意：
+#   - placeholder-webhook 故意指向不可达 URL (example.invalid)，避免误投递
+#   - W1.5（通知中心）落地后，请把 webhook url 换成 omcgo-app 的真实告警入口
+#   - 邮件 / 钉钉 / 飞书等渠道在通知中心统一配置，AlertManager 仅作为 Prometheus
+#     端的兜底转发层
+
+route:
+  receiver: "placeholder-webhook"
+  group_by: ["alertname", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: "placeholder-webhook"
+    webhook_configs:
+      - url: "http://example.invalid/webhook"
+        send_resolved: true
+
+inhibit_rules:
+  # 同一 service 同时存在 critical 时，抑制对应的 warning 告警
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ["service", "alertname"]

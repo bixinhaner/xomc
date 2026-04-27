@@ -1,0 +1,17 @@
+# Grafana datasource provisioning — 自动注册 Prometheus 数据源
+#
+# 容器内部网络中 prometheus 服务名为 prometheus，监听 9090。
+# 若改动 prometheus 服务名或端口，请同步修改 url。
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST

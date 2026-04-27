@@ -1,0 +1,19 @@
+# Grafana dashboard provisioning — 从 /etc/grafana/dashboards 自动加载所有 JSON
+#
+# 容器内挂载点：
+#   /etc/grafana/provisioning/dashboards/default.yml  ← 本文件
+#   /etc/grafana/dashboards/                          ← 实际 JSON dashboard 目录
+
+apiVersion: 1
+
+providers:
+  - name: "OMC default"
+    orgId: 1
+    folder: "OMC"
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
