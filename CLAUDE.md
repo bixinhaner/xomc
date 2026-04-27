@@ -40,26 +40,48 @@
 ## 3. 仓库结构
 
 ```
-omc/                                # 根仓库
+omc/                                # 根仓库（单一 git）
 ├── CLAUDE.md                       # 本文件 — 全局指导
 ├── omcgo/                          # Go 后端源码（子目录，随主仓库追踪）
 │   ├── CLAUDE.md                   # 后端详细指导
 │   ├── cmd/                        # 入口：app / acs / worker / migrate / omcctl
-│   ├── internal/                   # 私有代码（按功能域组织）
-│   ├── migrations/                 # 数据库迁移
-│   └── scripts/                    # E2E 测试、压测工具
-├── omcmb/                          # React 前端源码（子目录，随主仓库追踪）
-│   └── webcode/                    # 前端源码
-│       ├── src/services/api/       # API 服务层（24 文件）
-│       ├── src/hooks/api/          # React Query Hooks（21 文件）
-│       ├── src/pages/              # 页面组件（18 模块）
-│       └── src/components/         # 可复用组件
-├── .claude/commands/               # Claude Code Skills
-├── docs/                           # 文档与审查报告
-└── *.md                            # 分析报告、开发计划等
+│   ├── internal/                   # 私有代码（功能域 + 基础设施）
+│   │   ├── core/                   #   基础设施（appconfig/components/event/middleware/model/...）
+│   │   ├── carrier/                #   运营商适配（cmcc/ctcc/cucc）
+│   │   ├── acs/ config/ pm/ alarm/ mr/                 # F01-F05
+│   │   ├── device/ admin/ topology/ software/ backup/
+│   │   ├── dashboard/ ops/ report/ mml/ filemanager/
+│   │   ├── syslog/ license/                            # F06 各子模块
+│   │   ├── nedirect/ northbound/ provision/ interop/   # F07-F10
+│   │   └── notification/ task/ transfer/ events/       # 跨域基础设施（详见 §6）
+│   ├── datamodels/                 # TR069 数据模型种子
+│   ├── migrations/                 # 数据库迁移（goose）
+│   ├── scripts/                    # E2E、压测、CPE 模拟器、诊断
+│   └── 规范/                        # 三大运营商技术规范原件
+├── omcmb/                          # 前端源码（子目录，随主仓库追踪）
+│   ├── frontend-core/              # 共享业务层（多皮肤复用，vite alias `@core`）
+│   │   └── src/
+│   │       ├── services/           #   http.ts (Axios) + apiSwitch.ts + api/*.ts (29)
+│   │       ├── hooks/api/          #   React Query Hooks（24）
+│   │       ├── store/              #   Zustand: userStore/appStore/tabStore/taskStore/alarmStore
+│   │       ├── types/              #   TypeScript 类型定义
+│   │       ├── i18n/               #   zh-CN / en-US
+│   │       └── mock/               #   Mock 数据
+│   ├── webcode/                    # 主皮肤 UI 壳（pages/components/router/providers/theme）
+│   ├── webcode-v2/                 # 多皮肤候选 v2（详见 docs/project/frontend-multi-skin-plan-20260422.md）
+│   └── webcode-v3/                 # 多皮肤候选 v3
+├── deployments/                    # 部署清单（docker compose、监控）
+├── run/                            # 本地一键启停
+│   ├── scripts/                    #   restart-all.sh / start-{deps,backend,frontend,design-baseline}.sh
+│   └── logs/                       #   各进程日志（运行时）
+├── .claude/                        # Claude Code Skills + settings.json
+│   └── commands/                   #   acs-stress-test / commit / dev-pipeline / e2e / review
+└── docs/                           # 设计、审查、流程、PRD、Sprint、Backlog
 ```
 
-**仓库组成**：本项目是**单一 git 仓库**（根 `goomc/.git`），`omcgo/` 和 `omcmb/` 是源码子目录，**不含独立 `.git`**。所有 git 操作在 `goomc/` 根目录执行。根 `.gitignore` 只忽略编译产物（`omcgo/bin/`、`omcmb/webcode/node_modules/`、`omcmb/webcode/dist/` 等），源码全部随主仓库追踪。
+**仓库组成**：本项目是**单一 git 仓库**（根 `goomc/.git`），`omcgo/` 和 `omcmb/` 是源码子目录，**不含独立 `.git`**。所有 git 操作在 `goomc/` 根目录执行。根 `.gitignore` 只忽略编译产物（`omcgo/bin/`、`omcmb/*/node_modules/`、`omcmb/*/dist/` 等），源码全部随主仓库追踪。
+
+**前端三包关系**：业务层（API / Hook / Store / Types / i18n / Mock）全部在 `omcmb/frontend-core/`，三个 UI 包（`webcode/`、`webcode-v2/`、`webcode-v3/`）通过 vite alias `@core → ../frontend-core/src` 共享同一份业务层。日常开发以 `webcode/` 为主皮肤；**新增 API / Hook / Store / Types 必须写在 `frontend-core/`**，UI 壳里只放页面与组件。
 
 ### 3.1 设计基线对比环境（worktree）
 
@@ -108,19 +130,21 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 | 指标 | Prometheus |
 | 链路追踪 | OpenTelemetry |
 
-### 前端 (omcmb/webcode/)
+### 前端 (omcmb/ — frontend-core 业务层 + webcode UI 壳)
 
 | 组件 | 选型 |
 |------|------|
-| 框架 | React 19 + TypeScript |
-| 构建 | Vite |
-| UI 库 | Ant Design 5 |
-| 状态管理 | Zustand |
-| 数据请求 | React Query (TanStack) |
-| HTTP 客户端 | Axios |
-| 图表 | ECharts |
-| 国际化 | react-intl |
-| 路由 | react-router-dom |
+| 框架 | React 19 + TypeScript（严格模式） |
+| 构建 | Vite 7 |
+| UI 库 | Ant Design 5 + @ant-design/pro-components |
+| 状态管理 | Zustand 5（业务层位于 `frontend-core/src/store/`） |
+| 数据请求 | React Query v5（业务 Hook 位于 `frontend-core/src/hooks/api/`） |
+| HTTP 客户端 | Axios（统一封装在 `frontend-core/src/services/http.ts`，自动 camelCase ↔ snake_case） |
+| 图表 | ECharts 6 + echarts-for-react |
+| 地图 | OpenLayers |
+| 国际化 | react-intl 8（语料在 `frontend-core/src/i18n/`） |
+| 路由 | react-router-dom 6 |
+| 测试 | Vitest + Testing Library + Playwright |
 
 ---
 
@@ -132,15 +156,17 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 
 ### 三个部署单元
 
-| 单元 | 用途 |
-|------|------|
-| `omcgo-app` | 主应用（F02-F10 模块化单体）REST API :8080 |
-| `omcgo-acs` | TR069 ACS 引擎（独立进程，水平可扩展）:7547 |
-| `omcgo-worker` | 后台工作进程（PM/MR 文件处理、KPI 计算）|
+| 单元 | 用途 | dev 端口（`config.dev.yaml`） | 标准/生产端口 |
+|------|------|------------------------------|--------------|
+| `omcgo-app` | 主应用（F02-F10 模块化单体）REST API + gRPC | HTTP `:8081` / TLS `:8444` / gRPC `:50051` / metrics `:9091` | 同左 |
+| `omcgo-acs` | TR069 ACS 引擎（独立进程，水平可扩展） | HTTP `:7557` / TLS `:7558` / STUN `:3478` / metrics `:9090` | CWMP 标准 `:7547`（生产可改回） |
+| `omcgo-worker` | 后台工作进程（PM/MR 文件处理、KPI 计算） | metrics `:9092` | 同左 |
+
+> 端口以 `omcgo/cmd/{app,acs,worker}/etc/config.dev.yaml` 为准。`run/scripts/start-all.sh` 启动横幅显示的端口仅供参考，与 nginx 容器（`deployments/docker/docker-compose.yml` 中的 `web` 服务，对外暴露 `:8080` / `:8081`）映射有关，不代表后端进程监听端口。
 
 ### 前端 SPA
 
-Vite dev server :3000 通过 `/api` 代理到后端 :8080。
+Vite dev server `:3000` 通过 `/api` 代理到后端 App `:8081`。设计基线（design-baseline 分支 worktree）跑在 `:3001`，详见 §3.1。
 
 ---
 
@@ -159,6 +185,17 @@ Vite dev server :3000 通过 `/api` 代理到后端 :8080。
 | F09 | 自动开站 | 设备自动发现、模板匹配、配置下发 | `provision/` |
 | F10 | 互操作测试 | 设备联调与一致性验证 | `interop/` |
 
+### 跨域基础设施模块（不属于 F0X，但承载多个功能域的能力）
+
+| 模块 | 用途 | 服务对象 |
+|------|------|---------|
+| `internal/task/` | 统一任务队列（Redis 双写 PG），CWMP ID ↔ Task 映射、reboot closer、completion router | F01/F02/F06（MML、固件、配置同步、Reboot 等所有需要派发到设备的指令） |
+| `internal/notification/` | 通知中心（ExpeditedEvent 实时告警、设备列表批量同步、邮件/SMS/Webhook 通道） | F04 告警，F06 运维事件 |
+| `internal/transfer/` | 文件传输桥（Download/Upload 与 ACS / app 的中介） | F03 PM、F05 MR、F06 软件升级 / 备份 |
+| `internal/events/` | 事件 hub / handler / store（基于 `internal/core/event` 的 EventBus 上层应用） | 跨模块异步联动 |
+| `internal/core/` | 进程级基础设施（appconfig / components / event / middleware / model / errors / utils / reliability / storage / tracing） | 所有模块 |
+| `internal/carrier/` | 运营商适配（CMCC / CTCC / CUCC），所有运营商差异在此封装 | 所有需要按运营商定制的模块 |
+
 ---
 
 ## 7. 关键文件路径
@@ -169,24 +206,35 @@ Vite dev server :3000 通过 `/api` 代理到后端 :8080。
 |------|------|
 | `omcgo/cmd/app/main.go` | 主应用入口 |
 | `omcgo/cmd/app/router/router.go` | 路由注册 + DI |
-| `omcgo/internal/` | 全部业务模块（按功能域扁平组织） |
+| `omcgo/internal/` | 业务模块（功能域）+ 跨域基础设施（详见 §6） |
+| `omcgo/internal/core/` | 进程级基础设施（appconfig / components / event / middleware / model / errors / utils / reliability / storage / tracing） |
 | `omcgo/global/errors.go` | 63 个错误码 |
-| `omcgo/migrations/` | 数据库迁移 (`000NNN_desc.up/down.sql`) |
-| `omcgo/scripts/e2e_verify.sh` | E2E 测试脚本 (~452 cases) |
+| `omcgo/migrations/` | 数据库迁移 (`000NNN_desc.sql`，goose 格式，已到 `000037`) |
+| `omcgo/migrations/seed/` | 种子数据迁移（DML，编号紧接 DDL 继续递增） |
+| `omcgo/scripts/e2e_verify.sh` | E2E 测试脚本（默认 `:8081`，~226 断言，覆盖 Sprint 0-9） |
 | `omcgo/scripts/seed_e2e_testdata.sql` | 测试数据 |
+| `omcgo/scripts/cpe_simulator.py` | CPE TR-069 模拟器（2200+ 行） |
 | `omcgo/CLAUDE.md` | **后端详细指导** |
 
 ### 前端
 
+> **业务层 vs UI 壳分离**：API 服务、Hook、Store、Types、i18n、Mock 全部位于 `omcmb/frontend-core/`（多皮肤共享），UI 壳（页面、组件、路由）位于 `omcmb/webcode/`（以及 `webcode-v2`、`webcode-v3` 候选皮肤）。Vite alias `@core` → `../frontend-core/src`，import 写法形如 `import { authApi } from '@core/services/api/authApi'`。
+
 | 路径 | 说明 |
 |------|------|
-| `omcmb/webcode/src/services/api/*.ts` | API 服务（24 文件，一模块一文件） |
-| `omcmb/webcode/src/services/http.ts` | Axios 客户端（拦截器、camelCase↔snake_case） |
-| `omcmb/webcode/src/services/apiSwitch.ts` | Mock/Real 切换 (`useMock`) |
-| `omcmb/webcode/src/hooks/api/*.ts` | React Query Hooks（21 文件） |
-| `omcmb/webcode/src/pages/` | 页面组件（18 功能模块） |
-| `omcmb/webcode/src/store/` | Zustand 状态管理 |
-| `omcmb/webcode/src/types/` | TypeScript 类型定义 |
+| `omcmb/frontend-core/src/services/api/*.ts` | API 服务（**29 文件**，一模块一文件） |
+| `omcmb/frontend-core/src/services/http.ts` | Axios 客户端（拦截器、camelCase ↔ snake_case、Token 续期） |
+| `omcmb/frontend-core/src/services/apiSwitch.ts` | Mock / Real 切换（`useMock`，受 `VITE_USE_MOCK` 控制） |
+| `omcmb/frontend-core/src/hooks/api/*.ts` | React Query Hooks（**24 文件**） |
+| `omcmb/frontend-core/src/store/*.ts` | Zustand 状态：`userStore` `appStore` `tabStore` `taskStore` `alarmStore` |
+| `omcmb/frontend-core/src/types/` | TypeScript 类型定义 |
+| `omcmb/frontend-core/src/i18n/` | 多语言语料（zh-CN / en-US） |
+| `omcmb/frontend-core/src/mock/` | Mock 数据 |
+| `omcmb/webcode/src/pages/` | 主皮肤页面组件（18 个功能模块） |
+| `omcmb/webcode/src/components/` | 主皮肤可复用组件 |
+| `omcmb/webcode/src/router/` | 路由表与 PrivateRoute |
+| `omcmb/webcode/src/providers/` | LocaleProvider / QueryProvider / ThemeProvider |
+| `omcmb/webcode/vite.config.ts` | Vite 配置（含 `@core` alias 与 `:8081` 代理） |
 
 ---
 
@@ -206,8 +254,8 @@ Vite dev server :3000 通过 `/api` 代理到后端 :8080。
 
 **Type**: `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf` | `build` | `ci` | `style`
 
-**Scope** (与功能域对应):
-`acs` `config` `pm` `alarm` `mr` `device` `admin` `topology` `software` `backup` `dashboard` `ops` `report` `mml` `filemanager` `syslog` `license` `nedirect` `northbound` `provision` `interop` `carrier` `components` `api` `deploy`
+**Scope** (与功能域 / 模块对应):
+`acs` `config` `pm` `alarm` `mr` `device` `admin` `topology` `software` `backup` `dashboard` `ops` `report` `mml` `filemanager` `syslog` `license` `nedirect` `northbound` `provision` `interop` `carrier` `notification` `task` `transfer` `events` `core` `migration` `frontend` `frontend-core` `components` `api` `deploy` `docs`
 
 **Git 操作规则**:
 - 本项目单一 git 仓库，统一在 `goomc/` 根目录执行 `git add / commit / push`，无需 `cd` 到子目录
@@ -267,13 +315,16 @@ Related: F06
 
 ### 8.3 React/TypeScript 前端规范
 
-- **API 服务模式**: 每模块一个 `xxxApi.ts`，导出服务对象
-- **Hook 模式**: 每模块一个 `useXxx.ts`，内部使用 `useMock ? mockService : realApi`
-- **HTTP 客户端**: Axios 拦截器自动 camelCase ↔ snake_case 转换，Bearer token 注入
+- **代码归属**: API / Hook / Store / Types / i18n / Mock 一律放 `omcmb/frontend-core/`；页面、组件、路由放 `omcmb/webcode/`（或对应皮肤包）
+- **API 服务模式**: 每模块一个 `xxxApi.ts`（位于 `frontend-core/src/services/api/`），导出服务对象
+- **Hook 模式**: 每模块一个 `useXxx.ts`（位于 `frontend-core/src/hooks/api/`），内部使用 `useMock ? mockService : realApi`
+- **HTTP 客户端**: Axios 拦截器自动 camelCase ↔ snake_case 转换，Bearer Token 注入与续期，统一在 `frontend-core/src/services/http.ts`
 - **类型安全**: 禁止 `any`，Backend 响应用 `BackendXxx` 接口 → `mapBackendXxx` 转换 → 前端 `Xxx` 接口
-- **状态管理**: Zustand（`userStore`、`deviceStore`、`uiStore`）
+- **状态管理**: Zustand（`userStore`、`appStore`、`tabStore`、`taskStore`、`alarmStore`，全部位于 `frontend-core/src/store/`）
 - **查询键**: 层级式 `['devices', 'list', params]`
-- **Mock 开关**: `VITE_USE_MOCK` 环境变量控制
+- **Mock 开关**: `VITE_USE_MOCK` 环境变量（或 `npm run dev:mock` / `build:mock`）控制
+- **导入路径**: 跨包引用走 `@core/...`，禁止使用相对路径越级
+- **多皮肤影响评估**: 改 `frontend-core/` 的类型 / Mock / Store 形态时，确认 `webcode-v2/`、`webcode-v3/` 仍能编译
 
 ---
 
@@ -310,8 +361,8 @@ Related: F06
 
 - [ ] 后端 `go build ./...` 编译通过
 - [ ] 后端 `go test ./...` 测试通过
-- [ ] 前端 `npx tsc --noEmit` 类型检查通过（如涉及前端）
-- [ ] 无编译器/linter 警��
+- [ ] 前端 `cd omcmb/webcode && npm run typecheck` 类型检查通过（如涉及前端）
+- [ ] 无编译器 / linter 警告
 - [ ] 新功能包含对应测试
 - [ ] 提交消息清晰说明"为什么"
 
@@ -377,39 +428,55 @@ Related: F06
 
 ## 13. 测试
 
-| 类型 | 工具/方法 |
+| 类型 | 工具 / 方法 |
 |------|----------|
-| 后端单元测试 | `go test ./...` + testify |
-| 后端 E2E | `bash omcgo/scripts/e2e_verify.sh http://localhost:8080` (~452 cases) |
+| 后端单元测试 | `go test ./...` + testify（截至 2026-04-27 共 159 个 `*_test.go`） |
+| 后端 E2E | `bash omcgo/scripts/e2e_verify.sh http://localhost:8081` （Sprint 0-9 全量，~226 个 `check_status` 断言） |
 | 后端 lint | `golangci-lint run` (`.golangci.yml` 配置) |
-| 前端类型检查 | `cd omcmb/webcode && npx tsc --noEmit` |
+| 后端集成 | `bash omcgo/scripts/integration_test.sh`、`bash omcgo/scripts/test_acs_inform.sh` |
+| CPE 模拟 | `python3 omcgo/scripts/cpe_simulator.py` |
+| 前端类型检查 | `cd omcmb/webcode && npm run typecheck` |
 | 前端 lint | `cd omcmb/webcode && npm run lint` |
+| 前端单元测试 | `cd omcmb/webcode && npm run test` (Vitest) |
+| 前端 E2E | `cd omcmb/webcode && npm run test:e2e` (Playwright) |
 | 压力测试 | `omcgo/bin/loadtest` (acs/kpi/mr/all 模式) |
 
 ---
 
 ## 14. 常用命令
 
+### 一键启停（推荐日常）
+
+```bash
+bash run/scripts/start-all.sh       # 依赖 → 后端三进程 → 前端 :3000 → 设计基线 :3001
+bash run/scripts/restart-all.sh     # 全部重启
+bash run/scripts/status.sh          # 查看 PID / 端口占用
+bash run/scripts/stop-all.sh        # 停止全部
+```
+
 ### 后端 (omcgo/)
 
 ```bash
 cd omcgo
-make build          # 编译所有二进制
+make build          # 编译所有二进制（omcgo-app/-acs/-worker/migrate/omcctl）
 make test           # 运行测试
 make lint           # golangci-lint
 make migrate-up     # 执行数据库迁移
 go build ./...      # 快速编译检查
+bash scripts/check-migrations.sh   # 校验迁移版本号连续性
 ```
 
-### 前端 (omcmb/webcode/)
+### 前端 (omcmb/webcode/，业务层在 omcmb/frontend-core/)
 
 ```bash
 cd omcmb/webcode
-npm run dev         # 开发服务器 (代理到 :8080)
-npm run dev:mock    # Mock 模式开发
+npm run dev         # 开发服务器 :3000，代理到 App :8081
+npm run dev:mock    # Mock 模式开发（VITE_USE_MOCK=true）
 npm run build       # 生产构建
-npx tsc --noEmit    # 类型检查
+npm run typecheck   # tsc --noEmit
 npm run lint        # ESLint
+npm run test        # Vitest 单元测试
+npm run test:e2e    # Playwright E2E
 ```
 
 ---
@@ -427,6 +494,10 @@ npm run lint        # ESLint
 | 代码审查 Skill | `.claude/commands/review.md` |
 | 智能提交 Skill | `.claude/commands/commit.md` |
 | 前后端整合方案 | `docs/design/前后端整合方案.md` |
+| 前端多皮肤架构方案 | `docs/project/frontend-multi-skin-plan-20260422.md` |
+| 消息队列全流程说明 | `docs/消息队列全流程流转说明书.md` |
+| DoD / Release Gate | `docs/project/dod.md` / `docs/project/release-gate.md` |
+| 风险登记册 | `docs/project/risk-register.md` |
 
 ---
 
@@ -439,19 +510,23 @@ AI 在处理不同领域的代码变更时，应自动激活对应专家视角�
 根据**修改文件路径**自动激活领域专家（16.1-16.9）：
 
 ```
-internal/acs/**              → TR-069 协议栈专家 + Go 工程专家
-internal/config/**           → 电信业务专家 + 数据与存储专家
-internal/pm/**               → 电信业务专家 + 数据与存储专家
-internal/alarm/**            → 电信业务专家 + 安全合规专家
-internal/admin/**            → 安全合规专家 + Go 工程专家
-internal/core/**             → 架构专家 + Go 工程专家
-migrations/**                → 数据与存储专家
-deployments/**               → 运维与可观测性专家
-omcmb/webcode/**             → 前端专家
-scripts/e2e* | *_test.go     → 测试专家
-scripts/loadtest*            → 测试专家 + 运维专家
-cmd/**/main.go | router.go   → 架构专家 + 运维专家
-新增模块目录                  → 架构专家 + Go 工程专家
+internal/acs/**                          → TR-069 协议栈专家 + Go 工程专家
+internal/config/**                       → 电信业务专家 + 数据与存储专家
+internal/pm/**                           → 电信业务专家 + 数据与存储专家
+internal/alarm/**                        → 电信业务专家 + 安全合规专家
+internal/admin/**                        → 安全合规专家 + Go 工程专家
+internal/core/**                         → 架构专家 + Go 工程专家
+internal/{notification,task,transfer,events}/**  → 架构专家 + Go 工程专家（跨域基础设施，慎改）
+internal/carrier/**                      → 电信业务专家 + 架构专家
+migrations/** | omcgo/migrations/**      → 数据与存储专家
+deployments/** | run/scripts/**          → 运维与可观测性专家
+omcmb/frontend-core/**                   → 前端专家（业务层，多皮肤共享，改动需评估三皮肤影响）
+omcmb/webcode/** | webcode-v2/**         → 前端专家
+omcmb/webcode-v3/**                      → 前端专家
+scripts/e2e* | *_test.go                 → 测试专家
+scripts/loadtest* | scripts/cpe_simulator.py → 测试专家 + 运维专家
+cmd/**/main.go | router.go               → 架构专家 + 运维专家
+新增模块目录                              → 架构专家 + Go 工程专家
 ```
 
 根据**工作阶段/用户意图**自动激活流程专家（16.10-16.12）：
@@ -477,8 +552,9 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 **核心知识**：
 - 模块化单体 — 当前不拆微服务，按功能域内聚
-- 三个部署单元：app（:8080）、acs（:7547）、worker（后台）
-- 模块间通信：同进程直接调用 + EventBus（NATS JetStream）
+- 三个部署单元：app（dev `:8081`，TLS `:8444`，gRPC `:50051`）、acs（dev HTTP `:7557`，CWMP 标准 `:7547`）、worker（无对外端口）
+- 跨域基础设施：`internal/core/`（进程级）+ `internal/{notification,task,transfer,events}/`（业务级，跨多个功能域）
+- 模块间通信：同进程直接调用 + EventBus（`internal/core/event` 抽象，下挂 ChannelBus / NATSBus 双实现）
 - 扩展路线：10 万 → 100 万基站时按功能域渐进拆分
 
 **审查清单**：
@@ -614,21 +690,24 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 **职责**：确保前端代码质量、用户体验和前后端一致性。
 
 **核心知识**：
+- 三包结构：业务层 `omcmb/frontend-core/`（多皮肤共享）+ 三个 UI 壳 `webcode/`、`webcode-v2/`、`webcode-v3/`，通过 vite alias `@core` 互通
 - React 19 + TypeScript 严格模式
-- Ant Design 5 组件库规范
-- Zustand 状态管理（userStore / deviceStore / uiStore）
-- React Query 数据请求与缓存策略
-- Axios 拦截器：自动 camelCase ↔ snake_case、Bearer Token 注入
+- Ant Design 5 + @ant-design/pro-components 组件库规范
+- Zustand 状态管理：`userStore` / `appStore` / `tabStore` / `taskStore` / `alarmStore`（位于 `frontend-core/src/store/`）
+- React Query v5 数据请求与缓存策略
+- Axios 拦截器：自动 camelCase ↔ snake_case、Bearer Token 注入、Token 续期（统一在 `frontend-core/src/services/http.ts`）
 
 **审查清单**：
+- [ ] 改动定位正确：API / Hook / Store / Types 进 `frontend-core/`，页面 / 组件 / 路由进 `webcode*/`
 - [ ] 类型安全：禁止 `any`，后端响应定义 `BackendXxx` → `mapBackendXxx` → `Xxx`
-- [ ] API 服务：一模块一文件（`xxxApi.ts`），导出服务对象
-- [ ] Hook 模式：`useMock ? mockService : realApi`
+- [ ] API 服务：一模块一文件（`xxxApi.ts`），导出服务对象，写在 `frontend-core/src/services/api/`
+- [ ] Hook 模式：`useMock ? mockService : realApi`，写在 `frontend-core/src/hooks/api/`
 - [ ] 查询键层级：`['domain', 'action', params]`
-- [ ] 国际化：用户可见文本通过 `react-intl`
-- [ ] 组件复用：优先使用 `src/components/` 现有组件
+- [ ] 国际化：用户可见文本通过 `react-intl`，语料进 `frontend-core/src/i18n/`
+- [ ] 组件复用：优先使用 `webcode/src/components/` 现有组件
 - [ ] 错误处理：Axios 拦截器统一处理 + 页面级 ErrorBoundary
-- [ ] 字段映射：snake_case→camelCase 自动转换覆盖完整
+- [ ] 字段映射：snake_case → camelCase 自动转换覆盖完整
+- [ ] 改 `frontend-core/` 时评估对 `webcode-v2/`、`webcode-v3/` 的影响（Mock 数据形态、类型变更）
 
 ---
 
@@ -638,9 +717,10 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 **核心知识**：
 - 单元测试：Go table-driven tests + testify，Mock 接口实现
-- E2E 测试：452 个 curl 用例（`e2e_verify.sh`），覆盖 10 个 Sprint
-- CPE 模拟器：Python TR-069 会话模拟（`cpe_simulator.py`）
-- 压力测试：递进式加压（200→500→1K→2K→5K 设备）
+- E2E 测试：`scripts/e2e_verify.sh` 默认指向 `:8081`，覆盖 Sprint 0-9，含约 226 个 `check_status` 断言（数字会随用例补齐而增加，请以脚本实际运行 `Results: $PASS / $FAIL / $TOTAL` 为准）
+- CPE 模拟器：Python TR-069 会话模拟（`scripts/cpe_simulator.py`，2200+ 行）
+- 前端测试：Vitest（单元）+ Playwright（E2E）
+- 压力测试：递进式加压（200→500→1K→2K→5K 设备），二进制 `omcgo/bin/loadtest`
 
 **审查清单**：
 - [ ] 新功能包含成功和失败两条路径的测试
@@ -651,12 +731,12 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 - [ ] 绝不禁用失败测试 — 修复它们
 - [ ] 性能变更需更新压测基线
 
-**测试金字塔**：
+**测试金字塔**（截至 2026-04-27，数字仅供量级参考，以 CI 实际为准）：
 ```
-         /  E2E (452 cases)  \         ← 端到端：验证完整业务流
-        / Integration Tests   \        ← 集成：验证模块组合
-       /   Unit Tests (84 files) \     ← 单元：验证函数/方法逻辑
-      ─────────────────────────────
+         /  E2E (~226 断言)        \    ← 端到端：scripts/e2e_verify.sh 全量
+        / Integration Tests          \   ← 集成：scripts/integration_test.sh、test_acs_inform.sh
+       /   Unit Tests (~159 *_test.go) \  ← 单元：go test ./...
+      ─────────────────────────────────
 ```
 
 ---
