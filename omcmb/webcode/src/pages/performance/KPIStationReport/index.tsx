@@ -10,8 +10,8 @@ import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
-import { useDeviceList } from '@/hooks/api/useDevices';
-import { useEnableIndicators, useDisableIndicators } from '@/hooks/api/useIndicator';
+import { useDeviceList } from '@core/hooks/api/useDevices';
+import { useEnableIndicators, useDisableIndicators } from '@core/hooks/api/useIndicator';
 import MeasurementFileDrawer from './components/MeasurementFileDrawer';
 
 /** 测量维护行数据 */

@@ -2,10 +2,10 @@ import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Card, Descriptions, Skeleton, Space, Tag, Typography } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
-import { useIndicatorGroupTree, useIndicatorInfo } from '@/hooks/api/useIndicator';
+import { useIndicatorGroupTree, useIndicatorInfo } from '@core/hooks/api/useIndicator';
 import { useT } from '@/hooks/useT';
-import { useAppStore } from '@/store/appStore';
-import type { IndicatorGroup } from '@/types/indicator';
+import { useAppStore } from '@core/store/appStore';
+import type { IndicatorGroup } from '@core/types/indicator';
 
 const { Title, Text } = Typography;
 

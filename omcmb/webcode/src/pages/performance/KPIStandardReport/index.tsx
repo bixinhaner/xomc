@@ -18,11 +18,11 @@ import {
   useDisableIndicators,
   useExportIndicators,
   useUpdateCustName,
-} from '@/hooks/api/useIndicator';
-import { indicatorApi } from '@/services/api/indicatorApi';
-import { useAppStore } from '@/store/appStore';
-import { useUserStore } from '@/store/userStore';
-import type { IndicatorGroup, PerfIndicator } from '@/types/indicator';
+} from '@core/hooks/api/useIndicator';
+import { indicatorApi } from '@core/services/api/indicatorApi';
+import { useAppStore } from '@core/store/appStore';
+import { useUserStore } from '@core/store/userStore';
+import type { IndicatorGroup, PerfIndicator } from '@core/types/indicator';
 
 const { Link } = Typography;
 

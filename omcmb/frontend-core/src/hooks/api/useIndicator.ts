@@ -5,10 +5,10 @@ import type {
   IndicatorCreateParams,
   EnableIndicatorsParams,
   CustNameUpdateParams,
-} from '@/types/indicator';
-import { indicatorService } from '@/mock/services/indicatorService';
-import { indicatorApi } from '@/services/api/indicatorApi';
-import { useMock } from '@/services/apiSwitch';
+} from '@core/types/indicator';
+import { indicatorService } from '@core/mock/services/indicatorService';
+import { indicatorApi } from '@core/services/api/indicatorApi';
+import { useMock } from '@core/services/apiSwitch';
 
 // ── Query key factory ────────────────────────────────────────────────────────
 
