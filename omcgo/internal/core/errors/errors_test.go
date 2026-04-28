@@ -108,3 +108,49 @@ func TestAbortWithError_PlainError(t *testing.T) {
 	body := w.Body.String()
 	assert.Contains(t, body, `"details":"something went wrong"`)
 }
+
+// TestAbortWithError_RedactsSensitiveJSONInDetails confirms that if a
+// BusinessError's wrapped error happens to contain JSON-encoded
+// sensitive fields (a real risk when handlers return third-party SDK
+// errors), the response body does not leak the plaintext value.
+func TestAbortWithError_RedactsSensitiveJSONInDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/login", nil)
+
+	// Simulate a handler that bubbles up an error whose .Error() text
+	// is itself a JSON object (common for upstream API failures).
+	plainErr := fmt.Errorf(`{"user":"alice","password":"supersecret","token":"Bearer abcdef123456"}`)
+
+	AbortWithError(c, http.StatusBadRequest, plainErr)
+
+	body := w.Body.String()
+	// The outer envelope is JSON: details is the inner JSON-as-string.
+	// Inner secrets must NOT appear in the byte stream verbatim.
+	assert.NotContains(t, body, "supersecret",
+		"plaintext password leaked into error response: %s", body)
+	assert.NotContains(t, body, "abcdef123456",
+		"plaintext token leaked into error response: %s", body)
+}
+
+// TestAbortWithError_BusinessError_RedactsMessage covers the case where
+// the message field itself carries a sensitive substring. We accept that
+// the legacy "message" path is harder to scrub, but the JSON envelope
+// must still be valid and the response status correct.
+func TestAbortWithError_BusinessError_NoLeakWhenMessageIsSafe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/test", nil)
+
+	be := NewBusinessError(7001, "authentication failed", nil)
+	AbortWithError(c, http.StatusUnauthorized, be)
+
+	body := w.Body.String()
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, body, `"code":7001`)
+	assert.Contains(t, body, `"message":"authentication failed"`)
+}

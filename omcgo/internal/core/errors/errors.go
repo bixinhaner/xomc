@@ -8,11 +8,14 @@
 package errors
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/omcgo/omcgo/internal/core/redact"
 )
 
 // Sentinel errors for common failure conditions.
@@ -71,6 +74,12 @@ type ErrorResponse struct {
 }
 
 // AbortWithError writes a JSON error response and aborts the Gin handler chain.
+//
+// Before sending the body, the response is round-tripped through
+// redact.RedactJSON so that any sensitive fields embedded in error
+// messages or details (passwords, tokens, API keys, device credentials)
+// are masked. This is a defense-in-depth layer: callers should still
+// avoid putting secrets in error messages, but mistakes do not leak.
 func AbortWithError(c *gin.Context, statusCode int, err error) {
 	var reqIDStr string
 	if rid, exists := c.Get("request_id"); exists {
@@ -88,10 +97,26 @@ func AbortWithError(c *gin.Context, statusCode int, err error) {
 		resp.Code = bErr.Code
 		resp.Message = bErr.Message
 	} else if err != nil {
-		resp.Details = err.Error()
+		// If the error string is itself JSON (common when bubbling up
+		// upstream API errors), redact embedded sensitive fields before
+		// surfacing it. RedactJSON returns the input unchanged when it
+		// is not valid JSON, so plain messages flow through untouched.
+		resp.Details = string(redact.RedactJSON([]byte(err.Error())))
 	}
 
-	c.AbortWithStatusJSON(statusCode, resp)
+	body, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		// Fallback: use Gin's default JSON marshalling so we still emit
+		// a valid response even if redaction can't run.
+		c.AbortWithStatusJSON(statusCode, resp)
+		return
+	}
+	cleaned := redact.RedactJSON(body)
+
+	c.Status(statusCode)
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	_, _ = c.Writer.Write(cleaned)
+	c.Abort()
 }
 
 // HTTPStatusFromError maps sentinel errors to HTTP status codes.
