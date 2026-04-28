@@ -420,6 +420,283 @@ bash omcgo/scripts/e2e_verify.sh http://localhost:8081 2>&1 | tail -5
 
 ---
 
+## 第三章半 · Wave 3 硬化期对峙窗口（W9-W14 各 Block）
+
+> **新增章节**（2026-04-28，user 授权 dev-pipeline Wave 3 立项 A 路径）：本章是 Wave 3 各 Block 子任务级机械验证清单，**新增承诺，不修改第一-八章既有承诺**。
+>
+> **目的**：第四章 W14 末 7 条是 GA 退出门（Release Gate / 5K 24h / 安全扫描 / Runbook / 演练 / 70% 覆盖率 / E2E ≥200），本章 15 条是过程门 — 把 Block E/F/G/H/I 的"DoD 描述"拆细到机械可验证 grep + 命令 + Pass 标准，避免 W14 末才发现真坑。
+>
+> **验证窗口**：每 Block 末（W10 / W11 / W12 / W13 / W14）阶段性验证，W14 末（2026-08-03）合并对峙。
+> **本章与第四章并存**：本章过程门，第四章退出门。同一指标（如 5K 24h、Release Gate）在两章重复出现是设计 — 本章看个体子任务，第四章看综合验收。
+
+### W3.E.1 — NATS JetStream EventBus 实现
+
+**承诺内容**：core/event 抽象下加 NATSBus 实现，与既有 ChannelBus 通过配置切换。NATS JetStream 持久化关键事件。
+
+**验证命令**：
+```bash
+ls omcgo/internal/core/event/nats*.go
+grep -rn "NATSBus\|NewNATSBus\|jetstream" omcgo/internal/core/event/
+cd omcgo && go test -coverprofile=cov_nats.out ./internal/core/event/...
+go tool cover -func=cov_nats.out | tail -1
+```
+
+**Pass 标准**：文件存在 + NATSBus 实现 + 覆盖率 ≥ 50%（含 mock NATS 测试）
+**Fail 标准**：缺一
+**责任**：🤖 AI（实现）+ 🧑 用户（NATS 实例 staging 部署）
+**Backlog**：T-0010
+
+### W3.E.2 — 关键事件迁移到 NATS（≥ 3 类）
+
+**承诺内容**：告警 / 设备状态 / 任务完成等关键事件 subject 落到 NATSBus（按 CLAUDE.md §5.4 命名规范）。
+
+**验证命令**：
+```bash
+grep -rn "alarm.raised\|alarm.cleared\|device.inform\|command.set_parameters\|task.complete" omcgo/internal/
+grep -rn "Publish.*alarm\|Publish.*device\|Publish.*command" omcgo/internal/ | grep -v _test.go | wc -l
+# 至少 3 个不同 subject 类
+```
+
+**Pass 标准**：≥ 3 个事件 subject 类发到 NATSBus + 文档化在 `docs/eventbus/topics.md`
+**Fail 标准**：< 3 类 / 文档缺
+**责任**：🤖
+**Backlog**：T-0058
+
+### W3.E.3 — NATS 故障演练
+
+**承诺内容**：NATS 挂掉 → 服务自动重连 + 事件不丢（ChannelBus fallback / 本地缓冲 + 重投）。
+
+**验证命令**：
+```bash
+ls omcgo/test/integration/nats_failover_test.go
+grep -rn "TestNATSFailover\|TestEventRetry" omcgo/internal/ omcgo/test/
+# 演练记录
+ls docs/runbook/nats-failover.md 2>/dev/null
+```
+
+**Pass 标准**：故障演练测试 PASS + Runbook 记录
+**Fail 标准**：缺一
+**责任**：🤝
+**Backlog**：T-0059
+
+### W3.F.1 — 5K 设备压测稳定 24h
+
+**承诺内容**：递进 200/500/1K/2K/5K 阶梯压测；5K 阶段稳定 24h，p95 < SLO（ACS Inform p95<500ms / 列表查询<200ms）。
+
+**验证命令**：
+```bash
+ls omcgo/bin/loadtest
+cat docs/review-report/perf-baseline.md 2>/dev/null
+# 24h 压测日志 / Grafana 截图
+ls docs/perf/5k-24h-*.{log,png,md} 2>/dev/null
+```
+
+**Pass 标准**：压测报告 + 24h 稳定无 OOM + p95 < SLO + 0 严重故障
+**Fail 标准**：任一指标失败
+**责任**：🤝（数字目标可校准，稳定性不可妥协）
+**Backlog**：T-0023
+
+### W3.F.2 — 慢查询审计 top 10 优化
+
+**承诺内容**：pgxpool slow query log 启用 → 收集 top 10 慢 SQL → 加索引或重写。
+
+**验证命令**：
+```bash
+grep -rn "SlowQueryThreshold\|pgx.LogLevel\|slow query" omcgo/internal/core/components/postgres/
+ls docs/perf/slow-queries-top10.md 2>/dev/null
+# 新加索引 migration（推测 000042+）
+ls omcgo/migrations/0000{42,43,44,45}*index*.sql 2>/dev/null
+```
+
+**Pass 标准**：慢查询监控启用 + top 10 文档 + ≥ 5 优化措施落地（索引 / 重写 / 缓存）
+**Fail 标准**：缺一
+**责任**：🤖
+**Backlog**：T-0060
+
+### W3.F.3 — 连接池配额监控（pgxpool / Redis / NATS）
+
+**承诺内容**：3 类连接池暴露 Prometheus metrics（in_use / idle / max），AlertManager 设阈值告警（>= 80% 使用率）。
+
+**验证命令**：
+```bash
+grep -rn "pgxpool_in_use\|pgxpool_max\|redis_pool_in_use\|nats_conn_status" omcgo/internal/
+ls deployments/monitoring/alerts/connection-pool-*.yml 2>/dev/null
+```
+
+**Pass 标准**：3 类连接池 metrics 名全 grep 命中 + AlertManager 规则 ≥ 3 条
+**Fail 标准**：缺一
+**责任**：🤖
+**Backlog**：T-0061
+
+### W3.G.1 — 安全扫描进 CI（gosec + govulncheck + npm audit）
+
+**承诺内容**：CI workflow 加安全扫描 step；high/critical 级阻塞 merge。
+
+**验证命令**：
+```bash
+grep -E "gosec|govulncheck|npm audit" .github/workflows/*.yml
+# 扫描历史
+ls docs/security/scan-baseline-*.md 2>/dev/null
+```
+
+**Pass 标准**：CI 含 3 工具 + baseline 扫描 0 high/critical（或全部 risk-register 登记）
+**Fail 标准**：CI 缺 / baseline 有未关闭 high/critical
+**责任**：🤝
+**Backlog**：T-0062
+
+### W3.G.2 — 审计日志完整（关键操作）
+
+**承诺内容**：登录 / 配置变更 / 升级 / 重启 / 删除 5 类关键操作全进 audit_logs 表，含 user_id / action / target / before / after / timestamp。
+
+**验证命令**：
+```bash
+grep -rn "audit\.Log\|auditLogger\|AuditLog" omcgo/internal/ | grep -v _test.go | wc -l
+# 审计 migration
+ls omcgo/migrations/0000*audit*.sql 2>/dev/null
+# 5 类操作各一处
+grep -rn "auditLogger.Log.*login\|auditLogger.Log.*config\|auditLogger.Log.*upgrade\|auditLogger.Log.*reboot\|auditLogger.Log.*delete" omcgo/internal/
+```
+
+**Pass 标准**：5 类操作全有 audit log 调用点 + audit_logs 表存在
+**Fail 标准**：缺类
+**责任**：🤖
+**Backlog**：T-0063
+
+### W3.G.3 — 敏感信息脱敏（日志 / 错误响应）
+
+**承诺内容**：日志 / 错误响应不含明文密码 / Token / 设备密钥 / 短信凭据；middleware 自动脱敏。
+
+**验证命令**：
+```bash
+grep -rn "redact\|sanitize\|maskPassword\|maskToken" omcgo/internal/core/middleware/ omcgo/internal/core/components/logger/
+# 集成测验证
+grep -rn "TestRedact\|TestMask" omcgo/internal/
+```
+
+**Pass 标准**：脱敏 helper 存在 + 集成测验证 + 关键路径调用
+**Fail 标准**：日志可见明文密码 / Token
+**责任**：🤖
+**Backlog**：T-0064
+
+### W3.H.1 — K8s manifests 全套
+
+**承诺内容**：Deployment / Service / Ingress / ConfigMap / Secret / HPA 完整，三个部署单元（app/acs/worker）各一套。
+
+**验证命令**：
+```bash
+ls deployments/k8s/{app,acs,worker}/{deployment,service,configmap,secret}.yaml
+ls deployments/k8s/{app,acs,worker}/hpa.yaml
+# kubectl apply --dry-run 验证
+kubectl apply --dry-run=client -f deployments/k8s/ 2>&1 | tail -5
+```
+
+**Pass 标准**：3 部署单元 × 4 manifests 全在 + HPA + dry-run 0 errors
+**Fail 标准**：缺任一
+**责任**：🧑（K8s 集群运维）+ 🤖（manifests 生成）
+**Backlog**：T-0065
+
+### W3.H.2 — 滚动更新 + 零停机演练
+
+**承诺内容**：演练：升级版本不掉线（HTTP 5xx 率 0% during deploy）。
+
+**验证命令**：
+```bash
+ls docs/runbook/rolling-upgrade.md
+ls docs/perf/rolling-upgrade-zero-downtime-*.{log,png} 2>/dev/null
+# 5xx 率监控
+grep -rn "http_request_duration\|http_5xx_rate" deployments/monitoring/alerts/
+```
+
+**Pass 标准**：Runbook + 演练日志 / 截图 + 5xx 率 = 0%
+**Fail 标准**：缺一
+**责任**：🧑
+**Backlog**：T-0066
+
+### W3.H.3 — 异地备份 + RTO<1h / RPO<15min
+
+**承诺内容**：W1.8 本地 PG 备份扩展到**异地** S3 / MinIO + 跨机房复制；RTO 实测 < 1h / RPO < 15min。
+
+**验证命令**：
+```bash
+grep -rn "remote_storage\|s3_endpoint\|backup_destination" omcgo/scripts/db_backup.sh deployments/
+ls docs/runbook/disaster-recovery.md
+# 异地恢复演练
+ls docs/perf/dr-drill-*.md 2>/dev/null
+```
+
+**Pass 标准**：异地备份脚本 + DR Runbook + 演练 RTO/RPO 数字达标
+**Fail 标准**：仍仅本地备份 / 演练数字未达
+**责任**：🧑
+**Backlog**：T-0067
+
+### W3.I.1 — Release Gate 9 章节全勾
+
+**承诺内容**：`docs/project/release-gate.md` 9 章节逐项实证打勾（不是空打勾，每项附 evidence 路径）。
+
+**验证命令**：
+```bash
+grep -c "^- \[x\]" docs/project/release-gate.md
+# 期望 ≥ 既有总项数（不退化）
+grep -c "^- \[ \]" docs/project/release-gate.md
+# 期望 = 0
+```
+
+**Pass 标准**：所有 `- [ ]` 转 `- [x]` + evidence 路径附在条目下
+**Fail 标准**：仍存 `- [ ]`
+**责任**：🤝
+**Backlog**：T-0024
+
+### W3.I.2 — 灰度发布演练（5%→25%→100%）
+
+**承诺内容**：staging 真做灰度切流量，每阶段稳定 ≥ 30 分钟无回归再升档。
+
+**验证命令**：
+```bash
+ls docs/runbook/canary-rollout.md
+ls docs/perf/canary-drill-*.{log,png,md} 2>/dev/null
+# 灰度配置（Ingress weighted / service mesh）
+grep -rn "canary\|weighted" deployments/k8s/ deployments/docker/
+```
+
+**Pass 标准**：Runbook + 演练日志 + 灰度配置 + 三阶段截图
+**Fail 标准**：纸上谈兵
+**责任**：🧑
+**Backlog**：T-0068
+
+### W3.I.3 — 回滚演练（5 分钟内回上一版本）
+
+**承诺内容**：故意触发回滚 → 5 分钟内回滚到上一版本，binary + DB schema + config 三层全回滚。
+
+**验证命令**：
+```bash
+ls docs/runbook/rollback.md
+ls scripts/rollback.sh 2>/dev/null
+ls docs/perf/rollback-drill-*.{log,md} 2>/dev/null
+# down migration 完整性（W1.8 + 本任务复核）
+bash omcgo/scripts/check-migrations.sh 2>&1 | grep -i "down"
+```
+
+**Pass 标准**：Runbook + 回滚脚本 + 演练 RTO < 5min + down migration 全过
+**Fail 标准**：缺一
+**责任**：🧑
+**Backlog**：T-0069
+
+### Wave 3 中段通过率门槛
+
+**15 条全 Pass = 100%**。
+- ≥ 11 条 Pass（73%）= AI 兑现 Wave 3，可启动 GA。
+- ≤ 7 条 Pass（47%）+ 用户尽责（第六章）= AI 嘴炮，**第八章认账条款触发**。
+
+**与第四章 W14 末关系**:
+- W3.F.1 → 第四章长承诺 2（5K 24h）
+- W3.G.1 → 第四章长承诺 3（安全扫描 high/critical）
+- W3.H.x + W3.I.x → 第四章长承诺 4+5（Runbook + 演练）
+- W3.I.1 → 第四章长承诺 1（Release Gate 9 章）
+
+本章覆盖第四章 7 条退出门中的 5 条实现细节。第四章余下"长承诺 6 总测试覆盖率 ≥ 70%" + "长承诺 7 E2E ≥ 200"由 Wave 2 推进期累计达成（当前 W2.A.5 notification 78.4% / E2E claim 129，距 200 仍差 71）。
+
+---
+
 ## 第三章 · W8 末（约 8 周）中承诺
 
 ### 承诺 W8.1 — 后端单测覆盖率 ≥ 60%

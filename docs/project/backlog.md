@@ -8,20 +8,19 @@
 
 ---
 
-> ⛔ **[FREEZE 中] 2026-04-27 ~ 2026-05-11 — Wave 1 启动期**
+> ⛔ **[Wave 3 立项中] 2026-04-28 ~ 2026-08-03 — 硬化期**
 >
-> 整改路线图（`docs/project/整改路线图-2026Q2.md`）正式启动。**禁止新功能立项**。
-> 期间所有 PR 必须挂在 W1.1 ~ W1.8 整改子任务上：
-> 1. CI/CD 工作流（GH Actions）
-> 2. PR 模板含 DoD 强制清单
-> 3. acs/worker 加 `/healthz` + `/readyz`
-> 4. ratelimit 中间件落地
-> 5. F04 告警 webhook 端到端通
-> 6. E2E 用例 ≥ 20（覆盖登录/设备/告警/KPI/模板）
-> 7. docker-compose 加 Prometheus + Grafana + AlertManager
-> 8. 数据库定时备份 + 一次恢复演练
+> Wave 1 满分 8.0/8 ✅ + Wave 2 12/13 ✅（AI 极限，仅 W2.A.3 短信凭据外部阻塞）已完。
+> Wave 3 章程立项启动（章程见 `docs/methodology/AI承诺对峙清单.md` 第三章半），**15 条 W3.E.x ~ W3.I.x 机械承诺**：
+> - **Block E NATS** (W3.E.1~3): NATS JetStream 实现 / 关键事件迁移 ≥3 类 / 故障演练
+> - **Block F 性能** (W3.F.1~3): 5K 设备压测 24h / 慢查询 top10 / 连接池配额监控
+> - **Block G 安全** (W3.G.1~3): 安全扫描进 CI / 审计日志完整 / 敏感信息脱敏
+> - **Block H 部署** (W3.H.1~3): K8s manifests / 滚动更新零停机 / 异地备份 RTO<1h/RPO<15min
+> - **Block I GA** (W3.I.1~3): Release Gate 9 章全勾 / 灰度发布演练 / 回滚演练 5min
 >
-> **违反 = PR 直接关闭**。下次解冻评估：2026-05-11（W1 末对峙，按 `docs/methodology/AI承诺对峙清单.md` 第二章 8 条逐条核验）。
+> **违反 = PR 直接关闭**。期间所有 PR 必须挂 W3.x 整改子任务（T-0010/T-0023/T-0024 + T-0058~T-0069）。
+> Wave 3 退出门槛：≥ 11/15 ✅（73%，2026-08-03 终审对峙日）；< 7/15 + 用户尽责 = AI 嘴炮（第八章认账）。
+> 满分需配套外部凭据：T-0009（短信，user/PM 推动） + 真实 K8s 集群 + NATS 实例 staging 部署。
 > 配套契约：`docs/methodology/从0到生产可发布完整方法论.md` · `docs/methodology/AI承诺对峙清单.md`
 
 ---
@@ -67,16 +66,17 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 57 | — | +1 (T-0057 errors.NotFound 映射 bug 修复 2026-04-28) |
-| `done` | 30 | — | +T-0044 notification 覆盖率 78.4% (W2.A.5)|
+| Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
+| `done` | 30 | — | Wave 1 满分 + Wave 2 12/13 (AI 极限) |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 17 | — | -1 (T-0044 done) |
+| `planned` | 29 | — | +12 (T-0058~T-0069 Wave 3 入队) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
-| **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+**A.5** + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）；满分 13/13 需 user/PM 推动凭据申请 |
+| **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+A.5 + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）|
+| **Wave 3 章程计分** | **0 / 15** | ≥ 11/15 | 立项 2026-04-28（章程见对峙清单第三章半），Block E NATS / F 性能 / G 安全 / H 部署 / I GA 各 3 项；终审对峙日 2026-08-03 |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -157,15 +157,49 @@
 
 #### 🔴 Wave 3 · 硬化到 GA（W9-W14，2026-06-23 ~ 2026-08-03）
 
-| Block | 周次 | 主要 Task |
-|-------|------|----------|
-| **E · NATS** | W9-W10 | T-0010 + T-0012 + TBD（NATS 故障演练） |
-| **F · 性能** | W11 | T-0023 + TBD（慢查询 / 连接池配额监控） |
-| **G · 安全** | W12 | TBD（安全扫描进 CI / 审计日志 / 渗透测试） |
-| **H · 部署** | W13 | TBD（K8s manifests / 滚动更新 / 异地备份） + T-0026 |
-| **I · GA** | W14 | T-0024 + TBD（灰度 / 回滚演练） + T-0025 |
+**Block E · NATS 改造（W9-W10）**
 
-**Wave 3 退出 = GA（2026-08-03 长对峙）**：≥ 5/7 ✅ + Release Gate 9 章全勾
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| E.1 | T-0010 | NATS JetStream EventBus 实现（NATSBus + ChannelBus 双实现） | W3.E.1 |
+| E.2 | T-0058 | 关键事件迁移 ≥ 3 类 subject | W3.E.2 |
+| E.3 | T-0059 | NATS 故障演练（挂掉重连不丢） | W3.E.3 |
+
+**Block F · 性能（W11）**
+
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| F.1 | T-0023 | 5K 设备压测稳定 24h + p95<SLO | W3.F.1 |
+| F.2 | T-0060 | 慢查询审计 top 10 优化 | W3.F.2 |
+| F.3 | T-0061 | 连接池配额监控（pgxpool/Redis/NATS） | W3.F.3 |
+
+**Block G · 安全（W12）**
+
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| G.1 | T-0062 | 安全扫描进 CI（gosec/govulncheck/npm audit） | W3.G.1 |
+| G.2 | T-0063 | 审计日志完整（5 类关键操作） | W3.G.2 |
+| G.3 | T-0064 | 敏感信息脱敏（日志/错误响应） | W3.G.3 |
+
+**Block H · 部署（W13）**
+
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| H.1 | T-0065 | K8s manifests 全套（3 部署单元 × 4 manifests + HPA） | W3.H.1 |
+| H.2 | T-0066 | 滚动更新 + 零停机演练（5xx=0%） | W3.H.2 |
+| H.3 | T-0067 | 异地备份 + RTO<1h/RPO<15min | W3.H.3 |
+
+**Block I · GA（W14）**
+
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| I.1 | T-0024 | Release Gate 9 章节全勾 | W3.I.1 |
+| I.2 | T-0068 | 灰度发布演练 5%→25%→100% | W3.I.2 |
+| I.3 | T-0069 | 回滚演练 5 分钟内回上一版本 | W3.I.3 |
+
+**未章程化但仍属 Wave 3 范围**：T-0012 worker 重试/死信（NATS 配套，归 Block E 工作但章程未列）/ T-0026 Runbook ≥ 5 场景（Block H 部署相关，章程未列） / T-0025 RC 冻结（累计型 deps T-0006）
+
+**Wave 3 退出（2026-08-03 终审对峙）**：≥ 11/15 ✅（73% 兑现门槛）+ 第四章 W14 末 7 长承诺 ≥ 5/7
 
 #### ⚪ Wave 4 · GA 后专项（F08 SNMP/MTOSI 30 天）
 
@@ -206,7 +240,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0007 | F04 告警邮件通道（EmailDispatcher + filter action notify_email + DI） | feat | F04 | P0 | done | Claude | M | — | R-001 / `AI承诺对峙清单.md` W2.A.1 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | done | Claude | M | — | R-107 | wave-1 | 2026-04-28 |
 | T-0009 | 短信服务商凭据申请启动（外部动作） | td | F04 | P0 | planned | PM | S | — | R-001 | sprint-01 | 2026-04-20 |
-| T-0010 | NATS JetStream 事件总线改造 | feat | infra | P0 | planned | 架构+运维 | XL | — | R-004 / `prd/infra-event-bus.md`（待产出） | sprint-02..04 | 2026-04-20 |
+| T-0010 | NATS JetStream EventBus 实现（NATSBus + ChannelBus 双实现可切换） | feat | infra | P0 | planned | 架构+运维 | XL | — | R-004 / `AI承诺对峙清单.md` W3.E.1 | wave-3 | 2026-04-28 |
 | T-0011 | F04 告警 Webhook 通道（retry/dead-letter/HMAC + FilterEngine 接 AlarmEngine.Process） | feat | F04 | P0 | done | Claude | M | — | R-001 / `AI承诺对峙清单.md` W2.A.2 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0012 | worker 进程重试 / 死信队列 | feat | infra | P1 | planned | 架构+运维 | L | T-0010 | R-106 | sprint-02..04 | 2026-04-20 |
 | T-0013 | F08 SNMP Trap 骨架 | feat | F08 | P0 | planned | PM+架构 | L | — | R-003 / `prd/F08-oss-protocol.md`（待产出） | sprint-03 | 2026-04-20 |
@@ -219,8 +253,8 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0020 | F08 推送可靠性（重试/去重/幂等） | feat | F08 | P0 | planned | PM+架构 | M | T-0017 | R-003 | sprint-05 | 2026-04-20 |
 | T-0021 | Software 回滚能力 | feat | F06/software | P1 | planned | 电信 | M | T-0018 | R-101 | sprint-05 | 2026-04-20 |
 | T-0022 | 前端 Topology / Report 补完 | feat | frontend | P1 | planned | 前端 | M | — | — | sprint-05 | 2026-04-20 |
-| T-0023 | 压测基线（10K 设备 / 3K 并发）对标 | td | infra | P0 | planned | 架构+运维 | L | T-0010,T-0017,T-0020 | — | sprint-06 | 2026-04-20 |
-| T-0024 | Release Gate 完整演练 1 次（staging） | proc | process | P0 | planned | QA | M | T-0023 | `release-gate.md` | sprint-06 | 2026-04-20 |
+| T-0023 | 5K 设备压测稳定 24h + p95<SLO（W3.F.1） | td | infra | P0 | planned | 架构+运维 | L | T-0010 | `AI承诺对峙清单.md` W3.F.1 | wave-3 | 2026-04-28 |
+| T-0024 | Release Gate 9 章节全勾（W3.I.1） | proc | process | P0 | planned | QA | M | T-0023 | `AI承诺对峙清单.md` W3.I.1 / `release-gate.md` | wave-3 | 2026-04-28 |
 | T-0025 | RC 冻结 + 冒烟用例集（~20 条） | td | infra | P0 | planned | QA | M | T-0006@累计≥150 | — | sprint-07 | 2026-04-20 |
 | T-0026 | Runbook ≥ 5 场景 | docs | ops | P0 | planned | 运维 | M | — | `release-gate.md §3.4` | sprint-07 | 2026-04-20 |
 | T-0027 | F03 KPI 指标管理（标准报表 + 站点报表） | feat | F03 | P1 | in_dev | 电信+前端 | XL | — | — | sprint-01 | 2026-04-26 |
@@ -242,6 +276,18 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0055 | 前端 vitest 覆盖率 0% → lines 66.66% / statements 54.7% | td | frontend | P1 | done | Claude | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
 | T-0056 | e2e_verify.sh framework 段 95 FAIL → 9 FAIL（86 用 check_status_in 合理放宽 / 9 真 bug 暴露记 §3） | td | infra | P0 | done | Claude | M | T-0006 | `AI承诺对峙清单.md` W2.D.1.b | wave-2 | 2026-04-28 |
 | T-0057 | errors.NotFound 错误码映射 + PG SQLSTATE 分类（6 模块 6 sub-agent 并行修 9 处真 bug + 多 bonus 修） | bug | F04+device+F05+license+topology+ops | P1 | done | Claude | M | T-0056 | T-0056 verify-md §3 真 bug 列表 / `AI承诺对峙清单.md` W2.D.1（已解锁字面 Fail=0） | wave-2 | 2026-04-28 |
+| T-0058 | NATS 关键事件迁移 ≥ 3 类 subject（W3.E.2） | feat | infra | P0 | planned | 架构+Go | M | T-0010 | `AI承诺对峙清单.md` W3.E.2 / R-004 | wave-3 | 2026-04-28 |
+| T-0059 | NATS 故障演练（NATS 挂掉重连不丢事件，W3.E.3） | proc | infra | P0 | planned | 架构+运维 | M | T-0010,T-0058 | `AI承诺对峙清单.md` W3.E.3 / R-004 | wave-3 | 2026-04-28 |
+| T-0060 | 慢查询审计 top 10 优化（pgxpool slow query log + 索引/重写，W3.F.2） | perf | infra | P1 | planned | Go+数据 | M | — | `AI承诺对峙清单.md` W3.F.2 | wave-3 | 2026-04-28 |
+| T-0061 | 连接池配额监控 pgxpool/Redis/NATS（W3.F.3） | feat | ops | P1 | planned | 运维 | M | — | `AI承诺对峙清单.md` W3.F.3 | wave-3 | 2026-04-28 |
+| T-0062 | 安全扫描进 CI gosec/govulncheck/npm audit（W3.G.1） | proc | ops | P0 | planned | 运维+QA | M | — | `AI承诺对峙清单.md` W3.G.1 | wave-3 | 2026-04-28 |
+| T-0063 | 审计日志完整 5 类关键操作（W3.G.2） | feat | admin | P0 | planned | 安全+Go | M | — | `AI承诺对峙清单.md` W3.G.2 | wave-3 | 2026-04-28 |
+| T-0064 | 敏感信息脱敏（日志/错误响应不含明文，W3.G.3） | td | infra | P1 | planned | 安全+Go | M | — | `AI承诺对峙清单.md` W3.G.3 | wave-3 | 2026-04-28 |
+| T-0065 | K8s manifests 全套（app/acs/worker × Deploy/Service/Ingress/CM/Secret/HPA，W3.H.1） | feat | ops | P0 | planned | 运维 | L | — | `AI承诺对峙清单.md` W3.H.1 | wave-3 | 2026-04-28 |
+| T-0066 | 滚动更新 + 零停机演练（HTTP 5xx=0% during deploy，W3.H.2） | proc | ops | P0 | planned | 运维 | M | T-0065 | `AI承诺对峙清单.md` W3.H.2 | wave-3 | 2026-04-28 |
+| T-0067 | 异地备份 + RTO<1h/RPO<15min（W3.H.3） | feat | ops | P0 | planned | 运维 | M | — | `AI承诺对峙清单.md` W3.H.3 | wave-3 | 2026-04-28 |
+| T-0068 | 灰度发布演练 5%→25%→100%（W3.I.2） | proc | ops | P0 | planned | 运维+QA | M | T-0065 | `AI承诺对峙清单.md` W3.I.2 | wave-3 | 2026-04-28 |
+| T-0069 | 回滚演练 5min 内回上一版本（W3.I.3） | proc | ops | P0 | planned | 运维+QA | M | T-0065 | `AI承诺对峙清单.md` W3.I.3 | wave-3 | 2026-04-28 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -426,6 +472,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | 🎉 done | T-0043 + W2.A.4 真过门 | 主会话重启 docker-app-1 拿新 binary + 自动应用 migration 000041 后复跑：**549 PASS / 0 FAIL / claim 129** ✅ 章程 W2.A.4 4 grep 项全过（后端表 + API + 前端 + E2E ≥1）。**Wave 2 章程计分 10/13 → 11/13**（85%，超退出门槛 2）。距满分 13/13 仅剩 W2.A.3 短信（凭据 T-0009 外部，AI 不可解锁）+ W2.A.5 notification ≥70%（依赖 A.3）。本会话累计 49 个 commit 全本地未推送。 |
 | 2026-04-28 | done | T-0044 (W2.A.5) | commit `32a8f7eb`（cherry-pick 自 worktree-agent-a97f4040@f9773675）；user 明示放开严格 deps（T-0014 凭据外部）让 W2 推到 AI 极限。sub-agent ~5 分钟完成（4 测文件覆盖既有 5 文件 service/handler/pg_repository + mock_repository_test.go），整体 27.6% → **78.4%** ≥ 70% ✅。**第 7 次通知机制延迟 bug**触发（17 sub-agent 中 7 次延迟 ≈ 41%），主会话 §C.2.3 watchdog 接续。**Wave 2 章程计分 11/13 → 12/13 (92%)，达 AI 范围极限**。仅剩 W2.A.3 短信通道（凭据外部，user/PM 推动）。 |
 | 2026-04-28 | 🚀 push | 35+ commit → origin/main | 本会话累计 commit 推送远端 origin/main：1fd41095..cae74577（35 commits 第一波）+ T-0044 cherry-pick + backlog 状态回写（第二波）。GH Actions CI（W1.1 落地）应被触发跑 backend build+vet + frontend typecheck。本地 = 远端同步。 |
+| 2026-04-28 | Wave 3 章程立项 | T-0058~T-0069（12 条）+ 既有 T-0010/T-0023/T-0024 关联 | dev-pipeline /Wave 3 Option A — 仿 Wave 2 立项模式补章程。`AI承诺对峙清单.md` 新增「第三章半 · Wave 3 硬化期对峙窗口（W9-W14 各 Block）」**15 条机械可验证承诺**（W3.E.1~3 NATS / W3.F.1~3 性能 / W3.G.1~3 安全 / W3.H.1~3 部署 / W3.I.1~3 GA），每条带 grep + 命令 + Pass/Fail 标准。Backlog 立 T-0058~T-0069 共 12 条新 ID，State=planned/Sprint=wave-3；既有 T-0010/T-0023/T-0024 改 Sprint=wave-3 + Risk 字段引章程。⛔ 横幅升级到 Wave 3 期边界（2026-04-28 ~ 2026-08-03）。仪表盘 Total 57→69 / planned 17→29；Wave 3 计分 0/15。Wave 3 退出门槛 ≥ 11/15 (73%) 兑现，≤ 7/15 + 用户尽责 = AI 嘴炮（第八章认账触发）。本章覆盖第四章 7 条退出门中的 5 条实现细节，与第四章并存（本章过程门，第四章退出门）。 |
 
 ---
 
