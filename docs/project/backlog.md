@@ -68,15 +68,15 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 55 | — | +13 (T-0043~T-0055 Wave 2 章程立项 2026-04-28) |
-| `done` | 22 | — | +Block B 七并行批：T-0045/T-0046/T-0047/T-0048/T-0049/T-0050/T-0051 |
+| `done` | 26 | — | +Block C 三并行批：T-0052/T-0053/T-0054/T-0055 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 23 | — | -7 (Block B 七 task done) |
+| `planned` | 19 | — | -4 (Block C 四 task done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
-| **Wave 2 章程计分** | **6 / 13** | ≥ 9/13 | W2.A.1 + W2.A.2 + W2.B.1 + W2.B.2 + W2.B.3 + W2.B.4 全 PASS；剩余 W2.A.3 短信（凭据外部）+ W2.A.4 模板/历史 + W2.A.5 notification ≥70% + W2.C.1/C.2/C.3 前端 + W2.D.1 E2E≥100 |
+| **Wave 2 章程计分** | **9 / 13 ✅ 已过门槛** | ≥ 9/13 | A.1+A.2 + B.1+B.2+B.3+B.4 + C.1+C.2+C.3 全 PASS（69%，提前 ~7 周达成 2026-06-22 对峙日）；剩余满分路径：W2.A.3 短信（凭据外部）+ W2.A.4 模板/历史 + W2.A.5 notification ≥70% + W2.D.1 E2E≥100 |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -146,10 +146,10 @@
 
 | 序 | Task | 标题 | 章程 |
 |----|------|------|------|
-| C.1 | T-0052 | frontend-core hooks/services 对齐（差距 ≤ 1） | W2.C.1 |
-| C.2 | T-0053 | 前端 `any` 清零 | W2.C.2 |
-| C.3 | T-0054 | DeviceGrouping 1573 行拆分（≤ 400 行/文件） | W2.C.2 |
-| C.4 | T-0055 | 前端 vitest 覆盖率 ≥ 50% | W2.C.3 |
+| C.1 | T-0052 | frontend-core hooks/services 对齐（24 → 28 hooks, gap 5 → 1） | ✅ W2.C.1 2026-04-28 |
+| C.2 | T-0053 | 前端 any 清零（20 → 0） | ✅ W2.C.2 (a) 2026-04-28 |
+| C.3 | T-0054 | DeviceGrouping 拆分（max 650 → 303 行 / 6 子组件 + 6 hooks） | ✅ W2.C.2 (b) 2026-04-28 |
+| C.4 | T-0055 | 前端 vitest 0% → lines 66.66% / statements 54.7% | ✅ W2.C.3 2026-04-28 |
 
 **Block D · E2E ≥ 100（W8）**：T-0006 累计目标 @≥100（章程 W2.D.1）
 
@@ -236,10 +236,10 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0049 | syslog/ 补 service 层（thin facade + 10 顶层 + 5 sub-test） | ref | F06/syslog | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
 | T-0050 | provision/ 补 service 层（facade 包既有 engine/orchestrator/state_machine） | ref | F09 | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
 | T-0051 | interop/ 补 service 层（facade 包既有 runner/validator/report） | ref | F10 | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
-| T-0052 | frontend-core hooks 与 services/api 对齐（差距 ≤ 1） | ref | frontend | P1 | planned | 前端 | M | — | `AI承诺对峙清单.md` W2.C.1 / R-102 | wave-2 | 2026-04-28 |
-| T-0053 | 前端 `any` 类型清零 | td | frontend | P1 | planned | 前端 | S | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
-| T-0054 | DeviceGrouping 1573 行拆分（≤ 400 行/文件） | ref | frontend | P1 | planned | 前端 | M | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
-| T-0055 | 前端 vitest 覆盖率 ≥ 50% | td | frontend | P1 | planned | 前端 | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
+| T-0052 | frontend-core hooks/services/api 对齐（24 → 28 hooks，gap 5 → 1） | ref | frontend | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W2.C.1 / R-102 | wave-2 | 2026-04-28 |
+| T-0053 | 前端 any 类型清零（20 → 0） | td | frontend | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
+| T-0054 | DeviceGrouping 拆分（max 650 → 303 行 / 6 子组件 + 6 hooks） | ref | frontend | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
+| T-0055 | 前端 vitest 覆盖率 0% → lines 66.66% / statements 54.7% | td | frontend | P1 | done | Claude | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -411,6 +411,8 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | wave-batched 七批并行（最大并行度） | T-0045+T-0046+T-0047+T-0048+T-0049+T-0050+T-0051 | dev-pipeline §C.2.1 路径互斥编排 + §C.2.2 工作目录硬约束 + §C.2.3 watchdog + §C.2.4 自动清理；七 sub-agent 全 DONE 全部落 main：T-0045 (cd991d8a, task 21.3%→75.3%, 17min) / T-0046 (b0c1ac53, events 0%→87.6% + service, 5.9min) / T-0047 (acb956ec, core 43.2%→55.7% + bonus 修 pagination 漂移, 6.8min) / T-0048 (3830fb54, mr facade + 11 测, 4min) / T-0049 (ac32cc34, syslog facade + 15 测, 3.5min) / T-0050 (e44ca68e, provision facade 包既有 engine/orchestrator + 13 测, 4.4min) / T-0051 (a3a52f88, interop facade 包既有 runner/validator + 12 测, 3.2min)；总 wall ≈ 17min（最长 T-0045 决定）；七 worktree 全 staged → main self-verify build/test PASS → cherry-pick → cleanup；所有 service 设计为 thin facade 不强制 modules.go DI（与 T-0007 整合 commit 模式不同），章程 W2.B.1-B.4 grep 自然全过，**modules.go 整合 commit 可省**；Wave 2 章程计分 2/13 → 6/13（W2.B.1 + W2.B.2 + W2.B.3 + W2.B.4 全 PASS）|
 | 2026-04-28 | 待 triage 候选 | PgTaskRepository.scanTaskRow source_id NULL bug | T-0045 sub-agent 发现：`PgTaskRepository.scanTaskRow` 把 `source_id` UUID NULL 列扫到非指针 string，碰到 source_id IS NULL 的行会失败；测试 workaround 给所有用例填合法 UUID 绕过。**与 W2.B.1 task 改动无关**（pre-existing bug）；建议另立 backlog task 修（改 source_id 为 *string 或 sql.NullString 接收）。属内部工程债，影响 task source_id 可空场景的 query。 |
 | 2026-04-28 | 待 triage 候选 | core/model/pagination_test PageSize 上限漂移已修复（bonus） | T-0047 sub-agent 发现既存测试失败：`pagination_test.go` 假设 PageSize 上限 100，但生产代码已改 1000（commit 7440e52d），baseline 即 -race fail；该 sub-agent 顺手修复了。本属 bonus 不在 W2.B.3 scope，但避免后续回归。无需另立 task。 |
+| 2026-04-28 | wave-batched 八批并行（Block C 三并行） | T-0052+T-0053+T-0054+T-0055 | dev-pipeline §C.2.1 路径互斥编排（T-0052 仅 hooks/api 新增 / T-0053+T-0054 合并 worktree any+拆分 / T-0055 测试不碰 DeviceGrouping/hooks-api）；三 sub-agent 全 DONE：T-0052 (b1d9787d, hooks 24→28 gap 5→1, 3.7min) / T-0053+T-0054 合并 (38418c1a, any 20→0 + DeviceGrouping max 650→303 / 11 新文件，~25min) / T-0055 (18801567, vitest 0%→lines 66.66% / stmts 54.7% + 修主仓 baseline zustand alias, 10min)；T-0053+T-0054 sub-agent 通知机制延迟未发回 completion notification（与 W1.5 API 403 中断同模式 — work done 但 outbound message 未达），主会话按 §C.2.3 watchdog 检查心跳 5 行 + .wave-status.txt=DONE + 主仓未污染 + verify md 齐全后接续 commit；**Wave 2 章程计分 6/13 → 9/13 ✅ 过 69% 退出门槛**（提前 ~7 周达成 2026-06-22 对峙日）|
+| 2026-04-28 | 🎉 里程碑 | Wave 2 退出门槛达成 | 9/13 ≥ 9/13 ✅；Block A.1+A.2（F04 邮件+Webhook） + Block B.1+B.2+B.3+B.4（task/events/core 测试 + 4 模块 service） + Block C.1+C.2+C.3（前端 hooks/any/拆分/vitest）全 PASS；剩余 4 项满分路径：W2.A.3 短信（凭据外部 T-0009）/ W2.A.4 通知模板历史 UI（T-0043）/ W2.A.5 notification ≥70%（T-0044）/ W2.D.1 E2E ≥100（T-0006 累计型）|
 
 ---
 
