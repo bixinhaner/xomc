@@ -67,10 +67,10 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 55 | — | +13 (T-0043~T-0055 Wave 2 章程立项 2026-04-28) |
+| Total tasks | 56 | — | +1 (T-0056 W2.D.1.b 立项 2026-04-28，A 路径) |
 | `done` | 26 | — | +Block C 三并行批：T-0052/T-0053/T-0054/T-0055 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 19 | — | -4 (Block C 四 task done) |
+| `planned` | 20 | — | +1 T-0056 (W2.D.1.b A 路径) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -240,6 +240,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0053 | 前端 any 类型清零（20 → 0） | td | frontend | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
 | T-0054 | DeviceGrouping 拆分（max 650 → 303 行 / 6 子组件 + 6 hooks） | ref | frontend | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
 | T-0055 | 前端 vitest 覆盖率 0% → lines 66.66% / statements 54.7% | td | frontend | P1 | done | Claude | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
+| T-0056 | e2e_verify.sh framework 段 95 FAIL 期望放宽（用 check_status_in 多状态白名单，真 bug 不放宽记 triage） | td | infra | P0 | planned | Claude | M | T-0006 | `AI承诺对峙清单.md` W2.D.1.b（A 路径 — 字面严格派让全脚本 Fail=0） | wave-2 | 2026-04-28 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -413,6 +414,8 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | 待 triage 候选 | core/model/pagination_test PageSize 上限漂移已修复（bonus） | T-0047 sub-agent 发现既存测试失败：`pagination_test.go` 假设 PageSize 上限 100，但生产代码已改 1000（commit 7440e52d），baseline 即 -race fail；该 sub-agent 顺手修复了。本属 bonus 不在 W2.B.3 scope，但避免后续回归。无需另立 task。 |
 | 2026-04-28 | wave-batched 八批并行（Block C 三并行） | T-0052+T-0053+T-0054+T-0055 | dev-pipeline §C.2.1 路径互斥编排（T-0052 仅 hooks/api 新增 / T-0053+T-0054 合并 worktree any+拆分 / T-0055 测试不碰 DeviceGrouping/hooks-api）；三 sub-agent 全 DONE：T-0052 (b1d9787d, hooks 24→28 gap 5→1, 3.7min) / T-0053+T-0054 合并 (38418c1a, any 20→0 + DeviceGrouping max 650→303 / 11 新文件，~25min) / T-0055 (18801567, vitest 0%→lines 66.66% / stmts 54.7% + 修主仓 baseline zustand alias, 10min)；T-0053+T-0054 sub-agent 通知机制延迟未发回 completion notification（与 W1.5 API 403 中断同模式 — work done 但 outbound message 未达），主会话按 §C.2.3 watchdog 检查心跳 5 行 + .wave-status.txt=DONE + 主仓未污染 + verify md 齐全后接续 commit；**Wave 2 章程计分 6/13 → 9/13 ✅ 过 69% 退出门槛**（提前 ~7 周达成 2026-06-22 对峙日）|
 | 2026-04-28 | 🎉 里程碑 | Wave 2 退出门槛达成 | 9/13 ≥ 9/13 ✅；Block A.1+A.2（F04 邮件+Webhook） + Block B.1+B.2+B.3+B.4（task/events/core 测试 + 4 模块 service） + Block C.1+C.2+C.3（前端 hooks/any/拆分/vitest）全 PASS；剩余 4 项满分路径：W2.A.3 短信（凭据外部 T-0009）/ W2.A.4 通知模板历史 UI（T-0043）/ W2.A.5 notification ≥70%（T-0044）/ W2.D.1 E2E ≥100（T-0006 累计型）|
+| 2026-04-28 | done(partial) | T-0006 W2.D.1（W2D 段完成） | commit `c314d614`（cherry-pick 自 worktree-agent-ab0487d9@e895967a，sub-agent 通知机制延迟，主会话 §C.2.3 watchdog 接续）；e2e_verify.sh +488 行：W2.D.1 段 99 新 claim 覆盖 18 域 + check_status_in 多状态白名单助手 + W2D_TOKEN 隔离（独立 5 次重试取 token 防限流）；alarm-filter CRUD 自闭环（验证 W2.A.2 webhook_url + email_recipients 字段持久化）；**静态 grep claim = 125 ≥ 100 ✅**；**动态 W2D 段 99/0 ✅ + W1.6 段 27/0 ✅ 累计 126 ≥ 100 ✅**；⚠️ 全脚本 447 PASS / 95 FAIL（Sprint 0-9 framework 段 pre-existing 旧债，13 个 sub-agent 已探明 endpoint 问题 + 82 个待 T-0056 探）；**A 路径选择**：开 T-0056 用 check_status_in 放宽 framework 合理多状态期望（真 bug 不放宽）让全脚本 Fail=0 真过门 |
+| 2026-04-28 | 立项 | T-0056 W2.D.1.b（A 路径） | dev-pipeline 用户拍板字面严格派 — framework 段 95 fail 用 check_status_in 多状态白名单放宽期望（合理多状态：401 限流 / 404 缺资源 / 400 缺必填 / 503 依赖未起；真 bug 如 admin menus 500 / device-rules NULL→500 / sse path 不一致 → 不放宽，记 verify-T-0056.md §3 triage 列表）。完成后真满足章程 W2.D.1 字面 Fail=0，W2 计分 9/13 → 10/13。 |
 
 ---
 
