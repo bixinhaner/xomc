@@ -3934,6 +3934,55 @@ const messages: Record<string, string> = {
   'commission.stationType2g':                 '2G (GSM)',
   'commission.stationCodePlaceholder':        'Enter station code',
   'commission.stationNamePlaceholder':        'Enter station name',
+
+  // -------------------------------------------------------------------------
+  // Notification Center (Templates + History)
+  // -------------------------------------------------------------------------
+  'notification.title':                        'Notification Center',
+  'notification.tab.template':                 'Templates',
+  'notification.tab.history':                  'History',
+
+  // Template list
+  'notification.template.list.title':          'Template List',
+  'notification.template.create':              'New Template',
+  'notification.template.edit':                'Edit Template',
+  'notification.template.delete':              'Delete Template',
+  'notification.template.deleteConfirm':       'Delete this template?',
+  'notification.template.name':                'Template Name',
+  'notification.template.channel':             'Channel',
+  'notification.template.language':            'Language',
+  'notification.template.subject':             'Subject',
+  'notification.template.body':                'Body',
+  'notification.template.variables':           'Variables',
+  'notification.template.variablesHint':       'Comma-separated, e.g. device_sn,severity',
+  'notification.template.enabled':             'Enabled',
+  'notification.template.createdAt':           'Created',
+  'notification.template.updatedAt':           'Updated',
+
+  // Channels
+  'notification.channel.email':                'Email',
+  'notification.channel.sms':                  'SMS',
+  'notification.channel.webhook':              'Webhook',
+
+  // History
+  'notification.history.list.title':           'History',
+  'notification.history.detail':               'History Detail',
+  'notification.history.recipients':           'Recipients',
+  'notification.history.subject':              'Subject',
+  'notification.history.body':                 'Body',
+  'notification.history.status':               'Status',
+  'notification.history.errorMessage':         'Error Message',
+  'notification.history.alarmId':              'Related Alarm ID',
+  'notification.history.templateId':           'Template ID',
+  'notification.history.retryCount':           'Retry Count',
+  'notification.history.sentAt':               'Sent At',
+  'notification.history.createdAt':            'Created At',
+
+  // Statuses
+  'notification.status.pending':               'Pending',
+  'notification.status.sent':                  'Sent',
+  'notification.status.failed':                'Failed',
+  'notification.status.dead_letter':           'Dead Letter',
 };
 
 export default messages;

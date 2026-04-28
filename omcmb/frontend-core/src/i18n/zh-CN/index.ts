@@ -3939,6 +3939,55 @@ const messages: Record<string, string> = {
   'commission.stationType2g':                 '2G (GSM)',
   'commission.stationCodePlaceholder':        '请输入基站编码',
   'commission.stationNamePlaceholder':        '请输入基站名称',
+
+  // -------------------------------------------------------------------------
+  // 通知中心（模板 + 历史）
+  // -------------------------------------------------------------------------
+  'notification.title':                        '通知中心',
+  'notification.tab.template':                 '通知模板',
+  'notification.tab.history':                  '发送历史',
+
+  // 模板列表
+  'notification.template.list.title':          '模板列表',
+  'notification.template.create':              '新建模板',
+  'notification.template.edit':                '编辑模板',
+  'notification.template.delete':              '删除模板',
+  'notification.template.deleteConfirm':       '确定删除该模板？',
+  'notification.template.name':                '模板名称',
+  'notification.template.channel':             '通道',
+  'notification.template.language':            '语言',
+  'notification.template.subject':             '主题',
+  'notification.template.body':                '正文',
+  'notification.template.variables':           '变量',
+  'notification.template.variablesHint':       '逗号分隔，如：device_sn,severity',
+  'notification.template.enabled':             '启用',
+  'notification.template.createdAt':           '创建时间',
+  'notification.template.updatedAt':           '更新时间',
+
+  // 通道枚举
+  'notification.channel.email':                '邮件',
+  'notification.channel.sms':                  '短信',
+  'notification.channel.webhook':              'Webhook',
+
+  // 历史
+  'notification.history.list.title':           '发送历史',
+  'notification.history.detail':               '历史详情',
+  'notification.history.recipients':           '收件人',
+  'notification.history.subject':              '主题',
+  'notification.history.body':                 '正文',
+  'notification.history.status':               '状态',
+  'notification.history.errorMessage':         '错误信息',
+  'notification.history.alarmId':              '关联告警 ID',
+  'notification.history.templateId':           '关联模板 ID',
+  'notification.history.retryCount':           '重试次数',
+  'notification.history.sentAt':               '发送时间',
+  'notification.history.createdAt':            '创建时间',
+
+  // 状态枚举
+  'notification.status.pending':               '待发送',
+  'notification.status.sent':                  '已发送',
+  'notification.status.failed':                '发送失败',
+  'notification.status.dead_letter':           '死信',
 };
 
 export default messages;

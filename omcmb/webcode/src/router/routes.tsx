@@ -145,6 +145,9 @@ const LicenseLogs        = React.lazy(() => import('@/pages/license/LicenseLogs'
 const PlugAndPlay        = React.lazy(() => import('@/pages/device/PlugAndPlay'));
 const AddPolicyPage      = React.lazy(() => import('@/pages/device/PlugAndPlay/AddPolicyPage'));
 
+// Notifications
+const NotificationsPage  = React.lazy(() => import('@/pages/notifications'));
+
 // Ops Management
 const OpsTemplates       = React.lazy(() => import('@/pages/ops/Templates'));
 const OpsCommands        = React.lazy(() => import('@/pages/ops/CommandManagement'));
@@ -322,6 +325,9 @@ export const routes: RouteObject[] = [
       { path: 'device/plug-and-play/add', element: withSuspense(AddPolicyPage) },
       { path: 'device/plug-and-play/edit/:id', element: withSuspense(AddPolicyPage) },
       { path: 'device/plug-and-play/view/:id', element: withSuspense(AddPolicyPage) },
+
+      // Notifications
+      { path: 'notifications',         element: withSuspense(NotificationsPage) },
 
       // Ops Management
       { path: 'ops/templates',         element: withSuspense(OpsTemplates) },
