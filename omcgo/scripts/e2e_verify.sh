@@ -5425,6 +5425,31 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/readyz")
 check_status_in "W2D obs-2: GET /readyz" "200 503" "$HTTP_CODE"
 
 # ------------------------------------------------------------
+# W2.A.4 / T-0043 notifications 模板 + 历史 (整合 commit 加)
+# ------------------------------------------------------------
+section "W2.A.4 notifications template + history (≥ 3 claims)"
+
+claim "notification: GET /notifications/templates list returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/notifications/templates?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D notif-1: GET /notifications/templates" "200 401" "$HTTP_CODE"
+
+claim "notification: GET nonexistent template returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/notifications/templates/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D notif-2: GET /notifications/templates/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "notification: GET /notifications/history list returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/notifications/history?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D notif-3: GET /notifications/history" "200 401" "$HTTP_CODE"
+
+claim "notification: GET nonexistent history returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/notifications/history/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D notif-4: GET /notifications/history/<not-found>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
 # W2.D.1 段尾打印分段统计，方便 verify 报告引用
 echo ""
 echo -e "${YELLOW}=== W2.D.1 段累计 claim 总数 ${CLAIM_COUNT}（≥ 100 即合规）===${NC}"

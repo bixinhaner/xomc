@@ -242,6 +242,16 @@ func initMiscModules(c *Container) error {
 	notifRepo := notification.NewPgRepository(c.PgPool)
 	notifService := notification.NewService(notifRepo, messageHub, logger)
 	c.miscDeps.notificationHandler = notification.NewHandler(notifService, logger)
+
+	// W2.A.4 / T-0043: Notification template + history submodules
+	templateRepo := notification.NewPgTemplateRepository(c.PgPool)
+	templateService := notification.NewTemplateService(templateRepo, logger)
+	c.miscDeps.notifTemplateHandler = notification.NewTemplateHandler(templateService, logger)
+
+	historyRepo := notification.NewPgHistoryRepository(c.PgPool)
+	historyService := notification.NewHistoryService(historyRepo, logger)
+	c.miscDeps.notifHistoryHandler = notification.NewHistoryHandler(historyService, logger)
+
 	logger.Info("notification module initialized")
 
 	// MML Console module
@@ -423,6 +433,10 @@ type miscDeps struct {
 		sseHandler          *events.SSEHandler
 		notificationHandler *notification.Handler
 		messageHub          *events.MessageHub
+
+		// W2.A.4 / T-0043: Notification template + history
+		notifTemplateHandler *notification.TemplateHandler
+		notifHistoryHandler  *notification.HistoryHandler
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.
