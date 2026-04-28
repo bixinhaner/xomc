@@ -194,11 +194,12 @@ grep -rE "pg_dump|pg_restore" deployments/ run/ scripts/ 2>/dev/null
 
 **验证命令**：
 ```bash
-# 1. 文件存在
+# 1. 文件存在 + filter action 注册（注：alarm 模块的 action 调度在 filter_engine.go executeAction，
+#    action enum 在 filter_model.go binding tag；不存在 notification_action_engine.go）
 ls omcgo/internal/alarm/email_dispatcher*.go
-grep -n "notify_email" omcgo/internal/alarm/notification_action_engine.go
-# 2. 单测含 EndToEnd 用例
-cd omcgo && go test -run "TestProcessAlarm_NotifyEmail_EndToEnd" -race ./internal/alarm/... -v
+grep -rn "notify_email\|FilterActionNotifyEmail" omcgo/internal/alarm/filter_model.go omcgo/internal/alarm/filter_engine.go
+# 2. 单测含 EndToEnd 用例（SMTP mock）
+cd omcgo && go test -run "TestSMTPEmailDispatcher_|TestProcessAlarm_NotifyEmail_EndToEnd" -race ./internal/alarm/... -v
 # 3. 新指标埋点
 grep -rn "alarm_email_dispatches_total" omcgo/internal/alarm/
 ```
@@ -214,15 +215,15 @@ grep -rn "alarm_email_dispatches_total" omcgo/internal/alarm/
 
 **验证命令**：
 ```bash
-# 1. 重试 + 死信
-grep -rn "RetryAttempt\|dead_letter\|DeadLetter" omcgo/internal/alarm/
+# 1. 重试 + 死信（实现 + migration）
+grep -rn "RetryAttempt\|dead_letter\|DeadLetter\|ErrDeadLetter" omcgo/internal/alarm/
 ls omcgo/migrations/0000{39,40,41,42}*dead_letter* 2>/dev/null
-# 2. HMAC 签名
-grep -rn "X-Hub-Signature\|hmac\.New\|HMACSign" omcgo/internal/alarm/
-# 3. FilterEngine 接生产路径（W1.5 真正的尾巴）
-grep -rn "filterEngine\.ProcessAlarm\|FilterEngine\.\?ProcessAlarm" omcgo/internal/alarm/*service*.go omcgo/internal/alarm/handler*.go
+# 2. HMAC 签名（实际 header: X-OMC-Signature，GitHub 风格）
+grep -rn "X-OMC-Signature\|hmac\.New\|HMACSign" omcgo/internal/alarm/
+# 3. FilterEngine 接生产路径（W1.5 真正的尾巴；alarm 主路径在 receiver/sync_*/handler，按实际接入点 grep 全覆盖）
+grep -rn "filterEngine\.ProcessAlarm\|FilterEngine\.ProcessAlarm" omcgo/internal/alarm/receiver*.go omcgo/internal/alarm/sync_*.go omcgo/internal/alarm/handler.go omcgo/cmd/app/
 # 4. 单测覆盖关键路径
-cd omcgo && go test -run "TestWebhookDispatcher_Retry|TestWebhookDispatcher_DeadLetter|TestWebhookDispatcher_HMAC" -race ./internal/alarm/... -v
+cd omcgo && go test -run "TestWebhookDispatcher_Retry|TestWebhookDispatcher_DeadLetter|TestWebhookDispatcher_HMAC|TestFilterEngine_ProcessAlarm_Live" -race ./internal/alarm/... -v
 ```
 
 **Pass 标准**：四类 grep 全有命中 + 单测 PASS + FilterEngine 真接进 alarm 主路径
@@ -237,8 +238,8 @@ cd omcgo && go test -run "TestWebhookDispatcher_Retry|TestWebhookDispatcher_Dead
 **验证命令**：
 ```bash
 ls omcgo/internal/alarm/sms_dispatcher*.go
-grep -n "notify_sms" omcgo/internal/alarm/notification_action_engine.go
-cd omcgo && go test -run "TestProcessAlarm_NotifySMS" -race ./internal/alarm/... -v
+grep -rn "notify_sms\|FilterActionNotifySMS" omcgo/internal/alarm/filter_model.go omcgo/internal/alarm/filter_engine.go
+cd omcgo && go test -run "TestSMSDispatcher_|TestProcessAlarm_NotifySMS" -race ./internal/alarm/... -v
 ```
 
 **Pass 标准**：文件 + filter action + 单测 PASS
