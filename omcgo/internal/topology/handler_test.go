@@ -12,11 +12,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func commonErrInvalidInput() error  { return commonerrors.ErrInvalidInput }
+func commonErrAlreadyExists() error { return commonerrors.ErrAlreadyExists }
 
 // ---------------------------------------------------------------------------
 // Mock: DeviceGroupRepository
@@ -166,7 +170,8 @@ func (m *mockDeviceGroupRepo) UpdateBoundRule(_ context.Context, _, _ uuid.UUID)
 // ---------------------------------------------------------------------------
 
 type mockSiteRepo struct {
-	sites map[uuid.UUID]*Site
+	sites     map[uuid.UUID]*Site
+	createErr error // when set, Create returns this error without persisting
 }
 
 func newMockSiteRepo() *mockSiteRepo {
@@ -174,6 +179,9 @@ func newMockSiteRepo() *mockSiteRepo {
 }
 
 func (m *mockSiteRepo) Create(_ context.Context, site *Site) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
 	if site.ID == uuid.Nil {
 		site.ID = uuid.New()
 	}
@@ -259,6 +267,20 @@ var (
 	errDeviceNotInGroup = fmt.Errorf("device not in group")
 	errSiteNotFound     = fmt.Errorf("site not found")
 )
+
+// fkLikeErr returns an error that wraps the ErrInvalidInput sentinel; this is
+// what the site repository should yield after classifying a PG 23503 (foreign
+// key violation), so the handler maps it to 400.
+func fkLikeErr() error {
+	return fmt.Errorf("%w: foreign key violation simulated",
+		commonErrInvalidInput())
+}
+
+// uniqueLikeErr returns an error wrapping ErrAlreadyExists, simulating PG 23505.
+func uniqueLikeErr() error {
+	return fmt.Errorf("%w: unique violation simulated",
+		commonErrAlreadyExists())
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -492,6 +514,116 @@ func TestHandler_ListSites(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
+}
+
+// TestHandler_CreateSite_Success exercises the happy path: 201 + persisted record.
+func TestHandler_CreateSite_Success(t *testing.T) {
+	h, _, siteRepo, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	body := map[string]interface{}{
+		"name":    "Site-OK",
+		"address": "addr",
+		"status":  "active",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sites",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Len(t, siteRepo.sites, 1)
+}
+
+// TestHandler_CreateSite_BadJSON guards the input-validation branch (binding error → 400).
+func TestHandler_CreateSite_BadJSON(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sites",
+		bytes.NewReader([]byte(`{not-json`)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestHandler_CreateSite_InvalidDomainID guards the uuid.Parse branch.
+func TestHandler_CreateSite_InvalidDomainID(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	body := map[string]interface{}{
+		"name":      "Site-Bad-Domain",
+		"domain_id": "not-a-uuid",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sites",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestHandler_CreateSite_RepoErrors verifies that sentinel errors from the
+// repository (which represent constraint violations from PostgreSQL) are
+// translated into 4xx HTTP statuses by the handler instead of 500.
+//
+// This is the regression test for T-0057 / W2.D.1.b real-bug #7 (POST /sites
+// returned 500 when domain_id violated the FK to device_groups).
+func TestHandler_CreateSite_RepoErrors(t *testing.T) {
+	commonerrPkg := "github.com/omcgo/omcgo/internal/core/errors"
+	_ = commonerrPkg // documentation only
+
+	cases := []struct {
+		name       string
+		repoErr    error
+		wantStatus int
+	}{
+		{
+			name:       "fk violation maps to 400",
+			repoErr:    fmt.Errorf("simulated fk violation: %w", fkLikeErr()),
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "unique violation maps to 409",
+			repoErr:    fmt.Errorf("simulated unique violation: %w", uniqueLikeErr()),
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name:       "unmapped error stays 500",
+			repoErr:    fmt.Errorf("some unrelated DB failure"),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, siteRepo, _, _ := newTestHandler()
+			siteRepo.createErr = tc.repoErr
+			router := setupRouter(h)
+
+			body := map[string]interface{}{
+				"name":   "Site-X",
+				"status": "active",
+			}
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/sites",
+				bytes.NewReader(mustMarshal(t, body)))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.wantStatus, w.Code,
+				"repo err %v should produce HTTP %d but got %d", tc.repoErr, tc.wantStatus, w.Code)
+		})
+	}
 }
 
 func TestHandler_ListTopoNodes(t *testing.T) {

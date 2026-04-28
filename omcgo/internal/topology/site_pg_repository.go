@@ -3,18 +3,51 @@ package topology
 import (
 	"context"
 	"database/sql"
+	gerrors "errors"
 	"fmt"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
+
+// PostgreSQL SQLSTATE codes used in topology repositories.
+// See https://www.postgresql.org/docs/current/errcodes-appendix.html
+const (
+	pgUniqueViolation     = "23505"
+	pgForeignKeyViolation = "23503"
+	pgNotNullViolation    = "23502"
+	pgCheckViolation      = "23514"
+)
+
+// classifyPgError maps a Postgres error to a sentinel error from
+// internal/core/errors so the handler layer can return the right HTTP code via
+// HTTPStatusFromError. It returns the original error if it is not a known
+// constraint violation that maps to a client error.
+func classifyPgError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if !gerrors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case pgUniqueViolation:
+		return fmt.Errorf("%w: %s", commonerrors.ErrAlreadyExists, pgErr.Message)
+	case pgForeignKeyViolation, pgNotNullViolation, pgCheckViolation:
+		return fmt.Errorf("%w: %s", commonerrors.ErrInvalidInput, pgErr.Message)
+	default:
+		return err
+	}
+}
 
 // ======================================================================
 // Column lists
@@ -77,6 +110,9 @@ func (r *PgSiteRepository) Create(ctx context.Context, site *Site) error {
 
 	_, err = r.pool.Exec(ctx, query, args...)
 	if err != nil {
+		if classified := classifyPgError(err); classified != err {
+			return classified
+		}
 		return fmt.Errorf("insert site: %w", err)
 	}
 	return nil
