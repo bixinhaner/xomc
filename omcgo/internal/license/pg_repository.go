@@ -3,17 +3,23 @@ package license
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
+
+// PostgreSQL unique_violation error code.
+// See: https://www.postgresql.org/docs/current/errcodes-appendix.html
+const pgUniqueViolation = "23505"
 
 var licenseColumns = []string{
 	"id", "license_name", "license_code", "product_name",
@@ -67,6 +73,12 @@ func (r *PgLicenseRepository) Create(ctx context.Context, lic *License) error {
 	row := r.pool.QueryRow(ctx, query, args...)
 	created, err := scanLicense(row)
 	if err != nil {
+		// Map PostgreSQL unique_violation (23505) to ErrAlreadyExists so the
+		// HTTP layer can surface 409 instead of 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return fmt.Errorf("license already exists: %w", commonerrors.ErrAlreadyExists)
+		}
 		return fmt.Errorf("create license: %w", err)
 	}
 	*lic = *created

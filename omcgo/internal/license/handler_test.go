@@ -322,3 +322,54 @@ func TestHandler_Import(t *testing.T) {
 	require.NotNil(t, resp.Notes)
 	assert.Equal(t, "Imported for testing", *resp.Notes)
 }
+
+// TestHandler_Import_DuplicateCode_Returns409 guards the W2.D.1.b /
+// T-0057 fix: posting a duplicate license_code must yield HTTP 409
+// (Conflict), not 500 (Internal Server Error).
+func TestHandler_Import_DuplicateCode_Returns409(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	// Seed an existing license with the code that the request will reuse.
+	seedLicense(repo, "Existing License", "LIC-DUP-IMP-001", "Product X", TypeSubscription, StatusActive)
+
+	body := ImportRequest{
+		LicenseName: "Duplicate Attempt",
+		LicenseCode: "LIC-DUP-IMP-001",
+		ProductName: "Product X",
+		LicenseType: TypeSubscription,
+		MaxDevices:  10,
+		IssueDate:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/import", bytes.NewReader(mustMarshalLicense(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code,
+		"duplicate license_code must yield 409; got %d (body=%s)", w.Code, w.Body.String())
+}
+
+// TestHandler_Import_MissingRequiredField_Returns400 guards against
+// missing-field requests surfacing as 500 from a NOT NULL constraint.
+// Note: gin's `binding:"required"` already catches *some* of these, but
+// service-level validation is the second line of defense.
+func TestHandler_Import_MissingRequiredField_Returns400(t *testing.T) {
+	h, _ := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	// Empty body — gin binding will reject this with 400 immediately.
+	body := map[string]any{
+		// no license_name / license_code / product_name / issue_date
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/import",
+		bytes.NewReader(mustMarshalLicense(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"missing required fields must yield 400; got %d (body=%s)", w.Code, w.Body.String())
+}

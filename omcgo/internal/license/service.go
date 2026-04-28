@@ -2,6 +2,7 @@ package license
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -92,7 +93,24 @@ func (s *Service) Revoke(ctx context.Context, id uuid.UUID) error {
 }
 
 // Import creates a new license record.
+//
+// Returns:
+//   - commonerrors.ErrInvalidInput (→ 400) when required fields are missing.
+//   - commonerrors.ErrAlreadyExists (→ 409) when license_code already exists.
 func (s *Service) Import(ctx context.Context, lic *License) (*License, error) {
+	if lic == nil {
+		return nil, fmt.Errorf("license payload is nil: %w", commonerrors.ErrInvalidInput)
+	}
+	if lic.LicenseCode == "" {
+		return nil, fmt.Errorf("license_code is required: %w", commonerrors.ErrInvalidInput)
+	}
+	if lic.LicenseName == "" {
+		return nil, fmt.Errorf("license_name is required: %w", commonerrors.ErrInvalidInput)
+	}
+	if lic.ProductName == "" {
+		return nil, fmt.Errorf("product_name is required: %w", commonerrors.ErrInvalidInput)
+	}
+
 	if lic.Status == "" {
 		lic.Status = StatusPending
 	}
@@ -100,7 +118,18 @@ func (s *Service) Import(ctx context.Context, lic *License) (*License, error) {
 		lic.Features = []byte("[]")
 	}
 
+	// Pre-check: if a license with the same code already exists, return 409
+	// instead of letting the unique-violation surface as 500.
+	existing, err := s.repo.GetByCode(ctx, lic.LicenseCode)
+	if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
+		return nil, fmt.Errorf("check existing license: %w", err)
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("license_code %q already exists: %w", lic.LicenseCode, commonerrors.ErrAlreadyExists)
+	}
+
 	if err := s.repo.Create(ctx, lic); err != nil {
+		// Repository may also detect unique-violation as a safety net.
 		return nil, fmt.Errorf("import license: %w", err)
 	}
 

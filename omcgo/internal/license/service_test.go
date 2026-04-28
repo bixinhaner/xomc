@@ -339,3 +339,139 @@ func TestService_Import_WithExplicitStatus(t *testing.T) {
 	assert.Equal(t, StatusTrial, result.Status, "explicit status should be preserved")
 	assert.Equal(t, json.RawMessage(`["feature_a"]`), result.Features, "explicit features should be preserved")
 }
+
+// TestService_Import_DuplicateCode_ReturnsAlreadyExists verifies that
+// importing a license whose code already exists returns ErrAlreadyExists
+// (which the HTTP layer maps to 409), not a raw 500.
+//
+// This guards against the W2.D.1.b T-0057 license/import bug where a
+// unique-violation on license_code surfaced as 500.
+func TestService_Import_DuplicateCode_ReturnsAlreadyExists(t *testing.T) {
+	existing := &License{
+		ID:          uuid.New(),
+		LicenseCode: "LIC-DUP-001",
+		LicenseName: "Existing",
+		ProductName: "P",
+		Status:      StatusActive,
+	}
+
+	createCalled := false
+	repo := &mockLicenseRepo{
+		getByCodeFn: func(ctx context.Context, code string) (*License, error) {
+			assert.Equal(t, "LIC-DUP-001", code)
+			return existing, nil
+		},
+		createFn: func(ctx context.Context, lic *License) error {
+			createCalled = true
+			return nil
+		},
+	}
+
+	svc := newTestService(repo)
+
+	lic := &License{
+		LicenseName: "Duplicate Attempt",
+		LicenseCode: "LIC-DUP-001",
+		ProductName: "P",
+		LicenseType: TypeSubscription,
+	}
+
+	result, err := svc.Import(context.Background(), lic)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, commonerrors.ErrAlreadyExists),
+		"duplicate license_code must surface ErrAlreadyExists; got: %v", err)
+	assert.False(t, createCalled, "Create must not be called when license_code already exists")
+}
+
+// TestService_Import_MissingFields_ReturnsInvalidInput verifies field
+// validation: missing license_code / license_name / product_name should
+// surface ErrInvalidInput (→ 400), not 500 from a downstream NOT NULL
+// constraint failure.
+func TestService_Import_MissingFields_ReturnsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		lic  *License
+	}{
+		{
+			name: "nil license",
+			lic:  nil,
+		},
+		{
+			name: "missing license_code",
+			lic: &License{
+				LicenseName: "Has Name",
+				ProductName: "Has Product",
+			},
+		},
+		{
+			name: "missing license_name",
+			lic: &License{
+				LicenseCode: "LIC-X",
+				ProductName: "Has Product",
+			},
+		},
+		{
+			name: "missing product_name",
+			lic: &License{
+				LicenseCode: "LIC-X",
+				LicenseName: "Has Name",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &mockLicenseRepo{
+				createFn: func(ctx context.Context, lic *License) error {
+					t.Fatalf("Create must not be called for invalid input")
+					return nil
+				},
+				getByCodeFn: func(ctx context.Context, code string) (*License, error) {
+					t.Fatalf("GetByCode must not be called for invalid input")
+					return nil, nil
+				},
+			}
+			svc := newTestService(repo)
+
+			result, err := svc.Import(context.Background(), tc.lic)
+
+			require.Error(t, err)
+			assert.Nil(t, result)
+			assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput),
+				"missing required field must surface ErrInvalidInput; got: %v", err)
+		})
+	}
+}
+
+// TestService_Import_NotFoundFromRepo_TreatedAsAvailable verifies that
+// a repository returning ErrNotFound from GetByCode is interpreted as
+// "the code is available" — Import should proceed to Create, not bubble
+// the NotFound to the caller.
+func TestService_Import_NotFoundFromRepo_TreatedAsAvailable(t *testing.T) {
+	createCalled := false
+	repo := &mockLicenseRepo{
+		getByCodeFn: func(ctx context.Context, code string) (*License, error) {
+			return nil, commonerrors.ErrNotFound
+		},
+		createFn: func(ctx context.Context, lic *License) error {
+			createCalled = true
+			lic.ID = uuid.New()
+			return nil
+		},
+	}
+	svc := newTestService(repo)
+
+	lic := &License{
+		LicenseName: "Fresh License",
+		LicenseCode: "LIC-FRESH-001",
+		ProductName: "P",
+	}
+
+	result, err := svc.Import(context.Background(), lic)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, createCalled, "Create should be called when GetByCode returns ErrNotFound")
+}
