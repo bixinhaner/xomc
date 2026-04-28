@@ -202,7 +202,7 @@ func (h *Handler) Acknowledge(c *gin.Context) {
 		return
 	}
 	if err := h.engine.Acknowledge(c.Request.Context(), id, req.AcknowledgedBy); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "alarm acknowledged"})
@@ -215,7 +215,7 @@ func (h *Handler) ClearAlarm(c *gin.Context) {
 		return
 	}
 	if err := h.engine.Clear(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "alarm cleared"})

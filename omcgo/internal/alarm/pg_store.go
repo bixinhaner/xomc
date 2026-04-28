@@ -3,12 +3,15 @@ package alarm
 import (
 	"context"
 	"encoding/json"
+	gerr "errors"
 	"fmt"
 	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -409,6 +412,9 @@ func scanAlarmRow(row scannable) (*model.Alarm, error) {
 		&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
 		&a.NetworkLocation, &a.ExplicitCause, &a.IsRead, &a.AckCount,
 		&a.FirstRaisedAt, &a.LastUpdatedAt, &a.ProbableCause); err != nil {
+		if gerr.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("alarm not found: %w", commonerrors.ErrNotFound)
+		}
 		return nil, fmt.Errorf("scan alarm: %w", err)
 	}
 	if len(additionalJSON) > 0 {

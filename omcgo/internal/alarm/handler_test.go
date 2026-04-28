@@ -286,7 +286,26 @@ func TestHandler_Acknowledge_NotFoundAlarm(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestAcknowledge_NotFound_Returns404 ensures that POST /alarms/:id/acknowledge
+// against a non-existent alarm ID returns HTTP 404 (not 500), so the
+// pgx.ErrNoRows from the repository is mapped to commonerrors.ErrNotFound and
+// then translated to 404 by HTTPStatusFromError. (T-0057 / W2.D.1.b)
+func TestAcknowledge_NotFound_Returns404(t *testing.T) {
+	_, _, _, router := setupHandlerTest()
+
+	body := `{"acknowledged_by":"admin"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("/alarms/%s/acknowledge", uuid.New().String()),
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code,
+		"missing alarm should map ErrNotFound to 404, got body=%s", w.Body.String())
 }
 
 // ---------- ClearAlarm ----------
@@ -327,7 +346,22 @@ func TestHandler_ClearAlarm_NotFound(t *testing.T) {
 		fmt.Sprintf("/alarms/%s/clear", uuid.New().String()), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestClear_NotFound_Returns404 ensures that POST /alarms/:id/clear against a
+// non-existent alarm ID returns HTTP 404 instead of leaking pgx.ErrNoRows
+// through as 500. (T-0057 / W2.D.1.b)
+func TestClear_NotFound_Returns404(t *testing.T) {
+	_, _, _, router := setupHandlerTest()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("/alarms/%s/clear", uuid.New().String()), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code,
+		"missing alarm should map ErrNotFound to 404, got body=%s", w.Body.String())
 }
 
 // ---------- parseSeverity ----------

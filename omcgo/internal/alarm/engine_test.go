@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func (m *mockAlarmStore) SaveActive(_ context.Context, alarm *model.Alarm) error
 func (m *mockAlarmStore) GetActiveByID(_ context.Context, id uuid.UUID) (*model.Alarm, error) {
 	a, ok := m.active[id]
 	if !ok {
-		return nil, fmt.Errorf("not found")
+		return nil, fmt.Errorf("alarm not found: %w", commonerrors.ErrNotFound)
 	}
 	return a, nil
 }
