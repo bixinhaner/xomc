@@ -1,0 +1,44 @@
+# omcgo-acs HorizontalPodAutoscaler
+# ACS 是 TR-069 协议处理热点，CPU 弹性扩容窗口比 app 更激进
+# 边界：min 2（双活）, max 10（10 万设备规模下的上限测算）
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: omcgo-acs
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-acs
+    app.kubernetes.io/component: hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: omcgo-acs
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 180

@@ -1,0 +1,12 @@
+# OMC 命名空间
+# 所有 omc 相关资源（app/acs/worker、ConfigMap、Secret、HPA、Ingress）统一部署在此 namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omc
+  labels:
+    name: omc
+    app.kubernetes.io/part-of: omc
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    description: "OMC (Operations, Management and Control) — 小基站无线网管系统"

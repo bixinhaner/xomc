@@ -1,0 +1,26 @@
+# omcgo-worker Service
+# Headless Service（clusterIP: None）— Worker 不需要负载均衡
+# 仅供 Prometheus ServiceMonitor 通过 endpoints 抓取每个 pod 的 metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: omcgo-worker
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: omc
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9092"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: omcgo-worker
+  ports:
+    - name: metrics
+      port: 9092
+      targetPort: metrics
+      protocol: TCP

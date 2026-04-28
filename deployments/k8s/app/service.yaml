@@ -1,0 +1,38 @@
+# omcgo-app Service
+# ClusterIP — 集群内由 Ingress 转发到此 Service，对外暴露 REST API
+# gRPC 端口供 omcgo-acs 在集群内访问
+# metrics 端口由 Prometheus Operator 通过 ServiceMonitor 抓取
+apiVersion: v1
+kind: Service
+metadata:
+  name: omcgo-app
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-app
+    app.kubernetes.io/component: app
+    app.kubernetes.io/part-of: omc
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9091"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: omcgo-app
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+      protocol: TCP
+    - name: https
+      port: 8444
+      targetPort: https
+      protocol: TCP
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: 9091
+      targetPort: metrics
+      protocol: TCP

@@ -1,0 +1,45 @@
+# omcgo-app HorizontalPodAutoscaler
+# 触发条件：CPU 使用率持续 > 70% 时扩容
+# 边界：min 2（保证高可用），max 10（防止失控）
+# 也可基于 metrics-server 的内存指标触发，本文件先用 CPU 维度
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: omcgo-app
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-app
+    app.kubernetes.io/component: hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: omcgo-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

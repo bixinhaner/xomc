@@ -1,0 +1,100 @@
+# omcgo-acs Deployment
+# TR-069 ACS 引擎，独立扩展，会话状态由 Redis 持久化（无状态 pod）
+# 端口：
+#   7547  — CWMP HTTP（生产标准端口；dev 用 7557）
+#   7548  — CWMP HTTPS（TLS）
+#   3478  — STUN（UDP，用于 NAT 穿透 / Connection Request）
+#   9090  — Prometheus metrics + /healthz + /readyz
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omcgo-acs
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-acs
+    app.kubernetes.io/component: acs
+    app.kubernetes.io/part-of: omc
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omcgo-acs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: omcgo-acs
+        app.kubernetes.io/component: acs
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: acs
+          image: omcgo/acs:${VERSION}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config"
+            - "/etc/omcgo/config.yaml"
+          ports:
+            - name: cwmp
+              containerPort: 7547
+              protocol: TCP
+            - name: cwmp-tls
+              containerPort: 7548
+              protocol: TCP
+            - name: stun
+              containerPort: 3478
+              protocol: UDP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: omcgo-acs-secret
+          env:
+            - name: OMCGO_ENV
+              value: "prod"
+            - name: TZ
+              value: "Asia/Shanghai"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/omcgo
+              readOnly: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+      volumes:
+        - name: config
+          configMap:
+            name: omcgo-acs-config
+            items:
+              - key: config.yaml
+                path: config.yaml

@@ -1,0 +1,87 @@
+# omcgo-app ConfigMap
+# 来源：omcgo/cmd/app/etc/config.prod.yaml
+# 容器内挂载到 /etc/omcgo/config.yaml
+# 敏感字段（DB 密码、JWT secret、SMTP 凭据）由 Secret 通过环境变量注入并在程序内 override，本 ConfigMap 不含明文
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omcgo-app-config
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-app
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 8081
+      tls_port: 8444
+      grpc_port: 50051
+      tls:
+        enabled: false
+
+    db:
+      dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=disable"
+      max_conns: 50
+      min_conns: 10
+      max_conn_lifetime: 30m
+      max_conn_idle_time: 5m
+      health_check_interval: 30s
+
+    tsdb:
+      dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=disable"
+      max_conns: 30
+      min_conns: 5
+      max_conn_lifetime: 30m
+      max_conn_idle_time: 5m
+      health_check_interval: 30s
+
+    redis:
+      addrs:
+        - "${REDIS_HOST}:6379"
+      password: "${REDIS_PASSWORD}"
+      db: 0
+      pool_size: 200
+
+    nats:
+      url: "nats://${NATS_HOST}:4222"
+      max_reconnect: -1
+      reconnect_wait: 2s
+
+    minio:
+      endpoint: "${MINIO_HOST}:9000"
+      access_key: "${MINIO_ACCESS_KEY}"
+      secret_key: "${MINIO_SECRET_KEY}"
+      use_ssl: false
+      buckets:
+        pm_files: "pm-files"
+        mr_files: "mr-files"
+        firmware: "firmware"
+        config_backup: "config-backup"
+        logs: "logs"
+        reports: "reports"
+        exchange: "omc-exchange"
+
+    conn_req:
+      server_addr: "omcgo-acs:7547"
+      shared_secret: "${CONN_REQ_SECRET}"
+
+    jwt:
+      secret: "${JWT_SECRET}"
+      access_token_ttl: 30m
+      refresh_token_ttl: 168h
+
+    cors:
+      allow_origins:
+        - "https://omc.example.com"
+
+    metrics:
+      port: 9091
+
+    log:
+      level: "info"
+      format: "json"
+      output_paths:
+        - "stdout"
+
+    request_id_prefix: "app"

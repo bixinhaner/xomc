@@ -1,0 +1,66 @@
+# omcgo-worker ConfigMap
+# 来源：omcgo/cmd/worker/etc/config.prod.yaml
+# 容器内挂载到 /etc/omcgo/config.yaml
+# Worker 无对外端口，仅暴露 :9092 metrics + /healthz + /readyz
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omcgo-worker-config
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-worker
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    db:
+      dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=disable"
+      max_conns: 20
+      min_conns: 5
+      max_conn_lifetime: 30m
+      max_conn_idle_time: 5m
+      health_check_interval: 30s
+
+    tsdb:
+      dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=disable"
+      max_conns: 20
+      min_conns: 5
+      max_conn_lifetime: 30m
+      max_conn_idle_time: 5m
+      health_check_interval: 30s
+
+    redis:
+      addrs:
+        - "${REDIS_HOST}:6379"
+      password: "${REDIS_PASSWORD}"
+      db: 0
+      pool_size: 100
+
+    nats:
+      url: "nats://${NATS_HOST}:4222"
+      max_reconnect: -1
+      reconnect_wait: 2s
+
+    minio:
+      endpoint: "${MINIO_HOST}:9000"
+      access_key: "${MINIO_ACCESS_KEY}"
+      secret_key: "${MINIO_SECRET_KEY}"
+      use_ssl: false
+      buckets:
+        pm_files: "pm-files"
+        mr_files: "mr-files"
+        firmware: "firmware"
+        config_backup: "config-backup"
+        logs: "logs"
+        reports: "reports"
+        exchange: "omc-exchange"
+
+    metrics:
+      port: 9092
+
+    log:
+      level: "info"
+      format: "json"
+      output_paths:
+        - "stdout"
+
+    request_id_prefix: "worker"

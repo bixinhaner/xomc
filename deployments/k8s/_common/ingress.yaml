@@ -1,0 +1,45 @@
+# OMC App Ingress
+# 仅 omcgo-app 通过 Ingress 暴露（REST API + Web 静态资源）
+# omcgo-acs 通常通过独立 LoadBalancer / NodePort 直连 CPE，本 Ingress 不涉及
+# omcgo-worker 无对外端口
+#
+# 生产环境注意：
+#   1. host 替换为真实域名
+#   2. ingressClassName 根据集群实际 Ingress Controller 调整（nginx / traefik / istio）
+#   3. TLS Secret 通过 cert-manager 或手动签发
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: omcgo-app
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-app
+    app.kubernetes.io/part-of: omc
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - omc.example.com
+      secretName: omcgo-app-tls
+  rules:
+    - host: omc.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: omcgo-app
+                port:
+                  number: 8081
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: omcgo-app
+                port:
+                  number: 8081

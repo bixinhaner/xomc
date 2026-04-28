@@ -1,0 +1,87 @@
+# omcgo-worker Deployment
+# 后台工作进程：PM/MR 文件解析、KPI 计算、定时聚合
+# 无对外业务端口；仅 :9092 暴露 Prometheus metrics + 探针
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omcgo-worker
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: omc
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omcgo-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: omcgo-worker
+        app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9092"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: omcgo/worker:${VERSION}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config"
+            - "/etc/omcgo/config.yaml"
+          ports:
+            - name: metrics
+              containerPort: 9092
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: omcgo-worker-secret
+          env:
+            - name: OMCGO_ENV
+              value: "prod"
+            - name: TZ
+              value: "Asia/Shanghai"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/omcgo
+              readOnly: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+      volumes:
+        - name: config
+          configMap:
+            name: omcgo-worker-config
+            items:
+              - key: config.yaml
+                path: config.yaml

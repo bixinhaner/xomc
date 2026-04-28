@@ -1,0 +1,106 @@
+# omcgo-acs ConfigMap
+# 来源：omcgo/cmd/acs/etc/config.prod.yaml
+# 容器内挂载到 /etc/omcgo/config.yaml
+# 端口：HTTP CWMP :7547（生产标准） / metrics :9090 / STUN :3478
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omcgo-acs-config
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-acs
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 7547
+      tls_port: 7548
+      tls:
+        enabled: false
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 120s
+
+    session:
+      timeout: 5m
+      max_concurrent: 10000
+      max_rpc_per_session: 50
+
+    rate_limit:
+      per_device: 10
+      burst: 5
+      max_devices: 200000
+      cleanup_interval: 5m
+      cleanup_timeout: 10m
+
+    auth:
+      mode: "none"
+
+    stun:
+      enabled: true
+      listen_addr: ":3478"
+      worker_size: 4
+      buffer_size: 2048
+      cache_ttl: 30m
+      shared_secret: "${CONN_REQ_SECRET}"
+
+    redis:
+      addrs:
+        - "${REDIS_HOST}:6379"
+      password: "${REDIS_PASSWORD}"
+      db: 0
+      pool_size: 100
+
+    nats:
+      url: "nats://${NATS_HOST}:4222"
+      max_reconnect: -1
+      reconnect_wait: 2s
+
+    db:
+      dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=disable"
+      max_conns: 20
+      min_conns: 5
+      max_conn_lifetime: 30m
+      max_conn_idle_time: 5m
+      health_check_interval: 30s
+
+    minio:
+      endpoint: "${MINIO_HOST}:9000"
+      access_key: "${MINIO_ACCESS_KEY}"
+      secret_key: "${MINIO_SECRET_KEY}"
+      use_ssl: false
+      buckets:
+        pm_files: "pm-files"
+        mr_files: "mr-files"
+        firmware: "firmware"
+        config_backup: "config-backup"
+        logs: "logs"
+        reports: "reports"
+        exchange: "omc-exchange"
+
+    upload:
+      base_url: "http://omcgo-acs:7547"
+      path: "/smallcell/FileUploadService"
+      username: "${UPLOAD_USERNAME}"
+      password: "${UPLOAD_PASSWORD}"
+      max_file_size: 104857600
+
+    download:
+      base_url: "http://omcgo-acs:7547"
+      path: "/smallcell/FileDownloadService"
+      username: "${DOWNLOAD_USERNAME}"
+      password: "${DOWNLOAD_PASSWORD}"
+
+    metrics:
+      port: 9090
+
+    log:
+      level: "info"
+      format: "json"
+      output_paths:
+        - "stdout"
+
+    request_id_prefix: "acs"
+
+    enable_test_task_injection: false

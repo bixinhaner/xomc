@@ -1,0 +1,37 @@
+# omcgo-acs Service
+# 类型：ClusterIP（生产建议在前端再放一个 LoadBalancer / NodePort 暴露给 CPE 网络）
+# CWMP 端口供集群内 app 反向调用 Connection Request；CPE 通过外部入口接入
+apiVersion: v1
+kind: Service
+metadata:
+  name: omcgo-acs
+  namespace: omc
+  labels:
+    app.kubernetes.io/name: omcgo-acs
+    app.kubernetes.io/component: acs
+    app.kubernetes.io/part-of: omc
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: omcgo-acs
+  ports:
+    - name: cwmp
+      port: 7547
+      targetPort: cwmp
+      protocol: TCP
+    - name: cwmp-tls
+      port: 7548
+      targetPort: cwmp-tls
+      protocol: TCP
+    - name: stun
+      port: 3478
+      targetPort: stun
+      protocol: UDP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
