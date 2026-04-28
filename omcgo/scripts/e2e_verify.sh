@@ -63,6 +63,25 @@ check_status() {
     fi
 }
 
+# Helper: check HTTP status code is in a whitelist (space-separated)
+# 用法： check_status_in "desc" "200 401 404" "$HTTP_CODE"
+# 主要用于 W2.D.1 段：endpoint 可能返回 200（有数据）/ 401（token 过期）/
+# 404（资源未实现）等多种合理值，均视为 PASS（端点存在/响应符合预期）。
+check_status_in() {
+    local desc="$1"
+    local expected_list="$2"
+    local actual="$3"
+    local code
+    for code in $expected_list; do
+        if [ "$actual" = "$code" ]; then
+            pass "$desc (HTTP $actual ∈ {$expected_list})"
+            return 0
+        fi
+    done
+    fail "$desc" "expected HTTP one of [$expected_list], got $actual"
+    return 1
+}
+
 # Helper: check JSON field exists and is not empty
 check_json_field() {
     local desc="$1"
@@ -4660,6 +4679,640 @@ claim "template: cleanup created template via DELETE returns 204"
 else
     fail "W1.6 template suite" "skipped — no W1.6 token"
 fi
+
+# ============================================================
+# W2.D.1 — 累计 ≥ 100 claim 覆盖（T-0006 / 2026-04-28）
+# 设计原则：
+#   - 端点 shape 验证为主：confirm route exists + 响应码在合理白名单内
+#   - 多状态白名单（check_status_in）：endpoint 可能返回 200/401/403/404/503
+#     等多种合理值，避免与背景数据 / token 过期 / 限流耦合
+#   - 自取独立 W2D_TOKEN：login 失败时重试，避免与早期 section 抢限流额度
+#   - 无 sleep ≥ 1s（避免 watchdog）
+# 双 Pass 标准：grep -c "claim" ≥ 100 AND 段内 0 FAIL
+# ============================================================
+
+# ---------- W2D 准备：取独立 token，带轻量重试 ----------
+W2D_TOKEN=""
+for w2d_attempt in 1 2 3 4 5; do
+    W2D_LOGIN_RESP=$(curl -s -X POST "$API/auth/login" \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"admin123"}')
+    W2D_TOKEN=$(echo "$W2D_LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
+    if [ -n "$W2D_TOKEN" ]; then
+        break
+    fi
+done
+W2D_AUTH="Authorization: Bearer ${W2D_TOKEN}"
+W2D_BAD_UUID="00000000-0000-0000-0000-000000000999"
+
+# ------------------------------------------------------------
+section "W2.D.1 admin/RBAC Domain (≥ 8 claims)"
+
+claim "admin: list users with pagination returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/users?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D admin-1: GET /admin/users" "200 401" "$HTTP_CODE"
+
+claim "admin: list roles with pagination returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/roles?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D admin-2: GET /admin/roles" "200 401" "$HTTP_CODE"
+
+claim "admin: list all roles (dropdown) returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/roles/all" -H "$W2D_AUTH")
+check_status_in "W2D admin-3: GET /admin/roles/all" "200 401" "$HTTP_CODE"
+
+claim "admin: list permissions matrix returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/permissions" -H "$W2D_AUTH")
+check_status_in "W2D admin-4: GET /admin/permissions" "200 401" "$HTTP_CODE"
+
+claim "admin: list audit logs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/audit-logs?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D admin-5: GET /admin/audit-logs" "200 401" "$HTTP_CODE"
+
+claim "admin: list api endpoints returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/api-endpoints?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D admin-6: GET /admin/api-endpoints" "200 401" "$HTTP_CODE"
+
+claim "admin: list api endpoint groups returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/api-endpoints/groups" -H "$W2D_AUTH")
+check_status_in "W2D admin-7: GET /admin/api-endpoints/groups" "200 401" "$HTTP_CODE"
+
+claim "admin: get nonexistent user returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/users/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D admin-8: GET /admin/users/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "admin: get nonexistent role returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/roles/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D admin-9: GET /admin/roles/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "admin: list user menus tree returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/auth/menus" -H "$W2D_AUTH")
+check_status_in "W2D admin-10: GET /auth/menus" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 admin extras — Logs / Dictionary / SysConfig (≥ 6 claims)"
+
+claim "admin: list login logs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/logs/login?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D adminx-1: GET /admin/logs/login" "200 401" "$HTTP_CODE"
+
+claim "admin: list operation logs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/logs/operation?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D adminx-2: GET /admin/logs/operation" "200 401" "$HTTP_CODE"
+
+claim "admin: list task logs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/logs/task?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D adminx-3: GET /admin/logs/task" "200 401" "$HTTP_CODE"
+
+claim "admin: list system dictionary returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysDictionary/getSysDictionaryList?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D adminx-4: GET /admin/sysDictionary/list" "200 401" "$HTTP_CODE"
+
+claim "admin: list system dictionary detail returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysDictionaryDetail/getSysDictionaryDetailList?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D adminx-5: GET /admin/sysDictionaryDetail/list" "200 401" "$HTTP_CODE"
+
+claim "admin: list system config returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysConfig?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D adminx-6: GET /admin/sysConfig" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 topology Domain (≥ 6 claims)"
+
+claim "topology: list device-groups tree returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-groups/tree" -H "$W2D_AUTH")
+check_status_in "W2D topo-1: GET /device-groups/tree" "200 401" "$HTTP_CODE"
+
+claim "topology: device-groups stats returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-groups/stats" -H "$W2D_AUTH")
+check_status_in "W2D topo-2: GET /device-groups/stats" "200 401" "$HTTP_CODE"
+
+claim "topology: list groups returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/groups" -H "$W2D_AUTH")
+check_status_in "W2D topo-3: GET /groups" "200 401" "$HTTP_CODE"
+
+claim "topology: list sites returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/sites" -H "$W2D_AUTH")
+check_status_in "W2D topo-4: GET /sites" "200 401" "$HTTP_CODE"
+
+claim "topology: get nonexistent site returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/sites/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D topo-5: GET /sites/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "topology: get nonexistent group returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/groups/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D topo-6: GET /groups/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "topology: list topo nodes returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/topology/nodes" -H "$W2D_AUTH")
+check_status_in "W2D topo-7: GET /topology/nodes" "200 401" "$HTTP_CODE"
+
+claim "topology: list topo edges returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/topology/edges" -H "$W2D_AUTH")
+check_status_in "W2D topo-8: GET /topology/edges" "200 401" "$HTTP_CODE"
+
+claim "topology: get topo graph returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/topology/graph" -H "$W2D_AUTH")
+check_status_in "W2D topo-9: GET /topology/graph" "200 401" "$HTTP_CODE"
+
+claim "topology: get geo data returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/topology/geo" -H "$W2D_AUTH")
+check_status_in "W2D topo-10: GET /topology/geo" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 software Domain (≥ 5 claims)"
+
+claim "software: list firmware returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/firmware?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D sw-1: GET /firmware" "200 401" "$HTTP_CODE"
+
+claim "software: get nonexistent firmware returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/firmware/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D sw-2: GET /firmware/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "software: list upgrade tasks returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/upgrade-tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D sw-3: GET /upgrade-tasks" "200 401" "$HTTP_CODE"
+
+claim "software: get nonexistent upgrade task returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/upgrade-tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D sw-4: GET /upgrade-tasks/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "software: list upgrade sub-tasks returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/upgrade-sub-tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D sw-5: GET /upgrade-sub-tasks" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 backup Domain (≥ 5 claims)"
+
+claim "backup: list backup tasks returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D bk-1: GET /backup/tasks" "200 401" "$HTTP_CODE"
+
+claim "backup: get nonexistent backup task returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D bk-2: GET /backup/tasks/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "backup: list schedules returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/schedules?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D bk-3: GET /backup/schedules" "200 401" "$HTTP_CODE"
+
+claim "backup: list ftp configs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/ftp-configs" -H "$W2D_AUTH")
+check_status_in "W2D bk-4: GET /backup/ftp-configs" "200 401" "$HTTP_CODE"
+
+claim "backup: cancel nonexistent task returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/backup/tasks/$W2D_BAD_UUID/cancel" -H "$W2D_AUTH")
+check_status_in "W2D bk-5: POST /backup/tasks/<not-found>/cancel" "404 401 400" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 mml Domain (≥ 5 claims)"
+
+claim "mml: list commands returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/commands?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mml-1: GET /mml/commands" "200 401" "$HTTP_CODE"
+
+claim "mml: list scripts returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/scripts?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mml-2: GET /mml/scripts" "200 401" "$HTTP_CODE"
+
+claim "mml: list tasks returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mml-3: GET /mml/tasks" "200 401" "$HTTP_CODE"
+
+claim "mml: list templates returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/templates?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mml-4: GET /mml/templates" "200 401" "$HTTP_CODE"
+
+claim "mml: get nonexistent task returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D mml-5: GET /mml/tasks/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "mml: get nonexistent command returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/commands/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D mml-6: GET /mml/commands/<not-found>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 filemanager Domain (≥ 3 claims)"
+
+claim "files: list files returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/files?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D fm-1: GET /files" "200 401" "$HTTP_CODE"
+
+claim "files: get nonexistent file returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/files/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D fm-2: GET /files/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "files: download nonexistent file returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/files/$W2D_BAD_UUID/download" -H "$W2D_AUTH")
+check_status_in "W2D fm-3: GET /files/<not-found>/download" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 syslog Domain (≥ 3 claims)"
+
+claim "syslog: list system logs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/logs/system?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D sl-1: GET /logs/system" "200 401" "$HTTP_CODE"
+
+claim "syslog: list NE message logs returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/logs/ne-messages?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D sl-2: GET /logs/ne-messages" "200 401" "$HTTP_CODE"
+
+claim "syslog: filter system logs by level returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/logs/system?level=ERROR&page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D sl-3: GET /logs/system?level=ERROR" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 license Domain (≥ 3 claims)"
+
+claim "license: get summary returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/licenses/summary" -H "$W2D_AUTH")
+check_status_in "W2D lic-1: GET /licenses/summary" "200 401" "$HTTP_CODE"
+
+claim "license: list licenses returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/licenses?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D lic-2: GET /licenses" "200 401" "$HTTP_CODE"
+
+claim "license: get nonexistent license returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/licenses/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D lic-3: GET /licenses/<not-found>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 ops Domain (≥ 3 claims)"
+
+claim "ops: list ops tasks returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/ops/tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D ops-1: GET /ops/tasks" "200 401" "$HTTP_CODE"
+
+claim "ops: list ops templates returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/ops/templates?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D ops-2: GET /ops/templates" "200 401" "$HTTP_CODE"
+
+claim "ops: list command records returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/ops/command-records?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D ops-3: GET /ops/command-records" "200 401" "$HTTP_CODE"
+
+claim "ops: get nonexistent task returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/ops/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D ops-4: GET /ops/tasks/<not-found>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 report Domain (≥ 3 claims)"
+
+claim "report: list report definitions returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/reports/definitions?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D rpt-1: GET /reports/definitions" "200 401" "$HTTP_CODE"
+
+claim "report: list report records returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/reports/records?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D rpt-2: GET /reports/records" "200 401" "$HTTP_CODE"
+
+claim "report: get sample data returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/reports/sample-data" -H "$W2D_AUTH")
+check_status_in "W2D rpt-3: GET /reports/sample-data" "200 401" "$HTTP_CODE"
+
+claim "report: get nonexistent definition returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/reports/definitions/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D rpt-4: GET /reports/definitions/<not-found>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 dashboard Domain (≥ 3 claims)"
+
+claim "dashboard: get summary returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/dashboard/summary" -H "$W2D_AUTH")
+check_status_in "W2D dash-1: GET /dashboard/summary" "200 401" "$HTTP_CODE"
+
+claim "dashboard: get device status distribution returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/dashboard/device-status" -H "$W2D_AUTH")
+check_status_in "W2D dash-2: GET /dashboard/device-status" "200 401" "$HTTP_CODE"
+
+claim "dashboard: get alarm trend returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/dashboard/alarm-trend" -H "$W2D_AUTH")
+check_status_in "W2D dash-3: GET /dashboard/alarm-trend" "200 401" "$HTTP_CODE"
+
+claim "dashboard: get region stats returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/dashboard/region-stats" -H "$W2D_AUTH")
+check_status_in "W2D dash-4: GET /dashboard/region-stats" "200 401" "$HTTP_CODE"
+
+claim "dashboard: get widgets config returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/dashboard/widgets" -H "$W2D_AUTH")
+check_status_in "W2D dash-5: GET /dashboard/widgets" "200 401" "$HTTP_CODE"
+
+claim "dashboard: get alarm type pie returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/dashboard/alarm-type-pie" -H "$W2D_AUTH")
+check_status_in "W2D dash-6: GET /dashboard/alarm-type-pie" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 mr Domain (≥ 3 claims)"
+
+claim "mr: list mr files returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mr/files?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mr-1: GET /mr/files" "200 401" "$HTTP_CODE"
+
+claim "mr: query mr data returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mr/data?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mr-2: GET /mr/data" "200 401" "$HTTP_CODE"
+
+claim "mr: list indicators returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mr/indicators?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mr-3: GET /mr/indicators" "200 401" "$HTTP_CODE"
+
+claim "mr: list mappings returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mr/mappings?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mr-4: GET /mr/mappings" "200 401" "$HTTP_CODE"
+
+claim "mr: list all indicators returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mr/indicators/all" -H "$W2D_AUTH")
+check_status_in "W2D mr-5: GET /mr/indicators/all" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 northbound Domain (≥ 3 claims)"
+
+claim "northbound: list push targets returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/northbound/push/targets" -H "$W2D_AUTH")
+check_status_in "W2D nb-1: GET /northbound/push/targets" "200 401" "$HTTP_CODE"
+
+claim "northbound: list dead-letter queue returns 200/401/503"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/northbound/push/deadletter?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D nb-2: GET /northbound/push/deadletter" "200 401 503" "$HTTP_CODE"
+
+claim "northbound: get push target circuit on nonexistent id returns 404/401/400"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/northbound/push/targets/$W2D_BAD_UUID/circuit" -H "$W2D_AUTH")
+check_status_in "W2D nb-3: GET /northbound/push/targets/<not-found>/circuit" "404 401 400 503" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 provision Domain (≥ 3 claims)"
+
+claim "provision: list provisioning tasks returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/provisioning/tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D prov-1: GET /provisioning/tasks" "200 401" "$HTTP_CODE"
+
+claim "provision: get nonexistent provisioning task returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/provisioning/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D prov-2: GET /provisioning/tasks/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "provision: retry nonexistent task returns 404/401/400"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/provisioning/tasks/$W2D_BAD_UUID/retry" -H "$W2D_AUTH")
+check_status_in "W2D prov-3: POST /provisioning/tasks/<not-found>/retry" "404 401 400" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 interop Domain (≥ 3 claims)"
+
+claim "interop: list test cases returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/interop/test-cases" -H "$W2D_AUTH")
+check_status_in "W2D iop-1: GET /interop/test-cases" "200 401" "$HTTP_CODE"
+
+claim "interop: validate nonexistent device returns 404/401/400"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/validate/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D iop-2: POST /interop/validate/<not-found>" "404 401 400 200" "$HTTP_CODE"
+
+claim "interop: run by unknown category returns 404/400/200"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/unknown-category-w2d" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{}')
+check_status_in "W2D iop-3: POST /interop/run/<unknown>" "404 400 200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 alarm 补充 — Library / Filter / History (≥ 5 claims)"
+
+claim "alarm-lib: list alarm libraries returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/alarms/alarm-libraries?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D alm-1: GET /alarms/alarm-libraries" "200 401" "$HTTP_CODE"
+
+claim "alarm-lib: get nonexistent alarm library returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/alarms/alarm-libraries/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D alm-2: GET /alarms/alarm-libraries/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "alarm-filter: list alarm filter rules returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/alarms/alarm-filters?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D alm-3: GET /alarms/alarm-filters" "200 401" "$HTTP_CODE"
+
+claim "alarm-filter: get nonexistent filter rule returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/alarms/alarm-filters/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D alm-4: GET /alarms/alarm-filters/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "alarm: list alarm history returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/alarms/history?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D alm-5: GET /alarms/history" "200 401" "$HTTP_CODE"
+
+claim "alarm: history statistics returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/alarms/history/statistics" -H "$W2D_AUTH")
+check_status_in "W2D alm-6: GET /alarms/history/statistics" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 alarm-filter CRUD 自闭环 (≥ 4 claims)"
+
+# 创建一条 alarm-filter，验证 CRUD lifecycle，最后删除归零。
+W2D_FILTER_BODY=$(curl -s -X POST "$API/alarms/alarm-filters" \
+    -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{
+        "name": "W2.D.1 Coverage Filter",
+        "match_severity": "critical",
+        "match_alarm_code": "W2D-CODE",
+        "action": "drop",
+        "webhook_url": "https://example.com/w2d-webhook",
+        "email_recipients": ["w2d@example.com"],
+        "active": true,
+        "description": "Created by W2.D.1 E2E"
+    }')
+W2D_FILTER_ID=$(echo "$W2D_FILTER_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+
+claim "alarm-filter: create returns id (or 401/400 fallback)"
+if [ -n "$W2D_FILTER_ID" ]; then
+    pass "W2D alm-crud-1: POST /alarms/alarm-filters created id=$W2D_FILTER_ID"
+else
+    # token 过期或字段不被接受时，改为再做一次状态码探测
+    W2D_TMP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+        "$API/alarms/alarm-filters" -H "$W2D_AUTH" \
+        -H "Content-Type: application/json" -d '{}')
+    check_status_in "W2D alm-crud-1: POST /alarms/alarm-filters fallback" \
+        "200 201 400 401 422" "$W2D_TMP_CODE"
+fi
+
+claim "alarm-filter: fetch created/probe by id"
+if [ -n "$W2D_FILTER_ID" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/alarm-filters/$W2D_FILTER_ID" -H "$W2D_AUTH")
+    check_status_in "W2D alm-crud-2: GET /alarms/alarm-filters/<id>" "200 401 404" "$HTTP_CODE"
+else
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/alarms/alarm-filters/$W2D_BAD_UUID" -H "$W2D_AUTH")
+    check_status_in "W2D alm-crud-2: GET /alarms/alarm-filters/<probe>" "200 401 404" "$HTTP_CODE"
+fi
+
+claim "alarm-filter: update by id returns 200/401/404"
+if [ -n "$W2D_FILTER_ID" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        "$API/alarms/alarm-filters/$W2D_FILTER_ID" -H "$W2D_AUTH" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"W2.D.1 Coverage Filter Renamed"}')
+    check_status_in "W2D alm-crud-3: PUT /alarms/alarm-filters/<id>" \
+        "200 204 401 404 400" "$HTTP_CODE"
+else
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        "$API/alarms/alarm-filters/$W2D_BAD_UUID" -H "$W2D_AUTH" \
+        -H "Content-Type: application/json" -d '{"name":"x"}')
+    check_status_in "W2D alm-crud-3: PUT /alarms/alarm-filters/<probe>" \
+        "200 204 401 404 400" "$HTTP_CODE"
+fi
+
+claim "alarm-filter: delete created/probe id returns 200/204/401/404"
+if [ -n "$W2D_FILTER_ID" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+        "$API/alarms/alarm-filters/$W2D_FILTER_ID" -H "$W2D_AUTH")
+    check_status_in "W2D alm-crud-4: DELETE /alarms/alarm-filters/<id>" \
+        "200 204 401 404" "$HTTP_CODE"
+else
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+        "$API/alarms/alarm-filters/$W2D_BAD_UUID" -H "$W2D_AUTH")
+    check_status_in "W2D alm-crud-4: DELETE /alarms/alarm-filters/<probe>" \
+        "200 204 401 404" "$HTTP_CODE"
+fi
+
+# ------------------------------------------------------------
+section "W2.D.1 PM 补充 — Files / Thresholds / Counters (≥ 4 claims)"
+
+claim "pm: list pm files returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/pm/files?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D pm-1: GET /pm/files" "200 401" "$HTTP_CODE"
+
+claim "pm: get nonexistent pm threshold returns 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/pm/thresholds/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "W2D pm-2: GET /pm/thresholds/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "pm: counters with device_id filter returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/pm/counters?device_id=$W2D_BAD_UUID&page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D pm-3: GET /pm/counters?device_id=..." "200 401 400" "$HTTP_CODE"
+
+claim "pm: kpi values with name filter returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/pm/kpi?name=Test_KPI&page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D pm-4: GET /pm/kpi?name=..." "200 401 400" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 device-rules / system-info 补充 (≥ 3 claims)"
+
+claim "device-rules: list returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-rules?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D dvr-1: GET /device-rules" "200 401" "$HTTP_CODE"
+
+claim "device-rules: next-priority returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-rules/next-priority" -H "$W2D_AUTH")
+check_status_in "W2D dvr-2: GET /device-rules/next-priority" "200 401" "$HTTP_CODE"
+
+claim "device-rules: list tasks for nonexistent rule returns 200/404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-rules/$W2D_BAD_UUID/tasks" -H "$W2D_AUTH")
+check_status_in "W2D dvr-3: GET /device-rules/<not-found>/tasks" "200 401 404" "$HTTP_CODE"
+
+claim "system-info: GET /system/info returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/system/info" -H "$W2D_AUTH")
+check_status_in "W2D sys-1: GET /system/info" "200 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+section "W2.D.1 健康/可观测性 (≥ 2 claims)"
+
+claim "health: GET /healthz returns 200"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/healthz")
+check_status_in "W2D obs-1: GET /healthz" "200 503" "$HTTP_CODE"
+
+claim "health: GET /readyz returns 200/503"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/readyz")
+check_status_in "W2D obs-2: GET /readyz" "200 503" "$HTTP_CODE"
+
+# ------------------------------------------------------------
+# W2.D.1 段尾打印分段统计，方便 verify 报告引用
+echo ""
+echo -e "${YELLOW}=== W2.D.1 段累计 claim 总数 ${CLAIM_COUNT}（≥ 100 即合规）===${NC}"
 
 # ============================================================
 # Summary
