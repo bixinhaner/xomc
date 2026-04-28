@@ -2,17 +2,57 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
+
+// PostgreSQL SQLSTATE codes used in error mapping.
+const (
+	pgCodeForeignKeyViolation = "23503" // foreign_key_violation
+	pgCodeUniqueViolation     = "23505" // unique_violation
+	pgCodeNotNullViolation    = "23502" // not_null_violation
+	pgCodeCheckViolation      = "23514" // check_violation
+)
+
+// mapPgError translates PostgreSQL constraint violations into sentinel errors so
+// that the HTTP layer can map them to the correct status code (400/404/409
+// instead of a misleading 500).
+//
+// Returns the original error if it doesn't represent a recognised constraint
+// violation.
+func mapPgError(err error, resource string) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case pgCodeForeignKeyViolation:
+		// A referenced row (e.g. template_id) does not exist. Treat as bad
+		// input rather than a server fault.
+		return fmt.Errorf("%s references a missing related record (constraint %s): %w",
+			resource, pgErr.ConstraintName, commonerrors.ErrInvalidInput)
+	case pgCodeUniqueViolation:
+		return fmt.Errorf("%s already exists (constraint %s): %w",
+			resource, pgErr.ConstraintName, commonerrors.ErrAlreadyExists)
+	case pgCodeNotNullViolation, pgCodeCheckViolation:
+		return fmt.Errorf("%s has invalid field %q: %w",
+			resource, pgErr.ColumnName, commonerrors.ErrInvalidInput)
+	}
+	return err
+}
 
 // ---- column lists ----
 
@@ -79,6 +119,9 @@ func (r *PgTemplateRepository) Create(ctx context.Context, tmpl *OpsTemplate) er
 	row := r.pool.QueryRow(ctx, query, args...)
 	created, err := scanTemplate(row)
 	if err != nil {
+		if mapped := mapPgError(err, "ops_template"); mapped != err {
+			return mapped
+		}
 		return fmt.Errorf("create ops_template: %w", err)
 	}
 	*tmpl = *created
@@ -96,7 +139,7 @@ func (r *PgTemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*OpsT
 
 	tmpl, err := scanTemplate(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, commonerrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("get ops_template: %w", err)
@@ -328,6 +371,11 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *OpsTask) error {
 	row := r.pool.QueryRow(ctx, query, args...)
 	created, err := scanTask(row)
 	if err != nil {
+		// Map PostgreSQL constraint violations (e.g. unknown template_id FK)
+		// to sentinel errors so handlers return 400 instead of 500.
+		if mapped := mapPgError(err, "ops_task"); mapped != err {
+			return mapped
+		}
 		return fmt.Errorf("create ops_task: %w", err)
 	}
 	*task = *created
@@ -345,7 +393,7 @@ func (r *PgTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*OpsTask,
 
 	task, err := scanTask(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, commonerrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("get ops_task: %w", err)
@@ -515,6 +563,9 @@ func (r *PgCommandRecordRepository) Create(ctx context.Context, record *OpsComma
 	row := r.pool.QueryRow(ctx, query, args...)
 	created, err := scanCmdRecord(row)
 	if err != nil {
+		if mapped := mapPgError(err, "ops_command_record"); mapped != err {
+			return mapped
+		}
 		return fmt.Errorf("create ops_command_record: %w", err)
 	}
 	*record = *created

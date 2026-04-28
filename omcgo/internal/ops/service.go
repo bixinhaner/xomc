@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -108,6 +109,11 @@ func (s *Service) ListTemplates(ctx context.Context, filter TemplateFilter) (*mo
 // ---- Task operations ----
 
 // CreateTask creates a new ops task with status=pending.
+//
+// When a template_id is supplied, the template is verified up-front: a missing
+// template returns ErrNotFound (404) instead of letting the database FK
+// violation surface as a 500. Other template lookup failures are propagated
+// so the caller observes the real error class.
 func (s *Service) CreateTask(ctx context.Context, task *OpsTask) (*OpsTask, error) {
 	task.Status = OpsTaskPending
 	task.CurrentStep = 0
@@ -125,20 +131,35 @@ func (s *Service) CreateTask(ctx context.Context, task *OpsTask) (*OpsTask, erro
 		task.TotalCount = len(deviceSNs)
 	}
 
-	// If template is specified, get total steps from template
+	// If template is specified, validate it up-front and resolve total_steps.
+	// We don't silently swallow lookup errors: a missing template must produce
+	// 404 rather than a 500 from a downstream FK violation.
 	if task.TemplateID != nil {
 		tmpl, err := s.templateRepo.GetByID(ctx, *task.TemplateID)
-		if err == nil {
-			var steps []json.RawMessage
-			if err := json.Unmarshal(tmpl.Steps, &steps); err == nil {
-				task.TotalSteps = len(steps)
+		if err != nil {
+			if errors.Is(err, commonerrors.ErrNotFound) {
+				return nil, fmt.Errorf("ops template %s not found: %w",
+					task.TemplateID, commonerrors.ErrNotFound)
 			}
-			// Increment use count
-			_ = s.templateRepo.IncrementUseCount(ctx, *task.TemplateID)
+			return nil, fmt.Errorf("resolve ops template: %w", err)
+		}
+		var steps []json.RawMessage
+		if err := json.Unmarshal(tmpl.Steps, &steps); err == nil {
+			task.TotalSteps = len(steps)
+		}
+		// Best-effort: increment use count, but don't fail task creation if
+		// the counter update fails.
+		if err := s.templateRepo.IncrementUseCount(ctx, *task.TemplateID); err != nil {
+			s.logger.Warn("failed to increment template use_count",
+				zap.String("template_id", task.TemplateID.String()),
+				zap.Error(err),
+			)
 		}
 	}
 
 	if err := s.taskRepo.Create(ctx, task); err != nil {
+		// Repo already maps PgError → sentinel; preserve sentinel via %w so
+		// HTTPStatusFromError picks the right status.
 		return nil, fmt.Errorf("create ops task: %w", err)
 	}
 

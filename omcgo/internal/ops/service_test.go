@@ -3,10 +3,13 @@ package ops
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -494,4 +497,229 @@ func TestService_CreateCommandRecord(t *testing.T) {
 	require.NotNil(t, result)
 	assert.False(t, saved.ExecuteTime.IsZero(), "ExecuteTime should default to now when zero")
 	assert.WithinDuration(t, time.Now(), saved.ExecuteTime, 2*time.Second)
+}
+
+// ---------------------------------------------------------------------------
+// CreateTask error-path tests (T-0057.6: HTTP status mapping for ops/tasks)
+// ---------------------------------------------------------------------------
+
+// TestService_CreateTask_TemplateNotFound — missing template_id must surface as
+// ErrNotFound (404) instead of being silently swallowed (which previously let
+// the FK violation reach the DB and produce a 500).
+func TestService_CreateTask_TemplateNotFound(t *testing.T) {
+	missingTemplateID := uuid.New()
+
+	tmplRepo := &mockTemplateRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTemplate, error) {
+			assert.Equal(t, missingTemplateID, id)
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	taskCreated := false
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, _ *OpsTask) error {
+			taskCreated = true
+			return nil
+		},
+	}
+
+	svc := newTestService(tmplRepo, taskRepo, &mockCmdRepo{})
+
+	task := &OpsTask{
+		TaskName:   "Task with missing template",
+		TemplateID: &missingTemplateID,
+		DeviceSNs:  json.RawMessage(`["SN001"]`),
+		Creator:    "admin",
+	}
+
+	result, err := svc.CreateTask(context.Background(), task)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
+		"missing template must propagate ErrNotFound (got: %v)", err)
+	assert.False(t, taskCreated,
+		"task must NOT be persisted when template is missing")
+
+	// HTTP layer must map this to 404, not 500.
+	assert.Equal(t, http.StatusNotFound, commonerrors.HTTPStatusFromError(err),
+		"HTTPStatusFromError must return 404 for missing template")
+}
+
+// TestService_CreateTask_RepoFKViolation — when template_id passes the up-front
+// check but a FK violation slips through (e.g. concurrent template deletion),
+// the repo's mapPgError must translate it to ErrInvalidInput so the handler
+// returns 400 instead of 500.
+func TestService_CreateTask_RepoFKViolation(t *testing.T) {
+	tmplID := uuid.New()
+
+	tmplRepo := &mockTemplateRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTemplate, error) {
+			return &OpsTemplate{ID: tmplID, Steps: json.RawMessage(`[]`)}, nil
+		},
+	}
+
+	// Simulate the repo returning the same sentinel that mapPgError would
+	// produce for a FK violation (PostgreSQL SQLSTATE 23503).
+	taskRepo := &mockTaskRepo{
+		createFn: func(_ context.Context, _ *OpsTask) error {
+			return commonerrors.ErrInvalidInput
+		},
+	}
+
+	svc := newTestService(tmplRepo, taskRepo, &mockCmdRepo{})
+
+	task := &OpsTask{
+		TaskName:   "Task hitting FK violation",
+		TemplateID: &tmplID,
+		DeviceSNs:  json.RawMessage(`["SN001"]`),
+		Creator:    "admin",
+	}
+
+	_, err := svc.CreateTask(context.Background(), task)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput),
+		"FK violation must surface as ErrInvalidInput (got: %v)", err)
+
+	// HTTP layer must map this to 400, not 500.
+	assert.Equal(t, http.StatusBadRequest, commonerrors.HTTPStatusFromError(err),
+		"HTTPStatusFromError must return 400 for FK violation")
+}
+
+// TestService_CreateTask_TemplateLookupGenericError — non-NotFound errors from
+// template lookup must propagate (not be swallowed) so operators can observe
+// real infrastructure issues.
+func TestService_CreateTask_TemplateLookupGenericError(t *testing.T) {
+	tmplID := uuid.New()
+	infraErr := errors.New("connection refused")
+
+	tmplRepo := &mockTemplateRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTemplate, error) {
+			return nil, infraErr
+		},
+	}
+
+	svc := newTestService(tmplRepo, &mockTaskRepo{}, &mockCmdRepo{})
+
+	task := &OpsTask{
+		TaskName:   "Task with infra failure",
+		TemplateID: &tmplID,
+		DeviceSNs:  json.RawMessage(`["SN001"]`),
+		Creator:    "admin",
+	}
+
+	_, err := svc.CreateTask(context.Background(), task)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, infraErr),
+		"underlying infra error must be wrapped, not swallowed")
+	// Generic error (no sentinel) → HTTP 500, which is correct here.
+	assert.Equal(t, http.StatusInternalServerError, commonerrors.HTTPStatusFromError(err))
+}
+
+// ---------------------------------------------------------------------------
+// CancelTask / PauseTask / ResumeTask error-path tests
+// (Verify ErrNotFound propagates through %w wrapping for handler 404 mapping)
+// ---------------------------------------------------------------------------
+
+func TestService_CancelTask_NotFound(t *testing.T) {
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	svc := newTestService(&mockTemplateRepo{}, taskRepo, &mockCmdRepo{})
+	err := svc.CancelTask(context.Background(), uuid.New())
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
+	assert.Equal(t, http.StatusNotFound, commonerrors.HTTPStatusFromError(err))
+}
+
+func TestService_PauseTask_NotFound(t *testing.T) {
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	svc := newTestService(&mockTemplateRepo{}, taskRepo, &mockCmdRepo{})
+	err := svc.PauseTask(context.Background(), uuid.New())
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
+	assert.Equal(t, http.StatusNotFound, commonerrors.HTTPStatusFromError(err))
+}
+
+func TestService_ResumeTask_NotFound(t *testing.T) {
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	svc := newTestService(&mockTemplateRepo{}, taskRepo, &mockCmdRepo{})
+	err := svc.ResumeTask(context.Background(), uuid.New())
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
+	assert.Equal(t, http.StatusNotFound, commonerrors.HTTPStatusFromError(err))
+}
+
+// ---------------------------------------------------------------------------
+// mapPgError unit tests (translate PostgreSQL SQLSTATE codes → sentinel errors)
+// ---------------------------------------------------------------------------
+
+func TestMapPgError_ForeignKeyViolation(t *testing.T) {
+	pgErr := &pgconn.PgError{
+		Code:           pgCodeForeignKeyViolation,
+		ConstraintName: "ops_tasks_template_id_fkey",
+		Message:        "insert or update on table \"ops_tasks\" violates foreign key constraint",
+	}
+	mapped := mapPgError(pgErr, "ops_task")
+
+	require.Error(t, mapped)
+	assert.True(t, errors.Is(mapped, commonerrors.ErrInvalidInput),
+		"FK violation must map to ErrInvalidInput")
+	assert.Equal(t, http.StatusBadRequest, commonerrors.HTTPStatusFromError(mapped))
+}
+
+func TestMapPgError_UniqueViolation(t *testing.T) {
+	pgErr := &pgconn.PgError{
+		Code:           pgCodeUniqueViolation,
+		ConstraintName: "ops_templates_name_key",
+	}
+	mapped := mapPgError(pgErr, "ops_template")
+
+	require.Error(t, mapped)
+	assert.True(t, errors.Is(mapped, commonerrors.ErrAlreadyExists))
+	assert.Equal(t, http.StatusConflict, commonerrors.HTTPStatusFromError(mapped))
+}
+
+func TestMapPgError_NotNullViolation(t *testing.T) {
+	pgErr := &pgconn.PgError{
+		Code:       pgCodeNotNullViolation,
+		ColumnName: "task_name",
+	}
+	mapped := mapPgError(pgErr, "ops_task")
+
+	require.Error(t, mapped)
+	assert.True(t, errors.Is(mapped, commonerrors.ErrInvalidInput))
+	assert.Equal(t, http.StatusBadRequest, commonerrors.HTTPStatusFromError(mapped))
+}
+
+func TestMapPgError_NonPgError_PassesThrough(t *testing.T) {
+	plain := errors.New("network timeout")
+	mapped := mapPgError(plain, "ops_task")
+
+	// Non-pg errors must be returned unchanged so callers can apply their
+	// own handling.
+	assert.Same(t, plain, mapped, "non-PgError must pass through unchanged")
+}
+
+func TestMapPgError_Nil(t *testing.T) {
+	assert.Nil(t, mapPgError(nil, "ops_task"))
 }
