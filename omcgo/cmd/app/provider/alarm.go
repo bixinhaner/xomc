@@ -37,6 +37,13 @@ func initAlarmModule(c *Container) error {
 	// 过滤规则仓储
 	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(c.PgPool)
 
+	// W2 T-0011: webhook 派发器（含 retry / HMAC / dead-letter）+ 死信仓储 + 过滤引擎
+	webhookMetrics := alarm.NewWebhookMetrics(c.MetricsReg)
+	webhookDispatcher := alarm.NewHTTPWebhookDispatcher(logger.Named("webhook"), webhookMetrics)
+	deadLetterRepo := alarm.NewPgDeadLetterRepository(c.PgPool)
+	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger.Named("filter"))
+	alarmEngine.SetFilterEngine(filterEngine)
+
 	// 数据权限检查器
 	dataPermissionChecker := alarm.NewDataPermissionChecker(logger)
 

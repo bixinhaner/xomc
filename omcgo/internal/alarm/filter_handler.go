@@ -96,6 +96,7 @@ func (h *FilterHandler) Create(c *gin.Context) {
 		Action:          req.Action,
 		AcknowledgeDesc: req.AcknowledgeDesc,
 		WebhookURL:      req.WebhookURL,
+		WebhookSecret:   req.WebhookSecret,
 		Priority:        req.Priority,
 		Enabled:         true,
 	}
@@ -164,6 +165,9 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	}
 	if req.WebhookURL != nil {
 		rule.WebhookURL = req.WebhookURL
+	}
+	if req.WebhookSecret != nil {
+		rule.WebhookSecret = req.WebhookSecret
 	}
 	if req.Priority != nil {
 		rule.Priority = *req.Priority

@@ -37,12 +37,12 @@ func (r *PgAlarmFilterRuleRepository) Create(ctx context.Context, rule *AlarmFil
 		Insert("alarm_filters").
 		Columns(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url",
+			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		Values(
 			rule.ID, rule.Name, rule.FilterType, rule.AlarmSources, rule.AlarmIdentifiers,
-			rule.DeviceIDs, rule.DeviceGroupIDs, rule.Action, rule.AcknowledgeDesc, rule.WebhookURL,
+			rule.DeviceIDs, rule.DeviceGroupIDs, rule.Action, rule.AcknowledgeDesc, rule.WebhookURL, rule.WebhookSecret,
 			rule.Priority, rule.Enabled, rule.CreatedBy, rule.CreatedAt, rule.UpdatedBy, rule.UpdatedAt,
 		).
 		Suffix("RETURNING id")
@@ -59,7 +59,7 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 	query := storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url",
+			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		From("alarm_filters").
@@ -73,7 +73,7 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 	rule := &AlarmFilterRule{}
 	err = r.db.QueryRow(ctx, sql, args...).Scan(
 		&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL,
+		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret,
 		&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 	)
 	if err != nil {
@@ -101,6 +101,7 @@ func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFil
 		Set("action", rule.Action).
 		Set("acknowledge_desc", rule.AcknowledgeDesc).
 		Set("webhook_url", rule.WebhookURL).
+		Set("webhook_secret", rule.WebhookSecret).
 		Set("priority", rule.Priority).
 		Set("enabled", rule.Enabled).
 		Set("updated_by", rule.UpdatedBy).
@@ -150,7 +151,7 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 	query := storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url",
+			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		From("alarm_filters").
@@ -187,7 +188,7 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 		rule := AlarmFilterRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL,
+			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret,
 			&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -260,7 +261,7 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 	query := storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url",
+			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		From("alarm_filters").
@@ -283,7 +284,7 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 		rule := AlarmFilterRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL,
+			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret,
 			&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 		)
 		if err != nil {

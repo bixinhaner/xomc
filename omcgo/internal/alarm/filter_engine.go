@@ -3,6 +3,7 @@ package alarm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,22 +13,25 @@ import (
 
 // FilterEngine 告警过滤引擎，根据告警过滤规则处理入站告警。
 type FilterEngine struct {
-	filterRepo AlarmFilterRuleRepository
-	store      AlarmStore
-	dispatcher WebhookDispatcher
-	metrics    *WebhookMetrics
-	logger     *zap.Logger
+	filterRepo     AlarmFilterRuleRepository
+	store          AlarmStore
+	dispatcher     WebhookDispatcher
+	deadLetterRepo DeadLetterRepository
+	metrics        *WebhookMetrics
+	logger         *zap.Logger
 }
 
 // NewFilterEngine 创建告警过滤引擎。
 //
-// dispatcher / metrics 可为 nil：
-//   - dispatcher == nil → 回退到 noopWebhookDispatcher，notify_webhook 动作记 skipped 计数；
-//   - metrics == nil    → 不记 Prometheus 指标。
+// dispatcher / deadLetterRepo / metrics 可为 nil：
+//   - dispatcher == nil      → 回退到 noopWebhookDispatcher，notify_webhook 动作记 skipped 计数；
+//   - deadLetterRepo == nil  → ErrDeadLetter 时仅记日志，不持久化（适合内存测试）；
+//   - metrics == nil         → 不记 Prometheus 指标。
 func NewFilterEngine(
 	filterRepo AlarmFilterRuleRepository,
 	store AlarmStore,
 	dispatcher WebhookDispatcher,
+	deadLetterRepo DeadLetterRepository,
 	metrics *WebhookMetrics,
 	logger *zap.Logger,
 ) *FilterEngine {
@@ -38,11 +42,12 @@ func NewFilterEngine(
 		logger = zap.NewNop()
 	}
 	return &FilterEngine{
-		filterRepo: filterRepo,
-		store:      store,
-		dispatcher: dispatcher,
-		metrics:    metrics,
-		logger:     logger,
+		filterRepo:     filterRepo,
+		store:          store,
+		dispatcher:     dispatcher,
+		deadLetterRepo: deadLetterRepo,
+		metrics:        metrics,
+		logger:         logger,
 	}
 }
 
@@ -154,7 +159,7 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 
 	case FilterActionNotifyWebhook:
 		e.dispatchWebhook(ctx, alarm, rule)
-		// 不阻塞：dispatch 错误已在 dispatchWebhook 内部 log + 计数，调用方仍视为已处理
+		// 不阻塞：dispatch 错误已在 dispatchWebhook 内部 log + 计数 + dead-letter 落库，调用方仍视为已处理
 		return &ProcessResult{Handled: true, Action: FilterActionNotifyWebhook}, nil
 
 	default:
@@ -163,7 +168,9 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 }
 
 // dispatchWebhook 构建 alarm payload 并交给 dispatcher 发送。
-// 失败仅 log + 计数，不向调用方传播。
+// dispatcher 内部已实现 retry / HMAC，这里负责：
+//   - skipped 路径（缺 URL）记 metric 并返回；
+//   - ErrDeadLetter 时写一条 dead-letter 记录（如配置了 repo），便于后续排查 / 重投递。
 func (e *FilterEngine) dispatchWebhook(ctx context.Context, alarm *model.Alarm, rule *AlarmFilterRule) {
 	if rule.WebhookURL == nil || *rule.WebhookURL == "" {
 		// DB CHECK 约束理论上拒绝此情况，留作运行时兜底。
@@ -183,17 +190,39 @@ func (e *FilterEngine) dispatchWebhook(ctx context.Context, alarm *model.Alarm, 
 			zap.String("rule_name", rule.Name),
 			zap.Error(err))
 		if e.metrics != nil {
-			e.metrics.DispatchTotal.WithLabelValues("failure").Inc()
+			e.metrics.DispatchTotal.WithLabelValues("dead_letter").Inc()
 		}
 		return
 	}
 
-	if err := e.dispatcher.Dispatch(ctx, *rule.WebhookURL, body); err != nil {
-		// dispatcher 内部已经记 metric + warn，这里再附 rule 上下文
+	secret := ""
+	if rule.WebhookSecret != nil {
+		secret = *rule.WebhookSecret
+	}
+
+	if err := e.dispatcher.Dispatch(ctx, *rule.WebhookURL, secret, body); err != nil {
+		// dispatcher 内部已记 metric（success/retry/dead_letter）+ warn；
+		// 这里追加 rule 上下文，并在 dead-letter 时持久化死信记录。
 		e.logger.Warn("webhook dispatch returned error",
 			zap.String("rule_name", rule.Name),
 			zap.String("alarm_identifier", alarm.AlarmIdentifier),
 			zap.Error(err))
+		if errors.Is(err, ErrDeadLetter) && e.deadLetterRepo != nil {
+			rec := &DeadLetterRecord{
+				FilterID:   rule.ID,
+				AlarmID:    alarm.ID,
+				Payload:    body,
+				LastError:  err.Error(),
+				RetryCount: webhookRetryMaxRetry,
+				FailedAt:   time.Now(),
+			}
+			if dlErr := e.deadLetterRepo.Insert(ctx, rec); dlErr != nil {
+				e.logger.Error("insert dead-letter record failed",
+					zap.String("rule_name", rule.Name),
+					zap.String("alarm_identifier", alarm.AlarmIdentifier),
+					zap.Error(dlErr))
+			}
+		}
 		return
 	}
 
@@ -203,8 +232,8 @@ func (e *FilterEngine) dispatchWebhook(ctx context.Context, alarm *model.Alarm, 
 		zap.String("webhook_url", *rule.WebhookURL))
 }
 
-// webhookPayload 是 W1.5 冒烟版本的 alarm webhook 负载结构。
-// Wave 2 T-0011 将引入用户可配模板渲染，届时此结构可作为默认模板的字段集。
+// webhookPayload 是当前的 alarm webhook 负载结构。
+// 后续任务（用户可配模板）将此结构作为默认模板的字段集。
 type webhookPayload struct {
 	AlarmIdentifier string    `json:"alarm_identifier"`
 	Severity        int       `json:"severity"` // 1=Critical/2=Major/3=Minor/4=Warning，与 global.AlarmSeverity 对齐

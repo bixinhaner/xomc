@@ -59,22 +59,27 @@ func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error  
 
 // mockDispatcher 记录所有 Dispatch 调用，用于断言。
 type mockDispatcher struct {
-	mu      sync.Mutex
-	calls   []dispatchCall
+	mu       sync.Mutex
+	calls    []dispatchCall
 	failNext bool
+	failErr  error // 显式指定失败时返回的错误（用于测 ErrDeadLetter 路径）
 }
 
 type dispatchCall struct {
 	URL     string
+	Secret  string
 	Payload []byte
 }
 
-func (m *mockDispatcher) Dispatch(ctx context.Context, url string, payload []byte) error {
+func (m *mockDispatcher) Dispatch(ctx context.Context, url, secret string, payload []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, dispatchCall{URL: url, Payload: append([]byte(nil), payload...)})
+	m.calls = append(m.calls, dispatchCall{URL: url, Secret: secret, Payload: append([]byte(nil), payload...)})
 	if m.failNext {
 		m.failNext = false
+		if m.failErr != nil {
+			return m.failErr
+		}
 		return assert.AnError
 	}
 	return nil
@@ -90,7 +95,7 @@ func (m *mockDispatcher) Calls() []dispatchCall {
 
 func newTestFilterEngine(rules []AlarmFilterRule, dispatcher WebhookDispatcher) *FilterEngine {
 	repo := &mockFilterRuleRepo{rules: rules}
-	return NewFilterEngine(repo, &mockStoreForEngine{}, dispatcher, nil, zap.NewNop())
+	return NewFilterEngine(repo, &mockStoreForEngine{}, dispatcher, nil, nil, zap.NewNop())
 }
 
 func TestMatch_IgnoreAction(t *testing.T) {
@@ -251,7 +256,7 @@ func TestProcessAlarm_NotifyWebhook_EndToEnd(t *testing.T) {
 			Name:             "webhook-e2e",
 		},
 	}}
-	engine := NewFilterEngine(repo, &mockStoreForEngine{}, dispatcher, metrics, zap.NewNop())
+	engine := NewFilterEngine(repo, &mockStoreForEngine{}, dispatcher, nil, metrics, zap.NewNop())
 
 	alarm := &model.Alarm{
 		ID:              uuid.New(),

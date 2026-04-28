@@ -20,6 +20,7 @@ type AlarmEngine struct {
 	carrierRegistry *carrier.CarrierRegistry
 	eventBus        event.EventBus
 	metrics         *AlarmMetrics
+	filterEngine    *FilterEngine // optional; nil 时跳过过滤逻辑（向后兼容）
 	logger          *zap.Logger
 }
 
@@ -45,6 +46,12 @@ func (e *AlarmEngine) SetMetrics(m *AlarmMetrics) {
 	e.metrics = m
 }
 
+// SetFilterEngine 注入过滤引擎，使所有入站告警在落库前先经 FilterEngine.ProcessAlarm。
+// 调用方负责构造 FilterEngine（带 dispatcher / dead-letter / metrics）。nil 时跳过过滤。
+func (e *AlarmEngine) SetFilterEngine(fe *FilterEngine) {
+	e.filterEngine = fe
+}
+
 // severityLabel converts an AlarmSeverity to a Prometheus label string.
 func severityLabel(s model.AlarmSeverity) string {
 	return strconv.Itoa(int(s))
@@ -52,6 +59,27 @@ func severityLabel(s model.AlarmSeverity) string {
 
 // Process handles an incoming alarm: maps severity, deduplicates, and persists.
 func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
+	// 0. Apply user-defined filter rules (W2 T-0011 接生产路径)
+	//    ignore     → 直接返回，不入库
+	//    auto_clear → 直接返回，不入库（设备-发起的清除走 AutoClear 路径）
+	//    auto_ack / notify_webhook → 仅修改 alarm 状态或派发 webhook，仍继续走 dedup + 入库
+	if e.filterEngine != nil {
+		result, err := e.filterEngine.ProcessAlarm(ctx, alarm, alarm.DeviceID)
+		if err != nil {
+			e.logger.Warn("filter engine processing failed, falling through to default flow",
+				zap.Error(err),
+				zap.String("alarm_identifier", alarm.AlarmIdentifier))
+		} else if result != nil && result.Handled {
+			switch result.Action {
+			case FilterActionIgnore, FilterActionAutoClear:
+				e.logger.Debug("alarm short-circuited by filter",
+					zap.String("action", result.Action),
+					zap.String("alarm_identifier", alarm.AlarmIdentifier))
+				return nil
+			}
+		}
+	}
+
 	// 1. Map severity via carrier adapter
 	if e.carrierRegistry != nil {
 		c, err := e.carrierRegistry.Get(alarm.Carrier)

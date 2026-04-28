@@ -37,6 +37,7 @@ type AlarmFilterRule struct {
 	Action          string      `json:"action" db:"action"`
 	AcknowledgeDesc string      `json:"acknowledge_desc,omitempty" db:"acknowledge_desc"`
 	WebhookURL      *string     `json:"webhook_url,omitempty" db:"webhook_url"`
+	WebhookSecret   *string     `json:"webhook_secret,omitempty" db:"webhook_secret"`
 	Priority        int         `json:"priority" db:"priority"`
 	Enabled         bool        `json:"enabled" db:"enabled"`
 	CreatedBy       string      `json:"created_by,omitempty" db:"created_by"`
@@ -64,6 +65,7 @@ type CreateAlarmFilterRuleRequest struct {
 	Action          string      `json:"action" binding:"required,oneof=default ignore auto_acknowledge auto_clear notify_webhook"`
 	AcknowledgeDesc string      `json:"acknowledge_desc"`
 	WebhookURL      *string     `json:"webhook_url"`
+	WebhookSecret   *string     `json:"webhook_secret"`
 	Priority        int         `json:"priority"`
 	Enabled         *bool       `json:"enabled"`
 }
@@ -79,6 +81,7 @@ type UpdateAlarmFilterRuleRequest struct {
 	Action          *string      `json:"action" binding:"omitempty,oneof=default ignore auto_acknowledge auto_clear notify_webhook"`
 	AcknowledgeDesc *string      `json:"acknowledge_desc"`
 	WebhookURL      *string      `json:"webhook_url"`
+	WebhookSecret   *string      `json:"webhook_secret"`
 	Priority        *int         `json:"priority"`
 	Enabled         *bool        `json:"enabled"`
 }
