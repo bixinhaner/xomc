@@ -25,20 +25,32 @@ type GroupAssigner interface {
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	deviceRepo     DeviceRepository
-	paramRepo      DeviceParameterRepository
-	deviceInfoRepo DeviceInfoRepository
-	regRepo        RegistrationRepository
-	groupAssigner  GroupAssigner
-	infoSyncer     *InfoSyncer
-	heartbeat      *HeartbeatMonitor
-	eventBus       event.EventBus
-	taskSvc        task.Enqueuer
-	connReq        ConnectionRequester
-	stunUpdater    StunAddressUpdater
-	cache          *DeviceCache
-	metrics        *DeviceMetrics
-	logger         *zap.Logger
+	deviceRepo       DeviceRepository
+	paramRepo        DeviceParameterRepository
+	deviceInfoRepo   DeviceInfoRepository
+	regRepo          RegistrationRepository
+	groupAssigner    GroupAssigner
+	infoSyncer       *InfoSyncer
+	heartbeat        *HeartbeatMonitor
+	eventBus         event.EventBus
+	taskSvc          task.Enqueuer
+	connReq          ConnectionRequester
+	stunUpdater      StunAddressUpdater
+	cache            *DeviceCache
+	metrics          *DeviceMetrics
+	licenseEnforcer  LicenseEnforcer
+	logger           *zap.Logger
+}
+
+// LicenseEnforcer is the narrow interface DeviceService consumes from the
+// license package. Defined here on the consumer side so DeviceService stays
+// independent of the full license model. Wired via SetLicenseEnforcer.
+//
+// Both methods may be called as nil-safe gates: SetLicenseEnforcer with a
+// nil value is fine and disables enforcement (used in dev/test).
+type LicenseEnforcer interface {
+	EnforceCapacity(ctx context.Context, additional int) error
+	EnforceExpiry(ctx context.Context, operation string) error
 }
 
 // ConnectionRequester sends Connection Request to wake a CPE device.
@@ -107,6 +119,12 @@ func (s *DeviceService) SetRegistrationRepo(repo RegistrationRepository) {
 // SetGroupAssigner sets the group assigner for assigning devices to groups.
 func (s *DeviceService) SetGroupAssigner(ga GroupAssigner) {
 	s.groupAssigner = ga
+}
+
+// SetLicenseEnforcer wires the license enforcer used by CreateDevice to gate
+// against capacity/expiry. Pass nil to disable (default in tests).
+func (s *DeviceService) SetLicenseEnforcer(e LicenseEnforcer) {
+	s.licenseEnforcer = e
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
@@ -965,6 +983,16 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 	}
 	if existing != nil {
 		return nil, commonerrors.ErrAlreadyExists
+	}
+
+	// License enforcement (T-0015 / R-103). nil enforcer = enforcement disabled.
+	if s.licenseEnforcer != nil {
+		if err := s.licenseEnforcer.EnforceExpiry(ctx, "device.create"); err != nil {
+			return nil, err
+		}
+		if err := s.licenseEnforcer.EnforceCapacity(ctx, 1); err != nil {
+			return nil, err
+		}
 	}
 
 	now := time.Now()

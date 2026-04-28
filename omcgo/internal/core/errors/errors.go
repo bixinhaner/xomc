@@ -28,6 +28,11 @@ var (
 	ErrInternal      = errors.New("internal error")
 	ErrTimeout       = errors.New("operation timed out")
 	ErrUnavailable   = errors.New("service unavailable")
+
+	// License enforcement sentinels (R-103 / T-0015).
+	// Both map to HTTP 403 via HTTPStatusFromError.
+	ErrLicenseCapacityExceeded = errors.New("license capacity exceeded")
+	ErrLicenseExpired          = errors.New("license expired")
 )
 
 // Error code ranges by domain:
@@ -131,6 +136,9 @@ func HTTPStatusFromError(err error) int {
 	case errors.Is(err, ErrUnauthorized):
 		return http.StatusUnauthorized
 	case errors.Is(err, ErrForbidden):
+		return http.StatusForbidden
+	case errors.Is(err, ErrLicenseCapacityExceeded),
+		errors.Is(err, ErrLicenseExpired):
 		return http.StatusForbidden
 	case errors.Is(err, ErrTimeout):
 		return http.StatusGatewayTimeout

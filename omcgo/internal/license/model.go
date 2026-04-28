@@ -48,6 +48,37 @@ type License struct {
 	Notes       *string         `json:"notes"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+
+	// Enforcement extension (T-0015 / R-103, migration 000043).
+
+	// GracePeriodDays is the number of days after ExpiryDate that the license
+	// is still considered active (0 = no grace). Range [0, 365].
+	GracePeriodDays int `json:"grace_period_days"`
+
+	// CapacityAlertThresholds is a JSON array of percentage breakpoints (e.g.
+	// [80, 90, 95]) that trigger capacity alerts when used_devices/max_devices
+	// crosses each threshold.
+	CapacityAlertThresholds json.RawMessage `json:"capacity_alert_thresholds"`
+
+	// LastCapacityAlertAt tracks the most recent capacity alert dispatch for
+	// dedup (6h window per threshold). Nil if never alerted.
+	LastCapacityAlertAt *time.Time `json:"last_capacity_alert_at"`
+
+	// LastCapacityAlertThreshold records the threshold percentage of the most
+	// recent alert so the monitor can detect threshold crossings.
+	LastCapacityAlertThreshold *int `json:"last_capacity_alert_threshold"`
+}
+
+// Quota describes the current license enforcement state, returned by
+// GET /api/v1/licenses/quota.
+type Quota struct {
+	HasActiveLicense bool    `json:"has_active_license"`
+	MaxDevices       int     `json:"max_devices"`
+	UsedDevices      int     `json:"used_devices"`
+	UsageRatio       float64 `json:"usage_ratio"`
+	DaysRemaining    int     `json:"days_remaining"` // -1 = perpetual / no expiry
+	LicenseType      string  `json:"license_type"`
+	GracePeriodDays  int     `json:"grace_period_days"`
 }
 
 // LicenseSummary contains aggregated license statistics.

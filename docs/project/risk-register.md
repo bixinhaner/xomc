@@ -189,10 +189,11 @@
 - **概率**：中
 - **影响**：违反商业约束，不符合授权要求
 - **Owner**：电信业务专家
-- **状态**：Open
-- **关联 Task**：T-0015（License 容量/过期拦截）
-- **缓解**：Sprint 3 补拦截逻辑
-- **下次复盘**：Sprint-03
+- **状态**：✅ Closed (2026-04-28)
+- **关联 Task**：T-0015（License 容量/过期拦截）✅ done
+- **缓解**：T-0015 完成 — Enforcer + Monitor cron + 6 Prometheus metrics + device.CreateDevice 拦截闸 + GET /licenses/quota 端点；6 项决策（过期软告警限写 D1 / 三档容量阈值 D2 / max active license D3 / perpetual 跳过 D4 / grace_period_days 可配 D5 / 第一版仅 device D6）全部实施
+- **关闭依据**：`docs/project/prd/F06-license-enforcement.md` + `docs/review-report/20260428/verify-T-0015.md` + commit (post-S6)
+- **下次复盘**：N/A（已关闭）
 
 ### R-104 拓扑自动分组规则引擎未激活
 - **描述**：`rule_service` 注释为 TODO，rule_matcher 存在但未接入

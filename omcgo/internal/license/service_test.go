@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -18,12 +19,17 @@ import (
 // --- Mock Repository ---
 
 type mockLicenseRepo struct {
-	createFn    func(ctx context.Context, lic *License) error
-	getByIDFn   func(ctx context.Context, id uuid.UUID) (*License, error)
-	getByCodeFn func(ctx context.Context, code string) (*License, error)
-	updateFn    func(ctx context.Context, lic *License) error
-	listFn      func(ctx context.Context, filter LicenseFilter) (*model.ListResponse[License], error)
-	summaryFn   func(ctx context.Context) (*LicenseSummary, error)
+	createFn      func(ctx context.Context, lic *License) error
+	getByIDFn     func(ctx context.Context, id uuid.UUID) (*License, error)
+	getByCodeFn   func(ctx context.Context, code string) (*License, error)
+	updateFn      func(ctx context.Context, lic *License) error
+	listFn        func(ctx context.Context, filter LicenseFilter) (*model.ListResponse[License], error)
+	summaryFn     func(ctx context.Context) (*LicenseSummary, error)
+	getActiveFn   func(ctx context.Context) (*License, error)
+	listActiveFn  func(ctx context.Context) ([]*License, error)
+	countDevFn    func(ctx context.Context) (int, error)
+	markExpFn     func(ctx context.Context, id uuid.UUID) error
+	updCapAlertFn func(ctx context.Context, id uuid.UUID, threshold int, at time.Time) error
 }
 
 func (m *mockLicenseRepo) Create(ctx context.Context, lic *License) error {
@@ -66,6 +72,41 @@ func (m *mockLicenseRepo) Summary(ctx context.Context) (*LicenseSummary, error) 
 		return m.summaryFn(ctx)
 	}
 	return nil, nil
+}
+
+func (m *mockLicenseRepo) GetActiveLicenseWithMaxDevices(ctx context.Context) (*License, error) {
+	if m.getActiveFn != nil {
+		return m.getActiveFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockLicenseRepo) ListActiveLicenses(ctx context.Context) ([]*License, error) {
+	if m.listActiveFn != nil {
+		return m.listActiveFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockLicenseRepo) CountDevices(ctx context.Context) (int, error) {
+	if m.countDevFn != nil {
+		return m.countDevFn(ctx)
+	}
+	return 0, nil
+}
+
+func (m *mockLicenseRepo) MarkExpired(ctx context.Context, id uuid.UUID) error {
+	if m.markExpFn != nil {
+		return m.markExpFn(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockLicenseRepo) UpdateCapacityAlert(ctx context.Context, id uuid.UUID, threshold int, at time.Time) error {
+	if m.updCapAlertFn != nil {
+		return m.updCapAlertFn(ctx, id, threshold, at)
+	}
+	return nil
 }
 
 // --- Helper ---

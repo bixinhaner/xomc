@@ -130,6 +130,9 @@ func (m *mockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64
 func (m *mockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *mockDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Mock: DeviceParameterRepository

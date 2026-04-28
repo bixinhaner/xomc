@@ -138,6 +138,9 @@ func (m *fakeDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64
 func (m *fakeDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *fakeDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 

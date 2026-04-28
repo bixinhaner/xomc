@@ -5102,6 +5102,20 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/licenses/$W2D_BAD_UUID" -H "$W2D_AUTH")
 check_status_in "W2D lic-3: GET /licenses/<not-found>" "404 401" "$HTTP_CODE"
 
+# T-0015 / R-103: License capacity & expiry enforcement
+claim "license: quota endpoint returns 200/401 with has_active_license field"
+QUOTA_BODY=$(curl -s "$API/licenses/quota" -H "$W2D_AUTH" 2>/dev/null || true)
+QUOTA_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/licenses/quota" -H "$W2D_AUTH")
+check_status_in "W2D lic-4: GET /licenses/quota" "200 401" "$QUOTA_HTTP"
+if [ "$QUOTA_HTTP" = "200" ]; then
+    if echo "$QUOTA_BODY" | grep -q '"has_active_license"'; then
+        pass "W2D lic-4a: quota response includes has_active_license"
+    else
+        fail "W2D lic-4a: quota response missing has_active_license field"
+    fi
+fi
+
 # ------------------------------------------------------------
 section "W2.D.1 ops Domain (≥ 3 claims)"
 

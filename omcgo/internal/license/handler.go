@@ -33,12 +33,29 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 	// Register specific routes BEFORE the :id route to avoid conflicts.
 	licenses.GET("/summary", h.GetSummary)
+	licenses.GET("/quota", h.GetQuota)
 	licenses.POST("/activate", h.Activate)
 	licenses.POST("/import", h.Import)
 
 	licenses.GET("", h.List)
 	licenses.GET("/:id", h.GetByID)
 	licenses.POST("/:id/revoke", h.Revoke)
+}
+
+// GetQuota returns the current license enforcement state.
+//
+//	GET /api/v1/licenses/quota
+//
+// Response: 200 + Quota JSON; HasActiveLicense=false when no active license.
+func (h *Handler) GetQuota(c *gin.Context) {
+	q, err := h.service.Quota(c.Request.Context())
+	if err != nil {
+		h.logger.Error("get license quota failed", zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			commonerrors.NewBusinessError(9103, "failed to load license quota", err))
+		return
+	}
+	c.JSON(http.StatusOK, q)
 }
 
 // ---- Request types ----

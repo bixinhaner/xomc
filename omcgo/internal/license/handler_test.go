@@ -100,6 +100,53 @@ func (m *fakeLicenseRepo) Summary(_ context.Context) (*LicenseSummary, error) {
 	return summary, nil
 }
 
+// Enforcement extension methods (T-0015 / R-103).
+
+func (m *fakeLicenseRepo) GetActiveLicenseWithMaxDevices(_ context.Context) (*License, error) {
+	var best *License
+	for _, lic := range m.licenses {
+		if lic.Status != StatusActive {
+			continue
+		}
+		if best == nil || lic.MaxDevices > best.MaxDevices {
+			best = lic
+		}
+	}
+	return best, nil
+}
+
+func (m *fakeLicenseRepo) ListActiveLicenses(_ context.Context) ([]*License, error) {
+	var out []*License
+	for _, lic := range m.licenses {
+		if lic.Status == StatusActive {
+			out = append(out, lic)
+		}
+	}
+	return out, nil
+}
+
+// fakeDeviceCount lets tests override the device-count return value.
+var fakeDeviceCount = 0
+
+func (m *fakeLicenseRepo) CountDevices(_ context.Context) (int, error) {
+	return fakeDeviceCount, nil
+}
+
+func (m *fakeLicenseRepo) MarkExpired(_ context.Context, id uuid.UUID) error {
+	if lic, ok := m.licenses[id]; ok {
+		lic.Status = StatusExpired
+	}
+	return nil
+}
+
+func (m *fakeLicenseRepo) UpdateCapacityAlert(_ context.Context, id uuid.UUID, threshold int, at time.Time) error {
+	if lic, ok := m.licenses[id]; ok {
+		lic.LastCapacityAlertAt = &at
+		lic.LastCapacityAlertThreshold = &threshold
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

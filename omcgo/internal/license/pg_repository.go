@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -16,6 +17,19 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
+
+// licenseEnforcementColumns is the full column list including the
+// enforcement-extension columns added by migration 000043. Used by
+// methods that need GracePeriodDays / CapacityAlertThresholds / etc.
+var licenseEnforcementColumns = []string{
+	"id", "license_name", "license_code", "product_name",
+	"license_type", "status", "max_devices", "used_devices",
+	"features", "issue_date", "expiry_date",
+	"licensor", "device_type", "region", "notes",
+	"created_at", "updated_at",
+	"grace_period_days", "capacity_alert_thresholds",
+	"last_capacity_alert_at", "last_capacity_alert_threshold",
+}
 
 // PostgreSQL unique_violation error code.
 // See: https://www.postgresql.org/docs/current/errcodes-appendix.html
@@ -292,6 +306,139 @@ func scanLicenseRow(rows pgx.Rows) (*License, error) {
 		l.Features = json.RawMessage("[]")
 	}
 	return &l, nil
+}
+
+// ======================================================================
+// Enforcement methods (T-0015 / R-103)
+// ======================================================================
+
+// scanLicenseFull scans a row containing the full licenseEnforcementColumns
+// (21 columns), populating the enforcement-extension fields.
+func scanLicenseFull(row pgx.Row) (*License, error) {
+	var l License
+	var featuresJSON []byte
+	var thresholdsJSON []byte
+
+	err := row.Scan(
+		&l.ID, &l.LicenseName, &l.LicenseCode, &l.ProductName,
+		&l.LicenseType, &l.Status, &l.MaxDevices, &l.UsedDevices,
+		&featuresJSON, &l.IssueDate, &l.ExpiryDate,
+		&l.Licensor, &l.DeviceType, &l.Region, &l.Notes,
+		&l.CreatedAt, &l.UpdatedAt,
+		&l.GracePeriodDays, &thresholdsJSON,
+		&l.LastCapacityAlertAt, &l.LastCapacityAlertThreshold,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if featuresJSON != nil {
+		l.Features = json.RawMessage(featuresJSON)
+	}
+	if l.Features == nil {
+		l.Features = json.RawMessage("[]")
+	}
+	if thresholdsJSON != nil {
+		l.CapacityAlertThresholds = json.RawMessage(thresholdsJSON)
+	}
+	if l.CapacityAlertThresholds == nil {
+		l.CapacityAlertThresholds = json.RawMessage("[80, 90, 95]")
+	}
+	return &l, nil
+}
+
+// GetActiveLicenseWithMaxDevices returns the active license with the largest
+// MaxDevices, the canonical "enforcement" license when multiple actives
+// exist. Returns (nil, nil) if no active license exists.
+func (r *PgLicenseRepository) GetActiveLicenseWithMaxDevices(ctx context.Context) (*License, error) {
+	query, args, err := storage.Psql.Select(licenseEnforcementColumns...).
+		From("licenses").
+		Where(sq.Eq{"status": StatusActive}).
+		OrderBy("max_devices DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build active license query: %w", err)
+	}
+
+	lic, err := scanLicenseFull(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get active license with max devices: %w", err)
+	}
+	return lic, nil
+}
+
+// ListActiveLicenses returns all licenses currently in active status.
+func (r *PgLicenseRepository) ListActiveLicenses(ctx context.Context) ([]*License, error) {
+	query, args, err := storage.Psql.Select(licenseEnforcementColumns...).
+		From("licenses").
+		Where(sq.Eq{"status": StatusActive}).
+		OrderBy("max_devices DESC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list active licenses query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list active licenses: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*License
+	for rows.Next() {
+		lic, err := scanLicenseFull(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan active license: %w", err)
+		}
+		out = append(out, lic)
+	}
+	return out, nil
+}
+
+// CountDevices returns the total number of registered devices.
+// Used as the "used_devices" measurement for capacity enforcement.
+func (r *PgLicenseRepository) CountDevices(ctx context.Context) (int, error) {
+	var count int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM devices").Scan(&count); err != nil {
+		return 0, fmt.Errorf("count devices: %w", err)
+	}
+	return count, nil
+}
+
+// MarkExpired transitions a license from active to expired. Idempotent.
+func (r *PgLicenseRepository) MarkExpired(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Update("licenses").
+		Set("status", StatusExpired).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"status": StatusActive}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark expired SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("mark license expired: %w", err)
+	}
+	return nil
+}
+
+// UpdateCapacityAlert records the most recent capacity alert (threshold and
+// timestamp) so the hourly checker can dedupe within a 6h window.
+func (r *PgLicenseRepository) UpdateCapacityAlert(ctx context.Context, id uuid.UUID, threshold int, at time.Time) error {
+	query, args, err := storage.Psql.Update("licenses").
+		Set("last_capacity_alert_at", at).
+		Set("last_capacity_alert_threshold", threshold).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update capacity alert SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update capacity alert: %w", err)
+	}
+	return nil
 }
 
 // ---- shared helpers ----

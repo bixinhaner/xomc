@@ -307,11 +307,32 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.baselineHandler = baseline.NewHandler(baselineSvc, logger)
 	logger.Info("config baseline module initialized")
 
-	// License module
+	// License module + Enforcer (T-0015 / R-103).
+	// Enforcer is registered with the global Prometheus registry so the
+	// 6 license metrics are scraped without further wiring. Enforcer is
+	// wired into Service for cache invalidation and also exposed via
+	// Container so DeviceService can pick it up via SetLicenseEnforcer.
 	licenseRepo := license.NewPgLicenseRepository(c.PgPool)
 	licenseSvc := license.NewService(licenseRepo, logger)
+	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
+	licenseEnforcer := license.NewEnforcer(licenseRepo, logger, licenseMetrics)
+	licenseSvc.SetEnforcer(licenseEnforcer)
 	c.miscDeps.licenseHandler = license.NewHandler(licenseSvc, logger)
-	logger.Info("license module initialized")
+	c.miscDeps.licenseEnforcer = licenseEnforcer
+	c.miscDeps.licenseMonitor = license.NewMonitor(licenseRepo, license.NoopAlertSink{}, licenseMetrics, logger)
+
+	// Wire enforcer into DeviceService so device.create / future write ops
+	// gate on capacity + expiry. Read-only operations are unaffected (D1).
+	if c.DeviceService != nil {
+		c.DeviceService.SetLicenseEnforcer(licenseEnforcer)
+	}
+
+	// Start the cron monitor. ctx-derived timeout per check ensures a stuck
+	// scrape can't cascade-fail subsequent ticks.
+	if err := c.miscDeps.licenseMonitor.Start(context.Background()); err != nil {
+		logger.Warn("license monitor start failed", zap.Error(err))
+	}
+	logger.Info("license module initialized with enforcer + cron monitor")
 
 	// OpsTools module
 	opsTemplateRepo := ops.NewPgTemplateRepository(c.PgPool)
@@ -411,8 +432,10 @@ type miscDeps struct {
 	// Baseline
 	baselineHandler *baseline.Handler
 
-	// License
-	licenseHandler *license.Handler
+	// License + enforcement (T-0015 / R-103)
+	licenseHandler  *license.Handler
+	licenseEnforcer *license.EnforcerImpl
+	licenseMonitor  *license.Monitor
 
 	// Ops
 	opsHandler *ops.Handler

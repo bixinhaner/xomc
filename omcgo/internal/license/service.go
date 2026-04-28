@@ -14,8 +14,9 @@ import (
 
 // Service provides business logic for license management.
 type Service struct {
-	repo   LicenseRepository
-	logger *zap.Logger
+	repo     LicenseRepository
+	logger   *zap.Logger
+	enforcer Enforcer // optional; nil during bootstrap before Enforcer is wired
 }
 
 // NewService creates a new license Service.
@@ -24,6 +25,28 @@ func NewService(repo LicenseRepository, logger *zap.Logger) *Service {
 		repo:   repo,
 		logger: logger.Named("license"),
 	}
+}
+
+// SetEnforcer wires an Enforcer so the Service can call Invalidate after
+// state-mutating operations (Import / Activate / Revoke). Optional.
+func (s *Service) SetEnforcer(e Enforcer) {
+	s.enforcer = e
+}
+
+// invalidateEnforcerCache calls Invalidate on the Enforcer if wired.
+func (s *Service) invalidateEnforcerCache() {
+	if s.enforcer != nil {
+		s.enforcer.Invalidate()
+	}
+}
+
+// Quota is a passthrough to Enforcer.Quota for the handler. Returns an
+// empty quota with HasActiveLicense=false when no Enforcer is wired.
+func (s *Service) Quota(ctx context.Context) (*Quota, error) {
+	if s.enforcer == nil {
+		return &Quota{HasActiveLicense: false}, nil
+	}
+	return s.enforcer.Quota(ctx)
 }
 
 // List returns a paginated list of licenses.
@@ -61,6 +84,8 @@ func (s *Service) Activate(ctx context.Context, licenseCode string) (*License, e
 		return nil, fmt.Errorf("activate license: %w", err)
 	}
 
+	s.invalidateEnforcerCache()
+
 	s.logger.Info("license activated",
 		zap.String("license_id", lic.ID.String()),
 		zap.String("license_code", licenseCode),
@@ -84,6 +109,8 @@ func (s *Service) Revoke(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.Update(ctx, lic); err != nil {
 		return fmt.Errorf("revoke license: %w", err)
 	}
+
+	s.invalidateEnforcerCache()
 
 	s.logger.Info("license revoked",
 		zap.String("license_id", id.String()),
@@ -132,6 +159,8 @@ func (s *Service) Import(ctx context.Context, lic *License) (*License, error) {
 		// Repository may also detect unique-violation as a safety net.
 		return nil, fmt.Errorf("import license: %w", err)
 	}
+
+	s.invalidateEnforcerCache()
 
 	s.logger.Info("license imported",
 		zap.String("license_id", lic.ID.String()),

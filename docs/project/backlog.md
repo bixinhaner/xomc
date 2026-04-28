@@ -67,13 +67,13 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 45 | — | +三并行批：T-0041 (W1.4 ratelimit 数据回写) + T-0026 (Runbook 体系 6 份 ≥5) + T-0013 (F08 SNMP 骨架 Wave 4 P0 启动)；+五并行批：T-0060 / T-0061 / T-0065 / T-0067 / T-0024 |
+| `done` | 46 | — | +T-0015 (License Enforcer + Monitor + 6 metrics, R-103 关闭)；+三并行批 / +五并行批（详见早期记账）|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 14 | — | -3 (T-0041/T-0026/T-0013 done) -5 (五并行批 done) |
+| `planned` | 13 | — | -1 (T-0015 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
-| **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
+| **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：P1 R-103 在 T-0015 后关闭，但不计入 P0 计数）|
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
 | **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+A.5 + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）|
 | **Wave 3 章程计分** | **11 / 15 ✅ (退出门槛达成)** | ≥ 11/15 | **🎉 真过门 73%**：E.1+E.2+E.3 (NATS) / F.2+F.3 (性能/连接池) / G.1+G.2+G.3 (安全) / H.1+H.3 (K8s/异地备份) / I.1 (Release Gate)；剩余 4 项：F.1 (5K 24h 压测)/H.2 (零停机演练)/I.2 (灰度演练)/I.3 (回滚演练) — 均需 staging 环境 |
@@ -245,7 +245,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0012 | worker 进程重试 / 死信队列 | feat | infra | P1 | planned | 架构+运维 | L | T-0010 | R-106 | sprint-02..04 | 2026-04-20 |
 | T-0013 | F08 SNMP Trap 骨架（PRD 365 行 + 10 .go 文件 + 50 测/82.1% cov + 依赖完全隔离，待 T-0017 接生产）| feat | F08 | P0 | done | Claude | L | — | R-003 / `prd/F08-oss-protocol.md` | sprint-03 | 2026-04-28 |
 | T-0014 | F04 告警短信通道 | feat | F04 | P0 | planned | 电信+Go | M | T-0009 | R-001 / `prd/F04-alarm-notification.md` | sprint-03 | 2026-04-20 |
-| T-0015 | License 容量 / 过期拦截 | feat | F06/license | P1 | planned | 电信 | M | — | R-103 | sprint-03 | 2026-04-20 |
+| T-0015 | License Enforcer + Monitor cron + 6 metrics + device.Create 闸（capacity/expiry/grace/multi-active/perpetual D1-D6 全实施）| feat | F06/license | P1 | done | Claude | M | — | R-103 / `prd/F06-license-enforcement.md` | sprint-03 | 2026-04-28 |
 | T-0016 | 前端 Backup 业务逻辑补齐 | feat | frontend | P1 | planned | 前端 | M | — | R-102 | sprint-03 | 2026-04-20 |
 | T-0017 | F08 SNMP Trap 联调（staging ≥1 家运营商） | feat | F08 | P0 | planned | PM+架构 | L | T-0013 | R-003 | sprint-04 | 2026-04-20 |
 | T-0018 | Software 灰度升级策略 | feat | F06/software | P1 | planned | 电信 | L | — | R-101 | sprint-04..05 | 2026-04-20 |
@@ -487,6 +487,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | done | T-0041 W1.4 backlog 数据回写 | commit `758aace9` 早已落地 W1.4 ratelimit per-IP token bucket（2026-04-27），本次仅 backlog 主表 planned → done + Owner Claude，无新代码；属数据一致性 fix。Wave 1 计分仍 8.0/8 ✅ 不变（T-0041 早已计入）。 |
 | 2026-04-28 | done | T-0026 W3 Runbook 体系达 6 ≥5 | commit `f4bba7da`（cherry-pick 自 worktree-agent-t0026@ef2e60f7，sub-agent 8.2min）；3 新 Runbook 共 1491+ 行（pg-failover 390 / redis-failover 455 / acs-overload 479），9 章节完整结构（目标/前置/故障注入/期间观察/恢复/验证/失败处理/回滚/实测占位）；故障注入命令具体可执行（patronictl / pkill / iptables / Sentinel FAILOVER / cpe_simulator.py / loadtest）；6 份 Runbook 体系：DR 整机房 + PG/Redis/NATS 数据层 + ACS 流量层 + Backup 基线。release-gate.md §3.4 Runbook ≥5 项达标。 |
 | 2026-04-28 | done | T-0013 F08 SNMP Trap 骨架（Wave 4 P0 启动） | commit `928d7124`（cherry-pick 自 worktree-agent-t0013@4ce84c04，sub-agent 10.4min）；PRD 七要素全 365 行（业务背景/用户故事/3 GWT/CMCC+CTCC+CUCC 差异矩阵/非目标/依赖/度量 + 设计备忘 6 节）；10 .go 文件骨架（types.go 153 / oid.go 32 / mapper.go 93 / sender.go 255 / registry.go 176 / engine.go 182 / doc.go 44 / 三测 668 行 50 测例）；**关键设计：依赖完全隔离**（go list -deps grep "internal/(alarm\|carrier\|core/event)" → 零）+ Sender/Registry/AlarmMapper 三层接口化（T-0017 替换实现 Engine 零改）+ WithMapper hook 预留 + AlarmEvent 私有 stub；安全红线 TrapTarget.String() 永不渲染 community/authPassword/privPassword（有测试守护）；新增依赖 gosnmp v1.43.2 + benbjohnson/clock；Pass：build/vet/test -race/82.1% cov 全过。**严禁 10/10 全守**：未动 cmd/app/provider / cmd/app/router / internal/alarm / internal/carrier / migrations 等。后续 PR：T-0017（接 alarm.Engine + Carrier + DI + router + migration + 联调 ≥1 家运营商）/ T-0020（重试+outbox+熔断+告警）。 |
+| 2026-04-28 | done | T-0015 License Enforcer + Monitor + R-103 关闭 | `/dev-pipeline pick T-0015` ULTRATHINK A 方案（主会话全程深度协作）。完整 S0→S7：S0 PRD 七要素 270 行 + CMCC/CTCC/CUCC 差异矩阵（一致，OEM 颁发与运营商解耦）；S2 设计备忘内嵌 PRD（Enforcer 接口 + DB schema + 缓存策略 + 多 active 处理）；S3 实施 6 项决策（D1-D6 全部按 ULTRATHINK 推荐落地）：5 新文件（enforcer.go 270 + enforcer_test.go 280 / monitor.go 310 + monitor_test.go 250 / metrics.go 95）+ migration 000043（grace_period_days+capacity_alert_thresholds+last_capacity_alert_at + 2 partial index）+ 13 修改文件（errors sentinel + repo 接口 5 新方法 + pg_repo scanLicenseFull + service Enforcer hook + handler /quota 端点 + DI 装载 + DeviceService.SetLicenseEnforcer + Monitor.Start cron）；S4 自验：go build/test -race/vet/check-migrations 全过 / 6 metric grep 全过 / 18+14 单测 / 新代码覆盖率 84-100% / e2e_verify.sh +1 claim；**bonus 修补 8 个 mock 文件加 ListProductClasses stub**（main HEAD pre-existing，T-0045 sub-agent 已发现）；S5/S6/S7：feat 类型完整流水线 + R-103 关闭 + commit + push。**核心突破**：device.CreateDevice 现在可拦截超容量+过期，dev 默认放行（无 active license = warn + metric 0），多 active 取 max(MaxDevices)，永久 license 跳过过期检查，6h 同阈值告警去重。 |
 
 ---
 

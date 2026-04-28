@@ -216,6 +216,9 @@ func (m *svcMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (in
 func (m *svcMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *svcMockDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 type svcMockCmdQueue struct {
 	createFn func(ctx context.Context, req *devtask.CreateTaskRequest) (*devtask.Task, error)

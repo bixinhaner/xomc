@@ -101,6 +101,9 @@ func (m *execDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int64
 func (m *execDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *execDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 // execCmdQueue is the test stand-in for task.Enqueuer: it captures
 // CreateTask calls so assertions can inspect what was enqueued.

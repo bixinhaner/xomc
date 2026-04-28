@@ -120,6 +120,9 @@ func (m *infMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (in
 func (m *infMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *infMockDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 type infMockParamRepo struct {
 	batchUpsertFn func(ctx context.Context, deviceID uuid.UUID, params []model.DeviceParameter) error

@@ -121,6 +121,9 @@ func (m *hbMockDeviceRepo) RestoreDevices(_ context.Context, _ []uuid.UUID) (int
 func (m *hbMockDeviceRepo) PermanentDelete(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (m *hbMockDeviceRepo) ListProductClasses(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
