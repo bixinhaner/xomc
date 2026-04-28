@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -229,6 +230,153 @@ func TestProcessAlarm_NotifyWebhook_MissingURL_Skipped(t *testing.T) {
 	assert.True(t, result.Handled, "missing URL still treated as handled to keep flow non-blocking")
 	assert.Equal(t, FilterActionNotifyWebhook, result.Action)
 	assert.Empty(t, dispatcher.Calls(), "dispatcher should not be called when URL is empty")
+}
+
+// ------------ W2.A.1 / T-0007 整合：notify_email 测试 ------------
+
+// mockEmailDispatcher 记录所有 Dispatch 调用，用于断言。
+type mockEmailDispatcher struct {
+	mu    sync.Mutex
+	calls []emailCall
+}
+
+type emailCall struct {
+	To      []string
+	Subject string
+	Body    string
+}
+
+func (m *mockEmailDispatcher) Dispatch(_ context.Context, to []string, subject, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, emailCall{To: append([]string(nil), to...), Subject: subject, Body: body})
+	return nil
+}
+
+func (m *mockEmailDispatcher) Calls() []emailCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]emailCall, len(m.calls))
+	copy(out, m.calls)
+	return out
+}
+
+// W2.A.1：notify_email 命中规则后应调用 emailDispatcher，收件人/Subject/Body 与配置一致。
+func TestProcessAlarm_NotifyEmail_Dispatched(t *testing.T) {
+	dispatcher := &mockEmailDispatcher{}
+	engine := newTestFilterEngine([]AlarmFilterRule{
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionNotifyEmail,
+			EmailRecipients:  []string{"oncall@omc.local", "ops@omc.local"},
+			Name:             "email-offline",
+		},
+	}, nil)
+	engine.SetEmailDispatcher(dispatcher)
+
+	alarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-OFFLINE",
+		Severity:        model.AlarmCritical,
+		AlarmIdentifier: "DEVICE_OFFLINE",
+		AlarmSource:     strPtr("Device"),
+		Status:          model.AlarmActive,
+		RaisedAt:        time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC),
+	}
+
+	result, err := engine.ProcessAlarm(context.Background(), alarm, alarm.DeviceID)
+	assert.NoError(t, err)
+	assert.True(t, result.Handled)
+	assert.Equal(t, FilterActionNotifyEmail, result.Action)
+
+	calls := dispatcher.Calls()
+	assert.Len(t, calls, 1, "email dispatcher should be invoked once")
+	assert.Equal(t, []string{"oncall@omc.local", "ops@omc.local"}, calls[0].To)
+	assert.Contains(t, calls[0].Subject, "DEVICE_OFFLINE")
+	assert.Contains(t, calls[0].Subject, "SN-OFFLINE")
+	assert.Contains(t, calls[0].Body, "DEVICE_OFFLINE")
+	assert.Contains(t, calls[0].Body, "Device")
+	assert.Contains(t, calls[0].Body, "SN-OFFLINE")
+}
+
+// W2.A.1 兜底：收件人列表为空时，dispatcher 不被调用，rule 仍记 Handled=true。
+func TestProcessAlarm_NotifyEmail_MissingRecipients_Skipped(t *testing.T) {
+	dispatcher := &mockEmailDispatcher{}
+	engine := newTestFilterEngine([]AlarmFilterRule{
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"CPU_OVERLOAD"},
+			Action:           FilterActionNotifyEmail,
+			EmailRecipients:  nil,
+			Name:             "email-missing",
+		},
+	}, nil)
+	engine.SetEmailDispatcher(dispatcher)
+
+	alarm := &model.Alarm{AlarmIdentifier: "CPU_OVERLOAD"}
+	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.UUID{})
+	assert.NoError(t, err)
+	assert.True(t, result.Handled, "missing recipients still treated as handled")
+	assert.Equal(t, FilterActionNotifyEmail, result.Action)
+	assert.Empty(t, dispatcher.Calls(), "dispatcher should not be called when recipients empty")
+}
+
+// W2.A.1 章程：notify_email 与真实 SMTP 服务对接（复用 email_dispatcher_test.go 的 mockSMTPServer）。
+func TestProcessAlarm_NotifyEmail_EndToEnd(t *testing.T) {
+	srv := newMockSMTPServer(t, mockSMTPBehavior{})
+	t.Cleanup(srv.Close)
+
+	dispatcher := NewSMTPEmailDispatcher(
+		EmailConfig{
+			Host:    srv.host,
+			Port:    srv.port,
+			From:    "alarm@omc.test",
+			Timeout: 2 * time.Second,
+		},
+		zap.NewNop(),
+		NewEmailMetrics(nil),
+	)
+
+	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionNotifyEmail,
+			EmailRecipients:  []string{"oncall@omc.test", "ops@omc.test"},
+			Name:             "email-e2e",
+		},
+	}}
+	engine := NewFilterEngine(repo, &mockStoreForEngine{}, nil, nil, nil, zap.NewNop())
+	engine.SetEmailDispatcher(dispatcher)
+
+	alarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-E2E",
+		Severity:        model.AlarmMajor,
+		AlarmIdentifier: "DEVICE_OFFLINE",
+		AlarmSource:     strPtr("Device"),
+		Status:          model.AlarmActive,
+		RaisedAt:        time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := engine.ProcessAlarm(ctx, alarm, alarm.DeviceID)
+	assert.NoError(t, err)
+	assert.True(t, result.Handled)
+	assert.Equal(t, FilterActionNotifyEmail, result.Action)
+
+	// 等 SMTP server 收到 DATA（Dispatch 同步完成时已落数据）
+	body := srv.DataBody()
+	assert.NotEmpty(t, body, "mock SMTP should receive DATA body")
+	assert.Contains(t, body, "Subject: ")
+	assert.Contains(t, body, "DEVICE_OFFLINE")
+	assert.Contains(t, body, "From: alarm@omc.test")
+	assert.Contains(t, body, "To: oncall@omc.test, ops@omc.test")
 }
 
 // W1.5 charter 步骤 4：与真实 HTTP 服务对接，httptest.Server 替代 webhook.site。
