@@ -69,6 +69,88 @@ jobs:
         run: npm run typecheck
 
   # ============================================================
+  # 安全扫描（W3.G.1 / T-0062）— 2026-04-28 起生效
+  # 配套：docs/security/scan-baseline-2026-04-28.md
+  # 三 jobs 并行；high/critical 阻塞 merge（exit code != 0 → CI fail）
+  # 工具版本 pin 至明确 tag，避免上游升级破坏。
+  # ============================================================
+
+  security-gosec:
+    name: Security · gosec (Go SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go 1.25
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: omcgo/go.sum
+
+      - name: Install gosec v2.21.4
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
+
+      - name: Run gosec
+        working-directory: omcgo
+        # -severity high: 仅 high/critical 失败；medium/low 在 baseline 治理
+        # -confidence medium: 滤掉低置信度噪声
+        # -exclude-dir: 跳过测试夹具与生成代码
+        # -exclude=G115,G118,G404: baseline 治理项
+        #   G115 (整型溢出转换 ×129) — 全部 PG repository 分页 cast，业务路径已校验，待 R-310 专项修
+        #   G118 (goroutine context.Background ×13) — 部分守护型 goroutine 设计意图，待 R-311 逐点 review
+        #   G404 (math/rand ×9) — 全部非加密用途（cwmpID 计数 / UDP jitter / 压测），待 R-312 迁 math/rand/v2
+        # 详见 docs/security/scan-baseline-2026-04-28.md §3
+        run: gosec -severity high -confidence medium -exclude-dir=test/fixtures -exclude=G115,G118,G404 ./...
+
+  security-govulncheck:
+    name: Security · govulncheck (Go vuln DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go 1.25
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: omcgo/go.sum
+
+      - name: Install govulncheck v1.1.4
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run govulncheck
+        working-directory: omcgo
+        run: govulncheck ./...
+
+  security-npm-audit:
+    name: Security · npm audit (Frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: omcmb/webcode/package-lock.json
+
+      - name: Install dependencies
+        working-directory: omcmb/webcode
+        run: npm ci
+
+      - name: npm audit (high/critical only)
+        working-directory: omcmb/webcode
+        # --audit-level=high → 只看 high/critical；moderate/low 在 baseline 治理
+        # --omit=dev → 生产依赖才阻塞 merge；devDeps 漏洞不进入产物
+        run: npm audit --audit-level=high --omit=dev
+
+  # ============================================================
   # 以下 Job 在 ratchet 时间点启用，先以 continue-on-error 试运行
   # 取消注释 + 删除 continue-on-error 即从"宽容"转为"阻塞"
   # ============================================================
