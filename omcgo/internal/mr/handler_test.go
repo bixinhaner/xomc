@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/mr/parser"
 	"github.com/stretchr/testify/assert"
@@ -381,4 +383,87 @@ func TestHandler_QueryMRData_WithMRTypeFilter(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Tests — UpdateMapping / ToggleMapping NotFound mapping (T-0057)
+// ---------------------------------------------------------------------------
+
+// TestUpdateMapping_NotFound_Returns404 verifies that PUT /mr/mappings/:id
+// returns 404 (not 500) when the mapping does not exist. Repository wraps
+// pgx.ErrNoRows / RowsAffected==0 as coreerrors.ErrNotFound; handler must
+// translate via HTTPStatusFromError + AbortWithError.
+func TestUpdateMapping_NotFound_Returns404(t *testing.T) {
+	mapRepo := &mockMappingRepo{
+		updateFn: func(_ context.Context, _ *MRDeviceMapping) error {
+			return fmt.Errorf("mr mapping not found: %w", coreerrors.ErrNotFound)
+		},
+	}
+	router := setupMRRouter(&mockMRStore{}, &mockIndicatorRepo{}, mapRepo)
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"sampling_interval":30}`)
+	req, _ := http.NewRequest(http.MethodPut, "/mr/mappings/00000000-0000-0000-0000-000000000001", body)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestUpdateMapping_BareErrNotFound_Returns404 covers repositories that return
+// a bare ErrNotFound sentinel (no fmt.Errorf wrap). HTTPStatusFromError must
+// still resolve via errors.Is.
+func TestUpdateMapping_BareErrNotFound_Returns404(t *testing.T) {
+	mapRepo := &mockMappingRepo{
+		updateFn: func(_ context.Context, _ *MRDeviceMapping) error {
+			return coreerrors.ErrNotFound
+		},
+	}
+	router := setupMRRouter(&mockMRStore{}, &mockIndicatorRepo{}, mapRepo)
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"sampling_interval":30}`)
+	req, _ := http.NewRequest(http.MethodPut, "/mr/mappings/00000000-0000-0000-0000-000000000099", body)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestUpdateMapping_OtherError_Returns500 verifies non-NotFound errors fall
+// back to 500 (default branch of HTTPStatusFromError).
+func TestUpdateMapping_OtherError_Returns500(t *testing.T) {
+	mapRepo := &mockMappingRepo{
+		updateFn: func(_ context.Context, _ *MRDeviceMapping) error {
+			return fmt.Errorf("db connection lost")
+		},
+	}
+	router := setupMRRouter(&mockMRStore{}, &mockIndicatorRepo{}, mapRepo)
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"sampling_interval":30}`)
+	req, _ := http.NewRequest(http.MethodPut, "/mr/mappings/00000000-0000-0000-0000-000000000001", body)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// TestToggleMapping_NotFound_Returns404 covers PUT /mr/mappings/:id/toggle
+// where ToggleEnabled returned ErrNotFound (pgx.ErrNoRows on RETURNING).
+func TestToggleMapping_NotFound_Returns404(t *testing.T) {
+	mapRepo := &mockMappingRepo{
+		toggleEnabledFn: func(_ context.Context, _ uuid.UUID, _ bool) (*MRDeviceMapping, error) {
+			return nil, fmt.Errorf("mr mapping not found: %w", coreerrors.ErrNotFound)
+		},
+	}
+	router := setupMRRouter(&mockMRStore{}, &mockIndicatorRepo{}, mapRepo)
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"enabled":false}`)
+	req, _ := http.NewRequest(http.MethodPut, "/mr/mappings/00000000-0000-0000-0000-000000000001/toggle", body)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }

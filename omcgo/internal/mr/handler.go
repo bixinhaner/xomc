@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
@@ -330,7 +331,7 @@ func (h *Handler) UpdateMapping(c *gin.Context) {
 	}
 
 	if err := h.mapRepo.Update(c.Request.Context(), mapping); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, coreerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, mapping)
@@ -352,7 +353,7 @@ func (h *Handler) ToggleMapping(c *gin.Context) {
 
 	result, err := h.mapRepo.ToggleEnabled(c.Request.Context(), id, req.Enabled)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, coreerrors.HTTPStatusFromError(err), err)
 		return
 	}
 	c.JSON(http.StatusOK, result)

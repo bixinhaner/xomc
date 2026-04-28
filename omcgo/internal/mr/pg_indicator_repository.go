@@ -2,6 +2,7 @@ package mr
 
 import (
 	"context"
+	gerr "errors"
 	"fmt"
 
 	"github.com/Masterminds/squirrel"
@@ -153,8 +154,8 @@ func (r *PgIndicatorRepository) GetByCode(ctx context.Context, code string) (*MR
 
 	ind, err := scanIndicator(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, commonerrors.ErrNotFound
+		if gerr.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("mr indicator not found: %w", commonerrors.ErrNotFound)
 		}
 		return nil, fmt.Errorf("get mr_indicator: %w", err)
 	}
@@ -288,7 +289,7 @@ func (r *PgMappingRepository) Update(ctx context.Context, mapping *MRDeviceMappi
 		return fmt.Errorf("update mr_device_mapping: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return commonerrors.ErrNotFound
+		return fmt.Errorf("mr mapping not found: %w", commonerrors.ErrNotFound)
 	}
 	return nil
 }
@@ -305,8 +306,8 @@ func (r *PgMappingRepository) ToggleEnabled(ctx context.Context, id uuid.UUID, e
 
 	m, err := scanMapping(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, commonerrors.ErrNotFound
+		if gerr.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("mr mapping not found: %w", commonerrors.ErrNotFound)
 		}
 		return nil, fmt.Errorf("toggle mr_device_mapping: %w", err)
 	}
