@@ -99,12 +99,12 @@
 | W1.4 | T-0041 | `internal/core/middleware/ratelimit` 落地 | ✅ 2026-04-27 | Claude | commit `758aace9`；per-IP token bucket（`golang.org/x/time/rate`，sync.Map+atomic 无锁读路径，后台清扫）+ `cmd/app/provider/router.go` 接入 100 r/s burst 200，跳过 /healthz/readyz/metrics；10 单元测试 -race PASS；charter 两条 grep 全过；新指标 `http_ratelimit_rejections_total{path}` |
 | W1.5 | T-0007 + T-0011（W1.5 子集） | F04 告警 webhook 端到端冒烟 | ✅ 2026-04-27 | Claude | commit `43903b81`；migration 000038 加 `alarm_filters.webhook_url` + CHECK 约束；新加 `notify_webhook` filter action + `WebhookDispatcher` 接口（HTTP/JSON，5s 超时，无重试）；8 单元测试 -race 全过（5 dispatcher + 3 filter engine 含 `TestProcessAlarm_NotifyWebhook_EndToEnd` 用 httptest.Server 验证 charter 步骤 4）；新指标 `alarm_webhook_dispatches_total{result}`；retry/dead-letter/HMAC/header/template/email/sms 留 Wave 2 Block A 全量做 |
 | W1.6 | T-0006 | E2E 累计用例 @≥20 | ✅ 2026-04-27 | Claude | commit `328c1f48`；`scripts/e2e_verify.sh` 加 `claim()`/`CLAIM_COUNT` 计数器 + W1.6 段补 26 条 claim；实跑 W1.6 段 **27 PASS / 0 FAIL**；五域齐备（auth 5 / device 6 / alarm 5 / kpi+pm 5 / template 5）；断言只判 200/401/404/400 不依赖 seed 列表非空；template 用例自创建-回查-DELETE 闭环 |
-| W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | 🟢 0.5 (DoD-partial) 2026-04-27 | Claude | commit `e878d5e0`；yaml 严格解析 + grep 命中三 service；三 curl 未实测（worktree 无 docker），复现脚本在 verify-T-0008.md §4.2，docker 环境跑后回填 §4.3 即转 ✅ |
+| W1.7 | T-0008 | Prom/Grafana/AlertManager 容器编排 | ✅ 2026-04-28 (backfill) | Claude | commit `e878d5e0` (主体) + verify-T-0008.md §4.3 backfill (2026-04-28)；docker compose 起三容器 → Prom `Healthy.` / Grafana `database=ok v10.4.0` / AlertManager `OK` / `/api/v1/targets` 4 target 全 `up`（omc-app/acs/worker/prometheus）；DoD 满 |
 | W1.8 | T-0042 | 数据库定时备份 + 恢复演练 | ✅ 2026-04-27 | Claude | commit `27fa743a`；DoD 三 grep 全过；真跑 backup + restore drill：6 项校验全 OK，**RTO 实测 1.034s**（44MB / 30,030 设备 / 138 表，本机 PG16） |
 
 **Wave 1 退出（2026-05-11 对峙）**：≥ 6/8 ✅ + 用户尽责 → 进 Wave 2；< 4/8 + 用户尽责 → AI 嘴炮认账（见 `docs/methodology/AI承诺对峙清单.md` 第二章）
 
-**📊 当前阶段计分（2026-04-27 第三次盘点）**：**7.5 / 8 ✅** = W1.1 + W1.2 + W1.3 + W1.4 + W1.5 + W1.6 + W1.7×0.5 + W1.8 = 1 + 1 + 1 + 1 + 1 + 1 + 0.5 + 1 = 7.5；**已过退出门槛 6/8 + 1.5 buffer**（距 2026-05-11 对峙日还有 14 天）。剩余：W1.7 (0.5 docker 环境实测三 curl，外部待办)。**满分路径**：找带 docker 的环境跑 `docs/review-report/20260427/verify-T-0008.md §4.2` 三 curl → 8.0/8。**历史盘点**：一盘 4.5（W1.3/W1.7×0.5/W1.8 落地后）；二盘 6.5（W1.4/W1.6 闭环后）；三盘 7.5（W1.5 闭环后）。
+**📊 当前阶段计分（2026-04-28 第四次盘点 — 满分）**：**8.0 / 8 ✅** = W1.1 + W1.2 + W1.3 + W1.4 + W1.5 + W1.6 + W1.7 + W1.8 = 1×8 = 8.0；**Wave 1 满分提前 13 天达成**（对峙日 2026-05-11）。**第二章 W1 末通过率门槛全部突破**：8/8 = 100% > 75% 兑现门槛。**历史盘点**：一盘 4.5（W1.3/W1.7×0.5/W1.8 落地后）；二盘 6.5（W1.4/W1.6 闭环后）；三盘 7.5（W1.5 闭环后）；**四盘 8.0（W1.7 docker backfill 收尾，docker compose up 三容器 + 三 curl + targets 全 up，verify-T-0008.md §4.3 实跑日志已贴）**。
 
 **📌 W1.6 spec 决策（2026-04-27）**：
 - 现状：`scripts/e2e_verify.sh` 已含 226 处 `check_status`（多为框架骨架 / 占位），R-002 描述实际可跑用例数为 0（grep `claim` = 0）
@@ -202,7 +202,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 |----|-------|------|--------|------|-------|-------|-----|------|----------|--------|---------|
 | T-0006 | E2E 用例补齐（贯穿 01→07 累计 ≥200） | td | infra | P0 | in_dev | QA | XL | — | R-002 | sprint-01..07 | 2026-04-20 |
 | T-0007 | F04 告警邮件通道 | feat | F04 | P0 | planned | 电信+Go | M | — | R-001 / `prd/F04-alarm-notification.md` | sprint-01 | 2026-04-20 |
-| T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | done(0.5) | Claude | M | — | R-107 | wave-1 | 2026-04-27 |
+| T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | done | Claude | M | — | R-107 | wave-1 | 2026-04-28 |
 | T-0009 | 短信服务商凭据申请启动（外部动作） | td | F04 | P0 | planned | PM | S | — | R-001 | sprint-01 | 2026-04-20 |
 | T-0010 | NATS JetStream 事件总线改造 | feat | infra | P0 | planned | 架构+运维 | XL | — | R-004 / `prd/infra-event-bus.md`（待产出） | sprint-02..04 | 2026-04-20 |
 | T-0011 | F04 告警 Webhook 通道 | feat | F04 | P0 | planned | 电信+Go | M | T-0010 | R-001 / `prd/F04-alarm-notification.md` | sprint-02 | 2026-04-20 |
@@ -399,6 +399,9 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-27 | docs | W1.5 live | commit `a11ee3ab`；`docs/review-report/20260427/verify-T-0007-W1.5-live.md` 315 行；记录 charter 4 步 live 全过 + 已知边界（FilterEngine 未接入生产 alarm 路径，Wave 2 T-0011 必做） |
 | 2026-04-27 | 待 triage 候选 task | F04 alarm-filters API 改进 | 1) Create handler 加联合校验（action=notify_webhook 时 webhook_url 必填）→ 返回 400 而非 500；2) FilterEngine 装配进生产 alarm 接收路径（pre-existing tech debt，Wave 2 T-0011 全量必做） |
 | 2026-04-28 | Wave 2 章程立项 | T-0043~T-0055（13 条） | dev-pipeline Option A 路径：先补章程再发车。`AI承诺对峙清单.md` 新增「第二章半 · Wave 2 中段对峙窗口（W3-W8 各 Block）」13 条机械承诺（W2.A.1~A.5 / W2.B.1~B.4 / W2.C.1~C.3 / W2.D.1）含验证命令 + Pass/Fail 标准；Block A.5/A.6 + Block B.1-4（拆 4 条） + Block C.1-4 共 10 个 TBD 占位转 T-0043~T-0055（B.4 拆 mr/syslog/provision/interop 共 4 条 → 总 13 条）；State=planned / Sprint=wave-2 / Risk 字段引章程子项；通过率门槛 ≥ 9/13 = 69% 兑现，≤ 5/13 = AI 嘴炮（与第三章 W8 末并存：本章过程门，第三章退出门） |
+| 2026-04-28 | fix | charter W2.A.1/A.2/A.3 grep | commit `31dd1a69`；W2.A 三处 grep 路径原写 `notification_action_engine.go`（不存在），对齐到 alarm 模块实际：filter_model.go binding tag + filter_engine.go executeAction；HMAC header 名 `X-Hub-Signature` → `X-OMC-Signature`（与发车 sub-agent prompt 一致）；FilterEngine 接入路径 grep 范围扩到 receiver/sync_/handler/cmd-app；**仅修可验证性，不改任何承诺语义**（Pass 标准 / 责任划分 / N/A 条件 / Backlog ID 全部不动） |
+| 2026-04-28 | done | T-0008 (W1.7 backfill) | verify-T-0008.md §4.3 backfill：docker compose 起 prom/grafana/alertmanager 三容器，三 curl 全 200（Prom `Server is Healthy.` / Grafana `database=ok v10.4.0` / AlertManager `OK`）+ `/api/v1/targets` 4 target 全 `up`（omc-app/acs/worker/prometheus）；T-0008 state done(0.5) → done；**Wave 1 计分 7.5 → 8.0/8 ✅ 满分**（提前 13 天达成对峙日 2026-05-11） |
+| 2026-04-28 | wave-batched 四批并行 | T-0011 + T-0007 sub-agent | dev-pipeline §C.2.1 路径互斥编排发车：T-0011 (W2.A.2 webhook 完整化 retry/dead-letter/HMAC + FilterEngine 接生产路径) 改 webhook_dispatcher / filter_engine / filter_model / pg_filter_repository / 新 migration 000039；T-0007 (W2.A.1 EmailDispatcher 内部) 仅新建 email_dispatcher{,_test}.go，**严禁碰 filter_engine.go/filter_model.go**；§C.2.2 prompt 含工作目录硬约束 + 心跳协议；§C.2.3 主会话 watchdog；T-0007 完成 .wave-status=DONE，5 untracked 零 M，5 单测 -race PASS，整合 checklist 留主会话 |
 
 ---
 

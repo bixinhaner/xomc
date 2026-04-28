@@ -155,14 +155,50 @@ echo "== AlertManager ==" && curl -fsSL http://localhost:9093/-/healthy
 > **后续动作**：在带 docker 的开发机上执行 4.2 脚本，把真实 curl 输出
 > 追加到本文件第 4.3 节"实跑日志"中即可关闭 W1.7。
 
-### 4.3 实跑日志（占位，待具备 docker 的环境补齐）
+### 4.3 实跑日志（2026-04-28 backfill 完成 — Docker Desktop 29.4.0 / macOS）
 
 ```
-[ ] Prometheus  /-/healthy        → 待补
-[ ] Grafana     /api/health       → 待补
-[ ] AlertManager /-/healthy        → 待补
-[ ] /api/v1/targets activeTargets → 待补（应包含 omc-app/omc-acs/omc-worker）
+$ docker compose -f deployments/docker/docker-compose.yml up -d prometheus alertmanager grafana
+... Volume docker_prometheusdata Created
+... Volume docker_alertmanagerdata Created
+... Volume docker_grafanadata Created
+... Container docker-alertmanager-1 Started
+... Container docker-prometheus-1 Started → Healthy
+... Container docker-grafana-1 Started
+
+$ curl -fsSL http://localhost:9094/-/healthy
+Prometheus Server is Healthy.
+
+$ curl -fsSL http://localhost:3002/api/health
+{
+  "commit": "03f502a94d17f7dc4e6c34acdf8428aedd986e4c",
+  "database": "ok",
+  "version": "10.4.0"
+}
+
+$ curl -fsSL http://localhost:9093/-/healthy
+OK     (注：v0.27.0 实际返回 "OK"，原 §4.2 预期写"无 body"是经验值偏差；
+        HTTP 200 是判定依据，body 不影响)
+
+$ curl -s http://localhost:9094/api/v1/targets | python3 (jq 等价)
+omc-acs         health=up     lastError=
+omc-app         health=up     lastError=
+omc-worker      health=up     lastError=
+prometheus      health=up     lastError=
 ```
+
+判定（对照 §4.2 / §5 预期）：
+- [x] Prometheus  `/-/healthy`         → 200 body `Prometheus Server is Healthy.`
+- [x] Grafana     `/api/health`        → 200 JSON `database=ok version=10.4.0`
+- [x] AlertManager `/-/healthy`        → 200 body `OK`
+- [x] `/api/v1/targets activeTargets` → 4 个 target 全 `up`（omc-app/omc-acs/omc-worker/prometheus）
+
+**W1.7 全部 DoD 通过。任务从 done(0.5) 升至 done ✅。Wave 1 计分 7.5/8 → 8.0/8 满分（提前 13 天达成，对峙日 2026-05-11）。**
+
+容器留运行中，用户可访问：
+- Prometheus UI: http://localhost:9094
+- Grafana UI: http://localhost:3002 (admin/admin dev only)
+- AlertManager UI: http://localhost:9093
 
 ---
 
