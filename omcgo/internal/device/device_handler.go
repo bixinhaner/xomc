@@ -309,7 +309,7 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 	}
 
 	if err := h.service.RebootDevice(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 

@@ -448,6 +448,36 @@ func TestHandler_ListDevices(t *testing.T) {
 	assert.Equal(t, 20, resp.PageSize)
 }
 
+// TestRebootDevice_NotFound_Returns404 verifies that POST /devices/:id/reboot
+// returns 404 (not 500) when the device does not exist. This guards against
+// the prior bug where service-layer ErrNotFound was mapped to 500 by the
+// handler's hard-coded http.StatusInternalServerError.
+func TestRebootDevice_NotFound_Returns404(t *testing.T) {
+	h, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	nonExistentID := uuid.New()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+nonExistentID.String()+"/reboot", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestRebootDevice_InvalidUUID_Returns400 verifies that an unparseable UUID
+// path parameter still returns 400 Bad Request.
+func TestRebootDevice_InvalidUUID_Returns400(t *testing.T) {
+	h, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/not-a-uuid/reboot", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestHandler_GetStats(t *testing.T) {
 	h, deviceRepo, _ := newTestHandler()
 	router := setupRouter(h)
