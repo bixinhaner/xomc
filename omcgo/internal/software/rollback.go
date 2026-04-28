@@ -63,6 +63,13 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 		return
 	}
 
+	// Check device online status
+	if dev.Status != model.DeviceActive {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, device is %s. Please retry when device is online.", dev.Status), FailureDeviceOffline)
+		return
+	}
+
 	// Record device info
 	subTask.DeviceSN = dev.SerialNumber
 	subTask.OriVersion = dev.FirmwareVersion
