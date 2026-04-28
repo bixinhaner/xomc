@@ -47,10 +47,11 @@ func Test_ListRequest_Limit(t *testing.T) {
 		{"normal size", 20, 20},
 		{"size 1", 1, 1},
 		{"size 100", 100, 100},
+		{"size 1000", 1000, 1000},
 		{"zero defaults to 20", 0, 20},
 		{"negative defaults to 20", -5, 20},
-		{"over 100 capped to 100", 150, 100},
-		{"size 101 capped to 100", 101, 100},
+		{"over 1000 capped to 1000", 1500, 1000},
+		{"size 1001 capped to 1000", 1001, 1000},
 	}
 
 	for _, tt := range tests {
@@ -67,9 +68,9 @@ func Test_ListRequest_Limit_MutatesPageSize(t *testing.T) {
 	_ = r.Limit()
 	assert.Equal(t, 20, r.PageSize, "PageSize should be normalized after Limit()")
 
-	r2 := ListRequest{PageSize: 200}
+	r2 := ListRequest{PageSize: 2000}
 	_ = r2.Limit()
-	assert.Equal(t, 100, r2.PageSize, "PageSize should be capped after Limit()")
+	assert.Equal(t, 1000, r2.PageSize, "PageSize should be capped after Limit()")
 }
 
 func Test_NewListResponse(t *testing.T) {
