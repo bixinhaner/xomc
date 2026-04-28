@@ -68,15 +68,15 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 57 | — | +1 (T-0057 errors.NotFound 映射 bug 修复 2026-04-28) |
-| `done` | 29 | — | +T-0043 通知模板/历史 (W2.A.4，2 sub-agent 并行 + 主会话整合)|
+| `done` | 30 | — | +T-0044 notification 覆盖率 78.4% (W2.A.5)|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 18 | — | -1 (T-0043 done) |
+| `planned` | 17 | — | -1 (T-0044 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
-| **Wave 2 章程计分** | **11 / 13 ✅** | ≥ 9/13 | A.1+A.2+**A.4** + B.1-4 + C.1-3 + D.1 全 PASS（85%，超退出门槛 2）；剩余满分路径：W2.A.3 短信（凭据外部）+ W2.A.5 notification ≥70%（依赖 A.3 凭据） |
+| **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+**A.5** + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）；满分 13/13 需 user/PM 推动凭据申请 |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -228,7 +228,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0041 | `internal/core/middleware/ratelimit` 中间件（W1.4） | feat | infra | P0 | planned | TBD | M | — | `AI承诺对峙清单.md` W1.4 | wave-1 | 2026-04-27 |
 | T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.8 | wave-1 | 2026-04-27 |
 | T-0043 | 通知模板 + 历史记录（migration 000041 + 17 后端文件 + 11 前端文件 + DI/路由整合 + 4 e2e claim） | feat | F04 | P0 | done | Claude | L | T-0007,T-0011 | `AI承诺对峙清单.md` W2.A.4 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
-| T-0044 | notification/ 模块测试覆盖率 ≥ 70% | td | infra | P0 | planned | Go | M | T-0007,T-0011,T-0014,T-0043 | `AI承诺对峙清单.md` W2.A.5 | wave-2 | 2026-04-28 |
+| T-0044 | notification/ 模块测试覆盖率 27.6% → 78.4%（≥ 70%）| td | infra | P0 | done | Claude | M | T-0007,T-0011,T-0043 (T-0014 凭据外部，user 明示放开) | `AI承诺对峙清单.md` W2.A.5 | wave-2 | 2026-04-28 |
 | T-0045 | task/ 模块测试覆盖率 ≥ 70%（CWMP map / reboot closer / completion router） | td | infra | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W2.B.1 | wave-2 | 2026-04-28 |
 | T-0046 | events/ 模块测试覆盖率 ≥ 60% + 补 service 层（实测 87.6%） | td | infra | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W2.B.2 | wave-2 | 2026-04-28 |
 | T-0047 | core/ 模块测试覆盖率 43.2% → 55.7%（任务卡 16% 基线已过时） | td | infra | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W2.B.3 | wave-2 | 2026-04-28 |
@@ -424,6 +424,8 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | 🎉 done | T-0057 + W2.D.1 真过门 | 主会话重启 docker-app-1 拿新 binary 后复跑 e2e_verify.sh：**545 PASS / 0 FAIL / 147 TOTAL，claim 125** ✅ 章程 W2.D.1 字面三标准（claim≥100 / 实跑 Pass 100+ / Fail=0）全过。从 T-0006 W2D 段 99 / T-0056 framework 减到 9 fail / T-0057 修真 bug → 0 fail，全链路闭环。**Wave 2 章程计分 9/13 → 10/13**（77%）。第三章 W8.3 同步达成。距满分 13/13 还差 W2.A.3 (短信凭据外部) + W2.A.4 模板/历史 UI + W2.A.5 notification ≥70%。 |
 | 2026-04-28 | wave-batched 二并行 | T-0043 通知模板/历史 UI | dev-pipeline 2 sub-agent 并行（前端 + 后端，共享 API schema 防契约偏差）。前端 7min: 11 文件（types/api/hook/i18n/4 pages/route），typecheck 0 errors，落 main `f13d08dd`。后端 13min: migration 000041 + 17 文件（template + history 子模块各 8 + verify-md），32/32 测 PASS，落 main `638245cb`。两 sub-agent 都正常发回 completion notification（少见的"全正常"批次）。主会话整合 commit `9fa5c457`：modules.go DI 装配 + miscDeps 字段 + router.go 注册 `permGroup("alarms").Group("/notifications")`（templates+history）+ e2e_verify.sh 加 4 claim。 |
 | 2026-04-28 | 🎉 done | T-0043 + W2.A.4 真过门 | 主会话重启 docker-app-1 拿新 binary + 自动应用 migration 000041 后复跑：**549 PASS / 0 FAIL / claim 129** ✅ 章程 W2.A.4 4 grep 项全过（后端表 + API + 前端 + E2E ≥1）。**Wave 2 章程计分 10/13 → 11/13**（85%，超退出门槛 2）。距满分 13/13 仅剩 W2.A.3 短信（凭据 T-0009 外部，AI 不可解锁）+ W2.A.5 notification ≥70%（依赖 A.3）。本会话累计 49 个 commit 全本地未推送。 |
+| 2026-04-28 | done | T-0044 (W2.A.5) | commit `32a8f7eb`（cherry-pick 自 worktree-agent-a97f4040@f9773675）；user 明示放开严格 deps（T-0014 凭据外部）让 W2 推到 AI 极限。sub-agent ~5 分钟完成（4 测文件覆盖既有 5 文件 service/handler/pg_repository + mock_repository_test.go），整体 27.6% → **78.4%** ≥ 70% ✅。**第 7 次通知机制延迟 bug**触发（17 sub-agent 中 7 次延迟 ≈ 41%），主会话 §C.2.3 watchdog 接续。**Wave 2 章程计分 11/13 → 12/13 (92%)，达 AI 范围极限**。仅剩 W2.A.3 短信通道（凭据外部，user/PM 推动）。 |
+| 2026-04-28 | 🚀 push | 35+ commit → origin/main | 本会话累计 commit 推送远端 origin/main：1fd41095..cae74577（35 commits 第一波）+ T-0044 cherry-pick + backlog 状态回写（第二波）。GH Actions CI（W1.1 落地）应被触发跑 backend build+vet + frontend typecheck。本地 = 远端同步。 |
 
 ---
 
