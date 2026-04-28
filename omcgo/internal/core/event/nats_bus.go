@@ -104,38 +104,93 @@ func (b *NATSEventBus) Close() error {
 
 func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
 	return func(msg *nats.Msg) {
-		var evt Event
-		if err := json.Unmarshal(msg.Data, &evt); err != nil {
-			b.logger.Error("unmarshal event", zap.Error(err))
+		evt, parseErr := decodeEventBytes(msg.Data)
+		if parseErr != nil {
+			b.logger.Error("unmarshal event", zap.Error(parseErr))
 			// Permanent parse error — terminate to avoid infinite retry
-			msg.Term()
+			_ = msg.Term()
 			return
 		}
 
-		if err := handler(b.ctx, evt); err != nil {
-			meta, _ := msg.Metadata()
-			deliveries := uint64(1)
-			if meta != nil {
-				deliveries = meta.NumDelivered
-			}
-			b.logger.Error("handle event",
+		handlerErr := handler(b.ctx, evt)
+		deliveries := uint64(1)
+		if meta, mErr := msg.Metadata(); mErr == nil && meta != nil {
+			deliveries = meta.NumDelivered
+		}
+
+		decision := decideAck(handlerErr, deliveries, maxDeliveries)
+		switch decision.action {
+		case ackActionAck:
+			_ = msg.Ack()
+		case ackActionTerm:
+			b.logger.Error("handle event (terminating)",
 				zap.String("subject", evt.Subject),
 				zap.Uint64("delivery", deliveries),
-				zap.Error(err))
-			if deliveries >= maxDeliveries {
-				b.logger.Warn("max deliveries reached, terminating message",
-					zap.String("subject", evt.Subject),
-					zap.Uint64("deliveries", deliveries))
-				msg.Term()
-			} else {
-				// Exponential backoff: 1s, 2s, 4s, 8s ...
-				msg.NakWithDelay(time.Duration(1<<(deliveries-1)) * time.Second)
-			}
-			return
+				zap.Error(handlerErr))
+			_ = msg.Term()
+		case ackActionNak:
+			b.logger.Error("handle event (retrying)",
+				zap.String("subject", evt.Subject),
+				zap.Uint64("delivery", deliveries),
+				zap.Duration("backoff", decision.backoff),
+				zap.Error(handlerErr))
+			_ = msg.NakWithDelay(decision.backoff)
 		}
-
-		msg.Ack()
 	}
+}
+
+// ackAction 表示对一条 NATS 消息的处置动作。
+type ackAction int
+
+const (
+	ackActionAck ackAction = iota
+	ackActionNak
+	ackActionTerm
+)
+
+// ackDecision 描述 wrapHandler 在执行业务 handler 后对 nats.Msg 的处置。
+// 把决策逻辑独立成纯函数便于单元测试，避免依赖真实 NATS server。
+type ackDecision struct {
+	action  ackAction
+	backoff time.Duration
+}
+
+// decideAck 决定对已投递 deliveries 次的消息采取何种动作：
+//   - handler 无错 → Ack
+//   - handler 出错且未达 maxDelivery → Nak with exponential backoff
+//   - handler 出错且达到 maxDelivery → Term（避免无限重试）
+//
+// 指数退避序列：1s, 2s, 4s, 8s ...（基于 deliveries 已投递次数）。
+// 该函数无副作用，可独立测试。
+func decideAck(handlerErr error, deliveries, maxDelivery uint64) ackDecision {
+	if handlerErr == nil {
+		return ackDecision{action: ackActionAck}
+	}
+	if deliveries >= maxDelivery {
+		return ackDecision{action: ackActionTerm}
+	}
+	if deliveries == 0 {
+		deliveries = 1
+	}
+	// shift 上限保护，防止极端 deliveries 触发位移溢出。
+	shift := deliveries - 1
+	if shift > 30 {
+		shift = 30
+	}
+	return ackDecision{
+		action:  ackActionNak,
+		backoff: time.Duration(1<<shift) * time.Second,
+	}
+}
+
+// decodeEventBytes 把 JetStream 投递的 raw bytes 解析成 Event。
+// 单独提取便于测试 unmarshal 路径与错误处理。
+func decodeEventBytes(data []byte) (Event, error) {
+	var evt Event
+	if err := json.Unmarshal(data, &evt); err != nil {
+		return Event{}, fmt.Errorf("unmarshal event: %w", err)
+	}
+	return evt, nil
 }
 
 type natsSubscription struct {
