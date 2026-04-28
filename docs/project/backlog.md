@@ -67,16 +67,16 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 30 | — | Wave 1 满分 + Wave 2 12/13 (AI 极限) |
+| `done` | 33 | — | +Block G 三并行：T-0062 / T-0063 / T-0064（W3.G 全 PASS）|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 29 | — | +12 (T-0058~T-0069 Wave 3 入队) |
+| `planned` | 26 | — | -3 (Block G 三 task done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
 | **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+A.5 + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）|
-| **Wave 3 章程计分** | **0 / 15** | ≥ 11/15 | 立项 2026-04-28（章程见对峙清单第三章半），Block E NATS / F 性能 / G 安全 / H 部署 / I GA 各 3 项；终审对峙日 2026-08-03 |
+| **Wave 3 章程计分** | **3 / 15** | ≥ 11/15 | **Block G 安全全 PASS**（T-0062 CI 扫描 + T-0063 audit 5 类 + T-0064 redact 三层），20% 已达；下一目标 Block E NATS / Block F 性能 |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -177,9 +177,9 @@
 
 | 序 | Task | 标题 | 章程 |
 |----|------|------|------|
-| G.1 | T-0062 | 安全扫描进 CI（gosec/govulncheck/npm audit） | W3.G.1 |
-| G.2 | T-0063 | 审计日志完整（5 类关键操作） | W3.G.2 |
-| G.3 | T-0064 | 敏感信息脱敏（日志/错误响应） | W3.G.3 |
+| G.1 | T-0062 | 安全扫描进 CI（gosec/govulncheck/npm audit + R-310~R-314 风险草案）| ✅ W3.G.1 2026-04-28 |
+| G.2 | T-0063 | 审计日志完整 5 类（audit pkg + global singleton + 5 埋点）| ✅ W3.G.2 2026-04-28 |
+| G.3 | T-0064 | 敏感信息脱敏（redact + zap + errors 三层集成）| ✅ W3.G.3 2026-04-28 |
 
 **Block H · 部署（W13）**
 
@@ -280,9 +280,9 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0059 | NATS 故障演练（NATS 挂掉重连不丢事件，W3.E.3） | proc | infra | P0 | planned | 架构+运维 | M | T-0010,T-0058 | `AI承诺对峙清单.md` W3.E.3 / R-004 | wave-3 | 2026-04-28 |
 | T-0060 | 慢查询审计 top 10 优化（pgxpool slow query log + 索引/重写，W3.F.2） | perf | infra | P1 | planned | Go+数据 | M | — | `AI承诺对峙清单.md` W3.F.2 | wave-3 | 2026-04-28 |
 | T-0061 | 连接池配额监控 pgxpool/Redis/NATS（W3.F.3） | feat | ops | P1 | planned | 运维 | M | — | `AI承诺对峙清单.md` W3.F.3 | wave-3 | 2026-04-28 |
-| T-0062 | 安全扫描进 CI gosec/govulncheck/npm audit（W3.G.1） | proc | ops | P0 | planned | 运维+QA | M | — | `AI承诺对峙清单.md` W3.G.1 | wave-3 | 2026-04-28 |
-| T-0063 | 审计日志完整 5 类关键操作（W3.G.2） | feat | admin | P0 | planned | 安全+Go | M | — | `AI承诺对峙清单.md` W3.G.2 | wave-3 | 2026-04-28 |
-| T-0064 | 敏感信息脱敏（日志/错误响应不含明文，W3.G.3） | td | infra | P1 | planned | 安全+Go | M | — | `AI承诺对峙清单.md` W3.G.3 | wave-3 | 2026-04-28 |
+| T-0062 | 安全扫描进 CI（gosec/govulncheck/npm audit + R-310~R-314 草案登记） | proc | ops | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W3.G.1 / R-310~R-314 草案 | wave-3 | 2026-04-28 |
+| T-0063 | 审计日志完整 5 类（cross-module audit pkg + global singleton 自然解耦避 DI） | feat | admin | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W3.G.2 | wave-3 | 2026-04-28 |
+| T-0064 | 敏感信息脱敏（redact pkg + zap helper + errors AbortWithError 三层集成） | td | infra | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W3.G.3 | wave-3 | 2026-04-28 |
 | T-0065 | K8s manifests 全套（app/acs/worker × Deploy/Service/Ingress/CM/Secret/HPA，W3.H.1） | feat | ops | P0 | planned | 运维 | L | — | `AI承诺对峙清单.md` W3.H.1 | wave-3 | 2026-04-28 |
 | T-0066 | 滚动更新 + 零停机演练（HTTP 5xx=0% during deploy，W3.H.2） | proc | ops | P0 | planned | 运维 | M | T-0065 | `AI承诺对峙清单.md` W3.H.2 | wave-3 | 2026-04-28 |
 | T-0067 | 异地备份 + RTO<1h/RPO<15min（W3.H.3） | feat | ops | P0 | planned | 运维 | M | — | `AI承诺对峙清单.md` W3.H.3 | wave-3 | 2026-04-28 |
@@ -473,6 +473,10 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | done | T-0044 (W2.A.5) | commit `32a8f7eb`（cherry-pick 自 worktree-agent-a97f4040@f9773675）；user 明示放开严格 deps（T-0014 凭据外部）让 W2 推到 AI 极限。sub-agent ~5 分钟完成（4 测文件覆盖既有 5 文件 service/handler/pg_repository + mock_repository_test.go），整体 27.6% → **78.4%** ≥ 70% ✅。**第 7 次通知机制延迟 bug**触发（17 sub-agent 中 7 次延迟 ≈ 41%），主会话 §C.2.3 watchdog 接续。**Wave 2 章程计分 11/13 → 12/13 (92%)，达 AI 范围极限**。仅剩 W2.A.3 短信通道（凭据外部，user/PM 推动）。 |
 | 2026-04-28 | 🚀 push | 35+ commit → origin/main | 本会话累计 commit 推送远端 origin/main：1fd41095..cae74577（35 commits 第一波）+ T-0044 cherry-pick + backlog 状态回写（第二波）。GH Actions CI（W1.1 落地）应被触发跑 backend build+vet + frontend typecheck。本地 = 远端同步。 |
 | 2026-04-28 | Wave 3 章程立项 | T-0058~T-0069（12 条）+ 既有 T-0010/T-0023/T-0024 关联 | dev-pipeline /Wave 3 Option A — 仿 Wave 2 立项模式补章程。`AI承诺对峙清单.md` 新增「第三章半 · Wave 3 硬化期对峙窗口（W9-W14 各 Block）」**15 条机械可验证承诺**（W3.E.1~3 NATS / W3.F.1~3 性能 / W3.G.1~3 安全 / W3.H.1~3 部署 / W3.I.1~3 GA），每条带 grep + 命令 + Pass/Fail 标准。Backlog 立 T-0058~T-0069 共 12 条新 ID，State=planned/Sprint=wave-3；既有 T-0010/T-0023/T-0024 改 Sprint=wave-3 + Risk 字段引章程。⛔ 横幅升级到 Wave 3 期边界（2026-04-28 ~ 2026-08-03）。仪表盘 Total 57→69 / planned 17→29；Wave 3 计分 0/15。Wave 3 退出门槛 ≥ 11/15 (73%) 兑现，≤ 7/15 + 用户尽责 = AI 嘴炮（第八章认账触发）。本章覆盖第四章 7 条退出门中的 5 条实现细节，与第四章并存（本章过程门，第四章退出门）。 |
+| 2026-04-28 | wave-batched 三并行（Block G 安全） | T-0062 + T-0063 + T-0064 | dev-pipeline §C.2.1 路径互斥三层切割（.github/ vs internal/admin/audit/ vs internal/core/redact/）。三 sub-agent 全 DONE 全部落 main：T-0064 redact (ef8a42ca, 6min, redact pkg + zap + errors 三层 + 24 测) / T-0062 CI security (3a30dec5, 9.2min, ci.yml +3 jobs gosec/govulncheck/npm-audit + scan-baseline + R-310~R-314 草案) / T-0063 audit log (2306c33e, 14.4min, audit pkg + cross-module global singleton + 5 类埋点 + 8+5 测)；本批 3 sub-agent 通知机制全正常（少见的"全正常"批次，累计 21 sub-agent / 7 延迟 ≈ 33%）；T-0063 通过 NewAdminService side-effect 注册 audit sink 全局 singleton，**无需主会话整合 commit**（与 T-0007/T-0043 整合 commit 模式不同的优雅解耦）。**Wave 3 章程计分 0/15 → 3/15 (20%)**，Block G 安全全 PASS。 |
+| 2026-04-28 | done | T-0062 W3.G.1（CI 安全扫描）| commit `3a30dec5`；ci.yml +82 行加 3 并行 job（gosec@v2.21.4 / govulncheck@v1.1.4 / npm audit --omit=dev --audit-level=high），全工具版本 pin；gosec 排除 G115/G118/G404 safe by design 类（剩 30 规则守护）；npm audit **故意 fail**（生产路径 5 high lodash + path-to-regexp 倒逼前端 owner 修依赖）；govulncheck CI Go 1.25 0 vuln；R-310~R-314 风险草案登记。 |
+| 2026-04-28 | done | T-0063 W3.G.2（审计日志 5 类）| commit `2306c33e`；audit_logs 表已 W2.D.1 加（migrations/000007）无需新 migration；新建 internal/admin/audit/ 跨模块 package（5 ActionXxx 常量 + Default singleton + Log/LogAsync）+ AuditSink 适配器 + AuditContextFromGin helper；NewAdminService side-effect 注册全局 sink 避 modules.go DI 改动；5 类埋点：login×6 / config×1 / upgrade×1 / reboot×2 / delete×2；8+5 单测 PASS。pre-existing race in mockAuditRepo 与本任务无关。 |
+| 2026-04-28 | done | T-0064 W3.G.3（敏感脱敏）| commit `ef8a42ca`；新建 internal/core/redact/ 包（SensitiveKeys 14 类 + MaskString head2***tail2 风格 + RedactMap 不变性递归 + RedactJSON + zap field helpers）+ logger/redact.go 桥接 + errors AbortWithError 自动 RedactJSON；18+6+2 测 PASS（含 zap 集成 + 防中段泄漏回归 + SDK JSON 透传场景）。 |
 
 ---
 
