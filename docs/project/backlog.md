@@ -68,15 +68,15 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 55 | — | +13 (T-0043~T-0055 Wave 2 章程立项 2026-04-28) |
-| `done` | 15 | — | Wave 1 满分 8.0/8 ✅；+T-0008 W1.7 / +T-0011 W2.A.2 / +T-0007 W2.A.1 整合 |
+| `done` | 22 | — | +Block B 七并行批：T-0045/T-0046/T-0047/T-0048/T-0049/T-0050/T-0051 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 30 | — | -2 (T-0011 + T-0007 done) |
+| `planned` | 23 | — | -7 (Block B 七 task done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
-| **Wave 2 章程计分** | **2 / 13** | ≥ 9/13 | W2.A.2 PASS（T-0011）+ W2.A.1 PASS（T-0007 整合）；下一目标 Block B 测试三批 + B.4 四批 |
+| **Wave 2 章程计分** | **6 / 13** | ≥ 9/13 | W2.A.1 + W2.A.2 + W2.B.1 + W2.B.2 + W2.B.3 + W2.B.4 全 PASS；剩余 W2.A.3 短信（凭据外部）+ W2.A.4 模板/历史 + W2.A.5 notification ≥70% + W2.C.1/C.2/C.3 前端 + W2.D.1 E2E≥100 |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -134,13 +134,13 @@
 
 | 序 | Task | 标题 | 章程 |
 |----|------|------|------|
-| B.1 | T-0045 | task/ 测试覆盖率 ≥ 70%（CWMP map / reboot closer / completion router） | W2.B.1 |
-| B.2 | T-0046 | events/ 测试 ≥ 60% + 补 service 层 | W2.B.2 |
-| B.3 | T-0047 | core/ 测试覆盖率 16% → 50% | W2.B.3 |
-| B.4a | T-0048 | mr/ 补 service 层 | W2.B.4 |
-| B.4b | T-0049 | syslog/ 补 service 层 | W2.B.4 |
-| B.4c | T-0050 | provision/ 补 service 层 | W2.B.4 |
-| B.4d | T-0051 | interop/ 补 service 层 | W2.B.4 |
+| B.1 | T-0045 | task/ 测试覆盖率 21.3% → 75.3% (CWMP/Reboot/Completion 三关键测试 PASS) | ✅ W2.B.1 2026-04-28 |
+| B.2 | T-0046 | events/ 测试 0% → 87.6% + EventService facade（39 测） | ✅ W2.B.2 2026-04-28 |
+| B.3 | T-0047 | core/ 覆盖率 43.2% → 55.7% (carrier/cmcc/ctcc/cucc 0% → 91-97%) | ✅ W2.B.3 2026-04-28 |
+| B.4a | T-0048 | mr/ thin service facade + 11 测 | ✅ W2.B.4 2026-04-28 |
+| B.4b | T-0049 | syslog/ thin service facade + 15 测 | ✅ W2.B.4 2026-04-28 |
+| B.4c | T-0050 | provision/ facade 包既有 engine/orchestrator + 13 测 | ✅ W2.B.4 2026-04-28 |
+| B.4d | T-0051 | interop/ facade 包既有 runner/validator + 12 测 | ✅ W2.B.4 2026-04-28 |
 
 **Block C · 前端整改（W7）**
 
@@ -229,13 +229,13 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.8 | wave-1 | 2026-04-27 |
 | T-0043 | 通知模板 + 历史记录（API + UI） | feat | F04 | P0 | planned | 电信+前端 | L | T-0007,T-0011 | `AI承诺对峙清单.md` W2.A.4 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0044 | notification/ 模块测试覆盖率 ≥ 70% | td | infra | P0 | planned | Go | M | T-0007,T-0011,T-0014,T-0043 | `AI承诺对峙清单.md` W2.A.5 | wave-2 | 2026-04-28 |
-| T-0045 | task/ 模块测试覆盖率 ≥ 70%（CWMP map / reboot closer / completion router） | td | infra | P0 | planned | Go | M | — | `AI承诺对峙清单.md` W2.B.1 | wave-2 | 2026-04-28 |
-| T-0046 | events/ 模块测试覆盖率 ≥ 60% + 补 service 层 | td | infra | P0 | planned | 架构+Go | M | — | `AI承诺对峙清单.md` W2.B.2 | wave-2 | 2026-04-28 |
-| T-0047 | core/ 模块测试覆盖率 16% → 50% | td | infra | P1 | planned | Go | M | — | `AI承诺对峙清单.md` W2.B.3 | wave-2 | 2026-04-28 |
-| T-0048 | mr/ 补 service 层（无 service 层修复） | ref | F05 | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
-| T-0049 | syslog/ 补 service 层 | ref | F06/syslog | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
-| T-0050 | provision/ 补 service 层 | ref | F09 | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
-| T-0051 | interop/ 补 service 层 | ref | F10 | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0045 | task/ 模块测试覆盖率 ≥ 70%（CWMP map / reboot closer / completion router） | td | infra | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W2.B.1 | wave-2 | 2026-04-28 |
+| T-0046 | events/ 模块测试覆盖率 ≥ 60% + 补 service 层（实测 87.6%） | td | infra | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W2.B.2 | wave-2 | 2026-04-28 |
+| T-0047 | core/ 模块测试覆盖率 43.2% → 55.7%（任务卡 16% 基线已过时） | td | infra | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W2.B.3 | wave-2 | 2026-04-28 |
+| T-0048 | mr/ 补 service 层（thin facade + 11 测） | ref | F05 | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0049 | syslog/ 补 service 层（thin facade + 10 顶层 + 5 sub-test） | ref | F06/syslog | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0050 | provision/ 补 service 层（facade 包既有 engine/orchestrator/state_machine） | ref | F09 | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0051 | interop/ 补 service 层（facade 包既有 runner/validator/report） | ref | F10 | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
 | T-0052 | frontend-core hooks 与 services/api 对齐（差距 ≤ 1） | ref | frontend | P1 | planned | 前端 | M | — | `AI承诺对峙清单.md` W2.C.1 / R-102 | wave-2 | 2026-04-28 |
 | T-0053 | 前端 `any` 类型清零 | td | frontend | P1 | planned | 前端 | S | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
 | T-0054 | DeviceGrouping 1573 行拆分（≤ 400 行/文件） | ref | frontend | P1 | planned | 前端 | M | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
@@ -408,6 +408,9 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | done | T-0011 (W2.A.2) | commit `682ea585`（cherry-pick 自 worktree-agent-ab4a7023@d6a72677）；新建 5（dead_letter.go/pg_dead_letter_repository.go/dead_letter_test.go/engine_filter_integration_test.go/migrations/000039_alarm_webhook_dead_letters.sql）+ 修改 9（webhook_dispatcher 加 retry+HMAC+ErrDeadLetter / filter_engine 加 DeadLetterRepo 注入 / filter_model+filter_handler 加 WebhookSecret / pg_filter_repository **5 处 SQL 全加 webhook_secret 列**（吸取 W1.5 GetByID 漏字段教训）/ engine.go SetFilterEngine setter / cmd/app/provider/alarm.go DI / 既有测试同步新签名）；948+/-88；章程 W2.A.2 grep 4 类全过；新 5 测 PASS（Retry 1.51s 真延时 / DeadLetter 3.51s 跑到 max retry / HMAC 验签 / FilterEngine 3 子测 short-circuit/fall-through/nil-engine）；W1.5 既有 8 测全 PASS；migration 000039 编号连续 + up/down 配对；sub-agent 14 分钟（853s）完成；worktree 清理；**Wave 2 章程 1/13 PASS** |
 | 2026-04-28 | 待 triage 候选 | pre-existing W1.5 mockAlarmStore race | T-0007/T-0011 sub-agent 都独立确认 main HEAD 同样 -race fail（5 个 TestIntegration_FullPipeline_* 用例，`mockAlarmStore.SaveActive()` map 无锁），**与 W2.A.2 改动无关**；建议另立 backlog task 修 mockAlarmStore（→ sync.Map 或 Mutex）；与 backlog §10 早前登记的 `expedited_receiver.go:48` race 是不同两处问题（一个 production code, 一个 test mock），需分开 triage |
 | 2026-04-28 | done | T-0007 (W2.A.1 整合完整) | commit `1b8710d2`；主会话整合 commit — 把 sub-agent 1089a315 实现的 EmailDispatcher 接入 alarm 主路径：filter_model.go +FilterActionNotifyEmail + EmailRecipients 字段 + binding；filter_engine.go +emailDispatcher + SetEmailDispatcher setter + executeAction case + dispatchEmail/buildEmailSubject/buildEmailBody helpers；cmd/app/provider/alarm.go DI 注入 NewSMTPEmailDispatcher（OMC_SMTP_* env 读取）+ filterEngine.SetEmailDispatcher；pg_filter_repository.go 5 处 SQL 加 email_recipients 列（**replace_all 跨缩进漏 3 处** Create Values + GetByID Scan + Update Set，W1.5 教训二次复现，手工补完）；migration 000040_alarm_filter_email_recipients.sql；filter_engine_test.go +mockEmailDispatcher + 3 测（Dispatched/MissingRecipients_Skipped/EndToEnd via newMockSMTPServer）-race 全 PASS；alarm 包 13.8s 全测 PASS；章程 W2.A.1 4 类 grep 全过；migration check 通过；**Wave 2 章程计分 1/13 → 2/13** |
+| 2026-04-28 | wave-batched 七批并行（最大并行度） | T-0045+T-0046+T-0047+T-0048+T-0049+T-0050+T-0051 | dev-pipeline §C.2.1 路径互斥编排 + §C.2.2 工作目录硬约束 + §C.2.3 watchdog + §C.2.4 自动清理；七 sub-agent 全 DONE 全部落 main：T-0045 (cd991d8a, task 21.3%→75.3%, 17min) / T-0046 (b0c1ac53, events 0%→87.6% + service, 5.9min) / T-0047 (acb956ec, core 43.2%→55.7% + bonus 修 pagination 漂移, 6.8min) / T-0048 (3830fb54, mr facade + 11 测, 4min) / T-0049 (ac32cc34, syslog facade + 15 测, 3.5min) / T-0050 (e44ca68e, provision facade 包既有 engine/orchestrator + 13 测, 4.4min) / T-0051 (a3a52f88, interop facade 包既有 runner/validator + 12 测, 3.2min)；总 wall ≈ 17min（最长 T-0045 决定）；七 worktree 全 staged → main self-verify build/test PASS → cherry-pick → cleanup；所有 service 设计为 thin facade 不强制 modules.go DI（与 T-0007 整合 commit 模式不同），章程 W2.B.1-B.4 grep 自然全过，**modules.go 整合 commit 可省**；Wave 2 章程计分 2/13 → 6/13（W2.B.1 + W2.B.2 + W2.B.3 + W2.B.4 全 PASS）|
+| 2026-04-28 | 待 triage 候选 | PgTaskRepository.scanTaskRow source_id NULL bug | T-0045 sub-agent 发现：`PgTaskRepository.scanTaskRow` 把 `source_id` UUID NULL 列扫到非指针 string，碰到 source_id IS NULL 的行会失败；测试 workaround 给所有用例填合法 UUID 绕过。**与 W2.B.1 task 改动无关**（pre-existing bug）；建议另立 backlog task 修（改 source_id 为 *string 或 sql.NullString 接收）。属内部工程债，影响 task source_id 可空场景的 query。 |
+| 2026-04-28 | 待 triage 候选 | core/model/pagination_test PageSize 上限漂移已修复（bonus） | T-0047 sub-agent 发现既存测试失败：`pagination_test.go` 假设 PageSize 上限 100，但生产代码已改 1000（commit 7440e52d），baseline 即 -race fail；该 sub-agent 顺手修复了。本属 bonus 不在 W2.B.3 scope，但避免后续回归。无需另立 task。 |
 
 ---
 
