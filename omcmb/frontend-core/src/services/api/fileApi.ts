@@ -163,7 +163,7 @@ export const fileApi = {
     const formData = new FormData();
 
     // The real upload expects a File object. When called from the frontend form
-    // the caller should have attached a File via (data as any).file.
+    // the caller should have attached a File via the optional `file` field.
     // For the API layer we build the FormData from the fields the backend expects.
     const fileObj = (data as unknown as { file?: File }).file;
     if (fileObj) {

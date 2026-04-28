@@ -56,6 +56,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   // 使用 OpenLayers Hook
   const {
     mapRef,
+    mapInstanceRef,
     updateDevices,
     getViewport,
     flyTo,
@@ -108,8 +109,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
   // 缩放控制
   const handleZoomIn = useCallback(() => {
-    if (!mapRef.current) return;
-    const map = (mapRef.current as any)._olMap;
+    const map = mapInstanceRef.current;
     if (map) {
       const view = map.getView();
       const currentZoom = view.getZoom() ?? defaultZoom;
@@ -118,11 +118,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
         duration: 300,
       });
     }
-  }, [mapRef, defaultZoom]);
+  }, [mapInstanceRef, defaultZoom]);
 
   const handleZoomOut = useCallback(() => {
-    if (!mapRef.current) return;
-    const map = (mapRef.current as any)._olMap;
+    const map = mapInstanceRef.current;
     if (map) {
       const view = map.getView();
       const currentZoom = view.getZoom() ?? defaultZoom;
@@ -131,7 +130,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
         duration: 300,
       });
     }
-  }, [mapRef, defaultZoom]);
+  }, [mapInstanceRef, defaultZoom]);
 
   // 高亮设备（用于搜索定位）
   const highlightAndFlyTo = useCallback((device: MapDevice) => {

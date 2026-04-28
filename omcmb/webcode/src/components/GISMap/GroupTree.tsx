@@ -79,7 +79,7 @@ const GroupTree: React.FC<GroupTreeProps> = ({
   };
 
   // 处理复选框变化
-  const _handleCheck = (checked: React.Key[], _info: any) => {
+  const _handleCheck = (checked: React.Key[], _info: unknown) => {
     onSelect(checked as string[]);
   };
 

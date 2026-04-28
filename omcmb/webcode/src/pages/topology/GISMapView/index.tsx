@@ -804,7 +804,7 @@ export default function GISMapView() {
 
               {/* 输入框 */}
               <input
-                ref={searchInputRef as any}
+                ref={searchInputRef}
                 type="text"
                 value={deviceSearchValue}
                 onChange={(e) => handleDeviceSearch(e.target.value)}

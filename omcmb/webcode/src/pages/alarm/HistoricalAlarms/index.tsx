@@ -199,14 +199,12 @@ export default function HistoricalAlarms() {
     } else if (key === 'cleared') {
       setFilterParams((prev) => ({
         ...prev,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        dealState: ['2', '3'] as any,
+        dealState: ['2', '3'] as AlarmFilter['dealState'],
       }));
     } else if (key === 'confirmed') {
       setFilterParams((prev) => ({
         ...prev,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        dealState: ['1', '3'] as any,
+        dealState: ['1', '3'] as AlarmFilter['dealState'],
       }));
     } else {
       // severity: critical, major, minor, warning

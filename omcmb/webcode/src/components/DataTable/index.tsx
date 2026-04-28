@@ -19,7 +19,7 @@ export interface DataTableColumn<T> {
   fixed?: 'left' | 'right';
   sorter?: boolean;
   ellipsis?: boolean;
-  render?: (value: any, record: T, index: number) => React.ReactNode;
+  render?: (value: unknown, record: T, index: number) => React.ReactNode;
   filterable?: boolean;
   filterType?: 'text' | 'select' | 'date';
   filterOptions?: { label: string; value: string }[];

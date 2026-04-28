@@ -6,6 +6,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
+import BaseLayer from 'ol/layer/Base';
 import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
@@ -177,7 +178,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
     // 创建瓦片图层（可选：如果提供了 tileUrl 则使用，否则不显示底图）
     // 地图背景使用 CSS 格条纹理，不再使用 OSM 瓦片
-    const layers: any[] = [];
+    const layers: BaseLayer[] = [];
 
     // 只有提供了 tileUrl 才添加瓦片图层
     if (tileUrl) {

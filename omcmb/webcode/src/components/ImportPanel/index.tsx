@@ -41,6 +41,12 @@ export interface ImportPanelRef {
   loading: boolean;
 }
 
+/**
+ * 导入结果（来自后端 JSON 响应或自定义 onImport 返回值）。
+ * 调用方根据实际后端形态在 onSuccess 中收窄。
+ */
+export type ImportResult = unknown;
+
 export interface ImportPanelProps {
   /** 接受的文件格式，如 ".xlsx,.xls" */
   accept?: string;
@@ -51,11 +57,11 @@ export interface ImportPanelProps {
   /** 导入URL */
   importUrl?: string;
   /** 导入成功回调 */
-  onSuccess?: (result: any) => void;
+  onSuccess?: (result: ImportResult) => void;
   /** 导入失败回调 */
   onError?: (error: Error) => void;
   /** 自定义导入处理函数（优先于importUrl） */
-  onImport?: (file: File) => Promise<any>;
+  onImport?: (file: File) => Promise<ImportResult>;
   /** 自定义下载模板函数（优先于templateUrl） */
   onDownloadTemplate?: () => void;
   /** 额外的提示信息 */
@@ -146,7 +152,7 @@ const ImportPanel = forwardRef<ImportPanelRef, ImportPanelProps>(function Import
     setLoading(true);
 
     try {
-      let result;
+      let result: ImportResult;
 
       if (onImport) {
         result = await onImport(file);

@@ -1,16 +1,10 @@
-import React, { useMemo } from 'react';
-import { Button, Drawer, Form, Input, Modal, Radio, Select, TreeSelect, Typography } from 'antd';
-import { CloseCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import React from 'react';
 import type { FormInstance } from 'antd';
 import type { NameFilterItem, GroupItem } from './types';
-import {
-  generateId,
-  generateOperators,
-  getAndOrOptions,
-  getFilterConditionOptions,
-} from './types';
-
-const { Text } = Typography;
+import AddGroupDrawer from './AddGroupDrawer';
+import EditGroupModal from './EditGroupModal';
+import AddChildGroupDrawer from './AddChildGroupDrawer';
+import EditLevel2GroupDrawer from './EditLevel2GroupDrawer';
 
 export interface GroupDialogsProps {
   // Add Level-1 Group Drawer
@@ -51,6 +45,10 @@ export interface GroupDialogsProps {
   t: (id: string, values?: Record<string, unknown>) => string;
 }
 
+/**
+ * 分组相关对话框组合容器：4 个 dialog 拆分到独立文件，本组件仅负责装配。
+ * 拆分自旧版 GroupDialogs.tsx（W2.C.2 / T-0054，单文件 ≤ 400 行）。
+ */
 export default function GroupDialogs({
   addModalOpen,
   addForm,
@@ -81,496 +79,51 @@ export default function GroupDialogs({
   onEditLevel2NameFiltersChange,
   t,
 }: GroupDialogsProps) {
-  // Preview condition description for add child form
-  const previewText = useMemo(() => {
-    if (matchingMode === 'deviceName') {
-      return generateOperators({ matchingMode: 'deviceName', nameRuleList: nameFilters }, t);
-    }
-    return '';
-  }, [matchingMode, nameFilters, t]);
-
-  // 构建父级分组选择器的树形数据（仅显示 L1 根分组）
-  const parentGroupTreeData = useMemo(() => {
-    // 只显示根分组（parentId 为 null 或 undefined）
-    const rootGroups = (groups || []).filter((g) => !g.parentId);
-    return rootGroups.map((g) => ({
-        value: g.id,
-        title: g.name,
-        key: g.id,
-      }));
-  }, [groups]);
-
-  // 编辑时构建父级分组选择器的树形数据（排除当前编辑的分组，防止循环引用）
-  const parentGroupTreeDataForEdit = useMemo(() => {
-    // 只显示根分组（parentId 为 null 或 undefined），排除当前编辑的分组
-    const rootGroups = (groups || []).filter((g) => !g.parentId && g.id !== editingGroupId);
-    return rootGroups.map((g) => ({
-      value: g.id,
-      title: g.name,
-      key: g.id,
-    }));
-  }, [groups, editingGroupId]);
-
   return (
     <>
-      {/* Add Group Drawer - 使用 Drawer 与新增子分组保持一致 */}
-      <Drawer
-        title={t('device.addGroup')}
+      <AddGroupDrawer
         open={addModalOpen}
-        onClose={onAddModalCancel}
-        width={520}
-        destroyOnClose
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button onClick={onAddModalCancel}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={onAddModalOk}>
-              {t('common.confirm')}
-            </Button>
-          </div>
-        }
-      >
-        <Form form={addForm} layout="vertical">
-          {/* Basic info */}
-          <div style={{
-            padding: '16px',
-            background: 'var(--color-fill-quaternary)',
-            borderRadius: 8,
-            marginBottom: 16
-          }}>
-            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
-              {t('device.basicInfo')}
-            </div>
-            <Form.Item
-              name="name"
-              label={t('table.name')}
-              rules={[{ required: true, message: t('common.placeholder') }]}
-              style={{ marginBottom: 12 }}
-            >
-              <Input placeholder={t('common.placeholder')} maxLength={50} />
-            </Form.Item>
-            <Form.Item
-              name="parentId"
-              label={t('device.parentGroup')}
-              tooltip={t('device.parentGroupTooltip')}
-              style={{ marginBottom: 0 }}
-            >
-              <TreeSelect
-                treeData={parentGroupTreeData}
-                placeholder={t('device.selectParentGroup')}
-                allowClear
-                showSearch
-                treeNodeFilterProp="title"
-                treeDefaultExpandAll
-              />
-            </Form.Item>
-          </div>
+        form={addForm}
+        groups={groups}
+        onOk={onAddModalOk}
+        onCancel={onAddModalCancel}
+        t={t}
+      />
 
-          {/* Description */}
-          <div style={{
-            padding: '16px',
-            background: 'var(--color-fill-quaternary)',
-            borderRadius: 8
-          }}>
-            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
-              {t('table.description')}
-            </div>
-            <Form.Item name="description" style={{ marginBottom: 0 }}>
-              <Input.TextArea rows={3} placeholder={t('common.placeholder')} maxLength={200} />
-            </Form.Item>
-          </div>
-        </Form>
-      </Drawer>
-
-      {/* Edit Group Modal */}
-      <Modal
-        title={t('common.edit')}
+      <EditGroupModal
         open={editModalOpen}
+        form={editForm}
+        groups={groups}
+        editingGroupId={editingGroupId}
         onOk={onEditModalOk}
         onCancel={onEditModalCancel}
-        okText={t('common.save')}
-      >
-        <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="name"
-            label={t('table.name')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
-          >
-            <Input placeholder={t('common.placeholder')} />
-          </Form.Item>
-          <Form.Item
-            name="parentId"
-            label={t('device.parentGroup')}
-            tooltip={t('device.parentGroupEditTooltip')}
-          >
-            <TreeSelect
-              treeData={parentGroupTreeDataForEdit}
-              placeholder={t('device.selectParentGroup')}
-              allowClear
-              showSearch
-              treeNodeFilterProp="title"
-              treeDefaultExpandAll
-            />
-          </Form.Item>
-          <Form.Item name="description" label={t('table.description')}>
-            <Input.TextArea rows={3} placeholder={t('common.placeholder')} />
-          </Form.Item>
-        </Form>
-      </Modal>
+        t={t}
+      />
 
-      {/* Add Child Group Drawer */}
-      <Drawer
-        title={t('device.addChildGroup')}
+      <AddChildGroupDrawer
         open={addChildDrawerOpen}
+        form={addChildForm}
+        matchingMode={matchingMode}
+        nameFilters={nameFilters}
         onClose={onAddChildDrawerClose}
-        width={520}
-        destroyOnClose
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button onClick={onAddChildDrawerClose}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={onSaveChildGroup}>
-              {t('common.confirm')}
-            </Button>
-          </div>
-        }
-      >
-        <Form form={addChildForm} layout="vertical">
-          {/* Basic info */}
-          <div style={{
-            padding: '16px',
-            background: 'var(--color-fill-quaternary)',
-            borderRadius: 8,
-            marginBottom: 16
-          }}>
-            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
-              {t('device.basicInfo')}
-            </div>
-            <Form.Item
-              name="name"
-              label={t('device.childGroupName')}
-              rules={[{ required: true, message: t('common.placeholder') }]}
-              style={{ marginBottom: 0 }}
-            >
-              <Input placeholder={t('common.placeholder')} maxLength={50} />
-            </Form.Item>
-          </div>
+        onSave={onSaveChildGroup}
+        onMatchingModeChange={onMatchingModeChange}
+        onAddFilter={onAddFilter}
+        onRemoveFilter={onRemoveFilter}
+        onUpdateFilter={onUpdateFilter}
+        t={t}
+      />
 
-          {/* Match rule */}
-          <div style={{
-            padding: '16px',
-            background: 'var(--color-fill-quaternary)',
-            borderRadius: 8
-          }}>
-            <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
-              {t('device.matchRule')}
-            </div>
-            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-              {t('device.matchRuleDesc')}
-            </Text>
-            <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
-              <Radio.Group onChange={onMatchingModeChange}>
-                <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
-                <Radio value="lac">LAC</Radio>
-                <Radio value="tac">TAC</Radio>
-              </Radio.Group>
-            </Form.Item>
-
-            {/* Device name filter conditions */}
-            {matchingMode === 'deviceName' && (
-              <>
-                <Form.Item
-                  label={
-                    <span>
-                      {t('device.rules.filterCondition')}
-                      <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                        {t('device.rules.conditionLimit', { max: 10 })}
-                      </Text>
-                    </span>
-                  }
-                  style={{ marginBottom: 0 }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {nameFilters.map((filter, index) => (
-                      <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        {index === 0 ? (
-                          <>
-                            <Select
-                              value={filter.condition}
-                              style={{ width: 120 }}
-                              options={getFilterConditionOptions(t)}
-                              onChange={(v) => onUpdateFilter(filter.id, 'condition', v)}
-                            />
-                            <Input
-                              value={filter.value}
-                              style={{ flex: 1 }}
-                              maxLength={64}
-                              placeholder={t('common.placeholder')}
-                              onChange={(e) => onUpdateFilter(filter.id, 'value', e.target.value)}
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <Select
-                              value={filter.andOr || 'and'}
-                              style={{ width: 70 }}
-                              options={getAndOrOptions(t)}
-                              onChange={(v) => onUpdateFilter(filter.id, 'andOr', v)}
-                            />
-                            <Select
-                              value={filter.condition}
-                              style={{ width: 120 }}
-                              options={getFilterConditionOptions(t)}
-                              onChange={(v) => onUpdateFilter(filter.id, 'condition', v)}
-                            />
-                            <Input
-                              value={filter.value}
-                              style={{ flex: 1 }}
-                              maxLength={64}
-                              placeholder={t('common.placeholder')}
-                              onChange={(e) => onUpdateFilter(filter.id, 'value', e.target.value)}
-                            />
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={<CloseCircleOutlined />}
-                              onClick={() => onRemoveFilter(filter.id)}
-                              style={{ color: 'var(--color-text-quaternary)' }}
-                            />
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {nameFilters.length < 10 && (
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={onAddFilter} style={{ marginTop: 8 }}>
-                      {t('device.rules.addCondition')}
-                    </Button>
-                  )}
-                </Form.Item>
-
-                {/* Preview condition description */}
-                {previewText && (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      color: 'var(--color-text-tertiary)',
-                      fontSize: 12,
-                      padding: '8px 12px',
-                      background: 'var(--color-bg-container)',
-                      borderRadius: 4,
-                      wordBreak: 'break-all',
-                      border: '1px solid var(--color-border-secondary)',
-                    }}
-                  >
-                    {previewText}
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* TAC/LAC input */}
-            {(matchingMode === 'tac' || matchingMode === 'lac') && (
-              <Form.Item
-                name="tacRag"
-                label={matchingMode === 'tac' ? 'TAC' : 'LAC'}
-                style={{ marginBottom: 0 }}
-                extra={
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t('device.rules.formatRange', { range: '0-65535' })}
-                  </Text>
-                }
-              >
-                <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
-              </Form.Item>
-            )}
-          </div>
-        </Form>
-      </Drawer>
-
-      {/* Edit Level 2 Group Drawer */}
-      <Drawer
-        title={t('device.editGroup')}
+      <EditLevel2GroupDrawer
         open={editLevel2DrawerOpen}
+        form={editLevel2Form}
+        matchingMode={editLevel2MatchingMode}
+        nameFilters={editLevel2NameFilters}
         onClose={onEditLevel2DrawerClose}
-        width={520}
-        destroyOnClose
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button onClick={onEditLevel2DrawerClose}>{t('common.cancel')}</Button>
-            <Button type="primary" onClick={onSaveEditLevel2}>
-              {t('common.confirm')}
-            </Button>
-          </div>
-        }
-      >
-        <Form form={editLevel2Form} layout="vertical">
-          {/* Basic info */}
-          <div style={{
-            padding: '16px',
-            background: 'var(--color-fill-quaternary)',
-            borderRadius: 8,
-            marginBottom: 16
-          }}>
-            <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
-              {t('device.basicInfo')}
-            </div>
-            <Form.Item
-              name="name"
-              label={t('device.groupName')}
-              rules={[{ required: true, message: t('common.placeholder') }]}
-              style={{ marginBottom: 0 }}
-            >
-              <Input placeholder={t('common.placeholder')} maxLength={50} />
-            </Form.Item>
-          </div>
-
-          {/* Match rule */}
-          <div style={{
-            padding: '16px',
-            background: 'var(--color-fill-quaternary)',
-            borderRadius: 8
-          }}>
-            <div style={{ marginBottom: 4, fontWeight: 500, color: 'var(--color-text)' }}>
-              {t('device.matchRule')}
-            </div>
-            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-              {t('device.matchRuleDesc')}
-            </Text>
-            <Form.Item name="matchingMode" label={t('device.rules.matchingMode')} style={{ marginBottom: 12 }}>
-              <Radio.Group onChange={() => {
-                onEditLevel2NameFiltersChange([{ id: generateId(), condition: 'contain', value: '' }]);
-                editLevel2Form.setFieldsValue({ tacRag: '' });
-              }}>
-                <Radio value="deviceName">{t('device.rules.deviceName')}</Radio>
-                <Radio value="lac">LAC</Radio>
-                <Radio value="tac">TAC</Radio>
-              </Radio.Group>
-            </Form.Item>
-
-            {/* Device name filter conditions */}
-            {editLevel2MatchingMode === 'deviceName' && (
-              <>
-                <Form.Item
-                  label={
-                    <span>
-                      {t('device.rules.filterCondition')}
-                      <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>
-                        {t('device.rules.conditionLimit', { max: 10 })}
-                      </Text>
-                    </span>
-                  }
-                  style={{ marginBottom: 0 }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {editLevel2NameFilters.map((filter, index) => (
-                      <div key={filter.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        {index === 0 ? (
-                          <>
-                            <Select
-                              value={filter.condition}
-                              style={{ width: 120 }}
-                              options={getFilterConditionOptions(t)}
-                              onChange={(v) => {
-                                onEditLevel2NameFiltersChange(prev => prev.map(f => f.id === filter.id ? { ...f, condition: v } : f));
-                              }}
-                            />
-                            <Input
-                              value={filter.value}
-                              style={{ flex: 1 }}
-                              maxLength={64}
-                              placeholder={t('common.placeholder')}
-                              onChange={(e) => {
-                                onEditLevel2NameFiltersChange(prev => prev.map(f => f.id === filter.id ? { ...f, value: e.target.value } : f));
-                              }}
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <Select
-                              value={filter.andOr || 'and'}
-                              style={{ width: 70 }}
-                              options={getAndOrOptions(t)}
-                              onChange={(v) => {
-                                onEditLevel2NameFiltersChange(prev => prev.map(f => f.id === filter.id ? { ...f, andOr: v } : f));
-                              }}
-                            />
-                            <Select
-                              value={filter.condition}
-                              style={{ width: 120 }}
-                              options={getFilterConditionOptions(t)}
-                              onChange={(v) => {
-                                onEditLevel2NameFiltersChange(prev => prev.map(f => f.id === filter.id ? { ...f, condition: v } : f));
-                              }}
-                            />
-                            <Input
-                              value={filter.value}
-                              style={{ flex: 1 }}
-                              maxLength={64}
-                              placeholder={t('common.placeholder')}
-                              onChange={(e) => {
-                                onEditLevel2NameFiltersChange(prev => prev.map(f => f.id === filter.id ? { ...f, value: e.target.value } : f));
-                              }}
-                            />
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={<CloseCircleOutlined />}
-                              onClick={() => {
-                                onEditLevel2NameFiltersChange(prev => {
-                                  if (prev.length <= 1) return prev;
-                                  const newFilters = prev.filter(f => f.id !== filter.id);
-                                  if (newFilters.length > 0 && newFilters[0].andOr !== undefined) {
-                                    const { andOr: _, ...rest } = newFilters[0];
-                                    newFilters[0] = rest as NameFilterItem;
-                                  }
-                                  return newFilters;
-                                });
-                              }}
-                              style={{ color: 'var(--color-text-quaternary)' }}
-                            />
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {editLevel2NameFilters.length < 10 && (
-                    <Button
-                      type="dashed"
-                      icon={<PlusOutlined />}
-                      onClick={() => {
-                        if (editLevel2NameFilters.length >= 10) return;
-                        const hasOr = editLevel2NameFilters.some((f, index) => index > 0 && f.andOr === 'or');
-                        onEditLevel2NameFiltersChange(prev => [
-                          ...prev,
-                          { id: generateId(), condition: 'contain', value: '', andOr: hasOr ? 'or' : 'and' },
-                        ]);
-                      }}
-                      style={{ marginTop: 8 }}
-                    >
-                      {t('device.rules.addCondition')}
-                    </Button>
-                  )}
-                </Form.Item>
-              </>
-            )}
-
-            {/* TAC/LAC input */}
-            {(editLevel2MatchingMode === 'tac' || editLevel2MatchingMode === 'lac') && (
-              <Form.Item
-                name="tacRag"
-                label={editLevel2MatchingMode === 'tac' ? 'TAC' : 'LAC'}
-                style={{ marginBottom: 0 }}
-                extra={
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t('device.rules.formatRange', { range: '0-65535' })}
-                  </Text>
-                }
-              >
-                <Input placeholder="eg: 1,2,3,1-3" maxLength={50} />
-              </Form.Item>
-            )}
-          </div>
-        </Form>
-      </Drawer>
+        onSave={onSaveEditLevel2}
+        onNameFiltersChange={onEditLevel2NameFiltersChange}
+        t={t}
+      />
     </>
   );
 }

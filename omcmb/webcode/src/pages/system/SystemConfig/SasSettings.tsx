@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Form, Switch, Space, Table, Button, Modal, Input, Radio, Card, Upload, Dropdown, App } from 'antd';
 import { PlusOutlined, MoreOutlined, UploadOutlined } from '@ant-design/icons';
+import type { RadioChangeEvent } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { MenuProps } from 'antd';
+import type { UploadChangeParam, UploadFile } from 'antd/es/upload/interface';
 import { useT } from '@/hooks/useT';
 
 interface SasProvider {
@@ -114,21 +116,21 @@ export default function SasSettings({ form }: SasSettingsProps) {
     });
   };
 
-  const handleCertTypeChange = (e: any) => {
-    const type = e.target.value;
+  const handleCertTypeChange = (e: RadioChangeEvent) => {
+    const type = e.target.value as string;
     setCertType(type);
     setCertFileName('');
     setPrivateKeyFileName('');
     providerForm.setFieldValue('password', '');
   };
 
-  const handleCertFileChange = (info: any) => {
+  const handleCertFileChange = (info: UploadChangeParam<UploadFile>) => {
     if (info.file) {
       setCertFileName(info.file.name);
     }
   };
 
-  const handlePrivateKeyFileChange = (info: any) => {
+  const handlePrivateKeyFileChange = (info: UploadChangeParam<UploadFile>) => {
     if (info.file) {
       setPrivateKeyFileName(info.file.name);
     }

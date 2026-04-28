@@ -84,13 +84,45 @@ export function useGeoData() {
 
 // ── Group CRUD hooks ──
 
+// Shape returned by topologyApi.createGroup / updateGroup (mirror of BackendDeviceGroup
+// after http.ts camelCase transform). Kept local because the api file does not export it.
+export interface DeviceGroupResult {
+  id: string;
+  name: string;
+  parentId: string | null;
+  carrier: string;
+  description: string;
+  sortOrder: number;
+  children?: DeviceGroupResult[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+function makeMockGroupResult(input: {
+  name?: string;
+  parent_id?: string;
+  description?: string;
+}): DeviceGroupResult {
+  const now = new Date().toISOString();
+  return {
+    id: `mock-${Date.now()}`,
+    name: input.name ?? '',
+    parentId: input.parent_id ?? null,
+    carrier: '',
+    description: input.description ?? '',
+    sortOrder: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export function useCreateGroup() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { name: string; parent_id?: string; description?: string }) =>
+  return useMutation<DeviceGroupResult, Error, { name: string; parent_id?: string; description?: string }>({
+    mutationFn: (data) =>
       useMock
-        ? topologyService.getDomains().then(() => data as any)
-        : topologyApi.createGroup(data),
+        ? topologyService.getDomains().then(() => makeMockGroupResult(data))
+        : (topologyApi.createGroup(data) as unknown as Promise<DeviceGroupResult>),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['topology', 'domains'] });
       void queryClient.invalidateQueries({ queryKey: ['topology', 'domain-tree'] });
@@ -100,11 +132,11 @@ export function useCreateGroup() {
 
 export function useUpdateGroup() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string } }) =>
+  return useMutation<DeviceGroupResult, Error, { id: string; data: { name?: string; description?: string } }>({
+    mutationFn: ({ id, data }) =>
       useMock
-        ? topologyService.getDomains().then(() => data as any)
-        : topologyApi.updateGroup(id, data),
+        ? topologyService.getDomains().then(() => makeMockGroupResult(data))
+        : (topologyApi.updateGroup(id, data) as unknown as Promise<DeviceGroupResult>),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['topology', 'domains'] });
       void queryClient.invalidateQueries({ queryKey: ['topology', 'domain-tree'] });
@@ -114,10 +146,10 @@ export function useUpdateGroup() {
 
 export function useDeleteGroup() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
+  return useMutation<void, Error, string>({
+    mutationFn: (id) =>
       useMock
-        ? topologyService.getDomains().then(() => undefined as any)
+        ? topologyService.getDomains().then(() => undefined)
         : topologyApi.deleteGroup(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['topology', 'domains'] });

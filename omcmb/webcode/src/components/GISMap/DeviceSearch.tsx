@@ -202,7 +202,7 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
 
           {/* 输入框 */}
           <input
-            ref={inputRef as any}
+            ref={inputRef}
             type="text"
             value={value}
             onChange={handleInputChange}

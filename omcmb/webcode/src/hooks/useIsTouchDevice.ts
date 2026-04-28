@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 interface TouchState {
   /** Primary pointer is coarse (finger) rather than fine (mouse) */
   isTouchPrimary: boolean;
-  /** Device has any touch capability (includes hybrid laptop+touchscreen) */
+  /** True when the device exposes touch capability (includes hybrid laptop+touchscreen) */
   hasTouchSupport: boolean;
 }
 
@@ -45,7 +45,7 @@ function ensureListener() {
 /**
  * Detects touch input capability.
  * `isTouchPrimary` — the main pointer is a finger (phone/tablet).
- * `hasTouchSupport` — device has any touch support (includes hybrid laptops).
+ * `hasTouchSupport` — device exposes some touch support (includes hybrid laptops).
  */
 export function useIsTouchDevice(): TouchState {
   if (!initialized) ensureListener();
