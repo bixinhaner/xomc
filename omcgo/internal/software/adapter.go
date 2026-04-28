@@ -15,7 +15,7 @@ import (
 // In the future these methods could be migrated into carrier.Carrier.
 type UpgradeAdapter interface {
 	// RollbackParameterPath returns the TR-069 parameter path to trigger a rollback.
-	// For 4G/LTE: typically "ROLLBACK_CONTROL".
+	// For 4G/LTE: typically "Device.DeviceInfo.X_COM_ROLLBACK_CONTROL".
 	// For 5G/NR: typically "Device.SoftwareCtrl.ActivateEnable".
 	RollbackParameterPath(tech model.Technology) string
 
@@ -48,7 +48,7 @@ func (a *DefaultUpgradeAdapter) RollbackParameterPath(tech model.Technology) str
 	case model.TechNR:
 		return "Device.SoftwareCtrl.ActivateEnable"
 	default: // LTE
-		return "ROLLBACK_CONTROL"
+		return "Device.DeviceInfo.X_COM_ROLLBACK_CONTROL"
 	}
 }
 

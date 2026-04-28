@@ -141,11 +141,11 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 		zap.Bool("enable_check", needEnableCheck))
 }
 
-// checkRollbackEnable queries the device for ROLLBACK_ENABLE parameter.
+// checkRollbackEnable queries the device for X_COM_ROLLBACK_ENABLE parameter.
 // For 4G devices, the device must support rollback before we can trigger it.
 func (e *RollbackExecutor) checkRollbackEnable(ctx context.Context, dev *model.Device, rollbackPath string) (bool, error) {
 	// Derive enable check path from rollback path (vendor-specific convention)
-	enablePath := "ROLLBACK_ENABLE"
+	enablePath := "Device.DeviceInfo.X_COM_ROLLBACK_ENABLE"
 
 	paramsJSON, err := json.Marshal(map[string]interface{}{
 		"parameter_names": []string{enablePath},
@@ -175,7 +175,7 @@ func (e *RollbackExecutor) checkRollbackEnable(ctx context.Context, dev *model.D
 	}
 
 	// For now, assume enabled. The GPV response will be handled asynchronously.
-	// If the device reports ROLLBACK_ENABLE=false, the rollback will fail at the SPV step.
+	// If the device reports X_COM_ROLLBACK_ENABLE=false, the rollback will fail at the SPV step.
 	return true, nil
 }
 
