@@ -201,6 +201,7 @@ type AllSubTaskFilter struct {
 	TaskName *string       `form:"task_name"`
 	DeviceSN *string       `form:"device_sn"`
 	Status   *UpgradeState `form:"status"`
+	TaskType *TaskType     `form:"task_type"`
 	model.ListRequest
 }
 
@@ -217,9 +218,10 @@ type BatchUpgradeRequest struct {
 
 // RollbackRequest is the JSON body for triggering a batch rollback.
 type RollbackRequest struct {
-	DeviceIDs  []uuid.UUID `json:"device_ids" binding:"required,min=1"`
-	TaskName   string      `json:"task_name" binding:"required"`
-	CreateUser string      `json:"create_user" binding:"required"`
+	DeviceIDs       []uuid.UUID `json:"device_ids" binding:"required,min=1"`
+	TaskName        string      `json:"task_name" binding:"required"`
+	CreateUser      string      `json:"create_user" binding:"required"`
+	CreateSuspended bool        `json:"create_suspended"`
 }
 
 // BatchActionRequest is the JSON body for batch actions (suspend/resume/terminate).

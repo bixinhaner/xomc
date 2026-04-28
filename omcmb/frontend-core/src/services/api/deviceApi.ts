@@ -554,4 +554,9 @@ export const deviceApi = {
     const { data } = await http.delete<BatchOperationResult>('/devices/recycle/permanent', { data: { ids } });
     return data;
   },
+
+  async getProductClasses(): Promise<string[]> {
+    const { data } = await http.get<string[]>('/devices/product-classes');
+    return data;
+  },
 };

@@ -23,7 +23,7 @@ import {
 import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, DesktopOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -33,6 +33,7 @@ import { useT } from '@/hooks/useT';
 import {
   useUpgradeTasks,
   useSubTasks,
+  useAllSubTasks,
   useCreateRollback,
   useSuspendTask,
   useResumeTask,
@@ -40,6 +41,7 @@ import {
   useDeleteTask,
   useRetryTask,
 } from '@core/hooks/api/useSoftware';
+import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
 
 // Execution method enum
@@ -88,6 +90,20 @@ const SUB_TASK_STATUS_COLORS: Record<string, string> = {
 export default function VersionRollback() {
   const t = useT();
 
+  // ---- Dynamic product type options from API ----
+  const { data: productClassesData } = useProductClasses();
+  const productTypeOptions = useMemo(() => {
+    if (productClassesData && productClassesData.length > 0) {
+      return productClassesData.map((c) => ({ label: c, value: c }));
+    }
+    return [
+      { label: 'PM-B4860', value: 'PM-B4860' },
+      { label: 'QAFA', value: 'QAFA' },
+      { label: 'QAFB', value: 'QAFB' },
+      { label: 'FAP/BU1810', value: 'FAP/BU1810' },
+    ];
+  }, [productClassesData]);
+
   // ---- Pagination & filter state ----
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -103,13 +119,18 @@ export default function VersionRollback() {
     taskType: 2, // Only show rollback tasks
   });
 
-  // ---- Selected task for device list tab ----
-  const [deviceListTaskId, setDeviceListTaskId] = useState<string>('');
-  const [deviceListTaskName, setDeviceListTaskName] = useState<string>('');
-  const { data: deviceSubTasksData, isLoading: deviceSubTasksLoading } = useSubTasks(
-    deviceListTaskId,
-    { page: 1, pageSize: 100 },
-  );
+  // ---- Device list tab: pagination & filter (all sub-tasks across rollback tasks) ----
+  const [devicePage, setDevicePage] = useState(1);
+  const [devicePageSize, setDevicePageSize] = useState(20);
+  const [deviceFilters, setDeviceFilters] = useState<Record<string, unknown>>({});
+  const { data: deviceSubTasksData, isLoading: deviceSubTasksLoading } = useAllSubTasks({
+    page: devicePage,
+    pageSize: devicePageSize,
+    taskName: (deviceFilters.keyword as string) || undefined,
+    deviceSn: (deviceFilters.stationCode as string) || undefined,
+    status: (deviceFilters.status as string) || undefined,
+    taskType: 2,
+  });
 
   // ---- Fetch sub-tasks for the detail drawer ----
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
@@ -196,21 +217,30 @@ export default function VersionRollback() {
   // Task detail drawer state
   const [taskDetailRecord, setTaskDetailRecord] = useState<UpgradeTaskInfo | null>(null);
 
+  // ---- Fetch real devices from API by productType ----
+  const { data: deviceListData } = useDeviceList(
+    {
+      productType: drawerProductType,
+      page: 1,
+      pageSize: 500,
+    },
+    { refetchInterval: 0 },
+  );
+
   // ---- Available devices for add-device modal ----
   const availableDevices = useMemo(() => {
-    if (!drawerProductType) return [];
-    // Placeholder devices for add-device modal (in real implementation, fetched from device API)
-    return [
-      { id: 'dev-001', deviceSn: 'ENB00001', deviceName: '华北-基站001', sourceVersion: 'V1.1.5', productType: 'PM-B4860', deviceGroup: '北京移动' },
-      { id: 'dev-002', deviceSn: 'ENB00002', deviceName: '华北-基站002', sourceVersion: 'V1.1.5', productType: 'PM-B4860', deviceGroup: '北京移动' },
-      { id: 'dev-003', deviceSn: 'ENB00003', deviceName: '华东-基站001', sourceVersion: 'V1.2.0', productType: 'QAFA', deviceGroup: '上海移动' },
-      { id: 'dev-004', deviceSn: 'ENB00004', deviceName: '华东-基站002', sourceVersion: 'V1.2.0', productType: 'QAFA', deviceGroup: '上海移动' },
-      { id: 'dev-005', deviceSn: 'GNB00001', deviceName: '华南-基站001', sourceVersion: 'V2.0.0', productType: 'QATA', deviceGroup: '广东移动' },
-    ].filter((d) => {
-      if (drawerProductType && d.productType !== drawerProductType) return false;
-      return !drawerDevices.some((existing) => existing.id === d.id);
-    });
-  }, [drawerProductType, drawerDevices]);
+    if (!drawerProductType || !deviceListData?.items) return [];
+    return deviceListData.items
+      .filter((d) => !drawerDevices.some((existing) => existing.id === d.id))
+      .map((d) => ({
+        id: d.id,
+        deviceSn: d.sn,
+        deviceName: d.name,
+        sourceVersion: d.firmwareVersion || d.softwareVersion || '',
+        productType: d.productType,
+        deviceGroup: d.groupName || '',
+      }));
+  }, [drawerProductType, deviceListData, drawerDevices]);
 
   const filteredAvailableDevices = useMemo(() => {
     if (!addDeviceKeyword) return availableDevices;
@@ -220,10 +250,7 @@ export default function VersionRollback() {
     );
   }, [availableDevices, addDeviceKeyword]);
 
-  const allDevicesCountOfType = useMemo(() => {
-    if (!drawerProductType) return 0;
-    return availableDevices.length + drawerDevices.length;
-  }, [drawerProductType, availableDevices, drawerDevices]);
+  const allDevicesCountOfType = deviceListData?.total ?? 0;
 
   // ---- Export ----
   const handleExport = useCallback(() => {
@@ -258,41 +285,8 @@ export default function VersionRollback() {
 
   // ---- Filter definitions ----
 
-  const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: t('software.stationCodeOrName'), type: 'input', placeholder: t('software.inputStationCodeOrName') },
-    {
-      name: 'productType',
-      label: t('software.upgrade.productType'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: 'PM-B4860', value: 'PM-B4860' },
-        { label: 'QAFA', value: 'QAFA' },
-        { label: 'QATA', value: 'QATA' },
-        { label: 'QAFB', value: 'QAFB' },
-        { label: 'RTD', value: 'RTD' },
-        { label: 'BaiBNX', value: 'BaiBNX' },
-        { label: 'BaiBNQ', value: 'BaiBNQ' },
-        { label: 'BSC', value: 'BSC' },
-        { label: 'BTS', value: 'BTS' },
-        { label: 'FAP/BU1810', value: 'FAP/BU1810' },
-      ],
-    },
-    {
-      name: 'result',
-      label: t('table.result'),
-      type: 'select',
-      placeholder: t('common.pleaseSelect'),
-      options: [
-        { label: t('common.all'), value: 'all' },
-        { label: t('status.success'), value: 'success' },
-        { label: t('status.failed'), value: 'failed' },
-        { label: t('software.status.partialSuccess'), value: 'partial' },
-        { label: t('software.status.rollingBack'), value: 'running' },
-        { label: t('software.status.pendingStatus'), value: 'pending' },
-      ],
-    },
+  const taskFilterFields: FilterField[] = useMemo(() => [
+    { name: 'keyword', label: t('software.taskName'), type: 'input', placeholder: t('software.upgrade.inputTaskName') },
     {
       name: 'timeRange',
       label: t('common.timeRange'),
@@ -301,13 +295,25 @@ export default function VersionRollback() {
     },
   ], [t]);
 
-  const taskFilterFields: FilterField[] = useMemo(() => [
+  const deviceFilterFields: FilterField[] = useMemo(() => [
     { name: 'keyword', label: t('software.taskName'), type: 'input', placeholder: t('software.upgrade.inputTaskName') },
+    { name: 'stationCode', label: t('software.stationCode'), type: 'input', placeholder: t('software.inputStationCodeOrName') },
     {
-      name: 'timeRange',
-      label: t('common.timeRange'),
-      type: 'date-range',
-      placeholder: t('common.selectTimeRange'),
+      name: 'status',
+      label: t('table.result'),
+      type: 'select',
+      placeholder: t('common.pleaseSelect'),
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('software.status.waiting'), value: 'pending' },
+        { label: t('software.status.downloading'), value: 'downloading' },
+        { label: t('software.status.rebooting'), value: 'rebooting' },
+        { label: t('software.status.verifying'), value: 'verifying' },
+        { label: t('status.success'), value: 'completed' },
+        { label: t('status.failed'), value: 'failed' },
+        { label: t('software.status.paused'), value: 'suspended' },
+        { label: t('common.terminate'), value: 'terminated' },
+      ],
     },
   ], [t]);
 
@@ -423,7 +429,7 @@ export default function VersionRollback() {
     }
 
     const deviceIds = selectAllOfType
-      ? availableDevices.map((d) => d.id)
+      ? (deviceListData?.items ?? []).map((d) => d.id)
       : drawerDevices.map((d) => d.id);
 
     createRollbackMutation.mutate(
@@ -431,6 +437,7 @@ export default function VersionRollback() {
         deviceIds,
         taskName,
         createUser: 'admin',
+        createSuspended: executionMethod === 'suspend',
       },
       {
         onSuccess: () => {
@@ -729,6 +736,8 @@ export default function VersionRollback() {
           setActiveTab(e.target.value);
           setFilters({});
           setPage(1);
+          setDeviceFilters({});
+          setDevicePage(1);
         }}
         optionType="button"
         buttonStyle="solid"
@@ -741,9 +750,15 @@ export default function VersionRollback() {
       {/* Search form */}
       <FilterBar
         filterId={`rollback-filter-${activeTab}`}
-        fields={activeTab === 'task' ? taskFilterFields : filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
+        fields={activeTab === 'task' ? taskFilterFields : deviceFilterFields}
+        onSearch={(vals) => {
+          if (activeTab === 'task') { setFilters(vals); setPage(1); }
+          else { setDeviceFilters(vals); setDevicePage(1); }
+        }}
+        onReset={() => {
+          if (activeTab === 'task') { setFilters({}); setPage(1); }
+          else { setDeviceFilters({}); setDevicePage(1); }
+        }}
       />
 
       {/* Task list tab */}
@@ -770,49 +785,27 @@ export default function VersionRollback() {
           />
         </Card>
       ) : (
-        // Device list tab - sub-tasks for a selected rollback task
+        // Device list tab - all sub-tasks across all rollback tasks
         <Card
           size="small"
           bordered
           style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
         >
-          {!deviceListTaskId ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
-              <DesktopOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-              <div>{t('software.upgrade.selectTaskToViewDevices') ?? '请在任务列表中选择一个任务查看设备列表'}</div>
-              <div style={{ marginTop: 8 }}>
-                <Button type="link" onClick={() => setActiveTab('task')}>
-                  {t('software.upgrade.goToTaskList') ?? '前往任务列表'}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Space>
-                  <span>{t('software.taskName')}: <strong>{deviceListTaskName}</strong></span>
-                </Space>
-                <Button size="small" onClick={() => { setDeviceListTaskId(''); setDeviceListTaskName(''); }}>
-                  {t('common.close') ?? '关闭'}
-                </Button>
-              </div>
-              <DataTable<UpgradeSubTaskInfo>
-                tableId="rollback-list-device"
-                columns={deviceColumns}
-                dataSource={deviceSubTaskList}
-                rowKey="id"
-                total={deviceSubTaskTotal}
-                currentPage={1}
-                pageSize={100}
-                onPageChange={() => {}}
-                loading={deviceSubTasksLoading}
-                scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
-                showRowNumber
-                rowNumberTitle={t('table.rowNumber')}
-              />
-            </>
-          )}
+          <DataTable<UpgradeSubTaskInfo>
+            tableId="rollback-list-device"
+            columns={deviceColumns}
+            dataSource={deviceSubTaskList}
+            rowKey="id"
+            total={deviceSubTaskTotal}
+            currentPage={devicePage}
+            pageSize={devicePageSize}
+            onPageChange={(p, s) => { setDevicePage(p); setDevicePageSize(s); }}
+            loading={deviceSubTasksLoading}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 540px)' }}
+            showRowNumber
+            rowNumberTitle={t('table.rowNumber')}
+          />
         </Card>
       )}
 
@@ -966,7 +959,7 @@ export default function VersionRollback() {
             <Button
               type="primary"
               onClick={handleSubmitUpgrade}
-              disabled={!selectAllOfType && drawerDevices.length === 0}
+              disabled={(!selectAllOfType && drawerDevices.length === 0) || createRollbackMutation.isPending}
               loading={createRollbackMutation.isPending}
             >
               {t('software.rollback.confirmRollback')}
@@ -995,16 +988,7 @@ export default function VersionRollback() {
                 setSelectAllOfType(false);
                 setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
               }}
-              options={[
-                { label: 'PM-B4860', value: 'PM-B4860' },
-                { label: 'QAFA', value: 'QAFA' },
-                { label: 'QATA', value: 'QATA' },
-                { label: 'QAFB', value: 'QAFB' },
-                { label: 'RTD', value: 'RTD' },
-                { label: 'BaiBNX', value: 'BaiBNX' },
-                { label: 'BaiBNQ', value: 'BaiBNQ' },
-                { label: 'FAP/BU1810', value: 'FAP/BU1810' },
-              ]}
+              options={productTypeOptions}
               style={{ width: '100%' }}
             />
           </Form.Item>

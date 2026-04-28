@@ -240,3 +240,11 @@ export function usePermanentDeleteDevices() {
     },
   });
 }
+
+export function useProductClasses() {
+  return useQuery({
+    queryKey: ['devices', 'product-classes'],
+    queryFn: () => deviceApi.getProductClasses(),
+    staleTime: 5 * 60 * 1000,
+  });
+}

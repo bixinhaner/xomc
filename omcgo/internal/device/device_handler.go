@@ -40,6 +40,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	devices := rg.Group("/devices")
 	{
 		devices.GET("", h.ListDevices)
+		devices.GET("/product-classes", h.ListProductClasses)
 		devices.GET("/stats", h.GetStats)
 		devices.GET("/geo", h.ListGeo)           // Map device geo data
 		devices.GET("/geo/stats", h.GetGeoStats) // Map device statistics
@@ -162,6 +163,16 @@ func (h *Handler) DeleteDevice(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// ListProductClasses handles GET /api/v1/devices/product-classes.
+func (h *Handler) ListProductClasses(c *gin.Context) {
+	classes, err := h.service.GetProductClasses(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, classes)
 }
 
 // ListDevices handles GET /api/v1/devices with pagination and filtering.

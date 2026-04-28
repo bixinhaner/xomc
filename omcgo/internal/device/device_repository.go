@@ -120,6 +120,9 @@ type DeviceReader interface {
 	GetGeoStats(ctx context.Context, groupIDs []string) (*GeoStats, error)
 	// SearchDevices searches devices by keyword for map display.
 	SearchDevices(ctx context.Context, keyword string, limit int) ([]GeoDevice, error)
+	// ListProductClasses returns distinct product_class values from devices,
+	// merged with a set of mandatory types that must always appear.
+	ListProductClasses(ctx context.Context) ([]string, error)
 	// FindStaleDevices finds active devices that haven't sent Inform within the threshold.
 	// Used by OfflineDetector to mark devices as offline.
 	FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
@@ -1319,4 +1322,37 @@ func (r *PgDeviceRepository) FindStaleDevices(ctx context.Context, threshold tim
 	}
 
 	return devices, nil
+}
+
+// mandatoryProductClasses are always returned even if no devices exist in the database.
+var mandatoryProductClasses = []string{"QAFA", "QAFB", "BM", "BNQ", "MLQ", "MLN", "BLQ"}
+
+// ListProductClasses returns distinct product_class values from devices,
+// merged with mandatory types, sorted alphabetically.
+func (r *PgDeviceRepository) ListProductClasses(ctx context.Context) ([]string, error) {
+	query := `SELECT product_class FROM (
+		SELECT DISTINCT product_class FROM devices WHERE product_class IS NOT NULL AND product_class != ''
+		UNION
+		SELECT unnest($1::text[])
+	) sub ORDER BY product_class`
+
+	rows, err := r.pool.Query(ctx, query, mandatoryProductClasses)
+	if err != nil {
+		return nil, fmt.Errorf("list product classes: %w", err)
+	}
+	defer rows.Close()
+
+	var classes []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, fmt.Errorf("scan product class: %w", err)
+		}
+		classes = append(classes, c)
+	}
+
+	if classes == nil {
+		classes = []string{}
+	}
+	return classes, nil
 }

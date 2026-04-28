@@ -43,7 +43,7 @@ import {
   useAllSubTasks,
   useSoftwareVersions,
 } from '@core/hooks/api/useSoftware';
-import { useDeviceList } from '@core/hooks/api/useDevices';
+import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
 
 // Upgrade category enum
@@ -101,6 +101,20 @@ const SUB_TASK_STATUS_COLORS: Record<string, string> = {
 export default function UpgradePlan() {
   const t = useT();
 
+  // ---- Dynamic product type options from API ----
+  const { data: productClassesData } = useProductClasses();
+  const productTypeOptions = useMemo(() => {
+    if (productClassesData && productClassesData.length > 0) {
+      return productClassesData.map((c) => ({ label: c, value: c }));
+    }
+    return [
+      { label: 'PM-B4860', value: 'PM-B4860' },
+      { label: 'QAFA', value: 'QAFA' },
+      { label: 'QAFB', value: 'QAFB' },
+      { label: 'FAP/BU1810', value: 'FAP/BU1810' },
+    ];
+  }, [productClassesData]);
+
   // ---- Pagination & filter state ----
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -126,6 +140,7 @@ export default function UpgradePlan() {
     taskName: (deviceFilters.keyword as string) || undefined,
     deviceSn: (deviceFilters.stationCode as string) || undefined,
     status: (deviceFilters.status as string) || undefined,
+    taskType: 1,
   });
 
   // ---- Fetch sub-tasks for the detail drawer ----
@@ -1150,16 +1165,7 @@ export default function UpgradePlan() {
                 setSelectAllOfType(false);
                 setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
               }}
-              options={[
-                { label: 'PM-B4860', value: 'PM-B4860' },
-                { label: 'QAFA', value: 'QAFA' },
-                { label: 'QATA', value: 'QATA' },
-                { label: 'QAFB', value: 'QAFB' },
-                { label: 'RTD', value: 'RTD' },
-                { label: 'BaiBNX', value: 'BaiBNX' },
-                { label: 'BaiBNQ', value: 'BaiBNQ' },
-                { label: 'FAP/BU1810', value: 'FAP/BU1810' },
-              ]}
+              options={productTypeOptions}
               style={{ width: '100%' }}
             />
           </Form.Item>

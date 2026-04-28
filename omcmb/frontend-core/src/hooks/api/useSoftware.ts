@@ -215,6 +215,7 @@ export function useCreateRollback() {
       deviceIds: string[];
       taskName: string;
       createUser: string;
+      createSuspended?: boolean;
     }) => api.createRollback(req),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
@@ -252,7 +253,7 @@ export function useSubTaskById(id: string) {
 }
 
 export function useAllSubTasks(
-  params: { taskName?: string; deviceSn?: string; status?: string } & PageRequest
+  params: { taskName?: string; deviceSn?: string; status?: string; taskType?: number } & PageRequest
 ) {
   return useQuery({
     queryKey: ['software', 'all-sub-tasks', params],

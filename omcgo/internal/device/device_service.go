@@ -1129,3 +1129,9 @@ func (s *DeviceService) RestoreDevices(ctx context.Context, ids []uuid.UUID) (in
 func (s *DeviceService) PermanentDeleteDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
 	return s.deviceRepo.PermanentDelete(ctx, ids)
 }
+
+// GetProductClasses returns distinct product types from the device table,
+// merged with mandatory types.
+func (s *DeviceService) GetProductClasses(ctx context.Context) ([]string, error) {
+	return s.deviceRepo.ListProductClasses(ctx)
+}

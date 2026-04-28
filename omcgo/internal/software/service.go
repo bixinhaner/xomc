@@ -226,6 +226,42 @@ func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*Upgr
 	}
 }
 
+// startRollbackExecution launches goroutines to execute rollback sub-tasks with bounded concurrency.
+func (s *SoftwareService) startRollbackExecution(subTasks []*UpgradeSubTask) {
+	concurrency := 5
+	sem := make(chan struct{}, concurrency)
+	for i := range subTasks {
+		sem <- struct{}{}
+		go func(st *UpgradeSubTask) {
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("rollback executor panic",
+						zap.String("sub_task_id", st.ID.String()),
+						zap.Any("recover", r))
+				}
+			}()
+
+			dev, err := s.deviceRepo.GetByID(context.Background(), st.DeviceID)
+			if err != nil {
+				s.rollbackExec.FailRollbackSubTask(context.Background(), st, fmt.Sprintf("device not found: %v", err), FailureDeviceNotFound)
+				return
+			}
+
+			tech := model.TechLTE
+			if Is5G(dev) {
+				tech = model.TechNR
+			}
+
+			rollbackPath := s.adapter.RollbackParameterPath(tech)
+			rollbackValue := s.adapter.RollbackParameterValue(tech)
+			needEnableCheck := s.adapter.RollbackNeedsEnableCheck(tech)
+
+			s.rollbackExec.RollbackOne(context.Background(), st, dev, rollbackPath, rollbackValue, needEnableCheck)
+		}(subTasks[i])
+	}
+}
+
 // HandleTransferComplete advances the upgrade state machine when a device reports transfer complete.
 // ACS publishes two kinds of TC events on the same subject:
 //   1. Inform-level (from publishInformEvents): payload has device_sn but no TC body data
@@ -422,14 +458,6 @@ func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) e
 		return commonerrors.NewBusinessError(8004, "task is not suspended or pending", commonerrors.ErrInvalidInput)
 	}
 
-	var fw *FirmwareVersion
-	if task.FirmwareID != nil {
-		fw, err = s.firmwareRepo.GetByID(ctx, *task.FirmwareID)
-		if err != nil {
-			return fmt.Errorf("get firmware for resume: %w", err)
-		}
-	}
-
 	pendingStatus := UpgradeState(UpgradePending)
 	subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
 		TaskID: taskID,
@@ -439,18 +467,31 @@ func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) e
 		return fmt.Errorf("list pending sub-tasks: %w", err)
 	}
 
-	if fw == nil || len(subResult.Items) == 0 {
+	if len(subResult.Items) == 0 {
 		return commonerrors.NewBusinessError(8010, "no pending sub-tasks to execute", commonerrors.ErrInvalidInput)
+	}
+
+	subTasks := make([]*UpgradeSubTask, len(subResult.Items))
+	for i := range subResult.Items {
+		subTasks[i] = &subResult.Items[i]
 	}
 
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
 		return fmt.Errorf("resume main task: %w", err)
 	}
 
-	if fw != nil && len(subResult.Items) > 0 {
-		subTasks := make([]*UpgradeSubTask, len(subResult.Items))
-		for i := range subResult.Items {
-			subTasks[i] = &subResult.Items[i]
+	if task.TaskType == TaskTypeRollback {
+		s.startRollbackExecution(subTasks)
+	} else {
+		var fw *FirmwareVersion
+		if task.FirmwareID != nil {
+			fw, err = s.firmwareRepo.GetByID(ctx, *task.FirmwareID)
+			if err != nil {
+				return fmt.Errorf("get firmware for resume: %w", err)
+			}
+		}
+		if fw == nil {
+			return commonerrors.NewBusinessError(8010, "firmware not found for upgrade task", commonerrors.ErrInvalidInput)
 		}
 		s.startExecution(task, subTasks, fw, task.MaxConcurrent)
 	}
@@ -522,10 +563,19 @@ func (s *SoftwareService) RetryUpgrade(ctx context.Context, taskID uuid.UUID) er
 // RollbackDevices creates a rollback task for the specified devices.
 // Per-device technology detection determines 4G/5G-specific parameters.
 func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackRequest) (*UpgradeTask, error) {
+	var productClass string
+	if len(req.DeviceIDs) > 0 {
+		if dev, err := s.deviceRepo.GetByID(ctx, req.DeviceIDs[0]); err == nil {
+			productClass = dev.ProductClass
+		}
+	}
+
 	mainTask := &UpgradeTask{
 		TaskName:      req.TaskName,
 		TaskType:      TaskTypeRollback,
 		Status:        TaskPending,
+		ProductClass:  productClass,
+		CreateStatus:  "active",
 		CreateUser:    req.CreateUser,
 		TotalCount:    len(req.DeviceIDs),
 		MaxConcurrent: 5,
@@ -542,6 +592,10 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 			Status:     UpgradePending,
 			MaxRetries: 3,
 		}
+		if dev, err := s.deviceRepo.GetByID(ctx, deviceID); err == nil {
+			subTask.DeviceSN = dev.SerialNumber
+			subTask.OriVersion = dev.FirmwareVersion
+		}
 		subTasks = append(subTasks, subTask)
 	}
 
@@ -549,45 +603,19 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		return nil, fmt.Errorf("batch create rollback sub-tasks: %w", err)
 	}
 
+	if req.CreateSuspended {
+		s.logger.Info("rollback task created in pending (suspended) mode",
+			zap.String("task_id", mainTask.ID.String()),
+			zap.Int("device_count", len(req.DeviceIDs)))
+		return mainTask, nil
+	}
+
 	if err := s.taskRepo.UpdateStatus(ctx, mainTask.ID, TaskInProgress, ""); err != nil {
 		s.logger.Error("update rollback task to in_progress", zap.Error(err))
 	}
 	mainTask.Status = TaskInProgress
 
-	// Per-device rollback with technology detection
-	concurrency := 5
-	sem := make(chan struct{}, concurrency)
-	for i := range subTasks {
-		sem <- struct{}{}
-		go func(st *UpgradeSubTask) {
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					s.logger.Error("rollback executor panic",
-						zap.String("sub_task_id", st.ID.String()),
-						zap.Any("recover", r))
-				}
-			}()
-
-			// Determine technology per device
-			dev, err := s.deviceRepo.GetByID(context.Background(), st.DeviceID)
-			if err != nil {
-				s.rollbackExec.FailRollbackSubTask(context.Background(), st, fmt.Sprintf("device not found: %v", err), FailureDeviceNotFound)
-				return
-			}
-
-			tech := model.TechLTE
-			if Is5G(dev) {
-				tech = model.TechNR
-			}
-
-			rollbackPath := s.adapter.RollbackParameterPath(tech)
-			rollbackValue := s.adapter.RollbackParameterValue(tech)
-			needEnableCheck := s.adapter.RollbackNeedsEnableCheck(tech)
-
-			s.rollbackExec.RollbackOne(context.Background(), st, dev, rollbackPath, rollbackValue, needEnableCheck)
-		}(subTasks[i])
-	}
+	s.startRollbackExecution(subTasks)
 
 	s.logger.Info("rollback task created",
 		zap.String("task_id", mainTask.ID.String()),

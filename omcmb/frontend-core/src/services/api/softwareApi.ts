@@ -429,12 +429,15 @@ export const softwareApi = {
     deviceIds: string[];
     taskName: string;
     createUser: string;
+    createSuspended?: boolean;
   }): Promise<UpgradeTaskInfo> {
-    const { data } = await http.post<BackendUpgradeTask>('/upgrade-tasks/rollback', {
+    const body: Record<string, unknown> = {
       device_ids: req.deviceIds,
       task_name: req.taskName,
       create_user: req.createUser,
-    });
+    };
+    if (req.createSuspended) body.create_suspended = true;
+    const { data } = await http.post<BackendUpgradeTask>('/upgrade-tasks/rollback', body);
     return mapUpgradeTask(data);
   },
 
@@ -469,7 +472,7 @@ export const softwareApi = {
   // ---- All Sub Tasks (跨任务设备列表) ----
 
   async getAllSubTasks(
-    params: { taskName?: string; deviceSn?: string; status?: string } & PageRequest
+    params: { taskName?: string; deviceSn?: string; status?: string; taskType?: number } & PageRequest
   ): Promise<PageResponse<UpgradeSubTaskInfo>> {
     const query: Record<string, unknown> = {
       page: params.page,
@@ -478,6 +481,7 @@ export const softwareApi = {
     if (params.taskName) query.task_name = params.taskName;
     if (params.deviceSn) query.device_sn = params.deviceSn;
     if (params.status) query.status = params.status;
+    if (params.taskType !== undefined) query.task_type = params.taskType;
 
     const { data } = await http.get<BackendListResponse<BackendUpgradeSubTask>>(
       '/upgrade-sub-tasks',

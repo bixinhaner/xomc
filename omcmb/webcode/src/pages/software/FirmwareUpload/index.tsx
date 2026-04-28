@@ -42,10 +42,19 @@ import {
   useDownloadFirmware,
   useUpdateFirmware,
 } from '@core/hooks/api/useSoftware';
+import { useProductClasses } from '@core/hooks/api/useDevices';
 import type { SoftwareVersion } from '@core/mock/data/software';
 
 const { Dragger } = Upload;
 const { TextArea } = Input;
+
+// 产品类型列表 — 从后端动态获取，此常量仅作为 fallback
+const fallbackProductTypeOptions = [
+  { label: 'PM-B4860', value: 'PM-B4860' },
+  { label: 'QAFA', value: 'QAFA' },
+  { label: 'QAFB', value: 'QAFB' },
+  { label: 'FAP/BU1810', value: 'FAP/BU1810' },
+];
 
 // 文件类型枚举
 type FileType = 'upgrade' | 'ca' | 'fpga' | 'ap';
@@ -58,18 +67,6 @@ const fileTypeParamMap: Record<FileType, 0 | 1 | 5 | 6> = {
   ap: 5,
 };
 
-// 产品类型列表
-const productTypeOptions = [
-  { label: 'PM-B4860', value: 'PM-B4860' },
-  { label: 'QAFA', value: 'QAFA' },
-  { label: 'QATA', value: 'QATA' },
-  { label: 'QAFB', value: 'QAFB' },
-  { label: 'RTD', value: 'RTD' },
-  { label: 'BaiBNX', value: 'BaiBNX' },
-  { label: 'BaiBNQ', value: 'BaiBNQ' },
-  { label: 'FAP/BU1810', value: 'FAP/BU1810' },
-];
-
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
@@ -81,6 +78,15 @@ export default function FirmwareUpload() {
   const [form] = Form.useForm();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Dynamic product type options from API
+  const { data: productClassesData } = useProductClasses();
+  const productTypeOptions = useMemo(() => {
+    if (productClassesData && productClassesData.length > 0) {
+      return productClassesData.map((c) => ({ label: c, value: c }));
+    }
+    return fallbackProductTypeOptions;
+  }, [productClassesData]);
 
   // 文件类型状态
   const [fileType, setFileType] = useState<FileType>('upgrade');

@@ -234,6 +234,9 @@ func (r *PgSubTaskRepository) Update(ctx context.Context, task *UpgradeSubTask) 
 		Set("command_key", task.CommandKey).
 		Set("failure_reason", task.FailureReason).
 		Set("pre_suspend_status", task.PreSuspendStatus).
+		Set("device_sn", task.DeviceSN).
+		Set("ori_version", task.OriVersion).
+		Set("dest_version", task.DestVersion).
 		Where(sq.Eq{"id": task.ID})
 
 	query, args, err := builder.ToSql()
@@ -491,6 +494,12 @@ func (r *PgSubTaskRepository) ListAll(ctx context.Context, filter AllSubTaskFilt
 	}
 	if filter.Status != nil {
 		pred := sq.Eq{"ust.status": *filter.Status}
+		base = base.Where(pred)
+		countBase = countBase.Where(pred)
+	}
+
+	if filter.TaskType != nil {
+		pred := sq.Eq{"ut.task_type": *filter.TaskType}
 		base = base.Where(pred)
 		countBase = countBase.Where(pred)
 	}
