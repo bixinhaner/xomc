@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -274,6 +276,20 @@ func (h *Handler) CreateUpgradeTask(c *gin.Context) {
 	}
 
 	task, err := h.service.BatchUpgrade(c.Request.Context(), req)
+
+	// Cross-module audit: ActionUpgrade / category 3 of 5 (W3.G.2).
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionUpgrade
+	entry.ResourceType = audit.ResourceUpgradeTask
+	entry.Success = err == nil
+	if task != nil {
+		entry.ResourceID = task.ID.String()
+	}
+	if err != nil {
+		entry.ErrorMessage = err.Error()
+	}
+	audit.LogAsync(entry)
+
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

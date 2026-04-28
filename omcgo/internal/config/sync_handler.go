@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/task"
@@ -85,6 +87,22 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 		Params:   params,
 		Source:   task.TaskSourceAPI,
 	})
+
+	// Cross-module audit: ActionConfig / category 2 of 5 (W3.G.2).
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionConfig
+	entry.ResourceType = audit.ResourceConfig
+	entry.ResourceID = deviceID
+	entry.Details = map[string]interface{}{
+		"method":    "SetParameterValues",
+		"param_cnt": len(req.Parameters),
+	}
+	entry.Success = err == nil
+	if err != nil {
+		entry.ErrorMessage = err.Error()
+	}
+	audit.LogAsync(entry)
+
 	if err != nil {
 		logger.L(c.Request.Context()).Error("push config command", zap.String("device_id", deviceID), zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)

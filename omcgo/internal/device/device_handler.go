@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -142,8 +143,21 @@ func (h *Handler) DeleteDevice(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.DeleteDevice(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	delErr := h.service.DeleteDevice(c.Request.Context(), id)
+
+	// Cross-module audit: ActionDelete / category 5 of 5 (W3.G.2).
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionDelete
+	entry.ResourceType = audit.ResourceDevice
+	entry.ResourceID = id.String()
+	entry.Success = delErr == nil
+	if delErr != nil {
+		entry.ErrorMessage = delErr.Error()
+	}
+	audit.LogAsync(entry)
+
+	if delErr != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, delErr)
 		return
 	}
 
@@ -308,8 +322,21 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.RebootDevice(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+	rebootErr := h.service.RebootDevice(c.Request.Context(), id)
+
+	// Cross-module audit: ActionReboot / category 4 of 5 (W3.G.2).
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionReboot
+	entry.ResourceType = audit.ResourceDevice
+	entry.ResourceID = id.String()
+	entry.Success = rebootErr == nil
+	if rebootErr != nil {
+		entry.ErrorMessage = rebootErr.Error()
+	}
+	audit.LogAsync(entry)
+
+	if rebootErr != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(rebootErr), rebootErr)
 		return
 	}
 
@@ -527,6 +554,20 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 	}
 
 	result := h.service.BatchDeleteDevices(c.Request.Context(), req.IDs, deletedBy)
+
+	// Cross-module audit: ActionDelete (batch) / category 5 of 5 (W3.G.2).
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionDelete
+	entry.ResourceType = audit.ResourceDevice
+	entry.Details = map[string]interface{}{
+		"batch":     true,
+		"id_count":  len(req.IDs),
+		"succeeded": result.Succeeded,
+		"failed":    result.Failed,
+	}
+	entry.Success = result.Failed == 0
+	audit.LogAsync(entry)
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -549,6 +590,20 @@ func (h *Handler) BatchRebootDevices(c *gin.Context) {
 	}
 
 	result := h.service.BatchRebootDevices(c.Request.Context(), req.IDs)
+
+	// Cross-module audit: ActionReboot (batch) / category 4 of 5 (W3.G.2).
+	entry := admin.AuditContextFromGin(c)
+	entry.Action = audit.ActionReboot
+	entry.ResourceType = audit.ResourceDevice
+	entry.Details = map[string]interface{}{
+		"batch":     true,
+		"id_count":  len(req.IDs),
+		"succeeded": result.Succeeded,
+		"failed":    result.Failed,
+	}
+	entry.Success = result.Failed == 0
+	audit.LogAsync(entry)
+
 	c.JSON(http.StatusAccepted, result)
 }
 

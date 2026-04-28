@@ -67,6 +67,10 @@ func (h *Handler) Login(c *gin.Context) {
 			zap.String("reason", reason),
 		)
 
+		// W3.G.2 ActionLogin / category 1 of 5: handled by recordAuthAuditLog,
+		// which writes "login_failed" — a sub-action of audit.ActionLogin —
+		// directly through the AuditRepository. Avoid double-emission via
+		// audit.LogAsync; both paths share the same repo.
 		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, reason)
 
 		if h.loginGuard != nil {
@@ -94,6 +98,7 @@ func (h *Handler) Login(c *gin.Context) {
 		zap.String("ip", clientIP),
 	)
 
+	// W3.G.2 ActionLogin / category 1 of 5: see comment in failure branch.
 	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, "")
 
 	c.JSON(http.StatusOK, tokenPair)

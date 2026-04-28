@@ -8,13 +8,23 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
+
+	"github.com/omcgo/omcgo/internal/admin/audit"
 )
 
 // Audit log action constants for authentication events.
-const (
-	auditActionLoginSuccess = "login_success"
-	auditActionLoginFailed  = "login_failed"
-	auditActionLogout       = "logout"
+//
+// These are sub-actions of audit.ActionLogin (W3.G.2 / T-0063 charter
+// category 1 of 5). The "login_success" / "login_failed" / "logout"
+// strings are persisted to audit_logs.action so dashboards can filter
+// successful vs failed authentications.
+//
+// The category is built from audit.ActionLogin so that any future change
+// to the canonical constant ripples through to these sub-actions.
+var (
+	auditActionLoginSuccess = audit.ActionLogin + "_success" // "login_success"
+	auditActionLoginFailed  = audit.ActionLogin + "_failed"  // "login_failed"
+	auditActionLogout       = "logout"                       // sub-action of audit.ActionLogin
 )
 
 // Login rate limiting constants.

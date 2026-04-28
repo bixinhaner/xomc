@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -32,6 +33,11 @@ type AdminService struct {
 }
 
 // NewAdminService creates a new AdminService.
+//
+// As a side effect, this registers the package-level audit sink (see
+// internal/admin/audit) so cross-module callers can use audit.Log without
+// directly depending on AdminService. The first AdminService constructed
+// wins; subsequent calls overwrite the sink (matters mainly for tests).
 func NewAdminService(
 	userRepo UserRepository,
 	roleRepo RoleRepository,
@@ -40,6 +46,12 @@ func NewAdminService(
 	jwtService *JWTService,
 	logger *zap.Logger,
 ) *AdminService {
+	if auditRepo != nil {
+		audit.SetDefault(NewAuditSink(auditRepo))
+	}
+	if logger != nil {
+		audit.SetFallbackLogger(logger.Named("audit"))
+	}
 	return &AdminService{
 		userRepo:  userRepo,
 		roleRepo:  roleRepo,
