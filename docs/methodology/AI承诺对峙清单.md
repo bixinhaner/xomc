@@ -179,6 +179,246 @@ grep -rE "pg_dump|pg_restore" deployments/ run/ scripts/ 2>/dev/null
 
 ---
 
+## 第二章半 · Wave 2 中段对峙窗口（W3-W8 各 Block）
+
+> **新增章节**（2026-04-28，user 授权 dev-pipeline Option A）：本章是 Wave 2 各 Block 子任务级机械验证清单，**新增承诺，不修改第一-八章既有承诺**。
+>
+> **目的**：第三章 W8 末 10 条是粗粒度退出门，本章 13 条是过程门 — 把 Block A/B/C/D 的"DoD 描述"翻译成机械可验证的命令 + Pass 标准，避免重蹈 W1.6 那种"骨架 226 处 check_status 实际 0 个真用例"的字面陷阱。
+>
+> **验证窗口**：每 Block 末（W4 / W6 / W7 / W8）阶段性验证，W8 末（2026-06-22）合并对峙。
+> **本章与第三章并存**：本章过程门，第三章退出门。同一指标（如 E2E ≥ 100、any = 0、F04 三通道）在两章重复出现是设计——本章看个体子任务，第三章看横切综合。
+
+### W2.A.1 — F04 邮件通道端到端
+
+**承诺内容**：实现 SMTP 客户端 + EmailDispatcher；新增 `notify_email` filter action；触发后真发邮件（单测用 net/smtp 本地服务器或 mock；staging 用真凭据）。
+
+**验证命令**：
+```bash
+# 1. 文件存在
+ls omcgo/internal/alarm/email_dispatcher*.go
+grep -n "notify_email" omcgo/internal/alarm/notification_action_engine.go
+# 2. 单测含 EndToEnd 用例
+cd omcgo && go test -run "TestProcessAlarm_NotifyEmail_EndToEnd" -race ./internal/alarm/... -v
+# 3. 新指标埋点
+grep -rn "alarm_email_dispatches_total" omcgo/internal/alarm/
+```
+
+**Pass 标准**：四类命令全有命中 + 单测 PASS
+**Fail 标准**：缺一
+**责任**：🤖 AI（实现）+ 🧑 用户（SMTP 凭据）
+**Backlog**：T-0007（Wave 2 Block A.1）
+
+### W2.A.2 — F04 Webhook 完整（retry / dead-letter / HMAC + FilterEngine 接生产路径）
+
+**承诺内容**：W1.5 webhook MVP 升级到生产级 — 加重试（指数退避，≤ 3 次）、死信记录（PG 表）、HMAC 签名（可选 header）；**FilterEngine 装配进生产 alarm 接收路径**（W1.5 留下的 pre-existing tech debt，backlog §10 末记载）。
+
+**验证命令**：
+```bash
+# 1. 重试 + 死信
+grep -rn "RetryAttempt\|dead_letter\|DeadLetter" omcgo/internal/alarm/
+ls omcgo/migrations/0000{39,40,41,42}*dead_letter* 2>/dev/null
+# 2. HMAC 签名
+grep -rn "X-Hub-Signature\|hmac\.New\|HMACSign" omcgo/internal/alarm/
+# 3. FilterEngine 接生产路径（W1.5 真正的尾巴）
+grep -rn "filterEngine\.ProcessAlarm\|FilterEngine\.\?ProcessAlarm" omcgo/internal/alarm/*service*.go omcgo/internal/alarm/handler*.go
+# 4. 单测覆盖关键路径
+cd omcgo && go test -run "TestWebhookDispatcher_Retry|TestWebhookDispatcher_DeadLetter|TestWebhookDispatcher_HMAC" -race ./internal/alarm/... -v
+```
+
+**Pass 标准**：四类 grep 全有命中 + 单测 PASS + FilterEngine 真接进 alarm 主路径
+**Fail 标准**：FilterEngine 仍是 dead code 不接生产路径 / 任一单测缺
+**责任**：🤖 AI
+**Backlog**：T-0011（Wave 2 Block A.3）
+
+### W2.A.3 — F04 短信通道端到端
+
+**承诺内容**：至少一家运营商网关接通；`notify_sms` filter action 落地。
+
+**验证命令**：
+```bash
+ls omcgo/internal/alarm/sms_dispatcher*.go
+grep -n "notify_sms" omcgo/internal/alarm/notification_action_engine.go
+cd omcgo && go test -run "TestProcessAlarm_NotifySMS" -race ./internal/alarm/... -v
+```
+
+**Pass 标准**：文件 + filter action + 单测 PASS
+**N/A 条件**：T-0009 短信凭据外部动作未到位 → 本条标 N/A 不计入分母（13 → 12）
+**Fail 标准**：凭据到位但实现缺
+**责任**：🤝（凭据 🧑 / 实现 🤖）
+**Backlog**：T-0014（Wave 2 Block A.2）
+
+### W2.A.4 — 通知模板 + 历史记录（API + UI）
+
+**承诺内容**：模板 CRUD（多语言）+ 通知历史持久化（PG 表）+ 查询 API + 前端列表页。
+
+**验证命令**：
+```bash
+# 后端
+ls omcgo/internal/notification/template*.go omcgo/internal/notification/history*.go
+ls omcgo/migrations/00004*notification_*.sql 2>/dev/null
+grep -rn "/api/v1/notifications/templates\|/api/v1/notifications/history" omcgo/cmd/app/
+# 前端
+ls omcmb/frontend-core/src/services/api/notificationApi.ts
+ls -d omcmb/webcode/src/pages/notification* 2>/dev/null
+# E2E
+grep -c "notification" omcgo/scripts/e2e_verify.sh
+```
+
+**Pass 标准**：后端表 + API + 前端页面 + E2E ≥ 1 条 claim
+**Fail 标准**：缺一
+**责任**：🤝（后端 🤖 / 前端 🤖 / E2E 🤝）
+**Backlog**：T-0043（Wave 2 Block A.5）
+
+### W2.A.5 — notification/ 模块测试覆盖率 ≥ 70%
+
+**验证命令**：
+```bash
+cd omcgo && go test -coverprofile=cov_notification.out ./internal/notification/... 2>&1 | tail -5
+go tool cover -func=cov_notification.out | tail -1
+```
+
+**Pass 标准**：`total: (statements) ≥ 70.0%`
+**Fail 标准**：< 70%
+**责任**：🤖
+**Backlog**：T-0044（Wave 2 Block A.6）
+
+### W2.B.1 — task/ 模块测试覆盖率 ≥ 70%
+
+**承诺内容**：CWMP ID ↔ Task 映射、reboot closer、completion router 三个关键路径全覆盖。
+
+**验证命令**：
+```bash
+cd omcgo
+go test -coverprofile=cov_task.out ./internal/task/... 2>&1 | tail -5
+go tool cover -func=cov_task.out | tail -1
+go test -run "TestCWMPMapping|TestRebootCloser|TestCompletionRouter" -race ./internal/task/... -v 2>&1 | tail -20
+```
+
+**Pass 标准**：覆盖率 ≥ 70% + 三个关键测试 PASS
+**Fail 标准**：覆盖率 < 70% 或关键测试缺失
+**责任**：🤖
+**Backlog**：T-0045（Wave 2 Block B.1）
+
+### W2.B.2 — events/ 模块测试 + service 层补齐
+
+**承诺内容**：覆盖率 ≥ 60%；EventBus 抽象 + 两实现（Channel/NATS）测试；补 service 层（当前仅 hub/handler/store）。
+
+**验证命令**：
+```bash
+cd omcgo
+ls internal/events/*service*.go
+go test -coverprofile=cov_events.out ./internal/events/... 2>&1 | tail -5
+go tool cover -func=cov_events.out | tail -1
+```
+
+**Pass 标准**：service 文件存在 + 覆盖率 ≥ 60%
+**Fail 标准**：缺一
+**责任**：🤖
+**Backlog**：T-0046（Wave 2 Block B.2）
+
+### W2.B.3 — core/ 模块测试覆盖率 ≥ 50%
+
+**验证命令**：
+```bash
+cd omcgo && go test -coverprofile=cov_core.out ./internal/core/... 2>&1 | tail -5
+go tool cover -func=cov_core.out | tail -1
+```
+
+**Pass 标准**：≥ 50%（基线 16%）
+**Fail 标准**：< 50%
+**责任**：🤖
+**Backlog**：T-0047（Wave 2 Block B.3）
+
+### W2.B.4 — mr / syslog / provision / interop 补 service 层
+
+**验证命令**：
+```bash
+for mod in mr syslog provision interop; do
+  echo -n "$mod service files: "
+  ls omcgo/internal/$mod/*service*.go 2>/dev/null | wc -l
+done
+```
+
+**Pass 标准**：四个模块各 ≥ 1 个 service 文件
+**Fail 标准**：任一为 0
+**责任**：🤖
+**Backlog**：T-0048 / T-0049 / T-0050 / T-0051（Wave 2 Block B.4 拆 4 条）
+
+### W2.C.1 — frontend-core hooks 与 services/api 对齐
+
+**承诺内容**：当前 24 hooks vs 29 services（差 5）；补齐到差距 ≤ 1（部分 service 不需 hook 可豁免）。
+
+**验证命令**：
+```bash
+echo "services: $(ls omcmb/frontend-core/src/services/api/*.ts | wc -l)"
+echo "hooks:    $(ls omcmb/frontend-core/src/hooks/api/*.ts | wc -l)"
+```
+
+**Pass 标准**：差距 ≤ 1
+**Fail 标准**：差距 ≥ 3
+**责任**：🤖
+**Backlog**：T-0052（Wave 2 Block C.1）
+
+### W2.C.2 — 前端 any 清零 + DeviceGrouping 拆分
+
+**验证命令**：
+```bash
+# any 计数（排除 ts-ignore 注释）
+cd omcmb && grep -rEn ":\s*any\b|<any>|as\s+any" --include="*.ts" --include="*.tsx" frontend-core/src webcode/src | grep -v "// @ts-" | wc -l
+# DeviceGrouping 行数
+find omcmb -name "DeviceGrouping*.tsx" -exec wc -l {} +
+```
+
+**Pass 标准**：any 计数 = 0 + 所有 `DeviceGrouping*.tsx` 单文件 ≤ 400 行
+**Fail 标准**：any > 0 或仍存 1500+ 行单文件
+**责任**：🤖
+**Backlog**：T-0053（any 清零）+ T-0054（DeviceGrouping 拆分）
+
+### W2.C.3 — 前端 vitest 覆盖率 ≥ 50%
+
+**验证命令**：
+```bash
+cd omcmb/webcode && npx vitest run --coverage 2>&1 | tail -10
+```
+
+**Pass 标准**：lines ≥ 50% 或 statements ≥ 50%
+**Fail 标准**：< 50%
+**责任**：🤖
+**Backlog**：T-0055（Wave 2 Block C.4）
+
+### W2.D.1 — E2E 累计 claim 用例 ≥ 100（实跑 PASS）
+
+**验证命令**：
+```bash
+# 启动 app 后（restart-all.sh）
+grep -c "^[[:space:]]*claim[[:space:]]" omcgo/scripts/e2e_verify.sh
+bash omcgo/scripts/e2e_verify.sh http://localhost:8081 2>&1 | tail -5
+```
+
+**Pass 标准**：claim 计数 ≥ 100 + 实跑 `Pass: 100+` + Fail = 0
+**Fail 标准**：claim < 100 或实跑 Fail > 0
+**责任**：🤝（写用例 🤖 / 启动环境 🧑）
+**Backlog**：T-0006（累计型，下游 T-0025 RC 冻结依赖 @累计≥150）
+
+### Wave 2 中段通过率门槛
+
+**13 条全 Pass = 100%**。
+- ≥ 9 条 Pass（69% ≈ 70%）= AI 兑现 Wave 2，可进 Wave 3 硬化期。
+- ≤ 5 条 Pass（38%）+ 用户尽责（第六章）= AI 嘴炮，**第八章认账条款触发**。
+- W2.A.3（短信）凭据未到位 → 本条标 N/A 不入分母（13 → 12，门槛同步降到 ≥ 9 → ≥ 8）。
+
+**与第三章 W8 末关系**：
+- W2.A.1+A.3+A.4 共同实现 → 第三章 W8.4（F04 三通道端到端）
+- W2.D.1 ≥ 100 → 第三章 W8.3（同指标，同验证命令）
+- W2.A.5+B.1+B.2 模块覆盖 → 第三章 W8.2（task/notification/events ≥ 60%）
+- W2.B.1+B.2+B.3+B.5 + 后端总覆盖率 → 第三章 W8.1（≥ 60%）
+- W2.C.1+C.2 → 第三章 W8.5+W8.7+W8.6
+- W2.B.4 → 第三章 W8.9
+
+本章覆盖了第三章 W8.1-W8.7 + W8.9 共 8 条粗粒度门的实现细节。第三章余下 W8.8（Backlog in-progress ≤ 3，纪律门）+ W8.10（CI 4 周成功率 ≥ 80%，文化门）由用户全责，本章不重复。
+
+---
+
 ## 第三章 · W8 末（约 8 周）中承诺
 
 ### 承诺 W8.1 — 后端单测覆盖率 ≥ 60%

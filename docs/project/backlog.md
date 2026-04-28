@@ -67,15 +67,15 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 42 | — | +5 (T-0038~T-0042 整改启动) |
-| `done` | 12 | — | +T-0041 W1.4 / +T-0006 W1.6（W1.6 段实跑 27/0 PASS）|
+| Total tasks | 55 | — | +13 (T-0043~T-0055 Wave 2 章程立项 2026-04-28) |
+| `done` | 12 | — | Wave 1 主体收尾，剩 W1.7 docker 0.5 外部待办 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 19 | — | -1 (T-0041 已 done) |
+| `planned` | 32 | — | +13 (T-0043~T-0055 Wave 2 入队) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
-| E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；W2 Block A/D 接续 |
+| E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
 **健康度警报**：当前无。
@@ -119,34 +119,37 @@
 
 **Block A · F04 通知三通道（W3-W4）**
 
-| 序 | Task | 标题 |
-|----|------|------|
-| A.1 | T-0007 | F04 邮件通道 |
-| A.2 | T-0014 | F04 短信通道（依赖 T-0009） |
-| A.3 | T-0011 | F04 Webhook 通道（W1.5 延伸到完整 retry/dead-letter） |
-| A.4 | T-0009 | 短信凭据申请（外部动作） |
-| A.5 | TBD（W3 立项时分配 T-NNNN） | 通知模板/历史 UI |
-| A.6 | TBD | notification/ 测试覆盖率 ≥ 70% |
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| A.1 | T-0007 | F04 邮件通道 | W2.A.1 |
+| A.2 | T-0014 | F04 短信通道（依赖 T-0009） | W2.A.3 |
+| A.3 | T-0011 | F04 Webhook 通道（W1.5 延伸到完整 retry/dead-letter + FilterEngine 接生产路径） | W2.A.2 |
+| A.4 | T-0009 | 短信凭据申请（外部动作） | — |
+| A.5 | T-0043 | 通知模板 + 历史记录（API + UI） | W2.A.4 |
+| A.6 | T-0044 | notification/ 测试覆盖率 ≥ 70% | W2.A.5 |
 
 **Block B · 测试债清零（W5-W6）**
 
-| 序 | Task | 标题 |
-|----|------|------|
-| B.1 | TBD | task/ 测试 ≥ 70% |
-| B.2 | TBD | events/ 测试 + 补 service 层 |
-| B.3 | TBD | core/ 测试覆盖率 16% → 50% |
-| B.4 | TBD | mr/syslog/provision/interop 补 service 层（4 任务） |
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| B.1 | T-0045 | task/ 测试覆盖率 ≥ 70%（CWMP map / reboot closer / completion router） | W2.B.1 |
+| B.2 | T-0046 | events/ 测试 ≥ 60% + 补 service 层 | W2.B.2 |
+| B.3 | T-0047 | core/ 测试覆盖率 16% → 50% | W2.B.3 |
+| B.4a | T-0048 | mr/ 补 service 层 | W2.B.4 |
+| B.4b | T-0049 | syslog/ 补 service 层 | W2.B.4 |
+| B.4c | T-0050 | provision/ 补 service 层 | W2.B.4 |
+| B.4d | T-0051 | interop/ 补 service 层 | W2.B.4 |
 
 **Block C · 前端整改（W7）**
 
-| 序 | Task | 标题 |
-|----|------|------|
-| C.1 | TBD | frontend-core 5 个缺失 hook 配齐 |
-| C.2 | TBD | 11 处 `any` 清零 |
-| C.3 | TBD | DeviceGrouping 1573 行拆分 |
-| C.4 | TBD | 前端 vitest 覆盖率 ≥ 50% |
+| 序 | Task | 标题 | 章程 |
+|----|------|------|------|
+| C.1 | T-0052 | frontend-core hooks/services 对齐（差距 ≤ 1） | W2.C.1 |
+| C.2 | T-0053 | 前端 `any` 清零 | W2.C.2 |
+| C.3 | T-0054 | DeviceGrouping 1573 行拆分（≤ 400 行/文件） | W2.C.2 |
+| C.4 | T-0055 | 前端 vitest 覆盖率 ≥ 50% | W2.C.3 |
 
-**Block D · E2E ≥ 100（W8）**：T-0006 累计目标 @≥100
+**Block D · E2E ≥ 100（W8）**：T-0006 累计目标 @≥100（章程 W2.D.1）
 
 **Wave 2 退出（2026-06-22 对峙）**：≥ 7/10 ✅ → 进 Wave 3
 
@@ -222,6 +225,19 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.3 | wave-1 | 2026-04-27 |
 | T-0041 | `internal/core/middleware/ratelimit` 中间件（W1.4） | feat | infra | P0 | planned | TBD | M | — | `AI承诺对峙清单.md` W1.4 | wave-1 | 2026-04-27 |
 | T-0042 | 数据库定时备份脚本 + 一次恢复演练（W1.8） | proc | ops | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.8 | wave-1 | 2026-04-27 |
+| T-0043 | 通知模板 + 历史记录（API + UI） | feat | F04 | P0 | planned | 电信+前端 | L | T-0007,T-0011 | `AI承诺对峙清单.md` W2.A.4 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
+| T-0044 | notification/ 模块测试覆盖率 ≥ 70% | td | infra | P0 | planned | Go | M | T-0007,T-0011,T-0014,T-0043 | `AI承诺对峙清单.md` W2.A.5 | wave-2 | 2026-04-28 |
+| T-0045 | task/ 模块测试覆盖率 ≥ 70%（CWMP map / reboot closer / completion router） | td | infra | P0 | planned | Go | M | — | `AI承诺对峙清单.md` W2.B.1 | wave-2 | 2026-04-28 |
+| T-0046 | events/ 模块测试覆盖率 ≥ 60% + 补 service 层 | td | infra | P0 | planned | 架构+Go | M | — | `AI承诺对峙清单.md` W2.B.2 | wave-2 | 2026-04-28 |
+| T-0047 | core/ 模块测试覆盖率 16% → 50% | td | infra | P1 | planned | Go | M | — | `AI承诺对峙清单.md` W2.B.3 | wave-2 | 2026-04-28 |
+| T-0048 | mr/ 补 service 层（无 service 层修复） | ref | F05 | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0049 | syslog/ 补 service 层 | ref | F06/syslog | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0050 | provision/ 补 service 层 | ref | F09 | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0051 | interop/ 补 service 层 | ref | F10 | P1 | planned | 电信 | S | — | `AI承诺对峙清单.md` W2.B.4 | wave-2 | 2026-04-28 |
+| T-0052 | frontend-core hooks 与 services/api 对齐（差距 ≤ 1） | ref | frontend | P1 | planned | 前端 | M | — | `AI承诺对峙清单.md` W2.C.1 / R-102 | wave-2 | 2026-04-28 |
+| T-0053 | 前端 `any` 类型清零 | td | frontend | P1 | planned | 前端 | S | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
+| T-0054 | DeviceGrouping 1573 行拆分（≤ 400 行/文件） | ref | frontend | P1 | planned | 前端 | M | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
+| T-0055 | 前端 vitest 覆盖率 ≥ 50% | td | frontend | P1 | planned | 前端 | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -382,6 +398,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-27 | fix | T-0007/T-0011 接续 | commit `10a214b2`；W1.5 live 验证暴露的 bug：`pg_filter_repository.go` GetByID Scan 漏 `&rule.WebhookURL`（agent 在 Create/Update/List/ListEnabled 都加了，唯独 GetByID 漏），导致 GET by id 404；fix 1 行；Toggle/Update 内部都用 GetByID 取当前 row，本修复同步生效 |
 | 2026-04-27 | docs | W1.5 live | commit `a11ee3ab`；`docs/review-report/20260427/verify-T-0007-W1.5-live.md` 315 行；记录 charter 4 步 live 全过 + 已知边界（FilterEngine 未接入生产 alarm 路径，Wave 2 T-0011 必做） |
 | 2026-04-27 | 待 triage 候选 task | F04 alarm-filters API 改进 | 1) Create handler 加联合校验（action=notify_webhook 时 webhook_url 必填）→ 返回 400 而非 500；2) FilterEngine 装配进生产 alarm 接收路径（pre-existing tech debt，Wave 2 T-0011 全量必做） |
+| 2026-04-28 | Wave 2 章程立项 | T-0043~T-0055（13 条） | dev-pipeline Option A 路径：先补章程再发车。`AI承诺对峙清单.md` 新增「第二章半 · Wave 2 中段对峙窗口（W3-W8 各 Block）」13 条机械承诺（W2.A.1~A.5 / W2.B.1~B.4 / W2.C.1~C.3 / W2.D.1）含验证命令 + Pass/Fail 标准；Block A.5/A.6 + Block B.1-4（拆 4 条） + Block C.1-4 共 10 个 TBD 占位转 T-0043~T-0055（B.4 拆 mr/syslog/provision/interop 共 4 条 → 总 13 条）；State=planned / Sprint=wave-2 / Risk 字段引章程子项；通过率门槛 ≥ 9/13 = 69% 兑现，≤ 5/13 = AI 嘴炮（与第三章 W8 末并存：本章过程门，第三章退出门） |
 
 ---
 
