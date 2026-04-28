@@ -68,13 +68,15 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 55 | — | +13 (T-0043~T-0055 Wave 2 章程立项 2026-04-28) |
-| `done` | 12 | — | Wave 1 主体收尾，剩 W1.7 docker 0.5 外部待办 |
+| `done` | 14 | — | Wave 1 满分 8.0/8 ✅；+T-0008 W1.7 backfill / +T-0011 W2.A.2 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 32 | — | +13 (T-0043~T-0055 Wave 2 入队) |
+| `planned` | 31 | — | -1 (T-0011 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
+| **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
+| **Wave 2 章程计分** | **1 / 13** | ≥ 9/13 | W2.A.2 PASS（T-0011）；W2.A.1 部分（T-0007 待整合） |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -121,9 +123,9 @@
 
 | 序 | Task | 标题 | 章程 |
 |----|------|------|------|
-| A.1 | T-0007 | F04 邮件通道 | W2.A.1 |
+| A.1 | T-0007 | F04 邮件通道（**部分实现**：EmailDispatcher 内部 + 5 单测；filter action 接入待整合） | W2.A.1 部分 |
 | A.2 | T-0014 | F04 短信通道（依赖 T-0009） | W2.A.3 |
-| A.3 | T-0011 | F04 Webhook 通道（W1.5 延伸到完整 retry/dead-letter + FilterEngine 接生产路径） | W2.A.2 |
+| A.3 | T-0011 | F04 Webhook 通道（retry/dead-letter/HMAC + FilterEngine 接 AlarmEngine.Process） | ✅ W2.A.2 2026-04-28 |
 | A.4 | T-0009 | 短信凭据申请（外部动作） | — |
 | A.5 | T-0043 | 通知模板 + 历史记录（API + UI） | W2.A.4 |
 | A.6 | T-0044 | notification/ 测试覆盖率 ≥ 70% | W2.A.5 |
@@ -201,11 +203,11 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | ID | Title | Type | Domain | Prio | State | Owner | Est | Deps | Risk/PRD | Sprint | Updated |
 |----|-------|------|--------|------|-------|-------|-----|------|----------|--------|---------|
 | T-0006 | E2E 用例补齐（贯穿 01→07 累计 ≥200） | td | infra | P0 | in_dev | QA | XL | — | R-002 | sprint-01..07 | 2026-04-20 |
-| T-0007 | F04 告警邮件通道 | feat | F04 | P0 | planned | 电信+Go | M | — | R-001 / `prd/F04-alarm-notification.md` | sprint-01 | 2026-04-20 |
+| T-0007 | F04 告警邮件通道 | feat | F04 | P0 | planned | 电信+Go | M | — | R-001 / `AI承诺对峙清单.md` W2.A.1 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | done | Claude | M | — | R-107 | wave-1 | 2026-04-28 |
 | T-0009 | 短信服务商凭据申请启动（外部动作） | td | F04 | P0 | planned | PM | S | — | R-001 | sprint-01 | 2026-04-20 |
 | T-0010 | NATS JetStream 事件总线改造 | feat | infra | P0 | planned | 架构+运维 | XL | — | R-004 / `prd/infra-event-bus.md`（待产出） | sprint-02..04 | 2026-04-20 |
-| T-0011 | F04 告警 Webhook 通道 | feat | F04 | P0 | planned | 电信+Go | M | T-0010 | R-001 / `prd/F04-alarm-notification.md` | sprint-02 | 2026-04-20 |
+| T-0011 | F04 告警 Webhook 通道（retry/dead-letter/HMAC + FilterEngine 接 AlarmEngine.Process） | feat | F04 | P0 | done | Claude | M | — | R-001 / `AI承诺对峙清单.md` W2.A.2 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0012 | worker 进程重试 / 死信队列 | feat | infra | P1 | planned | 架构+运维 | L | T-0010 | R-106 | sprint-02..04 | 2026-04-20 |
 | T-0013 | F08 SNMP Trap 骨架 | feat | F08 | P0 | planned | PM+架构 | L | — | R-003 / `prd/F08-oss-protocol.md`（待产出） | sprint-03 | 2026-04-20 |
 | T-0014 | F04 告警短信通道 | feat | F04 | P0 | planned | 电信+Go | M | T-0009 | R-001 / `prd/F04-alarm-notification.md` | sprint-03 | 2026-04-20 |
@@ -401,7 +403,10 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | Wave 2 章程立项 | T-0043~T-0055（13 条） | dev-pipeline Option A 路径：先补章程再发车。`AI承诺对峙清单.md` 新增「第二章半 · Wave 2 中段对峙窗口（W3-W8 各 Block）」13 条机械承诺（W2.A.1~A.5 / W2.B.1~B.4 / W2.C.1~C.3 / W2.D.1）含验证命令 + Pass/Fail 标准；Block A.5/A.6 + Block B.1-4（拆 4 条） + Block C.1-4 共 10 个 TBD 占位转 T-0043~T-0055（B.4 拆 mr/syslog/provision/interop 共 4 条 → 总 13 条）；State=planned / Sprint=wave-2 / Risk 字段引章程子项；通过率门槛 ≥ 9/13 = 69% 兑现，≤ 5/13 = AI 嘴炮（与第三章 W8 末并存：本章过程门，第三章退出门） |
 | 2026-04-28 | fix | charter W2.A.1/A.2/A.3 grep | commit `31dd1a69`；W2.A 三处 grep 路径原写 `notification_action_engine.go`（不存在），对齐到 alarm 模块实际：filter_model.go binding tag + filter_engine.go executeAction；HMAC header 名 `X-Hub-Signature` → `X-OMC-Signature`（与发车 sub-agent prompt 一致）；FilterEngine 接入路径 grep 范围扩到 receiver/sync_/handler/cmd-app；**仅修可验证性，不改任何承诺语义**（Pass 标准 / 责任划分 / N/A 条件 / Backlog ID 全部不动） |
 | 2026-04-28 | done | T-0008 (W1.7 backfill) | verify-T-0008.md §4.3 backfill：docker compose 起 prom/grafana/alertmanager 三容器，三 curl 全 200（Prom `Server is Healthy.` / Grafana `database=ok v10.4.0` / AlertManager `OK`）+ `/api/v1/targets` 4 target 全 `up`（omc-app/acs/worker/prometheus）；T-0008 state done(0.5) → done；**Wave 1 计分 7.5 → 8.0/8 ✅ 满分**（提前 13 天达成对峙日 2026-05-11） |
-| 2026-04-28 | wave-batched 四批并行 | T-0011 + T-0007 sub-agent | dev-pipeline §C.2.1 路径互斥编排发车：T-0011 (W2.A.2 webhook 完整化 retry/dead-letter/HMAC + FilterEngine 接生产路径) 改 webhook_dispatcher / filter_engine / filter_model / pg_filter_repository / 新 migration 000039；T-0007 (W2.A.1 EmailDispatcher 内部) 仅新建 email_dispatcher{,_test}.go，**严禁碰 filter_engine.go/filter_model.go**；§C.2.2 prompt 含工作目录硬约束 + 心跳协议；§C.2.3 主会话 watchdog；T-0007 完成 .wave-status=DONE，5 untracked 零 M，5 单测 -race PASS，整合 checklist 留主会话 |
+| 2026-04-28 | wave-batched 四批并行 | T-0011 + T-0007 sub-agent | dev-pipeline §C.2.1 路径互斥编排发车：T-0011 (W2.A.2 webhook 完整化 retry/dead-letter/HMAC + FilterEngine 接生产路径) 改 webhook_dispatcher / filter_engine / filter_model / pg_filter_repository / 新 migration 000039；T-0007 (W2.A.1 EmailDispatcher 内部) 仅新建 email_dispatcher{,_test}.go，**严禁碰 filter_engine.go/filter_model.go**；§C.2.2 prompt 含工作目录硬约束 + 心跳协议；§C.2.3 主会话 watchdog；§C.2.4 收尾自动清理 worktree |
+| 2026-04-28 | done(partial) | T-0007 (W2.A.1 部分) | commit `1089a315`（cherry-pick 自 worktree-agent-a5148380@c94ae47d）；EmailDispatcher 内部完整：interface + EmailConfig + SMTPEmailDispatcher（net/smtp + crypto/tls 标准库）+ noopEmailDispatcher + EmailMetrics（alarm_email_dispatches_total{result}）；5 单测 -race PASS（Success/Timeout/AuthFail/ParamValidation×3）；零修改 filter_engine.go/filter_model.go（路径互斥保证）；T-0007 整合 (filter action enum + dispatchEmail 分支 + DI) 留下批合并 commit；sub-agent 7 分钟（425s）完成；worktree 清理 |
+| 2026-04-28 | done | T-0011 (W2.A.2) | commit `682ea585`（cherry-pick 自 worktree-agent-ab4a7023@d6a72677）；新建 5（dead_letter.go/pg_dead_letter_repository.go/dead_letter_test.go/engine_filter_integration_test.go/migrations/000039_alarm_webhook_dead_letters.sql）+ 修改 9（webhook_dispatcher 加 retry+HMAC+ErrDeadLetter / filter_engine 加 DeadLetterRepo 注入 / filter_model+filter_handler 加 WebhookSecret / pg_filter_repository **5 处 SQL 全加 webhook_secret 列**（吸取 W1.5 GetByID 漏字段教训）/ engine.go SetFilterEngine setter / cmd/app/provider/alarm.go DI / 既有测试同步新签名）；948+/-88；章程 W2.A.2 grep 4 类全过；新 5 测 PASS（Retry 1.51s 真延时 / DeadLetter 3.51s 跑到 max retry / HMAC 验签 / FilterEngine 3 子测 short-circuit/fall-through/nil-engine）；W1.5 既有 8 测全 PASS；migration 000039 编号连续 + up/down 配对；sub-agent 14 分钟（853s）完成；worktree 清理；**Wave 2 章程 1/13 PASS** |
+| 2026-04-28 | 待 triage 候选 | pre-existing W1.5 mockAlarmStore race | T-0007/T-0011 sub-agent 都独立确认 main HEAD 同样 -race fail（5 个 TestIntegration_FullPipeline_* 用例，`mockAlarmStore.SaveActive()` map 无锁），**与 W2.A.2 改动无关**；建议另立 backlog task 修 mockAlarmStore（→ sync.Map 或 Mutex）；与 backlog §10 早前登记的 `expedited_receiver.go:48` race 是不同两处问题（一个 production code, 一个 test mock），需分开 triage |
 
 ---
 
