@@ -67,10 +67,10 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 56 | — | +1 (T-0056 W2.D.1.b 立项 2026-04-28，A 路径) |
-| `done` | 26 | — | +Block C 三并行批：T-0052/T-0053/T-0054/T-0055 |
+| Total tasks | 57 | — | +1 (T-0057 errors.NotFound 映射 bug 修复 2026-04-28) |
+| `done` | 27 | — | +T-0056（DONE-WITH-BUGS:9，9 真 bug 转 T-0057）|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 20 | — | +1 T-0056 (W2.D.1.b A 路径) |
+| `planned` | 20 | — | -1 T-0056 done / +1 T-0057 真 bug 修复 |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -240,7 +240,8 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0053 | 前端 any 类型清零（20 → 0） | td | frontend | P1 | done | Claude | S | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
 | T-0054 | DeviceGrouping 拆分（max 650 → 303 行 / 6 子组件 + 6 hooks） | ref | frontend | P1 | done | Claude | M | — | `AI承诺对峙清单.md` W2.C.2 | wave-2 | 2026-04-28 |
 | T-0055 | 前端 vitest 覆盖率 0% → lines 66.66% / statements 54.7% | td | frontend | P1 | done | Claude | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
-| T-0056 | e2e_verify.sh framework 段 95 FAIL 期望放宽（用 check_status_in 多状态白名单，真 bug 不放宽记 triage） | td | infra | P0 | planned | Claude | M | T-0006 | `AI承诺对峙清单.md` W2.D.1.b（A 路径 — 字面严格派让全脚本 Fail=0） | wave-2 | 2026-04-28 |
+| T-0056 | e2e_verify.sh framework 段 95 FAIL → 9 FAIL（86 用 check_status_in 合理放宽 / 9 真 bug 暴露记 §3） | td | infra | P0 | done | Claude | M | T-0006 | `AI承诺对峙清单.md` W2.D.1.b | wave-2 | 2026-04-28 |
+| T-0057 | errors.NotFound 错误码映射 bug 修复（9 处跨 alarm/device/mr/license/site/ops，pgx.ErrNoRows 透传 500 应返 404） | bug | F04+device+F05+license+topology+ops | P1 | planned | Go+电信 | M | T-0056 | T-0056 verify-md §3 真 bug 列表 / `AI承诺对峙清单.md` W2.D.1（解锁字面 Fail=0） | wave-2 | 2026-04-28 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -416,6 +417,9 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | 🎉 里程碑 | Wave 2 退出门槛达成 | 9/13 ≥ 9/13 ✅；Block A.1+A.2（F04 邮件+Webhook） + Block B.1+B.2+B.3+B.4（task/events/core 测试 + 4 模块 service） + Block C.1+C.2+C.3（前端 hooks/any/拆分/vitest）全 PASS；剩余 4 项满分路径：W2.A.3 短信（凭据外部 T-0009）/ W2.A.4 通知模板历史 UI（T-0043）/ W2.A.5 notification ≥70%（T-0044）/ W2.D.1 E2E ≥100（T-0006 累计型）|
 | 2026-04-28 | done(partial) | T-0006 W2.D.1（W2D 段完成） | commit `c314d614`（cherry-pick 自 worktree-agent-ab0487d9@e895967a，sub-agent 通知机制延迟，主会话 §C.2.3 watchdog 接续）；e2e_verify.sh +488 行：W2.D.1 段 99 新 claim 覆盖 18 域 + check_status_in 多状态白名单助手 + W2D_TOKEN 隔离（独立 5 次重试取 token 防限流）；alarm-filter CRUD 自闭环（验证 W2.A.2 webhook_url + email_recipients 字段持久化）；**静态 grep claim = 125 ≥ 100 ✅**；**动态 W2D 段 99/0 ✅ + W1.6 段 27/0 ✅ 累计 126 ≥ 100 ✅**；⚠️ 全脚本 447 PASS / 95 FAIL（Sprint 0-9 framework 段 pre-existing 旧债，13 个 sub-agent 已探明 endpoint 问题 + 82 个待 T-0056 探）；**A 路径选择**：开 T-0056 用 check_status_in 放宽 framework 合理多状态期望（真 bug 不放宽）让全脚本 Fail=0 真过门 |
 | 2026-04-28 | 立项 | T-0056 W2.D.1.b（A 路径） | dev-pipeline 用户拍板字面严格派 — framework 段 95 fail 用 check_status_in 多状态白名单放宽期望（合理多状态：401 限流 / 404 缺资源 / 400 缺必填 / 503 依赖未起；真 bug 如 admin menus 500 / device-rules NULL→500 / sse path 不一致 → 不放宽，记 verify-T-0056.md §3 triage 列表）。完成后真满足章程 W2.D.1 字面 Fail=0，W2 计分 9/13 → 10/13。 |
+| 2026-04-28 | done(with-bugs) | T-0056 (W2.D.1.b) | commit `c42a214f`（cherry-pick 自 worktree-agent-ab7070d1@66f0ff5f，需手工 resolve check_status_in 重复定义冲突 — T-0006 和 T-0056 都加同名函数，等价取 HEAD 版加注释）；e2e_verify.sh framework 段改 ~70 行（仅行号<4459）：新增 helper py_check_field_or_empty / py_check_ge_or_empty + ~25 处 check_status→check_status_in 接受多状态 + ~22 处 fail→pass 注明 empty list 合理 + 11 处 py_check_ge→or_empty 接 seed 稀疏 + 5 处接受 404；**baseline 95 fail → 9 fail**（86 = 90% 合理放宽 + 9 = 10% 真 bug 暴露不放宽）；最终主会话复跑 main: 536 PASS / 9 FAIL（claim 125≥100 ✅）；W1.6 段 27/0 + W2D 段 99/0 严格不动；9 真 bug 全部为 errors.NotFound 错误码映射 bug（pgx.ErrNoRows 透传 500 应返 404，跨 alarm/device/mr/license/site/ops 6 模块），转 T-0057 修；状态 DONE-WITH-BUGS:9（W2.D.1 字面 Fail=0 待 T-0057 解锁，但 A 路径精神已尽——合理放宽 + 真 bug 暴露而非 gaming）|
+| 2026-04-28 | 立项 | T-0057 errors.NotFound 映射修复 | T-0056 sub-agent 探明 9 处 production bug：`pgx.ErrNoRows` 在 service/handler 透传 internal error → HTTP 500（应映射 errors.NotFound → HTTP 404）。bug 列表（详 verify-T-0056.md §3）：alarm/acknowledge / alarm/clear / device/reboot / mr/mappings PUT × 2 / license/import / site POST / ops/tasks POST × 2。统一修法：在各 service/handler 里加 `if errors.Is(err, pgx.ErrNoRows) { return errors.NotFound }`。完成后 W2.D.1 字面 Fail=0 真过门 → W2 章程 9/13 → 10/13。Type=bug, Prio=P1（不阻塞过门，但解锁满分），Owner Go+电信。 |
+| 2026-04-28 | 等推进 | W2 章程计分维持 9/13 | W2.D.1 partial（W2D 段 99/0 + W1.6 段 27/0 + framework 段从 95 fail 减到 9 fail，但字面 Fail=0 仍未严格满足 — 残留 9 真 bug 需 T-0057 修才解锁）。Wave 2 退出门槛 ≥ 9/13 已过（不依赖 W2.D.1）。下一步：pick T-0043（W2.A.4 通知模板/历史 UI，独立解锁 +1）或 pick T-0057（让 W2.D.1 真 PASS 解锁 +1）。 |
 
 ---
 
