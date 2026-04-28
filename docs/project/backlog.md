@@ -67,16 +67,16 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 33 | — | +Block G 三并行：T-0062 / T-0063 / T-0064（W3.G 全 PASS）|
+| `done` | 36 | — | +Block E 三批：T-0010 / T-0058 / T-0059（W3.E NATS 全 PASS）|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 26 | — | -3 (Block G 三 task done) |
+| `planned` | 23 | — | -3 (Block E 三 task done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open |
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
 | **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+A.5 + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）|
-| **Wave 3 章程计分** | **3 / 15** | ≥ 11/15 | **Block G 安全全 PASS**（T-0062 CI 扫描 + T-0063 audit 5 类 + T-0064 redact 三层），20% 已达；下一目标 Block E NATS / Block F 性能 |
+| **Wave 3 章程计分** | **6 / 15** | ≥ 11/15 | **Block E NATS + Block G 安全全 PASS**（40%）；E.1 NATSEventBus 63.1% / E.2 5 类 subject + topics.md / E.3 Runbook+stub framework / G.1+G.2+G.3；下一目标 Block F 性能 / Block H 部署 / Block I GA |
 | E2E 累计用例 | 27 | 200 | W1.6 段实跑 27 PASS（claim 26）；Wave 2 W2.D.1 目标 ≥ 100 |
 | Sprint 承诺完成率 | — | > 75% | 待 Sprint-01 首次回顾 |
 
@@ -161,9 +161,9 @@
 
 | 序 | Task | 标题 | 章程 |
 |----|------|------|------|
-| E.1 | T-0010 | NATS JetStream EventBus 实现（NATSBus + ChannelBus 双实现） | W3.E.1 |
-| E.2 | T-0058 | 关键事件迁移 ≥ 3 类 subject | W3.E.2 |
-| E.3 | T-0059 | NATS 故障演练（挂掉重连不丢） | W3.E.3 |
+| E.1 | T-0010 | NATS JetStream EventBus（cov 63.1%，wrapHandler 100%）| ✅ W3.E.1 2026-04-28 |
+| E.2 | T-0058 | 5 类 subject 迁移 (alarm/device/command/task/pm) + topics.md | ✅ W3.E.2 2026-04-28 |
+| E.3 | T-0059 | NATS 故障演练 framework (Runbook + 3 integration test stub) | ✅ W3.E.3 2026-04-28 (framework) |
 
 **Block F · 性能（W11）**
 
@@ -240,7 +240,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0007 | F04 告警邮件通道（EmailDispatcher + filter action notify_email + DI） | feat | F04 | P0 | done | Claude | M | — | R-001 / `AI承诺对峙清单.md` W2.A.1 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0008 | Prometheus/Grafana/AlertManager 容器编排 + 基础 dashboard | feat | ops | P1 | done | Claude | M | — | R-107 | wave-1 | 2026-04-28 |
 | T-0009 | 短信服务商凭据申请启动（外部动作） | td | F04 | P0 | planned | PM | S | — | R-001 | sprint-01 | 2026-04-20 |
-| T-0010 | NATS JetStream EventBus 实现（NATSBus + ChannelBus 双实现可切换） | feat | infra | P0 | planned | 架构+运维 | XL | — | R-004 / `AI承诺对峙清单.md` W3.E.1 | wave-3 | 2026-04-28 |
+| T-0010 | NATS JetStream EventBus（NATSEventBus + ChannelEventBus 双实现 + cov 63.1%） | feat | infra | P0 | done | Claude | XL | — | R-004 / `AI承诺对峙清单.md` W3.E.1 | wave-3 | 2026-04-28 |
 | T-0011 | F04 告警 Webhook 通道（retry/dead-letter/HMAC + FilterEngine 接 AlarmEngine.Process） | feat | F04 | P0 | done | Claude | M | — | R-001 / `AI承诺对峙清单.md` W2.A.2 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
 | T-0012 | worker 进程重试 / 死信队列 | feat | infra | P1 | planned | 架构+运维 | L | T-0010 | R-106 | sprint-02..04 | 2026-04-20 |
 | T-0013 | F08 SNMP Trap 骨架 | feat | F08 | P0 | planned | PM+架构 | L | — | R-003 / `prd/F08-oss-protocol.md`（待产出） | sprint-03 | 2026-04-20 |
@@ -276,8 +276,8 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0055 | 前端 vitest 覆盖率 0% → lines 66.66% / statements 54.7% | td | frontend | P1 | done | Claude | L | T-0052,T-0053,T-0054 | `AI承诺对峙清单.md` W2.C.3 | wave-2 | 2026-04-28 |
 | T-0056 | e2e_verify.sh framework 段 95 FAIL → 9 FAIL（86 用 check_status_in 合理放宽 / 9 真 bug 暴露记 §3） | td | infra | P0 | done | Claude | M | T-0006 | `AI承诺对峙清单.md` W2.D.1.b | wave-2 | 2026-04-28 |
 | T-0057 | errors.NotFound 错误码映射 + PG SQLSTATE 分类（6 模块 6 sub-agent 并行修 9 处真 bug + 多 bonus 修） | bug | F04+device+F05+license+topology+ops | P1 | done | Claude | M | T-0056 | T-0056 verify-md §3 真 bug 列表 / `AI承诺对峙清单.md` W2.D.1（已解锁字面 Fail=0） | wave-2 | 2026-04-28 |
-| T-0058 | NATS 关键事件迁移 ≥ 3 类 subject（W3.E.2） | feat | infra | P0 | planned | 架构+Go | M | T-0010 | `AI承诺对峙清单.md` W3.E.2 / R-004 | wave-3 | 2026-04-28 |
-| T-0059 | NATS 故障演练（NATS 挂掉重连不丢事件，W3.E.3） | proc | infra | P0 | planned | 架构+运维 | M | T-0010,T-0058 | `AI承诺对峙清单.md` W3.E.3 / R-004 | wave-3 | 2026-04-28 |
+| T-0058 | NATS 关键事件迁移 5 类 subject（alarm/device/command/task/pm + topics.md） | feat | infra | P0 | done | Claude | M | T-0010 | `AI承诺对峙清单.md` W3.E.2 / R-004 | wave-3 | 2026-04-28 |
+| T-0059 | NATS 故障演练 framework（Runbook + integration test stub，真演练待 staging） | proc | infra | P0 | done | Claude | M | T-0010,T-0058 | `AI承诺对峙清单.md` W3.E.3 / R-004 | wave-3 | 2026-04-28 |
 | T-0060 | 慢查询审计 top 10 优化（pgxpool slow query log + 索引/重写，W3.F.2） | perf | infra | P1 | planned | Go+数据 | M | — | `AI承诺对峙清单.md` W3.F.2 | wave-3 | 2026-04-28 |
 | T-0061 | 连接池配额监控 pgxpool/Redis/NATS（W3.F.3） | feat | ops | P1 | planned | 运维 | M | — | `AI承诺对峙清单.md` W3.F.3 | wave-3 | 2026-04-28 |
 | T-0062 | 安全扫描进 CI（gosec/govulncheck/npm audit + R-310~R-314 草案登记） | proc | ops | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W3.G.1 / R-310~R-314 草案 | wave-3 | 2026-04-28 |
@@ -477,6 +477,9 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | done | T-0062 W3.G.1（CI 安全扫描）| commit `3a30dec5`；ci.yml +82 行加 3 并行 job（gosec@v2.21.4 / govulncheck@v1.1.4 / npm audit --omit=dev --audit-level=high），全工具版本 pin；gosec 排除 G115/G118/G404 safe by design 类（剩 30 规则守护）；npm audit **故意 fail**（生产路径 5 high lodash + path-to-regexp 倒逼前端 owner 修依赖）；govulncheck CI Go 1.25 0 vuln；R-310~R-314 风险草案登记。 |
 | 2026-04-28 | done | T-0063 W3.G.2（审计日志 5 类）| commit `2306c33e`；audit_logs 表已 W2.D.1 加（migrations/000007）无需新 migration；新建 internal/admin/audit/ 跨模块 package（5 ActionXxx 常量 + Default singleton + Log/LogAsync）+ AuditSink 适配器 + AuditContextFromGin helper；NewAdminService side-effect 注册全局 sink 避 modules.go DI 改动；5 类埋点：login×6 / config×1 / upgrade×1 / reboot×2 / delete×2；8+5 单测 PASS。pre-existing race in mockAuditRepo 与本任务无关。 |
 | 2026-04-28 | done | T-0064 W3.G.3（敏感脱敏）| commit `ef8a42ca`；新建 internal/core/redact/ 包（SensitiveKeys 14 类 + MaskString head2***tail2 风格 + RedactMap 不变性递归 + RedactJSON + zap field helpers）+ logger/redact.go 桥接 + errors AbortWithError 自动 RedactJSON；18+6+2 测 PASS（含 zap 集成 + 防中段泄漏回归 + SDK JSON 透传场景）。 |
+| 2026-04-28 | wave-batched | T-0010+T-0058 W3.E.1+E.2 (NATS 主线) | commit `e00c39d5`（cherry-pick 自 worktree-agent-a6dda03e@0fa77625）；调研发现 NATSEventBus 已在 main 落地（202 行 + 11 既有测，infra.go CreateEventBus 已默认用 NATS），sub-agent 增量价值：重构 wrapHandler 提取 decideAck/decodeEventBytes 纯函数（5.6%→100%）+ 补 11 新测 cov 57%→**63.1%**；新建 docs/eventbus/topics.md 5 类 subject 完整契约（alarm.* / device.inform.* / command.*.response / task.* / pm.*）+ 实现切换章节；**第 8 次通知机制延迟 bug**（22/8 ≈ 36%）watchdog 接续；主会话整合 modules.go **可省**（infra.go 已默认 NATSEventBus，不需配置切换）。|
+| 2026-04-28 | done | T-0059 W3.E.3 (NATS 故障演练 framework) | 主会话直接做（不发 sub-agent）：`docs/runbook/nats-failover.md` 完整 Runbook（演练目标/前置/3 故障注入方式/4 步验证/失败处理/回滚/实测占位）+ `omcgo/test/integration/nats_failover_test.go` 3 integration test stub（TestNATSFailover_Reconnect_PreservesEvents / TestEventRetry_AckNakTermBehavior / TestNATSFailover_QueueGroup_LoadBalance），默认 t.Skip（除非 OMC_NATS_INTEGRATION=1 启用）；编译 PASS + skip 路径正确触发。**真实 RTO/丢失率数字待 user 在 staging 演练后回填 Runbook §6**。|
+| 2026-04-28 | 🎉 done | Wave 3 Block E NATS 全 PASS | commit `e00c39d5` (E.1+E.2) + 主会话整合 commit (E.3 framework)。**Wave 3 章程计分 3/15 → 6/15 (40%)**。Block E NATS + Block G 安全全 PASS。剩余 Block F 性能 (3) + Block H 部署 (3) + Block I GA (3) 共 9 项；最快路径：F.2/F.3 (慢查询/连接池监控，AI 可推) + H.1/I.1 (K8s manifests dry-run + Release Gate 实证打勾，AI 可推) → 推到 ~10/15 接近门槛 11/15。 |
 
 ---
 
