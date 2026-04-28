@@ -1,0 +1,98 @@
+# Connection pool 告警规则（章程 W3.F.3 / T-0061）
+#
+# 覆盖三类基础设施连接池：
+#   - PostgreSQL (pgxpool)：utilization = pgxpool_in_use / pgxpool_max
+#   - Redis     (go-redis)：utilization = redis_pool_in_use / redis_pool_max
+#   - NATS      (jetstream client)：连接断开（nats_conn_status == 0）/ 重连风暴
+#
+# 阈值：使用率 ≥ 80% 持续 5 分钟，对应 Sprint 容量基线（10 万设备 × 主备 app/acs/worker）。
+# severity: warning（容量预警）/ critical（连接断开主链路）。
+
+groups:
+  - name: omc.connection_pool
+    interval: 30s
+    rules:
+      - alert: PgxPoolHighUtilization
+        expr: (pgxpool_in_use / pgxpool_max) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: postgres
+        annotations:
+          summary: "pgxpool utilization > 80% on {{ $labels.instance }}"
+          description: |
+            PostgreSQL pgxpool sustained over 80% utilization for 5 minutes.
+            Current: in_use={{ $value | humanize }} of max.
+            Affected instance: {{ $labels.instance }}, job={{ $labels.job }}.
+            Impact: 业务请求开始排队等待连接，p99 延迟会先抖动；继续上行将拒绝请求。
+            Action:
+              1. 看 db_query_duration_seconds 是否同步上行（慢查询导致占用）。
+              2. 检查 components/postgres/slow_query 日志找到 hot SQL。
+              3. 短期可上调 PostgresConfig.MaxConns；长期需消减慢查询或加只读副本。
+
+      - alert: PgxPoolNearExhaustion
+        expr: (pgxpool_in_use / pgxpool_max) > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: postgres
+        annotations:
+          summary: "pgxpool near exhaustion (>95%) on {{ $labels.instance }}"
+          description: |
+            PostgreSQL pgxpool utilization > 95% for 2 minutes — near exhaustion.
+            New requests will start to wait or be rejected with `acquire timeout`.
+            Action: 立即排查并扩容；同时审查是否存在长事务持有连接不释放。
+
+      - alert: RedisPoolHighUtilization
+        expr: (redis_pool_in_use / redis_pool_max) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: redis
+        annotations:
+          summary: "redis pool utilization > 80% on {{ $labels.instance }}"
+          description: |
+            Redis pool sustained over 80% utilization for 5 minutes.
+            Current: in_use={{ $value | humanize }} of max (PoolSize).
+            Affected instance: {{ $labels.instance }}, job={{ $labels.job }}.
+            Impact: ACS 会话 / cmdq / datamodel 缓存读写排队；命令延迟上升。
+            Action:
+              1. 检查 redis_operation_duration_seconds histogram 是否上行。
+              2. 查看 redisx Pipeline 使用是否合理（是否有逐键操作）。
+              3. 上调 RedisConfig.PoolSize 或拆分 Redis 实例。
+
+      - alert: NatsDisconnected
+        expr: nats_conn_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: nats
+        annotations:
+          summary: "NATS client disconnected on {{ $labels.instance }}"
+          description: |
+            NATS connection has been down for 1 minute.
+            Affected instance: {{ $labels.instance }}, job={{ $labels.job }}.
+            Impact: JetStream 事件不能发布/消费；告警转发、设备同步、PM/MR 异步处理停滞。
+            Action:
+              1. 看 NATS server 健康（`nats server check connection`）。
+              2. 看 nats_reconnect_total 是否在攀升（说明在反复尝试）。
+              3. 查 components/nats/nats.go DisconnectErrHandler 日志定位失败原因。
+
+      - alert: NatsReconnectStorm
+        expr: increase(nats_reconnect_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: nats
+        annotations:
+          summary: "NATS reconnect storm: > 5 reconnects in 5m on {{ $labels.instance }}"
+          description: |
+            NATS client reconnected more than 5 times in the last 5 minutes.
+            Affected instance: {{ $labels.instance }}, job={{ $labels.job }}.
+            Impact: 频繁重连意味着网络抖动或 NATS server 不稳定，JetStream 消息可能延迟。
+            Action: 检查网络链路；查 NATS server 日志；考虑切换到主备实例。
