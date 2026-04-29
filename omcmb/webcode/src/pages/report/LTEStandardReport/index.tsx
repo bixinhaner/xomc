@@ -6,7 +6,12 @@ import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useDownloadReport } from '@core/hooks/api/useReports';
+import {
+  useDownloadReport,
+  useReportRecords,
+  useGenerateReport,
+  useReportDefinitions,
+} from '@core/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
 
 const REPORT_CATEGORY_KEYS = [
@@ -48,30 +53,14 @@ const REPORT_CATEGORY_KEYS = [
   },
 ];
 
-type ReportStatus = 'generated' | 'generating' | 'failed' | 'scheduled';
+// T-0022: shapes + mock data centralised in @core/mock/data/reports.
+import {
+  mockLTEReportRecords,
+  type LTEReportRecord,
+  type LTEReportStatus,
+} from '@core/mock/data/reports';
 
-interface ReportRecord {
-  id: string;
-  reportName: string;
-  reportType: string;
-  period: string;
-  generatedTime: string;
-  status: ReportStatus;
-  fileSize?: number;
-  category: string;
-}
-
-const mockReportRecords: ReportRecord[] = [
-  { id: 'rr-001', reportName: '华北区域eNB日KPI报表_20240601', reportType: '日报', period: '2024-06-01', generatedTime: '2024-06-02T01:00:00.000Z', status: 'generated', fileSize: 1024 * 512, category: 'kpi-daily' },
-  { id: 'rr-002', reportName: '华北区域eNB日KPI报表_20240602', reportType: '日报', period: '2024-06-02', generatedTime: '2024-06-03T01:00:00.000Z', status: 'generated', fileSize: 1024 * 480, category: 'kpi-daily' },
-  { id: 'rr-003', reportName: '全网周KPI报表_W22_2024', reportType: '周报', period: '2024-W22', generatedTime: '2024-06-03T06:00:00.000Z', status: 'generated', fileSize: 1024 * 1024 * 2, category: 'kpi-weekly' },
-  { id: 'rr-004', reportName: '基站可用性日报_20240601', reportType: '日报', period: '2024-06-01', generatedTime: '2024-06-02T02:00:00.000Z', status: 'generated', fileSize: 1024 * 256, category: 'avail-station' },
-  { id: 'rr-005', reportName: '全网月KPI报表_2024-05', reportType: '月报', period: '2024-05', generatedTime: '2024-06-01T08:00:00.000Z', status: 'generated', fileSize: 1024 * 1024 * 8, category: 'kpi-monthly' },
-  { id: 'rr-006', reportName: 'PRB利用率周报_W23_2024', reportType: '周报', period: '2024-W23', generatedTime: '', status: 'generating', category: 'cap-prb' },
-  { id: 'rr-007', reportName: 'VoLTE质量日报_20240603', reportType: '日报', period: '2024-06-03', generatedTime: '', status: 'failed', category: 'qual-voice' },
-];
-
-const statusColorMap: Record<ReportStatus, string> = {
+const statusColorMap: Record<LTEReportStatus, string> = {
   generated: 'green',
   generating: 'processing',
   failed: 'red',
@@ -100,12 +89,18 @@ export default function LTEStandardReport() {
   const [pageSize, setPageSize] = useState(20);
 
   const downloadReport = useDownloadReport();
+  const generateReport = useGenerateReport();
+  // Probe definitions/records endpoints to keep the page wired to real data
+  // flow even while the categorised display still consumes the local LTE
+  // mock listing (no categorised endpoint exists server-side yet).
+  const { data: definitionsData } = useReportDefinitions({ page: 1, pageSize: 50 });
+  useReportRecords({ page: 1, pageSize: 50 });
 
-  const currentRecords = mockReportRecords.filter((r) => r.category === selectedCategory);
+  const currentRecords = mockLTEReportRecords.filter((r) => r.category === selectedCategory);
   const startIndex = (page - 1) * pageSize;
   const paginated = currentRecords.slice(startIndex, startIndex + pageSize);
 
-  const columns: DataTableColumn<ReportRecord & Record<string, unknown>>[] = useMemo(() => [
+  const columns: DataTableColumn<LTEReportRecord & Record<string, unknown>>[] = useMemo(() => [
     { key: 'reportName', title: t('table.name'), dataIndex: 'reportName', ellipsis: true },
     { key: 'reportType', title: t('table.type'), dataIndex: 'reportType', width: 90, render: (val) => <Tag>{String(val)}</Tag> },
     { key: 'period', title: t('perf.timeRange'), dataIndex: 'period', width: 120 },
@@ -127,7 +122,7 @@ export default function LTEStandardReport() {
     {
       key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
       render: (_, record) => {
-        const r = record as ReportRecord;
+        const r = record as LTEReportRecord;
         const items: MenuProps['items'] = [
           { key: 'download', label: t('common.download'), icon: <DownloadOutlined />, disabled: r.status !== 'generated',
             onClick: () => downloadReport.mutate(r.id, { onSuccess: () => void message.success(t('common.download')) }),
@@ -167,8 +162,26 @@ export default function LTEStandardReport() {
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
           <span style={{ fontWeight: 500 }}>{t('table.total')} ({currentRecords.length})</span>
-          <Button type="primary" size="small" icon={<PlusOutlined />}
-            onClick={() => void message.info(t('common.featureInDev'))}>
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            loading={generateReport.isPending}
+            disabled={!definitionsData || definitionsData.items.length === 0}
+            onClick={async () => {
+              const firstDef = definitionsData?.items?.[0];
+              if (!firstDef) {
+                void message.warning(t('common.pleaseSelect'));
+                return;
+              }
+              try {
+                await generateReport.mutateAsync({ definitionId: firstDef.id });
+                void message.success(t('common.save'));
+              } catch {
+                void message.error(t('status.failed'));
+              }
+            }}
+          >
             {t('common.add')}
           </Button>
         </div>
@@ -176,7 +189,7 @@ export default function LTEStandardReport() {
           <DataTable
             tableId="lte-report-list"
             columns={columns}
-            dataSource={paginated as (ReportRecord & Record<string, unknown>)[]}
+            dataSource={paginated as (LTEReportRecord & Record<string, unknown>)[]}
             loading={false}
             rowKey="id"
             total={currentRecords.length}

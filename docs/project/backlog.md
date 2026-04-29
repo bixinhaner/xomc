@@ -67,9 +67,9 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 47 | — | +T-0012 (worker retry/DLQ 通用框架, R-106 关闭)；+T-0015 (License Enforcer, R-103 关闭)；+三并行批 / +五并行批（详见早期记账）|
+| `done` | 48 | — | +T-0022 (前端 Topology/Report 补完, 4 page 去 mock + 接 hook)；+T-0012 (worker retry/DLQ, R-106 关闭)；+T-0015 (License Enforcer, R-103 关闭)；+三并行批 / +五并行批（详见早期记账）|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 12 | — | -1 (T-0012 done) |
+| `planned` | 11 | — | -1 (T-0022 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -252,7 +252,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0019 | 前端 Software 业务逻辑 | feat | frontend | P1 | planned | 前端 | M | T-0018 | R-102 | sprint-04 | 2026-04-20 |
 | T-0020 | F08 推送可靠性（重试/去重/幂等） | feat | F08 | P0 | planned | PM+架构 | M | T-0017 | R-003 | sprint-05 | 2026-04-20 |
 | T-0021 | Software 回滚能力 | feat | F06/software | P1 | planned | 电信 | M | T-0018 | R-101 | sprint-05 | 2026-04-20 |
-| T-0022 | 前端 Topology / Report 补完 | feat | frontend | P1 | planned | 前端 | M | — | — | sprint-05 | 2026-04-20 |
+| T-0022 | 前端 Topology/Report 补完（4 page 去 inline mock + 接 useDomains/useReportRecords/useDownloadReport/useReportDefinitions/useGenerateReport，mock 集中到 frontend-core）| feat | frontend | P1 | done | Claude | M | — | `prd/T-0022-frontend-topology-report.md` | sprint-05 | 2026-04-28 |
 | T-0023 | 5K 设备压测稳定 24h + p95<SLO（W3.F.1） | td | infra | P0 | planned | 架构+运维 | L | T-0010 | `AI承诺对峙清单.md` W3.F.1 | wave-3 | 2026-04-28 |
 | T-0024 | Release Gate 9 章节 [ ] 66→0（[x]=42 / [N/A]=13 全部映射 follow-up，W3.I.1） | proc | process | P0 | done | Claude | M | T-0023 | `AI承诺对峙清单.md` W3.I.1 / `release-gate.md` | wave-3 | 2026-04-28 |
 | T-0025 | RC 冻结 + 冒烟用例集（~20 条） | td | infra | P0 | planned | QA | M | T-0006@累计≥150 | — | sprint-07 | 2026-04-20 |

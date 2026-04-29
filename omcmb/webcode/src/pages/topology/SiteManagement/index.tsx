@@ -7,20 +7,13 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useSites } from '@core/hooks/api/useTopology';
+import { useSites, useDomains } from '@core/hooks/api/useTopology';
 import type { Site } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
-interface SiteRow extends Record<string, unknown> {
-  id: string;
-  name: string;
+// Row shape extends Site with a derived domainName (resolved from useDomains).
+interface SiteRow extends Site, Record<string, unknown> {
   domainName: string;
-  domainId: string;
-  address: string;
-  longitude: number;
-  latitude: number;
-  deviceCount: number;
-  status: 'active' | 'inactive' | 'maintenance';
 }
 
 const STATUS_MAP: Record<string, { color: string; key: string }> = {
@@ -28,34 +21,6 @@ const STATUS_MAP: Record<string, { color: string; key: string }> = {
   inactive: { color: 'default', key: 'topology.site.inactive' },
   maintenance: { color: 'warning', key: 'topology.site.maintenance' },
 };
-
-const DOMAIN_OPTIONS = [
-  { label: '北京朝阳区', value: 'bj-cy' },
-  { label: '北京海淀区', value: 'bj-hd' },
-  { label: '上海浦东新区', value: 'sh-pd' },
-  { label: '上海静安区', value: 'sh-ja' },
-  { label: '广州天河区', value: 'gz-th' },
-  { label: '深圳南山区', value: 'sz-ns' },
-];
-
-const DOMAIN_NAME_MAP: Record<string, string> = {
-  'bj-cy': '北京朝阳区',
-  'bj-hd': '北京海淀区',
-  'sh-pd': '上海浦东新区',
-  'sh-ja': '上海静安区',
-  'gz-th': '广州天河区',
-  'sz-ns': '深圳南山区',
-};
-
-const mockData: SiteRow[] = [
-  { id: '1', name: '北京朝阳站点01', domainId: 'bj-cy', domainName: '北京朝阳区', address: '北京市朝阳区建国路88号', longitude: 116.46, latitude: 39.92, deviceCount: 3, status: 'active' },
-  { id: '2', name: '北京海淀站点01', domainId: 'bj-hd', domainName: '北京海淀区', address: '北京市海淀区中关村大街1号', longitude: 116.31, latitude: 39.98, deviceCount: 2, status: 'active' },
-  { id: '3', name: '北京朝阳站点02', domainId: 'bj-cy', domainName: '北京朝阳区', address: '北京市朝阳区望京街道', longitude: 116.49, latitude: 40.00, deviceCount: 1, status: 'maintenance' },
-  { id: '4', name: '上海浦东站点01', domainId: 'sh-pd', domainName: '上海浦东新区', address: '上海市浦东新区张江高科技园区', longitude: 121.60, latitude: 31.21, deviceCount: 4, status: 'active' },
-  { id: '5', name: '上海静安站点01', domainId: 'sh-ja', domainName: '上海静安区', address: '上海市静安区南京西路1882号', longitude: 121.45, latitude: 31.23, deviceCount: 2, status: 'active' },
-  { id: '6', name: '广州天河站点01', domainId: 'gz-th', domainName: '广州天河区', address: '广州市天河区珠江新城', longitude: 113.33, latitude: 23.12, deviceCount: 3, status: 'active' },
-  { id: '7', name: '深圳南山站点01', domainId: 'sz-ns', domainName: '深圳南山区', address: '深圳市南山区科技园', longitude: 113.93, latitude: 22.53, deviceCount: 2, status: 'active' },
-];
 
 export default function SiteManagement() {
   const t = useT();
@@ -67,9 +32,26 @@ export default function SiteManagement() {
   const [pageSize, setPageSize] = useState(20);
   const [form] = Form.useForm();
 
+  const { data: domainsData } = useDomains();
+  const { data: sitesData, isLoading, refetch } = useSites();
+
+  // Build domainId → name map from real domain tree (no hardcoded zh-CN mapping).
+  const domainOptions = useMemo(
+    () =>
+      (domainsData ?? []).map((d) => ({ label: d.name, value: d.id })),
+    [domainsData]
+  );
+  const domainNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const d of domainsData ?? []) {
+      map[d.id] = d.name;
+    }
+    return map;
+  }, [domainsData]);
+
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'name', label: t('table.name'), type: 'input' },
-    { name: 'domainId', label: t('table.region'), type: 'select', options: DOMAIN_OPTIONS },
+    { name: 'domainId', label: t('table.region'), type: 'select', options: domainOptions },
     {
       name: 'status',
       label: t('table.status'),
@@ -80,12 +62,16 @@ export default function SiteManagement() {
         { label: t('status.pending'), value: 'maintenance' },
       ],
     },
-  ], [t]);
+  ], [t, domainOptions]);
 
-  const { data, isLoading, refetch } = useSites();
-  void (null as unknown as Site);
-
-  const tableSource = (data ?? mockData) as unknown as SiteRow[];
+  const tableSource: SiteRow[] = useMemo(
+    () =>
+      (sitesData?.items ?? []).map((site: Site) => ({
+        ...site,
+        domainName: domainNameMap[site.domainId] ?? site.domainId,
+      })),
+    [sitesData, domainNameMap]
+  );
 
   const filteredSource = tableSource.filter((row) => {
     if (filters.name && !row.name.includes(filters.name as string)) return false;
@@ -104,12 +90,13 @@ export default function SiteManagement() {
   };
 
   const handleSave = () => {
-    form.validateFields().then((vals: Record<string, unknown>) => {
-      const domainName = DOMAIN_NAME_MAP[vals.domainId as string] ?? vals.domainId;
-      void domainName;
+    form.validateFields().then(() => {
+      // TODO: backend exposes only GET/POST /sites today (no PUT/DELETE).
+      // POST create flow + PUT/DELETE wiring are tracked as a follow-up task.
       void message.success(t('common.save'));
       setModalVisible(false);
       form.resetFields();
+      void refetch();
     }).catch(() => undefined);
   };
 
@@ -234,7 +221,7 @@ export default function SiteManagement() {
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
           <Form.Item label={t('table.region')} name="domainId" rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%' }} placeholder={t('common.placeholder')} />
+            <Input placeholder={t('common.placeholder')} />
           </Form.Item>
           <Form.Item label={t('table.site')} name="address" rules={[{ required: true }]}>
             <Input placeholder={t('common.placeholder')} />

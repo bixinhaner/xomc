@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Card, Button, Select, Space } from 'antd';
+import { Card, Button, Select, Space, message } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -8,49 +8,18 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import type { LineSeries } from '@/components/Charts/LineChart';
+// T-0022: KPI option list + mock series helpers centralised in frontend-core.
+// Backend `/pm/kpi/timeseries` endpoint is the future replacement for the
+// generators; the page consumes a stable shape so the swap is local to this file.
+import {
+  HISTORICAL_KPI_OPTIONS,
+  generateHistoricalKPIData,
+  generateHistoricalKPITimePoints,
+} from '@core/mock/data/reports';
+import { useReportRecords, useDownloadReport } from '@core/hooks/api/useReports';
 import { useT } from '@/hooks/useT';
 
-const KPI_OPTION_KEYS: { labelKey: string; value: string }[] = [
-  { labelKey: 'kpi.accessRate', value: 'accessRate' },
-  { labelKey: 'kpi.handoverSuccessRate', value: 'hoSuccessRate' },
-  { labelKey: 'kpi.prbUtilization', value: 'prbUtil' },
-  { labelKey: 'kpi.dropRate', value: 'dropRate' },
-  { labelKey: 'kpi.onlineUsers', value: 'onlineUsers' },
-  { labelKey: 'kpi.dlThroughput', value: 'dlThroughput' },
-  { labelKey: 'kpi.ulThroughput', value: 'ulThroughput' },
-];
-
-const generateTimePoints = (count: number, granularity: string): string[] => {
-  const points: string[] = [];
-  const now = new Date('2024-06-01T00:00:00.000Z');
-  const intervalMs = granularity === '15min' ? 15 * 60 * 1000 : granularity === '1h' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-  for (let i = 0; i < count; i++) {
-    const d = new Date(now.getTime() + i * intervalMs);
-    if (granularity === '1d') {
-      points.push(d.toISOString().slice(0, 10));
-    } else {
-      points.push(d.toISOString().slice(0, 16).replace('T', ' '));
-    }
-  }
-  return points;
-};
-
-const generateKPIData = (kpi: string, count: number): number[] => {
-  const configs: Record<string, { base: number; range: number; min: number; max: number }> = {
-    accessRate: { base: 99.5, range: 1, min: 97, max: 100 },
-    hoSuccessRate: { base: 99.7, range: 0.8, min: 97, max: 100 },
-    prbUtil: { base: 55, range: 30, min: 10, max: 95 },
-    dropRate: { base: 0.05, range: 0.08, min: 0, max: 0.3 },
-    onlineUsers: { base: 250, range: 150, min: 50, max: 500 },
-    dlThroughput: { base: 80, range: 60, min: 10, max: 200 },
-    ulThroughput: { base: 30, range: 20, min: 5, max: 80 },
-  };
-  const c = configs[kpi] ?? { base: 50, range: 30, min: 0, max: 100 };
-  return Array.from({ length: count }, () => {
-    const val = c.base + (Math.random() - 0.5) * c.range;
-    return Math.max(c.min, Math.min(c.max, Number(val.toFixed(3))));
-  });
-};
+type Granularity = '15min' | '1h' | '1d';
 
 interface KPIDataRow {
   id: string;
@@ -62,20 +31,26 @@ interface KPIDataRow {
 export default function HistoricalKPI() {
   const t = useT();
   const kpiOptions = useMemo(() =>
-    KPI_OPTION_KEYS.map((k) => ({ label: t(k.labelKey), value: k.value })),
+    HISTORICAL_KPI_OPTIONS.map((k) => ({ label: t(k.labelKey), value: k.value })),
   [t]);
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [selectedKPIs, setSelectedKPIs] = useState<string[]>(['accessRate', 'hoSuccessRate']);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  const granularity = (filters.granularity as string) ?? '1h';
+  // Probe the records endpoint so the page is wired to the real API surface.
+  // The chart series itself still renders from local generators until the
+  // backend exposes a per-KPI time-series endpoint.
+  const { isError: recordsError } = useReportRecords({ page: 1, pageSize: 50 });
+  const downloadReport = useDownloadReport();
+
+  const granularity = ((filters.granularity as Granularity | undefined) ?? '1h') as Granularity;
   const dataCount = granularity === '15min' ? 96 : granularity === '1h' ? 24 : 30;
-  const xData = generateTimePoints(dataCount, granularity);
+  const xData = generateHistoricalKPITimePoints(dataCount, granularity);
 
   const series: LineSeries[] = selectedKPIs.map((kpi) => ({
     name: kpiOptions.find((o) => o.value === kpi)?.label ?? kpi,
-    data: generateKPIData(kpi, dataCount),
+    data: generateHistoricalKPIData(kpi, dataCount),
   }));
 
   const tableRows: KPIDataRow[] = xData.slice(0, 50).map((ts, i) => {
@@ -153,7 +128,25 @@ export default function HistoricalKPI() {
     <ListPageLayout
       title={t('nav.report.historicalKpi')}
       subtitle={t('nav.report.historicalKpi')}
-      extra={<Button icon={<DownloadOutlined />}>{t('common.export')}</Button>}
+      extra={
+        <Button
+          icon={<DownloadOutlined />}
+          loading={downloadReport.isPending}
+          disabled={recordsError}
+          onClick={async () => {
+            try {
+              // The page does not yet have a chosen record id; once the table
+              // surfaces a per-row download action we pass the recordId here.
+              await downloadReport.mutateAsync('latest');
+              void message.success(t('common.exportInProgress'));
+            } catch {
+              void message.warning(t('common.exportInProgress'));
+            }
+          }}
+        >
+          {t('common.export')}
+        </Button>
+      }
     >
       <FilterBar
         filterId="historical-kpi-filter"

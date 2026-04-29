@@ -6,31 +6,10 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+// T-0022: Mock data centralised in frontend-core; will switch to real
+// /pm/kpi/by-station endpoint when the backend exposes it.
+import { mockStationKPIs, type StationKPIRecord } from '@core/mock/data/reports';
 import { useT } from '@/hooks/useT';
-
-interface StationKPIRecord {
-  id: string;
-  stationName: string;
-  stationSn: string;
-  region: string;
-  date: string;
-  accessRate: number;
-  hoSuccessRate: number;
-  prbUtilization: number;
-  dropRate: number;
-  volteMos: number;
-  onlineUsers: number;
-  dataVolume: number;
-}
-
-const mockStationKPIs: StationKPIRecord[] = [
-  { id: 'sk-001', stationName: '北京-eNB-0001', stationSn: 'ENB00001', region: '北京', date: '2024-06-01', accessRate: 99.85, hoSuccessRate: 99.92, prbUtilization: 45.2, dropRate: 0.02, volteMos: 4.21, onlineUsers: 234, dataVolume: 1024 * 150 },
-  { id: 'sk-002', stationName: '北京-eNB-0002', stationSn: 'ENB00002', region: '北京', date: '2024-06-01', accessRate: 99.21, hoSuccessRate: 98.88, prbUtilization: 67.8, dropRate: 0.08, volteMos: 4.05, onlineUsers: 312, dataVolume: 1024 * 220 },
-  { id: 'sk-003', stationName: '上海-eNB-0001', stationSn: 'ENB00010', region: '上海', date: '2024-06-01', accessRate: 99.95, hoSuccessRate: 99.98, prbUtilization: 38.5, dropRate: 0.01, volteMos: 4.35, onlineUsers: 189, dataVolume: 1024 * 120 },
-  { id: 'sk-004', stationName: '广州-eNB-0001', stationSn: 'ENB00020', region: '广州', date: '2024-06-01', accessRate: 98.76, hoSuccessRate: 98.45, prbUtilization: 82.3, dropRate: 0.15, volteMos: 3.92, onlineUsers: 425, dataVolume: 1024 * 380 },
-  { id: 'sk-005', stationName: '北京-gNB-0001', stationSn: 'GNB00001', region: '北京', date: '2024-06-01', accessRate: 99.98, hoSuccessRate: 99.99, prbUtilization: 28.9, dropRate: 0.005, volteMos: 4.48, onlineUsers: 98, dataVolume: 1024 * 580 },
-  { id: 'sk-006', stationName: '深圳-eNB-0001', stationSn: 'ENB00030', region: '深圳', date: '2024-06-01', accessRate: 99.34, hoSuccessRate: 99.12, prbUtilization: 71.5, dropRate: 0.06, volteMos: 4.12, onlineUsers: 356, dataVolume: 1024 * 290 },
-];
 
 function getKPIColor(value: number, type: 'rate' | 'drop' | 'prb' | 'mos'): string {
   if (type === 'rate') return value >= 99.5 ? '#52c41a' : value >= 98 ? '#faad14' : '#ff4d4f';
