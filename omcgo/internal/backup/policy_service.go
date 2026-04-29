@@ -22,11 +22,24 @@ var cleanupTimeRe = regexp.MustCompile(`^(?:[01][0-9]|2[0-3]):[0-5][0-9]$`)
 type PolicyService struct {
 	repo   PolicyRepository
 	logger *zap.Logger
+	// T-0075: optional KeyProvider — when wired, validatePolicy rejects
+	// EnableEncryption=true if the algorithm requires a KEK and the provider
+	// reports Available()=false. nil-safe: nil means encryption availability
+	// is not enforced at PUT time (UI Alert remains the only signal).
+	keyProvider KeyProvider
 }
 
 // NewPolicyService constructs a PolicyService.
 func NewPolicyService(repo PolicyRepository, logger *zap.Logger) *PolicyService {
 	return &PolicyService{repo: repo, logger: logger.Named("backup-policy")}
+}
+
+// SetKeyProvider wires a backup-encryption KeyProvider for T-0075 validation.
+// Pass nil to disable PUT-time KEK availability checks (UI/operator picks up
+// the slack via the persisted-warning Tag). Constructed separately from
+// NewPolicyService to keep the signature stable for existing call sites.
+func (s *PolicyService) SetKeyProvider(kp KeyProvider) {
+	s.keyProvider = kp
 }
 
 // Get returns the persisted policy or DefaultPolicy() when none exists.
@@ -50,7 +63,7 @@ func (s *PolicyService) Update(ctx context.Context, p *BackupPolicy) (*BackupPol
 	if p == nil {
 		return nil, fmt.Errorf("nil policy: %w", commonerrors.ErrInvalidInput)
 	}
-	if err := validatePolicy(p); err != nil {
+	if err := s.validatePolicy(p); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Upsert(ctx, p); err != nil {
@@ -65,6 +78,32 @@ func (s *PolicyService) Update(ctx context.Context, p *BackupPolicy) (*BackupPol
 		zap.Bool("alert_on_failure", p.AlertOnFailure),
 	)
 	return p, nil
+}
+
+// validatePolicy is the package-level legacy entry point retained for tests
+// that exercise validation without a *PolicyService instance. The
+// PolicyService method (s.validatePolicy below) wraps this with KeyProvider
+// availability checks (T-0075).
+func (s *PolicyService) validatePolicy(p *BackupPolicy) error {
+	if err := validatePolicy(p); err != nil {
+		return err
+	}
+	// T-0075: encryption activation requires a usable KEK. AES-256-CBC and
+	// ChaCha20-Poly1305 are persisted but not yet implemented (T-0085 stub
+	// rejection mirrors T-0074 lz4/bzip2 pattern).
+	if p.EnableEncryption {
+		switch p.EncryptionAlgorithm {
+		case "AES-256-GCM":
+			if s.keyProvider != nil && !s.keyProvider.Available() {
+				return fmt.Errorf("encryption_algorithm=AES-256-GCM enabled but encryption key not configured (set %s env var to a 64-hex-char string): %w",
+					EnvBackupEncryptionKey, commonerrors.ErrInvalidInput)
+			}
+		case "AES-256-CBC", "ChaCha20-Poly1305":
+			return fmt.Errorf("encryption_algorithm=%s not yet implemented (暂未支持); choose AES-256-GCM, or set enable_encryption=false (请选择 AES-256-GCM 或关闭加密): %w",
+				p.EncryptionAlgorithm, commonerrors.ErrInvalidInput)
+		}
+	}
+	return nil
 }
 
 // validatePolicy enforces the same value ranges as the DB CHECK constraints,

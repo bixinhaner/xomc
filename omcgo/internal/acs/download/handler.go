@@ -1,7 +1,9 @@
 package download
 
 import (
+	"bytes"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/backup"
 )
 
 // Handler handles HTTP file download requests from CPE devices.
@@ -26,6 +30,12 @@ type Handler struct {
 	// T-0072: optional metrics for on-the-fly decompression. nil-safe — Record*
 	// methods short-circuit on nil receiver, so wiring is optional.
 	metrics *DecompressMetrics
+	// T-0075: optional decryptor for objects with `.enc` suffix. nil-safe;
+	// when nil, encrypted objects are served as-is (CPE will fail to consume
+	// them — visible in download metrics). encMetrics is the shared
+	// PolicyMetrics surface where decryption failures count.
+	encryptor   backup.Encryptor
+	encMetrics  *backup.PolicyMetrics
 }
 
 // NewHandler creates a new download handler.
@@ -42,6 +52,14 @@ func NewHandler(minioClient *minio.Client, username, password string, logger *za
 // Pass nil to disable; the Record* methods are nil-safe.
 func (h *Handler) SetDecompressMetrics(m *DecompressMetrics) {
 	h.metrics = m
+}
+
+// SetEncryption wires the backup decryptor for `.enc` objects (T-0075).
+// Both args may be nil; encrypted objects without a wired decryptor are
+// served as raw ciphertext (CPE will fail to apply — visible in metrics).
+func (h *Handler) SetEncryption(enc backup.Encryptor, m *backup.PolicyMetrics) {
+	h.encryptor = enc
+	h.encMetrics = m
 }
 
 // ServeHTTP handles download requests.
@@ -141,15 +159,49 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.Int64("size", info.Size),
 		zap.String("remote_addr", r.RemoteAddr))
 
-	// T-0072: detect compressed extension; if matched, wrap the MinIO object
-	// stream with a decompressor so CPE receives plaintext. Filename header
-	// loses the compressed extension so consumers see the canonical name.
-	decomp, cleanName, doDecompress := detectCompression(objectPath)
-	filename := filepath.Base(objectPath)
+	// T-0075: peel optional `.enc` suffix first. If matched and the
+	// decryptor is wired, buffer the entire object (capped) and decrypt
+	// using AAD = filename (without `.enc`). The result feeds back into
+	// the T-0072 decompression path as a normal io.Reader, so a file
+	// like `cfg.xml.gz.enc` becomes plaintext XML at the wire.
+	pathForCompression := objectPath
+	innerName := filepath.Base(objectPath)
+	encReader, encActive, encErr := h.maybeDecrypt(obj, info.Size, objectPath)
+	if encErr != nil {
+		// Decryption failure is not fall-through: failing closed stops the
+		// CPE from getting ciphertext-shaped bytes that would never apply.
+		// Metrics recorded inside maybeDecrypt.
+		h.logger.Warn("decrypt failed; aborting download",
+			zap.String("path", objectPath), zap.Error(encErr))
+		status := http.StatusInternalServerError
+		if errors.Is(encErr, backup.ErrEncryptionAuthFailed) ||
+			errors.Is(encErr, backup.ErrEncryptionFormatInvalid) {
+			status = http.StatusUnprocessableEntity
+		}
+		http.Error(w, "decryption failed", status)
+		return
+	}
+	if encActive {
+		pathForCompression = strings.TrimSuffix(objectPath, "."+h.encryptor.Extension())
+		innerName = filepath.Base(pathForCompression)
+	}
+
+	// T-0072: detect compressed extension; if matched, wrap the (possibly
+	// decrypted) stream with a decompressor so CPE receives plaintext.
+	// Filename header loses the compressed extension so consumers see the
+	// canonical name.
+	decomp, cleanName, doDecompress := detectCompression(pathForCompression)
+	var sourceReader io.Reader
+	if encActive {
+		sourceReader = encReader
+	} else {
+		sourceReader = obj
+	}
+	filename := innerName
 	w.Header().Set("Content-Type", "application/octet-stream")
 
 	if doDecompress {
-		body, err := decomp.Wrap(obj)
+		body, err := decomp.Wrap(sourceReader)
 		if err != nil {
 			h.metrics.RecordError(decomp.Format(), "open")
 			h.logger.Warn("decompress wrap failed; falling back to raw stream",
@@ -179,18 +231,76 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pass-through path: serve raw object with Content-Length.
+	// Pass-through path: serve the (possibly decrypted) bytes. When
+	// encryption was active but compression was not, the decrypted plaintext
+	// has unknown size — Content-Length is omitted; otherwise we use the
+	// original MinIO object size.
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	if !encActive {
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	}
 
 	if r.Method == http.MethodHead {
 		return
 	}
 
-	if _, err := io.Copy(w, obj); err != nil {
+	if _, err := io.Copy(w, sourceReader); err != nil {
 		h.logger.Warn("stream file to client",
 			zap.Error(err),
 			zap.String("bucket", bucket),
 			zap.String("path", objectPath))
 	}
+}
+
+// maybeDecrypt returns (reader, encActive, error). When the object path ends
+// with the encryptor's extension AND a decryptor is wired, the entire object
+// is buffered (capped at 64MB + a little slack for the encryption envelope
+// overhead) and decrypted. Returns the plaintext bytes wrapped in
+// bytes.Reader so subsequent decompression can stream from it.
+//
+// encActive=false means "no decryption applied" — caller should serve the
+// raw obj. error is non-nil only when an encrypted object failed to decrypt
+// (auth tag mismatch, malformed format, key unavailable). Decryption is
+// fail-closed: the caller does NOT fall through to ciphertext on error.
+func (h *Handler) maybeDecrypt(obj io.Reader, size int64, objectPath string) (io.Reader, bool, error) {
+	if h.encryptor == nil {
+		return obj, false, nil
+	}
+	suffix := "." + h.encryptor.Extension()
+	if !strings.HasSuffix(objectPath, suffix) {
+		return obj, false, nil
+	}
+	// Cap at 64MB + 1KB envelope tolerance — same ceiling as upload-side.
+	const maxEncryptedSize = 64*1024*1024 + 1024
+	if size > 0 && size > maxEncryptedSize {
+		h.encMetrics.RecordBackupDecryptionError("format_invalid")
+		return nil, false, fmt.Errorf("encrypted object exceeds %d bytes: %w",
+			maxEncryptedSize, backup.ErrEncryptionFormatInvalid)
+	}
+	limited := io.LimitReader(obj, maxEncryptedSize+1)
+	blob, err := io.ReadAll(limited)
+	if err != nil {
+		h.encMetrics.RecordBackupDecryptionError("format_invalid")
+		return nil, false, fmt.Errorf("buffer encrypted object: %w", err)
+	}
+	if int64(len(blob)) > maxEncryptedSize {
+		h.encMetrics.RecordBackupDecryptionError("format_invalid")
+		return nil, false, fmt.Errorf("encrypted object stream truncation read >%d: %w",
+			maxEncryptedSize, backup.ErrEncryptionFormatInvalid)
+	}
+	innerPath := strings.TrimSuffix(objectPath, suffix)
+	aad := []byte(filepath.Base(innerPath))
+	plaintext, err := h.encryptor.Decrypt(blob, aad)
+	if err != nil {
+		switch {
+		case errors.Is(err, backup.ErrEncryptionAuthFailed):
+			h.encMetrics.RecordBackupDecryptionError("tamper")
+		case errors.Is(err, backup.ErrEncryptionKeyUnavailable):
+			h.encMetrics.RecordBackupDecryptionError("key_unavailable")
+		default:
+			h.encMetrics.RecordBackupDecryptionError("format_invalid")
+		}
+		return nil, false, err
+	}
+	return bytes.NewReader(plaintext), true, nil
 }

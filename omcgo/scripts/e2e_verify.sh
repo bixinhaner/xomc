@@ -5059,6 +5059,23 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -d '{"backup_task_id":"'"$W2D_BAD_UUID"'","target_device_sns":["SN001"]}')
 check_status_in "W2D bk-11: POST /backup/restore/by-task-id (T-0079)" "404 401 400" "$HTTP_CODE"
 
+# T-0075 / R-102: PUT policy AES-256-CBC + EnableEncryption=true rejected
+# (CBC stub; only AES-256-GCM ships in current build).
+claim "backup: PUT policy AES-256-CBC+EnableEncryption rejected (T-0075)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    "$API/backup/policy" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"retention_days":30,"max_backup_count":100,"min_backup_count":3,"auto_cleanup":true,"cleanup_time":"03:00","cleanup_day_of_week":-1,"keep_last_n":5,"enable_compression":false,"compression_level":6,"compression_format":"gzip","storage_backend":"local","local_path":"/var/backup/omc","max_storage_gb":500,"enable_encryption":true,"encryption_algorithm":"AES-256-CBC","alert_on_failure":true,"alert_email":"","alert_threshold_percent":80}')
+check_status_in "W2D bk-12: PUT /backup/policy CBC reject (T-0075)" "400 401" "$HTTP_CODE"
+
+# T-0075 / R-102: PUT policy AES-256-GCM accepted at schema (whether KEK is
+# wired depends on env var; either 200 or 400 ErrInvalidInput when KEK is
+# unset — both surface here as expected behavior).
+claim "backup: PUT policy AES-256-GCM+EnableEncryption schema-valid (T-0075)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    "$API/backup/policy" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"retention_days":30,"max_backup_count":100,"min_backup_count":3,"auto_cleanup":true,"cleanup_time":"03:00","cleanup_day_of_week":-1,"keep_last_n":5,"enable_compression":false,"compression_level":6,"compression_format":"gzip","storage_backend":"local","local_path":"/var/backup/omc","max_storage_gb":500,"enable_encryption":true,"encryption_algorithm":"AES-256-GCM","alert_on_failure":true,"alert_email":"","alert_threshold_percent":80}')
+check_status_in "W2D bk-13: PUT /backup/policy GCM (T-0075)" "200 400 401" "$HTTP_CODE"
+
 claim "backup: list ftp configs returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/ftp-configs" -H "$W2D_AUTH")

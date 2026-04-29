@@ -137,6 +137,30 @@ func runACS(cmd *cobra.Command, args []string) error {
 		backupPolicySvc := backup.NewPolicyService(backupPolicyRepo, inf.Logger)
 		backupPolicyMetrics := backup.NewPolicyMetrics(inf.MetricsReg)
 		uploadHandler.SetCompression(backupPolicySvc, backupPolicyMetrics)
+
+		// T-0075: optional backup encryption (AES-256-GCM envelope). The KEK
+		// comes from OMC_BACKUP_ENCRYPTION_KEY env var (64 hex chars / 32B).
+		// If unset, encryption stays disabled (Available()=false) — operators
+		// who want encryption must restart with the env var set. An invalid
+		// value (bad hex / wrong length) is a startup config error.
+		backupKeyProvider, kpErr := backup.NewEnvKeyProvider()
+		if kpErr != nil {
+			return fmt.Errorf("backup encryption key: %w", kpErr)
+		}
+		var backupEncryptor backup.Encryptor
+		if backupKeyProvider.Available() {
+			enc, encErr := backup.NewEncryptor("AES-256-GCM", backupKeyProvider)
+			if encErr != nil {
+				return fmt.Errorf("backup encryptor: %w", encErr)
+			}
+			backupEncryptor = enc
+			uploadHandler.SetEncryption(backupEncryptor)
+			inf.Logger.Info("backup encryption enabled",
+				zap.String("algorithm", "AES-256-GCM"))
+		} else {
+			inf.Logger.Info("backup encryption disabled (OMC_BACKUP_ENCRYPTION_KEY unset)")
+		}
+
 		deps.UploadHandler = uploadHandler
 		deps.UploadConfig = &cfg.Upload
 		inf.Logger.Info("upload handler enabled with backup compression",
@@ -152,6 +176,10 @@ func runACS(cmd *cobra.Command, args []string) error {
 		// (.gz/.zst/.lz4/.bz2). Mirrors the streaming compression added in T-0074
 		// on the upload side. Metrics are nil-safe.
 		downloadHandler.SetDecompressMetrics(download.NewDecompressMetrics(inf.MetricsReg))
+		// T-0075: enable on-the-fly decryption for `.enc` objects.
+		if backupEncryptor != nil {
+			downloadHandler.SetEncryption(backupEncryptor, backupPolicyMetrics)
+		}
 		deps.DownloadHandler = downloadHandler
 		deps.DownloadConfig = &cfg.Download
 		inf.Logger.Info("download handler enabled with backup decompression",

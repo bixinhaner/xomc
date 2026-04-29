@@ -181,6 +181,15 @@ func initBackupModule(c *Container) error {
 	// T-0071 / R-102 followup: singleton BackupPolicy persistence.
 	policyRepo := backup.NewPgPolicyRepository(c.PgPool)
 	policyService := backup.NewPolicyService(policyRepo, logger)
+	// T-0075: wire KeyProvider for PUT-time validation. The same env var is
+	// read on both ACS and App processes — keep them in sync via deployment
+	// config (systemd EnvironmentFile= or k8s ConfigMap).
+	if kp, kpErr := backup.NewEnvKeyProvider(); kpErr != nil {
+		logger.Error("backup encryption key invalid; PUT /backup/policy will block AES-256-GCM",
+			zap.Error(kpErr))
+	} else {
+		policyService.SetKeyProvider(kp)
+	}
 	backupHandler.SetPolicyService(policyService)
 
 	// T-0073 Phase 1: BackupPolicy enforcement Monitor (cleanup cron) +

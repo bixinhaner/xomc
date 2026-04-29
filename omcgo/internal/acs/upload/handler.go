@@ -1,8 +1,10 @@
 package upload
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +43,12 @@ type Handler struct {
 	// PutObject. Both fields are nil-safe — a nil getter disables compression.
 	policyGetter       backup.PolicyGetter
 	compressionMetrics *backup.PolicyMetrics
+	// T-0075: optional encryptor for AES-256-GCM envelope encryption applied
+	// after the compression wrap. nil-safe: nil disables encryption (the
+	// pre-T-0075 plaintext-or-compressed pipeline). When wired AND policy.
+	// EnableEncryption=true, ServeHTTP buffers the (possibly compressed) body
+	// (up to 64MB), encrypts in-memory, appends ".enc" to the object path.
+	encryptor backup.Encryptor
 }
 
 // NewHandler creates a new upload Handler.
@@ -163,6 +171,50 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		uploadOpts.ContentEncoding = cmp.format
 	}
 
+	// T-0075: encryption layer (after compression). Buffers fully into memory
+	// up to 64MB (encMaxPlaintext); rejects oversize uploads.
+	//
+	// AAD must equal the on-disk basename minus the .enc suffix so that the
+	// download handler — which only knows the MinIO object path — can
+	// reconstruct the same value. When compression is active the on-disk
+	// name is `<filename>.<cmp.ext>.enc`, so AAD = filename+cmp.ext. Without
+	// compression AAD = filename. This binding survives MinIO-level rename
+	// attacks (review HIGH-1 fix).
+	encApplied := false
+	if h.encryptor != nil && ft == tr069.FileTypeConfig && h.policyGetter != nil {
+		pol, perr := h.policyGetter.Get(ctx)
+		if perr == nil && pol != nil && pol.EnableEncryption && pol.EncryptionAlgorithm == "AES-256-GCM" {
+			encAAD := filename
+			if cmp.applied {
+				encAAD = filename + cmp.ext
+			}
+			encryptedBlob, encErr := h.encryptUpload(body, encAAD)
+			if encErr != nil {
+				// Fail closed: never fall through to plaintext when policy
+				// asked for encryption — that would silently weaken security.
+				h.compressionMetrics.RecordBackupEncryptionError(classifyEncryptError(encErr))
+				h.logger.Error("backup encryption failed; aborting upload",
+					zap.Error(encErr), zap.String("filename", filename))
+				status := http.StatusInternalServerError
+				if errors.Is(encErr, backup.ErrEncryptionInputTooLarge) {
+					status = http.StatusRequestEntityTooLarge
+				}
+				http.Error(w, "encryption failed", status)
+				return
+			}
+			body = bytes.NewReader(encryptedBlob)
+			contentLength = int64(len(encryptedBlob))
+			objectPath += "." + h.encryptor.Extension()
+			// ContentEncoding chains: e.g. "gzip+aes-256-gcm".
+			if uploadOpts.ContentEncoding != "" {
+				uploadOpts.ContentEncoding += "+" + h.encryptor.Format()
+			} else {
+				uploadOpts.ContentEncoding = h.encryptor.Format()
+			}
+			encApplied = true
+		}
+	}
+
 	startUpload := time.Now()
 	info, err := h.minioClient.PutObject(ctx, bucket, objectPath, body, contentLength, uploadOpts)
 	if err != nil {
@@ -185,6 +237,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// propagation through the pipe), so atomic.Int64 reads are safe.
 		h.compressionMetrics.RecordCompressionBytes(cmp.format, cmp.bytesIn(), info.Size)
 		h.compressionMetrics.RecordCompressionDuration(cmp.format, time.Since(startUpload).Seconds())
+	}
+	if encApplied {
+		h.compressionMetrics.RecordBackupEncrypted()
 	}
 
 	h.logger.Info("file uploaded",
@@ -289,6 +344,47 @@ func (h *Handler) publishDataModelEvent(ctx context.Context, bucket, objectPath,
 	h.logger.Info("published datamodel.file.received",
 		zap.String("device_sn", deviceSN),
 		zap.String("path", objectPath))
+}
+
+// SetEncryption wires the optional T-0075 backup encryptor. nil disables.
+// Caller is responsible for constructing the Encryptor with a working
+// KeyProvider (see backup.NewEncryptor + backup.NewEnvKeyProvider).
+func (h *Handler) SetEncryption(enc backup.Encryptor) {
+	h.encryptor = enc
+}
+
+// encryptUpload reads the (possibly compressed) body fully into memory up to
+// the encryption ceiling, then runs Encrypt with the supplied AAD. Returns
+// the fully-formed encrypted blob suitable for bytes.Reader → PutObject.
+//
+// aad must equal the on-disk basename minus the `.enc` suffix so the
+// downloader can reconstruct it from the object path (review HIGH-1 fix).
+func (h *Handler) encryptUpload(body io.Reader, aad string) ([]byte, error) {
+	// Limit + 1 lets us detect overflow without truncating silently.
+	limited := io.LimitReader(body, int64(64*1024*1024)+1)
+	buf, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("buffer body for encryption: %w", err)
+	}
+	if len(buf) > 64*1024*1024 {
+		return nil, backup.ErrEncryptionInputTooLarge
+	}
+	return h.encryptor.Encrypt(buf, []byte(aad))
+}
+
+// classifyEncryptError maps an encryption error to a coarse metric reason
+// label. Unknown errors fall to "encrypt_fail".
+func classifyEncryptError(err error) string {
+	switch {
+	case errors.Is(err, backup.ErrEncryptionKeyUnavailable):
+		return "key_unavailable"
+	case errors.Is(err, backup.ErrEncryptionInputTooLarge):
+		return "oversize"
+	case errors.Is(err, backup.ErrEncryptionFormatInvalid):
+		return "format_invalid"
+	default:
+		return "encrypt_fail"
+	}
 }
 
 // SetCompression wires backup compression dependencies into the handler.

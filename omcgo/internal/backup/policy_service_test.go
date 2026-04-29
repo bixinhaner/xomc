@@ -133,6 +133,21 @@ func TestPolicyService_Update_ValidationMatrix(t *testing.T) {
 			p.EnableCompression = true
 			p.CompressionFormat = "bzip2"
 		}, false, ""},
+		// T-0075: encryption-algorithm stub rejection (mirror lz4/bzip2 T-0074 pattern).
+		{"AES-256-CBC + enable_encryption=true rejected (T-0075)", func(p *BackupPolicy) {
+			p.EnableEncryption = true
+			p.EncryptionAlgorithm = "AES-256-CBC"
+		}, true, "AES-256-CBC not yet implemented"},
+		{"ChaCha20-Poly1305 + enable_encryption=true rejected (T-0075)", func(p *BackupPolicy) {
+			p.EnableEncryption = true
+			p.EncryptionAlgorithm = "ChaCha20-Poly1305"
+		}, true, "ChaCha20-Poly1305 not yet implemented"},
+		// AES-256-GCM + EnableEncryption=true ACCEPTED when no KeyProvider wired
+		// (validation skips KEK check; UI Persisted-Tag is the only signal).
+		{"AES-256-GCM + enable_encryption=true accepted with no key provider (T-0075)", func(p *BackupPolicy) {
+			p.EnableEncryption = true
+			p.EncryptionAlgorithm = "AES-256-GCM"
+		}, false, ""},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -196,4 +211,43 @@ func TestPolicyService_Update_UpsertError(t *testing.T) {
 	_, err := svc.Update(context.Background(), DefaultPolicy())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "simulated DB outage")
+}
+
+// TestValidatePolicy_AESGCM_KEKUnavailable verifies the T-0075 PUT-time
+// guard: when KeyProvider.Available()=false, EnableEncryption=true with
+// AES-256-GCM is rejected — operator must either set OMC_BACKUP_ENCRYPTION_KEY
+// or disable encryption.
+func TestValidatePolicy_AESGCM_KEKUnavailable(t *testing.T) {
+	repo := &mockPolicyRepo{}
+	svc := NewPolicyService(repo, zap.NewNop())
+	svc.SetKeyProvider(newStaticKeyProvider(nil)) // unavailable
+
+	p := *DefaultPolicy()
+	p.EnableEncryption = true
+	p.EncryptionAlgorithm = "AES-256-GCM"
+
+	_, err := svc.Update(context.Background(), &p)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+	assert.Contains(t, err.Error(), "encryption key not configured")
+	assert.Contains(t, err.Error(), EnvBackupEncryptionKey)
+}
+
+// TestValidatePolicy_AESGCM_KEKAvailable confirms the happy path: same
+// policy with a wired-and-available KeyProvider passes validation.
+func TestValidatePolicy_AESGCM_KEKAvailable(t *testing.T) {
+	repo := &mockPolicyRepo{}
+	svc := NewPolicyService(repo, zap.NewNop())
+	key := make([]byte, kekSize)
+	for i := range key {
+		key[i] = 0x42
+	}
+	svc.SetKeyProvider(newStaticKeyProvider(key))
+
+	p := *DefaultPolicy()
+	p.EnableEncryption = true
+	p.EncryptionAlgorithm = "AES-256-GCM"
+
+	_, err := svc.Update(context.Background(), &p)
+	require.NoError(t, err, "AES-256-GCM with available KEK must pass")
 }

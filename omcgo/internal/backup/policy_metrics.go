@@ -31,6 +31,11 @@ type PolicyMetrics struct {
 	// T-0076 physical file delete (MinIO object removal alongside DB cleanup):
 	fileDeletedTotal      prometheus.Counter
 	fileDeleteErrorsTotal *prometheus.CounterVec
+
+	// T-0075 backup encryption (AES-256-GCM envelope; CBC/ChaCha20 stub):
+	encryptedTotal         prometheus.Counter
+	encryptionErrorsTotal  *prometheus.CounterVec
+	decryptionErrorsTotal  *prometheus.CounterVec
 }
 
 // NewPolicyMetrics registers all collectors on the given registry.
@@ -76,6 +81,19 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "omc_backup_file_delete_errors_total",
 			Help: "Cleanup MinIO RemoveObject errors by reason (not_found|network|parse_path|other).",
 		}, []string{"reason"}),
+
+		encryptedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_backup_encrypted_total",
+			Help: "Backup files successfully AES-256-GCM encrypted before MinIO PutObject (T-0075).",
+		}),
+		encryptionErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_encryption_errors_total",
+			Help: "Backup encrypt-side failures by reason (key_unavailable|oversize|encrypt_fail|format_invalid).",
+		}, []string{"reason"}),
+		decryptionErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_decryption_errors_total",
+			Help: "Backup decrypt-side failures by reason (wrong_aad|tamper|key_unavailable|format_invalid).",
+		}, []string{"reason"}),
 	}
 	if reg != nil {
 		reg.MustRegister(
@@ -83,6 +101,7 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			m.compressionBytesIn, m.compressionBytesOut,
 			m.compressionDuration, m.compressionErrors,
 			m.fileDeletedTotal, m.fileDeleteErrorsTotal,
+			m.encryptedTotal, m.encryptionErrorsTotal, m.decryptionErrorsTotal,
 		)
 	}
 	return m
@@ -161,4 +180,30 @@ func (m *PolicyMetrics) RecordFileDeleteError(reason string) {
 		return
 	}
 	m.fileDeleteErrorsTotal.WithLabelValues(reason).Inc()
+}
+
+// RecordBackupEncrypted increments the upload-side encryption success counter (T-0075).
+func (m *PolicyMetrics) RecordBackupEncrypted() {
+	if m == nil {
+		return
+	}
+	m.encryptedTotal.Inc()
+}
+
+// RecordBackupEncryptionError tallies an encrypt-side failure.
+// reason ∈ {"key_unavailable", "oversize", "encrypt_fail", "format_invalid"}.
+func (m *PolicyMetrics) RecordBackupEncryptionError(reason string) {
+	if m == nil {
+		return
+	}
+	m.encryptionErrorsTotal.WithLabelValues(reason).Inc()
+}
+
+// RecordBackupDecryptionError tallies a decrypt-side failure on the download path.
+// reason ∈ {"wrong_aad", "tamper", "key_unavailable", "format_invalid"}.
+func (m *PolicyMetrics) RecordBackupDecryptionError(reason string) {
+	if m == nil {
+		return
+	}
+	m.decryptionErrorsTotal.WithLabelValues(reason).Inc()
 }
