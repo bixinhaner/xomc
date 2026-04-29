@@ -67,9 +67,9 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 48 | — | +T-0022 (前端 Topology/Report 补完, 4 page 去 mock + 接 hook)；+T-0012 (worker retry/DLQ, R-106 关闭)；+T-0015 (License Enforcer, R-103 关闭)；+三并行批 / +五并行批（详见早期记账）|
+| `done` | 49 | — | +T-0025 (RC 冻结 + 冒烟用例, **首版 RC tag rc-2026Q2-001**)；+T-0022 (前端 Topology/Report)；+T-0012 (worker DLQ, R-106 关闭)；+T-0015 (License, R-103 关闭)；+三并行批 / +五并行批 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 11 | — | -1 (T-0022 done) |
+| `planned` | 10 | — | -1 (T-0025 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -255,7 +255,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0022 | 前端 Topology/Report 补完（4 page 去 inline mock + 接 useDomains/useReportRecords/useDownloadReport/useReportDefinitions/useGenerateReport，mock 集中到 frontend-core）| feat | frontend | P1 | done | Claude | M | — | `prd/T-0022-frontend-topology-report.md` | sprint-05 | 2026-04-28 |
 | T-0023 | 5K 设备压测稳定 24h + p95<SLO（W3.F.1） | td | infra | P0 | planned | 架构+运维 | L | T-0010 | `AI承诺对峙清单.md` W3.F.1 | wave-3 | 2026-04-28 |
 | T-0024 | Release Gate 9 章节 [ ] 66→0（[x]=42 / [N/A]=13 全部映射 follow-up，W3.I.1） | proc | process | P0 | done | Claude | M | T-0023 | `AI承诺对峙清单.md` W3.I.1 / `release-gate.md` | wave-3 | 2026-04-28 |
-| T-0025 | RC 冻结 + 冒烟用例集（~20 条） | td | infra | P0 | planned | QA | M | T-0006@累计≥150 | — | sprint-07 | 2026-04-20 |
+| T-0025 | RC 冻结 + 冒烟用例 20 条（smoke_test.sh 8 域 20 用例 + RC-2026Q2-001.md 9 章 + git tag rc-2026Q2-001；本地实测 19/20，staging 应达 20/20）| td | infra | P0 | done | Claude | M | T-0006@累计≥150 ✅ (实跑 549) | `prd/T-0025-rc-freeze-smoke.md` | sprint-07 | 2026-04-29 |
 | T-0026 | Runbook 体系 6 份达标 ≥5（pg/redis/acs 三新 + 既有 nats/dr/db-backup，1491+ 行） | docs | ops | P0 | done | Claude | M | — | `release-gate.md §3.4` | sprint-07 | 2026-04-28 |
 | T-0027 | F03 KPI 指标管理（标准报表 + 站点报表） | feat | F03 | P1 | in_dev | 电信+前端 | XL | — | — | sprint-01 | 2026-04-26 |
 | T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.3 | wave-1 | 2026-04-27 |
