@@ -161,17 +161,18 @@
 
 ## P1 风险（质量影响）
 
-### R-101 Software 模块缺灰度升级策略
-- **描述**：`internal/software/` 批量升级仅支持全量并发控制，无分组/延时/百分比策略
+### R-101 Software 模块缺灰度升级策略 + 回退审计/触发
+- **描述**：`internal/software/` 批量升级仅支持全量并发控制，无分组/延时/百分比策略；回退仅"机械触发"，无审计/原因/灰度联动
 - **等级**：P1
 - **概率**：中
-- **影响**：大规模升级无法分批验证，失败面影响全量
+- **影响**：大规模升级无法分批验证；回退缺审计影响事故追溯
 - **Owner**：电信业务专家
-- **状态**：✅ Closed (2026-04-29) — 部分（灰度策略已落，回滚由 T-0021 独立处理）
-- **关联 Task**：T-0018（灰度升级策略）✅ done / T-0021（回滚能力）planned
-- **缓解**：T-0018 完成 — `internal/software/canary.go` 类型 + DefaultCanaryStages [1,10,50,100] + ValidateStages / DevicesForStage / FailureRate 等；`canary_monitor.go` cron 每 1 min 失败率阈值检查 → 自动暂停 + 4 Prometheus 指标；4 Admin endpoints (advance/pause/resume/abort)；migration 000045 +7 字段（strategy/canary_stages/current_stage/stage_status/stage_history/auto_advance/auto_advance_minutes）；BatchUpgradeRequest 加 strategy 向后兼容（默认 full）
-- **关闭依据**：`docs/project/prd/T-0018-software-canary-upgrade.md` + `docs/review-report/20260429/verify-T-0018.md`
-- **下次复盘**：T-0021 回滚能力推进时
+- **状态**：✅ **完整闭环 Closed** (2026-04-29) — T-0018 灰度 + T-0021 回退增强双链落地
+- **关联 Task**：T-0018（灰度升级策略）✅ done / T-0021（回退增强）✅ done
+- **缓解（灰度，T-0018）**：`internal/software/canary.go` 类型 + DefaultCanaryStages [1,10,50,100] + ValidateStages / DevicesForStage / FailureRate；`canary_monitor.go` cron 每 1 min 失败率阈值检查 → 自动暂停 + 4 Prometheus 指标；4 Admin endpoints (advance/pause/resume/abort)；migration 000045 +7 字段；BatchUpgradeRequest 加 strategy 向后兼容
+- **缓解（回退，T-0021）**：`RollbackRequest` +3 audit 字段（reason/source/target_firmware_id）；4 source 枚举 + CHECK 约束 + IsValidRollbackSource；TargetFirmwareID 非空时 sub_tasks.DestVersion 取该固件版本；`CanaryStrategy +RollbackOnFailure`（默认 false 维持"不擅自回滚"D4 invariant）；canary monitor 阈值超 + opt-in → pause 后追加 auto-rollback；3 新 Counter（`software_rollback_total{source}` / `software_rollback_devices_total{source}` / `software_rollback_with_target_total`）；migration 000046 +4 列 + 1 部分索引；e2e_verify.sh +1 claim
+- **关闭依据**：`docs/project/prd/T-0018-software-canary-upgrade.md` + `docs/review-report/20260429/verify-T-0018.md` + `docs/project/prd/T-0021-software-rollback-enhanced.md` + `docs/review-report/20260429/verify-T-0021.md` + commit `5baaf633`
+- **下次复盘**：N/A（已闭环）
 
 ### R-102 前端 Backup/Software 页面仅骨架
 - **描述**：Backup 48%、Software 52% 完成度，业务逻辑缺失（任务创建/升级进度/回滚）
