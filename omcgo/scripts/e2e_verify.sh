@@ -5021,6 +5021,12 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/schedules?page=1&page_size=5" -H "$W2D_AUTH")
 check_status_in "W2D bk-3: GET /backup/schedules" "200 401" "$HTTP_CODE"
 
+# T-0071 / R-102: BackupPolicy singleton endpoint — defaults round-trip on empty table
+claim "backup: GET /backup/policy returns 200/401 (singleton with defaults if empty)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/policy" -H "$W2D_AUTH")
+check_status_in "W2D bk-7: GET /backup/policy (T-0071 persistence MVP)" "200 401" "$HTTP_CODE"
+
 claim "backup: list ftp configs returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/ftp-configs" -H "$W2D_AUTH")

@@ -46,6 +46,58 @@ export interface FTPConfig {
   createTime: string;
 }
 
+// T-0071: BackupPolicy persistence (singleton). Mirrors backend `BackupPolicy`
+// struct exactly (19 fields × 7 categories). Enforcement boundary: cleanup /
+// compression / encryption / alarm fields are *stored* today but executor
+// enforcement is per-category followup (T-0073 / T-0074 / T-0075). UI uses
+// `backup.policy.persistedNotEnforced` tag in Collapse panels to surface this.
+export interface BackupPolicy {
+  id?: string;
+  retentionDays: number;
+  maxBackupCount: number;
+  minBackupCount: number;
+  autoCleanup: boolean;
+  cleanupTime: string;
+  cleanupDayOfWeek: number;
+  keepLastN: number;
+  enableCompression: boolean;
+  compressionLevel: number;
+  compressionFormat: 'gzip' | 'bzip2' | 'lz4' | 'zstd';
+  storageBackend: 'local' | 'ftp' | 'sftp' | 'nfs';
+  ftpConfigId?: string | null;
+  localPath: string;
+  maxStorageGB: number;
+  enableEncryption: boolean;
+  encryptionAlgorithm: string;
+  alertOnFailure: boolean;
+  alertEmail: string;
+  alertThresholdPercent: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_BACKUP_POLICY: BackupPolicy = {
+  retentionDays: 30,
+  maxBackupCount: 100,
+  minBackupCount: 3,
+  autoCleanup: true,
+  cleanupTime: '03:00',
+  cleanupDayOfWeek: -1,
+  keepLastN: 5,
+  enableCompression: true,
+  compressionLevel: 6,
+  compressionFormat: 'gzip',
+  storageBackend: 'local',
+  ftpConfigId: null,
+  localPath: '/var/backup/omc',
+  maxStorageGB: 500,
+  enableEncryption: false,
+  encryptionAlgorithm: 'AES-256-GCM',
+  alertOnFailure: true,
+  alertEmail: '',
+  alertThresholdPercent: 80,
+};
+
 export const mockBackupTasks: BackupTask[] = [
   {
     id: 'bkp-001',

@@ -1,5 +1,6 @@
 import http from '../http';
-import type { BackupTask, BackupSchedule, FTPConfig } from '../../mock/data/backup';
+import type { BackupTask, BackupSchedule, FTPConfig, BackupPolicy } from '../../mock/data/backup';
+import { DEFAULT_BACKUP_POLICY } from '../../mock/data/backup';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // ---------------------------------------------------------------------------
@@ -361,6 +362,32 @@ export const backupApi = {
     const { data } = await http.post<{ success: boolean; message: string }>(
       `/backup/ftp-configs/${id}/test`
     );
+    return data;
+  },
+
+  // --- Policy (T-0071, singleton) ---
+
+  /**
+   * Fetches the singleton backup policy. When the backend returns a 404
+   * (table empty) we surface canonical defaults so first-render UI matches
+   * what a fresh PUT would create. Other errors propagate.
+   */
+  async getPolicy(): Promise<BackupPolicy> {
+    try {
+      const { data } = await http.get<BackupPolicy>('/backup/policy');
+      // Axios interceptor already converts snake_case → camelCase, so the
+      // response shape is the frontend BackupPolicy interface. ftp_config_id
+      // null → ftpConfigId null, preserved.
+      return data;
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) return { ...DEFAULT_BACKUP_POLICY };
+      throw err;
+    }
+  },
+
+  async updatePolicy(payload: BackupPolicy): Promise<BackupPolicy> {
+    const { data } = await http.put<BackupPolicy>('/backup/policy', payload);
     return data;
   },
 };

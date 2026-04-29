@@ -178,6 +178,11 @@ func initBackupModule(c *Container) error {
 	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, c.EventBus, logger)
 	backupHandler := backup.NewHandler(backupService, ftpRepo, logger)
 
+	// T-0071 / R-102 followup: singleton BackupPolicy persistence.
+	policyRepo := backup.NewPgPolicyRepository(c.PgPool)
+	policyService := backup.NewPolicyService(policyRepo, logger)
+	backupHandler.SetPolicyService(policyService)
+
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")

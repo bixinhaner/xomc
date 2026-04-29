@@ -13,18 +13,27 @@ import (
 
 // Handler provides HTTP handlers for backup management REST API.
 type Handler struct {
-	service *Service
-	ftpRepo FTPConfigRepository
-	logger  *zap.Logger
+	service       *Service
+	ftpRepo       FTPConfigRepository
+	policyService *PolicyService // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
+	logger        *zap.Logger
 }
 
 // NewHandler creates a new backup Handler.
+// policyService is optional during incremental rollout; pass nil to disable
+// the /backup/policy endpoint group, or use SetPolicyService after construction.
 func NewHandler(service *Service, ftpRepo FTPConfigRepository, logger *zap.Logger) *Handler {
 	return &Handler{
 		service: service,
 		ftpRepo: ftpRepo,
 		logger:  logger.Named("backup-handler"),
 	}
+}
+
+// SetPolicyService wires the BackupPolicy CRUD service post-construction.
+// Used by DI to avoid changing the existing NewHandler signature.
+func (h *Handler) SetPolicyService(s *PolicyService) {
+	h.policyService = s
 }
 
 // RegisterRoutes registers backup routes on the given router group.
@@ -50,6 +59,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	ftp.PUT("/:id", h.UpdateFTPConfig)
 	ftp.DELETE("/:id", h.DeleteFTPConfig)
 	ftp.POST("/:id/test", h.TestFTPConnection)
+
+	// T-0071 / R-102 followup: singleton policy endpoint.
+	policy := rg.Group("/backup/policy")
+	policy.GET("", h.GetPolicy)
+	policy.PUT("", h.UpdatePolicy)
 }
 
 // ---- Task request types ----

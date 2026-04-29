@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { BackupTask, BackupSchedule, FTPConfig } from '../../mock/data/backup';
+import type { BackupTask, BackupSchedule, FTPConfig, BackupPolicy } from '../../mock/data/backup';
+import { DEFAULT_BACKUP_POLICY } from '../../mock/data/backup';
 import type { PageRequest } from '../../types/pagination';
 import { backupService } from '../../mock/services/backupService';
 import { backupApi } from '../../services/api/backupApi';
@@ -145,5 +146,32 @@ export function useTestFTPConnection() {
   return useMutation({
     mutationFn: (id: string) =>
       useMock ? backupService.testFTPConnection(id) : backupApi.testFTPConnection(id),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Backup Policy hooks (T-0071, singleton)
+//
+// Mock mode returns DEFAULT_BACKUP_POLICY synchronously (no backupService stub
+// since policy isn't exercised in unit tests yet); real mode goes through
+// backupApi which gracefully falls back to defaults on 404. Mutation invalidates
+// the query so the form refreshes after a successful PUT.
+// ---------------------------------------------------------------------------
+
+export function useBackupPolicy() {
+  return useQuery<BackupPolicy>({
+    queryKey: ['backup', 'policy'],
+    queryFn: () => (useMock ? Promise.resolve({ ...DEFAULT_BACKUP_POLICY }) : backupApi.getPolicy()),
+  });
+}
+
+export function useUpdateBackupPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: BackupPolicy) =>
+      useMock ? Promise.resolve(data) : backupApi.updatePolicy(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backup', 'policy'] });
+    },
   });
 }
