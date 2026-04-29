@@ -9,6 +9,9 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/reliability"
+	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
+	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
@@ -77,7 +80,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	logger := w.Logger
 
-	// PM Collector
+	// PM Collector — wraps handler with retry+DLQ runner (T-0012 / R-106).
 	counterRepo := counter.NewPgCounterRepository(w.TsPool)
 	kpiRepo := kpi.NewPgKPIRepository(w.TsPool)
 	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, w.Carriers, logger)
@@ -86,10 +89,19 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
+
+	// Runner wires retry + DLQ instrumentation around the PM handler.
+	// dlqRepo + runnerMetrics are scoped to the worker process; admin handler
+	// in app process reads the same dead_letters table directly.
+	dlqRepo := dlq.NewPgRepository(w.PgPool)
+	runnerMetrics := runner.NewMetrics(w.MetricsReg)
+	pmRunner := runner.NewRunner("pm", reliability.DefaultRetryConfig(), dlqRepo, w.EventBus, runnerMetrics, logger)
+	pmCollector.SetRunner(pmRunner)
+
 	if err := pmCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe PM collector", zap.Error(err))
 	}
-	logger.Info("PM collector started")
+	logger.Info("PM collector started with retry+DLQ runner")
 
 	// Alarm Receiver + Sync
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)

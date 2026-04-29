@@ -8,10 +8,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/core/reliability"
+	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
+	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/filemanager"
@@ -379,6 +383,22 @@ func initMiscModules(c *Container) error {
 	// PM threshold
 	c.miscDeps.thresholdRepo = pm.NewPgThresholdRepository(c.PgPool)
 
+	// Dead-letter admin handler (T-0012 / R-106).
+	// Worker process owns the runner that writes to dead_letters; the app
+	// process exposes read/delete/replay over /admin/dead-letters. Replay uses
+	// a per-module runner.Runner (sharing the EventBus publisher) so the app
+	// can re-publish events back to the bus — worker subscribers will pick
+	// them up like any normal event.
+	dlqRepo := dlq.NewPgRepository(c.PgPool)
+	dlqMetrics := runner.NewMetrics(c.MetricsReg)
+	dlqHandler := admin.NewDeadLetterHandler(dlqRepo, logger)
+	if c.EventBus != nil {
+		pmReplayer := runner.NewRunner("pm", reliability.DefaultRetryConfig(), dlqRepo, c.EventBus, dlqMetrics, logger)
+		dlqHandler.SetReplayer("pm", pmReplayer)
+	}
+	c.miscDeps.deadLetterHandler = dlqHandler
+	logger.Info("dead-letter admin handler initialized")
+
 	return nil
 }
 
@@ -460,6 +480,9 @@ type miscDeps struct {
 		// W2.A.4 / T-0043: Notification template + history
 		notifTemplateHandler *notification.TemplateHandler
 		notifHistoryHandler  *notification.HistoryHandler
+
+		// T-0012 / R-106: worker retry + dead-letter queue admin
+		deadLetterHandler *admin.DeadLetterHandler
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

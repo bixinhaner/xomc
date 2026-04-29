@@ -5464,6 +5464,17 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 check_status_in "W2D notif-4: GET /notifications/history/<not-found>" "404 401" "$HTTP_CODE"
 
 # ------------------------------------------------------------
+# T-0012 / R-106 worker retry + dead-letter queue admin
+# /admin/dead-letters 由 admin RBAC (users:admin) 拦截：未授权 401，
+# 已授权且无记录返回空数据集 200。403 留给非 admin 角色场景（路由层保证）。
+section "T-0012 dead-letter admin (≥ 1 claim)"
+
+claim "admin: dead-letters list endpoint returns 200/401/403"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/dead-letters?page=1&page_size=10" -H "$W2D_AUTH")
+check_status_in "T-0012 dlq-1: GET /admin/dead-letters" "200 401 403" "$HTTP_CODE"
+
+# ------------------------------------------------------------
 # W2.D.1 段尾打印分段统计，方便 verify 报告引用
 echo ""
 echo -e "${YELLOW}=== W2.D.1 段累计 claim 总数 ${CLAIM_COUNT}（≥ 100 即合规）===${NC}"

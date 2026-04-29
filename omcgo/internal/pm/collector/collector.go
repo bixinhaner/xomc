@@ -10,6 +10,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -26,6 +27,13 @@ type FileReceivedPayload struct {
 }
 
 // PMCollector handles PM file processing: download from MinIO, parse XML, store counters.
+//
+// The optional runner.Wrapper field enables retry + DLQ instrumentation: when
+// SetRunner has been called, Subscribe wires the handler through the wrapper
+// so transient failures are retried per RetryConfig and exhausted events land
+// in the dead_letters table (T-0012 / R-106). When runner is nil the handler
+// is registered directly, preserving legacy behaviour for tests / single-process
+// deployments without DLQ infra.
 type PMCollector struct {
 	minioClient *minio.Client
 	bucket      string
@@ -35,6 +43,7 @@ type PMCollector struct {
 	fileStore   pm.PMFileStore
 	eventBus    event.EventBus
 	metrics     *pm.PMMetrics
+	runner      runner.Wrapper
 	logger      *zap.Logger
 }
 
@@ -58,13 +67,27 @@ func (c *PMCollector) SetMetrics(m *pm.PMMetrics) {
 	c.metrics = m
 }
 
+// SetRunner attaches a retry+DLQ wrapper. When set, Subscribe wires the
+// handler through w.Wrap so failures are retried and exhausted events land
+// in the dead_letters table. Pass nil to keep the legacy direct-subscribe
+// behaviour. Call this before Subscribe; mid-flight changes are not honoured.
+func (c *PMCollector) SetRunner(w runner.Wrapper) {
+	c.runner = w
+}
+
 // Subscribe registers the collector to listen for PM file received events.
 func (c *PMCollector) Subscribe(bus event.EventBus) error {
-	_, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", c.handleFileReceived)
+	handler := c.handleFileReceived
+	if c.runner != nil {
+		handler = c.runner.Wrap(event.SubjectPMFileReceived, c.handleFileReceived)
+	}
+	_, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", handler)
 	if err != nil {
 		return fmt.Errorf("subscribe pm.file.received: %w", err)
 	}
-	c.logger.Info("PM collector subscribed to pm.file.received")
+	c.logger.Info("PM collector subscribed to pm.file.received",
+		zap.Bool("retry_dlq_wrapped", c.runner != nil),
+	)
 	return nil
 }
 
