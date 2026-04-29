@@ -327,6 +327,17 @@ func (s *swHTaskRepoStub) IncrementCounts(_ context.Context, _ uuid.UUID, _, _ i
 }
 func (s *swHTaskRepoStub) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 
+// Canary repository methods (added in T-0018; stub returns harmless zero values).
+func (s *swHTaskRepoStub) GetCanaryFields(_ context.Context, _ uuid.UUID) (*software.CanaryFields, error) {
+	return nil, nil
+}
+func (s *swHTaskRepoStub) UpdateCanaryFields(_ context.Context, _ uuid.UUID, _ *software.CanaryFields) error {
+	return nil
+}
+func (s *swHTaskRepoStub) ListActiveCanaryTaskIDs(_ context.Context) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 type swHSubTaskRepoStub struct{}
 
 func (s *swHSubTaskRepoStub) Create(_ context.Context, task *software.UpgradeSubTask) error {

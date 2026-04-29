@@ -53,10 +53,10 @@ func initConfigModule(c *Container) error {
 
 	// Store repos for handler creation
 	c.configHandlerDeps = &configHandlerDeps{
-		dmRepo:     dmRepo,
-		ouiRepo:    ouiRepo,
-		dmRegistry: dmRegistry,
-		dmImporter: dmImporter,
+		dmRepo:       dmRepo,
+		ouiRepo:      ouiRepo,
+		dmRegistry:   dmRegistry,
+		dmImporter:   dmImporter,
 		templateRepo: templateRepo,
 	}
 

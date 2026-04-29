@@ -28,11 +28,17 @@ type CanaryStage struct {
 
 // CanaryStrategy is the full per-task strategy descriptor.
 // Stored in upgrade_tasks.canary_stages as JSON encoding of just []CanaryStage;
-// auto_advance / auto_advance_minutes are stored in dedicated columns.
+// auto_advance / auto_advance_minutes / rollback_on_failure are stored in
+// dedicated columns or carried inline by the request DTO depending on context.
 type CanaryStrategy struct {
 	Stages             []CanaryStage `json:"stages"`
 	AutoAdvance        bool          `json:"auto_advance"`
 	AutoAdvanceMinutes int           `json:"auto_advance_minutes,omitempty"`
+
+	// RollbackOnFailure (T-0021): when true, threshold-exceeded stages
+	// trigger an automatic rollback in addition to auto-pause. Defaults to
+	// false to preserve the T-0018 D4 invariant ("不擅自回滚").
+	RollbackOnFailure bool `json:"rollback_on_failure,omitempty"`
 }
 
 // DefaultCanaryStages is the recommended default progression: 1% → 10% → 50% → 100%
@@ -58,15 +64,15 @@ const (
 
 // StageHistoryEntry records the outcome of one stage transition for audit.
 type StageHistoryEntry struct {
-	Stage         int       `json:"stage"`           // 1-indexed
-	Percent       int       `json:"percent"`
-	DevicesInStage int      `json:"devices_in_stage"`
-	SuccessCount  int       `json:"success_count"`
-	FailCount     int       `json:"fail_count"`
-	FailureRate   float64   `json:"failure_rate"`    // 0.0–1.0
-	Action        string    `json:"action"`          // "advanced" / "paused" / "aborted" / "completed"
-	At            time.Time `json:"at"`
-	Reason        string    `json:"reason,omitempty"`
+	Stage          int       `json:"stage"` // 1-indexed
+	Percent        int       `json:"percent"`
+	DevicesInStage int       `json:"devices_in_stage"`
+	SuccessCount   int       `json:"success_count"`
+	FailCount      int       `json:"fail_count"`
+	FailureRate    float64   `json:"failure_rate"` // 0.0–1.0
+	Action         string    `json:"action"`       // "advanced" / "paused" / "aborted" / "completed"
+	At             time.Time `json:"at"`
+	Reason         string    `json:"reason,omitempty"`
 }
 
 // ValidateStages checks a canary stage list for monotonicity and basic ranges.
@@ -156,6 +162,7 @@ type CanaryFields struct {
 	StageHistory       []StageHistoryEntry
 	AutoAdvance        bool
 	AutoAdvanceMinutes int
+	RollbackOnFailure  bool // T-0021: gate auto-rollback in canary monitor
 	TotalCount         int
 }
 

@@ -7,11 +7,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
-	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
@@ -22,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 )
 
@@ -87,7 +87,7 @@ type Container struct {
 	BaselineSvc *baseline.Service
 
 	// ===== 内部 deps（各模块 handler/路由注册使用）=====
-	configHandlerDeps    *configHandlerDeps
+	configHandlerDeps   *configHandlerDeps
 	topologyHandlerDeps *topologyHandlerDeps
 	adminHandlerDeps    *adminHandlerDeps
 	deviceHandlerDeps   *deviceHandlerDeps

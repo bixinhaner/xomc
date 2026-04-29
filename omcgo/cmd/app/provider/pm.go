@@ -59,12 +59,12 @@ func initPMModule(c *Container) error {
 
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{
-		pmCounterRepo:     pmCounterRepo,
-		pmKPIRepo:         pmKPIRepo,
-		pmKPIEngine:       pmKPIEngine,
-		pmTaskRepo:        pmTaskRepo,
-		pmFileStore:       pmFileStore,
-		indicatorHandler:  indicatorHandler,
+		pmCounterRepo:    pmCounterRepo,
+		pmKPIRepo:        pmKPIRepo,
+		pmKPIEngine:      pmKPIEngine,
+		pmTaskRepo:       pmTaskRepo,
+		pmFileStore:      pmFileStore,
+		indicatorHandler: indicatorHandler,
 	}
 
 	logger.Info("PM module initialized")

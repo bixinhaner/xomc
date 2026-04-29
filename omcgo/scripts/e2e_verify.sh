@@ -4993,6 +4993,16 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     "$API/upgrade-tasks/$W2D_BAD_UUID/advance" -H "$W2D_AUTH")
 check_status_in "W2D sw-6: POST /upgrade-tasks/<id>/advance" "404 401 400" "$HTTP_CODE"
 
+# T-0021 / R-101: rollback endpoint accepts the audit fields (reason/source/target_firmware_id).
+# Body uses the new optional fields; with empty device_ids the server should reject as 400/401
+# (validation hits "device_ids required"), proving the route + JSON binding accept the new schema.
+claim "software: rollback endpoint accepts reason/source/target_firmware_id audit fields"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" -H "$W2D_AUTH" \
+    -d '{"device_ids":[],"task_name":"e2e-rollback-audit","create_user":"e2e","reason":"e2e claim","source":"manual"}' \
+    "$API/upgrade-tasks/rollback")
+check_status_in "W2D sw-7: POST /upgrade-tasks/rollback (T-0021 audit fields)" "400 401" "$HTTP_CODE"
+
 # ------------------------------------------------------------
 section "W2.D.1 backup Domain (≥ 5 claims)"
 

@@ -18,18 +18,18 @@ import (
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/events"
 	"github.com/omcgo/omcgo/internal/filemanager"
 	"github.com/omcgo/omcgo/internal/interop"
 	"github.com/omcgo/omcgo/internal/interop/cases"
 	"github.com/omcgo/omcgo/internal/license"
-	"github.com/omcgo/omcgo/internal/events"
 	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/mr"
-	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/nedirect"
 	"github.com/omcgo/omcgo/internal/northbound"
 	"github.com/omcgo/omcgo/internal/northbound/push"
 	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/provision"
@@ -76,7 +76,14 @@ func initSoftwareModule(c *Container) error {
 	// Canary monitor + metrics (T-0018 / R-101)
 	canaryMetrics := software.NewCanaryMetrics(c.MetricsReg)
 	softwareService.SetCanaryMetrics(canaryMetrics)
+	// Rollback metrics (T-0021 / R-101): registered before canary monitor wiring
+	// so the auto-rollback path emits counters on first fire.
+	rollbackMetrics := software.NewRollbackMetrics(c.MetricsReg)
+	softwareService.SetRollbackMetrics(rollbackMetrics)
 	canaryMonitor := software.NewCanaryMonitor(taskRepo, canaryMetrics, logger)
+	// Wire SoftwareService as the auto-rollback trigger. Default RollbackOnFailure
+	// is false; the trigger only fires when a canary task explicitly opted in.
+	canaryMonitor.SetRollbackTrigger(softwareService)
 	if err := canaryMonitor.Start(context.Background()); err != nil {
 		logger.Warn("start canary monitor", zap.Error(err))
 	}
@@ -111,7 +118,7 @@ func initProvisionModule(c *Container) error {
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
 	}
 	if c.Cfg.Provision.AutoSync.Enabled {
-			planStore := provision.NewSyncPlanStore(c.Redis)
+		planStore := provision.NewSyncPlanStore(c.Redis)
 		syncSvc := provision.NewSyncService(
 			c.ParamRepo, discoveryLogRepo, c.TaskSvc, planStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
@@ -312,7 +319,7 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.paramHandler = mml.NewParamHandler(paramService, logger)
 	logger.Info("MML console module initialized")
 
-		// Config Baseline module
+	// Config Baseline module
 	baselineRepo := baseline.NewPgBaselineRepository(c.PgPool)
 	configTaskRepo := baseline.NewPgConfigTaskRepository(c.PgPool)
 	neighborRepo := baseline.NewPgNeighborRepository(c.PgPool)
@@ -416,17 +423,17 @@ func initMiscModules(c *Container) error {
 // These are populated by initMiscModules and consumed during route registration.
 type miscDeps struct {
 	// MR
-	mrStore    *mr.PgMRStore
-	mrIndRepo  *mr.PgIndicatorRepository
-	mrMapRepo  *mr.PgMappingRepository
+	mrStore   *mr.PgMRStore
+	mrIndRepo *mr.PgIndicatorRepository
+	mrMapRepo *mr.PgMappingRepository
 
 	// Software
 	softwareHandler *software.Handler
 	canaryMonitor   *software.CanaryMonitor
 
 	// Provision
-	provisionRepo    *provision.PgProvisioningTaskRepository
-	provisionEngine  *provision.ProvisioningEngine
+	provisionRepo   *provision.PgProvisioningTaskRepository
+	provisionEngine *provision.ProvisioningEngine
 
 	// Task
 	taskHandler *task.Handler
@@ -483,17 +490,17 @@ type miscDeps struct {
 	// PM Threshold
 	thresholdRepo *pm.PgThresholdRepository
 
-		// SSE / Events
-		sseHandler          *events.SSEHandler
-		notificationHandler *notification.Handler
-		messageHub          *events.MessageHub
+	// SSE / Events
+	sseHandler          *events.SSEHandler
+	notificationHandler *notification.Handler
+	messageHub          *events.MessageHub
 
-		// W2.A.4 / T-0043: Notification template + history
-		notifTemplateHandler *notification.TemplateHandler
-		notifHistoryHandler  *notification.HistoryHandler
+	// W2.A.4 / T-0043: Notification template + history
+	notifTemplateHandler *notification.TemplateHandler
+	notifHistoryHandler  *notification.HistoryHandler
 
-		// T-0012 / R-106: worker retry + dead-letter queue admin
-		deadLetterHandler *admin.DeadLetterHandler
+	// T-0012 / R-106: worker retry + dead-letter queue admin
+	deadLetterHandler *admin.DeadLetterHandler
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

@@ -74,11 +74,11 @@ func initAlarmModule(c *Container) error {
 
 	// Store deps for route registration
 	c.alarmHandlerDeps = &alarmHandlerDeps{
-		alarmPgStore:           alarmPgStore,
-		alarmLibraryService:    alarmLibraryService,
-		alarmFilterRuleRepo:    alarmFilterRuleRepo,
-		dataPermissionChecker:  dataPermissionChecker,
-		alarmSyncService:       alarmSyncService,
+		alarmPgStore:          alarmPgStore,
+		alarmLibraryService:   alarmLibraryService,
+		alarmFilterRuleRepo:   alarmFilterRuleRepo,
+		dataPermissionChecker: dataPermissionChecker,
+		alarmSyncService:      alarmSyncService,
 	}
 
 	logger.Info("alarm module initialized")

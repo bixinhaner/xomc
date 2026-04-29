@@ -24,27 +24,34 @@ import (
 
 // SoftwareService provides firmware upload and device upgrade functionality.
 type SoftwareService struct {
-	firmwareRepo FirmwareRepository
-	taskRepo     TaskRepository
-	subTaskRepo  SubTaskRepository
-	deviceRepo   device.DeviceRepository
-	taskSvc      devtask.Enqueuer
-	connReq      *connreq.Client
-	minioClient  *minio.Client
-	firmwareBkt  string
-	eventBus     event.EventBus
-	redis        redis.UniversalClient
-	executor     *UpgradeExecutor
-	rollbackExec *RollbackExecutor
-	adapter      UpgradeAdapter
-	canaryMetrics *CanaryMetrics // optional; nil-safe via metrics methods
-	logger       *zap.Logger
+	firmwareRepo    FirmwareRepository
+	taskRepo        TaskRepository
+	subTaskRepo     SubTaskRepository
+	deviceRepo      device.DeviceRepository
+	taskSvc         devtask.Enqueuer
+	connReq         *connreq.Client
+	minioClient     *minio.Client
+	firmwareBkt     string
+	eventBus        event.EventBus
+	redis           redis.UniversalClient
+	executor        *UpgradeExecutor
+	rollbackExec    *RollbackExecutor
+	adapter         UpgradeAdapter
+	canaryMetrics   *CanaryMetrics   // optional; nil-safe via metrics methods
+	rollbackMetrics *RollbackMetrics // optional; nil-safe via metrics methods (T-0021)
+	logger          *zap.Logger
 }
 
 // SetCanaryMetrics wires Prometheus metrics for canary stage transitions.
 // Safe to call after construction (DI container picks one MetricsReg).
 func (s *SoftwareService) SetCanaryMetrics(m *CanaryMetrics) {
 	s.canaryMetrics = m
+}
+
+// SetRollbackMetrics wires Prometheus metrics for rollback audit (T-0021).
+// Safe to call after construction so the DI container drives registration.
+func (s *SoftwareService) SetRollbackMetrics(m *RollbackMetrics) {
+	s.rollbackMetrics = m
 }
 
 // NewSoftwareService creates a new SoftwareService.
@@ -222,6 +229,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 			StageHistory:       []StageHistoryEntry{},
 			AutoAdvance:        req.AutoAdvance,
 			AutoAdvanceMinutes: req.AutoAdvanceMinutes,
+			RollbackOnFailure:  req.RollbackOnFailure,
 			TotalCount:         mainTask.TotalCount,
 		}); err != nil {
 			return nil, fmt.Errorf("init canary fields: %w", err)
@@ -231,6 +239,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 			zap.Int("total_devices", mainTask.TotalCount),
 			zap.Int("stage_count", len(stages)),
 			zap.Bool("auto_advance", req.AutoAdvance),
+			zap.Bool("rollback_on_failure", req.RollbackOnFailure),
 		)
 	}
 
@@ -404,9 +413,9 @@ func (s *SoftwareService) startRollbackExecution(subTasks []*UpgradeSubTask) {
 
 // HandleTransferComplete advances the upgrade state machine when a device reports transfer complete.
 // ACS publishes two kinds of TC events on the same subject:
-//   1. Inform-level (from publishInformEvents): payload has device_sn but no TC body data
-//   2. TC SOAP body level (from handleTransferComplete): payload is tr069.TransferComplete with
-//      command_key, fault_struct (FaultCode/FaultString), start_time, complete_time — but no device_sn
+//  1. Inform-level (from publishInformEvents): payload has device_sn but no TC body data
+//  2. TC SOAP body level (from handleTransferComplete): payload is tr069.TransferComplete with
+//     command_key, fault_struct (FaultCode/FaultString), start_time, complete_time — but no device_sn
 //
 // Both are needed: #2 carries fault information, #1 carries device identity.
 // We try to decode both formats and route accordingly.
@@ -702,7 +711,31 @@ func (s *SoftwareService) RetryUpgrade(ctx context.Context, taskID uuid.UUID) er
 
 // RollbackDevices creates a rollback task for the specified devices.
 // Per-device technology detection determines 4G/5G-specific parameters.
+//
+// Audit fields (T-0021): Reason / Source / TargetFirmwareID are persisted on
+// the parent task. Source defaults to "manual" when blank; an explicit value
+// is validated against the canonical RollbackSource* set. When TargetFirmwareID
+// is non-nil, all sub_tasks adopt that firmware's version as DestVersion (the
+// device's previous firmware is still recorded as OriVersion).
 func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackRequest) (*UpgradeTask, error) {
+	// Source validation: blank → manual; non-blank must be canonical.
+	source := req.Source
+	if source == "" {
+		source = RollbackSourceManual
+	} else if !IsValidRollbackSource(source) {
+		return nil, fmt.Errorf("invalid rollback source %q: %w", source, commonerrors.ErrInvalidInput)
+	}
+
+	// Optional target firmware override: validate existence + capture version.
+	var targetVersion string
+	if req.TargetFirmwareID != nil {
+		fw, err := s.firmwareRepo.GetByID(ctx, *req.TargetFirmwareID)
+		if err != nil {
+			return nil, fmt.Errorf("get target firmware: %w", err)
+		}
+		targetVersion = fw.Version
+	}
+
 	var productClass string
 	if len(req.DeviceIDs) > 0 {
 		if dev, err := s.deviceRepo.GetByID(ctx, req.DeviceIDs[0]); err == nil {
@@ -711,14 +744,17 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 	}
 
 	mainTask := &UpgradeTask{
-		TaskName:      req.TaskName,
-		TaskType:      TaskTypeRollback,
-		Status:        TaskPending,
-		ProductClass:  productClass,
-		CreateStatus:  "active",
-		CreateUser:    req.CreateUser,
-		TotalCount:    len(req.DeviceIDs),
-		MaxConcurrent: 5,
+		TaskName:                 req.TaskName,
+		TaskType:                 TaskTypeRollback,
+		Status:                   TaskPending,
+		ProductClass:             productClass,
+		CreateStatus:             "active",
+		CreateUser:               req.CreateUser,
+		TotalCount:               len(req.DeviceIDs),
+		MaxConcurrent:            5,
+		RollbackReason:           req.Reason,
+		RollbackSource:           source,
+		RollbackTargetFirmwareID: req.TargetFirmwareID,
 	}
 	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
 		return nil, fmt.Errorf("create rollback task: %w", err)
@@ -736,6 +772,13 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 			subTask.DeviceSN = dev.SerialNumber
 			subTask.OriVersion = dev.FirmwareVersion
 		}
+		// Target firmware override: explicit version trumps the legacy "back to
+		// OriVersion" path. OriVersion still records the device's current state
+		// for audit / failure recovery.
+		if targetVersion != "" {
+			subTask.DestVersion = targetVersion
+			subTask.FirmwareID = req.TargetFirmwareID
+		}
 		subTasks = append(subTasks, subTask)
 	}
 
@@ -743,10 +786,23 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		return nil, fmt.Errorf("batch create rollback sub-tasks: %w", err)
 	}
 
+	// Metrics fire only once the task is fully persisted (parent + sub-tasks);
+	// suspended-mode rollbacks are still real persisted artefacts so they count too.
+	recordMetrics := func() {
+		s.rollbackMetrics.RecordRollback(source, len(req.DeviceIDs))
+		if req.TargetFirmwareID != nil {
+			s.rollbackMetrics.RecordWithTarget()
+		}
+	}
+
 	if req.CreateSuspended {
+		recordMetrics()
 		s.logger.Info("rollback task created in pending (suspended) mode",
 			zap.String("task_id", mainTask.ID.String()),
-			zap.Int("device_count", len(req.DeviceIDs)))
+			zap.Int("device_count", len(req.DeviceIDs)),
+			zap.String("source", source),
+			zap.String("reason", req.Reason),
+			zap.Bool("with_target", req.TargetFirmwareID != nil))
 		return mainTask, nil
 	}
 
@@ -755,13 +811,91 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 	}
 	mainTask.Status = TaskInProgress
 
+	// Metrics after the task transitioned to in_progress so dashboards reflect
+	// rollbacks that actually entered execution (not just creation attempts).
+	recordMetrics()
+
 	s.startRollbackExecution(subTasks)
 
 	s.logger.Info("rollback task created",
 		zap.String("task_id", mainTask.ID.String()),
-		zap.Int("device_count", len(req.DeviceIDs)))
+		zap.Int("device_count", len(req.DeviceIDs)),
+		zap.String("source", source),
+		zap.String("reason", req.Reason),
+		zap.Bool("with_target", req.TargetFirmwareID != nil))
 
 	return mainTask, nil
+}
+
+// TriggerCanaryFailureRollback is invoked by the canary monitor when a stage
+// crosses its failure threshold AND the canary task opted into RollbackOnFailure.
+//
+// Devices already promoted (sub_tasks with status=Completed) are rolled back
+// automatically with source=canary_failure. Failed/pending devices are skipped:
+// failed ones never received the new firmware, pending ones haven't started.
+func (s *SoftwareService) TriggerCanaryFailureRollback(ctx context.Context, taskID uuid.UUID, reason string) error {
+	parent, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get canary task: %w", err)
+	}
+
+	// canaryAutoRollbackPageCap caps the auto-rollback batch size at 1000 devices.
+	// Larger canary stages (>1000 promoted devices) require operators to fall
+	// back to a manual paginated rollback — log.warn flags this so dashboards
+	// surface the truncation. TODO(T-future): paginate this loop when canary
+	// rollouts routinely exceed 1000 devices.
+	const canaryAutoRollbackPageCap = 1000
+
+	completed := UpgradeCompleted
+	subResp, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
+		TaskID: taskID,
+		Status: &completed,
+		ListRequest: model.ListRequest{
+			Page:     1,
+			PageSize: canaryAutoRollbackPageCap,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("list completed sub-tasks: %w", err)
+	}
+	if subResp == nil || len(subResp.Items) == 0 {
+		s.logger.Info("canary auto-rollback skipped: no completed devices to roll back",
+			zap.String("task_id", taskID.String()))
+		return nil
+	}
+	if len(subResp.Items) >= canaryAutoRollbackPageCap {
+		s.logger.Warn("canary auto-rollback page cap reached: rolling back first N devices only — operators must paginate manually for the rest",
+			zap.String("task_id", taskID.String()),
+			zap.Int("page_cap", canaryAutoRollbackPageCap),
+			zap.Int64("total_completed", subResp.Total),
+		)
+	}
+
+	deviceIDs := make([]uuid.UUID, 0, len(subResp.Items))
+	for _, st := range subResp.Items {
+		deviceIDs = append(deviceIDs, st.DeviceID)
+	}
+
+	rollbackName := fmt.Sprintf("%s-auto-rollback", parent.TaskName)
+	if len(rollbackName) > 200 {
+		rollbackName = rollbackName[:200]
+	}
+	req := RollbackRequest{
+		DeviceIDs:  deviceIDs,
+		TaskName:   rollbackName,
+		CreateUser: "canary-monitor",
+		Reason:     reason,
+		Source:     RollbackSourceCanaryFailure,
+	}
+	if _, err := s.RollbackDevices(ctx, req); err != nil {
+		return fmt.Errorf("auto-rollback: %w", err)
+	}
+	s.logger.Warn("canary task auto-rolled back (threshold exceeded + opt-in)",
+		zap.String("canary_task_id", taskID.String()),
+		zap.Int("device_count", len(deviceIDs)),
+		zap.String("reason", reason),
+	)
+	return nil
 }
 
 // DownloadFirmware streams a firmware file from MinIO.

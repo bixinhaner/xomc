@@ -8,11 +8,11 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
-	devtask "github.com/omcgo/omcgo/internal/task"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	devtask "github.com/omcgo/omcgo/internal/task"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,12 +45,12 @@ func (m *svcMockFirmwareRepo) List(_ context.Context, _ FirmwareFilter) (*model.
 	return model.NewListResponse([]FirmwareVersion{}, 0, 1, 20), nil
 }
 func (m *svcMockFirmwareRepo) Update(_ context.Context, _ *FirmwareVersion) error { return nil }
-func (m *svcMockFirmwareRepo) Delete(_ context.Context, _ uuid.UUID) error         { return nil }
+func (m *svcMockFirmwareRepo) Delete(_ context.Context, _ uuid.UUID) error        { return nil }
 
 type svcMockTaskRepo struct {
-	createFn         func(ctx context.Context, task *UpgradeTask) error
-	getByIDFn        func(ctx context.Context, id uuid.UUID) (*UpgradeTask, error)
-	updateStatusFn   func(ctx context.Context, id uuid.UUID, status TaskStatus, result TaskResult) error
+	createFn          func(ctx context.Context, task *UpgradeTask) error
+	getByIDFn         func(ctx context.Context, id uuid.UUID) (*UpgradeTask, error)
+	updateStatusFn    func(ctx context.Context, id uuid.UUID, status TaskStatus, result TaskResult) error
 	incrementCountsFn func(ctx context.Context, taskID uuid.UUID, successDelta, failDelta int) error
 }
 
@@ -829,9 +829,9 @@ func TestService_RollbackDevices_CreatesTask(t *testing.T) {
 	)
 
 	req := RollbackRequest{
-		DeviceIDs:    []uuid.UUID{deviceID1, deviceID2},
-		TaskName:     "rollback-test",
-		CreateUser:   "admin",
+		DeviceIDs:  []uuid.UUID{deviceID1, deviceID2},
+		TaskName:   "rollback-test",
+		CreateUser: "admin",
 	}
 
 	task, err := svc.RollbackDevices(context.Background(), req)
@@ -845,4 +845,259 @@ func TestService_RollbackDevices_CreatesTask(t *testing.T) {
 
 	// After RollbackDevices returns, status should be updated to in_progress
 	assert.Equal(t, TaskInProgress, task.Status)
+}
+
+// ---------------------------------------------------------------------------
+// T-0021 Rollback enhancement tests (source / reason / target_firmware_id)
+// ---------------------------------------------------------------------------
+
+// TestService_RollbackDevices_SourceMatrix exercises the canonical source enum:
+// blank → manual default; each canonical value persists verbatim; non-canonical
+// fails ErrInvalidInput.
+func TestService_RollbackDevices_SourceMatrix(t *testing.T) {
+	tests := []struct {
+		name           string
+		inSource       string
+		expectSource   string
+		expectErrInput bool
+	}{
+		{"blank defaults to manual", "", RollbackSourceManual, false},
+		{"manual passes through", RollbackSourceManual, RollbackSourceManual, false},
+		{"canary_failure passes through", RollbackSourceCanaryFailure, RollbackSourceCanaryFailure, false},
+		{"compatibility passes through", RollbackSourceCompatibility, RollbackSourceCompatibility, false},
+		{"scheduled passes through", RollbackSourceScheduled, RollbackSourceScheduled, false},
+		{"unknown source rejected", "bogus_value", "", true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedTask *UpgradeTask
+			taskRepo := &svcMockTaskRepo{
+				createFn: func(_ context.Context, task *UpgradeTask) error {
+					capturedTask = task
+					task.ID = uuid.New()
+					return nil
+				},
+			}
+			svc := NewSoftwareService(
+				&svcMockFirmwareRepo{},
+				taskRepo,
+				&svcMockSubTaskRepo{},
+				&svcMockDeviceRepo{},
+				&svcMockCmdQueue{},
+				nil, nil, "test-bucket",
+				&svcMockEventBus{}, nil, zap.NewNop(),
+			)
+
+			req := RollbackRequest{
+				DeviceIDs:  []uuid.UUID{uuid.New()},
+				TaskName:   "rb-source-" + tt.name,
+				CreateUser: "admin",
+				Source:     tt.inSource,
+			}
+			_, err := svc.RollbackDevices(context.Background(), req)
+			if tt.expectErrInput {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+				assert.Nil(t, capturedTask, "task must not be persisted on validation error")
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, capturedTask)
+			assert.Equal(t, tt.expectSource, capturedTask.RollbackSource)
+		})
+	}
+}
+
+// TestService_RollbackDevices_TargetFirmwareMatrix covers the four target
+// branches: nil (legacy OriVersion path), valid firmware, missing firmware,
+// and combined with source=canary_failure.
+func TestService_RollbackDevices_TargetFirmwareMatrix(t *testing.T) {
+	targetFW := uuid.New()
+	missingFW := uuid.New()
+
+	tests := []struct {
+		name              string
+		targetID          *uuid.UUID
+		source            string
+		fwRepo            *svcMockFirmwareRepo
+		expectErr         bool
+		expectDestVersion string // "" means inherit OriVersion (legacy path)
+		expectTaskTarget  *uuid.UUID
+	}{
+		{
+			name:              "nil target keeps legacy path (DestVersion empty)",
+			targetID:          nil,
+			source:            "",
+			fwRepo:            &svcMockFirmwareRepo{},
+			expectDestVersion: "",
+			expectTaskTarget:  nil,
+		},
+		{
+			name:     "valid target overrides DestVersion",
+			targetID: &targetFW,
+			source:   "",
+			fwRepo: &svcMockFirmwareRepo{
+				getByIDFn: func(_ context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+					return &FirmwareVersion{ID: id, Version: "V2.5.7"}, nil
+				},
+			},
+			expectDestVersion: "V2.5.7",
+			expectTaskTarget:  &targetFW,
+		},
+		{
+			name:     "missing target firmware errors",
+			targetID: &missingFW,
+			source:   "",
+			fwRepo: &svcMockFirmwareRepo{
+				getByIDFn: func(_ context.Context, _ uuid.UUID) (*FirmwareVersion, error) {
+					return nil, commonerrors.ErrNotFound
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name:     "target + canary_failure source combine",
+			targetID: &targetFW,
+			source:   RollbackSourceCanaryFailure,
+			fwRepo: &svcMockFirmwareRepo{
+				getByIDFn: func(_ context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+					return &FirmwareVersion{ID: id, Version: "V1.9.0"}, nil
+				},
+			},
+			expectDestVersion: "V1.9.0",
+			expectTaskTarget:  &targetFW,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedTask *UpgradeTask
+			var capturedSubTasks []*UpgradeSubTask
+			taskRepo := &svcMockTaskRepo{
+				createFn: func(_ context.Context, task *UpgradeTask) error {
+					capturedTask = task
+					task.ID = uuid.New()
+					return nil
+				},
+			}
+			subRepo := &svcMockSubTaskRepo{
+				batchCreateFn: func(_ context.Context, tasks []*UpgradeSubTask) error {
+					capturedSubTasks = append(capturedSubTasks, tasks...)
+					for _, st := range tasks {
+						st.ID = uuid.New()
+					}
+					return nil
+				},
+			}
+			devRepo := &svcMockDeviceRepo{
+				getByIDFn: func(_ context.Context, id uuid.UUID) (*model.Device, error) {
+					return &model.Device{ID: id, SerialNumber: "SN-RB-001", FirmwareVersion: "V3.0.0"}, nil
+				},
+			}
+
+			svc := NewSoftwareService(
+				tt.fwRepo, taskRepo, subRepo, devRepo, &svcMockCmdQueue{},
+				nil, nil, "test-bucket",
+				&svcMockEventBus{}, nil, zap.NewNop(),
+			)
+
+			req := RollbackRequest{
+				DeviceIDs:        []uuid.UUID{uuid.New()},
+				TaskName:         "rb-target-" + tt.name,
+				CreateUser:       "admin",
+				Source:           tt.source,
+				TargetFirmwareID: tt.targetID,
+			}
+			_, err := svc.RollbackDevices(context.Background(), req)
+			if tt.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, capturedTask)
+			require.Len(t, capturedSubTasks, 1)
+			assert.Equal(t, tt.expectDestVersion, capturedSubTasks[0].DestVersion,
+				"DestVersion should match target firmware version (or be blank for legacy path)")
+			assert.Equal(t, "V3.0.0", capturedSubTasks[0].OriVersion,
+				"OriVersion always reflects device's current firmware")
+			if tt.expectTaskTarget == nil {
+				assert.Nil(t, capturedTask.RollbackTargetFirmwareID)
+			} else {
+				require.NotNil(t, capturedTask.RollbackTargetFirmwareID)
+				assert.Equal(t, *tt.expectTaskTarget, *capturedTask.RollbackTargetFirmwareID)
+			}
+		})
+	}
+}
+
+// TestService_RollbackDevices_ReasonRoundTrip ensures the audit reason
+// reaches the persisted task verbatim.
+func TestService_RollbackDevices_ReasonRoundTrip(t *testing.T) {
+	var capturedTask *UpgradeTask
+	taskRepo := &svcMockTaskRepo{
+		createFn: func(_ context.Context, task *UpgradeTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{}, taskRepo, &svcMockSubTaskRepo{},
+		&svcMockDeviceRepo{}, &svcMockCmdQueue{},
+		nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	const reason = "stage-1 failure_rate 12.50% > threshold 5%"
+	_, err := svc.RollbackDevices(context.Background(), RollbackRequest{
+		DeviceIDs:  []uuid.UUID{uuid.New()},
+		TaskName:   "rb-with-reason",
+		CreateUser: "canary-monitor",
+		Reason:     reason,
+		Source:     RollbackSourceCanaryFailure,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, capturedTask)
+	assert.Equal(t, reason, capturedTask.RollbackReason)
+	assert.Equal(t, RollbackSourceCanaryFailure, capturedTask.RollbackSource)
+}
+
+// TestIsValidRollbackSource sanity-checks the enum guard used by RollbackDevices.
+func TestIsValidRollbackSource(t *testing.T) {
+	cases := map[string]bool{
+		"manual":         true,
+		"canary_failure": true,
+		"compatibility":  true,
+		"scheduled":      true,
+		"":               false,
+		"MANUAL":         false,
+		"unknown":        false,
+	}
+	for in, expect := range cases {
+		assert.Equal(t, expect, IsValidRollbackSource(in), "input=%q", in)
+	}
+}
+
+// TestService_TriggerCanaryFailureRollback_NoCompletedDevices is a no-op when
+// no sub-tasks reached UpgradeCompleted.
+func TestService_TriggerCanaryFailureRollback_NoCompletedDevices(t *testing.T) {
+	canaryID := uuid.New()
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			return &UpgradeTask{ID: id, TaskName: "canary-x"}, nil
+		},
+	}
+	subRepo := &svcMockSubTaskRepo{}
+	// default svcMockSubTaskRepo.ListByTaskID returns empty list
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{}, taskRepo, subRepo,
+		&svcMockDeviceRepo{}, &svcMockCmdQueue{},
+		nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+	err := svc.TriggerCanaryFailureRollback(context.Background(), canaryID, "test reason")
+	assert.NoError(t, err, "no completed devices = silent no-op")
 }

@@ -22,6 +22,8 @@ var taskColumns = []string{
 	"status", "result", "product_class", "is_keep_config",
 	"create_status", "create_user", "total_count", "success_count", "fail_count",
 	"max_concurrent", "started_at", "ended_at", "created_at", "updated_at",
+	// Rollback metadata (T-0021 / R-101).
+	"rollback_reason", "rollback_source", "rollback_target_firmware_id",
 }
 
 var _ TaskRepository = (*PgTaskRepository)(nil)
@@ -42,12 +44,16 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	var fileName, fileMD5, result sql.NullString
 	var startedAt, endedAt sql.NullTime
 	var createdAt, updatedAt time.Time
+	var rollbackReason sql.NullString
+	var rollbackSource sql.NullString
+	var rollbackTargetFW sql.NullString
 
 	err := row.Scan(
 		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &fileName, &fileMD5,
 		&task.Status, &result, &task.ProductClass, &task.IsKeepConfig,
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
+		&rollbackReason, &rollbackSource, &rollbackTargetFW,
 	)
 	if err != nil {
 		return nil, err
@@ -76,17 +82,45 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	}
 	task.CreatedAt = JSONTime(createdAt)
 	task.UpdatedAt = JSONTime(updatedAt)
+	if rollbackReason.Valid {
+		task.RollbackReason = rollbackReason.String
+	}
+	if rollbackSource.Valid {
+		task.RollbackSource = rollbackSource.String
+	}
+	if rollbackTargetFW.Valid {
+		if fid, err := uuid.Parse(rollbackTargetFW.String); err == nil {
+			task.RollbackTargetFirmwareID = &fid
+		}
+	}
 	return &task, nil
 }
 
 func (r *PgTaskRepository) Create(ctx context.Context, task *UpgradeTask) error {
+	// Rollback metadata defaults: source must satisfy the CHECK constraint —
+	// blank → 'manual'. Reason/target stay NULL when not supplied.
+	rollbackSource := task.RollbackSource
+	if rollbackSource == "" {
+		rollbackSource = RollbackSourceManual
+	}
+	var rollbackReason any
+	if task.RollbackReason != "" {
+		rollbackReason = task.RollbackReason
+	}
+	var rollbackTargetFW any
+	if task.RollbackTargetFirmwareID != nil {
+		rollbackTargetFW = *task.RollbackTargetFirmwareID
+	}
+
 	builder := storage.Psql.Insert("upgrade_tasks").
 		Columns("task_name", "task_type", "firmware_id", "file_name", "file_md5",
 			"status", "product_class", "is_keep_config",
-			"create_status", "create_user", "total_count", "max_concurrent").
+			"create_status", "create_user", "total_count", "max_concurrent",
+			"rollback_reason", "rollback_source", "rollback_target_firmware_id").
 		Values(task.TaskName, task.TaskType, task.FirmwareID, task.FileName, task.FileMD5,
 			task.Status, task.ProductClass, task.IsKeepConfig,
-			task.CreateStatus, task.CreateUser, task.TotalCount, task.MaxConcurrent).
+			task.CreateStatus, task.CreateUser, task.TotalCount, task.MaxConcurrent,
+			rollbackReason, rollbackSource, rollbackTargetFW).
 		Suffix("RETURNING " + joinColumns(taskColumns))
 
 	query, args, err := builder.ToSql()
@@ -299,12 +333,16 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	var fileName, fileMD5, result sql.NullString
 	var startedAt, endedAt sql.NullTime
 	var createdAt, updatedAt time.Time
+	var rollbackReason sql.NullString
+	var rollbackSource sql.NullString
+	var rollbackTargetFW sql.NullString
 
 	err := rows.Scan(
 		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &fileName, &fileMD5,
 		&task.Status, &result, &task.ProductClass, &task.IsKeepConfig,
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
+		&rollbackReason, &rollbackSource, &rollbackTargetFW,
 	)
 	if err != nil {
 		return nil, err
@@ -332,6 +370,17 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	}
 	task.CreatedAt = JSONTime(createdAt)
 	task.UpdatedAt = JSONTime(updatedAt)
+	if rollbackReason.Valid {
+		task.RollbackReason = rollbackReason.String
+	}
+	if rollbackSource.Valid {
+		task.RollbackSource = rollbackSource.String
+	}
+	if rollbackTargetFW.Valid {
+		if fid, err := uuid.Parse(rollbackTargetFW.String); err == nil {
+			task.RollbackTargetFirmwareID = &fid
+		}
+	}
 	return &task, nil
 }
 
@@ -346,7 +395,7 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 func (r *PgTaskRepository) GetCanaryFields(ctx context.Context, id uuid.UUID) (*CanaryFields, error) {
 	const q = `
 		SELECT strategy, canary_stages, current_stage, stage_status, stage_history,
-		       auto_advance, auto_advance_minutes, total_count
+		       auto_advance, auto_advance_minutes, rollback_on_failure, total_count
 		FROM upgrade_tasks
 		WHERE id = $1`
 	var (
@@ -357,11 +406,12 @@ func (r *PgTaskRepository) GetCanaryFields(ctx context.Context, id uuid.UUID) (*
 		historyRaw         []byte
 		autoAdvance        bool
 		autoAdvanceMinutes int
+		rollbackOnFailure  bool
 		totalCount         int
 	)
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&strategy, &stagesRaw, &currentStage, &stageStatus, &historyRaw,
-		&autoAdvance, &autoAdvanceMinutes, &totalCount,
+		&autoAdvance, &autoAdvanceMinutes, &rollbackOnFailure, &totalCount,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -391,6 +441,7 @@ func (r *PgTaskRepository) GetCanaryFields(ctx context.Context, id uuid.UUID) (*
 		StageHistory:       history,
 		AutoAdvance:        autoAdvance,
 		AutoAdvanceMinutes: autoAdvanceMinutes,
+		RollbackOnFailure:  rollbackOnFailure,
 		TotalCount:         totalCount,
 	}, nil
 }
@@ -419,11 +470,13 @@ func (r *PgTaskRepository) UpdateCanaryFields(ctx context.Context, id uuid.UUID,
 		    stage_history = $5,
 		    auto_advance = $6,
 		    auto_advance_minutes = $7,
+		    rollback_on_failure = $8,
 		    updated_at = NOW()
-		WHERE id = $8`
+		WHERE id = $9`
 	tag, err := r.pool.Exec(ctx, q,
 		fields.Strategy, stagesRaw, fields.CurrentStage, fields.StageStatus,
-		historyRaw, fields.AutoAdvance, fields.AutoAdvanceMinutes, id,
+		historyRaw, fields.AutoAdvance, fields.AutoAdvanceMinutes,
+		fields.RollbackOnFailure, id,
 	)
 	if err != nil {
 		return fmt.Errorf("update canary fields: %w", err)

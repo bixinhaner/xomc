@@ -194,3 +194,148 @@ func TestCanaryMonitor_StartStop(t *testing.T) {
 	require.NoError(t, m.Start(context.Background()))
 	m.Stop()
 }
+
+// ---------------------------------------------------------------------------
+// T-0021 auto-rollback opt-in tests
+// ---------------------------------------------------------------------------
+
+// fakeRollbackTrigger captures TriggerCanaryFailureRollback invocations.
+type fakeRollbackTrigger struct {
+	calls    int
+	lastID   uuid.UUID
+	lastMsg  string
+	failWith error
+}
+
+func (f *fakeRollbackTrigger) TriggerCanaryFailureRollback(_ context.Context, taskID uuid.UUID, reason string) error {
+	f.calls++
+	f.lastID = taskID
+	f.lastMsg = reason
+	return f.failWith
+}
+
+// TestCanaryMonitor_ThresholdExceeded_AutoRollback_OptIn — when
+// RollbackOnFailure=true and trigger is wired, threshold breach also fires
+// the rollback trigger (in addition to pause).
+func TestCanaryMonitor_ThresholdExceeded_AutoRollback_OptIn(t *testing.T) {
+	defer fixedNow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
+
+	id := uuid.New()
+	repo := newFakeCanaryRepo()
+	repo.activeIDs = []uuid.UUID{id}
+	repo.canary[id] = &CanaryFields{
+		TaskID:            id,
+		Strategy:          StrategyCanary,
+		Stages:            DefaultCanaryStages,
+		CurrentStage:      1,
+		StageStatus:       StageStatusRunning,
+		RollbackOnFailure: true,
+		TotalCount:        100,
+	}
+	repo.tasks[id] = &UpgradeTask{ID: id, FailCount: 1, SuccessCount: 0, TotalCount: 100}
+
+	trigger := &fakeRollbackTrigger{}
+	m := NewCanaryMonitor(repo, NewCanaryMetrics(nil), zap.NewNop())
+	m.SetRollbackTrigger(trigger)
+	require.NoError(t, m.CheckCanaryTasks(context.Background()))
+
+	updated := repo.updatedWith[id]
+	require.NotNil(t, updated)
+	assert.Equal(t, StageStatusPaused, updated.StageStatus, "still pauses (rollback runs in addition to pause, not in place of)")
+	assert.Equal(t, 1, trigger.calls, "auto-rollback trigger should fire exactly once")
+	assert.Equal(t, id, trigger.lastID)
+	assert.Contains(t, trigger.lastMsg, "threshold")
+}
+
+// TestCanaryMonitor_ThresholdExceeded_AutoRollback_OptOut — RollbackOnFailure=false
+// (default) means trigger never fires; canary stays paused for manual review
+// (preserves T-0018 D4 invariant).
+func TestCanaryMonitor_ThresholdExceeded_AutoRollback_OptOut(t *testing.T) {
+	defer fixedNow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
+
+	id := uuid.New()
+	repo := newFakeCanaryRepo()
+	repo.activeIDs = []uuid.UUID{id}
+	repo.canary[id] = &CanaryFields{
+		TaskID:            id,
+		Strategy:          StrategyCanary,
+		Stages:            DefaultCanaryStages,
+		CurrentStage:      1,
+		StageStatus:       StageStatusRunning,
+		RollbackOnFailure: false, // default; explicit for test clarity
+		TotalCount:        100,
+	}
+	repo.tasks[id] = &UpgradeTask{ID: id, FailCount: 1, SuccessCount: 0, TotalCount: 100}
+
+	trigger := &fakeRollbackTrigger{}
+	m := NewCanaryMonitor(repo, NewCanaryMetrics(nil), zap.NewNop())
+	m.SetRollbackTrigger(trigger)
+	require.NoError(t, m.CheckCanaryTasks(context.Background()))
+
+	assert.Equal(t, StageStatusPaused, repo.updatedWith[id].StageStatus)
+	assert.Zero(t, trigger.calls, "opt-out: trigger must not fire")
+}
+
+// TestCanaryMonitor_ThresholdExceeded_AutoRollback_NoTrigger — even if
+// RollbackOnFailure=true, a nil trigger silently skips (DI not yet wired).
+func TestCanaryMonitor_ThresholdExceeded_AutoRollback_NoTrigger(t *testing.T) {
+	defer fixedNow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
+
+	id := uuid.New()
+	repo := newFakeCanaryRepo()
+	repo.activeIDs = []uuid.UUID{id}
+	repo.canary[id] = &CanaryFields{
+		TaskID:            id,
+		Strategy:          StrategyCanary,
+		Stages:            DefaultCanaryStages,
+		CurrentStage:      1,
+		StageStatus:       StageStatusRunning,
+		RollbackOnFailure: true,
+		TotalCount:        100,
+	}
+	repo.tasks[id] = &UpgradeTask{ID: id, FailCount: 1, SuccessCount: 0, TotalCount: 100}
+
+	m := NewCanaryMonitor(repo, NewCanaryMetrics(nil), zap.NewNop())
+	// no SetRollbackTrigger
+	require.NoError(t, m.CheckCanaryTasks(context.Background()))
+	assert.Equal(t, StageStatusPaused, repo.updatedWith[id].StageStatus, "pause still happens; rollback gracefully skipped")
+}
+
+// TestCanaryMonitor_ThresholdExceeded_AutoRollback_TriggerError — pause is
+// already persisted; trigger error must not propagate (operators recover manually).
+func TestCanaryMonitor_ThresholdExceeded_AutoRollback_TriggerError(t *testing.T) {
+	defer fixedNow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
+
+	id := uuid.New()
+	repo := newFakeCanaryRepo()
+	repo.activeIDs = []uuid.UUID{id}
+	repo.canary[id] = &CanaryFields{
+		TaskID:            id,
+		Strategy:          StrategyCanary,
+		Stages:            DefaultCanaryStages,
+		CurrentStage:      1,
+		StageStatus:       StageStatusRunning,
+		RollbackOnFailure: true,
+		TotalCount:        100,
+	}
+	repo.tasks[id] = &UpgradeTask{ID: id, FailCount: 1, SuccessCount: 0, TotalCount: 100}
+
+	trigger := &fakeRollbackTrigger{failWith: assertExpectedTriggerError()}
+	m := NewCanaryMonitor(repo, NewCanaryMetrics(nil), zap.NewNop())
+	m.SetRollbackTrigger(trigger)
+
+	// Whole CheckCanaryTasks loop must not surface the trigger error: pause is
+	// already saved and the error is logged + swallowed by design.
+	require.NoError(t, m.CheckCanaryTasks(context.Background()))
+	assert.Equal(t, 1, trigger.calls)
+	assert.Equal(t, StageStatusPaused, repo.updatedWith[id].StageStatus)
+}
+
+// assertExpectedTriggerError returns an error to simulate a downstream failure.
+func assertExpectedTriggerError() error {
+	return errStub("simulated trigger failure")
+}
+
+type errStub string
+
+func (e errStub) Error() string { return string(e) }

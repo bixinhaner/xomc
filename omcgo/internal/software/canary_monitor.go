@@ -1,16 +1,17 @@
 // Package software — Canary monitor (cron-driven failure-rate guardrail).
 //
 // The Monitor runs one periodic check:
-//   every 1 min   CheckCanaryTasks
 //
-//     1. ListActiveCanaryTaskIDs (running + paused)
-//     2. For each task, GetCanaryFields
-//     3. Compute failure rate of the active stage
-//        (success_count + fail_count vs total devices for stage)
-//     4. If failure_rate > stage threshold AND status='running' → pause +
-//        log + metric (operators decide resume / abort)
-//     5. If status='running' AND auto_advance AND stage success-completed
-//        AND elapsed > auto_advance_minutes → advance to next stage
+//	every 1 min   CheckCanaryTasks
+//
+//	  1. ListActiveCanaryTaskIDs (running + paused)
+//	  2. For each task, GetCanaryFields
+//	  3. Compute failure rate of the active stage
+//	     (success_count + fail_count vs total devices for stage)
+//	  4. If failure_rate > stage threshold AND status='running' → pause +
+//	     log + metric (operators decide resume / abort)
+//	  5. If status='running' AND auto_advance AND stage success-completed
+//	     AND elapsed > auto_advance_minutes → advance to next stage
 //
 // Decision: rollback is intentionally NOT automatic (T-0021 separate task).
 package software
@@ -34,23 +35,41 @@ type canaryRepoView interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*UpgradeTask, error)
 }
 
+// canaryRollbackTrigger is the narrow contract for triggering an automatic
+// rollback when a canary stage exceeds its failure threshold AND the task
+// opted into RollbackOnFailure (T-0021). Optional: nil disables auto-rollback,
+// preserving the T-0018 default ("不擅自回滚").
+type canaryRollbackTrigger interface {
+	TriggerCanaryFailureRollback(ctx context.Context, taskID uuid.UUID, reason string) error
+}
+
 // CanaryMonitor periodically checks failure rates and auto-advance windows.
 type CanaryMonitor struct {
-	repo    canaryRepoView
-	metrics *CanaryMetrics
-	logger  *zap.Logger
+	repo            canaryRepoView
+	rollbackTrigger canaryRollbackTrigger // optional; nil = auto-rollback disabled
+	metrics         *CanaryMetrics
+	logger          *zap.Logger
 
 	cron   *cron.Cron
 	cancel context.CancelFunc
 }
 
-// NewCanaryMonitor constructs a Monitor.
+// NewCanaryMonitor constructs a Monitor without auto-rollback wiring.
+// Use SetRollbackTrigger to enable T-0021 auto-rollback after construction
+// (avoids a constructor-cycle: SoftwareService creates the monitor, then wires
+// itself in as the trigger).
 func NewCanaryMonitor(repo canaryRepoView, metrics *CanaryMetrics, logger *zap.Logger) *CanaryMonitor {
 	return &CanaryMonitor{
 		repo:    repo,
 		metrics: metrics,
 		logger:  logger.Named("canary-monitor"),
 	}
+}
+
+// SetRollbackTrigger wires the auto-rollback callback. nil disables it.
+// Safe to call once at startup before Start().
+func (m *CanaryMonitor) SetRollbackTrigger(t canaryRollbackTrigger) {
+	m.rollbackTrigger = t
 }
 
 // Start launches the cron schedule (every 1 min).
@@ -135,6 +154,7 @@ func (m *CanaryMonitor) evaluateOne(ctx context.Context, id uuid.UUID) error {
 
 	// Threshold guardrail: only pause when running (avoid double-action on already-paused).
 	if fields.StageStatus == StageStatusRunning && completed >= 1 && rate > thresholdFraction {
+		reason := fmt.Sprintf("failure_rate %.2f%% > threshold %d%%", rate*100, stage.FailureThreshold)
 		fields.StageStatus = StageStatusPaused
 		fields.StageHistory = append(fields.StageHistory, StageHistoryEntry{
 			Stage:          fields.CurrentStage,
@@ -145,7 +165,7 @@ func (m *CanaryMonitor) evaluateOne(ctx context.Context, id uuid.UUID) error {
 			FailureRate:    rate,
 			Action:         "paused",
 			At:             nowFunc(),
-			Reason:         fmt.Sprintf("failure_rate %.2f%% > threshold %d%%", rate*100, stage.FailureThreshold),
+			Reason:         reason,
 		})
 		m.metrics.RecordAdvance("threshold_exceeded")
 		m.logger.Warn("canary task auto-paused (threshold exceeded)",
@@ -154,7 +174,24 @@ func (m *CanaryMonitor) evaluateOne(ctx context.Context, id uuid.UUID) error {
 			zap.Float64("failure_rate", rate),
 			zap.Int("threshold_pct", stage.FailureThreshold),
 		)
-		return m.repo.UpdateCanaryFields(ctx, id, fields)
+		if err := m.repo.UpdateCanaryFields(ctx, id, fields); err != nil {
+			return err
+		}
+
+		// T-0021 auto-rollback (opt-in only). Pause already happened above —
+		// rollback runs *in addition*, so even if the trigger errors the canary
+		// task stays safely paused.
+		if fields.RollbackOnFailure && m.rollbackTrigger != nil {
+			if err := m.rollbackTrigger.TriggerCanaryFailureRollback(ctx, id, reason); err != nil {
+				m.logger.Error("canary auto-rollback trigger failed",
+					zap.String("task_id", id.String()),
+					zap.Error(err))
+				// swallow: the pause is already persisted; operators can rollback manually
+			} else {
+				m.metrics.RecordAdvance("auto_rollback")
+			}
+		}
+		return nil
 	}
 
 	// Auto-advance: stage devices fully completed, low failure, auto_advance set.

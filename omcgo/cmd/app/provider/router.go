@@ -354,18 +354,18 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	md.mmlHandler.RegisterRoutes(permGroup("devices"))
 	md.paramHandler.RegisterRoutes(permGroup("devices"))
 
-		// ----- SSE Stream endpoint (authenticated users, no permission check) -----
-		md.sseHandler.RegisterRoutes(v1)
+	// ----- SSE Stream endpoint (authenticated users, no permission check) -----
+	md.sseHandler.RegisterRoutes(v1)
 
-		// ----- Notifications → resource "devices" -----
-		md.notificationHandler.RegisterRoutes(permGroup("devices"))
+	// ----- Notifications → resource "devices" -----
+	md.notificationHandler.RegisterRoutes(permGroup("devices"))
 
-		// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
-		// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
-		//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]
-		notifGroup := permGroup("alarms").Group("/notifications")
-		md.notifTemplateHandler.RegisterRoutes(notifGroup)
-		md.notifHistoryHandler.RegisterRoutes(notifGroup)
+	// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
+	// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
+	//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]
+	notifGroup := permGroup("alarms").Group("/notifications")
+	md.notifTemplateHandler.RegisterRoutes(notifGroup)
+	md.notifHistoryHandler.RegisterRoutes(notifGroup)
 
 	// ----- Config Baseline routes → resource "config" -----
 	md.baselineHandler.RegisterRoutes(permGroup("config"))

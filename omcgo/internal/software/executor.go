@@ -314,7 +314,7 @@ func (e *UpgradeExecutor) HandleUpgradeFinish(ctx context.Context, evt event.Eve
 		DeviceID struct {
 			SerialNumber string `json:"SerialNumber"`
 		} `json:"device_id"`
-		Events        []string                   `json:"events"`
+		Events        []string                 `json:"events"`
 		ParameterList []map[string]interface{} `json:"parameter_list"`
 	}
 	if err := evt.DecodePayload(&payload); err != nil || payload.DeviceID.SerialNumber == "" {

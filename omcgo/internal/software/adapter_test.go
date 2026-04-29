@@ -10,7 +10,7 @@ import (
 func TestDefaultAdapter_RollbackParameterPath_LTE(t *testing.T) {
 	adapter := NewDefaultUpgradeAdapter()
 	path := adapter.RollbackParameterPath(model.TechLTE)
-	assert.Equal(t, "ROLLBACK_CONTROL", path)
+	assert.Equal(t, "Device.DeviceInfo.X_COM_ROLLBACK_CONTROL", path)
 }
 
 func TestDefaultAdapter_RollbackParameterPath_NR(t *testing.T) {
