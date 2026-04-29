@@ -33,7 +33,11 @@ type StorageInfo struct {
 	CapacityBytes    int64
 	UsagePercent     int
 	ThresholdPercent int
-	AlertEmail       string
+	// Severity is the policy-driven alarm severity (T-0084). Caller
+	// (PolicyMonitor) injects from policy.AlertSeverity. Empty string
+	// falls back to alarmSeverityMajor via severityOrDefault.
+	Severity   string
+	AlertEmail string
 }
 
 // StorageTransition encodes the edge-trigger state change PolicyMonitor
@@ -75,7 +79,7 @@ func PublishStorageThresholdAlarm(
 	subject, kind, summary := storageAlarmRoute(transition, info)
 	payload := StorageThresholdAlarmPayload{
 		Source:           alarmSourceBackup,
-		Severity:         alarmSeverityMajor,
+		Severity:         severityOrDefault(info.Severity),
 		Identifier:       storageThresholdIdentifier,
 		Summary:          summary,
 		BucketName:       info.BucketName,

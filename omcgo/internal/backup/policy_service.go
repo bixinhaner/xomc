@@ -170,5 +170,9 @@ func validatePolicy(p *BackupPolicy) error {
 			return fmt.Errorf("alert_email invalid: %w", commonerrors.ErrInvalidInput)
 		}
 	}
+	if _, ok := validBackupPolicyAlertSeverities[p.AlertSeverity]; !ok {
+		return fmt.Errorf("invalid alert_severity %q (must be warning|major|critical): %w",
+			p.AlertSeverity, commonerrors.ErrInvalidInput)
+	}
 	return nil
 }

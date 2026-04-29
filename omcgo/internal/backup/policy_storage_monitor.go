@@ -134,7 +134,12 @@ func (m *PolicyMonitor) RunStorageCheckOnce(ctx context.Context) (int64, error) 
 		CapacityBytes:    capacity,
 		UsagePercent:     usagePercent(used, capacity),
 		ThresholdPercent: policy.AlertThresholdPercent,
-		AlertEmail:       policy.AlertEmail,
+		// Apply fallback at the producer side too (review MED-1, T-0084).
+		// PublishStorageThresholdAlarm also calls severityOrDefault, so this
+		// is defense-in-depth: any future caller building StorageInfo gets
+		// the fallback whether or not they remember the helper.
+		Severity:   severityOrDefault(policy.AlertSeverity),
+		AlertEmail: policy.AlertEmail,
 	}
 
 	switch {

@@ -380,6 +380,65 @@ func TestStorageCheck_OverCapacity_PayloadPercentExceeds100(t *testing.T) {
 	assert.Equal(t, 250, payload.UsagePercent, "percent must NOT clamp at 100; over-capacity is real")
 }
 
+// V6 (T-0084) — storage raised alarm carries policy.AlertSeverity.
+func TestStorageCheck_PolicyDrivenSeverity_Raised(t *testing.T) {
+	policy := makeStoragePolicy(10, 80, true)
+	policy.AlertSeverity = "warning"
+	lister := &fakeBucketLister{
+		objects: []minio.ObjectInfo{{Size: gigabyte(9)}}, // above
+	}
+	bus := &fakeEventBus{}
+	mon, _ := newStorageMonitor(t, policy, lister, bus)
+
+	_, err := mon.RunStorageCheckOnce(context.Background())
+	require.NoError(t, err)
+	events := bus.snapshot()
+	require.Len(t, events, 1)
+	assert.Equal(t, "warning", events[0].decodePayload(t).Severity)
+}
+
+// V7 (T-0084) — storage cleared alarm also carries policy.AlertSeverity.
+func TestStorageCheck_PolicyDrivenSeverity_Cleared(t *testing.T) {
+	policy := makeStoragePolicy(10, 80, true)
+	policy.AlertSeverity = "critical"
+	bus := &fakeEventBus{}
+	policySvc := NewPolicyService(&monPolicyRepo{current: policy}, zap.NewNop())
+	mon := NewPolicyMonitor(policySvc, &monTaskRepo{}, NewPolicyMetrics(nil), zap.NewNop())
+	mon.SetEventBus(bus)
+	mon.storageMu.Lock()
+	mon.lastAboveThreshold = true
+	mon.storageMu.Unlock()
+	mon.SetBucketLister(&fakeBucketLister{
+		objects: []minio.ObjectInfo{{Size: gigabyte(7)}}, // below 80%
+	})
+
+	_, err := mon.RunStorageCheckOnce(context.Background())
+	require.NoError(t, err)
+	events := bus.snapshot()
+	require.Len(t, events, 1)
+	assert.Equal(t, event.SubjectAlarmCleared, events[0].subject)
+	assert.Equal(t, "critical", events[0].decodePayload(t).Severity,
+		"cleared alarm uses same severity as raised so F04 engine pairs correctly")
+}
+
+// V8 (T-0084) — empty AlertSeverity falls back to "major" at runtime.
+func TestStorageCheck_EmptyAlertSeverity_FallsBackToMajor(t *testing.T) {
+	policy := makeStoragePolicy(10, 80, true)
+	policy.AlertSeverity = "" // legacy/test edge case
+	lister := &fakeBucketLister{
+		objects: []minio.ObjectInfo{{Size: gigabyte(9)}},
+	}
+	bus := &fakeEventBus{}
+	mon, _ := newStorageMonitor(t, policy, lister, bus)
+
+	_, err := mon.RunStorageCheckOnce(context.Background())
+	require.NoError(t, err)
+	events := bus.snapshot()
+	require.Len(t, events, 1)
+	assert.Equal(t, "major", events[0].decodePayload(t).Severity,
+		"empty Severity must fall back to alarmSeverityMajor (severityOrDefault)")
+}
+
 // Bonus — publisher-level wiring tests (separate from monitor edge logic).
 func TestPublishStorageThresholdAlarm_NilBus(t *testing.T) {
 	err := PublishStorageThresholdAlarm(context.Background(), nil, NewPolicyMetrics(nil),

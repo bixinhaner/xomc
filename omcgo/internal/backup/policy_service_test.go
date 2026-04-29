@@ -15,7 +15,7 @@ import (
 
 // mockPolicyRepo implements PolicyRepository for unit tests.
 type mockPolicyRepo struct {
-	current  *BackupPolicy   // nil = empty table
+	current  *BackupPolicy // nil = empty table
 	upsertFn func(ctx context.Context, p *BackupPolicy) error
 }
 
@@ -98,10 +98,10 @@ func TestPolicyService_Update_ValidationMatrix(t *testing.T) {
 	good := DefaultPolicy()
 
 	tests := []struct {
-		name       string
-		mutate     func(p *BackupPolicy)
-		expectErr  bool
-		errSubstr  string
+		name      string
+		mutate    func(p *BackupPolicy)
+		expectErr bool
+		errSubstr string
 	}{
 		{"defaults pass", func(_ *BackupPolicy) {}, false, ""},
 		{"retention too low", func(p *BackupPolicy) { p.RetentionDays = 0 }, true, "retention_days"},
@@ -148,6 +148,13 @@ func TestPolicyService_Update_ValidationMatrix(t *testing.T) {
 			p.EnableEncryption = true
 			p.EncryptionAlgorithm = "AES-256-GCM"
 		}, false, ""},
+		// T-0084 V3: alert_severity allowlist accept warning/major/critical
+		{"alert_severity=warning accepted (T-0084)", func(p *BackupPolicy) { p.AlertSeverity = "warning" }, false, ""},
+		{"alert_severity=major accepted (T-0084)", func(p *BackupPolicy) { p.AlertSeverity = "major" }, false, ""},
+		{"alert_severity=critical accepted (T-0084)", func(p *BackupPolicy) { p.AlertSeverity = "critical" }, false, ""},
+		// T-0084 V4: alert_severity allowlist rejects empty + outside set
+		{"alert_severity empty rejected (T-0084)", func(p *BackupPolicy) { p.AlertSeverity = "" }, true, "alert_severity"},
+		{"alert_severity=emergency rejected (T-0084)", func(p *BackupPolicy) { p.AlertSeverity = "emergency" }, true, "alert_severity"},
 	}
 	for _, tt := range tests {
 		tt := tt

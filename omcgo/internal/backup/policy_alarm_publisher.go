@@ -13,9 +13,24 @@ import (
 // publishers can't drift apart.
 const alarmSourceBackup = "backup"
 
-// alarmSeverityMajor is the default severity for backup alarms (data-loss
-// precursor). Policy-driven severity tracking is the T-0084 followup.
+// alarmSeverityMajor is the canonical default severity for backup alarms.
+// Used as the SQL DEFAULT for backup_policies.alert_severity (migration
+// 000050) and as the runtime fallback inside severityOrDefault when
+// policy.AlertSeverity is empty (legacy/test BackupPolicy literals that
+// predate T-0084).
 const alarmSeverityMajor = "major"
+
+// severityOrDefault returns the policy-supplied severity, falling back to
+// alarmSeverityMajor when empty. Validate-path rejects empty AlertSeverity
+// at PUT time (validBackupPolicyAlertSeverities); this fallback covers
+// runtime-constructed BackupPolicy literals (mostly tests) that don't go
+// through Update validation.
+func severityOrDefault(s string) string {
+	if s == "" {
+		return alarmSeverityMajor
+	}
+	return s
+}
 
 // FailureAlarmPayload is the event payload published on backup task failure
 // when the active BackupPolicy has alert_on_failure=true. The alarm engine
@@ -23,9 +38,9 @@ const alarmSeverityMajor = "major"
 // `identifier` to the appropriate notification channel (T-0007 EmailDispatcher
 // for `alert_email`).
 type FailureAlarmPayload struct {
-	Source       string `json:"source"`        // always "backup"
-	Severity     string `json:"severity"`      // "major" — backup data loss
-	Identifier   string `json:"identifier"`    // "backup_task_failed"
+	Source       string `json:"source"`     // always "backup"
+	Severity     string `json:"severity"`   // "major" — backup data loss
+	Identifier   string `json:"identifier"` // "backup_task_failed"
 	Summary      string `json:"summary"`
 	TaskID       string `json:"task_id"`
 	TargetCount  int    `json:"target_count"`
@@ -73,13 +88,8 @@ func PublishFailureAlarm(
 		errMsg = *task.ErrorMessage
 	}
 	payload := FailureAlarmPayload{
-		Source: alarmSourceBackup,
-		// TODO(T-0084): policy-driven severity (warning/major/critical). T-0076
-		// considered closing this but punted — the natural design needs a new
-		// BackupPolicy.AlertSeverity column + schema migration which couples
-		// poorly with the in-flight T-0082 disk-threshold work. Combined design
-		// recommended; for now backup failures stay "major" (see T-0076 PRD §2.4).
-		Severity:     alarmSeverityMajor,
+		Source:       alarmSourceBackup,
+		Severity:     severityOrDefault(policy.AlertSeverity),
 		Identifier:   "backup_task_failed",
 		Summary:      fmt.Sprintf("Backup task failed for %d target(s)", len(task.TargetIDs)),
 		TaskID:       task.ID.String(),

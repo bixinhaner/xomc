@@ -36,6 +36,7 @@ type PolicyRequest struct {
 	AlertOnFailure        bool       `json:"alert_on_failure"`
 	AlertEmail            string     `json:"alert_email"`
 	AlertThresholdPercent int        `json:"alert_threshold_percent"`
+	AlertSeverity         string     `json:"alert_severity"` // T-0084: warning|major|critical
 }
 
 func (req PolicyRequest) toModel() *BackupPolicy {
@@ -59,6 +60,7 @@ func (req PolicyRequest) toModel() *BackupPolicy {
 		AlertOnFailure:        req.AlertOnFailure,
 		AlertEmail:            req.AlertEmail,
 		AlertThresholdPercent: req.AlertThresholdPercent,
+		AlertSeverity:         req.AlertSeverity,
 	}
 }
 

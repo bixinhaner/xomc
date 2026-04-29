@@ -26,10 +26,10 @@ type monTaskRepo struct {
 	gotKeep      int
 }
 
-func (m *monTaskRepo) Create(_ context.Context, _ *BackupTask) error              { return nil }
+func (m *monTaskRepo) Create(_ context.Context, _ *BackupTask) error               { return nil }
 func (m *monTaskRepo) GetByID(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return nil, nil }
-func (m *monTaskRepo) Update(_ context.Context, _ *BackupTask) error              { return nil }
-func (m *monTaskRepo) Delete(_ context.Context, _ uuid.UUID) error                { return nil }
+func (m *monTaskRepo) Update(_ context.Context, _ *BackupTask) error               { return nil }
+func (m *monTaskRepo) Delete(_ context.Context, _ uuid.UUID) error                 { return nil }
 func (m *monTaskRepo) List(_ context.Context, _ TaskFilter) (*model.ListResponse[BackupTask], error) {
 	return nil, nil
 }

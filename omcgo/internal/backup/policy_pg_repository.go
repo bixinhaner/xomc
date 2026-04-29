@@ -22,7 +22,7 @@ var policyColumns = []string{
 	"enable_compression", "compression_level", "compression_format",
 	"storage_backend", "ftp_config_id", "local_path", "max_storage_gb",
 	"enable_encryption", "encryption_algorithm",
-	"alert_on_failure", "alert_email", "alert_threshold_percent",
+	"alert_on_failure", "alert_email", "alert_threshold_percent", "alert_severity",
 	"created_at", "updated_at",
 }
 
@@ -48,7 +48,7 @@ func scanPolicy(row pgx.Row) (*BackupPolicy, error) {
 		&p.EnableCompression, &p.CompressionLevel, &p.CompressionFormat,
 		&p.StorageBackend, &ftpID, &p.LocalPath, &p.MaxStorageGB,
 		&p.EnableEncryption, &p.EncryptionAlgorithm,
-		&p.AlertOnFailure, &p.AlertEmail, &p.AlertThresholdPercent,
+		&p.AlertOnFailure, &p.AlertEmail, &p.AlertThresholdPercent, &p.AlertSeverity,
 		&p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (r *PgPolicyRepository) Upsert(ctx context.Context, p *BackupPolicy) error 
 			enable_compression, compression_level, compression_format,
 			storage_backend, ftp_config_id, local_path, max_storage_gb,
 			enable_encryption, encryption_algorithm,
-			alert_on_failure, alert_email, alert_threshold_percent
+			alert_on_failure, alert_email, alert_threshold_percent, alert_severity
 		) VALUES (
 			$1,
 			$2, $3, $4,
@@ -110,7 +110,7 @@ func (r *PgPolicyRepository) Upsert(ctx context.Context, p *BackupPolicy) error 
 			$9, $10, $11,
 			$12, $13, $14, $15,
 			$16, $17,
-			$18, $19, $20
+			$18, $19, $20, $21
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			retention_days          = EXCLUDED.retention_days,
@@ -132,6 +132,7 @@ func (r *PgPolicyRepository) Upsert(ctx context.Context, p *BackupPolicy) error 
 			alert_on_failure        = EXCLUDED.alert_on_failure,
 			alert_email             = EXCLUDED.alert_email,
 			alert_threshold_percent = EXCLUDED.alert_threshold_percent,
+			alert_severity          = EXCLUDED.alert_severity,
 			updated_at              = NOW()
 		RETURNING ` + strings.Join(policyColumns, ", ")
 
@@ -142,7 +143,7 @@ func (r *PgPolicyRepository) Upsert(ctx context.Context, p *BackupPolicy) error 
 		p.EnableCompression, p.CompressionLevel, p.CompressionFormat,
 		p.StorageBackend, ftpConfigArg(p.FTPConfigID), p.LocalPath, p.MaxStorageGB,
 		p.EnableEncryption, p.EncryptionAlgorithm,
-		p.AlertOnFailure, p.AlertEmail, p.AlertThresholdPercent,
+		p.AlertOnFailure, p.AlertEmail, p.AlertThresholdPercent, p.AlertSeverity,
 	)
 	upserted, err := scanPolicy(row)
 	if err != nil {

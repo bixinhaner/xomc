@@ -23,19 +23,19 @@ type BackupPolicy struct {
 	ID uuid.UUID `json:"id"`
 
 	// 保留策略
-	RetentionDays   int `json:"retention_days"`
-	MaxBackupCount  int `json:"max_backup_count"`
-	MinBackupCount  int `json:"min_backup_count"`
+	RetentionDays  int `json:"retention_days"`
+	MaxBackupCount int `json:"max_backup_count"`
+	MinBackupCount int `json:"min_backup_count"`
 
 	// 自动清理（enforcement = T-0073）
-	AutoCleanup       bool   `json:"auto_cleanup"`
-	CleanupTime       string `json:"cleanup_time"`         // "HH:MM"
-	CleanupDayOfWeek  int    `json:"cleanup_day_of_week"`  // -1 = everyday; 0..6 = sun..sat
-	KeepLastN         int    `json:"keep_last_n"`
+	AutoCleanup      bool   `json:"auto_cleanup"`
+	CleanupTime      string `json:"cleanup_time"`        // "HH:MM"
+	CleanupDayOfWeek int    `json:"cleanup_day_of_week"` // -1 = everyday; 0..6 = sun..sat
+	KeepLastN        int    `json:"keep_last_n"`
 
 	// 压缩（enforcement = T-0074）
 	EnableCompression bool   `json:"enable_compression"`
-	CompressionLevel  int    `json:"compression_level"` // 1..9
+	CompressionLevel  int    `json:"compression_level"`  // 1..9
 	CompressionFormat string `json:"compression_format"` // gzip|bzip2|lz4|zstd
 
 	// 存储
@@ -48,10 +48,15 @@ type BackupPolicy struct {
 	EnableEncryption    bool   `json:"enable_encryption"`
 	EncryptionAlgorithm string `json:"encryption_algorithm"` // AES-256-GCM|AES-256-CBC|ChaCha20-Poly1305
 
-	// 告警（enforcement = T-0073，集成 F04 邮件通道 T-0007）
+	// 告警（enforcement = T-0073/T-0082；severity policy-driven = T-0084）
 	AlertOnFailure        bool   `json:"alert_on_failure"`
 	AlertEmail            string `json:"alert_email"`
 	AlertThresholdPercent int    `json:"alert_threshold_percent"`
+	// AlertSeverity controls the severity field on both backup_task_failed
+	// (T-0073) and backup_storage_threshold_exceeded (T-0082) alarm payloads.
+	// Single column covers both alarm types — operators rarely want to split
+	// failure-vs-storage severity (PRD T-0084 §2.1).
+	AlertSeverity string `json:"alert_severity"` // warning|major|critical
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -79,6 +84,7 @@ func DefaultPolicy() *BackupPolicy {
 		AlertOnFailure:        true,
 		AlertEmail:            "",
 		AlertThresholdPercent: 80,
+		AlertSeverity:         "major",
 	}
 }
 
@@ -96,9 +102,18 @@ var (
 	// so SecOps can register new algorithms without a migration), but the
 	// service still rejects unknown values to avoid storing typos.
 	validBackupPolicyEncryptionAlgorithms = map[string]struct{}{
-		"AES-256-GCM":        {},
-		"AES-256-CBC":        {},
-		"ChaCha20-Poly1305":  {},
+		"AES-256-GCM":       {},
+		"AES-256-CBC":       {},
+		"ChaCha20-Poly1305": {},
+	}
+	// validBackupPolicyAlertSeverities mirrors the DB CHECK constraint on
+	// backup_policies.alert_severity (T-0084). 3GPP 32.111 lists more
+	// granular levels (minor/indeterminate/etc) but operators rarely need
+	// them for backup; broaden the set in a future migration if needed.
+	validBackupPolicyAlertSeverities = map[string]struct{}{
+		"warning":  {},
+		"major":    {},
+		"critical": {},
 	}
 )
 

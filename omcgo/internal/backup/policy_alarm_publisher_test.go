@@ -29,8 +29,8 @@ func (p *pubPolicyGetter) Get(_ context.Context) (*BackupPolicy, error) {
 
 // pubEventBus captures Publish calls for assertions.
 type pubEventBus struct {
-	mu        sync.Mutex
-	calls     []pubCall
+	mu         sync.Mutex
+	calls      []pubCall
 	publishErr error
 }
 
@@ -143,4 +143,34 @@ func TestPublishFailureAlarm_NilEventBus(t *testing.T) {
 	err := PublishFailureAlarm(context.Background(), getter, nil, NewPolicyMetrics(nil), task)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "event bus")
+}
+
+// V5 (T-0084) — policy.AlertSeverity drives payload.Severity.
+func TestPublishFailureAlarm_PolicyDrivenSeverity(t *testing.T) {
+	cases := []struct {
+		name     string
+		severity string
+		want     string
+	}{
+		{"warning passthrough", "warning", "warning"},
+		{"major passthrough", "major", "major"},
+		{"critical passthrough", "critical", "critical"},
+		{"empty falls back to major (V8 fallback)", "", "major"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			policy := DefaultPolicy()
+			policy.AlertOnFailure = true
+			policy.AlertSeverity = tc.severity
+			getter := &pubPolicyGetter{policy: policy}
+			bus := &pubEventBus{}
+			task := &BackupTask{ID: uuid.New(), TargetIDs: []string{"SN-1"}}
+
+			err := PublishFailureAlarm(context.Background(), getter, bus, NewPolicyMetrics(nil), task)
+			require.NoError(t, err)
+			require.Len(t, bus.calls, 1)
+			assert.Equal(t, tc.want, bus.calls[0].payload.Severity)
+		})
+	}
 }
