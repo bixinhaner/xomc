@@ -71,6 +71,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	// restore service is not wired (mirrors policy nil-safety).
 	restore := rg.Group("/backup")
 	restore.POST("/restore", h.CreateRestore)
+	// T-0079: restore_by_task_id mode — same fan-out, but resolves bucket +
+	// object_path automatically from backup_tasks.file_path linkage.
+	restore.POST("/restore/by-task-id", h.CreateRestoreByTaskID)
 	restore.GET("/restore-tasks", h.ListRestoreTasks)
 	restore.GET("/restore-tasks/:id", h.GetRestoreTask)
 }

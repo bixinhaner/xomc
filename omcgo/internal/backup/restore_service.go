@@ -14,6 +14,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	pathpkg "path"
 	"strings"
@@ -54,14 +55,24 @@ type MinIOStater interface {
 	StatObject(ctx context.Context, bucket, object string, opts minio.StatObjectOptions) (minio.ObjectInfo, error)
 }
 
+// BackupTaskFinder is the narrow contract RestoreService needs to fetch the
+// originating backup_task for `restore_by_task_id` mode (T-0079). The full
+// TaskRepository satisfies it; declared narrow here to keep test mocks small.
+type BackupTaskFinder interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*BackupTask, error)
+}
+
 // RestoreService orchestrates restore_task creation + device task fan-out.
 type RestoreService struct {
-	repo       RestoreTaskRepository
-	deviceRepo DeviceLookup
-	taskSvc    TaskCreator
-	stater     MinIOStater
-	metrics    *RestoreMetrics
-	logger     *zap.Logger
+	repo            RestoreTaskRepository
+	deviceRepo      DeviceLookup
+	taskSvc         TaskCreator
+	stater          MinIOStater
+	metrics         *RestoreMetrics
+	logger          *zap.Logger
+	// T-0079: optional — when wired enables POST /backup/restore/by-task-id.
+	// nil-safe: nil disables the endpoint (handler returns 503).
+	backupTaskFinder BackupTaskFinder
 }
 
 // NewRestoreService wires the dependencies. metrics may be nil (Record* nil-safe).
@@ -81,6 +92,12 @@ func NewRestoreService(
 		metrics:    metrics,
 		logger:     logger.Named("backup-restore"),
 	}
+}
+
+// SetBackupTaskFinder enables the by-task-id restore mode (T-0079) without
+// changing NewRestoreService's signature. Pass nil to disable.
+func (s *RestoreService) SetBackupTaskFinder(finder BackupTaskFinder) {
+	s.backupTaskFinder = finder
 }
 
 // CreateRestoreRequest is the API request body validated and persisted.
@@ -213,6 +230,86 @@ func (s *RestoreService) updateSkipped(ctx context.Context, t *RestoreTask) erro
 		return nil
 	}
 	return s.repo.UpdateErrorMessage(ctx, t.ID, *t.ErrorMessage)
+}
+
+// CreateByTaskIDRequest is the API body for `POST /backup/restore/by-task-id`.
+type CreateByTaskIDRequest struct {
+	BackupTaskID    uuid.UUID `json:"backup_task_id" binding:"required"`
+	TargetDeviceSNs []string  `json:"target_device_sns" binding:"required,min=1"`
+}
+
+// CreateByTaskIDResult bundles the created RestoreTask with an optional
+// human-readable warning (e.g. multi-device backup caveat) so the handler
+// can include it in the response body without inflating RestoreTask itself.
+type CreateByTaskIDResult struct {
+	Task    *RestoreTask `json:"task"`
+	Warning *string      `json:"warning,omitempty"`
+}
+
+// CreateByTaskID resolves backup_tasks.file_path for the given task and
+// dispatches a restore (T-0079). Returns ErrNotFound when the backup_task
+// hasn't uploaded yet (file_path is null) so the handler can surface 404.
+func (s *RestoreService) CreateByTaskID(
+	ctx context.Context,
+	req *CreateByTaskIDRequest,
+	createdBy string,
+) (*CreateByTaskIDResult, error) {
+	if s.backupTaskFinder == nil {
+		return nil, fmt.Errorf("by-task-id mode not configured: %w", commonerrors.ErrInvalidInput)
+	}
+	if req == nil {
+		s.metrics.RecordRestoreByTask("rejected_invalid_input")
+		return nil, fmt.Errorf("nil request: %w", commonerrors.ErrInvalidInput)
+	}
+	if len(req.TargetDeviceSNs) == 0 {
+		s.metrics.RecordRestoreByTask("rejected_invalid_input")
+		return nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
+	}
+	bt, err := s.backupTaskFinder.GetByID(ctx, req.BackupTaskID)
+	if err != nil {
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			s.metrics.RecordRestoreByTask("rejected_not_uploaded")
+			return nil, err
+		}
+		return nil, fmt.Errorf("lookup backup_task %s: %w", req.BackupTaskID, err)
+	}
+	if bt.FilePath == nil || *bt.FilePath == "" {
+		s.metrics.RecordRestoreByTask("rejected_not_uploaded")
+		return nil, fmt.Errorf("backup_task %s file_path not yet recorded; CPE may not have uploaded yet: %w",
+			req.BackupTaskID, commonerrors.ErrNotFound)
+	}
+	bucket, objectPath, err := splitBucketAndPath(*bt.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("parse backup_task.file_path %q: %w", *bt.FilePath, err)
+	}
+	rt, err := s.Create(ctx, &CreateRestoreRequest{
+		Bucket:          bucket,
+		ObjectPath:      objectPath,
+		TargetDeviceSNs: req.TargetDeviceSNs,
+	}, createdBy)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &CreateByTaskIDResult{Task: rt}
+	if len(bt.TargetIDs) > 1 {
+		w := fmt.Sprintf("multi-device backup (target_count=%d); restore uses only the first device's config (first-write-wins)",
+			len(bt.TargetIDs))
+		result.Warning = &w
+	}
+	s.metrics.RecordRestoreByTask("accepted")
+	return result, nil
+}
+
+// splitBucketAndPath splits a "bucket/path/to/object" string into its parts.
+// Returns ErrInvalidInput when the format is unexpected (no '/' separator).
+func splitBucketAndPath(combined string) (bucket, objectPath string, err error) {
+	idx := strings.IndexByte(combined, '/')
+	if idx <= 0 || idx >= len(combined)-1 {
+		return "", "", fmt.Errorf("file_path %q missing bucket/path separator: %w",
+			combined, commonerrors.ErrInvalidInput)
+	}
+	return combined[:idx], combined[idx+1:], nil
 }
 
 // List proxies to the repo.

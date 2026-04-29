@@ -5050,6 +5050,15 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/restore-tasks" -H "$W2D_AUTH")
 check_status_in "W2D bk-10: GET /backup/restore-tasks (T-0072)" "200 401" "$HTTP_CODE"
 
+# T-0079 / R-102: restore-by-task-id mode rejects when backup_task.file_path
+# is not yet set (CPE hasn't uploaded). 404 on unknown task UUID is also
+# acceptable for the same reason — both surface as ErrNotFound from service.
+claim "backup: POST /backup/restore/by-task-id 404 when not yet uploaded (T-0079)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/backup/restore/by-task-id" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"backup_task_id":"'"$W2D_BAD_UUID"'","target_device_sns":["SN001"]}')
+check_status_in "W2D bk-11: POST /backup/restore/by-task-id (T-0079)" "404 401 400" "$HTTP_CODE"
+
 claim "backup: list ftp configs returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/ftp-configs" -H "$W2D_AUTH")

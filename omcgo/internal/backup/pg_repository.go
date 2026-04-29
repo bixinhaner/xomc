@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -237,6 +238,93 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 	}
 
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
+}
+
+// UpdateFilePath sets file_path via atomic CAS — only writes when the column
+// is currently NULL (first-write-wins). Returns ErrFilePathAlreadySet when a
+// concurrent writer already set the value (multi-device backup tasks have N
+// uploads racing for one file_path slot); returns ErrNotFound when no row
+// matches the id at all. The CAS is performed at the DB layer, so the
+// recorder's read-then-write surface is TOCTOU-free.
+func (r *PgTaskRepository) UpdateFilePath(ctx context.Context, id uuid.UUID, filePath string) error {
+	// Conditional UPDATE: only write when file_path is currently NULL.
+	query, args, err := storage.Psql.Update("backup_tasks").
+		Set("file_path", filePath).
+		Where(sq.Eq{"id": id, "file_path": nil}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update backup_task file_path SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update backup_task file_path: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	// 0 rows affected — disambiguate "id not found" vs "already set" via a
+	// follow-up read. This is a small extra cost on the rare lose-the-race
+	// path; the win path is single-RTT.
+	var existing *string
+	err = r.pool.QueryRow(ctx,
+		`SELECT file_path FROM backup_tasks WHERE id = $1`, id,
+	).Scan(&existing)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("backup_task %s: %w", id, commonerrors.ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("read backup_task %s for CAS disambiguation: %w", id, err)
+	}
+	if existing != nil && *existing != "" {
+		return ErrFilePathAlreadySet
+	}
+	// Row exists, file_path is null, but UPDATE matched 0 rows — should not
+	// happen in practice; treat as transient and surface as ErrNotFound for
+	// the recorder to no-op.
+	return fmt.Errorf("backup_task %s: %w", id, commonerrors.ErrNotFound)
+}
+
+// FindByIDPrefix returns up to `limit` backup_tasks whose UUID (without
+// dashes) starts with the given hex prefix. Used by FilePathRecorder to map
+// the {taskID8} prefix in an upload filename back to the originating task
+// (T-0079). Returns an empty slice if prefix is empty or no rows match.
+//
+// Implementation note: PG `uuid::text` includes dashes (e.g.
+// "abcdef12-3456-..."), but our prefix is the dashless first 8 chars. Use
+// REPLACE(id::text, '-', '') LIKE 'prefix%' so the prefix matches the first
+// 8 hex characters regardless of the dash position. Backup_tasks is small
+// enough at MVP scale that the seq scan is acceptable; if scale demands an
+// index, a generated column + functional index is a future optimization.
+func (r *PgTaskRepository) FindByIDPrefix(ctx context.Context, prefix string, limit int) ([]*BackupTask, error) {
+	if prefix == "" {
+		return nil, nil
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	q := storage.Psql.Select(taskColumns...).
+		From("backup_tasks").
+		Where("REPLACE(id::text, '-', '') LIKE ?", prefix+"%").
+		OrderBy("created_at DESC").
+		Limit(uint64(limit))
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find backup_task by prefix SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query backup_task by prefix: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*BackupTask, 0, limit)
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan backup_task row: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 // ---- task scanning helpers ----

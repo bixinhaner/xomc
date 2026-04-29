@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,12 @@ func (m *execTaskRepo) Update(ctx context.Context, task *BackupTask) error {
 }
 func (m *execTaskRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 func (m *execTaskRepo) List(_ context.Context, _ TaskFilter) (*model.ListResponse[BackupTask], error) {
+	return nil, nil
+}
+func (m *execTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *execTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*BackupTask, error) {
 	return nil, nil
 }
 func (m *execTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
@@ -229,6 +236,15 @@ func TestHandleTask_PushUploadCommand(t *testing.T) {
 	var params map[string]interface{}
 	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
 	assert.Equal(t, "3", params["file_type"])
+
+	// T-0079: target_file_name embeds backup_task UUID prefix so the upload
+	// handler can route the MinIO object back to this task via
+	// `backup.file.received` event. Pattern: backup-{taskID8}-{SN}.xml
+	assert.Contains(t, params["target_file_name"], "backup-")
+	assert.Contains(t, params["target_file_name"], "-SN001.xml")
+	// CommandKey + SourceID linkage for TransferComplete correlation
+	assert.Equal(t, task.ID.String(), cmdQ.pushed[0].Req.SourceID)
+	assert.True(t, strings.HasPrefix(cmdQ.pushed[0].Req.CommandKey, "backup-"))
 }
 
 func TestHandleTask_ProgressUpdate(t *testing.T) {

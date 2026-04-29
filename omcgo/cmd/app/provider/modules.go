@@ -199,6 +199,14 @@ func initBackupModule(c *Container) error {
 	restoreService := backup.NewRestoreService(
 		restoreRepo, c.DeviceRepo, c.TaskSvc, c.MinIO, restoreMetrics, logger,
 	)
+	// T-0079: enable by-task-id restore mode + subscribe FilePathRecorder to
+	// `backup.file.received` events so backup_tasks.file_path is populated
+	// after CPE finishes uploading. Both wire onto the same RestoreMetrics.
+	restoreService.SetBackupTaskFinder(backupTaskRepo)
+	filePathRecorder := backup.NewFilePathRecorder(backupTaskRepo, restoreMetrics, logger)
+	if err := filePathRecorder.Subscribe(c.EventBus); err != nil {
+		logger.Warn("subscribe backup file path recorder", zap.Error(err))
+	}
 	backupHandler.SetRestoreService(restoreService)
 
 	c.miscDeps.backupHandler = backupHandler

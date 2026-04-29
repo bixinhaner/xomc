@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,15 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
+
+// taskIDPrefix returns the first 8 hex characters of a backup_task UUID with
+// dashes stripped — embedded in the Upload target_file_name so the upload
+// handler can route the resulting MinIO object back to the originating task
+// via SubjectBackupFileReceived (T-0079). 8 hex chars = 32 bits, collision
+// risk < 50% under ~65k concurrent backup tasks (acceptable for MVP).
+func taskIDPrefix(id uuid.UUID) string {
+	return strings.ReplaceAll(id.String(), "-", "")[:8]
+}
 
 // BackupExecutor subscribes to backup.task.created events and executes
 // backup tasks by pushing Upload commands to the unified device task queue.
@@ -135,18 +145,30 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 		// (the canonical type for backup) — see pkg/tr069.FileTypeConfig.
 		// Historical bug fix (T-0074): previously sent "2" (Patch), causing the
 		// file to land in the firmware/patch bucket instead of config_backup.
+		//
+		// T-0079: target_file_name embeds the backup_task UUID prefix so the
+		// upload handler can route the MinIO object back to this task via the
+		// `backup.file.received` event subscriber. Pattern:
+		//   backup-{taskID8}-{deviceSN}.xml
+		// CommandKey + SourceID also link back so TransferComplete consumers
+		// can correlate without parsing filenames.
+		idPrefix := taskIDPrefix(task.ID)
+		targetFilename := fmt.Sprintf("backup-%s-%s.xml", idPrefix, dev.SerialNumber)
 		paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
-			"file_type": "3",
+			"file_type":        "3",
+			"target_file_name": targetFilename,
 		})
 		if marshalErr != nil {
 			e.logger.Warn("marshal upload params", zap.String("device_sn", targetSN), zap.Error(marshalErr))
 			continue
 		}
 		if _, err := e.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
-			DeviceSN: dev.SerialNumber,
-			Method:   "Upload",
-			Params:   paramsJSON,
-			Source:   devtask.TaskSourceSystem,
+			DeviceSN:   dev.SerialNumber,
+			Method:     "Upload",
+			Params:     paramsJSON,
+			Source:     devtask.TaskSourceSystem,
+			SourceID:   task.ID.String(),
+			CommandKey: "backup-" + idPrefix,
 		}); err != nil {
 			e.logger.Warn("push upload command",
 				zap.String("device_sn", dev.SerialNumber),

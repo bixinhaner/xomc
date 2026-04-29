@@ -63,6 +63,12 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 func (m *mockTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
 	return 0, nil
 }
+func (m *mockTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*BackupTask, error) {
+	return nil, nil
+}
 
 type mockScheduleRepo struct {
 	createFn  func(ctx context.Context, schedule *BackupSchedule) error

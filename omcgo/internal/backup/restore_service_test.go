@@ -190,6 +190,91 @@ func TestCreate_nilRequest(t *testing.T) {
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
 }
 
+// fakeBackupTaskFinder is a tiny stub for CreateByTaskID tests (T-0079).
+type fakeBackupTaskFinder struct {
+	task *BackupTask
+	err  error
+}
+
+func (f *fakeBackupTaskFinder) GetByID(_ context.Context, _ uuid.UUID) (*BackupTask, error) {
+	return f.task, f.err
+}
+
+func TestCreateByTaskID_resolvesAndDispatches(t *testing.T) {
+	svc, _, enq := newSvc(t, []string{"SN999"}, true)
+	taskID := uuid.New()
+	fp := "config_backup/backup/2026/04/29/backup-abcdef12-SN001.xml.gz"
+	bt := &BackupTask{ID: taskID, TargetIDs: []string{"SN001"}, FilePath: &fp}
+	svc.SetBackupTaskFinder(&fakeBackupTaskFinder{task: bt})
+
+	res, err := svc.CreateByTaskID(context.Background(), &CreateByTaskIDRequest{
+		BackupTaskID:    taskID,
+		TargetDeviceSNs: []string{"SN999"},
+	}, "alice")
+	require.NoError(t, err)
+	require.NotNil(t, res.Task)
+	require.Nil(t, res.Warning, "single-device source must have no warning")
+	require.Len(t, enq.requests, 1)
+	assert.Contains(t, string(enq.requests[0].Params), `"url":"config_backup/backup/2026/04/29/backup-abcdef12-SN001.xml.gz"`)
+}
+
+func TestCreateByTaskID_multiDeviceWarning(t *testing.T) {
+	svc, _, _ := newSvc(t, []string{"SN999"}, true)
+	taskID := uuid.New()
+	fp := "config_backup/backup/x.xml"
+	bt := &BackupTask{ID: taskID, TargetIDs: []string{"SN001", "SN002", "SN003"}, FilePath: &fp}
+	svc.SetBackupTaskFinder(&fakeBackupTaskFinder{task: bt})
+
+	res, err := svc.CreateByTaskID(context.Background(), &CreateByTaskIDRequest{
+		BackupTaskID:    taskID,
+		TargetDeviceSNs: []string{"SN999"},
+	}, "")
+	require.NoError(t, err)
+	require.NotNil(t, res.Warning)
+	assert.Contains(t, *res.Warning, "multi-device")
+	assert.Contains(t, *res.Warning, "first-write-wins")
+}
+
+func TestCreateByTaskID_filePathNullRejected(t *testing.T) {
+	svc, _, _ := newSvc(t, []string{"SN999"}, true)
+	taskID := uuid.New()
+	bt := &BackupTask{ID: taskID, TargetIDs: []string{"SN001"}, FilePath: nil}
+	svc.SetBackupTaskFinder(&fakeBackupTaskFinder{task: bt})
+
+	_, err := svc.CreateByTaskID(context.Background(), &CreateByTaskIDRequest{
+		BackupTaskID:    taskID,
+		TargetDeviceSNs: []string{"SN999"},
+	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound), "null file_path → ErrNotFound 404")
+}
+
+func TestCreateByTaskID_finderNotConfigured(t *testing.T) {
+	svc, _, _ := newSvc(t, []string{"SN999"}, true)
+	// Do NOT call SetBackupTaskFinder — simulate the case where DI didn't wire it.
+
+	_, err := svc.CreateByTaskID(context.Background(), &CreateByTaskIDRequest{
+		BackupTaskID:    uuid.New(),
+		TargetDeviceSNs: []string{"SN999"},
+	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+}
+
+func TestSplitBucketAndPath(t *testing.T) {
+	bucket, path, err := splitBucketAndPath("config_backup/backup/2026/04/29/x.xml.gz")
+	require.NoError(t, err)
+	assert.Equal(t, "config_backup", bucket)
+	assert.Equal(t, "backup/2026/04/29/x.xml.gz", path)
+
+	_, _, err = splitBucketAndPath("nopath")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+
+	_, _, err = splitBucketAndPath("/leadingslash")
+	require.Error(t, err)
+}
+
 func TestValidateRestorePath_table(t *testing.T) {
 	good := []string{
 		"backup/2026/04/29/cfg.xml",

@@ -38,6 +38,12 @@ func (m *monTaskRepo) CleanupOldRows(ctx context.Context, cutoff time.Time, keep
 	}
 	return 0, nil
 }
+func (m *monTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *monTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*BackupTask, error) {
+	return nil, nil
+}
 
 // monPolicyRepo lets tests dictate what BackupPolicy the monitor sees.
 type monPolicyRepo struct {

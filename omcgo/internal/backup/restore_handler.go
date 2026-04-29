@@ -82,6 +82,43 @@ func (h *Handler) ListRestoreTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// CreateRestoreByTaskID handles POST /api/v1/backup/restore/by-task-id (T-0079).
+//
+// Body: {"backup_task_id": "<uuid>", "target_device_sns": ["SN001", ...]}
+//
+// Resolves backup_tasks.file_path for the given task and dispatches the same
+// fan-out as POST /backup/restore. Multi-device source backups produce a
+// human-readable warning in the response body alongside the created
+// RestoreTask. Returns 404 when the task hasn't uploaded yet (file_path null).
+func (h *Handler) CreateRestoreByTaskID(c *gin.Context) {
+	if h.restoreService == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			errors.New("restore service not configured"))
+		return
+	}
+	var req CreateByTaskIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	createdBy, _ := c.Get("user_id")
+	createdByStr, _ := createdBy.(string)
+
+	result, err := h.restoreService.CreateByTaskID(c.Request.Context(), &req, createdByStr)
+	if err != nil {
+		switch {
+		case errors.Is(err, commonerrors.ErrInvalidInput):
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		case errors.Is(err, commonerrors.ErrNotFound):
+			commonerrors.AbortWithError(c, http.StatusNotFound, err)
+		default:
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 // GetRestoreTask handles GET /api/v1/backup/restore-tasks/:id.
 func (h *Handler) GetRestoreTask(c *gin.Context) {
 	if h.restoreService == nil {

@@ -301,6 +301,13 @@ const (
 	// SubjectBackupTaskDone 是备份文件已上传到 MinIO 并完成入库后发布。
 	// 发布者：backup.Executor，订阅者：暂无
 	SubjectBackupTaskDone = "backup.task.done"
+
+	// SubjectBackupFileReceived 是 CPE 上传备份配置文件落 MinIO 后发布（T-0079）。
+	// 发布者：acs/upload/handler.go ServeHTTP（FileType=3 / FileTypeConfig 分支）
+	// 订阅者：backup.FilePathRecorder（解析 filename 中嵌的 backup_task_id 前缀
+	// 后写回 backup_tasks.file_path，建立 task↔path 链路供 restore_by_task_id
+	// 模式使用）。Payload 见 backup.BackupFileReceivedPayload。
+	SubjectBackupFileReceived = "backup.file.received"
 )
 
 // Report events

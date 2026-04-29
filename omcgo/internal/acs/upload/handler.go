@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -199,6 +200,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.publishDataModelEvent(ctx, bucket, objectPath, filename, info.Size)
 	}
 
+	// 6.2. T-0079: For backup config uploads (FileType "3"), publish
+	// `backup.file.received` so the backup module can write
+	// backup_tasks.file_path. Decoupled via EventBus to keep the ACS process
+	// from importing backup module directly.
+	if ft == tr069.FileTypeConfig && h.eventBus != nil {
+		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size)
+	}
+
 	// 7. Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -376,6 +385,64 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n.Add(int64(n))
 	return n, err
+}
+
+// publishBackupFileReceivedEvent emits SubjectBackupFileReceived after a
+// FileType=3 (Vendor Configuration File) upload lands in MinIO. The backup
+// module subscribes to this and writes backup_tasks.file_path (T-0079). The
+// filename is expected to follow the executor-generated pattern:
+//
+//	backup-{taskID8}-{deviceSN}.xml(.gz|.zst|.lz4|.bz2)?
+//
+// Filenames not matching the pattern still publish the event with empty
+// backup_task_id_prefix; the subscriber treats that as "no-match skip" and
+// won't error — this preserves operator-uploaded ad-hoc config files (rare).
+func (h *Handler) publishBackupFileReceivedEvent(
+	ctx context.Context, bucket, objectPath, filename string, fileSize int64,
+) {
+	taskIDPrefix, deviceSN := parseBackupFilename(filename)
+
+	payload := map[string]interface{}{
+		"bucket":                 bucket,
+		"object_path":            objectPath,
+		"filename":               filename,
+		"backup_task_id_prefix":  taskIDPrefix,
+		"device_sn":              deviceSN,
+		"file_size":              fileSize,
+	}
+
+	evt, err := event.NewEvent(event.SubjectBackupFileReceived, payload)
+	if err != nil {
+		h.logger.Error("create backup.file.received event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, event.SubjectBackupFileReceived, evt); err != nil {
+		h.logger.Error("publish backup.file.received", zap.Error(err))
+		return
+	}
+	h.logger.Info("published backup.file.received",
+		zap.String("path", objectPath),
+		zap.String("backup_task_id_prefix", taskIDPrefix),
+		zap.String("device_sn", deviceSN))
+}
+
+// backupFilenameRe matches the executor's `backup-{taskID8}-{deviceSN}.xml`
+// pattern with optional T-0074/T-0077 compression extension. Capture groups:
+//   1: taskID8 (8 hex chars)
+//   2: deviceSN (any chars up to .xml)
+//   3: optional compression extension (.gz/.zst/.lz4/.bz2) — discarded
+var backupFilenameRe = regexp.MustCompile(`^backup-([0-9a-f]{8})-(.+)\.xml(\.[a-z0-9]+)?$`)
+
+// parseBackupFilename returns (taskIDPrefix, deviceSN) extracted from a
+// backup filename. Returns ("", "") when the filename does not match the
+// executor-generated pattern (e.g. operator-uploaded ad-hoc config) — the
+// subscriber will treat the empty prefix as "no-match skip" without erroring.
+func parseBackupFilename(filename string) (taskIDPrefix, deviceSN string) {
+	m := backupFilenameRe.FindStringSubmatch(filename)
+	if len(m) >= 3 {
+		return m[1], m[2]
+	}
+	return "", ""
 }
 
 // extractDeviceSNFromFilename extracts device SN from filename pattern.

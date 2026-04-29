@@ -8,10 +8,14 @@ package backup
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// RestoreMetrics holds the restore-specific Prometheus collectors.
+// RestoreMetrics holds the restore-specific Prometheus collectors. T-0079
+// adds two more on the same `omc_backup_*` namespace covering the
+// task→file_path linkage and the by-task-id restore mode.
 type RestoreMetrics struct {
-	requestsTotal    *prometheus.CounterVec
-	devicesEnqueued  prometheus.Counter
+	requestsTotal       *prometheus.CounterVec
+	devicesEnqueued     prometheus.Counter
+	filePathRecorded    *prometheus.CounterVec // T-0079
+	restoreByTaskTotal  *prometheus.CounterVec // T-0079
 }
 
 // NewRestoreMetrics registers collectors on the given registry.
@@ -26,9 +30,20 @@ func NewRestoreMetrics(reg prometheus.Registerer) *RestoreMetrics {
 			Name: "omc_backup_restore_devices_enqueued_total",
 			Help: "Total number of device tasks enqueued by restore (cumulative).",
 		}),
+		filePathRecorded: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_filepath_recorded_total",
+			Help: "backup.file.received subscriber outcomes (T-0079). result ∈ {recorded, skipped_already_set, skipped_no_match, error}.",
+		}, []string{"result"}),
+		restoreByTaskTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_restore_by_task_total",
+			Help: "Outcomes of POST /backup/restore/by-task-id (T-0079). result ∈ {accepted, rejected_not_uploaded, rejected_invalid_input}.",
+		}, []string{"result"}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.requestsTotal, m.devicesEnqueued)
+		reg.MustRegister(
+			m.requestsTotal, m.devicesEnqueued,
+			m.filePathRecorded, m.restoreByTaskTotal,
+		)
 	}
 	return m
 }
@@ -49,4 +64,22 @@ func (m *RestoreMetrics) RecordDevicesEnqueued(n int64) {
 		return
 	}
 	m.devicesEnqueued.Add(float64(n))
+}
+
+// RecordFilePathRecord increments the file_path linkage counter (T-0079).
+// result ∈ {"recorded", "skipped_already_set", "skipped_no_match", "error"}.
+func (m *RestoreMetrics) RecordFilePathRecord(result string) {
+	if m == nil {
+		return
+	}
+	m.filePathRecorded.WithLabelValues(result).Inc()
+}
+
+// RecordRestoreByTask increments the by-task-id restore mode counter (T-0079).
+// result ∈ {"accepted", "rejected_not_uploaded", "rejected_invalid_input"}.
+func (m *RestoreMetrics) RecordRestoreByTask(result string) {
+	if m == nil {
+		return
+	}
+	m.restoreByTaskTotal.WithLabelValues(result).Inc()
 }
