@@ -72,11 +72,21 @@ func initSoftwareModule(c *Container) error {
 	}
 	softwareService.RestorePendingUpgrades(context.Background())
 	softwareService.StartTaskReaper()
+
+	// Canary monitor + metrics (T-0018 / R-101)
+	canaryMetrics := software.NewCanaryMetrics(c.MetricsReg)
+	softwareService.SetCanaryMetrics(canaryMetrics)
+	canaryMonitor := software.NewCanaryMonitor(taskRepo, canaryMetrics, logger)
+	if err := canaryMonitor.Start(context.Background()); err != nil {
+		logger.Warn("start canary monitor", zap.Error(err))
+	}
+	c.miscDeps.canaryMonitor = canaryMonitor
+
 	softwareHandler := software.NewHandler(softwareService, firmwareRepo, taskRepo, subTaskRepo, logger)
 
 	c.miscDeps.softwareHandler = softwareHandler
 
-	logger.Info("software management module initialized")
+	logger.Info("software management module initialized with canary monitor")
 	return nil
 }
 
@@ -412,6 +422,7 @@ type miscDeps struct {
 
 	// Software
 	softwareHandler *software.Handler
+	canaryMonitor   *software.CanaryMonitor
 
 	// Provision
 	provisionRepo    *provision.PgProvisioningTaskRepository

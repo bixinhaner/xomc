@@ -90,6 +90,15 @@ func (m *swHTaskRepo) IncrementCounts(_ context.Context, _ uuid.UUID, _, _ int) 
 	return nil
 }
 func (m *swHTaskRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *swHTaskRepo) GetCanaryFields(_ context.Context, _ uuid.UUID) (*CanaryFields, error) {
+	return nil, nil
+}
+func (m *swHTaskRepo) UpdateCanaryFields(_ context.Context, _ uuid.UUID, _ *CanaryFields) error {
+	return nil
+}
+func (m *swHTaskRepo) ListActiveCanaryTaskIDs(_ context.Context) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 type swHSubTaskRepo struct{}
 

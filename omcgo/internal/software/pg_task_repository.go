@@ -3,6 +3,7 @@ package software
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -308,7 +309,6 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if firmwareID.Valid {
 		fid, _ := uuid.Parse(firmwareID.String)
 		task.FirmwareID = &fid
@@ -333,4 +333,127 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	task.CreatedAt = JSONTime(createdAt)
 	task.UpdatedAt = JSONTime(updatedAt)
 	return &task, nil
+}
+
+// =============================================================================
+// Canary fields (T-0018 / R-101) — separate read/write paths so the legacy
+// scanUpgradeTask + Create remain byte-identical.
+// =============================================================================
+
+// GetCanaryFields reads the canary-related columns for one task. total_count
+// is included so the cron monitor can compute per-stage device counts without
+// a second round trip.
+func (r *PgTaskRepository) GetCanaryFields(ctx context.Context, id uuid.UUID) (*CanaryFields, error) {
+	const q = `
+		SELECT strategy, canary_stages, current_stage, stage_status, stage_history,
+		       auto_advance, auto_advance_minutes, total_count
+		FROM upgrade_tasks
+		WHERE id = $1`
+	var (
+		strategy           string
+		stagesRaw          []byte
+		currentStage       int
+		stageStatus        string
+		historyRaw         []byte
+		autoAdvance        bool
+		autoAdvanceMinutes int
+		totalCount         int
+	)
+	err := r.pool.QueryRow(ctx, q, id).Scan(
+		&strategy, &stagesRaw, &currentStage, &stageStatus, &historyRaw,
+		&autoAdvance, &autoAdvanceMinutes, &totalCount,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get canary fields: %w", err)
+	}
+
+	stages, err := UnmarshalStages(stagesRaw)
+	if err != nil {
+		return nil, fmt.Errorf("decode canary_stages: %w", err)
+	}
+
+	var history []StageHistoryEntry
+	if len(historyRaw) > 0 {
+		if err := json.Unmarshal(historyRaw, &history); err != nil {
+			return nil, fmt.Errorf("decode stage_history: %w", err)
+		}
+	}
+
+	return &CanaryFields{
+		TaskID:             id,
+		Strategy:           strategy,
+		Stages:             stages,
+		CurrentStage:       currentStage,
+		StageStatus:        stageStatus,
+		StageHistory:       history,
+		AutoAdvance:        autoAdvance,
+		AutoAdvanceMinutes: autoAdvanceMinutes,
+		TotalCount:         totalCount,
+	}, nil
+}
+
+// UpdateCanaryFields persists every canary column. Used both at Canary start
+// (after Create) and on stage transitions (advance/pause/resume/abort).
+func (r *PgTaskRepository) UpdateCanaryFields(ctx context.Context, id uuid.UUID, fields *CanaryFields) error {
+	if fields == nil {
+		return fmt.Errorf("UpdateCanaryFields: nil fields: %w", commonerrors.ErrInvalidInput)
+	}
+	stagesRaw, err := MarshalStages(fields.Stages)
+	if err != nil {
+		return fmt.Errorf("encode canary_stages: %w", err)
+	}
+	historyRaw, err := json.Marshal(fields.StageHistory)
+	if err != nil {
+		return fmt.Errorf("encode stage_history: %w", err)
+	}
+
+	const q = `
+		UPDATE upgrade_tasks
+		SET strategy = $1,
+		    canary_stages = $2,
+		    current_stage = $3,
+		    stage_status = $4,
+		    stage_history = $5,
+		    auto_advance = $6,
+		    auto_advance_minutes = $7,
+		    updated_at = NOW()
+		WHERE id = $8`
+	tag, err := r.pool.Exec(ctx, q,
+		fields.Strategy, stagesRaw, fields.CurrentStage, fields.StageStatus,
+		historyRaw, fields.AutoAdvance, fields.AutoAdvanceMinutes, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update canary fields: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// ListActiveCanaryTaskIDs returns ids of canary tasks that are still in a
+// non-terminal stage_status (running or paused). Used by the cron monitor.
+func (r *PgTaskRepository) ListActiveCanaryTaskIDs(ctx context.Context) ([]uuid.UUID, error) {
+	const q = `
+		SELECT id FROM upgrade_tasks
+		WHERE strategy = 'canary' AND stage_status IN ('running', 'paused')
+		ORDER BY updated_at ASC`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list active canary tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan canary task id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }

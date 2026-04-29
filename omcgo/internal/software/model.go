@@ -214,6 +214,14 @@ type BatchUpgradeRequest struct {
 	TaskType         TaskType    `json:"task_type"`
 	IsKeepConfig     bool        `json:"is_keep_config"`
 	CreateSuspended  bool        `json:"create_suspended"`
+
+	// Canary strategy (T-0018 / R-101). Strategy defaults to "full" (legacy
+	// path); when "canary", CanaryStages drives stage progression. Empty
+	// CanaryStages falls back to DefaultCanaryStages [1,10,50,100].
+	Strategy           string        `json:"strategy,omitempty"`
+	CanaryStages       []CanaryStage `json:"canary_stages,omitempty"`
+	AutoAdvance        bool          `json:"auto_advance,omitempty"`
+	AutoAdvanceMinutes int           `json:"auto_advance_minutes,omitempty"`
 }
 
 // RollbackRequest is the JSON body for triggering a batch rollback.

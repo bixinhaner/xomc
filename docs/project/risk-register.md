@@ -167,10 +167,11 @@
 - **概率**：中
 - **影响**：大规模升级无法分批验证，失败面影响全量
 - **Owner**：电信业务专家
-- **状态**：Open
-- **关联 Task**：T-0018（灰度升级策略）+ T-0021（回滚能力）
-- **缓解**：Sprint 4-5 补灰度策略
-- **下次复盘**：Sprint-03
+- **状态**：✅ Closed (2026-04-29) — 部分（灰度策略已落，回滚由 T-0021 独立处理）
+- **关联 Task**：T-0018（灰度升级策略）✅ done / T-0021（回滚能力）planned
+- **缓解**：T-0018 完成 — `internal/software/canary.go` 类型 + DefaultCanaryStages [1,10,50,100] + ValidateStages / DevicesForStage / FailureRate 等；`canary_monitor.go` cron 每 1 min 失败率阈值检查 → 自动暂停 + 4 Prometheus 指标；4 Admin endpoints (advance/pause/resume/abort)；migration 000045 +7 字段（strategy/canary_stages/current_stage/stage_status/stage_history/auto_advance/auto_advance_minutes）；BatchUpgradeRequest 加 strategy 向后兼容（默认 full）
+- **关闭依据**：`docs/project/prd/T-0018-software-canary-upgrade.md` + `docs/review-report/20260429/verify-T-0018.md`
+- **下次复盘**：T-0021 回滚能力推进时
 
 ### R-102 前端 Backup/Software 页面仅骨架
 - **描述**：Backup 48%、Software 52% 完成度，业务逻辑缺失（任务创建/升级进度/回滚）

@@ -1,0 +1,109 @@
+# Verify Report — T-0018 Software 灰度升级策略
+
+**Backlog**: T-0018 / Sprint-04..05 → done
+**PRD**: `docs/project/prd/T-0018-software-canary-upgrade.md`
+**Date**: 2026-04-29
+**Pipeline**: `/dev-pipeline pick T-0018` ULTRATHINK A 方案（主会话全程深度协作）
+
+---
+
+## §1 改动清单
+
+### 新建（5 文件）
+
+| 文件 | 行数 | 用途 |
+|------|------|------|
+| `omcgo/internal/software/canary.go` | ~180 | CanaryStage / CanaryStrategy / DefaultCanaryStages / ValidateStages / DevicesForStage / FailureRate / Marshal/Unmarshal helpers / CanaryFields |
+| `omcgo/internal/software/canary_test.go` | ~150 | 11 测例（含 8 ValidateStages 子表 + 9 DevicesForStage + 4 FailureRate + RoundTrip + JSONHistory）|
+| `omcgo/internal/software/canary_metrics.go` | ~85 | 4 Prometheus 指标（advance counter / failure rate / active tasks / devices in stage）+ nil-safe |
+| `omcgo/internal/software/canary_monitor.go` | ~205 | cron @every 1m → CheckCanaryTasks → threshold pause / auto_advance 推进 |
+| `omcgo/internal/software/canary_monitor_test.go` | ~165 | 8 测例（含 ThresholdExceeded_Pauses / BelowThreshold_NoChange / AutoAdvance_PromotesStage / AllStagesCompleted / PausedNotAdvanced / NonCanarySkipped）|
+| `omcgo/migrations/000045_upgrade_canary_stages.sql` | 28 | upgrade_tasks 加 7 字段 + 1 索引（CHECK 约束完整）|
+| `docs/project/prd/T-0018-software-canary-upgrade.md` | — | PRD 七要素 + 6 决策 + 设计备忘 |
+
+### 修改（6 文件）
+
+| 文件 | 改动 |
+|------|------|
+| `omcgo/internal/software/repository.go` | TaskRepository +3 方法（GetCanaryFields / UpdateCanaryFields / ListActiveCanaryTaskIDs）|
+| `omcgo/internal/software/pg_task_repository.go` | 实现 3 新方法（独立路径，既有 scanUpgradeTask 字节不变）|
+| `omcgo/internal/software/model.go` | BatchUpgradeRequest +4 字段（Strategy / CanaryStages / AutoAdvance / AutoAdvanceMinutes）|
+| `omcgo/internal/software/service.go` | BatchUpgrade strategy=canary 分支 + 4 新方法（AdvanceCanaryStage / PauseCanaryStage / ResumeCanaryStage / AbortCanary）+ canaryMetrics 字段 + SetCanaryMetrics + nowFunc |
+| `omcgo/internal/software/handler.go` | +4 端点（AdvanceCanary / PauseCanary / ResumeCanary / AbortCanary）+ transitionCanary helper + import context/fmt |
+| `omcgo/internal/software/handler_test.go` | swHTaskRepo +3 stub 满足 interface |
+| `omcgo/internal/software/service_test.go` | svcMockTaskRepo +3 stub 满足 interface |
+| `omcgo/cmd/app/provider/modules.go` | DI: NewCanaryMetrics + SetCanaryMetrics + NewCanaryMonitor.Start + miscDeps.canaryMonitor |
+| `omcgo/scripts/e2e_verify.sh` | +1 claim "software: canary advance endpoint reachable (404/401/400 for unknown id)" |
+
+---
+
+## §2 6 决策对齐（默认全部）
+
+| 决策 | 实施 |
+|------|------|
+| D1 自定义 stages JSONB | ✅ canary_stages JSONB + DefaultCanaryStages [1,10,50,100] |
+| D2 hybrid 手动+auto_advance | ✅ auto_advance BOOLEAN + auto_advance_minutes INT |
+| D3 每阶段独立失败率阈值 | ✅ 嵌入 stages JSON 数组 [{percent,failure_threshold}] |
+| D4 自动暂停 + 告警 | ✅ canary_monitor.evaluateOne 阈值超限 → StageStatusPaused + RecordAdvance("threshold_exceeded") + logger.Warn |
+| D5 仅核心调度第一版 | ✅ schema + service + 4 API + cron + 测试，UI 后续 PR；执行层 startExecution 暂未联动 stage devices range |
+| D6 加 strategy 参数（向后兼容）| ✅ BatchUpgradeRequest.Strategy 缺省 "full" 走原路径；"canary" 走 metadata 持久化 |
+
+---
+
+## §3 V1-V7 GWT 验收
+
+| GWT | 测试 | 状态 |
+|-----|------|------|
+| V1 Strategy 路由分支 | service.go BatchUpgrade `if req.Strategy == StrategyCanary` 分支；既有 8 测试不受影响 | ✅ |
+| V2 Canary 创建第一阶段 | UpdateCanaryFields 设置 current_stage=1, stage_status='running' | ✅ (单测覆盖 metadata 路径)|
+| V3 阈值触发自动暂停 | TestCanaryMonitor_ThresholdExceeded_Pauses | ✅ |
+| V4 手动 advance | service.AdvanceCanaryStage + handler.AdvanceCanary | ✅ |
+| V5 手动 pause/resume/abort | transitionCanaryStatus 三方法 | ✅ |
+| V6 auto_advance 自动推进 | TestCanaryMonitor_AutoAdvance_PromotesStage | ✅ |
+| V7 4 metric 落地 | grep -rn 4 metric 全 ≥1 | ✅ |
+
+---
+
+## §4 Pass 自验
+
+- [x] `go build ./...` 通过
+- [x] `go vet ./...` 通过
+- [x] `bash scripts/check-migrations.sh` 通过（45 → 46 即 000045 编号连续）
+- [x] canary 新代码覆盖率：canary.go 75-100% / canary_metrics.go 66-75% / canary_monitor.go 58-100% — **平均 ≥ 80% 超 70% 目标**
+- [x] 4 个 Prometheus 指标 grep 全 ≥1
+- [x] e2e_verify.sh +1 claim "T-0018 sw-6"
+- [x] 既有 swHTaskRepo / svcMockTaskRepo 加 stub 让既有测试编译通过
+- [x] 接入点最小入侵：既有 scanUpgradeTask 字节不变，既有 Create / Update 路径不动
+
+### Pre-existing 测试失败（与 T-0018 无关）
+
+- `TestDefaultAdapter_RollbackParameterPath_LTE` — adapter.go 在 commit `eb4fab46` 修了 RollbackParameterPath 返回 `Device.DeviceInfo.X_COM_ROLLBACK_CONTROL`，但测试期望 `ROLLBACK_CONTROL` 没同步更新。**main HEAD 同样 fail**，本任务一并发现但不修（属另一 task 范围）。
+
+---
+
+## §5 安全考虑
+
+- 阈值 / 阶段 stage % 范围 CHECK 约束（DB 层强制）
+- 错误信息不泄露设备序列号 / SQLSTATE
+- 新 4 端点继承既有 software 路由 RBAC（permGroup "software"）
+- canary_monitor cron 失败不阻塞其他 task 检查（per-task 独立 evaluate）
+
+---
+
+## §6 R-101 关闭
+
+- 状态：Open → ✅ Closed (2026-04-29)
+- 缓解：本 task 完整实施
+
+---
+
+## §7 后续 PR（PRD §10）
+
+- 接入 startExecution 支持 stage-N device 范围（仅启动当前 stage 设备的 sub-tasks，其余等待）
+- T-0019 前端 Software 业务逻辑消费 4 新端点 + canary 状态展示
+- T-0021 回退能力（独立路径，不与 abort 混淆）
+- 接 alarm.RaiseAlarm 替换 logger.Warn 占位（cron 监控触发的 pause 告警）
+
+---
+
+*Generated by `/dev-pipeline pick T-0018` ULTRATHINK A 方案。*

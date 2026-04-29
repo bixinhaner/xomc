@@ -1,6 +1,8 @@
 package software
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -56,6 +58,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	upgrade.POST("/:id/retry", h.RetryUpgradeTask)
 	upgrade.POST("/rollback", h.CreateRollback)
 	upgrade.GET("/:id/tasks", h.ListSubTasks)
+	// Canary stage transitions (T-0018 / R-101)
+	upgrade.POST("/:id/advance", h.AdvanceCanary)
+	upgrade.POST("/:id/pause-canary", h.PauseCanary)
+	upgrade.POST("/:id/resume-canary", h.ResumeCanary)
+	upgrade.POST("/:id/abort-canary", h.AbortCanary)
 
 	subTasks := rg.Group("/upgrade-sub-tasks")
 	subTasks.GET("/:id", h.GetSubTask)
@@ -432,4 +439,51 @@ func (h *Handler) GetSubTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, task)
+}
+
+// ==========================================================================
+// Canary stage transitions (T-0018 / R-101)
+// ==========================================================================
+
+// AdvanceCanary handles POST /upgrade-tasks/:id/advance
+//
+// Promotes a paused/running canary task to its next stage. 404 if task
+// not found, 400 if task is not on the canary path or already terminal.
+func (h *Handler) AdvanceCanary(c *gin.Context) {
+	h.transitionCanary(c, h.service.AdvanceCanaryStage, "advance")
+}
+
+// PauseCanary handles POST /upgrade-tasks/:id/pause-canary
+//
+// Pauses stage progression. In-flight sub-tasks continue. Distinct from
+// SuspendUpgradeTask (PUT /upgrade-tasks/:id/suspend) which halts execution.
+func (h *Handler) PauseCanary(c *gin.Context) {
+	h.transitionCanary(c, h.service.PauseCanaryStage, "pause")
+}
+
+// ResumeCanary handles POST /upgrade-tasks/:id/resume-canary
+func (h *Handler) ResumeCanary(c *gin.Context) {
+	h.transitionCanary(c, h.service.ResumeCanaryStage, "resume")
+}
+
+// AbortCanary handles POST /upgrade-tasks/:id/abort-canary
+//
+// Terminates remaining stages. Already-running sub-tasks are not killed —
+// operators must call SuspendUpgradeTask in addition if they want to halt
+// in-flight executions.
+func (h *Handler) AbortCanary(c *gin.Context) {
+	h.transitionCanary(c, h.service.AbortCanary, "abort")
+}
+
+func (h *Handler) transitionCanary(c *gin.Context, fn func(ctx context.Context, taskID uuid.UUID) error, op string) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("invalid task id: %w", err))
+		return
+	}
+	if err := fn(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"task_id": id.String(), "operation": op, "result": "ok"})
 }

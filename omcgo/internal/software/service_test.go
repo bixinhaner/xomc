@@ -84,6 +84,15 @@ func (m *svcMockTaskRepo) IncrementCounts(ctx context.Context, taskID uuid.UUID,
 	return nil
 }
 func (m *svcMockTaskRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *svcMockTaskRepo) GetCanaryFields(_ context.Context, _ uuid.UUID) (*CanaryFields, error) {
+	return nil, nil
+}
+func (m *svcMockTaskRepo) UpdateCanaryFields(_ context.Context, _ uuid.UUID, _ *CanaryFields) error {
+	return nil
+}
+func (m *svcMockTaskRepo) ListActiveCanaryTaskIDs(_ context.Context) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 type svcMockSubTaskRepo struct {
 	createFn            func(ctx context.Context, task *UpgradeSubTask) error

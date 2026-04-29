@@ -4987,6 +4987,12 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/upgrade-sub-tasks?page=1&page_size=5" -H "$W2D_AUTH")
 check_status_in "W2D sw-5: GET /upgrade-sub-tasks" "200 401" "$HTTP_CODE"
 
+# T-0018 / R-101: canary stage transition endpoints (admin/RBAC)
+claim "software: canary advance endpoint reachable (404/401/400 for unknown id)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/upgrade-tasks/$W2D_BAD_UUID/advance" -H "$W2D_AUTH")
+check_status_in "W2D sw-6: POST /upgrade-tasks/<id>/advance" "404 401 400" "$HTTP_CODE"
+
 # ------------------------------------------------------------
 section "W2.D.1 backup Domain (≥ 5 claims)"
 

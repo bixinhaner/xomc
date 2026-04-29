@@ -37,7 +37,14 @@ type SoftwareService struct {
 	executor     *UpgradeExecutor
 	rollbackExec *RollbackExecutor
 	adapter      UpgradeAdapter
+	canaryMetrics *CanaryMetrics // optional; nil-safe via metrics methods
 	logger       *zap.Logger
+}
+
+// SetCanaryMetrics wires Prometheus metrics for canary stage transitions.
+// Safe to call after construction (DI container picks one MetricsReg).
+func (s *SoftwareService) SetCanaryMetrics(m *CanaryMetrics) {
+	s.canaryMetrics = m
 }
 
 // NewSoftwareService creates a new SoftwareService.
@@ -193,6 +200,40 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		return mainTask, nil
 	}
 
+	// Canary strategy (T-0018 / R-101): persist stage metadata before kicking
+	// execution. The execution layer still launches all sub-tasks today; the
+	// canary monitor (canary_monitor.go) gates stage progression by failure-
+	// rate thresholds and triggers SuspendUpgrade when crossed. Subsequent PR
+	// extends startExecution to start only stage-N devices.
+	if req.Strategy == StrategyCanary {
+		stages := req.CanaryStages
+		if len(stages) == 0 {
+			stages = append([]CanaryStage(nil), DefaultCanaryStages...)
+		}
+		if err := ValidateStages(stages); err != nil {
+			return nil, fmt.Errorf("validate canary stages: %w", err)
+		}
+		if err := s.taskRepo.UpdateCanaryFields(ctx, mainTask.ID, &CanaryFields{
+			TaskID:             mainTask.ID,
+			Strategy:           StrategyCanary,
+			Stages:             stages,
+			CurrentStage:       1,
+			StageStatus:        StageStatusRunning,
+			StageHistory:       []StageHistoryEntry{},
+			AutoAdvance:        req.AutoAdvance,
+			AutoAdvanceMinutes: req.AutoAdvanceMinutes,
+			TotalCount:         mainTask.TotalCount,
+		}); err != nil {
+			return nil, fmt.Errorf("init canary fields: %w", err)
+		}
+		s.logger.Info("canary upgrade started",
+			zap.String("task_id", mainTask.ID.String()),
+			zap.Int("total_devices", mainTask.TotalCount),
+			zap.Int("stage_count", len(stages)),
+			zap.Bool("auto_advance", req.AutoAdvance),
+		)
+	}
+
 	if err := s.taskRepo.UpdateStatus(ctx, mainTask.ID, TaskInProgress, ""); err != nil {
 		s.logger.Error("update main task to in_progress", zap.Error(err))
 	}
@@ -202,6 +243,105 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 
 	return mainTask, nil
 }
+
+// =============================================================================
+// Canary stage transitions (T-0018 / R-101)
+// =============================================================================
+
+// AdvanceCanaryStage promotes a paused/running canary task to the next stage.
+// Returns ErrInvalidInput when the task is not on the canary path or already
+// completed/aborted.
+func (s *SoftwareService) AdvanceCanaryStage(ctx context.Context, taskID uuid.UUID) error {
+	fields, err := s.taskRepo.GetCanaryFields(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get canary fields: %w", err)
+	}
+	if !fields.IsCanary() {
+		return fmt.Errorf("task is not canary: %w", commonerrors.ErrInvalidInput)
+	}
+	if fields.StageStatus == StageStatusCompleted || fields.StageStatus == StageStatusAborted {
+		return fmt.Errorf("canary task already terminal (%s): %w", fields.StageStatus, commonerrors.ErrInvalidInput)
+	}
+	next := fields.CurrentStage + 1
+	if next > len(fields.Stages) {
+		// All stages exhausted → mark completed.
+		fields.StageStatus = StageStatusCompleted
+		fields.StageHistory = append(fields.StageHistory, StageHistoryEntry{
+			Stage: fields.CurrentStage, Action: "completed", At: nowFunc(),
+		})
+		s.logger.Info("canary task completed all stages", zap.String("task_id", taskID.String()))
+	} else {
+		fields.StageHistory = append(fields.StageHistory, StageHistoryEntry{
+			Stage:   fields.CurrentStage,
+			Percent: fields.Stages[fields.CurrentStage-1].Percent,
+			Action:  "advanced",
+			At:      nowFunc(),
+		})
+		fields.CurrentStage = next
+		fields.StageStatus = StageStatusRunning
+		s.logger.Info("canary task advanced",
+			zap.String("task_id", taskID.String()),
+			zap.Int("new_stage", next),
+			zap.Int("percent", fields.Stages[next-1].Percent),
+		)
+	}
+	if s.canaryMetrics != nil {
+		s.canaryMetrics.RecordAdvance("advanced")
+	}
+	return s.taskRepo.UpdateCanaryFields(ctx, taskID, fields)
+}
+
+// PauseCanaryStage pauses a running canary task. In-flight sub-tasks continue;
+// no new stage promotion until ResumeCanaryStage / AbortCanary is called.
+func (s *SoftwareService) PauseCanaryStage(ctx context.Context, taskID uuid.UUID) error {
+	return s.transitionCanaryStatus(ctx, taskID, StageStatusPaused, "paused", "manual_pause")
+}
+
+// ResumeCanaryStage moves a paused canary back to running.
+func (s *SoftwareService) ResumeCanaryStage(ctx context.Context, taskID uuid.UUID) error {
+	return s.transitionCanaryStatus(ctx, taskID, StageStatusRunning, "resumed", "manual_resume")
+}
+
+// AbortCanary terminates remaining stages of a canary task. Already-running
+// sub-tasks are not killed — operators must call SuspendUpgrade if they
+// also want to halt in-flight executions.
+func (s *SoftwareService) AbortCanary(ctx context.Context, taskID uuid.UUID) error {
+	return s.transitionCanaryStatus(ctx, taskID, StageStatusAborted, "aborted", "manual_abort")
+}
+
+func (s *SoftwareService) transitionCanaryStatus(ctx context.Context, taskID uuid.UUID, target, action, reason string) error {
+	fields, err := s.taskRepo.GetCanaryFields(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get canary fields: %w", err)
+	}
+	if !fields.IsCanary() {
+		return fmt.Errorf("task is not canary: %w", commonerrors.ErrInvalidInput)
+	}
+	if fields.StageStatus == StageStatusCompleted || fields.StageStatus == StageStatusAborted {
+		return fmt.Errorf("canary task already terminal (%s): %w", fields.StageStatus, commonerrors.ErrInvalidInput)
+	}
+	prev := fields.StageStatus
+	fields.StageStatus = target
+	fields.StageHistory = append(fields.StageHistory, StageHistoryEntry{
+		Stage:  fields.CurrentStage,
+		Action: action,
+		At:     nowFunc(),
+		Reason: reason,
+	})
+	s.logger.Info("canary task status changed",
+		zap.String("task_id", taskID.String()),
+		zap.String("from", prev),
+		zap.String("to", target),
+		zap.String("reason", reason),
+	)
+	if s.canaryMetrics != nil {
+		s.canaryMetrics.RecordAdvance(action)
+	}
+	return s.taskRepo.UpdateCanaryFields(ctx, taskID, fields)
+}
+
+// nowFunc is overridable for tests; production reads time.Now.
+var nowFunc = func() time.Time { return time.Now() }
 
 // startExecution launches goroutines to execute upgrade sub-tasks with bounded concurrency.
 func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, fw *FirmwareVersion, concurrency int) {

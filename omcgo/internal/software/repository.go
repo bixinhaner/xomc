@@ -26,6 +26,12 @@ type TaskRepository interface {
 	IncrementCounts(ctx context.Context, taskID uuid.UUID, successDelta, failDelta int) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status TaskStatus, result TaskResult) error
 	Delete(ctx context.Context, id uuid.UUID) error
+
+	// Canary fields (T-0018 / R-101). Read/written via dedicated methods so
+	// the legacy scanUpgradeTask + Create paths stay byte-identical.
+	GetCanaryFields(ctx context.Context, id uuid.UUID) (*CanaryFields, error)
+	UpdateCanaryFields(ctx context.Context, id uuid.UUID, fields *CanaryFields) error
+	ListActiveCanaryTaskIDs(ctx context.Context) ([]uuid.UUID, error)
 }
 
 // SubTaskRepository provides persistence for per-device upgrade sub-tasks (upgrade_sub_tasks table).
