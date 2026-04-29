@@ -180,10 +180,11 @@
 - **概率**：高
 - **影响**：运维场景不可用
 - **Owner**：前端专家
-- **状态**：Open
-- **关联 Task**：T-0016（Backup）/ T-0019（Software）/ T-0022（Topology/Report）
-- **缓解**：Sprint 3-4 补业务逻辑
-- **下次复盘**：Sprint-02
+- **状态**：⚠️ Partially Closed (2026-04-29) — Software/Topology/Report 全闭环；Backup 仅 Tasks/FTP 子集闭环；Schedule/Policy/Restore 留 3 followup
+- **关联 Task**：T-0019 ✅（Software Canary 消费）/ T-0022 ✅（Topology/Report）/ T-0016 ✅（Backup Tasks + FTP）；followups T-0070 (Schedule UI 重设计) / T-0071 (Policy 后端+前端) / T-0072 (Restore 流程设计)
+- **关闭依据（已闭环部分）**：T-0019 commit `4ebdc91c` + T-0022 commit `c5e134c0` + T-0016 commit `c939ff12`
+- **未闭环部分**：审计发现 Backup 子模块原 48% 完成度估值偏乐观，实际 ≈20%（BackupTasks `void data` 不消费 hook、BackupSchedule 名实不符、BackupPolicy 后端无 endpoint、RestoreData 后端无 restore）；本任务务实闭环 Tasks+FTP，剩余三个子模块各需独立 design 工作
+- **下次复盘**：T-0070/0071/0072 完成时（预计 sprint-06+）
 
 ### R-103 License 容量/过期未拦截
 - **描述**：`MaxDevices`/`ExpiryDate` 字段有，但无超限拦截与自动禁用
