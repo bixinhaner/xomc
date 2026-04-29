@@ -316,8 +316,6 @@ func (c compressionWrap) bytesIn() int64 {
 //   - no policyGetter wired, OR
 //   - policy lookup failed, OR
 //   - policy.EnableCompression=false, OR
-//   - format ∈ {lz4, bzip2} (not yet implemented; service layer should have
-//     rejected this combination on PUT, but defend in depth), OR
 //   - NewCompressor / Wrap failed (recorded as metric, fall back to plaintext).
 //
 // The fall-back-on-failure choice is deliberate: backup is a high-availability
@@ -334,11 +332,8 @@ func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType
 		}
 		return compressionWrap{}
 	}
-	if pol.CompressionFormat == "lz4" || pol.CompressionFormat == "bzip2" {
-		h.logger.Warn("compression format not implemented; passing through",
-			zap.String("format", pol.CompressionFormat))
-		return compressionWrap{}
-	}
+	// T-0077: lz4 + bzip2 are now real implementations; the earlier
+	// "format not implemented; passing through" guard was removed.
 	c, err := backup.NewCompressor(pol.CompressionFormat, pol.CompressionLevel)
 	if err != nil {
 		h.compressionMetrics.RecordCompressionError(pol.CompressionFormat, "open")

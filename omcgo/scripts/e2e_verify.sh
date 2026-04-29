@@ -5027,14 +5027,14 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/policy" -H "$W2D_AUTH")
 check_status_in "W2D bk-7: GET /backup/policy (T-0071 persistence MVP)" "200 401" "$HTTP_CODE"
 
-# T-0074 / R-102: PUT /backup/policy with EnableCompression=true + format=lz4
-# rejected at service-layer validation (lz4 not yet implemented; gzip / zstd
-# only supported in current build). Followup T-0077 will lift this restriction.
-claim "backup: PUT policy with lz4+EnableCompression rejected (T-0074)"
+# T-0077 / R-102: PUT /backup/policy with EnableCompression=true + format=lz4
+# now ACCEPTED (lz4 + bzip2 ship as first-class implementations alongside
+# gzip/zstd from T-0074). Previous T-0074 e2e expected 400; inverted to 200.
+claim "backup: PUT policy with lz4+EnableCompression accepted (T-0077)"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
     "$API/backup/policy" -H "$W2D_AUTH" -H "Content-Type: application/json" \
     -d '{"retention_days":30,"max_backup_count":100,"min_backup_count":3,"auto_cleanup":true,"cleanup_time":"03:00","cleanup_day_of_week":-1,"keep_last_n":5,"enable_compression":true,"compression_level":6,"compression_format":"lz4","storage_backend":"local","local_path":"/var/backup/omc","max_storage_gb":500,"enable_encryption":false,"encryption_algorithm":"AES-256-GCM","alert_on_failure":true,"alert_email":"","alert_threshold_percent":80}')
-check_status_in "W2D bk-8: PUT /backup/policy lz4 reject (T-0074)" "400 401" "$HTTP_CODE"
+check_status_in "W2D bk-8: PUT /backup/policy lz4 accept (T-0077)" "200 401" "$HTTP_CODE"
 
 claim "backup: list ftp configs returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \

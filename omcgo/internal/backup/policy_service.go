@@ -98,16 +98,10 @@ func validatePolicy(p *BackupPolicy) error {
 	if _, ok := validBackupPolicyCompressionFormats[p.CompressionFormat]; !ok {
 		return fmt.Errorf("invalid compression_format %q: %w", p.CompressionFormat, commonerrors.ErrInvalidInput)
 	}
-	// T-0074: lz4 / bzip2 are accepted as persisted values (schema-level CHECK
-	// allows them) but are not implemented in the executor yet. Reject the
-	// combination "EnableCompression=true AND format ∈ {lz4, bzip2}" so the
-	// user sees a clear 400 instead of silent fall-through to no-op.
-	// Followup T-0077 will lift this restriction once the algorithms ship.
-	if p.EnableCompression && (p.CompressionFormat == "lz4" || p.CompressionFormat == "bzip2") {
-		return fmt.Errorf(
-			"compression_format=%s not yet implemented (暂未支持); choose gzip or zstd, or set enable_compression=false (请选择 gzip/zstd 或关闭压缩): %w",
-			p.CompressionFormat, commonerrors.ErrInvalidInput)
-	}
+	// T-0077: lz4 + bzip2 are now first-class implementations (alongside gzip
+	// and zstd from T-0074). The previous "reject when EnableCompression=true"
+	// guard was removed because all four formats produce real compressed
+	// streams now.
 	if _, ok := validBackupPolicyStorageBackends[p.StorageBackend]; !ok {
 		return fmt.Errorf("invalid storage_backend %q: %w", p.StorageBackend, commonerrors.ErrInvalidInput)
 	}

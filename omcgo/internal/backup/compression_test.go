@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	stdbzip2 "compress/bzip2"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/pierrec/lz4/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,16 +32,17 @@ func TestNewCompressor_levelOutOfRange(t *testing.T) {
 	}
 }
 
-func TestNewCompressor_lz4Stub(t *testing.T) {
-	_, err := NewCompressor("lz4", 6)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrCompressionFormatNotImplemented))
-}
+// T-0077: lz4 + bzip2 are now first-class implementations (no longer stubs).
+// The corresponding stub-error tests were removed; round-trip suites below
+// exercise the full encoder/decoder pair instead.
 
-func TestNewCompressor_bzip2Stub(t *testing.T) {
-	_, err := NewCompressor("bzip2", 6)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrCompressionFormatNotImplemented))
+func TestNewCompressor_lz4_bzip2_areImplemented(t *testing.T) {
+	for _, fmtName := range []string{"lz4", "bzip2"} {
+		c, err := NewCompressor(fmtName, 6)
+		require.NoError(t, err, "format=%s should construct", fmtName)
+		require.NotNil(t, c)
+		assert.Equal(t, fmtName, c.Format())
+	}
 }
 
 func TestGzipRoundTrip_allLevels(t *testing.T) {
@@ -169,6 +172,94 @@ func (c *countingZeroReader) Read(p []byte) (int, error) {
 	c.remaining -= int64(n)
 	c.read += int64(n)
 	return n, nil
+}
+
+// TestLZ4RoundTrip_allLevels — T-0077.
+func TestLZ4RoundTrip_allLevels(t *testing.T) {
+	plaintext := []byte(strings.Repeat("backup config payload ", 256))
+	for level := 1; level <= 9; level++ {
+		level := level
+		t.Run("level="+itoa(level), func(t *testing.T) {
+			c, err := NewCompressor("lz4", level)
+			require.NoError(t, err)
+			assert.Equal(t, "lz4", c.Format())
+			assert.Equal(t, ".lz4", c.Extension())
+
+			rc, err := c.Wrap(context.Background(), bytes.NewReader(plaintext))
+			require.NoError(t, err)
+			defer rc.Close()
+
+			compressed, err := io.ReadAll(rc)
+			require.NoError(t, err)
+
+			// lz4 frame magic bytes: 0x04 0x22 0x4d 0x18
+			require.GreaterOrEqual(t, len(compressed), 4)
+			assert.Equal(t, byte(0x04), compressed[0])
+			assert.Equal(t, byte(0x22), compressed[1])
+			assert.Equal(t, byte(0x4d), compressed[2])
+			assert.Equal(t, byte(0x18), compressed[3])
+
+			lzr := lz4.NewReader(bytes.NewReader(compressed))
+			recovered, err := io.ReadAll(lzr)
+			require.NoError(t, err)
+			assert.Equal(t, plaintext, recovered)
+		})
+	}
+}
+
+// TestBzip2RoundTrip_allLevels — T-0077.
+//
+// Read side uses the stdlib `compress/bzip2` reader so we are testing
+// interoperability with non-dsnet decompressors (the most common consumer
+// case — `bunzip2` CLI / archive/tar consumers).
+func TestBzip2RoundTrip_allLevels(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip bzip2 round-trip under -short (slow)")
+	}
+	plaintext := []byte(strings.Repeat("backup config payload ", 256))
+	for level := 1; level <= 9; level++ {
+		level := level
+		t.Run("level="+itoa(level), func(t *testing.T) {
+			c, err := NewCompressor("bzip2", level)
+			require.NoError(t, err)
+			assert.Equal(t, "bzip2", c.Format())
+			assert.Equal(t, ".bz2", c.Extension())
+
+			rc, err := c.Wrap(context.Background(), bytes.NewReader(plaintext))
+			require.NoError(t, err)
+			defer rc.Close()
+
+			compressed, err := io.ReadAll(rc)
+			require.NoError(t, err)
+
+			// bzip2 magic bytes: "BZh" = 0x42 0x5a 0x68
+			require.GreaterOrEqual(t, len(compressed), 3)
+			assert.Equal(t, byte(0x42), compressed[0])
+			assert.Equal(t, byte(0x5a), compressed[1])
+			assert.Equal(t, byte(0x68), compressed[2])
+
+			bzr := stdbzip2.NewReader(bytes.NewReader(compressed))
+			recovered, err := io.ReadAll(bzr)
+			require.NoError(t, err)
+			assert.Equal(t, plaintext, recovered)
+		})
+	}
+}
+
+// TestLZ4LevelMapping ensures the 1..9 → pierrec named-level mapping is direct.
+func TestLZ4LevelMapping(t *testing.T) {
+	tests := []struct {
+		level int
+		want  lz4.CompressionLevel
+	}{
+		{1, lz4.Level1},
+		{5, lz4.Level5},
+		{9, lz4.Level9},
+	}
+	for _, tc := range tests {
+		got := lz4LevelFor(tc.level)
+		assert.Equal(t, tc.want, got, "level=%d", tc.level)
+	}
 }
 
 // TestZstdLevelMapping exercises the 1..9 → klauspost level collapsing.

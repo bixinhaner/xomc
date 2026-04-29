@@ -8,6 +8,7 @@ require (
 	github.com/beevik/etree v1.6.0
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/doug-martin/goqu/v9 v9.19.0
+	github.com/dsnet/compress v0.0.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
@@ -19,6 +20,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/minio/minio-go/v7 v7.0.98
 	github.com/nats-io/nats.go v1.31.0
+	github.com/pierrec/lz4/v4 v4.1.26
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2

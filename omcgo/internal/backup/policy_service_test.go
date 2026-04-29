@@ -122,19 +122,16 @@ func TestPolicyService_Update_ValidationMatrix(t *testing.T) {
 		{"alert threshold too high", func(p *BackupPolicy) { p.AlertThresholdPercent = 96 }, true, "alert_threshold"},
 		{"bad email when alert on", func(p *BackupPolicy) { p.AlertOnFailure = true; p.AlertEmail = "not-an-email" }, true, "alert_email"},
 		{"empty email ok when alert on", func(p *BackupPolicy) { p.AlertOnFailure = true; p.AlertEmail = "" }, false, ""},
-		// T-0074: lz4 / bzip2 with enable_compression=true → 400 (not yet implemented).
-		{"lz4 + enable_compression=true rejected (T-0074)", func(p *BackupPolicy) {
+		// T-0077: lz4 + bzip2 are now first-class implementations and accepted
+		// regardless of EnableCompression value (the prior T-0074 reject guard
+		// was removed in policy_service.go alongside this assertion change).
+		{"lz4 + enable_compression=true now accepted (T-0077)", func(p *BackupPolicy) {
 			p.EnableCompression = true
 			p.CompressionFormat = "lz4"
-		}, true, "lz4 not yet implemented"},
-		{"bzip2 + enable_compression=true rejected (T-0074)", func(p *BackupPolicy) {
+		}, false, ""},
+		{"bzip2 + enable_compression=true now accepted (T-0077)", func(p *BackupPolicy) {
 			p.EnableCompression = true
 			p.CompressionFormat = "bzip2"
-		}, true, "bzip2 not yet implemented"},
-		// Persisted with EnableCompression=false → allowed (just stored).
-		{"lz4 with enable_compression=false ok (T-0074)", func(p *BackupPolicy) {
-			p.EnableCompression = false
-			p.CompressionFormat = "lz4"
 		}, false, ""},
 	}
 	for _, tt := range tests {

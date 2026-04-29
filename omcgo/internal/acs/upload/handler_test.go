@@ -64,22 +64,33 @@ func TestMaybeWrapForCompression_disabled(t *testing.T) {
 	assert.False(t, w.applied, "EnableCompression=false must keep plaintext")
 }
 
-func TestMaybeWrapForCompression_lz4PassThrough(t *testing.T) {
+// T-0077: lz4 / bzip2 now apply (no longer pass through). The pass-through
+// tests were inverted — both formats now exercise the same applied=true path
+// as gzip/zstd, exercised end-to-end by TestMaybeWrapForCompression_lz4Applied
+// and _bzip2Applied below.
+
+func TestMaybeWrapForCompression_lz4Applied(t *testing.T) {
 	pol := backup.DefaultPolicy()
 	pol.EnableCompression = true
 	pol.CompressionFormat = "lz4"
 	h := newTestHandler(t, &fakePolicyGetter{policy: pol})
 	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
-	assert.False(t, w.applied, "lz4 (not implemented) must pass through")
+	require.True(t, w.applied, "lz4 must apply now that T-0077 ships the real impl")
+	defer w.body.Close()
+	assert.Equal(t, "lz4", w.format)
+	assert.Equal(t, ".lz4", w.ext)
 }
 
-func TestMaybeWrapForCompression_bzip2PassThrough(t *testing.T) {
+func TestMaybeWrapForCompression_bzip2Applied(t *testing.T) {
 	pol := backup.DefaultPolicy()
 	pol.EnableCompression = true
 	pol.CompressionFormat = "bzip2"
 	h := newTestHandler(t, &fakePolicyGetter{policy: pol})
 	w := h.maybeWrapForCompression(context.Background(), tr069.FileTypeConfig, strings.NewReader("payload"))
-	assert.False(t, w.applied, "bzip2 (not implemented) must pass through")
+	require.True(t, w.applied, "bzip2 must apply now that T-0077 ships the real impl")
+	defer w.body.Close()
+	assert.Equal(t, "bzip2", w.format)
+	assert.Equal(t, ".bz2", w.ext)
 }
 
 func TestMaybeWrapForCompression_gzipApplied(t *testing.T) {

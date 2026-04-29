@@ -8,11 +8,11 @@
 // upload r.Body with a Compressor when policy.EnableCompression=true and the
 // file type is FileTypeConfig (CWMP "3" Vendor Configuration File).
 //
-// Algorithm coverage in this MVP:
-//   - gzip:  full, stdlib compress/gzip
-//   - zstd:  full, github.com/klauspost/compress/zstd
-//   - lz4:   stub, returns ErrCompressionFormatNotImplemented (followup T-0077)
-//   - bzip2: stub, returns ErrCompressionFormatNotImplemented (followup T-0077)
+// Algorithm coverage:
+//   - gzip:  full, stdlib compress/gzip                            (T-0074)
+//   - zstd:  full, github.com/klauspost/compress/zstd              (T-0074)
+//   - lz4:   full, github.com/pierrec/lz4/v4 (frame format)        (T-0077)
+//   - bzip2: full, github.com/dsnet/compress/bzip2                 (T-0077)
 package backup
 
 import (
@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/dsnet/compress/bzip2"
 	"github.com/klauspost/compress/zstd"
+	"github.com/pierrec/lz4/v4"
 )
 
 // Sentinel errors callers compare with errors.Is.
@@ -49,8 +51,11 @@ type Compressor interface {
 }
 
 // NewCompressor returns the Compressor matching format/level. format must be
-// one of gzip|bzip2|lz4|zstd; level must be in [1,9]. lz4 and bzip2 currently
-// return ErrCompressionFormatNotImplemented (see T-0077 followup).
+// one of gzip|bzip2|lz4|zstd; level must be in [1,9].
+//
+// ErrCompressionFormatNotImplemented is retained as a sentinel for any future
+// algorithm whose dep is gated behind a build tag — currently no algorithm
+// returns it.
 func NewCompressor(format string, level int) (Compressor, error) {
 	if level < 1 || level > 9 {
 		return nil, fmt.Errorf("level=%d: %w", level, ErrCompressionLevelOutOfRange)
@@ -60,8 +65,10 @@ func NewCompressor(format string, level int) (Compressor, error) {
 		return &gzipCompressor{level: level}, nil
 	case "zstd":
 		return &zstdCompressor{level: zstdLevelFor(level)}, nil
-	case "lz4", "bzip2":
-		return nil, fmt.Errorf("format=%q: %w", format, ErrCompressionFormatNotImplemented)
+	case "lz4":
+		return &lz4Compressor{level: lz4LevelFor(level)}, nil
+	case "bzip2":
+		return &bzip2Compressor{level: level}, nil
 	default:
 		return nil, fmt.Errorf("format=%q: %w", format, ErrCompressionFormatInvalid)
 	}
@@ -164,4 +171,76 @@ func zstdLevelFor(level int) zstd.EncoderLevel {
 	default:
 		return zstd.SpeedBestCompression
 	}
+}
+
+// lz4Compressor — github.com/pierrec/lz4/v4. Default frame format (compatible
+// with the `lz4` CLI tool), not block format.
+type lz4Compressor struct {
+	level lz4.CompressionLevel
+}
+
+func (c *lz4Compressor) Format() string    { return "lz4" }
+func (c *lz4Compressor) Extension() string { return ".lz4" }
+
+func (c *lz4Compressor) Wrap(ctx context.Context, src io.Reader) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	lzw := lz4.NewWriter(pw)
+	if err := lzw.Apply(lz4.CompressionLevelOption(c.level)); err != nil {
+		_ = pw.Close()
+		return nil, fmt.Errorf("lz4 writer level=%v: %w", c.level, err)
+	}
+	go pumpAndClose(ctx, src, lzw, pw)
+	return pr, nil
+}
+
+// lz4LevelFor maps OMC's 1..9 scale to pierrec/lz4 named levels.
+// pierrec exposes Fast (level 0) plus Level1..Level9; OMC's 1..9 maps directly.
+func lz4LevelFor(level int) lz4.CompressionLevel {
+	switch level {
+	case 1:
+		return lz4.Level1
+	case 2:
+		return lz4.Level2
+	case 3:
+		return lz4.Level3
+	case 4:
+		return lz4.Level4
+	case 5:
+		return lz4.Level5
+	case 6:
+		return lz4.Level6
+	case 7:
+		return lz4.Level7
+	case 8:
+		return lz4.Level8
+	case 9:
+		return lz4.Level9
+	default:
+		// Defensive — NewCompressor already rejects out-of-range; fallback to
+		// Level3 (pierrec's documented sweet spot).
+		return lz4.Level3
+	}
+}
+
+// bzip2Compressor — github.com/dsnet/compress/bzip2.
+//
+// bzip2 is slow vs zstd/lz4 but ships in this build for parity with the
+// schema CHECK constraint and for legacy integrations that ship `bunzip2` on
+// the consumer side. Restore (T-0072) decompresses via stdlib compress/bzip2.
+type bzip2Compressor struct {
+	level int // 1..9 — accepted natively
+}
+
+func (c *bzip2Compressor) Format() string    { return "bzip2" }
+func (c *bzip2Compressor) Extension() string { return ".bz2" }
+
+func (c *bzip2Compressor) Wrap(ctx context.Context, src io.Reader) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	bzw, err := bzip2.NewWriter(pw, &bzip2.WriterConfig{Level: c.level})
+	if err != nil {
+		_ = pw.Close()
+		return nil, fmt.Errorf("bzip2 writer level=%d: %w", c.level, err)
+	}
+	go pumpAndClose(ctx, src, bzw, pw)
+	return pr, nil
 }
