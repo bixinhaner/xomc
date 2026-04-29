@@ -176,6 +176,52 @@
       "fieldConfig": {
         "defaults": {"unit": "Bps"}
       }
+    },
+    {
+      "title": "Backup Storage Usage Ratio (T-0082)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 60},
+      "targets": [
+        {"expr": "omc_backup_storage_usage_ratio"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": 0},
+            {"color": "yellow", "value": 0.6},
+            {"color": "red", "value": 0.8}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Backup Storage Used vs Capacity (T-0082)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 60},
+      "targets": [
+        {"expr": "omc_backup_storage_used_bytes", "legendFormat": "used"},
+        {"expr": "omc_backup_storage_capacity_bytes", "legendFormat": "capacity"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "bytes"}
+      }
+    },
+    {
+      "title": "Backup Storage Check Outcomes (T-0082)",
+      "type": "timeseries",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 60},
+      "targets": [
+        {"expr": "sum by (result) (rate(omc_backup_storage_check_total[1h]))", "legendFormat": "{{result}}"}
+      ]
+    },
+    {
+      "title": "Backup Storage Threshold Alarms Raised/Cleared (T-0082)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 64},
+      "targets": [
+        {"expr": "sum by (kind) (omc_backup_storage_threshold_alarm_total{kind=~\"raised|cleared\"})", "legendFormat": "{{kind}}"}
+      ]
     }
   ],
   "schemaVersion": 39,

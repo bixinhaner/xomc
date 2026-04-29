@@ -180,11 +180,11 @@
 - **概率**：高
 - **影响**：运维场景不可用
 - **Owner**：前端专家
-- **状态**：⚠️ Partially Closed (2026-04-29) — Software/Topology/Report 全闭环 + Backup 持久化层 4/4 闭环（Tasks ✅ + FTP ✅ + Schedule ✅ + Policy ✅）；剩 Restore 流程 design 留 T-0072；3 enforcement followup（T-0073/0074/0075）覆盖 cleanup/压缩/加密 executor 集成
-- **关联 Task**：T-0019 ✅ / T-0022 ✅ / T-0016 ✅ / T-0070 ✅ / T-0071 ✅ / T-0073 ✅（cleanup cron + 失败告警 Phase 1）；followups T-0072 (Restore design) / T-0074 压缩 / T-0075 加密 / T-0076 (T-0073 Phase 2: file delete + 磁盘阈值)
-- **关闭依据（已闭环部分）**：T-0019 commit `4ebdc91c` + T-0022 commit `c5e134c0` + T-0016 commit `c939ff12` + T-0070 commit `9f7ce74e` + T-0071 commit `d05831c3` + T-0073 commit `4f534b2d`
-- **未闭环部分**：(a) RestoreData 流程 design（T-0072）；(b) BackupPolicy enforcement Phase 2 —— file delete + 磁盘阈值（T-0076） / 压缩 executor（T-0074） / 加密 + KMS（T-0075，**安全敏感** P1）
-- **下次复盘**：T-0072 完成时 + T-0074/0075/0076 enforcement 任一闭环时（预计 sprint-07+）
+- **状态**：⚠️ Partially Closed (2026-04-29) — Software/Topology/Report 全闭环 + Backup 持久化 4/4 ✅ + Restore 主链路 ✅（T-0072/0078/0079/0080）+ enforcement 4/4 ✅（T-0073 cleanup Phase 1 / T-0074 压缩 / T-0075 加密 / T-0076 cleanup Phase 2 物理删除）；剩**磁盘容量保护**（T-0082，本任务）+ orphan reaper（T-0083）+ encryption followup（T-0085~T-0089）
+- **关联 Task**：T-0019 ✅ / T-0022 ✅ / T-0016 ✅ / T-0070 ✅ / T-0071 ✅ / T-0072 ✅ / T-0073 ✅ / T-0074 ✅ / T-0075 ✅ / T-0076 ✅ / T-0077 ✅ / T-0078 ✅ / T-0079 ✅ / T-0080 ✅；in-flight T-0082（disk threshold edge-trigger + alarm.cleared）；followups T-0083/T-0084/T-0085/T-0086/T-0087/T-0088/T-0089
+- **关闭依据（已闭环部分）**：T-0019 `4ebdc91c` + T-0022 `c5e134c0` + T-0016 `c939ff12` + T-0070 `9f7ce74e` + T-0071 `d05831c3` + T-0073 `4f534b2d` + T-0074 `6043d326` + T-0075 `715a756a` + T-0076 `e22dc3e4` + T-0079 `2d7b5be6` + T-0072 `b7e09ed9` + T-0078 `286d56fb` + T-0080 `51100478` + T-0077 `d9d14417`
+- **未闭环部分**：(a) 磁盘容量保护 — bucket 用量 poll + 阈值 alarm（T-0082 in-flight）；(b) 多设备 orphan 文件回收（T-0083，依赖 list-prefix 或 backup_files 表）；(c) encryption 增强（T-0085 CBC+ChaCha20 / T-0086 KMS / T-0087 KEK 旋转 / T-0088 FE Tag / T-0089 decrypt semaphore）
+- **下次复盘**：T-0082 完成时（本任务）+ T-0083/T-0085~T-0089 任一闭环时
 
 ### R-103 License 容量/过期未拦截
 - **描述**：`MaxDevices`/`ExpiryDate` 字段有，但无超限拦截与自动禁用

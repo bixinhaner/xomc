@@ -1,4 +1,4 @@
-// Package backup — Prometheus metrics for BackupPolicy enforcement (T-0073, T-0074).
+// Package backup — Prometheus metrics for BackupPolicy enforcement (T-0073, T-0074, T-0082).
 //
 // T-0073 cleanup counters:
 //   - backup_cleanup_runs_total{result}            — cron tick outcomes (success/failure/skipped)
@@ -10,6 +10,13 @@
 //   - omc_backup_compression_bytes_out_total{format}    — compressed bytes produced
 //   - omc_backup_compression_duration_seconds{format}   — single-stream compression latency
 //   - omc_backup_compression_errors_total{format,reason} — failure tally (open|copy|close)
+//
+// T-0082 storage threshold gauges/counters:
+//   - omc_backup_storage_used_bytes                — current bucket usage (gauge)
+//   - omc_backup_storage_capacity_bytes            — MaxStorageGB×1024³ (gauge)
+//   - omc_backup_storage_usage_ratio               — used/capacity, may exceed 1 (gauge)
+//   - omc_backup_storage_check_total{result}       — poll outcomes (success/failure/skipped)
+//   - omc_backup_storage_threshold_alarm_total{kind} — raise/clear/skipped (counter)
 //
 // All methods are nil-safe so production wiring (DI passes a registry) and
 // tests (no registry) share one method surface.
@@ -33,9 +40,16 @@ type PolicyMetrics struct {
 	fileDeleteErrorsTotal *prometheus.CounterVec
 
 	// T-0075 backup encryption (AES-256-GCM envelope; CBC/ChaCha20 stub):
-	encryptedTotal         prometheus.Counter
-	encryptionErrorsTotal  *prometheus.CounterVec
-	decryptionErrorsTotal  *prometheus.CounterVec
+	encryptedTotal        prometheus.Counter
+	encryptionErrorsTotal *prometheus.CounterVec
+	decryptionErrorsTotal *prometheus.CounterVec
+
+	// T-0082 storage threshold (poll bucket size + edge-trigger alarm):
+	storageUsedBytes       prometheus.Gauge
+	storageCapacityBytes   prometheus.Gauge
+	storageUsageRatio      prometheus.Gauge
+	storageCheckTotal      *prometheus.CounterVec
+	storageThresholdAlarms *prometheus.CounterVec
 }
 
 // NewPolicyMetrics registers all collectors on the given registry.
@@ -94,6 +108,27 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "omc_backup_decryption_errors_total",
 			Help: "Backup decrypt-side failures by reason (wrong_aad|tamper|key_unavailable|format_invalid).",
 		}, []string{"reason"}),
+
+		storageUsedBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_backup_storage_used_bytes",
+			Help: "Current backup bucket usage in bytes (T-0082; updated by hourly storage check).",
+		}),
+		storageCapacityBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_backup_storage_capacity_bytes",
+			Help: "Backup storage capacity in bytes from BackupPolicy.MaxStorageGB×1024³ (T-0082).",
+		}),
+		storageUsageRatio: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_backup_storage_usage_ratio",
+			Help: "Backup storage usage ratio used/capacity; may exceed 1 when over capacity (T-0082).",
+		}),
+		storageCheckTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_storage_check_total",
+			Help: "Backup storage threshold check tick outcomes (success|failure|skipped) (T-0082).",
+		}, []string{"result"}),
+		storageThresholdAlarms: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_storage_threshold_alarm_total",
+			Help: "Backup storage threshold alarm publish events (raised|cleared|skipped) (T-0082).",
+		}, []string{"kind"}),
 	}
 	if reg != nil {
 		reg.MustRegister(
@@ -102,6 +137,8 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			m.compressionDuration, m.compressionErrors,
 			m.fileDeletedTotal, m.fileDeleteErrorsTotal,
 			m.encryptedTotal, m.encryptionErrorsTotal, m.decryptionErrorsTotal,
+			m.storageUsedBytes, m.storageCapacityBytes, m.storageUsageRatio,
+			m.storageCheckTotal, m.storageThresholdAlarms,
 		)
 	}
 	return m
@@ -206,4 +243,47 @@ func (m *PolicyMetrics) RecordBackupDecryptionError(reason string) {
 		return
 	}
 	m.decryptionErrorsTotal.WithLabelValues(reason).Inc()
+}
+
+// SetStorageUsedBytes updates the bucket usage gauge (T-0082).
+func (m *PolicyMetrics) SetStorageUsedBytes(used int64) {
+	if m == nil {
+		return
+	}
+	m.storageUsedBytes.Set(float64(used))
+}
+
+// SetStorageCapacityBytes updates the configured capacity gauge (T-0082).
+func (m *PolicyMetrics) SetStorageCapacityBytes(capacity int64) {
+	if m == nil {
+		return
+	}
+	m.storageCapacityBytes.Set(float64(capacity))
+}
+
+// SetStorageUsageRatio updates the usage ratio gauge (T-0082). Callers must
+// guard capacity=0 to avoid NaN.
+func (m *PolicyMetrics) SetStorageUsageRatio(ratio float64) {
+	if m == nil {
+		return
+	}
+	m.storageUsageRatio.Set(ratio)
+}
+
+// RecordStorageCheck increments the storage check tick outcome counter (T-0082).
+// result ∈ {"success", "failure", "skipped"}.
+func (m *PolicyMetrics) RecordStorageCheck(result string) {
+	if m == nil {
+		return
+	}
+	m.storageCheckTotal.WithLabelValues(result).Inc()
+}
+
+// RecordStorageThresholdAlarm increments the storage alarm publish counter (T-0082).
+// kind ∈ {"raised", "cleared", "skipped"}.
+func (m *PolicyMetrics) RecordStorageThresholdAlarm(kind string) {
+	if m == nil {
+		return
+	}
+	m.storageThresholdAlarms.WithLabelValues(kind).Inc()
 }

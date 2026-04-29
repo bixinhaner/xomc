@@ -201,6 +201,11 @@ func initBackupModule(c *Container) error {
 	// cleanup. minio is optional (nil-safe); when wired, RunCleanupOnce
 	// calls RemoveObject for each deleted backup_task's file_path.
 	backupPolicyMonitor.SetMinIO(c.MinIO)
+	// T-0082: enable hourly bucket-usage poll + edge-trigger alarm.raised/
+	// cleared. Both BucketLister and EventBus must be set; either nil
+	// disables the storage check (preserves T-0073/T-0076 behaviour).
+	backupPolicyMonitor.SetBucketLister(c.MinIO)
+	backupPolicyMonitor.SetEventBus(c.EventBus)
 	if err := backupPolicyMonitor.Start(context.Background()); err != nil {
 		logger.Warn("start backup policy monitor", zap.Error(err))
 	}
@@ -484,8 +489,8 @@ type miscDeps struct {
 	taskSvc     *task.TaskService
 
 	// Backup
-	backupHandler        *backup.Handler
-	backupPolicyMonitor  *backup.PolicyMonitor // T-0073 Phase 1
+	backupHandler       *backup.Handler
+	backupPolicyMonitor *backup.PolicyMonitor // T-0073 Phase 1
 
 	// Dashboard
 	dashboardHandler *dashboard.Handler

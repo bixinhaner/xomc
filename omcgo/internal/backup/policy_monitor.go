@@ -1,20 +1,24 @@
-// Package backup — BackupPolicy enforcement Monitor (T-0073 + T-0076).
+// Package backup — BackupPolicy enforcement Monitor (T-0073 + T-0076 + T-0082).
 //
-// The Monitor runs one cron tick per day:
+// The Monitor runs two cron schedules in one cron.Cron instance:
 //
-//	@daily   RunCleanupOnce — reads the active BackupPolicy and deletes
-//	                          terminal-status backup_tasks rows older than
-//	                          retention_days while keeping the most-recent
-//	                          keep_last_n rows per target_type partition.
-//	                          T-0076: physically deletes the corresponding
-//	                          MinIO objects (best-effort, by file_path).
+//	@daily    RunCleanupOnce      — T-0073 DB row deletion + T-0076 physical
+//	                                MinIO RemoveObject for each deleted file_path.
+//	@hourly   RunStorageCheckOnce — T-0082 bucket usage poll + edge-trigger
+//	                                alarm.raised/cleared when usage crosses
+//	                                BackupPolicy.AlertThresholdPercent.
 //
 // T-0076 closed: physical file delete now runs alongside DB cleanup. Each
 // deleted backup_tasks row's file_path (where non-NULL — populated by T-0079
 // linkage) is fed to MinIO RemoveObject; failures are recorded in metrics
 // and logged but never roll back the DB delete (which is the source of
-// truth). Storage-quota threshold alarms (alert_threshold_percent) and the
-// multi-device orphan reaper remain deferred to T-0082 / T-0083.
+// truth).
+//
+// T-0082 closed: storage threshold alarm publishes alarm.raised once when
+// bucket usage crosses MaxStorageGB×AlertThresholdPercent and alarm.cleared
+// once when it drops back below. Edge state lives in-memory; restart resends
+// raised at most once. The multi-device orphan reaper remains deferred to
+// T-0083; AlertSeverity policy-driven assignment to T-0084.
 package backup
 
 import (
@@ -22,11 +26,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/event"
 )
 
 // MinIOObjectRemover is the narrow contract PolicyMonitor needs to physically
@@ -51,6 +58,16 @@ type PolicyMonitor struct {
 	metrics       *PolicyMetrics
 	logger        *zap.Logger
 	minio         MinIOObjectRemover // optional T-0076 — nil disables physical delete
+
+	// T-0082 storage threshold monitoring (both must be set to enable):
+	bucketLister BucketLister   // optional — nil disables disk monitor
+	bus          event.EventBus // optional — nil disables disk alarm publish
+
+	// T-0082 in-memory edge-trigger state. Process restart resets to false;
+	// first post-restart tick may resend alarm.raised once. F04 alarm engine
+	// deduplicates by (source, identifier).
+	storageMu          sync.Mutex
+	lastAboveThreshold bool
 
 	cron   *cron.Cron
 	cancel context.CancelFunc
@@ -95,10 +112,29 @@ func (m *PolicyMonitor) Start(ctx context.Context) error {
 		cancel()
 		m.cancel = nil
 		m.cron = nil
-		return fmt.Errorf("schedule backup policy monitor: %w", err)
+		return fmt.Errorf("schedule backup cleanup tick: %w", err)
 	}
+
+	// T-0082: hourly storage threshold check. Inner method is nil-safe when
+	// bucketLister/bus aren't wired, so this AddFunc is unconditional —
+	// the runtime gate decides whether to actually poll.
+	if _, err := m.cron.AddFunc("@hourly", func() {
+		c, c2 := context.WithTimeout(scoped, 2*time.Minute)
+		defer c2()
+		if _, err := m.RunStorageCheckOnce(c); err != nil {
+			m.logger.Warn("backup storage check tick failed", zap.Error(err))
+		}
+	}); err != nil {
+		cancel()
+		m.cancel = nil
+		m.cron = nil
+		return fmt.Errorf("schedule backup storage check tick: %w", err)
+	}
+
 	m.cron.Start()
-	m.logger.Info("backup policy monitor started", zap.String("schedule", "@daily"))
+	m.logger.Info("backup policy monitor started",
+		zap.String("cleanup_schedule", "@daily"),
+		zap.String("storage_check_schedule", "@hourly"))
 	return nil
 }
 

@@ -8,6 +8,15 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 )
 
+// alarmSourceBackup is the canonical "source" label on every backup-domain
+// alarm payload. Centralised so the FailureAlarm and StorageThreshold
+// publishers can't drift apart.
+const alarmSourceBackup = "backup"
+
+// alarmSeverityMajor is the default severity for backup alarms (data-loss
+// precursor). Policy-driven severity tracking is the T-0084 followup.
+const alarmSeverityMajor = "major"
+
 // FailureAlarmPayload is the event payload published on backup task failure
 // when the active BackupPolicy has alert_on_failure=true. The alarm engine
 // (F04) subscribes to event.SubjectAlarmRaised and routes by `source` /
@@ -64,13 +73,13 @@ func PublishFailureAlarm(
 		errMsg = *task.ErrorMessage
 	}
 	payload := FailureAlarmPayload{
-		Source: "backup",
+		Source: alarmSourceBackup,
 		// TODO(T-0084): policy-driven severity (warning/major/critical). T-0076
 		// considered closing this but punted — the natural design needs a new
 		// BackupPolicy.AlertSeverity column + schema migration which couples
 		// poorly with the in-flight T-0082 disk-threshold work. Combined design
 		// recommended; for now backup failures stay "major" (see T-0076 PRD §2.4).
-		Severity:     "major",
+		Severity:     alarmSeverityMajor,
 		Identifier:   "backup_task_failed",
 		Summary:      fmt.Sprintf("Backup task failed for %d target(s)", len(task.TargetIDs)),
 		TaskID:       task.ID.String(),
