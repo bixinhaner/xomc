@@ -17,13 +17,20 @@ import (
 
 // BackupExecutor subscribes to backup.task.created events and executes
 // backup tasks by pushing Upload commands to the unified device task queue.
+//
+// T-0073 Phase 1 additions: when configured with a PolicyService and metrics,
+// the executor publishes alarm.raised on failure paths according to the
+// active BackupPolicy.AlertOnFailure flag. Both fields are optional (nil-safe)
+// to keep the constructor signature backward-compatible.
 type BackupExecutor struct {
-	taskRepo   TaskRepository
-	deviceRepo device.DeviceRepository
-	taskSvc    devtask.Enqueuer
-	connReq    *connreq.Client
-	eventBus   event.EventBus
-	logger     *zap.Logger
+	taskRepo      TaskRepository
+	deviceRepo    device.DeviceRepository
+	taskSvc       devtask.Enqueuer
+	connReq       *connreq.Client
+	eventBus      event.EventBus
+	policyService PolicyGetter   // optional (T-0073)
+	metrics       *PolicyMetrics // optional (T-0073)
+	logger        *zap.Logger
 }
 
 // NewBackupExecutor creates a new BackupExecutor.
@@ -43,6 +50,14 @@ func NewBackupExecutor(
 		eventBus:   eventBus,
 		logger:     logger.Named("backup-executor"),
 	}
+}
+
+// SetPolicyEnforcement wires PolicyService + metrics post-construction so the
+// failure path can publish alarm.raised when AlertOnFailure=true. Either
+// argument may be nil to disable that side-effect (default is disabled).
+func (e *BackupExecutor) SetPolicyEnforcement(policyService PolicyGetter, metrics *PolicyMetrics) {
+	e.policyService = policyService
+	e.metrics = metrics
 }
 
 // Subscribe registers the executor to listen for backup task created events.
@@ -167,6 +182,17 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 	task.CompletedAt = &completedAt
 	if err := e.taskRepo.Update(ctx, task); err != nil {
 		return fmt.Errorf("update backup task completion: %w", err)
+	}
+
+	// T-0073 Phase 1: opt-in failure alarm publish.
+	// Only fire on TaskFailed AND when BackupPolicy.AlertOnFailure=true.
+	// Best-effort: alarm publish errors are logged, never blocking.
+	if task.Status == TaskFailed && e.policyService != nil {
+		if pubErr := PublishFailureAlarm(ctx, e.policyService, e.eventBus, e.metrics, task); pubErr != nil {
+			e.logger.Warn("publish backup failure alarm",
+				zap.String("task_id", payload.TaskID),
+				zap.Error(pubErr))
+		}
 	}
 
 	e.logger.Info("backup task completed",

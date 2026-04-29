@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -57,6 +58,10 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 		return m.listFn(ctx, filter)
 	}
 	return nil, nil
+}
+
+func (m *mockTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
+	return 0, nil
 }
 
 type mockScheduleRepo struct {

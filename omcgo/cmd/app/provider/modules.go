@@ -183,6 +183,16 @@ func initBackupModule(c *Container) error {
 	policyService := backup.NewPolicyService(policyRepo, logger)
 	backupHandler.SetPolicyService(policyService)
 
+	// T-0073 Phase 1: BackupPolicy enforcement Monitor (cleanup cron) +
+	// metrics. Failure-alarm publishing is wired on the worker side
+	// (executor) — see cmd/worker/main.go.
+	policyMetrics := backup.NewPolicyMetrics(c.MetricsReg)
+	backupPolicyMonitor := backup.NewPolicyMonitor(policyService, backupTaskRepo, policyMetrics, logger)
+	if err := backupPolicyMonitor.Start(context.Background()); err != nil {
+		logger.Warn("start backup policy monitor", zap.Error(err))
+	}
+	c.miscDeps.backupPolicyMonitor = backupPolicyMonitor
+
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")
@@ -445,7 +455,8 @@ type miscDeps struct {
 	taskSvc     *task.TaskService
 
 	// Backup
-	backupHandler *backup.Handler
+	backupHandler        *backup.Handler
+	backupPolicyMonitor  *backup.PolicyMonitor // T-0073 Phase 1
 
 	// Dashboard
 	dashboardHandler *dashboard.Handler

@@ -72,6 +72,10 @@ func (m *fakeTaskRepo) List(_ context.Context, filter TaskFilter) (*model.ListRe
 	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
+func (m *fakeTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
+	return 0, nil
+}
+
 // ---------------------------------------------------------------------------
 // Mock: ScheduleRepository
 // ---------------------------------------------------------------------------

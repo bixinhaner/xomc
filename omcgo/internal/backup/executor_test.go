@@ -42,6 +42,9 @@ func (m *execTaskRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil
 func (m *execTaskRepo) List(_ context.Context, _ TaskFilter) (*model.ListResponse[BackupTask], error) {
 	return nil, nil
 }
+func (m *execTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
+	return 0, nil
+}
 
 type execDeviceRepo struct {
 	getBySNFn func(ctx context.Context, sn string) (*model.Device, error)

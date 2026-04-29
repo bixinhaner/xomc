@@ -179,10 +179,17 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		backupTaskRepo, deviceRepo, w.TaskService, connReqClient,
 		w.EventBus, logger,
 	)
+	// T-0073 Phase 1: opt-in backup-failure alarm publish via PolicyService.
+	// Worker shares the same backup_policies table as app; reads policy on each
+	// failure to honour latest AlertOnFailure flag.
+	backupPolicyRepo := backup.NewPgPolicyRepository(w.PgPool)
+	backupPolicyService := backup.NewPolicyService(backupPolicyRepo, logger)
+	backupPolicyMetrics := backup.NewPolicyMetrics(w.MetricsReg)
+	backupExecutor.SetPolicyEnforcement(backupPolicyService, backupPolicyMetrics)
 	if err := backupExecutor.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe backup executor", zap.Error(err))
 	}
-	logger.Info("backup executor started")
+	logger.Info("backup executor started (with T-0073 failure-alarm enforcement)")
 
 	// Report Generator
 	reportDefRepo := report.NewPgDefinitionRepository(w.PgPool)

@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -14,6 +15,11 @@ type TaskRepository interface {
 	Update(ctx context.Context, task *BackupTask) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[BackupTask], error)
+
+	// CleanupOldRows deletes terminal-status rows older than `cutoff` while
+	// preserving the most-recent `keepLastN` rows per target_type partition.
+	// Returns the number of rows actually deleted. (T-0073 cleanup cron.)
+	CleanupOldRows(ctx context.Context, cutoff time.Time, keepLastN int) (int64, error)
 }
 
 // ScheduleRepository provides persistence for backup schedules.
