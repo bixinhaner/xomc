@@ -181,10 +181,10 @@
 - **影响**：运维场景不可用
 - **Owner**：前端专家
 - **状态**：⚠️ Partially Closed (2026-04-29) — Software/Topology/Report 全闭环 + Backup 持久化层 4/4 闭环（Tasks ✅ + FTP ✅ + Schedule ✅ + Policy ✅）；剩 Restore 流程 design 留 T-0072；3 enforcement followup（T-0073/0074/0075）覆盖 cleanup/压缩/加密 executor 集成
-- **关联 Task**：T-0019 ✅（Software Canary 消费）/ T-0022 ✅（Topology/Report）/ T-0016 ✅（Backup Tasks + FTP）/ T-0070 ✅（BackupSchedule UI）/ T-0071 ✅（BackupPolicy 持久化）；followups T-0072 (Restore design) / T-0073 cleanup cron + 告警 / T-0074 压缩 / T-0075 加密
-- **关闭依据（已闭环部分）**：T-0019 commit `4ebdc91c` + T-0022 commit `c5e134c0` + T-0016 commit `c939ff12` + T-0070 commit `9f7ce74e` + T-0071 commit `d05831c3`
-- **未闭环部分**：(a) RestoreData 流程 design（T-0072）—— restore = 配置同步 vs 备份解压恢复尚未明确；(b) BackupPolicy enforcement —— schema 已就位，executor 端 cleanup/压缩/加密 集成拆 T-0073/0074/0075（T-0075 加密**安全敏感** P1）
-- **下次复盘**：T-0072 完成时 + T-0073-0075 enforcement 任一闭环时（预计 sprint-07+）
+- **关联 Task**：T-0019 ✅ / T-0022 ✅ / T-0016 ✅ / T-0070 ✅ / T-0071 ✅ / T-0073 ✅（cleanup cron + 失败告警 Phase 1）；followups T-0072 (Restore design) / T-0074 压缩 / T-0075 加密 / T-0076 (T-0073 Phase 2: file delete + 磁盘阈值)
+- **关闭依据（已闭环部分）**：T-0019 commit `4ebdc91c` + T-0022 commit `c5e134c0` + T-0016 commit `c939ff12` + T-0070 commit `9f7ce74e` + T-0071 commit `d05831c3` + T-0073 commit `4f534b2d`
+- **未闭环部分**：(a) RestoreData 流程 design（T-0072）；(b) BackupPolicy enforcement Phase 2 —— file delete + 磁盘阈值（T-0076） / 压缩 executor（T-0074） / 加密 + KMS（T-0075，**安全敏感** P1）
+- **下次复盘**：T-0072 完成时 + T-0074/0075/0076 enforcement 任一闭环时（预计 sprint-07+）
 
 ### R-103 License 容量/过期未拦截
 - **描述**：`MaxDevices`/`ExpiryDate` 字段有，但无超限拦截与自动禁用
