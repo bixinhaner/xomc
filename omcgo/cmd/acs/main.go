@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -179,6 +181,27 @@ func runACS(cmd *cobra.Command, args []string) error {
 		// T-0075: enable on-the-fly decryption for `.enc` objects.
 		if backupEncryptor != nil {
 			downloadHandler.SetEncryption(backupEncryptor, backupPolicyMetrics)
+			// T-0089: bound concurrent decrypt buffer allocations
+			// (64MB × N memory amplification). Tunable via env var; 0
+			// disables (preserves T-0075 unbounded behaviour for
+			// deployments that prefer rate-limit middleware alone).
+			limit := decryptDefaultLimit(inf.Logger)
+			sem := download.NewDecryptSemaphore(limit, decryptDefaultTimeout, backupPolicyMetrics)
+			downloadHandler.SetDecryptSemaphore(sem)
+			// Review MED-2 fix: surface clamp visibility at startup —
+			// previously this was a metric pulse, now it's a structured
+			// log so misconfig at boot is auditable without polluting
+			// per-acquire rejection telemetry.
+			if effective := sem.ClampedLimit(); effective != 0 && effective < limit {
+				inf.Logger.Warn("OMC_BACKUP_DECRYPT_CONCURRENCY exceeds hard cap; clamped",
+					zap.Int("requested", limit),
+					zap.Int("clamped", effective),
+					zap.Int("hard_cap", download.DecryptSemaphoreHardCap))
+			}
+			inf.Logger.Info("backup decrypt semaphore configured",
+				zap.Int("limit", limit),
+				zap.Int("effective", sem.ClampedLimit()),
+				zap.Duration("timeout", decryptDefaultTimeout))
 		}
 		deps.DownloadHandler = downloadHandler
 		deps.DownloadConfig = &cfg.Download
@@ -371,4 +394,32 @@ func parseStringSlice(s string) []string {
 		}
 	}
 	return result
+}
+
+// decryptDefaultLimit reads OMC_BACKUP_DECRYPT_CONCURRENCY (T-0089). Empty
+// returns 8 (sane default for ~512MB peak buffer footprint). Invalid values
+// log warn and fall back to 8 — boot must not panic on operator typo. Zero
+// or negative disables the semaphore entirely (preserves T-0075 baseline);
+// review MED-1 fix emits a loud WARN in that case so an operator who
+// typed -1 thinking "no limit" sees the **opposite** semantics in logs
+// before deploying.
+const decryptDefaultTimeout = 30 * time.Second
+
+func decryptDefaultLimit(logger *zap.Logger) int {
+	const fallback = 8
+	v := os.Getenv("OMC_BACKUP_DECRYPT_CONCURRENCY")
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		logger.Warn("OMC_BACKUP_DECRYPT_CONCURRENCY invalid; using default",
+			zap.String("value", v), zap.Int("default", fallback), zap.Error(err))
+		return fallback
+	}
+	if n <= 0 {
+		logger.Warn("OMC_BACKUP_DECRYPT_CONCURRENCY <= 0 disables semaphore — backup decrypt 64MB×N memory amplification UNBOUNDED; set positive integer to enable cap",
+			zap.Int("value", n))
+	}
+	return n
 }

@@ -18,6 +18,11 @@
 //   - omc_backup_storage_check_total{result}       — poll outcomes (success/failure/skipped)
 //   - omc_backup_storage_threshold_alarm_total{kind} — raise/clear/skipped (counter)
 //
+// T-0089 decrypt semaphore (concurrency cap to bound 64MB×N memory amplification):
+//   - omc_backup_decrypt_in_flight                 — current decrypt slots held (gauge)
+//   - omc_backup_decrypt_wait_seconds              — acquire wait latency (histogram)
+//   - omc_backup_decrypt_rejected_total{reason}    — timeout/ctx_cancel/oversize_config (counter)
+//
 // All methods are nil-safe so production wiring (DI passes a registry) and
 // tests (no registry) share one method surface.
 package backup
@@ -50,6 +55,11 @@ type PolicyMetrics struct {
 	storageUsageRatio      prometheus.Gauge
 	storageCheckTotal      *prometheus.CounterVec
 	storageThresholdAlarms *prometheus.CounterVec
+
+	// T-0089 decrypt semaphore (concurrency cap):
+	decryptInFlight      prometheus.Gauge
+	decryptWaitSeconds   prometheus.Histogram
+	decryptRejectedTotal *prometheus.CounterVec
 }
 
 // NewPolicyMetrics registers all collectors on the given registry.
@@ -129,6 +139,20 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "omc_backup_storage_threshold_alarm_total",
 			Help: "Backup storage threshold alarm publish events (raised|cleared|skipped) (T-0082).",
 		}, []string{"kind"}),
+
+		decryptInFlight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_backup_decrypt_in_flight",
+			Help: "Current concurrent backup-decrypt slots held (T-0089 semaphore).",
+		}),
+		decryptWaitSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_backup_decrypt_wait_seconds",
+			Help:    "Backup-decrypt semaphore acquire wait latency (T-0089).",
+			Buckets: prometheus.DefBuckets,
+		}),
+		decryptRejectedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_decrypt_rejected_total",
+			Help: "Backup-decrypt semaphore acquire rejections by reason (timeout|ctx_cancel|oversize_config) (T-0089).",
+		}, []string{"reason"}),
 	}
 	if reg != nil {
 		reg.MustRegister(
@@ -139,6 +163,7 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			m.encryptedTotal, m.encryptionErrorsTotal, m.decryptionErrorsTotal,
 			m.storageUsedBytes, m.storageCapacityBytes, m.storageUsageRatio,
 			m.storageCheckTotal, m.storageThresholdAlarms,
+			m.decryptInFlight, m.decryptWaitSeconds, m.decryptRejectedTotal,
 		)
 	}
 	return m
@@ -286,4 +311,29 @@ func (m *PolicyMetrics) RecordStorageThresholdAlarm(kind string) {
 		return
 	}
 	m.storageThresholdAlarms.WithLabelValues(kind).Inc()
+}
+
+// SetBackupDecryptInFlight updates the decrypt slot gauge (T-0089).
+func (m *PolicyMetrics) SetBackupDecryptInFlight(n int) {
+	if m == nil {
+		return
+	}
+	m.decryptInFlight.Set(float64(n))
+}
+
+// ObserveBackupDecryptWait records an acquire wait sample in seconds (T-0089).
+func (m *PolicyMetrics) ObserveBackupDecryptWait(seconds float64) {
+	if m == nil {
+		return
+	}
+	m.decryptWaitSeconds.Observe(seconds)
+}
+
+// RecordBackupDecryptRejected increments the decrypt rejection counter (T-0089).
+// reason ∈ {"timeout", "ctx_cancel", "oversize_config"}.
+func (m *PolicyMetrics) RecordBackupDecryptRejected(reason string) {
+	if m == nil {
+		return
+	}
+	m.decryptRejectedTotal.WithLabelValues(reason).Inc()
 }

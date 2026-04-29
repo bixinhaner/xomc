@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -34,8 +35,11 @@ type Handler struct {
 	// when nil, encrypted objects are served as-is (CPE will fail to consume
 	// them — visible in download metrics). encMetrics is the shared
 	// PolicyMetrics surface where decryption failures count.
-	encryptor   backup.Encryptor
-	encMetrics  *backup.PolicyMetrics
+	encryptor  backup.Encryptor
+	encMetrics *backup.PolicyMetrics
+	// T-0089: optional concurrency cap for maybeDecrypt 64MB×N memory
+	// amplification. nil = unbounded (T-0075 baseline).
+	decryptSem *DecryptSemaphore
 }
 
 // NewHandler creates a new download handler.
@@ -60,6 +64,15 @@ func (h *Handler) SetDecompressMetrics(m *DecompressMetrics) {
 func (h *Handler) SetEncryption(enc backup.Encryptor, m *backup.PolicyMetrics) {
 	h.encryptor = enc
 	h.encMetrics = m
+}
+
+// SetDecryptSemaphore wires the concurrency cap that bounds the 64MB×N
+// memory amplification on maybeDecrypt (T-0089). Pass nil to disable
+// (preserves T-0075 baseline). Constructed separately from SetEncryption
+// so deployments can tune concurrency without touching the encryption key
+// path.
+func (h *Handler) SetDecryptSemaphore(s *DecryptSemaphore) {
+	h.decryptSem = s
 }
 
 // ServeHTTP handles download requests.
@@ -166,20 +179,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// like `cfg.xml.gz.enc` becomes plaintext XML at the wire.
 	pathForCompression := objectPath
 	innerName := filepath.Base(objectPath)
-	encReader, encActive, encErr := h.maybeDecrypt(obj, info.Size, objectPath)
+	encReader, encActive, encErr := h.maybeDecrypt(r.Context(), obj, info.Size, objectPath)
 	if encErr != nil {
 		// Decryption failure is not fall-through: failing closed stops the
 		// CPE from getting ciphertext-shaped bytes that would never apply.
-		// Metrics recorded inside maybeDecrypt.
+		// Metrics recorded inside maybeDecrypt / DecryptSemaphore.
 		h.logger.Warn("decrypt failed; aborting download",
 			zap.String("path", objectPath), zap.Error(encErr))
-		status := http.StatusInternalServerError
-		if errors.Is(encErr, backup.ErrEncryptionAuthFailed) ||
-			errors.Is(encErr, backup.ErrEncryptionFormatInvalid) {
-			status = http.StatusUnprocessableEntity
+		// T-0089 status mapping. Order matters: ctx cancel → client gone,
+		// don't bother writing; semaphore timeout → 503 + Retry-After;
+		// auth/format → 422; everything else → 500.
+		switch {
+		case errors.Is(encErr, context.Canceled), errors.Is(encErr, context.DeadlineExceeded):
+			return
+		case errors.Is(encErr, ErrDecryptSemaphoreTimeout):
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, "decrypt overload; retry later", http.StatusServiceUnavailable)
+			return
+		case errors.Is(encErr, backup.ErrEncryptionAuthFailed),
+			errors.Is(encErr, backup.ErrEncryptionFormatInvalid):
+			http.Error(w, "decryption failed", http.StatusUnprocessableEntity)
+			return
+		default:
+			http.Error(w, "decryption failed", http.StatusInternalServerError)
+			return
 		}
-		http.Error(w, "decryption failed", status)
-		return
 	}
 	if encActive {
 		pathForCompression = strings.TrimSuffix(objectPath, "."+h.encryptor.Extension())
@@ -260,9 +284,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //
 // encActive=false means "no decryption applied" — caller should serve the
 // raw obj. error is non-nil only when an encrypted object failed to decrypt
-// (auth tag mismatch, malformed format, key unavailable). Decryption is
-// fail-closed: the caller does NOT fall through to ciphertext on error.
-func (h *Handler) maybeDecrypt(obj io.Reader, size int64, objectPath string) (io.Reader, bool, error) {
+// (auth tag mismatch, malformed format, key unavailable, semaphore reject).
+// Decryption is fail-closed: the caller does NOT fall through to ciphertext
+// on error.
+//
+// T-0089: when h.decryptSem is wired, Acquire is called BEFORE the 64MB
+// buffer allocation — cap the worst-case memory amplification to
+// (limit × 64MB). Acquired slot released via defer.
+func (h *Handler) maybeDecrypt(ctx context.Context, obj io.Reader, size int64, objectPath string) (io.Reader, bool, error) {
 	if h.encryptor == nil {
 		return obj, false, nil
 	}
@@ -271,12 +300,21 @@ func (h *Handler) maybeDecrypt(obj io.Reader, size int64, objectPath string) (io
 		return obj, false, nil
 	}
 	// Cap at 64MB + 1KB envelope tolerance — same ceiling as upload-side.
+	// Review fix MED-3 (T-0089): the size pre-check happens BEFORE
+	// semaphore Acquire so attackers spamming oversize objects can't churn
+	// slots — they get the 422 without ever taking a slot.
 	const maxEncryptedSize = 64*1024*1024 + 1024
 	if size > 0 && size > maxEncryptedSize {
 		h.encMetrics.RecordBackupDecryptionError("format_invalid")
 		return nil, false, fmt.Errorf("encrypted object exceeds %d bytes: %w",
 			maxEncryptedSize, backup.ErrEncryptionFormatInvalid)
 	}
+	// T-0089: bound concurrent buffer allocations. nil-safe — when the
+	// semaphore is not wired this is a no-op.
+	if _, err := h.decryptSem.Acquire(ctx); err != nil {
+		return nil, false, err
+	}
+	defer h.decryptSem.Release()
 	limited := io.LimitReader(obj, maxEncryptedSize+1)
 	blob, err := io.ReadAll(limited)
 	if err != nil {
