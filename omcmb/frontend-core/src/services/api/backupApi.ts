@@ -1,5 +1,5 @@
 import http from '../http';
-import type { BackupTask, BackupSchedule, FTPConfig, BackupPolicy } from '../../mock/data/backup';
+import type { BackupTask, BackupSchedule, FTPConfig, BackupPolicy, RestoreTask, RestoreStatus } from '../../mock/data/backup';
 import { DEFAULT_BACKUP_POLICY } from '../../mock/data/backup';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
@@ -54,6 +54,24 @@ interface BackendListResponse<T> {
   page: number;
   page_size: number;
   total_pages: number;
+}
+
+// T-0072 / T-0078: backend restore_tasks row shape (snake_case before axios
+// interceptor camelCase conversion). Mapping into the frontend RestoreTask is
+// explicit so we control nullability normalization (error_message → undefined).
+interface BackendRestoreTask {
+  id: string;
+  source_bucket: string;
+  source_object_path: string;
+  target_device_sns: string[];
+  status: string;
+  progress: number;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,4 +408,84 @@ export const backupApi = {
     const { data } = await http.put<BackupPolicy>('/backup/policy', payload);
     return data;
   },
+
+  // --- Restore (T-0072 / T-0078) ---
+
+  /**
+   * Creates a restore task. Backend validates path traversal + restricts the
+   * source bucket to "config_backup"; FE form should mirror these rules so a
+   * 400 is rare.
+   */
+  async createRestore(req: {
+    bucket: string;
+    objectPath: string;
+    targetDeviceSns: string[];
+  }): Promise<RestoreTask> {
+    const { data } = await http.post<BackendRestoreTask>('/backup/restore', {
+      bucket: req.bucket,
+      object_path: req.objectPath,
+      target_device_sns: req.targetDeviceSns,
+    });
+    return mapBackendRestoreTask(data);
+  },
+
+  async listRestoreTasks(
+    params: PageRequest & { status?: RestoreStatus }
+  ): Promise<PageResponse<RestoreTask>> {
+    const { data } = await http.get<BackendListResponse<BackendRestoreTask>>(
+      '/backup/restore-tasks',
+      { params }
+    );
+    return {
+      items: (data.items || []).map(mapBackendRestoreTask),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+      totalPages: data.total_pages,
+    };
+  },
+
+  async getRestoreTask(id: string): Promise<RestoreTask> {
+    const { data } = await http.get<BackendRestoreTask>(
+      `/backup/restore-tasks/${id}`
+    );
+    return mapBackendRestoreTask(data);
+  },
 };
+
+// ---------------------------------------------------------------------------
+// Mapping helpers (T-0078): restore_tasks
+// ---------------------------------------------------------------------------
+
+// Whitelist of valid restore status values mirroring the DB CHECK constraint.
+// Any unknown value from the backend (e.g. a future status the FE doesn't
+// recognize yet) collapses to 'pending' so the UI avoids `undefined`
+// indexing into STATUS_TAG and producing a runtime crash on Tag color (review M1 fix).
+const KNOWN_RESTORE_STATUSES: ReadonlySet<RestoreStatus> = new Set<RestoreStatus>([
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+function mapBackendRestoreTask(b: BackendRestoreTask): RestoreTask {
+  const rawStatus = b.status as RestoreStatus;
+  const status: RestoreStatus = KNOWN_RESTORE_STATUSES.has(rawStatus)
+    ? rawStatus
+    : 'pending';
+  return {
+    id: b.id,
+    sourceBucket: b.source_bucket,
+    sourceObjectPath: b.source_object_path,
+    targetDeviceSns: b.target_device_sns ?? [],
+    status,
+    progress: b.progress ?? 0,
+    errorMessage: b.error_message ?? undefined,
+    startedAt: b.started_at ?? undefined,
+    completedAt: b.completed_at ?? undefined,
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+    createdBy: b.created_by ?? undefined,
+  };
+}

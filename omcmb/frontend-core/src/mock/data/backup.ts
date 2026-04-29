@@ -436,6 +436,93 @@ export const mockBackupSchedules: BackupSchedule[] = [
   },
 ];
 
+// T-0072 / T-0078: RestoreTask is the persisted record for a `POST /backup/restore`
+// fan-out. One row per request; per-device progress is tracked separately via
+// device_tasks (Method=Download). Backend table = `restore_tasks` (migration 000048).
+export type RestoreStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface RestoreTask {
+  id: string;
+  sourceBucket: string;
+  sourceObjectPath: string;
+  targetDeviceSns: string[];
+  status: RestoreStatus;
+  progress: number;
+  errorMessage?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+}
+
+export const mockRestoreTasks: RestoreTask[] = [
+  {
+    id: 'rt-001',
+    sourceBucket: 'config_backup',
+    sourceObjectPath: 'backup/2026/04/29/cfg-cmcc-lte-001.xml.gz',
+    targetDeviceSns: ['SN001', 'SN002', 'SN003'],
+    status: 'completed',
+    progress: 100,
+    startedAt: '2026-04-29T08:00:00.000Z',
+    completedAt: '2026-04-29T08:02:30.000Z',
+    createdAt: '2026-04-29T08:00:00.000Z',
+    updatedAt: '2026-04-29T08:02:30.000Z',
+    createdBy: 'operator01',
+  },
+  {
+    id: 'rt-002',
+    sourceBucket: 'config_backup',
+    sourceObjectPath: 'backup/2026/04/28/cfg-cmcc-nr-007.xml.zst',
+    targetDeviceSns: ['SN007'],
+    status: 'running',
+    progress: 60,
+    startedAt: '2026-04-29T09:15:00.000Z',
+    createdAt: '2026-04-29T09:15:00.000Z',
+    updatedAt: '2026-04-29T09:16:30.000Z',
+    createdBy: 'operator02',
+  },
+  {
+    id: 'rt-003',
+    sourceBucket: 'config_backup',
+    sourceObjectPath: 'backup/2026/04/27/cfg-ctcc-lte-099.xml.gz',
+    targetDeviceSns: ['SN099', 'SN_GHOST'],
+    status: 'completed',
+    progress: 100,
+    errorMessage: 'skipped: SN_GHOST',
+    startedAt: '2026-04-29T07:00:00.000Z',
+    completedAt: '2026-04-29T07:01:15.000Z',
+    createdAt: '2026-04-29T07:00:00.000Z',
+    updatedAt: '2026-04-29T07:01:15.000Z',
+    createdBy: 'operator01',
+  },
+  {
+    id: 'rt-004',
+    sourceBucket: 'config_backup',
+    sourceObjectPath: 'backup/2026/04/29/cfg-cucc-nr-042.xml.lz4',
+    targetDeviceSns: ['SN042'],
+    status: 'failed',
+    progress: 0,
+    errorMessage: 'CPE Download RPC fault: file URL unreachable',
+    startedAt: '2026-04-29T10:00:00.000Z',
+    completedAt: '2026-04-29T10:00:30.000Z',
+    createdAt: '2026-04-29T10:00:00.000Z',
+    updatedAt: '2026-04-29T10:00:30.000Z',
+    createdBy: 'operator02',
+  },
+  {
+    id: 'rt-005',
+    sourceBucket: 'config_backup',
+    sourceObjectPath: 'backup/2026/04/29/cfg-cmcc-lte-bulk.xml.bz2',
+    targetDeviceSns: ['SN101', 'SN102', 'SN103', 'SN104', 'SN105'],
+    status: 'pending',
+    progress: 0,
+    createdAt: '2026-04-29T10:30:00.000Z',
+    updatedAt: '2026-04-29T10:30:00.000Z',
+    createdBy: 'operator01',
+  },
+];
+
 export const mockFTPConfigs: FTPConfig[] = [
   {
     id: 'ftp-001',
