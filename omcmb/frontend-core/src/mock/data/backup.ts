@@ -72,6 +72,10 @@ export interface BackupPolicy {
   alertOnFailure: boolean;
   alertEmail: string;
   alertThresholdPercent: number;
+  // T-0084: policy-driven severity for backup alarms (warning|major|critical).
+  // Single field controls both backup_task_failed (T-0073) and
+  // backup_storage_threshold_exceeded (T-0082) alarm severities.
+  alertSeverity: 'warning' | 'major' | 'critical';
   createdAt?: string;
   updatedAt?: string;
 }
@@ -96,6 +100,7 @@ export const DEFAULT_BACKUP_POLICY: BackupPolicy = {
   alertOnFailure: true,
   alertEmail: '',
   alertThresholdPercent: 80,
+  alertSeverity: 'major',
 };
 
 export const mockBackupTasks: BackupTask[] = [

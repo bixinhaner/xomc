@@ -66,11 +66,12 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 89 | — | unchanged（T-0089 由 triaged → done，无新增）|
-| `done` | 67 | — | **+T-0089** (backup decrypt 并发 semaphore — buffered channel + timeout-then-reject + 503 Retry-After + 3 metric + env var；闭环 T-0075 review M-4 资源耗尽漏洞)；+T-0084 / +T-0082 / +T-0075 / +T-0076 / +T-0079 / +T-0078 / +T-0080 / +T-0072 / +T-0077 / +T-0074 / +T-0073 / +T-0071 / +T-0070 / +T-0016 / +T-0021 / +T-0019 / +T-0018 / +T-0025 / +T-0022 / +T-0012 / +T-0015 |
+| Total tasks | 89 | — | unchanged（T-0088 由 triaged → done，无新增）|
+| `done` | 68 | — | **+T-0088** (前端 BackupPolicy encryption Tag 3 态化 + alert_severity Select 3 选 1；FE-only encryption_ready 派生)；+T-0089 / +T-0084 / +T-0082 / +T-0075 / +T-0076 / +T-0079 / +T-0078 / +T-0080 / +T-0072 / +T-0077 / +T-0074 / +T-0073 / +T-0071 / +T-0070 / +T-0016 / +T-0021 / +T-0019 / +T-0018 / +T-0025 / +T-0022 / +T-0012 / +T-0015 |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
+| `in_design` | 2 | — | T-0083 + T-0085（PRD 已落地 commit `84006d50`，serial 实施延 next turn） |
 | `planned` | 6 | — | 不变 |
-| `triaged` | 11 | — | -1 T-0089 done；剩 T-0083/0085/0086/0087/0088 (R-102 enhancement followups) + 既有 6 |
+| `triaged` | 8 | — | -3 T-0083/0085 → in_design + T-0088 → done；剩 T-0086/0087 (R-102 KMS+KEK 旋转 enhancement，需外部凭据) + 既有 6 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：P1 R-103 在 T-0015 后关闭，但不计入 P0 计数）|
@@ -301,7 +302,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0085 | backup 加密 AES-256-CBC + ChaCha20-Poly1305 算法实施 — CBC+HMAC-SHA256 (encrypt-then-MAC) 防 padding-oracle + ChaCha20-Poly1305 AEAD + OENC v1 algoByte 'C'/'P' + KEK 共用 + HKDF MAC key（mirror T-0077 模式；T-0075 followup）| feat | F06/backup+security | P3 | in_design | Claude | M | T-0075 ✅ | R-102 / `prd/T-0085-backup-encryption-cbc-chacha20.md` | sprint-08 | 2026-04-29 |
 | T-0086 | backup KMSKeyProvider 实施（HSM / 云 KMS plug-in；T-0075 KeyProvider 接口预留点）| feat | F06/backup+security | P2 | triaged | 电信+SecOps+运维 | L | T-0075 ✅ | R-102 / T-0075 followup | sprint-08..09 | 2026-04-29 |
 | T-0087 | backup KEK 旋转 + 历史文件 re-encrypt 工具（KEK1→KEK2 切换 + 老文件批量 backfill）| feat | F06/backup+security | P2 | triaged | 电信+SecOps | L | T-0075 ✅, T-0086 | R-102 / T-0075 followup | sprint-09 | 2026-04-29 |
-| T-0088 | 前端 BackupPolicy encryption Tag 条件化 + alert_severity Select 3 选 1（AES-256-GCM 时 green "已生效"；其它 warning；FE-only encryption_ready 派生避免 backend API 扩展）| feat | frontend | P3 | in_design | Claude | S | T-0075 ✅, T-0084 ✅ | R-102 / `prd/T-0088-frontend-backup-encryption-tag-severity-select.md` | sprint-08 | 2026-04-29 |
+| T-0088 | 前端 BackupPolicy encryption Tag 条件化 + alert_severity Select 3 选 1（AES-256-GCM 时 green "已生效"；其它 warning；FE-only encryption_ready 派生避免 backend API 扩展）| feat | frontend | P3 | done | Claude | S | T-0075 ✅, T-0084 ✅ | R-102 / `prd/T-0088-frontend-backup-encryption-tag-severity-select.md` | sprint-08 | 2026-04-29 |
 | T-0089 | backup decrypt 并发 semaphore 防 DoS — buffered channel + timeout-then-reject + 503 Retry-After + 3 metric + env var OMC_BACKUP_DECRYPT_CONCURRENCY 默认 8（闭环 T-0075 review M-4 资源耗尽漏洞）| feat | F06/backup+ops | P3 | done | Claude | S | T-0075 ✅ | T-0075 review M-4 / `prd/T-0089-backup-decrypt-semaphore.md` | sprint-08 | 2026-04-29 |
 | T-0072 | 备份恢复后端 MVP（TR-069 Download(FileType=3) 路径 + download handler 流式解压 + restore_tasks 表 + POST /backup/restore；FE 拆 T-0078 / task↔path 链路拆 T-0079）| feat | F06/backup | P1 | done | Claude | M | T-0071 ✅, T-0074 ✅, T-0077 ✅ | R-102 / `prd/T-0072-backup-restore-backend-mvp.md` | sprint-07 | 2026-04-29 |
 | T-0078 | 前端 RestoreData wholesale rewrite + 3 hook + 26 i18n key（**MVP 手动路径输入**；filemanager 路径架构不匹配 → 文件浏览器拆 T-0081 / T-0079 后做）| feat | frontend | P1 | done | Claude | L | T-0072 ✅ | R-102 / `prd/T-0078-frontend-restoredata-rewrite.md` | sprint-07 | 2026-04-29 |

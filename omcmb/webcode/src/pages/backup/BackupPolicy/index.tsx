@@ -63,6 +63,49 @@ function PersistedOnlyTag({ severity = 'info' }: { severity?: 'info' | 'warning'
   );
 }
 
+// EncryptionStatusTag — 3-state badge replacing PersistedOnlyTag on the
+// encryption Collapse header (T-0088). State derives FE-only from form
+// values; KEK availability is enforced by backend at PUT time (returns 400
+// with a clear message when AES-256-GCM is enabled but no key is configured).
+//
+//   active            — green   — EnableEncryption=true && algorithm=AES-256-GCM
+//   notYetEffective   — orange  — EnableEncryption=true && other algorithm
+//                                 (CBC / ChaCha20 are persisted but executor
+//                                 only acts on GCM until T-0085 lands)
+//   disabled          — default — EnableEncryption=false
+function EncryptionStatusTag({
+  enabled,
+  algorithm,
+}: {
+  enabled: boolean;
+  algorithm: string;
+}): JSX.Element {
+  const t = useT();
+  if (!enabled) {
+    return (
+      <Tag color="default" icon={<InfoCircleOutlined />} style={{ marginLeft: 8 }}>
+        {t('backup.policy.encryptionStatus.disabled')}
+      </Tag>
+    );
+  }
+  if (algorithm === 'AES-256-GCM') {
+    return (
+      <Tooltip title={t('backup.policy.encryptionStatus.activeHelp')}>
+        <Tag color="green" icon={<InfoCircleOutlined />} style={{ marginLeft: 8 }}>
+          {t('backup.policy.encryptionStatus.active')}
+        </Tag>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip title={t('backup.policy.persistedNotEnforcedTooltip')}>
+      <Tag color="orange" icon={<InfoCircleOutlined />} style={{ marginLeft: 8 }}>
+        {t('backup.policy.encryptionStatus.notYetEffective')}
+      </Tag>
+    </Tooltip>
+  );
+}
+
 export default function BackupPolicyPage(): JSX.Element {
   const t = useT();
   const [form] = Form.useForm<BackupPolicy>();
@@ -85,6 +128,9 @@ export default function BackupPolicyPage(): JSX.Element {
   const autoCleanup = Form.useWatch('autoCleanup', form) ?? true;
   const enableCompression = Form.useWatch('enableCompression', form) ?? true;
   const enableEncryption = Form.useWatch('enableEncryption', form) ?? false;
+  // T-0088: encryption_ready FE-only derivation. Backend enforces KEK
+  // availability at PUT time; UI just reflects current form values.
+  const encryptionAlgorithm = Form.useWatch('encryptionAlgorithm', form) ?? 'AES-256-GCM';
 
   // GET on mount: setFieldsValue once data arrives. setFieldsValue is OK in
   // useEffect because it mutates the form (ref-stable) — not a setState.
@@ -261,7 +307,7 @@ export default function BackupPolicyPage(): JSX.Element {
       label: (
         <span>
           {t('backup.policy.encryption')}
-          <PersistedOnlyTag severity="warning" />
+          <EncryptionStatusTag enabled={enableEncryption} algorithm={encryptionAlgorithm} />
         </span>
       ),
       children: (
@@ -306,6 +352,28 @@ export default function BackupPolicyPage(): JSX.Element {
           </Form.Item>
           <Form.Item label={t('backup.policy.alertEmail')} name="alertEmail">
             <Input placeholder="admin@example.com" />
+          </Form.Item>
+          {/* T-0088: alert_severity policy-driven (T-0084 schema). Single
+              field controls both backup_task_failed and
+              backup_storage_threshold_exceeded alarm severity. */}
+          <Form.Item
+            label={
+              <Tooltip title={t('backup.policy.alertSeverityHelp')}>
+                <span>
+                  {t('backup.policy.alertSeverity')} <InfoCircleOutlined />
+                </span>
+              </Tooltip>
+            }
+            name="alertSeverity"
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                { label: t('backup.policy.alertSeverity.warning'), value: 'warning' },
+                { label: t('backup.policy.alertSeverity.major'), value: 'major' },
+                { label: t('backup.policy.alertSeverity.critical'), value: 'critical' },
+              ]}
+            />
           </Form.Item>
         </div>
       ),

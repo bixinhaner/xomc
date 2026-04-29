@@ -396,7 +396,9 @@ export const backupApi = {
       // Axios interceptor already converts snake_case → camelCase, so the
       // response shape is the frontend BackupPolicy interface. ftp_config_id
       // null → ftpConfigId null, preserved.
-      return data;
+      // T-0088 fallback: pre-T-0084 backend may not return alertSeverity;
+      // default to 'major' so the form Select renders deterministically.
+      return { alertSeverity: 'major', ...data };
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return { ...DEFAULT_BACKUP_POLICY };
