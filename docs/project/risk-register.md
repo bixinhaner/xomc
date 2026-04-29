@@ -180,11 +180,11 @@
 - **概率**：高
 - **影响**：运维场景不可用
 - **Owner**：前端专家
-- **状态**：⚠️ Partially Closed (2026-04-29) — Software/Topology/Report 全闭环 + Backup 持久化 4/4 ✅ + Restore 主链路 ✅（T-0072/0078/0079/0080）+ enforcement 4/4 ✅（T-0073 cleanup Phase 1 / T-0074 压缩 / T-0075 加密 / T-0076 cleanup Phase 2 物理删除）+ **磁盘容量保护 ✅ T-0082（disk-fill 漏洞闭环）**；剩 orphan reaper（T-0083）+ severity policy-driven（T-0084）+ encryption followup（T-0085~T-0089）— 全部为 enhancement，不阻塞主链路
-- **关联 Task**：T-0019 ✅ / T-0022 ✅ / T-0016 ✅ / T-0070 ✅ / T-0071 ✅ / T-0072 ✅ / T-0073 ✅ / T-0074 ✅ / T-0075 ✅ / T-0076 ✅ / T-0077 ✅ / T-0078 ✅ / T-0079 ✅ / T-0080 ✅ / **T-0082 ✅**；followups T-0083/T-0084/T-0085/T-0086/T-0087/T-0088/T-0089
-- **关闭依据（已闭环部分）**：T-0019 `4ebdc91c` + T-0022 `c5e134c0` + T-0016 `c939ff12` + T-0070 `9f7ce74e` + T-0071 `d05831c3` + T-0073 `4f534b2d` + T-0074 `6043d326` + T-0075 `715a756a` + T-0076 `e22dc3e4` + T-0079 `2d7b5be6` + T-0072 `b7e09ed9` + T-0078 `286d56fb` + T-0080 `51100478` + T-0077 `d9d14417` + **T-0082 `08913d0e`**
-- **未闭环部分**：(a) 多设备 orphan 文件回收（T-0083，依赖 list-prefix 或 backup_files 表）；(b) severity policy-driven 化（T-0084，关闭 backup_task_failed + backup_storage_threshold_exceeded 两处 TODO）；(c) encryption 增强（T-0085 CBC+ChaCha20 / T-0086 KMS / T-0087 KEK 旋转 / T-0088 FE Tag / T-0089 decrypt semaphore）— 均为 enhancement followup
-- **下次复盘**：T-0083/T-0084/T-0085~T-0089 任一闭环时
+- **状态**：⚠️ Partially Closed (2026-04-29) — Software/Topology/Report 全闭环 + Backup 持久化 4/4 ✅ + Restore 主链路 ✅（T-0072/0078/0079/0080）+ enforcement 4/4 ✅（T-0073 cleanup Phase 1 / T-0074 压缩 / T-0075 加密 / T-0076 cleanup Phase 2 物理删除）+ **磁盘容量保护 ✅ T-0082** + **severity 灵活化 ✅ T-0084**（policy-driven warning/major/critical 3 档，关闭 2 处 TODO）；剩 orphan reaper（T-0083）+ encryption followup（T-0085~T-0089）— 全部为 enhancement，不阻塞主链路
+- **关联 Task**：T-0019 ✅ / T-0022 ✅ / T-0016 ✅ / T-0070 ✅ / T-0071 ✅ / T-0072 ✅ / T-0073 ✅ / T-0074 ✅ / T-0075 ✅ / T-0076 ✅ / T-0077 ✅ / T-0078 ✅ / T-0079 ✅ / T-0080 ✅ / T-0082 ✅ / **T-0084 ✅**；followups T-0083/T-0085/T-0086/T-0087/T-0088/T-0089
+- **关闭依据（已闭环部分）**：T-0019 `4ebdc91c` + T-0022 `c5e134c0` + T-0016 `c939ff12` + T-0070 `9f7ce74e` + T-0071 `d05831c3` + T-0073 `4f534b2d` + T-0074 `6043d326` + T-0075 `715a756a` + T-0076 `e22dc3e4` + T-0079 `2d7b5be6` + T-0072 `b7e09ed9` + T-0078 `286d56fb` + T-0080 `51100478` + T-0077 `d9d14417` + T-0082 `08913d0e` + **T-0084 `5cafe871`**
+- **未闭环部分**：(a) 多设备 orphan 文件回收（T-0083，依赖 list-prefix 或 backup_files 表）；(b) encryption 增强（T-0085 CBC+ChaCha20 / T-0086 KMS / T-0087 KEK 旋转 / T-0088 FE Tag / T-0089 decrypt semaphore）— 均为 enhancement followup
+- **下次复盘**：T-0083/T-0085~T-0089 任一闭环时
 
 ### R-103 License 容量/过期未拦截
 - **描述**：`MaxDevices`/`ExpiryDate` 字段有，但无超限拦截与自动禁用
