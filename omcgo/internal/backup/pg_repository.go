@@ -119,13 +119,17 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *BackupTask) error {
 
 // CleanupOldRows deletes terminal-status rows older than cutoff while keeping
 // the most-recent `keepLastN` rows per target_type partition. Returns the
-// number of rows deleted. (T-0073 cleanup cron, phase 1 — DB rows only,
-// no file-system delete; that's deferred to T-0076.)
+// non-empty file_paths of the deleted rows (for T-0076 physical delete) and
+// the total deleted-row count. Pending/running tasks are excluded so an
+// in-flight backup can never be deleted out from under itself.
 //
 // SQL strategy: a CTE ranks rows newest-first within target_type (ROW_NUMBER
 // OVER PARTITION BY); the outer DELETE removes rows older than cutoff that
-// are NOT in the kept-set. Pending/running tasks are excluded so an in-flight
-// backup can never be deleted out from under itself.
+// are NOT in the kept-set. RETURNING file_path streams the to-be-physically-
+// deleted paths back to the caller (T-0076) so MinIO RemoveObject can run
+// best-effort outside the DB transaction. Rows with NULL or empty file_path
+// (legacy rows from before T-0079 wired the linkage) are silently skipped at
+// the application layer.
 //
 // Note: kept-set spans all terminal statuses (completed/failed/cancelled), so
 // repeated failures on the same target_type can occupy keep slots. This is
@@ -133,8 +137,10 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *BackupTask) error {
 // retained alongside successes. To bias toward successes, future PR can add a
 // secondary ORDER BY clause `(status='completed') DESC, completed_at DESC`.
 // Performance note: backup_tasks has no `(target_type, completed_at)` index;
-// at < 100k rows the seq scan is fine; T-0076 may add the index if needed.
-func (r *PgTaskRepository) CleanupOldRows(ctx context.Context, cutoff time.Time, keepLastN int) (int64, error) {
+// at < 100k rows the seq scan is fine.
+func (r *PgTaskRepository) CleanupOldRows(
+	ctx context.Context, cutoff time.Time, keepLastN int,
+) (deletedFilePaths []string, total int64, err error) {
 	if keepLastN < 0 {
 		keepLastN = 0
 	}
@@ -150,12 +156,29 @@ WHERE status IN ('completed', 'failed', 'cancelled')
   AND completed_at IS NOT NULL
   AND completed_at < $1
   AND id NOT IN (SELECT id FROM ranked WHERE rn <= $2)
+RETURNING file_path
 `
-	tag, err := r.pool.Exec(ctx, q, cutoff, keepLastN)
+	rows, err := r.pool.Query(ctx, q, cutoff, keepLastN)
 	if err != nil {
-		return 0, fmt.Errorf("cleanup old backup_tasks: %w", err)
+		return nil, 0, fmt.Errorf("cleanup old backup_tasks: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	defer rows.Close()
+
+	deletedFilePaths = make([]string, 0)
+	for rows.Next() {
+		var fp *string
+		if scanErr := rows.Scan(&fp); scanErr != nil {
+			return nil, 0, fmt.Errorf("scan deleted file_path: %w", scanErr)
+		}
+		total++
+		if fp != nil && *fp != "" {
+			deletedFilePaths = append(deletedFilePaths, *fp)
+		}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, 0, fmt.Errorf("iterate deleted rows: %w", rowsErr)
+	}
+	return deletedFilePaths, total, nil
 }
 
 func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {

@@ -125,6 +125,57 @@
       "fieldConfig": {
         "defaults": {"unit": "s"}
       }
+    },
+    {
+      "title": "Backup Cleanup - Run Outcomes (T-0073/T-0076)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "sum by (result) (rate(backup_cleanup_runs_total[5m]))", "legendFormat": "{{result}}"}
+      ]
+    },
+    {
+      "title": "Backup Cleanup - Rows Deleted (rate)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "targets": [
+        {"expr": "rate(backup_cleanup_rows_deleted_total[5m])", "legendFormat": "rows/s"}
+      ]
+    },
+    {
+      "title": "Backup Cleanup - MinIO Files Deleted (T-0076)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
+      "targets": [
+        {"expr": "rate(omc_backup_file_deleted_total[5m])", "legendFormat": "files/s"}
+      ]
+    },
+    {
+      "title": "Backup Cleanup - File Delete Errors by Reason (T-0076)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
+      "targets": [
+        {"expr": "sum by (reason) (rate(omc_backup_file_delete_errors_total[5m]))", "legendFormat": "{{reason}}"}
+      ]
+    },
+    {
+      "title": "Backup Failure Alarms Published (T-0073)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 12, "x": 0, "y": 52},
+      "targets": [
+        {"expr": "sum by (kind) (backup_failure_alarm_published_total)", "legendFormat": "{{kind}}"}
+      ]
+    },
+    {
+      "title": "Backup Compression Throughput by Format (T-0074/T-0077)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
+      "targets": [
+        {"expr": "sum by (format) (rate(omc_backup_compression_bytes_in_total[5m]))", "legendFormat": "{{format}} bytes/s"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "Bps"}
+      }
     }
   ],
   "schemaVersion": 39,

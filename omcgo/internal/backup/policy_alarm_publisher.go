@@ -65,9 +65,11 @@ func PublishFailureAlarm(
 	}
 	payload := FailureAlarmPayload{
 		Source: "backup",
-		// TODO(T-0076): policy-driven severity (warning/major/critical). Phase 1
-		// hard-codes "major" because backup failure usually warrants ops attention;
-		// future PR maps policy.alert_threshold_percent or a new severity field.
+		// TODO(T-0084): policy-driven severity (warning/major/critical). T-0076
+		// considered closing this but punted — the natural design needs a new
+		// BackupPolicy.AlertSeverity column + schema migration which couples
+		// poorly with the in-flight T-0082 disk-threshold work. Combined design
+		// recommended; for now backup failures stay "major" (see T-0076 PRD §2.4).
 		Severity:     "major",
 		Identifier:   "backup_task_failed",
 		Summary:      fmt.Sprintf("Backup task failed for %d target(s)", len(task.TargetIDs)),

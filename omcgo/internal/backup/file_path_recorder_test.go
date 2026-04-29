@@ -46,8 +46,8 @@ func (m *fakePrefixRepo) Delete(_ context.Context, _ uuid.UUID) error   { return
 func (m *fakePrefixRepo) List(_ context.Context, _ TaskFilter) (*model.ListResponse[BackupTask], error) {
 	return nil, nil
 }
-func (m *fakePrefixRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
-	return 0, nil
+func (m *fakePrefixRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) ([]string, int64, error) {
+	return nil, 0, nil
 }
 func (m *fakePrefixRepo) UpdateFilePath(_ context.Context, id uuid.UUID, filePath string) error {
 	m.updateCalls = append(m.updateCalls, updateCall{id, filePath})

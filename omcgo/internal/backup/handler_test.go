@@ -72,8 +72,8 @@ func (m *fakeTaskRepo) List(_ context.Context, filter TaskFilter) (*model.ListRe
 	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
-func (m *fakeTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
-	return 0, nil
+func (m *fakeTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) ([]string, int64, error) {
+	return nil, 0, nil
 }
 func (m *fakeTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) error {
 	return nil

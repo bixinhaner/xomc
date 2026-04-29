@@ -27,6 +27,10 @@ type PolicyMetrics struct {
 	compressionBytesOut *prometheus.CounterVec
 	compressionDuration *prometheus.HistogramVec
 	compressionErrors   *prometheus.CounterVec
+
+	// T-0076 physical file delete (MinIO object removal alongside DB cleanup):
+	fileDeletedTotal      prometheus.Counter
+	fileDeleteErrorsTotal *prometheus.CounterVec
 }
 
 // NewPolicyMetrics registers all collectors on the given registry.
@@ -63,12 +67,22 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "omc_backup_compression_errors_total",
 			Help: "Backup compression error tally, per format and reason (open|copy|close).",
 		}, []string{"format", "reason"}),
+
+		fileDeletedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_backup_file_deleted_total",
+			Help: "Total MinIO objects physically deleted by cleanup cron (T-0076).",
+		}),
+		fileDeleteErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_file_delete_errors_total",
+			Help: "Cleanup MinIO RemoveObject errors by reason (not_found|network|parse_path|other).",
+		}, []string{"reason"}),
 	}
 	if reg != nil {
 		reg.MustRegister(
 			m.cleanupRuns, m.cleanupRowsDeleted, m.failureAlarmTotal,
 			m.compressionBytesIn, m.compressionBytesOut,
 			m.compressionDuration, m.compressionErrors,
+			m.fileDeletedTotal, m.fileDeleteErrorsTotal,
 		)
 	}
 	return m
@@ -129,4 +143,22 @@ func (m *PolicyMetrics) RecordCompressionError(format, reason string) {
 		return
 	}
 	m.compressionErrors.WithLabelValues(format, reason).Inc()
+}
+
+// RecordFileDeleted increments the cleanup-side MinIO RemoveObject success
+// counter (T-0076).
+func (m *PolicyMetrics) RecordFileDeleted() {
+	if m == nil {
+		return
+	}
+	m.fileDeletedTotal.Inc()
+}
+
+// RecordFileDeleteError tallies a cleanup-side MinIO RemoveObject failure.
+// reason ∈ {"not_found", "network", "parse_path", "other"}.
+func (m *PolicyMetrics) RecordFileDeleteError(reason string) {
+	if m == nil {
+		return
+	}
+	m.fileDeleteErrorsTotal.WithLabelValues(reason).Inc()
 }

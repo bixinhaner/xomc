@@ -49,8 +49,8 @@ func (m *execTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) 
 func (m *execTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*BackupTask, error) {
 	return nil, nil
 }
-func (m *execTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
-	return 0, nil
+func (m *execTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) ([]string, int64, error) {
+	return nil, 0, nil
 }
 
 type execDeviceRepo struct {

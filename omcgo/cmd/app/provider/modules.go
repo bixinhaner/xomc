@@ -188,6 +188,10 @@ func initBackupModule(c *Container) error {
 	// (executor) — see cmd/worker/main.go.
 	policyMetrics := backup.NewPolicyMetrics(c.MetricsReg)
 	backupPolicyMonitor := backup.NewPolicyMonitor(policyService, backupTaskRepo, policyMetrics, logger)
+	// T-0076 Phase 2: enable physical MinIO object deletion alongside DB
+	// cleanup. minio is optional (nil-safe); when wired, RunCleanupOnce
+	// calls RemoveObject for each deleted backup_task's file_path.
+	backupPolicyMonitor.SetMinIO(c.MinIO)
 	if err := backupPolicyMonitor.Start(context.Background()); err != nil {
 		logger.Warn("start backup policy monitor", zap.Error(err))
 	}

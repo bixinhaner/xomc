@@ -26,8 +26,11 @@ type TaskRepository interface {
 
 	// CleanupOldRows deletes terminal-status rows older than `cutoff` while
 	// preserving the most-recent `keepLastN` rows per target_type partition.
-	// Returns the number of rows actually deleted. (T-0073 cleanup cron.)
-	CleanupOldRows(ctx context.Context, cutoff time.Time, keepLastN int) (int64, error)
+	// Returns the file_path values of the deleted rows that had a non-empty
+	// path (for downstream MinIO RemoveObject — T-0076 physical delete) plus
+	// the total deleted-row count. file_paths from rows where file_path is
+	// NULL or empty are filtered out — they don't have a known MinIO object.
+	CleanupOldRows(ctx context.Context, cutoff time.Time, keepLastN int) (deletedFilePaths []string, total int64, err error)
 
 	// UpdateFilePath sets backup_tasks.file_path on the given row using an
 	// atomic CAS — only writes when the column is currently NULL. Used by

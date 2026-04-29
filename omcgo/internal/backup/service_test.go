@@ -60,8 +60,8 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 	return nil, nil
 }
 
-func (m *mockTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) (int64, error) {
-	return 0, nil
+func (m *mockTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) ([]string, int64, error) {
+	return nil, 0, nil
 }
 func (m *mockTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) error {
 	return nil
