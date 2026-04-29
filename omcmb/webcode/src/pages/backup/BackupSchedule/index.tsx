@@ -1,460 +1,475 @@
-import { useState, useMemo } from 'react';
+// T-0070 / R-102 followup: BackupSchedule UI 重设计
+//
+// 历史: 此页面（路由 /backup/schedule，菜单"备份调度"）原本是"配置文件 import/export"
+// demo placeholder（460 行 mock + Blob 客户端拼接 XML），与同名的 BackupSchedule 后端
+// 完全错位。T-0016 audit 后判定为未上线生产的 dev artifact，按 PRD §1 wholesale replace。
+//
+// 现在: 消费 frontend-core 4 schedule hooks，做真实的 cron 调度任务管理。
+//
+// 非目标（PRD §5）：cron 解析依赖 / 下次执行时间预测 / 调度执行历史 / clone / template
+
+import { useCallback, useMemo, useState } from 'react';
 import {
   Button,
-  message,
-  Drawer,
-  Radio,
   Form,
-  Table,
-  Tag,
-  Alert,
+  Input,
+  Modal,
+  Popconfirm,
+  Radio,
+  Select,
   Space,
-  Divider,
+  Switch,
+  Tag,
+  message,
 } from 'antd';
-import {
-  UploadOutlined,
-  DownloadOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  InboxOutlined,
-} from '@ant-design/icons';
-import { Upload } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn, BatchAction } from '@/components/DataTable';
-import FilterBar from '@/components/FilterBar';
-import type { FilterField } from '@/components/FilterBar';
+import type { DataTableColumn } from '@/components/DataTable';
+import {
+  useBackupSchedules,
+  useCreateBackupSchedule,
+  useUpdateBackupSchedule,
+  useDeleteBackupSchedules,
+} from '@core/hooks/api/useBackup';
+import { useAllDeviceGroups } from '@core/hooks/api/useSystem';
+import type { BackupSchedule } from '@core/mock/data/backup';
+import type { DeviceGroup } from '@core/types/device';
 import { useT } from '@/hooks/useT';
 
-// 产品类型选项
-const PRODUCT_TYPE_OPTIONS = [
-  'PM-B4860', 'QAFA', 'QATA', 'QAFB', 'RTD',
-  'BaiBNX', 'BaiBNQ', 'BSC', 'BTS',
-];
+// ---------------------------------------------------------------------------
+// Cron presets (in-house, no third-party dependency per PRD §5)
+// ---------------------------------------------------------------------------
 
-// 导入方式
-type ImportMode = 'filename' | 'all';
-
-// 匹配结果行
-interface MatchRow {
-  id: string;
-  deviceSn: string;
-  deviceName: string;
-  productType: string;
-  fileName: string;
-  matched: boolean;
+interface CronPreset {
+  key: string;
+  cron: string;
+  labelKey: string;
 }
 
-interface ConfigFileRow extends Record<string, unknown> {
-  id: string;
-  deviceSn: string;
-  deviceName: string;
-  productType: string;
-  configFile: string;
-  fileSize: string;
-  updateTime: string;
+const CRON_PRESETS: readonly CronPreset[] = [
+  { key: 'daily-midnight', cron: '0 0 * * *', labelKey: 'backup.cronDaily00' },
+  { key: 'weekly-mon', cron: '0 0 * * 1', labelKey: 'backup.cronWeeklyMon' },
+  { key: 'monthly-1st', cron: '0 0 1 * *', labelKey: 'backup.cronMonthly1st' },
+  { key: 'every-6h', cron: '0 */6 * * *', labelKey: 'backup.cronEvery6h' },
+  { key: 'custom', cron: '', labelKey: 'backup.cronCustom' },
+] as const;
+
+function isValidCron(s: string): boolean {
+  // Minimal 5-field shape check: server is the source of truth for semantic validation.
+  const parts = s.trim().split(/\s+/);
+  return parts.length === 5 && parts.every((p) => p.length > 0);
 }
 
-// Mock 数据
-const mockData: ConfigFileRow[] = [
-  { id: '1', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', productType: 'PM-B4860', configFile: 'ENB00001_config_20260302.xml', fileSize: '128 KB', updateTime: '2026-03-02 10:15:00' },
-  { id: '2', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', productType: 'PM-B4860', configFile: 'ENB00002_config_20260302.xml', fileSize: '115 KB', updateTime: '2026-03-02 10:12:00' },
-  { id: '3', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', productType: 'QAFA', configFile: 'ENB00003_config_20260301.xml', fileSize: '96 KB', updateTime: '2026-03-01 14:30:00' },
-  { id: '4', deviceSn: 'GNB00001', deviceName: '北京5G基站01', productType: 'BaiBNX', configFile: 'GNB00001_config_20260302.xml', fileSize: '256 KB', updateTime: '2026-03-02 08:45:00' },
-  { id: '5', deviceSn: 'GNB00002', deviceName: '上海5G基站01', productType: 'BaiBNX', configFile: 'GNB00002_config_20260228.xml', fileSize: '245 KB', updateTime: '2026-02-28 16:20:00' },
-  { id: '6', deviceSn: 'ENB00004', deviceName: '广州天河基站01', productType: 'QATA', configFile: 'ENB00004_config_20260302.xml', fileSize: '102 KB', updateTime: '2026-03-02 09:30:00' },
-  { id: '7', deviceSn: 'ENB00005', deviceName: '深圳南山基站01', productType: 'QAFB', configFile: 'ENB00005_config_20260301.xml', fileSize: '88 KB', updateTime: '2026-03-01 11:00:00' },
-  { id: '8', deviceSn: 'GNB00003', deviceName: '广州5G基站01', productType: 'BaiBNQ', configFile: 'GNB00003_config_20260302.xml', fileSize: '198 KB', updateTime: '2026-03-02 07:50:00' },
-  { id: '9', deviceSn: 'ENB00006', deviceName: '杭州西湖基站01', productType: 'RTD', configFile: 'ENB00006_config_20260227.xml', fileSize: '72 KB', updateTime: '2026-02-27 13:45:00' },
-  { id: '10', deviceSn: 'ENB00007', deviceName: '南京鼓楼基站01', productType: 'PM-B4860', configFile: 'ENB00007_config_20260302.xml', fileSize: '135 KB', updateTime: '2026-03-02 10:45:00' },
-  { id: '11', deviceSn: 'GNB00004', deviceName: '深圳5G基站01', productType: 'BaiBNX', configFile: 'GNB00004_config_20260301.xml', fileSize: '262 KB', updateTime: '2026-03-01 15:30:00' },
-  { id: '12', deviceSn: 'ENB00008', deviceName: '成都武侯基站01', productType: 'QAFA', configFile: 'ENB00008_config_20260228.xml', fileSize: '91 KB', updateTime: '2026-02-28 09:10:00' },
-];
+function presetForCron(cron: string): string {
+  const hit = CRON_PRESETS.find((p) => p.cron === cron);
+  return hit ? hit.key : 'custom';
+}
 
-export default function BackupSchedule() {
+// ---------------------------------------------------------------------------
+// UI types
+// ---------------------------------------------------------------------------
+
+interface ScheduleRow extends Record<string, unknown> {
+  id: string;
+  scheduleName: string;
+  cronExpression: string;
+  backupType: BackupSchedule['backupType'];
+  deviceGroups: string[]; // group IDs
+  enabled: boolean;
+  createTime: string;
+}
+
+function toRow(s: BackupSchedule): ScheduleRow {
+  return {
+    id: s.id,
+    scheduleName: s.scheduleName,
+    cronExpression: s.cronExpression,
+    backupType: s.backupType,
+    deviceGroups: s.deviceGroups ?? [],
+    enabled: s.enabled,
+    createTime: s.createTime,
+  };
+}
+
+interface ScheduleFormValues {
+  scheduleName: string;
+  cronPreset: string;
+  cronExpression: string;
+  backupType: BackupSchedule['backupType'];
+  deviceGroups: string[];
+  enabled: boolean;
+}
+
+function getErrMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e && 'message' in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return '';
+}
+
+const BACKUP_TYPE_TAG_COLOR: Record<BackupSchedule['backupType'], string> = {
+  full: 'blue',
+  incremental: 'cyan',
+  'config-only': 'purple',
+};
+
+const BACKUP_TYPE_LABEL_KEY: Record<BackupSchedule['backupType'], string> = {
+  full: 'backup.fullBackup',
+  incremental: 'backup.incrementalBackup',
+  'config-only': 'backup.configBackup',
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function BackupSchedulePage(): JSX.Element {
   const t = useT();
-  const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  // 导入抽屉状态
-  const [importVisible, setImportVisible] = useState(false);
-  const [importMode, setImportMode] = useState<ImportMode>('filename');
-  const [importFileList, setImportFileList] = useState<any[]>([]);
-  const [matchResult, setMatchResult] = useState<MatchRow[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingRow, setEditingRow] = useState<ScheduleRow | null>(null);
+  const [form] = Form.useForm<ScheduleFormValues>();
+  const cronPreset = Form.useWatch('cronPreset', form);
 
-  // ========== 筛选条件 ==========
-  const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: '基站编码/名称', type: 'input', placeholder: '请输入基站编码或名称' },
-    {
-      name: 'productType',
-      label: '产品类型',
-      type: 'select',
-      placeholder: '请选择',
-      options: [
-        { label: '全部', value: 'all' },
-        ...PRODUCT_TYPE_OPTIONS.map((p) => ({ label: p, value: p })),
-      ],
-    },
-  ], []);
+  const { data, isLoading, refetch } = useBackupSchedules({ page, pageSize });
+  const { data: groupsData } = useAllDeviceGroups();
+  const createSchedule = useCreateBackupSchedule();
+  const updateSchedule = useUpdateBackupSchedule();
+  const deleteSchedules = useDeleteBackupSchedules();
 
-  // ========== 过滤数据 ==========
-  const filteredData = useMemo(() => {
-    return mockData.filter((row) => {
-      if (filters.keyword && typeof filters.keyword === 'string') {
-        const keyword = filters.keyword.toLowerCase();
-        if (!row.deviceSn.toLowerCase().includes(keyword) &&
-            !row.deviceName.toLowerCase().includes(keyword)) {
-          return false;
-        }
-      }
-      if (filters.productType && filters.productType !== 'all') {
-        if (row.productType !== filters.productType) return false;
-      }
-      return true;
+  const tableSource: ScheduleRow[] = useMemo(
+    () => (data?.items ?? []).map(toRow),
+    [data?.items],
+  );
+
+  const groupOptions = useMemo(
+    () =>
+      (groupsData ?? []).map((g: DeviceGroup) => ({
+        label: g.name,
+        value: g.id,
+      })),
+    [groupsData],
+  );
+
+  const groupNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of groupsData ?? []) m.set(g.id, g.name);
+    return m;
+  }, [groupsData]);
+
+  const openCreate = (): void => {
+    setEditingRow(null);
+    form.resetFields();
+    form.setFieldsValue({
+      scheduleName: '',
+      cronPreset: 'daily-midnight',
+      cronExpression: '0 0 * * *',
+      backupType: 'full',
+      deviceGroups: [],
+      enabled: true,
     });
-  }, [filters]);
+    setModalVisible(true);
+  };
 
-  // 分页数据切片
-  const paginatedData = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredData.slice(start, start + pageSize);
-  }, [filteredData, page, pageSize]);
-
-  // ========== 匹配结果统计 ==========
-  const matchStats = useMemo(() => {
-    const matched = matchResult.filter((r) => r.matched).length;
-    const unmatched = matchResult.filter((r) => !r.matched).length;
-    return { matched, unmatched, total: matchResult.length };
-  }, [matchResult]);
-
-  // ========== 列定义（无操作列）==========
-  const columns: DataTableColumn<ConfigFileRow>[] = useMemo(() => [
-    { key: 'deviceSn', title: '基站编码', dataIndex: 'deviceSn', width: 120 },
-    { key: 'deviceName', title: '基站名称', dataIndex: 'deviceName', width: 180, ellipsis: true },
-    { key: 'productType', title: '产品类型', dataIndex: 'productType', width: 100 },
-    {
-      key: 'configFile',
-      title: '配置文件',
-      dataIndex: 'configFile',
-      ellipsis: true,
-      render: (val: string, record: ConfigFileRow) => (
-        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => handleDownloadFile(val, record)}>
-          {val}
-        </Button>
-      ),
+  const openEdit = useCallback(
+    (row: ScheduleRow): void => {
+      setEditingRow(row);
+      form.resetFields();
+      form.setFieldsValue({
+        scheduleName: row.scheduleName,
+        cronPreset: presetForCron(row.cronExpression),
+        cronExpression: row.cronExpression,
+        backupType: row.backupType,
+        deviceGroups: row.deviceGroups,
+        enabled: row.enabled,
+      });
+      setModalVisible(true);
     },
-    { key: 'updateTime', title: '更新时间', dataIndex: 'updateTime', width: 160 },
-  ], []);
+    [form],
+  );
 
-  // ========== 操作处理 ==========
-  const handleDownloadFile = (fileName: string, record: ConfigFileRow) => {
-    // 生成模拟 XML 配置文件内容
-    const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <device>
-    <sn>${record.deviceSn}</sn>
-    <name>${record.deviceName}</name>
-    <productType>${record.productType}</productType>
-  </device>
-  <parameters>
-    <parameter name="SystemName" value="${record.deviceName}"/>
-    <parameter name="SoftwareVersion" value="V1.3.0"/>
-    <parameter name="IPAddress" value="192.168.1.${parseInt(record.id, 10) * 10}"/>
-    <parameter name="SubnetMask" value="255.255.255.0"/>
-    <parameter name="Gateway" value="192.168.1.1"/>
-  </parameters>
-  <timestamp>${record.updateTime}</timestamp>
-</config>`;
-
-    const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    link.click();
-    URL.revokeObjectURL(url);
-
-    void message.success(`已下载: ${fileName}`);
+  const closeModal = (): void => {
+    setModalVisible(false);
+    setEditingRow(null);
+    form.resetFields();
   };
 
-  const handleBatchExport = (keys: React.Key[]) => {
-    if (keys.length === 0) {
-      void message.warning('请选择要导出的配置文件');
-      return;
+  const handlePresetChange = (key: string): void => {
+    const preset = CRON_PRESETS.find((p) => p.key === key);
+    if (preset && preset.cron) {
+      form.setFieldValue('cronExpression', preset.cron);
     }
-    const selected = filteredData.filter((d) => keys.includes(d.id));
-    void message.success(`开始导出 ${selected.length} 个配置文件`);
   };
 
-  // 打开导入抽屉
-  const handleBatchImport = () => {
-    setImportMode('filename');
-    setImportFileList([]);
-    setMatchResult([]);
-    setImportVisible(true);
-  };
-
-  // 模拟匹配：上传文件后根据导入方式匹配设备
-  const handleMatchPreview = () => {
-    if (importFileList.length === 0) {
-      setMatchResult([]);
-      return;
+  const handleSave = async (): Promise<void> => {
+    let vals: ScheduleFormValues;
+    try {
+      vals = await form.validateFields();
+    } catch {
+      return; // antd surfaces field errors
     }
 
-    // 获取已选设备（如果有选择则用已选，否则用全部）
-    const targetDevices = selectedRowKeys.length > 0
-      ? mockData.filter((d) => selectedRowKeys.includes(d.id))
-      : mockData;
+    const payload: Omit<BackupSchedule, 'id' | 'createTime'> = {
+      scheduleName: vals.scheduleName,
+      cronExpression: vals.cronExpression,
+      cronDescription: '', // backend does not store; reserved for UI-derived text
+      enabled: vals.enabled,
+      backupType: vals.backupType,
+      deviceGroups: vals.deviceGroups,
+      retentionDays: 0, // not yet wired
+      storageLocation: '',
+      nextRunTime: '',
+      creator: '',
+    };
 
-    if (importMode === 'filename') {
-      // 按文件名匹配：从文件名中提取设备SN前缀进行匹配
-      const result: MatchRow[] = [];
-      for (const device of targetDevices) {
-        const matchedFile = importFileList.find((f) => {
-          const fileName = (f.name || '').toUpperCase();
-          return fileName.includes(device.deviceSn.toUpperCase());
-        });
-        result.push({
-          id: device.id,
-          deviceSn: device.deviceSn,
-          deviceName: device.deviceName,
-          productType: device.productType,
-          fileName: matchedFile ? matchedFile.name : '',
-          matched: !!matchedFile,
-        });
-      }
-      setMatchResult(result);
+    if (editingRow) {
+      updateSchedule.mutate(
+        { id: editingRow.id, data: payload },
+        {
+          onSuccess: () => {
+            void message.success(t('backup.scheduleUpdateSuccess'));
+            closeModal();
+          },
+          onError: (e: unknown) => {
+            void message.error(t('backup.scheduleUpdateFailed', { error: getErrMsg(e) }));
+          },
+        },
+      );
     } else {
-      // 所有设备匹配一个配置文件：用第一个文件匹配所有设备
-      const firstFile = importFileList[0];
-      const result: MatchRow[] = targetDevices.map((device) => ({
-        id: device.id,
-        deviceSn: device.deviceSn,
-        deviceName: device.deviceName,
-        productType: device.productType,
-        fileName: firstFile?.name || '',
-        matched: true,
-      }));
-      setMatchResult(result);
+      createSchedule.mutate(payload, {
+        onSuccess: () => {
+          void message.success(t('backup.scheduleCreateSuccess'));
+          closeModal();
+        },
+        onError: (e: unknown) => {
+          void message.error(t('backup.scheduleCreateFailed', { error: getErrMsg(e) }));
+        },
+      });
     }
   };
 
-  // 确认导入
-  const handleImportConfirm = () => {
-    if (importFileList.length === 0) {
-      void message.warning('请选择要导入的文件');
-      return;
-    }
-    const matchedCount = matchResult.filter((r) => r.matched).length;
-    void message.success(`已成功导入配置文件，匹配设备 ${matchedCount} 台`);
-    setImportVisible(false);
-    setImportFileList([]);
-    setMatchResult([]);
-    setSelectedRowKeys([]);
-  };
-
-  // ========== 批量操作（与设备列表风格一致）==========
-  const batchActions = useMemo((): BatchAction[] => [
-    {
-      key: 'batch-import',
-      label: '导入文件',
-      icon: <UploadOutlined />,
-      onClick: handleBatchImport,
+  const handleToggleEnabled = useCallback(
+    (row: ScheduleRow, enabled: boolean): void => {
+      updateSchedule.mutate(
+        { id: row.id, data: { enabled } },
+        {
+          onError: (e: unknown) => {
+            void message.error(t('backup.scheduleUpdateFailed', { error: getErrMsg(e) }));
+          },
+        },
+      );
     },
-    {
-      key: 'batch-export',
-      label: '导出文件',
-      icon: <DownloadOutlined />,
-      onClick: handleBatchExport,
-    },
-  ], [filteredData, selectedRowKeys]);
+    [updateSchedule, t],
+  );
 
-  // ========== 页面头部按钮 ==========
-  const headerExtra = null;
+  const handleDelete = useCallback(
+    (row: ScheduleRow): void => {
+      deleteSchedules.mutate([row.id], {
+        onSuccess: () => {
+          void message.success(t('backup.scheduleDeleteSuccess'));
+        },
+        onError: (e: unknown) => {
+          void message.error(t('backup.scheduleDeleteFailed', { error: getErrMsg(e) }));
+        },
+      });
+    },
+    [deleteSchedules, t],
+  );
+
+  const columns: DataTableColumn<ScheduleRow>[] = useMemo(
+    () => [
+      { key: 'scheduleName', title: t('table.name'), dataIndex: 'scheduleName', width: 200 },
+      {
+        key: 'cronExpression',
+        title: t('backup.cronExpression'),
+        dataIndex: 'cronExpression',
+        width: 180,
+        mono: true,
+      },
+      {
+        key: 'backupType',
+        title: t('backup.backupType'),
+        dataIndex: 'backupType',
+        width: 130,
+        render: (val) => {
+          const v = val as BackupSchedule['backupType'];
+          return <Tag color={BACKUP_TYPE_TAG_COLOR[v]}>{t(BACKUP_TYPE_LABEL_KEY[v])}</Tag>;
+        },
+      },
+      {
+        key: 'deviceGroups',
+        title: t('backup.deviceGroups'),
+        dataIndex: 'deviceGroups',
+        width: 220,
+        render: (val) => {
+          const ids = val as string[];
+          if (!ids.length) return '-';
+          const names = ids.map((id) => groupNameById.get(id) ?? id).join(', ');
+          return (
+            <span title={names}>
+              {t('backup.deviceGroupsCount', { count: ids.length })}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'enabled',
+        title: t('table.status'),
+        dataIndex: 'enabled',
+        width: 100,
+        render: (val, record) => (
+          <Switch
+            size="small"
+            checked={val as boolean}
+            checkedChildren={t('common.enable')}
+            unCheckedChildren={t('common.disable')}
+            onChange={(checked) => handleToggleEnabled(record, checked)}
+          />
+        ),
+      },
+      { key: 'createTime', title: t('table.createTime'), dataIndex: 'createTime', width: 170 },
+      {
+        key: 'operation',
+        title: t('table.operation'),
+        width: 140,
+        fixed: 'right',
+        render: (_val, record) => (
+          <Space size="small">
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              {t('common.edit')}
+            </Button>
+            <Popconfirm
+              title={t('backup.confirmDeleteSchedule', { name: record.scheduleName })}
+              onConfirm={() => handleDelete(record)}
+              okText={t('common.confirm')}
+              cancelText={t('common.cancel')}
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="link" size="small" danger>
+                {t('common.delete')}
+              </Button>
+            </Popconfirm>
+          </Space>
+        ),
+      },
+    ],
+    [t, groupNameById, openEdit, handleToggleEnabled, handleDelete],
+  );
 
   return (
-    <ListPageLayout title={t('nav.backup.schedule')} extra={headerExtra}>
-      {/* 筛选条件 */}
-      <FilterBar
-        filterId="config-file-filter"
-        fields={filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
-      />
-
-      {/* 列表 */}
-      <DataTable<ConfigFileRow>
-        tableId="config-file-list"
+    <ListPageLayout
+      title={t('backup.scheduleListTitle')}
+      extra={
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          {t('backup.newSchedule')}
+        </Button>
+      }
+    >
+      <DataTable<ScheduleRow>
+        tableId="backup-schedules"
         columns={columns}
-        dataSource={paginatedData}
+        dataSource={tableSource}
+        loading={isLoading}
         rowKey="id"
-        selectable
-        selectedRowKeys={selectedRowKeys}
-        onSelectionChange={(keys) => setSelectedRowKeys(keys)}
-        total={filteredData.length}
+        total={data?.total ?? tableSource.length}
         currentPage={page}
         pageSize={pageSize}
-        onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        batchActions={batchActions}
-        showRowNumber
-        rowNumberTitle="序号"
-        scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+        onPageChange={(p, s) => {
+          setPage(p);
+          setPageSize(s);
+        }}
+        onRefresh={() => void refetch()}
+        scroll={{ x: 1200 }}
       />
 
-      {/* 导入抽屉 */}
-      <Drawer
-        title="导入配置文件"
-        placement="right"
-        width={680}
-        open={importVisible}
-        onClose={() => { setImportVisible(false); setImportFileList([]); setMatchResult([]); }}
-        footer={
-          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={() => { setImportVisible(false); setImportFileList([]); setMatchResult([]); }}>取消</Button>
-            {matchResult.length > 0 && matchStats.matched > 0 && (
-              <Button
-                type="primary"
-                onClick={handleImportConfirm}
-              >
-                导入匹配成功的文件（{matchStats.matched} 台）
-              </Button>
-            )}
-          </Space>
-        }
+      <Modal
+        title={editingRow ? t('backup.editSchedule') : t('backup.newSchedule')}
+        open={modalVisible}
+        onOk={() => void handleSave()}
+        onCancel={closeModal}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        width={620}
+        confirmLoading={createSchedule.isPending || updateSchedule.isPending}
+        destroyOnHidden
       >
-        <Form layout="vertical" size="small">
-          {/* 文件导入方式 */}
-          <Form.Item label="文件导入方式" required>
-            <Radio.Group
-              value={importMode}
-              onChange={(e) => {
-                setImportMode(e.target.value);
-                setImportFileList([]);
-                setMatchResult([]);
-              }}
-            >
-              <Radio value="filename">按导入文件名匹配</Radio>
-              <Radio value="all">所有设备匹配一个配置文件</Radio>
+        <Form<ScheduleFormValues> form={form} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            label={t('table.name')}
+            name="scheduleName"
+            rules={[{ required: true, message: t('backup.scheduleNameRequired') }]}
+          >
+            <Input maxLength={128} />
+          </Form.Item>
+
+          <Form.Item label={t('backup.cronPreset')} name="cronPreset">
+            <Radio.Group onChange={(e) => handlePresetChange(e.target.value as string)}>
+              {CRON_PRESETS.map((p) => (
+                <Radio key={p.key} value={p.key}>
+                  {t(p.labelKey)}
+                </Radio>
+              ))}
             </Radio.Group>
-            <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
-              {importMode === 'filename'
-                ? '根据文件名中的设备SN自动匹配对应设备'
-                : '将选中的配置文件应用到所有已选设备'}
-            </div>
           </Form.Item>
 
-          {/* 导入配置文件 - 使用导入组件 */}
-          <Form.Item label="导入配置文件" required>
-            <Upload.Dragger
-              multiple={importMode === 'filename'}
-              accept=".xml,.zip"
-              maxCount={importMode === 'filename' ? undefined : 1}
-              fileList={importFileList}
-              onChange={({ fileList }) => {
-                setImportFileList(fileList);
-                setMatchResult([]);
-              }}
-              beforeUpload={() => false}
-              style={{ marginBottom: 8 }}
-            >
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined />
-              </p>
-              <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-              <p className="ant-upload-hint">
-                支持 .xml、.zip 格式
-                {importMode === 'filename' ? '，可同时上传多个文件按文件名匹配' : '，只能上传一个配置文件'}
-              </p>
-            </Upload.Dragger>
+          <Form.Item
+            label={t('backup.cronExpression')}
+            name="cronExpression"
+            rules={[
+              { required: true, message: t('backup.cronExprInvalid') },
+              {
+                validator: (_rule, value: string) =>
+                  isValidCron(value) ? Promise.resolve() : Promise.reject(new Error(t('backup.cronExprInvalid'))),
+              },
+            ]}
+            extra={cronPreset === 'custom' ? t('backup.cronCustomHint') : undefined}
+          >
+            <Input
+              placeholder="* * * * *"
+              disabled={cronPreset !== 'custom'}
+              style={{ fontFamily: 'monospace' }}
+            />
           </Form.Item>
 
-          {/* 匹配按钮 */}
-          {importFileList.length > 0 && matchResult.length === 0 && (
-            <Form.Item>
-              <Button type="primary" onClick={handleMatchPreview}>
-                开始匹配
-              </Button>
-            </Form.Item>
-          )}
+          <Form.Item
+            label={t('backup.backupType')}
+            name="backupType"
+            rules={[{ required: true }]}
+          >
+            <Radio.Group>
+              <Radio value="full">{t('backup.fullBackup')}</Radio>
+              <Radio value="incremental">{t('backup.incrementalBackup')}</Radio>
+              <Radio value="config-only">{t('backup.configBackup')}</Radio>
+            </Radio.Group>
+          </Form.Item>
 
-          {/* 匹配结果 */}
-          {matchResult.length > 0 && (
-            <>
-              <Divider />
-              <Form.Item label={
-                <span>
-                  匹配结果
-                  <Tag color="success" style={{ marginLeft: 8 }}>
-                    <CheckCircleOutlined /> 匹配成功 {matchStats.matched}
-                  </Tag>
-                  {matchStats.unmatched > 0 && (
-                    <Tag color="error" style={{ marginLeft: 4 }}>
-                      <CloseCircleOutlined /> 未匹配 {matchStats.unmatched}
-                    </Tag>
-                  )}
-                </span>
-              }>
-                {matchStats.matched > 0 && (
-                  <Alert
-                    type="success"
-                    showIcon
-                    message={`共匹配成功 ${matchStats.matched} 台设备${matchStats.unmatched > 0 ? `，${matchStats.unmatched} 台设备未匹配到配置文件` : ''}`}
-                    style={{ marginBottom: 12 }}
-                  />
-                )}
-                {matchStats.matched === 0 && (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    message="没有匹配到任何设备，请检查文件名是否包含设备SN"
-                    style={{ marginBottom: 12 }}
-                  />
-                )}
-                <Table
-                  size="small"
-                  dataSource={matchResult}
-                  rowKey="id"
-                  pagination={matchResult.length > 10 ? { pageSize: 10 } : false}
-                  scroll={{ y: 300 }}
-                  columns={[
-                    {
-                      title: '基站编码',
-                      dataIndex: 'deviceSn',
-                      width: 110,
-                    },
-                    {
-                      title: '基站名称',
-                      dataIndex: 'deviceName',
-                      ellipsis: true,
-                    },
-                    {
-                      title: '产品类型',
-                      dataIndex: 'productType',
-                      width: 90,
-                    },
-                    {
-                      title: '匹配文件',
-                      dataIndex: 'fileName',
-                      width: 200,
-                      ellipsis: true,
-                      render: (val: string) => val || '-',
-                    },
-                    {
-                      title: '匹配状态',
-                      width: 90,
-                      dataIndex: 'matched',
-                      render: (val: boolean) => val
-                        ? <Tag color="success" icon={<CheckCircleOutlined />}>成功</Tag>
-                        : <Tag color="error" icon={<CloseCircleOutlined />}>未匹配</Tag>,
-                    },
-                  ]}
-                />
-              </Form.Item>
-            </>
-          )}
+          <Form.Item
+            label={t('backup.deviceGroups')}
+            name="deviceGroups"
+            rules={[{ required: true, type: 'array', min: 1 }]}
+          >
+            <Select
+              mode="multiple"
+              placeholder={t('common.placeholder')}
+              options={groupOptions}
+              optionFilterProp="label"
+              showSearch
+            />
+          </Form.Item>
+
+          <Form.Item
+            label={t('common.enable')}
+            name="enabled"
+            valuePropName="checked"
+          >
+            {/* enabled default 在 openCreate/openEdit 通过 form.setFieldsValue 注入；不再走 initialValue */}
+            <Switch checkedChildren={t('status.enabled')} unCheckedChildren={t('status.disabled')} />
+          </Form.Item>
         </Form>
-      </Drawer>
+      </Modal>
     </ListPageLayout>
   );
 }
