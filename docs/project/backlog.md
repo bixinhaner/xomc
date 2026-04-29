@@ -66,7 +66,7 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
+| Total tasks | 72 | — | +3 (T-0070/0071/0072 T-0016 followups 2026-04-29) |
 | `done` | 52 | — | +T-0021 (Software 回滚增强 reason/source/target + canary auto-rollback opt-in, R-101 完整闭环)；+T-0019 (前端 Canary API 消费, T-0018 链解锁)；+T-0018 (Software 灰度升级)；+T-0025 / +T-0022 / +T-0012 (R-106) / +T-0015 (R-103) |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
 | `planned` | 7 | — | -1 (T-0021 done) |
@@ -288,6 +288,9 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0067 | 异地备份扩展 db_backup.sh +186 行 + DR Runbook 9 章 388 行（实测 RTO/RPO 待 staging，W3.H.3） | feat | ops | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W3.H.3 | wave-3 | 2026-04-28 |
 | T-0068 | 灰度发布演练 5%→25%→100%（W3.I.2） | proc | ops | P0 | planned | 运维+QA | M | T-0065 | `AI承诺对峙清单.md` W3.I.2 | wave-3 | 2026-04-28 |
 | T-0069 | 回滚演练 5min 内回上一版本（W3.I.3） | proc | ops | P0 | planned | 运维+QA | M | T-0065 | `AI承诺对峙清单.md` W3.I.3 | wave-3 | 2026-04-28 |
+| T-0070 | 前端 BackupSchedule UI 重设计 + 接 4 schedule hooks（当前页面实为"配置文件 import/export"，与后端 backup-schedules 错位） | feat | frontend | P2 | triaged | 前端 | M | — | R-102 / T-0016 followup | sprint-06 | 2026-04-29 |
+| T-0071 | 后端 backup policy endpoint 设计 + 前端 BackupPolicy 接入（保留策略/自动清理/压缩/加密/告警 7 类配置） | feat | F06/backup+frontend | P2 | triaged | 电信+前端 | L | — | R-102 / T-0016 followup | sprint-06 | 2026-04-29 |
+| T-0072 | 备份恢复流程设计 + 后端 /backup/restore endpoint + 前端 RestoreData 接入（明确 restore 是配置同步还是备份解压恢复）| feat | F06/backup+frontend | P1 | triaged | 架构+电信+前端 | L | T-0071 | R-102 / T-0016 followup | sprint-06..07 | 2026-04-29 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。

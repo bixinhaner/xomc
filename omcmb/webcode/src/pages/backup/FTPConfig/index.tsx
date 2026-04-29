@@ -34,12 +34,6 @@ const DEFAULT_PORTS: Record<string, number> = {
   FTPS: 990,
 };
 
-const mockData: FTPRow[] = [
-  { id: '1', configName: '主备份FTP服务器', host: '192.168.100.10', port: 21, username: 'ftpuser', protocol: 'FTP', remotePath: '/backup/omc', passive: true, enabled: true, createTime: '2026-01-10 10:00:00' },
-  { id: '2', configName: '异地备份SFTP', host: '10.200.1.50', port: 22, username: 'sftpuser', protocol: 'SFTP', remotePath: '/data/backup', passive: false, enabled: true, createTime: '2026-01-15 14:00:00' },
-  { id: '3', configName: '云存储FTPS', host: 'ftps.cloud.example.com', port: 990, username: 'clouduser', protocol: 'FTPS', remotePath: '/omc/backup', passive: true, enabled: false, createTime: '2026-02-01 09:00:00' },
-];
-
 export default function FTPConfigPage() {
   const t = useT();
   const [page, setPage] = useState(1);
@@ -55,7 +49,9 @@ export default function FTPConfigPage() {
   const deleteConfigs = useDeleteFTPConfigs();
   const testConnection = useTestFTPConnection();
 
-  const tableSource = (data?.items ?? mockData) as unknown as FTPRow[];
+  // T-0016 / R-102: real backend data only — no fallback to mock so a backend
+  // outage shows an empty state instead of fake-but-plausible rows.
+  const tableSource = (data?.items ?? []) as unknown as FTPRow[];
 
   const openEdit = (record: FTPRow) => {
     setEditingRow(record);
@@ -135,7 +131,15 @@ export default function FTPConfigPage() {
           checked={val as boolean}
           checkedChildren={t('common.enable')}
           unCheckedChildren={t('common.disable')}
-          onChange={() => updateConfig.mutate({ id: record.id, data: { enabled: !val } })}
+          onChange={() => updateConfig.mutate(
+            { id: record.id, data: { enabled: !val } },
+            {
+              // T-0016 / R-102: failure must surface so the toggle reverts visually.
+              // Without this, the Switch optimistically shows the new state but
+              // backend reject leaves the cache stale.
+              onError: () => { void message.error(t('status.failed')); },
+            }
+          )}
         />
       ),
     },

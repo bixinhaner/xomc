@@ -39,7 +39,13 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useBackupTasks } from '@core/hooks/api/useBackup';
+import {
+  useBackupTasks,
+  useCreateBackupTask,
+  useCancelBackupTask,
+  useDeleteBackupTasks,
+} from '@core/hooks/api/useBackup';
+import type { BackupTask } from '@core/mock/data/backup';
 import { useT } from '@/hooks/useT';
 
 // 备份任务状态
@@ -152,14 +158,61 @@ const mockDeviceData: BackupDeviceRow[] = [
   { id: 'd12', taskId: 'bkp-005', taskName: '手动备份-单台设备', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productType: 'BBU', backupType: 'config-only', status: 'cancelled', progress: 20, startTime: '2026-02-28 09:00:00', endTime: '2026-02-28 09:05:00', fileSize: 0, failureReason: '' },
 ];
 
-// Mock 任务级别数据
-const mockTaskData: BackupTaskRow[] = [
-  { id: 'bkp-001', taskName: '全量备份-北京站点', taskType: 'manual', backupType: 'full', deviceRange: 'ENB00001, ENB00002, ENB00003, GNB00001', deviceCount: 4, status: 4, progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:45:32', fileSize: 1024 * 1024 * 256, creator: 'admin', operateTime: '2026-03-01 01:55:00', successCount: 4, failedCount: 0, runningCount: 0, pendingCount: 0 },
-  { id: 'bkp-002', taskName: '计划备份-全网每日', taskType: 'scheduled', backupType: 'full', deviceRange: '全部设备 (18台)', deviceCount: 18, status: 2, progress: 65, startTime: '2026-03-02 02:00:00', endTime: '-', fileSize: 0, creator: 'system', operateTime: '2026-03-02 01:58:00', successCount: 1, failedCount: 0, runningCount: 2, pendingCount: 15 },
-  { id: 'bkp-003', taskName: '配置备份-5G基站', taskType: 'manual', backupType: 'config-only', deviceRange: 'GNB00001, GNB00002', deviceCount: 2, status: 4, progress: 100, startTime: '2026-03-01 15:30:00', endTime: '2026-03-01 15:38:12', fileSize: 0, creator: 'operator1', operateTime: '2026-03-01 15:25:00', successCount: 0, failedCount: 2, runningCount: 0, pendingCount: 0 },
-  { id: 'bkp-004', taskName: '增量备份-上海站点', taskType: 'scheduled', backupType: 'incremental', deviceRange: 'ENB00003', deviceCount: 1, status: 4, progress: 100, startTime: '2026-03-01 04:00:00', endTime: '2026-03-01 04:12:05', fileSize: 1024 * 1024 * 32, creator: 'system', operateTime: '2026-03-01 03:55:00', successCount: 1, failedCount: 0, runningCount: 0, pendingCount: 0 },
-  { id: 'bkp-005', taskName: '手动备份-单台设备', taskType: 'manual', backupType: 'config-only', deviceRange: 'ENB00001', deviceCount: 1, status: 4, progress: 100, startTime: '2026-02-28 09:00:00', endTime: '2026-02-28 09:05:00', fileSize: 0, creator: 'operator2', operateTime: '2026-02-28 08:55:00', successCount: 0, failedCount: 0, runningCount: 0, pendingCount: 0 },
-];
+// Map frontend-core BackupTask (camelCase, backend-derived) → UI BackupTaskRow.
+// Backend currently lacks a few UI columns (creator/startTime/endTime/runningCount/pendingCount);
+// derive what we can and use empty / zero fallbacks for the rest. T-0016 / R-102.
+const TASK_STATUS_TO_NUM: Record<BackupTask['status'], TaskStatus> = {
+  pending: 1,
+  running: 2,
+  success: 4,
+  failed: 4,
+  cancelled: 4,
+  partial: 4,
+};
+
+function mapTaskToRow(t: BackupTask): BackupTaskRow {
+  const total = t.totalCount ?? 0;
+  const ok = t.successCount ?? 0;
+  const failed = t.failCount ?? 0;
+  const remaining = Math.max(total - ok - failed, 0);
+  const isRunning = t.status === 'running';
+  return {
+    id: t.id,
+    taskName: t.taskName ?? '',
+    taskType: t.taskType ?? 'manual',
+    backupType: t.backupType,
+    deviceRange: (t.deviceSns ?? []).join(', '),
+    deviceCount: total,
+    status: TASK_STATUS_TO_NUM[t.status] ?? 1,
+    progress: t.progress ?? 0,
+    startTime: t.createdAt ?? '',
+    endTime: t.updatedAt && t.status !== 'running' && t.status !== 'pending' ? t.updatedAt : '',
+    fileSize: t.fileSize ?? 0,
+    creator: t.creator ?? '',
+    operateTime: t.createdAt ?? '',
+    successCount: ok,
+    failedCount: failed,
+    runningCount: isRunning ? remaining : 0,
+    pendingCount: !isRunning ? remaining : 0,
+  };
+}
+
+function getErrMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e && 'message' in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return '';
+}
+
+// Numeric TaskStatus → backend status string. 3 (paused) and 5 (terminating)
+// have no backend equivalent yet — those filter selections fall through to a
+// no-server-filter request and rely on client-side filtering.
+const STATUS_NUM_TO_BACKEND: Record<number, string> = {
+  1: 'pending',
+  2: 'running',
+  4: 'completed',
+};
 
 export default function BackupTasks() {
   const t = useT();
@@ -212,9 +265,31 @@ export default function BackupTasks() {
     notFound: string[];
   }>({ matched: [], notFound: [] });
 
-  const { data, isLoading, refetch } = useBackupTasks({ page, pageSize });
+  // T-0016 / R-102: only `status` is pushed to the backend list endpoint.
+  // `taskType` (manual/scheduled) and `keyword` / `timeRange` filter
+  // client-side — backend backupApi maps task_type to full/incremental/
+  // config_only which is a different axis, so the manual/scheduled axis can't
+  // round-trip yet. Once backend exposes a "creation_kind" filter, push it here.
+  const taskQueryParams = useMemo(() => {
+    const q: { page: number; pageSize: number; status?: string } = { page, pageSize };
+    if (typeof filters.status === 'number' && STATUS_NUM_TO_BACKEND[filters.status]) {
+      q.status = STATUS_NUM_TO_BACKEND[filters.status];
+    }
+    return q;
+  }, [page, pageSize, filters.status]);
 
-  void data;
+  const { data: tasksResp, isLoading, refetch } = useBackupTasks(taskQueryParams);
+  const createTask = useCreateBackupTask();
+  const cancelTask = useCancelBackupTask();
+  const deleteTasks = useDeleteBackupTasks();
+
+  // T-0016 / R-102: replace inline mock with real backend data.
+  // Empty list (no items / network error) renders DataTable's empty state — do
+  // NOT fall back to fake rows in production.
+  const realTaskData: BackupTaskRow[] = useMemo(
+    () => (tasksResp?.items ?? []).map(mapTaskToRow),
+    [tasksResp?.items]
+  );
 
   // ========== 导出 ==========
   const handleExport = () => {
@@ -274,12 +349,24 @@ export default function BackupTasks() {
   };
 
   // ========== 任务操作处理 ==========
+  // "Start" remains advisory: backend has no /tasks/:id/start (creation is the
+  // only entry point; existing pending tasks transition automatically). T-0016
+  // keeps the toast for now — runtime control deferred to a later task.
   const handleStartTask = (record: BackupTaskRow) => {
     void message.success(t('backup.startedTask', { name: record.taskName }));
   };
 
   const handleStopTask = (record: BackupTaskRow) => {
-    void message.success(t('backup.stoppedTask', { name: record.taskName }));
+    // useCancelBackupTask invalidates ['backup', 'tasks'] on success; explicit
+    // refetch() would double-fetch.
+    cancelTask.mutate(record.id, {
+      onSuccess: () => {
+        void message.success(t('backup.cancelSuccess', { name: record.taskName }));
+      },
+      onError: (e: unknown) => {
+        void message.error(t('backup.cancelFailed', { error: getErrMsg(e) }));
+      },
+    });
   };
 
   const handleDeleteTask = (record: BackupTaskRow) => {
@@ -404,11 +491,40 @@ export default function BackupTasks() {
       void message.warning(t('backup.pleaseSelectDevices'));
       return;
     }
+    // T-0016 / R-102: "全选所有设备" path is gated until a real device-list
+    // hook (useDevices) replaces mockDeviceData here. POSTing mock SNs to the
+    // real /backup/tasks endpoint would create a backend task with fake target_ids.
+    if (selectAllDevices) {
+      void message.warning(t('backup.selectAllNotSupportedYet'));
+      return;
+    }
 
+    // T-0016 / R-102: real POST /backup/tasks via useCreateBackupTask.
+    // Backend currently lacks scheduled / FTP fields on the create payload —
+    // those Drawer states are captured but not yet sent (out of scope for M).
+    const deviceSns = drawerDevices.map((d) => d.deviceSn);
     const mode = backupDrawerMode === 'scheduled' ? t('backup.cycleBackupMode') : t('backup.newBackupMode');
-    const deviceInfo = selectAllDevices ? t('backup.allDeviceCount', { count: mockDeviceData.length }) : t('backup.deviceCountUnit', { count: drawerDevices.length });
-    void message.success(t('backup.createdBackupTask', { mode, name: drawerTaskName, deviceInfo }));
-    closeBackupDrawer();
+
+    createTask.mutate(
+      {
+        taskName: drawerTaskName,
+        taskType: backupDrawerMode === 'scheduled' ? 'scheduled' : 'manual',
+        deviceSns,
+        backupType: 'full',
+        storageLocation: '',
+        creator: '',
+      },
+      {
+        onSuccess: () => {
+          const deviceInfo = t('backup.deviceCountUnit', { count: drawerDevices.length });
+          void message.success(t('backup.createdBackupTask', { mode, name: drawerTaskName, deviceInfo }));
+          closeBackupDrawer();
+        },
+        onError: (e: unknown) => {
+          void message.error(t('backup.createFailed', { error: getErrMsg(e) }));
+        },
+      }
+    );
   };
 
   // ========== 任务列表筛选条件 ==========
@@ -493,7 +609,7 @@ export default function BackupTasks() {
 
   // ========== 任务列表过滤 ==========
   const filteredTaskData = useMemo(() => {
-    return mockTaskData.filter((row) => {
+    return realTaskData.filter((row) => {
       if (filters.keyword && typeof filters.keyword === 'string') {
         const keyword = filters.keyword.toLowerCase();
         if (!row.taskName.toLowerCase().includes(keyword)) return false;
@@ -519,7 +635,7 @@ export default function BackupTasks() {
       }
       return true;
     });
-  }, [filters]);
+  }, [filters, realTaskData]);
 
   // ========== 设备列表过滤 ==========
   const filteredDeviceData = useMemo(() => {
@@ -700,13 +816,17 @@ export default function BackupTasks() {
   ], [t]);
 
   // ========== 查找任务详情 ==========
+  // T-0016 / R-102: detail Drawer reads from real task list (no separate
+  // /backup/tasks/:id polling — useBackupTaskById exists but list is enough
+  // for current display). Device-level detail still uses inline mock since
+  // backend has no per-device sub-task model — out of scope per PRD §5.
   const taskDetail = useMemo(() => {
     if (!taskDetailId) return null;
-    const task = mockTaskData.find((t) => t.id === taskDetailId);
+    const task = realTaskData.find((row) => row.id === taskDetailId);
     if (!task) return null;
     const devices = mockDeviceData.filter((d) => d.taskId === taskDetailId);
     return { task, devices };
-  }, [taskDetailId]);
+  }, [taskDetailId, realTaskData]);
 
   // ========== 页面头部按钮 ==========
   const headerExtra = (
@@ -793,7 +913,9 @@ export default function BackupTasks() {
             dataSource={filteredTaskData}
             loading={isLoading}
             rowKey="id"
-            total={filteredTaskData.length}
+            // T-0016 / R-102: server total drives pager; client-side keyword/
+            // timeRange filters reduce the visible page but never inflate count.
+            total={tasksResp?.total ?? filteredTaskData.length}
             currentPage={page}
             pageSize={pageSize}
             onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
@@ -896,14 +1018,21 @@ export default function BackupTasks() {
         open={!!deleteRecord}
         onCancel={() => setDeleteRecord(null)}
         onOk={() => {
-          if (deleteRecord) {
-            void message.success(t('common.deleteSuccess'));
-            setDeleteRecord(null);
-          }
+          if (!deleteRecord) return;
+          // T-0016 / R-102: real DELETE /backup/tasks/:id (batched).
+          deleteTasks.mutate([deleteRecord.id], {
+            onSuccess: () => {
+              void message.success(t('backup.deleteSuccess'));
+              setDeleteRecord(null);
+            },
+            onError: (e: unknown) => {
+              void message.error(t('backup.deleteFailed', { error: getErrMsg(e) }));
+            },
+          });
         }}
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, loading: deleteTasks.isPending }}
       >
         {deleteRecord && (
           <Typography.Text>
