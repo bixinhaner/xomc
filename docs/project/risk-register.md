@@ -223,10 +223,11 @@
 - **概率**：中
 - **影响**：PM/MR 文件处理失败会直接丢弃
 - **Owner**：架构师 + 运维
-- **状态**：Open
-- **关联 Task**：T-0012（worker 重试/死信，依赖 T-0010）
-- **缓解**：Sprint 2 与 NATS 改造（R-004）同步
-- **下次复盘**：Sprint-02
+- **状态**：✅ Closed (2026-04-28)
+- **关联 Task**：T-0012（worker 重试/死信） ✅ done
+- **缓解**：T-0012 完成 — `internal/core/reliability/dlq` 通用 DLQ 子包 + `runner` retry 装饰器（内层 3 次 + NATSEventBus 外层 5 次双重保险）+ `/api/v1/admin/dead-letters` 4 端点（List/Get/Delete/Replay，admin RBAC）+ migration 000044 dead_letters 表 + 4 Prometheus metric + PM Collector 接入示范；其他 11 subscriber 后续 PR 扩展
+- **关闭依据**：`docs/project/prd/T-0012-worker-retry-dlq.md` + `docs/review-report/20260428/verify-T-0012.md` + commit (post-S6)
+- **下次复盘**：N/A（已关闭）
 
 ### R-107 Prometheus/Grafana/AlertManager 容器编排缺失
 - **描述**：metrics/tracing 已集成但 docker-compose 无监控栈

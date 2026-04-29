@@ -67,9 +67,9 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 46 | — | +T-0015 (License Enforcer + Monitor + 6 metrics, R-103 关闭)；+三并行批 / +五并行批（详见早期记账）|
+| `done` | 47 | — | +T-0012 (worker retry/DLQ 通用框架, R-106 关闭)；+T-0015 (License Enforcer, R-103 关闭)；+三并行批 / +五并行批（详见早期记账）|
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 13 | — | -1 (T-0015 done) |
+| `planned` | 12 | — | -1 (T-0012 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -242,7 +242,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0009 | 短信服务商凭据申请启动（外部动作） | td | F04 | P0 | planned | PM | S | — | R-001 | sprint-01 | 2026-04-20 |
 | T-0010 | NATS JetStream EventBus（NATSEventBus + ChannelEventBus 双实现 + cov 63.1%） | feat | infra | P0 | done | Claude | XL | — | R-004 / `AI承诺对峙清单.md` W3.E.1 | wave-3 | 2026-04-28 |
 | T-0011 | F04 告警 Webhook 通道（retry/dead-letter/HMAC + FilterEngine 接 AlarmEngine.Process） | feat | F04 | P0 | done | Claude | M | — | R-001 / `AI承诺对峙清单.md` W2.A.2 / `prd/F04-alarm-notification.md` | wave-2 | 2026-04-28 |
-| T-0012 | worker 进程重试 / 死信队列 | feat | infra | P1 | planned | 架构+运维 | L | T-0010 | R-106 | sprint-02..04 | 2026-04-20 |
+| T-0012 | worker retry/DLQ 通用框架（dlq 子包+runner 装饰器+migration 000044+admin/replay+PM 接入示范，runner cov 96.8%）| feat | infra | P1 | done | Claude | L | T-0010 | R-106 / `prd/T-0012-worker-retry-dlq.md` | sprint-02..04 | 2026-04-28 |
 | T-0013 | F08 SNMP Trap 骨架（PRD 365 行 + 10 .go 文件 + 50 测/82.1% cov + 依赖完全隔离，待 T-0017 接生产）| feat | F08 | P0 | done | Claude | L | — | R-003 / `prd/F08-oss-protocol.md` | sprint-03 | 2026-04-28 |
 | T-0014 | F04 告警短信通道 | feat | F04 | P0 | planned | 电信+Go | M | T-0009 | R-001 / `prd/F04-alarm-notification.md` | sprint-03 | 2026-04-20 |
 | T-0015 | License Enforcer + Monitor cron + 6 metrics + device.Create 闸（capacity/expiry/grace/multi-active/perpetual D1-D6 全实施）| feat | F06/license | P1 | done | Claude | M | — | R-103 / `prd/F06-license-enforcement.md` | sprint-03 | 2026-04-28 |
@@ -488,6 +488,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 | 2026-04-28 | done | T-0026 W3 Runbook 体系达 6 ≥5 | commit `f4bba7da`（cherry-pick 自 worktree-agent-t0026@ef2e60f7，sub-agent 8.2min）；3 新 Runbook 共 1491+ 行（pg-failover 390 / redis-failover 455 / acs-overload 479），9 章节完整结构（目标/前置/故障注入/期间观察/恢复/验证/失败处理/回滚/实测占位）；故障注入命令具体可执行（patronictl / pkill / iptables / Sentinel FAILOVER / cpe_simulator.py / loadtest）；6 份 Runbook 体系：DR 整机房 + PG/Redis/NATS 数据层 + ACS 流量层 + Backup 基线。release-gate.md §3.4 Runbook ≥5 项达标。 |
 | 2026-04-28 | done | T-0013 F08 SNMP Trap 骨架（Wave 4 P0 启动） | commit `928d7124`（cherry-pick 自 worktree-agent-t0013@4ce84c04，sub-agent 10.4min）；PRD 七要素全 365 行（业务背景/用户故事/3 GWT/CMCC+CTCC+CUCC 差异矩阵/非目标/依赖/度量 + 设计备忘 6 节）；10 .go 文件骨架（types.go 153 / oid.go 32 / mapper.go 93 / sender.go 255 / registry.go 176 / engine.go 182 / doc.go 44 / 三测 668 行 50 测例）；**关键设计：依赖完全隔离**（go list -deps grep "internal/(alarm\|carrier\|core/event)" → 零）+ Sender/Registry/AlarmMapper 三层接口化（T-0017 替换实现 Engine 零改）+ WithMapper hook 预留 + AlarmEvent 私有 stub；安全红线 TrapTarget.String() 永不渲染 community/authPassword/privPassword（有测试守护）；新增依赖 gosnmp v1.43.2 + benbjohnson/clock；Pass：build/vet/test -race/82.1% cov 全过。**严禁 10/10 全守**：未动 cmd/app/provider / cmd/app/router / internal/alarm / internal/carrier / migrations 等。后续 PR：T-0017（接 alarm.Engine + Carrier + DI + router + migration + 联调 ≥1 家运营商）/ T-0020（重试+outbox+熔断+告警）。 |
 | 2026-04-28 | done | T-0015 License Enforcer + Monitor + R-103 关闭 | `/dev-pipeline pick T-0015` ULTRATHINK A 方案（主会话全程深度协作）。完整 S0→S7：S0 PRD 七要素 270 行 + CMCC/CTCC/CUCC 差异矩阵（一致，OEM 颁发与运营商解耦）；S2 设计备忘内嵌 PRD（Enforcer 接口 + DB schema + 缓存策略 + 多 active 处理）；S3 实施 6 项决策（D1-D6 全部按 ULTRATHINK 推荐落地）：5 新文件（enforcer.go 270 + enforcer_test.go 280 / monitor.go 310 + monitor_test.go 250 / metrics.go 95）+ migration 000043（grace_period_days+capacity_alert_thresholds+last_capacity_alert_at + 2 partial index）+ 13 修改文件（errors sentinel + repo 接口 5 新方法 + pg_repo scanLicenseFull + service Enforcer hook + handler /quota 端点 + DI 装载 + DeviceService.SetLicenseEnforcer + Monitor.Start cron）；S4 自验：go build/test -race/vet/check-migrations 全过 / 6 metric grep 全过 / 18+14 单测 / 新代码覆盖率 84-100% / e2e_verify.sh +1 claim；**bonus 修补 8 个 mock 文件加 ListProductClasses stub**（main HEAD pre-existing，T-0045 sub-agent 已发现）；S5/S6/S7：feat 类型完整流水线 + R-103 关闭 + commit + push。**核心突破**：device.CreateDevice 现在可拦截超容量+过期，dev 默认放行（无 active license = warn + metric 0），多 active 取 max(MaxDevices)，永久 license 跳过过期检查，6h 同阈值告警去重。 |
+| 2026-04-28 | done | T-0012 worker retry/DLQ 通用框架 + R-106 关闭 | `/dev-pipeline pick T-0012` ULTRATHINK B 方案（主会话 PRD + sub-agent 实施 S3）。完整 S0→S7：S0 PRD 6 项决策 D1-D6 默认推荐 + 7 GWT + 设计备忘 + DoD 9 项；S3 sub-agent (a4f34582, 16.8min) 严格按 PRD 实施 — 16 文件（11 新建 / 5 修改）/ ~1900 行；S4 全绿（runner cov 96.8% / 4 metric grep 全过 / 0 lint warning / migration check 通过 / V1-V7 GWT 全测试覆盖）；S5/S6/S7：feat 完整流水线 + R-106 关闭 + commit `01683c9e` + push。**框架核心**：`internal/core/reliability/dlq` 通用 DLQ 子包（types/pg_repo + 通用 dead_letters 表，区分 source_module）+ `internal/core/reliability/runner` retry+DLQ 装饰器（用既有 reliability.Retry() 内层 3 次 + NATSEventBus 外层 5 次双重保险）+ `/api/v1/admin/dead-letters` 4 端点（List/Get/Delete/Replay，admin RBAC ops）；接入示范 PM Collector 一处（最小 viable，其他 11 subscriber 后续 PR）。**严禁 10/10 守住**：未动 alarm/dead_letter（T-0011 outbound webhook DLQ 并存）/ NATSEventBus / retry.go / charter / go.mod / 11 个非 PM subscriber 等。pre-existing admin -race fail 已确认（base 重跑同 fail，与本任务无关）。 |
 
 ---
 
