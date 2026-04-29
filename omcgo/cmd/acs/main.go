@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/acs/upload"
+	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components"
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
@@ -127,9 +128,18 @@ func runACS(cmd *cobra.Command, args []string) error {
 			cfg.Upload.Username, cfg.Upload.Password,
 			inf.EventBus, inf.Logger,
 		)
+		// T-0074: enable streaming compression for FileTypeConfig backup uploads.
+		// PolicyGetter pulls live policy from PG; metrics track ratio/duration.
+		// Both args are nil-safe — PolicyService.Get always returns DefaultPolicy
+		// when the row does not exist, so compression activates only when the
+		// operator has explicitly set EnableCompression=true.
+		backupPolicyRepo := backup.NewPgPolicyRepository(inf.PgPool)
+		backupPolicySvc := backup.NewPolicyService(backupPolicyRepo, inf.Logger)
+		backupPolicyMetrics := backup.NewPolicyMetrics(inf.MetricsReg)
+		uploadHandler.SetCompression(backupPolicySvc, backupPolicyMetrics)
 		deps.UploadHandler = uploadHandler
 		deps.UploadConfig = &cfg.Upload
-		inf.Logger.Info("upload handler enabled",
+		inf.Logger.Info("upload handler enabled with backup compression",
 			zap.String("username", cfg.Upload.Username))
 
 		// Setup download handler for CPE file download (MinIO -> CPE proxy).

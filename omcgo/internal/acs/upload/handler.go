@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
@@ -31,6 +34,12 @@ type Handler struct {
 	// Global credentials for upload authentication
 	username string
 	password string
+	// T-0074: optional backup compression hooks. When both fields are set and
+	// the inbound file_type is FileTypeConfig with policy.EnableCompression=true,
+	// the body stream is wrapped with the configured compressor before MinIO
+	// PutObject. Both fields are nil-safe — a nil getter disables compression.
+	policyGetter       backup.PolicyGetter
+	compressionMetrics *backup.PolicyMetrics
 }
 
 // NewHandler creates a new upload Handler.
@@ -127,12 +136,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		objectPath = fmt.Sprintf("%s/%s", now.Format("2006/01/02"), filename)
 	}
 
-	// 6. Stream upload to MinIO
+	// 6. Stream upload to MinIO. For FileTypeConfig (TR-069 "3" Vendor
+	// Configuration File = backup), optionally wrap the body in a streaming
+	// compressor per BackupPolicy (T-0074).
+	//
+	// Note: r.Body is owned by net/http; the server closes it on handler
+	// return. We do NOT close r.Body explicitly here — the compressor's pump
+	// goroutine reads from a counting wrapper around r.Body, and ctx
+	// cancellation (handler return) interrupts the pump.
 	ctx := r.Context()
-	info, err := h.minioClient.PutObject(ctx, bucket, objectPath, r.Body, r.ContentLength, minio.PutObjectOptions{
-		ContentType: "application/octet-stream",
-	})
+
+	body := io.Reader(r.Body)
+	contentLength := r.ContentLength
+	uploadOpts := minio.PutObjectOptions{ContentType: "application/octet-stream"}
+
+	cmp := h.maybeWrapForCompression(ctx, ft, r.Body)
+	if cmp.applied {
+		defer cmp.body.Close()
+		body = cmp.body
+		contentLength = -1 // streaming, compressed size unknown
+		objectPath += cmp.ext
+		// ContentEncoding documents the on-disk compression so the restore
+		// side (T-0072) can read it from object metadata as a backup signal
+		// to the .gz/.zst filename suffix.
+		uploadOpts.ContentEncoding = cmp.format
+	}
+
+	startUpload := time.Now()
+	info, err := h.minioClient.PutObject(ctx, bucket, objectPath, body, contentLength, uploadOpts)
 	if err != nil {
+		// Do NOT record this as a compression error: the failure could be
+		// MinIO-side (network, auth, bucket missing). Compression-internal
+		// errors propagate through the pipe to PutObject as body-read errors,
+		// but distinguishing them at this layer is unreliable. Restrict the
+		// "copy" reason to genuine compression-stream issues; track upload
+		// failures via existing logging.
 		h.logger.Error("upload to minio failed",
 			zap.Error(err),
 			zap.String("file_type", fileType),
@@ -141,12 +179,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upload failed", http.StatusInternalServerError)
 		return
 	}
+	if cmp.applied {
+		// pump goroutine has finished by the time PutObject returns (EOF
+		// propagation through the pipe), so atomic.Int64 reads are safe.
+		h.compressionMetrics.RecordCompressionBytes(cmp.format, cmp.bytesIn(), info.Size)
+		h.compressionMetrics.RecordCompressionDuration(cmp.format, time.Since(startUpload).Seconds())
+	}
 
 	h.logger.Info("file uploaded",
 		zap.String("file_type", fileType),
 		zap.String("filename", filename),
 		zap.String("path", objectPath),
 		zap.Int64("size", info.Size),
+		zap.String("compression", cmp.format),
 	)
 
 	// 6.1. For parameter model uploads (FileType "11"), publish event for processing.
@@ -235,6 +280,107 @@ func (h *Handler) publishDataModelEvent(ctx context.Context, bucket, objectPath,
 	h.logger.Info("published datamodel.file.received",
 		zap.String("device_sn", deviceSN),
 		zap.String("path", objectPath))
+}
+
+// SetCompression wires backup compression dependencies into the handler.
+// Both arguments may be nil to disable compression (the default state).
+// T-0074: keeps NewHandler signature backward-compatible (same pattern as
+// BackupExecutor.SetPolicyEnforcement).
+func (h *Handler) SetCompression(getter backup.PolicyGetter, metrics *backup.PolicyMetrics) {
+	h.policyGetter = getter
+	h.compressionMetrics = metrics
+}
+
+// compressionWrap is the result of maybeWrapForCompression. When applied=false
+// the upstream code paths take the original body untouched.
+type compressionWrap struct {
+	applied bool
+	body    io.ReadCloser // wrapped reader; caller must Close
+	ext     string        // ".gz" / ".zst", appended to object path
+	format  string        // metric label (gzip|zstd)
+	counter *countingReader
+}
+
+// bytesIn reports the plaintext byte count consumed so far. Safe to call
+// concurrently with the pump goroutine — counter.n is atomic.Int64.
+func (c compressionWrap) bytesIn() int64 {
+	if c.counter == nil {
+		return 0
+	}
+	return c.counter.n.Load()
+}
+
+// maybeWrapForCompression decides whether the inbound upload body should be
+// streaming-compressed. Returns applied=false (and no error) when:
+//   - file type is not FileTypeConfig (only backup files compress today), OR
+//   - no policyGetter wired, OR
+//   - policy lookup failed, OR
+//   - policy.EnableCompression=false, OR
+//   - format ∈ {lz4, bzip2} (not yet implemented; service layer should have
+//     rejected this combination on PUT, but defend in depth), OR
+//   - NewCompressor / Wrap failed (recorded as metric, fall back to plaintext).
+//
+// The fall-back-on-failure choice is deliberate: backup is a high-availability
+// feature; we prefer storing larger uncompressed bytes over failing the upload.
+func (h *Handler) maybeWrapForCompression(ctx context.Context, ft tr069.FileType, src io.Reader) compressionWrap {
+	if ft != tr069.FileTypeConfig || h.policyGetter == nil {
+		return compressionWrap{}
+	}
+	pol, err := h.policyGetter.Get(ctx)
+	if err != nil || pol == nil || !pol.EnableCompression {
+		if err != nil {
+			h.logger.Warn("backup policy lookup failed; uploading without compression",
+				zap.Error(err))
+		}
+		return compressionWrap{}
+	}
+	if pol.CompressionFormat == "lz4" || pol.CompressionFormat == "bzip2" {
+		h.logger.Warn("compression format not implemented; passing through",
+			zap.String("format", pol.CompressionFormat))
+		return compressionWrap{}
+	}
+	c, err := backup.NewCompressor(pol.CompressionFormat, pol.CompressionLevel)
+	if err != nil {
+		h.compressionMetrics.RecordCompressionError(pol.CompressionFormat, "open")
+		h.logger.Warn("compressor construction failed; passing through",
+			zap.String("format", pol.CompressionFormat),
+			zap.Int("level", pol.CompressionLevel),
+			zap.Error(err))
+		return compressionWrap{}
+	}
+	counter := &countingReader{r: src}
+	wrapped, err := c.Wrap(ctx, counter)
+	if err != nil {
+		h.compressionMetrics.RecordCompressionError(c.Format(), "open")
+		h.logger.Warn("compressor wrap failed; passing through",
+			zap.String("format", c.Format()),
+			zap.Error(err))
+		return compressionWrap{}
+	}
+	return compressionWrap{
+		applied: true,
+		body:    wrapped,
+		ext:     c.Extension(),
+		format:  c.Format(),
+		counter: counter,
+	}
+}
+
+// countingReader counts plaintext bytes consumed so the compression metric
+// can compute compressed/raw ratio after PutObject completes. n is atomic
+// because the pump goroutine writes it from inside io.Copy while the request
+// goroutine reads it after PutObject returns; pipe close establishes a
+// happens-before but the race detector does not always recognize that
+// synchronization for ad-hoc int fields.
+type countingReader struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+	return n, err
 }
 
 // extractDeviceSNFromFilename extracts device SN from filename pattern.

@@ -1,9 +1,15 @@
-// Package backup — Prometheus metrics for BackupPolicy enforcement (T-0073).
+// Package backup — Prometheus metrics for BackupPolicy enforcement (T-0073, T-0074).
 //
-// Three counters cover the Phase 1 enforcement:
+// T-0073 cleanup counters:
 //   - backup_cleanup_runs_total{result}            — cron tick outcomes (success/failure/skipped)
 //   - backup_cleanup_rows_deleted_total            — rows removed (sum across all runs)
 //   - backup_failure_alarm_published_total{kind}   — alarm.raised publish events (published/skipped)
+//
+// T-0074 compression counters/histograms (acs/upload/handler.go integration):
+//   - omc_backup_compression_bytes_in_total{format}     — plaintext bytes consumed
+//   - omc_backup_compression_bytes_out_total{format}    — compressed bytes produced
+//   - omc_backup_compression_duration_seconds{format}   — single-stream compression latency
+//   - omc_backup_compression_errors_total{format,reason} — failure tally (open|copy|close)
 //
 // All methods are nil-safe so production wiring (DI passes a registry) and
 // tests (no registry) share one method surface.
@@ -13,12 +19,17 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // PolicyMetrics holds the BackupPolicy-specific Prometheus collectors.
 type PolicyMetrics struct {
-	cleanupRuns         *prometheus.CounterVec
-	cleanupRowsDeleted  prometheus.Counter
-	failureAlarmTotal   *prometheus.CounterVec
+	cleanupRuns        *prometheus.CounterVec
+	cleanupRowsDeleted prometheus.Counter
+	failureAlarmTotal  *prometheus.CounterVec
+
+	compressionBytesIn  *prometheus.CounterVec
+	compressionBytesOut *prometheus.CounterVec
+	compressionDuration *prometheus.HistogramVec
+	compressionErrors   *prometheus.CounterVec
 }
 
-// NewPolicyMetrics registers the three counters on the given registry.
+// NewPolicyMetrics registers all collectors on the given registry.
 // Pass nil for tests; the returned struct is still usable.
 func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 	m := &PolicyMetrics{
@@ -34,9 +45,31 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "backup_failure_alarm_published_total",
 			Help: "Backup task failure alarm.raised publish events, by outcome.",
 		}, []string{"kind"}),
+
+		compressionBytesIn: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_compression_bytes_in_total",
+			Help: "Plaintext bytes consumed by backup compression, per format.",
+		}, []string{"format"}),
+		compressionBytesOut: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_compression_bytes_out_total",
+			Help: "Compressed bytes produced by backup compression, per format.",
+		}, []string{"format"}),
+		compressionDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "omc_backup_compression_duration_seconds",
+			Help:    "Single-stream backup compression latency, per format.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"format"}),
+		compressionErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_compression_errors_total",
+			Help: "Backup compression error tally, per format and reason (open|copy|close).",
+		}, []string{"format", "reason"}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.cleanupRuns, m.cleanupRowsDeleted, m.failureAlarmTotal)
+		reg.MustRegister(
+			m.cleanupRuns, m.cleanupRowsDeleted, m.failureAlarmTotal,
+			m.compressionBytesIn, m.compressionBytesOut,
+			m.compressionDuration, m.compressionErrors,
+		)
 	}
 	return m
 }
@@ -65,4 +98,35 @@ func (m *PolicyMetrics) RecordFailureAlarm(kind string) {
 		return
 	}
 	m.failureAlarmTotal.WithLabelValues(kind).Inc()
+}
+
+// RecordCompressionBytes adds plaintext-in / compressed-out byte counts.
+// Negative values are ignored (no-op).
+func (m *PolicyMetrics) RecordCompressionBytes(format string, bytesIn, bytesOut int64) {
+	if m == nil {
+		return
+	}
+	if bytesIn > 0 {
+		m.compressionBytesIn.WithLabelValues(format).Add(float64(bytesIn))
+	}
+	if bytesOut > 0 {
+		m.compressionBytesOut.WithLabelValues(format).Add(float64(bytesOut))
+	}
+}
+
+// RecordCompressionDuration observes a compression latency sample (seconds).
+func (m *PolicyMetrics) RecordCompressionDuration(format string, seconds float64) {
+	if m == nil {
+		return
+	}
+	m.compressionDuration.WithLabelValues(format).Observe(seconds)
+}
+
+// RecordCompressionError tallies a compression failure by reason.
+// reason ∈ {"open", "copy", "close"}.
+func (m *PolicyMetrics) RecordCompressionError(format, reason string) {
+	if m == nil {
+		return
+	}
+	m.compressionErrors.WithLabelValues(format, reason).Inc()
 }

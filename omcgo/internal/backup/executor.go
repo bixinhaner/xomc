@@ -131,9 +131,12 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 			continue
 		}
 
-		// Build Upload command (TR-069 FileType "2" = VendorConfigurationFile)
+		// Build Upload command. TR-069 FileType "3" = Vendor Configuration File
+		// (the canonical type for backup) — see pkg/tr069.FileTypeConfig.
+		// Historical bug fix (T-0074): previously sent "2" (Patch), causing the
+		// file to land in the firmware/patch bucket instead of config_backup.
 		paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
-			"file_type": "2",
+			"file_type": "3",
 		})
 		if marshalErr != nil {
 			e.logger.Warn("marshal upload params", zap.String("device_sn", targetSN), zap.Error(marshalErr))

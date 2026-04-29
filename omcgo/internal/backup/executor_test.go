@@ -224,10 +224,11 @@ func TestHandleTask_PushUploadCommand(t *testing.T) {
 	assert.Equal(t, "SN002", cmdQ.pushed[1].DeviceSN)
 	assert.Equal(t, "Upload", cmdQ.pushed[1].Req.Method)
 
-	// Verify file_type in params
+	// Verify file_type in params (T-0074: changed from "2" Patch to "3"
+	// Vendor Configuration File so the file routes into config_backup bucket).
 	var params map[string]interface{}
 	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
-	assert.Equal(t, "2", params["file_type"])
+	assert.Equal(t, "3", params["file_type"])
 }
 
 func TestHandleTask_ProgressUpdate(t *testing.T) {
