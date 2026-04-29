@@ -145,6 +145,50 @@ export const softwareService = {
     }
   },
 
+  // ---- Canary stage transitions (T-0019, mirrors backend T-0018) ----
+  // Mock implementations only mutate the in-memory task; deeper canary
+  // simulation lives in the backend. Stage_status / current_stage updates
+  // are minimal no-ops sufficient for the dev/test workflow.
+
+  async advanceCanary(id: string): Promise<void> {
+    await delay(50, 150);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task && task.strategy === 'canary' && (task.currentStage ?? 0) > 0) {
+      const next = (task.currentStage ?? 0) + 1;
+      const max = task.canaryStages?.length ?? 0;
+      if (next > max) {
+        task.stageStatus = 'completed';
+      } else {
+        task.currentStage = next;
+        task.stageStatus = 'running';
+      }
+    }
+  },
+
+  async pauseCanary(id: string): Promise<void> {
+    await delay(50, 150);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task && task.strategy === 'canary') {
+      task.stageStatus = 'paused';
+    }
+  },
+
+  async resumeCanary(id: string): Promise<void> {
+    await delay(50, 150);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task && task.strategy === 'canary') {
+      task.stageStatus = 'running';
+    }
+  },
+
+  async abortCanary(id: string): Promise<void> {
+    await delay(50, 150);
+    const task = mockUpgradeTasks.find((t) => t.id === id);
+    if (task && task.strategy === 'canary') {
+      task.stageStatus = 'aborted';
+    }
+  },
+
   async createRollback(req: {
     deviceIds: string[];
     taskName: string;

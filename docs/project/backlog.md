@@ -67,9 +67,9 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 69 | — | +12 (T-0058~T-0069 Wave 3 章程立项 2026-04-28) |
-| `done` | 50 | — | +T-0018 (Software 灰度升级, R-101 关闭)；+T-0025 (RC 冻结 rc-2026Q2-001)；+T-0022 / +T-0012 (R-106 关闭) / +T-0015 (R-103 关闭)；+三并行批 / +五并行批 |
+| `done` | 51 | — | +T-0019 (前端 Canary API 消费, T-0018 链解锁)；+T-0018 (Software 灰度升级, R-101 关闭)；+T-0025 / +T-0022 / +T-0012 (R-106) / +T-0015 (R-103) |
 | `in_dev` | 1 | — | T-0027 KPI（FREEZE 冲突，PgM 待决） |
-| `planned` | 9 | — | -1 (T-0018 done) |
+| `planned` | 8 | — | -1 (T-0019 done) |
 | `triaged` | 6 | — | P1/P2，暂未排期 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -249,7 +249,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0016 | 前端 Backup 业务逻辑补齐 | feat | frontend | P1 | planned | 前端 | M | — | R-102 | sprint-03 | 2026-04-20 |
 | T-0017 | F08 SNMP Trap 联调（staging ≥1 家运营商） | feat | F08 | P0 | planned | PM+架构 | L | T-0013 | R-003 | sprint-04 | 2026-04-20 |
 | T-0018 | Software 灰度升级 — Canary stages [1/10/50/100]% + 失败率阈值 + cron monitor + 4 Admin API + 4 metric（R-101 部分关闭，回滚 T-0021）| feat | F06/software | P1 | done | Claude | L | — | R-101 / `prd/T-0018-software-canary-upgrade.md` | sprint-04..05 | 2026-04-29 |
-| T-0019 | 前端 Software 业务逻辑 | feat | frontend | P1 | planned | 前端 | M | T-0018 | R-102 | sprint-04 | 2026-04-20 |
+| T-0019 | 前端 Software 消费 Canary API（frontend-core 7 type 字段 + 4 method + 4 hook + UpgradePlan UI 4 按钮 + canary stage 列）| feat | frontend | P1 | done | Claude | M | T-0018 ✅ | R-102 / `prd/T-0019-frontend-software-canary.md` | sprint-04 | 2026-04-29 |
 | T-0020 | F08 推送可靠性（重试/去重/幂等） | feat | F08 | P0 | planned | PM+架构 | M | T-0017 | R-003 | sprint-05 | 2026-04-20 |
 | T-0021 | Software 回滚能力 | feat | F06/software | P1 | planned | 电信 | M | T-0018 | R-101 | sprint-05 | 2026-04-20 |
 | T-0022 | 前端 Topology/Report 补完（4 page 去 inline mock + 接 useDomains/useReportRecords/useDownloadReport/useReportDefinitions/useGenerateReport，mock 集中到 frontend-core）| feat | frontend | P1 | done | Claude | M | — | `prd/T-0022-frontend-topology-report.md` | sprint-05 | 2026-04-28 |

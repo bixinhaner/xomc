@@ -38,6 +38,23 @@ interface BackendFirmwareVersion {
   updated_at: string;
 }
 
+interface BackendCanaryStage {
+  percent: number;
+  failure_threshold: number;
+}
+
+interface BackendStageHistoryEntry {
+  stage: number;
+  percent?: number;
+  devices_in_stage?: number;
+  success_count?: number;
+  fail_count?: number;
+  failure_rate?: number;
+  action: string;
+  at: string;
+  reason?: string;
+}
+
 interface BackendUpgradeTask {
   id: string;
   task_name: string;
@@ -59,6 +76,15 @@ interface BackendUpgradeTask {
   ended_at?: string;
   created_at: string;
   updated_at: string;
+
+  // Canary fields (T-0019, mirrors backend T-0018 migration 000045)
+  strategy?: string;
+  canary_stages?: BackendCanaryStage[];
+  current_stage?: number;
+  stage_status?: string;
+  stage_history?: BackendStageHistoryEntry[];
+  auto_advance?: boolean;
+  auto_advance_minutes?: number;
 }
 
 interface BackendUpgradeSubTask {
@@ -142,7 +168,7 @@ function mapFirmwareListResponse(
 }
 
 function mapUpgradeTask(bt: BackendUpgradeTask): UpgradeTaskInfo {
-  return {
+  const result: UpgradeTaskInfo = {
     id: bt.id,
     taskName: bt.task_name,
     taskType: bt.task_type as TaskTypeValue,
@@ -164,6 +190,42 @@ function mapUpgradeTask(bt: BackendUpgradeTask): UpgradeTaskInfo {
     createdAt: bt.created_at,
     updatedAt: bt.updated_at,
   };
+  // Canary fields (T-0019, optional). Default strategy='full' when missing.
+  if (bt.strategy) {
+    result.strategy = bt.strategy as 'full' | 'canary';
+  }
+  if (bt.canary_stages) {
+    result.canaryStages = bt.canary_stages.map((s) => ({
+      percent: s.percent,
+      failureThreshold: s.failure_threshold,
+    }));
+  }
+  if (typeof bt.current_stage === 'number') {
+    result.currentStage = bt.current_stage;
+  }
+  if (bt.stage_status) {
+    result.stageStatus = bt.stage_status as UpgradeTaskInfo['stageStatus'];
+  }
+  if (bt.stage_history) {
+    result.stageHistory = bt.stage_history.map((h) => ({
+      stage: h.stage,
+      percent: h.percent ?? 0,
+      devicesInStage: h.devices_in_stage ?? 0,
+      successCount: h.success_count ?? 0,
+      failCount: h.fail_count ?? 0,
+      failureRate: h.failure_rate ?? 0,
+      action: h.action,
+      at: h.at,
+      reason: h.reason,
+    }));
+  }
+  if (typeof bt.auto_advance === 'boolean') {
+    result.autoAdvance = bt.auto_advance;
+  }
+  if (typeof bt.auto_advance_minutes === 'number') {
+    result.autoAdvanceMinutes = bt.auto_advance_minutes;
+  }
+  return result;
 }
 
 function mapUpgradeTaskListResponse(
@@ -421,6 +483,24 @@ export const softwareApi = {
 
   async retryTask(id: string): Promise<void> {
     await http.post(`/upgrade-tasks/${id}/retry`);
+  },
+
+  // ---- Canary stage transitions (T-0019, mirrors backend T-0018) ----
+
+  async advanceCanary(id: string): Promise<void> {
+    await http.post(`/upgrade-tasks/${id}/advance`);
+  },
+
+  async pauseCanary(id: string): Promise<void> {
+    await http.post(`/upgrade-tasks/${id}/pause-canary`);
+  },
+
+  async resumeCanary(id: string): Promise<void> {
+    await http.post(`/upgrade-tasks/${id}/resume-canary`);
+  },
+
+  async abortCanary(id: string): Promise<void> {
+    await http.post(`/upgrade-tasks/${id}/abort-canary`);
   },
 
   // ---- Rollback (回退) ----

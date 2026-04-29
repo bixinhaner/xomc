@@ -59,6 +59,33 @@ export interface UpgradePlan {
   message?: string;
 }
 
+// Canary upgrade strategy types (T-0019, mirrors backend T-0018).
+// strategy='full' is the legacy path; 'canary' adds staged rollout with
+// per-stage failure-rate gating.
+export type CanaryStageStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'aborted'
+  | 'completed';
+
+export interface CanaryStage {
+  percent: number;          // 1..100 cumulative
+  failureThreshold: number; // 1..100 percentage
+}
+
+export interface StageHistoryEntry {
+  stage: number;
+  percent: number;
+  devicesInStage: number;
+  successCount: number;
+  failCount: number;
+  failureRate: number;      // 0.0 - 1.0
+  action: string;           // 'advanced' / 'paused' / 'aborted' / 'completed'
+  at: string;
+  reason?: string;
+}
+
 // UpgradeTaskInfo — frontend model for main upgrade task (upgrade_tasks table)
 export interface UpgradeTaskInfo {
   id: string;
@@ -81,6 +108,15 @@ export interface UpgradeTaskInfo {
   endedAt?: string;
   createdAt: string;
   updatedAt: string;
+
+  // Canary fields (T-0019, optional for backwards compat with full-strategy tasks)
+  strategy?: 'full' | 'canary';
+  canaryStages?: CanaryStage[];
+  currentStage?: number;          // 1-indexed
+  stageStatus?: CanaryStageStatus;
+  stageHistory?: StageHistoryEntry[];
+  autoAdvance?: boolean;
+  autoAdvanceMinutes?: number;
 }
 
 // UpgradeSubTaskInfo — frontend model for sub-task (upgrade_sub_tasks table)

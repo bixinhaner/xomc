@@ -42,6 +42,11 @@ import {
   useSubTasks,
   useAllSubTasks,
   useSoftwareVersions,
+  // T-0019: canary stage transitions
+  useAdvanceCanary,
+  usePauseCanary,
+  useResumeCanary,
+  useAbortCanary,
 } from '@core/hooks/api/useSoftware';
 import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
 import type { UpgradeTaskInfo, UpgradeSubTaskInfo } from '@core/mock/data/software';
@@ -157,6 +162,12 @@ export default function UpgradePlan() {
   const terminateMutation = useTerminateTask();
   const deleteMutation = useDeleteTask();
   const retryMutation = useRetryTask();
+
+  // T-0019: canary mutations
+  const advanceCanaryMutation = useAdvanceCanary();
+  const pauseCanaryMutation = usePauseCanary();
+  const resumeCanaryMutation = useResumeCanary();
+  const abortCanaryMutation = useAbortCanary();
 
   // ---- Task status config with i18n ----
   const TASK_STATUS_CONFIG = useMemo((): Record<number, { color: string; text: string }> => ({
@@ -650,6 +661,15 @@ export default function UpgradePlan() {
         const showTerminate = status === 1 || status === 2 || status === 3;
         const showDelete = status !== 2;
 
+        // T-0019: canary stage transition controls. Only available when the
+        // task was created with strategy='canary' and the stage is in a
+        // non-terminal state.
+        const isCanary = record.strategy === 'canary';
+        const stageStatus = record.stageStatus ?? 'pending';
+        const canaryRunning = isCanary && stageStatus === 'running';
+        const canaryPaused = isCanary && stageStatus === 'paused';
+        const canaryTerminal = isCanary && (stageStatus === 'completed' || stageStatus === 'aborted');
+
         const items: MenuProps['items'] = [
           showStart ? {
             key: 'start',
@@ -670,7 +690,34 @@ export default function UpgradePlan() {
             danger: true,
             onClick: () => handleTerminateTask(record),
           } : null,
-          (showStart || showPause || showTerminate) && showDelete ? { type: 'divider' } : null,
+          // T-0019: canary stage transitions
+          isCanary && !canaryTerminal ? { type: 'divider' as const } : null,
+          isCanary && canaryRunning ? {
+            key: 'canary-advance',
+            label: t('software.canary.advance') || '推进下一阶段',
+            icon: <PlayCircleOutlined />,
+            onClick: () => advanceCanaryMutation.mutate(record.id),
+          } : null,
+          isCanary && canaryRunning ? {
+            key: 'canary-pause',
+            label: t('software.canary.pause') || '暂停灰度',
+            icon: <PauseOutlined />,
+            onClick: () => pauseCanaryMutation.mutate(record.id),
+          } : null,
+          isCanary && canaryPaused ? {
+            key: 'canary-resume',
+            label: t('software.canary.resume') || '恢复灰度',
+            icon: <PlayCircleOutlined />,
+            onClick: () => resumeCanaryMutation.mutate(record.id),
+          } : null,
+          isCanary && (canaryRunning || canaryPaused) ? {
+            key: 'canary-abort',
+            label: t('software.canary.abort') || '终止灰度',
+            icon: <StopOutlined />,
+            danger: true,
+            onClick: () => abortCanaryMutation.mutate(record.id),
+          } : null,
+          (showStart || showPause || showTerminate || isCanary) && showDelete ? { type: 'divider' as const } : null,
           showDelete ? {
             key: 'delete',
             label: t('common.delete'),
@@ -721,6 +768,36 @@ export default function UpgradePlan() {
       },
     },
     { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'fileName', width: 120, render: (val: string) => val || '-' },
+    {
+      key: 'canaryStage',
+      title: t('software.canary.stage') || '灰度阶段',
+      width: 160,
+      render: (_unused: unknown, record: UpgradeTaskInfo) => {
+        if (record.strategy !== 'canary') {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        const cur = record.currentStage ?? 0;
+        const total = record.canaryStages?.length ?? 0;
+        const pct = record.canaryStages?.[cur - 1]?.percent;
+        const status = record.stageStatus ?? 'pending';
+        const statusColorMap: Record<string, string> = {
+          pending: 'default',
+          running: 'processing',
+          paused: 'warning',
+          aborted: 'error',
+          completed: 'success',
+        };
+        return (
+          <Space size={4}>
+            <span style={{ fontFamily: 'monospace' }}>
+              {cur > 0 && total > 0 ? `${cur}/${total}` : '-'}
+              {pct ? ` (${pct}%)` : ''}
+            </span>
+            <Tag color={statusColorMap[status] ?? 'default'}>{status}</Tag>
+          </Space>
+        );
+      },
+    },
     {
       key: 'upgradeType',
       title: t('software.upgrade.upgradeType'),

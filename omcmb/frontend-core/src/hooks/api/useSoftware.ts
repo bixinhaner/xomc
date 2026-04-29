@@ -205,6 +205,50 @@ export function useRetryTask() {
 }
 
 // ============================================================================
+// Canary stage transitions (T-0019, mirrors backend T-0018)
+// ============================================================================
+
+export function useAdvanceCanary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.advanceCanary(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
+    },
+  });
+}
+
+export function usePauseCanary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.pauseCanary(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
+    },
+  });
+}
+
+export function useResumeCanary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.resumeCanary(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
+    },
+  });
+}
+
+export function useAbortCanary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.abortCanary(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['software', 'upgrade-tasks'] });
+    },
+  });
+}
+
+// ============================================================================
 // Rollback hooks
 // ============================================================================
 
