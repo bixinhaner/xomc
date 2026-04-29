@@ -5036,6 +5036,20 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
     -d '{"retention_days":30,"max_backup_count":100,"min_backup_count":3,"auto_cleanup":true,"cleanup_time":"03:00","cleanup_day_of_week":-1,"keep_last_n":5,"enable_compression":true,"compression_level":6,"compression_format":"lz4","storage_backend":"local","local_path":"/var/backup/omc","max_storage_gb":500,"enable_encryption":false,"encryption_algorithm":"AES-256-GCM","alert_on_failure":true,"alert_email":"","alert_threshold_percent":80}')
 check_status_in "W2D bk-8: PUT /backup/policy lz4 accept (T-0077)" "200 401" "$HTTP_CODE"
 
+# T-0072 / R-102: restore endpoint validates path traversal + bucket allow-list.
+# Disallowed bucket "firmware" must yield 400 even if object_path is benign.
+claim "backup: POST /backup/restore disallowed bucket rejected (T-0072)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/backup/restore" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"bucket":"firmware","object_path":"img/v2.bin","target_device_sns":["SN_NONEXISTENT"]}')
+check_status_in "W2D bk-9: POST /backup/restore disallowed bucket (T-0072)" "400 401" "$HTTP_CODE"
+
+# T-0072 / R-102: restore-tasks listing endpoint.
+claim "backup: GET /backup/restore-tasks (T-0072)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/restore-tasks" -H "$W2D_AUTH")
+check_status_in "W2D bk-10: GET /backup/restore-tasks (T-0072)" "200 401" "$HTTP_CODE"
+
 claim "backup: list ftp configs returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/backup/ftp-configs" -H "$W2D_AUTH")

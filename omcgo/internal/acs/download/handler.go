@@ -23,6 +23,9 @@ type Handler struct {
 	logger      *zap.Logger
 	username    string
 	password    string
+	// T-0072: optional metrics for on-the-fly decompression. nil-safe — Record*
+	// methods short-circuit on nil receiver, so wiring is optional.
+	metrics *DecompressMetrics
 }
 
 // NewHandler creates a new download handler.
@@ -33,6 +36,12 @@ func NewHandler(minioClient *minio.Client, username, password string, logger *za
 		password:    password,
 		logger:      logger,
 	}
+}
+
+// SetDecompressMetrics wires Prometheus collectors for on-the-fly decompression.
+// Pass nil to disable; the Record* methods are nil-safe.
+func (h *Handler) SetDecompressMetrics(m *DecompressMetrics) {
+	h.metrics = m
 }
 
 // ServeHTTP handles download requests.
@@ -132,9 +141,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.Int64("size", info.Size),
 		zap.String("remote_addr", r.RemoteAddr))
 
-	// Set response headers
+	// T-0072: detect compressed extension; if matched, wrap the MinIO object
+	// stream with a decompressor so CPE receives plaintext. Filename header
+	// loses the compressed extension so consumers see the canonical name.
+	decomp, cleanName, doDecompress := detectCompression(objectPath)
 	filename := filepath.Base(objectPath)
 	w.Header().Set("Content-Type", "application/octet-stream")
+
+	if doDecompress {
+		body, err := decomp.Wrap(obj)
+		if err != nil {
+			h.metrics.RecordError(decomp.Format(), "open")
+			h.logger.Warn("decompress wrap failed; falling back to raw stream",
+				zap.String("format", decomp.Format()),
+				zap.String("path", objectPath),
+				zap.Error(err))
+			// Fall through to pass-through path (preserve compressed bytes).
+		} else {
+			defer body.Close()
+			filename = filepath.Base(cleanName)
+			// Content-Length is unknown after streaming decompression; do NOT
+			// set it (chunked transfer or close-delimited body is fine).
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+			if r.Method == http.MethodHead {
+				return
+			}
+			if _, copyErr := io.Copy(w, body); copyErr != nil {
+				h.metrics.RecordError(decomp.Format(), "copy")
+				h.logger.Warn("decompressed stream to client failed",
+					zap.Error(copyErr),
+					zap.String("format", decomp.Format()),
+					zap.String("path", objectPath))
+				return
+			}
+			h.metrics.RecordSuccess(decomp.Format())
+			return
+		}
+	}
+
+	// Pass-through path: serve raw object with Content-Length.
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 
@@ -142,9 +187,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stream file to client.
-	// Note: once the first byte is written, the 200 status is committed and
-	// any subsequent io.Copy error cannot be surfaced to the client via HTTP status.
 	if _, err := io.Copy(w, obj); err != nil {
 		h.logger.Warn("stream file to client",
 			zap.Error(err),

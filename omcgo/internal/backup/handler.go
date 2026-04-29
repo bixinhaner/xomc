@@ -13,10 +13,11 @@ import (
 
 // Handler provides HTTP handlers for backup management REST API.
 type Handler struct {
-	service       *Service
-	ftpRepo       FTPConfigRepository
-	policyService *PolicyService // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
-	logger        *zap.Logger
+	service        *Service
+	ftpRepo        FTPConfigRepository
+	policyService  *PolicyService  // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
+	restoreService *RestoreService // T-0072; nil-safe (restore endpoints return 503 if unset)
+	logger         *zap.Logger
 }
 
 // NewHandler creates a new backup Handler.
@@ -64,6 +65,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	policy := rg.Group("/backup/policy")
 	policy.GET("", h.GetPolicy)
 	policy.PUT("", h.UpdatePolicy)
+
+	// T-0072 / R-102 followup: restore endpoint group + restore_tasks listing.
+	// Routes are always registered — handlers themselves return 503 if the
+	// restore service is not wired (mirrors policy nil-safety).
+	restore := rg.Group("/backup")
+	restore.POST("/restore", h.CreateRestore)
+	restore.GET("/restore-tasks", h.ListRestoreTasks)
+	restore.GET("/restore-tasks/:id", h.GetRestoreTask)
 }
 
 // ---- Task request types ----

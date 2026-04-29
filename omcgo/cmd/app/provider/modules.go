@@ -193,6 +193,14 @@ func initBackupModule(c *Container) error {
 	}
 	c.miscDeps.backupPolicyMonitor = backupPolicyMonitor
 
+	// T-0072 / R-102 followup: restore endpoint + restore_tasks tracking.
+	restoreRepo := backup.NewPgRestoreTaskRepository(c.PgPool)
+	restoreMetrics := backup.NewRestoreMetrics(c.MetricsReg)
+	restoreService := backup.NewRestoreService(
+		restoreRepo, c.DeviceRepo, c.TaskSvc, c.MinIO, restoreMetrics, logger,
+	)
+	backupHandler.SetRestoreService(restoreService)
+
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")

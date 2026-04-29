@@ -295,7 +295,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0074 | backup 压缩集成 MVP（acs/upload/handler 流式压缩 + gzip/zstd 实施 + lz4/bzip2 stub + executor file_type 2→3 fix）| feat | F06/backup | P3 | done | Claude | M | T-0071 ✅ | R-102 / `prd/T-0074-backup-executor-compression.md` | sprint-07 | 2026-04-29 |
 | T-0077 | backup 压缩 lz4 + bzip2 算法实施（重定 scope：FE dropdown disable cancels by 实施 / zstd encoder pool defer）| feat | F06/backup | P3 | done | Claude | S | T-0074 ✅ | R-102 / `prd/T-0077-backup-compression-lz4-bzip2.md` | sprint-07 | 2026-04-29 |
 | T-0075 | backup 加密执行 + 密钥管理（**安全敏感** — 需 SecOps 评审；KMS / 本地密钥设计 + executor 集成）| feat | F06/backup+security | P1 | triaged | 电信+SecOps | L | T-0071 | R-102 / T-0071 followup（安全敏感优先级提为 P1）| sprint-07..08 | 2026-04-29 |
-| T-0072 | 备份恢复流程设计 + 后端 /backup/restore endpoint + 前端 RestoreData 接入（明确 restore 是配置同步还是备份解压恢复）| feat | F06/backup+frontend | P1 | triaged | 架构+电信+前端 | L | T-0071 | R-102 / T-0016 followup | sprint-06..07 | 2026-04-29 |
+| T-0072 | 备份恢复后端 MVP（TR-069 Download(FileType=3) 路径 + download handler 流式解压 + restore_tasks 表 + POST /backup/restore；FE 拆 T-0078 / task↔path 链路拆 T-0079）| feat | F06/backup | P1 | in_dev | Claude | M | T-0071 ✅, T-0074 ✅, T-0077 ✅ | R-102 / `prd/T-0072-backup-restore-backend-mvp.md` | sprint-07 | 2026-04-29 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。

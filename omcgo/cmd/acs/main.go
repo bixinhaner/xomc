@@ -148,9 +148,13 @@ func runACS(cmd *cobra.Command, args []string) error {
 			cfg.Download.Username, cfg.Download.Password,
 			inf.Logger,
 		)
+		// T-0072: enable on-the-fly decompression for compressed backup objects
+		// (.gz/.zst/.lz4/.bz2). Mirrors the streaming compression added in T-0074
+		// on the upload side. Metrics are nil-safe.
+		downloadHandler.SetDecompressMetrics(download.NewDecompressMetrics(inf.MetricsReg))
 		deps.DownloadHandler = downloadHandler
 		deps.DownloadConfig = &cfg.Download
-		inf.Logger.Info("download handler enabled",
+		inf.Logger.Info("download handler enabled with backup decompression",
 			zap.String("username", cfg.Download.Username))
 	}
 
