@@ -451,6 +451,9 @@ func initMiscModules(c *Container) error {
 	ruleTaskRepo := topology.NewPgRuleTaskRepository(c.PgPool)
 	matcher := topology.NewDeviceMatcher(c.GroupRepo, c.PgPool, logger)
 	ruleService := topology.NewDeviceRuleService(ruleRepo, ruleTaskRepo, c.GroupRepo, matcher, c.PgPool, 4, logger)
+	// T-0027 S3 Day 4：注入 PgDeviceLister 替换 getAllDevices stub
+	// 见 prd/F06-topology-auto-grouping.md §12.1，让 ApplyRule 能扫描真实设备
+	ruleService.SetDeviceLister(topology.NewPgDeviceLister(c.PgPool, logger))
 	c.miscDeps.ruleHandler = topology.NewRuleHandler(ruleService)
 
 	// System Info endpoint
