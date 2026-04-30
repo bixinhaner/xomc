@@ -133,15 +133,17 @@ func TestPolicyService_Update_ValidationMatrix(t *testing.T) {
 			p.EnableCompression = true
 			p.CompressionFormat = "bzip2"
 		}, false, ""},
-		// T-0075: encryption-algorithm stub rejection (mirror lz4/bzip2 T-0074 pattern).
-		{"AES-256-CBC + enable_encryption=true rejected (T-0075)", func(p *BackupPolicy) {
+		// T-0085: encryption-algorithm matrix closed — CBC + ChaCha20-Poly1305 now
+		// accepted when no KeyProvider wired (mirror GCM behaviour; KP-availability
+		// reject is exercised in TestPolicyService_validatePolicy_KEKUnavailable).
+		{"AES-256-CBC + enable_encryption=true accepted (T-0085)", func(p *BackupPolicy) {
 			p.EnableEncryption = true
 			p.EncryptionAlgorithm = "AES-256-CBC"
-		}, true, "AES-256-CBC not yet implemented"},
-		{"ChaCha20-Poly1305 + enable_encryption=true rejected (T-0075)", func(p *BackupPolicy) {
+		}, false, ""},
+		{"ChaCha20-Poly1305 + enable_encryption=true accepted (T-0085)", func(p *BackupPolicy) {
 			p.EnableEncryption = true
 			p.EncryptionAlgorithm = "ChaCha20-Poly1305"
-		}, true, "ChaCha20-Poly1305 not yet implemented"},
+		}, false, ""},
 		// AES-256-GCM + EnableEncryption=true ACCEPTED when no KeyProvider wired
 		// (validation skips KEK check; UI Persisted-Tag is the only signal).
 		{"AES-256-GCM + enable_encryption=true accepted with no key provider (T-0075)", func(p *BackupPolicy) {

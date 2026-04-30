@@ -88,19 +88,17 @@ func (s *PolicyService) validatePolicy(p *BackupPolicy) error {
 	if err := validatePolicy(p); err != nil {
 		return err
 	}
-	// T-0075: encryption activation requires a usable KEK. AES-256-CBC and
-	// ChaCha20-Poly1305 are persisted but not yet implemented (T-0085 stub
-	// rejection mirrors T-0074 lz4/bzip2 pattern).
+	// T-0075 + T-0085: encryption activation requires a usable KEK across
+	// every implemented algorithm (T-0085 closes CBC + ChaCha20-Poly1305).
+	// The KEK availability gate fails fast at PUT time; the encryptor
+	// factory enforces the same gate at upload time as defence-in-depth.
 	if p.EnableEncryption {
 		switch p.EncryptionAlgorithm {
-		case "AES-256-GCM":
+		case "AES-256-GCM", "AES-256-CBC", "ChaCha20-Poly1305":
 			if s.keyProvider != nil && !s.keyProvider.Available() {
-				return fmt.Errorf("encryption_algorithm=AES-256-GCM enabled but encryption key not configured (set %s env var to a 64-hex-char string): %w",
-					EnvBackupEncryptionKey, commonerrors.ErrInvalidInput)
+				return fmt.Errorf("encryption_algorithm=%s enabled but encryption key not configured (set %s env var to a 64-hex-char string): %w",
+					p.EncryptionAlgorithm, EnvBackupEncryptionKey, commonerrors.ErrInvalidInput)
 			}
-		case "AES-256-CBC", "ChaCha20-Poly1305":
-			return fmt.Errorf("encryption_algorithm=%s not yet implemented (暂未支持); choose AES-256-GCM, or set enable_encryption=false (请选择 AES-256-GCM 或关闭加密): %w",
-				p.EncryptionAlgorithm, commonerrors.ErrInvalidInput)
 		}
 	}
 	return nil
