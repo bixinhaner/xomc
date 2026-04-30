@@ -70,32 +70,43 @@ Values(cmd.CommandName, cmd.CommandCode, cmd.OperationType,
 
 ---
 
-## 5. Runtime 真库验证（**待用户/PM 操作**）
+## 5. Runtime 真库验证（**已闭环 2026-04-30**）
 
-docker 当前未起，此 verify 报告无法独自终结。一行 SQL 闭环：
+> **凭据修正**：本节早前命令写错为 `omcuser/omcdb`，正确凭据从 `deployments/docker/docker-compose.yml` 第 24-26 行 `POSTGRES_USER=omcgo / POSTGRES_DB=omcgo`。docker 实际已运行 33 分钟（postgres/redis/minio 全 healthy；migrate-schema/seed Exited(0)），无需重启。
+
+实际命令：
 
 ```bash
-cd ~/code/baicells/goomc
-docker compose -f deployments/docker/docker-compose.yml up -d postgres
-docker compose -f deployments/docker/docker-compose.yml exec postgres \
-  psql -U omcuser -d omcdb -c '\d mml_custom_command' | grep -i category_group
+docker compose -f deployments/docker/docker-compose.yml exec -T postgres \
+  psql -U omcgo -d omcgo -c '\d mml_custom_command'
 ```
 
-**预期输出**（列存在）：
+**实际输出**（节选 — 列与索引部分）：
 
 ```
- category_group  | character varying(50) |           |          |
+                Table "public.mml_custom_command"
+     Column     |           Type           | Nullable |        Default
+----------------+--------------------------+----------+------------------------------
+ ...
+ category_group | character varying(50)    |          |
+Indexes:
+    "idx_mml_templates_scope_group" btree (command_scope, category_group)
 ```
 
-**Alternative — 一句 SQL 直接判**：
+**结论 ✅**：
+- 列 `category_group character varying(50)` 存在，可空（无 NOT NULL，无默认值）
+- 索引 `idx_mml_templates_scope_group` 在位（注意索引名仍带 `mml_templates` 前缀，cosmetic only — 000026 索引重命名循环遗漏，functional impact 0；可在 T-0090 一并清理或独立 P3 housekeeping 任务）
+- INSERT (`pg_repository.go:1282-1288`) 走参数化路径不会失败（列名匹配现有 schema）
+- backlog T-0094 描述事实错误（漏读 000020 ALTER ADD 历史）
+
+**Alternative — 一句 SQL 验证**（仅供后续回归用）：
 
 ```sql
 SELECT column_name, data_type, character_maximum_length
 FROM information_schema.columns
 WHERE table_name = 'mml_custom_command' AND column_name = 'category_group';
+-- 实跑返 1 行 = 列存在 ✅
 ```
-
-返 1 行 = 列存在；返 0 行 = 列缺失（极低概率）。
 
 ---
 
