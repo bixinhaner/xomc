@@ -1,15 +1,25 @@
 // Package backup — backup encryption key management (T-0075).
 //
 // KeyProvider returns the Key-Encryption-Key (KEK) used to wrap per-file
-// Data-Encryption-Keys (DEK) under envelope encryption. The default
-// EnvKeyProvider reads OMC_BACKUP_ENCRYPTION_KEY (64-hex-char string ⇒ 32
-// bytes / 256 bits). KMS / HSM providers are out of scope for this MVP and
-// will plug into the same interface in T-0086.
+// Data-Encryption-Keys (DEK) under envelope encryption. Two implementations
+// satisfy the interface today:
+//
+//   - EnvKeyProvider (this file)        — reads OMC_BACKUP_ENCRYPTION_KEY
+//     (64-hex-char string ⇒ 32 bytes / 256 bits). The default for local /
+//     systemd / docker-compose deployments without external KMS.
+//   - KMSKeyProvider (key_provider_kms.go) — fetches the KEK from a
+//     KMSClient at construction time. Skeleton + mock; the production
+//     adapters (AWS KMS / Vault / HSM) plug into KMSClient via T-0091.
+//
+// Both store the plaintext KEK in process memory; the proper "KEK never
+// in process" flow is the KEKWrapper interface (T-0087+ alongside
+// envelope kek_id field for rotation).
 //
 // Security notes:
 //   - The KEK lives in process memory and (transitively) in the env var
-//     visible via /proc/<pid>/environ. Operators are expected to restrict
-//     access via systemd EnvironmentFile= + chmod 600 or equivalent.
+//     visible via /proc/<pid>/environ for EnvKeyProvider. Operators are
+//     expected to restrict access via systemd EnvironmentFile= + chmod 600
+//     or equivalent.
 //   - KEK rotation is out of scope (T-0087); changing the key invalidates
 //     all previously-encrypted backups.
 //   - This package never logs the key bytes or returns them in error
@@ -89,5 +99,3 @@ func (p *EnvKeyProvider) KEK(_ context.Context) ([]byte, error) {
 func (p *EnvKeyProvider) Available() bool {
 	return p != nil && len(p.key) == kekSize
 }
-
-
