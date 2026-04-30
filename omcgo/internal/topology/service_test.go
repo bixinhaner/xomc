@@ -82,6 +82,10 @@ func (m *mockGroupRepo) AddDevice(ctx context.Context, groupID, deviceID uuid.UU
 	return nil
 }
 
+func (m *mockGroupRepo) AddDeviceWithSource(_ context.Context, _, _ uuid.UUID, _ string, _ *uuid.UUID) (int64, error) {
+	return 1, nil
+}
+
 func (m *mockGroupRepo) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
 	if m.removeDeviceFn != nil {
 		return m.removeDeviceFn(ctx, groupID, deviceID)

@@ -377,6 +377,29 @@ func (r *PgDeviceGroupRepository) AddDevice(ctx context.Context, groupID, device
 	return nil
 }
 
+// AddDeviceWithSource UPSERT 设备到 group 并标注来源（T-0027 D5.B）。
+// SQL 层 A4 守护：WHERE device_group_members.source_type != 'manual' 让
+// PG 在冲突时跳过 UPDATE — manual 行被永久保留。
+// 返回 rowsAffected：1 表示真插入/更新，0 表示因 manual override 被跳过。
+// 调用方按返回值决定 metric counter（matched / skipped_manual）。
+func (r *PgDeviceGroupRepository) AddDeviceWithSource(ctx context.Context, groupID, deviceID uuid.UUID, sourceType string, sourceRuleID *uuid.UUID) (int64, error) {
+	const rawSQL = `
+		INSERT INTO device_group_members (group_id, device_id, added_at, source_type, source_rule_id)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (device_id) DO UPDATE SET
+			group_id = EXCLUDED.group_id,
+			added_at = EXCLUDED.added_at,
+			source_type = EXCLUDED.source_type,
+			source_rule_id = EXCLUDED.source_rule_id
+		WHERE device_group_members.source_type IS DISTINCT FROM 'manual'`
+
+	tag, err := r.pool.Exec(ctx, rawSQL, groupID, deviceID, time.Now(), sourceType, sourceRuleID)
+	if err != nil {
+		return 0, fmt.Errorf("add device to group with source: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *PgDeviceGroupRepository) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
 	query, args, err := storage.Psql.Delete("device_group_members").
 		Where(sq.And{

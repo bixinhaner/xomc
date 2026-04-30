@@ -459,10 +459,23 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 				}
 
 				if matched && rule.TargetGroupID != nil {
-					if err := s.groupRepo.AddDevice(ctx, *rule.TargetGroupID, device.ID); err != nil {
+					// T-0027 D5.B：写 source_type='rule' + source_rule_id；
+					// SQL 层 A4 守护跳过 source_type='manual' 行（rowsAffected=0）。
+					affected, err := s.groupRepo.AddDeviceWithSource(
+						ctx, *rule.TargetGroupID, device.ID, "rule", &rule.ID,
+					)
+					if err != nil {
 						mu.Lock()
 						failedCount++
 						mu.Unlock()
+						return
+					}
+					if affected == 0 {
+						// manual override 跳过，不计 matched / failed
+						s.logger.Debug("topology.rule.manual_skipped",
+							zap.String("device_id", device.ID.String()),
+							zap.String("rule_id", rule.ID.String()),
+						)
 						return
 					}
 					mu.Lock()

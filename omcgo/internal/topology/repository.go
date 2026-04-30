@@ -38,6 +38,12 @@ type GroupMembership interface {
 	BatchRemoveDevices(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) (int64, error)
 	MoveDevices(ctx context.Context, deviceIDs []uuid.UUID, targetGroupID uuid.UUID) (int64, error)
 	MoveGroupDevicesToDefault(ctx context.Context, groupIDs []uuid.UUID) (int64, error)
+
+	// AddDeviceWithSource UPSERT 设备到指定 group 并标注来源（T-0027 D5.B）。
+	// SQL 层 A4 守护：WHERE source_type != 'manual' 拒绝覆盖手工置位行。
+	// 返回 rowsAffected：1 = inserted/updated；0 = manual override 跳过。
+	// sourceType 应为 "rule"；sourceRuleID 非 nil 时记录归属规则。
+	AddDeviceWithSource(ctx context.Context, groupID, deviceID uuid.UUID, sourceType string, sourceRuleID *uuid.UUID) (int64, error)
 }
 
 // DeviceGroupRepository defines the full persistence interface for device groups.

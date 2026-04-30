@@ -107,6 +107,11 @@ func (m *mockDeviceGroupRepo) AddDevice(_ context.Context, groupID, deviceID uui
 	return nil
 }
 
+func (m *mockDeviceGroupRepo) AddDeviceWithSource(_ context.Context, groupID, deviceID uuid.UUID, _ string, _ *uuid.UUID) (int64, error) {
+	m.devices[groupID] = append(m.devices[groupID], deviceID)
+	return 1, nil
+}
+
 func (m *mockDeviceGroupRepo) RemoveDevice(_ context.Context, groupID, deviceID uuid.UUID) error {
 	ids := m.devices[groupID]
 	for i, id := range ids {

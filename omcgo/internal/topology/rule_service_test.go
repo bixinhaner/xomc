@@ -179,6 +179,64 @@ func TestApplyRule_ConcurrentRunningTask_Rejected(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// A1.f — D5.B wiring：processTask matched 路径调 AddDeviceWithSource('rule')
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// PRD §3 GWT A1 + D5.B 决议：rule-driven add 必须传 source_type='rule' +
+// source_rule_id，让 cron reEvaluateAll 后续可识别 rule-applied 行；A4
+// manual override 通过 SQL 层 `WHERE source_type IS DISTINCT FROM 'manual'`
+// 守护，本路径只验证调用契约。
+func TestProcessTask_MatchedDevice_CallsAddDeviceWithSourceRule(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, taskRepo, groupRepo := newTestRuleService(t, ctrl)
+	lister := NewMockDeviceLister(ctrl)
+	svc.SetDeviceLister(lister)
+
+	// Given: 启用规则 R 按 deviceName equal "dev-001" 匹配
+	targetGroup := uuid.New()
+	rule := &DeviceRule{
+		ID:            uuid.New(),
+		Name:          "name-rule",
+		Priority:      50,
+		TargetGroupID: &targetGroup,
+		Enabled:       true,
+		MatchingMode:  MatchingModeDeviceName,
+		NameRuleList:  []NameRule{{Condition: "contain", Value: "dev-001"}}, // matcher.go 未实现 "equal"（pre-existing 缺口）
+	}
+	deviceID := uuid.New()
+	taskID := uuid.New()
+
+	// Mock 期望（按 processTask 调用顺序）
+	taskRepo.EXPECT().GetByID(gomock.Any(), taskID).Return(
+		&RuleTask{ID: taskID, RuleID: rule.ID, RuleName: rule.Name, Status: "pending"}, nil,
+	)
+	taskRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	repo.EXPECT().GetByID(gomock.Any(), rule.ID).Return(rule, nil)
+	lister.EXPECT().ListAllForRuleEval(gomock.Any()).Return([]DeviceForMatch{
+		{ID: deviceID, Name: "dev-001"},
+	}, nil)
+
+	// **核心契约断言**：AddDeviceWithSource 被调用且参数匹配 D5.B
+	groupRepo.EXPECT().AddDeviceWithSource(
+		gomock.Any(),
+		targetGroup,
+		deviceID,
+		"rule",
+		gomock.Cond(func(p any) bool {
+			ruleIDPtr, ok := p.(*uuid.UUID)
+			return ok && ruleIDPtr != nil && *ruleIDPtr == rule.ID
+		}),
+	).Return(int64(1), nil)
+
+	// When: 直接驱动 worker 私有方法（workers=0 testing 通道）
+	svc.processTask(context.Background(), taskID)
+
+	// Then: gomock EXPECT 自动断言；ctrl.Finish 验证全部期望被满足
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // A2 — 新设备 bootstrap → 自动评估并入 target group（PRD §3 GWT A2）
 // ──────────────────────────────────────────────────────────────────────────────
 // 阻塞在 S3 Day 3+ 的 EventBus 订阅 + handleDeviceBootstrap 实现：
