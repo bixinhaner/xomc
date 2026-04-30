@@ -442,6 +442,12 @@ ALTER TABLE device_group_members DROP COLUMN IF EXISTS source_type;
 
 **已收敛 2 项 < 3 阈值 ✅**
 
+**W3**（S3 Day 3 暴露 — pre-existing 缺口）：matcher.go MatchRequest 期望 `LAC *int` / `TAC *int`，但 devices 与 device_info 表均**无 LAC/TAC 列**（grep 全部 migrations/*.sql 确认；只有 device_groups.lac_list 和 device_rules.lac_list 是匹配条件方），现网设备级 LAC/TAC 数据无来源 ⇒ LAC / TAC 匹配 mode 在生产环境全部 false。
+- 范围影响：D7.A 选定的三维（Name/LAC/TAC）中实际只有 Name 可工作，LAC/TAC 是哑路径
+- **Day 3 决策**：T-0027 收紧到 Name 匹配可用 + LAC/TAC nil 安全降级（matcher 已支持 nil → false）；LAC/TAC 数据源（候选 device_parameters TR-069 path / sites 关联 / device_info 加列）**carve out 为 T-0027 followup**（候选 T-0098 待开），不阻塞 T-0027 主体过门
+- 影响验收：A1/A2 GWT 用例若按 LAC 匹配验证需先 mock 数据；e2e 用例临时改成 Name 模式
+- 风险等级：M（不阻塞 R-104 关闭，仅限缩 T-0027 实际 active 维度从 3 → 1）
+
 ### 12.9 S3 实施清单（按时序）
 
 1. (1h) S3 第一动作：grep device.Create 确认 W1 答案 + 选定 reEvaluateAll SQL 路径

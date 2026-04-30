@@ -14,16 +14,30 @@ import (
 	"go.uber.org/zap"
 )
 
+// DeviceLister 设备列举器（消费侧 narrow 接口，单方法）。
+//
+// 用于 ApplyRule 异步 worker 中的 getAllDevices；nil 时 worker 走旧 stub
+// 行为返空切片（向后兼容，便于 Day 3 灰度推进）。
+//
+// 实施位于 PgDeviceLister（同包，pg_device_lister.go）。
+type DeviceLister interface {
+	// ListAllForRuleEval 返回所有可被规则匹配的设备的最小信息集。
+	// 当前 LAC/TAC 字段为 nil（W3 待定点：LAC/TAC 数据源 — devices/device_info
+	// 表无对应列，需后续确认 device_parameters TR-069 path 或 sites 关联）。
+	ListAllForRuleEval(ctx context.Context) ([]DeviceForMatch, error)
+}
+
 // DeviceRuleService 设备规则服务
 type DeviceRuleService struct {
-	repo       DeviceRuleRepository
-	taskRepo   RuleTaskRepository
-	groupRepo  DeviceGroupRepository
-	matcher    *DeviceMatcher
-	pool       *pgxpool.Pool
-	taskQueue  chan uuid.UUID // 任务队列
-	workers    int            // Worker 数量
-	logger     *zap.Logger
+	repo         DeviceRuleRepository
+	taskRepo     RuleTaskRepository
+	groupRepo    DeviceGroupRepository
+	matcher      *DeviceMatcher
+	pool         *pgxpool.Pool
+	deviceLister DeviceLister   // 可选注入；nil 时 getAllDevices 返空切片
+	taskQueue    chan uuid.UUID // 任务队列
+	workers      int            // Worker 数量
+	logger       *zap.Logger
 }
 
 // NewDeviceRuleService 创建设备规则服务
@@ -502,11 +516,23 @@ type DeviceForMatch struct {
 	TAC  *int
 }
 
-// getAllDevices 获取所有设备（简化实现，实际应从设备服务获取）
+// SetDeviceLister 注入设备列举器，替换默认 stub 行为。
+// 通常由 modules.go DI 装配阶段调用一次（Day 3+ 接通真实施）。
+func (s *DeviceRuleService) SetDeviceLister(l DeviceLister) {
+	s.deviceLister = l
+}
+
+// getAllDevices 获取所有设备供 worker 匹配。
+// 注入了 deviceLister 时走真实施；未注入时返空切片（兼容 Day 1-2 行为）。
 func (s *DeviceRuleService) getAllDevices(ctx context.Context) ([]DeviceForMatch, error) {
-	// TODO: 从设备服务或设备表获取所有设备
-	// 这里返回空切片，实际实现需要从 device_info 表查询
-	return []DeviceForMatch{}, nil
+	if s.deviceLister == nil {
+		return []DeviceForMatch{}, nil
+	}
+	devices, err := s.deviceLister.ListAllForRuleEval(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list devices for rule eval: %w", err)
+	}
+	return devices, nil
 }
 
 // matchRule 匹配规则

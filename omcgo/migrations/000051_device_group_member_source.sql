@@ -1,5 +1,6 @@
 -- +goose Up
 -- T-0027 拓扑自动分组规则引擎激活：device_group_members 加 source_type / source_rule_id 区分手工 vs 规则
+-- 引用 PRD §12.3
 -- D5.B（auto-migrate from default）：rule 触发的 INSERT/UPDATE 显式置 source_type='rule' + source_rule_id
 -- A4 守护：DEFAULT 'manual' 让所有现存行视为 manual override，cron 重评不触动
 

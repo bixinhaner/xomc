@@ -120,6 +120,43 @@ func TestApplyRule_RuleNotEnabled_ReturnsBusinessError(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// A1.d — getAllDevices wiring：未注入 DeviceLister → 返空切片（兼容 Day 1-2 stub）
+// ──────────────────────────────────────────────────────────────────────────────
+func TestGetAllDevices_NoListerInjected_ReturnsEmpty(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, _, _, _ := newTestRuleService(t, ctrl)
+	devices, err := svc.getAllDevices(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, devices, "未注入 DeviceLister 时应返空切片")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A1.e — getAllDevices wiring：注入 DeviceLister 后委托调用
+// ──────────────────────────────────────────────────────────────────────────────
+func TestGetAllDevices_WithListerInjected_DelegatesToLister(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, _, _, _ := newTestRuleService(t, ctrl)
+	lister := NewMockDeviceLister(ctrl)
+	svc.SetDeviceLister(lister)
+
+	expected := []DeviceForMatch{
+		{ID: uuid.New(), Name: "dev-001"},
+		{ID: uuid.New(), Name: "dev-002"},
+	}
+	lister.EXPECT().ListAllForRuleEval(gomock.Any()).Return(expected, nil)
+
+	devices, err := svc.getAllDevices(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, expected, devices)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // A1.c — ApplyRule 已有 running task → 拒绝并发
 // ──────────────────────────────────────────────────────────────────────────────
 func TestApplyRule_ConcurrentRunningTask_Rejected(t *testing.T) {
