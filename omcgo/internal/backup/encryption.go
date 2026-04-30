@@ -75,18 +75,35 @@ var (
 
 // File-format constants. Layout (all multi-byte fields little-endian):
 //
-//	[magic "OENC" 4B][version 1B][algo 1B][reserved 2B 0x0000]   ← header 8B
-//	[outer_nonce 12B]                                            ← KEK→DEK GCM nonce
-//	[wrapped_DEK_len 4B u32]
-//	[wrapped_DEK ?B (= 32B DEK + 16B GCM tag = 48B)]
-//	[inner_nonce 12B]                                            ← DEK→data GCM nonce
-//	[ciphertext + 16B GCM tag]                                   ← AAD bound
+// OENC v1 (T-0075 / T-0085):
 //
-// Header overhead = 100 bytes per encrypted file (8 header + 12 outer + 4
-// length + 48 wrapped + 12 inner + 16 tag).
+//	[magic "OENC" 4B][version=1 1B][algo 1B][reserved 2B 0x0000]   ← header 8B
+//	[outer_nonce 12B]                                              ← KEK→DEK GCM nonce
+//	[wrapped_DEK_len 4B u32]
+//	[wrapped_DEK 48B]
+//	[body algo-specific]                                           ← see Encrypt
+//
+// OENC v2 (T-0087, current writer):
+//
+//	[magic "OENC" 4B][version=2 1B][algo 1B][kek_id_len 1B][reserved 1B 0x00]   ← header 8B
+//	[kek_id NB (0..255)]                                           ← envelope→KEK lookup
+//	[outer_nonce 12B]
+//	[wrapped_DEK_len 4B u32]
+//	[wrapped_DEK 48B]
+//	[body algo-specific]
+//
+// kek_id is NOT in the AAD/HMAC authenticated scope (PRD §2.3): an attacker
+// who flips kek_id to a non-existent ID is rejected at KEKByID lookup; an
+// attacker who flips to a known wrong ID still fails at unwrap-DEK GCM
+// verification because the wrapped_DEK is bound to the original KEK.
+//
+// Header overhead before body:
+//   - v1 = 8 + 12 + 4 + 48 = 72B
+//   - v2 = 8 + N + 12 + 4 + 48 = 72 + N (= 72 for empty kek_id; same as v1)
 const (
 	encMagic          = "OENC"
-	encVersion        = byte(0x01)
+	encVersion        = byte(0x01) // legacy reader-only support (T-0075/T-0085 written)
+	encVersion2       = byte(0x02) // T-0087: writes carry kek_id field
 	encAlgoGCM        = byte('G')
 	encAlgoCBC        = byte('C')                  // T-0085: AES-256-CBC + HMAC-SHA256
 	encAlgoChaCha20   = byte('P')                  // T-0085: ChaCha20-Poly1305 (Poly1305 → 'P')
@@ -240,6 +257,122 @@ func deriveCBCMACKey(dek []byte) ([]byte, error) {
 	return out, nil
 }
 
+// envelopeHeader holds the parsed-and-validated common prefix shared by
+// all three OENC body variants. Produced by parseEnvelopeHeader and
+// consumed by each algo's Decrypt to skip past the variable-length kek_id
+// (v2) and locate body fields (outer_nonce / wrapped_DEK / body).
+type envelopeHeader struct {
+	algo       byte
+	kekID      string
+	outerNonce []byte
+	wrappedDEK []byte
+	bodyOffset int // byte index where algo-specific body begins
+}
+
+// minEnvelopePrefix is the smallest common prefix that always exists in
+// any OENC envelope (header 8 + outer_nonce 12 + wrapped_DEK_len 4 +
+// wrapped_DEK 48 = 72), excluding the algo-specific body. v2 envelopes
+// add kek_id between the header and outer_nonce (0..255 bytes).
+const minEnvelopePrefix = 8 + encNonceSize + 4 + encWrappedDEKSize
+
+// parseEnvelopeHeader validates magic / version / algo / kek_id / wrapped
+// DEK size and returns the parsed envelopeHeader plus the offset where
+// the algo-specific body begins. Accepts both v1 (legacy) and v2
+// envelopes; the only behavioural difference is whether a kek_id_len
+// byte and kek_id field are present.
+//
+// Errors are wrapped under ErrEncryptionFormatInvalid for caller-uniform
+// handling. The caller is expected to perform algo-specific body checks
+// (e.g., CBC HMAC trailing 32B, GCM/ChaCha tag overhead) starting at
+// envelopeHeader.bodyOffset.
+func parseEnvelopeHeader(blob []byte) (*envelopeHeader, error) {
+	if len(blob) < minEnvelopePrefix {
+		return nil, fmt.Errorf("blob too short (%d < %d): %w",
+			len(blob), minEnvelopePrefix, ErrEncryptionFormatInvalid)
+	}
+	if string(blob[0:4]) != encMagic {
+		return nil, fmt.Errorf("magic mismatch: %w", ErrEncryptionFormatInvalid)
+	}
+	ver := blob[4]
+	algo := blob[5]
+
+	var kekID string
+	off := 8
+	switch ver {
+	case encVersion:
+		// v1: bytes 6-7 must be reserved 0x0000. Older code wrote 0x00,
+		// 0x00 explicitly; reject if not (defends against attacker
+		// repurposing the byte as a hidden kek_id_len).
+		if blob[6] != 0x00 || blob[7] != 0x00 {
+			return nil, fmt.Errorf("v1 reserved bytes nonzero (%#x, %#x): %w",
+				blob[6], blob[7], ErrEncryptionFormatInvalid)
+		}
+	case encVersion2:
+		// v2: byte 6 = kek_id_len, byte 7 reserved.
+		if blob[7] != 0x00 {
+			return nil, fmt.Errorf("v2 reserved byte nonzero (%#x): %w",
+				blob[7], ErrEncryptionFormatInvalid)
+		}
+		kekIDLen := int(blob[6])
+		if 8+kekIDLen+encNonceSize+4+encWrappedDEKSize > len(blob) {
+			return nil, fmt.Errorf("truncated kek_id (len=%d): %w",
+				kekIDLen, ErrEncryptionFormatInvalid)
+		}
+		kekID = string(blob[8 : 8+kekIDLen])
+		off = 8 + kekIDLen
+	default:
+		return nil, fmt.Errorf("version=%d unsupported: %w", ver, ErrEncryptionFormatInvalid)
+	}
+
+	outerNonce := blob[off : off+encNonceSize]
+	off += encNonceSize
+
+	wrappedLen := int(binary.LittleEndian.Uint32(blob[off : off+4]))
+	off += 4
+	if wrappedLen != encWrappedDEKSize {
+		return nil, fmt.Errorf("wrapped_DEK_len=%d expected %d: %w",
+			wrappedLen, encWrappedDEKSize, ErrEncryptionFormatInvalid)
+	}
+	if off+wrappedLen > len(blob) {
+		return nil, fmt.Errorf("truncated wrapped_DEK: %w", ErrEncryptionFormatInvalid)
+	}
+	wrappedDEK := blob[off : off+wrappedLen]
+	off += wrappedLen
+
+	return &envelopeHeader{
+		algo:       algo,
+		kekID:      kekID,
+		outerNonce: outerNonce,
+		wrappedDEK: wrappedDEK,
+		bodyOffset: off,
+	}, nil
+}
+
+// encodeEnvelopeHeader writes the v2 envelope header + kek_id +
+// outer_nonce + wrapped_DEK_len + wrapped_DEK into a fresh slice. The
+// returned slice has cap pre-sized to bodyHint to avoid grows when
+// callers append the algo-specific body.
+//
+// kekID is taken verbatim from KeyProvider.ActiveKEKID(); validation
+// (max length 255) is enforced via panic-free truncation rejection.
+func encodeEnvelopeHeader(algo byte, kekID string, outerNonce, wrappedDEK []byte, bodyHint int) ([]byte, error) {
+	if len(kekID) > maxKEKIDLen {
+		return nil, fmt.Errorf("kek_id len=%d > %d: %w",
+			len(kekID), maxKEKIDLen, ErrEncryptionFormatInvalid)
+	}
+	headerLen := 8 + len(kekID) + encNonceSize + 4 + len(wrappedDEK)
+	out := make([]byte, 0, headerLen+bodyHint)
+	out = append(out, encMagic...)
+	out = append(out, encVersion2, algo, byte(len(kekID)), 0x00)
+	out = append(out, kekID...)
+	out = append(out, outerNonce...)
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(wrappedDEK)))
+	out = append(out, lenBuf[:]...)
+	out = append(out, wrappedDEK...)
+	return out, nil
+}
+
 // computeCBCMAC computes HMAC-SHA256 over (algo_byte ‖ IV ‖ AAD ‖
 // ciphertext). Domain components in this exact order:
 //
@@ -274,9 +407,10 @@ func (e *aesGCMEncryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 		return nil, fmt.Errorf("plaintext %d > max %d: %w",
 			len(plaintext), encMaxPlaintext, ErrEncryptionInputTooLarge)
 	}
-	kek, err := e.kp.KEK(nil)
+	kekID := e.kp.ActiveKEKID()
+	kek, err := e.kp.KEKByID(nil, kekID)
 	if err != nil {
-		return nil, fmt.Errorf("get KEK: %w", err)
+		return nil, fmt.Errorf("get KEK id=%q: %w", kekID, err)
 	}
 
 	// Generate per-file DEK (32 bytes) + outer nonce (12 bytes).
@@ -290,15 +424,10 @@ func (e *aesGCMEncryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	}
 
 	// Wrap DEK under KEK.
-	kekBlock, err := aes.NewCipher(kek)
+	wrappedDEK, err := wrapDEKWithKEK(kek, outerNonce, dek)
 	if err != nil {
-		return nil, fmt.Errorf("aes cipher (KEK): %w", err)
+		return nil, err
 	}
-	kekGCM, err := cipher.NewGCM(kekBlock)
-	if err != nil {
-		return nil, fmt.Errorf("aead (KEK): %w", err)
-	}
-	wrappedDEK := kekGCM.Seal(nil, outerNonce, dek, nil)
 
 	// Encrypt plaintext under DEK with AAD.
 	innerNonce := make([]byte, encNonceSize)
@@ -315,84 +444,41 @@ func (e *aesGCMEncryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	}
 	ciphertext := dekGCM.Seal(nil, innerNonce, plaintext, aad)
 
-	// Assemble: header(8) + outer_nonce(12) + len(4) + wrapped(48) + inner_nonce(12) + ciphertext.
-	totalLen := 8 + encNonceSize + 4 + len(wrappedDEK) + encNonceSize + len(ciphertext)
-	out := make([]byte, 0, totalLen)
-	out = append(out, encMagic...)
-	out = append(out, encVersion, encAlgoGCM, 0x00, 0x00)
-	out = append(out, outerNonce...)
-	var lenBuf [4]byte
-	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(wrappedDEK)))
-	out = append(out, lenBuf[:]...)
-	out = append(out, wrappedDEK...)
+	// Body = inner_nonce + ciphertext+tag.
+	out, err := encodeEnvelopeHeader(encAlgoGCM, kekID, outerNonce, wrappedDEK, encNonceSize+len(ciphertext))
+	if err != nil {
+		return nil, err
+	}
 	out = append(out, innerNonce...)
 	out = append(out, ciphertext...)
 	return out, nil
 }
 
 func (e *aesGCMEncryptor) Decrypt(blob, aad []byte) ([]byte, error) {
-	// Minimum size: header(8) + outer_nonce(12) + len(4) + wrapped(48) + inner_nonce(12) + tag(16) = 100
-	const minSize = 8 + encNonceSize + 4 + encWrappedDEKSize + encNonceSize + encGCMTagSize
-	if len(blob) < minSize {
-		return nil, fmt.Errorf("blob too short (%d < %d): %w", len(blob), minSize, ErrEncryptionFormatInvalid)
-	}
-
-	// Parse header.
-	if string(blob[0:4]) != encMagic {
-		return nil, fmt.Errorf("magic mismatch: %w", ErrEncryptionFormatInvalid)
-	}
-	if blob[4] != encVersion {
-		return nil, fmt.Errorf("version=%d unsupported: %w", blob[4], ErrEncryptionFormatInvalid)
-	}
-	if blob[5] != encAlgoGCM {
-		return nil, fmt.Errorf("algo=%c unsupported: %w", blob[5], ErrEncryptionAlgorithmNotImplemented)
-	}
-	// reserved bytes [6:8] ignored
-	off := 8
-
-	outerNonce := blob[off : off+encNonceSize]
-	off += encNonceSize
-
-	wrappedLen := int(binary.LittleEndian.Uint32(blob[off : off+4]))
-	off += 4
-	if wrappedLen != encWrappedDEKSize {
-		return nil, fmt.Errorf("wrapped_DEK_len=%d expected %d: %w",
-			wrappedLen, encWrappedDEKSize, ErrEncryptionFormatInvalid)
-	}
-	if off+wrappedLen+encNonceSize+encGCMTagSize > len(blob) {
-		return nil, fmt.Errorf("truncated blob: %w", ErrEncryptionFormatInvalid)
-	}
-	wrappedDEK := blob[off : off+wrappedLen]
-	off += wrappedLen
-
-	innerNonce := blob[off : off+encNonceSize]
-	off += encNonceSize
-
-	ciphertext := blob[off:]
-
-	// Unwrap DEK.
-	kek, err := e.kp.KEK(nil)
+	hdr, err := parseEnvelopeHeader(blob)
 	if err != nil {
-		return nil, fmt.Errorf("get KEK: %w", err)
+		return nil, err
 	}
-	kekBlock, err := aes.NewCipher(kek)
+	if hdr.algo != encAlgoGCM {
+		return nil, fmt.Errorf("algo=%c unsupported by aes-256-gcm decryptor: %w",
+			hdr.algo, ErrEncryptionAlgorithmNotImplemented)
+	}
+	// Body = inner_nonce(12) + ciphertext+tag(>=16).
+	if hdr.bodyOffset+encNonceSize+encGCMTagSize > len(blob) {
+		return nil, fmt.Errorf("truncated gcm body: %w", ErrEncryptionFormatInvalid)
+	}
+	innerNonce := blob[hdr.bodyOffset : hdr.bodyOffset+encNonceSize]
+	ciphertext := blob[hdr.bodyOffset+encNonceSize:]
+
+	kek, err := e.kp.KEKByID(nil, hdr.kekID)
 	if err != nil {
-		return nil, fmt.Errorf("aes cipher (KEK): %w", err)
+		return nil, fmt.Errorf("get KEK id=%q: %w", hdr.kekID, err)
 	}
-	kekGCM, err := cipher.NewGCM(kekBlock)
+	dek, err := unwrapDEKWithKEK(kek, hdr.outerNonce, hdr.wrappedDEK)
 	if err != nil {
-		return nil, fmt.Errorf("aead (KEK): %w", err)
-	}
-	dek, err := kekGCM.Open(nil, outerNonce, wrappedDEK, nil)
-	if err != nil {
-		// Wrong KEK or tampered wrapped_DEK.
-		return nil, fmt.Errorf("unwrap DEK: %w", ErrEncryptionAuthFailed)
-	}
-	if len(dek) != encDEKSize {
-		return nil, fmt.Errorf("unexpected DEK size %d: %w", len(dek), ErrEncryptionFormatInvalid)
+		return nil, err
 	}
 
-	// Decrypt body.
 	dekBlock, err := aes.NewCipher(dek)
 	if err != nil {
 		return nil, fmt.Errorf("aes cipher (DEK): %w", err)
@@ -445,9 +531,10 @@ func (e *aesCBCEncryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 		return nil, fmt.Errorf("plaintext %d > max %d: %w",
 			len(plaintext), encMaxPlaintext, ErrEncryptionInputTooLarge)
 	}
-	kek, err := e.kp.KEK(nil)
+	kekID := e.kp.ActiveKEKID()
+	kek, err := e.kp.KEKByID(nil, kekID)
 	if err != nil {
-		return nil, fmt.Errorf("get KEK: %w", err)
+		return nil, fmt.Errorf("get KEK id=%q: %w", kekID, err)
 	}
 
 	dek := make([]byte, encDEKSize)
@@ -482,15 +569,11 @@ func (e *aesCBCEncryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	}
 	mac := computeCBCMAC(macKey, iv, aad, ciphertext)
 
-	totalLen := 8 + encNonceSize + 4 + len(wrappedDEK) + encCBCBlockSize + len(ciphertext) + encHMACSize
-	out := make([]byte, 0, totalLen)
-	out = append(out, encMagic...)
-	out = append(out, encVersion, encAlgoCBC, 0x00, 0x00)
-	out = append(out, outerNonce...)
-	var lenBuf [4]byte
-	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(wrappedDEK)))
-	out = append(out, lenBuf[:]...)
-	out = append(out, wrappedDEK...)
+	bodyHint := encCBCBlockSize + len(ciphertext) + encHMACSize
+	out, err := encodeEnvelopeHeader(encAlgoCBC, kekID, outerNonce, wrappedDEK, bodyHint)
+	if err != nil {
+		return nil, err
+	}
 	out = append(out, iv...)
 	out = append(out, ciphertext...)
 	out = append(out, mac...)
@@ -498,57 +581,36 @@ func (e *aesCBCEncryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 }
 
 func (e *aesCBCEncryptor) Decrypt(blob, aad []byte) ([]byte, error) {
-	// Minimum size = 8 + 12 + 4 + 48 + 16 + 16 (one block ciphertext) + 32 = 136
-	const minSize = 8 + encNonceSize + 4 + encWrappedDEKSize + encCBCBlockSize + encCBCBlockSize + encHMACSize
-	if len(blob) < minSize {
-		return nil, fmt.Errorf("blob too short (%d < %d): %w", len(blob), minSize, ErrEncryptionFormatInvalid)
+	hdr, err := parseEnvelopeHeader(blob)
+	if err != nil {
+		return nil, err
 	}
-	if string(blob[0:4]) != encMagic {
-		return nil, fmt.Errorf("magic mismatch: %w", ErrEncryptionFormatInvalid)
+	if hdr.algo != encAlgoCBC {
+		return nil, fmt.Errorf("algo=%c unsupported by aes-256-cbc decryptor: %w",
+			hdr.algo, ErrEncryptionAlgorithmNotImplemented)
 	}
-	if blob[4] != encVersion {
-		return nil, fmt.Errorf("version=%d unsupported: %w", blob[4], ErrEncryptionFormatInvalid)
+	// Body = iv(16) + ciphertext (block-aligned, ≥1 block) + hmac(32).
+	if hdr.bodyOffset+encCBCBlockSize+encCBCBlockSize+encHMACSize > len(blob) {
+		return nil, fmt.Errorf("truncated cbc body: %w", ErrEncryptionFormatInvalid)
 	}
-	if blob[5] != encAlgoCBC {
-		return nil, fmt.Errorf("algo=%c unsupported by aes-256-cbc decryptor: %w", blob[5], ErrEncryptionAlgorithmNotImplemented)
-	}
-	off := 8
-	outerNonce := blob[off : off+encNonceSize]
-	off += encNonceSize
-
-	wrappedLen := int(binary.LittleEndian.Uint32(blob[off : off+4]))
-	off += 4
-	if wrappedLen != encWrappedDEKSize {
-		return nil, fmt.Errorf("wrapped_DEK_len=%d expected %d: %w",
-			wrappedLen, encWrappedDEKSize, ErrEncryptionFormatInvalid)
-	}
-	if off+wrappedLen+encCBCBlockSize+encHMACSize > len(blob) {
-		return nil, fmt.Errorf("truncated blob: %w", ErrEncryptionFormatInvalid)
-	}
-	wrappedDEK := blob[off : off+wrappedLen]
-	off += wrappedLen
-
-	iv := blob[off : off+encCBCBlockSize]
-	off += encCBCBlockSize
-
-	// Trailing HMAC-SHA256 occupies the last 32B; ciphertext is everything
-	// in between. Reject lengths that would produce an empty ciphertext or
-	// a ciphertext not aligned to the block size.
+	iv := blob[hdr.bodyOffset : hdr.bodyOffset+encCBCBlockSize]
 	macStart := len(blob) - encHMACSize
-	if macStart <= off {
+	ciphertextStart := hdr.bodyOffset + encCBCBlockSize
+	if macStart <= ciphertextStart {
 		return nil, fmt.Errorf("missing ciphertext slot: %w", ErrEncryptionFormatInvalid)
 	}
-	ciphertext := blob[off:macStart]
+	ciphertext := blob[ciphertextStart:macStart]
 	storedMAC := blob[macStart:]
 	if len(ciphertext) == 0 || len(ciphertext)%encCBCBlockSize != 0 {
-		return nil, fmt.Errorf("ciphertext len=%d not block-aligned: %w", len(ciphertext), ErrEncryptionFormatInvalid)
+		return nil, fmt.Errorf("ciphertext len=%d not block-aligned: %w",
+			len(ciphertext), ErrEncryptionFormatInvalid)
 	}
 
-	kek, err := e.kp.KEK(nil)
+	kek, err := e.kp.KEKByID(nil, hdr.kekID)
 	if err != nil {
-		return nil, fmt.Errorf("get KEK: %w", err)
+		return nil, fmt.Errorf("get KEK id=%q: %w", hdr.kekID, err)
 	}
-	dek, err := unwrapDEKWithKEK(kek, outerNonce, wrappedDEK)
+	dek, err := unwrapDEKWithKEK(kek, hdr.outerNonce, hdr.wrappedDEK)
 	if err != nil {
 		return nil, err
 	}
@@ -611,9 +673,10 @@ func (e *chaCha20Encryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 		return nil, fmt.Errorf("plaintext %d > max %d: %w",
 			len(plaintext), encMaxPlaintext, ErrEncryptionInputTooLarge)
 	}
-	kek, err := e.kp.KEK(nil)
+	kekID := e.kp.ActiveKEKID()
+	kek, err := e.kp.KEKByID(nil, kekID)
 	if err != nil {
-		return nil, fmt.Errorf("get KEK: %w", err)
+		return nil, fmt.Errorf("get KEK id=%q: %w", kekID, err)
 	}
 
 	dek := make([]byte, encDEKSize)
@@ -639,60 +702,35 @@ func (e *chaCha20Encryptor) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	}
 	ciphertext := aead.Seal(nil, innerNonce, plaintext, aad)
 
-	totalLen := 8 + encNonceSize + 4 + len(wrappedDEK) + encNonceSize + len(ciphertext)
-	out := make([]byte, 0, totalLen)
-	out = append(out, encMagic...)
-	out = append(out, encVersion, encAlgoChaCha20, 0x00, 0x00)
-	out = append(out, outerNonce...)
-	var lenBuf [4]byte
-	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(wrappedDEK)))
-	out = append(out, lenBuf[:]...)
-	out = append(out, wrappedDEK...)
+	out, err := encodeEnvelopeHeader(encAlgoChaCha20, kekID, outerNonce, wrappedDEK, encNonceSize+len(ciphertext))
+	if err != nil {
+		return nil, err
+	}
 	out = append(out, innerNonce...)
 	out = append(out, ciphertext...)
 	return out, nil
 }
 
 func (e *chaCha20Encryptor) Decrypt(blob, aad []byte) ([]byte, error) {
-	const minSize = 8 + encNonceSize + 4 + encWrappedDEKSize + encNonceSize + encChaChaTagSize
-	if len(blob) < minSize {
-		return nil, fmt.Errorf("blob too short (%d < %d): %w", len(blob), minSize, ErrEncryptionFormatInvalid)
-	}
-	if string(blob[0:4]) != encMagic {
-		return nil, fmt.Errorf("magic mismatch: %w", ErrEncryptionFormatInvalid)
-	}
-	if blob[4] != encVersion {
-		return nil, fmt.Errorf("version=%d unsupported: %w", blob[4], ErrEncryptionFormatInvalid)
-	}
-	if blob[5] != encAlgoChaCha20 {
-		return nil, fmt.Errorf("algo=%c unsupported by chacha20-poly1305 decryptor: %w", blob[5], ErrEncryptionAlgorithmNotImplemented)
-	}
-	off := 8
-	outerNonce := blob[off : off+encNonceSize]
-	off += encNonceSize
-
-	wrappedLen := int(binary.LittleEndian.Uint32(blob[off : off+4]))
-	off += 4
-	if wrappedLen != encWrappedDEKSize {
-		return nil, fmt.Errorf("wrapped_DEK_len=%d expected %d: %w",
-			wrappedLen, encWrappedDEKSize, ErrEncryptionFormatInvalid)
-	}
-	if off+wrappedLen+encNonceSize+encChaChaTagSize > len(blob) {
-		return nil, fmt.Errorf("truncated blob: %w", ErrEncryptionFormatInvalid)
-	}
-	wrappedDEK := blob[off : off+wrappedLen]
-	off += wrappedLen
-
-	innerNonce := blob[off : off+encNonceSize]
-	off += encNonceSize
-
-	ciphertext := blob[off:]
-
-	kek, err := e.kp.KEK(nil)
+	hdr, err := parseEnvelopeHeader(blob)
 	if err != nil {
-		return nil, fmt.Errorf("get KEK: %w", err)
+		return nil, err
 	}
-	dek, err := unwrapDEKWithKEK(kek, outerNonce, wrappedDEK)
+	if hdr.algo != encAlgoChaCha20 {
+		return nil, fmt.Errorf("algo=%c unsupported by chacha20-poly1305 decryptor: %w",
+			hdr.algo, ErrEncryptionAlgorithmNotImplemented)
+	}
+	if hdr.bodyOffset+encNonceSize+encChaChaTagSize > len(blob) {
+		return nil, fmt.Errorf("truncated chacha body: %w", ErrEncryptionFormatInvalid)
+	}
+	innerNonce := blob[hdr.bodyOffset : hdr.bodyOffset+encNonceSize]
+	ciphertext := blob[hdr.bodyOffset+encNonceSize:]
+
+	kek, err := e.kp.KEKByID(nil, hdr.kekID)
+	if err != nil {
+		return nil, fmt.Errorf("get KEK id=%q: %w", hdr.kekID, err)
+	}
+	dek, err := unwrapDEKWithKEK(kek, hdr.outerNonce, hdr.wrappedDEK)
 	if err != nil {
 		return nil, err
 	}

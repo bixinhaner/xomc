@@ -121,13 +121,8 @@ func NewKMSKeyProvider(ctx context.Context, client KMSClient, ciphertextBlob []b
 // KEK returns a fresh copy of the cached plaintext KEK. Mirrors
 // EnvKeyProvider.KEK behaviour (review M-2 fix): copy isolates callers from
 // the provider's internal storage so mutation in one place can't ripple.
-func (p *KMSKeyProvider) KEK(_ context.Context) ([]byte, error) {
-	if !p.Available() {
-		return nil, ErrEncryptionKeyUnavailable
-	}
-	out := make([]byte, len(p.kek))
-	copy(out, p.kek)
-	return out, nil
+func (p *KMSKeyProvider) KEK(ctx context.Context) ([]byte, error) {
+	return p.KEKByID(ctx, p.ActiveKEKID())
 }
 
 // Available reports whether the provider holds a usable cached KEK.
@@ -143,4 +138,28 @@ func (p *KMSKeyProvider) KeyID() string {
 		return ""
 	}
 	return p.keyID
+}
+
+// ActiveKEKID returns the active key identifier for envelope writes
+// (T-0087). Single-key skeleton — equals KeyID(). Multi-version support
+// for true KEK rotation is T-0091 territory (real KMS adapters with their
+// own key versioning will extend KMSKeyProvider).
+func (p *KMSKeyProvider) ActiveKEKID() string { return p.KeyID() }
+
+// KEKByID looks up the KEK by id. Single-key skeleton: only returns the
+// cached key when kekID equals the provider's KeyID, OR equals "" (the
+// legacy slot — supports decrypting v1 envelopes that were written by
+// EnvKeyProvider before a deployment switched to KMS-backed config).
+// T-0091 will extend this to a proper multi-version cache map.
+func (p *KMSKeyProvider) KEKByID(_ context.Context, kekID string) ([]byte, error) {
+	if !p.Available() {
+		return nil, ErrEncryptionKeyUnavailable
+	}
+	if kekID != "" && kekID != p.keyID {
+		return nil, fmt.Errorf("kms key provider single-key, got id=%q expected %q or empty: %w",
+			kekID, p.keyID, ErrEncryptionKeyUnavailable)
+	}
+	out := make([]byte, len(p.kek))
+	copy(out, p.kek)
+	return out, nil
 }

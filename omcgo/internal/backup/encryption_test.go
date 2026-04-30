@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,7 +69,7 @@ func TestAESGCM_RoundTrip_sizes(t *testing.T) {
 			// Magic header check
 			require.GreaterOrEqual(t, len(blob), 8)
 			assert.Equal(t, []byte(encMagic), blob[:4])
-			assert.Equal(t, encVersion, blob[4])
+			assert.Equal(t, encVersion2, blob[4])
 			assert.Equal(t, encAlgoGCM, blob[5])
 			// Overhead = 100 bytes per file
 			assert.Equal(t, len(plaintext)+100, len(blob))
@@ -209,7 +210,7 @@ func TestAESCBC_RoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, len(blob), 8)
 			assert.Equal(t, []byte(encMagic), blob[:4])
-			assert.Equal(t, encVersion, blob[4])
+			assert.Equal(t, encVersion2, blob[4])
 			assert.Equal(t, encAlgoCBC, blob[5])
 
 			recovered, err := enc.Decrypt(blob, []byte("cfg.xml"))
@@ -351,7 +352,7 @@ func TestChaCha20Poly1305_RoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, len(blob), 8)
 			assert.Equal(t, []byte(encMagic), blob[:4])
-			assert.Equal(t, encVersion, blob[4])
+			assert.Equal(t, encVersion2, blob[4])
 			assert.Equal(t, encAlgoChaCha20, blob[5])
 			// ChaCha20-Poly1305 envelope shape mirrors GCM exactly:
 			// 100-byte overhead per file (header 8 + outer 12 + len 4 +
@@ -450,6 +451,213 @@ func TestPKCS7_PadUnpad_RoundTrip(t *testing.T) {
 			assert.True(t, bytes.Equal(data, unpadded))
 		})
 	}
+}
+
+// =============================================================================
+// T-0087 — KEK rotation: envelope OENC v2 with kek_id field
+// =============================================================================
+
+// TestT0087_V1_V2EnvelopeRoundTrip — write/read with explicit kek_id="v2"
+// for all three algorithms.
+func TestT0087_V1_V2EnvelopeRoundTrip(t *testing.T) {
+	keys := map[string][]byte{"v2": makeTestKey(t)}
+	kp := newMultiKeyProvider("v2", keys)
+
+	for _, algo := range []string{"AES-256-GCM", "AES-256-CBC", "ChaCha20-Poly1305"} {
+		algo := algo
+		t.Run(algo, func(t *testing.T) {
+			enc, err := NewEncryptor(algo, kp)
+			require.NoError(t, err)
+
+			plaintext := []byte("rotation-aware payload")
+			blob, err := enc.Encrypt(plaintext, []byte("cfg.xml"))
+			require.NoError(t, err)
+
+			// Envelope shape:
+			require.Equal(t, encVersion2, blob[4])
+			require.Equal(t, byte(2), blob[6], "kek_id_len for 'v2' = 2")
+			require.Equal(t, byte(0x00), blob[7])
+			require.Equal(t, "v2", string(blob[8:10]))
+
+			recovered, err := enc.Decrypt(blob, []byte("cfg.xml"))
+			require.NoError(t, err)
+			assert.Equal(t, plaintext, recovered)
+		})
+	}
+}
+
+// TestT0087_V2_V1EnvelopeBackwardsCompat — synthesise a v1 envelope (no
+// kek_id field, byte 6+7 = 0x00) and verify decrypt routes to KEKByID("").
+// Builds the v1 envelope by encrypting under empty active ID then mutating
+// the version byte from 2→1 to simulate a T-0085-era file.
+func TestT0087_V2_V1EnvelopeBackwardsCompat(t *testing.T) {
+	keys := map[string][]byte{"": makeTestKey(t)}
+	kp := newMultiKeyProvider("", keys)
+	enc, err := NewEncryptor("AES-256-GCM", kp)
+	require.NoError(t, err)
+
+	plaintext := []byte("legacy v1 payload")
+	blob, err := enc.Encrypt(plaintext, []byte("cfg.xml"))
+	require.NoError(t, err)
+	// At active ID "", v2 envelope has kek_id_len=0; bytes 6,7 are both
+	// 0x00 — byte-identical to a v1 envelope except for blob[4]. Mutate
+	// the version byte 2→1 to simulate a T-0085-era file.
+	require.Equal(t, encVersion2, blob[4])
+	require.Equal(t, byte(0), blob[6])
+	require.Equal(t, byte(0), blob[7])
+	blob[4] = encVersion
+
+	recovered, err := enc.Decrypt(blob, []byte("cfg.xml"))
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, recovered)
+}
+
+// TestT0087_V3_RotationScenario — encrypt under kek_id="v1", switch
+// active to "v2", verify v1 file still decrypts via KEKByID("v1").
+func TestT0087_V3_RotationScenario(t *testing.T) {
+	keyV1 := makeTestKey(t)
+	keyV2 := makeTestKey(t)
+
+	// Step 1: active=v1, encrypt file A
+	kpStep1 := newMultiKeyProvider("v1", map[string][]byte{"v1": keyV1})
+	encStep1, err := NewEncryptor("AES-256-GCM", kpStep1)
+	require.NoError(t, err)
+	plaintextA := []byte("file A under v1")
+	blobA, err := encStep1.Encrypt(plaintextA, []byte("a.xml"))
+	require.NoError(t, err)
+
+	// Step 2: active=v2, history retains v1 — read A (encrypted under v1)
+	kpStep2 := newMultiKeyProvider("v2", map[string][]byte{
+		"v1": keyV1,
+		"v2": keyV2,
+	})
+	encStep2, err := NewEncryptor("AES-256-GCM", kpStep2)
+	require.NoError(t, err)
+
+	// A still readable
+	recoveredA, err := encStep2.Decrypt(blobA, []byte("a.xml"))
+	require.NoError(t, err)
+	assert.Equal(t, plaintextA, recoveredA)
+
+	// New writes use v2
+	plaintextB := []byte("file B under v2")
+	blobB, err := encStep2.Encrypt(plaintextB, []byte("b.xml"))
+	require.NoError(t, err)
+	require.Equal(t, "v2", string(blobB[8:10]))
+}
+
+// TestT0087_V4_UnknownKEKID — envelope with kek_id="v999" but provider
+// has only "v1"+"v2" → ErrEncryptionKeyUnavailable.
+func TestT0087_V4_UnknownKEKID(t *testing.T) {
+	// Encrypt under v1 then craft an envelope with kek_id="vXX" that the
+	// decrypt-side provider doesn't have. We build via a "v1" provider,
+	// then provide a different one for decrypt (only "v2").
+	kpEncrypt := newMultiKeyProvider("v1", map[string][]byte{"v1": makeTestKey(t)})
+	encEnc, _ := NewEncryptor("AES-256-GCM", kpEncrypt)
+	blob, err := encEnc.Encrypt([]byte("payload"), nil)
+	require.NoError(t, err)
+
+	kpDecrypt := newMultiKeyProvider("v2", map[string][]byte{"v2": makeTestKey(t)})
+	encDec, _ := NewEncryptor("AES-256-GCM", kpDecrypt)
+	_, err = encDec.Decrypt(blob, nil)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionKeyUnavailable),
+		"unknown kek_id must surface as ErrEncryptionKeyUnavailable")
+}
+
+// TestT0087_V5_KEKIDTamperingRejected — flip kek_id byte to map to a
+// wrong key (still valid id but different key) → wrong KEK unwrap fails.
+func TestT0087_V5_KEKIDTamperingRejected(t *testing.T) {
+	keyV1 := makeTestKey(t)
+	keyV2 := makeTestKey(t)
+	keys := map[string][]byte{"v1": keyV1, "v2": keyV2}
+
+	// Encrypt under v1
+	kp := newMultiKeyProvider("v1", keys)
+	enc, err := NewEncryptor("AES-256-GCM", kp)
+	require.NoError(t, err)
+	blob, err := enc.Encrypt([]byte("payload"), []byte("cfg.xml"))
+	require.NoError(t, err)
+	require.Equal(t, "v1", string(blob[8:10]))
+
+	// Tamper kek_id v1 → v2 (single byte flip)
+	tampered := make([]byte, len(blob))
+	copy(tampered, blob)
+	tampered[9] = '2'
+	require.Equal(t, "v2", string(tampered[8:10]))
+
+	// Decrypt tries v2 KEK → unwrap of v1-wrapped DEK fails.
+	_, err = enc.Decrypt(tampered, []byte("cfg.xml"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionAuthFailed),
+		"kek_id tamper must fail at unwrap-DEK GCM verification")
+}
+
+// TestT0087_V6_EmptyKEKIDV2 — v2 envelope written with active="" mirrors
+// v1 byte layout but with version=2; round-trip OK.
+func TestT0087_V6_EmptyKEKIDV2(t *testing.T) {
+	kp := newMultiKeyProvider("", map[string][]byte{"": makeTestKey(t)})
+	enc, err := NewEncryptor("AES-256-GCM", kp)
+	require.NoError(t, err)
+
+	blob, err := enc.Encrypt([]byte("legacy-style v2"), []byte("cfg.xml"))
+	require.NoError(t, err)
+	require.Equal(t, encVersion2, blob[4])
+	require.Equal(t, byte(0), blob[6], "kek_id_len for empty ID")
+
+	recovered, err := enc.Decrypt(blob, []byte("cfg.xml"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("legacy-style v2"), recovered)
+}
+
+// TestT0087_V7_LongKEKID — 255-byte kek_id (max u8).
+func TestT0087_V7_LongKEKID(t *testing.T) {
+	longID := strings.Repeat("a", 255)
+	kp := newMultiKeyProvider(longID, map[string][]byte{longID: makeTestKey(t)})
+	enc, err := NewEncryptor("AES-256-GCM", kp)
+	require.NoError(t, err)
+
+	blob, err := enc.Encrypt([]byte("p"), nil)
+	require.NoError(t, err)
+	require.Equal(t, byte(0xFF), blob[6])
+
+	recovered, err := enc.Decrypt(blob, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("p"), recovered)
+}
+
+// TestT0087_V11_BadVersion — version byte 0x99 still rejects.
+func TestT0087_V11_BadVersion(t *testing.T) {
+	kp := newMultiKeyProvider("", map[string][]byte{"": makeTestKey(t)})
+	enc, _ := NewEncryptor("AES-256-GCM", kp)
+	blob, _ := enc.Encrypt([]byte("p"), nil)
+
+	tampered := make([]byte, len(blob))
+	copy(tampered, blob)
+	tampered[4] = 0x99
+
+	_, err := enc.Decrypt(tampered, nil)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionFormatInvalid))
+}
+
+// TestT0087_V12_V1ReservedNonZeroRejected — synthesised v1 envelope with
+// non-zero reserved byte must fail (defends against attacker repurposing
+// byte 6 as a hidden kek_id_len in a v1 envelope).
+func TestT0087_V12_V1ReservedNonZeroRejected(t *testing.T) {
+	kp := newMultiKeyProvider("", map[string][]byte{"": makeTestKey(t)})
+	enc, _ := NewEncryptor("AES-256-GCM", kp)
+	blob, _ := enc.Encrypt([]byte("p"), nil)
+
+	tampered := make([]byte, len(blob))
+	copy(tampered, blob)
+	tampered[4] = encVersion // claim v1
+	tampered[6] = 0x05       // attacker-controlled kek_id_len for v2-misparse
+
+	_, err := enc.Decrypt(tampered, nil)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionFormatInvalid),
+		"v1 with non-zero reserved must reject — defends against v2-misparse")
 }
 
 // TestPKCS7_Unpad_RejectsMalformed — exhaustive negative cases catch
