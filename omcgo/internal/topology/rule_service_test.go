@@ -2,6 +2,7 @@ package topology
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -260,17 +261,107 @@ func TestHandleDeviceBootstrap_MultiRuleMatch_LowerPriorityWins_TODO(t *testing.
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// A4 — manual override 在 cron 重评中保留（PRD §3 GWT A4）
+// A4.a — reEvaluateAll：无启用规则时返 nil（边界用例）
 // ──────────────────────────────────────────────────────────────────────────────
-// 阻塞在 reEvaluateAll 实现 — 需新增 method + cron 装配 + SQL 过滤
-// `WHERE source_type != 'manual'`。落地后：
-//   - 设备 D 通过 ApplyRule 进 G（source_type='rule'）
-//   - 运维 manual MOVE D 到 H（source_type='manual'）
-//   - 规则 R 改 LAC 阈值，D 已不再符合
-//   - 调 reEvaluateAll
-//   - 断言 D 仍在 H + log 含 "topology.rule.manual_skipped"
+func TestReEvaluateAll_NoEnabledRules_ReturnsNil(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, _, _ := newTestRuleService(t, ctrl)
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{}, nil)
+
+	err := svc.reEvaluateAll(context.Background())
+	require.NoError(t, err)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A4.b — reEvaluateAll：repo error 包装返出
+// ──────────────────────────────────────────────────────────────────────────────
+func TestReEvaluateAll_RepoError_PropagatesWrapped(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, _, _ := newTestRuleService(t, ctrl)
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return(nil, fmt.Errorf("db down"))
+
+	err := svc.reEvaluateAll(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list enabled rules for cron re-eval")
+	assert.Contains(t, err.Error(), "db down")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A4.c — reEvaluateAll：单条规则 ApplyRule 失败不中断批量（PRD §3 GWT A5 语义在 cron 路径）
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// 设两条启用规则 R1/R2；R1 ApplyRule 因 GetByID 失败抛错，R2 应仍被尝试。
+// 验证：repo.GetEnabledByPriority 返 2 规则；第一规则 ApplyRule chain 出错；
+// 第二规则 ApplyRule chain 完整跑通；reEvaluateAll 返 nil（per-rule 错误转 log）。
+func TestReEvaluateAll_SingleRuleFailure_ContinuesBatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, taskRepo, _ := newTestRuleService(t, ctrl)
+
+	r1 := DeviceRule{ID: uuid.New(), Name: "r1-broken", Enabled: true}
+	r2 := DeviceRule{ID: uuid.New(), Name: "r2-ok", Enabled: true, MatchingMode: MatchingModeDeviceName,
+		NameRuleList: []NameRule{{Condition: "contain", Value: "x"}}, TargetGroupID: ptrUUID(uuid.New())}
+
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{r1, r2}, nil)
+
+	// R1: ApplyRule 入口 GetByID 失败（模拟 db hiccup）
+	repo.EXPECT().GetByID(gomock.Any(), r1.ID).Return(nil, fmt.Errorf("rule fetch failed"))
+	// R2: ApplyRule 完整链：GetByID rule + GetLatestByRule + Create task
+	repo.EXPECT().GetByID(gomock.Any(), r2.ID).Return(&r2, nil)
+	taskRepo.EXPECT().GetLatestByRule(gomock.Any(), r2.ID).Return(nil, nil)
+	taskRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	err := svc.reEvaluateAll(context.Background())
+	require.NoError(t, err, "单条规则失败不应中断批量（per-rule 转 log）")
+
+	// R2 task 入队
+	select {
+	case <-svc.taskQueue:
+	default:
+		t.Fatal("R2 task 未入队")
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A4.d — Start: 注册 @hourly cron 后调度器为非 nil
+// ──────────────────────────────────────────────────────────────────────────────
+func TestStart_RegistersCron(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, _, _, _ := newTestRuleService(t, ctrl)
+	require.Nil(t, svc.cron)
+
+	require.NoError(t, svc.Start(context.Background()))
+	require.NotNil(t, svc.cron, "Start 后 cron 应非 nil")
+	assert.Len(t, svc.cron.Entries(), 1, "应注册 1 个 cron entry (@hourly)")
+
+	// 幂等：第二次调用 no-op
+	require.NoError(t, svc.Start(context.Background()))
+	assert.Len(t, svc.cron.Entries(), 1, "Start 幂等：cron entry 数仍为 1")
+
+	svc.Stop()
+	assert.Nil(t, svc.cron, "Stop 后 cron 置 nil")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A4 — manual override 在 cron 重评中保留（PRD §3 GWT A4 — SQL 层守护）
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// A4 manual override 守护由 AddDeviceWithSource SQL 层 WHERE 子句强制
+// （Day 5 commit ba45e854 落地）。reEvaluateAll cron 路径调 ApplyRule
+// → processTask → AddDeviceWithSource 自然继承守护。
+//
+// 单元层验证 SQL 行为需真 PG 或 sqlmock，本测试遗留 SKIP 待 S4 integration
+// 实测；reEvaluateAll 调用契约由 A4.a/A4.b/A4.c + Day 5
+// TestProcessTask_MatchedDevice_CallsAddDeviceWithSourceRule 联合覆盖。
 func TestReEvaluateAll_ManualOverride_NotTouched_TODO(t *testing.T) {
-	t.Skip("TODO Day 3+: reEvaluateAll method + source_type column wiring (PRD §3 A4 / §12.1 / §12.3)")
+	t.Skip("integration test 待 S4 实测：PG 真验证 source_type='manual' 行 rowsAffected=0")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

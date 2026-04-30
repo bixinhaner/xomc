@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
@@ -35,6 +36,7 @@ type DeviceRuleService struct {
 	matcher      *DeviceMatcher
 	pool         *pgxpool.Pool
 	deviceLister DeviceLister   // 可选注入；nil 时 getAllDevices 返空切片
+	cron         *cron.Cron     // T-0027 D6 cron @hourly 调度器，Start 后非 nil
 	taskQueue    chan uuid.UUID // 任务队列
 	workers      int            // Worker 数量
 	logger       *zap.Logger
@@ -533,6 +535,73 @@ type DeviceForMatch struct {
 // 通常由 modules.go DI 装配阶段调用一次（Day 3+ 接通真实施）。
 func (s *DeviceRuleService) SetDeviceLister(l DeviceLister) {
 	s.deviceLister = l
+}
+
+// Start 启动后台任务：cron @hourly reEvaluateAll。
+// 应在 DI 装配阶段调用一次；幂等（重复调用 no-op）。
+// 未来 Day 7+ EventBus 订阅 device.inform.bootstrap 也在此装配。
+//
+// PRD §12.1 §D2 拍板 default 走 @hourly；§D5.B 重评全规则不区分 default
+// vs 其他组（target_group 已是 GroupReader 计算结果），SQL 层 A4 守护
+// （AddDeviceWithSource WHERE source_type IS DISTINCT FROM 'manual'）让
+// manual override 行天然不被 cron 触动。
+func (s *DeviceRuleService) Start(ctx context.Context) error {
+	if s.cron != nil {
+		return nil
+	}
+	s.cron = cron.New()
+	if _, err := s.cron.AddFunc("@hourly", func() {
+		s.logger.Info("topology.cron.tick") // PRD §12.5 log key
+		if err := s.reEvaluateAll(ctx); err != nil {
+			s.logger.Error("reEvaluateAll failed", zap.Error(err))
+		}
+	}); err != nil {
+		s.cron = nil
+		return fmt.Errorf("register cron @hourly: %w", err)
+	}
+	s.cron.Start()
+	s.logger.Info("topology rule cron started", zap.String("schedule", "@hourly"))
+	return nil
+}
+
+// Stop 优雅停止 cron 调度器。Start 未调用过则 no-op。
+// 用于 graceful shutdown 与单元测试清理。
+func (s *DeviceRuleService) Stop() {
+	if s.cron == nil {
+		return
+	}
+	ctx := s.cron.Stop()
+	<-ctx.Done() // 等正在执行的 job 结束
+	s.cron = nil
+}
+
+// reEvaluateAll 遍历所有启用规则，对每条触发 ApplyRule。
+// 用于 cron @hourly 重评：让 rule-applied 分组随设备状态漂移自动更新。
+//
+// 单条规则 ApplyRule 失败（如已有 running task / 目标 group 缺失）走
+// log warn 不中断批量（PRD §3 GWT A5 — 单失败不影响其他）。
+// A4 manual override 守护在 AddDeviceWithSource SQL 层（Day 5）已强制，
+// 本路径不需额外过滤。
+func (s *DeviceRuleService) reEvaluateAll(ctx context.Context) error {
+	rules, err := s.repo.GetEnabledByPriority(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled rules for cron re-eval: %w", err)
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+	for i := range rules {
+		rule := &rules[i]
+		if _, err := s.ApplyRule(ctx, rule.ID, ApplyRuleRequest{}, "system:cron"); err != nil {
+			s.logger.Warn("topology.cron.rule_skipped",
+				zap.String("rule_id", rule.ID.String()),
+				zap.String("rule_name", rule.Name),
+				zap.Error(err),
+			)
+			continue
+		}
+	}
+	return nil
 }
 
 // getAllDevices 获取所有设备供 worker 匹配。
