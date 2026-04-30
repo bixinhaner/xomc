@@ -231,6 +231,12 @@ func initBackupModule(c *Container) error {
 	}
 	backupHandler.SetRestoreService(restoreService)
 
+	// T-0032: FTP connection-test service with default 5s timeout.
+	// *net.Dialer satisfies the Dialer interface; no third-party FTP
+	// client dep is introduced (FTP USER/PASS probe uses stdlib
+	// net/textproto). SFTP/FTPS deeper auth probes carve T-0093.
+	backupHandler.SetFTPTester(backup.NewFTPConnectionTester(nil, 0, logger))
+
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")

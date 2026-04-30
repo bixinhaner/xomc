@@ -15,8 +15,9 @@ import (
 type Handler struct {
 	service        *Service
 	ftpRepo        FTPConfigRepository
-	policyService  *PolicyService  // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
-	restoreService *RestoreService // T-0072; nil-safe (restore endpoints return 503 if unset)
+	policyService  *PolicyService       // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
+	restoreService *RestoreService      // T-0072; nil-safe (restore endpoints return 503 if unset)
+	ftpTester      *FTPConnectionTester // T-0032; nil-safe (TestFTPConnection returns stub when unset)
 	logger         *zap.Logger
 }
 
@@ -35,6 +36,13 @@ func NewHandler(service *Service, ftpRepo FTPConfigRepository, logger *zap.Logge
 // Used by DI to avoid changing the existing NewHandler signature.
 func (h *Handler) SetPolicyService(s *PolicyService) {
 	h.policyService = s
+}
+
+// SetFTPTester wires the FTP connection-test service (T-0032). When nil,
+// the TestFTPConnection endpoint reports a clear "not wired" message
+// instead of running a real probe.
+func (h *Handler) SetFTPTester(t *FTPConnectionTester) {
+	h.ftpTester = t
 }
 
 // RegisterRoutes registers backup routes on the given router group.
@@ -248,10 +256,10 @@ func (h *Handler) CreateSchedule(c *gin.Context) {
 	}
 
 	schedule := &BackupSchedule{
-		Name:     req.Name,
-		CronExpr: req.CronExpr,
-		Enabled:  req.Enabled,
-		TaskType: req.TaskType,
+		Name:      req.Name,
+		CronExpr:  req.CronExpr,
+		Enabled:   req.Enabled,
+		TaskType:  req.TaskType,
 		TargetIDs: req.TargetIDs,
 	}
 	if req.TargetType != "" {
@@ -282,10 +290,10 @@ func (h *Handler) UpdateSchedule(c *gin.Context) {
 	}
 
 	schedule := &BackupSchedule{
-		Name:     req.Name,
-		CronExpr: req.CronExpr,
-		Enabled:  req.Enabled,
-		TaskType: req.TaskType,
+		Name:      req.Name,
+		CronExpr:  req.CronExpr,
+		Enabled:   req.Enabled,
+		TaskType:  req.TaskType,
 		TargetIDs: req.TargetIDs,
 	}
 	if req.TargetType != "" {
@@ -474,6 +482,11 @@ func (h *Handler) DeleteFTPConfig(c *gin.Context) {
 }
 
 // TestFTPConnection handles POST /api/v1/backup/ftp-configs/:id/test.
+//
+// T-0032: when FTPConnectionTester is wired (SetFTPTester), runs a
+// two-tier probe (TCP reachability + protocol-specific auth) and
+// returns FTPTestResult JSON. When unwired, returns a clear "not
+// wired" stub so existing callers still get HTTP 200.
 func (h *Handler) TestFTPConnection(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -481,14 +494,23 @@ func (h *Handler) TestFTPConnection(c *gin.Context) {
 		return
 	}
 
-	// Verify config exists
-	if _, err := h.ftpRepo.GetByID(c.Request.Context(), id); err != nil {
+	cfg, err := h.ftpRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Connection test not implemented",
-	})
+	if h.ftpTester == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success":  false,
+			"message":  "FTP connection tester not wired (DI gap; see T-0032)",
+			"protocol": cfg.Protocol,
+			"host":     cfg.Host,
+			"port":     cfg.Port,
+		})
+		return
+	}
+
+	result := h.ftpTester.Test(c.Request.Context(), cfg)
+	c.JSON(http.StatusOK, result)
 }
