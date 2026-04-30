@@ -5,9 +5,9 @@
 **作者**：Claude（PM 16.10 + 架构 16.1 + 电信 16.4 联合起草）
 **创建日期**：2026-04-30
 **最后更新**：2026-04-30
-**状态**：Draft（待 PM 拍板 §11 决策点 → 进入 S1 排期）
+**状态**：S2 done（2026-04-30 — D1-D7 全部拍板 + S1 排期 sprint-09 + S2 设计备忘补完 §12；待 user 确认进 S3 编码）
 **关联 Milestone**：`docs/project/milestone/2026Q2-to-RC.md`
-**关联 Sprint**：待 S1（候选 sprint-09 或 wave-3 末尾）
+**关联 Sprint**：`docs/project/sprint/sprint-09.md`（2026-05-01 ~ 2026-05-14）
 **关联 Risk**：`docs/project/risk-register.md#R-104`（拓扑自动分组规则引擎未激活，P1 / Open）
 **关联 Backlog**：`docs/project/backlog.md` §4 Triaged T-0027（**真号**，2026-04-20 早登记，2026-04-30 ID 冲突修正后保号）
 
@@ -289,11 +289,12 @@ ALTER TABLE device_group_members DROP COLUMN IF EXISTS source_type;
 
 **推荐 D4.A 理由**：device_group_members PK = (group_id, device_id)，单设备多组在 schema 层支持；但运维心智成本高，单 group 最简；priority 已是数据模型字段，复用即可。
 
-### D5 — Default group 行为
+### D5 — Default group 行为 ✅ 拍板 2026-04-30：D5.B
 
 - ⬜ D5.A：规则引擎激活后，default group 的设备保留不动（本 PRD 不动 default 组）
-- ⬜ D5.B：default group 自动随规则重评迁出（凡符合规则的设备从 default 迁到目标组）
-- 待 PM 拍板
+- ✅ **D5.B（拍板）**：default group 自动随规则重评迁出（凡符合规则的设备从 default 迁到目标组）
+
+**理由**（PM 拍板时 ULTRATHINK）：default 是"未分类临时容器"语义，不是 manual 永久归属；首次 inform 自动入 default 是**未经决策的安置**，不应受 A4 manual override 保护（manual 是用户**显式**操作语义）。D5.A 让 default 变成"永久未分类垃圾桶"，规则引擎价值砍半。**风险缓解**：source_type='rule' 标记后运维 manual 改一下即升级 'manual'（A4 守护），首次激活前可在 admin UI 加 banner 提示。
 
 ### D6 — 规则评估的事件发布
 
@@ -303,23 +304,157 @@ ALTER TABLE device_group_members DROP COLUMN IF EXISTS source_type;
 
 **推荐 D6.A 理由**：北向 OSS（F08）后续可订阅；前端 SSE 实时刷新分组也用得上；与 W3.E.2 5 类 subject 设计一致。
 
-### D7 — 规则的范围维度（运营商专有维度纳入与否）
+### D7 — 规则的范围维度（运营商专有维度纳入与否）✅ 拍板 2026-04-30：D7.A
 
-- ⬜ D7.A：本 PRD 仅做 LAC/TAC/Name 三维度（与现有 matchingMode 一致）
+- ✅ **D7.A（拍板）**：本 PRD 仅做 LAC/TAC/Name 三维度（与现有 matchingMode 一致）
 - ⬜ D7.B：本 PRD 加 OUI / manufacturer / product_class 三维度（同步扩 matcher）
 - ⬜ D7.C：本 PRD 仅接线，不扩维度（D7.A 即接线现状）
-- 待 PM 拍板（影响 Est：A=M / B=L / C=S）
+
+**理由**（PM 拍板时 ULTRATHINK）：T-0027 焦点是"激活骨架"非"扩展维度"，scope 收紧让任务更稳过门；LAC/TAC/Name 三维度已能解决 80% 场景，无紧迫业务驱动加 OUI/manufacturer/product_class；维度扩展可作 followup（一旦有"按 OUI 分组"需求即开 T-0098 子任务），ROI 实际驱动。维持 Est=M（1-3 天），与 §D2 cron @hourly + S2 4 接线断点工作量协同。T-0030 F10 互操作如未来需要 OUI 维度可一并扩展。
 
 ---
 
-## 12. 设计备忘（S2 待补）
+## 12. 设计备忘（S2 — 2026-04-30 完成）
 
-> 本节由 S2 设计阶段的架构师 + 领域专家填写；S0 仅占位。
+> 激活 §16.1 架构 + §16.4 电信 + §16.2 Go + §16.5 数据 + §16.6 前端 + §16.9 运维 6 专家。
+> S2 出口门：接口契约 ✅ / 迁移草案 ✅ / Carrier 扩展点 ✅ / 埋点名字 ✅ / 待定点 < 3 ✅。
 
-- 接口契约（含新增 `RuleEventSubscriber`、`RuleScheduler` 接口签名）：TBD
-- 迁移 up/down 草案：见 §8 实施要点 — 待 review
-- Carrier 扩展点位置（如 D7.B 选中）：TBD
-- 观测埋点完整名字清单：见 §7 度量 — 已 5 个，需补 log key
-- Cron entry 注册位置（modules.go DI vs main.go startup）：TBD
-- NATS 订阅 group 名 / Queue group 策略：TBD
-- 待定点列表（必 < 3 才能进 S3）：S2 收敛后填
+### 12.1 接口签名（关键设计）
+
+```go
+// internal/topology/rule_service.go (新增依赖)
+
+// DeviceLister — 替换现有 stub `getAllDevices()` 的最小接口
+// 实现位于 internal/device/repository.go（新加 ListAllForRuleEval 方法）
+type DeviceLister interface {
+    ListAllForRuleEval(ctx context.Context) ([]*model.Device, error)
+}
+
+// DeviceRuleService 注入 3 个新依赖
+type DeviceRuleService struct {
+    repo         DeviceRuleRepository
+    matcher      *DeviceMatcher
+    deviceLister DeviceLister              // ← 新（D5.B 实现核心）
+    eventBus     event.EventBus            // ← 新（订阅 device.inform.bootstrap）
+    cron         *cron.Cron                // ← 新（@hourly 重评）
+    workerCount  int
+    taskQueue    chan *RuleTask
+}
+
+// 新方法
+func (s *DeviceRuleService) Start(ctx context.Context) error
+    // 启动 cron @hourly + EventBus 订阅；DI 装配阶段被调用
+func (s *DeviceRuleService) handleDeviceBootstrap(ctx context.Context, evt *event.DeviceInformEvent) error
+    // 单设备评估路径（A2 GWT）；按 priority 排序找首个 match 规则
+func (s *DeviceRuleService) reEvaluateAll(ctx context.Context) error
+    // cron 入口；分批 LIMIT 1000 + source_type 过滤（保留 manual 行 A4）
+```
+
+### 12.2 路由 — 0 新增
+
+现有 14 个 rule REST 端点（`/device-rules/*`）已 `router.go:296` 注册。本任务**不新增端点**；仅完善 ApplyRule 行为（D5.B：对 default 组的 device_group_members 行也评估）。
+
+### 12.3 迁移草案 `migrations/000051_device_group_member_source.sql`
+
+```sql
+-- +goose Up
+ALTER TABLE device_group_members
+  ADD COLUMN IF NOT EXISTS source_type VARCHAR(16) NOT NULL DEFAULT 'manual'
+  CHECK (source_type IN ('manual', 'rule'));
+ALTER TABLE device_group_members
+  ADD COLUMN IF NOT EXISTS source_rule_id UUID;
+CREATE INDEX IF NOT EXISTS idx_device_group_members_source
+  ON device_group_members(source_type, source_rule_id);
+
+-- +goose Down
+DROP INDEX IF EXISTS idx_device_group_members_source;
+ALTER TABLE device_group_members DROP COLUMN IF EXISTS source_rule_id;
+ALTER TABLE device_group_members DROP COLUMN IF EXISTS source_type;
+```
+
+**历史数据策略**：DEFAULT 'manual' 让所有现存 device_group_members 行受 A4 保护；新规则触发的 INSERT/UPDATE 显式置 source_type='rule' + source_rule_id。
+
+### 12.4 Carrier 扩展点 — 无
+
+§4 已说明三家一致（LAC/TAC/Name 是 3GPP+TR-069 标准字段）。本任务**不**触及 `internal/carrier/`；不引入 `if carrier == ...` 硬编码。
+
+### 12.5 观测埋点完整名字清单
+
+#### Prometheus metrics（6 个）
+
+| 名 | 类型 | 标签 | 说明 |
+|----|------|------|------|
+| `omc_topology_rule_evaluations_total` | Counter | `result=matched\|skipped\|failed`，`source=manual\|cron\|inform` | 评估总数（§7 度量第 1） |
+| `omc_topology_rule_evaluation_duration_seconds` | Histogram | `rule_id` | 单规则评估耗时（§7 度量第 2） |
+| `omc_topology_rule_apply_failures_total` | Counter | `reason=db_error\|target_group_missing\|other` | 失败计数（§7 度量第 3） |
+| `omc_topology_devices_in_rule_groups` | Gauge | — | 当前归属规则组的设备数（§7 度量第 4） |
+| `omc_topology_active_rules` | Gauge | — | 当前启用规则数（新增） |
+| `omc_topology_default_group_migrations_total` | Counter | `result` | D5.B 专用：从 default 迁出计数 |
+
+#### Zap structured log keys（7 类）
+
+| Key | Level | 触发点 | 用例守护 |
+|-----|-------|-------|---------|
+| `topology.rule.evaluating` | info | ApplyRule 入口 | A1 |
+| `topology.rule.matched` | info | 单设备 match 命中 | A2 |
+| `topology.rule.priority_winner` | debug | 多规则 match 时 priority 比较 | A3 |
+| `topology.rule.manual_skipped` | debug | source_type='manual' 行被跳过 | A4 |
+| `topology.rule.apply_failed` | warn | rule task 失败 | A5 |
+| `topology.cron.tick` | info | cron @hourly 触发 | — |
+| `topology.event.bootstrap_received` | debug | EventBus device.inform.bootstrap 收到 | A2 |
+
+### 12.6 跨模块联合变更
+
+涉及 7 个变更点（全在单 PR 内，不拆分）：
+
+- `omcgo/internal/topology/rule_service.go` — 接通 4 接线断点（getAllDevices / EventBus / cron / source_type）
+- `omcgo/internal/topology/matcher.go` — 沿用现有 LAC/TAC/Name 3 mode（D7.A：不动）
+- `omcgo/internal/topology/pg_repository.go` — INSERT/UPDATE device_group_members 增 source_type / source_rule_id 列
+- `omcgo/internal/topology/model.go` — DeviceGroupMember struct 加 SourceType + SourceRuleID 字段
+- `omcgo/cmd/app/provider/modules.go` — DI 装配 EventBus + cron 给 DeviceRuleService + 调 Start(ctx)
+- `omcgo/migrations/000051_device_group_member_source.sql` — 见 §12.3
+- `omcgo/internal/device/repository.go` — 新加 `ListAllForRuleEval(ctx)` 方法
+- `omcmb/frontend-core/src/types/topology.ts` — DeviceGroupMember 加 sourceType 字段（snake_case → camelCase 自动转）
+- `omcmb/webcode/src/pages/device/DeviceGrouping/` — 表格列加"来源（手工 / 规则名）"显示
+
+**联合变更策略**：单 PR 包含 backend + FE，因 sourceType 端到端贯通；S6 commit 一并；E2E 加 5 条 claim（A1-A5 各 1）。
+
+### 12.7 NATS 订阅设计
+
+- 主题：`device.inform.bootstrap`（W3.E.2 已上线 5 类 subject 之一）
+- Queue group：`topology-rule-engine`（多实例分布式负载，单一事件只消费一次）
+- Idempotency：source_rule_id + device_id 复合 key 去重；重复消费同事件不致多次 INSERT
+
+### 12.8 待定点（< 3 标准 ✅ 满足）
+
+**W1**（最关键）：device 首次注册时是否在 device_group_members 表写入"default 组成员"行？
+- 选项 W1.A：写入（每个 device 必有 group_member 行 → ApplyRule 自然能 evaluate）
+- 选项 W1.B：不写入（device 隐式属 default → ApplyRule 需先 list 所有 device 再判属 default）
+- **S3 第一动作**：grep `internal/device/service.go` Create 路径确认；按真实状态决定 D5.B 实施细节
+- 影响：W1.A 简单（直接 UPDATE 现有行 source_type='rule'）；W1.B 需先 INSERT 再 UPDATE
+- 风险等级：M（不阻塞 S3 启动，第一日内可消除）
+
+**W2**：cron 重评对 source_type='manual' 行的处理路径（依赖 W1）
+- 历史行 source_type='manual'（DEFAULT 值）→ A4 用例硬守不触动
+- 但 D5.B 决策要求规则可触动 default 组中"未决策"行 — 取决于 W1 答案
+- **S3 实施**：W1 确认后设计 reEvaluateAll 的 SQL WHERE 子句（`WHERE source_type='rule' OR source_type IS NULL` vs `WHERE source_type != 'manual'`）
+- 风险等级：L（W1 解决后自然消除）
+
+**已收敛 2 项 < 3 阈值 ✅**
+
+### 12.9 S3 实施清单（按时序）
+
+1. (1h) S3 第一动作：grep device.Create 确认 W1 答案 + 选定 reEvaluateAll SQL 路径
+2. (2h) 写测试 — A1-A5 GWT 5 条单元测试 + 各 1 条 e2e claim
+3. (3h) 实施 getAllDevices() — 接 DeviceRepository.ListAllForRuleEval
+4. (3h) 实施 EventBus 订阅 + handleDeviceBootstrap
+5. (2h) 实施 cron @hourly + reEvaluateAll
+6. (2h) migration 000051 + repo 改 source_type/source_rule_id 列写入
+7. (2h) modules.go DI 装配 + Start(ctx)
+8. (2h) 6 metric + 7 log key 埋点
+9. (2h) FE — types + DeviceGrouping 表格列改 + i18n
+10. (1h) bash scripts/check-migrations.sh + 完整 build/test/race
+11. (1h) E2E claim 5 条 + verify-T-0027.md 写
+12. (0.5h) S5 self-review 14 项 + DoD 勾选
+
+总计 ~21h ≈ **3 人日**（M 上限），与 PRD §8 估算一致。

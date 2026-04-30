@@ -205,9 +205,9 @@
 - **影响**：分组依赖手工维护，规模上不去
 - **Owner**：架构师
 - **状态**：Open
-- **关联 Task**：T-0027（triaged，等 Sprint Planning 拉起）
-- **缓解**：Sprint 5 激活
-- **下次复盘**：Sprint-04
+- **关联 Task**：T-0027（**planned，sprint-09 / Owner Claude / S2 done 2026-04-30** — D1-D7 全拍板 + PRD `prd/F06-topology-auto-grouping.md` + 设计备忘补完 §12，待 S3 编码）
+- **缓解**：sprint-09（2026-05-01 ~ 2026-05-14）激活；S3 实施清单 12 步 ~21h ≈ 3 人日；4 接线断点（getAllDevices / EventBus 订阅 device.inform.bootstrap / cron @hourly / device_group_members source_type）+ migration 000051
+- **下次复盘**：sprint-09 末（2026-05-14 Sprint Retro）— S6 commit 后随 T-0027 done 本风险关闭
 
 ### R-105 syslog 远程转发缺失
 - **描述**：仅查询，无 UDP/TCP syslog 转发
