@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/core/carrier"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -25,21 +26,22 @@ type GroupAssigner interface {
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	deviceRepo       DeviceRepository
-	paramRepo        DeviceParameterRepository
-	deviceInfoRepo   DeviceInfoRepository
-	regRepo          RegistrationRepository
-	groupAssigner    GroupAssigner
-	infoSyncer       *InfoSyncer
-	heartbeat        *HeartbeatMonitor
-	eventBus         event.EventBus
-	taskSvc          task.Enqueuer
-	connReq          ConnectionRequester
-	stunUpdater      StunAddressUpdater
-	cache            *DeviceCache
-	metrics          *DeviceMetrics
-	licenseEnforcer  LicenseEnforcer
-	logger           *zap.Logger
+	deviceRepo      DeviceRepository
+	paramRepo       DeviceParameterRepository
+	deviceInfoRepo  DeviceInfoRepository
+	regRepo         RegistrationRepository
+	groupAssigner   GroupAssigner
+	infoSyncer      *InfoSyncer
+	heartbeat       *HeartbeatMonitor
+	eventBus        event.EventBus
+	taskSvc         task.Enqueuer
+	connReq         ConnectionRequester
+	stunUpdater     StunAddressUpdater
+	cache           *DeviceCache
+	metrics         *DeviceMetrics
+	licenseEnforcer LicenseEnforcer
+	carrierRegistry *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
+	logger          *zap.Logger
 }
 
 // LicenseEnforcer is the narrow interface DeviceService consumes from the
@@ -83,6 +85,15 @@ func NewDeviceService(
 // SetTaskService sets the unified task service used to enqueue RPC commands.
 func (s *DeviceService) SetTaskService(t task.Enqueuer) {
 	s.taskSvc = t
+}
+
+// SetCarrierRegistry wires the Carrier adapter registry (T-0029). Used by
+// SetRFSwitch (and future carrier-aware paths) to resolve RF control paths
+// per (carrier, technology) instead of hardcoding TR-181 paths in device
+// code. nil-safe: when unset, SetRFSwitch returns a clear error rather
+// than queue an unkeyed SetParameterValues.
+func (s *DeviceService) SetCarrierRegistry(r *carrier.CarrierRegistry) {
+	s.carrierRegistry = r
 }
 
 // SetConnectionRequester sets the connection request client.
@@ -215,10 +226,18 @@ func (s *DeviceService) TriggerParamSync(ctx context.Context, deviceID uuid.UUID
 	return nil
 }
 
-// SetRFSwitch queues a SetParameterValues command to enable/disable the device RF.
-// TODO(carrier): RF control path is currently hardcoded for LTE. When Carrier adapter
-// layer is completed, replace with carrier.GetRFControlPath(device.Technology) to
-// support both LTE (FAPControl.LTE.AdminState) and NR (FAPControl.NR.AdminState).
+// SetRFSwitch queues a SetParameterValues command to enable/disable the
+// device RF. The TR-181 path is resolved through the Carrier adapter
+// (T-0029 / R-201) so:
+//
+//   - CMCC/CTCC use FAPControl.{LTE,NR}.AdminState by technology;
+//   - CUCC supports NR only — LTE returns "" and SetRFSwitch fails fast;
+//   - future carrier-specific paths (e.g. X_VENDOR_*) plug into the
+//     respective adapter's RFControlPath without changing this method.
+//
+// SetCarrierRegistry must be wired (DI). When the registry is nil or the
+// carrier/tech combination has no path, the method returns a clear error
+// rather than queuing an unkeyed command.
 func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, enabled bool) error {
 	device, err := s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
@@ -230,6 +249,19 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 	if s.taskSvc == nil {
 		return fmt.Errorf("task service not configured")
 	}
+	if s.carrierRegistry == nil {
+		return fmt.Errorf("carrier registry not configured (T-0029 DI gap)")
+	}
+
+	c, err := s.carrierRegistry.Get(device.Carrier)
+	if err != nil {
+		return fmt.Errorf("resolve carrier=%s for RF switch: %w", device.Carrier, err)
+	}
+	rfPath := c.RFControlPath(device.Technology)
+	if rfPath == "" {
+		return fmt.Errorf("carrier=%s does not support RF control for technology=%s: %w",
+			device.Carrier, device.Technology, commonerrors.ErrInvalidInput)
+	}
 
 	// RF switch value: "1" for enabled, "0" for disabled.
 	value := "0"
@@ -239,7 +271,7 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 
 	rfParamsJSON, _ := json.Marshal(map[string]interface{}{
 		"ParameterList": []map[string]string{
-			{"Name": "Device.Services.FAPService.1.FAPControl.LTE.AdminState", "Value": value},
+			{"Name": rfPath, "Value": value},
 		},
 	})
 	commandKey := uuid.New().String()

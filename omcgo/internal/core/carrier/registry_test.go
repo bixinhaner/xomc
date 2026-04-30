@@ -16,9 +16,9 @@ type registryMockCarrier struct {
 	ouiProductMap map[model.Technology][]OUIProductClassInfo
 }
 
-func (m *registryMockCarrier) Code() model.CarrierCode                  { return m.code }
-func (m *registryMockCarrier) Name() string                             { return string(m.code) }
-func (m *registryMockCarrier) SupportedTechnologies() []model.Technology { return m.technologies }
+func (m *registryMockCarrier) Code() model.CarrierCode                              { return m.code }
+func (m *registryMockCarrier) Name() string                                         { return string(m.code) }
+func (m *registryMockCarrier) SupportedTechnologies() []model.Technology            { return m.technologies }
 func (m *registryMockCarrier) DefaultDataModelVersions(_ model.Technology) []string { return nil }
 func (m *registryMockCarrier) KnownOUIProductClasses(tech model.Technology) []OUIProductClassInfo {
 	if m.ouiProductMap == nil {
@@ -26,13 +26,16 @@ func (m *registryMockCarrier) KnownOUIProductClasses(tech model.Technology) []OU
 	}
 	return m.ouiProductMap[tech]
 }
-func (m *registryMockCarrier) MapParameterToUnified(_ string) string                        { return "" }
-func (m *registryMockCarrier) MapUnifiedToParameter(_ string) string                        { return "" }
-func (m *registryMockCarrier) ProvisioningTemplates(_ model.Technology) []*ProvisionTemplate { return nil }
-func (m *registryMockCarrier) KPIDefinitions(_ model.Technology) []*KPIDefinition            { return nil }
-func (m *registryMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity             { return 0 }
-func (m *registryMockCarrier) ValidateParameter(_ string, _ string) error                    { return nil }
-func (m *registryMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string      { return nil }
+func (m *registryMockCarrier) MapParameterToUnified(_ string) string { return "" }
+func (m *registryMockCarrier) MapUnifiedToParameter(_ string) string { return "" }
+func (m *registryMockCarrier) ProvisioningTemplates(_ model.Technology) []*ProvisionTemplate {
+	return nil
+}
+func (m *registryMockCarrier) KPIDefinitions(_ model.Technology) []*KPIDefinition       { return nil }
+func (m *registryMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity        { return 0 }
+func (m *registryMockCarrier) ValidateParameter(_ string, _ string) error               { return nil }
+func (m *registryMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string { return nil }
+func (m *registryMockCarrier) RFControlPath(_ model.Technology) string                  { return "" }
 
 // ---------------------------------------------------------------------------
 // Tests

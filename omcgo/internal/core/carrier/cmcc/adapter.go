@@ -21,7 +21,7 @@ func New() *CMCCCarrier {
 }
 
 func (c *CMCCCarrier) Code() model.CarrierCode { return model.CarrierCMCC }
-func (c *CMCCCarrier) Name() string             { return "中国移动" }
+func (c *CMCCCarrier) Name() string            { return "中国移动" }
 
 func (c *CMCCCarrier) SupportedTechnologies() []model.Technology {
 	return []model.Technology{model.TechLTE, model.TechNR}
@@ -86,25 +86,41 @@ func (c *CMCCCarrier) SupportsDirectConnection() bool { return true }
 func (c *CMCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]string {
 	if tech == model.TechLTE {
 		return map[string]string{
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":          "eci",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":                 "pci",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":              "freq_point",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":               "bandwidth",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower":      "transmit_power",
-			"Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID":            "plmn",
-			"Device.DeviceInfo.X_CMCC_MACAddress":                                           "mac",
-			"Device.DeviceInfo.HardwareVersion":                                              "hardware_version",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":     "eci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":            "pci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":         "freq_point",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":          "bandwidth",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower": "transmit_power",
+			"Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID":       "plmn",
+			"Device.DeviceInfo.X_CMCC_MACAddress":                                     "mac",
+			"Device.DeviceInfo.HardwareVersion":                                       "hardware_version",
 		}
 	}
 	// NR mapping
 	return map[string]string{
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":    "cell_id",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":             "pci",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":       "freq_point",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth":  "bandwidth",
-		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":   "plmn",
-		"Device.DeviceInfo.X_CMCC_MACAddress":                                  "mac",
-		"Device.DeviceInfo.HardwareVersion":                                     "hardware_version",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":  "cell_id",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":            "pci",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":      "freq_point",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth": "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":  "plmn",
+		"Device.DeviceInfo.X_CMCC_MACAddress":                                "mac",
+		"Device.DeviceInfo.HardwareVersion":                                  "hardware_version",
+	}
+}
+
+// RFControlPath returns the TR069 path for enabling / disabling the device's
+// radio frequency output for the given technology. CMCC uses the standard
+// TR-181 FAPControl branch keyed by technology. Returns "" when the
+// technology is not recognized so the caller can surface a clear error
+// rather than send an unkeyed SetParameterValues (T-0029 / R-201).
+func (c *CMCCCarrier) RFControlPath(tech model.Technology) string {
+	switch tech {
+	case model.TechLTE:
+		return "Device.Services.FAPService.1.FAPControl.LTE.AdminState"
+	case model.TechNR:
+		return "Device.Services.FAPService.1.FAPControl.NR.AdminState"
+	default:
+		return ""
 	}
 }
 

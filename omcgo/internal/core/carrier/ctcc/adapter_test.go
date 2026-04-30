@@ -146,3 +146,11 @@ func Test_GetInfoParamMapping_NR(t *testing.T) {
 	m := c.GetInfoParamMapping(model.TechNR)
 	assert.NotEmpty(t, m)
 }
+
+// T-0029: CTCC RF control path follows TR-181 standard.
+func Test_RFControlPath_T0029(t *testing.T) {
+	c := New()
+	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.LTE.AdminState", c.RFControlPath(model.TechLTE))
+	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.NR.AdminState", c.RFControlPath(model.TechNR))
+	assert.Equal(t, "", c.RFControlPath(model.Technology("unknown")))
+}

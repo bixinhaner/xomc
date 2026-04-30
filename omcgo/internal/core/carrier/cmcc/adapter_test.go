@@ -163,6 +163,15 @@ func Test_GetInfoParamMapping_NR(t *testing.T) {
 	assert.NotEmpty(t, m)
 }
 
+// T-0029: CMCC RFControlPath returns standard FAPControl path per technology.
+// Empty technology returns "" so the device layer surfaces a clear error.
+func Test_RFControlPath_T0029(t *testing.T) {
+	c := New()
+	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.LTE.AdminState", c.RFControlPath(model.TechLTE))
+	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.NR.AdminState", c.RFControlPath(model.TechNR))
+	assert.Equal(t, "", c.RFControlPath(model.Technology("unknown")))
+}
+
 func Test_RoundTripParameterMapping(t *testing.T) {
 	c := New()
 	// Pick first key from the internal mapping and round-trip through both directions

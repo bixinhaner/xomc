@@ -161,3 +161,12 @@ func Test_GetInfoParamMapping_LTE_Empty(t *testing.T) {
 	m := c.GetInfoParamMapping(model.TechLTE)
 	assert.Empty(t, m)
 }
+
+// T-0029: CUCC NR-only — LTE returns "" so device layer fails fast with
+// a clear error rather than queue an unkeyed FAPControl.LTE command.
+func Test_RFControlPath_T0029(t *testing.T) {
+	c := New()
+	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.NR.AdminState", c.RFControlPath(model.TechNR))
+	assert.Equal(t, "", c.RFControlPath(model.TechLTE), "CUCC NR-only: LTE must return empty path")
+	assert.Equal(t, "", c.RFControlPath(model.Technology("unknown")))
+}

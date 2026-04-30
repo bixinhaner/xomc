@@ -37,6 +37,7 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
 	deviceService.SetTaskService(c.TaskSvc)
+	deviceService.SetCarrierRegistry(c.Carriers) // T-0029: RF control path lookup
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)

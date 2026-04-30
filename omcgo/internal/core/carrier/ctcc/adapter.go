@@ -21,7 +21,7 @@ func New() *CTCCCarrier {
 }
 
 func (c *CTCCCarrier) Code() model.CarrierCode { return model.CarrierCTCC }
-func (c *CTCCCarrier) Name() string             { return "中国电信" }
+func (c *CTCCCarrier) Name() string            { return "中国电信" }
 
 func (c *CTCCCarrier) SupportedTechnologies() []model.Technology {
 	return []model.Technology{model.TechLTE, model.TechNR}
@@ -82,22 +82,37 @@ func (c *CTCCCarrier) ValidateParameter(path string, value string) error {
 func (c *CTCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]string {
 	if tech == model.TechLTE {
 		return map[string]string{
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":          "eci",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":                 "pci",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":              "freq_point",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":               "bandwidth",
-			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower":      "transmit_power",
-			"Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID":            "plmn",
-			"Device.DeviceInfo.HardwareVersion":                                              "hardware_version",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity":     "eci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID":            "pci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.EARFCNDL":         "freq_point",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth":          "bandwidth",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ReferenceSignalPower": "transmit_power",
+			"Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.1.PLMNID":       "plmn",
+			"Device.DeviceInfo.HardwareVersion":                                       "hardware_version",
 		}
 	}
 	return map[string]string{
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":    "cell_id",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":             "pci",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":       "freq_point",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth":  "bandwidth",
-		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":   "plmn",
-		"Device.DeviceInfo.HardwareVersion":                                     "hardware_version",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":  "cell_id",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":            "pci",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":      "freq_point",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth": "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":  "plmn",
+		"Device.DeviceInfo.HardwareVersion":                                  "hardware_version",
+	}
+}
+
+// RFControlPath returns the TR069 path for radio control by technology
+// (T-0029 / R-201). CTCC follows the same TR-181 FAPControl pattern as
+// CMCC; if vendor-specific extensions appear (X_CTCC_*) this method is
+// the seam to localize them without leaking into device-layer code.
+func (c *CTCCCarrier) RFControlPath(tech model.Technology) string {
+	switch tech {
+	case model.TechLTE:
+		return "Device.Services.FAPService.1.FAPControl.LTE.AdminState"
+	case model.TechNR:
+		return "Device.Services.FAPService.1.FAPControl.NR.AdminState"
+	default:
+		return ""
 	}
 }
 

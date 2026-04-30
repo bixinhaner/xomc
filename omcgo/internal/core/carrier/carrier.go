@@ -48,4 +48,17 @@ type Carrier interface {
 	// Used by the info sync mechanism to extract key radio parameters from device_parameters
 	// and denormalize them into the device_info table for fast list/filter queries.
 	GetInfoParamMapping(tech model.Technology) map[string]string
+
+	// RFControlPath returns the TR069 parameter path used to enable / disable
+	// the device's radio frequency output for the given technology. Returns
+	// an empty string when the technology is not supported by this carrier
+	// (callers must surface that as an error rather than silently sending an
+	// unkeyed SetParameterValues).
+	//
+	// T-0029 / R-201: introduced to remove the LTE-hardcoded RF control path
+	// from device.SetRFSwitch. CMCC / CTCC / CUCC all use the same TR-181
+	// FAPControl branch in practice; this method exists as the seam where
+	// future carrier-specific divergence (e.g. vendor X.* extensions) plugs
+	// in without touching device-layer code.
+	RFControlPath(tech model.Technology) string
 }

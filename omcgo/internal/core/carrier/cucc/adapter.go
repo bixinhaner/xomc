@@ -22,7 +22,7 @@ func New() *CUCCCarrier {
 }
 
 func (c *CUCCCarrier) Code() model.CarrierCode { return model.CarrierCUCC }
-func (c *CUCCCarrier) Name() string             { return "中国联通" }
+func (c *CUCCCarrier) Name() string            { return "中国联通" }
 
 func (c *CUCCCarrier) SupportedTechnologies() []model.Technology {
 	return []model.Technology{model.TechNR} // NR only
@@ -82,43 +82,54 @@ func (c *CUCCCarrier) GetInfoParamMapping(tech model.Technology) map[string]stri
 		return nil
 	}
 	return map[string]string{
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":    "cell_id",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":             "pci",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":       "freq_point",
-		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth":  "bandwidth",
-		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":   "plmn",
-		"Device.DeviceInfo.HardwareVersion":                                     "hardware_version",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellLocalId":  "cell_id",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.NRPCI":            "pci",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.NRARFCN":      "freq_point",
+		"Device.Services.FAPService.1.CellConfig.NR.RAN.RF.ChannelBandwidth": "bandwidth",
+		"Device.Services.FAPService.1.CellConfig.NR.Core.PLMNList.1.PLMNID":  "plmn",
+		"Device.DeviceInfo.HardwareVersion":                                  "hardware_version",
 	}
+}
+
+// RFControlPath returns the TR069 path for radio control by technology
+// (T-0029 / R-201). CUCC supports NR only — LTE returns "" so the device
+// layer surfaces an "unsupported tech" error rather than queuing an
+// FAPControl.LTE.AdminState command that the CPE will reject.
+func (c *CUCCCarrier) RFControlPath(tech model.Technology) string {
+	if tech == model.TechNR {
+		return "Device.Services.FAPService.1.FAPControl.NR.AdminState"
+	}
+	return ""
 }
 
 // alarmSeverityMap maps CUCC alarm codes to standard severity levels.
 var alarmSeverityMap = map[string]model.AlarmSeverity{
 	// Critical alarms
-	"CELL_UNAVAILABLE":     model.AlarmCritical,
-	"NG_LINK_FAILURE":      model.AlarmCritical,
-	"SCTP_LINK_FAILURE":    model.AlarmCritical,
-	"SITE_POWER_FAILURE":   model.AlarmCritical,
+	"CELL_UNAVAILABLE":   model.AlarmCritical,
+	"NG_LINK_FAILURE":    model.AlarmCritical,
+	"SCTP_LINK_FAILURE":  model.AlarmCritical,
+	"SITE_POWER_FAILURE": model.AlarmCritical,
 
 	// Major alarms
-	"XN_LINK_FAILURE":      model.AlarmMajor,
-	"RADIO_FAILURE":        model.AlarmMajor,
-	"GPS_FAILURE":          model.AlarmMajor,
-	"CLOCK_SYNC_FAILURE":   model.AlarmMajor,
-	"BACKHAUL_DEGRADED":    model.AlarmMajor,
-	"RF_TX_FAILURE":        model.AlarmMajor,
+	"XN_LINK_FAILURE":    model.AlarmMajor,
+	"RADIO_FAILURE":      model.AlarmMajor,
+	"GPS_FAILURE":        model.AlarmMajor,
+	"CLOCK_SYNC_FAILURE": model.AlarmMajor,
+	"BACKHAUL_DEGRADED":  model.AlarmMajor,
+	"RF_TX_FAILURE":      model.AlarmMajor,
 
 	// Minor alarms
-	"TEMP_HIGH":            model.AlarmMinor,
-	"TEMP_LOW":             model.AlarmMinor,
-	"VSWR_HIGH":            model.AlarmMinor,
-	"CPU_OVERLOAD":         model.AlarmMinor,
-	"POWER_DEGRADED":       model.AlarmMinor,
+	"TEMP_HIGH":      model.AlarmMinor,
+	"TEMP_LOW":       model.AlarmMinor,
+	"VSWR_HIGH":      model.AlarmMinor,
+	"CPU_OVERLOAD":   model.AlarmMinor,
+	"POWER_DEGRADED": model.AlarmMinor,
 
 	// Warning alarms
-	"MEM_OVERLOAD":         model.AlarmWarning,
-	"CONFIG_MISMATCH":      model.AlarmWarning,
-	"SW_VERSION_MISMATCH":  model.AlarmWarning,
-	"LICENSE_EXPIRING":     model.AlarmWarning,
+	"MEM_OVERLOAD":        model.AlarmWarning,
+	"CONFIG_MISMATCH":     model.AlarmWarning,
+	"SW_VERSION_MISMATCH": model.AlarmWarning,
+	"LICENSE_EXPIRING":    model.AlarmWarning,
 }
 
 // paramValidators maps parameter paths to validation functions.

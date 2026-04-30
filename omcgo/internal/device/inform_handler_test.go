@@ -207,6 +207,7 @@ func (c *infMockCarrier) KPIDefinitions(_ model.Technology) []*carrier.KPIDefini
 func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity          { return 0 }
 func (c *infMockCarrier) ValidateParameter(_ string, _ string) error                 { return nil }
 func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string   { return nil }
+func (c *infMockCarrier) RFControlPath(_ model.Technology) string                    { return "" }
 
 // ---------------------------------------------------------------------------
 // Helpers
