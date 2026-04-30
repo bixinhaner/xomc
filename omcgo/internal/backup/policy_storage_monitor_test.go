@@ -291,7 +291,8 @@ func TestStorageCheck_ColdStart_AboveThresholdPublishesOnce(t *testing.T) {
 	assert.Len(t, bus.snapshot(), 1, "cold start above threshold = re-publish raised once")
 }
 
-// V9 — Cron Start does not panic and registers two schedules.
+// V9 — Cron Start does not panic and registers three schedules
+// (@daily cleanup + @hourly storage check + @weekly orphan reaper, T-0083).
 func TestStorageCheck_CronStartIncludesHourly(t *testing.T) {
 	policy := makeStoragePolicy(10, 80, true)
 	policySvc := NewPolicyService(&monPolicyRepo{current: policy}, zap.NewNop())
@@ -302,7 +303,7 @@ func TestStorageCheck_CronStartIncludesHourly(t *testing.T) {
 	require.NoError(t, mon.Start(context.Background()))
 	require.NotNil(t, mon.cron)
 	entries := mon.cron.Entries()
-	require.Len(t, entries, 2, "Start registers @daily cleanup AND @hourly storage check")
+	require.Len(t, entries, 3, "Start registers @daily cleanup + @hourly storage check + @weekly orphan reaper")
 	mon.Stop()
 }
 

@@ -314,7 +314,7 @@ func (r *PgTaskRepository) UpdateFilePath(ctx context.Context, id uuid.UUID, fil
 //
 // Implementation note: PG `uuid::text` includes dashes (e.g.
 // "abcdef12-3456-..."), but our prefix is the dashless first 8 chars. Use
-// REPLACE(id::text, '-', '') LIKE 'prefix%' so the prefix matches the first
+// REPLACE(id::text, '-', ”) LIKE 'prefix%' so the prefix matches the first
 // 8 hex characters regardless of the dash position. Backup_tasks is small
 // enough at MVP scale that the seq scan is acceptable; if scale demands an
 // index, a generated column + functional index is a future optimization.
@@ -346,6 +346,39 @@ func (r *PgTaskRepository) FindByIDPrefix(ctx context.Context, prefix string, li
 			return nil, fmt.Errorf("scan backup_task row: %w", err)
 		}
 		out = append(out, t)
+	}
+	return out, nil
+}
+
+// ListAllTaskIDPrefixes returns the set of 8-char hex prefixes for all
+// backup_tasks.id rows. Used by the orphan reaper (T-0083) to build a live
+// set before bucket scan.
+//
+// Returns DISTINCT prefixes so the result size is bounded by 16^8 ≈ 4.3 ×
+// 10^9 (in practice much smaller; collisions on 8-char prefixes are
+// possible but the live set is intentionally conservative — collisions
+// reduce reap aggressiveness without risking false-positive deletes).
+//
+// At MVP scale (≤ 1M rows) the seq scan + DISTINCT runs in a few hundred
+// ms; if that becomes a bottleneck, materialize via generated column +
+// index. PRD §2.6 sizing: 1M × 8 bytes ≈ 8MB heap, acceptable.
+func (r *PgTaskRepository) ListAllTaskIDPrefixes(ctx context.Context) (map[string]struct{}, error) {
+	const sqlStr = `SELECT DISTINCT SUBSTRING(REPLACE(id::text, '-', ''), 1, 8) FROM backup_tasks`
+	rows, err := r.pool.Query(ctx, sqlStr)
+	if err != nil {
+		return nil, fmt.Errorf("query backup_task id prefixes: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan backup_task id prefix: %w", err)
+		}
+		out[p] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate backup_task id prefixes: %w", err)
 	}
 	return out, nil
 }

@@ -46,6 +46,11 @@ type TaskRepository interface {
 	FindByIDPrefix(ctx context.Context, prefix string, limit int) ([]*BackupTask, error)
 }
 
+// PgTaskRepository.ListAllTaskIDPrefixes (defined in pg_repository.go)
+// satisfies the orphan-reaper's TaskIDLister consumer interface declared
+// in policy_orphan_reaper.go. Kept off TaskRepository so the existing
+// 5 in-package mocks stay untouched.
+
 // ScheduleRepository provides persistence for backup schedules.
 type ScheduleRepository interface {
 	Create(ctx context.Context, schedule *BackupSchedule) error

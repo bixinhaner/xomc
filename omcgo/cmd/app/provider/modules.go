@@ -206,6 +206,10 @@ func initBackupModule(c *Container) error {
 	// disables the storage check (preserves T-0073/T-0076 behaviour).
 	backupPolicyMonitor.SetBucketLister(c.MinIO)
 	backupPolicyMonitor.SetEventBus(c.EventBus)
+	// T-0083: enable weekly multi-device orphan reaper. PgTaskRepository's
+	// ListAllTaskIDPrefixes satisfies the narrow TaskIDLister contract;
+	// reaper additionally requires SetMinIO + SetBucketLister wired above.
+	backupPolicyMonitor.SetTaskIDLister(backupTaskRepo)
 	if err := backupPolicyMonitor.Start(context.Background()); err != nil {
 		logger.Warn("start backup policy monitor", zap.Error(err))
 	}

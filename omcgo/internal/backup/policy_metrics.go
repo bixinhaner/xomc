@@ -23,6 +23,11 @@
 //   - omc_backup_decrypt_wait_seconds              — acquire wait latency (histogram)
 //   - omc_backup_decrypt_rejected_total{reason}    — timeout/ctx_cancel/oversize_config (counter)
 //
+// T-0083 multi-device orphan reaper (weekly housekeeping for files left
+// behind by first-write-wins multi-device backups):
+//   - omc_backup_orphan_reaped_total               — successful reap count (counter)
+//   - omc_backup_orphan_skipped_total{reason}      — pattern_mismatch|live_task|age_recent|api_error (counter)
+//
 // All methods are nil-safe so production wiring (DI passes a registry) and
 // tests (no registry) share one method surface.
 package backup
@@ -60,6 +65,10 @@ type PolicyMetrics struct {
 	decryptInFlight      prometheus.Gauge
 	decryptWaitSeconds   prometheus.Histogram
 	decryptRejectedTotal *prometheus.CounterVec
+
+	// T-0083 multi-device orphan reaper (weekly housekeeping):
+	orphanReapedTotal  prometheus.Counter
+	orphanSkippedTotal *prometheus.CounterVec
 }
 
 // NewPolicyMetrics registers all collectors on the given registry.
@@ -153,6 +162,15 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "omc_backup_decrypt_rejected_total",
 			Help: "Backup-decrypt semaphore acquire rejections by reason (timeout|ctx_cancel|oversize_config) (T-0089).",
 		}, []string{"reason"}),
+
+		orphanReapedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_backup_orphan_reaped_total",
+			Help: "Total multi-device orphan files physically deleted by the weekly reaper (T-0083).",
+		}),
+		orphanSkippedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_orphan_skipped_total",
+			Help: "Reaper-skipped objects by reason (pattern_mismatch|live_task|age_recent|api_error) (T-0083).",
+		}, []string{"reason"}),
 	}
 	if reg != nil {
 		reg.MustRegister(
@@ -164,6 +182,7 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			m.storageUsedBytes, m.storageCapacityBytes, m.storageUsageRatio,
 			m.storageCheckTotal, m.storageThresholdAlarms,
 			m.decryptInFlight, m.decryptWaitSeconds, m.decryptRejectedTotal,
+			m.orphanReapedTotal, m.orphanSkippedTotal,
 		)
 	}
 	return m
@@ -336,4 +355,21 @@ func (m *PolicyMetrics) RecordBackupDecryptRejected(reason string) {
 		return
 	}
 	m.decryptRejectedTotal.WithLabelValues(reason).Inc()
+}
+
+// RecordOrphanReaped increments the orphan reap success counter (T-0083).
+func (m *PolicyMetrics) RecordOrphanReaped() {
+	if m == nil {
+		return
+	}
+	m.orphanReapedTotal.Inc()
+}
+
+// RecordOrphanSkipped tallies a reaper skip by reason (T-0083).
+// reason ∈ {"pattern_mismatch", "live_task", "age_recent", "api_error"}.
+func (m *PolicyMetrics) RecordOrphanSkipped(reason string) {
+	if m == nil {
+		return
+	}
+	m.orphanSkippedTotal.WithLabelValues(reason).Inc()
 }

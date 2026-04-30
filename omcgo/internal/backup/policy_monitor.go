@@ -63,6 +63,11 @@ type PolicyMonitor struct {
 	bucketLister BucketLister   // optional — nil disables disk monitor
 	bus          event.EventBus // optional — nil disables disk alarm publish
 
+	// T-0083 multi-device orphan reaper (all three of bucketLister/minio/
+	// taskIDLister must be set to enable; mirrors the storage-monitor
+	// gate pattern):
+	taskIDLister TaskIDLister // optional — nil disables orphan reaper
+
 	// T-0082 in-memory edge-trigger state. Process restart resets to false;
 	// first post-restart tick may resend alarm.raised once. F04 alarm engine
 	// deduplicates by (source, identifier).
@@ -131,10 +136,29 @@ func (m *PolicyMonitor) Start(ctx context.Context) error {
 		return fmt.Errorf("schedule backup storage check tick: %w", err)
 	}
 
+	// T-0083: weekly multi-device orphan reaper. Same nil-safe runtime
+	// gate as storage check — wiring decides whether to actually scan.
+	// Timeout 30 min: list+reap may iterate full bucket; with maxReap=1k
+	// (≤ 1k RemoveObject API calls) plus list latency this stays well
+	// under 30 min even at 100k-object buckets.
+	if _, err := m.cron.AddFunc("@weekly", func() {
+		c, c2 := context.WithTimeout(scoped, 30*time.Minute)
+		defer c2()
+		if _, err := m.RunOrphanReaperOnce(c); err != nil {
+			m.logger.Warn("backup orphan reaper tick failed", zap.Error(err))
+		}
+	}); err != nil {
+		cancel()
+		m.cancel = nil
+		m.cron = nil
+		return fmt.Errorf("schedule backup orphan reaper tick: %w", err)
+	}
+
 	m.cron.Start()
 	m.logger.Info("backup policy monitor started",
 		zap.String("cleanup_schedule", "@daily"),
-		zap.String("storage_check_schedule", "@hourly"))
+		zap.String("storage_check_schedule", "@hourly"),
+		zap.String("orphan_reaper_schedule", "@weekly"))
 	return nil
 }
 
