@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
@@ -35,10 +36,12 @@ type DeviceRuleService struct {
 	groupRepo    DeviceGroupRepository
 	matcher      *DeviceMatcher
 	pool         *pgxpool.Pool
-	deviceLister DeviceLister   // 可选注入；nil 时 getAllDevices 返空切片
-	cron         *cron.Cron     // T-0027 D6 cron @hourly 调度器，Start 后非 nil
-	taskQueue    chan uuid.UUID // 任务队列
-	workers      int            // Worker 数量
+	deviceLister DeviceLister      // 可选注入；nil 时 getAllDevices 返空切片
+	eventBus     event.EventBus    // T-0027 D7 可选注入；nil 时 Start 跳过订阅装配
+	cron         *cron.Cron        // T-0027 D6 cron @hourly 调度器，Start 后非 nil
+	subscription event.Subscription // T-0027 D7 device.registered 订阅句柄
+	taskQueue    chan uuid.UUID    // 任务队列
+	workers      int               // Worker 数量
 	logger       *zap.Logger
 }
 
@@ -537,6 +540,12 @@ func (s *DeviceRuleService) SetDeviceLister(l DeviceLister) {
 	s.deviceLister = l
 }
 
+// SetEventBus 注入 EventBus 让 Start 装配 device.registered 订阅。
+// nil 时 Start 跳过订阅装配（仅 cron 路径生效）。
+func (s *DeviceRuleService) SetEventBus(bus event.EventBus) {
+	s.eventBus = bus
+}
+
 // Start 启动后台任务：cron @hourly reEvaluateAll。
 // 应在 DI 装配阶段调用一次；幂等（重复调用 no-op）。
 // 未来 Day 7+ EventBus 订阅 device.inform.bootstrap 也在此装配。
@@ -546,33 +555,126 @@ func (s *DeviceRuleService) SetDeviceLister(l DeviceLister) {
 // （AddDeviceWithSource WHERE source_type IS DISTINCT FROM 'manual'）让
 // manual override 行天然不被 cron 触动。
 func (s *DeviceRuleService) Start(ctx context.Context) error {
-	if s.cron != nil {
-		return nil
-	}
-	s.cron = cron.New()
-	if _, err := s.cron.AddFunc("@hourly", func() {
-		s.logger.Info("topology.cron.tick") // PRD §12.5 log key
-		if err := s.reEvaluateAll(ctx); err != nil {
-			s.logger.Error("reEvaluateAll failed", zap.Error(err))
+	if s.cron == nil {
+		s.cron = cron.New()
+		if _, err := s.cron.AddFunc("@hourly", func() {
+			s.logger.Info("topology.cron.tick") // PRD §12.5 log key
+			if err := s.reEvaluateAll(ctx); err != nil {
+				s.logger.Error("reEvaluateAll failed", zap.Error(err))
+			}
+		}); err != nil {
+			s.cron = nil
+			return fmt.Errorf("register cron @hourly: %w", err)
 		}
-	}); err != nil {
-		s.cron = nil
-		return fmt.Errorf("register cron @hourly: %w", err)
+		s.cron.Start()
+		s.logger.Info("topology rule cron started", zap.String("schedule", "@hourly"))
 	}
-	s.cron.Start()
-	s.logger.Info("topology rule cron started", zap.String("schedule", "@hourly"))
+	// T-0027 D7：装配 device.registered 订阅（注：项目模式用 device.registered
+	// 而非 PRD §12.7 早稿的 device.inform.bootstrap，避免 InformHandler 与
+	// 后续消费者的 race — 与 ProvisioningEngine 同模式，commit 见 2026-03-18
+	// REVIEW_adc99fd_chenbo01_device.md）
+	if s.eventBus != nil && s.subscription == nil {
+		sub, err := s.eventBus.QueueSubscribe(
+			event.SubjectDeviceRegistered,
+			"topology-rule-engine", // PRD §12.7 NATS Queue group
+			func(ctx context.Context, evt event.Event) error {
+				return s.handleDeviceRegistered(ctx, evt)
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("subscribe device.registered: %w", err)
+		}
+		s.subscription = sub
+		s.logger.Info("topology rule subscribed device.registered",
+			zap.String("queue", "topology-rule-engine"))
+	}
 	return nil
 }
 
-// Stop 优雅停止 cron 调度器。Start 未调用过则 no-op。
-// 用于 graceful shutdown 与单元测试清理。
+// Stop 优雅停止 cron 调度器 + 取消 EventBus 订阅。
+// 用于 graceful shutdown 与单元测试清理；幂等。
 func (s *DeviceRuleService) Stop() {
-	if s.cron == nil {
-		return
+	if s.subscription != nil {
+		_ = s.subscription.Unsubscribe()
+		s.subscription = nil
 	}
-	ctx := s.cron.Stop()
-	<-ctx.Done() // 等正在执行的 job 结束
-	s.cron = nil
+	if s.cron != nil {
+		ctx := s.cron.Stop()
+		<-ctx.Done() // 等正在执行的 job 结束
+		s.cron = nil
+	}
+}
+
+// handleDeviceRegistered 处理 device.registered 事件 —— 单设备规则评估路径。
+//
+// PRD §3 GWT A2/A3：新设备首次注册后，遍历启用规则按 priority 升序找首个匹配，
+// 调 AddDeviceWithSource('rule', &rule.ID) 入目标分组；A4 manual 守护已 SQL 层。
+// 单设备路径不创建 RuleTask（task 表用于审计批量 ApplyRule）；用 debug log 记录。
+//
+// LAC/TAC 当前 nil（W3 待定点）；Name = serial_number（与 PgDeviceLister
+// fallback 一致）。device_info.device_name 由 cron @hourly 在用户填后接力。
+func (s *DeviceRuleService) handleDeviceRegistered(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		DeviceID     uuid.UUID `json:"device_id"`
+		SerialNumber string    `json:"serial_number"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return fmt.Errorf("decode device.registered payload: %w", err)
+	}
+	if payload.DeviceID == uuid.Nil {
+		return fmt.Errorf("device.registered payload missing device_id")
+	}
+
+	s.logger.Debug("topology.event.bootstrap_received", // PRD §12.5 log key
+		zap.String("device_id", payload.DeviceID.String()),
+		zap.String("serial", payload.SerialNumber))
+
+	rules, err := s.repo.GetEnabledByPriority(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled rules for bootstrap eval: %w", err)
+	}
+
+	for i := range rules {
+		rule := &rules[i]
+		matched, err := s.matcher.matchRule(ctx, rule, MatchRequest{
+			DeviceID:   payload.DeviceID,
+			DeviceName: payload.SerialNumber,
+		})
+		if err != nil {
+			s.logger.Warn("match rule failed",
+				zap.String("rule_id", rule.ID.String()),
+				zap.Error(err))
+			continue
+		}
+		if !matched || rule.TargetGroupID == nil {
+			continue
+		}
+		// PRD §3 GWT A3：priority asc first-match-wins，单组归属
+		s.logger.Info("topology.rule.priority_winner",
+			zap.String("device_id", payload.DeviceID.String()),
+			zap.String("rule_id", rule.ID.String()),
+			zap.Int("priority", rule.Priority))
+
+		affected, err := s.groupRepo.AddDeviceWithSource(
+			ctx, *rule.TargetGroupID, payload.DeviceID, "rule", &rule.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("add device to group: %w", err)
+		}
+		if affected == 0 {
+			// device_id 已是 manual 行；理论上首次注册不会触发，留作 NATS 重投递时的 idempotent 守护
+			s.logger.Debug("topology.rule.manual_skipped",
+				zap.String("device_id", payload.DeviceID.String()),
+				zap.String("rule_id", rule.ID.String()))
+		} else {
+			s.logger.Info("topology.rule.matched",
+				zap.String("device_id", payload.DeviceID.String()),
+				zap.String("rule_id", rule.ID.String()),
+				zap.String("group_id", rule.TargetGroupID.String()))
+		}
+		return nil // 找到首个匹配即停（A3 单组归属）
+	}
+	return nil // 无匹配规则属正常路径，不算错
 }
 
 // reEvaluateAll 遍历所有启用规则，对每条触发 ApplyRule。

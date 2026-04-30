@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -238,26 +239,127 @@ func TestProcessTask_MatchedDevice_CallsAddDeviceWithSourceRule(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// A2 — 新设备 bootstrap → 自动评估并入 target group（PRD §3 GWT A2）
+// A2 — device.registered → 自动评估命中规则并入 target group（PRD §3 GWT A2）
 // ──────────────────────────────────────────────────────────────────────────────
-// 阻塞在 S3 Day 3+ 的 EventBus 订阅 + handleDeviceBootstrap 实现：
-//   - 需新增 handleDeviceBootstrap(ctx, evt *event.DeviceInformEvent) error 方法
-//   - 需 mock event.EventBus + DeviceLister
-// 落地后这里实测：bootstrap event → matcher 单设备 → BatchAddDevices 到 target group + source_type='rule'
-func TestHandleDeviceBootstrap_MatchedDevice_AssignsToTargetGroup_TODO(t *testing.T) {
-	t.Skip("TODO Day 3+: handleDeviceBootstrap method not yet implemented (PRD §12.1, §12.7)")
+//
+// 注：实际订阅 SubjectDeviceRegistered（项目模式 — 见 commit 2026-03-18 race fix）
+// 而非 PRD §12.7 早稿写的 device.inform.bootstrap；保留测试名称含 "Bootstrap"
+// 反映 PRD §3 用例语义（新设备 bootstrap 概念）。
+func TestHandleDeviceRegistered_MatchedDevice_AssignsToTargetGroup(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, _, groupRepo := newTestRuleService(t, ctrl)
+
+	deviceID := uuid.New()
+	targetGroup := uuid.New()
+	rule := DeviceRule{
+		ID: uuid.New(), Name: "name-rule", Priority: 50, Enabled: true,
+		TargetGroupID: &targetGroup, MatchingMode: MatchingModeDeviceName,
+		NameRuleList: []NameRule{{Condition: "contain", Value: "ABC123"}},
+	}
+
+	// Mock: GetEnabledByPriority 返一条规则；命中后 AddDeviceWithSource
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{rule}, nil)
+	groupRepo.EXPECT().AddDeviceWithSource(
+		gomock.Any(), targetGroup, deviceID, "rule",
+		gomock.Cond(func(p any) bool {
+			rid, ok := p.(*uuid.UUID)
+			return ok && rid != nil && *rid == rule.ID
+		}),
+	).Return(int64(1), nil)
+
+	// 构造 device.registered 事件
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     deviceID,
+		"serial_number": "SN-ABC123-001",
+	})
+	require.NoError(t, err)
+
+	// When
+	err = svc.handleDeviceRegistered(context.Background(), evt)
+	require.NoError(t, err)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// A3 — 多规则匹配按 priority 数字小者胜（PRD §3 GWT A3）
+// A3 — 多规则匹配按 priority 升序首个胜（PRD §3 GWT A3）
 // ──────────────────────────────────────────────────────────────────────────────
-// 阻塞在 handleDeviceBootstrap 实现 — 内部需按 GetEnabledByPriority 顺序遍历
-// 找首个 match 的规则，跳过低优先级。落地后：
-//   - 准备 R1 priority=10 + R2 priority=20 同时 match D
-//   - 调 handleDeviceBootstrap → 仅 R1 target_group 加 D
-//   - log 含 "topology.rule.priority_winner" debug
-func TestHandleDeviceBootstrap_MultiRuleMatch_LowerPriorityWins_TODO(t *testing.T) {
-	t.Skip("TODO Day 3+: priority resolution in handleDeviceBootstrap (PRD §3 A3)")
+func TestHandleDeviceRegistered_MultiRuleMatch_LowestPriorityWins(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, _, groupRepo := newTestRuleService(t, ctrl)
+
+	deviceID := uuid.New()
+	g1 := uuid.New()
+	g2 := uuid.New()
+	r1 := DeviceRule{ID: uuid.New(), Name: "r1-pri10", Priority: 10, Enabled: true,
+		TargetGroupID: &g1, MatchingMode: MatchingModeDeviceName,
+		NameRuleList: []NameRule{{Condition: "contain", Value: "ABC"}}}
+	r2 := DeviceRule{ID: uuid.New(), Name: "r2-pri20", Priority: 20, Enabled: true,
+		TargetGroupID: &g2, MatchingMode: MatchingModeDeviceName,
+		NameRuleList: []NameRule{{Condition: "contain", Value: "ABC"}}}
+
+	// repo 已按 priority 升序返回（GetEnabledByPriority 契约）
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{r1, r2}, nil)
+	// 仅 r1 应触发 AddDeviceWithSource，r2 跳过
+	groupRepo.EXPECT().AddDeviceWithSource(
+		gomock.Any(), g1, deviceID, "rule", gomock.Any(),
+	).Return(int64(1), nil)
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     deviceID,
+		"serial_number": "SN-ABC-X",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.handleDeviceRegistered(context.Background(), evt))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A2.b — 无匹配规则属正常路径，不报错也不调 AddDevice
+// ──────────────────────────────────────────────────────────────────────────────
+func TestHandleDeviceRegistered_NoMatchingRule_NoOp(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, _, _ := newTestRuleService(t, ctrl)
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{}, nil)
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     uuid.New(),
+		"serial_number": "SN-X",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.handleDeviceRegistered(context.Background(), evt))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A2.c — Start 注入 EventBus 后装配 QueueSubscribe 订阅
+// ──────────────────────────────────────────────────────────────────────────────
+func TestStart_WithEventBus_RegistersQueueSubscribe(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, _, _, _ := newTestRuleService(t, ctrl)
+	bus := NewMockEventBus(ctrl)
+	sub := NewMockSubscription(ctrl)
+
+	bus.EXPECT().QueueSubscribe(
+		event.SubjectDeviceRegistered,
+		"topology-rule-engine",
+		gomock.Any(),
+	).Return(sub, nil)
+	sub.EXPECT().Unsubscribe().Return(nil)
+
+	svc.SetEventBus(bus)
+	require.NoError(t, svc.Start(context.Background()))
+	assert.NotNil(t, svc.subscription)
+
+	// Stop 应取消订阅
+	svc.Stop()
+	assert.Nil(t, svc.subscription)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

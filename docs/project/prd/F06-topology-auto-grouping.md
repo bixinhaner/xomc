@@ -419,11 +419,21 @@ ALTER TABLE device_group_members DROP COLUMN IF EXISTS source_type;
 
 **联合变更策略**：单 PR 包含 backend + FE，因 sourceType 端到端贯通；S6 commit 一并；E2E 加 5 条 claim（A1-A5 各 1）。
 
-### 12.7 NATS 订阅设计
+### 12.7 NATS 订阅设计（S3 Day 7 corrected — 2026-04-30）
 
-- 主题：`device.inform.bootstrap`（W3.E.2 已上线 5 类 subject 之一）
+- 主题：~~`device.inform.bootstrap`~~ → **`device.registered`**（事件常量
+  `event.SubjectDeviceRegistered`）
+  - **修正原因**：`device.inform.bootstrap` 是 ACS 解析 Inform 时立即发布 — 
+    此时 device 行尚未写入 devices 表；订阅会 race（device.id 在 EventBus
+    回调时不存在于 DB → AddDeviceWithSource 触发 ON CONFLICT 路径未走
+    UPSERT 而是 INSERT 失败）
+  - **正解**：`device.registered` 是 DeviceService 注册成功后发布
+    （`device_service.go:795-815`）— 因果链清晰，devices 行已存在
+  - **同模式先例**：ProvisioningEngine 在 commit 2026-03-18 `adc99fd`
+    切换；T-0027 跟随
 - Queue group：`topology-rule-engine`（多实例分布式负载，单一事件只消费一次）
-- Idempotency：source_rule_id + device_id 复合 key 去重；重复消费同事件不致多次 INSERT
+- Idempotency：AddDeviceWithSource ON CONFLICT (device_id) DO UPDATE 天然
+  幂等 — NATS 重投递同事件 → UPSERT 同行无副作用
 
 ### 12.8 待定点（< 3 标准 ✅ 满足）
 

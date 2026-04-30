@@ -454,6 +454,10 @@ func initMiscModules(c *Container) error {
 	// T-0027 S3 Day 4：注入 PgDeviceLister 替换 getAllDevices stub
 	// 见 prd/F06-topology-auto-grouping.md §12.1，让 ApplyRule 能扫描真实设备
 	ruleService.SetDeviceLister(topology.NewPgDeviceLister(c.PgPool, logger))
+	// T-0027 S3 Day 7：注入 EventBus 让 Start 装配 device.registered 订阅
+	// PRD §12.7 corrected：项目模式订 device.registered 而非早稿 device.inform.bootstrap
+	// 避免 InformHandler race（与 ProvisioningEngine 同模式，commit 2026-03-18）
+	ruleService.SetEventBus(c.EventBus)
 	// T-0027 S3 Day 6：启动 cron @hourly reEvaluateAll
 	// PRD §12.1 §D2；A4 manual 守护已在 AddDeviceWithSource SQL 层强制
 	// ctx=Background — cron.Cron 自带 goroutine 生命周期，进程退出随之结束
