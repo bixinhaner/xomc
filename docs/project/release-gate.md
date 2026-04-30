@@ -26,7 +26,7 @@
 - [x] `blocked` 任务数 ≤ 3；若 ≥ 3 → 评估是否阻塞本次发布
       evidence: backlog §2 仪表盘 blocked = 0（目标 ≤ 3 已达）
 - [x] `in_dev` 任务均在本次发布范围内；逾期（Updated > 10 天）者必须触发 3 次失败重评（CLAUDE.md §9）
-      evidence: backlog §2 in_dev = 1（T-0027 KPI，FREEZE 冲突已交 PgM 三选一决议）
+      evidence: backlog §2 in_dev = 1（T-0095 KPI，FREEZE 冲突已交 PgM 三选一决议；2026-04-30 由 T-0027 改号，原 T-0027 真号属拓扑分组 P1 triaged）
 - [x] 累计型任务（§3.1）的 Progress 达到下游声明阈值（如 T-0006 ≥ 150 以放行 T-0025）
       evidence: T-0006 partial 落地 `c314d614` + `1285ab21`，W2.D.1 段 549 PASS 已远超 150 阈值；W2.D.1 真过门 commit `541c6a31` 标记 W2 计分 9 → 10
 - [x] Sprint 承诺完成率近 3 个 Sprint 平均 > 75%
