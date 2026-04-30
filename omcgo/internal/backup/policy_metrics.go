@@ -28,6 +28,11 @@
 //   - omc_backup_orphan_reaped_total               — successful reap count (counter)
 //   - omc_backup_orphan_skipped_total{reason}      — pattern_mismatch|live_task|age_recent|api_error (counter)
 //
+// T-0092 KEK rotation re-encrypt CLI (one-shot ops tool that walks the
+// backup bucket and migrates every file to the target kek_id):
+//   - omc_backup_reencrypt_total{result}           — reencrypted|skip_already_target|skip_not_encrypted|skip_envelope_invalid|skip_source_kek_unavailable|skip_minio_error|failed (counter)
+//   - omc_backup_reencrypt_duration_seconds        — single-file re-encrypt latency (histogram)
+//
 // All methods are nil-safe so production wiring (DI passes a registry) and
 // tests (no registry) share one method surface.
 package backup
@@ -69,6 +74,10 @@ type PolicyMetrics struct {
 	// T-0083 multi-device orphan reaper (weekly housekeeping):
 	orphanReapedTotal  prometheus.Counter
 	orphanSkippedTotal *prometheus.CounterVec
+
+	// T-0092 KEK rotation re-encrypt CLI:
+	reencryptTotal           *prometheus.CounterVec
+	reencryptDurationSeconds prometheus.Histogram
 }
 
 // NewPolicyMetrics registers all collectors on the given registry.
@@ -171,6 +180,16 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			Name: "omc_backup_orphan_skipped_total",
 			Help: "Reaper-skipped objects by reason (pattern_mismatch|live_task|age_recent|api_error) (T-0083).",
 		}, []string{"reason"}),
+
+		reencryptTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_reencrypt_total",
+			Help: "T-0092 KEK rotation re-encrypt outcomes by result (reencrypted|skip_already_target|skip_not_encrypted|skip_envelope_invalid|skip_source_kek_unavailable|skip_minio_error|failed).",
+		}, []string{"result"}),
+		reencryptDurationSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_backup_reencrypt_duration_seconds",
+			Help:    "T-0092 single-file re-encrypt latency.",
+			Buckets: prometheus.DefBuckets,
+		}),
 	}
 	if reg != nil {
 		reg.MustRegister(
@@ -183,6 +202,7 @@ func NewPolicyMetrics(reg prometheus.Registerer) *PolicyMetrics {
 			m.storageCheckTotal, m.storageThresholdAlarms,
 			m.decryptInFlight, m.decryptWaitSeconds, m.decryptRejectedTotal,
 			m.orphanReapedTotal, m.orphanSkippedTotal,
+			m.reencryptTotal, m.reencryptDurationSeconds,
 		)
 	}
 	return m
@@ -372,4 +392,23 @@ func (m *PolicyMetrics) RecordOrphanSkipped(reason string) {
 		return
 	}
 	m.orphanSkippedTotal.WithLabelValues(reason).Inc()
+}
+
+// RecordReencryptOutcome tallies a single-file re-encrypt outcome (T-0092).
+// result ∈ {reencrypted, skip_already_target, skip_not_encrypted,
+// skip_envelope_invalid, skip_source_kek_unavailable, skip_minio_error,
+// failed}.
+func (m *PolicyMetrics) RecordReencryptOutcome(result string) {
+	if m == nil {
+		return
+	}
+	m.reencryptTotal.WithLabelValues(result).Inc()
+}
+
+// ObserveReencryptDuration observes a re-encrypt duration sample in seconds (T-0092).
+func (m *PolicyMetrics) ObserveReencryptDuration(seconds float64) {
+	if m == nil {
+		return
+	}
+	m.reencryptDurationSeconds.Observe(seconds)
 }
