@@ -13,6 +13,7 @@
 | 0.6  | 2026-05-06 | Backend/Frontend Team | 「角色 → 设备分组」相关描述全部迁出：详见 [roles.md §1.4 / §2.6 / §11](./roles.md)。本 PRD 仅保留用户操作侧的 cache invalidation 约束（§6.1 / §10 DoD）+ R3/R4 用户视角规则 + 决议 ② 用户操作侧落点 |
 | 0.7  | 2026-05-06 | Backend/Frontend Team | 列表页"用户名称"列**不再标记**内置（取消 `<Tag color="blue">内置</Tag>`），内置/管理员/LDAP 三种来源统一由独立的"来源"列（§3.1 第 8 列）承担，避免双源信息冗余；操作菜单按钮的置灰 + Tooltip 提示规则不变。详见 §11.8 |
 | 0.8  | 2026-05-06 | Backend/Frontend Team | 列表页"创建人/更新人"列：值为空（`createdBy / updatedBy IS NULL`）时显示**"内置"**而非 `-`。语义：seed 写入的内置用户与 LDAP 同步任务都没有 operator UUID，统一以"内置"兜底；非空时仍走 `useAllUsers` 做 id→username 映射。详见 §11.9 |
+| 0.9  | 2026-05-06 | Backend/Frontend Team | 下拉列表必须显示**业务名字**（而非 UUID）：`<Select>` `value` 用 UUID（提交后端用），`label` 用 `roleName/displayName/...`。Options 必须从对应资源的「全量」端点（如 `GET /admin/roles/all`）拿，不能复用分页端点。修复 `adminApi.getAllRoles` 误调 `/admin/roles`（分页）→ 改为 `/admin/roles/all`，否则编辑用户时角色下拉显示 UUID。详见 §11.10 |
 | 0.9  | 2026-05-06 | Backend/Frontend Team | 完整 **LDAP 集成方案** 落定：登录 bind 验证、周期+手动同步、字段映射、group→role 映射、异常处理、3 类新接口、2 张新表（`ldap_group_role_mappings` / `ldap_sync_logs`）。详见 §12；与 [system-config.md `ldap` Tab](./system-config.md) 共享配置项 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
@@ -901,3 +902,444 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 - 列表 `createdBy` / `updatedBy` 两列、查看 Drawer 的"创建人 / 更新人"两个 `Form.Item` 共享同一函数，自动一致
 
 **未来回退**：若运营商要求严格区分"系统"与"内置"，可改回选项 A：基于 `selectedUser.source` 做三态映射，作为 v0.9 决议另开。
+
+### 11.10 v0.9 — 下拉列表显示业务名字 + 全量端点规则
+
+**问题**：编辑用户时，角色 `<Select mode="multiple">` 显示 UUID 而非角色名字。
+
+根因：`adminApi.getAllRoles` 误调分页端点 `/admin/roles`（返回 `PageResponse<BackendRole>`），由 `Array.isArray(data)` 兜底返回 **空数组** → `roleOptions` 为空 → AntD `<Select>` 拿到 `value=UUID` 在 options 找不到对应 `label` → 退化显示原始 UUID。
+
+后端实际**已实现** `GET /admin/roles/all`（`handler.go` `roles.GET("/all", h.ListAllRoles)`，不分页，专供下拉），与 PRD §6.2 标注一致。
+
+**决议（本 PRD 范围）**：
+
+| 维度 | 规则 |
+|------|------|
+| 下拉 `value` | 用资源唯一标识（UUID），后端通信契约保持稳定 |
+| 下拉 `label` | 用业务名字（`roleName / displayName / username / groupName ...`），可包含 Tag 等装饰节点（如 §11.7 ① ⚠️ 标记） |
+| Options 来源 | **必须**调用对应资源的「全量」端点（`getAllRoles` → `/admin/roles/all`），不得复用分页端点 |
+| API 契约 | 全量端点返回**裸数组**（`BackendRole[]`），分页端点返回 `PageResponse<T>`；前端按 shape 区分 |
+| 兜底 | options 异步加载阶段，若 value 不在 options 中，UI 应优先显示 `user.roles[name]` 等已有名字字段；不行才退到 UUID |
+
+**全局推广（建议而非强制）**：本规则适用于所有"用户管理 / 角色管理 / 设备分组 / 字典 / 菜单 / API 管理 / 通知通道 ..." 的 `<Select>` `<Cascader>` `<TreeSelect>` 等组件，应抽到一份"前端 UI 通用规约"文档（`docs/project/frontend-conventions.md`，待立项）统一约束。本 PRD 仅落地用户管理范围内的修复。
+
+**实施面**：
+
+- 前端 `adminApi.getAllRoles`：URL 由 `/admin/roles` → `/admin/roles/all`
+- 验证：`useAllRoles` 拿到全量 → `roleOptions` 完整 → 编辑用户 / 创建用户 / 批量分配角色 三处 `<Select>` 全部显示角色名字
+- 注：列表页"角色"列（dataIndex `roles`）已经是名字数组（`mapBackendUser` 把 `bu.roles[].name` 取出），不受本 bug 影响
+
+**已知边界**：
+
+- `useAllRoles` 异步加载阶段（首次进入页面 + 缓存 miss），下拉 options 在数据到达前是空的，此时打开编辑 Drawer 会有毫秒级 UUID 闪烁 → React Query 默认 5min 缓存，二次打开不会出现
+- 若运营商角色总数 > 1000 → `getAllRoles` 一次拉全集会有性能问题；当前规模可接受，未来若超阈值改 `getRoles({ page, pageSize })` + Select `<showSearch onSearch>` 异步搜索（v1.0+ 决议）
+
+---
+
+## 12. LDAP 集成方案（v0.9）
+
+> 本章是「v0.9 决议 + 实施方案」合并体，独立成章便于实施时整体看完。
+> 所有 LDAP 配置项**复用** [system-config.md `ldap` Tab](./system-config.md)，但本章对字段集与默认值做权威约定。
+
+### 12.1 业务目标
+
+| # | 目标 | 说明 |
+|---|------|------|
+| G1 | 统一登录 | 运营商/集团客户的 LDAP/AD 账号无需在 OMC 重新创建，直接登录 |
+| G2 | 密码集中 | 密码完全归外部域管理；OMC 不存 / 不缓存 LDAP 用户密码 |
+| G3 | 账号同步 | LDAP 加人 → OMC 自动可见；LDAP 删人 → OMC 自动禁用（不删，便于回滚）|
+| G4 | 角色映射 | LDAP group `memberOf` → OMC role 自动绑定，避免手工维护 |
+| G5 | 可观测 | 同步成功率、最近同步时间、失败明细在 UI 与 Prometheus 双通道可见 |
+
+**与超管/管理员添加用户的关系**：
+
+- LDAP 用户与 admin / builtIn 用户**同表共存**（`users`，按 `source` 区分）
+- 一个 username 不可同时属于两个 source（unique 约束本来就保证）
+- 登录入口同一个 `POST /auth/login`，service 内部按 `source` 分流（详见 §12.5）
+
+### 12.2 配置项（`sys_configs` 表，category=`ldap`）
+
+> 本表是配置项**权威集**。[system-config.md §3.2 LDAP](./system-config.md) 的字段示例需要按此扩展。
+
+| key | value_type | 默认值 | 说明 |
+|-----|-----------|-------|------|
+| `enabled` | bool | `false` | 总开关；为 false 时所有 LDAP 行为关闭，`source=LDAP` 用户登录会拒绝 |
+| `server_url` | string | — | `ldap://host:389` 或 `ldaps://host:636`（生产强制 ldaps）|
+| `bind_dn` | string | — | 服务账号 DN，如 `CN=omc-bind,OU=service,DC=corp,DC=local` |
+| `bind_password` | string（**加密存储**）| — | 服务账号密码 |
+| `search_base` | string | — | 用户搜索基，如 `OU=users,DC=corp,DC=local` |
+| `user_filter` | string | `(&(objectClass=user)(sAMAccountName=%s))` | 用户过滤器，`%s` 占位符替换为 username |
+| `attr_email` | string | `mail` | LDAP 属性名 → `users.email` |
+| `attr_phone` | string | `telephoneNumber` | → `users.phone` |
+| `attr_displayname` | string | `displayName` | → `users.display_name` |
+| `attr_groups` | string | `memberOf` | LDAP group DN 列表，用于 group→role 映射 |
+| `sync_enabled` | bool | `true` | 是否启用周期同步（关闭后仅手动 / JIT）|
+| `sync_interval_min` | int | `60` | 周期同步间隔（分钟）|
+| `sync_carrier` | string \| null | `null` | LDAP 同步用户的 `users.carrier` 默认值；NULL = 超管（**生产慎用**）|
+| `default_role_id` | uuid \| null | `null` | 新同步用户的兜底角色（无 group 映射时用）|
+| `jit_provisioning_enabled` | bool | `false` | 即时入库：未在本地但 LDAP 中存在的账号首次登录时自动创建 |
+| `tls_skip_verify` | bool | `false` | 仅测试环境用 |
+| `connect_timeout_sec` | int | `5` | LDAP 连接超时 |
+| `request_timeout_sec` | int | `10` | LDAP 操作超时 |
+| `max_failed_login_in_omc` | int | `5` | OMC 端独立的密码错误锁定阈值（与 LDAP 端策略隔离，避免互锁）|
+
+**敏感字段加密**：`bind_password` 在 service 层用 AES-256-GCM 加密入库；handler 层解密。加密 key 来自环境变量 `OMC_CONFIG_ENC_KEY`。
+
+### 12.3 字段映射（LDAP attribute ↔ `users` 列）
+
+| `users` 列 | LDAP attribute（默认）| 同步行为 | 备注 |
+|-----------|---------------------|---------|------|
+| `username` | sAMAccountName / uid | 主键，**首次创建后不可改** | 可配，由 `user_filter` 中的属性决定 |
+| `email` | `mail`（可配 `attr_email`）| 同步覆盖 | LDAP 端为空时不清空本地值 |
+| `phone` | `telephoneNumber`（可配 `attr_phone`）| 同步覆盖 | 同上 |
+| `display_name` | `displayName`（可配 `attr_displayname`）| 同步覆盖 | LDAP 空 → 用 username 兜底 |
+| `carrier` | （不从 LDAP 取）| 由 `sync_carrier` 配置项决定 | 默认 NULL = 超管，生产环境强烈建议设为具体 carrier |
+| `status` | （LDAP 不再可见时）| 同步标记 `disabled`（不删除）| 见 §12.4 处理规则 |
+| `source` | （固定）| `'LDAP'` | |
+| `password_hash` | — | 写入哨兵值 `'__LDAP__'`（不可被 bcrypt 校验通过）| 防止任何路径误用本地密码校验 |
+| `description` | （可选）| 不从 LDAP 同步，留给管理员手记 | |
+| `expire_at` | （可选）| 不从 LDAP 同步 | LDAP 端 accountExpires 属性如需对接，列入 v1.0+ |
+| `last_login_at` | — | 由登录流程更新 | |
+| `created_by` / `updated_by` | NULL | 同步任务无 operator | 列表渲染显示"内置"（参 [v0.8 决议](#119-v08--列表创建人--更新人空值显示内置-而非)）|
+
+**LDAP group → OMC role 映射**：单独表 `ldap_group_role_mappings`（详见 §12.6）。
+
+### 12.4 同步流程
+
+#### 12.4.1 周期同步（cron，运行在 worker 进程）
+
+| 步骤 | 行为 |
+|------|------|
+| 1 | `cron` 触发（间隔 = `ldap.sync_interval_min`）；如 `ldap.enabled = false` 或 `ldap.sync_enabled = false` 立即返回 |
+| 2 | bind LDAP server（用 `bind_dn` + 解密后的 `bind_password`）|
+| 3 | search：base = `search_base`，filter = `(objectClass=user)`（去掉 `sAMAccountName=%s` 部分），attributes = 列出本次需要的字段 |
+| 4 | 流式遍历返回的 entry list，与 `SELECT id, username, ... FROM users WHERE source='LDAP'` 做 diff |
+| 5 | LDAP 中存在 + OMC 中不存在 → INSERT（source='LDAP', carrier=`sync_carrier`, password_hash='`__LDAP__`'）|
+| 6 | LDAP 中存在 + OMC 中存在 → UPDATE 字段（仅 `email/phone/display_name/updated_at`，**不动** `status` / `description` / 角色绑定）|
+| 7 | LDAP 中不存在 + OMC 中存在（且 status=active） → UPDATE `status='disabled'` + 写 `audit_logs`（不删除）|
+| 8 | 处理 group 变更（详见 §12.6）|
+| 9 | 写 `ldap_sync_logs` 一条记录（含 created/updated/disabled/failed 计数 + 总耗时）|
+
+**Schema：`ldap_sync_logs`**（新表，DDL 见 §12.8）：
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `id` | UUID | PK |
+| `started_at` | TIMESTAMPTZ | 开始时间 |
+| `finished_at` | TIMESTAMPTZ | 结束时间 |
+| `triggered_by` | VARCHAR(16) | `cron` / `manual` / `jit` |
+| `triggered_user_id` | UUID NULL | 手动触发时的操作人 |
+| `result` | VARCHAR(16) | `success` / `failed` / `partial` |
+| `created_count` | INT | 新建用户数 |
+| `updated_count` | INT | 更新用户数 |
+| `disabled_count` | INT | 标记禁用用户数 |
+| `failed_count` | INT | 处理失败条数 |
+| `error_summary` | TEXT NULL | 错误摘要（失败时填）|
+| `details` | JSONB NULL | 完整明细（失败的 username + 错误，限 100 条避免膨胀）|
+
+#### 12.4.2 手动同步
+
+UI 入口：系统配置 → LDAP Tab → "立即同步"按钮。
+
+| 步骤 | 行为 |
+|------|------|
+| 1 | 前端 `POST /admin/ldap/sync` |
+| 2 | handler 立即返回 `{ "job_id": "uuid", "status": "running" }`，同步在 goroutine 后台执行 |
+| 3 | 前端 polling `GET /admin/ldap/sync/status/{job_id}`（2 秒间隔）|
+| 4 | 同步完成后任务状态置 `success/failed`，前端弹 toast 显示结果统计 |
+
+**并发控制**：同时只允许一个 LDAP 同步任务运行（用 Redis 分布式锁 `lock:ldap:sync`，TTL = `connect_timeout_sec * 10`）。重复触发返回 409。
+
+#### 12.4.3 JIT 即时同步（首次登录）
+
+仅当 `jit_provisioning_enabled = true` 时启用：
+
+| 步骤 | 行为 |
+|------|------|
+| 1 | 用户输入 username + password 登录，`GetByUsername` 返回 ErrNotFound |
+| 2 | service 检查 `jit_provisioning_enabled`；为 true 则继续，否则返回 401 |
+| 3 | bind LDAP，search 该 username，找到则按 §12.3 字段映射创建本地记录 |
+| 4 | 创建后继续走 §12.5 LDAP bind 验证流程 |
+| 5 | 在 `ldap_sync_logs` 写一条 `triggered_by='jit'` 记录（仅含该用户）|
+
+**安全考量**：JIT 默认关闭。开启意味着任何 LDAP 中存在的账号都能直接登录，无需管理员预审；适用于完全信任 LDAP 域的场景。
+
+### 12.5 登录流程（service 内部分流）
+
+```
+POST /auth/login {username, password}
+  ↓
+1. GetByUsername(username)
+   ├─ ErrNotFound + jit_enabled=true → §12.4.3 JIT 路径
+   ├─ ErrNotFound + jit_enabled=false → 返回 401 「user not found」
+   └─ user 找到，继续
+  ↓
+2. 校验 user.status / user.locked_until / user.expire_at（统一逻辑，与 source 无关）
+  ↓
+3. switch user.source:
+   ├─ 'admin' / 'builtIn' → bcrypt.CompareHashAndPassword(user.password_hash, password)
+   └─ 'LDAP' →
+        a. 检查 ldap.enabled = true，否则 503
+        b. bind LDAP（用 bind_dn + bind_password 服务账号）
+        c. search ldap.user_filter % username 拿到该用户的 DN
+        d. **第二次 bind**：用拿到的 user DN + 用户输入的 password
+        e. bind 成功 = 密码正确；失败 = 密码错误
+        f. 失败计数走本地 `users.failed_login_attempts`（不依赖 LDAP，避免互锁）
+  ↓
+4. 成功 → 生成 token + UpdateLastLogin（与 admin 路径一致）
+```
+
+**关键约束**：
+
+- LDAP 用户的 `password_hash` 入库为 `'__LDAP__'` 哨兵值，确保即便误调 `bcrypt.CompareHashAndPassword` 也必然失败（哨兵值不可能匹配任何密码）
+- 第二次 bind 后**立即** unbind，不长连接（避免 LDAP 端连接资源耗尽）
+- LDAP 服务器宕机：登录返回 `503 Service Unavailable` + 明确错误体 `{ "error": "LDAP server unavailable", "retry_after_sec": 30 }`
+- 登录失败次数：与本地一致用 `users.failed_login_attempts`，达到 `max_failed_login_in_omc` 时本地锁定（不试图改 LDAP 端密码错误次数）
+
+### 12.6 LDAP group → OMC role 映射
+
+#### 12.6.1 表 `ldap_group_role_mappings`（DDL 见 §12.8）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `id` | UUID | PK |
+| `ldap_group_dn` | VARCHAR(512) | LDAP group 完整 DN，如 `CN=omc-ops,OU=groups,DC=corp,DC=local`，UNIQUE |
+| `role_id` | UUID | FK → `roles(id)` ON DELETE CASCADE |
+| `description` | TEXT | NULL |
+| `created_by` / `updated_by` | UUID | NULL |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL |
+
+#### 12.6.2 同步时的 role 计算
+
+每个用户同步时：
+
+1. 从 LDAP entry 取 `attr_groups`（默认 `memberOf`）拿到 group DN 数组
+2. 查 `ldap_group_role_mappings` 命中的 `role_id` 集合
+3. 对该用户当前 `user_roles`（仅 source='LDAP' 来源的角色，标记需新增字段 `assigned_by_ldap BOOLEAN`）做差量同步：
+   - 新命中 → INSERT user_roles，标 `assigned_by_ldap=true`
+   - 已存在但本次未命中 → DELETE
+   - 管理员手动加的角色（`assigned_by_ldap=false`）**不动**
+
+**Schema 调整**：`user_roles` 表加 `assigned_by_ldap BOOLEAN NOT NULL DEFAULT false`（迁移文件示例见 §12.8）。
+
+#### 12.6.3 兜底角色
+
+若用户的 LDAP groups 没有任何映射命中：
+
+- 若 `ldap.default_role_id` 非 NULL → 绑定该角色（`assigned_by_ldap=true`）
+- 若也未配置 → 用户登录后**无任何角色**（无设备数据可见、无菜单可见，对齐 [roles.md §11.2 决议 ①](./roles.md) 的提示规则）
+
+### 12.7 异常处理
+
+| 场景 | 行为 | 用户可见性 |
+|------|------|----------|
+| LDAP 服务器宕机 | 登录返回 503；周期同步任务 retry 3 次后中止本轮，记 `ldap_sync_logs.result='failed'` | UI 顶部 banner 显示「LDAP 不可用」，持续到下次同步成功 |
+| `bind_dn` 凭据失效 | 同上，error message 区分（`auth_failed` vs `unreachable`）| 系统配置 LDAP Tab 加红色提示 |
+| 用户 password 错误 | 走本地 `failed_login_attempts` + `lockout_duration` 锁定 | 与 admin 用户一致 |
+| LDAP 删用户但本地未同步 | 用户仍可登录（直到下次同步标记 disabled）| 接受该窗口；缩短 `sync_interval_min` 可降低风险 |
+| LDAP 同步用户 `attr_groups` 解析失败 | 该用户 group 映射跳过，保留旧角色 + 写入 `ldap_sync_logs.details` | 管理员可在同步历史查看 |
+| TLS 证书校验失败 | 同步与登录均失败；除非 `tls_skip_verify=true` | 强烈建议生产不开 skip_verify |
+| 同步任务正在运行时再次触发 | 返回 409 `{ "error": "sync already in progress" }` | UI toast 提示 |
+| `default_role_id` 指向已删除的 role | 同步时检测到 → 写 `ldap_sync_logs.error_summary` + 跳过该用户的兜底绑定 | 管理员需在配置页修复 |
+
+### 12.8 接口契约
+
+> Base URL：`/api/v1/admin`（admin 鉴权）
+
+#### 12.8.1 LDAP 同步管理
+
+| Method | 路径 | 说明 |
+|--------|------|------|
+| POST | `/ldap/sync` | 触发手动同步，返回 `{ "job_id": "uuid", "status": "running" }`，409 if 已有进行中任务 |
+| GET | `/ldap/sync/status/{job_id}` | 查同步进度，返回 `ldap_sync_logs` 一条记录 |
+| GET | `/ldap/sync/history?page=&pageSize=` | 同步历史分页 |
+| POST | `/ldap/test-connection` | 仅 bind 测试，验证 server_url + bind_dn + bind_password；返回 `{ "ok": true }` 或 `{ "ok": false, "error": "..." }` |
+
+#### 12.8.2 LDAP group→role 映射 CRUD
+
+| Method | 路径 | 说明 |
+|--------|------|------|
+| GET | `/ldap/group-mappings?page=&pageSize=` | 列表 |
+| POST | `/ldap/group-mappings` | 新增（Body：`{ "ldap_group_dn": "...", "role_id": "uuid", "description": "..." }`）|
+| PUT | `/ldap/group-mappings/{id}` | 编辑 |
+| DELETE | `/ldap/group-mappings/{id}` | 删除 |
+
+#### 12.8.3 现有接口的 LDAP 适配
+
+| 接口 | 适配点 |
+|------|--------|
+| `POST /auth/login` | service 内部按 `source` 分流（详见 §12.5），无需新端点 |
+| `POST /admin/users/{id}/reset-password` | `source='LDAP'` 返回 409（v0.2 已实现）|
+| `POST /admin/users` | 不接受 `source` 字段，固定 `'admin'`，无法通过本接口创建 LDAP 用户（必须走同步）|
+| `DELETE /admin/users/{id}` | LDAP 用户允许删除（仅删本地，不影响 LDAP 源）|
+| `PUT /admin/users/{id}` | `source='LDAP'` 用户的 `email/phone/display_name` 字段被覆盖时**写本地**，但下次 LDAP 同步会再次覆盖。建议前端 banner 提示「LDAP 用户的部分字段以 LDAP 端为准」|
+
+### 12.9 数据库迁移（DDL 示例）
+
+迁移文件版本号按发布时实际为准。下面给出参考 SQL。
+
+```sql
+-- +goose Up
+-- 1. user_roles 加来源标记
+ALTER TABLE user_roles
+    ADD COLUMN IF NOT EXISTS assigned_by_ldap BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 2. ldap_group_role_mappings
+CREATE TABLE IF NOT EXISTS ldap_group_role_mappings (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ldap_group_dn VARCHAR(512) NOT NULL UNIQUE,
+    role_id       UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    description   TEXT,
+    created_by    UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    updated_by    UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ldap_group_mappings_role_id ON ldap_group_role_mappings(role_id);
+
+-- 3. ldap_sync_logs
+CREATE TABLE IF NOT EXISTS ldap_sync_logs (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    started_at        TIMESTAMPTZ NOT NULL,
+    finished_at       TIMESTAMPTZ NULL,
+    triggered_by      VARCHAR(16) NOT NULL CHECK (triggered_by IN ('cron','manual','jit')),
+    triggered_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    result            VARCHAR(16) NOT NULL CHECK (result IN ('running','success','failed','partial')),
+    created_count     INT NOT NULL DEFAULT 0,
+    updated_count     INT NOT NULL DEFAULT 0,
+    disabled_count    INT NOT NULL DEFAULT 0,
+    failed_count      INT NOT NULL DEFAULT 0,
+    error_summary     TEXT NULL,
+    details           JSONB NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ldap_sync_logs_started_at ON ldap_sync_logs(started_at DESC);
+
+-- 4. seed sys_configs ldap.* 默认值
+INSERT INTO sys_configs (category, key, value, value_type, description, is_public) VALUES
+    ('ldap', 'enabled', 'false', 'bool', 'LDAP 总开关', FALSE),
+    ('ldap', 'sync_enabled', 'true', 'bool', '启用周期同步', FALSE),
+    ('ldap', 'sync_interval_min', '60', 'int', '周期同步间隔（分钟）', FALSE),
+    ('ldap', 'user_filter', '(&(objectClass=user)(sAMAccountName=%s))', 'string', '用户过滤器，%s 替换为 username', FALSE),
+    ('ldap', 'attr_email', 'mail', 'string', 'LDAP 属性名 → email', FALSE),
+    ('ldap', 'attr_phone', 'telephoneNumber', 'string', 'LDAP 属性名 → phone', FALSE),
+    ('ldap', 'attr_displayname', 'displayName', 'string', 'LDAP 属性名 → display_name', FALSE),
+    ('ldap', 'attr_groups', 'memberOf', 'string', 'LDAP 属性名 → groups DN list', FALSE),
+    ('ldap', 'jit_provisioning_enabled', 'false', 'bool', '即时入库（首登自动创建）', FALSE),
+    ('ldap', 'tls_skip_verify', 'false', 'bool', '跳过 TLS 证书校验（仅测试）', FALSE),
+    ('ldap', 'connect_timeout_sec', '5', 'int', 'LDAP 连接超时（秒）', FALSE),
+    ('ldap', 'request_timeout_sec', '10', 'int', 'LDAP 操作超时（秒）', FALSE),
+    ('ldap', 'max_failed_login_in_omc', '5', 'int', 'OMC 端独立的密码错误锁定阈值', FALSE)
+ON CONFLICT (category, key) DO NOTHING;
+
+-- +goose Down
+DROP TABLE IF EXISTS ldap_sync_logs;
+DROP TABLE IF EXISTS ldap_group_role_mappings;
+ALTER TABLE user_roles DROP COLUMN IF EXISTS assigned_by_ldap;
+DELETE FROM sys_configs WHERE category = 'ldap';
+```
+
+### 12.10 后端代码组织
+
+新模块路径：`internal/ldap/`（独立于 `internal/admin/`，避免 admin 包过大）。
+
+```
+internal/ldap/
+├── client.go              # go-ldap/v3 wrapper：bind / search / unbind 封装
+├── client_test.go         # 单元测试用 mock LDAP server (gldap 库)
+├── config.go              # sys_configs 读取 + bind_password 解密
+├── sync_service.go        # SyncOnce(ctx, triggeredBy) → *SyncResult
+├── sync_service_test.go
+├── login_service.go       # AuthenticateLDAP(ctx, username, password) → (*User, error)
+├── group_mapping_repo.go  # ldap_group_role_mappings CRUD
+├── sync_log_repo.go       # ldap_sync_logs CRUD
+├── handler.go             # /ldap/sync, /ldap/test-connection 等
+├── group_handler.go       # /ldap/group-mappings CRUD
+└── cron.go                # worker 进程注册的周期任务入口
+```
+
+**依赖**：
+
+| 库 | 用途 |
+|----|------|
+| `github.com/go-ldap/ldap/v3` | LDAP 客户端 |
+| `github.com/jimlambrt/gldap`（仅 test） | mock LDAP server |
+| 现有 `internal/admin` | 复用 `userRepo` / `roleRepo` |
+| 现有 `internal/core/components/redis` | 分布式锁 + 缓存 |
+
+**集成点**：
+
+- `cmd/worker/main.go`：启动时调 `ldap.RegisterCron(scheduler, deps)`
+- `cmd/app/provider/router.go`：挂 `ldapHandler.RegisterRoutes(adminGroup)`
+- `internal/admin/service.go::Login`：分流到 `ldap.AuthenticateLDAP` 当 `user.Source == UserSourceLDAP`
+
+### 12.11 后端补齐 Backlog
+
+#### P0（与 v0.9 决议同时落地）
+
+1. **DDL 迁移**（§12.9）落地
+2. **配置项 seed**（§12.9 INSERT 部分）
+3. **`internal/ldap/` 模块基线**：client.go / config.go / sync_service.go / login_service.go
+4. **`AdminService.Login` 分流**：按 `user.Source` 走 LDAP 或 bcrypt
+5. **worker cron 注册**：`cmd/worker/main.go` 调 `ldap.RegisterCron`
+6. **`POST /admin/users` 拒绝** `source` 字段，已在 v0.2 落地（确认仍生效）
+7. **bind_password 加密存储 / 解密**：service 层用 AES-256-GCM，key 从环境变量
+
+#### P1
+
+8. **LDAP 同步 UI**：系统配置 LDAP Tab 加 「立即同步」 按钮 + 同步历史 tab + 测试连接按钮
+9. **LDAP group→role 映射页面**：新建 `pages/system/LdapGroupMappings/index.tsx` + 路由
+10. **失败告警**：周期同步连续失败 3 次 → 写 `notifications` 表（消息中心）通知所有 admin 角色用户；Prometheus metric `omc_ldap_sync_failed_total`
+11. **测试连接接口** `/ldap/test-connection`
+12. **JIT provisioning** 实现（默认配置开关关闭）
+
+#### P2
+
+13. **多 LDAP 数据源**：支持配置多个 LDAP server，`users.source` 细分为 `LDAP:<server-id>`
+14. **LDAP 用户密码到期提醒**：解析 LDAP `pwdLastSet` / `accountExpires` → 登录时 banner 提示
+15. **LDAP 嵌套 group**：`memberOf` 不能直接拿到嵌套关系，需要递归查 `member` 反查 → 性能优化
+16. **同步预演（dry-run）**：手动同步前可选择"仅预览不写库"
+
+### 12.12 验收清单（DoD）
+
+#### 后端
+
+- [ ] §12.9 DDL 迁移落地，版本号连续，Down 完整
+- [ ] `internal/ldap/` 模块单测覆盖：bind / search / sync diff 三类核心逻辑
+- [ ] worker 进程启动后周期任务运行（日志可见）
+- [ ] `POST /admin/users` 提交 `source: 'LDAP'` 时被忽略，固定 `'admin'`
+- [ ] LDAP 服务器宕机时 `/auth/login` 对 source='LDAP' 用户返回 503，对 admin 用户不受影响
+- [ ] `bind_password` 在 DB 中是密文，`GET /admin/configs?category=ldap` 响应中字段被脱敏（返回 `'****'`）
+- [ ] `ldap_sync_logs` 一周内的记录可查
+- [ ] 同步任务并发锁生效（重复触发返 409）
+- [ ] 单元测试 mock LDAP server 覆盖：成功 bind / 错误密码 / 服务器超时 / 用户不存在 / TLS 失败 5 类场景
+- [ ] Prometheus 指标暴露：`omc_ldap_sync_total{result}`、`omc_ldap_sync_duration_seconds`、`omc_ldap_login_total{result}`、`omc_ldap_failed_total{reason}`
+
+#### 前端
+
+- [ ] 系统配置 LDAP Tab 字段集与 §12.2 对齐（含 13 个配置项）
+- [ ] 「立即同步」按钮 + 进度 polling + 结果 toast
+- [ ] LDAP 同步历史页（最近 30 天，含 created/updated/disabled/failed 计数 + error_summary）
+- [ ] LDAP group→role 映射 CRUD 页面
+- [ ] 用户列表 `source` 过滤器加 `LDAP` 选项
+- [ ] LDAP 用户的「编辑用户」表单顶部 banner：「该用户由 LDAP 同步管理，邮箱/手机/姓名等字段会被下次同步覆盖」
+- [ ] LDAP 用户的「重置密码」按钮置灰（v0.2 已实现，本节确认）
+- [ ] `npm run typecheck` & `lint` 通过
+
+#### 文档
+
+- [ ] [system-config.md §3.2 LDAP](./system-config.md) 字段集按 §12.2 扩展（13 个键）
+- [ ] [roles.md](./roles.md) 在 §1 边界声明：`ldap_group_role_mappings` 由本 PRD 承担，roles.md 不重复描述
+- [ ] [README.md 索引](./README.md) 在 P0 列表中加入 LDAP 集成相关条目
+
+#### 部署
+
+- [ ] `OMC_CONFIG_ENC_KEY` 环境变量在所有部署 yaml 中存在；缺失时 worker 启动失败
+- [ ] 默认 `ldap.enabled = false`，新部署不影响现有功能
+- [ ] 升级文档说明：开启 LDAP 前必须配置完整 §12.2 字段并 `test-connection` 通过
+
+### 12.13 v1.0+ 候选（待澄清事项）
+
+- [ ] 多个 LDAP 数据源场景下，`source = 'LDAP:<id>'` 细分（与 [users.md §11.4](#114-待澄清事项) 联动）
+- [ ] LDAP 嵌套 group 性能优化（recursive `member` 查询）
+- [ ] OMC 端的 RBAC 角色变更是否反向同步到 LDAP（默认不做，避免改动外部域）
+- [ ] LDAP 用户能否升超管（修改 carrier=NULL）—— 当前规则上可以，但应在 UI 加二次确认

@@ -529,7 +529,8 @@ export const adminApi = {
   },
 
   async getAllRoles(): Promise<Role[]> {
-    const { data } = await http.get<BackendRole[]>('/admin/roles');
+    // PRD §11.10 v0.9：下拉用全量端点，不复用分页端点（/admin/roles 返回 PageResponse 而非数组）。
+    const { data } = await http.get<BackendRole[]>('/admin/roles/all');
     return (Array.isArray(data) ? data : []).map(mapBackendRole);
   },
 
@@ -614,11 +615,11 @@ export const adminApi = {
       id: role.id,
       groupName: role.name,
       description: role.description,
-      builtIn: role.isSystem ? 1 : 0,
-      userCount: role.userCount || 0,
+      builtIn: role.is_system ? 1 : 0,
+      userCount: role.user_count || 0,
       roleCount: 0, // 角色没有"角色数"概念
-      updUser: role.updatedBy || '',
-      updTime: role.updatedAt || '',
+      updUser: role.updated_by || '',
+      updTime: role.updated_at || '',
     }));
   },
 
