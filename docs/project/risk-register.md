@@ -198,16 +198,21 @@
 - **关闭依据**：`docs/project/prd/F06-license-enforcement.md` + `docs/review-report/20260428/verify-T-0015.md` + commit (post-S6)
 - **下次复盘**：N/A（已关闭）
 
-### R-104 拓扑自动分组规则引擎未激活
-- **描述**：`rule_service` 注释为 TODO，rule_matcher 存在但未接入
+### R-104 拓扑自动分组规则引擎未激活 — **已关闭 2026-05-06**
+- **描述**：~~`rule_service` 注释为 TODO，rule_matcher 存在但未接入~~ → 三路径全闭环
 - **等级**：P1
 - **概率**：低
-- **影响**：分组依赖手工维护，规模上不去
+- **影响**：~~分组依赖手工维护，规模上不去~~ → 解决
 - **Owner**：架构师
-- **状态**：Open
-- **关联 Task**：T-0027（**planned，sprint-09 / Owner Claude / S2 done 2026-04-30** — D1-D7 全拍板 + PRD `prd/F06-topology-auto-grouping.md` + 设计备忘补完 §12，待 S3 编码）
-- **缓解**：sprint-09（2026-05-01 ~ 2026-05-14）激活；S3 实施清单 12 步 ~21h ≈ 3 人日；4 接线断点（getAllDevices / EventBus 订阅 device.inform.bootstrap / cron @hourly / device_group_members source_type）+ migration 000051
-- **下次复盘**：sprint-09 末（2026-05-14 Sprint Retro）— S6 commit 后随 T-0027 done 本风险关闭
+- **状态**：**Closed**（2026-05-06）
+- **关联 Task**：T-0027（**done sprint-09 / Owner Claude**；S0-S7 全过 11 commits — `b7fd2add` ID 修正 → `689207ad` S0 PRD → ... → `ad553f95` S3 Day 9 FE）
+- **关闭依据**：
+  * 三路径全闭环：手工 ApplyRule（Day 4-5）+ cron @hourly reEvaluateAll（Day 6）+ device.registered EventBus 订阅（Day 7）
+  * A4 manual override SQL 层守护（Day 5 `WHERE source_type IS DISTINCT FROM 'manual'`），三路径自然继承
+  * 6 metric + 7 log key 完整交付（Day 8 PRD §12.5 全核销）
+  * 17 unit test PASS / 2 SKIP（A4/A5 PG integration 重定位 S4） / 0 FAIL / -race 全过
+  * verify report：`docs/review-report/20260506/verify-T-0027.md`
+- **followup**（不阻塞 R-104 关闭）：A4 PG integration test、Gauge 周期 SQL 抽样、evaluation_duration timer 包裹、W3 LAC/TAC 数据源（候选 T-0098）— 详见 verify §9
 
 ### R-105 syslog 远程转发缺失
 - **描述**：仅查询，无 UDP/TCP syslog 转发

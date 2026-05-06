@@ -67,15 +67,15 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 95 | — | **+T-0097**（MML console「保存脚本」弹窗 API 结果反馈 bug；@chenbo01 提需求 2026-04-30；静态核查显示 toast 代码已有 → 真实性存疑，待 triage reproduce；T-0096 上游）；**+T-0096**（MML script 页面「更新」弹窗取消产品类型字段，与 /mml/console 对齐；@chenbo01 提需求 2026-04-30，proposed）；**+T-0094**（T-0090 triage 时发现 MML category_group DB 列缺失 pre-existing bug 拆分）；T-0093（T-0032 carve-out SFTP/FTPS auth probe）|
-| `done` | 77 | — | **+T-0028** (syslog 远程转发 UDP/TCP — RFC 3164 wire format / UDP fire-and-forget / TCP 持久连接 lazy reconnect / Forwarder API / 17 severity / 0 新依赖) **+T-0029** (RF 控制走 Carrier 适配器 — Carrier 接口 +RFControlPath(tech) / 3 carrier 适配 / DeviceService DI carrier registry / 去 LTE 硬编码) **+T-0031** (CAPTCHA 图形生成 — PNG 5-char 噪图 / 5×7 bitmap font / 31-char keyspace / crypto/rand 全程 / 0 新依赖)；+T-0032 / +T-0092 / +T-0087 / +T-0086 / +T-0085 / +T-0083 / +T-0088 / +T-0089 / +T-0084 / +T-0082 / +T-0075 / +T-0076 / +T-0079 / +T-0078 / +T-0080 / +T-0072 / +T-0077 / +T-0074 / +T-0073 / +T-0071 / +T-0070 / +T-0016 / +T-0021 / +T-0019 / +T-0018 / +T-0025 / +T-0022 / +T-0012 / +T-0015 |
+| `done` | 78 | — | **+T-0027** (拓扑自动分组规则引擎激活 — 三路径全闭环：手工 ApplyRule + cron @hourly + device.registered；A4 SQL 守护；6 metric + 7 log key；FE source 列；R-104 关闭；S0-S7 全过 11 commits 见 verify-T-0027.md) **+T-0028** (syslog 远程转发 UDP/TCP — RFC 3164 wire format / UDP fire-and-forget / TCP 持久连接 lazy reconnect / Forwarder API / 17 severity / 0 新依赖) **+T-0029** (RF 控制走 Carrier 适配器 — Carrier 接口 +RFControlPath(tech) / 3 carrier 适配 / DeviceService DI carrier registry / 去 LTE 硬编码) **+T-0031** (CAPTCHA 图形生成 — PNG 5-char 噪图 / 5×7 bitmap font / 31-char keyspace / crypto/rand 全程 / 0 新依赖)；+T-0032 / +T-0092 / +T-0087 / +T-0086 / +T-0085 / +T-0083 / +T-0088 / +T-0089 / +T-0084 / +T-0082 / +T-0075 / +T-0076 / +T-0079 / +T-0078 / +T-0080 / +T-0072 / +T-0077 / +T-0074 / +T-0073 / +T-0071 / +T-0070 / +T-0016 / +T-0021 / +T-0019 / +T-0018 / +T-0025 / +T-0022 / +T-0012 / +T-0015 |
 | `in_dev` | 1 | — | T-0095 KPI（FREEZE 冲突，PgM 待决；2026-04-30 由 T-0027 改号，原 T-0027 真号属拓扑分组） |
 | `in_design` | 0 | — | T-0028 + T-0029 + T-0031 + T-0083 + T-0085 + T-0086 + T-0087 + T-0092 + T-0032 全部 done；当前无 in_design |
 | `planned` | 6 | — | 不变 |
 | `triaged` | 7 | — | **−T-0027**（拓扑分组 D1-D7 全拍板 + S1 排期 sprint-09 + S2 设计备忘补完 → §3 Active planned）；**−T-0094**（MML category_group SQL 闭环 → §8 Rejected）；**+T-0097**（MML console 保存脚本反馈 bug；pre-pick 需 reproduce）**+T-0096**（MML script 弹窗取消产品类型；deps T-0090 反向语义）**+T-0090**（MML UX 整改 — B 扩展后 7 子项 / XL / Risk 双重）；剩 T-0030 F10 互操作 + T-0091 真 KMS + T-0093 SFTP/FTPS + T-0035 前端多皮肤（均不阻塞主链路） |
-| `planned` | 7 | — | **+T-0027**（拓扑分组 / Owner Claude / sprint-09 / S2 done 待 user 确认进 S3） |
+| `planned` | 6 | — | **−T-0027** (done 2026-05-06，三路径闭环 + R-104 关闭 → §6 Done) |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
-| **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：P1 R-103 在 T-0015 后关闭，但不计入 P0 计数）|
+| **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**）|
 | **Wave 1 计分** | **8.0 / 8 ✅** | ≥ 6/8 | 满分；提前 13 天达成（对峙日 2026-05-11） |
 | **Wave 2 章程计分** | **12 / 13 ✅ (AI 极限)** | ≥ 9/13 | A.1+A.2+A.4+A.5 + B.1-4 + C.1-3 + D.1 全 PASS（92%）；仅 W2.A.3 短信（T-0014 deps T-0009 凭据外部，AI 不可解锁）|
 | **Wave 3 章程计分** | **11 / 15 ✅ (退出门槛达成)** | ≥ 11/15 | **🎉 真过门 73%**：E.1+E.2+E.3 (NATS) / F.2+F.3 (性能/连接池) / G.1+G.2+G.3 (安全) / H.1+H.3 (K8s/异地备份) / I.1 (Release Gate)；剩余 4 项：F.1 (5K 24h 压测)/H.2 (零停机演练)/I.2 (灰度演练)/I.3 (回滚演练) — 均需 staging 环境 |
@@ -314,7 +314,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0078 | 前端 RestoreData wholesale rewrite + 3 hook + 26 i18n key（**MVP 手动路径输入**；filemanager 路径架构不匹配 → 文件浏览器拆 T-0081 / T-0079 后做）| feat | frontend | P1 | done | Claude | L | T-0072 ✅ | R-102 / `prd/T-0078-frontend-restoredata-rewrite.md` | sprint-07 | 2026-04-29 |
 | T-0079 | backup_task → file_path 链路回填（EventBus pub-sub + filename embed taskID8 + DB-layer CAS first-write-wins + restore_by_task_id 新 endpoint）| feat | F06/backup | P2 | done | Claude | M | T-0072 ✅, T-0007 ✅ | R-102 / `prd/T-0079-backup-task-filepath-linkage.md` | sprint-07 | 2026-04-29 |
 | T-0080 | migration 000038 重复 hotfix（rename `000038_upgrade_tasks_firmware_id_nullable.sql` → `000049_*.sql` 让 goose 可解析；pre-existing 历史遗留，T-0072 review-agent 发现）| fix | infra/migration | P0 | done | Claude | S | — | CLAUDE.md §5.5 / T-0072 review finding | sprint-07 | 2026-04-29 |
-| T-0027 | 拓扑自动分组规则引擎激活（4 接线断点：getAllDevices stub + EventBus 订阅 + cron @hourly + device_group_members source_type；migration 000051）| feat | F06/topology | P1 | planned | Claude | M | — | R-104 / `prd/F06-topology-auto-grouping.md` (S2 done) | sprint-09 | 2026-04-30 |
+| T-0027 | 拓扑自动分组规则引擎激活（三路径全闭环：手工 ApplyRule + cron @hourly + device.registered EventBus；A4 SQL 守护；6 metric + 7 log key + FE 来源列；R-104 关闭）| feat | F06/topology | P1 | done | Claude | M | — | R-104 关闭 / `prd/F06-topology-auto-grouping.md` / `docs/review-report/20260506/verify-T-0027.md` | sprint-09 | 2026-05-06 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
