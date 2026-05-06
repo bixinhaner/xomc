@@ -12,6 +12,8 @@
 | 0.5  | 2026-05-06 | Backend/Frontend Team | 数据权限三项决议：① 角色未绑分组时 UI 强提示；② 缓存失效**不引入 EventBus**，handler 同步调 `InvalidateUserCache`；③ 设备分组被删除时，角色侧需提示「分组已删除」；详见 §11.7 |
 | 0.6  | 2026-05-06 | Backend/Frontend Team | 「角色 → 设备分组」相关描述全部迁出：详见 [roles.md §1.4 / §2.6 / §11](./roles.md)。本 PRD 仅保留用户操作侧的 cache invalidation 约束（§6.1 / §10 DoD）+ R3/R4 用户视角规则 + 决议 ② 用户操作侧落点 |
 | 0.7  | 2026-05-06 | Backend/Frontend Team | 列表页"用户名称"列**不再标记**内置（取消 `<Tag color="blue">内置</Tag>`），内置/管理员/LDAP 三种来源统一由独立的"来源"列（§3.1 第 8 列）承担，避免双源信息冗余；操作菜单按钮的置灰 + Tooltip 提示规则不变。详见 §11.8 |
+| 0.8  | 2026-05-06 | Backend/Frontend Team | 列表页"创建人/更新人"列：值为空（`createdBy / updatedBy IS NULL`）时显示**"内置"**而非 `-`。语义：seed 写入的内置用户与 LDAP 同步任务都没有 operator UUID，统一以"内置"兜底；非空时仍走 `useAllUsers` 做 id→username 映射。详见 §11.9 |
+| 0.9  | 2026-05-06 | Backend/Frontend Team | 完整 **LDAP 集成方案** 落定：登录 bind 验证、周期+手动同步、字段映射、group→role 映射、异常处理、3 类新接口、2 张新表（`ldap_group_role_mappings` / `ldap_sync_logs`）。详见 §12；与 [system-config.md `ldap` Tab](./system-config.md) 共享配置项 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -49,7 +51,7 @@ OMC 是面向运营商的商用网管系统，用户管理是 RBAC 的入口：
 |------|----------------|---------|---------|
 | **内置用户** | `builtIn` | 由 `migrations/seed/` 在系统初始化时写入（如 `admin`） | **不可删除、不可禁用、不可改用户名**；其他字段（`displayName` / `email` / `phone` / `password` / `roles` / `description`）可改 |
 | **管理员添加** | `admin` | 由有权限的管理员通过本页面 `POST /admin/users` 创建 | 可执行全部用户操作 |
-| **LDAP 用户** | `LDAP` | 由 LDAP 同步任务（F06 LDAP 模块）写入 | **禁止"重置密码"**（密码归属外部域）；可禁用、可删除（仅删本地映射，不影响 LDAP 源） |
+| **LDAP 用户** | `LDAP` | 由 LDAP 同步任务（v0.9 起由 worker 进程的 cron 触发；详见 §12.4）+ 手动同步 / 即时（JIT）首登创建 | **登录走 LDAP bind 验证**，不查本地 `password_hash`；**禁止"重置密码"**（密码归属外部域）；可禁用、可删除（仅删本地映射，不影响 LDAP 源）。完整方案见 §12 |
 
 ⚠️ **大小写约定**：枚举字面值大小写混杂（camelCase / lower / UPPER），由 DB CHECK 约束锁定。前后端 / 文档 / SQL 中必须严格保持字面值。如未来需统一，走 P3 数据迁移。
 
@@ -233,8 +235,8 @@ interface User {
 | 10 | `lastLoginTime` | 最后登录时间 | datetime | 格式化，空 `-` | 160 | |
 | 11 | `createTime` | 创建时间 | datetime | 格式化，空 `-` | 160 | |
 | 12 | `updateTime` | 更新时间 | datetime | 格式化，空 `-` | 160 | |
-| 13 | `createUser` | 创建人 | string | 文本，空 `-` | 100 | |
-| 14 | `updateUser` | 更新人 | string | 文本，空 `-` | 100 | |
+| 13 | `createdBy`（前端实际 dataIndex；PRD 历史名 `createUser`） | 创建人 | UUID | 非空 → `useAllUsers` 做 id→username 映射；**空 → "内置"**（v0.8） | 110 | |
+| 14 | `updatedBy`（前端实际 dataIndex；PRD 历史名 `updateUser`） | 更新人 | UUID | 同上（共用 `renderUserId`） | 110 | |
 | 15 | `description` | 备注 | string | `ellipsis: true`，长度 > 20 加 `<Tooltip>` 显示全量 | 150 | |
 
 ### 3.2 表格能力
@@ -535,7 +537,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 #### `POST /admin/users/{id}/reset-password` — 重置密码
 
 **前置校验**（v0.2）：
-- `source = 'LDAP'` → 返回 `409 Conflict` `{ "error": "LDAP user password is managed externally" }`
+- `source = 'LDAP'` → 返回 `409 Conflict` `{ "error": "LDAP user password is managed externally" }`（LDAP 用户密码归外部域，重置请到 LDAP/AD 端；详见 §12.5）
 - `source = 'builtIn'` → 允许（紧急通道）
 
 **Body**：`{ "new_password": "..." }`（min 6）
@@ -630,7 +632,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
    - `description TEXT NULL`
    - `created_by UUID NULL` / `updated_by UUID NULL`（`REFERENCES users(id) ON DELETE SET NULL`）
 5. **Model / DTO 跟进**：`User` 结构体、`CreateUserRequest`、`UpdateUserRequest` 增对应字段
-6. **登录守卫扩展**：登录时校验 `expire_at` 已过 / `status = disabled` / `source = 'LDAP'` 时改走 LDAP 流程（暂留接口，由 LDAP 模块对接）
+6. **登录守卫扩展**：登录时校验 `expire_at` 已过 / `status = disabled`；`source = 'LDAP'` 改走 LDAP bind 验证流程（**v0.9 已落定完整方案，详见 §12.5**）
 7. **强制下线接口**（§6.3 第 1 条）+ Redis 会话/黑名单设计（§6.4）
 8. **批量分配角色接口** `POST /admin/users/assign-roles`（v0.3 重命名自 `move-group`，§6.3 第 2 条）：语义为「整体替换角色集」（与 `UpdateUserRequest.RoleIDs` 差量同步一致）。如需「追加」语义另开 `append-roles`
 
@@ -652,7 +654,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 ## 8. 非目标（Out of Scope）
 
 - 单点登录（SSO / OAuth2）—— 由独立模块处理
-- LDAP 同步实现 —— 仅在 schema 上预留 `source` 字段，实际同步由 F06 LDAP 模块负责
+- ~~LDAP 同步实现~~（v0.9 起**已纳入本 PRD 范围**，详见 §12）
 - 多租户用户隔离 —— 当前以 `carrier` 字段做软隔离，不做强租户
 - 用户偏好（主题、语言）—— 由 `appStore` 前端本地保存，不入用户主表
 - API Keys 管理 —— 已有 `api_keys` 表（见 §2.1），但本页面不涉及
@@ -866,3 +868,36 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 **实施面**：
 
 - 前端 `UserManagement/index.tsx` 列定义中 `displayName` 列 `render` 移除 `isBuiltIn(user) && <Tag>` 分支，回到纯文本
+
+### 11.9 v0.8 — 列表"创建人/更新人"列空值显示"内置"
+
+**问题**：`users.created_by / updated_by` 是 v0.4 / 000054 迁移加入的可空 UUID 列，目前在三种情况下会是 `NULL`：
+
+1. **内置用户（source=builtIn）**：seed 文件写入，没有 operator
+2. **LDAP 同步任务**：同步进程没有 operator UUID（属于"系统"代理）
+3. **历史数据兼容**：v0.7 之前已存在的用户，迁移 000054 加列时也是 NULL
+
+之前列里这三种都显示 `-`，让管理员看不懂"为什么这条没创建人"。
+
+**决议**：
+
+- "创建人" / "更新人" 列：**`createdBy / updatedBy` 为空时显示"内置"**；非空时仍走 `useAllUsers` 做 id→username 映射
+- 复用同一个 `renderUserId(val)` 函数，列表两列 + 查看 Drawer 两个 `Form.Item` 共享，避免散落
+- 含义说明：「内置」在本上下文等价于「无 operator UUID」，覆盖 builtIn / LDAP / 历史 三种成因
+
+**为何不区分 LDAP / 历史 / builtIn**：
+
+| 选项 | 取舍 |
+|------|------|
+| 当前选定：统一显示"内置" | 简单可读；来源信息已由"来源"列承担，不会真混淆 |
+| 备选 A：用 `source` 派生（builtIn→"内置" / LDAP→"LDAP 同步" / 其它空 → "-"） | 更精准，但渲染依赖第二个字段，且历史数据无 source 时仍要兜底 |
+| 备选 B：后端 join `users` 表把"系统"显示为伪用户名 | 引入伪行，污染 users 表 |
+
+选项一被采纳：UI 信息密度低、来源已显式列出、避免后端污染。
+
+**实施面**：
+
+- 前端 `UserManagement/index.tsx` `renderUserId` 助手：值为 falsy 时返回 `'内置'`（替代之前的 `'-'`）
+- 列表 `createdBy` / `updatedBy` 两列、查看 Drawer 的"创建人 / 更新人"两个 `Form.Item` 共享同一函数，自动一致
+
+**未来回退**：若运营商要求严格区分"系统"与"内置"，可改回选项 A：基于 `selectedUser.source` 做三态映射，作为 v0.9 决议另开。

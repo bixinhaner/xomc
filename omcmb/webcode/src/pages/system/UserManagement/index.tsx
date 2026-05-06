@@ -86,13 +86,14 @@ export default function UserManagement() {
   const { data: allUsers } = useAllUsers();
 
   // 创建人 / 更新人列：后端字段是 UUID，前端用 username 展示。
+  // PRD §11.9 v0.8：空值显示"内置"（覆盖 builtIn / LDAP / 历史三种无 operator 场景）。
   const userIdToName = useMemo(() => {
     const map = new Map<string, string>();
     (allUsers ?? []).forEach((u) => map.set(u.id, u.username));
     return map;
   }, [allUsers]);
   const renderUserId = useCallback((val: unknown) => {
-    if (!val) return '-';
+    if (!val) return '内置';
     const id = String(val);
     return userIdToName.get(id) ?? id.slice(0, 8);
   }, [userIdToName]);
