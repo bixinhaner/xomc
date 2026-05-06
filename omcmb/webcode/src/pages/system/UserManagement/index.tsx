@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   App,
   Button,
@@ -33,7 +33,6 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import ImportPanel, { type ImportPanelRef } from '@/components/ImportPanel';
 import dayjs from 'dayjs';
 import {
   useUsers,
@@ -49,13 +48,10 @@ import {
   useResetPassword,
   useBatchAssignRoles,
 } from '@core/hooks/api/useSystem';
-import { adminApi, type ImportUserResult } from '@core/services/api/adminApi';
 import type { User, UserRole, UserStatus } from '@core/types/system';
 import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
-
-type CreateMode = 'add' | 'import';
 
 export default function UserManagement() {
   const t = useT();
@@ -64,7 +60,6 @@ export default function UserManagement() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [createVisible, setCreateVisible] = useState(false);
-  const [createMode, setCreateMode] = useState<CreateMode>('add');
   const [editVisible, setEditVisible] = useState(false);
   const [viewVisible, setViewVisible] = useState(false);
   const [resetPwdVisible, setResetPwdVisible] = useState(false);
@@ -74,7 +69,6 @@ export default function UserManagement() {
   const [pwdForm] = Form.useForm();
   const [moveGroupForm] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const importPanelRef = useRef<ImportPanelRef>(null);
 
   const { data, isLoading, refetch } = useUsers({
     userName: filters.userName as string | undefined,
@@ -216,51 +210,10 @@ export default function UserManagement() {
     });
   };
 
-  const [importing, setImporting] = useState(false);
-  const handleImport = useCallback(async (file: File): Promise<ImportUserResult> => {
-    setImporting(true);
-    try {
-      return await adminApi.importUsers(file);
-    } finally {
-      setImporting(false);
-    }
-  }, []);
-
-  const handleImportSuccess = useCallback((result: unknown) => {
-    const r = result as ImportUserResult;
-    if (r.failed > 0) {
-      const sample = (r.errors ?? []).slice(0, 3).map((e) => `第 ${e.row} 行: ${e.message}`).join('\n');
-      modal.warning({
-        title: '部分导入失败',
-        content: `成功 ${r.created} 条，失败 ${r.failed} 条${sample ? '\n' + sample : ''}`,
-      });
-    } else {
-      message.success(`导入成功 ${r.created} 条`);
-    }
-    setCreateVisible(false);
-    void refetch();
-  }, [message, modal, refetch]);
-
-  const handleDownloadTemplate = useCallback(async () => {
-    try {
-      const blob = await adminApi.downloadImportTemplate();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'users_import_template.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error(err, t('common.error'));
-    }
-  }, [t]);
-
   const handleEdit = () => {
     if (!selectedUser) return;
     form.validateFields().then((vals) => {
-      // 仅传后端 UpdateUserRequest 接收的字段：display_name / email / phone / carrier / status / role_ids。
+      // 仅传后端 UpdateUserRequest 接收的字段：display_name / email / phone / status / role_ids（v1.0：carrier 已删除）。
       // role_ids 非 undefined 时由后端做差量同步。
       const expire = vals.expireTime as dayjs.Dayjs | undefined;
       const data: Partial<User> = {
@@ -442,7 +395,6 @@ export default function UserManagement() {
   }, [copyUser, t, modal]);
 
   const openCreateDrawer = () => {
-    setCreateMode('add');
     setCreateVisible(true);
     form.resetFields();
   };
@@ -597,7 +549,7 @@ export default function UserManagement() {
     },
     {
       key: 'displayName',
-      title: '用户名称',
+      title: '用户昵称',
       dataIndex: 'displayName',
       width: 150,
       // PRD §11.8 v0.7：不再追加"内置"Tag；内置/管理员/LDAP 来源由"来源"列承担。
@@ -816,9 +768,10 @@ export default function UserManagement() {
         />
       </Card>
 
-      {/* Create Drawer - 包含添加和导入两种模式 */}
+      {/* 添加用户 Drawer (PRD §5.1 / §11.12)：v1.1 起取消"导入用户"模式切换；
+          字段顺序与 §5.2 编辑表单完全对齐（创建独有的 password / confirmPassword 紧随 username 之后）。 */}
       <Drawer
-        title={t('common.add')}
+        title="添加用户"
         open={createVisible}
         onClose={() => {
           setCreateVisible(false);
@@ -838,39 +791,26 @@ export default function UserManagement() {
             </Button>
             <Button
               type="primary"
-              loading={createMode === 'add' ? createUser.isPending : importing}
-              onClick={createMode === 'add' ? handleCreate : () => importPanelRef.current?.handleImport()}
+              loading={createUser.isPending}
+              onClick={handleCreate}
             >
               {t('common.confirm')}
             </Button>
           </div>
         }
       >
-        {/* 模式切换 */}
-        <Radio.Group
-          value={createMode}
-          onChange={(e) => setCreateMode(e.target.value)}
-          style={{ marginBottom: 24 }}
-        >
-          <Radio value="add">{t('user.addUser')}</Radio>
-          <Radio value="import">{t('user.importUser')}</Radio>
-        </Radio.Group>
-
-        {/* 添加用户表单 —— to-do-list 本轮 系统管理#1：
-            · 字段名 userName → username，与后端 CreateUserRequest.Username 对齐（修复 400）
-            · 必填字段（用户名/密码/确认密码/角色）排列在前，非必填（邮箱/手机/到期时间/描述）在后
-            · 角色选择紧跟在"确认密码"之后 */}
-        {createMode === 'add' && (
-          <Form form={form} layout="vertical">
+        {/* 添加用户表单 (PRD §5.1 / §11.12)：v1.1 起字段顺序与编辑表单同步，
+            标签统一为"用户账号 / 用户昵称"。 */}
+        <Form form={form} layout="vertical">
             <Form.Item
               name="username"
-              label={t('user.userName')}
+              label="用户账号"
               rules={[
                 { required: true, message: t('user.pleaseInputUserName') },
                 { pattern: /^[a-zA-Z0-9_-]{3,32}$/, message: t('user.userNameRule') },
               ]}
             >
-              <Input placeholder={t('user.userName')} maxLength={32} />
+              <Input placeholder="用户账号" maxLength={32} />
             </Form.Item>
             <Form.Item
               name="password"
@@ -898,28 +838,8 @@ export default function UserManagement() {
             >
               <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
             </Form.Item>
-            <Form.Item
-              name="roleIds"
-              label="角色"
-              rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
-            >
-              <Select
-                mode="multiple"
-                placeholder={t('common.pleaseSelect')}
-                options={roleOptions}
-              />
-            </Form.Item>
-            <Form.Item
-              name="displayName"
-              label="用户名称"
-            >
+            <Form.Item name="displayName" label="用户昵称">
               <Input placeholder="留空则与用户账号相同" maxLength={64} />
-            </Form.Item>
-            <Form.Item name="status" label="状态" initialValue="active">
-              <Radio.Group>
-                <Radio value="active">激活</Radio>
-                <Radio value="disabled">禁用</Radio>
-              </Radio.Group>
             </Form.Item>
             <Form.Item
               name="email"
@@ -937,6 +857,23 @@ export default function UserManagement() {
             >
               <Input placeholder={t('user.phone')} maxLength={11} />
             </Form.Item>
+            <Form.Item
+              name="roleIds"
+              label="角色"
+              rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
+            >
+              <Select
+                mode="multiple"
+                placeholder={t('common.pleaseSelect')}
+                options={roleOptions}
+              />
+            </Form.Item>
+            <Form.Item name="status" label="状态" initialValue="active">
+              <Radio.Group>
+                <Radio value="active">激活</Radio>
+                <Radio value="disabled">禁用</Radio>
+              </Radio.Group>
+            </Form.Item>
             <Form.Item name="expireTime" label="过期时间" extra="留空表示永久有效；过期后该用户将无法登录">
               <DatePicker
                 showTime
@@ -946,22 +883,9 @@ export default function UserManagement() {
               />
             </Form.Item>
             <Form.Item name="description" label="备注">
-              <Input.TextArea rows={3} placeholder="备注（可选）" maxLength={500} showCount />
+              <Input.TextArea rows={3} placeholder="备注，可选" maxLength={500} showCount />
             </Form.Item>
           </Form>
-        )}
-
-        {/* 导入用户 */}
-        {createMode === 'import' && (
-          <ImportPanel
-            ref={importPanelRef}
-            accept=".xlsx,.xls"
-            maxSizeMB={10}
-            onImport={handleImport}
-            onSuccess={handleImportSuccess}
-            onDownloadTemplate={handleDownloadTemplate}
-          />
-        )}
       </Drawer>
 
       {/* Edit Drawer */}
@@ -994,13 +918,13 @@ export default function UserManagement() {
       >
         <Form form={form} layout="vertical">
           {/* 编辑表单字段与后端 admin.UpdateUserRequest 对齐：
-              display_name / email / phone / carrier / status / role_ids。
+              display_name / email / phone / status / role_ids（v1.0：carrier 已删除）。
               role_ids 由后端 service.syncUserRoles 做差量同步。 */}
           <Form.Item name="username" label="用户账号">
             <Input readOnly />
           </Form.Item>
-          <Form.Item name="displayName" label="用户名称">
-            <Input placeholder="用户名称" maxLength={64} />
+          <Form.Item name="displayName" label="用户昵称">
+            <Input placeholder="用户昵称" maxLength={64} />
           </Form.Item>
           <Form.Item
             name="email"
@@ -1083,7 +1007,7 @@ export default function UserManagement() {
           <Form.Item name="username" label="用户账号">
             <Input readOnly />
           </Form.Item>
-          <Form.Item label="用户名称">
+          <Form.Item label="用户昵称">
             <span>{selectedUser?.displayName || '-'}</span>
           </Form.Item>
           <Form.Item name="email" label={t('user.email')}>

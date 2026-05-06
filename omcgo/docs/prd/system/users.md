@@ -15,6 +15,8 @@
 | 0.8  | 2026-05-06 | Backend/Frontend Team | 列表页"创建人/更新人"列：值为空（`createdBy / updatedBy IS NULL`）时显示**"内置"**而非 `-`。语义：seed 写入的内置用户与 LDAP 同步任务都没有 operator UUID，统一以"内置"兜底；非空时仍走 `useAllUsers` 做 id→username 映射。详见 §11.9 |
 | 0.9  | 2026-05-06 | Backend/Frontend Team | 下拉列表必须显示**业务名字**（而非 UUID）：`<Select>` `value` 用 UUID（提交后端用），`label` 用 `roleName/displayName/...`。Options 必须从对应资源的「全量」端点（如 `GET /admin/roles/all`）拿，不能复用分页端点。修复 `adminApi.getAllRoles` 误调 `/admin/roles`（分页）→ 改为 `/admin/roles/all`，否则编辑用户时角色下拉显示 UUID。详见 §11.10 |
 | 0.9  | 2026-05-06 | Backend/Frontend Team | 完整 **LDAP 集成方案** 落定：登录 bind 验证、周期+手动同步、字段映射、group→role 映射、异常处理、3 类新接口、2 张新表（`ldap_group_role_mappings` / `ldap_sync_logs`）。详见 §12；与 [system-config.md `ldap` Tab](./system-config.md) 共享配置项 |
+| 1.0  | 2026-05-06 | Backend/Frontend Team | **删除 `users.carrier` 字段**：超管判定改用 `source = 'builtIn'`；JWT 新增 `IsSuperAdmin` claim；Casbin 去 domain；`PermissionService.GetUserVisibleGroupIDs` 签名改为传 `isSuperAdmin bool`；UI 多租户 carrier（设备/告警维度）不动。LDAP `sync_carrier` 配置项作废。详见 §11.11 |
+| 1.1  | 2026-05-06 | Backend/Frontend Team | UI 文案与表单同步：① 新增/编辑/查看/列表四处的字段标签统一为 `username → 用户账号`、`displayName → 用户昵称`，列表第 2 列 title 同步改"用户昵称"；② **取消"导入用户"功能前端入口**（Radio 模式切换 + ImportPanel 集成全部移除），新增 Drawer 仅保留"添加用户"表单，字段顺序与编辑 Drawer 完全对齐；后端 `POST /admin/users/import` + `GET /admin/users/import/template` 端点能力**保留**（暂作内部工具，不暴露 UI）。详见 §11.12 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -71,9 +73,9 @@ OMC 是面向运营商的商用网管系统，用户管理是 RBAC 的入口：
 **用户视角的两条规则**（详细规则见 roles.md §11.1 R 全集）：
 
 - **R3 用户继承**：用户的设备数据可见域 = 其所拥有角色的 `role_device_groups` 绑定**并集**（多角色按并集放宽）。
-- **R4 超管旁路**：`users.carrier IS NULL` 表示超管，绕过角色绑定检查，看见所有设备分组。
+- **R4 超管旁路**（v1.0 改）：`users.source = 'builtIn'` 表示超管，绕过角色绑定检查，看见所有设备分组、所有菜单、所有 API。`source` 是创建时即固定的不可变属性，确保超管身份不可被运行期改写。
 
-**用户管理操作触发的缓存失效要求**：当用户被分配 / 解绑角色，或 `carrier` 字段被修改时，service 层必须同步调 `PermissionService.InvalidateUserCache(userID)`（详见 §6.1 副作用注解 + §10 DoD）。其它影响可见域的写操作（角色 → 设备分组绑定变更、设备分组层级变更）由 [roles.md §11.3](./roles.md) 与 F06 拓扑管理 PRD 承担。
+**用户管理操作触发的缓存失效要求**：当用户被分配 / 解绑角色（影响可见角色集合）时，service 层必须同步调 `PermissionService.InvalidateUserCache(userID)`（详见 §6.1 副作用注解 + §10 DoD）。其它影响可见域的写操作（角色 → 设备分组绑定变更、设备分组层级变更）由 [roles.md §11.3](./roles.md) 与 F06 拓扑管理 PRD 承担。
 
 ---
 
@@ -89,7 +91,7 @@ OMC 是面向运营商的商用网管系统，用户管理是 RBAC 的入口：
 | `password_hash` | VARCHAR(256) | NOT NULL | bcrypt 哈希，**不下发到前端**（json:"-"） |
 | `display_name` | VARCHAR(128) | NULL | 展示名 |
 | `email` | VARCHAR(256) | NULL | 邮箱 |
-| `carrier` | VARCHAR(4) | NULL | 运营商：`cmcc` / `ctcc` / `cucc`（NULL = 不绑定） |
+| ~~`carrier`~~ | ~~VARCHAR(4)~~ | ~~NULL~~ | ~~运营商：`cmcc` / `ctcc` / `cucc`~~ **v1.0 删除**（迁移文件 `000NNN_drop_users_carrier.sql`，超管判定改用 `source = 'builtIn'`，详见 §11.11）|
 | `status` | VARCHAR(16) | NOT NULL, DEFAULT 'active' | `active` / `disabled` |
 | `source` | VARCHAR(16) | NOT NULL, DEFAULT 'admin', `CHECK (source IN ('builtIn','admin','LDAP'))` | 用户来源（v0.2 新增）：`builtIn` 系统内置（不可删/不可禁用） / `admin` 管理员添加 / `LDAP` LDAP 同步 |
 | `last_login_at` | TIMESTAMPTZ | NULL | 最后登录时间 |
@@ -99,7 +101,7 @@ OMC 是面向运营商的商用网管系统，用户管理是 RBAC 的入口：
 | `created_at` | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 创建时间 |
 | `updated_at` | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 更新时间（trigger） |
 
-索引：`idx_users_username(username)`、`idx_users_carrier(carrier) WHERE carrier IS NOT NULL`、`idx_users_status(status)`、`idx_users_source(source)`（v0.2 新增，用于按来源筛选与防误删校验）
+索引：`idx_users_username(username)`、`idx_users_status(status)`、`idx_users_source(source)`（v0.2 新增，用于按来源筛选与防误删校验）。~~`idx_users_carrier`~~ v1.0 随 carrier 列一并删除。
 
 **约束建议**（v0.2）：
 
@@ -144,7 +146,7 @@ type User struct {
     PasswordHash        string             `json:"-"`
     DisplayName         string             `json:"display_name"`
     Email               string             `json:"email,omitempty"`
-    Carrier             *model.CarrierCode `json:"carrier,omitempty"`
+    // Carrier *model.CarrierCode `json:"carrier,omitempty"` — v1.0 删除，超管判定走 source='builtIn'
     Status              UserStatus         `json:"status"`         // "active" | "disabled"
     Roles               []Role             `json:"roles,omitempty"`
     FailedLoginAttempts int                `json:"failed_login_attempts"`
@@ -170,7 +172,7 @@ interface User {
   role: UserRole;
   status: UserStatus;
   phone?: string;
-  carrier?: string;
+  // carrier?: string; — v1.0 删除（前端 User 类型同步移除）
   lastLoginTime?: string;
   createTime: string;
   updateTime?: string;
@@ -225,7 +227,8 @@ interface User {
 | 顺序 | key | 列标题 | dataIndex 类型 | UI 渲染 | 列宽 | 备注 |
 |------|------|-------|----------------|--------|------|------|
 | 1 | `actions` | 操作 | — | `<Button type="link">查看</Button> + <Dropdown>更多</Dropdown>` | 100，`fixed: 'right'` | 见 §4 操作清单 |
-| 2 | `userName` | 用户名 | string | 纯文本（v0.7 起取消"内置" Tag — 内置/admin/LDAP 三种来源统一由第 8 列"来源"承担，避免冗余） | 130 | |
+| 2 | `displayName` | 用户昵称 | string | 纯文本（v0.7 起取消"内置" Tag — 内置/admin/LDAP 三种来源统一由第 8 列"来源"承担，避免冗余）；v1.1 列 title 由"用户名"改"用户昵称"，与表单字段对齐 | 150 | dataIndex 由前端历史 `userName` 改为真实字段 `displayName` |
+| 2.5 | `username` | 用户账号 | string | 纯文本，monospace 字体（与 ID/账号语义一致） | 130 | v1.1 新增独立列，与"用户昵称"分离 |
 | 3 | `status` | 状态 | enum | `<Tag color="success">启用</Tag>` / `<Tag color="error">禁用</Tag>` | 90 | 后端枚举对齐后改读 `active/disabled` |
 | 4 | `onlineStatus` | 在线状态 | enum | `<Tag color="green">在线</Tag>` / `<Tag>离线</Tag>` | 90 | |
 | 5 | `email` | 邮箱 | string | 文本，`ellipsis: true` | flex | |
@@ -256,7 +259,7 @@ interface User {
 |------|------|--------|------|------------|
 | `userName` | 用户名 | `<Input>` | — | `?search=<keyword>`（后端按 `username` 模糊匹配） |
 
-> **建议补充**（后续迭代）：状态筛选（启用/禁用）、来源筛选（本地/LDAP）、角色筛选、创建时间范围。后端 `UserFilter` 已支持 `Carrier`/`Status`/`Search` 字段。
+> **建议补充**（后续迭代）：状态筛选（启用/禁用）、来源筛选（本地/LDAP）、角色筛选、创建时间范围。后端 `UserFilter` 支持 `Status`/`Search` 字段（v1.0 起 `Carrier` 已删，按角色名隐式过滤 carrier 范围）。
 
 ### 3.4 顶部右侧按钮
 
@@ -332,21 +335,22 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 
 ## 5. 表单字段定义
 
-### 5.1 创建用户 Form（Drawer / 模式："add"）
+### 5.1 创建用户 Form（Drawer，仅一种模式）
 
-> 字段顺序设计：必填在前，选填在后。
+> v1.1 起：① 取消"导入用户"模式切换（Radio 移除）；② 字段顺序与 §5.2 编辑表单**完全一致**（创建独有的 password / confirmPassword 紧随 username 之后），便于 UI 视觉同步；③ 标签统一为"用户账号 / 用户昵称"。
 
 | # | 字段 name | 标签 | 类型 | UI 组件 | 必填 | 默认值 | 校验 | 占位/选项 | 备注 |
 |---|----------|------|------|--------|------|-------|------|---------|------|
-| 1 | `username` | 用户名 | string | `<Input maxLength=32>` | ✅ | — | `pattern: /^[a-zA-Z0-9_-]{3,32}$/`（字母/数字/`_`/`-`，3–32 位）| `用户名` | 创建后不可改 |
+| 1 | `username` | 用户账号 | string | `<Input maxLength=32>` | ✅ | — | `pattern: /^[a-zA-Z0-9_-]{3,32}$/`（字母/数字/`_`/`-`，3–32 位）| `用户账号` | 创建后不可改；v1.1 标签由"用户名"改"用户账号" |
 | 2 | `password` | 密码 | string | `<Input.Password maxLength=20>` | ✅ | — | `min: 8` | `密码` | 提交时明文，由后端 bcrypt |
 | 3 | `confirmPassword` | 确认密码 | string | `<Input.Password maxLength=20>` | ✅ | — | 必须等于 `password` | `确认密码` | 仅前端校验，不提交 |
-| 4 | `roleIds`（v0.3 目标） / `groupNames`（历史） | 角色 | UUID[] | `<Select mode="multiple">` | ✅ | — | 至少选一项 | options 来自 `useAllRoles()`（建议替代 `useAllGroups`）→ `{ label: r.name, value: r.id }` | v0.3：字段统一为 `roleIds`，与后端 `CreateUserRequest.RoleIDs` 直接对齐 |
-| 5 | `status` | 状态 | enum | `<Radio.Group>` 启用 / 禁用 | — | `enabled` | — | — | **TODO**：枚举值改 `active`/`disabled` |
-| 6 | `email` | 邮箱 | string | `<Input maxLength=50>` | — | — | `type: email` | `邮箱` | |
-| 7 | `phone` | 手机 | string | `<Input maxLength=11>` | — | — | `pattern: /^1\d{10}$/`（中国手机号）| `手机` | 后端 DDL 待补 |
-| 8 | `expireTime` | 过期时间 | datetime | `<DatePicker showTime format="YYYY-MM-DD HH:mm:ss">`，禁用过去日期 | — | — | — | — | 后端 DDL 待补 |
-| 9 | `description` | 备注 | string | `<Input.TextArea rows=3 maxLength=500 showCount>` | — | — | — | `备注` | 后端 DDL 待补 |
+| 4 | `displayName` | 用户昵称 | string | `<Input maxLength=64>` | — | — | — | `留空则与用户账号相同` | v1.1 标签由"用户名称"改"用户昵称"；提交时如为空，后端使用 username 兜底 |
+| 5 | `email` | 邮箱 | string | `<Input maxLength=50>` | — | — | `type: email` | `邮箱` | |
+| 6 | `phone` | 手机 | string | `<Input maxLength=11>` | — | — | `pattern: /^1\d{10}$/`（中国手机号）| `手机` | |
+| 7 | `roleIds` | 角色 | UUID[] | `<Select mode="multiple">` | ✅ | — | 至少选一项 | options 来自 `useAllRoles()` → `{ label: r.roleName, value: r.id }` | 字段统一为 `roleIds`，与后端 `CreateUserRequest.RoleIDs` 对齐 |
+| 8 | `status` | 状态 | enum | `<Radio.Group>` 激活 / 禁用 | — | `active` | — | — | |
+| 9 | `expireTime` | 过期时间 | datetime | `<DatePicker showTime format="YYYY-MM-DD HH:mm:ss">`，禁用过去日期 | — | — | — | `留空表示永久有效；过期后该用户将无法登录` | |
+| 10 | `description` | 备注 | string | `<Input.TextArea rows=3 maxLength=500 showCount>` | — | — | — | `备注（可选）` | |
 
 **前端当前提交（payload）**（`UserManagement/index.tsx:154-166`，待重构）：
 
@@ -389,15 +393,18 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 
 ### 5.2 编辑用户 Form（Drawer）
 
-| 字段 name | 标签 | UI 组件 | 是否可编辑 | 备注 |
-|----------|------|--------|-----------|------|
-| `userName` | 用户名 | `<Input readOnly>` | ❌ 只读 | 创建后不可改名 |
-| `email` | 邮箱 | `<Input>` | ✅ | 同创建 |
-| `phone` | 手机 | `<Input>` | ✅ | 同创建 |
-| `roleIds` | 角色 | `<Select mode="multiple">` | ✅ | 必填；v0.3 起字段名统一（历史名 `groupNames` 弃用） |
-| `status` | 状态 | `<Radio.Group>` | ✅ | 启用/禁用 |
-| `expireTime` | 过期时间 | `<DatePicker>` | ✅ | |
-| `description` | 备注 | `<Input.TextArea>` | ✅ | |
+> v1.1 起：字段顺序与 §5.1 创建表单同步（除了创建独有的 password/confirmPassword）；标签统一为"用户账号 / 用户昵称"。
+
+| # | 字段 name | 标签 | UI 组件 | 是否可编辑 | 备注 |
+|---|----------|------|--------|-----------|------|
+| 1 | `username` | 用户账号 | `<Input readOnly>` | ❌ 只读 | 创建后不可改 |
+| 2 | `displayName` | 用户昵称 | `<Input maxLength=64>` | ✅ | v1.1 标签由"用户名称"改"用户昵称" |
+| 3 | `email` | 邮箱 | `<Input>` | ✅ | 同创建 |
+| 4 | `phone` | 手机 | `<Input>` | ✅ | 同创建 |
+| 5 | `roleIds` | 角色 | `<Select mode="multiple" allowClear>` | ✅ | 后端 `service.syncUserRoles` 做差量同步 |
+| 6 | `status` | 状态 | `<Radio.Group>` | ✅ | 激活/禁用 |
+| 7 | `expireTime` | 过期时间 | `<DatePicker>` | ✅ | 留空=永久 |
+| 8 | `description` | 备注 | `<Input.TextArea>` | ✅ | |
 
 > **不可改字段**（所有用户类型）：
 > - `username`（创建后不可改）
@@ -413,7 +420,8 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 |------|---------|---------|
 | `onlineStatus` | `<Tag>` 在线/离线 | — |
 | `status` | `<Tag>` 启用/禁用 | — |
-| `userName` | `<Input readOnly>` | — |
+| `username`（用户账号） | `<Input readOnly>` | — |
+| `displayName`（用户昵称） | `<span>` 文本 | `-` |
 | `email` | `<Input readOnly>` | — |
 | `phone` | `<span>` 文本 | `-` |
 | `roles`（角色名数组） | `<span>` 用 `, ` 拼接 | `-` |
@@ -443,13 +451,16 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 
 > 语义：用 `roleIds` **整体替换** 选中用户的角色集（与 `UpdateUserRequest.RoleIDs` 一致的差量同步语义）。如需「追加角色」交互，另开端点 `POST /admin/users/append-roles`。
 
-### 5.6 导入用户（Drawer / 模式："import"）
+### 5.6 导入用户（v1.1 起前端入口移除）
 
-- 组件：`<ImportPanel>`
-- 文件类型：`.xlsx / .xls`
-- 最大尺寸：10 MB
-- 模板下载：占位（TODO）
-- 接口：当前是前端 mock；**后端需新增 `POST /admin/users/import`，multipart/form-data 上传 Excel**
+> v1.1：取消用户管理页面的"导入用户"前端入口（Radio 模式切换 + ImportPanel 集成均移除）。新增 Drawer 仅保留单一"添加用户"表单。
+
+**保留的后端能力**（不暴露 UI，可作内部工具/调试用）：
+
+- `POST /admin/users/import`（multipart/form-data，xlsx）— `internal/admin/user_import_handler.go`
+- `GET /admin/users/import/template`（xlsx 模板下载）
+
+**未来若重新启用**：单独立项「批量导入入口」需求，UI 入口可选（独立按钮 / 单独菜单 / 独立页面），不再寄生在"添加用户"Drawer 里。
 
 ---
 
@@ -471,7 +482,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | `pageSize` | int | — | 默认 20 |
 | `search` | string | — | 模糊匹配 `username` |
 | `status` | `active` / `disabled` | — | |
-| `carrier` | `cmcc` / `ctcc` / `cucc` | — | |
+| ~~`carrier`~~ | ~~`cmcc` / `ctcc` / `cucc`~~ | — | **v1.0 删除**（参 §11.11）|
 
 **Response 200**：
 
@@ -499,8 +510,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
   "password": "P@ssw0rd",         // required, min 6
   "display_name": "Alice",
   "email": "alice@op.cn",         // optional, email
-  "carrier": "cmcc",              // optional
-  "role_ids": ["uuid-1","uuid-2"] // optional
+  "role_ids": ["uuid-1","uuid-2"] // optional （v1.0 删除 carrier 字段）
 }
 ```
 
@@ -517,13 +527,12 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
   "display_name": "Alice Liu",
   "email": "alice2@op.cn",
   "phone": "13800000000",
-  "carrier": "ctcc",
   "status": "disabled",
   "role_ids": ["uuid-1", "uuid-2"]
 }
 ```
 
-> **数据权限副作用**（v0.4）：当 `role_ids` 或 `carrier` 字段被更新时，service 必须 `InvalidateUserCache(userID)`。`carrier` 从非 NULL 改为 NULL（升超管）或反向变更同样影响可见域。
+> **数据权限副作用**（v0.4 + v1.0 修订）：当 `role_ids` 字段被更新时，service 必须 `InvalidateUserCache(userID)`。v1.0 起 `carrier` 字段已删，超管身份由 `source = 'builtIn'` 决定且 source 不可修改，无升降超管路径。
 
 **Response 200**：更新后的 `User` 对象
 
@@ -656,7 +665,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 
 - 单点登录（SSO / OAuth2）—— 由独立模块处理
 - ~~LDAP 同步实现~~（v0.9 起**已纳入本 PRD 范围**，详见 §12）
-- 多租户用户隔离 —— 当前以 `carrier` 字段做软隔离，不做强租户
+- ~~多租户用户隔离 —— 当前以 `carrier` 字段做软隔离~~（v1.0 已删除 `carrier` 字段；多 carrier 隔离能力由 `role_device_groups` 通过设备分组层提供，不在 user 表层做隔离）
 - 用户偏好（主题、语言）—— 由 `appStore` 前端本地保存，不入用户主表
 - API Keys 管理 —— 已有 `api_keys` 表（见 §2.1），但本页面不涉及
 
@@ -688,7 +697,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 - [ ] **数据权限缓存一致性**（v0.4 + v0.5 决议 ②）：以下操作成功后必须**同步**调 `PermissionService.InvalidateUserCache(userID)`，**禁止改造为 EventBus / 异步事件**：
   - `POST /admin/users/{id}/roles`（分配单角色）
   - `DELETE /admin/users/{id}/roles/{roleId}`（解绑单角色）
-  - `PUT /admin/users/{id}` 当 `role_ids` 或 `carrier` 字段被更新
+  - `PUT /admin/users/{id}` 当 `role_ids` 字段被更新（v1.0：`carrier` 已删除，无需关注）
   - `POST /admin/users/assign-roles`（批量分配角色，逐用户失效）
   - `DELETE /admin/users/{id}`（删除用户，顺带清空缓存避免泄漏）
 - [ ] 上述每个 service 方法的单元测试断言：写库成功后 `InvalidateUserCache(userID)` 被调用恰好 1 次（mock 验证）
@@ -796,8 +805,8 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | 规则 | 内容 |
 |------|------|
 | **R3 用户继承** | 用户可见域 = 各角色 `role_device_groups` 的**并集**；多角色按并集放宽，不是交集收紧 |
-| **R4 超管旁路** | `users.carrier IS NULL` 表示超管，绕过 R2/R3，看见所有分组（实现：`PermissionService:50-54`）|
-| **R7 缓存一致性**（用户操作侧）| 用户管理任何会改变可见域的操作（分配/解绑角色、改 carrier、删用户）必须**同步**调 `InvalidateUserCache(userID)` |
+| **R4 超管旁路**（v1.0 改）| `users.source = 'builtIn'` 表示超管，绕过 R2/R3，看见所有分组（实现：`PermissionService` + `User.IsSuperAdmin()` 派生）。source 创建时即固定，不可运行期改写 |
+| **R7 缓存一致性**（用户操作侧）| 用户管理任何会改变可见域的操作（分配/解绑角色、删用户）必须**同步**调 `InvalidateUserCache(userID)`（v1.0：`carrier` 已删，无需再列 carrier 变更场景）|
 
 **与本 PRD 的边界**（v0.6 更新）：
 
@@ -837,7 +846,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 
 **实施约束**：
 
-- `AdminService.AssignRole` / `RemoveRole` / `UpdateUser`（含 `role_ids` / `carrier`）/ `DeleteUser` / `BatchAssignRoles` —— 这 5 个方法必须在写库成功后**返回前**调 `InvalidateUserCache`
+- `AdminService.AssignRole` / `RemoveRole` / `UpdateUser`（含 `role_ids`）/ `DeleteUser` / `BatchAssignRoles` —— 这 5 个方法必须在写库成功后**返回前**调 `InvalidateUserCache`（v1.0：carrier 已删，触发条件简化）
 - `InvalidateUserCache` 失败**不阻塞**写库结果（已落库），但记 ERROR 日志 + Prometheus 计数器 `omc_perm_cache_invalidate_failed_total`
 - 单元测试覆盖：每个方法的 happy path 必须断言 cache invalidate 被调用一次（用 mock）
 
@@ -934,6 +943,119 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 - `useAllRoles` 异步加载阶段（首次进入页面 + 缓存 miss），下拉 options 在数据到达前是空的，此时打开编辑 Drawer 会有毫秒级 UUID 闪烁 → React Query 默认 5min 缓存，二次打开不会出现
 - 若运营商角色总数 > 1000 → `getAllRoles` 一次拉全集会有性能问题；当前规模可接受，未来若超阈值改 `getRoles({ page, pageSize })` + Select `<showSearch onSearch>` 异步搜索（v1.0+ 决议）
 
+### 11.11 v1.0 — 删除 `users.carrier` + 超管走 `source = 'builtIn'`
+
+**背景**：经 v0.10 的字段必要性分析，`users.carrier` 同时承载三重含义（业务标签 + 多租户 Casbin domain + 隐式超管标志 NULL）违反单一职责。同时 v0.4 已将"数据可见域"明确归 `role_device_groups` 决定，user 层的 carrier 在数据权限层属冗余双保险。
+
+**决策**：
+
+| 项 | 旧（v0.10 之前）| 新（v1.0）|
+|----|----------------|----------|
+| 超管判定 | `users.carrier IS NULL` 隐式 | `users.source = 'builtIn'` 显式 |
+| 超管权限范围 | 仅数据可见域旁路 | **数据 + 菜单 + API 三层旁路**（等同 root）|
+| 多 carrier 隔离 | Casbin domain 用 carrier | Casbin 去 domain（单域）；运营商隔离由 `role_device_groups` 通过设备分组层实现 |
+| JWT Claims | `Carrier *string` | **新增 `IsSuperAdmin bool`，删除 `Carrier`** |
+| `users.carrier` 列 | 存在（VARCHAR(4)）| **DROP COLUMN**（goose 迁移文件 `000NNN_drop_users_carrier.sql`）|
+| `UserFilter.Carrier` | 用 carrier 过滤用户 | **删除**（按 role 隐式过滤）|
+| `PermissionService.GetUserVisibleGroupIDs` 签名 | `(ctx, userID, carrier *CarrierCode)` | `(ctx, userID, isSuperAdmin bool)` |
+| `LDAP.sync_carrier` 配置项 | LDAP 同步用户的 carrier 默认值 | **作废**：LDAP 用户 source='LDAP' 必非 builtIn，无升超管路径 |
+| 前端 `User.carrier` | 字段存在 | **删除** |
+
+**11 项决议（Q1-Q11）落定**：
+
+1. **Q1 全权限范围**：builtIn = 数据可见域 + 菜单可见性 + API 鉴权 三层全旁路
+2. **Q2 现存 `carrier=NULL` 非 admin 处理**：迁移前必须 audit `SELECT id, username, source FROM users WHERE carrier IS NULL`，业务逐个确认；预期 seed admin 已是 source='builtIn'，其他人保持 source='admin'（即降级为普通用户）
+3. **Q3 Casbin domain**：完全去 domain，policy 统一在 'system' 单域；如未来真有多 carrier 需求另开决议
+4. **Q4 JWT 签发 `is_super_admin`**：是；同时修复告警模块 latent bug（`alarm/data_permission.go:93` 早已读取该 claim 但 jwt 不签发，永远 false）
+5. **Q5 PermissionService 签名**：传 `isSuperAdmin bool`；最小破坏；调用方在 ctx 解 claims 转换
+6. **Q6 DROP COLUMN 时机**：分两步——本发布周期 Phase 2 仅停用代码引用（不删列），下个发布周期 Phase 5 才物理 DROP；中间观察期 1 周
+7. **Q7 前端 `UserFilter.carrier`**：删除
+8. **Q8 LDAP `sync_carrier`**：删除
+9. **Q9 前端 `User.carrier`**：删除
+10. **Q10 是否引入 `users.is_super_admin` 列**：**不加**；超管完全由 `source = 'builtIn'` 派生，避免双源不一致
+11. **Q11 sqlc 实验代码**：清理（删 `internal/admin/sqlc/`、`queries/`、`sqlc.yaml`、`pg_user_repository_v2.go`、Makefile sqlc-* target）；与 CLAUDE.md「squirrel + pgx，不使用 ORM」立场对齐
+
+**实施分 6 个 Phase**：
+
+| Phase | 范围 | 风险 |
+|-------|------|------|
+| 1 | 文档先行（users.md / roles.md / system-config.md / README.md / ui-customization.md）| 🟢 |
+| 2 | 后端代码改造（model / repo / service / jwt / middleware / casbin / permission_service / alarm / device + 单测）| 🟡 |
+| 3 | 前端代码改造（types / adminApi / UserManagement page）| 🟢 |
+| 4 | 数据 audit + 迁移文件草拟（不入主目录）| 🟡 |
+| 5 | goose 迁移上线（DROP COLUMN，1 周观察）| 🔴 不可逆 |
+| 6 | sqlc 实验代码清理 | 🟢 |
+
+**关键约束**：
+
+- DROP COLUMN 不可回滚（goose Down 仅恢复列定义，业务数据需备份恢复）
+- Phase 2 完成后必须留至少 1 周观察期，验证所有功能正常，才能进 Phase 5
+- LDAP 模块如已签发的 v0.9 spec 中含 `sync_carrier`，全部按本节作废
+- alarm 模块的 `IsSuperAdmin` 行为变化：之前**永远 false**（latent bug），v1.0 后**仅 builtIn 用户为 true**，符合预期，但需通知运维
+
+**风险与缓解**：
+
+| 风险 | 缓解 |
+|------|------|
+| 现存"假超管"（手工建的 carrier=NULL 非 admin 用户）失去权限 | Phase 4 audit 报告 + 业务确认 |
+| Casbin 多租户 policy 隔离失效 | 当前 seed 未用多 domain policy，影响小；如未来需要恢复，加 domain 字段 |
+| 已签发 JWT 仍含 `Carrier` claim | go-jwt 默认忽略未识别字段；新签发不再包含；老 token 自然过期 |
+| 30+ 处单测含 carrier mock | Phase 2G 系统化清理 |
+
+**度量**：
+
+- `omc_user_super_admin_count` Gauge：按 source 统计，验证超管数量在预期内
+- `omc_perm_check_total{decision}` Counter：审计超管旁路次数（高峰可能成为攻击信号）
+
+### 11.12 v1.1 — UI 文案统一 + 取消"导入用户"前端入口
+
+#### 11.12.1 字段标签统一
+
+**问题**：v1.0 之前用户管理 UI 的字段标签存在三处不一致：
+
+| 字段 | 列表表头 | 创建表单 | 编辑表单 | 查看 Drawer |
+|------|---------|---------|---------|-----------|
+| `username` | 用户账号 | 用户名（i18n `user.userName`） | 用户账号 | 用户账号 |
+| `displayName` | 用户名称 | 用户名称 | 用户名称 | 用户名称 |
+
+用户调研反馈"用户名"和"用户名称"难以区分（前者像登录账号，后者更像别名 / nickname）。
+
+**决议**：
+
+- `username` 字段标签全局统一为 **"用户账号"**（语义：登录用、唯一、不可改）
+- `displayName` 字段标签全局统一为 **"用户昵称"**（语义：展示用、可改、留空兜底为 username）
+- 列表第 2 列 title 由"用户名"/"用户名称"改"用户昵称"
+- 创建表单字段顺序与编辑表单同步，便于视觉迁移：`username → password → confirmPassword → displayName → email → phone → roleIds → status → expireTime → description`
+
+**不在范围**：
+
+- i18n key `user.userName` 等保留（其它页面可能仍引用），但 UserManagement 页面**不再使用** `t('user.userName')` 而是直接写中文常量"用户账号"
+- 后端字段名（`username` / `display_name`）保持不变，仅 UI 标签改
+
+#### 11.12.2 取消"导入用户"前端入口
+
+**问题**：之前"添加用户" Drawer 内嵌 Radio 切换"添加 / 导入"两个模式：
+- 用户体验：单一 Drawer 承载两种语义混乱
+- ImportPanel 集成 ref + state（importing / createMode）增加心智负担
+- 当前阶段批量导入需求弱，单条添加更高频
+
+**决议**：
+
+- 用户管理页面**取消**"导入用户"前端入口：
+  - 移除 `<Radio.Group>` 模式切换
+  - 移除 `<ImportPanel>` 集成（连带 `importPanelRef` / `importing` state / `createMode` state / 类型 `CreateMode` / `handleImport` / `handleImportSuccess` / `handleDownloadTemplate` 等辅助）
+  - Drawer 标题简化为"添加用户"，Footer 按钮直接调 `handleCreate`
+- 后端 `POST /admin/users/import` + `GET /admin/users/import/template` 端点能力**保留**（`internal/admin/user_import_handler.go` + 路由注册），作为**内部工具**（运维直接 curl / 内部 CLI 脚本）
+- UI 与表单：与 §5.2 编辑表单字段顺序对齐，视觉一致性最大化
+
+**未来回退**：若重新引入批量导入入口，应单独立项（独立按钮 / 独立菜单项 / 独立页面），不再寄生在"添加"Drawer 里 — 单一职责。
+
+**实施面**：
+
+- 前端 `UserManagement/index.tsx`：删除 `Radio.Group` 与 `<ImportPanel>` 段落；删除 `CreateMode` 类型、`createMode` / `setCreateMode` / `importing` / `setImporting` state、`importPanelRef` ref；删除 `handleImport` / `handleImportSuccess` / `handleDownloadTemplate` 三个 callback；Drawer footer 按钮简化
+- 前端 `adminApi.importUsers / downloadImportTemplate` **保留**（内部可能继续调用）
+- 不动后端端点
+
 ---
 
 ## 12. LDAP 集成方案（v0.9）
@@ -975,7 +1097,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | `attr_groups` | string | `memberOf` | LDAP group DN 列表，用于 group→role 映射 |
 | `sync_enabled` | bool | `true` | 是否启用周期同步（关闭后仅手动 / JIT）|
 | `sync_interval_min` | int | `60` | 周期同步间隔（分钟）|
-| `sync_carrier` | string \| null | `null` | LDAP 同步用户的 `users.carrier` 默认值；NULL = 超管（**生产慎用**）|
+| ~~`sync_carrier`~~ | — | — | **v1.0 删除**：`users.carrier` 字段已不存在，且 LDAP 用户 `source='LDAP'` ≠ `'builtIn'`，永远不可能升超管 |
 | `default_role_id` | uuid \| null | `null` | 新同步用户的兜底角色（无 group 映射时用）|
 | `jit_provisioning_enabled` | bool | `false` | 即时入库：未在本地但 LDAP 中存在的账号首次登录时自动创建 |
 | `tls_skip_verify` | bool | `false` | 仅测试环境用 |
@@ -993,7 +1115,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | `email` | `mail`（可配 `attr_email`）| 同步覆盖 | LDAP 端为空时不清空本地值 |
 | `phone` | `telephoneNumber`（可配 `attr_phone`）| 同步覆盖 | 同上 |
 | `display_name` | `displayName`（可配 `attr_displayname`）| 同步覆盖 | LDAP 空 → 用 username 兜底 |
-| `carrier` | （不从 LDAP 取）| 由 `sync_carrier` 配置项决定 | 默认 NULL = 超管，生产环境强烈建议设为具体 carrier |
+| ~~`carrier`~~ | — | — | **v1.0 删除**：users 表无此字段；LDAP 用户的"运营商范围"通过其绑定的角色 → role_device_groups 决定 |
 | `status` | （LDAP 不再可见时）| 同步标记 `disabled`（不删除）| 见 §12.4 处理规则 |
 | `source` | （固定）| `'LDAP'` | |
 | `password_hash` | — | 写入哨兵值 `'__LDAP__'`（不可被 bcrypt 校验通过）| 防止任何路径误用本地密码校验 |
@@ -1014,7 +1136,7 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 | 2 | bind LDAP server（用 `bind_dn` + 解密后的 `bind_password`）|
 | 3 | search：base = `search_base`，filter = `(objectClass=user)`（去掉 `sAMAccountName=%s` 部分），attributes = 列出本次需要的字段 |
 | 4 | 流式遍历返回的 entry list，与 `SELECT id, username, ... FROM users WHERE source='LDAP'` 做 diff |
-| 5 | LDAP 中存在 + OMC 中不存在 → INSERT（source='LDAP', carrier=`sync_carrier`, password_hash='`__LDAP__`'）|
+| 5 | LDAP 中存在 + OMC 中不存在 → INSERT（source='LDAP', password_hash='`__LDAP__`'；**v1.0：不再写 carrier，字段已删**）|
 | 6 | LDAP 中存在 + OMC 中存在 → UPDATE 字段（仅 `email/phone/display_name/updated_at`，**不动** `status` / `description` / 角色绑定）|
 | 7 | LDAP 中不存在 + OMC 中存在（且 status=active） → UPDATE `status='disabled'` + 写 `audit_logs`（不删除）|
 | 8 | 处理 group 变更（详见 §12.6）|
@@ -1342,4 +1464,4 @@ internal/ldap/
 - [ ] 多个 LDAP 数据源场景下，`source = 'LDAP:<id>'` 细分（与 [users.md §11.4](#114-待澄清事项) 联动）
 - [ ] LDAP 嵌套 group 性能优化（recursive `member` 查询）
 - [ ] OMC 端的 RBAC 角色变更是否反向同步到 LDAP（默认不做，避免改动外部域）
-- [ ] LDAP 用户能否升超管（修改 carrier=NULL）—— 当前规则上可以，但应在 UI 加二次确认
+- [x] ~~LDAP 用户能否升超管（修改 carrier=NULL）~~ → **v1.0 已闭环**：source='LDAP' ≠ 'builtIn'，超管身份无法获取，UI 也无可改字段
