@@ -1,6 +1,9 @@
 export type UserOnlineStatus = 'online' | 'offline';
-export type UserStatus = 'active' | 'inactive' | 'locked';
+export type UserStatus = 'active' | 'disabled' | 'inactive' | 'locked';
 export type UserRole = 'admin' | 'operator' | 'viewer' | 'auditor';
+// 与后端 admin.UserSource 保持一致，字面值大小写敏感（DB CHECK 锁定）。
+// 详见 omcgo/docs/prd/system/users.md §1.1 / §11.3。
+export type UserSource = 'builtIn' | 'admin' | 'LDAP';
 
 export interface User {
   id: string;
@@ -8,15 +11,28 @@ export interface User {
   displayName: string;
   email: string;
   role: UserRole;
+  roles?: string[];
+  roleIds?: string[];
   status: UserStatus;
+  source?: UserSource;
   phone?: string;
   carrier?: string;
+  /** ISO 8601 时间戳；登录时若 expireTime <= 现在则拒绝登录（见后端 service.Login）。 */
+  expireTime?: string;
   lastLoginTime?: string;
   createTime: string;
   updateTime?: string;
+  /** 创建人 / 更新人：后端返回 UUID，前端通过 useAllUsers 查 username 显示。 */
+  createdBy?: string;
+  updatedBy?: string;
   department?: string;
   description?: string;
 }
+
+/** 派生：是否为内置用户。用于 UI 操作权限判定（删除/禁用按钮 disable）。 */
+export const isBuiltInUser = (u: Pick<User, 'source'>): boolean => u.source === 'builtIn';
+/** 派生：是否为 LDAP 用户。重置密码按钮 disable。 */
+export const isLdapUser = (u: Pick<User, 'source'>): boolean => u.source === 'LDAP';
 
 export interface Role {
   id: string;

@@ -3,6 +3,7 @@ import type {
   User,
   UserRole,
   UserStatus,
+  UserSource,
   Role,
   Permission,
   OperationLog,
@@ -147,40 +148,59 @@ function mapBackendDictionaryDetail(b: BackendDictionaryDetail): DictionaryDetai
 }
 // ---- End Dictionary types ----
 
-// Backend user model - matches Go User struct JSON tags
+// 用户批量导入响应（与后端 admin.ImportUserResult 对齐）。
+export interface ImportUserError {
+  row: number;
+  message: string;
+}
+export interface ImportUserResult {
+  created: number;
+  failed: number;
+  errors?: ImportUserError[];
+}
+
+// Backend user model - matches Go User struct JSON tags (snake_case).
+// Axios 不做 body/response 转换，必须按后端原样字段名访问。
 interface BackendUser {
   id: string;
   username: string;
-  displayName?: string;
+  display_name?: string;
   email?: string;
+  phone?: string;
+  description?: string;
   carrier?: string;
   status: string; // active, disabled
+  source?: string; // builtIn / admin / LDAP
   roles?: BackendRole[];
-  failedLoginAttempts?: number;
-  lockedUntil?: string;
-  lastFailedLoginAt?: string;
-  lastLoginAt?: string;
-  createdAt: string;
-  updatedAt: string;
+  failed_login_attempts?: number;
+  locked_until?: string;
+  last_failed_login_at?: string;
+  last_login_at?: string;
+  expire_at?: string;
+  created_by?: string;
+  updated_by?: string;
+  created_at: string;
+  updated_at: string;
 }
 
-// Backend role model - matches Go Role struct JSON tags
+// Backend role model - matches Go Role struct JSON tags (snake_case).
+// Axios 不做 body/response 转换，必须按后端原样字段名访问。
 interface BackendRole {
   id: string;
   name: string;
   description: string;
-  isSystem: boolean;
+  is_system: boolean;
   status?: string; // active, disabled - may be empty
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
   // Fields that may or may not be included in list response
   permissions?: BackendPermission[];
-  deviceGroupIds?: string[];
-  menuIds?: string[];
+  device_group_ids?: string[];
+  menu_ids?: string[];
   menus?: BackendMenu[];
-  userCount?: number;
-  createdBy?: string;
-  updatedBy?: string;
+  user_count?: number;
+  created_by?: string;
+  updated_by?: string;
 }
 
 // Backend menu model
@@ -245,23 +265,39 @@ interface BackendListResponse<T> {
 }
 
 function mapBackendUser(bu: BackendUser): User {
-  const validStatuses: readonly UserStatus[] = ['active', 'inactive', 'locked'];
+  const validStatuses: readonly UserStatus[] = ['active', 'disabled', 'inactive', 'locked'];
   const status: UserStatus = (validStatuses as readonly string[]).includes(bu.status)
     ? (bu.status as UserStatus)
-    : 'inactive';
-  const role: UserRole = ((bu.roles && bu.roles.length > 0 ? bu.roles[0].name : 'viewer') as UserRole);
+    : 'disabled';
+  const roleList = bu.roles ?? [];
+  const roleNames = roleList.map((r) => r.name).filter(Boolean);
+  const roleIds = roleList.map((r) => r.id).filter(Boolean);
+  const role: UserRole = (roleNames[0] ?? 'viewer') as UserRole;
+
+  const validSources: readonly UserSource[] = ['builtIn', 'admin', 'LDAP'];
+  const source: UserSource | undefined = bu.source && (validSources as readonly string[]).includes(bu.source)
+    ? (bu.source as UserSource)
+    : undefined;
 
   return {
     id: bu.id,
     username: bu.username,
-    displayName: bu.displayName || bu.username,
+    displayName: bu.display_name || bu.username,
     email: bu.email || '',
+    phone: bu.phone,
+    description: bu.description,
     role,
+    roles: roleNames,
+    roleIds,
     status,
+    source,
     carrier: bu.carrier,
-    lastLoginTime: bu.lastLoginAt || undefined,
-    createTime: bu.createdAt,
-    updateTime: bu.updatedAt,
+    expireTime: bu.expire_at || undefined,
+    lastLoginTime: bu.last_login_at || undefined,
+    createTime: bu.created_at,
+    updateTime: bu.updated_at,
+    createdBy: bu.created_by,
+    updatedBy: bu.updated_by,
   };
 }
 
@@ -269,8 +305,13 @@ function mapFrontendUser(user: Partial<User>): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   if (user.username !== undefined) payload.username = user.username;
   if (user.email !== undefined) payload.email = user.email;
-  if (user.displayName !== undefined) payload.displayName = user.displayName;
+  if (user.phone !== undefined) payload.phone = user.phone;
+  if (user.description !== undefined) payload.description = user.description;
+  if (user.expireTime !== undefined) payload.expire_at = user.expireTime;
+  if (user.displayName !== undefined) payload.display_name = user.displayName;
   if (user.status !== undefined) payload.status = user.status;
+  // role_ids === null 表示"清空角色"，undefined 表示"不变更"。
+  if (user.roleIds !== undefined) payload.role_ids = user.roleIds;
   return payload;
 }
 
@@ -290,13 +331,13 @@ function mapBackendRole(br: BackendRole): Role {
     batchOperation: 0, // Backend doesn't have this field
     description: br.description || '',
     permissions,
-    deviceGroupIds: br.deviceGroupIds,
-    userCount: br.userCount ?? 0,
-    builtIn: br.isSystem ? 1 : 0,
-    createUser: br.createdBy,
-    updateUser: br.updatedBy,
-    createTime: br.createdAt,
-    updateTime: br.updatedAt,
+    deviceGroupIds: br.device_group_ids ?? [],
+    userCount: br.user_count ?? 0,
+    builtIn: br.is_system ? 1 : 0,
+    createUser: br.created_by,
+    updateUser: br.updated_by,
+    createTime: br.created_at,
+    updateTime: br.updated_at,
   };
 }
 
@@ -377,14 +418,21 @@ export const adminApi = {
   },
 
   async createUser(
-    data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & { password: string }
+    data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
+      password: string;
+      roleIds?: string[];
+    }
   ): Promise<User> {
     const { data: bu } = await http.post<BackendUser>('/admin/users', {
       username: data.username,
       password: data.password,
       email: data.email || undefined,
-      displayName: data.displayName || '',
+      phone: data.phone || undefined,
+      description: data.description || undefined,
+      expire_at: data.expireTime || undefined,
+      display_name: data.displayName || data.username,
       status: data.status,
+      role_ids: data.roleIds && data.roleIds.length > 0 ? data.roleIds : undefined,
     });
     return mapBackendUser(bu);
   },
@@ -405,7 +453,8 @@ export const adminApi = {
   },
 
   async resetPassword(id: string, newPassword: string): Promise<void> {
-    await http.post(`/admin/users/${id}/reset-password`, { newPassword });
+    // 后端字段名 new_password（snake_case），axios 不转 body 字段。
+    await http.post(`/admin/users/${id}/reset-password`, { new_password: newPassword });
   },
 
   async lockUser(id: string): Promise<void> {
@@ -417,16 +466,49 @@ export const adminApi = {
   },
 
   async forceLogout(ids: string[]): Promise<void> {
-    await http.post('/admin/users/force-logout', { userIds: ids });
+    // 后端字段名 user_ids（snake_case），axios 不转 body 字段。
+    await http.post('/admin/users/force-logout', { user_ids: ids });
   },
 
   async moveUsersToGroup(userIds: string[], groupId: string): Promise<void> {
     await http.post('/admin/users/move-group', { userIds, groupId });
   },
 
-  async copyUser(id: string): Promise<User> {
-    const { data } = await http.post<BackendUser>(`/admin/users/${id}/copy`);
-    return mapBackendUser(data);
+  async copyUser(id: string): Promise<{ user: User; tempPassword: string }> {
+    // 后端返回 { user: BackendUser, temp_password: string }
+    const { data } = await http.post<{ user: BackendUser; temp_password: string }>(
+      `/admin/users/${id}/copy`,
+    );
+    return {
+      user: mapBackendUser(data.user),
+      tempPassword: data.temp_password,
+    };
+  },
+
+  // 批量分配角色：与后端 admin.BatchAssignRoles (POST /admin/users/assign-roles) 对齐。
+  async batchAssignRoles(userIds: string[], roleIds: string[]): Promise<void> {
+    await http.post('/admin/users/assign-roles', {
+      user_ids: userIds,
+      role_ids: roleIds,
+    });
+  },
+
+  // 用户批量导入：与后端 admin.ImportUsers (POST /admin/users/import) 对齐。
+  async importUsers(file: File): Promise<ImportUserResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await http.post<ImportUserResult>('/admin/users/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  // 用户导入模板下载：与后端 admin.DownloadImportTemplate (GET /admin/users/import/template) 对齐。
+  async downloadImportTemplate(): Promise<Blob> {
+    const { data } = await http.get<Blob>('/admin/users/import/template', {
+      responseType: 'blob',
+    });
+    return data;
   },
 
   // Roles - backend now supports pagination

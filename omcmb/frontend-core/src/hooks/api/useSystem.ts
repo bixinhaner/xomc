@@ -38,7 +38,7 @@ export function useUserById(id: string) {
 export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & { password: string }) =>
+    mutationFn: (data: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & { password: string; roleIds?: string[] }) =>
       useMock ? systemService.createUser(data) : adminApi.createUser(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
@@ -114,6 +114,18 @@ export function useMoveUsersToGroup() {
   return useMutation({
     mutationFn: ({ userIds, groupId }: { userIds: string[]; groupId: string }) =>
       useMock ? systemService.moveUsersToGroup(userIds, groupId) : adminApi.moveUsersToGroup(userIds, groupId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
+    },
+  });
+}
+
+// 批量分配角色（PRD §5.5 / §11.5）：整体替换语义，与 UpdateUser.RoleIDs 一致。
+export function useBatchAssignRoles() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userIds, roleIds }: { userIds: string[]; roleIds: string[] }) =>
+      adminApi.batchAssignRoles(userIds, roleIds),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'users'] });
     },

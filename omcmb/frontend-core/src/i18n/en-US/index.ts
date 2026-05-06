@@ -2998,6 +2998,9 @@ const messages: Record<string, string> = {
 
   // System - User Management
   'user.source.local':                       'Local',
+  'user.source.builtIn':                     'Built-in',
+  'user.source.admin':                       'Admin Added',
+  'user.source.LDAP':                        'LDAP',
   'user.confirmDisableUser':                 'Are you sure to disable this user? The user will not be able to login.',
   'user.confirmEnableUser':                  'Are you sure to enable this user?',
   'user.permanent':                          'Permanent',

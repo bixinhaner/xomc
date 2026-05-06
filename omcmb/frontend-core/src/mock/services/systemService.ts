@@ -90,7 +90,7 @@ export const systemService = {
     void groupId;
   },
 
-  async copyUser(id: string): Promise<User> {
+  async copyUser(id: string): Promise<{ user: User; tempPassword: string }> {
     await delay(200, 400);
     const user = users.find((u) => u.id === id);
     if (!user) throw new Error(`User ${id} not found`);
@@ -102,7 +102,7 @@ export const systemService = {
       lastLoginTime: new Date().toISOString(),
     };
     users.push(newUser);
-    return newUser;
+    return { user: newUser, tempPassword: 'mock-temp-pwd' };
   },
 
   // Roles

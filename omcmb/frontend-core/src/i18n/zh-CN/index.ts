@@ -3005,6 +3005,9 @@ const messages: Record<string, string> = {
 
   // System - User Management
   'user.source.local':                       '本地',
+  'user.source.builtIn':                     '内置',
+  'user.source.admin':                       '管理员添加',
+  'user.source.LDAP':                        'LDAP',
   'user.confirmDisableUser':                 '确定要禁用该用户吗？禁用后用户将无法登录系统。',
   'user.confirmEnableUser':                  '确定要启用该用户吗？',
   'user.permanent':                          '永久',

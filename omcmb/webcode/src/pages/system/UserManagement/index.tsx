@@ -34,8 +34,10 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import ImportPanel, { type ImportPanelRef } from '@/components/ImportPanel';
+import dayjs from 'dayjs';
 import {
   useUsers,
+  useAllUsers,
   useCreateUser,
   useUpdateUser,
   useDeleteUsers,
@@ -43,13 +45,15 @@ import {
   useUnlockUser,
   useForceLogout,
   useCopyUser,
-  useMoveUsersToGroup,
-  useAllGroups,
+  useAllRoles,
+  useResetPassword,
+  useBatchAssignRoles,
 } from '@core/hooks/api/useSystem';
-import type { User } from '@core/types/system';
+import { adminApi, type ImportUserResult } from '@core/services/api/adminApi';
+import type { User, UserRole, UserStatus } from '@core/types/system';
+import { isBuiltInUser, isLdapUser } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
-import dayjs from 'dayjs';
 
 type CreateMode = 'add' | 'import';
 
@@ -78,7 +82,38 @@ export default function UserManagement() {
     pageSize,
   });
 
-  const { data: allGroups } = useAllGroups();
+  const { data: allRoles } = useAllRoles();
+  const { data: allUsers } = useAllUsers();
+
+  // 创建人 / 更新人列：后端字段是 UUID，前端用 username 展示。
+  const userIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    (allUsers ?? []).forEach((u) => map.set(u.id, u.username));
+    return map;
+  }, [allUsers]);
+  const renderUserId = useCallback((val: unknown) => {
+    if (!val) return '-';
+    const id = String(val);
+    return userIdToName.get(id) ?? id.slice(0, 8);
+  }, [userIdToName]);
+
+  // PRD §11.7 决议 ①：未绑定任何设备分组的角色，下拉 option 追加 ⚠️ 标记，
+  // 防止管理员误以为"分配了角色就能看到设备"。
+  const roleOptions = useMemo(() =>
+    (allRoles ?? []).map((r) => {
+      const noGroups = !r.deviceGroupIds || r.deviceGroupIds.length === 0;
+      return {
+        value: r.id,
+        label: noGroups ? (
+          <span>
+            {r.roleName}
+            <Tag color="warning" style={{ marginLeft: 4 }}>⚠️ 无设备权限</Tag>
+          </span>
+        ) : (
+          r.roleName
+        ),
+      };
+    }), [allRoles]);
 
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -87,10 +122,11 @@ export default function UserManagement() {
   const unlockUser = useUnlockUser();
   const forceLogout = useForceLogout();
   const copyUser = useCopyUser();
-  const moveUsersToGroup = useMoveUsersToGroup();
+  const batchAssignRoles = useBatchAssignRoles();
+  const resetPassword = useResetPassword();
 
-  const isBuiltIn = useCallback((user: User) => user.builtIn === 1, []);
-  const isAdmin = useCallback((user: User) => user.userName === 'admin', []);
+  // 内置用户判定：后端 users.source === 'builtIn'（迁移 000053 / PRD §11.3）。
+  const isBuiltIn = useCallback((user: User) => isBuiltInUser(user), []);
 
   // 检查选中的用户中是否有内置用户
   const selectedUsers = useMemo(() => {
@@ -149,20 +185,24 @@ export default function UserManagement() {
 
   const handleCreate = () => {
     form.validateFields().then((vals) => {
-      // 与后端 admin.CreateUserRequest 对齐：必须送 username（原先误写为 userName
-      // 导致 400：Field validation for 'Username' failed on the 'required' tag）。
-      const userData = {
+      // 与后端 admin.CreateUserRequest 对齐，仅传后端实际接收的字段。
+      // role 用占位值满足 hook 类型；真实角色分配走 roleIds（→ 后端 role_ids）。
+      const roleIds = (vals.roleIds as string[]) ?? [];
+      const expire = vals.expireTime as dayjs.Dayjs | undefined;
+      const userData: Omit<User, 'id' | 'createTime' | 'lastLoginTime'> & {
+        password: string;
+        roleIds?: string[];
+      } = {
         username: vals.username as string,
         password: vals.password as string,
-        email: vals.email as string,
-        phone: vals.phone as string,
-        groupNames: (vals.groupNames as string[]) || [],
-        status: vals.status as string,
-        expireTime: vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
-        description: (vals.description as string) ?? '',
-        source: '本地',
-        onlineStatus: 'offline',
-        builtIn: 0,
+        displayName: ((vals.displayName as string) || (vals.username as string)) ?? '',
+        email: (vals.email as string) || '',
+        phone: (vals.phone as string) || undefined,
+        description: (vals.description as string) || undefined,
+        expireTime: expire ? expire.toISOString() : undefined,
+        role: 'viewer' as UserRole,
+        status: (vals.status as UserStatus) ?? 'active',
+        roleIds: roleIds.length > 0 ? roleIds : undefined,
       };
       createUser.mutate(userData, {
         onSuccess: () => {
@@ -175,41 +215,64 @@ export default function UserManagement() {
     });
   };
 
-  const handleImport = useCallback(async (file: File) => {
-    // TODO: 实现导入API调用
-    console.log('Import file:', file.name);
-    // 模拟API调用
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    return { success: true };
+  const [importing, setImporting] = useState(false);
+  const handleImport = useCallback(async (file: File): Promise<ImportUserResult> => {
+    setImporting(true);
+    try {
+      return await adminApi.importUsers(file);
+    } finally {
+      setImporting(false);
+    }
   }, []);
 
-  const handleImportSuccess = useCallback(() => {
-    message.success(t('common.success'));
+  const handleImportSuccess = useCallback((result: unknown) => {
+    const r = result as ImportUserResult;
+    if (r.failed > 0) {
+      const sample = (r.errors ?? []).slice(0, 3).map((e) => `第 ${e.row} 行: ${e.message}`).join('\n');
+      modal.warning({
+        title: '部分导入失败',
+        content: `成功 ${r.created} 条，失败 ${r.failed} 条${sample ? '\n' + sample : ''}`,
+      });
+    } else {
+      message.success(`导入成功 ${r.created} 条`);
+    }
     setCreateVisible(false);
     void refetch();
-  }, [message, t, refetch]);
+  }, [message, modal, refetch]);
 
-  const handleDownloadTemplate = useCallback(() => {
-    // TODO: 实现下载模板功能
-    message.info(t('user.downloadingTemplate'));
-  }, [message, t]);
+  const handleDownloadTemplate = useCallback(async () => {
+    try {
+      const blob = await adminApi.downloadImportTemplate();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'users_import_template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err, t('common.error'));
+    }
+  }, [t]);
 
   const handleEdit = () => {
     if (!selectedUser) return;
     form.validateFields().then((vals) => {
+      // 仅传后端 UpdateUserRequest 接收的字段：display_name / email / phone / carrier / status / role_ids。
+      // role_ids 非 undefined 时由后端做差量同步。
+      const expire = vals.expireTime as dayjs.Dayjs | undefined;
+      const data: Partial<User> = {
+        displayName: (vals.displayName as string) || selectedUser.displayName,
+        email: (vals.email as string) || '',
+        phone: (vals.phone as string) || undefined,
+        description: (vals.description as string) ?? '',
+        expireTime: expire ? expire.toISOString() : undefined,
+        status: vals.status as UserStatus,
+        roleIds: (vals.roleIds as string[]) ?? [],
+      };
       updateUser.mutate(
-        {
-          id: selectedUser.id,
-          data: {
-            userName: vals.userName as string,
-            email: vals.email as string,
-            phone: vals.phone as string,
-            groupNames: (vals.groupNames as string[]) || [],
-            status: vals.status as string,
-            expireTime: vals.expireTime?.format('YYYY-MM-DD HH:mm:ss'),
-            description: vals.description as string,
-          },
-        },
+        { id: selectedUser.id, data },
         {
           onSuccess: () => {
             message.success(t('common.save'));
@@ -224,22 +287,31 @@ export default function UserManagement() {
 
   const handleResetPassword = () => {
     if (!selectedUser) return;
-    pwdForm.validateFields().then(() => {
-      message.success(t('common.save'));
-      setResetPwdVisible(false);
-      pwdForm.resetFields();
-      setSelectedUser(null);
+    pwdForm.validateFields().then((vals) => {
+      resetPassword.mutate(
+        { id: selectedUser.id, newPassword: vals.newPassword as string },
+        {
+          onSuccess: () => {
+            message.success(t('common.save'));
+            setResetPwdVisible(false);
+            pwdForm.resetFields();
+            setSelectedUser(null);
+          },
+          onError: (err) => toast.error(err, t('common.error')),
+        },
+      );
     });
   };
 
+  // PRD §5.5 / §11.5：批量分配角色，整体替换语义。
   const handleMoveGroup = () => {
-    const targetGroupId = moveGroupForm.getFieldValue('targetGroupId') as string;
-    if (!targetGroupId) {
+    const targetRoleIds = moveGroupForm.getFieldValue('targetRoleIds') as string[] | undefined;
+    if (!targetRoleIds || targetRoleIds.length === 0) {
       message.warning(t('common.pleaseSelect'));
       return;
     }
-    moveUsersToGroup.mutate(
-      { userIds: selectedKeys.map(String), groupId: targetGroupId },
+    batchAssignRoles.mutate(
+      { userIds: selectedKeys.map(String), roleIds: targetRoleIds },
       {
         onSuccess: () => {
           message.success(t('common.save'));
@@ -247,12 +319,11 @@ export default function UserManagement() {
           setSelectedKeys([]);
           moveGroupForm.resetFields();
         },
-      }
+      },
     );
   };
 
   const handleBatchForceLogout = useCallback(() => {
-    // 内置用户不允许操作
     if (hasBuiltInSelected) {
       modal.warning({
         title: t('common.warning'),
@@ -260,21 +331,14 @@ export default function UserManagement() {
       });
       return;
     }
-    const onlineUsers = (data?.items || []).filter(
-      (u) => selectedKeys.includes(u.id) && u.onlineStatus === 'online'
-    );
-    if (onlineUsers.length === 0) {
-      modal.warning({
-        title: t('common.warning'),
-        content: t('user.noOnlineUsers'),
-      });
-      return;
-    }
+    // 后端 ForceLogout 通过 Redis 撤销 token，不依赖在线状态——选中即可下线。
+    const targets = (data?.items || []).filter((u) => selectedKeys.includes(u.id));
+    if (targets.length === 0) return;
     modal.confirm({
       title: t('common.confirm'),
       content: t('user.confirmForceLogout'),
       onOk: () => {
-        forceLogout.mutate(onlineUsers.map((u) => u.id), {
+        forceLogout.mutate(targets.map((u) => u.id), {
           onSuccess: () => {
             message.success(t('common.success'));
             setSelectedKeys([]);
@@ -367,11 +431,14 @@ export default function UserManagement() {
 
   const handleCopy = useCallback((user: User) => {
     copyUser.mutate(user.id, {
-      onSuccess: () => {
-        message.success(t('common.success'));
+      onSuccess: (result) => {
+        modal.success({
+          title: t('common.success'),
+          content: `已复制为 ${result.user.username}\n临时密码：${result.tempPassword}\n请立即让该用户登录后修改密码。`,
+        });
       },
     });
-  }, [copyUser, t, message]);
+  }, [copyUser, t, modal]);
 
   const openCreateDrawer = () => {
     setCreateMode('add');
@@ -393,13 +460,15 @@ export default function UserManagement() {
       fixed: 'right',
       render: (_, record) => {
         const user = record as User;
-        const isBuiltInUser = isBuiltIn(user);
-        const isOnline = user.onlineStatus === 'online';
-        const canEdit = !isBuiltInUser;
-        const canDelete = !isBuiltInUser;
-        const canChangeStatus = !isBuiltInUser;
-        const canForceLogout = !isBuiltInUser && isOnline;
-        const canResetPwd = !isBuiltInUser && user.source !== 'LDAP';
+        // PRD §4.1：内置（builtIn）禁止删除/禁用；LDAP 禁止重置密码。
+        // 编辑 / 强制下线 / 改密 在内置用户上 v0.2 起已放开（紧急通道）。
+        const builtIn = isBuiltIn(user);
+        const ldap = isLdapUser(user);
+        const canEdit = true;
+        const canDelete = !builtIn;
+        const canChangeStatus = !builtIn;
+        const canForceLogout = true;
+        const canResetPwd = !ldap;
 
         const moreItems: MenuProps['items'] = [
           {
@@ -410,13 +479,14 @@ export default function UserManagement() {
             onClick: () => {
               setSelectedUser(user);
               form.setFieldsValue({
-                userName: user.userName,
+                username: user.username,
+                displayName: user.displayName,
                 email: user.email,
                 phone: user.phone,
-                groupNames: user.groupNames,
-                description: user.description,
                 status: user.status,
+                roleIds: user.roleIds ?? [],
                 expireTime: user.expireTime ? dayjs(user.expireTime) : undefined,
+                description: user.description ?? '',
               });
               setEditVisible(true);
             },
@@ -430,16 +500,27 @@ export default function UserManagement() {
           { type: 'divider' },
           {
             key: 'status',
-            label: user.status === 'enabled' ? '禁用' : '启用',
-            icon: user.status === 'enabled' ? <StopOutlined /> : <CheckCircleOutlined />,
+            label: !canChangeStatus ? (
+              <Tooltip title="内置用户不可禁用，避免锁死系统登录入口" placement="left">
+                <span>{user.status === 'active' ? '禁用' : '启用'}</span>
+              </Tooltip>
+            ) : (
+              user.status === 'active' ? '禁用' : '启用'
+            ),
+            icon: user.status === 'active' ? <StopOutlined /> : <CheckCircleOutlined />,
             disabled: !canChangeStatus,
             onClick: () => {
+              const targetStatus: UserStatus = user.status === 'active' ? 'disabled' : 'active';
               modal.confirm({
                 title: t('common.confirm'),
-                content: user.status === 'enabled' ? '确定要禁用该用户吗？禁用后用户将无法登录系统。' : '确定要启用该用户吗？',
+                content: user.status === 'active' ? '确定要禁用该用户吗？禁用后用户将无法登录系统。' : '确定要启用该用户吗？',
                 onOk: () => {
-                  message.success(t('common.success'));
-                  void refetch();
+                  updateUser.mutate(
+                    { id: user.id, data: { status: targetStatus } },
+                    {
+                      onSuccess: () => message.success(t('common.success')),
+                    },
+                  );
                 },
               });
             },
@@ -463,7 +544,13 @@ export default function UserManagement() {
           },
           {
             key: 'resetPwd',
-            label: t('user.resetPassword'),
+            label: !canResetPwd ? (
+              <Tooltip title="LDAP 用户密码由外部域管理，无法在本系统重置" placement="left">
+                <span>{t('user.resetPassword')}</span>
+              </Tooltip>
+            ) : (
+              t('user.resetPassword')
+            ),
             icon: <KeyOutlined />,
             disabled: !canResetPwd,
             onClick: () => {
@@ -474,7 +561,13 @@ export default function UserManagement() {
           { type: 'divider' },
           {
             key: 'delete',
-            label: t('common.delete'),
+            label: !canDelete ? (
+              <Tooltip title="内置用户不可删除" placement="left">
+                <span>{t('common.delete')}</span>
+              </Tooltip>
+            ) : (
+              t('common.delete')
+            ),
             icon: <DeleteOutlined />,
             danger: true,
             disabled: !canDelete,
@@ -487,11 +580,8 @@ export default function UserManagement() {
               onClick={() => {
                 setSelectedUser(user);
                 form.setFieldsValue({
-                  userName: user.userName,
+                  username: user.username,
                   email: user.email,
-                  phone: user.phone,
-                  groupNames: user.groupNames,
-                  description: user.description,
                 });
                 setViewVisible(true);
               }}>
@@ -505,19 +595,29 @@ export default function UserManagement() {
       },
     },
     {
-      key: 'userName',
-      title: t('user.userName'),
-      dataIndex: 'userName',
-      width: 130,
+      key: 'displayName',
+      title: '用户名称',
+      dataIndex: 'displayName',
+      width: 150,
       render: (val, record) => {
         const user = record as User;
+        const text = (val as string) || user.username;
         return (
           <span>
-            <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{String(val)}</span>
+            <span style={{ fontWeight: 500 }}>{text}</span>
             {isBuiltIn(user) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('user.builtIn')}</Tag>}
           </span>
         );
       },
+    },
+    {
+      key: 'username',
+      title: '用户账号',
+      dataIndex: 'username',
+      width: 130,
+      render: (val) => (
+        <span style={{ fontFamily: 'monospace' }}>{String(val ?? '-')}</span>
+      ),
     },
     {
       key: 'status',
@@ -525,24 +625,10 @@ export default function UserManagement() {
       dataIndex: 'status',
       width: 90,
       render: (val) => {
-        const isEnabled = val === 'enabled';
+        const isActive = val === 'active';
         return (
-          <Tag color={isEnabled ? 'success' : 'error'}>
-            {isEnabled ? '启用' : '禁用'}
-          </Tag>
-        );
-      },
-    },
-    {
-      key: 'onlineStatus',
-      title: t('user.onlineStatus'),
-      dataIndex: 'onlineStatus',
-      width: 90,
-      render: (val) => {
-        const isOnline = val === 'online';
-        return (
-          <Tag color={isOnline ? 'green' : 'default'}>
-            {isOnline ? t('user.online') : t('user.offline')}
+          <Tag color={isActive ? 'success' : 'error'}>
+            {isActive ? '激活' : '禁用'}
           </Tag>
         );
       },
@@ -550,22 +636,40 @@ export default function UserManagement() {
     { key: 'email', title: t('user.email'), dataIndex: 'email', ellipsis: true },
     { key: 'phone', title: t('user.phone'), dataIndex: 'phone', width: 120, render: (v) => v || '-' },
     {
-      key: 'groupNames',
+      key: 'roles',
       title: '角色',
-      dataIndex: 'groupNames',
+      dataIndex: 'roles',
       width: 150,
       render: (val) => {
-        const groups = val as string[];
-        if (!groups || groups.length === 0) return '—';
-        if (groups.length === 1) return groups[0];
+        const roles = (val as string[]) ?? [];
+        if (roles.length === 0) return '—';
+        if (roles.length === 1) return roles[0];
         return (
-          <Tooltip title={groups.join(', ')}>
-            <span>{groups[0]}...</span>
+          <Tooltip title={roles.join(', ')}>
+            <span>{roles[0]}...</span>
           </Tooltip>
         );
       },
     },
-    { key: 'source', title: t('user.source'), dataIndex: 'source', width: 80 },
+    {
+      key: 'source',
+      title: t('user.source'),
+      dataIndex: 'source',
+      width: 110,
+      render: (val) => {
+        // PRD §3.1：source 列文本映射 + 颜色。
+        switch (val) {
+          case 'builtIn':
+            return <Tag color="blue">{t('user.source.builtIn')}</Tag>;
+          case 'LDAP':
+            return <Tag color="purple">LDAP</Tag>;
+          case 'admin':
+            return <Tag>{t('user.source.admin')}</Tag>;
+          default:
+            return '—';
+        }
+      },
+    },
     {
       key: 'expireTime',
       title: '过期时间',
@@ -594,28 +698,40 @@ export default function UserManagement() {
       width: 160,
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
     },
-    { key: 'createUser', title: '创建人', dataIndex: 'createUser', width: 100, render: (v) => v || '-' },
-    { key: 'updateUser', title: '更新人', dataIndex: 'updateUser', width: 100, render: (v) => v || '-' },
+    {
+      key: 'createdBy',
+      title: '创建人',
+      dataIndex: 'createdBy',
+      width: 110,
+      render: renderUserId,
+    },
+    {
+      key: 'updatedBy',
+      title: '更新人',
+      dataIndex: 'updatedBy',
+      width: 110,
+      render: renderUserId,
+    },
     {
       key: 'description',
       title: '备注',
       dataIndex: 'description',
-      width: 150,
+      width: 160,
       ellipsis: true,
       render: (val) => {
-        const desc = val as string;
+        const desc = val as string | undefined;
         if (!desc) return '-';
         if (desc.length > 20) {
           return (
             <Tooltip title={desc}>
-              <span>{desc.substring(0, 20)}...</span>
+              <span>{desc.slice(0, 20)}…</span>
             </Tooltip>
           );
         }
         return desc;
       },
     },
-  ], [t, form, isBuiltIn, isAdmin, handleDelete, handleCopy, lockUser, unlockUser, forceLogout, modal, message]);
+  ], [t, form, isBuiltIn, handleDelete, handleCopy, forceLogout, updateUser, modal, message, renderUserId]);
 
   return (
     <ListPageLayout
@@ -725,7 +841,7 @@ export default function UserManagement() {
             </Button>
             <Button
               type="primary"
-              loading={createMode === 'add' ? createUser.isPending : importPanelRef.current?.loading}
+              loading={createMode === 'add' ? createUser.isPending : importing}
               onClick={createMode === 'add' ? handleCreate : () => importPanelRef.current?.handleImport()}
             >
               {t('common.confirm')}
@@ -786,19 +902,25 @@ export default function UserManagement() {
               <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
             </Form.Item>
             <Form.Item
-              name="groupNames"
+              name="roleIds"
               label="角色"
               rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
             >
               <Select
                 mode="multiple"
                 placeholder={t('common.pleaseSelect')}
-                options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
+                options={roleOptions}
               />
             </Form.Item>
-            <Form.Item name="status" label="状态" initialValue="enabled">
+            <Form.Item
+              name="displayName"
+              label="用户名称"
+            >
+              <Input placeholder="留空则与用户账号相同" maxLength={64} />
+            </Form.Item>
+            <Form.Item name="status" label="状态" initialValue="active">
               <Radio.Group>
-                <Radio value="enabled">启用</Radio>
+                <Radio value="active">激活</Radio>
                 <Radio value="disabled">禁用</Radio>
               </Radio.Group>
             </Form.Item>
@@ -818,19 +940,16 @@ export default function UserManagement() {
             >
               <Input placeholder={t('user.phone')} maxLength={11} />
             </Form.Item>
-            <Form.Item
-              name="expireTime"
-              label={t('user.expireTime')}
-            >
+            <Form.Item name="expireTime" label="过期时间" extra="留空表示永久有效；过期后该用户将无法登录">
               <DatePicker
                 showTime
                 format="YYYY-MM-DD HH:mm:ss"
-                disabledDate={(current) => current && current < dayjs().startOf('day')}
+                disabledDate={(current) => current && current.isBefore(dayjs().startOf('day'))}
                 style={{ width: '100%' }}
               />
             </Form.Item>
-            <Form.Item name="description" label={t('user.description')}>
-              <Input.TextArea rows={3} placeholder={t('user.description')} maxLength={500} showCount />
+            <Form.Item name="description" label="备注">
+              <Input.TextArea rows={3} placeholder="备注（可选）" maxLength={500} showCount />
             </Form.Item>
           </Form>
         )}
@@ -877,10 +996,14 @@ export default function UserManagement() {
         }
       >
         <Form form={form} layout="vertical">
-          {/* 编辑 Drawer 暂保持 userName 旧键以兼容已有 setFieldsValue 调用；
-              修复"新增 400"只需改创建表单，详见 handleCreate 注释。 */}
-          <Form.Item name="userName" label={t('user.userName')}>
+          {/* 编辑表单字段与后端 admin.UpdateUserRequest 对齐：
+              display_name / email / phone / carrier / status / role_ids。
+              role_ids 由后端 service.syncUserRoles 做差量同步。 */}
+          <Form.Item name="username" label="用户账号">
             <Input readOnly />
+          </Form.Item>
+          <Form.Item name="displayName" label="用户名称">
+            <Input placeholder="用户名称" maxLength={64} />
           </Form.Item>
           <Form.Item
             name="email"
@@ -898,36 +1021,30 @@ export default function UserManagement() {
           >
             <Input placeholder={t('user.phone')} maxLength={11} />
           </Form.Item>
-          <Form.Item
-            name="groupNames"
-            label="角色"
-            rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
-          >
+          <Form.Item name="roleIds" label="角色">
             <Select
               mode="multiple"
               placeholder={t('common.pleaseSelect')}
-              options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.groupName }))}
+              options={roleOptions}
+              allowClear
             />
           </Form.Item>
           <Form.Item name="status" label="状态">
             <Radio.Group>
-              <Radio value="enabled">启用</Radio>
+              <Radio value="active">激活</Radio>
               <Radio value="disabled">禁用</Radio>
             </Radio.Group>
           </Form.Item>
-          <Form.Item
-            name="expireTime"
-            label={t('user.expireTime')}
-          >
+          <Form.Item name="expireTime" label="过期时间" extra="留空表示永久有效；过期后该用户将无法登录">
             <DatePicker
               showTime
               format="YYYY-MM-DD HH:mm:ss"
-              disabledDate={(current) => current && current < dayjs().startOf('day')}
+              disabledDate={(current) => current && current.isBefore(dayjs().startOf('day'))}
               style={{ width: '100%' }}
             />
           </Form.Item>
-          <Form.Item name="description" label={t('user.description')}>
-            <Input.TextArea rows={3} maxLength={500} showCount />
+          <Form.Item name="description" label="备注">
+            <Input.TextArea rows={3} placeholder="备注（可选）" maxLength={500} showCount />
           </Form.Item>
         </Form>
       </Drawer>
@@ -955,18 +1072,22 @@ export default function UserManagement() {
         }
       >
         <Form form={form} layout="vertical">
-          <Form.Item label={t('user.onlineStatus')}>
-            <Tag color={selectedUser?.onlineStatus === 'online' ? 'green' : 'default'}>
-              {selectedUser?.onlineStatus === 'online' ? t('user.online') : t('user.offline')}
-            </Tag>
-          </Form.Item>
           <Form.Item label="状态">
-            <Tag color={selectedUser?.status === 'enabled' ? 'success' : 'error'}>
-              {selectedUser?.status === 'enabled' ? '启用' : '禁用'}
+            <Tag color={selectedUser?.status === 'active' ? 'success' : 'error'}>
+              {selectedUser?.status === 'active' ? '激活' : '禁用'}
             </Tag>
           </Form.Item>
-          <Form.Item name="userName" label={t('user.userName')}>
+          <Form.Item label={t('user.source')}>
+            {selectedUser?.source === 'builtIn' && <Tag color="blue">{t('user.source.builtIn')}</Tag>}
+            {selectedUser?.source === 'LDAP' && <Tag color="purple">LDAP</Tag>}
+            {selectedUser?.source === 'admin' && <Tag>{t('user.source.admin')}</Tag>}
+            {!selectedUser?.source && <span>—</span>}
+          </Form.Item>
+          <Form.Item name="username" label="用户账号">
             <Input readOnly />
+          </Form.Item>
+          <Form.Item label="用户名称">
+            <span>{selectedUser?.displayName || '-'}</span>
           </Form.Item>
           <Form.Item name="email" label={t('user.email')}>
             <Input readOnly />
@@ -974,14 +1095,11 @@ export default function UserManagement() {
           <Form.Item label={t('user.phone')}>
             <span>{selectedUser?.phone || '-'}</span>
           </Form.Item>
-          <Form.Item label={t('user.groupName')}>
-            <span>{selectedUser?.groupNames?.join(', ') || '-'}</span>
+          <Form.Item label="角色">
+            <span>{selectedUser?.roles?.join(', ') || '-'}</span>
           </Form.Item>
-          <Form.Item label={t('user.source')}>
-            <span>{selectedUser?.source || '-'}</span>
-          </Form.Item>
-          <Form.Item label={t('user.expireTime')}>
-            <span>{selectedUser?.expireTime || t('user.noTimeLimit')}</span>
+          <Form.Item label="过期时间">
+            <span>{selectedUser?.expireTime ? new Date(selectedUser.expireTime).toLocaleString('zh-CN') : '永久'}</span>
           </Form.Item>
           <Form.Item label={t('user.lastLoginTime')}>
             <span>{selectedUser?.lastLoginTime ? new Date(selectedUser.lastLoginTime).toLocaleString('zh-CN') : '-'}</span>
@@ -993,10 +1111,10 @@ export default function UserManagement() {
             <span>{selectedUser?.updateTime ? new Date(selectedUser.updateTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
           <Form.Item label="创建人">
-            <span>{selectedUser?.createUser || '-'}</span>
+            <span>{renderUserId(selectedUser?.createdBy)}</span>
           </Form.Item>
           <Form.Item label="更新人">
-            <span>{selectedUser?.updateUser || '-'}</span>
+            <span>{renderUserId(selectedUser?.updatedBy)}</span>
           </Form.Item>
           <Form.Item label="备注">
             <span>{selectedUser?.description || '-'}</span>
@@ -1006,7 +1124,7 @@ export default function UserManagement() {
 
       {/* Reset Password Modal */}
       <Modal
-        title={`${t('user.resetPassword')} - ${selectedUser?.userName ?? ''}`}
+        title={`${t('user.resetPassword')} - ${selectedUser?.username ?? ''}`}
         open={resetPwdVisible}
         onOk={handleResetPassword}
         onCancel={() => {
@@ -1046,23 +1164,29 @@ export default function UserManagement() {
         </Form>
       </Modal>
 
-      {/* Move Group Modal */}
+      {/* 批量分配角色 Modal（PRD §5.5 / §11.5：原"移动到组"重命名） */}
       <Modal
-        title={t('user.moveGroup')}
+        title="批量分配角色"
         open={moveGroupVisible}
         onOk={handleMoveGroup}
         onCancel={() => {
           setMoveGroupVisible(false);
           moveGroupForm.resetFields();
         }}
-        confirmLoading={moveUsersToGroup.isPending}
+        confirmLoading={batchAssignRoles.isPending}
         width={420}
       >
         <Form form={moveGroupForm} layout="vertical">
-          <Form.Item name="targetGroupId" label={t('user.targetGroup')} rules={[{ required: true }]}>
+          <Form.Item
+            name="targetRoleIds"
+            label="目标角色"
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+            extra="选择后将整体替换所选用户的角色集合"
+          >
             <Select
+              mode="multiple"
               placeholder={t('common.pleaseSelect')}
-              options={(allGroups ?? []).map((g) => ({ label: g.groupName, value: g.id }))}
+              options={roleOptions}
             />
           </Form.Item>
         </Form>
