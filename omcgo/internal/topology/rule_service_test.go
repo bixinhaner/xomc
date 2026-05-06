@@ -452,6 +452,38 @@ func TestStart_RegistersCron(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// D8 — RuleMetrics 全部方法 nil-safe（PRD §12.5；模仿 PolicyMetrics 模式）
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// 测试场景：未注入 metrics 时（生产 reg=nil 或单测路径）service 调埋点
+// 不应 panic。RuleMetrics 通过 nil receiver 早 return 实现。
+func TestRuleMetrics_NilSafe_AllMethods(t *testing.T) {
+	var m *RuleMetrics // nil 指针
+
+	// 应无 panic
+	m.RecordEvaluation("matched", "manual")
+	m.RecordEvaluation("skipped", "cron")
+	m.RecordEvaluation("failed", "inform")
+	m.ObserveEvaluationDuration("rule-id", 0.123)
+	m.RecordApplyFailure("db_error")
+	m.SetDevicesInRuleGroups(42)
+	m.SetActiveRules(7)
+	m.RecordDefaultGroupMigration("migrated")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// D8 — RuleMetrics reg=nil 构造 + 方法调用 不 panic（生产模式抽样）
+// ──────────────────────────────────────────────────────────────────────────────
+func TestNewRuleMetrics_NilRegistry_DoesNotRegister(t *testing.T) {
+	m := NewRuleMetrics(nil) // 单测场景常见
+	require.NotNil(t, m)
+	// 调几个常用方法验证非 nil 字段也不 panic
+	m.RecordEvaluation("matched", "manual")
+	m.SetActiveRules(3)
+	m.ObserveEvaluationDuration("r1", 0.05)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // A4 — manual override 在 cron 重评中保留（PRD §3 GWT A4 — SQL 层守护）
 // ──────────────────────────────────────────────────────────────────────────────
 //

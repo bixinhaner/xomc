@@ -40,6 +40,7 @@ type DeviceRuleService struct {
 	eventBus     event.EventBus    // T-0027 D7 可选注入；nil 时 Start 跳过订阅装配
 	cron         *cron.Cron        // T-0027 D6 cron @hourly 调度器，Start 后非 nil
 	subscription event.Subscription // T-0027 D7 device.registered 订阅句柄
+	metrics      *RuleMetrics      // T-0027 D8 可选注入；nil 时所有埋点 no-op（PRD §12.5）
 	taskQueue    chan uuid.UUID    // 任务队列
 	workers      int               // Worker 数量
 	logger       *zap.Logger
@@ -323,6 +324,10 @@ func (s *DeviceRuleService) BatchSortRules(ctx context.Context, items []RuleSort
 
 // ApplyRule 应用规则（异步）
 func (s *DeviceRuleService) ApplyRule(ctx context.Context, ruleID uuid.UUID, req ApplyRuleRequest, operator string) (*RuleTask, error) {
+	s.logger.Info("topology.rule.evaluating", // PRD §12.5 log key
+		zap.String("rule_id", ruleID.String()),
+		zap.String("operator", operator),
+	)
 	// 1. 获取规则
 	rule, err := s.repo.GetByID(ctx, ruleID)
 	if err != nil {
@@ -473,6 +478,7 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 						mu.Lock()
 						failedCount++
 						mu.Unlock()
+						s.metrics.RecordEvaluation("failed", "manual")
 						return
 					}
 					if affected == 0 {
@@ -481,11 +487,13 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 							zap.String("device_id", device.ID.String()),
 							zap.String("rule_id", rule.ID.String()),
 						)
+						s.metrics.RecordEvaluation("skipped", "manual")
 						return
 					}
 					mu.Lock()
 					matchedCount++
 					mu.Unlock()
+					s.metrics.RecordEvaluation("matched", "manual")
 				}
 			}(j)
 		}
@@ -520,10 +528,13 @@ func (s *DeviceRuleService) failTask(ctx context.Context, task *RuleTask, errMsg
 	task.CompletedAt = &completedAt
 	s.taskRepo.Update(ctx, task)
 
-	s.logger.Error("rule apply task failed",
+	// PRD §12.5：log key + metric 联动
+	s.logger.Warn("topology.rule.apply_failed",
 		zap.String("task_id", task.ID.String()),
+		zap.String("rule_id", task.RuleID.String()),
 		zap.String("error", errMsg),
 	)
+	s.metrics.RecordApplyFailure("other") // 通用归类；目标组缺失类失败由调用点定向归类（Step 11 优化）
 }
 
 // DeviceForMatch 用于匹配的设备信息
@@ -544,6 +555,12 @@ func (s *DeviceRuleService) SetDeviceLister(l DeviceLister) {
 // nil 时 Start 跳过订阅装配（仅 cron 路径生效）。
 func (s *DeviceRuleService) SetEventBus(bus event.EventBus) {
 	s.eventBus = bus
+}
+
+// SetMetrics 注入 RuleMetrics（PRD §12.5）。nil 时所有埋点 no-op。
+// 所有 RuleMetrics 方法 nil-safe，setter 不强制 — 测试场景可省。
+func (s *DeviceRuleService) SetMetrics(m *RuleMetrics) {
+	s.metrics = m
 }
 
 // Start 启动后台任务：cron @hourly reEvaluateAll。
@@ -659,18 +676,20 @@ func (s *DeviceRuleService) handleDeviceRegistered(ctx context.Context, evt even
 			ctx, *rule.TargetGroupID, payload.DeviceID, "rule", &rule.ID,
 		)
 		if err != nil {
+			s.metrics.RecordEvaluation("failed", "inform")
 			return fmt.Errorf("add device to group: %w", err)
 		}
 		if affected == 0 {
-			// device_id 已是 manual 行；理论上首次注册不会触发，留作 NATS 重投递时的 idempotent 守护
 			s.logger.Debug("topology.rule.manual_skipped",
 				zap.String("device_id", payload.DeviceID.String()),
 				zap.String("rule_id", rule.ID.String()))
+			s.metrics.RecordEvaluation("skipped", "inform")
 		} else {
 			s.logger.Info("topology.rule.matched",
 				zap.String("device_id", payload.DeviceID.String()),
 				zap.String("rule_id", rule.ID.String()),
 				zap.String("group_id", rule.TargetGroupID.String()))
+			s.metrics.RecordEvaluation("matched", "inform")
 		}
 		return nil // 找到首个匹配即停（A3 单组归属）
 	}
@@ -689,6 +708,8 @@ func (s *DeviceRuleService) reEvaluateAll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list enabled rules for cron re-eval: %w", err)
 	}
+	// 周期更新 active_rules gauge（PRD §12.5）
+	s.metrics.SetActiveRules(float64(len(rules)))
 	if len(rules) == 0 {
 		return nil
 	}
@@ -700,6 +721,7 @@ func (s *DeviceRuleService) reEvaluateAll(ctx context.Context) error {
 				zap.String("rule_name", rule.Name),
 				zap.Error(err),
 			)
+			s.metrics.RecordEvaluation("failed", "cron")
 			continue
 		}
 	}
