@@ -38,6 +38,12 @@ export interface Device {
   firmwareVersion: string;
   macAddress: string;
   groupName: string;
+  // T-0027 D9：分组归属来源（PRD §12.6 跨模块联合变更）
+  // backend 通过 device_group_members.source_type 列传出（snake_case → camelCase 自动）
+  // 'manual' = 用户手工指派；'rule' = 规则自动评估命中（D5.B SQL 守护已在后端）
+  // optional 因后端列表 API 尚未全部 JOIN device_group_members 暴露此字段
+  sourceType?: 'manual' | 'rule';
+  sourceRuleId?: string; // 当 sourceType='rule' 时关联的 device_rules.id
   onlineTime: string;
   offlineTime: string;
   onlineDuration: number;
