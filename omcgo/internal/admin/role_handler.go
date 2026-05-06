@@ -111,6 +111,24 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 	c.JSON(http.StatusNoContent, nil)
 }
 
+// CopyRole handles POST /roles/:id/copy（roles.md §7 P2 #9）。
+// 一键复制角色：name 自动加 _copy / _copy_2... 后缀；permissions / role_menus /
+// role_device_groups / role_api_permissions 全部复制；is_system 强制为 false。
+func (h *Handler) CopyRole(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	role, err := h.service.CopyRole(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	c.JSON(http.StatusCreated, role)
+}
+
 func (h *Handler) ListPermissions(c *gin.Context) {
 	perms, err := h.service.ListAllPermissions(c.Request.Context())
 	if err != nil {
@@ -169,10 +187,9 @@ func (h *Handler) SetRoleDeviceGroups(c *gin.Context) {
 		return
 	}
 
-	// Invalidate permission cache for this role.
-	if h.permService != nil {
-		h.permService.InvalidateRoleCache(c.Request.Context(), id)
-	}
+	// PRD roles.md §10 DoD：设备分组绑定变更后必须失效该角色下所有用户的可见域缓存。
+	// 之前只调 InvalidateRoleCache（log-only），无法真正使 perm:visible_groups 失效。
+	h.service.InvalidatePermCacheByRole(c.Request.Context(), id)
 
 	c.JSON(http.StatusOK, gin.H{"message": "device groups updated"})
 }

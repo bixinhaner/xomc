@@ -8,8 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // mockPermInvalidator 记录 InvalidateUserCache 的调用，用于断言次数（PRD §10 DoD）。
@@ -93,28 +91,9 @@ func TestInvalidatePermCache_UpdateUser_RoleChange(t *testing.T) {
 	assert.Equal(t, 1, inv.callCount(), "UpdateUser(role_ids) 应调 InvalidateUserCache 1 次")
 }
 
-// TestInvalidatePermCache_UpdateUser_CarrierChange 断言：carrier 变更触发 1 次失效。
-func TestInvalidatePermCache_UpdateUser_CarrierChange(t *testing.T) {
-	userID := uuid.New()
-	carrier := model.CarrierCode("cmcc")
-
-	userRepo := &mockUserRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*User, error) {
-			return &User{ID: id, Status: UserStatusActive}, nil
-		},
-		updateFn: func(_ context.Context, _ *User) error { return nil },
-	}
-	roleRepo := &mockRoleRepo{
-		getUserRolesFn: func(_ context.Context, _ uuid.UUID) ([]Role, error) { return nil, nil },
-	}
-	svc := newTestService(userRepo, roleRepo, &mockAuditRepo{})
-	inv := &mockPermInvalidator{}
-	svc.SetPermissionInvalidator(inv)
-
-	_, err := svc.UpdateUser(context.Background(), userID, UpdateUserRequest{Carrier: &carrier})
-	require.NoError(t, err)
-	assert.Equal(t, 1, inv.callCount(), "UpdateUser(carrier) 应调 InvalidateUserCache 1 次")
-}
+// TestInvalidatePermCache_UpdateUser_CarrierChange removed in v1.0:
+// users.carrier column dropped, UpdateUserRequest no longer has Carrier field.
+// See PRD §11.11.
 
 // TestInvalidatePermCache_UpdateUser_NoVisibilityChange 断言：仅改 email 不触发缓存失效。
 func TestInvalidatePermCache_UpdateUser_NoVisibilityChange(t *testing.T) {
@@ -178,4 +157,69 @@ func TestInvalidatePermCache_BatchAssignRoles(t *testing.T) {
 	require.NoError(t, svc.BatchAssignRoles(context.Background(), userIDs, roleIDs))
 	assert.Equal(t, len(userIDs), inv.callCount(),
 		"BatchAssignRoles 应对每个用户调 1 次（共 %d 次）", len(userIDs))
+}
+
+// TestInvalidatePermCacheByRole 断言：roleID 持有 N 用户时，InvalidateUserCache 调 N 次。
+// PRD roles.md §10 DoD。
+func TestInvalidatePermCacheByRole(t *testing.T) {
+	roleID := uuid.New()
+	userIDs := []uuid.UUID{uuid.New(), uuid.New()}
+
+	roleRepo := &mockRoleRepo{
+		listUserIDsByRoleFn: func(_ context.Context, rid uuid.UUID) ([]uuid.UUID, error) {
+			assert.Equal(t, roleID, rid)
+			return userIDs, nil
+		},
+	}
+	svc := newTestService(&mockUserRepo{}, roleRepo, &mockAuditRepo{})
+	inv := &mockPermInvalidator{}
+	svc.SetPermissionInvalidator(inv)
+
+	svc.InvalidatePermCacheByRole(context.Background(), roleID)
+	assert.Equal(t, len(userIDs), inv.callCount(),
+		"InvalidatePermCacheByRole 应对每个用户调 1 次（共 %d 次）", len(userIDs))
+}
+
+// TestInvalidatePermCache_DeleteRole 断言：DeleteRole 成功后该角色下用户全部失效。
+func TestInvalidatePermCache_DeleteRole(t *testing.T) {
+	roleID := uuid.New()
+	userIDs := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
+
+	roleRepo := &mockRoleRepo{
+		listUserIDsByRoleFn: func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+			return userIDs, nil
+		},
+		deleteFn: func(_ context.Context, _ uuid.UUID) error { return nil },
+	}
+	svc := newTestService(&mockUserRepo{}, roleRepo, &mockAuditRepo{})
+	inv := &mockPermInvalidator{}
+	svc.SetPermissionInvalidator(inv)
+
+	require.NoError(t, svc.DeleteRole(context.Background(), roleID))
+	assert.Equal(t, len(userIDs), inv.callCount(),
+		"DeleteRole 应对每个用户调 InvalidateUserCache 1 次（共 %d 次）", len(userIDs))
+}
+
+// TestInvalidatePermCache_SetRoleMenus 断言：SetRoleMenus 成功后该角色下用户全部失效。
+// mockMenuRepo.SetRoleMenus 默认返回 nil（成功），不需要自定义 fn。
+func TestInvalidatePermCache_SetRoleMenus(t *testing.T) {
+	roleID := uuid.New()
+	operatorID := uuid.New()
+	userIDs := []uuid.UUID{uuid.New()}
+
+	roleRepo := &mockRoleRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*Role, error) {
+			return &Role{ID: id}, nil
+		},
+		listUserIDsByRoleFn: func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+			return userIDs, nil
+		},
+	}
+	svc := newTestService(&mockUserRepo{}, roleRepo, &mockAuditRepo{})
+	inv := &mockPermInvalidator{}
+	svc.SetPermissionInvalidator(inv)
+
+	require.NoError(t, svc.SetRoleMenus(context.Background(), roleID, []uuid.UUID{uuid.New()}, operatorID))
+	assert.Equal(t, len(userIDs), inv.callCount(),
+		"SetRoleMenus 应对每个用户调 InvalidateUserCache 1 次")
 }

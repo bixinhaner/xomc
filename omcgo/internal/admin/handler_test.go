@@ -143,6 +143,9 @@ func (m *handlerMockRoleRepo) SetDefaultRole(_ context.Context, _, _ uuid.UUID) 
 func (m *handlerMockRoleRepo) ListRoleUsers(_ context.Context, _ uuid.UUID, _, _ int) ([]RoleUserItem, int64, error) {
 	return []RoleUserItem{}, 0, nil
 }
+func (m *handlerMockRoleRepo) ListUserIDsByRole(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 type handlerMockAuditRepo struct{}
 

@@ -15,6 +15,13 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
+// roleColumns: v0.6 起加入 code / created_by / updated_by。
+// 顺序须与 scanRole / scanRoleFromRows 中 Scan 参数一致。
+var roleColumns = []string{
+	"id", "name", "code", "description", "is_system",
+	"created_by", "updated_by", "created_at", "updated_at",
+}
+
 // PgRoleRepository implements RoleRepository using PostgreSQL.
 type PgRoleRepository struct {
 	pool       *pgxpool.Pool
@@ -41,10 +48,16 @@ func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
 		role.ID = uuid.New()
 	}
 	now := time.Now()
+	role.CreatedAt = now
+	role.UpdatedAt = now
 
 	query, args, err := storage.Psql.Insert("roles").
-		Columns("id", "name", "description", "is_system", "created_at", "updated_at").
-		Values(role.ID, role.Name, role.Description, role.IsSystem, now, now).
+		Columns(roleColumns...).
+		Values(
+			role.ID, role.Name, nullableString(role.Code), role.Description, role.IsSystem,
+			nullableUUID(role.CreatedBy), nullableUUID(role.UpdatedBy),
+			role.CreatedAt, role.UpdatedAt,
+		).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert role SQL: %w", err)
@@ -57,8 +70,23 @@ func (r *PgRoleRepository) Create(ctx context.Context, role *Role) error {
 	return nil
 }
 
+// scanRoleFromRow scan a single row from QueryRow result into Role, handling NULL columns.
+func scanRoleFromRow(row pgx.Row, role *Role) error {
+	var code *string
+	return row.Scan(
+		&role.ID, &role.Name, &code, &role.Description, &role.IsSystem,
+		&role.CreatedBy, &role.UpdatedBy, &role.CreatedAt, &role.UpdatedAt,
+	)
+}
+
+func applyRoleNullables(role *Role, code *string) {
+	if code != nil {
+		role.Code = *code
+	}
+}
+
 func (r *PgRoleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Role, error) {
-	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(roleColumns...).
 		From("roles").
 		Where(sq.Eq{"id": id}).
 		ToSql()
@@ -67,9 +95,10 @@ func (r *PgRoleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Role, er
 	}
 
 	var role Role
+	var code *string
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
-		&role.ID, &role.Name, &role.Description, &role.IsSystem,
-		&role.CreatedAt, &role.UpdatedAt,
+		&role.ID, &role.Name, &code, &role.Description, &role.IsSystem,
+		&role.CreatedBy, &role.UpdatedBy, &role.CreatedAt, &role.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -77,17 +106,29 @@ func (r *PgRoleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Role, er
 		}
 		return nil, fmt.Errorf("get role: %w", err)
 	}
+	applyRoleNullables(&role, code)
 
 	perms, err := r.GetPermissions(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	role.Permissions = perms
+
+	// 与列表接口对齐，让单角色详情也带 DeviceGroupIDs / UserCount（前端编辑面板可一次拿全）
+	roles := []Role{role}
+	if err := r.populateDeviceGroupIDs(ctx, roles); err != nil {
+		return nil, fmt.Errorf("populate role device groups: %w", err)
+	}
+	if err := r.populateUserCounts(ctx, roles); err != nil {
+		return nil, fmt.Errorf("populate role user counts: %w", err)
+	}
+	role = roles[0]
+
 	return &role, nil
 }
 
 func (r *PgRoleRepository) GetByName(ctx context.Context, name string) (*Role, error) {
-	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(roleColumns...).
 		From("roles").
 		Where(sq.Eq{"name": name}).
 		ToSql()
@@ -96,9 +137,10 @@ func (r *PgRoleRepository) GetByName(ctx context.Context, name string) (*Role, e
 	}
 
 	var role Role
+	var code *string
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
-		&role.ID, &role.Name, &role.Description, &role.IsSystem,
-		&role.CreatedAt, &role.UpdatedAt,
+		&role.ID, &role.Name, &code, &role.Description, &role.IsSystem,
+		&role.CreatedBy, &role.UpdatedBy, &role.CreatedAt, &role.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -106,15 +148,19 @@ func (r *PgRoleRepository) GetByName(ctx context.Context, name string) (*Role, e
 		}
 		return nil, fmt.Errorf("get role by name: %w", err)
 	}
+	applyRoleNullables(&role, code)
 	return &role, nil
 }
 
 func (r *PgRoleRepository) Update(ctx context.Context, role *Role) error {
 	now := time.Now()
+	role.UpdatedAt = now
 
 	query, args, err := storage.Psql.Update("roles").
 		Set("name", role.Name).
+		Set("code", nullableString(role.Code)).
 		Set("description", role.Description).
+		Set("updated_by", nullableUUID(role.UpdatedBy)).
 		Set("updated_at", now).
 		Where(sq.Eq{"id": role.ID}).
 		ToSql()
@@ -160,7 +206,7 @@ func (r *PgRoleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PgRoleRepository) List(ctx context.Context) ([]Role, error) {
-	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(roleColumns...).
 		From("roles").
 		OrderBy("name ASC").
 		ToSql()
@@ -177,12 +223,101 @@ func (r *PgRoleRepository) List(ctx context.Context) ([]Role, error) {
 	var roles []Role
 	for rows.Next() {
 		var role Role
-		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.IsSystem, &role.CreatedAt, &role.UpdatedAt); err != nil {
+		var code *string
+		if err := rows.Scan(
+			&role.ID, &role.Name, &code, &role.Description, &role.IsSystem,
+			&role.CreatedBy, &role.UpdatedBy, &role.CreatedAt, &role.UpdatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan role: %w", err)
 		}
+		applyRoleNullables(&role, code)
 		roles = append(roles, role)
 	}
+	if err := r.populateDeviceGroupIDs(ctx, roles); err != nil {
+		return nil, fmt.Errorf("populate role device groups: %w", err)
+	}
+	if err := r.populateUserCounts(ctx, roles); err != nil {
+		return nil, fmt.Errorf("populate role user counts: %w", err)
+	}
 	return roles, nil
+}
+
+// populateUserCounts 一次性批量补全 roles 列表的 UserCount 字段（§7 P0 #2）。
+// 单 SQL 聚合查询：SELECT role_id, COUNT(*) GROUP BY role_id WHERE role_id = ANY($1)。
+func (r *PgRoleRepository) populateUserCounts(ctx context.Context, roles []Role) error {
+	if len(roles) == 0 {
+		return nil
+	}
+	roleIDs := make([]uuid.UUID, len(roles))
+	for i, role := range roles {
+		roleIDs[i] = role.ID
+	}
+
+	rows, err := r.pool.Query(ctx,
+		`SELECT role_id, COUNT(*) FROM user_roles WHERE role_id = ANY($1) GROUP BY role_id`, roleIDs)
+	if err != nil {
+		return fmt.Errorf("query user_roles count: %w", err)
+	}
+	defer rows.Close()
+
+	countByRole := make(map[uuid.UUID]int, len(roles))
+	for rows.Next() {
+		var roleID uuid.UUID
+		var cnt int
+		if err := rows.Scan(&roleID, &cnt); err != nil {
+			return fmt.Errorf("scan user_roles count: %w", err)
+		}
+		countByRole[roleID] = cnt
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for i := range roles {
+		roles[i].UserCount = countByRole[roles[i].ID]
+	}
+	return nil
+}
+
+// populateDeviceGroupIDs 一次性批量补全 roles 列表的 DeviceGroupIDs 字段，
+// 让前端 RolePermission 列表 / users 管理「未绑分组角色 ⚠️」判定（PRD §11.2 决议 ①）准确。
+//
+// 仅取 group_id（不取 network_types，network_types 仍由专项端点
+// `GET /admin/roles/{id}/device-groups` 单独返回，避免 list 响应膨胀）。
+func (r *PgRoleRepository) populateDeviceGroupIDs(ctx context.Context, roles []Role) error {
+	if len(roles) == 0 {
+		return nil
+	}
+	roleIDs := make([]uuid.UUID, len(roles))
+	for i, role := range roles {
+		roleIDs[i] = role.ID
+	}
+
+	rows, err := r.pool.Query(ctx,
+		`SELECT role_id, group_id FROM role_device_groups WHERE role_id = ANY($1)`, roleIDs)
+	if err != nil {
+		return fmt.Errorf("query role_device_groups: %w", err)
+	}
+	defer rows.Close()
+
+	groupsByRole := make(map[uuid.UUID][]uuid.UUID, len(roles))
+	for rows.Next() {
+		var roleID, groupID uuid.UUID
+		if err := rows.Scan(&roleID, &groupID); err != nil {
+			return fmt.Errorf("scan role_device_groups: %w", err)
+		}
+		groupsByRole[roleID] = append(groupsByRole[roleID], groupID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for i := range roles {
+		if gids := groupsByRole[roles[i].ID]; gids != nil {
+			roles[i].DeviceGroupIDs = gids
+		}
+	}
+	return nil
 }
 
 func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error) {
@@ -209,7 +344,7 @@ func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFi
 	limit := filter.Limit()
 
 	// Data query
-	query, args, err := storage.Psql.Select("id", "name", "description", "is_system", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(roleColumns...).
 		From("roles").
 		Where(where).
 		OrderBy("name ASC").
@@ -229,10 +364,21 @@ func (r *PgRoleRepository) ListWithPagination(ctx context.Context, filter RoleFi
 	var items []Role
 	for rows.Next() {
 		var role Role
-		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.IsSystem, &role.CreatedAt, &role.UpdatedAt); err != nil {
+		var code *string
+		if err := rows.Scan(
+			&role.ID, &role.Name, &code, &role.Description, &role.IsSystem,
+			&role.CreatedBy, &role.UpdatedBy, &role.CreatedAt, &role.UpdatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan role: %w", err)
 		}
+		applyRoleNullables(&role, code)
 		items = append(items, role)
+	}
+	if err := r.populateDeviceGroupIDs(ctx, items); err != nil {
+		return nil, fmt.Errorf("populate role device groups: %w", err)
+	}
+	if err := r.populateUserCounts(ctx, items); err != nil {
+		return nil, fmt.Errorf("populate role user counts: %w", err)
 	}
 
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
@@ -324,6 +470,37 @@ func (r *PgRoleRepository) SetDefaultRole(ctx context.Context, userID, roleID uu
 	}
 
 	return tx.Commit(ctx)
+}
+
+// ListUserIDsByRole 返回当前持有该角色的所有用户 ID（无分页）。
+// PRD docs/prd/system/roles.md §10 DoD：角色侧写操作后用此结果遍历调
+// PermissionInvalidator.InvalidateUserCache 失效缓存。
+func (r *PgRoleRepository) ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	query, args, err := storage.Psql.Select("user_id").
+		From("user_roles").
+		Where(sq.Eq{"role_id": roleID}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list users by role SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query users by role: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan user id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users by role: %w", err)
+	}
+	return ids, nil
 }
 
 func (r *PgRoleRepository) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, error) {

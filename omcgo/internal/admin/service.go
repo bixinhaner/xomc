@@ -138,6 +138,27 @@ func (s *AdminService) invalidatePermCache(ctx context.Context, userID uuid.UUID
 	}
 }
 
+// InvalidatePermCacheByRole 遍历该角色的所有用户，逐一调 invalidatePermCache。
+// 用于 PRD docs/prd/system/roles.md §10 DoD：角色侧写操作（菜单/分组/API/删除）后
+// 同步失效该角色下所有用户的可见域缓存。public 以便 handler 在直接调 repo 写库后调用。
+func (s *AdminService) InvalidatePermCacheByRole(ctx context.Context, roleID uuid.UUID) {
+	if s.permInvalidator == nil {
+		return
+	}
+	userIDs, err := s.roleRepo.ListUserIDsByRole(ctx, roleID)
+	if err != nil {
+		s.logger.Error("list users by role for cache invalidate failed",
+			zap.String("role_id", roleID.String()), zap.Error(err))
+		if s.metrics != nil {
+			s.metrics.PermCacheInvalidateFailed.Inc()
+		}
+		return
+	}
+	for _, uid := range userIDs {
+		s.invalidatePermCache(ctx, uid)
+	}
+}
+
 // ForceLogout 把指定用户的 access/refresh token 全部标记为失效（写入 Redis 撤销时间戳）。
 // 已签发但 iat < 撤销时间戳的 token 会在下一次中间件校验时被拒绝。
 // 内置用户（source=builtIn）不允许下线，避免锁死系统登录入口。
@@ -199,7 +220,7 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	tokenPair, err := s.jwt.GenerateTokenPair(&Claims{
 		UserID:        user.ID,
 		Username:      user.Username,
-		Carrier:       user.Carrier,
+		IsSuperAdmin:  user.IsSuperAdmin(),
 		Roles:         roleNames,
 		CurrentRoleID: s.getDefaultRoleID(ctx, user.ID, roles),
 	})
@@ -257,7 +278,7 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 	return s.jwt.GenerateTokenPair(&Claims{
 		UserID:        user.ID,
 		Username:      user.Username,
-		Carrier:       user.Carrier,
+		IsSuperAdmin:  user.IsSuperAdmin(),
 		Roles:         roleNames,
 		CurrentRoleID: defaultRoleID,
 	})
@@ -281,7 +302,6 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 		Phone:        req.Phone,
 		Description:  req.Description,
 		ExpireAt:     req.ExpireAt,
-		Carrier:      req.Carrier,
 		Status:       UserStatusActive,
 		Source:       UserSourceAdmin,
 	}
@@ -335,9 +355,6 @@ func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateU
 	if req.ExpireAt != nil {
 		user.ExpireAt = req.ExpireAt
 	}
-	if req.Carrier != nil {
-		user.Carrier = req.Carrier
-	}
 	if req.Status != nil {
 		user.Status = *req.Status
 	}
@@ -355,8 +372,9 @@ func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateU
 		}
 	}
 
-	// 角色或运营商变更 → 失效该用户的可见分组缓存（PRD §10 DoD）。
-	if req.RoleIDs != nil || req.Carrier != nil {
+	// 角色变更 → 失效该用户的可见分组缓存（PRD §10 DoD）。
+	// v1.0：carrier 字段已删，仅判定 RoleIDs 变化。
+	if req.RoleIDs != nil {
 		s.invalidatePermCache(ctx, user.ID)
 	}
 
@@ -385,7 +403,7 @@ func (s *AdminService) BatchAssignRoles(ctx context.Context, userIDs, roleIDs []
 }
 
 // CopyUser 复制一个用户：用户名 = "<src.username>_copy_<n>"（n 自动递增直到不冲突）。
-// 复制项：display_name / email / phone / carrier / 当前 roles。
+// 复制项：display_name / email / phone / 当前 roles（v1.0：carrier 字段已删除）。
 // 不复制项：password（强制随机生成 12 位密码并随响应返回，前端必须立刻提示管理员重置）/ source（新副本固定 admin）。
 func (s *AdminService) CopyUser(ctx context.Context, sourceID uuid.UUID) (*User, string, error) {
 	src, err := s.userRepo.GetByID(ctx, sourceID)
@@ -418,7 +436,6 @@ func (s *AdminService) CopyUser(ctx context.Context, sourceID uuid.UUID) (*User,
 		DisplayName:  src.DisplayName,
 		Email:        src.Email,
 		Phone:        src.Phone,
-		Carrier:      src.Carrier,
 		Status:       UserStatusActive,
 		Source:       UserSourceAdmin,
 	}
@@ -688,10 +705,16 @@ func (s *AdminService) GetRole(ctx context.Context, id uuid.UUID) (*Role, error)
 }
 
 // CreateRole creates a new role with optional permissions.
+// v0.6（roles.md §7 P1 #5）：自动写入 created_by / updated_by = ctx 中的操作者 ID。
 func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*Role, error) {
 	role := &Role{
 		Name:        req.Name,
+		Code:        req.Code,
 		Description: req.Description,
+	}
+	if op := operatorIDFromContext(ctx); op != nil {
+		role.CreatedBy = op
+		role.UpdatedBy = op
 	}
 
 	if err := s.roleRepo.Create(ctx, role); err != nil {
@@ -716,6 +739,7 @@ func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*
 }
 
 // UpdateRole updates an existing role's fields and replaces its permissions.
+// v0.6（roles.md §7 P1 #5）：自动写入 updated_by = ctx 中的操作者 ID。
 func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateRoleRequest) (*Role, error) {
 	role, err := s.roleRepo.GetByID(ctx, id)
 	if err != nil {
@@ -725,8 +749,14 @@ func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateR
 	if req.Name != nil {
 		role.Name = *req.Name
 	}
+	if req.Code != nil {
+		role.Code = *req.Code
+	}
 	if req.Description != nil {
 		role.Description = *req.Description
+	}
+	if op := operatorIDFromContext(ctx); op != nil {
+		role.UpdatedBy = op
 	}
 
 	if err := s.roleRepo.Update(ctx, role); err != nil {
@@ -756,8 +786,121 @@ func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateR
 }
 
 // DeleteRole deletes a role by ID.
+// PRD roles.md §10 DoD：删除前先取该角色用户列表（之后 user_roles 由 ON DELETE CASCADE
+// 自动清空），删库成功后再逐一失效这些用户的权限缓存。
 func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
-	return s.roleRepo.Delete(ctx, id)
+	userIDs, err := s.roleRepo.ListUserIDsByRole(ctx, id)
+	if err != nil {
+		s.logger.Warn("list users by role before delete failed",
+			zap.String("role_id", id.String()), zap.Error(err))
+	}
+	if err := s.roleRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	for _, uid := range userIDs {
+		s.invalidatePermCache(ctx, uid)
+	}
+	return nil
+}
+
+// CopyRole 一键复制一个角色（roles.md §7 P2 #9）。
+// 复制项：name + "_copy_N"（N 自动递增直到不冲突）/ description / permissions / role_menus / role_device_groups（含 network_types）/ role_api_permissions。
+// 不复制项：is_system（副本固定 false，绝不会复制出新内置角色）/ created_by / updated_by（重新写为操作者）。
+//
+// 失败语义：源不存在 → ErrNotFound；副本名冲突超 99 次 → 报错；其它操作失败立即返回（已创建副本不回滚，便于排查）。
+func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role, error) {
+	src, err := s.roleRepo.GetByID(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get source role: %w", err)
+	}
+
+	newName, err := s.allocateCopyRoleName(ctx, src.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	op := operatorIDFromContext(ctx)
+	copied := &Role{
+		Name:        newName,
+		Description: src.Description,
+		IsSystem:    false,
+		CreatedBy:   op,
+		UpdatedBy:   op,
+	}
+	if err := s.roleRepo.Create(ctx, copied); err != nil {
+		return nil, fmt.Errorf("create copy role: %w", err)
+	}
+
+	// 复制 permissions（roles.permissions 三元组）
+	if len(src.Permissions) > 0 {
+		perms := make([]Permission, len(src.Permissions))
+		for i, p := range src.Permissions {
+			perms[i] = Permission{
+				RoleID:   copied.ID,
+				Resource: p.Resource,
+				Action:   p.Action,
+			}
+		}
+		if err := s.roleRepo.AddPermissions(ctx, copied.ID, perms); err != nil {
+			s.logger.Warn("copy role permissions failed",
+				zap.String("role_id", copied.ID.String()), zap.Error(err))
+		}
+	}
+
+	// 复制 role_device_groups（含 network_types）/ role_api_permissions：
+	// 这两类绑定走 RoleDeviceGroupRepository / RoleApiPermissionRepository 接口，
+	// 当前 service 没有独立字段引用它们；走类型断言直接调 PgRoleRepository（生产实现），
+	// 与 LockUserByUsername 中 s.userRepo.(*PgUserRepository) 模式一致；
+	// 单测里若使用 mock 则该断言失败，CopyRole 的绑定复制不生效（仅 base + permissions 复制）。
+	if pgRepo, ok := s.roleRepo.(*PgRoleRepository); ok {
+		// device groups + network_types
+		if data, err := pgRepo.GetDeviceGroupData(ctx, sourceID); err == nil && data != nil && len(data.GroupIDs) > 0 {
+			if err := pgRepo.SetDeviceGroupData(ctx, copied.ID, *data); err != nil {
+				s.logger.Warn("copy role device groups failed",
+					zap.String("role_id", copied.ID.String()), zap.Error(err))
+			}
+		}
+		// api permissions
+		if endpointIDs, err := pgRepo.GetRoleApiEndpointIDs(ctx, sourceID); err == nil && len(endpointIDs) > 0 {
+			if err := pgRepo.SetRoleApiEndpoints(ctx, copied.ID, endpointIDs); err != nil {
+				s.logger.Warn("copy role api permissions failed",
+					zap.String("role_id", copied.ID.String()), zap.Error(err))
+			}
+		}
+	} else {
+		s.logger.Warn("copy role: roleRepo not *PgRoleRepository, device-groups & api-permissions skipped",
+			zap.String("role_id", copied.ID.String()))
+	}
+
+	// 复制 role_menus（menuRepo 接口本身有 GetRoleMenuIDs / SetRoleMenus）
+	if menuIDs, err := s.menuRepo.GetRoleMenuIDs(ctx, sourceID); err == nil && len(menuIDs) > 0 {
+		opID := uuid.Nil
+		if op != nil {
+			opID = *op
+		}
+		if err := s.menuRepo.SetRoleMenus(ctx, copied.ID, menuIDs, opID); err != nil {
+			s.logger.Warn("copy role menus failed",
+				zap.String("role_id", copied.ID.String()), zap.Error(err))
+		}
+	}
+
+	return s.GetRole(ctx, copied.ID)
+}
+
+// allocateCopyRoleName 寻找一个可用的副本角色名：base_copy / base_copy_2 / base_copy_3 ...
+// 上限 99 次以避免极端情况下无限循环（与 allocateCopyUsername 对齐）。
+func (s *AdminService) allocateCopyRoleName(ctx context.Context, base string) (string, error) {
+	for i := 1; i <= 99; i++ {
+		candidate := base + "_copy"
+		if i > 1 {
+			candidate = fmt.Sprintf("%s_copy_%d", base, i)
+		}
+		if _, err := s.roleRepo.GetByName(ctx, candidate); err != nil {
+			// GetByName 返回 ErrNotFound 即可用
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no available copy role name for %s after 99 attempts", base)
 }
 
 // ListAllPermissions returns all permissions across all roles.
@@ -855,7 +998,12 @@ func (s *AdminService) SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuI
 		return commonerrors.ErrNotFound
 	}
 
-	return s.menuRepo.SetRoleMenus(ctx, roleID, menuIDs, operatorID)
+	if err := s.menuRepo.SetRoleMenus(ctx, roleID, menuIDs, operatorID); err != nil {
+		return err
+	}
+	// PRD roles.md §10 DoD：菜单变更后失效该角色下所有用户的可见域缓存。
+	s.InvalidatePermCacheByRole(ctx, roleID)
+	return nil
 }
 
 // GetRoleMenus returns the menu permissions for a role.
@@ -987,7 +1135,7 @@ func (s *AdminService) SwitchRole(ctx context.Context, userID uuid.UUID, targetR
 	return s.jwt.GenerateTokenPair(&Claims{
 		UserID:        user.ID,
 		Username:      user.Username,
-		Carrier:       user.Carrier,
+		IsSuperAdmin:  user.IsSuperAdmin(),
 		Roles:         roleNames,
 		CurrentRoleID: &targetRoleID,
 	})

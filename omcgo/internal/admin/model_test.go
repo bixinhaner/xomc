@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -85,15 +84,15 @@ func Test_Claims_Construction(t *testing.T) {
 	userID := uuid.New()
 
 	claims := Claims{
-		UserID:   userID,
-		Username: "testuser",
-		Carrier:  nil,
-		Roles:    []string{"admin", "operator"},
+		UserID:       userID,
+		Username:     "testuser",
+		IsSuperAdmin: false,
+		Roles:        []string{"admin", "operator"},
 	}
 
 	assert.Equal(t, userID, claims.UserID)
 	assert.Equal(t, "testuser", claims.Username)
-	assert.Nil(t, claims.Carrier)
+	assert.False(t, claims.IsSuperAdmin)
 	assert.Len(t, claims.Roles, 2)
 	assert.Contains(t, claims.Roles, "admin")
 }
@@ -162,17 +161,8 @@ func Test_NullableString(t *testing.T) {
 	}
 }
 
-func Test_NullableCarrier(t *testing.T) {
-	t.Run("nil returns nil", func(t *testing.T) {
-		assert.Nil(t, nullableCarrier(nil))
-	})
-
-	t.Run("non-nil returns string value", func(t *testing.T) {
-		cmcc := model.CarrierCMCC
-		result := nullableCarrier(&cmcc)
-		assert.Equal(t, "cmcc", result)
-	})
-}
+// Test_NullableCarrier removed in v1.0: nullableCarrier helper was deleted
+// alongside users.carrier column. See PRD §11.11.
 
 func Test_NullableTime(t *testing.T) {
 	t.Run("nil returns nil", func(t *testing.T) {

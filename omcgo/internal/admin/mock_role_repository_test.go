@@ -203,6 +203,21 @@ func (mr *MockRoleRepositoryMockRecorder) GetUserRolesBatch(ctx, userIds any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserRolesBatch", reflect.TypeOf((*MockRoleRepository)(nil).GetUserRolesBatch), ctx, userIds)
 }
 
+// ListUserIDsByRole mocks base method.
+func (m *MockRoleRepository) ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUserIDsByRole", ctx, roleID)
+	ret0, _ := ret[0].([]uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUserIDsByRole indicates an expected call of ListUserIDsByRole.
+func (mr *MockRoleRepositoryMockRecorder) ListUserIDsByRole(ctx, roleID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserIDsByRole", reflect.TypeOf((*MockRoleRepository)(nil).ListUserIDsByRole), ctx, roleID)
+}
+
 // List mocks base method.
 func (m *MockRoleRepository) List(ctx context.Context) ([]Role, error) {
 	m.ctrl.T.Helper()

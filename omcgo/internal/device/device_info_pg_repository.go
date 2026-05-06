@@ -175,10 +175,11 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		Where(sq.Eq{"d.deleted_at": nil})
 
 	// Data permission filter: VisibleGroups semantics:
-	//   nil          → superadmin, no filtering (see all devices)
+	//   nil          → superadmin (v1.0：source='builtIn'，由 PermissionService 上游决定)，no filtering (see all devices)
 	//   []uuid.UUID{} → no permissions, return empty result
 	//   [id1, id2]   → filter to devices in these groups
 	// Note: dgm (device_group_members) is already joined via LeftJoin at line 167
+	// 注：filter.Carrier 是**设备**的 carrier (devices.carrier，物理属性)，不是用户的 carrier；users.carrier 在 v1.0 已删除。
 	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
 		// User has no group permissions — short-circuit to empty result.
 		builder = builder.Where("FALSE")

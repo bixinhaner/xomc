@@ -8,17 +8,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // Context keys for authenticated user information.
+//
+// v1.0：移除 CtxKeyCarrier / CtxKeyCarrierFilter（users.carrier 已删，不再传播）。
+// 新增 CtxKeyIsSuperAdmin：来自 JWT claims.IsSuperAdmin（user.IsSuperAdmin() 派生）。
 const (
-	CtxKeyUserID        = "user_id"
-	CtxKeyUsername      = "username"
-	CtxKeyCarrier       = "carrier"
-	CtxKeyCarrierFilter = "carrier_filter"
-	CtxKeyRoles         = "roles"
-	CtxKeyClaims        = "claims"
+	CtxKeyUserID       = "user_id"
+	CtxKeyUsername     = "username"
+	CtxKeyIsSuperAdmin = "is_super_admin"
+	CtxKeyRoles        = "roles"
+	CtxKeyClaims       = "claims"
 )
 
 // RequireAuth returns a Gin middleware that validates JWT access tokens
@@ -46,7 +47,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 				return
 			}
 
-			// Load user to get carrier and roles
+			// Load user to derive IsSuperAdmin and roles (v1.0：carrier 已删除)
 			user, err := userRepo.GetByID(c.Request.Context(), key.UserID)
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -58,7 +59,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 
 			c.Set(CtxKeyUserID, user.ID)
 			c.Set(CtxKeyUsername, user.Username)
-			c.Set(CtxKeyCarrier, user.Carrier)
+			c.Set(CtxKeyIsSuperAdmin, user.IsSuperAdmin())
 
 			// Load roles for API key user when roleReader is available
 			var roleNames []string
@@ -118,7 +119,7 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 
 		c.Set(CtxKeyUserID, claims.UserID)
 		c.Set(CtxKeyUsername, claims.Username)
-		c.Set(CtxKeyCarrier, claims.Carrier)
+		c.Set(CtxKeyIsSuperAdmin, claims.IsSuperAdmin)
 		c.Set(CtxKeyRoles, claims.Roles)
 		c.Set(CtxKeyClaims, claims)
 		c.Next()
@@ -147,14 +148,13 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 			return
 		}
 
-		// Inject carrier domain into context for Casbin
-		ctx := c.Request.Context()
-		if carrierVal, exists := c.Get(CtxKeyCarrier); exists {
-			if carrier, ok := carrierVal.(*model.CarrierCode); ok && carrier != nil {
-				ctx = context.WithValue(ctx, CtxKeyCarrier, string(*carrier))
-			}
+		// v1.0：超管旁路 — builtIn 用户直接放行（不再走 Casbin domain）。
+		if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
+			c.Next()
+			return
 		}
 
+		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -176,24 +176,8 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 	}
 }
 
-// RequireCarrier returns a Gin middleware that sets a carrier filter
-// based on the authenticated user's carrier binding.
-// If the user has no carrier binding (nil), no filter is applied (super admin).
-func RequireCarrier() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		carrierVal, exists := c.Get(CtxKeyCarrier)
-		if !exists {
-			c.Next()
-			return
-		}
-
-		if carrier, ok := carrierVal.(*model.CarrierCode); ok && carrier != nil {
-			c.Set(CtxKeyCarrierFilter, *carrier)
-		}
-
-		c.Next()
-	}
-}
+// RequireCarrier — v1.0 已删除：users.carrier 已从 schema 移除，无 carrier 过滤需求。
+// 如旧代码仍 import 该函数，需要按 PRD §11.11 改造。
 
 // RequireResourcePermission returns a Gin middleware that dynamically determines
 // the permission action based on the HTTP method and checks the user has the
@@ -225,14 +209,13 @@ func RequireResourcePermission(roleRepo PermissionChecker, resource string) gin.
 			return
 		}
 
-		// Inject carrier domain into context for Casbin
-		ctx := c.Request.Context()
-		if carrierVal, exists := c.Get(CtxKeyCarrier); exists {
-			if carrier, ok := carrierVal.(*model.CarrierCode); ok && carrier != nil {
-				ctx = context.WithValue(ctx, CtxKeyCarrier, string(*carrier))
-			}
+		// v1.0：超管旁路 — builtIn 用户直接放行（不再走 Casbin domain）。
+		if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
+			c.Next()
+			return
 		}
 
+		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{

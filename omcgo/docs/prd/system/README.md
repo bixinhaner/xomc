@@ -93,7 +93,7 @@ notification_recipient_groups + notification_templates
 |------|---------|
 | 字典批量导入 / 多语言 | [data-dictionary.md §7](./data-dictionary.md) |
 | 系统配置版本快照 / 跨环境导入导出 | [system-config.md §7](./system-config.md) |
-| UI 定制按 carrier 多租户 | [ui-customization.md §7](./ui-customization.md) |
+| UI 定制按 carrier 多租户（部署级 carrier，非 user 字段；users.carrier 已 v1.0 删除）| [ui-customization.md §7](./ui-customization.md) |
 | API 端点 OpenAPI 导出 | [api-management.md §7](./api-management.md) |
 | 通知规则优先级 / 静默时段 | [notification-settings.md §7](./notification-settings.md) |
 | 角色克隆 | [roles.md §7](./roles.md) |

@@ -43,6 +43,10 @@ type RoleAssigner interface {
 	GetUserRolesBatch(ctx context.Context, userIds []uuid.UUID) (map[uuid.UUID][]Role, error)
 	GetDefaultRoleID(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
 	SetDefaultRole(ctx context.Context, userID, roleID uuid.UUID) error
+	// ListUserIDsByRole 返回当前持有该角色的全部用户 ID（无分页）。
+	// 用于 PRD docs/prd/system/roles.md §10 DoD：角色侧写操作（菜单/分组/API/删除）后
+	// 同步失效该角色下所有用户的可见域缓存。
+	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // PermissionChecker provides permission query capabilities.

@@ -57,15 +57,13 @@ func (h *ExportHandler) ExportDevices(c *gin.Context) {
 	}
 
 	// Inject data permission: restrict to user-visible groups.
+	// v1.0：超管判定走 source = 'builtIn'（来自 ctx CtxKeyIsSuperAdmin）。
 	if h.permService != nil {
 		userID, _ := c.Get(admin.CtxKeyUserID)
-		carrierVal, _ := c.Get(admin.CtxKeyCarrier)
+		isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+		isSuper, _ := isSuperVal.(bool)
 		if uid, ok := userID.(uuid.UUID); ok {
-			var carrier *model.CarrierCode
-			if cv, ok := carrierVal.(*model.CarrierCode); ok {
-				carrier = cv
-			}
-			visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, carrier)
+			visibleGroups, err := h.permService.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
 			if err != nil {
 				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 				return

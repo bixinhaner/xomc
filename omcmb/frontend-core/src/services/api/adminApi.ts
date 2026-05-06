@@ -168,7 +168,7 @@ interface BackendUser {
   email?: string;
   phone?: string;
   description?: string;
-  carrier?: string;
+  // carrier?: string; — v1.0 删除（详见 omcgo/docs/prd/system/users.md §11.11）
   status: string; // active, disabled
   source?: string; // builtIn / admin / LDAP
   roles?: BackendRole[];
@@ -188,6 +188,7 @@ interface BackendUser {
 interface BackendRole {
   id: string;
   name: string;
+  code?: string; // v0.6: 程序化引用编码（可选，全局唯一）
   description: string;
   is_system: boolean;
   status?: string; // active, disabled - may be empty
@@ -291,7 +292,7 @@ function mapBackendUser(bu: BackendUser): User {
     roleIds,
     status,
     source,
-    carrier: bu.carrier,
+    // carrier: bu.carrier — v1.0 删除
     expireTime: bu.expire_at || undefined,
     lastLoginTime: bu.last_login_at || undefined,
     createTime: bu.created_at,
@@ -327,7 +328,8 @@ function mapBackendRole(br: BackendRole): Role {
   return {
     id: br.id,
     roleName,
-    roleCode: roleName,
+    // v0.6：roleCode 优先用后端 code（程序化引用编码），未配 code 时用 name 兜底
+    roleCode: br.code || roleName,
     batchOperation: 0, // Backend doesn't have this field
     description: br.description || '',
     permissions,
@@ -577,6 +579,12 @@ export const adminApi = {
     for (const id of ids) {
       await http.delete(`/admin/roles/${id}`);
     }
+  },
+
+  // v0.6（roles.md §7 P2 #9）：一键复制角色，副本名 base_copy / base_copy_2 ...
+  async copyRole(id: string): Promise<Role> {
+    const { data } = await http.post<BackendRole>(`/admin/roles/${id}/copy`);
+    return mapBackendRole(data);
   },
 
   async getPermissions(): Promise<Permission[]> {

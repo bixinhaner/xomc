@@ -63,26 +63,8 @@ func newTestAuthorizer(t *testing.T) *CasbinAuthorizer {
 	}
 }
 
-// --- getDomainFromContext ---
-
-func TestGetDomainFromContext_CarrierSet(t *testing.T) {
-	ctx := context.WithValue(context.Background(), CtxKeyCarrier, "CMCC")
-	assert.Equal(t, "CMCC", getDomainFromContext(ctx))
-}
-
-func TestGetDomainFromContext_CarrierEmpty(t *testing.T) {
-	ctx := context.WithValue(context.Background(), CtxKeyCarrier, "")
-	assert.Equal(t, "system", getDomainFromContext(ctx))
-}
-
-func TestGetDomainFromContext_NoCarrier(t *testing.T) {
-	assert.Equal(t, "system", getDomainFromContext(context.Background()))
-}
-
-func TestGetDomainFromContext_NonStringValue(t *testing.T) {
-	ctx := context.WithValue(context.Background(), CtxKeyCarrier, 42)
-	assert.Equal(t, "system", getDomainFromContext(ctx))
-}
+// --- getDomainFromContext: removed in v1.0 (Casbin domain 已统一为 "system") ---
+// 旧测试 TestGetDomainFromContext_* 与 carrier domain 一同移除（详见 PRD §11.11 决议 Q3）。
 
 // --- CheckPermission: wildcard action ---
 
@@ -180,31 +162,8 @@ func TestCheckPermission_RoleInheritance(t *testing.T) {
 }
 
 // --- CheckPermission: domain isolation ---
-
-func TestCheckPermission_DomainIsolation(t *testing.T) {
-	auth := newTestAuthorizer(t)
-	carrierUserID := uuid.New()
-
-	// User has carrier_admin role only in CMCC domain
-	auth.enforcer.AddNamedGroupingPolicy("g", carrierUserID.String(), "role:carrier_admin", "CMCC")
-
-	// In CMCC domain: should allow (g matches, p.dom=="system" is true)
-	cmccCtx := context.WithValue(context.Background(), CtxKeyCarrier, "CMCC")
-	ok, err := auth.CheckPermission(cmccCtx, carrierUserID, "devices", "read")
-	require.NoError(t, err)
-	assert.True(t, ok)
-
-	// In system domain: should deny (g tuple is for CMCC, not system)
-	ok, err = auth.CheckPermission(context.Background(), carrierUserID, "devices", "read")
-	require.NoError(t, err)
-	assert.False(t, ok)
-
-	// In different carrier domain: should also deny
-	cuccCtx := context.WithValue(context.Background(), CtxKeyCarrier, "CUCC")
-	ok, err = auth.CheckPermission(cuccCtx, carrierUserID, "devices", "read")
-	require.NoError(t, err)
-	assert.False(t, ok)
-}
+// v1.0：domain 已统一为 "system"（详见 PRD §11.11 决议 Q3），多 carrier domain 隔离测试已废弃。
+// 旧 TestCheckPermission_DomainIsolation 与 carrier-specific group policy 一同移除。
 
 // --- CheckPermission: keyMatch resource ---
 
@@ -230,26 +189,18 @@ func TestCheckPermission_KeyMatchResource(t *testing.T) {
 	assert.False(t, ok, "keyMatch should NOT match api/v2/devices against api/v1/*")
 }
 
-// --- CheckPermission: system domain with carrier role ---
+// --- CheckPermission: system domain only (v1.0：carrier domain 已废弃) ---
 
 func TestCheckPermission_SystemUserAllDomains(t *testing.T) {
 	auth := newTestAuthorizer(t)
 	sysAdminID := uuid.New()
 
-	// Admin assigned in system domain should work in system context
 	auth.enforcer.AddNamedGroupingPolicy("g", sysAdminID.String(), "role:admin", "system")
 
 	ctx := context.Background()
 	ok, err := auth.CheckPermission(ctx, sysAdminID, "users", "delete")
 	require.NoError(t, err)
 	assert.True(t, ok)
-
-	// System admin should NOT automatically have permissions in carrier domain
-	// because g is domain-scoped
-	carrierCtx := context.WithValue(context.Background(), CtxKeyCarrier, "CMCC")
-	ok, err = auth.CheckPermission(carrierCtx, sysAdminID, "users", "delete")
-	require.NoError(t, err)
-	assert.False(t, ok, "system admin should not auto-grant in carrier domain")
 }
 
 // --- pgAdapter no-op methods ---

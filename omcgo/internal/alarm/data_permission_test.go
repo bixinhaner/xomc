@@ -3,26 +3,27 @@ package alarm
 import (
 	"testing"
 
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
 func TestApplyDataPermission_SuperAdmin(t *testing.T) {
+	// v1.0：PermissionContext.Carrier 已删除（详见 PRD §11.11）；超管旁路语义不变。
 	checker := NewDataPermissionChecker(zap.NewNop())
-	permCtx := &PermissionContext{IsSuperAdmin: true, Carrier: "cmcc"}
+	permCtx := &PermissionContext{IsSuperAdmin: true}
 	filter := &AlarmFilter{}
 	checker.ApplyDataPermission(nil, permCtx, filter)
 	assert.Nil(t, filter.Carrier)
 }
 
 func TestApplyDataPermission_NormalUser(t *testing.T) {
+	// v1.0：filter.Carrier 是设备视角字段，不再由用户 carrier 自动注入；
+	// 普通用户的可见域收敛由 DeviceGroupIDs 承担。
 	checker := NewDataPermissionChecker(zap.NewNop())
-	permCtx := &PermissionContext{Role: "operator", Carrier: "cmcc"}
+	permCtx := &PermissionContext{Role: "operator", DeviceGroupIDs: []string{"g1"}}
 	filter := &AlarmFilter{}
 	checker.ApplyDataPermission(nil, permCtx, filter)
-	assert.NotNil(t, filter.Carrier)
-	assert.Equal(t, model.CarrierCode("cmcc"), *filter.Carrier)
+	assert.Nil(t, filter.Carrier, "filter.Carrier 不再由用户上下文写入")
 }
 
 func TestApplyDataPermission_NilContext(t *testing.T) {
@@ -50,18 +51,17 @@ func TestCanClear(t *testing.T) {
 }
 
 func TestBuildPermissionContext(t *testing.T) {
+	// v1.0：claims["carrier"] 不再被 BuildPermissionContext 解析；PermissionContext.Carrier 字段已删除。
 	checker := NewDataPermissionChecker(zap.NewNop())
 	claims := map[string]interface{}{
 		"user_id":          "user-123",
 		"role":             "operator",
 		"is_super_admin":   false,
-		"carrier":          "ctcc",
 		"device_group_ids": []interface{}{"group-1", "group-2"},
 	}
 	ctx := checker.BuildPermissionContext(claims)
 	assert.Equal(t, "user-123", ctx.UserID)
 	assert.Equal(t, "operator", ctx.Role)
-	assert.Equal(t, model.CarrierCode("ctcc"), ctx.Carrier)
 	assert.Equal(t, []string{"group-1", "group-2"}, ctx.DeviceGroupIDs)
 }
 

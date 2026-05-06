@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -45,11 +44,13 @@ func NewPermissionService(
 }
 
 // GetUserVisibleGroupIDs returns the L2 group IDs visible to the given user.
-// A nil carrier means superadmin — all groups are visible (returns nil slice).
-// Results are cached in Redis for 5 minutes.
-func (s *PermissionService) GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID, carrier *model.CarrierCode) ([]uuid.UUID, error) {
-	// Superadmin (carrier=nil) sees everything.
-	if carrier == nil {
+//
+// v1.0：参数 `isSuperAdmin` 替代旧 `carrier *model.CarrierCode`（详见 docs/prd/system/users.md §11.11）。
+// isSuperAdmin = true（即 user.Source == 'builtIn'） → 看见所有分组（返回 nil 切片）。
+// isSuperAdmin = false → 走 user → roles → role_device_groups 派生 + L1/L2 树展开，结果缓存 5min。
+func (s *PermissionService) GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID, isSuperAdmin bool) ([]uuid.UUID, error) {
+	// 超管 (source='builtIn') 看见所有分组。
+	if isSuperAdmin {
 		return nil, nil
 	}
 

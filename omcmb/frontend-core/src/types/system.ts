@@ -16,7 +16,7 @@ export interface User {
   status: UserStatus;
   source?: UserSource;
   phone?: string;
-  carrier?: string;
+  // carrier?: string; — v1.0 删除（后端 users.carrier 已移除，详见 omcgo/docs/prd/system/users.md §11.11）
   /** ISO 8601 时间戳；登录时若 expireTime <= 现在则拒绝登录（见后端 service.Login）。 */
   expireTime?: string;
   lastLoginTime?: string;

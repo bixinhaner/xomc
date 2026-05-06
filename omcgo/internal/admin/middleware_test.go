@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,19 +34,18 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
 	require.NoError(t, err)
 	userID := uuid.New()
-	carrier := model.CarrierCMCC
 
 	pair, err := jwtService.GenerateTokenPair(&Claims{
-		UserID:   userID,
-		Username: "testuser",
-		Carrier:  &carrier,
-		Roles:    []string{"admin"},
+		UserID:       userID,
+		Username:     "testuser",
+		IsSuperAdmin: true,
+		Roles:        []string{"admin"},
 	})
 	require.NoError(t, err)
 
 	var capturedUserID uuid.UUID
 	var capturedUsername string
-	var capturedCarrier *model.CarrierCode
+	var capturedIsSuper bool
 	var capturedRoles []string
 
 	r := gin.New()
@@ -59,8 +57,8 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 		if uname, exists := c.Get(CtxKeyUsername); exists {
 			capturedUsername = uname.(string)
 		}
-		if cr, exists := c.Get(CtxKeyCarrier); exists {
-			capturedCarrier = cr.(*model.CarrierCode)
+		if v, exists := c.Get(CtxKeyIsSuperAdmin); exists {
+			capturedIsSuper, _ = v.(bool)
 		}
 		if roles, exists := c.Get(CtxKeyRoles); exists {
 			capturedRoles = roles.([]string)
@@ -76,8 +74,7 @@ func TestRequireAuth_ValidToken(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, userID, capturedUserID)
 	assert.Equal(t, "testuser", capturedUsername)
-	assert.NotNil(t, capturedCarrier)
-	assert.Equal(t, model.CarrierCMCC, *capturedCarrier)
+	assert.True(t, capturedIsSuper)
 	assert.Equal(t, []string{"admin"}, capturedRoles)
 }
 
@@ -222,75 +219,8 @@ func TestRequirePermission_NoAuth(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-func TestRequireCarrier_WithCarrier(t *testing.T) {
-	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
-	require.NoError(t, err)
-	carrier := model.CarrierCMCC
-
-	pair, err := jwtService.GenerateTokenPair(&Claims{
-		UserID:   uuid.New(),
-		Username: "cmcc_user",
-		Carrier:  &carrier,
-		Roles:    []string{"operator"},
-	})
-	require.NoError(t, err)
-
-	var capturedFilter model.CarrierCode
-	filterSet := false
-
-	r := gin.New()
-	r.Use(RequireAuth(jwtService))
-	r.Use(RequireCarrier())
-	r.GET("/test", func(c *gin.Context) {
-		if cf, exists := c.Get(CtxKeyCarrierFilter); exists {
-			capturedFilter = cf.(model.CarrierCode)
-			filterSet = true
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, filterSet)
-	assert.Equal(t, model.CarrierCMCC, capturedFilter)
-}
-
-func TestRequireCarrier_NilCarrier(t *testing.T) {
-	jwtService, err := NewJWTService("test-secret-minimum-32-characters!!")
-	require.NoError(t, err)
-
-	pair, err := jwtService.GenerateTokenPair(&Claims{
-		UserID:   uuid.New(),
-		Username: "superadmin",
-		Carrier:  nil,
-		Roles:    []string{"admin"},
-	})
-	require.NoError(t, err)
-
-	filterSet := false
-
-	r := gin.New()
-	r.Use(RequireAuth(jwtService))
-	r.Use(RequireCarrier())
-	r.GET("/test", func(c *gin.Context) {
-		if _, exists := c.Get(CtxKeyCarrierFilter); exists {
-			filterSet = true
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.False(t, filterSet)
-}
+// TestRequireCarrier_* removed in v1.0: RequireCarrier middleware deleted
+// alongside users.carrier column. See PRD §11.11.
 
 func TestAuditLogger_WritesOnPost(t *testing.T) {
 	auditCreated := false

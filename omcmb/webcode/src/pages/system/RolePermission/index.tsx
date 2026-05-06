@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -24,6 +25,7 @@ import {
   DeleteOutlined,
   EyeOutlined,
   MoreOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
@@ -41,6 +43,7 @@ import type { Role, ApiEndpoint } from '@core/types/system';
 import type { DeviceGroup } from '@core/types/device';
 import { useT } from '@/hooks/useT';
 import { apiPermissionApi } from '@core/services/api/apiPermissionApi';
+import { adminApi } from '@core/services/api/adminApi';
 
 // 操作权限类型
 interface OperationItem {
@@ -365,7 +368,65 @@ export default function RoleManagement() {
       apiPermissionApi.setRolePermissions(roleId, endpointIds),
   });
 
+  // v0.5：与 API 权限对齐的专项端点回显（参 docs/prd/system/roles.md）。
+  // 列表 / GetByID 接口虽已带 device_group_ids，但 network_types 仍由专项端点返回；
+  // 同时 GetByID(id) 返回完整 permissions（菜单权限），避免列表接口的回显空洞。
+  const getRoleDetail = useMutation({
+    mutationFn: (roleId: string) => adminApi.getRoleById(roleId),
+  });
+  const getRoleDeviceGroupsMut = useMutation({
+    mutationFn: (roleId: string) => adminApi.getRoleDeviceGroups(roleId),
+  });
+  const setRoleDeviceGroupsMut = useMutation({
+    mutationFn: ({ roleId, deviceGroupIds, networkTypes }: { roleId: string; deviceGroupIds: string[]; networkTypes: string[] }) =>
+      adminApi.setRoleDeviceGroups(roleId, { deviceGroupIds, networkTypes }),
+  });
+
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
+
+  // v0.5：编辑/查看面板打开时的统一回显逻辑（修复菜单权限 + 数据权限回显空白 bug）。
+  //
+  // 回显数据来源：
+  //   - 菜单权限（permissions） → adminApi.getRoleById(id) 的 permissions 字段
+  //     列表接口 ListWithPagination 不填充 permissions（性能考虑），用单角色详情兜底
+  //   - 数据权限（deviceGroupIds + networkTypes） → adminApi.getRoleDeviceGroups(id)
+  //     network_types 只有专项端点返回；列表接口的 device_group_ids 不带制式
+  //   - API 权限（apiPermissions） → 沿用 getRoleApiPermissions.mutate（已有，不动）
+  //
+  // 列表数据中的 role.deviceGroupIds（v0.5 起后端已填充）作为「⚠️ 未绑分组」标识用，
+  // 不参与编辑面板回显，避免与专项端点结果冲突。
+  const loadRoleDetailToForm = useCallback((role: Role) => {
+    setSelectedRole(role);
+    form.setFieldsValue({
+      roleName: role.roleName,
+      description: role.description,
+    });
+    setExpandedPermissionKeys(allModuleKeys);
+    // 先用列表数据快速展示（防止抖动），再用专项端点结果覆盖
+    setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
+    setSelectedDeviceGroupIds(role.deviceGroupIds || []);
+    setSelectedNetworkTypes(role.networkTypes || []);
+
+    // 1) 拉单角色详情，覆盖菜单权限回显（list 接口未填 permissions）
+    getRoleDetail.mutate(role.id, {
+      onSuccess: (full) => {
+        if (full?.permissions) {
+          setCheckedPermissionKeys(arrayToCheckedKeys(full.permissions));
+        }
+      },
+    });
+    // 2) 拉设备分组 + 网络制式专项端点
+    getRoleDeviceGroupsMut.mutate(role.id, {
+      onSuccess: ({ deviceGroupIds, networkTypes }) => {
+        setSelectedDeviceGroupIds(deviceGroupIds);
+        setSelectedNetworkTypes(networkTypes);
+      },
+    });
+    // 3) 拉 API 权限专项端点（保持原有逻辑）
+    getRoleApiPermissions.mutate(role.id, {
+      onSuccess: (ids) => setSelectedApiEndpointIds(ids),
+    });
+  }, [form, allModuleKeys, getRoleDetail, getRoleDeviceGroupsMut, getRoleApiPermissions]);
 
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
@@ -496,6 +557,32 @@ export default function RoleManagement() {
     });
   }, [isBuiltIn, t, deleteRoles, modal, message]);
 
+  // v0.6（roles.md §7 P2 #9）：一键复制角色。
+  // 后端会自动生成 base_copy / base_copy_2 ... 副本名，副本 is_system=false，
+  // 并复制 permissions / role_menus / role_device_groups / role_api_permissions 全部绑定。
+  const copyRoleMut = useMutation({
+    mutationFn: (id: string) => adminApi.copyRole(id),
+  });
+  const handleCopy = useCallback((role: Role) => {
+    modal.confirm({
+      title: '确认复制角色',
+      content: `将复制角色「${role.roleName}」的菜单/数据/API 权限到新副本（副本名自动生成 ${role.roleName}_copy）。`,
+      onOk: () => {
+        copyRoleMut.mutate(role.id, {
+          onSuccess: (newRole) => {
+            message.success(`已复制：${newRole.roleName}`);
+            // 强制刷新列表
+            void refetch();
+          },
+          onError: (err: unknown) => {
+            const msg = err instanceof Error ? err.message : '复制失败';
+            message.error(msg);
+          },
+        });
+      },
+    });
+  }, [copyRoleMut, modal, message, refetch]);
+
   const handleBatchDelete = useCallback((keys: React.Key[]) => {
     const rolesToDelete = (data?.items || []).filter(
       (r) => keys.includes(r.id) && !isBuiltIn(r)
@@ -544,15 +631,26 @@ export default function RoleManagement() {
           roleName: vals.roleName as string,
           description: (vals.description as string) ?? '',
           permissions: permissionsToArray(checkedPermissionKeys),
+          // deviceGroupIds 在 createRole 主请求里也带上，旧代码兼容；
+          // v0.5：后端 CreateRole 实际不读这两个字段（保留是为了兼容前端契约），
+          // 真正的写入由下方 setRoleDeviceGroupsMut 完成。
           deviceGroupIds: selectedDeviceGroupIds,
           networkTypes: selectedNetworkTypes,
           builtIn: 0,
         },
         {
           onSuccess: (newRole) => {
-            // 保存 API 权限
-            if (newRole?.id && selectedApiEndpointIds.length > 0) {
-              setRoleApiPermissions.mutate({ roleId: newRole.id, endpointIds: selectedApiEndpointIds });
+            if (newRole?.id) {
+              // v0.5 决议修复：通过专项端点保存设备分组 + 网络制式
+              setRoleDeviceGroupsMut.mutate({
+                roleId: newRole.id,
+                deviceGroupIds: selectedDeviceGroupIds,
+                networkTypes: selectedNetworkTypes,
+              });
+              // 保存 API 权限
+              if (selectedApiEndpointIds.length > 0) {
+                setRoleApiPermissions.mutate({ roleId: newRole.id, endpointIds: selectedApiEndpointIds });
+              }
             }
             message.success(t('common.save'));
             setCreateVisible(false);
@@ -566,7 +664,7 @@ export default function RoleManagement() {
         },
       );
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
+  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {
@@ -577,13 +675,29 @@ export default function RoleManagement() {
       message.warning(t('role.pleaseSelectPermission'));
       return;
     }
-    // 校验设备组（至少选择一个二级节点）
+    // §11.2 决议 ① 触点 5：清空设备分组二次确认。
+    // 选 0 个二级节点不再硬阻止，改为弹 Modal 警告 → OK 才继续保存（允许显式清空）。
     const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
     if (selectedSecondLevel.length === 0) {
-      message.warning(t('role.pleaseSelectDeviceGroup'));
+      modal.confirm({
+        title: '确认清空设备分组绑定',
+        content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
+        okText: '继续保存',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: () => {
+          // 用户确认清空 → 直接进入保存流程（绕过本校验）
+          doEditSubmit();
+        },
+      });
       return;
     }
+    doEditSubmit();
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, modal, t]);
 
+  // doEditSubmit 拆出实际提交逻辑，配合上方"清空设备分组二次确认"复用。
+  const doEditSubmit = useCallback(() => {
+    if (!selectedRole) return;
     form.validateFields().then((vals) => {
       updateRole.mutate(
         {
@@ -598,6 +712,12 @@ export default function RoleManagement() {
         },
         {
           onSuccess: () => {
+            // v0.5 决议修复：通过专项端点保存设备分组 + 网络制式
+            setRoleDeviceGroupsMut.mutate({
+              roleId: selectedRole.id,
+              deviceGroupIds: selectedDeviceGroupIds,
+              networkTypes: selectedNetworkTypes,
+            });
             // 保存 API 权限
             setRoleApiPermissions.mutate({ roleId: selectedRole.id, endpointIds: selectedApiEndpointIds });
             message.success(t('common.save'));
@@ -613,7 +733,7 @@ export default function RoleManagement() {
         },
       );
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -634,21 +754,15 @@ export default function RoleManagement() {
             label: t('common.view'),
             icon: <EyeOutlined />,
             onClick: () => {
-              setSelectedRole(role);
-              form.setFieldsValue({
-                roleName: role.roleName,
-                description: role.description,
-              });
-              setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
-              setExpandedPermissionKeys(allModuleKeys);
-              setSelectedDeviceGroupIds(role.deviceGroupIds || []);
-              setSelectedNetworkTypes(role.networkTypes || []);
-              // 加载角色 API 权限
-              getRoleApiPermissions.mutate(role.id, {
-                onSuccess: (ids) => setSelectedApiEndpointIds(ids),
-              });
+              loadRoleDetailToForm(role);
               setViewVisible(true);
             },
+          },
+          {
+            key: 'copy',
+            label: '复制',
+            icon: <CopyOutlined />,
+            onClick: () => handleCopy(role),
           },
           { type: 'divider' },
           {
@@ -664,19 +778,7 @@ export default function RoleManagement() {
           <Space size={4}>
             <Button type="link" size="small" disabled={isBuiltIn(role)}
               onClick={() => {
-                setSelectedRole(role);
-                form.setFieldsValue({
-                  roleName: role.roleName,
-                  description: role.description,
-                });
-                setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
-                setExpandedPermissionKeys(allModuleKeys);
-                setSelectedDeviceGroupIds(role.deviceGroupIds || []);
-                setSelectedNetworkTypes(role.networkTypes || []);
-                // 加载角色 API 权限
-                getRoleApiPermissions.mutate(role.id, {
-                  onSuccess: (ids) => setSelectedApiEndpointIds(ids),
-                });
+                loadRoleDetailToForm(role);
                 setEditVisible(true);
               }}>
               {t('common.edit')}
@@ -692,13 +794,19 @@ export default function RoleManagement() {
       key: 'roleName',
       title: t('role.roleName'),
       dataIndex: 'roleName',
-      width: 150,
+      width: 200,
       render: (val, record) => {
         const role = record as Role;
+        // §11.2 决议 ① 触点 1：未绑设备分组的角色，列表行加 ⚠️ Tag
+        // 用 list 接口返回的 deviceGroupIds（v0.5 已填充）判定
+        const noGroups = !role.deviceGroupIds || role.deviceGroupIds.length === 0;
         return (
           <span>
             {String(val)}
             {isBuiltIn(role) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('role.builtIn')}</Tag>}
+            {!isBuiltIn(role) && noGroups && (
+              <Tag color="warning" style={{ marginLeft: 8 }}>⚠️ 未绑分组</Tag>
+            )}
           </span>
         );
       },
@@ -720,7 +828,7 @@ export default function RoleManagement() {
       width: 160,
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
     },
-  ], [t, form, isBuiltIn, handleDelete, allModuleKeys, arrayToCheckedKeys]);
+  ], [t, isBuiltIn, handleDelete, handleCopy, loadRoleDetailToForm]);
 
   // 渲染菜单权限配置（树形结构 - 按图片样式）
   const renderPermissionConfig = (readOnly = false) => {
@@ -1261,6 +1369,16 @@ export default function RoleManagement() {
           </div>
         }
       >
+        {/* §11.2 决议 ① 触点 2：未绑设备分组的角色 banner 提示 */}
+        {selectedDeviceGroupIds.length === 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="该角色未绑定任何设备分组"
+            description="分配该角色的用户将无法查看任何设备数据。请在「数据权限」标签页选择至少一个二级设备分组。"
+          />
+        )}
         <Form form={form} layout="vertical">
           <Form.Item
             name="roleName"
@@ -1316,6 +1434,16 @@ export default function RoleManagement() {
           </div>
         }
       >
+        {/* §11.2 决议 ① 触点 3：未绑设备分组的角色 banner 提示（查看也展示）*/}
+        {selectedDeviceGroupIds.length === 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="该角色未绑定任何设备分组"
+            description="分配该角色的用户将无法查看任何设备数据。"
+          />
+        )}
         <Form form={form} layout="vertical">
           <Form.Item name="roleName" label={t('role.roleName')}>
             <Input readOnly />

@@ -185,5 +185,8 @@ func (h *Handler) SetRoleApiPermissions(c *gin.Context) {
 		return
 	}
 
+	// PRD roles.md §10 DoD：API 权限变更后失效该角色下所有用户的可见域缓存。
+	h.service.InvalidatePermCacheByRole(c.Request.Context(), roleID)
+
 	c.JSON(http.StatusOK, gin.H{"message": "api permissions updated", "count": len(req.EndpointIDs)})
 }

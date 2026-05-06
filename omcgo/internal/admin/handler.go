@@ -184,6 +184,7 @@ func (h *Handler) RegisterAdminRoutes(rg *gin.RouterGroup) {
 		roles.POST("", h.CreateRole)
 		roles.PUT("/:id", h.UpdateRole)
 		roles.DELETE("/:id", h.DeleteRole)
+		roles.POST("/:id/copy", h.CopyRole) // roles.md §7 P2 #9
 		roles.GET("/:id/device-groups", h.GetRoleDeviceGroups)
 		roles.PUT("/:id/device-groups", h.SetRoleDeviceGroups)
 		roles.GET("/:id/menus", h.GetRoleMenus)

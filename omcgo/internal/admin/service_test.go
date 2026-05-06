@@ -94,6 +94,7 @@ type mockRoleRepo struct {
 	assignRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
 	removeRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
 	getUserRolesFn         func(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	listUserIDsByRoleFn    func(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	getPermissionsFn       func(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	checkPermissionFn      func(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error)
 	listAllPermissionsFn   func(ctx context.Context) ([]Permission, error)
@@ -213,6 +214,13 @@ func (m *mockRoleRepo) SetDefaultRole(_ context.Context, _, _ uuid.UUID) error {
 }
 func (m *mockRoleRepo) ListRoleUsers(_ context.Context, _ uuid.UUID, _, _ int) ([]RoleUserItem, int64, error) {
 	return []RoleUserItem{}, 0, nil
+}
+
+func (m *mockRoleRepo) ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	if m.listUserIDsByRoleFn != nil {
+		return m.listUserIDsByRoleFn(ctx, roleID)
+	}
+	return nil, nil
 }
 
 type mockAuditRepo struct {
@@ -436,14 +444,12 @@ func TestAdminService_CreateUser_Success(t *testing.T) {
 	}
 
 	svc := newTestService(userRepo, roleRepo, &mockAuditRepo{})
-	carrier := model.CarrierCMCC
 
 	user, err := svc.CreateUser(context.Background(), CreateUserRequest{
 		Username:    "newuser",
 		Password:    "password123",
 		DisplayName: "New User",
 		Email:       "new@example.com",
-		Carrier:     &carrier,
 		RoleIDs:     []uuid.UUID{roleID},
 	})
 

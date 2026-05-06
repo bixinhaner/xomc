@@ -39,7 +39,7 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 
 	// 1. Load permission policies: p = (sub, dom, obj, act)
 	// Domain is "system" because permissions are role-level (carrier-agnostic).
-	// Carrier-level isolation is enforced via g (role assignment) domain.
+	// v1.0：users.carrier 已删除，g 策略也统一在 'system' 单域，多 carrier 隔离失效（参 §11.11 Q3）。
 	rows, err := a.pool.Query(ctx, `
 		SELECT r.name AS role_name, p.resource, p.action
 		FROM permissions p
@@ -62,9 +62,10 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	}
 
 	// 2. Load role assignments: g = (user_id, role:{name}, domain)
+	// v1.0：users.carrier 已删除，所有 g 策略统一在 'system' 单域。多 carrier RBAC 隔离能力不再保留。
+	// 详见 docs/prd/system/users.md §11.11 决议 Q3。
 	rows2, err := a.pool.Query(ctx, `
-		SELECT u.id::text AS user_id, r.name AS role_name,
-		       COALESCE(u.carrier, 'system') AS domain
+		SELECT u.id::text AS user_id, r.name AS role_name
 		FROM user_roles ur
 		JOIN roles r ON r.id = ur.role_id
 		JOIN users u ON u.id = ur.user_id
@@ -75,11 +76,11 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	defer rows2.Close()
 
 	for rows2.Next() {
-		var userID, roleName, domain string
-		if err := rows2.Scan(&userID, &roleName, &domain); err != nil {
+		var userID, roleName string
+		if err := rows2.Scan(&userID, &roleName); err != nil {
 			return fmt.Errorf("scan role assignment: %w", err)
 		}
-		m.AddPolicy("g", "g", []string{userID, "role:" + roleName, domain})
+		m.AddPolicy("g", "g", []string{userID, "role:" + roleName, "system"})
 	}
 	if err := rows2.Err(); err != nil {
 		return err
@@ -218,9 +219,9 @@ func NewCasbinAuthorizer(pool *pgxpool.Pool, bus event.EventBus, modelPath strin
 }
 
 // CheckPermission checks if a subject has permission (implements PermissionChecker interface).
-func (a *CasbinAuthorizer) CheckPermission(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error) {
-	domain := getDomainFromContext(ctx)
-	ok, err := a.enforcer.Enforce(userID.String(), domain, resource, action)
+// v1.0：domain 固定为 "system"（去 carrier 多租户隔离，详见 §11.11 Q3）。
+func (a *CasbinAuthorizer) CheckPermission(_ context.Context, userID uuid.UUID, resource, action string) (bool, error) {
+	ok, err := a.enforcer.Enforce(userID.String(), "system", resource, action)
 	if err != nil {
 		return false, fmt.Errorf("casbin enforce: %w", err)
 	}
@@ -241,16 +242,6 @@ func (a *CasbinAuthorizer) NotifyPolicyChange() error {
 // Stop closes the watcher.
 func (a *CasbinAuthorizer) Stop() {
 	a.watcher.Close()
-}
-
-// getDomainFromContext extracts the domain (carrier code or "system") from context.
-func getDomainFromContext(ctx context.Context) string {
-	if carrier := ctx.Value(CtxKeyCarrier); carrier != nil {
-		if code, ok := carrier.(string); ok && code != "" {
-			return code
-		}
-	}
-	return "system"
 }
 
 // StartPeriodicRefresh starts a background goroutine that reloads policies every interval.

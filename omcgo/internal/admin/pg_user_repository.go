@@ -16,9 +16,10 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
+// userColumns: v1.0 起 carrier 列已删除（Phase 5 goose 迁移），代码层不再读写。
 var userColumns = []string{
 	"id", "username", "password_hash", "display_name", "email", "phone",
-	"description", "carrier", "status", "source", "failed_login_attempts",
+	"description", "status", "source", "failed_login_attempts",
 	"locked_until", "last_failed_login_at", "last_login_at", "expire_at",
 	"created_by", "updated_by", "created_at", "updated_at",
 }
@@ -53,7 +54,6 @@ func (r *PgUserRepository) Create(ctx context.Context, user *User) error {
 			user.ID, user.Username, user.PasswordHash, user.DisplayName,
 			nullableString(user.Email), nullableString(user.Phone),
 			nullableString(user.Description),
-			nullableCarrier(user.Carrier),
 			user.Status, user.Source,
 			user.FailedLoginAttempts, nullableTime(user.LockedUntil),
 			nullableTime(user.LastFailedLoginAt), nullableTime(user.LastLoginAt),
@@ -114,7 +114,6 @@ func (r *PgUserRepository) Update(ctx context.Context, user *User) error {
 		Set("phone", nullableString(user.Phone)).
 		Set("description", nullableString(user.Description)).
 		Set("expire_at", nullableTime(user.ExpireAt)).
-		Set("carrier", nullableCarrier(user.Carrier)).
 		Set("status", user.Status).
 		Set("updated_by", nullableUUID(user.UpdatedBy)).
 		Set("updated_at", user.UpdatedAt).
@@ -176,10 +175,7 @@ func (r *PgUserRepository) List(ctx context.Context, filter UserFilter) (*model.
 	base := storage.Psql.Select(userColumns...).From("users")
 	countBase := storage.Psql.Select("COUNT(*)").From("users")
 
-	if filter.Carrier != nil {
-		base = base.Where(sq.Eq{"carrier": *filter.Carrier})
-		countBase = countBase.Where(sq.Eq{"carrier": *filter.Carrier})
-	}
+	// v1.0: filter.Carrier 已删除（详见 docs/prd/system/users.md §11.11）。
 	if filter.Status != nil {
 		base = base.Where(sq.Eq{"status": *filter.Status})
 		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
@@ -279,10 +275,10 @@ func (r *PgUserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID) er
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	var email, phone, description, carrier *string
+	var email, phone, description *string
 	err := row.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email, &phone,
-		&description, &carrier, &u.Status, &u.Source, &u.FailedLoginAttempts,
+		&description, &u.Status, &u.Source, &u.FailedLoginAttempts,
 		&u.LockedUntil, &u.LastFailedLoginAt, &u.LastLoginAt, &u.ExpireAt,
 		&u.CreatedBy, &u.UpdatedBy, &u.CreatedAt, &u.UpdatedAt,
 	)
@@ -292,27 +288,27 @@ func scanUser(row pgx.Row) (*User, error) {
 		}
 		return nil, fmt.Errorf("scan user: %w", err)
 	}
-	applyUserNullables(&u, email, phone, description, carrier)
+	applyUserNullables(&u, email, phone, description)
 	return &u, nil
 }
 
 func scanUserFromRows(rows pgx.Rows) (*User, error) {
 	var u User
-	var email, phone, description, carrier *string
+	var email, phone, description *string
 	err := rows.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email, &phone,
-		&description, &carrier, &u.Status, &u.Source, &u.FailedLoginAttempts,
+		&description, &u.Status, &u.Source, &u.FailedLoginAttempts,
 		&u.LockedUntil, &u.LastFailedLoginAt, &u.LastLoginAt, &u.ExpireAt,
 		&u.CreatedBy, &u.UpdatedBy, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan user row: %w", err)
 	}
-	applyUserNullables(&u, email, phone, description, carrier)
+	applyUserNullables(&u, email, phone, description)
 	return &u, nil
 }
 
-func applyUserNullables(u *User, email, phone, description, carrier *string) {
+func applyUserNullables(u *User, email, phone, description *string) {
 	if email != nil {
 		u.Email = *email
 	}
@@ -321,10 +317,6 @@ func applyUserNullables(u *User, email, phone, description, carrier *string) {
 	}
 	if description != nil {
 		u.Description = *description
-	}
-	if carrier != nil {
-		cc := model.CarrierCode(*carrier)
-		u.Carrier = &cc
 	}
 }
 
@@ -373,12 +365,8 @@ func nullableString(s string) interface{} {
 	return s
 }
 
-func nullableCarrier(c *model.CarrierCode) interface{} {
-	if c == nil {
-		return nil
-	}
-	return string(*c)
-}
+// nullableCarrier was used to write users.carrier; v1.0 removed.
+// Helper kept only if other call sites still reference it; remove with the migration when safe.
 
 func nullableTime(t *time.Time) interface{} {
 	if t == nil {

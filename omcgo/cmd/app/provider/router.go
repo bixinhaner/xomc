@@ -232,7 +232,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Protected API v1 routes (JWT or API Key authentication required)
 	v1 := r.Group("/api/v1")
 	v1.Use(admin.RequireAuthWithAPIKey(ad.jwtService, ad.apiKeySvc, ad.userRepo, ad.roleRepo, ad.tokenRevoker))
-	v1.Use(admin.RequireCarrier())
+	// v1.0：admin.RequireCarrier() 已删除（users.carrier 已移除，详见 docs/prd/system/users.md §11.11）
 	v1.Use(admin.AuditLogger(ad.auditRepo))
 
 	// Protected auth routes (no permission check)

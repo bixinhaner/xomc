@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,13 +12,12 @@ import (
 func TestJWTService_GenerateTokenPair(t *testing.T) {
 	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
 	require.NoError(t, err)
-	carrier := model.CarrierCMCC
 
 	claims := &Claims{
-		UserID:   uuid.New(),
-		Username: "testuser",
-		Carrier:  &carrier,
-		Roles:    []string{"admin", "operator"},
+		UserID:       uuid.New(),
+		Username:     "testuser",
+		IsSuperAdmin: false,
+		Roles:        []string{"admin", "operator"},
 	}
 
 	pair, err := svc.GenerateTokenPair(claims)
@@ -34,13 +32,12 @@ func TestJWTService_ValidateAccessToken(t *testing.T) {
 	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
 	require.NoError(t, err)
 	userID := uuid.New()
-	carrier := model.CarrierCTCC
 
 	original := &Claims{
-		UserID:   userID,
-		Username: "testuser",
-		Carrier:  &carrier,
-		Roles:    []string{"viewer"},
+		UserID:       userID,
+		Username:     "testuser",
+		IsSuperAdmin: false,
+		Roles:        []string{"viewer"},
 	}
 
 	pair, err := svc.GenerateTokenPair(original)
@@ -50,8 +47,7 @@ func TestJWTService_ValidateAccessToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, userID, parsed.UserID)
 	assert.Equal(t, "testuser", parsed.Username)
-	assert.NotNil(t, parsed.Carrier)
-	assert.Equal(t, model.CarrierCTCC, *parsed.Carrier)
+	assert.False(t, parsed.IsSuperAdmin)
 	assert.Equal(t, []string{"viewer"}, parsed.Roles)
 }
 
@@ -73,7 +69,6 @@ func TestJWTService_ValidateRefreshToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, userID, parsed.UserID)
 	assert.Equal(t, "testuser", parsed.Username)
-	assert.Nil(t, parsed.Carrier)
 }
 
 func TestJWTService_AccessTokenRejectsRefreshToken(t *testing.T) {
@@ -155,19 +150,20 @@ func TestJWTService_InvalidTokenString(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestJWTService_NilCarrier(t *testing.T) {
+func TestJWTService_SuperAdminClaim(t *testing.T) {
+	// v1.0：替换原 TestJWTService_NilCarrier，验证 IsSuperAdmin claim 签发与解析。
 	svc, err := NewJWTService("test-secret-minimum-32-characters!!")
 	require.NoError(t, err)
 
 	pair, err := svc.GenerateTokenPair(&Claims{
-		UserID:   uuid.New(),
-		Username: "superadmin",
-		Carrier:  nil,
-		Roles:    []string{"admin"},
+		UserID:       uuid.New(),
+		Username:     "superadmin",
+		IsSuperAdmin: true,
+		Roles:        []string{"admin"},
 	})
 	require.NoError(t, err)
 
 	parsed, err := svc.ValidateAccessToken(pair.AccessToken)
 	require.NoError(t, err)
-	assert.Nil(t, parsed.Carrier)
+	assert.True(t, parsed.IsSuperAdmin)
 }

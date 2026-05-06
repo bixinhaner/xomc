@@ -27,36 +27,52 @@ const (
 
 // User represents a system user.
 type User struct {
-	ID                  uuid.UUID          `json:"id"`
-	Username            string             `json:"username"`
-	PasswordHash        string             `json:"-"`
-	DisplayName         string             `json:"display_name"`
-	Email               string             `json:"email,omitempty"`
-	Phone               string             `json:"phone,omitempty"`
-	Description         string             `json:"description,omitempty"`
-	Carrier             *model.CarrierCode `json:"carrier,omitempty"`
-	Status              UserStatus         `json:"status"`
-	Source              UserSource         `json:"source"`
-	Roles               []Role             `json:"roles,omitempty"`
-	FailedLoginAttempts int                `json:"failed_login_attempts"`
-	LockedUntil         *time.Time         `json:"locked_until,omitempty"`
-	LastFailedLoginAt   *time.Time         `json:"last_failed_login_at,omitempty"`
-	LastLoginAt         *time.Time         `json:"last_login_at,omitempty"`
-	ExpireAt            *time.Time         `json:"expire_at,omitempty"`
-	CreatedBy           *uuid.UUID         `json:"created_by,omitempty"`
-	UpdatedBy           *uuid.UUID         `json:"updated_by,omitempty"`
-	CreatedAt           time.Time          `json:"created_at"`
-	UpdatedAt           time.Time          `json:"updated_at"`
+	ID                  uuid.UUID  `json:"id"`
+	Username            string     `json:"username"`
+	PasswordHash        string     `json:"-"`
+	DisplayName         string     `json:"display_name"`
+	Email               string     `json:"email,omitempty"`
+	Phone               string     `json:"phone,omitempty"`
+	Description         string     `json:"description,omitempty"`
+	Status              UserStatus `json:"status"`
+	Source              UserSource `json:"source"`
+	Roles               []Role     `json:"roles,omitempty"`
+	FailedLoginAttempts int        `json:"failed_login_attempts"`
+	LockedUntil         *time.Time `json:"locked_until,omitempty"`
+	LastFailedLoginAt   *time.Time `json:"last_failed_login_at,omitempty"`
+	LastLoginAt         *time.Time `json:"last_login_at,omitempty"`
+	ExpireAt            *time.Time `json:"expire_at,omitempty"`
+	CreatedBy           *uuid.UUID `json:"created_by,omitempty"`
+	UpdatedBy           *uuid.UUID `json:"updated_by,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+// IsSuperAdmin reports whether the user is a system built-in user (UserSourceBuiltIn).
+// 决议：v1.0 起超管由 source='builtIn' 唯一标识（不再用 carrier IS NULL）。
+// 详见 docs/prd/system/users.md §11.11。
+func (u *User) IsSuperAdmin() bool {
+	return u != nil && u.Source == UserSourceBuiltIn
 }
 
 // Role represents a named role with associated permissions.
+//
+// v0.6（roles.md §7 落地）新增字段：
+//   - Code        : 程序化引用用的角色编码，可选；非空时全局唯一
+//   - UserCount   : 列表派生字段（COUNT(*) FROM user_roles WHERE role_id = ...）
+//   - CreatedBy   : 创建者 user_id；NULL 表示 seed 写入（内置角色）
+//   - UpdatedBy   : 最近一次修改者 user_id
 type Role struct {
 	ID             uuid.UUID    `json:"id"`
 	Name           string       `json:"name"`
+	Code           string       `json:"code,omitempty"`
 	Description    string       `json:"description"`
 	IsSystem       bool         `json:"is_system"`
 	Permissions    []Permission `json:"permissions,omitempty"`
 	DeviceGroupIDs []uuid.UUID  `json:"device_group_ids,omitempty"`
+	UserCount      int          `json:"user_count"`
+	CreatedBy      *uuid.UUID   `json:"created_by,omitempty"`
+	UpdatedBy      *uuid.UUID   `json:"updated_by,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`
 	UpdatedAt      time.Time    `json:"updated_at"`
 }
@@ -92,21 +108,27 @@ type AuditLog struct {
 }
 
 // Claims contains the JWT token claims for authenticated users.
+//
+// v1.0 起：
+//   - 移除 `Carrier` 字段（users.carrier 列已删；UI/告警维度的 carrier 不再走 user 层）
+//   - 新增 `IsSuperAdmin` 字段，由 service 在签发时按 user.IsSuperAdmin() 写入
+//
+// 兼容性：旧版 token 反序列化时 IsSuperAdmin 缺省为 false，Carrier 缺省为 nil 已忽略。
 type Claims struct {
-	UserID        uuid.UUID          `json:"user_id"`
-	Username      string             `json:"username"`
-	Carrier       *model.CarrierCode `json:"carrier,omitempty"`
-	Roles         []string           `json:"roles"`
-	CurrentRoleID *uuid.UUID         `json:"current_role_id,omitempty"`
+	UserID        uuid.UUID  `json:"user_id"`
+	Username      string     `json:"username"`
+	IsSuperAdmin  bool       `json:"is_super_admin,omitempty"`
+	Roles         []string   `json:"roles"`
+	CurrentRoleID *uuid.UUID `json:"current_role_id,omitempty"`
 	// IssuedAt 是 JWT iat（Unix 秒），用于配合 TokenRevoker 判定 token 是否被强制下线。
 	IssuedAt int64 `json:"iat,omitempty"`
 }
 
 // UserFilter provides filtering options for listing users.
+// v1.0：移除 Carrier 过滤项（按 role 名间接过滤运营商范围）。
 type UserFilter struct {
-	Carrier *model.CarrierCode `form:"carrier"`
-	Status  *UserStatus        `form:"status"`
-	Search  *string            `form:"search"`
+	Status *UserStatus `form:"status"`
+	Search *string     `form:"search"`
 	model.ListRequest
 }
 
@@ -121,16 +143,16 @@ type AuditLogFilter struct {
 }
 
 // CreateUserRequest is the input for creating a new user.
+// v1.0：移除 Carrier 字段（users.carrier 已删）。
 type CreateUserRequest struct {
-	Username    string             `json:"username" binding:"required,min=3,max=64"`
-	Password    string             `json:"password" binding:"required,min=6"`
-	DisplayName string             `json:"display_name"`
-	Email       string             `json:"email" binding:"omitempty,email"`
-	Phone       string             `json:"phone"`
-	Description string             `json:"description"`
-	ExpireAt    *time.Time         `json:"expire_at"`
-	Carrier     *model.CarrierCode `json:"carrier"`
-	RoleIDs     []uuid.UUID        `json:"role_ids"`
+	Username    string      `json:"username" binding:"required,min=3,max=64"`
+	Password    string      `json:"password" binding:"required,min=6"`
+	DisplayName string      `json:"display_name"`
+	Email       string      `json:"email" binding:"omitempty,email"`
+	Phone       string      `json:"phone"`
+	Description string      `json:"description"`
+	ExpireAt    *time.Time  `json:"expire_at"`
+	RoleIDs     []uuid.UUID `json:"role_ids"`
 }
 
 // UpdateUserRequest is the input for updating an existing user.
@@ -138,15 +160,16 @@ type CreateUserRequest struct {
 // RoleIDs 语义：
 //   - nil      → 不变更角色（保持当前关联）
 //   - 非 nil（含空切片） → 用 RoleIDs 整体替换当前角色列表（差量执行 Assign/Remove）
+//
+// v1.0：移除 Carrier 字段（users.carrier 已删）。
 type UpdateUserRequest struct {
-	DisplayName *string            `json:"display_name"`
-	Email       *string            `json:"email" binding:"omitempty,email"`
-	Phone       *string            `json:"phone"`
-	Description *string            `json:"description"`
-	ExpireAt    *time.Time         `json:"expire_at"`
-	Carrier     *model.CarrierCode `json:"carrier"`
-	Status      *UserStatus        `json:"status"`
-	RoleIDs     *[]uuid.UUID       `json:"role_ids"`
+	DisplayName *string      `json:"display_name"`
+	Email       *string      `json:"email" binding:"omitempty,email"`
+	Phone       *string      `json:"phone"`
+	Description *string      `json:"description"`
+	ExpireAt    *time.Time   `json:"expire_at"`
+	Status      *UserStatus  `json:"status"`
+	RoleIDs     *[]uuid.UUID `json:"role_ids"`
 }
 
 // LoginRequest is the input for user authentication.
@@ -173,8 +196,10 @@ type ResetPasswordRequest struct {
 }
 
 // CreateRoleRequest is the input for creating a new role.
+// v0.6：新增可选 Code 字段（程序化引用），非空时全局唯一。
 type CreateRoleRequest struct {
 	Name        string            `json:"name" binding:"required"`
+	Code        string            `json:"code"`
 	Description string            `json:"description"`
 	Permissions []PermissionInput `json:"permissions"`
 }
@@ -186,8 +211,10 @@ type PermissionInput struct {
 }
 
 // UpdateRoleRequest is the input for updating an existing role.
+// v0.6：新增可选 Code 字段（指针：nil 表示不变更）。
 type UpdateRoleRequest struct {
 	Name        *string           `json:"name"`
+	Code        *string           `json:"code"`
 	Description *string           `json:"description"`
 	Permissions []PermissionInput `json:"permissions"`
 }

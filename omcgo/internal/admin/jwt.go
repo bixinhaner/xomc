@@ -6,7 +6,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // JWTService handles JWT token generation and validation.
@@ -16,12 +15,14 @@ type JWTService struct {
 	refreshTokenTTL time.Duration
 }
 
+// jwtClaims is the wire format. v1.0：移除 Carrier，新增 IsSuperAdmin。
+// 旧 token 反序列化时 IsSuperAdmin 缺省 false，老的 carrier 字段被 jwt 库忽略，向后兼容。
 type jwtClaims struct {
-	UserID        uuid.UUID          `json:"user_id"`
-	Username      string             `json:"username"`
-	Carrier       *model.CarrierCode `json:"carrier,omitempty"`
-	Roles         []string           `json:"roles"`
-	CurrentRoleID *uuid.UUID         `json:"current_role_id,omitempty"`
+	UserID        uuid.UUID  `json:"user_id"`
+	Username      string     `json:"username"`
+	IsSuperAdmin  bool       `json:"is_super_admin,omitempty"`
+	Roles         []string   `json:"roles"`
+	CurrentRoleID *uuid.UUID `json:"current_role_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -62,7 +63,7 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 	accessClaims := &jwtClaims{
 		UserID:        claims.UserID,
 		Username:      claims.Username,
-		Carrier:       claims.Carrier,
+		IsSuperAdmin:  claims.IsSuperAdmin,
 		Roles:         claims.Roles,
 		CurrentRoleID: claims.CurrentRoleID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -80,10 +81,10 @@ func (s *JWTService) GenerateTokenPair(claims *Claims) (*TokenPair, error) {
 	}
 
 	refreshClaims := &jwtClaims{
-		UserID:   claims.UserID,
-		Username: claims.Username,
-		Carrier:  claims.Carrier,
-		Roles:    claims.Roles,
+		UserID:       claims.UserID,
+		Username:     claims.Username,
+		IsSuperAdmin: claims.IsSuperAdmin,
+		Roles:        claims.Roles,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "refresh",
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -144,7 +145,7 @@ func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims
 	return &Claims{
 		UserID:        claims.UserID,
 		Username:      claims.Username,
-		Carrier:       claims.Carrier,
+		IsSuperAdmin:  claims.IsSuperAdmin,
 		Roles:         claims.Roles,
 		CurrentRoleID: claims.CurrentRoleID,
 		IssuedAt:      issuedAt,

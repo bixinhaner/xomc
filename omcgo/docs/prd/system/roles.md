@@ -7,6 +7,10 @@
 |------|------|------|------|
 | 0.1  | 2026-05-06 | Backend/Frontend Team | 基于现网 `RolePermission/index.tsx` + `internal/admin/role_handler.go` 抽取 |
 | 0.2  | 2026-05-06 | Backend/Frontend Team | 接管「角色 → 设备分组」数据权限的完整描述（从 [users.md](./users.md) v0.6 迁入）：新增 §1.4 数据权限模型、§2.6 `role_device_groups` 表、§11 决策记录（R 规则全集 + 决议 ① ③）|
+| 0.3  | 2026-05-06 | Backend/Frontend Team | 跟随 [users.md v1.0](./users.md) 删 `users.carrier`：§1.4 / §2.6 / §11.1 R4 / §11.2 例外条件全部改述为「超管 = `source = 'builtIn'`」；移除 §3 跨租户角色"以 carrier 隔离"措辞 |
+| 0.4  | 2026-05-06 | Backend/Frontend Team | §1 顶部增加超级管理员高优先级规则块：source='builtIn' 等价 Unix root，绕过菜单/API/设备分组/制式四类权限校验。把分散在 §1.4 / §11.1 / §11.2 中的"超管旁路"规则提到首屏强提示位 |
+| 0.5  | 2026-05-06 | Backend/Frontend Team | 修复角色编辑面板「菜单权限」「数据权限」回显空白 + 「数据权限」实际未保存的双 bug。**前端**：编辑/查看打开时通过 `getRoleById` + `getRoleDeviceGroups` 专项端点回显（与 API 权限模式一致）；保存时通过 `setRoleDeviceGroups` 专项端点写入。**后端**：`PgRoleRepository.List/ListWithPagination/GetByID` 批量填充 `DeviceGroupIDs`，让 [users.md §11.2 决议 ① ⚠️ 标识](./users.md) 判定准确。详见 §11.6 |
+| 0.6  | 2026-05-06 | Backend/Frontend Team | **§7 Backlog 全量落地**：① `role_api_permissions` DDL（P0 #1）；② `Role.UserCount/Code/CreatedBy/UpdatedBy` 字段（P0 #2 + P1 #5 + P2 #8）；③ ListWithPagination 批量派生 UserCount；④ CreateRole/UpdateRole 自动写入 created_by/updated_by；⑤ network_types 决议 **方案 B**（接受角色级简化，DDL 加注释，UI 不变）；⑥ §11.2 决议 ① 5 个 UI 触点全覆盖（角色列表 ⚠️ Tag、编辑/查看 banner、清空设备分组二次确认、用户管理分配下拉/批量 Modal 已在 v0.5 完成）；⑦ 角色克隆 `POST /admin/roles/{id}/copy`（P2 #9）。详见 §11.7 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -28,7 +32,17 @@
 
 ## 1. 业务背景
 
-角色（Role）是 RBAC 的核心聚合，对应「这个角色能做什么 + 能看哪些数据」：
+> **🔑 超级管理员（v1.0 起的最高优先级规则）**
+>
+> 当用户的 `users.source = 'builtIn'` 时，该用户为**超级管理员**，**绕过本 PRD 描述的所有角色权限校验**：
+> - 看见**所有**设备分组（无视 `role_device_groups`）
+> - 看见**所有**菜单（无视 `role_menus`）
+> - 调用**任意** API（无视 `role_api_permissions`）
+> - 看见**所有**网络制式（无视 `network_types`）
+>
+> 等价于 Unix root。`source` 创建时即固定，不可运行期改写，确保超管身份唯一来源是 seed。详见 [users.md §11.11](./users.md) 与本文 §11.1 R4。
+
+角色（Role）是 RBAC 的核心聚合，对应「这个角色能做什么 + 能看哪些数据」（**对非超管用户生效**）：
 
 | 维度 | 关联表 | 决定 |
 |------|--------|------|
@@ -70,8 +84,8 @@ User                              ← 用户
 
 | 场景 | 行为 |
 |------|------|
-| 用户 `carrier == NULL`（超管） | 绕过 `role_device_groups` 校验，看见所有设备分组（实现：`PermissionService.GetUserVisibleGroupIDs` 第 50-54 行）|
-| 用户 `carrier != NULL`（运营商范围用户） | 严格走 user → roles → role_device_groups 派生 |
+| 用户 `source == 'builtIn'`（超管，v0.3 改）| 绕过 `role_device_groups` 校验，看见**所有**设备分组、所有菜单、所有 API（实现：`PermissionService.GetUserVisibleGroupIDs` + `User.IsSuperAdmin()`）|
+| 用户 `source != 'builtIn'`（普通用户：admin / LDAP）| 严格走 user → roles → role_device_groups 派生 |
 | 角色绑定 L1 父分组 | 自动展开为该 L1 下所有 L2 子分组（树展开由 `GroupExpander.ListChildIDs` 完成）|
 | 角色 `role_device_groups.network_types` 非空 | 在分组基础上**进一步限制可见制式**（如只看 `lte`，看不到 `nr`）|
 | 用户多角色 | 可见分组 = 各角色分组的**并集**（不是交集）|
@@ -186,7 +200,7 @@ device_groups            ← 树形（parent_id），L1 / L2 两层
 
 **判定逻辑**（`internal/admin/permission_service.go:50-107`）：
 
-1. `if user.Carrier == nil` → 返回 nil（超管，所有分组可见）
+1. `if user.IsSuperAdmin() /* user.Source == UserSourceBuiltIn */` → 返回 nil（超管，所有分组可见）
 2. 否则查 `role_device_groups` 拿到所有 `(group_id, network_types)`
 3. 对每个 `group_id` 调 `groupExpander.GetGroupLevel`：
    - L1 → 调 `ListChildIDs` 展开为所有 L2 子组
@@ -377,7 +391,7 @@ device_groups            ← 树形（parent_id），L1 / L2 两层
 
 - 角色继承 / 角色组合 — 当前不支持，每个用户独立持有平铺角色集
 - 时序权限（限时角色）— 暂不支持
-- 跨租户角色 — 当前以 `users.carrier` 隔离，角色本身无 carrier 维度
+- 跨租户角色 — v1.0 起 `users.carrier` 已删；多 carrier 隔离能力由 `role_device_groups` 通过设备分组层提供（每个分组天然属于某 carrier），角色本身无 carrier 维度
 
 ---
 
@@ -422,7 +436,7 @@ device_groups            ← 树形（parent_id），L1 / L2 两层
 | **R1** 数据权限单位 | — | 设备数据按 `device_groups` 切分；权限到分组级，不到单设备级 | 共享（本 PRD 主责）|
 | **R2** 角色绑分组 | — | 角色通过 `role_device_groups` 关联表绑定一组 `(group_id, network_types)`；不绑 = 该角色无设备数据可见域 | 本 PRD |
 | **R3** 用户继承 | — | 用户可见域 = 各角色 `role_device_groups` 的**并集**（多角色按并集放宽，不是交集收紧）| [users.md](./users.md) |
-| **R4** 超管旁路 | — | `users.carrier IS NULL` 表示超管，绕过 R2/R3，看见所有分组（实现：`PermissionService:50-54`）| [users.md](./users.md) |
+| **R4** 超管旁路（v0.3 改）| — | `users.source = 'builtIn'` 表示超管，绕过 R2/R3，看见**所有**分组、菜单、API（实现：`PermissionService` + `User.IsSuperAdmin()` 派生）。`source` 创建时即固定，不可运行期改写 | [users.md §11.11](./users.md#1111-v10--删除-userscarrier--超管走-source--builtin) |
 | **R5** 树展开 | — | 角色绑 L1 父分组 = 自动可见所有 L2 子分组（`GroupExpander.ListChildIDs`）| 本 PRD |
 | **R6** 制式过滤 | — | `role_device_groups.network_types` 在分组基础上**进一步限制**可见制式（空数组=不限）| 本 PRD |
 | **R7** 缓存一致性 | — | 任何会改变可见域的操作必须**同步**调 `InvalidateUserCache(userID)`（用户管理操作详见 [users.md §10 DoD](./users.md)；角色管理 `SetRoleDeviceGroups` / `SetRoleMenus` / `SetRoleApiPermissions` 的责任在 §10 DoD）| 共享 |
@@ -439,7 +453,7 @@ device_groups            ← 树形（parent_id），L1 / L2 两层
 | 用户管理 — 批量分配角色 Modal | 同上 | option 自定义 render |
 | 角色管理 — 分配设备分组（`PUT /admin/roles/{id}/device-groups`）面板 | 当 `device_group_ids = []` 提交时弹二次确认：「确定要清空设备分组绑定吗？该角色下的用户将立即失去设备数据可见权限」 | `Modal.confirm` |
 
-**例外**：超管（用户 `carrier IS NULL`）走旁路，与角色绑定无关，不受此规则影响。
+**例外**：超管（用户 `source = 'builtIn'`，v0.3 改）走旁路，与角色绑定无关，不受此规则影响。
 
 **前后端协同**：
 
@@ -511,3 +525,151 @@ device_groups            ← 树形（parent_id），L1 / L2 两层
 - [ ] 多个 LDAP 数据源场景下，是否需要按 LDAP 来源进一步细分角色可见域？（与 [users.md §11.4](./users.md) 联动）
 - [ ] `network_types` UI 与 DDL 语义错位（§7 P1 #4）：决议方向（A：UI 改为按分组配置 / B：接受当前简化）应在 v0.3 落定
 - [ ] 角色克隆（§7 P2 #9）是否复制 `role_device_groups` 绑定？默认应复制；如不希望可加 `copy_device_groups: bool` 参数
+
+### 11.6 v0.5 — 角色编辑面板回显与保存 bug 修复
+
+**问题**：用户报告 `/system/roles` 编辑角色时「菜单权限」与「数据权限」勾选树空白，但「API 权限」回显正常。
+
+**根因**（保存 + 回显**双 bug**，不止回显）：
+
+| 维度 | 保存 | 回显 |
+|------|------|------|
+| **菜单权限**（`roles.permissions` 三元组） | ✅ 正常（`service.CreateRole/UpdateRole` 处理）| ❌ 列表接口 `ListWithPagination` 不填充 `Permissions`，前端 `role.permissions \|\| []` 永远空 |
+| **数据权限**（`role_device_groups`） | ❌ **从未保存** — 前端送了 `deviceGroupIds`，但后端 `CreateRole/UpdateRole` 静默丢弃，DB 实际为空 | ❌ 列表接口与 GetRole 都不填充 `DeviceGroupIDs` |
+| **API 权限**（`role_api_permissions`） | ✅ 正常（前端专门调 `setRoleApiPermissions`） | ✅ 正常（前端专门调 `getRoleApiPermissions`） |
+
+→ **API 权限正常**是因为前端编辑面板**绕开 CreateRole/UpdateRole**，专门调用专项端点保存与回显；菜单/数据权限没有这层绕行。
+
+**修复方案**（混合方案 A+B）：
+
+#### 前端修改（[`webcode/src/pages/system/RolePermission/index.tsx`](../../../../omcmb/webcode/src/pages/system/RolePermission/index.tsx)）
+
+| 改动 | 内容 |
+|------|------|
+| 新增 `loadRoleDetailToForm(role)` helper | 统一三个专项端点回显：`getRoleById` 拿 permissions、`getRoleDeviceGroups` 拿 `{deviceGroupIds, networkTypes}`、`getRoleApiPermissions` 拿 endpoint IDs |
+| 编辑/查看按钮 onClick | 改为单行 `loadRoleDetailToForm(role)` 调用 |
+| 创建 onSuccess | 增加 `setRoleDeviceGroups.mutate({roleId: newRole.id, deviceGroupIds, networkTypes})` |
+| 编辑 onSuccess | 同上 |
+
+#### 后端修改（[`pg_role_repository.go`](../../../internal/admin/pg_role_repository.go)）
+
+| 改动 | 内容 |
+|------|------|
+| 新增私有方法 `populateDeviceGroupIDs(ctx, roles []Role)` | 一次性 `SELECT role_id, group_id FROM role_device_groups WHERE role_id = ANY($1)`，按 role_id 分组填回 `Role.DeviceGroupIDs`。仅取 group_id（不取 network_types，避免 list 响应膨胀；network_types 仍由专项端点返回）|
+| `List()` / `ListWithPagination()` / `GetByID()` 末尾调用该 helper | 让列表 / 单角色详情都带 `device_group_ids`，让 [users.md §11.2 决议 ① "未绑分组" ⚠️](./users.md) 标识判定准确 |
+
+**保留的设计约定**：
+
+- 后端 `service.CreateRole/UpdateRole` **依然不处理** `device_group_ids` / `network_types` —— 这是**故意**的，与现有 `role_api_permissions` 的设计一致：所有「绑定关系」走专项端点（`PUT /admin/roles/{id}/{menus|api-permissions|device-groups}`），主请求只管 role 自身字段。前端送 `deviceGroupIds / networkTypes` 给主请求是兼容性传递，后端忽略不报错
+- `Role.NetworkTypes` Go 字段**不新增** —— 仍由专项端点 `GetRoleDeviceGroups` 返回，避免列表响应携带过多分组级数据
+
+**验证**：
+
+- 后端 `go test -count=1 ./internal/admin/...` 全过
+- 前端 `npm run typecheck` 通过
+- 实际编辑流程（手测）：
+  - [ ] 创建角色，勾选数据权限 + 菜单权限，保存 → DB 中 `role_device_groups` 写入；`permissions` 写入
+  - [ ] 重新打开同角色编辑面板 → 数据权限 / 菜单权限 / API 权限三个勾选树**全部正确回显**
+  - [ ] 用户管理「分配角色」下拉对没绑分组的角色显示 ⚠️ 标识不再误报
+
+**不在本次范围**：
+
+- `service.CreateRole/UpdateRole` 直接处理 device_group_ids（语义重复，且与 API 权限模式不一致）
+- 列表接口附带 `network_types` 字段（性能 / 响应大小考虑）
+- `Role.NetworkTypes` Go 字段（避免双源）
+
+### 11.7 v0.6 — §7 Backlog 全量落地
+
+本节记录 v0.6 一次性把 §7 P0/P1/P2 全部 9 项落地的实施细节、决议方向、与新增/修改的代码点。
+
+#### 实施清单（按 §7 编号映射）
+
+| §7 项 | 状态 | 落地文件 |
+|-------|------|---------|
+| **P0 #1** `role_api_permissions` DDL | ✅ | [migrations/000056_roles_v1_extras.sql](../../../migrations/000056_roles_v1_extras.sql) |
+| **P0 #2** Role.UserCount 派生 | ✅ | `pg_role_repository.go` 新增 `populateUserCounts(ctx, roles)` 一次性聚合 `SELECT role_id, COUNT(*) FROM user_roles GROUP BY role_id`；`List` / `ListWithPagination` / `GetByID` 末尾调用 |
+| **P0 #3** Role.built_in 派生 | ✅（已早实现）| 前端 `mapBackendRole` 直接 `builtIn: br.is_system ? 1 : 0` |
+| **P1 #4** network_types 语义对齐 | ✅ 决议 **方案 B** | 落定**接受当前角色级简化**，DDL 加 `COMMENT ON COLUMN role_device_groups.network_types`；UI 不动；如未来需要"按分组配置"再走 UI 升级（DDL 已支持）|
+| **P1 #5** 审计字段 created_by/updated_by | ✅ | `roles` 表加 `created_by` / `updated_by` UUID FK→`users(id) ON DELETE SET NULL`；`service.CreateRole/UpdateRole` 自动从 ctx 取 operator 写入 |
+| **P1 #6** ⚠️ 未绑分组 5 触点 | ✅ 全覆盖 | 用户管理 2 触点（v0.5 完成）+ 角色管理 3 触点（v0.6）：列表行 ⚠️ Tag、编辑 banner、查看 banner、清空二次确认 |
+| **P1 #7** 设备分组删除联动 | ⏳ 不在本 PRD | 跨模块（F06 拓扑管理 PRD）；本 PRD §11.4 仅声明边界 |
+| **P2 #8** Role.code 字段 | ✅ | `roles.code VARCHAR(64) NULL`，部分唯一索引；`mapBackendRole` 优先用 `br.code`，未配时用 `name` 兜底 |
+| **P2 #9** 角色克隆 | ✅ | `POST /admin/roles/{id}/copy`：副本 `name = base_copy / base_copy_2 ...`，复制 permissions / role_menus / role_device_groups（含 network_types）/ role_api_permissions；`is_system` 强制 false |
+
+#### 后端代码点（5 个文件）
+
+| 文件 | 改动 |
+|------|------|
+| [migrations/000056_roles_v1_extras.sql](../../../migrations/000056_roles_v1_extras.sql) | 新建 `role_api_permissions` 表 + 索引；`roles` 加 `code` (含部分唯一索引) / `created_by` / `updated_by`；DDL 注释统一 |
+| [internal/admin/model.go](../../../internal/admin/model.go) | `Role` 加 `Code` / `UserCount` / `CreatedBy` / `UpdatedBy`；`CreateRoleRequest` / `UpdateRoleRequest` 加 `Code` 字段 |
+| [internal/admin/pg_role_repository.go](../../../internal/admin/pg_role_repository.go) | 新增 `roleColumns` 常量 + `applyRoleNullables` helper；`Create/GetByID/GetByName/Update` 全部读写新字段；新增私有 `populateUserCounts(ctx, roles)`；`List/ListWithPagination` 末尾调用 |
+| [internal/admin/service.go](../../../internal/admin/service.go) | `CreateRole`/`UpdateRole` 自动写入 created_by/updated_by；新增 `CopyRole(ctx, sourceID)` + `allocateCopyRoleName` |
+| [internal/admin/role_handler.go](../../../internal/admin/role_handler.go) + [handler.go](../../../internal/admin/handler.go) | 新增 `CopyRole` HTTP handler；路由注册 `roles.POST("/:id/copy", h.CopyRole)` |
+
+#### 前端代码点（2 个文件）
+
+| 文件 | 改动 |
+|------|------|
+| [adminApi.ts](../../../../omcmb/frontend-core/src/services/api/adminApi.ts) | `BackendRole` 加 `code?: string`；`mapBackendRole` 优先用 `br.code`；新增 `adminApi.copyRole(id)` |
+| [RolePermission/index.tsx](../../../../omcmb/webcode/src/pages/system/RolePermission/index.tsx) | 引入 `Alert` / `CopyOutlined`；roleName 列加 ⚠️ 未绑分组 Tag；操作菜单加「复制」；编辑/查看 Drawer 顶部加 `<Alert>` banner；handleEdit 清空设备分组改 `modal.confirm` 二次确认（`doEditSubmit` 抽出）；新增 `copyRoleMut` + `handleCopy` |
+
+#### network_types 方案 B 详解
+
+| 维度 | 内容 |
+|------|------|
+| DDL | 不变 — `role_device_groups.network_types TEXT[]`（每分组独立数组）|
+| UI | 不变 — 角色编辑面板 `<Checkbox.Group>` 是"角色级"统一字段 |
+| 写入 | `SetRoleDeviceGroups` 接收单个 `network_types[]`，写入时给该角色下**每条** `role_device_groups` 行赋同样数组 |
+| 读取 | `GetRoleDeviceGroups` 返回任意一行的 `network_types`（约定所有行一致）|
+| 升级路径 | 如未来要做"每分组独立配置"，UI 改造为按行配置；DDL 已支持，无需迁移 |
+| DDL 注释 | `COMMENT ON COLUMN role_device_groups.network_types IS 'v0.6 决议 B：DB 是每分组独立数组；当前前端 UI 简化为角色级统一字段（同步 SetRoleDeviceGroups 时所有行写入相同值）';` |
+
+#### v0.6 触点 5 二次确认行为变化
+
+**之前（v0.5 及以前）**：
+
+```ts
+if (selectedSecondLevel.length === 0) {
+  message.warning('至少选一个二级节点');
+  return; // 硬阻止保存
+}
+```
+
+→ 用户**无法显式清空**设备分组绑定。
+
+**现在（v0.6）**：
+
+```ts
+if (selectedSecondLevel.length === 0) {
+  modal.confirm({
+    title: '确认清空设备分组绑定',
+    content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
+    okButtonProps: { danger: true },
+    onOk: () => doEditSubmit(),
+  });
+  return;
+}
+doEditSubmit();
+```
+
+→ 允许显式清空，但需用户**确认**，避免误操作；同时编辑面板 banner（触点 2）持续可见警告。
+
+#### 验证
+
+| 检查 | 结果 |
+|------|------|
+| `CGO_ENABLED=0 go build ./...` | ✅ |
+| `go test -count=1 ./internal/admin/...` | ✅ |
+| `bash scripts/check-migrations.sh` | ✅ 编号连续，Up/Down 完整 |
+| `npm run typecheck`（webcode） | ✅ |
+| 手测列表 ⚠️ Tag | 仅当 `deviceGroupIds.length === 0 && !isBuiltIn` 时显示，避免内置 admin 误标 |
+| 手测编辑/查看 banner | 仅当 `selectedDeviceGroupIds.length === 0` 时显示（与列表 ⚠️ 联动）|
+| 手测清空二次确认 | 选 0 个二级节点 → 弹 Modal；点"继续保存"成功；点"取消"不保存 |
+| 手测复制角色 | 列表行「更多 → 复制」→ Modal 确认 → 副本生成（`<原名>_copy`）；权限/菜单/分组/API 全部继承 |
+| 手测 audit | 创建/编辑角色后，DB 中 `roles.created_by` / `updated_by` 写入操作者 UUID |
+
+#### 待澄清事项（v0.7+ 候选）
+
+- [ ] `Role.code` 在 UI 上是否显式暴露给管理员配置？当前后端字段就位，前端表单**未加输入框**（避免暴露给非技术用户）；如某场景需配置（如审计/SDK 集成），加 `<Input>` 即可
+- [ ] CopyRole 是否要求源角色 `is_system = false`（即"内置角色不可被复制"）？当前**允许**复制内置角色（副本仍为非内置），实际业务可能希望禁止
+- [ ] CopyRole 副本的 `code` 字段如何处理？当前 service **不复制** `Code`（避免唯一约束冲突）；如未来 `code` 加自增后缀策略再调整

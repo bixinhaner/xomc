@@ -148,7 +148,7 @@ OMC 是面向运营商的商用产品，三大运营商（CMCC / CTCC / CUCC）�
 ### P1
 3. **文件上传端点**（§6.1）：上传到 MinIO 的 `ui-assets` bucket，返回公网 URL
 4. **资源安全检查**：上传 Logo/背景图限制类型（image/*）、大小（< 2MB）、扫描恶意内容
-5. **多版本/多租户**：未来支持按 `carrier` 区分 UI 主题（CMCC 用绿色，CTCC 用蓝色）
+5. **多版本/多租户**：未来支持按 `carrier` 区分 UI 主题（CMCC 用绿色，CTCC 用蓝色）—— **注**：此处 `carrier` 是部署级别的运营商标识（来自 `sys_configs` 或环境变量），与 [users.md v1.0 已删除的 `users.carrier`](./users.md) **是两个不同的维度**，不要混淆 |
 
 ### P2
 6. **预览模式**：保存前生成预览链接 `/preview?theme=<id>`，分享给评审
