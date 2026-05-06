@@ -1,0 +1,48 @@
+<?xml version='1.0' encoding='utf-8'?>
+<paramModelRouting totalRoutes="27" totalModels="9" generatedAt="2026-04-30 14:44:31">
+    <paramModel name="MLQ" routeCount="1">
+        <route productClass="^FAP/MLQ/SC$" />
+    </paramModel>
+    <paramModel name="MLN" routeCount="3">
+        <route productClass="^FAP/MLN/SC$" />
+        <route productClass="^FAP/MLN/CA$" />
+        <route productClass="^FAP/MLN/DC$" />
+    </paramModel>
+    <paramModel name="BM" routeCount="1">
+        <route productClass="^FAP/BU1810$" />
+    </paramModel>
+    <paramModel name="BSC" routeCount="1">
+        <route productClass="^FAP/PGSM$" />
+    </paramModel>
+    <paramModel name="BTS" routeCount="1">
+        <route productClass="^FAP/BTS$" />
+    </paramModel>
+    <paramModel name="BLQ" routeCount="4">
+        <route productClass="^FAP/pBS41010/SC$" />
+        <route productClass="FAP/\w+(BS31)\w+/CA" />
+        <route productClass="FAP/\w+(BS31)\w+/DC" />
+        <route productClass="FAP/\w+(BS31)\w+/SC" />
+    </paramModel>
+    <paramModel name="BaiBNQ" routeCount="1">
+        <route productClass="FAP/\w*BSC\w+" />
+    </paramModel>
+    <paramModel name="ENB_DEFAULT_181" routeCount="3">
+        <route productClass="SC3400(L1821)" />
+        <route productClass="fBS3251-B01" />
+        <route productClass="fBS3251-Q01" />
+    </paramModel>
+    <paramModel name="ENB_DEFAULT_098" routeCount="12">
+        <route productClass="FDD-LTE-Enterprise" />
+        <route productClass="HM-TCELL-AU-1800" />
+        <route productClass="HM-TCELL-AU-2100" />
+        <route productClass="HM-TCELL-0-2100" />
+        <route productClass="HM-TCELL-O-1800" />
+        <route productClass="HM-TCELL-O-2100" />
+        <route productClass="HM-TCELL-2100" />
+        <route productClass="LTE-FDD_N1" />
+        <route productClass="LTE-FDD_N2" />
+        <route productClass="LTE-FDD_N3" />
+        <route productClass="LTE-FDD_N4" />
+        <route productClass="femto_au" />
+    </paramModel>
+</paramModelRouting>

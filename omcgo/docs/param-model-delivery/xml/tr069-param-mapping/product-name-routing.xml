@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<productNameRouting totalRoutes="27" generatedAt="2026-04-30 14:44:31">
+    <route productClass="^FAP/pBS41010/SC$" productName="QRTB-SC" />
+    <route productClass="^FAP/MLQ/SC$" productName="MLQ" />
+    <route productClass="^FAP/MLN/SC$" productName="MLN-SC" />
+    <route productClass="^FAP/MLN/CA$" productName="MLN-CA" />
+    <route productClass="^FAP/MLN/DC$" productName="MLN-DC" />
+    <route productClass="^FAP/BU1810$" productName="BM" />
+    <route productClass="^FAP/PGSM$" productName="BSC" />
+    <route productClass="^FAP/BTS$" productName="BTS" />
+    <route productClass="FAP/\w+(BS31)\w+/CA" productName="QRTB-CA" />
+    <route productClass="FAP/\w+(BS31)\w+/DC" productName="QRTB-DC" />
+    <route productClass="FAP/\w+(BS31)\w+/SC" productName="QRTB-SC" />
+    <route productClass="FAP/\w*BSC\w+" productName="BaiBNQ" />
+    <route productClass="SC3400(L1821)" productName="CICT-SC3400(L1821)" />
+    <route productClass="FDD-LTE-Enterprise" productName="FDD-LTE-Enterprise" />
+    <route productClass="HM-TCELL-AU-1800" productName="HM-TCELL-AU-1800" />
+    <route productClass="HM-TCELL-AU-2100" productName="HM-TCELL-AU-2100" />
+    <route productClass="HM-TCELL-0-2100" productName="HM-TCELL-0-2100" />
+    <route productClass="HM-TCELL-O-1800" productName="HM-TCELL-O-1800" />
+    <route productClass="HM-TCELL-O-2100" productName="HM-TCELL-O-2100" />
+    <route productClass="HM-TCELL-2100" productName="HM-TCELL-2100" />
+    <route productClass="fBS3251-B01" productName="DT-fBS3251-B01" />
+    <route productClass="fBS3251-Q01" productName="DT-fBS3251-Q01" />
+    <route productClass="LTE-FDD_N1" productName="JX-LTE-FDD_N1" />
+    <route productClass="LTE-FDD_N2" productName="JX-LTE-FDD_N2" />
+    <route productClass="LTE-FDD_N3" productName="JX-LTE-FDD_N3" />
+    <route productClass="LTE-FDD_N4" productName="JX-LTE-FDD_N4" />
+    <route productClass="femto_au" productName="JX-femto_au" />
+</productNameRouting>

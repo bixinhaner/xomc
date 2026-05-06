@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="EGW" deviceType="4" totalCount="16">
+    <alarms>
+        <alarm identifier="31002" cnName="CPU利用率超过阈值" enName="CPU utilization overrun" severity="Warning" eventType="30003" cnProbableCause="CPU利用率告警" enProbableCause="CPU utilization alarm" cnSuggestion="" enSuggestion="Contract wcg engineer support" isShow="Y" />
+        <alarm identifier="31003" cnName="内存使用率超过阈值" enName="Memory usage overrun" severity="Warning" eventType="30003" cnProbableCause="内存占用过大告警" enProbableCause="A large alarm in memory" cnSuggestion="" enSuggestion="Contract wcg engineer support" isShow="Y" />
+        <alarm identifier="31004" cnName="磁盘空间使用超过阈值" enName="Disk space use overrun" severity="Warning" eventType="30003" cnProbableCause="磁盘容量过低告警" enProbableCause="Low disk capacity alarm" cnSuggestion="释放磁盘空间" enSuggestion="" isShow="Y" />
+        <alarm identifier="31005" cnName="历史日志超过阈值" enName="History log overrun" severity="Warning" eventType="30003" cnProbableCause="历史日志文件过大" enProbableCause="Too big a history log file" cnSuggestion="删除多余log" enSuggestion="" isShow="Y" />
+        <alarm identifier="31006" cnName="wcg业务进程发生复位" enName="Process down" severity="Critical" eventType="30003" cnProbableCause="进程复位告警" enProbableCause="wcg process is dead" cnSuggestion="" enSuggestion="Contract wcg engineer support" isShow="Y" />
+        <alarm identifier="32002" cnName="端口故障" enName="Interface down" severity="Critical" eventType="30003" cnProbableCause="端口故障告警" enProbableCause="Interface down" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="32004" cnName="4G SCTP链路断开" enName="4G SCTP Association Failure" severity="Critical" eventType="30000" cnProbableCause="4G SCTP链路断告警" enProbableCause="4G Sctp link disconnection alarm" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="32501" cnName="5G SCTP链路断开" enName="5G SCTP Association Failure" severity="Critical" eventType="30000" cnProbableCause="5G SCTP链路断开" enProbableCause="5G SCTP Association Failure" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="33001" cnName="在线基站数量超阈值" enName="cell station exceeds the maximum limit" severity="Warning" eventType="30003" cnProbableCause="在线基站数量超过阈值告警" enProbableCause="cell station exceeds the maximum limit" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="33002" cnName="在线UE数量超过阈值" enName="UE station exceeds the maximum limit" severity="Warning" eventType="30003" cnProbableCause="在线UE数量超过阈值告警" enProbableCause="UE station exceeds the maximum limit" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="33003" cnName="IPsec隧道数量超过阈值" enName="IPsec Tunnel number exceeds the maximum limit" severity="Warning" eventType="30003" cnProbableCause="IPsec隧道数量超过阈值" enProbableCause="IPsec Tunnel number exceeds the maximum limit" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="33501" cnName="5G在线cell数量超过阈值" enName="5G cell station exceeds the maximum limit" severity="Warning" eventType="30003" cnProbableCause="5G在线cell数量超过阈值告警" enProbableCause="5G cell station exceeds the maximum limit" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="33502" cnName="5G在线UE数量超过阈值" enName="5G UE station exceeds the maximum limit" severity="Warning" eventType="30003" cnProbableCause="5G 在线UE数量超过阈值告警" enProbableCause="5G UE station exceeds the maximum limit" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="35001" cnName="License有效期小于阈值" enName="License is rapidly expiring" severity="Critical" eventType="30001" cnProbableCause="Licence即将到期告警" enProbableCause="License is rapidly expiring" cnSuggestion="申请新的License" enSuggestion="" isShow="Y" />
+        <alarm identifier="35003" cnName="License已经超出有效期" enName="License expired" severity="Critical" eventType="30001" cnProbableCause="Licence已经超期告警" enProbableCause="License expired" cnSuggestion="申请新的License" enSuggestion="" isShow="Y" />
+        <alarm identifier="36001" cnName="基站非法访问网络设备" enName="Illegal access restrictions" severity="Warning" eventType="30003" cnProbableCause="基站非法访问网络设备" enProbableCause="Illegal access restrictions" cnSuggestion="" enSuggestion="" isShow="Y" />
+    </alarms>
+</alarmModel>
