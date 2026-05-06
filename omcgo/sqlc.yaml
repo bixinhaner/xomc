@@ -2,7 +2,11 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: "queries/admin/"
-    schema: "migrations/000002_users_roles.sql"
+    schema:
+      - "migrations/000002_users_roles.sql"
+      - "migrations/000052_users_phone.sql"
+      - "migrations/000053_users_source.sql"
+      - "migrations/000054_users_extend.sql"
     gen:
       go:
         package: "adminsqlc"

@@ -488,7 +488,12 @@ func TestAdminService_UpdateUser_Success(t *testing.T) {
 
 func TestAdminService_DeleteUser(t *testing.T) {
 	deleteCalled := false
+	userID := uuid.New()
 	userRepo := &mockUserRepo{
+		// service.DeleteUser 在删除前需先 GetByID 校验 source（非内置用户才允许）。
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*User, error) {
+			return &User{ID: id, Source: UserSourceAdmin}, nil
+		},
 		deleteFn: func(ctx context.Context, id uuid.UUID) error {
 			deleteCalled = true
 			return nil
@@ -497,9 +502,27 @@ func TestAdminService_DeleteUser(t *testing.T) {
 
 	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
 
-	err := svc.DeleteUser(context.Background(), uuid.New())
+	err := svc.DeleteUser(context.Background(), userID)
 	require.NoError(t, err)
 	assert.True(t, deleteCalled)
+}
+
+func TestAdminService_DeleteUser_BuiltInProtected(t *testing.T) {
+	userRepo := &mockUserRepo{
+		getByIDFn: func(ctx context.Context, id uuid.UUID) (*User, error) {
+			return &User{ID: id, Source: UserSourceBuiltIn}, nil
+		},
+		deleteFn: func(ctx context.Context, id uuid.UUID) error {
+			t.Fatal("Delete should not be called for built-in user")
+			return nil
+		},
+	}
+
+	svc := newTestService(userRepo, &mockRoleRepo{}, &mockAuditRepo{})
+
+	err := svc.DeleteUser(context.Background(), uuid.New())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrBuiltInUserProtected)
 }
 
 func TestAdminService_AssignRole(t *testing.T) {

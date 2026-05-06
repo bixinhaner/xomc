@@ -107,8 +107,12 @@ func (s *PermissionService) GetUserVisibleGroupIDs(ctx context.Context, userID u
 }
 
 // InvalidateUserCache removes the cached visible groups for a user.
-func (s *PermissionService) InvalidateUserCache(ctx context.Context, userID uuid.UUID) {
-	s.redis.Del(ctx, redisx.Keys.PermVisibleGroups(userID.String()))
+// 返回 error 以便调用方记录失败计数器（PRD §10 DoD: omc_perm_cache_invalidate_failed_total）。
+func (s *PermissionService) InvalidateUserCache(ctx context.Context, userID uuid.UUID) error {
+	if err := s.redis.Del(ctx, redisx.Keys.PermVisibleGroups(userID.String())).Err(); err != nil {
+		return fmt.Errorf("invalidate user cache %s: %w", userID, err)
+	}
+	return nil
 }
 
 // InvalidateRoleCache invalidates cache for all users with the given role.

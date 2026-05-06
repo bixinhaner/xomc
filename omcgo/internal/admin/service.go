@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -14,6 +16,32 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// operatorIDFromContext 从 gin/middleware 注入的 ctx 取出当前操作者用户 ID。
+// 用于审计字段 created_by / updated_by；未注入或类型不匹配时返回 nil。
+func operatorIDFromContext(ctx context.Context) *uuid.UUID {
+	v := ctx.Value(CtxKeyUserID)
+	if v == nil {
+		return nil
+	}
+	if id, ok := v.(uuid.UUID); ok {
+		return &id
+	}
+	return nil
+}
+
+// generateRandomPassword 返回长度为 n 的 url-safe base64 字符串作为临时密码。
+// 实际熵源是 crypto/rand，前端必须提示管理员立刻让用户重置。
+func generateRandomPassword(n int) (string, error) {
+	if n < 8 {
+		n = 8
+	}
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(bytes)[:n], nil
+}
+
 // Login failure sentinel errors used for audit log classification.
 // These are internal to the service and handler; callers receive generic ErrUnauthorized/ErrForbidden.
 var (
@@ -22,14 +50,30 @@ var (
 	errLoginWrongPassword   = fmt.Errorf("wrong password")
 )
 
+// User source protection errors. Wrap commonerrors.ErrAlreadyExists so HTTPStatusFromError → 409 Conflict.
+// 决策依据：docs/prd/system/users.md §1.1 / §4.1 / §11.2。
+var (
+	ErrBuiltInUserProtected = fmt.Errorf("built-in user cannot be deleted or disabled: %w", commonerrors.ErrAlreadyExists)
+	ErrLDAPPasswordExternal = fmt.Errorf("LDAP user password is managed externally: %w", commonerrors.ErrAlreadyExists)
+)
+
+// PermissionInvalidator 抽象 PermissionService 的失效操作，便于注入与测试。
+// 详见 PRD docs/prd/system/users.md §10 DoD「数据权限缓存一致性」。
+type PermissionInvalidator interface {
+	InvalidateUserCache(ctx context.Context, userID uuid.UUID) error
+}
+
 // AdminService provides user management, authentication, and RBAC functionality.
 type AdminService struct {
-	userRepo  UserRepository
-	roleRepo  RoleRepository
-	menuRepo  MenuRepository
-	auditRepo AuditRepository
-	jwt       *JWTService
-	logger    *zap.Logger
+	userRepo        UserRepository
+	roleRepo        RoleRepository
+	menuRepo        MenuRepository
+	auditRepo       AuditRepository
+	jwt             *JWTService
+	revoker         *TokenRevoker
+	permInvalidator PermissionInvalidator
+	metrics         *AdminMetrics
+	logger          *zap.Logger
 }
 
 // NewAdminService creates a new AdminService.
@@ -62,6 +106,61 @@ func NewAdminService(
 	}
 }
 
+// SetTokenRevoker 注入 token 撤销器，启用强制下线能力。
+// 不调用时 ForceLogout 退化为 no-op（仅记录日志），以便单元测试无需 Redis 也能跑。
+func (s *AdminService) SetTokenRevoker(r *TokenRevoker) {
+	s.revoker = r
+}
+
+// SetPermissionInvalidator 注入权限缓存失效器；用户角色 / 运营商 / 删除等写操作后会调用。
+// 详见 PRD docs/prd/system/users.md §10 DoD。
+func (s *AdminService) SetPermissionInvalidator(p PermissionInvalidator) {
+	s.permInvalidator = p
+}
+
+// SetMetrics 注入 admin 模块指标；未注入时不影响业务。
+func (s *AdminService) SetMetrics(m *AdminMetrics) {
+	s.metrics = m
+}
+
+// invalidatePermCache 失败仅记 ERROR 日志 + 递增计数器，不阻塞业务返回。
+// 计数器：omc_perm_cache_invalidate_failed_total（PRD §10 DoD）。
+func (s *AdminService) invalidatePermCache(ctx context.Context, userID uuid.UUID) {
+	if s.permInvalidator == nil {
+		return
+	}
+	if err := s.permInvalidator.InvalidateUserCache(ctx, userID); err != nil {
+		s.logger.Error("invalidate permission cache failed",
+			zap.String("user_id", userID.String()), zap.Error(err))
+		if s.metrics != nil {
+			s.metrics.PermCacheInvalidateFailed.Inc()
+		}
+	}
+}
+
+// ForceLogout 把指定用户的 access/refresh token 全部标记为失效（写入 Redis 撤销时间戳）。
+// 已签发但 iat < 撤销时间戳的 token 会在下一次中间件校验时被拒绝。
+// 内置用户（source=builtIn）不允许下线，避免锁死系统登录入口。
+func (s *AdminService) ForceLogout(ctx context.Context, userIDs []uuid.UUID) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	for _, id := range userIDs {
+		user, err := s.userRepo.GetByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("get user %s: %w", id, err)
+		}
+		if user.Source == UserSourceBuiltIn {
+			return ErrBuiltInUserProtected
+		}
+	}
+	if s.revoker == nil {
+		s.logger.Warn("ForceLogout called but TokenRevoker not configured", zap.Int("count", len(userIDs)))
+		return nil
+	}
+	return s.revoker.RevokeBatch(ctx, userIDs)
+}
+
 // Login authenticates a user and returns a JWT token pair.
 func (s *AdminService) Login(ctx context.Context, username, password string) (*TokenPair, error) {
 	user, err := s.userRepo.GetByUsername(ctx, username)
@@ -72,6 +171,11 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	// Check if account is temporarily locked due to brute-force
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
 		return nil, commonerrors.NewBusinessError(7012, "account temporarily locked due to too many failed attempts", commonerrors.ErrForbidden)
+	}
+
+	// PRD §7 P1：账号过期校验。expire_at <= now → 拒绝登录。
+	if user.ExpireAt != nil && !time.Now().Before(*user.ExpireAt) {
+		return nil, commonerrors.NewBusinessError(7013, "account expired", commonerrors.ErrForbidden)
 	}
 
 	if user.Status != UserStatusActive {
@@ -167,13 +271,23 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
+	// 通过本接口创建的用户固定为管理员添加。
+	// LDAP 同步任务走独立内部路径写 UserSourceLDAP；seed 文件写 UserSourceBuiltIn。
 	user := &User{
 		Username:     req.Username,
 		PasswordHash: string(hash),
 		DisplayName:  req.DisplayName,
 		Email:        req.Email,
+		Phone:        req.Phone,
+		Description:  req.Description,
+		ExpireAt:     req.ExpireAt,
 		Carrier:      req.Carrier,
 		Status:       UserStatusActive,
+		Source:       UserSourceAdmin,
+	}
+	if op := operatorIDFromContext(ctx); op != nil {
+		user.CreatedBy = op
+		user.UpdatedBy = op
 	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
@@ -199,6 +313,7 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 }
 
 // UpdateUser updates an existing user.
+// 当 req.RoleIDs != nil 时，对用户当前角色与目标 RoleIDs 做差量同步（Assign/Remove）。
 func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateUserRequest) (*User, error) {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
@@ -211,15 +326,38 @@ func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateU
 	if req.Email != nil {
 		user.Email = *req.Email
 	}
+	if req.Phone != nil {
+		user.Phone = *req.Phone
+	}
+	if req.Description != nil {
+		user.Description = *req.Description
+	}
+	if req.ExpireAt != nil {
+		user.ExpireAt = req.ExpireAt
+	}
 	if req.Carrier != nil {
 		user.Carrier = req.Carrier
 	}
 	if req.Status != nil {
 		user.Status = *req.Status
 	}
+	if op := operatorIDFromContext(ctx); op != nil {
+		user.UpdatedBy = op
+	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	if req.RoleIDs != nil {
+		if err := s.syncUserRoles(ctx, user.ID, *req.RoleIDs); err != nil {
+			return nil, fmt.Errorf("sync user roles: %w", err)
+		}
+	}
+
+	// 角色或运营商变更 → 失效该用户的可见分组缓存（PRD §10 DoD）。
+	if req.RoleIDs != nil || req.Carrier != nil {
+		s.invalidatePermCache(ctx, user.ID)
 	}
 
 	roles, _ := s.roleRepo.GetUserRoles(ctx, user.ID)
@@ -227,9 +365,149 @@ func (s *AdminService) UpdateUser(ctx context.Context, id uuid.UUID, req UpdateU
 	return user, nil
 }
 
+// BatchAssignRoles 整体替换一组用户的角色集合（语义与 UpdateUser.RoleIDs 差量同步一致）。
+// 失败语义：单个用户失败立即返回，已成功用户的变更不回滚（与 PRD §4.2 批量"汇总成功/跳过"约定）。
+// 每个用户成功后调用 InvalidateUserCache（PRD §10 DoD）。
+func (s *AdminService) BatchAssignRoles(ctx context.Context, userIDs, roleIDs []uuid.UUID) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	for _, uid := range userIDs {
+		if _, err := s.userRepo.GetByID(ctx, uid); err != nil {
+			return fmt.Errorf("get user %s: %w", uid, err)
+		}
+		if err := s.syncUserRoles(ctx, uid, roleIDs); err != nil {
+			return fmt.Errorf("sync roles for %s: %w", uid, err)
+		}
+		s.invalidatePermCache(ctx, uid)
+	}
+	return nil
+}
+
+// CopyUser 复制一个用户：用户名 = "<src.username>_copy_<n>"（n 自动递增直到不冲突）。
+// 复制项：display_name / email / phone / carrier / 当前 roles。
+// 不复制项：password（强制随机生成 12 位密码并随响应返回，前端必须立刻提示管理员重置）/ source（新副本固定 admin）。
+func (s *AdminService) CopyUser(ctx context.Context, sourceID uuid.UUID) (*User, string, error) {
+	src, err := s.userRepo.GetByID(ctx, sourceID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get source user: %w", err)
+	}
+
+	newUsername, err := s.allocateCopyUsername(ctx, src.Username)
+	if err != nil {
+		return nil, "", err
+	}
+
+	tempPwd, err := generateRandomPassword(12)
+	if err != nil {
+		return nil, "", fmt.Errorf("generate temp password: %w", err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(tempPwd), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, "", fmt.Errorf("hash temp password: %w", err)
+	}
+
+	srcRoles, err := s.roleRepo.GetUserRoles(ctx, src.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get source roles: %w", err)
+	}
+
+	copyUser := &User{
+		Username:     newUsername,
+		PasswordHash: string(hash),
+		DisplayName:  src.DisplayName,
+		Email:        src.Email,
+		Phone:        src.Phone,
+		Carrier:      src.Carrier,
+		Status:       UserStatusActive,
+		Source:       UserSourceAdmin,
+	}
+	if err := s.userRepo.Create(ctx, copyUser); err != nil {
+		return nil, "", fmt.Errorf("create copy user: %w", err)
+	}
+
+	for _, r := range srcRoles {
+		if err := s.roleRepo.AssignRole(ctx, copyUser.ID, r.ID); err != nil {
+			// 失败不回滚已创建的副本（管理员可手动调整角色），但记日志便于排查
+			s.logger.Warn("assign role to copy user failed",
+				zap.String("user_id", copyUser.ID.String()),
+				zap.String("role_id", r.ID.String()),
+				zap.Error(err))
+		}
+	}
+
+	loaded, _ := s.roleRepo.GetUserRoles(ctx, copyUser.ID)
+	copyUser.Roles = loaded
+	return copyUser, tempPwd, nil
+}
+
+// allocateCopyUsername 寻找一个可用的副本用户名：base_copy / base_copy_2 / base_copy_3 ...
+// 上限 99 次以避免极端情况下无限循环。
+func (s *AdminService) allocateCopyUsername(ctx context.Context, base string) (string, error) {
+	for i := 1; i <= 99; i++ {
+		candidate := base + "_copy"
+		if i > 1 {
+			candidate = fmt.Sprintf("%s_copy_%d", base, i)
+		}
+		if _, err := s.userRepo.GetByUsername(ctx, candidate); err != nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no available copy username for %s after 99 attempts", base)
+}
+
+// syncUserRoles 对比当前角色与目标角色，差量调用 AssignRole/RemoveRole。
+// 顺序：先 Assign（避免最后一个角色被先删导致中间态无角色）再 Remove。
+func (s *AdminService) syncUserRoles(ctx context.Context, userID uuid.UUID, target []uuid.UUID) error {
+	current, err := s.roleRepo.GetUserRoles(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get current roles: %w", err)
+	}
+
+	currentSet := make(map[uuid.UUID]struct{}, len(current))
+	for _, r := range current {
+		currentSet[r.ID] = struct{}{}
+	}
+	targetSet := make(map[uuid.UUID]struct{}, len(target))
+	for _, id := range target {
+		targetSet[id] = struct{}{}
+	}
+
+	for id := range targetSet {
+		if _, exists := currentSet[id]; exists {
+			continue
+		}
+		if err := s.roleRepo.AssignRole(ctx, userID, id); err != nil {
+			return fmt.Errorf("assign role %s: %w", id, err)
+		}
+	}
+	for id := range currentSet {
+		if _, keep := targetSet[id]; keep {
+			continue
+		}
+		if err := s.roleRepo.RemoveRole(ctx, userID, id); err != nil {
+			return fmt.Errorf("remove role %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 // DeleteUser deletes a user account.
+// 内置用户（source=builtIn）受保护，返回 ErrBuiltInUserProtected → HTTP 409。
+// 删除成功后失效该用户权限缓存，防止旧 key 在 TTL 内被陈旧请求命中（PRD §10 DoD）。
 func (s *AdminService) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	return s.userRepo.Delete(ctx, id)
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get user for delete: %w", err)
+	}
+	if user.Source == UserSourceBuiltIn {
+		return ErrBuiltInUserProtected
+	}
+	if err := s.userRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.invalidatePermCache(ctx, id)
+	return nil
 }
 
 // ListUsers returns a filtered, paginated list of users with roles loaded.
@@ -277,6 +555,7 @@ func (s *AdminService) GetUser(ctx context.Context, id uuid.UUID) (*User, error)
 }
 
 // AssignRole assigns a role to a user.
+// 成功后失效该用户权限缓存，使新角色对应的设备分组立即生效（PRD §10 DoD）。
 func (s *AdminService) AssignRole(ctx context.Context, userID, roleID uuid.UUID) error {
 	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
 		return fmt.Errorf("get user for role assignment: %w", err)
@@ -284,12 +563,21 @@ func (s *AdminService) AssignRole(ctx context.Context, userID, roleID uuid.UUID)
 	if _, err := s.roleRepo.GetByID(ctx, roleID); err != nil {
 		return fmt.Errorf("get role for assignment: %w", err)
 	}
-	return s.roleRepo.AssignRole(ctx, userID, roleID)
+	if err := s.roleRepo.AssignRole(ctx, userID, roleID); err != nil {
+		return err
+	}
+	s.invalidatePermCache(ctx, userID)
+	return nil
 }
 
 // RemoveRole removes a role from a user.
+// 成功后失效该用户权限缓存，避免继续看到已解绑角色的设备数据（PRD §10 DoD）。
 func (s *AdminService) RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error {
-	return s.roleRepo.RemoveRole(ctx, userID, roleID)
+	if err := s.roleRepo.RemoveRole(ctx, userID, roleID); err != nil {
+		return err
+	}
+	s.invalidatePermCache(ctx, userID)
+	return nil
 }
 
 // CheckPermission checks if a user has a specific permission.
@@ -308,22 +596,57 @@ func (s *AdminService) ListRolesPaginated(ctx context.Context, filter RoleFilter
 }
 
 // ResetPassword resets a user's password to the provided new password.
+// LDAP 用户（source=LDAP）密码归属外部域，拒绝重置 → HTTP 409。
+// 重置成功后同时清除登录失败计数与锁定状态，避免管理员重置后仍处于锁定。
 func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, newPassword string) error {
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get user for reset password: %w", err)
+	}
+	if user.Source == UserSourceLDAP {
+		return ErrLDAPPasswordExternal
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	return s.userRepo.UpdatePassword(ctx, id, string(hash))
+	if err := s.userRepo.UpdatePassword(ctx, id, string(hash)); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	// 与 LockUserByUsername 保持一致：ResetLoginSecurity 不在 UserRepository 接口上，
+	// 通过类型断言直接调具体实现，失败仅警告（密码已成功重置）。
+	if repo, ok := s.userRepo.(*PgUserRepository); ok {
+		if err := repo.ResetLoginSecurity(ctx, id); err != nil {
+			s.logger.Warn("reset login security after password reset", zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // LockUser disables a user account by setting its status to disabled.
+// 内置用户（source=builtIn）禁止禁用，避免锁死系统登录入口 → HTTP 409。
+// PRD §1.2 验收口径：禁用用户 → 该用户已签发的 token 强制失效（force-logout 联动）。
 func (s *AdminService) LockUser(ctx context.Context, id uuid.UUID) error {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get user for lock: %w", err)
 	}
+	if user.Source == UserSourceBuiltIn {
+		return ErrBuiltInUserProtected
+	}
 	user.Status = UserStatusDisabled
-	return s.userRepo.Update(ctx, user)
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return err
+	}
+	// PRD §1.2 验收口径：禁用 → 已签发 token 立即失效。
+	// revoker 未注入（测试场景）时退化为 no-op，状态变更仍然生效。
+	if s.revoker != nil {
+		if err := s.revoker.Revoke(ctx, id); err != nil {
+			s.logger.Error("revoke tokens after lock failed",
+				zap.String("user_id", id.String()), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // LockUserByUsername temporarily locks a user account due to brute-force protection.

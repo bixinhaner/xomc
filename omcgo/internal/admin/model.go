@@ -15,6 +15,16 @@ const (
 	UserStatusDisabled UserStatus = "disabled"
 )
 
+// UserSource represents the origin of a user account.
+// 字面值大小写敏感，由 DB CHECK 约束锁定，详见 docs/prd/system/users.md §11.3。
+type UserSource string
+
+const (
+	UserSourceBuiltIn UserSource = "builtIn" // 系统初始化写入，不可删除/不可禁用
+	UserSourceAdmin   UserSource = "admin"   // 管理员通过 API 创建
+	UserSourceLDAP    UserSource = "LDAP"    // LDAP 同步任务写入，密码归属外部域
+)
+
 // User represents a system user.
 type User struct {
 	ID                  uuid.UUID          `json:"id"`
@@ -22,13 +32,19 @@ type User struct {
 	PasswordHash        string             `json:"-"`
 	DisplayName         string             `json:"display_name"`
 	Email               string             `json:"email,omitempty"`
+	Phone               string             `json:"phone,omitempty"`
+	Description         string             `json:"description,omitempty"`
 	Carrier             *model.CarrierCode `json:"carrier,omitempty"`
 	Status              UserStatus         `json:"status"`
+	Source              UserSource         `json:"source"`
 	Roles               []Role             `json:"roles,omitempty"`
 	FailedLoginAttempts int                `json:"failed_login_attempts"`
 	LockedUntil         *time.Time         `json:"locked_until,omitempty"`
 	LastFailedLoginAt   *time.Time         `json:"last_failed_login_at,omitempty"`
 	LastLoginAt         *time.Time         `json:"last_login_at,omitempty"`
+	ExpireAt            *time.Time         `json:"expire_at,omitempty"`
+	CreatedBy           *uuid.UUID         `json:"created_by,omitempty"`
+	UpdatedBy           *uuid.UUID         `json:"updated_by,omitempty"`
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
 }
@@ -82,6 +98,8 @@ type Claims struct {
 	Carrier       *model.CarrierCode `json:"carrier,omitempty"`
 	Roles         []string           `json:"roles"`
 	CurrentRoleID *uuid.UUID         `json:"current_role_id,omitempty"`
+	// IssuedAt 是 JWT iat（Unix 秒），用于配合 TokenRevoker 判定 token 是否被强制下线。
+	IssuedAt int64 `json:"iat,omitempty"`
 }
 
 // UserFilter provides filtering options for listing users.
@@ -108,16 +126,27 @@ type CreateUserRequest struct {
 	Password    string             `json:"password" binding:"required,min=6"`
 	DisplayName string             `json:"display_name"`
 	Email       string             `json:"email" binding:"omitempty,email"`
+	Phone       string             `json:"phone"`
+	Description string             `json:"description"`
+	ExpireAt    *time.Time         `json:"expire_at"`
 	Carrier     *model.CarrierCode `json:"carrier"`
 	RoleIDs     []uuid.UUID        `json:"role_ids"`
 }
 
 // UpdateUserRequest is the input for updating an existing user.
+//
+// RoleIDs 语义：
+//   - nil      → 不变更角色（保持当前关联）
+//   - 非 nil（含空切片） → 用 RoleIDs 整体替换当前角色列表（差量执行 Assign/Remove）
 type UpdateUserRequest struct {
 	DisplayName *string            `json:"display_name"`
 	Email       *string            `json:"email" binding:"omitempty,email"`
+	Phone       *string            `json:"phone"`
+	Description *string            `json:"description"`
+	ExpireAt    *time.Time         `json:"expire_at"`
 	Carrier     *model.CarrierCode `json:"carrier"`
 	Status      *UserStatus        `json:"status"`
+	RoleIDs     *[]uuid.UUID       `json:"role_ids"`
 }
 
 // LoginRequest is the input for user authentication.

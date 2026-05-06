@@ -34,14 +34,20 @@ func (r *PgUserRepositoryV2) Create(ctx context.Context, user *User) error {
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
+	source := user.Source
+	if source == "" {
+		source = UserSourceAdmin
+	}
 	_, err := r.q.CreateUser(ctx, adminsqlc.CreateUserParams{
 		ID:           user.ID,
 		Username:     user.Username,
 		PasswordHash: user.PasswordHash,
 		DisplayName:  toPgText(user.DisplayName),
 		Email:        toPgText(user.Email),
+		Phone:        toPgText(user.Phone),
 		Carrier:      carrierToPgText(user.Carrier),
 		Status:       string(user.Status),
+		Source:       string(source),
 	})
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
@@ -70,6 +76,7 @@ func (r *PgUserRepositoryV2) Update(ctx context.Context, user *User) error {
 		ID:          user.ID,
 		DisplayName: toPgText(user.DisplayName),
 		Email:       toPgText(user.Email),
+		Phone:       toPgText(user.Phone),
 		Carrier:     carrierToPgText(user.Carrier),
 		Status:      string(user.Status),
 	})
@@ -155,6 +162,7 @@ func sqlcUserToAdmin(u adminsqlc.User) *User {
 		Username:     u.Username,
 		PasswordHash: u.PasswordHash,
 		Status:       UserStatus(u.Status),
+		Source:       UserSource(u.Source),
 		CreatedAt:    u.CreatedAt,
 		UpdatedAt:    u.UpdatedAt,
 	}
@@ -163,6 +171,9 @@ func sqlcUserToAdmin(u adminsqlc.User) *User {
 	}
 	if u.Email.Valid {
 		user.Email = u.Email.String
+	}
+	if u.Phone.Valid {
+		user.Phone = u.Phone.String
 	}
 	if u.Carrier.Valid {
 		c := model.CarrierCode(u.Carrier.String)

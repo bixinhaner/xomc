@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	CountUsers(ctx context.Context, arg CountUsersParams) (int64, error)
+	// source 由调用方决定（admin/builtIn/LDAP）；DB CHECK 约束限定取值。
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)

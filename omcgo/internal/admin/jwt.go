@@ -137,11 +137,16 @@ func (s *JWTService) validateToken(tokenString, expectedSubject string) (*Claims
 		return nil, fmt.Errorf("invalid token type: expected %s, got %s", expectedSubject, subject)
 	}
 
+	var issuedAt int64
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Unix()
+	}
 	return &Claims{
 		UserID:        claims.UserID,
 		Username:      claims.Username,
 		Carrier:       claims.Carrier,
 		Roles:         claims.Roles,
 		CurrentRoleID: claims.CurrentRoleID,
+		IssuedAt:      issuedAt,
 	}, nil
 }

@@ -33,9 +33,9 @@ func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, 
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, username, password_hash, display_name, email, carrier, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at
+INSERT INTO users (id, username, password_hash, display_name, email, phone, carrier, status, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at, phone, source, description, expire_at, created_by, updated_by
 `
 
 type CreateUserParams struct {
@@ -44,10 +44,13 @@ type CreateUserParams struct {
 	PasswordHash string      `json:"password_hash"`
 	DisplayName  pgtype.Text `json:"display_name"`
 	Email        pgtype.Text `json:"email"`
+	Phone        pgtype.Text `json:"phone"`
 	Carrier      pgtype.Text `json:"carrier"`
 	Status       string      `json:"status"`
+	Source       string      `json:"source"`
 }
 
+// source 由调用方决定（admin/builtIn/LDAP）；DB CHECK 约束限定取值。
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.ID,
@@ -55,8 +58,10 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.PasswordHash,
 		arg.DisplayName,
 		arg.Email,
+		arg.Phone,
 		arg.Carrier,
 		arg.Status,
+		arg.Source,
 	)
 	var i User
 	err := row.Scan(
@@ -73,6 +78,12 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.LastFailedLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Phone,
+		&i.Source,
+		&i.Description,
+		&i.ExpireAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
 	)
 	return i, err
 }
@@ -87,7 +98,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at, phone, source, description, expire_at, created_by, updated_by FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -107,12 +118,18 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.LastFailedLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Phone,
+		&i.Source,
+		&i.Description,
+		&i.ExpireAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at FROM users WHERE username = $1
+SELECT id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at, phone, source, description, expire_at, created_by, updated_by FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -132,12 +149,18 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.LastFailedLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Phone,
+		&i.Source,
+		&i.Description,
+		&i.ExpireAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at FROM users
+SELECT id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at, phone, source, description, expire_at, created_by, updated_by FROM users
 WHERE (carrier = $1 OR $1 IS NULL)
   AND (status = $2 OR $2 IS NULL)
   AND (username ILIKE '%' || $3 || '%' OR $3 = '')
@@ -182,6 +205,12 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.LastFailedLoginAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Phone,
+			&i.Source,
+			&i.Description,
+			&i.ExpireAt,
+			&i.CreatedBy,
+			&i.UpdatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -224,17 +253,19 @@ const updateUser = `-- name: UpdateUser :one
 UPDATE users
 SET display_name = COALESCE($2, display_name),
     email = COALESCE($3, email),
-    carrier = COALESCE($4, carrier),
-    status = COALESCE($5, status),
+    phone = COALESCE($4, phone),
+    carrier = COALESCE($5, carrier),
+    status = COALESCE($6, status),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at
+RETURNING id, username, password_hash, display_name, email, carrier, status, last_login_at, failed_login_attempts, locked_until, last_failed_login_at, created_at, updated_at, phone, source, description, expire_at, created_by, updated_by
 `
 
 type UpdateUserParams struct {
 	ID          uuid.UUID   `json:"id"`
 	DisplayName pgtype.Text `json:"display_name"`
 	Email       pgtype.Text `json:"email"`
+	Phone       pgtype.Text `json:"phone"`
 	Carrier     pgtype.Text `json:"carrier"`
 	Status      string      `json:"status"`
 }
@@ -244,6 +275,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		arg.ID,
 		arg.DisplayName,
 		arg.Email,
+		arg.Phone,
 		arg.Carrier,
 		arg.Status,
 	)
@@ -262,6 +294,12 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.LastFailedLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Phone,
+		&i.Source,
+		&i.Description,
+		&i.ExpireAt,
+		&i.CreatedBy,
+		&i.UpdatedBy,
 	)
 	return i, err
 }

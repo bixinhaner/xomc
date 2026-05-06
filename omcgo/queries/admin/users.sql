@@ -5,16 +5,18 @@ SELECT * FROM users WHERE id = $1;
 SELECT * FROM users WHERE username = $1;
 
 -- name: CreateUser :one
-INSERT INTO users (id, username, password_hash, display_name, email, carrier, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- source 由调用方决定（admin/builtIn/LDAP）；DB CHECK 约束限定取值。
+INSERT INTO users (id, username, password_hash, display_name, email, phone, carrier, status, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: UpdateUser :one
 UPDATE users
 SET display_name = COALESCE($2, display_name),
     email = COALESCE($3, email),
-    carrier = COALESCE($4, carrier),
-    status = COALESCE($5, status),
+    phone = COALESCE($4, phone),
+    carrier = COALESCE($5, carrier),
+    status = COALESCE($6, status),
     updated_at = NOW()
 WHERE id = $1
 RETURNING *;

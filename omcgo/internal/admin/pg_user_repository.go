@@ -17,9 +17,10 @@ import (
 )
 
 var userColumns = []string{
-	"id", "username", "password_hash", "display_name", "email",
-	"carrier", "status", "failed_login_attempts", "locked_until",
-	"last_failed_login_at", "last_login_at", "created_at", "updated_at",
+	"id", "username", "password_hash", "display_name", "email", "phone",
+	"description", "carrier", "status", "source", "failed_login_attempts",
+	"locked_until", "last_failed_login_at", "last_login_at", "expire_at",
+	"created_by", "updated_by", "created_at", "updated_at",
 }
 
 // PgUserRepository implements UserRepository using PostgreSQL.
@@ -42,13 +43,22 @@ func (r *PgUserRepository) Create(ctx context.Context, user *User) error {
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
+	if user.Source == "" {
+		user.Source = UserSourceAdmin
+	}
+
 	query, args, err := storage.Psql.Insert("users").
 		Columns(userColumns...).
 		Values(
 			user.ID, user.Username, user.PasswordHash, user.DisplayName,
-			nullableString(user.Email), nullableCarrier(user.Carrier),
-			user.Status, user.FailedLoginAttempts, nullableTime(user.LockedUntil),
+			nullableString(user.Email), nullableString(user.Phone),
+			nullableString(user.Description),
+			nullableCarrier(user.Carrier),
+			user.Status, user.Source,
+			user.FailedLoginAttempts, nullableTime(user.LockedUntil),
 			nullableTime(user.LastFailedLoginAt), nullableTime(user.LastLoginAt),
+			nullableTime(user.ExpireAt),
+			nullableUUID(user.CreatedBy), nullableUUID(user.UpdatedBy),
 			user.CreatedAt, user.UpdatedAt,
 		).
 		ToSql()
@@ -101,8 +111,12 @@ func (r *PgUserRepository) Update(ctx context.Context, user *User) error {
 	query, args, err := storage.Psql.Update("users").
 		Set("display_name", user.DisplayName).
 		Set("email", nullableString(user.Email)).
+		Set("phone", nullableString(user.Phone)).
+		Set("description", nullableString(user.Description)).
+		Set("expire_at", nullableTime(user.ExpireAt)).
 		Set("carrier", nullableCarrier(user.Carrier)).
 		Set("status", user.Status).
+		Set("updated_by", nullableUUID(user.UpdatedBy)).
 		Set("updated_at", user.UpdatedAt).
 		Where(sq.Eq{"id": user.ID}).
 		ToSql()
@@ -265,11 +279,12 @@ func (r *PgUserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID) er
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	var email, carrier *string
+	var email, phone, description, carrier *string
 	err := row.Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email,
-		&carrier, &u.Status, &u.FailedLoginAttempts, &u.LockedUntil,
-		&u.LastFailedLoginAt, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email, &phone,
+		&description, &carrier, &u.Status, &u.Source, &u.FailedLoginAttempts,
+		&u.LockedUntil, &u.LastFailedLoginAt, &u.LastLoginAt, &u.ExpireAt,
+		&u.CreatedBy, &u.UpdatedBy, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -277,35 +292,40 @@ func scanUser(row pgx.Row) (*User, error) {
 		}
 		return nil, fmt.Errorf("scan user: %w", err)
 	}
-	if email != nil {
-		u.Email = *email
-	}
-	if carrier != nil {
-		cc := model.CarrierCode(*carrier)
-		u.Carrier = &cc
-	}
+	applyUserNullables(&u, email, phone, description, carrier)
 	return &u, nil
 }
 
 func scanUserFromRows(rows pgx.Rows) (*User, error) {
 	var u User
-	var email, carrier *string
+	var email, phone, description, carrier *string
 	err := rows.Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email,
-		&carrier, &u.Status, &u.FailedLoginAttempts, &u.LockedUntil,
-		&u.LastFailedLoginAt, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email, &phone,
+		&description, &carrier, &u.Status, &u.Source, &u.FailedLoginAttempts,
+		&u.LockedUntil, &u.LastFailedLoginAt, &u.LastLoginAt, &u.ExpireAt,
+		&u.CreatedBy, &u.UpdatedBy, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan user row: %w", err)
 	}
+	applyUserNullables(&u, email, phone, description, carrier)
+	return &u, nil
+}
+
+func applyUserNullables(u *User, email, phone, description, carrier *string) {
 	if email != nil {
 		u.Email = *email
+	}
+	if phone != nil {
+		u.Phone = *phone
+	}
+	if description != nil {
+		u.Description = *description
 	}
 	if carrier != nil {
 		cc := model.CarrierCode(*carrier)
 		u.Carrier = &cc
 	}
-	return &u, nil
 }
 
 // UpdateLoginSecurity updates the failed login attempt counter and lock fields.
@@ -366,3 +386,4 @@ func nullableTime(t *time.Time) interface{} {
 	}
 	return *t
 }
+

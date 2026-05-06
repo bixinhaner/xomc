@@ -25,7 +25,13 @@ func initAdminModule(c *Container) error {
 		return fmt.Errorf("init JWT service: %w", err)
 	}
 
+	// TokenRevoker：基于 Redis 的用户级强制下线，TTL 与 refresh token 寿命对齐。
+	tokenRevoker := admin.NewTokenRevoker(c.Redis, c.Cfg.JWT.RefreshTokenTTL)
+
 	adminService := admin.NewAdminService(userRepo, roleRepo, menuRepo, auditRepo, jwtService, logger)
+	adminService.SetTokenRevoker(tokenRevoker)
+	// PRD §10 DoD：失效失败计数器 omc_perm_cache_invalidate_failed_total。
+	adminService.SetMetrics(admin.NewAdminMetrics(c.MetricsReg))
 	adminHandler := admin.NewHandler(adminService, logger)
 
 	captchaService := admin.NewCaptchaService(c.Redis)
@@ -37,6 +43,8 @@ func initAdminModule(c *Container) error {
 
 	permService := admin.NewPermissionService(roleRepo, c.GroupRepo, c.Redis, logger)
 	adminHandler.SetPermissionService(permService)
+	// PRD §10 DoD：用户写操作（assign/remove role、UpdateUser、DeleteUser、批量分配）后必须同步失效用户权限缓存。
+	adminService.SetPermissionInvalidator(permService)
 
 	apiKeyRepo := admin.NewPgAPIKeyRepository(c.PgPool)
 	apiKeySvc := admin.NewAPIKeyService(apiKeyRepo, userRepo, logger)
@@ -91,6 +99,7 @@ func initAdminModule(c *Container) error {
 		sysConfigHandler: sysConfigHandler,
 		logHandler:       logHandler,
 		jwtService:       jwtService,
+		tokenRevoker:     tokenRevoker,
 		apiKeySvc:        apiKeySvc,
 		userRepo:         userRepo,
 		roleRepo:         roleRepo,
@@ -108,6 +117,7 @@ type adminHandlerDeps struct {
 	sysConfigHandler *admin.SysConfigHandler
 	logHandler       *admin.LogHandler
 	jwtService       *admin.JWTService
+	tokenRevoker     *admin.TokenRevoker
 	apiKeySvc        *admin.APIKeyService
 	userRepo         *admin.PgUserRepository
 	roleRepo         *admin.PgRoleRepository

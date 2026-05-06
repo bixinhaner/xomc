@@ -25,12 +25,14 @@ const (
 // and sets user information in the request context.
 // It also supports X-API-Key header for programmatic access.
 func RequireAuth(jwt *JWTService) gin.HandlerFunc {
-	return RequireAuthWithAPIKey(jwt, nil, nil, nil)
+	return RequireAuthWithAPIKey(jwt, nil, nil, nil, nil)
 }
 
 // RequireAuthWithAPIKey returns a Gin middleware that validates either a JWT Bearer token
 // or an X-API-Key header, and sets user information in the request context.
-func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo UserRepository, roleReader RoleReader) gin.HandlerFunc {
+// 如果 revoker 非 nil，会在 JWT 验证后查询用户级撤销记录（强制下线场景），
+// token.iat 早于撤销时间戳则拒绝（401）。
+func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo UserRepository, roleReader RoleReader, revoker *TokenRevoker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Try X-API-Key header first
 		apiKey := c.GetHeader("X-API-Key")
@@ -100,6 +102,18 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 				"message": "invalid or expired token",
 			})
 			return
+		}
+
+		// 强制下线检查：token 签发时间早于用户最近一次 ForceLogout 时拒绝。
+		if revoker != nil {
+			revoked, err := revoker.IsRevoked(c.Request.Context(), claims.UserID, claims.IssuedAt)
+			if err == nil && revoked {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"code":    401,
+					"message": "session was forcibly terminated, please re-login",
+				})
+				return
+			}
 		}
 
 		c.Set(CtxKeyUserID, claims.UserID)

@@ -363,6 +363,10 @@ func TestHandler_GetUser_NotFound(t *testing.T) {
 func TestHandler_DeleteUser_Success(t *testing.T) {
 	deleteCalled := false
 	userRepo := &handlerMockUserRepo{
+		// service.DeleteUser 在删除前需先 GetByID 校验 source（仅非内置用户允许删除）。
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*User, error) {
+			return &User{ID: id, Source: UserSourceAdmin}, nil
+		},
 		deleteFn: func(_ context.Context, _ uuid.UUID) error {
 			deleteCalled = true
 			return nil

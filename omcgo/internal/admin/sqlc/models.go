@@ -69,6 +69,12 @@ type User struct {
 	LastFailedLoginAt   pgtype.Timestamptz `json:"last_failed_login_at"`
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
+	Phone               pgtype.Text        `json:"phone"`
+	Source              string             `json:"source"`
+	Description         pgtype.Text        `json:"description"`
+	ExpireAt            pgtype.Timestamptz `json:"expire_at"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
 }
 
 type UserColumnConfig struct {
