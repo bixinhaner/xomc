@@ -599,15 +599,11 @@ export default function UserManagement() {
       title: '用户名称',
       dataIndex: 'displayName',
       width: 150,
+      // PRD §11.8 v0.7：不再追加"内置"Tag；内置/管理员/LDAP 来源由"来源"列承担。
       render: (val, record) => {
         const user = record as User;
         const text = (val as string) || user.username;
-        return (
-          <span>
-            <span style={{ fontWeight: 500 }}>{text}</span>
-            {isBuiltIn(user) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('user.builtIn')}</Tag>}
-          </span>
-        );
+        return <span style={{ fontWeight: 500 }}>{text}</span>;
       },
     },
     {

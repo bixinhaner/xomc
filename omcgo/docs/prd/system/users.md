@@ -11,6 +11,7 @@
 | 0.4  | 2026-05-06 | Backend/Frontend Team | 显式声明数据权限模型：**用户 → 角色 → 设备分组**；新增 §1.3 与 §2.5 描述 `role_device_groups` 关联表与超管旁路；详见 §11.6 |
 | 0.5  | 2026-05-06 | Backend/Frontend Team | 数据权限三项决议：① 角色未绑分组时 UI 强提示；② 缓存失效**不引入 EventBus**，handler 同步调 `InvalidateUserCache`；③ 设备分组被删除时，角色侧需提示「分组已删除」；详见 §11.7 |
 | 0.6  | 2026-05-06 | Backend/Frontend Team | 「角色 → 设备分组」相关描述全部迁出：详见 [roles.md §1.4 / §2.6 / §11](./roles.md)。本 PRD 仅保留用户操作侧的 cache invalidation 约束（§6.1 / §10 DoD）+ R3/R4 用户视角规则 + 决议 ② 用户操作侧落点 |
+| 0.7  | 2026-05-06 | Backend/Frontend Team | 列表页"用户名称"列**不再标记**内置（取消 `<Tag color="blue">内置</Tag>`），内置/管理员/LDAP 三种来源统一由独立的"来源"列（§3.1 第 8 列）承担，避免双源信息冗余；操作菜单按钮的置灰 + Tooltip 提示规则不变。详见 §11.8 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -221,7 +222,7 @@ interface User {
 | 顺序 | key | 列标题 | dataIndex 类型 | UI 渲染 | 列宽 | 备注 |
 |------|------|-------|----------------|--------|------|------|
 | 1 | `actions` | 操作 | — | `<Button type="link">查看</Button> + <Dropdown>更多</Dropdown>` | 100，`fixed: 'right'` | 见 §4 操作清单 |
-| 2 | `userName` | 用户名 | string | `<span fontFamily=monospace>` + `<Tag color="blue">内置</Tag>`（v0.2：`source==='builtIn'` 时） | 130 | |
+| 2 | `userName` | 用户名 | string | 纯文本（v0.7 起取消"内置" Tag — 内置/admin/LDAP 三种来源统一由第 8 列"来源"承担，避免冗余） | 130 | |
 | 3 | `status` | 状态 | enum | `<Tag color="success">启用</Tag>` / `<Tag color="error">禁用</Tag>` | 90 | 后端枚举对齐后改读 `active/disabled` |
 | 4 | `onlineStatus` | 在线状态 | enum | `<Tag color="green">在线</Tag>` / `<Tag>离线</Tag>` | 90 | |
 | 5 | `email` | 邮箱 | string | 文本，`ellipsis: true` | flex | |
@@ -842,3 +843,26 @@ const hasBuiltInSelected = selectedUsers.some(u => u.source === 'builtIn');
 #### 决议 ③ → 已迁至 [roles.md §11.4](./roles.md)
 
 **用户管理侧落点**：删除设备分组的 service（属 F06 拓扑管理 PRD）实现时，必须对受影响角色下的所有用户调 `InvalidateUserCache`，避免缓存中保留已失效的可见域。详见 §10 DoD「v0.5 决议 ③ 交叉引用」条目。
+
+### 11.8 v0.7 — 列表"用户名称"列取消"内置"标记
+
+**问题**：v0.2 引入 `users.source` 显式枚举后，列表已有独立的"来源"列（§3.1 第 8 列）通过 `<Tag>` 颜色映射 `builtIn`/`admin`/`LDAP` 三态。同时"用户名称"列在 builtIn 用户后面再追加 `<Tag color="blue">内置</Tag>`，导致：
+
+- 同一信息（来源）在两列重复展示，视觉噪声
+- 当列设置允许用户隐藏"来源"列时，行为依然正确（标记仅在第 8 列承担），不需要在用户名列做兜底
+- "管理员添加"/"LDAP" 两类来源在用户名列没有对应 Tag，唯独 builtIn 有，三态不对称
+
+**决议**：
+
+- 列表"用户名称"列回归纯文本，**不再追加任何 Tag**
+- 内置/管理员/LDAP 来源信息**统一由"来源"列**通过 `<Tag>` 颜色映射展现（`builtIn`→蓝色 / `admin`→默认 / `LDAP`→紫色）
+- 操作菜单上对内置/LDAP 用户的按钮**置灰 + Tooltip 解释**规则**不变**（§4.1 + 前端 DoD）
+
+**不在范围**：
+
+- 「用户名称」列下方与 `username` 一起组合展示的两行布局（如某些设计稿见过）—— 当前 PRD 仍保持两个独立列（`displayName` + `username`）
+- 「来源」列改用更紧凑的 icon（PRD 仍保留 `<Tag>` 文本形态）
+
+**实施面**：
+
+- 前端 `UserManagement/index.tsx` 列定义中 `displayName` 列 `render` 移除 `isBuiltIn(user) && <Tag>` 分支，回到纯文本
