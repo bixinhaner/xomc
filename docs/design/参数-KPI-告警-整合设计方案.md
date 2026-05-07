@@ -1,8 +1,8 @@
 # 参数模型 / KPI 指标库 / 告警库 — 整合设计方案
 
-> 三个领域作为单一功能整体开发：共享"平台化数据字典"基础模式（XML 源文件 → 启动加载 → DB → 双层缓存 → REST API → React UI），实现层各自独立。
+> 三个领域作为单一功能整体开发：共享"平台化数据字典"基础模式（XML 源文件 → 启动加载 → DB → 双层缓存 → REST API → React UI），实现层各自独立。**产品（Product）** 是把三域装配成一个完整业务身份的"装配件"，是阅读全文的第一线索（详见 §0.5）。
 >
-> 文档版本：2026-05-07（v2 — 补 paramModel 参数级 `is_storable` / KPI XML `enabled` 属性 / 产品级 `enable_unknown_alarm` 三条策略字段）
+> 文档版本：2026-05-07（v3 — 重组：前置 §0.5 产品装配件、补三大业务流程图、按域归并验证/决策记录、删占位章节）
 
 ---
 
@@ -58,9 +58,96 @@ omcgo/
 └── migrations/000NNN_dict_libraries.sql     # 19 张表（含 products + product_class_patterns）
 ```
 
+### 0.5 产品作为装配件 — 前置阅读
+
+> **为什么先讲产品？** 三个底层字典（参数 / KPI / 告警）各自独立，但运行时**所有路由都从「产品」开始**：基站上报 productClass → 匹配出 product → 拿到三个字典的引用。如果没有这层装配件，§1-§3 任何一处的"参见 §4"都会让读者迷失。
+
+**装配关系**：
+
+```mermaid
+flowchart LR
+    PC[基站 productClass] -->|正则匹配| P[Product 装配件]
+    P -->|param_model_id| PM[§1 参数模型]
+    P -->|indicator_platform| KPI[§2 KPI 指标库]
+    P -->|alarm_ne_type| AL[§3 告警库]
+    P -->|enable_filetype11| FT[FileType=11 决策]
+    P -->|device_attrs_override| OV[交集元属性覆盖]
+    P -->|enable_unknown_alarm| UA[未识别告警策略]
+```
+
+**关键概念预览**（详见 §4）：
+
+| 概念 | 一句话 |
+|------|--------|
+| `products` 表 | 15 个产品聚合，持有三引用 + 三策略开关 |
+| `product_class_patterns` 表 | 27 条 productClass 正则，**全局** sort_order 排序，首次命中即返回 |
+| 三引用 | `param_model_id`（参数路径） + `indicator_device_type/platform`（KPI 平台） + `alarm_ne_type`（告警网元类型） |
+| 三策略 | `enable_filetype11`（是否拉设备实际参数集）+ `device_attrs_override`（哪些元属性以设备为准）+ `enable_unknown_alarm`（未知 identifier 是否入活动告警表） |
+| 孤儿设备 | productClass 不命中任何正则的设备；治理流程 §4.7 |
+
+**阅读顺序建议**：先快速浏览 §4.1-§4.3 建立"产品"心智模型 → 再读 §1-§3 各域细节 → 回头读 §4.4 之后的实现 → §5-§7 实现机制 → §8-§12 验证/风险/扩展。
+
 ---
 
 ## 1. 参数模型（ParamModel）
+
+### 1.0 业务流程图
+
+> 参数模型有两条主流程：**(A) 治理路径**（XML 启动加载）和 **(B) 运行时路径**（Bootstrap 阶段交集 + 业务消费阶段翻译）。下图按时间轴串起来。
+
+```mermaid
+flowchart TB
+    subgraph A["治理路径(启动期 / 重新导入)"]
+        A1[扫描 data/param-mappings/*.xml] --> A2[解析 4 种 XML 格式]
+        A2 --> A3[校验 i 占位符一致性]
+        A3 --> A4[(param_models)]
+        A3 --> A5[(param_mappings<br/>含 is_storable)]
+        A3 --> A6[(standard_params)]
+        A5 -.->|对账| A7[discovered_param_mappings<br/>UPDATE/DELETE]
+    end
+
+    subgraph B["运行时:Bootstrap 阶段"]
+        B1[基站 Inform productClass] --> B2{ProductRegistry<br/>正则匹配 §4}
+        B2 -->|未命中| B3[孤儿设备 §4.7]
+        B2 -->|命中| B4[Product 实体<br/>三引用 + 三策略]
+        B4 --> B5{enable_filetype11?}
+        B5 -->|false| B6[跳过 Upload<br/>直接用默认映射]
+        B5 -->|true| B7[下发 Upload FileType=11]
+        B7 -->|设备支持| B8[设备上传 paramModel XML]
+        B7 -->|设备不支持/Fault| B6
+        B8 --> B9[与默认映射取路径交集]
+        B9 --> B10{device_attrs_override<br/>逐属性判断}
+        B10 -->|true| B11[元属性取设备值]
+        B10 -->|false| B12[元属性取默认值]
+        B11 --> B13[(discovered_param_mappings<br/>按 product_id+swVersion)]
+        B12 --> B13
+    end
+
+    subgraph C["运行时:业务消费阶段"]
+        C1[Path A 模板下发<br/>standardPath] --> C2[Translator]
+        C3[Path B 自动同步<br/>privatePath 前缀] --> C2
+        C2 --> C4{discovered<br/>命中?}
+        C4 -->|是| C5[精确版本翻译]
+        C4 -->|否| C6[降级 param_mappings 默认]
+        C5 --> C7{is_storable?}
+        C6 --> C7
+        C7 -->|true| C8[写设备参数仓库]
+        C7 -->|false| C9[丢弃/仅日志]
+    end
+
+    A5 -.->|供 Translator 查找| C2
+    A7 -.->|供 Translator 查找| C2
+    B13 -.->|新增| A7
+```
+
+**关键决策点说明**：
+
+| 决策点 | 受控字段 | 默认 | 说明 |
+|--------|---------|------|------|
+| 是否拉设备实际参数集 | `products.enable_filetype11` | true | false 时全程走默认映射；详见 §1.10 |
+| 元属性以谁为准 | `products.device_attrs_override` JSONB | 5 个属性全 false（即全用默认） | data_type 业务上禁用；详见 §1.8 |
+| 自动同步是否落库 | `param_mappings.is_storable`（XML store 属性） | true | false 的参数仍翻译，但 sync 不写库；详见 §1.11 Path B |
+| 重新导入 XML 时旧 discovered 怎么办 | 对账 SQL | private_path 锚点，UPDATE / DELETE | 详见 §1.9 |
 
 ### 1.1 背景
 
@@ -148,17 +235,9 @@ omcgo/
 
 > **Translator 查找优先级**：`discovered_param_mappings`（精确版本）→ `param_mappings`（默认）降级。
 
-#### 1.2.4 ~~`product_name_routing`~~ → 已迁移到 §4 产品
+> **关于旧 routing 表**：旧设计的 `product_name_routing` + `param_model_routing` 已整体整合进 §4 的 `products` + `product_class_patterns`。运行时从两步正则遍历简化为一次匹配 + 一次主键查询。本节不再列旧表 schema，详见 §4。
 
-旧设计中的"产品名路由"表已**整合进 `products` 表**。本节保留为占位，迁移规则参见 §4 产品（Product）。
-
-#### 1.2.5 ~~`param_model_routing`~~ → 已迁移到 §4 产品
-
-旧设计中的"参数模型路由"表已**整合进 `product_class_patterns` 表**（一个产品可绑定多条 productClass 正则）。本节保留为占位，迁移规则参见 §4 产品（Product）。
-
-> **整体变化说明**：旧设计用两张 routing 表把 productClass 分别映射到 productName 和 paramModel；新设计把"产品"作为一等公民，由 `products` 表持有 paramModel + KPI 平台 + 告警 ne_type 三个字典引用，由 `product_class_patterns` 表挂多条匹配正则。运行时由两步正则匹配简化为一次 productClass → product_id 匹配，再一次主键查询拿到三个字典引用。详见 §4。
-
-#### 1.2.6 `standard_params` — 标准参数树（2,001 行）
+#### 1.2.4 `standard_params` — 标准参数树（2,001 行）
 
 OMC 统一的标准参数路径，独立于厂商实现。用于配置模板、KPI 定义等跨产品场景。
 
@@ -171,16 +250,18 @@ OMC 统一的标准参数路径，独立于厂商实现。用于配置模板、K
 | min_value / max_value | BIGINT | |
 | created_at / updated_at | TIMESTAMPTZ | |
 
-#### 1.2.7 既有表的变化
+#### 1.2.5 既有表的变化（参数模型相关）
 
 | 表 | 变化 |
 |----|------|
 | `oui_registry` | 保留不变 |
 | `parameter_discovery_log` | 新增 `param_model_id UUID`（nullable，FK CASCADE SET NULL） |
-| `devices` | 新增 `param_model_id UUID`（nullable，FK CASCADE SET NULL）+ `product_id UUID`（nullable，FK → products，CASCADE SET NULL；详见 §4） |
+| `devices.param_model_id` | 新增（nullable，FK CASCADE SET NULL） |
 | `data_model_definitions` | Phase 5 删除 |
 | `data_model_import_log` | Phase 5 删除 |
 | `devices.data_model_id` 列 | Phase 5 删除 |
+
+> `devices.product_id` 由 §4 持有，不在此处重复列出。
 
 ### 1.3 路由匹配规则（productClass → product）
 
@@ -246,7 +327,7 @@ internal/config/parammodel/
     → 按 sort_order ASC 遍历 product_class_patterns
     → 首次 regexp.MatchString 命中 → 得到 product_id
     → 查 products 表 → 返回 Product 实体（含 paramModelID / indicatorPlatform / alarmNeType 三引用）
-    → 未命中任何正则 → 返回 nil（孤儿设备，由 §4.6 处理）
+    → 未命中任何正则 → 返回 nil（孤儿设备，由 §4.7 处理）
 
   Step 2: 加载映射（ParamModelRegistry，按 productId 取映射集）
     → GetTranslator(product.ID, softwareVersion)
@@ -638,6 +719,51 @@ omcmb/frontend-core/src/hooks/api/useParamModels.ts
 
 ## 2. KPI 指标库（IndicatorLib）
 
+### 2.0 业务流程图
+
+> KPI 指标库有两条主流程：**(A) 治理路径**（XML 启动加载 + 默认启用集刷新）和 **(B) 运行时路径**（PM worker 公式展开 + 计算）。
+
+```mermaid
+flowchart TB
+    subgraph A["治理路径(启动期 / 重新导入)"]
+        A1[扫描 data/indicator-library/] --> A2[按文件名推断 deviceType<br/>enb / GSM / GNB]
+        A2 --> A3[解析 indicator + formula + enabled 属性]
+        A3 --> A4[多文件合并去重<br/>enabled 取 OR]
+        A4 --> A5[校验 KPI 引用的 Counter ID 存在]
+        A5 --> A6[(perf_indicators_*<br/>~1,764)]
+        A5 --> A7[(platform_indicator_formulas_*<br/>~6,254)]
+        A5 --> A8[(indicator_groups_*<br/>~45 节点)]
+        A5 --> A9[同步默认启用集]
+        A9 --> A10[(enabled_indicators_*<br/>仅 operator_code='default' 行<br/>不动其他 operator 覆盖)]
+    end
+
+    subgraph B["运行时:PM 采集与计算 worker"]
+        B1[基站上报 PM 文件<br/>3GPP 32.435] --> B2[解析原始字段名<br/>RRC.SetupTimeMean 等]
+        B2 --> B3{查 platform_formula<br/>当前平台}
+        B3 -->|Counter| B4[直接取实测值]
+        B3 -->|KPI| B5[取 arithmetic 表达式]
+        B5 --> B6[替换 Counter ID 为实测值]
+        B6 --> B7[expr 库 AST 求值]
+        B4 --> B8{查 enabled_indicators<br/>operator_code 命中?}
+        B7 --> B8
+        B8 -->|启用| B9[写时序表<br/>TimescaleDB hypertable]
+        B8 -->|未启用| B10[丢弃]
+    end
+
+    A6 -.->|供 worker 查找| B3
+    A7 -.->|供 worker 查找| B3
+    A10 -.->|供过滤| B8
+```
+
+**关键决策点说明**：
+
+| 决策点 | 受控字段 | 默认 | 说明 |
+|--------|---------|------|------|
+| 是否默认启用某指标 | `indicator.enabled` XML 属性 | true | 缺省视为 true；多文件 OR 合并；详见 §2.6 |
+| 运营商是否覆盖默认 | `enabled_indicators_*.operator_code` | "default" | 运营商按 operator_code 覆盖；loader 重导入仅刷新 default 行 |
+| 同一指标在不同平台 | `platform_indicator_formulas_*.platform_name` + `formula` | 按平台展开 | 例 BLQ vs MLN 的 RRC.SuccConnEstab 字段名可能不同 |
+| Counter 引用 KPI 不存在 | 启动校验 | 记 ERROR 但允许加载 | 旧数据有 97 个孤儿 KPI ID 历史包袱；UI 标红展示 |
+
 ### 2.1 背景
 
 KPI 指标库是 PM 性能管理子系统的元数据基础，定义"采集什么 / 怎么聚合 / 用什么公式计算"。源数据从旧 MySQL 系统导出 → 转换为 XML → 作为本系统唯一真相源。XML 文件由离线脚本生成，跟代码一起提交。
@@ -978,6 +1104,54 @@ type IndicatorConfig struct {
 
 ## 3. 告警库（AlarmLibrary）
 
+### 3.0 业务流程图
+
+> 告警库有两条主流程：**(A) 治理路径**（XML 启动加载）和 **(B) 运行时路径**（设备上报告警 → 命中/未命中两支 + 未识别治理闭环）。
+
+```mermaid
+flowchart TB
+    subgraph A["治理路径(启动期 / 重新导入)"]
+        A1[扫描 data/alarm-definitions/*.xml] --> A2[按文件名推断 ne_type]
+        A2 --> A3[校验 identifier 全局唯一]
+        A3 --> A4[severity 字符串 → 查 alarm_severity_levels]
+        A4 --> A5[(alarm_definitions<br/>442 行)]
+    end
+
+    subgraph B["运行时:告警接收路径(F04)"]
+        B1[设备上报 alarm.identifier] --> B2{Registry.GetByIdentifier}
+        B2 -->|命中| B3[取 cn_name / severity /<br/>probable_cause / suggestion]
+        B3 --> B4[(alarms 活动告警表<br/>is_unknown=false)]
+
+        B2 -->|未命中| B5{查 device.product_id}
+        B5 -->|product_id IS NULL<br/>孤儿设备| B6[走 false 分支]
+        B5 -->|查 product.enable_unknown_alarm| B7{开关?}
+        B7 -->|false 默认| B6
+        B6 --> B8[丢弃 + INFO 日志]
+        B7 -->|true 显式开启| B9[构造 fallback 告警<br/>severity=Warning<br/>cn_name=未识别告警<br/>is_unknown=true]
+        B9 --> B4
+        B9 --> B10[Prometheus<br/>alarm_unknown_total++]
+    end
+
+    subgraph C["治理闭环:未识别告警治理"]
+        C1[活动告警页 按 is_unknown 过滤] --> C2[管理员看到未知 identifier]
+        C2 --> C3[GET /alarm-definitions/unknown-stats<br/>聚合频次]
+        C3 --> C4[在 §3.5 管理面新建告警定义]
+        C4 -.->|不回填历史| A5
+        A5 -.->|新上报走正常路径| B2
+    end
+
+    A5 -.->|供 Registry 查找| B2
+```
+
+**关键决策点说明**：
+
+| 决策点 | 受控字段 | 默认 | 说明 |
+|--------|---------|------|------|
+| identifier 未命中怎么办 | `products.enable_unknown_alarm` | false | false 丢弃；true 写 fallback；详见 §3.3 |
+| 孤儿设备的未知告警 | `device.product_id IS NULL` | 走默认 false 分支 | 先治理孤儿设备，再决定是否开 unknown alarm |
+| 告警库后补 identifier 是否回填历史 | 设计原则 | 不回填 | 保留历史现场；新上报开始按正常路径写入 |
+| severity 是否允许编辑 | 完全只读 | 4 级行业标准固定值 | 详见 §3.5 + §11 |
+
 ### 3.1 背景
 
 告警库是 F04 告警管理子系统的元数据基础，存储 442 条告警定义（identifier → 中英文名 / 严重级 / 原因 / 建议）。基站上报告警时，F04 模块通过 identifier 查告警库取展示信息。
@@ -1191,7 +1365,7 @@ type AlarmDefinitionConfig struct {
 
 **与旧设计的差异**：
 
-| 维度 | 旧设计（§1.2.4 + §1.2.5） | 新设计（§4） |
+| 维度 | 旧设计（旧 routing 表，已删除） | 新设计（§4） |
 |------|------------------------|------------|
 | 表 | `product_name_routing`（27 行）+ `param_model_routing`（27 行）| `products`（按产品系列聚合，~12 行）+ `product_class_patterns`（27 行） |
 | 一个产品对应几条正则 | 1:1（每个 productName 一条 productClass） | 1:N（QRTB 系列含 CA/DC/SC 三条正则共 1 个产品） |
@@ -1879,54 +2053,84 @@ omcgo/data/alarm-definitions/   (7 XML)
 
 ## 10. 验证方案
 
+> 按"域 + Phase"两个维度交叉组织：每个域内按 Phase 1→5 推进；P1/P2 是后端契约，P3/P4 是接口与 UI，P5 是清理。
+
+#### 10.1 跨域基础 — 启动加载与引用校验
+
 | 阶段 | 方法 | 通过标准 |
 |------|------|---------|
 | P1 | 启动后查 DB 行数 | 参数 9 paramModel + 4,781 默认 + 2,001 标准；指标 1,764 唯一指标 + 6,254 平台公式 + 27 单位；告警 442 + 4 严重级；**产品 15 + 29 patterns** |
 | P1 | 启动期引用校验 | products.xml 加载时对每条 product 的三引用（paramModel.name / KPI platform / alarm ne_type）做存在性校验，不通过的产品记 ERROR 并跳过 |
-| P2 | 单元测试 | **产品 productClass 路由（含 FAP 兜底正确排序）**；参数翻译 round-trip + discovered → default 降级；KPI 公式展开 + Counter ID 校验；告警 identifier 查找 |
-| P2 | 集成测试 | provision / sync / interop / pm worker / alarm receiver 消费者全部通过；**ProductRegistry 作为 routing 入口能取代旧 ParamRegistry 路由功能** |
-| P3 | curl | 4 个域全部 CRUD + 导入端点逐个走通；**产品 productClass 测试匹配端点正确返回 + 孤儿设备列表/绑定流程通过** |
-| P4 | 浏览器手动 | 新一级菜单"产品管理"出现在侧边栏（仅 super_admin 可见，4 个子项：产品 / 参数模型 / KPI 指标库 / 告警库）；**产品页：列表 / 新建（三字典预览选择）/ 编辑（patterns 上下移动）/ 测试匹配 / 全局匹配顺序浮窗 / 孤儿设备处理** |
-| P4 | 角色权限 | 用 admin / operator / viewer 角色登录看不到"产品管理"菜单；直接访问 `/product/*` 路径被 PrivateRoute 拦截 |
-| P2 | 单元测试 | **enable_filetype11 = false 时跳过 Upload(FileType=11) 流程**；**device_attrs_override 各属性勾选/未勾选时交集结果按规则取设备值或默认值**；**data_type=true 在 API 层被拒绝（HTTP 400）** |
-| P3 | curl | **DELETE /api/v1/products/:id/discovered 清空交集；下次设备 Inform 触发重新上传 → 新 discovered 记录写入** |
-| P4 | 浏览器手动 | 产品编辑抽屉 §2.1 段：勾选/取消 device_attrs_override 各项；data_type checkbox 永远 disabled；「立即重置 discovered」按钮弹确认对话框含影响行数 |
+
+#### 10.2 §1 参数模型
+
+| 阶段 | 方法 | 通过标准 |
+|------|------|---------|
 | P1 | 启动加载 | **`param_mappings.is_storable` 默认值正确**（XML 不写 store 时取 true）；**XML `store="false"` 的条目在 DB 中 is_storable=false** |
+| P2 | 单元测试 | 参数翻译 round-trip + discovered → default 降级 |
+| P2 | 单元测试 | **enable_filetype11 = false 时跳过 Upload(FileType=11) 流程**；**device_attrs_override 各属性勾选/未勾选时交集结果按规则取设备值或默认值**；**data_type=true 在 API 层被拒绝（HTTP 400）** |
 | P2 | 单元测试 | **自动同步跳过 `is_storable=false` 的参数**：构造一个 paramModel 含 5 条参数（其中 1 条 storable=false），sync 后只有 4 条写入设备参数仓库；**对账 SQL 重新导入 XML 切换 storable 时 discovered 行同步刷新** |
+| P2 | 集成测试 | provision / sync / interop 消费者全部通过 |
+| P3 | curl | **DELETE /api/v1/products/:id/discovered 清空交集；下次设备 Inform 触发重新上传 → 新 discovered 记录写入** |
+| P4 | 浏览器手动 | 产品编辑抽屉 §4.9 段 2.1：勾选/取消 device_attrs_override 各项；data_type checkbox 永远 disabled；「立即重置 discovered」按钮弹确认对话框含影响行数 |
+
+#### 10.3 §2 KPI 指标库
+
+| 阶段 | 方法 | 通过标准 |
+|------|------|---------|
 | P1 | 启动加载 | **`enabled_indicators_<deviceType>` 默认行数 = XML 中 `enabled="true"` 的指标数**；XML 改 `enabled="false"` 重新加载后该行被删；**其他 operator_code 的覆盖行不被动到** |
+| P2 | 单元测试 | KPI 公式展开 + Counter ID 校验 |
 | P2 | 单元测试 | **多文件合并 enabled OR 规则**：同一 indicator 在 BLQ.xml `enabled="false"` 但在 ALL.xml `enabled="true"` → 默认启用集中存在 |
+| P2 | 集成测试 | pm worker 消费者按平台公式正确展开并计算落库 |
+
+#### 10.4 §3 告警库
+
+| 阶段 | 方法 | 通过标准 |
+|------|------|---------|
+| P2 | 单元测试 | 告警 identifier 查找命中分支 |
 | P2 | 单元测试 | **enable_unknown_alarm=false（默认）时未知 identifier 不入活动告警**；**=true 时构造 fallback 记录写入，severity=Warning, is_unknown=true**；**device.product_id IS NULL 的孤儿设备走默认 false 分支** |
+| P2 | 集成测试 | F04 告警接收路径接入 Registry 后命中/未命中两支均通过 |
 | P3 | curl | `GET /api/v1/alarm-definitions/unknown-stats?productId=xxx&days=7` 返回最近未知 identifier 频次列表 |
-| P4 | 浏览器手动 | 产品编辑抽屉新段 2.2：勾选 enable_unknown_alarm；活动告警页按 is_unknown 过滤显示未知告警；「查看未识别告警频次」跳转端点正确 |
+| P4 | 浏览器手动 | 产品编辑抽屉 §4.9 段 2.2：勾选 enable_unknown_alarm；活动告警页按 is_unknown 过滤显示未知告警；「查看未识别告警频次」跳转端点正确 |
+
+#### 10.5 §4 产品装配件
+
+| 阶段 | 方法 | 通过标准 |
+|------|------|---------|
+| P2 | 单元测试 | **产品 productClass 路由（含 FAP 兜底正确排序）** |
+| P2 | 集成测试 | **ProductRegistry 作为 routing 入口能取代旧 ParamRegistry 路由功能** |
+| P3 | curl | **产品 productClass 测试匹配端点正确返回 + 孤儿设备列表/绑定流程通过** |
+| P4 | 浏览器手动 | 新一级菜单"产品管理"出现在侧边栏（仅 super_admin 可见，4 个子项）；产品页：列表 / 新建（三字典预览选择）/ 编辑（patterns 上下移动）/ 测试匹配 / 全局匹配顺序浮窗 / 孤儿设备处理 |
+| P4 | 角色权限 | 用 admin / operator / viewer 角色登录看不到"产品管理"菜单；直接访问 `/product/*` 路径被 PrivateRoute 拦截 |
+
+#### 10.6 清理
+
+| 阶段 | 方法 | 通过标准 |
+|------|------|---------|
 | P5 | grep | `grep -r "datamodel" internal/` 无业务引用；旧 KPI/告警实现关键字无残留 |
 
 ---
 
 ## 11. 风险与权衡
 
+> 按"域 + 跨域"分组，每条决策在所属域章节有详细说明。
+
+#### 11.1 跨域基础设施
+
 | 风险/取舍 | 决策 | 理由 |
 |----------|-----|------|
-| KPI 三套独立表 vs 单表 + device_type 列 | 独立表 | ID 命名空间分离、GNB 字段差异、演进节奏不同 |
-| 告警单表 vs 七张独立表 | 单表 | 442 行规模小、字段完全相同、跨网元查询常见 |
-| 告警是否保留 device_type 列 | 删除 | 旧系统 device_type 与 ne_type 部分重叠（device_type=0 既是 ENB 又是 OMC，存在歧义），OMC 内部告警识别只用 identifier，ne_type 已足够展示分类。未来北向接口需要时由导出适配层根据 ne_type 反向映射 |
-| 三个管理页放哪 | 新增"产品管理"一级菜单（super_admin 角色），不复用既有 `/alarm/library` / `/performance/kpi-standard` / `/system/data-dictionary` | 业务消费视角与平台治理视角职责完全不同（前者按启用过滤、关注查询；后者全量、关注导入/CRUD）；硬塞进既有菜单会让普通用户误触底层定义。商用网管的常见做法是治理界面与消费界面物理隔离 |
 | 共享基础设施抽多深 | 仅抽设施层（scanner / cache_version / lifecycle）；不抽业务实体接口 | 三个域差异大，强行抽象引入虚假一致性 |
-| 公式解析自实现 vs 引第三方库 | 引 antonmedv/expr | 公式语法标准，无定制需求，自实现成本不划算 |
 | Pub/Sub vs 30s 轮询失效缓存 | 轮询 | 启动期消息丢失风险高；字典数据低频变更，30s 延迟可接受 |
-| 强制要求设备上报 SoftwareVersion | 不强制，缺失时降级到默认映射 | ACS 无法强制 CPE，需有兜底 |
-| 旧 ENB 公式表 97 个孤儿 KPI ID | 启动加载时记 ERROR 日志但允许加载，UI 标红 | 保留兼容性，避免阻塞启动；UI 提供修正入口 |
+| 三个管理页放哪 | 新增"产品管理"一级菜单（super_admin 角色），不复用既有 `/alarm/library` / `/performance/kpi-standard` / `/system/data-dictionary` | 业务消费视角与平台治理视角职责完全不同（前者按启用过滤、关注查询；后者全量、关注导入/CRUD）；硬塞进既有菜单会让普通用户误触底层定义。商用网管的常见做法是治理界面与消费界面物理隔离 |
+| 单位 / 平台公式 / 标准路径 删除时的处理 | 被引用时拒绝（返回 409 Conflict + 引用清单） | 静默删除会导致参数 / KPI / 公式断链；强制错误反馈让用户先清理引用 |
+
+#### 11.2 §1 参数模型
+
+| 风险/取舍 | 决策 | 理由 |
+|----------|-----|------|
 | 参数模型本身能否手动新建 | **否，仅 import XML** | 参数模型由产品发布物决定，手建一个空壳意义不大；强制走 XML 流程统一管理 |
 | 标准参数树是否允许编辑 | **super_admin 可写，其他用户只读** | 适配未来产品时需要补标准路径；但任何写操作影响所有 paramModel 的翻译，必须收口到最高权限 |
-| 严重级表是否允许编辑 | **完全只读** | 4 级（Critical/Major/Minor/Warning + 31001-31004）是行业标准，开放编辑反而引入不一致风险 |
-| 单位 / 平台公式 / 标准路径 删除时的处理 | 被引用时拒绝（返回 409 Conflict + 引用清单） | 静默删除会导致参数 / KPI / 公式断链；强制错误反馈让用户先清理引用 |
-| 旧 routing 表（产品名 / 参数模型）是保留还是替代 | **方案 B 替代**：用 `products` + `product_class_patterns` 整体替代两张 routing 表 | 旧 routing 半成品的"产品概念"零散成两张表，让"产品"作为一等公民符合业务直觉；运行时由两步遍历减为一次匹配；模型干净，未实现前重构成本最低 |
-| 1 个产品对应几条 productClass 正则 | **1 产品多正则**（QRTB 系列含 CA / DC / SC 三条正则共 1 个产品） | 业务上"QRTB 系列"是一个产品概念，CA/DC/SC 仅是射频模式；29 条正则归并为 15 个真正产品，UI 列表更清晰 |
-| 产品名是否独立于 product_code | **只保留 product_name**，不引入 product_code 短码 | 当前没有北向接口必须使用短码的需求；future-proofing 不值得引入冗余字段；需要时再加 |
-| 删除产品的处置 | **硬删除（device 数=0 才允许）**，不引入软删除/停用 | OMC 当前及未来历史数据都不通过 product_id 关联；硬删除语义清晰；无设备绑定即可安全删除 |
-| 孤儿设备处理时机 | **v1 必做**（不延后到 v2） | 产品功能闭环依赖此功能（新产品接入或正则调整后总会出现孤儿）；UI 多一个简单页面，工作量可控 |
-| 全局匹配顺序页是否可编辑 | **只读视图** | 跨产品调整 sort_order 容易误编辑；调整顺序回到对应产品的编辑抽屉里做，限定在产品上下文中操作更安全 |
-| BLQ 与 BAIBLQ KPI 是否合并 | **合并入 BLQ**（取并集 1095 指标）；BLX 独立保留 | 共有 647 条 formula 完全一致；BAIBLQ 与 BLQ 在 TR069 已是同一 paramModel，合并 KPI 后整体语义更清晰；BLX 虽然 ID 完全是 BAIBLQ 子集但保留独立配置以支持运行时按平台启用差异 |
-| BAIBLQ 设备的产品归属 | **新增独立产品**，与 QRTB 系列分开（共享同一 KPI 平台 BLQ） | BAIBLQ（V3 硬件 + 436Q 软件）与 QRTB（BS31 芯片）是不同产品形态，仅在 KPI 体系上同源；分开建产品便于设备列表统计 |
+| 强制要求设备上报 SoftwareVersion | 不强制，缺失时降级到默认映射 | ACS 无法强制 CPE，需有兜底 |
 | FileType=11 是否系统级开关还是产品级 | **产品级开关 `enable_filetype11`**（默认 true） | 不同产品对 FileType=11 的支持/兼容性差异大；产品级开关粒度合适，避免一刀切 |
 | 元属性覆盖配置存储格式 | **JSONB**（`device_attrs_override` 字段） | 未来扩展属性不需迁移；5 个 boolean 列也可行但不灵活 |
 | data_type 是否允许覆盖 | **完全禁止**：UI checkbox 永久 disabled + API 层 / loader 层校验为 true 时拒绝 | 类型变更几乎不会发生；允许覆盖反而引入数据一致性 bug 风险 |
@@ -1934,11 +2138,40 @@ omcgo/data/alarm-definitions/   (7 XML)
 | 关闭 enable_filetype11 时已有 discovered 数据处理 | **保留**（不自动失效）；如需立即清理，管理员使用 §4.9 重置按钮 | "配置变更"和"数据清理"解耦，避免误关开关导致运行时雪崩；显式重置更安全 |
 | discovered 刷新策略 | **B 主动重置**（UI 按钮 + REST API），不自动后台批量重跑 | 自动批量影响范围大、运维不可控；管理员主动操作更可预测 |
 | "是否存储"开关粒度 | **paramModel/参数维度（XML store 属性）**，不下沉到产品级覆盖 | 是否纳入持久化是参数本身的属性（与产品无关）；产品级覆盖会让同一参数在不同产品行为不一致，徒增混乱；`is_storable` 缺省 true 不影响现有行为 |
+
+#### 11.3 §2 KPI 指标库
+
+| 风险/取舍 | 决策 | 理由 |
+|----------|-----|------|
+| KPI 三套独立表 vs 单表 + device_type 列 | 独立表 | ID 命名空间分离、GNB 字段差异、演进节奏不同 |
+| 公式解析自实现 vs 引第三方库 | 引 antonmedv/expr | 公式语法标准，无定制需求，自实现成本不划算 |
+| 旧 ENB 公式表 97 个孤儿 KPI ID | 启动加载时记 ERROR 日志但允许加载，UI 标红 | 保留兼容性，避免阻塞启动；UI 提供修正入口 |
+| BLQ 与 BAIBLQ KPI 是否合并 | **合并入 BLQ**（取并集 1095 指标）；BLX 独立保留 | 共有 647 条 formula 完全一致；BAIBLQ 与 BLQ 在 TR069 已是同一 paramModel，合并 KPI 后整体语义更清晰；BLX 虽然 ID 完全是 BAIBLQ 子集但保留独立配置以支持运行时按平台启用差异 |
 | KPI 默认启用集来源 | **由 indicator XML `enabled` 属性决定**（缺省 true），loader 只刷新 `operator_code='default'` 行 | 旧设计"默认 263 行"无明确出处易迷失；XML 是真相源符合本方案统一原则；运营商覆盖行不动，避免治理动作互相破坏 |
 | 多文件合并时 enabled 取值规则 | **OR 合并**（任一文件 enabled=true 即默认启用） | 一个 indicator 在多平台共存时，部分平台禁用不应影响整体默认启用；如需平台级禁用，另用平台公式表的删除/不启用机制（非本字段范畴） |
+
+#### 11.4 §3 告警库
+
+| 风险/取舍 | 决策 | 理由 |
+|----------|-----|------|
+| 告警单表 vs 七张独立表 | 单表 | 442 行规模小、字段完全相同、跨网元查询常见 |
+| 告警是否保留 device_type 列 | 删除 | 旧系统 device_type 与 ne_type 部分重叠（device_type=0 既是 ENB 又是 OMC，存在歧义），OMC 内部告警识别只用 identifier，ne_type 已足够展示分类。未来北向接口需要时由导出适配层根据 ne_type 反向映射 |
+| 严重级表是否允许编辑 | **完全只读** | 4 级（Critical/Major/Minor/Warning + 31001-31004）是行业标准，开放编辑反而引入不一致风险 |
 | 未识别告警处理粒度 | **产品级开关 `enable_unknown_alarm`（默认 false）**；不做系统级开关 | 不同厂商/产品对未知 identifier 的处置策略差异大；默认严格丢弃避免淹没活动告警表，宽松模式按需开启；运维可通过 `unknown-stats` 端点持续治理告警库覆盖率 |
 | 未识别告警的孤儿设备处理 | **走默认 false 分支**（即丢弃记日志） | 孤儿设备本身已是治理目标（§4.7），叠加未知告警保留只会放大噪声；先把设备绑定到产品，再决定开不开 unknown alarm |
 | 未识别告警写入后的回填策略 | **不回填**已存在的未知告警记录 | 历史现场数据应保留，告警库后补不应改写历史；新上报开始按正常路径写入即可 |
+
+#### 11.5 §4 产品装配件
+
+| 风险/取舍 | 决策 | 理由 |
+|----------|-----|------|
+| 旧 routing 表（产品名 / 参数模型）是保留还是替代 | **方案 B 替代**：用 `products` + `product_class_patterns` 整体替代两张 routing 表 | 旧 routing 半成品的"产品概念"零散成两张表，让"产品"作为一等公民符合业务直觉；运行时由两步遍历减为一次匹配；模型干净，未实现前重构成本最低 |
+| 1 个产品对应几条 productClass 正则 | **1 产品多正则**（QRTB 系列含 CA / DC / SC 三条正则共 1 个产品） | 业务上"QRTB 系列"是一个产品概念，CA/DC/SC 仅是射频模式；29 条正则归并为 15 个真正产品，UI 列表更清晰 |
+| 产品名是否独立于 product_code | **只保留 product_name**，不引入 product_code 短码 | 当前没有北向接口必须使用短码的需求；future-proofing 不值得引入冗余字段；需要时再加 |
+| 删除产品的处置 | **硬删除（device 数=0 才允许）**，不引入软删除/停用 | OMC 当前及未来历史数据都不通过 product_id 关联；硬删除语义清晰；无设备绑定即可安全删除 |
+| 孤儿设备处理时机 | **v1 必做**（不延后到 v2） | 产品功能闭环依赖此功能（新产品接入或正则调整后总会出现孤儿）；UI 多一个简单页面，工作量可控 |
+| 全局匹配顺序页是否可编辑 | **只读视图** | 跨产品调整 sort_order 容易误编辑；调整顺序回到对应产品的编辑抽屉里做，限定在产品上下文中操作更安全 |
+| BAIBLQ 设备的产品归属 | **新增独立产品**，与 QRTB 系列分开（共享同一 KPI 平台 BLQ） | BAIBLQ（V3 硬件 + 436Q 软件）与 QRTB（BS31 芯片）是不同产品形态，仅在 KPI 体系上同源；分开建产品便于设备列表统计 |
 
 ---
 
