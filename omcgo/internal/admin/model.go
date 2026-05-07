@@ -243,18 +243,28 @@ const (
 	MenuTypeButton    string = "button"
 )
 
+// MenuShowStatus represents the visibility of a menu in the sidebar.
+// DDL menus.show_status 是 VARCHAR(16) NOT NULL CHECK IN ('show','hide')；
+// 此处用 string 而非 bool，与库列类型 + 前端 'show' | 'hide' 一致。
+type MenuShowStatus string
+
+const (
+	MenuShow MenuShowStatus = "show"
+	MenuHide MenuShowStatus = "hide"
+)
+
 // Menu represents a navigation menu item.
 type Menu struct {
-	ID             uuid.UUID   `json:"id"`
-	Name           string      `json:"name"`
-	Type           string      `json:"type"`
-	PermissionKey  string      `json:"permission_key"`
-	ParentID       *uuid.UUID  `json:"parent_id,omitempty"`
-	SortOrder      int         `json:"sort_order"`
-	RoutePath      string      `json:"route_path,omitempty"`
-	ComponentPath  string      `json:"component_path,omitempty"`
-	Icon           string      `json:"icon,omitempty"`
-	ShowStatus     bool        `json:"show_status"`
+	ID             uuid.UUID      `json:"id"`
+	Name           string         `json:"name"`
+	Type           string         `json:"type"`
+	PermissionKey  string         `json:"permission_key"`
+	ParentID       *uuid.UUID     `json:"parent_id,omitempty"`
+	SortOrder      int            `json:"sort_order"`
+	RoutePath      string         `json:"route_path,omitempty"`
+	ComponentPath  string         `json:"component_path,omitempty"`
+	Icon           string         `json:"icon,omitempty"`
+	ShowStatus     MenuShowStatus `json:"show_status"`
 	Status         MenuStatus  `json:"status"`
 	CreatedBy      *uuid.UUID  `json:"created_by,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
@@ -273,29 +283,29 @@ type MenuFilter struct {
 
 // UpdateMenuRequest is the input for updating an existing menu.
 type UpdateMenuRequest struct {
-	Name          *string     `json:"name"`
-	Type          *string     `json:"type"`
-	PermissionKey *string     `json:"permission_key"`
-	ParentID      *uuid.UUID  `json:"parent_id"`
-	SortOrder     *int        `json:"sort_order"`
-	RoutePath     *string     `json:"route_path"`
-	ComponentPath *string     `json:"component_path"`
-	Icon          *string     `json:"icon"`
-	ShowStatus    *bool       `json:"show_status"`
-	Status        *MenuStatus `json:"status"`
+	Name          *string         `json:"name"`
+	Type          *string         `json:"type"`
+	PermissionKey *string         `json:"permission_key"`
+	ParentID      *uuid.UUID      `json:"parent_id"`
+	SortOrder     *int            `json:"sort_order"`
+	RoutePath     *string         `json:"route_path"`
+	ComponentPath *string         `json:"component_path"`
+	Icon          *string         `json:"icon"`
+	ShowStatus    *MenuShowStatus `json:"show_status"`
+	Status        *MenuStatus     `json:"status"`
 }
 
 // CreateMenuRequest is the input for creating a new menu.
 type CreateMenuRequest struct {
-	Name          string     `json:"name" binding:"required"`
-	Type          string     `json:"type" binding:"required"`
-	PermissionKey string     `json:"permission_key" binding:"required"`
-	ParentID      *uuid.UUID `json:"parent_id"`
-	SortOrder     int        `json:"sort_order"`
-	RoutePath     string     `json:"route_path"`
-	ComponentPath string     `json:"component_path"`
-	Icon          string     `json:"icon"`
-	ShowStatus    bool       `json:"show_status"`
+	Name          string         `json:"name" binding:"required"`
+	Type          string         `json:"type" binding:"required"`
+	PermissionKey string         `json:"permission_key" binding:"required"`
+	ParentID      *uuid.UUID     `json:"parent_id"`
+	SortOrder     int            `json:"sort_order"`
+	RoutePath     string         `json:"route_path"`
+	ComponentPath string         `json:"component_path"`
+	Icon          string         `json:"icon"`
+	ShowStatus    MenuShowStatus `json:"show_status"`
 }
 
 // SetRoleMenusRequest is the input for setting role menu permissions.

@@ -938,7 +938,7 @@ func (s *AdminService) CreateMenu(ctx context.Context, req CreateMenuRequest, op
 		RoutePath:     req.RoutePath,
 		ComponentPath: req.ComponentPath,
 		Icon:          req.Icon,
-		ShowStatus:    req.ShowStatus,
+		ShowStatus:    defaultMenuShowStatus(req.ShowStatus),
 		Status:        MenuStatusNormal,
 	}
 
@@ -1074,6 +1074,15 @@ func filterTreeForDisplay(nodes []Menu) []Menu {
 		result = append(result, filtered)
 	}
 	return result
+}
+
+// defaultMenuShowStatus 当请求中未给定 show_status 时回退默认值 "show"，
+// 防止空串触发 DDL CHECK (show_status IN ('show','hide')) 失败。
+func defaultMenuShowStatus(s MenuShowStatus) MenuShowStatus {
+	if s == MenuShow || s == MenuHide {
+		return s
+	}
+	return MenuShow
 }
 
 // checkPermissionInMenus recursively checks if a permission key exists in the menu tree.
