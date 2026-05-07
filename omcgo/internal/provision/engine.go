@@ -308,6 +308,17 @@ func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *Provision
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
+	// T-0098 P2-04 dual-stack：先尝试 Path B 新栈；命中即返回，否则降级 dataModel 旧栈。
+	if used, err := e.syncService.StartPathBSync(ctx, dev); err != nil {
+		return e.failTask(ctx, task, fmt.Errorf("start path-b sync: %w", err))
+	} else if used {
+		e.logger.Info("path-b auto-sync initiated",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("task_id", task.ID.String()),
+		)
+		return nil
+	}
+
 	// Use two-phase sync with the data model iterator.
 	if err := e.syncService.StartTwoPhaseSync(ctx, dev, dm); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("start two-phase sync: %w", err))
@@ -515,9 +526,19 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		zap.String("model_id", dm.ID.String()),
 	)
 
-	// After model creation, auto-sync parameters using two-phase sync.
+	// After model creation, auto-sync parameters.
+	// T-0098 P2-04 dual-stack：Path B 新栈优先，旧栈降级。
 	if e.syncService != nil && e.config.AutoSync.Enabled {
-		if syncErr := e.syncService.StartTwoPhaseSync(ctx, dev, dm); syncErr != nil {
+		if used, syncErr := e.syncService.StartPathBSync(ctx, dev); syncErr != nil {
+			e.logger.Warn("path-b auto-sync after model upload failed",
+				zap.Error(syncErr),
+				zap.String("device_sn", payload.DeviceSN),
+			)
+		} else if used {
+			e.logger.Info("path-b auto-sync initiated after model upload",
+				zap.String("device_sn", payload.DeviceSN),
+			)
+		} else if syncErr := e.syncService.StartTwoPhaseSync(ctx, dev, dm); syncErr != nil {
 			e.logger.Warn("auto-sync after model upload failed",
 				zap.Error(syncErr),
 				zap.String("device_sn", payload.DeviceSN),
@@ -614,6 +635,18 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 	}
 
 	if e.syncService != nil {
+		// T-0098 P2-04 dual-stack：Path B 新栈优先翻译落库；命中即返回，否则降级旧栈。
+		if used, err := e.syncService.HandleSyncResultPathB(ctx, dev, payload.ParameterValues); err != nil {
+			e.logger.Error("path-b save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+			return nil
+		} else if used {
+			e.logger.Info("path-b parameter values saved",
+				zap.String("device_sn", payload.DeviceSN),
+				zap.Int("count", len(payload.ParameterValues)),
+			)
+			return nil
+		}
+
 		if err := e.syncService.HandleSyncResult(ctx, dev, payload.ParameterValues); err != nil {
 			e.logger.Error("save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 			return nil

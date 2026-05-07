@@ -122,7 +122,7 @@ func initProvisionModule(c *Container) error {
 		syncSvc := provision.NewSyncService(
 			c.ParamRepo, discoveryLogRepo, c.TaskSvc, planStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
-		)
+		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
 		provisionEngine.SetSyncService(syncSvc)
 		logger.Info("auto-sync service enabled")
 	}

@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 
@@ -20,14 +22,23 @@ import (
 )
 
 // SyncService handles batch parameter value synchronization from devices.
+//
+// T-0098 P2-04：双栈期 dataModel 与 paramRegistry 共存。当 paramRegistryEnabled 且
+// productRegistry/paramRegistry 注入、且 device.ProductClass 能命中 product 时，走
+// Path B 新栈：删 GPN 阶段 + ParamMapping 列表去重前缀 + Translator 落库 + is_storable
+// 过滤；否则降级到既有 dataModel 双阶段路径（StartTwoPhaseSync / HandleGPNResult /
+// HandleSyncResult）。
 type SyncService struct {
-	paramRepo     device.DeviceParameterRepository
-	discoveryRepo ParameterDiscoveryLogRepository
-	taskSvc       task.Enqueuer
-	planStore     *SyncPlanStore
-	config        appconfig.AutoSyncConfig
-	batchSize     int
-	logger        *zap.Logger
+	paramRepo            device.DeviceParameterRepository
+	discoveryRepo        ParameterDiscoveryLogRepository
+	taskSvc              task.Enqueuer
+	planStore            *SyncPlanStore
+	paramRegistry        *parammodel.Registry
+	productRegistry      *product.Registry
+	paramRegistryEnabled bool
+	config               appconfig.AutoSyncConfig
+	batchSize            int
+	logger               *zap.Logger
 }
 
 // NewSyncService creates a new SyncService.
