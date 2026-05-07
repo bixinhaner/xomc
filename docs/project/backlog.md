@@ -68,10 +68,10 @@
 |------|------|------|------|
 | Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
 | `done` | 78 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md` |
-| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella，36 子任务待 sprint planning） |
+| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 子任务 2026-05-07 已升格 planned/wave-3/Claude，30 子任务 P2-P5 待 sprint planning） |
 | `in_design` | 0 | — | — |
-| `planned` | 6 | — | T-0027 done 后无新增；下次 sprint planning 从 §4 Triaged 挑选 |
-| `triaged` | 43 | — | T-0098 36 sub-task 占 36 条；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
+| `planned` | 12 | — | + T-0098-P1-01..P1-06 6 条（wave-3 / Owner=Claude / 2026-05-07 升格，wave-batched 模式 §C.1 准入开发） |
+| `triaged` | 37 | — | T-0098 30 sub-task 占 30 条（P2-P5；P1 6 条 2026-05-07 升格 planned）；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**）|
@@ -171,7 +171,8 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
   - **理由**：P1-P3（schema + dictloader + Loader + Registry + REST API，22 子任务）视为设计稿 v3 已交付的"实现收敛"，归 W3 整改范畴推进；P4（前端 4 页 + nav 一级菜单，8 子任务）+ P5（旧 datamodel 清理 + 文档收尾，6 子任务）推迟到 2026-08-03 W3 终审后启动
   - **子任务标记**：§4.1 中 P4-* / P5-* 行 Notes 列含 "**D5=B Wave 3 后启动**" 字样，sprint planning 时识别准入边界
   - **配套决策**：D1=A 保 KPI 表名 / D2=B DROP+CREATE alarm_definitions / D3=A 保自实现公式 / D4=A 后端架构产 products.xml / D6 默认分工（待具体人）/ D7=A 仅评估 v2/v3 / D8=A 单 PR 合 P1 迁移 / D9=B feature flag 保留至 P5 / D10=A 吸收 T-0095（详见 §10 changelog 2026-05-07 行）
-  - **下一步**：sprint planning 从 §4.1 P1-* 6 条 + 无依赖 P2-* 中按 Owner 容量挑选进 sprint-NN；P1-01..P1-06 必须同 sprint 同 PR（D8=A 硬约束）
+  - **2026-05-07 PgM 后续决策（前戏完成）**：P1-01..P1-06 6 条**升格 planned / Sprint=wave-3 / Owner=Claude**（详 §4.1 + sub-task 文件）；wave-batched 模式（dev-pipeline §C.1）准入开发，Skip S0/S1，Footer 引用 `AI承诺对峙清单.md` W3 段 + `参数-KPI-告警-整合-实施计划.md`；**commit 形态 = 6 commit + 单 PR**（每 commit footer 各挂 `Backlog: T-0098-P1-0N`，PR 描述聚合 6 条；保留 D8=A 迁移 atomic 同时不破坏 §B6 footer 一对一）；可直接 `/dev-pipeline pick T-0098-P1-01` 开车
+  - **下一步（已替代旧 sprint planning 计划）**：~~sprint planning 从 §4.1 P1-* 6 条 + 无依赖 P2-* 中按 Owner 容量挑选进 sprint-NN~~；P1-01..P1-06 已直接进 wave-3（D8=A 硬约束 = 同 PR 由"6 commit + 单 PR"形态实现）；P2-01..P5-06 30 条仍 triaged 等下次 sprint planning
 
 ---
 
@@ -296,13 +297,15 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0090 | MML 控制台公/私命令新增页面 UX 整改 — ① 操作类型差异化（MOD→修改值入口）② 删 3 字段（参数配置/所属分类/适用产品类型）③ 命令编码 input→textarea ④ textarea 必须自定义、不允许选已有命令 ⑤ 私有命令页面参考公有页面（功能一致）⑥ 私有命令按当前管理员所属分组过滤（RBAC）⑦ 公有命令不按管理员过滤 | feat | frontend+F06/mml+admin | P2 | XL | — (T-0094 已 rejected as misdiagnosis 2026-04-30) | R-NEW（productTypes 删除破坏性 + RBAC 私有命令分组隔离 双重风险） | @chenbo01 提需求；**2026-04-30 B 方案二次扩展**：原 ①②③ 保留 + 新加 ④（textarea 自定义限制）+ ⑤⑥⑦（私有/公有命令 RBAC 差异化）；用户重叠检测拍板 B（不覆盖原版而是扩展）；**Est L → XL，强制 S2 拆**；ULTRATHINK 三层核查（Go struct + migrations + FE 表单）+ B 扩展后子项风险阶梯横跨 4 档：①③④⑤ 纯 FE 低风险（操作类型差异化 + textarea + 自定义限制 + 私有页面复用公有 UI）；② 中耦合（参数配置 UI section 删后端接空 map 兼容；categoryGroup 清理由 T-0094 决策）；②④ productTypes 删 = 破坏性 migration（drop column + 历史数据评估 + Down 段回滚预案）；⑥ RBAC = backend 改动（mml_custom_command 查询按当前 admin 的 role_device_groups 过滤 private 命令；query 重写 + service 层 admin context 注入）；S2 强建议**拆 4 段**：T-0090a（S, FE-only ① ③ ④ + ② UI section 删除）+ T-0090b（M, ref + migration drop productTypes）+ T-0090c（M-L, backend RBAC private 查询过滤 + admin context 注入）+ T-0090d（S, FE 私有命令页面创建 复用公有组件）；Domain 加 admin（⑥ 涉 RBAC）；候选 Sprint=GA 规划期 |
 | T-0096 | MML script 页面「更新」弹窗取消产品类型字段（应与 /mml/console「保存脚本」弹窗一致） | ref | frontend+F06/mml | P3 | S | T-0090 | R-NEW（共享 T-0090 productTypes 删除风险） | Triage 2026-04-30 走 B 方案 standalone（不 fold 进 T-0090a — 因 page scope 不同 script vs console + T-0090 体量已 L 不宜再扩 + 独立 PR 更清晰）；语义**反向** deps T-0090："与 console 一致"意味着 console 决定 productTypes 去留 → script 跟随（若 T-0090 决定保留 productTypes，T-0096 也保留；命名"取消"但执行随 T-0090）；建议与 T-0090a 同 Sprint 紧随做省 cross-PR 协调 |
 | T-0097 | MML console「保存脚本」弹窗确认按钮 API 结果反馈（成功/失败提示） | bug | frontend+F06/mml | P2 | S | — | R-NEW（toast util 场景失效面） | Triage 2026-04-30 走 C 方案 triaged + **pre-pick reproduce 待办**：静态核查 `ScriptTaskDrawer.tsx:232` toast.success + `:242` toast.error 已在 → bug 真实性存疑；pick 前需 user 提供 reproduce 步骤；4 候选成因优先级（高→低）：① mock 模式（useMock=true 时 mockService 不抛错 → toast.error 永不触发，最可能解释"看不到任何提示"）② axios 拦截器吞 401/403 错误码 ③ 用户混淆"保存脚本"指其他按钮 ④ toast util 场景失效（line 190 注释提示 to-do-list #2 曾遇）；建议 user 实测：先在 dev real-API 模式（VITE_USE_MOCK=false）尝试触发失败 + 看浏览器 console 是否报错 |
-| T-0098 | 参数模型 / KPI 指标库 / 告警库 数据字典平台化（XML 源文件 → 启动期 loader → DB schema → 双层缓存 → REST API → 产品管理 UI；本次提交仅交付 S2 整合设计稿 + XML 数据资产入库；**2026-05-07 v3 设计稿重组 + 三大业务流程图 + v1 实施计划落地** — 33 子任务 / 5 Phase / 10 决策待 PgM 拍板，**2026-05-07 D1-D10 全采纳推荐 + 36 子任务（T-0098-P1-01 .. T-0098-P5-06）拆出登记 §4.1 + 12 R-T0098-* 风险同步 risk-register**，详见 `docs/project/参数-KPI-告警-整合-实施计划.md` + §10 changelog；**新方案**取代 `omcgo/docs/param-model-delivery/参数模型重新设计方案.md` + `omcgo/docs/prd/product/产品模型*.md` 旧设计） | feat | F02+F03+F04 | P2 | in_dev | TBD | XL | — | `docs/design/参数-KPI-告警-整合设计方案.md` + `docs/project/参数-KPI-告警-整合-实施计划.md` | TBD | 2026-05-07 |
+| T-0098 | 参数模型 / KPI 指标库 / 告警库 数据字典平台化（XML 源文件 → 启动期 loader → DB schema → 双层缓存 → REST API → 产品管理 UI；本次提交仅交付 S2 整合设计稿 + XML 数据资产入库；**2026-05-07 v3 设计稿重组 + 三大业务流程图 + v1 实施计划落地** — 33 子任务 / 5 Phase / 10 决策待 PgM 拍板，**2026-05-07 D1-D10 全采纳推荐 + 36 子任务（T-0098-P1-01 .. T-0098-P5-06）拆出登记 §4.1 + 12 R-T0098-* 风险同步 risk-register + P1 6 条升格 planned/wave-3/Claude（前戏完成可开车）**，详见 `docs/project/参数-KPI-告警-整合-实施计划.md` + §10 changelog；**新方案**取代 `omcgo/docs/param-model-delivery/参数模型重新设计方案.md` + `omcgo/docs/prd/product/产品模型*.md` 旧设计） | feat | F02+F03+F04 | P2 | in_dev | Claude | XL | — | `docs/design/参数-KPI-告警-整合设计方案.md` + `docs/project/参数-KPI-告警-整合-实施计划.md` + `AI承诺对峙清单.md` W3 | wave-3 | 2026-05-07 |
 
 ### 4.1 T-0098 拆分子任务
 
 > 36 条子任务（T-0098-P1-01 .. T-0098-P5-06，2026-05-07 D1-D10 全采纳推荐后批量登记）已全量拆出。
-> 完整 sub-task 表（schema 与 §4 Triaged 主表对齐） → [`backlog/subtasks/T-0098-data-dict.md`](backlog/subtasks/T-0098-data-dict.md)
-> sprint planning 时从该文件挑选；本主表保留 umbrella 行 T-0098 不变（D5=B 准入边界 / D8=A 单 PR 约束等决策见 sub-task 文件 frontmatter）。
+> 完整 sub-task 表（schema 与 §3 Active 主表对齐 13 列） → [`backlog/subtasks/T-0098-data-dict.md`](backlog/subtasks/T-0098-data-dict.md)
+> sprint planning 时从该文件挑选；本主表保留 umbrella 行 T-0098（已升 wave-3/Claude）。
+>
+> **2026-05-07 前戏完成升格**：P1-01..P1-06 6 条已 **State→planned / Sprint=wave-3 / Owner=Claude**；wave-batched 模式（dev-pipeline §C.1）准入开发，Skip S0/S1；可直接 `/dev-pipeline pick T-0098-P1-01` 开车。**commit 形态**：6 commit + 单 PR（每 commit footer 各挂 `Backlog: T-0098-P1-0N`）；P2-01..P5-06 30 条仍 triaged 等下次 sprint planning。
 
 ---
 
@@ -394,6 +397,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-07 | P1-01..P1-06 升格 planned + 前戏完成 | T-0098 umbrella + 6 sub-task | Sprint=wave-3 / Owner=Claude；wave-batched §C.1 准入；6 commit + 单 PR 形态；可 `pick T-0098-P1-01` 开车 |
 | 2026-05-07 | D4=A 自动满足 + R-T0098-11 关闭 | T-0098-P1-02 / P1-06 Notes | products.xml 已入库（commit 50fa1a0c），P1-02 仅写 schema |
 | 2026-05-07 | PgM 决策 + 子任务批量登记 | T-0098 umbrella + 36 sub + 12 R-T0098-* | D1-D10 全采纳推荐；P1-P3 准 W3 / P4-P5 推迟 |
 | 2026-05-06 | S1+S2+...+S7 全过 | T-0027 拓扑自动分组规则引擎 | 11 commits + R-104 关闭；进 §6 Done |
