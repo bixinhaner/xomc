@@ -60,13 +60,21 @@ export const useUserStore = create<UserState>()(
       login: (user) => set({ currentUser: user, isAuthenticated: true }),
       setUser: (user) => set({ currentUser: user, isAuthenticated: true }),
 
-      setTokenPair: (pair: TokenPairResponse) =>
+      setTokenPair: (pair: TokenPairResponse) => {
+        if (!pair?.access_token || !pair?.refresh_token || !pair?.expires_at) {
+          throw new Error('setTokenPair: missing fields in token pair');
+        }
+        const expiresAt = new Date(pair.expires_at).getTime();
+        if (Number.isNaN(expiresAt)) {
+          throw new Error('setTokenPair: invalid expires_at format');
+        }
         set({
           accessToken: pair.access_token,
           refreshToken: pair.refresh_token,
-          tokenExpiresAt: new Date(pair.expires_at).getTime(),
+          tokenExpiresAt: expiresAt,
           isAuthenticated: true,
-        }),
+        });
+      },
 
       clearAuth: () => {
         set({

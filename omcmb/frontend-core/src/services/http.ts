@@ -169,23 +169,33 @@ http.interceptors.response.use(
       (originalRequest as unknown as Record<string, unknown>)._isRetry = true;
 
       try {
-        // Use plain axios to avoid interceptor loop
-        const { data } = await axios.post<{
-          access_token: string;
-          refresh_token: string;
-          expires_at: string;
-          token_type: string;
+        // 用裸 axios 避免 401 拦截器循环；裸 axios 不走信封剥壳拦截器，
+        // 后端 /auth/refresh 返回 {ret:1, msg, data:{access_token,...}}，必须手动剥一层。
+        const { data: envelope } = await axios.post<{
+          ret: number;
+          msg?: string;
+          data?: {
+            access_token: string;
+            refresh_token: string;
+            expires_at: string;
+            token_type?: string;
+          };
         }>(
           `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/auth/refresh`,
           { refresh_token: refreshToken }
         );
 
+        if (envelope.ret !== 1 || !envelope.data?.access_token) {
+          throw new Error(envelope.msg || 'refresh token failed');
+        }
+        const tokenPair = envelope.data;
+
         const { setTokenPair } = useUserStore.getState();
-        setTokenPair(data);
-        onTokenRefreshed(data.access_token);
+        setTokenPair(tokenPair);
+        onTokenRefreshed(tokenPair.access_token);
 
         if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+          originalRequest.headers.Authorization = `Bearer ${tokenPair.access_token}`;
         }
         return http(originalRequest);
       } catch {
