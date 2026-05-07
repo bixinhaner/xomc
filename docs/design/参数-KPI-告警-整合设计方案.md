@@ -2,7 +2,7 @@
 
 > 三个领域作为单一功能整体开发：共享"平台化数据字典"基础模式（XML 源文件 → 启动加载 → DB → 双层缓存 → REST API → React UI），实现层各自独立。
 >
-> 文档版本：2026-05-06
+> 文档版本：2026-05-07（v2 — 补 paramModel 参数级 `is_storable` / KPI XML `enabled` 属性 / 产品级 `enable_unknown_alarm` 三条策略字段）
 
 ---
 
@@ -112,12 +112,15 @@ omcgo/
 | data_type | VARCHAR(16) | STRING / INT / U_INT / BOOLEAN / DATE_TIME |
 | change_applies | VARCHAR(16) | Immediate / OnReboot |
 | min_value / max_value | BIGINT | |
+| **is_storable** | **BOOLEAN NOT NULL DEFAULT true** | **该参数是否纳入 OMC 自动同步与持久化；XML `store` 属性决定，缺省视为 true。false 时 sync 不写库（详见 §1.11 Path B）** |
 | is_active | BOOLEAN DEFAULT true | |
 | created_at / updated_at | TIMESTAMPTZ | |
 
 **索引**：
 - 唯一：`(param_model_id, standard_path)`
 - 反查：`(param_model_id, private_path) WHERE is_active`
+
+> `is_storable` 是 paramModel 维度的固有属性（属于"该参数有没有持久化价值"），不暴露为产品级覆盖；如需差异化，在 XML 离线工具里按 paramModel 维护。data_type 类业务上几乎不变；同理 is_storable 也建议谨慎调整。
 
 #### 1.2.3 `discovered_param_mappings` — 设备发现的映射（交集结果）
 
@@ -129,6 +132,7 @@ omcgo/
 | product_id | UUID FK → products | CASCADE 删除（产品删除时一并清理交集数据） |
 | software_version | VARCHAR(64) NOT NULL | 与 `devices.firmware_version` 同源 |
 | standard_path / private_path / entry_type / access / data_type / change_applies / min_value / max_value | 同 `param_mappings` | 部分元属性按 product.device_attrs_override 决定取设备上传值还是默认映射值 |
+| **is_storable** | **BOOLEAN NOT NULL DEFAULT true** | **从默认映射继承（不参与设备覆盖）；交集时复制 `param_mappings.is_storable` 当前值** |
 | is_active | BOOLEAN DEFAULT true | |
 | created_at / updated_at | TIMESTAMPTZ | |
 
@@ -310,12 +314,19 @@ standardPath 与 privatePath 的 `{i}` 出现次数**必须相等**（运行时�
         <param name="Device.DeviceInfo.CPI_Id"
                standardPath="Device.DeviceInfo.SAS.CpiId"
                access="READ_WRITE" type="STRING" max="256"
-               changeApplies="Immediate"/>
+               changeApplies="Immediate"
+               store="true"/>
+        <!-- store 属性可选；缺省视为 true。设为 false 表示该参数不纳入自动同步存储 -->
+        <param name="Device.DeviceInfo.X_Vendor_BuildTimestamp"
+               standardPath="Device.DeviceInfo.X_Vendor_BuildTimestamp"
+               access="READ_ONLY" type="STRING" max="64"
+               changeApplies="Immediate"
+               store="false"/>
     </parameters>
 </parameterModel>
 ```
 
-写入：`param_models`（1 行）+ `param_mappings`（N 行）
+写入：`param_models`（1 行）+ `param_mappings`（N 行，`is_storable = (store != "false")`）
 
 **格式 B & C 已合并** — 旧的 `product-name-routing.xml` + `param-model-routing.xml` 整合为新的 `products.xml`，详见 §4.5 XML 格式。新格式按"产品"组织，每个产品包含三字典引用 + N 条 productClass 正则。
 
@@ -423,12 +434,13 @@ UPDATE discovered_param_mappings d
 SET standard_path = p.standard_path,
     access = CASE WHEN (pr.device_attrs_override->>'access')::boolean THEN d.access ELSE p.access END,
     /* min_value / max_value / change_applies 同理 */
+    is_storable = p.is_storable,   -- 始终跟随默认映射（不参与设备覆盖）
     updated_at = now()
 FROM param_mappings p, products pr
 WHERE d.product_id = pr.id
   AND p.param_model_id = pr.param_model_id
   AND d.private_path = p.private_path
-  AND (d.standard_path IS DISTINCT FROM p.standard_path OR ...);
+  AND (d.standard_path IS DISTINCT FROM p.standard_path OR d.is_storable IS DISTINCT FROM p.is_storable OR ...);
 ```
 
 > 对账逻辑变更：UPDATE 时按 `device_attrs_override` 决定每个元属性是保留设备上传值还是刷新为新默认值。被覆盖的属性（设置为 true）始终保留 discovered 中的设备值；未被覆盖的属性才接受默认映射的更新。
@@ -486,10 +498,15 @@ WHERE d.product_id = pr.id
 | 环节 | 旧 | 新 |
 |------|-----|-----|
 | DataModel 获取 | `dmRegistry.ResolveForDevice` 三级回退 | `paramRegistry.ResolveParamModel(dev.ProductClass)` 正则路由 |
-| 同步计划 | `NewParameterTreeIterator(dm)` 遍历 JSONB | 从 `ParamMapping` 列表提取去重 privatePath 前缀 |
+| 同步计划 | `NewParameterTreeIterator(dm)` 遍历 JSONB | 从 `ParamMapping` 列表提取去重 privatePath 前缀（**仅 `is_storable=true` 的条目参与；详见下方"is_storable 过滤"**） |
 | 多实例发现 | GPN 分层 + `{N}` 实例号展开 | **删除**——直接 GPV 对象前缀，设备自动返回所有实例 |
 | 参数值读取 | GPV 按精确路径 | GPV 按对象前缀，一次取整个子树 |
-| 参数存储 | 原样存 privatePath | `TranslateToStandard` → 以 standardPath 存 |
+| 参数存储 | 原样存 privatePath | `TranslateToStandard` → 以 standardPath 存；落库前再按 `is_storable` 过滤一次（GPV 子树会带回不可存条目，丢弃即可） |
+
+**`is_storable` 过滤策略**：
+- 同步计划生成时：仅取 `is_storable=true` 的 privatePath 计算前缀集合（避免为纯不可存参数发起多余 GPV）
+- 接收 GPV 响应时：按精确路径反查 `param_mappings.is_storable`；false 的条目**不写入设备参数仓库**，但仍可保留在响应日志里供排查
+- Translator 与 Path A（模板下发）**不受影响**：模板用谁的 standardPath 就翻译谁的 privatePath，是否存储仅约束"自动同步是否落库"
 
 **删除的旧代码**：`ParameterTreeIterator` / GPN 分层调度 / `SyncPlan.Phase1GPNs` 等。
 
@@ -531,9 +548,9 @@ POST   /api/v1/param-models/:name/reload           # 从原始 XML 重新加载
 
 ```
 # 默认映射（XML 导入）
-GET    /api/v1/param-models/:name/mappings              # 列表（分页/搜索）
-POST   /api/v1/param-models/:name/mappings              # 手动创建
-PUT    /api/v1/param-models/:name/mappings/:id          # 更新
+GET    /api/v1/param-models/:name/mappings              # 列表（分页/搜索；响应含 is_storable）
+POST   /api/v1/param-models/:name/mappings              # 手动创建（含 is_storable，未传时默认 true）
+PUT    /api/v1/param-models/:name/mappings/:id          # 更新（含切换 is_storable）
 DELETE /api/v1/param-models/:name/mappings/:id          # 删除
 
 # 设备发现的交集映射
@@ -596,7 +613,7 @@ type ParamModelConfig struct {
 | Tab | 内容 |
 |-----|------|
 | 参数模型 | **顶部工具栏**：「导入 XML」/「从服务器加载」/「刷新缓存」。**表格**（Name / 总条目 / 对象 / 参数 / 加载来源 / is_active / 操作）。**操作列**：编辑（弹窗改 description / is_active）/ 重新加载（reload，从原始 XML 刷新）/ 导出 XML / 删除（二次确认，连带 mappings + discovered 全部 CASCADE）。点击行展开映射详情抽屉，抽屉内分子 Tab：「默认映射」「设备映射」（按 swVersion 分组） |
-| 默认映射抽屉 | **顶部**：「新增映射」按钮 + 关键字搜索。**表格**（standardPath / privatePath / type / access / changeApplies / min/max / 操作）。**操作列**：编辑（弹窗改字段，含 `{i}` 占位符校验）/ 删除（二次确认） |
+| 默认映射抽屉 | **顶部**：「新增映射」按钮 + 关键字搜索 + 「仅显示不可存」过滤。**表格**（standardPath / privatePath / type / access / changeApplies / min/max / **storable** / 操作）。**操作列**：编辑（弹窗改字段，含 `{i}` 占位符校验 + storable 切换）/ 删除（二次确认） |
 | 设备映射抽屉 | 按 swVersion 分组的下拉选择 + 表格只读展示 + 「删除该版本」按钮（清掉某个 swVersion 的全部交集，不影响默认映射） |
 | 标准参数树 | Ant Tree 组件，从 standard_params 构建层级树 + 关键字搜索。**super_admin 可见**：节点右侧「+ 新增子节点」/「编辑」/「删除」按钮（删除前校验未被任何 paramModel 引用，被引用时弹窗提示拒绝） |
 | OUI 注册表 | 沿用现有功能 |
@@ -645,8 +662,10 @@ KPI 指标库是 PM 性能管理子系统的元数据基础，定义"采集什�
 | 总数 | 1,409 | 73 | 282 |
 | 功能集节点 | 22 | 8 | 15 |
 | 平台数 | 8（保留，BAIBLQ 已合并入 BLQ） | 1（BSC） | 1（BaiBNQ） |
-| 默认启用 | 263 | 53 | 282（全量） |
+| 默认启用 | 263（XML enabled 属性决定，缺省 true） | 53（同 ENB 规则） | 282（XML 全部 enabled=true） |
 | `indicator_level` 字段 | 有 | 有 | **无** |
+
+> **默认启用列表的来源**：每个 indicator 在 XML 中携带 `enabled="true|false"` 属性（缺省视为 true）；loader 加载时按 `(operator_code='default', indicator_id)` upsert 到对应 device 的 `enabled_indicators_*` 表。运营商可在管理面页面（§2.9 启用配置 Tab）按运营商代码覆盖默认启用集，但 default 行始终由 XML 真相源刷新。
 
 > **设计抉择**：三套独立表 vs 单表 + device_type 列。
 > 选择独立表的原因：(1) 指标 ID 命名空间互不重叠（`C00...` ENB / `CGSM...` GSM / `C01...` GNB）；(2) GNB 没有 `indicator_level` 字段，强行合并需要 nullable 列；(3) 三套数据演进节奏可能不同。Java 类比：相当于三个独立 Entity，没有公共抽象父类。
@@ -704,25 +723,27 @@ KPI 指标库是 PM 性能管理子系统的元数据基础，定义"采集什�
 
 唯一约束：`(platform_name, indicator_id)`
 
-`enabled_indicators_enb` — 启用配置（默认 263 行）
+`enabled_indicators_enb` — 启用配置（默认 263 行，**操作员维度**；行数随 XML 中 `enabled="true"` 数量浮动）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
 | id | UUID PK | |
-| operator_code | VARCHAR(32) | "default" 或具体运营商代码 |
+| operator_code | VARCHAR(32) | "default"（XML 真相源；其他运营商行可覆盖） |
 | indicator_id | VARCHAR(16) FK → perf_indicators_enb | |
 | enabled_at | TIMESTAMPTZ | |
 
 唯一约束：`(operator_code, indicator_id)`
 
+> **写入语义**：仅"启用"才会有行；"禁用"=不存在该行。loader 重导入时，先按 `operator_code='default'` 删除无新 enabled=true 命中的旧行，再 upsert 新启用集，**绝不动其他 operator_code 的覆盖行**。
+
 
 #### 2.3.3 GSM 四件套
 
-结构与 ENB 完全平行。数据规模：73 + 8 + 73 + 53。仅 BSC 平台。
+结构与 ENB 完全平行。数据规模：73 + 8 + 73 + 53。仅 BSC 平台。`enabled_indicators_gsm` 默认 53 行同样由 XML `enabled` 属性决定（缺省 true）。
 
 #### 2.3.4 GNB 四件套
 
-结构与 ENB 平行，**但 `perf_indicators_gnb` 无 `indicator_level` 列**。数据规模：282 + 15 + 282 + 282（全量启用）。仅 BaiBNQ 平台（与 TR069 paramModel 同名，旧 KPI 命名 BaiBNX 已统一为 BaiBNQ）。
+结构与 ENB 平行，**但 `perf_indicators_gnb` 无 `indicator_level` 列**。数据规模：282 + 15 + 282 + 282（XML 全部 `enabled="true"`，因此默认全量启用）。仅 BaiBNQ 平台（与 TR069 paramModel 同名，旧 KPI 命名 BaiBNX 已统一为 BaiBNQ）。如未来需要默认禁用某些指标，在 XML 中改 `enabled="false"` 即可，无需改代码。
 
 ### 2.4 Go 后端架构
 
@@ -804,14 +825,24 @@ data/indicator-library/
 <?xml version="1.0" encoding="UTF-8"?>
 <indicatorModel platform="BLQ" indicatorCount="676">
     <indicators>
-        <!-- Counter -->
+        <!-- Counter，enabled 默认 true，写出来更直观；省略也视为 true -->
         <indicator id="C000000001" enName="RRC.SetupTimeMean" reportKey="RRC.SetupTimeMean"
                    cnName="RRC连接平均建立时长"
                    isBuildIn="1" isCounter="1"
                    dataType="整数" unitId="ms" statisType="avg"
                    arithmetic="C000000001"
                    indicatorLevel="device"
-                   formula="RRC.SetupTimeMean"/>
+                   formula="RRC.SetupTimeMean"
+                   enabled="true"/>
+        <!-- 显式禁用 — 例如默认不上报的内部计数器 -->
+        <indicator id="C000000999" enName="Internal.DebugCounter" reportKey="Internal.DebugCounter"
+                   cnName="内部调试计数器"
+                   isBuildIn="1" isCounter="1"
+                   dataType="整数" unitId="number" statisType="sum"
+                   arithmetic="C000000999"
+                   indicatorLevel="device"
+                   formula="Internal.DebugCounter"
+                   enabled="false"/>
         <!-- KPI -->
         <indicator id="K900010001" enName="KPI.RRCSetupSuccessRate" reportKey="KPI.RRCSetupSuccessRate"
                    cnName="RRC连接建立成功率"
@@ -819,7 +850,8 @@ data/indicator-library/
                    unitId="%" statisType="pct"
                    arithmetic="(C000000012/C000000005)*100"
                    indicatorLevel="device"
-                   formula="RRC.SuccConnEstab/(RRC.AttConnEstab)*100"/>
+                   formula="RRC.SuccConnEstab/(RRC.AttConnEstab)*100"
+                   enabled="true"/>
     </indicators>
 </indicatorModel>
 ```
@@ -829,11 +861,12 @@ GNB 文件**省略 `indicatorLevel`** 属性，根元素带 `deviceType="GNB"`�
 #### 加载流程
 
 1. 扫描目录，按文件路径推断 device_type（`enb/*.xml` → ENB；`GSM.xml` → GSM；`GNB.xml` → GNB）
-2. 解析 XML → 指标 + 公式
-3. **多文件合并去重**：同一 indicator_id 在多个 ENB 平台 XML 中重复出现 → 保留单条 indicator 定义，每个出现位置生成一条 platform_formula（按 platform_name 区分）
+2. 解析 XML → 指标 + 公式（含 `enabled` 属性，缺省 true）
+3. **多文件合并去重**：同一 indicator_id 在多个 ENB 平台 XML 中重复出现 → 保留单条 indicator 定义，每个出现位置生成一条 platform_formula（按 platform_name 区分）；**`enabled` 取多文件 OR**（任一文件标记启用即视为默认启用），避免某平台单独禁用整体被关掉
 4. 校验：indicator 字段完整性、KPI 引用的 Counter ID 存在性
 5. Upsert 写入对应 device_type 的四件套表（事务）
-6. 触发缓存失效
+6. **同步默认启用集**到 `enabled_indicators_<deviceType>`：在事务内 `WHERE operator_code='default'` 仅删除"上次启用 → 本次未启用"的差集，再 upsert 新启用集；**完全不动其他 operator_code 行**，保留运营商覆盖配置
+7. 触发缓存失效
 
 #### 已剔除的历史平台（不生成 XML、不导入）
 
@@ -1007,11 +1040,36 @@ internal/alarm/definition/
 ```
 设备上报 alarm.identifier="10001"
   → AlarmDefinition Registry.GetByIdentifier("10001")
-  → 取出 cn_name / severity / probable_cause / suggestion
-  → 写入活动告警表 alarms（含展示名 + 严重级）
+  │
+  ├─ 命中 → 取出 cn_name / severity / probable_cause / suggestion
+  │         → 写入活动告警表 alarms（含展示名 + 严重级）
+  │
+  └─ 未命中（identifier 不在告警库）
+       → 查 device.product_id → product.enable_unknown_alarm（详见 §4.2.1）
+         │
+         ├─ false（默认；含 product_id IS NULL 的孤儿设备）
+         │    → 丢弃，记 INFO 日志（device_id / identifier / ne_type / 时间戳）
+         │    → 不写活动告警表；运维通过日志定位"告警库需要补哪些 identifier"
+         │
+         └─ true（管理员显式开启的产品）
+              → 用 fallback 信息构造一条"未识别告警"写入活动告警表：
+                  · cn_name = "未识别告警 [{identifier}]"
+                  · en_name = "Unknown Alarm [{identifier}]"
+                  · severity = Warning（系统硬编码 fallback，不依赖告警库）
+                  · ne_type = 取自设备 productClass 路由出的 product.alarm_ne_type
+                  · cn/en_probable_cause = "告警库未定义此 identifier，请联系管理员补录"
+                  · 内部字段标记 is_unknown=true（用于运维筛选与告警库治理）
+              → 写活动告警表；指标 alarm_unknown_total{ne_type=…} +1
 ```
 
 Registry 通过 `sync.Map` 全量驻留 442 条定义（数据规模小，无内存压力）。Redis 仅作为多实例失效协调，不为单条查询。
+
+**未识别告警的运维闭环**：
+- 活动告警页支持按 `is_unknown=true` 过滤，方便管理员一眼看到"哪些 identifier 该补进告警库"
+- 一旦告警库补录该 identifier，**不回填**已存在的未知告警记录（保留历史现场），新上报开始按正常路径写入
+- 提供端点 `GET /api/v1/alarm-definitions/unknown-stats?productId=xxx` 聚合最近 7 天该产品的未知 identifier 频次 → 治理输入
+
+> `alarms` 表需要预留 `is_unknown BOOLEAN NOT NULL DEFAULT false` 字段（属于 F04 表结构，不在本设计 §3.2 范围内列出 DDL，但 P1 迁移文件需带）。
 
 ### 3.4 XML 加载器
 
@@ -1070,6 +1128,10 @@ POST   /api/v1/alarm-definitions/import             # 上传 XML
 POST   /api/v1/alarm-definitions/import-directory   # 从目录加载
 
 GET    /api/v1/alarm-severity-levels                # 严重级参考表（**仅 GET，不开放写**——4 级是行业标准固定值）
+
+# 未识别告警治理（详见 §3.3）
+GET    /api/v1/alarm-definitions/unknown-stats      # 聚合最近 N 天 is_unknown=true 的告警频次
+       ?productId=xxx&days=7                        # 返回 [{identifier, count, lastSeenAt, neType}]
 
 POST   /api/v1/alarm-definitions/cache/refresh
 ```
@@ -1156,6 +1218,7 @@ type AlarmDefinitionConfig struct {
 | alarm_ne_type | VARCHAR(16) NOT NULL | 告警 ne_type（软引用 alarm_definitions.ne_type） |
 | **enable_filetype11** | **BOOLEAN NOT NULL DEFAULT true** | **该产品 Bootstrap 时是否下发 Upload(FileType=11) 拉取设备实际参数模型** |
 | **device_attrs_override** | **JSONB NOT NULL DEFAULT '{}'** | **交集时哪些元属性用设备上传值覆盖默认；JSON 形如 `{"access":true,"min_value":true,"max_value":true,"change_applies":false,"data_type":false}`；data_type 业务上不开放（UI 禁用），即使 JSON 写 true 也建议拒绝** |
+| **enable_unknown_alarm** | **BOOLEAN NOT NULL DEFAULT false** | **该产品上报告警时，identifier 不在告警库定义中是否仍写入活动告警表（fallback severity=Warning，标记 is_unknown=true）；详见 §3.3 接收路径** |
 | created_at / updated_at | TIMESTAMPTZ | |
 
 **索引**：
@@ -1231,9 +1294,9 @@ internal/product/
 ```
 # 产品 CRUD
 GET    /api/v1/products                           # 列表（支持 vendor / tech / 关键字过滤；含每产品的 device 数）
-GET    /api/v1/products/:id                       # 详情（含 patterns 列表 + 三字典预览统计 + enable_filetype11 + device_attrs_override）
-POST   /api/v1/products                           # 新建（含 enable_filetype11 / device_attrs_override，未传时取默认值 true / {}）
-PUT    /api/v1/products/:id                       # 更新（含改三引用 / enable_filetype11 / device_attrs_override；data_type=true 被拒绝）
+GET    /api/v1/products/:id                       # 详情（含 patterns 列表 + 三字典预览统计 + enable_filetype11 + device_attrs_override + enable_unknown_alarm）
+POST   /api/v1/products                           # 新建（含 enable_filetype11 / device_attrs_override / enable_unknown_alarm，未传时取默认值 true / {} / false）
+PUT    /api/v1/products/:id                       # 更新（含改三引用 / enable_filetype11 / device_attrs_override / enable_unknown_alarm；data_type=true 被拒绝）
 DELETE /api/v1/products/:id                       # 删除（被 device 引用时拒绝，返回 409 + 引用清单；CASCADE 删除 product_class_patterns 与 discovered_param_mappings）
 
 # 上传策略 — 重置 discovered（管理员手动加速）
@@ -1274,7 +1337,7 @@ POST   /api/v1/products/cache/refresh
     <deviceAttrsOverride access="false" min_value="false" max_value="false"
                          change_applies="false" data_type="false"/>
     <indicator deviceType="enb" platform="BLQ"/>
-    <alarm neType="ENB"/>
+    <alarm neType="ENB" enableUnknownAlarm="false"/>
     <patterns>
       <pattern globalOrder="5">FAP/\w+(BS31)\w+/CA</pattern>
       <pattern globalOrder="6">FAP/\w+(BS31)\w+/DC</pattern>
@@ -1293,12 +1356,13 @@ POST   /api/v1/products/cache/refresh
 |------|------------------------|------|
 | `<enableFileType11>` | `true` | 该产品 Bootstrap 时是否下发 `Upload(FileType=11)` 拉取设备实际参数模型 |
 | `<deviceAttrsOverride>` | 5 个属性全 false | 交集时哪些元属性用设备上传值覆盖默认；属性间独立选择 |
+| `<alarm enableUnknownAlarm="…">` | `false` | identifier 不在告警库时是否仍写活动告警表（详见 §3.3）；属性写 `<alarm>` 元素上而非独立元素，与 `neType` 同源 |
 
 **加载流程**：
 1. 解析 XML → 校验每个 product 的三引用都在对应字典中存在（paramModel.name / KPI platform / alarm ne_type）
 2. 校验 globalOrder 跨所有 pattern 唯一
 3. **校验 `device_attrs_override.data_type` 不为 true**（业务上禁止覆盖类型，UI 禁用，XML 写了视为非法）
-4. 事务内：清空 `product_class_patterns` + Upsert `products`（含 enable_filetype11 / device_attrs_override JSONB 字段）+ 按 globalOrder 插入新 patterns
+4. 事务内：清空 `product_class_patterns` + Upsert `products`（含 enable_filetype11 / device_attrs_override JSONB / enable_unknown_alarm 字段）+ 按 globalOrder 插入新 patterns
 5. 触发缓存失效
 
 ### 4.6 Redis Key
@@ -1405,6 +1469,22 @@ type ProductConfig struct {
       - 影响 K 台绑定设备
       - 后续行为：FileType=11 启用时，下次设备 Bootstrap 重新触发 Upload；关闭时直接用默认映射
    确认后立即 DELETE WHERE product_id = ?
+```
+
+**段 2.2 告警接收策略**（紧接段 2.1，受 enable_unknown_alarm 控制）：
+
+```
+☐ 支持未识别的告警（enable_unknown_alarm，默认关闭）
+   开启后：当设备上报告警的 identifier 在告警库中未定义时，仍写入活动告警表
+            · severity 默认 Warning；cn_name="未识别告警 [{identifier}]"
+            · 标记 is_unknown=true，活动告警页可按此过滤
+   ⓘ 默认关闭的理由：避免未知告警淹没活动告警表；告警库覆盖率应是治理目标，不应通过宽松通道掩盖
+   ⓘ 关闭时：未知 identifier 仅记 INFO 日志，不入活动告警表
+   ⓘ 修改本配置仅影响**此后新上报**的告警，已存在的活动告警不会受影响
+
+[查看该产品最近 7 天未识别告警频次]
+   → 跳转 GET /api/v1/alarm-definitions/unknown-stats?productId={id}
+     列出 (identifier, count, lastSeenAt, ne_type) → 治理输入
 ```
 
 **段 3 productClass 正则关联**：
@@ -1811,6 +1891,13 @@ omcgo/data/alarm-definitions/   (7 XML)
 | P2 | 单元测试 | **enable_filetype11 = false 时跳过 Upload(FileType=11) 流程**；**device_attrs_override 各属性勾选/未勾选时交集结果按规则取设备值或默认值**；**data_type=true 在 API 层被拒绝（HTTP 400）** |
 | P3 | curl | **DELETE /api/v1/products/:id/discovered 清空交集；下次设备 Inform 触发重新上传 → 新 discovered 记录写入** |
 | P4 | 浏览器手动 | 产品编辑抽屉 §2.1 段：勾选/取消 device_attrs_override 各项；data_type checkbox 永远 disabled；「立即重置 discovered」按钮弹确认对话框含影响行数 |
+| P1 | 启动加载 | **`param_mappings.is_storable` 默认值正确**（XML 不写 store 时取 true）；**XML `store="false"` 的条目在 DB 中 is_storable=false** |
+| P2 | 单元测试 | **自动同步跳过 `is_storable=false` 的参数**：构造一个 paramModel 含 5 条参数（其中 1 条 storable=false），sync 后只有 4 条写入设备参数仓库；**对账 SQL 重新导入 XML 切换 storable 时 discovered 行同步刷新** |
+| P1 | 启动加载 | **`enabled_indicators_<deviceType>` 默认行数 = XML 中 `enabled="true"` 的指标数**；XML 改 `enabled="false"` 重新加载后该行被删；**其他 operator_code 的覆盖行不被动到** |
+| P2 | 单元测试 | **多文件合并 enabled OR 规则**：同一 indicator 在 BLQ.xml `enabled="false"` 但在 ALL.xml `enabled="true"` → 默认启用集中存在 |
+| P2 | 单元测试 | **enable_unknown_alarm=false（默认）时未知 identifier 不入活动告警**；**=true 时构造 fallback 记录写入，severity=Warning, is_unknown=true**；**device.product_id IS NULL 的孤儿设备走默认 false 分支** |
+| P3 | curl | `GET /api/v1/alarm-definitions/unknown-stats?productId=xxx&days=7` 返回最近未知 identifier 频次列表 |
+| P4 | 浏览器手动 | 产品编辑抽屉新段 2.2：勾选 enable_unknown_alarm；活动告警页按 is_unknown 过滤显示未知告警；「查看未识别告警频次」跳转端点正确 |
 | P5 | grep | `grep -r "datamodel" internal/` 无业务引用；旧 KPI/告警实现关键字无残留 |
 
 ---
@@ -1846,6 +1933,12 @@ omcgo/data/alarm-definitions/   (7 XML)
 | discovered 表键改造 | **从 `(paramModelId, swVersion)` 改为 `(product_id, swVersion)`** | 同一 paramModel 可能被多个产品共享，但每个产品的 enable_filetype11 / device_attrs_override 配置不同；按 product 隔离避免互相覆盖 |
 | 关闭 enable_filetype11 时已有 discovered 数据处理 | **保留**（不自动失效）；如需立即清理，管理员使用 §4.9 重置按钮 | "配置变更"和"数据清理"解耦，避免误关开关导致运行时雪崩；显式重置更安全 |
 | discovered 刷新策略 | **B 主动重置**（UI 按钮 + REST API），不自动后台批量重跑 | 自动批量影响范围大、运维不可控；管理员主动操作更可预测 |
+| "是否存储"开关粒度 | **paramModel/参数维度（XML store 属性）**，不下沉到产品级覆盖 | 是否纳入持久化是参数本身的属性（与产品无关）；产品级覆盖会让同一参数在不同产品行为不一致，徒增混乱；`is_storable` 缺省 true 不影响现有行为 |
+| KPI 默认启用集来源 | **由 indicator XML `enabled` 属性决定**（缺省 true），loader 只刷新 `operator_code='default'` 行 | 旧设计"默认 263 行"无明确出处易迷失；XML 是真相源符合本方案统一原则；运营商覆盖行不动，避免治理动作互相破坏 |
+| 多文件合并时 enabled 取值规则 | **OR 合并**（任一文件 enabled=true 即默认启用） | 一个 indicator 在多平台共存时，部分平台禁用不应影响整体默认启用；如需平台级禁用，另用平台公式表的删除/不启用机制（非本字段范畴） |
+| 未识别告警处理粒度 | **产品级开关 `enable_unknown_alarm`（默认 false）**；不做系统级开关 | 不同厂商/产品对未知 identifier 的处置策略差异大；默认严格丢弃避免淹没活动告警表，宽松模式按需开启；运维可通过 `unknown-stats` 端点持续治理告警库覆盖率 |
+| 未识别告警的孤儿设备处理 | **走默认 false 分支**（即丢弃记日志） | 孤儿设备本身已是治理目标（§4.7），叠加未知告警保留只会放大噪声；先把设备绑定到产品，再决定开不开 unknown alarm |
+| 未识别告警写入后的回填策略 | **不回填**已存在的未知告警记录 | 历史现场数据应保留，告警库后补不应改写历史；新上报开始按正常路径写入即可 |
 
 ---
 
