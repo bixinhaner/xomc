@@ -229,6 +229,20 @@ interface BackendPermission {
   action: string;
 }
 
+// Backend api_endpoint shape — matches Go ApiEndpointDB JSON tags (snake_case).
+// http.ts 不转 body 字段名，必须经 mapBackendApiEndpoint 转成前端 ApiEndpoint。
+interface BackendApiEndpoint {
+  id: string;
+  path: string;
+  method: string;
+  name: string;
+  description: string;
+  api_group: string;
+  is_auto: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // Backend group model
 interface BackendGroup {
   id: string;
@@ -404,6 +418,24 @@ function toBackendApiEndpointBody(payload: Partial<ApiEndpointPayload>): Record<
   if (payload.description !== undefined) body.description = payload.description;
   if (payload.apiGroup !== undefined) body.api_group = payload.apiGroup;
   return body;
+}
+
+// 后端 ApiEndpointDB JSON 字段全 snake_case，前端 ApiEndpoint 接口走 camelCase。
+// http.ts 仅转 query 参数，不动 body，所以列表/创建/更新的响应必须经此映射，否则
+// record.apiGroup 永远 undefined → 表格列空、编辑下拉不回显。
+function mapBackendApiEndpoint(b: BackendApiEndpoint): ApiEndpoint {
+  return {
+    id: b.id,
+    path: b.path,
+    method: b.method,
+    name: b.name ?? '',
+    description: b.description ?? '',
+    apiGroup: b.api_group ?? '',
+    // module 字段类型上是 string（早期遗留），为兼容现有列定义保留 path 兜底。
+    module: b.api_group ?? '',
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
 }
 
 export const adminApi = {
@@ -852,9 +884,9 @@ export const adminApi = {
 
   // API 管理（CRUD）
   async getApiEndpoints(params: ApiEndpointListParams): Promise<PageResponse<ApiEndpoint>> {
-    const { data } = await http.get<BackendListResponse<ApiEndpoint>>('/admin/api-endpoints', { params });
+    const { data } = await http.get<BackendListResponse<BackendApiEndpoint>>('/admin/api-endpoints', { params });
     return {
-      items: data.items || [],
+      items: (data.items || []).map(mapBackendApiEndpoint),
       total: data.total,
       page: data.page,
       pageSize: data.pageSize,
@@ -862,15 +894,14 @@ export const adminApi = {
   },
 
   async createApiEndpoint(payload: ApiEndpointPayload): Promise<ApiEndpoint> {
-    // 后端 CreateApiEndpointRequest.ApiGroup json tag 为 "api_group"，
-    // http.ts 不做 body 字段名转换，必须在此显式映射。
-    const { data } = await http.post<ApiEndpoint>('/admin/api-endpoints', toBackendApiEndpointBody(payload));
-    return data;
+    // 请求 body 字段：apiGroup → api_group；响应 body 字段：api_group → apiGroup。
+    const { data } = await http.post<BackendApiEndpoint>('/admin/api-endpoints', toBackendApiEndpointBody(payload));
+    return mapBackendApiEndpoint(data);
   },
 
   async updateApiEndpoint(id: string, payload: Partial<ApiEndpointPayload>): Promise<ApiEndpoint> {
-    const { data } = await http.put<ApiEndpoint>(`/admin/api-endpoints/${id}`, toBackendApiEndpointBody(payload));
-    return data;
+    const { data } = await http.put<BackendApiEndpoint>(`/admin/api-endpoints/${id}`, toBackendApiEndpointBody(payload));
+    return mapBackendApiEndpoint(data);
   },
 
   async deleteApiEndpoint(id: string): Promise<void> {
@@ -887,8 +918,10 @@ export const adminApi = {
   },
 
   async syncApiEndpoints(): Promise<SyncApiResult> {
-    const { data } = await http.post<{ data: SyncApiResult }>('/admin/api-endpoints/sync');
-    return data.data;
+    // 后端 SyncApiEndpoints handler 直接 c.JSON(StatusOK, result)，无 {data:...} 包裹。
+    // 之前读 data.data → undefined → 弹窗永远显示 0 / 0 / 0。
+    const { data } = await http.post<SyncApiResult>('/admin/api-endpoints/sync');
+    return data;
   },
 
   // Role device groups with network types
