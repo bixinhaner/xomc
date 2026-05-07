@@ -68,10 +68,10 @@
 |------|------|------|------|
 | Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
 | `done` | 84 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 T-0098-P1-01..P1-06 2026-05-07，**P1 wave 收官**） |
-| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 条 2026-05-07 全部 done，P1 wave 收官；30 子任务 P2-P5 待 sprint planning） |
+| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 条 2026-05-07 全部 done，P1 wave 收官；P2 11 条 2026-05-07 升格 planned 等 wave-batched 落地；P3-P5 19 子任务待下轮 planning） |
 | `in_design` | 0 | — | — |
-| `planned` | 6 | — | （T-0098-P1-02..P1-06 已于 2026-05-07 wave-batched 全部 done 收官；其他 6 条 planned 来自其他任务） |
-| `triaged` | 37 | — | T-0098 30 sub-task 占 30 条（P2-P5；P1 6 条 2026-05-07 升格 planned）；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
+| `planned` | 17 | — | P1 历史升格行已 done；新增 T-0098-P2-01..P2-11 11 条 2026-05-07 升格 wave-3 + Owner=Claude；其他 6 条来自其他任务 |
+| `triaged` | 26 | — | T-0098 19 sub-task 占 19 条（P3-P5；P1 6 条 + P2 11 条 2026-05-07 升格 planned）；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**）|
@@ -397,11 +397,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-07 | **P2 前戏完成升格 + 双入口准入** | T-0098-P2-01..P2-11 11 sub-task | State→planned / Sprint=wave-3 / Owner=Claude；P2-01 (F02 ProductRegistry) + P2-09 (F03 KPI loader) 两个独立入口可并发；其余 9 条因路径集中 `internal/provision/` 串行；wave-batched §C.1 准入 Skip S0/S1；triaged 37→26 / planned 6→17 |
 | 2026-05-07 | **P1 wave 收官** S2..S7 wave-batched 全过 | T-0098-P1-02..P1-06 5 commit | P1-02 products schema → P1-03 param 字典 + 跨域 FK → P1-04 alarm 字典 + 4 种子 → P1-05 KPI 命名 D1=A docs → P1-06 4 Loader + provider + 修复 entry_type 列宽；**DoD 12 项行数全过**（9+4781+2001 / 15+29 / 4+442 / 1764 / 6254）；6 sub-task 全部 done；wave-3 P1 阶段封箱 |
 | 2026-05-07 | S2..S7 wave-batched 全过 | T-0098-P1-01 dictloader 框架 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；planned → done；wave-3 P1 首发 |
 | 2026-05-07 | P1-01..P1-06 升格 planned + 前戏完成 | T-0098 umbrella + 6 sub-task | Sprint=wave-3 / Owner=Claude；wave-batched §C.1 准入；6 commit + 单 PR 形态 |
 | 2026-05-07 | D4=A 自动满足 + R-T0098-11 关闭 | T-0098-P1-02 / P1-06 Notes | products.xml 已入库（commit 50fa1a0c），P1-02 仅写 schema |
-| 2026-05-07 | PgM 决策 + 子任务批量登记 | T-0098 umbrella + 36 sub + 12 R-T0098-* | D1-D10 全采纳推荐；P1-P3 准 W3 / P4-P5 推迟 |
 
 ---
 
