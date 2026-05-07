@@ -31,14 +31,14 @@ func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, additional_info, created_at, updated_at,
-			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause, is_unknown)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
 		alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier, alarm.Severity,
 		alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description, alarm.Status,
 		alarm.RaisedAt, additionalJSON, alarm.CreatedAt, alarm.UpdatedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.IsRead, alarm.AckCount,
-		alarm.FirstRaisedAt, alarm.LastUpdatedAt, alarm.ProbableCause,
+		alarm.FirstRaisedAt, alarm.LastUpdatedAt, alarm.ProbableCause, alarm.IsUnknown,
 	)
 	if err != nil {
 		return fmt.Errorf("insert alarms_active: %w", err)
@@ -277,6 +277,8 @@ var activeColumns = []string{
 	"device_name", "technology", "alarm_source", "event_type",
 	"network_location", "explicit_cause", "is_read", "ack_count",
 	"first_raised_at", "last_updated_at", "probable_cause",
+	// T-0098 P2-10
+	"is_unknown",
 }
 
 func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
@@ -411,7 +413,7 @@ func scanAlarmRow(row scannable) (*model.Alarm, error) {
 		&a.AcknowledgedAt, &a.AcknowledgedBy, &a.AckNote, &additionalJSON, &a.CreatedAt, &a.UpdatedAt,
 		&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
 		&a.NetworkLocation, &a.ExplicitCause, &a.IsRead, &a.AckCount,
-		&a.FirstRaisedAt, &a.LastUpdatedAt, &a.ProbableCause); err != nil {
+		&a.FirstRaisedAt, &a.LastUpdatedAt, &a.ProbableCause, &a.IsUnknown); err != nil {
 		if gerr.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("alarm not found: %w", commonerrors.ErrNotFound)
 		}
