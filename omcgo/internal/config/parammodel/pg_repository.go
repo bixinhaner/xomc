@@ -128,3 +128,65 @@ func strDeref(p *string) string {
 	}
 	return *p
 }
+
+// UpsertDiscoveredMappings 实现 IntersectRepository。
+//
+// 写入语义：DELETE WHERE (product_id, software_version) + INSERT 给定 mappings，
+// 单事务保证。len(mappings)==0 时仅执行 DELETE（用于"立即重置"路径）。
+//
+// id 列由 PG `gen_random_uuid()` 默认生成；调用方传入零值即可。
+func (r *PgRepository) UpsertDiscoveredMappings(ctx context.Context, productID uuid.UUID, swVersion string, mappings []ParamMapping) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx upsert discovered: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	delSQL, delArgs, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Delete("discovered_param_mappings").
+		Where(sq.Eq{"product_id": productID, "software_version": swVersion}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete discovered: %w", err)
+	}
+	if _, err := tx.Exec(ctx, delSQL, delArgs...); err != nil {
+		return fmt.Errorf("exec delete discovered %s/%s: %w", productID, swVersion, err)
+	}
+
+	if len(mappings) > 0 {
+		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+			Insert("discovered_param_mappings").
+			Columns(
+				"product_id", "software_version", "standard_path", "private_path",
+				"entry_type", "access", "data_type", "change_applies",
+				"min_value", "max_value", "is_storable", "is_active",
+			)
+		for _, m := range mappings {
+			ib = ib.Values(
+				productID, swVersion, m.StandardPath, m.PrivatePath,
+				m.EntryType, nilIfEmpty(m.Access), nilIfEmpty(m.DataType), nilIfEmpty(m.ChangeApplies),
+				m.MinValue, m.MaxValue, m.IsStorable, m.IsActive,
+			)
+		}
+		insSQL, insArgs, err := ib.ToSql()
+		if err != nil {
+			return fmt.Errorf("build insert discovered: %w", err)
+		}
+		if _, err := tx.Exec(ctx, insSQL, insArgs...); err != nil {
+			return fmt.Errorf("exec insert discovered %s/%s: %w", productID, swVersion, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit upsert discovered: %w", err)
+	}
+	return nil
+}
+
+// nilIfEmpty 把空字符串转 nil，匹配 access/data_type/change_applies 列的可空语义。
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}

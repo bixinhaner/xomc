@@ -69,5 +69,17 @@ func initParamRegistryModule(c *Container) error {
 	}
 
 	c.ParamRegistry = registry
+
+	// T-0098 P2-03：IntersectService 与 Registry 共用同一个 PgRepository（读+写）
+	// 与同一个 productGetter；写完后通过 Registry.InvalidateProduct 失效缓存。
+	intersectMetrics := parammodel.NewIntersectMetrics(c.MetricsReg)
+	c.ParamIntersect = parammodel.NewIntersectService(
+		repo,
+		repo,
+		c.ProductRegistry,
+		registry,
+		intersectMetrics,
+		logger,
+	)
 	return nil
 }

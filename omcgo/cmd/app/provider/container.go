@@ -62,6 +62,9 @@ type Container struct {
 	// ParamRegistry 模块设置（T-0098 P2-02）
 	ParamRegistry *parammodel.Registry
 
+	// ParamIntersect 模块设置（T-0098 P2-03）
+	ParamIntersect *parammodel.IntersectService
+
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry
 	DMImporter      *datamodel.DataModelImporter
