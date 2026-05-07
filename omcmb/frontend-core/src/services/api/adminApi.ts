@@ -825,20 +825,24 @@ export const adminApi = {
   },
 
   // ---- Dictionary management ----
+  // 历史 API 形态为 {code, data, msg}（旧 gin-vue-admin 风格）；后端 v0.6 起统一切到
+  // {ret, msg, data} 信封（参 omgo/docs/architecture/api-envelope.md），http.ts 拦截器
+  // 自动剥掉外层信封 → 业务侧 `const { data } = await http.get(...)` 拿到的就是裸业务体。
+  // 因此这里所有读取直接走 `data.X`，不再 `data.data.X`。
   async getDictionaryList(): Promise<DictListResponse> {
-    const { data } = await http.get<{ code: number; data: { list: BackendDictionary[]; total: number } }>('/admin/sysDictionary/getSysDictionaryList');
-    const list = (data.data?.list || []).map(mapBackendDictionary);
-    return { list, total: list.length };
+    const { data } = await http.get<{ list: BackendDictionary[]; total: number }>('/admin/sysDictionary/getSysDictionaryList');
+    const list = (data.list || []).map(mapBackendDictionary);
+    return { list, total: data.total ?? list.length };
   },
 
   async createDictionary(req: CreateDictionaryPayload): Promise<Dictionary> {
-    const { data } = await http.post<{ code: number; data: BackendDictionary }>('/admin/sysDictionary/createSysDictionary', req);
-    return mapBackendDictionary(data.data);
+    const { data } = await http.post<BackendDictionary>('/admin/sysDictionary/createSysDictionary', req);
+    return mapBackendDictionary(data);
   },
 
   async updateDictionary(req: UpdateDictionaryPayload): Promise<Dictionary> {
-    const { data } = await http.put<{ code: number; data: BackendDictionary }>('/admin/sysDictionary/updateSysDictionary', req);
-    return mapBackendDictionary(data.data);
+    const { data } = await http.put<BackendDictionary>('/admin/sysDictionary/updateSysDictionary', req);
+    return mapBackendDictionary(data);
   },
 
   async deleteDictionary(id: number): Promise<void> {
@@ -852,19 +856,19 @@ export const adminApi = {
     };
     if (params.sysDictionaryId !== undefined) query.sysDictionaryId = params.sysDictionaryId;
     if (params.label) query.label = params.label;
-    const { data } = await http.get<{ code: number; data: { list: BackendDictionaryDetail[]; total: number } }>('/admin/sysDictionaryDetail/getSysDictionaryDetailList', { params: query });
-    const list = (data.data?.list || []).map(mapBackendDictionaryDetail);
-    return { list, total: data.data?.total || list.length };
+    const { data } = await http.get<{ list: BackendDictionaryDetail[]; total: number }>('/admin/sysDictionaryDetail/getSysDictionaryDetailList', { params: query });
+    const list = (data.list || []).map(mapBackendDictionaryDetail);
+    return { list, total: data.total ?? list.length };
   },
 
   async createDictionaryDetail(req: CreateDictionaryDetailPayload): Promise<DictionaryDetail> {
-    const { data } = await http.post<{ code: number; data: BackendDictionaryDetail }>('/admin/sysDictionaryDetail/createSysDictionaryDetail', req);
-    return mapBackendDictionaryDetail(data.data);
+    const { data } = await http.post<BackendDictionaryDetail>('/admin/sysDictionaryDetail/createSysDictionaryDetail', req);
+    return mapBackendDictionaryDetail(data);
   },
 
   async updateDictionaryDetail(req: UpdateDictionaryDetailPayload): Promise<DictionaryDetail> {
-    const { data } = await http.put<{ code: number; data: BackendDictionaryDetail }>('/admin/sysDictionaryDetail/updateSysDictionaryDetail', req);
-    return mapBackendDictionaryDetail(data.data);
+    const { data } = await http.put<BackendDictionaryDetail>('/admin/sysDictionaryDetail/updateSysDictionaryDetail', req);
+    return mapBackendDictionaryDetail(data);
   },
 
   async deleteDictionaryDetail(id: number): Promise<void> {
@@ -872,21 +876,26 @@ export const adminApi = {
   },
 
   async findDictionaryByType(type: string): Promise<Dictionary | null> {
-    const { data } = await http.get<{ code: number; data: { sysDictionaryDetails?: BackendDictionaryDetail[] } & BackendDictionary }>('/admin/sysDictionary/findSysDictionary', { params: { type } });
-    const dict = mapBackendDictionary(data.data);
-    dict.sysDictionaryDetails = (data.data?.sysDictionaryDetails || []).map(mapBackendDictionaryDetail);
+    const { data } = await http.get<BackendDictionary & { sysDictionaryDetails?: BackendDictionaryDetail[] }>('/admin/sysDictionary/findSysDictionary', { params: { type } });
+    const dict = mapBackendDictionary(data);
+    dict.sysDictionaryDetails = (data.sysDictionaryDetails || []).map(mapBackendDictionaryDetail);
     return dict;
   },
 
   // API 权限
+  // 后端 ListApiEndpoints 走分页（model.ListResponse），裸响应是 {items, total, page, page_size}；
+  // 这里统一用全量分页拼装函数 getApiEndpoints 拿全集即可，不再读 data.data。
   async listApiEndpoints(): Promise<ApiEndpoint[]> {
-    const { data } = await http.get<{ data: ApiEndpoint[] }>('/admin/api-endpoints');
-    return data.data;
+    const { items } = await this.getApiEndpoints({ page: 1, pageSize: 1000 });
+    return items;
   },
 
   async getRoleApiPermissions(roleId: string): Promise<ApiPermission[]> {
-    const { data } = await http.get<{ data: ApiPermission[] }>(`/admin/roles/${roleId}/api-permissions`);
-    return data.data;
+    // 注意：后端真实路径返回 {endpoint_ids: string[]}（参 internal/admin/api_endpoint_handler.go:160），
+    // 该签名 ApiPermission[] 与后端不一致；本函数无活跃业务消费者。这里仅修信封读取，
+    // 后续请用 apiPermissionApi.getRolePermissions（返回 string[] endpoint id 列表）。
+    const { data } = await http.get<{ endpoint_ids?: string[] }>(`/admin/roles/${roleId}/api-permissions`);
+    return ((data.endpoint_ids || []) as unknown) as ApiPermission[];
   },
 
   async setRoleApiPermissions(roleId: string, permissions: ApiPermission[]): Promise<void> {
