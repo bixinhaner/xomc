@@ -218,11 +218,16 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// isWritable 判定 access 字符串是否可写。容忍多种 XML 命名（readWrite / read_write / RW / writeOnly）。
-func isWritable(access string) bool {
+// IsAccessWritable 判定 access 字符串是否可写。容忍多种 XML 命名（readWrite / read_write / RW / writeOnly）。
+//
+// 导出供 P2-08 interop / P2-04 sync.go 等消费者复用，避免命名漂移。
+func IsAccessWritable(access string) bool {
 	switch strings.ToLower(strings.ReplaceAll(access, "_", "")) {
 	case "readwrite", "rw", "writeonly", "wo", "writeable":
 		return true
 	}
 	return false
 }
+
+// isWritable 是 IsAccessWritable 的内部别名（兼容现有调用点）。
+func isWritable(access string) bool { return IsAccessWritable(access) }

@@ -9,20 +9,29 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
 // ConformanceTestRunner executes predefined interop conformance test cases
 // against a target device identified by serial number.
+//
+// T-0098 P2-08：双栈期 dataModelReg 与 paramRegistry 共存。当 paramRegistryEnabled
+// 且 productRegistry/paramRegistry 均注入、且 device.ProductClass 能命中 product 时，
+// 走 ParamMapping 元属性校验；否则降级既有 dataModelReg 路径。
 type ConformanceTestRunner struct {
-	cases        map[TestCategory][]TestCase
-	deviceRepo   device.DeviceRepository
-	paramRepo    device.DeviceParameterRepository
-	dataModelReg *datamodel.DataModelRegistry
-	taskSvc      task.Enqueuer
-	logger       *zap.Logger
+	cases                map[TestCategory][]TestCase
+	deviceRepo           device.DeviceRepository
+	paramRepo            device.DeviceParameterRepository
+	dataModelReg         *datamodel.DataModelRegistry
+	paramRegistry        *parammodel.Registry
+	productRegistry      *product.Registry
+	paramRegistryEnabled bool
+	taskSvc              task.Enqueuer
+	logger               *zap.Logger
 }
 
 // NewConformanceTestRunner creates a runner pre-loaded with test cases.
@@ -41,6 +50,57 @@ func NewConformanceTestRunner(
 		taskSvc:      taskSvc,
 		logger:       logger.Named("conformance-runner"),
 	}
+}
+
+// WithParamRegistry 启用 T-0098 P2-08 dual-stack 模式。
+//
+// enabled=false 或 paramReg/prodReg 为 nil → 等价于不调用本方法（沿用 dataModelReg）。
+func (r *ConformanceTestRunner) WithParamRegistry(paramReg *parammodel.Registry, prodReg *product.Registry, enabled bool) *ConformanceTestRunner {
+	r.paramRegistry = paramReg
+	r.productRegistry = prodReg
+	r.paramRegistryEnabled = enabled && paramReg != nil && prodReg != nil
+	return r
+}
+
+// resolveExpectedParams 在 dual-stack 启用时尝试通过 ParamRegistry 获取期望参数集；
+// 任意一步失败 → 返回 (nil, "", err) 让调用方降级 dataModelReg。
+//
+// expectedParam 是 datamodel.Parameter 与 parammodel.ParamMapping 的最小公共视图，
+// 仅承载 Path / Type / Writable 三字段（足以驱动 path/type/writable 三类校验）。
+func (r *ConformanceTestRunner) resolveExpectedParams(ctx context.Context, dev *model.Device) ([]expectedParam, string, error) {
+	if !r.paramRegistryEnabled || r.paramRegistry == nil || r.productRegistry == nil {
+		return nil, "", nil
+	}
+	if dev == nil || dev.ProductClass == "" {
+		return nil, "", nil
+	}
+	match, err := r.productRegistry.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil || match == nil || match.Product == nil {
+		return nil, "", err
+	}
+	set, err := r.paramRegistry.GetByProduct(ctx, match.Product.ID, dev.FirmwareVersion)
+	if err != nil || set == nil {
+		return nil, "", err
+	}
+	out := make([]expectedParam, 0, len(set.Mappings))
+	for _, m := range set.Mappings {
+		if m.EntryType != "parameter" {
+			continue
+		}
+		out = append(out, expectedParam{
+			Path:     m.PrivatePath,
+			Type:     m.DataType,
+			Writable: parammodel.IsAccessWritable(m.Access),
+		})
+	}
+	return out, string(set.Source), nil
+}
+
+// expectedParam 是 datamodel.Parameter 与 parammodel.ParamMapping 的最小公共视图。
+type expectedParam struct {
+	Path     string
+	Type     string
+	Writable bool
 }
 
 // RegisterCases adds a batch of test cases under their respective categories.
@@ -223,6 +283,18 @@ func (r *ConformanceTestRunner) checkPositive(dev *model.Device, field string) e
 
 // checkParamPathsPresent verifies that device parameters include paths from the data model.
 func (r *ConformanceTestRunner) checkParamPathsPresent(ctx context.Context, dev *model.Device) error {
+	// T-0098 P2-08：优先 ParamRegistry，未启用或未命中则降级 dataModelReg。
+	if expected, _, _ := r.resolveExpectedParams(ctx, dev); expected != nil {
+		params, err := r.paramRepo.GetByDevice(ctx, dev.ID)
+		if err != nil {
+			return fmt.Errorf("get device parameters: %w", err)
+		}
+		if len(params) == 0 {
+			return fmt.Errorf("device has no reported parameters")
+		}
+		return nil
+	}
+
 	dm, err := r.dataModelReg.ResolveForDevice(ctx, dev)
 	if err != nil {
 		return fmt.Errorf("resolve data model: %w", err)
@@ -245,6 +317,22 @@ func (r *ConformanceTestRunner) checkParamPathsPresent(ctx context.Context, dev 
 
 // checkParamTypesMatch validates parameter types against the data model.
 func (r *ConformanceTestRunner) checkParamTypesMatch(ctx context.Context, dev *model.Device) error {
+	// T-0098 P2-08：优先 ParamRegistry，未启用或未命中则降级 dataModelReg。
+	if expected, _, _ := r.resolveExpectedParams(ctx, dev); expected != nil {
+		params, err := r.paramRepo.GetByDevice(ctx, dev.ID)
+		if err != nil {
+			return fmt.Errorf("get device parameters: %w", err)
+		}
+		if len(params) == 0 {
+			return fmt.Errorf("device has no reported parameters")
+		}
+		expectedTypes := make(map[string]string, len(expected))
+		for _, p := range expected {
+			expectedTypes[p.Path] = p.Type
+		}
+		return countTypeMismatches(params, expectedTypes)
+	}
+
 	dm, err := r.dataModelReg.ResolveForDevice(ctx, dev)
 	if err != nil {
 		return fmt.Errorf("resolve data model: %w", err)
@@ -274,18 +362,21 @@ func (r *ConformanceTestRunner) checkParamTypesMatch(ctx context.Context, dev *m
 		expectedTypes[p.Path] = p.Type
 	}
 
-	// Check each device parameter against expected types.
+	return countTypeMismatches(params, expectedTypes)
+}
+
+// countTypeMismatches 统计 actualParams 与 expectedTypes 之间的 type 不一致条数；> 0 时返回错误。
+func countTypeMismatches(actualParams []model.DeviceParameter, expectedTypes map[string]string) error {
 	mismatches := 0
-	for _, p := range params {
+	for _, p := range actualParams {
 		expected, ok := expectedTypes[p.ParameterPath]
 		if !ok {
-			continue // extra param, not a type mismatch
+			continue
 		}
 		if string(p.ParameterType) != expected {
 			mismatches++
 		}
 	}
-
 	if mismatches > 0 {
 		return fmt.Errorf("%d parameter type mismatches found", mismatches)
 	}
@@ -340,6 +431,10 @@ func (r *ConformanceTestRunner) executeVerifyResponse(ctx context.Context, dev *
 		return nil
 
 	case "model_exists":
+		// T-0098 P2-08：优先 ParamRegistry，未启用或未命中则降级 dataModelReg。
+		if expected, _, _ := r.resolveExpectedParams(ctx, dev); expected != nil {
+			return nil
+		}
 		dm, err := r.dataModelReg.ResolveForDevice(ctx, dev)
 		if err != nil {
 			return fmt.Errorf("resolve data model: %w", err)

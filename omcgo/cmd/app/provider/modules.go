@@ -280,11 +280,14 @@ func initNorthboundModule(c *Container) error {
 func initInteropModule(c *Container) error {
 	logger := c.Logger.Named("interop")
 
-	testRunner := interop.NewConformanceTestRunner(c.DeviceRepo, c.ParamRepo, c.DMRegistry, c.TaskSvc, logger)
+	// T-0098 P2-08：dual-stack 启用 ParamRegistry，flag off 时退化既有 dataModelReg 路径。
+	testRunner := interop.NewConformanceTestRunner(c.DeviceRepo, c.ParamRepo, c.DMRegistry, c.TaskSvc, logger).
+		WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
 	testRunner.RegisterCases(cases.ProtocolCases())
 	testRunner.RegisterCases(cases.DataModelCases())
 	testRunner.RegisterCases(cases.RPCCases())
-	dmValidator := interop.NewDataModelValidator(c.DMRegistry, c.ParamRepo, c.DeviceRepo, logger)
+	dmValidator := interop.NewDataModelValidator(c.DMRegistry, c.ParamRepo, c.DeviceRepo, logger).
+		WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
 	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
 
 	c.miscDeps.interopHandler = interopHandler
