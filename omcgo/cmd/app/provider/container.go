@@ -22,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 )
@@ -53,6 +54,9 @@ type Container struct {
 
 	// DictLoad 模块设置（T-0098 P1-06）
 	DictLoaderRegistry *dictloader.Registry
+
+	// ProductRegistry 模块设置（T-0098 P2-01）
+	ProductRegistry *product.Registry
 
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry

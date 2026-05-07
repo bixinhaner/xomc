@@ -41,6 +41,32 @@ type ProductClassPattern struct {
 	IsActive     bool
 }
 
+// MatchResult 是 ProductRegistry.MatchProductClass 的命中结果（设计 §4.3 核心类型）。
+type MatchResult struct {
+	Product        *Product
+	MatchedPattern string
+	GlobalOrder    int
+}
+
+// ValidationReport 汇总 ProductRegistry.ValidateReferences 的三引用校验结果（设计 §4.5）。
+//
+// 语义对齐 P1-06 product Loader：paramModel.id 由 PG FK 强一致已校验；
+// indicator_platform / alarm_ne_type 是软引用，本报告对未命中条目仅 WARN，
+// 不阻塞 Registry 启动。BlockedProducts 用于未来 handler 层（P3-01）保存校验。
+type ValidationReport struct {
+	TotalProducts   int
+	BlockedProducts []ValidationIssue // 硬阻断（保留，本任务暂不产出，留给 P3-01 handler）
+	WarnedProducts  []ValidationIssue
+}
+
+// ValidationIssue 单条引用校验问题。
+type ValidationIssue struct {
+	ProductID   uuid.UUID
+	ProductName string
+	Field       string // "indicator_platform" / "alarm_ne_type"
+	Reason      string
+}
+
 // ── XML 解析结构（设计 §4.5）────────────────────────────────────────
 
 type xmlProducts struct {

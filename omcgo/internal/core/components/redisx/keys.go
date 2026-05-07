@@ -109,6 +109,20 @@ func (KeyBuilder) DataModelResolve(carrier, tech, oui, productClass string) stri
 	return fmt.Sprintf("datamodel:resolve:%s:%s:%s:%s", carrier, tech, oui, productClass)
 }
 
+// ===== Product / ProductRegistry（T-0098 P2-01）=====
+
+// ProductByID 单 product 详情缓存（24h TTL，按 UUID 索引）。
+func (KeyBuilder) ProductByID(id string) string { return productByIDPrefix + id }
+
+// ProductByIDPrefix product 详情键前缀，供扫描使用。
+func (KeyBuilder) ProductByIDPrefix() string { return productByIDPrefix }
+
+// ProductPattern 扫描所有 product:* 键。
+func (KeyBuilder) ProductPattern() string { return productPattern }
+
+// ProductCacheVersion 跨实例 ProductRegistry 缓存版本号。
+func (KeyBuilder) ProductCacheVersion() string { return productCacheVersionKey }
+
 // ===== 告警 / 异常重启 =====
 
 // AlarmActive 活跃告警 Hash（每设备一个）。
@@ -186,6 +200,11 @@ const (
 	// datamodel
 	datamodelCacheVersionKey = "datamodel:cache_version"
 	datamodelPattern         = "datamodel:*"
+
+	// product (T-0098 P2-01 ProductRegistry)
+	productByIDPrefix       = "product:byID:"
+	productPattern          = "product:*"
+	productCacheVersionKey  = "product:cache_version"
 
 	// device / provision / upload
 	deviceSNPrefix          = "device:sn:"

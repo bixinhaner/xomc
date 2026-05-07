@@ -110,6 +110,13 @@ func Setup(r *gin.Engine, c *Container) error {
 		Name: "dictload",
 		Init: func() error { return initDictLoadModule(c) },
 	})
+	// T-0098 P2-01：ProductRegistry（productClass 全局正则路由 + L1+L2 缓存 + 三引用校验）
+	// 依赖 dictload 完成后 products / alarm_definitions / perf_indicators_* 表已写入。
+	graph.Add(components.ModuleInitializer{
+		Name:    "productregistry",
+		Depends: []string{"dictload"},
+		Init:    func() error { return initProductRegistryModule(c) },
+	})
 
 	totalStart := time.Now()
 
