@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   App,
   Button,
@@ -44,9 +44,33 @@ const METHOD_COLORS: Record<string, string> = {
   PATCH: 'purple',
 };
 
+// FilterBar sessionStorage key（与 <FilterBar filterId="api-management" /> 对齐）。
+const FILTER_STORAGE_KEY = 'omc_filter_api-management';
+
 export default function ApiManagement() {
   const t = useT();
   const { modal, message } = App.useApp();
+
+  // 进入页面时把 sessionStorage 里残留的 apiGroup 清掉，让筛选区的"API 分组"
+  // 恢复为空——其他字段（path / name / method）仍由 FilterBar 自身的恢复逻辑
+  // 还原。必须在子组件 FilterBar 的 mount useEffect 之前完成清理，因此放在
+  // 渲染函数顶部并用 ref 保证只跑一次。
+  const filterCleanupDoneRef = useRef<true | null>(null);
+  if (filterCleanupDoneRef.current == null) {
+    filterCleanupDoneRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(FILTER_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (parsed.apiGroup !== undefined) {
+          delete parsed.apiGroup;
+          sessionStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch {
+      // ignore — 仅影响首次加载时的"API 分组"默认空逻辑
+    }
+  }
 
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
