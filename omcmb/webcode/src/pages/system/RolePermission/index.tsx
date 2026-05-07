@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Alert,
@@ -343,6 +343,9 @@ export default function RoleManagement() {
   const [deviceGroupProductType, setDeviceGroupProductType] = useState<string>('');
   // API权限选择
   const [selectedApiEndpointIds, setSelectedApiEndpointIds] = useState<string[]>([]);
+  // API 树展开状态 + 父子联动（与菜单权限 UI 保持一致）
+  const [expandedApiGroupKeys, setExpandedApiGroupKeys] = useState<React.Key[]>([]);
+  const [apiCheckStrictly, setApiCheckStrictly] = useState(false);
 
 
   const { data, isLoading, refetch } = useRoles({
@@ -410,6 +413,73 @@ export default function RoleManagement() {
   }, [apiEndpoints]);
 
   const apiGroupNames = useMemo(() => Array.from(apiGroupMap.keys()).sort(), [apiGroupMap]);
+
+  // 父级（分组）节点 key 用 'group:<name>' 前缀避免与端点 UUID 冲突。
+  const apiGroupParentKeys = useMemo<string[]>(
+    () => apiGroupNames.map((g) => `group:${g}`),
+    [apiGroupNames],
+  );
+  // 所有 API 端点 ID（叶子，用于"全选"）。
+  const allApiEndpointIds = useMemo<string[]>(
+    () => (apiEndpoints ?? []).map((ep) => ep.id),
+    [apiEndpoints],
+  );
+
+  // antd Tree 渲染颜色 helper（GET=blue / POST=green / ...）。
+  const apiMethodColor = (method: string): string => {
+    switch (method) {
+      case 'GET': return 'blue';
+      case 'POST': return 'green';
+      case 'PUT': return 'orange';
+      case 'DELETE': return 'red';
+      case 'PATCH': return 'purple';
+      default: return 'default';
+    }
+  };
+
+  // 构建 API 权限树：分组（父）→ 端点（叶）。
+  const apiTreeData = useMemo<TreeDataNode[]>(() => {
+    return apiGroupNames.map((groupName) => {
+      const group = apiGroupMap.get(groupName) || [];
+      return {
+        key: `group:${groupName}`,
+        title: (
+          <span>
+            <span style={{ fontWeight: 500 }}>{groupName}</span>
+            <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
+              ({group.length})
+            </span>
+          </span>
+        ),
+        children: group.map((ep) => ({
+          key: ep.id,
+          title: (
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <Tag color={apiMethodColor(ep.method)} style={{ marginRight: 8, minWidth: 56, textAlign: 'center' }}>
+                {ep.method}
+              </Tag>
+              <span style={{ fontFamily: 'monospace', fontSize: 13 }}>{ep.path}</span>
+              {ep.name ? (
+                <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
+                  {ep.name}
+                </span>
+              ) : null}
+            </span>
+          ),
+          isLeaf: true,
+        })),
+      };
+    });
+  }, [apiGroupNames, apiGroupMap]);
+
+  // 数据加载到位后默认展开全部分组（与菜单权限"打开编辑面板自动展开二级"对齐）。
+  useEffect(() => {
+    if (apiGroupParentKeys.length > 0 && expandedApiGroupKeys.length === 0) {
+      setExpandedApiGroupKeys(apiGroupParentKeys);
+    }
+    // 仅在分组首次出现时触发；后续手动展开/折叠由用户控制。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiGroupParentKeys.length]);
 
   const getRoleApiPermissions = useMutation({
     mutationFn: (roleId: string) => apiPermissionApi.getRolePermissions(roleId),
@@ -1124,100 +1194,107 @@ export default function RoleManagement() {
   };
 
   // 渲染API权限配置（按分组展示，支持分组批量勾选）
+  // 渲染 API 权限：父=API分组、叶=端点（method+path），UI 与菜单权限 Tree 一致。
   const renderApiPermissionConfig = (readOnly = false) => {
-    const toggleEndpoint = (epId: string, checked: boolean) => {
-      setSelectedApiEndpointIds((prev) =>
-        checked ? [...prev, epId] : prev.filter((id) => id !== epId),
+    const isAllExpanded =
+      apiGroupParentKeys.length > 0 && expandedApiGroupKeys.length >= apiGroupParentKeys.length;
+    const isAllSelected =
+      allApiEndpointIds.length > 0 && selectedApiEndpointIds.length === allApiEndpointIds.length;
+    const isIndeterminate =
+      selectedApiEndpointIds.length > 0 && selectedApiEndpointIds.length < allApiEndpointIds.length;
+
+    const handleExpandAll = (checked: boolean) => {
+      setExpandedApiGroupKeys(checked ? apiGroupParentKeys : []);
+    };
+    const handleSelectAll = (checked: boolean) => {
+      setSelectedApiEndpointIds(checked ? allApiEndpointIds : []);
+    };
+    const handleLinkage = (checked: boolean) => {
+      // 勾选"父子联动" => checkStrictly=false（一致于菜单权限的语义）。
+      setApiCheckStrictly(!checked);
+    };
+
+    const handleCheck: TreeProps['onCheck'] = (checked) => {
+      // 联动模式 checked: Key[]；strict 模式 checked: { checked, halfChecked }。
+      const all = Array.isArray(checked) ? checked : checked.checked;
+      // 仅保留叶子（端点 UUID），过滤掉 'group:xxx' 父节点 key。
+      const leaves = (all as React.Key[]).filter(
+        (k): k is string => typeof k === 'string' && !k.startsWith('group:'),
       );
+      setSelectedApiEndpointIds(leaves);
     };
 
-    const toggleGroup = (groupName: string, checked: boolean) => {
-      const groupIds = (apiGroupMap.get(groupName) || []).map((ep) => ep.id);
-      setSelectedApiEndpointIds((prev) => {
-        const set = new Set(prev);
-        if (checked) {
-          groupIds.forEach((id) => set.add(id));
-        } else {
-          groupIds.forEach((id) => set.delete(id));
-        }
-        return Array.from(set);
-      });
+    const handleExpand: TreeProps['onExpand'] = (expanded) => {
+      setExpandedApiGroupKeys(expanded as React.Key[]);
     };
 
-    const methodColor = (method: string) => {
-      switch (method) {
-        case 'GET': return 'blue';
-        case 'POST': return 'green';
-        case 'PUT': return 'orange';
-        case 'DELETE': return 'red';
-        case 'PATCH': return 'purple';
-        default: return 'default';
-      }
-    };
+    // checkStrictly=true 时 antd Tree 要求对象形态；strict=false 直接传叶子数组即可，
+    // antd 会自动从子节点推导父节点 halfChecked。
+    const treeCheckedKeys: TreeProps['checkedKeys'] = apiCheckStrictly
+      ? { checked: selectedApiEndpointIds, halfChecked: [] }
+      : selectedApiEndpointIds;
 
     return (
-      <div>
-        {!readOnly && (
-          <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
-            <Button size="small" onClick={() => setSelectedApiEndpointIds((apiEndpoints || []).map((ep) => ep.id))}>
-              {t('role.selectAllApis')}
-            </Button>
-            <Button size="small" onClick={() => setSelectedApiEndpointIds([])}>
-              {t('common.clear')}
-            </Button>
-            <span style={{ marginLeft: 'auto', color: 'var(--color-text-secondary)', fontSize: 12, lineHeight: '24px' }}>
-              {t('role.selectedApiCount', { count: selectedApiEndpointIds.length })} / {apiEndpoints?.length ?? 0}
+      <Form.Item label={t('role.apiPermission')}>
+        <div style={{ border: '1px solid var(--color-border)', borderRadius: 6 }}>
+          <div
+            style={{
+              padding: '8px 12px',
+              borderBottom: '1px solid var(--color-border)',
+              background: 'var(--color-fill-quaternary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Checkbox
+              checked={isAllExpanded}
+              onChange={(e) => handleExpandAll(e.target.checked)}
+              disabled={readOnly || apiGroupParentKeys.length === 0}
+            >
+              {t('role.expandCollapse')}
+            </Checkbox>
+            <Checkbox
+              checked={isAllSelected}
+              indeterminate={isIndeterminate}
+              onChange={(e) => handleSelectAll(e.target.checked)}
+              disabled={readOnly || allApiEndpointIds.length === 0}
+            >
+              {t('role.selectAllOrNone')}
+            </Checkbox>
+            <Checkbox
+              checked={!apiCheckStrictly}
+              onChange={(e) => handleLinkage(e.target.checked)}
+              disabled={readOnly}
+            >
+              {t('role.parentChildLinkage')}
+            </Checkbox>
+            <span style={{ marginLeft: 'auto', color: 'var(--color-text-secondary)', fontSize: 12 }}>
+              {t('role.selectedApiCount', { count: selectedApiEndpointIds.length })}
+              {' / '}
+              {allApiEndpointIds.length}
             </span>
           </div>
-        )}
-        {isLoadingApiEndpoints ? (
-          <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
-        ) : (
-          <div style={{ maxHeight: 500, overflow: 'auto', border: '1px solid var(--color-border)', borderRadius: 6 }}>
-            {apiGroupNames.map((groupName) => {
-              const group = apiGroupMap.get(groupName) || [];
-              const checkedCount = group.filter((ep) => selectedApiEndpointIds.includes(ep.id)).length;
-              const isAllChecked = checkedCount === group.length;
-              const isIndeterminate = checkedCount > 0 && checkedCount < group.length;
-
-              return (
-                <div key={groupName} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <div style={{ padding: '8px 12px', background: 'var(--color-fill-quaternary)', display: 'flex', alignItems: 'center' }}>
-                    <Checkbox
-                      checked={isAllChecked}
-                      indeterminate={isIndeterminate}
-                      onChange={(e) => toggleGroup(groupName, e.target.checked)}
-                      disabled={readOnly}
-                    >
-                      <span style={{ fontWeight: 500 }}>{groupName}</span>
-                      <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-                        ({checkedCount}/{group.length})
-                      </span>
-                    </Checkbox>
-                  </div>
-                  <div style={{ padding: '4px 12px 4px 36px' }}>
-                    {group.map((ep) => (
-                      <div key={ep.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0', borderBottom: '1px solid var(--color-fill-quaternary)' }}>
-                        <Checkbox
-                          checked={selectedApiEndpointIds.includes(ep.id)}
-                          onChange={(e) => toggleEndpoint(ep.id, e.target.checked)}
-                          disabled={readOnly}
-                          style={{ marginRight: 8 }}
-                        >
-                          <Tag color={methodColor(ep.method)} style={{ marginRight: 8, minWidth: 52, textAlign: 'center' }}>
-                            {ep.method}
-                          </Tag>
-                          <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{ep.path}</span>
-                        </Checkbox>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+          <div style={{ padding: 8, maxHeight: 500, overflow: 'auto' }}>
+            {isLoadingApiEndpoints ? (
+              <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+            ) : (
+              <Tree
+                treeData={apiTreeData}
+                expandedKeys={expandedApiGroupKeys}
+                checkedKeys={treeCheckedKeys}
+                selectable={false}
+                checkable
+                disabled={readOnly}
+                checkStrictly={apiCheckStrictly}
+                onCheck={readOnly ? undefined : handleCheck}
+                onExpand={handleExpand}
+              />
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      </Form.Item>
     );
   };
 
