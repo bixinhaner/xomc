@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="OMC" deviceType="0" totalCount="28">
+    <alarms>
+        <alarm identifier="9" cnName="CPE网络断开" enName="CPE Disconnected" severity="Critical" eventType="30000" cnProbableCause="CPE与网管之间连线断开" enProbableCause="The connection between the CPE and the OMC is disconnected.Network failure between CPE and OMC." cnSuggestion="（1）检测传输链路是否正常
+（2）检查网管地址配置是否正确" enSuggestion="1. Check if the network is avaliable.
+2. Check if the configuration of OMC server address is correct." isShow="Y" />
+        <alarm identifier="10" cnName="主机切换告警" enName="HA Master-Slave server switched" severity="Critical" eventType="30000" cnProbableCause="主机服务异常" enProbableCause="Master server is abnormal" cnSuggestion="（1）检查主机系统是否发生断电、宕机等异常
+（2）检查主机网络是否异常
+（3）检查主机系统关键服务是否异常 " enSuggestion="1. Check if the master server is abnormal.
+ 2. Check if the network of master server is abnormal.
+ 3.Check if the Key services of the master server is abnormal" isShow="Y" />
+        <alarm identifier="118" cnName="主备系统连接网关异常告警" enName="GATEWAY Disconnected" severity="Critical" eventType="None" cnProbableCause="OMC server和网关之间连线断开" enProbableCause="The connection between the server  and the gateway is disconnected.Network failure between gateway and OMC server." cnSuggestion="（1）检测传输链路是否正常" enSuggestion="1. Check if the network is avaliable.
+" isShow="N" />
+        <alarm identifier="119" cnName="master主机异常" enName="master server exception" severity="Critical" eventType="None" cnProbableCause="OMC server异常" enProbableCause="The OMC master server exception" cnSuggestion="（1）检查OMC master服务器" enSuggestion="1. Check the master server" isShow="N" />
+        <alarm identifier="13" cnName="SAS DP 证书即将过期告警" enName="SAS DP Certificate will be expired" severity="Critical" eventType="30000" cnProbableCause="SAS证书即将过期告警" enProbableCause="SAS DP Certificate will be expired" cnSuggestion="更换证书" enSuggestion="Update Certificate" isShow="Y" />
+        <alarm identifier="14" cnName="磁盘占用率过高重要告警" enName="Important alarm of high disk occupancy" severity="Major" eventType="30003" cnProbableCause="磁盘占用率过高重要告警" enProbableCause="Important alarm of high disk occupancy" cnSuggestion="1.扩充磁盘容量
+2.清理无用的文件" enSuggestion="1.Expand disk capacity
+2.Clean up useless files" isShow="Y" />
+        <alarm identifier="15" cnName="磁盘占用率过高紧急告警" enName="Urgent alarm of high disk occupancy" severity="Critical" eventType="30003" cnProbableCause="磁盘占用率过高紧急告警" enProbableCause="Urgent alarm of high disk occupancy" cnSuggestion="立即扩充磁盘容量" enSuggestion="Expand disk capacity now" isShow="Y" />
+        <alarm identifier="16" cnName="服务器负载过高告警" enName="High system load alarm" severity="Major" eventType="30003" cnProbableCause="服务器负载过高告警" enProbableCause="High system load alarm" cnSuggestion="1.增加硬件配置
+2.反馈交付团队" enSuggestion="1.Increase hardware configuration
+2.Feedback to support team" isShow="Y" />
+        <alarm identifier="17" cnName="内存使用率过高重要告警" enName="Important alarm of high memory occupancy" severity="Major" eventType="30003" cnProbableCause="内存使用率过高重要告警" enProbableCause="Important alarm of high memory occupancy" cnSuggestion="1.扩充内存容量
+2.反馈交付团队" enSuggestion="1.Expand memory capacity
+2.Feedback to support team" isShow="Y" />
+        <alarm identifier="18" cnName="内存使用率过高紧急告警" enName="Urgent alarm of high memory occupancy" severity="Critical" eventType="30003" cnProbableCause="内存使用率过高紧急告警" enProbableCause="Urgent alarm of high memory occupancy" cnSuggestion="立即扩充内存容量" enSuggestion="Expand memory capacity now" isShow="Y" />
+        <alarm identifier="19" cnName="应用进程异常告警" enName="Service exception alarm" severity="Critical" eventType="30003" cnProbableCause="应用进程异常告警" enProbableCause="Service exception alarm" cnSuggestion="1.检查服务
+ 2.反馈交付团队" enSuggestion="1.Check service
+ 2.Feedback to support team" isShow="N" />
+        <alarm identifier="20" cnName="mysql异常告警" enName="Mysql exception alarm" severity="Critical" eventType="30003" cnProbableCause="mysql异常告警" enProbableCause="Mysql exception alarm" cnSuggestion="1.检查mysql服务
+ 2.反馈交付团队" enSuggestion="1.Check mysql service
+ 2.Feedback to support team" isShow="N" />
+        <alarm identifier="21" cnName="mongod异常告警" enName="Mongod exception alarm" severity="Critical" eventType="30003" cnProbableCause="mongod异常告警" enProbableCause="Mongod exception alarm" cnSuggestion="1.检查mongod服务
+ 2.反馈交付团队" enSuggestion="1.Check mongod service
+ 2.Feedback to support team" isShow="N" />
+        <alarm identifier="22" cnName="redis异常告警" enName="Redis exception alarm" severity="Critical" eventType="30003" cnProbableCause="redis异常告警" enProbableCause="Redis exception alarm" cnSuggestion="1.检查redis服务
+ 2.反馈交付团队" enSuggestion="1.Check redis service
+ 2.Feedback to support team" isShow="N" />
+        <alarm identifier="23" cnName="gNB网络断开" enName="GNB Disconnected" severity="Critical" eventType="30000" cnProbableCause="gNB网络断开" enProbableCause="GNB Disconnected" cnSuggestion="（1）检测传输链路是否正常
+（2）检查网管地址配置是否正确" enSuggestion="1. Check if the network is avaliable.
+2. Check if the configuration of OMC server address is correct." isShow="Y" />
+        <alarm identifier="25" cnName="服务器告警" enName="Server alarm" severity="Critical" eventType="30003" cnProbableCause="服务器异常" enProbableCause="Server excepthion " cnSuggestion="检测服务器" enSuggestion="Check Server" isShow="Y" />
+        <alarm identifier="26" cnName="服务器CPU告警" enName="Server cpu alarm" severity="Critical" eventType="30003" cnProbableCause="服务器CPU异常" enProbableCause="Server CPU excepthion" cnSuggestion="检测服务器CPU" enSuggestion="Check Server CPU" isShow="Y" />
+        <alarm identifier="27" cnName="服务器memory告警" enName="Server memory alarm" severity="Critical" eventType="30003" cnProbableCause="服务器内存异常" enProbableCause="Server memory excepthion" cnSuggestion="检测服务器内存" enSuggestion="Check Server memory" isShow="Y" />
+        <alarm identifier="28" cnName="服务器网卡告警" enName="Server NetworkInterfaces alarm" severity="Critical" eventType="30003" cnProbableCause="服务器网卡异常" enProbableCause="Server NetworkInterfaces excepthion" cnSuggestion="检测服务器网卡" enSuggestion="Check Server NetworkInterfaces" isShow="Y" />
+        <alarm identifier="29" cnName="服务器电源告警" enName="Server Power alarm" severity="Critical" eventType="30003" cnProbableCause="服务器电源异常" enProbableCause="Server Power excepthion" cnSuggestion="检测服务器电源" enSuggestion="Check Server Power" isShow="Y" />
+        <alarm identifier="30" cnName="服务器风扇告警" enName="Server Fan alarm" severity="Critical" eventType="30003" cnProbableCause="服务器风扇异常" enProbableCause="Server Fan excepthion" cnSuggestion="检测服务器风扇" enSuggestion="Check Server Fan" isShow="Y" />
+        <alarm identifier="31" cnName="服务器硬盘告警" enName="Server Storage alarm" severity="Critical" eventType="30003" cnProbableCause="服务器硬盘异常" enProbableCause="Server Storage excepthion" cnSuggestion="检测服务器硬盘" enSuggestion="Check Server Storage" isShow="Y" />
+        <alarm identifier="35" cnName="主机安全检测告警" enName="Host security detection alarm" severity="Critical" eventType="30000" cnProbableCause="主机安全异常" enProbableCause="Host security exception" cnSuggestion="（1）检查主机登录成功/失败信息
+（2）检查主机计划任务信息
+（3）检查主机系统异常进程
+（4）检查主机网络连接
+ （5）检查主机用户配置
+（6）检查主机Hosts文件信息" enSuggestion="1.Check host login success/failure information
+ 2.Check host scheduled task information
+ 3.Check host system abnormal processes
+ 4.Check host network connection
+ 5.Check host user configuration
+ 6.Check host hosts file information" isShow="Y" />
+        <alarm identifier="36" cnName="site离线告警" enName="site offline alarm" severity="Critical" eventType="30000" cnProbableCause="site offline" enProbableCause="site offline" cnSuggestion="检查site下所有设备" enSuggestion="Check these deivces of the site" isShow="Y" />
+        <alarm identifier="4" cnName="GSM网络断开" enName="GSM Disconnected" severity="Critical" eventType="30000" cnProbableCause="GSM与网管之间连线断开" enProbableCause="The connection between the GSM and the OMC is disconnected.Network failure between GSM and OMC." cnSuggestion="（1）检测传输链路是否正常
+（2）检查网管地址配置是否正确" enSuggestion="1. Check if the network is avaliable.
+2. Check if the configuration of OMC server address is correct." isShow="Y" />
+        <alarm identifier="5" cnName="unison异常告警" enName="service unison is abnormal" severity="Critical" eventType="30000" cnProbableCause="unison异常" enProbableCause="service unison is abnormal" cnSuggestion="（1）检查unison服务
+（2）检查备unsion shh是否异常" enSuggestion="1. Check if the service unison is abnormal.
+ 2. Check if the service unison ssh is abnormal." isShow="Y" />
+        <alarm identifier="6" cnName="备机网络异常告警" enName="HA Master-Slave slave server network abnormal" severity="Critical" eventType="30000" cnProbableCause="备机网络异常" enProbableCause="Slave server network is abnormal" cnSuggestion="（1）检查备机系统是否发生断电、宕机等异常
+（2）检查备机网络是否异常" enSuggestion="1. Check if the slave server is abnormal.
+ 2. Check if the network of slave server is abnormal." isShow="Y" />
+        <alarm identifier="7" cnName="eNB网络断开" enName="eNB Disconnected" severity="Critical" eventType="30000" cnProbableCause="基站与网管之间连线断开" enProbableCause="The connection between the base station and the OMC is disconnected.Network failure between base station and OMC." cnSuggestion="（1）检测传输链路是否正常
+（2）检查网管地址配置是否正确" enSuggestion="1. Check if the network is avaliable.
+2. Check if the configuration of OMC server address is correct." isShow="Y" />
+    </alarms>
+</alarmModel>

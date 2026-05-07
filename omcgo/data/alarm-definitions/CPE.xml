@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="CPE" deviceType="6" totalCount="2">
+    <alarms>
+        <alarm identifier="12" cnName="SAS异常告警" enName="SAS Abnormal alarm" severity="Critical" eventType="30003" cnProbableCause="SAS异常告警" enProbableCause="SAS Abnormal alarm" cnSuggestion="参考SAS日志" enSuggestion="Refer to SAS log" isShow="Y" />
+        <alarm identifier="24" cnName="SIM卡异常告警" enName="SIM Card Abnormal alarm" severity="Critical" eventType="30003" cnProbableCause="SIM卡异常告警" enProbableCause="SIM Card Abnormal alarm" cnSuggestion="检查SIM卡状态" enSuggestion="Check SIM Card status" isShow="Y" />
+    </alarms>
+</alarmModel>

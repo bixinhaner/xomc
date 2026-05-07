@@ -1,0 +1,240 @@
+<?xml version="1.0" ?>
+<parameterModel paramModel="BSC" totalEntries="232">
+    <objects>
+        <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
+    </objects>
+    <parameters>
+        <param name="Device.DeviceInfo.AntennaInfo.Height" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.GSM.RealtimeUserCount" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.HardwareVersion" standardPath="Device.DeviceInfo.HardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.SoftwareVersion" standardPath="Device.DeviceInfo.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_Log.FaultLogURL" standardPath="Device.DeviceInfo.FaultLogURL" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_MACAddress" standardPath="Device.Ethernet.Interface.MACAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_MODULE_TYPE" standardPath="Device.DeviceInfo.MODULE_TYPE" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_ROLLBACK_CONTROL" standardPath="Device.DeviceInfo.ROLLBACK_CONTROL" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_STATION_RUN_Time" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PerfMgmt.Config.{i}.Enable" standardPath="Device.FAP.PerfMgmt.Config.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" standardPath="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FAP.PerfMgmt.Config.{i}.URL" standardPath="Device.FAP.PerfMgmt.Config.{i}.URL" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.AlarmChangedTime" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AlarmChangedTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.EventType" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.EventType" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.ManagedObjectInstance" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.ManagedObjectInstance" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="512"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.PerceivedSeverity" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.PerceivedSeverity" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.ProbableCause" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.ProbableCause" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.FaultMgmt.CurrentAlarm.{i}.SpecificProblem" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.SpecificProblem" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="128"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalText" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.EventTime" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.EventTime" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.EventType" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.EventType" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="512"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.ProbableCause" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.ProbableCause" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64"/>
+        <param name="Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="128"/>
+        <param name="Device.HaltReason.DetailReason" standardPath="Device.HaltReason.DetailReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.HaltReason.MainReason" standardPath="Device.HaltReason.MainReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.LogMgmt.Password" standardPath="Device.LogMgmt.Password" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.LogMgmt.PeriodicUploadEnable" standardPath="Device.LogMgmt.PeriodicUploadEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.LogMgmt.PeriodicUploadInterval" standardPath="Device.LogMgmt.PeriodicUploadInterval" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.LogMgmt.URL" standardPath="Device.LogMgmt.URL" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.LogMgmt.Username" standardPath="Device.LogMgmt.Username" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Author" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.DelayControl" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.DelayControl" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.Description" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.Description" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.ID" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.ID" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.RemainingPeriod" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.RemainingPeriod" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.ValidPeriod" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.ValidPeriod" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.Value" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.Value" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.CapacityListNumberOfEntries" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.CapacityListNumberOfEntries" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Code" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Code" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.GenerateDate" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.GenerateDate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.HaloBCentralizedModeAvailable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.HaloBCentralizedModeAvailable" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.HaloBSingleModeAvailable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.HaloBSingleModeAvailable" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.SeqNum" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.SeqNum" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Version" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Version" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.SoftwareCtrl.SystemBackupVersion" standardPath="Device.SoftwareCtrl.SystemBackupVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <!-- 以下参数来源：MySQL small_cell_param，MongoDB 中无对应映射 -->
+        <param name="Device.DeviceInfo.HOST_CONFIG_DNS1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.HOST_CONFIG_DNS2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_MME_Status" standardPath="Device.DeviceInfo.X_COM_MME_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.CounterCheck" standardPath="Device.KeepalivedMgmt.CounterCheck" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.Enable" standardPath="Device.KeepalivedMgmt.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.LocalUplinkIpAddr" standardPath="Device.KeepalivedMgmt.LocalUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.ManualSwitch" standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.MaxVrrpEntries" standardPath="Device.KeepalivedMgmt.MaxVrrpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.RemoteUplinkIpAddr" standardPath="Device.KeepalivedMgmt.RemoteUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.RouterId" standardPath="Device.KeepalivedMgmt.RouterId" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.SecondTimeout" standardPath="Device.KeepalivedMgmt.SecondTimeout" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.Index" standardPath="Device.KeepalivedMgmt.VrrpMgmt.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Priority" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.SrcIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.State" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.IP" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.Label" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.{i}.NetmaskPrefix" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualRouterId" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.KeepalivedMgmt.VrrpNumberOfEntries" standardPath="Device.KeepalivedMgmt.VrrpNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.Index" standardPath="DeviceGSM.Bts.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.Trx.Index" standardPath="DeviceGSM.Bts.Trx.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Band" standardPath="DeviceGSM.Bts.{i}.Band" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Bsic" standardPath="DeviceGSM.Bts.{i}.Bsic" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.C0PowerRed" standardPath="DeviceGSM.Bts.{i}.C0PowerRed" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.CellId" standardPath="DeviceGSM.Bts.{i}.CellId" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.CellReselectHysteresis" standardPath="DeviceGSM.Bts.{i}.CellReselectHysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.CellReselectOffset" standardPath="DeviceGSM.Bts.{i}.CellReselectOffset" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" standardPath="DeviceGSM.Bts.{i}.CellReselectPenaltyTime" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.CodecSupport" standardPath="DeviceGSM.Bts.{i}.CodecSupport" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.GprsMode" standardPath="DeviceGSM.Bts.{i}.GprsMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.HandoverAlgorithm" standardPath="DeviceGSM.Bts.{i}.HandoverAlgorithm" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.IpaRslIp" standardPath="DeviceGSM.Bts.{i}.IpaRslIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.IpaUnitId" standardPath="DeviceGSM.Bts.{i}.IpaUnitId" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.LocationAreaCode" standardPath="DeviceGSM.Bts.{i}.LocationAreaCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.MsMaxPower" standardPath="DeviceGSM.Bts.{i}.MsMaxPower" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.NeighborCgiAdd" standardPath="DeviceGSM.Bts.{i}.NeighborCgiAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.NeighborCgiDel" standardPath="DeviceGSM.Bts.{i}.NeighborCgiDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.NeighborListMode" standardPath="DeviceGSM.Bts.{i}.NeighborListMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.NumofTrxChannel" standardPath="DeviceGSM.Bts.{i}.NumofTrxChannel" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.OmlConnectState" standardPath="DeviceGSM.Bts.{i}.OmlConnectState" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.OmlIpaStreamId" standardPath="DeviceGSM.Bts.{i}.OmlIpaStreamId" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.RachCellBarred" standardPath="DeviceGSM.Bts.{i}.RachCellBarred" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover" standardPath="DeviceGSM.Bts.{i}.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.power.budget.interval" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxlev.neighbor.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.assignment" standardPath="DeviceGSM.Bts.{i}.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.max-handovers" standardPath="DeviceGSM.Bts.{i}.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-h" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.min.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.min.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.min.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.failed-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.low-rxqual-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.penalty-time.max-distance" standardPath="DeviceGSM.Bts.{i}.handover2.penalty-time.max-distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover2.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.power.budget.interval" standardPath="DeviceGSM.Bts.{i}.handover2.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.retries" standardPath="DeviceGSM.Bts.{i}.handover2.retries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.tdma-measurement" standardPath="DeviceGSM.Bts.{i}.handover2.tdma-measurement" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.window.rxlev.averaging" standardPath="DeviceGSM.Bts.{i}.handover2.window.rxlev.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.Bts.{i}.handover2.window.rxlev.neighbor.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.window.rxqual.averaging" standardPath="DeviceGSM.Bts.{i}.handover2.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.BtsNum" standardPath="DeviceGSM.BtsNum" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.ForAs.Index" standardPath="DeviceGSM.Cs7Instance.ForAs.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.ForAsp.Index" standardPath="DeviceGSM.Cs7Instance.ForAsp.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.ForSccpAddr.Index" standardPath="DeviceGSM.Cs7Instance.ForSccpAddr.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.RoutingKey" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.TrafficMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.addAspName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" standardPath="DeviceGSM.Cs7Instance.{i}.As.{i}.delAspName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.AspRole" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.LocalPort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.Protocol" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.RemotePort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" standardPath="DeviceGSM.Cs7Instance.{i}.Asp.{i}.SctpRole" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" standardPath="DeviceGSM.Cs7Instance.{i}.NetworkIndicator" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.PointCode" standardPath="DeviceGSM.Cs7Instance.{i}.PointCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" standardPath="DeviceGSM.Cs7Instance.{i}.PointCodeFormat" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.PointCode" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.RoutingIndicator" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" standardPath="DeviceGSM.Cs7Instance.{i}.SccpAddr.{i}.SubsystemNumber" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" standardPath="DeviceGSM.Cs7Instance.{i}.XuaRkmRoutingKeyAllocation" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Encryption" standardPath="DeviceGSM.Encryption" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.HandoverAlgorithm" standardPath="DeviceGSM.HandoverAlgorithm" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Hodec2CongestionCheck" standardPath="DeviceGSM.Hodec2CongestionCheck" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Mcc" standardPath="DeviceGSM.Mcc" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwEndpointDomain" standardPath="DeviceGSM.Mgw.{i}.MgwEndpointDomain" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwLocalPort" standardPath="DeviceGSM.Mgw.{i}.MgwLocalPort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwRemoteIp" standardPath="DeviceGSM.Mgw.{i}.MgwRemoteIp" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Mgw.{i}.MgwRemotePort" standardPath="DeviceGSM.Mgw.{i}.MgwRemotePort" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Mnc" standardPath="DeviceGSM.Mnc" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.AllowEmergency" standardPath="DeviceGSM.Msc.{i}.AllowEmergency" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr10_2" standardPath="DeviceGSM.Msc.{i}.Amr10_2" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr12_2" standardPath="DeviceGSM.Msc.{i}.Amr12_2" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr4_75" standardPath="DeviceGSM.Msc.{i}.Amr4_75" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr5_15" standardPath="DeviceGSM.Msc.{i}.Amr5_15" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr5_90" standardPath="DeviceGSM.Msc.{i}.Amr5_90" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr6_70" standardPath="DeviceGSM.Msc.{i}.Amr6_70" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr7_40" standardPath="DeviceGSM.Msc.{i}.Amr7_40" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.Amr7_95" standardPath="DeviceGSM.Msc.{i}.Amr7_95" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.AmrPayload" standardPath="DeviceGSM.Msc.{i}.AmrPayload" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.AspProtocol" standardPath="DeviceGSM.Msc.{i}.AspProtocol" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.AttachProportion" standardPath="DeviceGSM.Msc.{i}.AttachProportion" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.LclsMismatch" standardPath="DeviceGSM.Msc.{i}.LclsMismatch" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.LclsMode" standardPath="DeviceGSM.Msc.{i}.LclsMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.MscAddr" standardPath="DeviceGSM.Msc.{i}.MscAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.MscCodecList" standardPath="DeviceGSM.Msc.{i}.MscCodecList" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.NriAdd" standardPath="DeviceGSM.Msc.{i}.NriAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.Msc.{i}.NriDel" standardPath="DeviceGSM.Msc.{i}.NriDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.NriBitLen" standardPath="DeviceGSM.NriBitLen" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.NriNullAdd" standardPath="DeviceGSM.NriNullAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.NriNullDel" standardPath="DeviceGSM.NriNullDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.TimerNetT3212" standardPath="DeviceGSM.TimerNetT3212" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover" standardPath="DeviceGSM.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.afs-bias.rxlev" standardPath="DeviceGSM.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.afs-bias.rxqual" standardPath="DeviceGSM.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.assignment" standardPath="DeviceGSM.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.max-handovers" standardPath="DeviceGSM.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.maximum.distance" standardPath="DeviceGSM.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.min-free-slots.tch-h" standardPath="DeviceGSM.handover2.min-free-slots.tch-h" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.min.rxlev" standardPath="DeviceGSM.handover2.min.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.min.rxqual" standardPath="DeviceGSM.handover2.min.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.penalty-time.failed-assignment" standardPath="DeviceGSM.handover2.penalty-time.failed-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.penalty-time.failed-ho" standardPath="DeviceGSM.handover2.penalty-time.failed-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-assignment" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.penalty-time.low-rxqual-ho" standardPath="DeviceGSM.handover2.penalty-time.low-rxqual-ho" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.penalty-time.max-distance" standardPath="DeviceGSM.handover2.penalty-time.max-distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.power.budget.hysteresis" standardPath="DeviceGSM.handover2.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.power.budget.interval" standardPath="DeviceGSM.handover2.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.retries" standardPath="DeviceGSM.handover2.retries" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.tdma-measurement" standardPath="DeviceGSM.handover2.tdma-measurement" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.window.rxlev.averaging" standardPath="DeviceGSM.handover2.window.rxlev.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.window.rxlev.neighbor.averaging" standardPath="DeviceGSM.handover2.window.rxlev.neighbor.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+        <param name="DeviceGSM.handover2.window.rxqual.averaging" standardPath="DeviceGSM.handover2.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
+    </parameters>
+</parameterModel>
