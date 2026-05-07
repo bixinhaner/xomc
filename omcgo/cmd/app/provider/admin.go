@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 )
 
@@ -71,6 +73,16 @@ func initAdminModule(c *Container) error {
 	c.AuditRepo = auditRepo
 	c.PermService = permService
 
+	// PRD users.md §11.7 决议③ / roles.md §11.4：注入"删除设备分组联动"钩子。
+	// admin 模块在 topology 之后初始化，此处把 roleRepo + adminService 适配到
+	// topology 包内定义的接口（避免 topology → admin 反向依赖）。
+	if c.GroupService != nil {
+		c.GroupService.SetGroupDeleteHooks(
+			&roleAffectedQueryAdapter{repo: roleRepo},
+			adminService,
+		)
+	}
+
 	// Dictionary module
 	dictRepo := admin.NewPgDictionaryRepository(c.PgPool)
 	dictDetailRepo := admin.NewPgDictionaryDetailRepository(c.PgPool)
@@ -108,6 +120,24 @@ func initAdminModule(c *Container) error {
 
 	logger.Info("admin/RBAC module initialized")
 	return nil
+}
+
+// roleAffectedQueryAdapter 把 *admin.PgRoleRepository.ListRolesByGroupIDs 的
+// []admin.Role 结果转成 topology.AffectedRole（仅 ID + Name 摘要）。
+type roleAffectedQueryAdapter struct {
+	repo *admin.PgRoleRepository
+}
+
+func (a *roleAffectedQueryAdapter) ListRolesByGroupIDs(ctx context.Context, groupIDs []uuid.UUID) ([]topology.AffectedRole, error) {
+	roles, err := a.repo.ListRolesByGroupIDs(ctx, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]topology.AffectedRole, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, topology.AffectedRole{ID: r.ID, Name: r.Name})
+	}
+	return out, nil
 }
 
 type adminHandlerDeps struct {

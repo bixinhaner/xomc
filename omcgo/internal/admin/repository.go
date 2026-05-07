@@ -93,6 +93,9 @@ type RoleDeviceGroupRepository interface {
 	GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error)
 	// SetDeviceGroupData replaces group IDs and network_types for a role.
 	SetDeviceGroupData(ctx context.Context, roleID uuid.UUID, data RoleDeviceGroupData) error
+	// ListRolesByGroupIDs 返回绑定了任一指定 group ID 的角色（去重）。
+	// PRD users.md §11.7 决议③ / roles.md §11.4：删除设备分组前查受影响角色。
+	ListRolesByGroupIDs(ctx context.Context, groupIDs []uuid.UUID) ([]Role, error)
 }
 
 // RoleApiPermissionRepository manages role–API-endpoint associations.

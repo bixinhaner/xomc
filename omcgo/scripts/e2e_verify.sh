@@ -4586,6 +4586,181 @@ else
 fi
 
 # ============================================================
+# Section 79: PRD users.md §11.7 决议③ + roles.md §11.4
+# 设备分组删除联动验证（创建角色 → 绑定分组 → 删分组 → 校验级联解绑 + 审计）
+# ============================================================
+section "79. PRD users/roles linkage — Group delete cascade & audit"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 79.1 创建测试角色
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/roles" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"e2e-prd-cascade-role","description":"PRD §11.4 cascade test role"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "S79.1 POST /admin/roles (cascade test role)" "201" "$HTTP_CODE"
+    S79_ROLE_ID=""
+    if [ "$HTTP_CODE" = "201" ]; then
+        S79_ROLE_ID=$(py_get "$BODY" "id")
+    fi
+
+    # 79.2 创建测试设备分组（非默认，可删除）
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/groups" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"e2e-prd-cascade-group","description":"PRD §11.4 cascade test group"}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "S79.2 POST /groups (cascade test group)" "201" "$HTTP_CODE"
+    S79_GROUP_ID=""
+    if [ "$HTTP_CODE" = "201" ]; then
+        S79_GROUP_ID=$(py_get "$BODY" "id")
+    fi
+
+    # 79.3 角色绑定该设备分组（PUT /admin/roles/:id/device-groups）
+    if [ -n "$S79_ROLE_ID" ] && [ -n "$S79_GROUP_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/admin/roles/$S79_ROLE_ID/device-groups" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d "{\"group_ids\":[\"$S79_GROUP_ID\"],\"network_types\":[]}")
+        check_status "S79.3 PUT /admin/roles/:id/device-groups (bind)" "200" "$HTTP_CODE"
+    else
+        fail "S79.3 PUT /admin/roles/:id/device-groups (bind)" "skipped — missing role or group"
+    fi
+
+    # 79.4 校验绑定生效：GET /admin/roles/:id/device-groups 包含该 groupID
+    if [ -n "$S79_ROLE_ID" ] && [ -n "$S79_GROUP_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/admin/roles/$S79_ROLE_ID/device-groups" \
+            -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "S79.4 GET /admin/roles/:id/device-groups (after bind)" "200" "$HTTP_CODE"
+        if [ "$HTTP_CODE" = "200" ]; then
+            HAS_GROUP=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+ids = d.get('group_ids') or []
+print('yes' if '$S79_GROUP_ID' in ids else 'no')
+" 2>/dev/null || echo "no")
+            if [ "$HAS_GROUP" = "yes" ]; then
+                pass "S79.4b group_ids contains the bound group"
+            else
+                fail "S79.4b group_ids contains the bound group" "group not in response"
+            fi
+        else
+            fail "S79.4b group_ids contains the bound group" "skipped — GET failed"
+        fi
+    else
+        fail "S79.4 GET /admin/roles/:id/device-groups (after bind)" "skipped — missing ids"
+        fail "S79.4b group_ids contains the bound group" "skipped"
+    fi
+
+    # 79.5 删除设备分组（应触发 PRD §11.7③：写审计 + 失效角色下用户缓存 + 级联解绑）
+    if [ -n "$S79_GROUP_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/groups/$S79_GROUP_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+            pass "S79.5 DELETE /groups/:id (cascade trigger) (HTTP $HTTP_CODE)"
+        else
+            fail "S79.5 DELETE /groups/:id (cascade trigger)" "expected 200/204, got $HTTP_CODE"
+        fi
+    else
+        fail "S79.5 DELETE /groups/:id (cascade trigger)" "skipped — no group id"
+    fi
+
+    # 79.6 校验级联解绑：GET /admin/roles/:id/device-groups 不再包含该 groupID
+    if [ -n "$S79_ROLE_ID" ] && [ -n "$S79_GROUP_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/admin/roles/$S79_ROLE_ID/device-groups" \
+            -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        if [ "$HTTP_CODE" = "200" ]; then
+            STILL_HAS=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+ids = d.get('group_ids') or []
+print('yes' if '$S79_GROUP_ID' in ids else 'no')
+" 2>/dev/null || echo "yes")
+            if [ "$STILL_HAS" = "no" ]; then
+                pass "S79.6 group_ids no longer contains deleted group (cascade ok)"
+            else
+                fail "S79.6 group_ids no longer contains deleted group" "still present after delete"
+            fi
+        else
+            fail "S79.6 group_ids no longer contains deleted group" "GET failed: $HTTP_CODE"
+        fi
+    else
+        fail "S79.6 group_ids no longer contains deleted group" "skipped — missing ids"
+    fi
+
+    # 79.7 校验审计日志已写入 action=role_device_group_revoked_by_group_delete
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/audit-logs?action=role_device_group_revoked_by_group_delete&page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "S79.7 GET /admin/audit-logs?action=role_device_group_revoked_by_group_delete" "200" "$HTTP_CODE"
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_AUDIT=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('items') if isinstance(d, dict) else []
+total = d.get('total') if isinstance(d, dict) else 0
+print('yes' if (items and len(items) > 0) or (total and total > 0) else 'no')
+" 2>/dev/null || echo "no")
+        if [ "$HAS_AUDIT" = "yes" ]; then
+            pass "S79.7b audit log entry present for cascade action"
+        else
+            fail "S79.7b audit log entry present for cascade action" "no entries returned"
+        fi
+    else
+        fail "S79.7b audit log entry present for cascade action" "skipped — list failed"
+    fi
+
+    # 79.8 清理：删除测试角色
+    if [ -n "$S79_ROLE_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/admin/roles/$S79_ROLE_ID" \
+            -H "$AUTH_HEADER")
+        if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+            pass "S79.8 DELETE /admin/roles/:id (cleanup) (HTTP $HTTP_CODE)"
+        else
+            fail "S79.8 DELETE /admin/roles/:id (cleanup)" "expected 200/204, got $HTTP_CODE"
+        fi
+    else
+        fail "S79.8 DELETE /admin/roles/:id (cleanup)" "skipped — no role id"
+    fi
+
+    # 79.9 PRD users.md v1.0：GET /admin/roles/all 用于编辑用户时下拉填充（dropdown 全量端点）
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/roles/all" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "S79.9 GET /admin/roles/all (dropdown source)" "200" "$HTTP_CODE"
+    if [ "$HTTP_CODE" = "200" ]; then
+        IS_LIST=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+arr = d if isinstance(d, list) else (d.get('items') if isinstance(d, dict) else None)
+print('yes' if isinstance(arr, list) else 'no')
+" 2>/dev/null || echo "no")
+        if [ "$IS_LIST" = "yes" ]; then
+            pass "S79.9b /admin/roles/all returns list/array"
+        else
+            fail "S79.9b /admin/roles/all returns list/array" "not array"
+        fi
+    fi
+
+    # 79.10 PRD users.md：用户内置 created_by/updated_by null → 列表能正常返回
+    RESP=$(curl -s -w "\n%{http_code}" "$API/admin/users?page=1&page_size=5" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "S79.10 GET /admin/users (built-in created_by null tolerance)" "200" "$HTTP_CODE"
+else
+    fail "S79 PRD users/roles linkage" "skipped — no access token"
+fi
+
+# ============================================================
 # W1.6 — Wave 1 minimum coverage (login / device / alarm / kpi / template)
 # 每条用例以 claim 标注，便于 grep -c 自动核销 ≥ 20。
 # 五域各 ≥ 4 条，使用稳定端点（list 200 / 不存在 ID 404 / 创建后回查）

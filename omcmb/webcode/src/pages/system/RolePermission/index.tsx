@@ -262,6 +262,42 @@ const buildDeviceGroupTreeData = (
     .filter((node): node is TreeDataNode => node !== null);
 };
 
+// 模块级派生常量：PERMISSION_MODULES 是编译期常量，其衍生 keys 不依赖任何运行期状态。
+// 之前用 useMemo([]) 包裹会触发 react-hooks/immutability lint 错误（编译器认为 deps 不充分）。
+const ALL_MODULE_KEYS: string[] = PERMISSION_MODULES.map((m) => m.key);
+const ALL_PERMISSION_KEYS: string[] = (() => {
+  const keys: string[] = [];
+  for (const module of PERMISSION_MODULES) {
+    keys.push(module.key);
+    for (const child of module.children) {
+      keys.push(`${module.key}.${child.key}`);
+      const operations = child.operations || DEFAULT_OPERATIONS;
+      for (const op of operations) {
+        keys.push(`${module.key}.${child.key}.${op.key}`);
+      }
+    }
+  }
+  return keys;
+})();
+// 仅叶子节点（三级操作）keys，用于 array ↔ checkedKeys 转换的过滤集。
+const ALL_PERMISSION_LEAF_KEYS: string[] = (() => {
+  const keys: string[] = [];
+  for (const module of PERMISSION_MODULES) {
+    for (const child of module.children) {
+      const operations = child.operations || DEFAULT_OPERATIONS;
+      for (const op of operations) {
+        keys.push(`${module.key}.${child.key}.${op.key}`);
+      }
+    }
+  }
+  return keys;
+})();
+// 把 permissions 字符串数组转为 Tree 的 checkedKeys（仅保留叶子节点）。
+// 模块级纯函数，无运行时依赖；避免 useCallback 的 lint immutability 问题。
+function permissionsArrayToCheckedKeys(permissions: string[]): React.Key[] {
+  return permissions.filter((p) => ALL_PERMISSION_LEAF_KEYS.includes(p));
+}
+
 export default function RoleManagement() {
   const t = useT();
   const { modal, message } = App.useApp();
@@ -401,9 +437,9 @@ export default function RoleManagement() {
       roleName: role.roleName,
       description: role.description,
     });
-    setExpandedPermissionKeys(allModuleKeys);
+    setExpandedPermissionKeys(ALL_MODULE_KEYS);
     // 先用列表数据快速展示（防止抖动），再用专项端点结果覆盖
-    setCheckedPermissionKeys(arrayToCheckedKeys(role.permissions || []));
+    setCheckedPermissionKeys(permissionsArrayToCheckedKeys(role.permissions || []));
     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
     setSelectedNetworkTypes(role.networkTypes || []);
 
@@ -411,7 +447,7 @@ export default function RoleManagement() {
     getRoleDetail.mutate(role.id, {
       onSuccess: (full) => {
         if (full?.permissions) {
-          setCheckedPermissionKeys(arrayToCheckedKeys(full.permissions));
+          setCheckedPermissionKeys(permissionsArrayToCheckedKeys(full.permissions));
         }
       },
     });
@@ -426,7 +462,8 @@ export default function RoleManagement() {
     getRoleApiPermissions.mutate(role.id, {
       onSuccess: (ids) => setSelectedApiEndpointIds(ids),
     });
-  }, [form, allModuleKeys, getRoleDetail, getRoleDeviceGroupsMut, getRoleApiPermissions]);
+    // ALL_MODULE_KEYS 是模块级常量，不需列入 deps。
+  }, [form, getRoleDetail, getRoleDeviceGroupsMut, getRoleApiPermissions]);
 
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
@@ -434,19 +471,7 @@ export default function RoleManagement() {
     [data?.items]
   );
 
-  // 获取所有权限项的 key（格式：module.subItem.operation）- 仅叶子节点（三级操作）
-  const allPermissionLeafKeys = useMemo(() => {
-    const keys: string[] = [];
-    for (const module of PERMISSION_MODULES) {
-      for (const child of module.children) {
-        const operations = child.operations || DEFAULT_OPERATIONS;
-        for (const op of operations) {
-          keys.push(`${module.key}.${child.key}.${op.key}`);
-        }
-      }
-    }
-    return keys;
-  }, []);
+  // 叶子节点 keys 直接用顶层 ALL_PERMISSION_LEAF_KEYS 常量（不再起本地别名）。
 
   // 获取所有二级菜单的 key（用于展开）
   const allSecondLevelKeys = useMemo(() => {
@@ -459,29 +484,7 @@ export default function RoleManagement() {
     return keys;
   }, []);
 
-  // 获取所有一级模块的 key
-  const allModuleKeys = useMemo(() => {
-    return PERMISSION_MODULES.map((m) => m.key);
-  }, []);
-
-  // 获取所有节点的 key（一级 + 二级 + 三级）- 用于全选
-  const allPermissionKeys = useMemo(() => {
-    const keys: string[] = [];
-    for (const module of PERMISSION_MODULES) {
-      // 一级节点
-      keys.push(module.key);
-      for (const child of module.children) {
-        // 二级节点
-        keys.push(`${module.key}.${child.key}`);
-        // 三级节点（操作）
-        const operations = child.operations || DEFAULT_OPERATIONS;
-        for (const op of operations) {
-          keys.push(`${module.key}.${child.key}.${op.key}`);
-        }
-      }
-    }
-    return keys;
-  }, []);
+  // PERMISSION_MODULES 派生 keys 直接复用顶层 ALL_MODULE_KEYS / ALL_PERMISSION_KEYS 常量。
 
   // 构建菜单权限树形数据（三级结构）
   const permissionTreeData = useMemo((): TreeDataNode[] => {
@@ -503,20 +506,17 @@ export default function RoleManagement() {
   // 将 checkedPermissionKeys 转换为 permissions 数组（用于提交）
   // 格式：["device.list", "alarm.current", ...]
   const permissionsToArray = useCallback((keys: React.Key[]): string[] => {
-    // 只返回叶子节点的 key
-    return keys.filter((k) => allPermissionLeafKeys.includes(k as string)) as string[];
-  }, [allPermissionLeafKeys]);
+    // 只返回叶子节点的 key；ALL_PERMISSION_LEAF_KEYS 为顶层常量不需列入 deps。
+    return keys.filter((k) => ALL_PERMISSION_LEAF_KEYS.includes(k as string)) as string[];
+  }, []);
 
-  // 将 permissions 数组转换为 checkedPermissionKeys
-  const arrayToCheckedKeys = useCallback((permissions: string[]): React.Key[] => {
-    // 直接返回权限列表作为选中的 key
-    return permissions.filter((p) => allPermissionLeafKeys.includes(p));
-  }, [allPermissionLeafKeys]);
+  // permissionsArrayToCheckedKeys 已抽到模块级 permissionsArrayToCheckedKeys（避免 lint
+  // immutability + before-declared 双重错误）。
 
   // 检查是否至少选择了一个权限
   const hasAnyPermission = useMemo(
-    () => checkedPermissionKeys.some((k) => allPermissionLeafKeys.includes(k as string)),
-    [checkedPermissionKeys, allPermissionLeafKeys]
+    () => checkedPermissionKeys.some((k) => ALL_PERMISSION_LEAF_KEYS.includes(k as string)),
+    [checkedPermissionKeys]
   );
 
   // 校验角色名称
@@ -666,36 +666,9 @@ export default function RoleManagement() {
     });
   }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
 
-  // 校验并提交编辑
-  const handleEdit = useCallback(() => {
-    if (!selectedRole) return;
-
-    // 校验权限
-    if (!hasAnyPermission) {
-      message.warning(t('role.pleaseSelectPermission'));
-      return;
-    }
-    // §11.2 决议 ① 触点 5：清空设备分组二次确认。
-    // 选 0 个二级节点不再硬阻止，改为弹 Modal 警告 → OK 才继续保存（允许显式清空）。
-    const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
-    if (selectedSecondLevel.length === 0) {
-      modal.confirm({
-        title: '确认清空设备分组绑定',
-        content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
-        okText: '继续保存',
-        okButtonProps: { danger: true },
-        cancelText: '取消',
-        onOk: () => {
-          // 用户确认清空 → 直接进入保存流程（绕过本校验）
-          doEditSubmit();
-        },
-      });
-      return;
-    }
-    doEditSubmit();
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, modal, t]);
-
-  // doEditSubmit 拆出实际提交逻辑，配合上方"清空设备分组二次确认"复用。
+  // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
+  // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
+  // "Cannot access doEditSubmit before it is declared"。
   const doEditSubmit = useCallback(() => {
     if (!selectedRole) return;
     form.validateFields().then((vals) => {
@@ -734,6 +707,35 @@ export default function RoleManagement() {
       );
     });
   }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
+
+  // 校验并提交编辑
+  const handleEdit = useCallback(() => {
+    if (!selectedRole) return;
+
+    // 校验权限
+    if (!hasAnyPermission) {
+      message.warning(t('role.pleaseSelectPermission'));
+      return;
+    }
+    // §11.2 决议 ① 触点 5：清空设备分组二次确认。
+    // 选 0 个二级节点不再硬阻止，改为弹 Modal 警告 → OK 才继续保存（允许显式清空）。
+    const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
+    if (selectedSecondLevel.length === 0) {
+      modal.confirm({
+        title: '确认清空设备分组绑定',
+        content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
+        okText: '继续保存',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: () => {
+          // 用户确认清空 → 直接进入保存流程（绕过本校验）
+          doEditSubmit();
+        },
+      });
+      return;
+    }
+    doEditSubmit();
+  }, [selectedRole, hasAnyPermission, selectedDeviceGroupIds, allSecondLevelIds, doEditSubmit, message, modal, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -833,13 +835,13 @@ export default function RoleManagement() {
   // 渲染菜单权限配置（树形结构 - 按图片样式）
   const renderPermissionConfig = (readOnly = false) => {
     // 是否全部展开（一级 + 二级都要展开）
-    const isAllExpanded = expandedPermissionKeys.length >= allModuleKeys.length + allSecondLevelKeys.length;
+    const isAllExpanded = expandedPermissionKeys.length >= ALL_MODULE_KEYS.length + allSecondLevelKeys.length;
 
     // 展开/折叠所有（复选框）
     const handleExpandChange = (checked: boolean) => {
       if (checked) {
         // 展开所有一级和二级节点
-        setExpandedPermissionKeys([...allModuleKeys, ...allSecondLevelKeys]);
+        setExpandedPermissionKeys([...ALL_MODULE_KEYS, ...allSecondLevelKeys]);
       } else {
         setExpandedPermissionKeys([]);
       }
@@ -848,7 +850,7 @@ export default function RoleManagement() {
     // 全选/全不选（复选框）- 控制所有节点
     const handleSelectAllChange = (checked: boolean) => {
       if (checked) {
-        setCheckedPermissionKeys(allPermissionKeys);
+        setCheckedPermissionKeys(ALL_PERMISSION_KEYS);
       } else {
         setCheckedPermissionKeys([]);
       }
@@ -861,13 +863,13 @@ export default function RoleManagement() {
 
     // 获取当前选中的节点数量（用于全选状态计算）- 统计所有节点
     const checkedCount = checkedPermissionKeys.filter((k) =>
-      allPermissionKeys.includes(k as string)
+      ALL_PERMISSION_KEYS.includes(k as string)
     ).length;
 
     // 是否全选
-    const isAllSelected = checkedCount === allPermissionKeys.length && allPermissionKeys.length > 0;
+    const isAllSelected = checkedCount === ALL_PERMISSION_KEYS.length && ALL_PERMISSION_KEYS.length > 0;
     // 是否部分选中
-    const isIndeterminate = checkedCount > 0 && checkedCount < allPermissionKeys.length;
+    const isIndeterminate = checkedCount > 0 && checkedCount < ALL_PERMISSION_KEYS.length;
 
     // 处理树节点选中
     const handleCheck: TreeProps['onCheck'] = (checked) => {

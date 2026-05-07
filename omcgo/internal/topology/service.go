@@ -3,10 +3,12 @@ package topology
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
@@ -17,6 +19,11 @@ type DeviceGroupService struct {
 	repo   DeviceGroupRepository
 	pool   *pgxpool.Pool
 	logger *zap.Logger
+
+	// PRD users.md §11.7 决议③ / roles.md §11.4：删除设备分组联动钩子。
+	// 两者均可为 nil（测试场景），DeleteGroup 退化为旧行为。
+	roleQuery       RoleAffectedQuery
+	roleCacheBuster RoleCachePurger
 }
 
 // NewDeviceGroupService creates a new DeviceGroupService.
@@ -236,6 +243,10 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 
 // DeleteGroup deletes a group, moving its devices to the default L2 group.
 // All steps run inside a single transaction when a pool is available.
+//
+// PRD users.md §11.7 决议③ / roles.md §11.4：删除前查 role_device_groups 取得受
+// 影响角色集 → 删除完成后写审计日志 + 失效这些角色下所有用户的可见域缓存。
+// 当钩子未注入（roleQuery == nil）时退化为旧行为（仅删库）。
 func (s *DeviceGroupService) DeleteGroup(ctx context.Context, id uuid.UUID) error {
 	group, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -256,24 +267,79 @@ func (s *DeviceGroupService) DeleteGroup(ctx context.Context, id uuid.UUID) erro
 		groupIDs = append(groupIDs, childIDs...)
 	}
 
-	// When pool is available (production), use a transaction.
-	if s.pool != nil {
-		return s.deleteGroupTx(ctx, id, group, groupIDs)
-	}
-
-	// Fallback (e.g. unit tests with mock repo): non-transactional path.
-	if _, err := s.repo.MoveGroupDevicesToDefault(ctx, groupIDs); err != nil {
-		return fmt.Errorf("move devices to default: %w", err)
-	}
-	if group.Level == 1 {
-		childIDs, _ := s.repo.ListChildIDs(ctx, id)
-		for _, cid := range childIDs {
-			if delErr := s.repo.Delete(ctx, cid); delErr != nil {
-				s.logger.Warn("failed to delete child group", zap.String("child_id", cid.String()), zap.Error(delErr))
-			}
+	// 1) 删前查受影响角色（删后 role_device_groups ON DELETE CASCADE 会清掉关联）。
+	var affected []AffectedRole
+	if s.roleQuery != nil {
+		var qerr error
+		affected, qerr = s.roleQuery.ListRolesByGroupIDs(ctx, groupIDs)
+		if qerr != nil {
+			s.logger.Warn("query affected roles before group delete failed",
+				zap.String("group_id", id.String()), zap.Error(qerr))
 		}
 	}
-	return s.repo.Delete(ctx, id)
+
+	// 2) 实际删除（事务 / 非事务两路径不变）。
+	if s.pool != nil {
+		if err := s.deleteGroupTx(ctx, id, group, groupIDs); err != nil {
+			return err
+		}
+	} else {
+		if _, err := s.repo.MoveGroupDevicesToDefault(ctx, groupIDs); err != nil {
+			return fmt.Errorf("move devices to default: %w", err)
+		}
+		if group.Level == 1 {
+			childIDs, _ := s.repo.ListChildIDs(ctx, id)
+			for _, cid := range childIDs {
+				if delErr := s.repo.Delete(ctx, cid); delErr != nil {
+					s.logger.Warn("failed to delete child group",
+						zap.String("child_id", cid.String()), zap.Error(delErr))
+				}
+			}
+		}
+		if err := s.repo.Delete(ctx, id); err != nil {
+			return err
+		}
+	}
+
+	// 3) 删后处理：写审计 + 失效缓存（任一失败仅日志，不阻塞删除结果）。
+	s.afterGroupDeleted(ctx, id, group, affected)
+	return nil
+}
+
+// afterGroupDeleted 实现 PRD §11.7 决议③ 后续动作：审计 + 通知（占位） + 缓存失效。
+// audit + cache invalidate 单独 goroutine 执行可减少延迟，但当前规模下顺序调用足够，
+// 且能让单元测试稳定断言。
+func (s *DeviceGroupService) afterGroupDeleted(ctx context.Context, groupID uuid.UUID, group *DeviceGroup, affected []AffectedRole) {
+	if len(affected) == 0 {
+		return
+	}
+
+	// 写审计日志（失败仅日志）。
+	rolesPayload := make([]map[string]any, 0, len(affected))
+	for _, r := range affected {
+		rolesPayload = append(rolesPayload, map[string]any{
+			"role_id":   r.ID.String(),
+			"role_name": r.Name,
+		})
+	}
+	audit.Log(ctx, audit.Entry{
+		Action:       "role_device_group_revoked_by_group_delete",
+		ResourceType: "device_group",
+		ResourceID:   groupID.String(),
+		Details: map[string]interface{}{
+			"group_name":     group.Name,
+			"affected_roles": rolesPayload,
+			"deleted_at":     time.Now().UTC().Format(time.RFC3339),
+		},
+		Success: true,
+	})
+
+	// 失效每个受影响角色下所有用户的可见域缓存。
+	if s.roleCacheBuster != nil {
+		for _, r := range affected {
+			s.roleCacheBuster.InvalidatePermCacheByRole(ctx, r.ID)
+		}
+	}
 }
 
 // deleteGroupTx performs the delete group operation inside a pgx transaction.

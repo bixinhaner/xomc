@@ -700,6 +700,36 @@ func (r *PgRoleRepository) SetGroupIDs(ctx context.Context, roleID uuid.UUID, gr
 	return tx.Commit(ctx)
 }
 
+// ListRolesByGroupIDs 查询绑定了任一指定 group ID 的角色（去重）。
+// PRD users.md §11.7 决议③ / roles.md §11.4：删除设备分组前调用 → 写审计 +
+// 失效角色下用户的可见域缓存。返回的 Role 仅含 ID + Name（其它字段未填）。
+func (r *PgRoleRepository) ListRolesByGroupIDs(ctx context.Context, groupIDs []uuid.UUID) ([]Role, error) {
+	if len(groupIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT r.id, r.name
+		 FROM roles r
+		 JOIN role_device_groups rdg ON rdg.role_id = r.id
+		 WHERE rdg.group_id = ANY($1)`, groupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list roles by group ids: %w", err)
+	}
+	defer rows.Close()
+	roles := make([]Role, 0)
+	for rows.Next() {
+		var role Role
+		if err := rows.Scan(&role.ID, &role.Name); err != nil {
+			return nil, fmt.Errorf("scan role row: %w", err)
+		}
+		roles = append(roles, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate roles by group ids: %w", err)
+	}
+	return roles, nil
+}
+
 // GetDeviceGroupData returns group IDs and network_types for a role.
 func (r *PgRoleRepository) GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error) {
 	rows, err := r.pool.Query(ctx,
