@@ -66,13 +66,12 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 132 | — | **2026-05-07 +T-0098 拆 36 子任务**（T-0098-P1-01 .. T-0098-P5-06，§4.1 子表；D1-D10 全采纳推荐 + 12 R-T0098-* 风险同步 risk-register；详见 §10 changelog）；**+T-0098**（参数 / KPI / 告警 数据字典平台化整合设计 + XML 资产入库 2026-05-07；新方案取代远端旧 param-model-delivery / product 设计）；**+T-0097**（MML console「保存脚本」弹窗 API 结果反馈 bug；@chenbo01 提需求 2026-04-30；静态核查显示 toast 代码已有 → 真实性存疑，待 triage reproduce；T-0096 上游）；**+T-0096**（MML script 页面「更新」弹窗取消产品类型字段，与 /mml/console 对齐；@chenbo01 提需求 2026-04-30，proposed）；**+T-0094**（T-0090 triage 时发现 MML category_group DB 列缺失 pre-existing bug 拆分）；T-0093（T-0032 carve-out SFTP/FTPS auth probe）|
-| `done` | 78 | — | **+T-0027** (拓扑自动分组规则引擎激活 — 三路径全闭环：手工 ApplyRule + cron @hourly + device.registered；A4 SQL 守护；6 metric + 7 log key；FE source 列；R-104 关闭；S0-S7 全过 11 commits 见 verify-T-0027.md) **+T-0028** (syslog 远程转发 UDP/TCP — RFC 3164 wire format / UDP fire-and-forget / TCP 持久连接 lazy reconnect / Forwarder API / 17 severity / 0 新依赖) **+T-0029** (RF 控制走 Carrier 适配器 — Carrier 接口 +RFControlPath(tech) / 3 carrier 适配 / DeviceService DI carrier registry / 去 LTE 硬编码) **+T-0031** (CAPTCHA 图形生成 — PNG 5-char 噪图 / 5×7 bitmap font / 31-char keyspace / crypto/rand 全程 / 0 新依赖)；+T-0032 / +T-0092 / +T-0087 / +T-0086 / +T-0085 / +T-0083 / +T-0088 / +T-0089 / +T-0084 / +T-0082 / +T-0075 / +T-0076 / +T-0079 / +T-0078 / +T-0080 / +T-0072 / +T-0077 / +T-0074 / +T-0073 / +T-0071 / +T-0070 / +T-0016 / +T-0021 / +T-0019 / +T-0018 / +T-0025 / +T-0022 / +T-0012 / +T-0015 |
-| `in_dev` | 2 | — | T-0095 KPI（**2026-05-07 D10=A 决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动正式合并关闭**；2026-04-30 由 T-0027 改号，原 T-0027 真号属拓扑分组）；T-0098 数据字典平台化（**2026-05-07 D1-D10 全采纳推荐 + 36 子任务拆出 §4.1 + 12 R-T0098-* 风险同步**；S2 设计已交付 + XML 入库 + v1 实施计划落地） |
-| `in_design` | 0 | — | T-0028 + T-0029 + T-0031 + T-0083 + T-0085 + T-0086 + T-0087 + T-0092 + T-0032 全部 done；当前无 in_design |
-| `planned` | 6 | — | 不变 |
-| `triaged` | 43 | — | **2026-05-07 +T-0098 拆 36 子任务（T-0098-P1-01 .. T-0098-P5-06，§4.1 子表；P1-P3 准 W3 / P4-P5 推 W3 后）**；**−T-0027**（拓扑分组 D1-D7 全拍板 + S1 排期 sprint-09 + S2 设计备忘补完 → §3 Active planned）；**−T-0094**（MML category_group SQL 闭环 → §8 Rejected）；**+T-0097**（MML console 保存脚本反馈 bug；pre-pick 需 reproduce）**+T-0096**（MML script 弹窗取消产品类型；deps T-0090 反向语义）**+T-0090**（MML UX 整改 — B 扩展后 7 子项 / XL / Risk 双重）；剩 T-0030 F10 互操作 + T-0091 真 KMS + T-0093 SFTP/FTPS + T-0035 前端多皮肤（均不阻塞主链路） |
-| `planned` | 6 | — | **−T-0027** (done 2026-05-06，三路径闭环 + R-104 关闭 → §6 Done) |
+| Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
+| `done` | 78 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md` |
+| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella，36 子任务待 sprint planning） |
+| `in_design` | 0 | — | — |
+| `planned` | 6 | — | T-0027 done 后无新增；下次 sprint planning 从 §4 Triaged 挑选 |
+| `triaged` | 43 | — | T-0098 36 sub-task 占 36 条；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**）|
