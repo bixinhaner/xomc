@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
@@ -49,6 +50,9 @@ type Container struct {
 	Health     *components.HealthChecker
 
 	// ===== 共享服务（由各模块 Init 设置）=====
+
+	// DictLoad 模块设置（T-0098 P1-06）
+	DictLoaderRegistry *dictloader.Registry
 
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry

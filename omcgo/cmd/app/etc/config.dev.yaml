@@ -109,6 +109,27 @@ datamodel_expiry:
   manual_max_idle_days: 60
   cleanup_cron: "0 3 * * *"
 
+# T-0098 P1-06：4 域字典启动期加载（paramModel / indicator / alarm-definition / product）
+dict_loader:
+  xml_base_dir: "data"           # 各 Loader Directory 相对此根（dev：相对 omcgo cwd；prod 建议绝对路径）
+  auto_load_on_startup: true
+  cache_version_poll_interval: 30s
+  load_concurrency: 4
+  param_model:
+    directory: "param-mappings"
+    standard_model_file: "standard-model.xml"
+    param_model_files: []        # 空 → Loader 扫除 standard-model.xml/products.xml/旧 routing 之外的 *.xml
+  indicator:
+    base_directory: "indicator-library"
+    enb_subdir: "enb"
+    gsm_file: "GSM.xml"
+    gnb_file: "GNB.xml"
+  alarm_definition:
+    directory: "alarm-definitions"
+  product:
+    directory: "param-mappings"
+    file: "products.xml"
+
 batch_processor:
   enabled: true           # 启用 Periodic Inform 批量处理
   workers: 2              # 工作协程数

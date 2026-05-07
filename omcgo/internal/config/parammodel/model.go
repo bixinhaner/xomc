@@ -1,0 +1,95 @@
+// Package parammodel 提供 T-0098 参数模型字典（设计 §1）。
+//
+// P1-06 阶段交付：
+//   - model.go    XML 解析结构 + 领域类型
+//   - loader.go   实现 dictloader.Loader 接口 — 启动期 9 个 paramModel XML + 1 个 standard XML 加载
+//
+// Phase 2 接力：Registry / Translator / Intersect / Cache（设计 §1.4-§1.10）。
+package parammodel
+
+import (
+	"encoding/xml"
+
+	"github.com/google/uuid"
+)
+
+// ── Domain types（直接对应 §1.2 表 schema）─────────────────────────────────
+
+// ParamModel 对应 param_models 表（设计 §1.2.1）。
+type ParamModel struct {
+	ID           uuid.UUID
+	Name         string
+	TotalEntries int
+	TotalObjects int
+	TotalParams  int
+	Description  string
+	IsActive     bool
+	LoadedFrom   string
+}
+
+// ParamMapping 对应 param_mappings 表（设计 §1.2.2）。
+type ParamMapping struct {
+	ParamModelID  uuid.UUID
+	StandardPath  string
+	PrivatePath   string
+	EntryType     string // "object" | "parameter"
+	Access        string
+	DataType      string
+	ChangeApplies string
+	MinValue      *int64
+	MaxValue      *int64
+	IsStorable    bool
+	IsActive      bool
+}
+
+// StandardParam 对应 standard_params 表（设计 §1.2.4）。
+type StandardParam struct {
+	StandardPath  string
+	EntryType     string
+	Access        string
+	DataType      string
+	ChangeApplies string
+	MinValue      *int64
+	MaxValue      *int64
+}
+
+// ── XML 解析结构（设计 §1.7 格式 A 与 D）────────────────────────────────
+
+// xmlParameterModel 解析 paramModel.xml（格式 A）。
+type xmlParameterModel struct {
+	XMLName      xml.Name        `xml:"parameterModel"`
+	ParamModel   string          `xml:"paramModel,attr"`
+	TotalEntries int             `xml:"totalEntries,attr"`
+	Objects      []xmlParamEntry `xml:"objects>object"`
+	Params       []xmlParamEntry `xml:"parameters>param"`
+}
+
+// xmlParamEntry 同时复用于 <object> 与 <param>（字段集合一致，仅元素名不同）。
+// 注意：XML 中 <object> 用 name 属性、<param> 也用 name 属性；store 仅 <param> 出现。
+type xmlParamEntry struct {
+	Name          string `xml:"name,attr"`
+	StandardPath  string `xml:"standardPath,attr"`
+	Access        string `xml:"access,attr"`
+	DataType      string `xml:"type,attr"`
+	ChangeApplies string `xml:"changeApplies,attr"`
+	Min           string `xml:"min,attr"`
+	Max           string `xml:"max,attr"`
+	Store         string `xml:"store,attr"` // "true" | "false" | ""（缺省视 true）
+}
+
+// xmlStandardModel 解析 standard-model.xml（格式 D）。
+type xmlStandardModel struct {
+	XMLName     xml.Name           `xml:"standardModel"`
+	TotalPaths  int                `xml:"totalPaths,attr"`
+	Objects     []xmlStandardEntry `xml:"objects>object"`
+	Params      []xmlStandardEntry `xml:"parameters>param"`
+}
+
+type xmlStandardEntry struct {
+	StandardPath  string `xml:"standardPath,attr"`
+	Access        string `xml:"access,attr"`
+	DataType      string `xml:"type,attr"`
+	ChangeApplies string `xml:"changeApplies,attr"`
+	Min           string `xml:"min,attr"`
+	Max           string `xml:"max,attr"`
+}

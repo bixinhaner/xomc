@@ -104,6 +104,12 @@ func Setup(r *gin.Engine, c *Container) error {
 		Depends: []string{"task"},
 		Init:    func() error { return initMiscModules(c) },
 	})
+	// T-0098 P1-06：字典加载（4 域 paramModel/indicator/alarm-definition/product）
+	// 无业务依赖，但 P1 schema 必须已迁移（migrate up 跑过 000057-000059）
+	graph.Add(components.ModuleInitializer{
+		Name: "dictload",
+		Init: func() error { return initDictLoadModule(c) },
+	})
 
 	totalStart := time.Now()
 
