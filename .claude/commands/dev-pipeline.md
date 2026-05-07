@@ -3,7 +3,15 @@
 将 L0 Backlog 中的任务按 S0→S7 七阶段门控推进到本地提交。部署流水线是最后防线，这个 skill 是**第一道防线**。
 
 **完整设计**：`docs/project/dev-pipeline-design-20260420.md`
-**任务源**：`docs/project/backlog.md`（唯一任务清单）
+**任务源**：`docs/project/backlog.md`（当前活跃，主入口） + `docs/project/backlog/`（归档/sub-task）
+
+**Backlog 文件布局**（2026-05-07 拆分后，详见 `docs/project/backlog/README.md`）：
+- `docs/project/backlog.md` — 当前活跃任务、§2 仪表盘、Wave 3 队列、近 7 天 Done 速览、近 5 条 changelog 速览
+- `docs/project/backlog/done/<季度>.md` — 历史完成任务的 Closing Evidence
+- `docs/project/backlog/changelog.md` — 完整变更日志
+- `docs/project/backlog/waves/wave-N.md` — 已完结 Wave 的队列与计分史
+- `docs/project/backlog/subtasks/T-NNNN-*.md` — umbrella 任务的 sub-task 表
+- `docs/project/backlog/bootstrap.md` — Bootstrap 阶段遗留
 
 ---
 
@@ -59,7 +67,10 @@
 ### §A1 status — 打印仪表盘
 
 1. 读 `docs/project/backlog.md` §2 仪表盘段。
-2. 按 schema 重新统计（防表格与实际行数不一致）：扫 §3/§4/§5/§6/§7/§8 分区，计数每个 state。
+2. 按 schema 重新统计（防表格与实际行数不一致）：
+   - 主 backlog.md §3 / §4 / §5 / §7 / §8 分区，计数 in-flight / planned / triaged / proposed / deferred / rejected
+   - **Done 总数**：从 `docs/project/backlog/done/*.md` 全季度归档表统计行数（§6 主表只是近 7 天速览，不可作为总数）
+   - **next-id 扫描**：grep `T-[0-9]{4}` 覆盖 `docs/project/backlog.md` + `docs/project/backlog/**/*.md` 取最大值（T-0098-P1-01 形式的 sub-task 不计入主序号扫描）
 3. 健康度检查（dev-pipeline-design §11.11）：
    - `proposed` 积压 > 7 天 → 告警"本周未 triage"
    - `blocked` > 3 → 告警"开阻塞专题"
@@ -125,8 +136,8 @@
 
 ### §A3 next — 出队
 
-1. 读 backlog §3 Active + §4 Triaged 两表。
-2. 读 §6 Done 建立 done-set。
+1. 读主 `backlog.md` §3 Active + §4 Triaged 两表 + `backlog/subtasks/*.md`（umbrella sub-task）。
+2. 建立 done-set：grep `T-NNNN` 覆盖 `backlog/done/*.md` 全季度归档表（不只读主 §6 速览）。
 3. 识别**累计型上游**（设计 §11.7.1）：扫描 §3 Active 中 `Sprint` 含 `..` 跨度 且 `Est=XL` 的 Task → 累计型集合。
 4. 过滤：
    - `State ∈ {triaged, planned}`（排除 in_*, blocked）
@@ -151,7 +162,7 @@
 
 ### §A4 pick T-NNNN
 
-1. 在 backlog 主表查找 T-NNNN；不存在 → 停，提示"未登记"。
+1. 查找 T-NNNN：先扫主 `backlog.md` §3/§4，找不到则扫 `backlog/subtasks/*.md`（umbrella sub-task 形如 T-NNNN-Px-yy）；再找不到 → 检查 `backlog/done/*.md`（已归档不可重开 → 提示"任务已 done"）；最终未命中 → 停，提示"未登记"。
 2. 验证 State ∈ {triaged, planned, in_*}：否则拒绝（done/deferred/rejected 不再工作）。
 3. 验证 Deps 全 done：否则转 blocked 并提示。
 4. 根据 Task.Type 决定裁剪（见 §C）。
@@ -166,14 +177,14 @@
 
 ### §A5 backlog add "<title>"
 
-1. 读 backlog.md，扫描最大 `T-NNNN`。
+1. 扫描最大 `T-NNNN`：grep `T-[0-9]{4}\b` 覆盖 `docs/project/backlog.md` + `docs/project/backlog/**/*.md`（**含归档** done/changelog/waves/subtasks/bootstrap，防 ID 冲突）；T-NNNN-Px-yy 形式的 sub-task 用 `\b` 边界排除。
 2. 生成下一 ID = `T-$(printf %04d $((max+1)))`。
-3. 在 §5 Proposed 表追加一行：
+3. 在主 `backlog.md` §5 Proposed 表追加一行：
    ```
    | T-NNNN | <title> | <user> | <today> | — |
    ```
-4. 更新 §2 仪表盘 proposed 计数。
-5. 更新 §10 变更日志追加一行。
+4. 更新主 `backlog.md` §2 仪表盘 proposed 计数。
+5. 在 `docs/project/backlog/changelog.md` **顶部**追加一行（不写主 backlog §10 速览；速览由 PgM 周一 Triage 时滚动）。
 6. 输出：`✅ 已登记 T-NNNN，等待下周 Triage（或执行 /dev-pipeline triage）`。
 
 ### §A6 triage
@@ -351,14 +362,15 @@
 **活动**：
 1. 输出"本地已提交（hash xxx），未推送远端。如需推送请明确告知"
 2. 更新 sprint-NN.md 条目 → Done
-3. 更新 backlog 主表：Task.State `in_review → done`；填 Closed
-4. 追加到 §6 Done 分区（带 Closing Evidence）
-5. 更新 §10 变更日志
-6. 关联 Risk mitigation 完成 → 更新 risk-register
-7. 走快速通道 → **强制**补 postmortem 到 risk-register
-8. E2E 覆盖增量记账到 §2 仪表盘
-9. **若来自 worktree（wave-batched 并行模式）**：按 §C.2.4 自动清理 worktree + 删分支；**不得追问用户**
-10. **next-batch 建议**：按 §C.2.5 格式自动输出下一步建议块；**不得追问用户**
+3. 主 `backlog.md`：Task.State `in_review → done`；填 Closed；从 §3/§4 主表删行
+4. **追加到 `docs/project/backlog/done/<当前季度>.md`**（带完整 Closing Evidence；当前季度 = 今天年份 + 季度，如 2026Q2 / 2026Q3）；季度初若文件不存在则按 `done/2026Q2.md` 模板新建
+5. 主 `backlog.md` §6 Done 速览刷新：把刚关闭的任务加到顶部，超过 10 条则尾部行删除（仅保速览，不替代归档）
+6. 在 `docs/project/backlog/changelog.md` 顶部追加一行；主 `backlog.md` §10 速览刷新（保近 5 条）
+7. 关联 Risk mitigation 完成 → 更新 risk-register
+8. 走快速通道 → **强制**补 postmortem 到 risk-register
+9. E2E 覆盖增量记账到 §2 仪表盘
+10. **若来自 worktree（wave-batched 并行模式）**：按 §C.2.4 自动清理 worktree + 删分支；**不得追问用户**
+11. **next-batch 建议**：按 §C.2.5 格式自动输出下一步建议块；**不得追问用户**
 
 **出口门**：
 - [ ] Sprint 状态更新
@@ -618,5 +630,5 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ---
 
 **完整 rationale / 专家评议 / bootstrap 策略**：`docs/project/dev-pipeline-design-20260420.md`
-**任务状态表**：`docs/project/backlog.md`
+**任务状态表**：`docs/project/backlog.md` + `docs/project/backlog/`（归档/sub-task；导航见 `backlog/README.md`）
 **DoD 硬门清单**：`docs/project/dod.md`
