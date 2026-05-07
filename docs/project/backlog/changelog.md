@@ -8,6 +8,7 @@
 
 | 日期 | 动作 | 条目 | 说明 |
 |------|------|------|------|
+| 2026-05-07 | **P1 wave 收官** S2..S7 wave-batched 全过 5 commit | T-0098-P1-02..P1-06 | feature 分支 `feature/T-0098-P1-data-dict` 第 2-6 commit：P1-02 (`2dea4992`) 迁移 000057 products/patterns + devices.product_id → P1-03 (`257275df`) 迁移 000058 param 4 表 + 跨域 FK → P1-04 (`013e9a5a`) 迁移 000059 alarm + 4 种子 + is_unknown → P1-05 (`1e84ca80`) D1=A 命名对齐文档（无 schema） → P1-06 (`75b551bb`) 4 域 Loader + provider 接线 + 修复 entry_type 列宽 000060 forward fix；**DoD 12 项行数全部命中**（param 9+4781+2001 / product 15+29 / alarm 4+442 / indicator 1764+6254）；planned → done × 5；§4.1 sub-task 表 + §6 速览 + done/2026Q2.md + 主 backlog §10 全部回写；wave-3 P1 阶段封箱；30 个 P2-P5 子任务仍 triaged 等下次 sprint planning |
 | 2026-05-07 | S2..S7 wave-batched 全过 | T-0098-P1-01 | dictloader 框架包：4 实现（scanner/lifecycle/cache_version/report）+ 4 _test.go ~495 LOC + DictLoaderConfig 进 appconfig；coverage 98.4%；feature 分支 `feature/T-0098-P1-data-dict` 第 1 commit；planned → done；§4.1 sub-task 表 + §6 速览 + done/2026Q2.md 全部回写；wave-3 P1 首发；P1-06 fan-in 待 P1-02..P1-05 接力 |
 | 2026-04-20 | 初始化 | 全部 37 条 | 反向索引自 milestone + risk-register + 近期 commit |
 | 2026-04-20 | done | T-0001 | 流程体系搭建完成（commit `b6da1e17`） |

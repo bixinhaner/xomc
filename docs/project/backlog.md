@@ -67,10 +67,10 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
-| `done` | 79 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+1 T-0098-P1-01 2026-05-07） |
-| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1-01 2026-05-07 done，P1-02..P1-06 5 条 planned/wave-3/Claude；30 子任务 P2-P5 待 sprint planning） |
+| `done` | 84 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 T-0098-P1-01..P1-06 2026-05-07，**P1 wave 收官**） |
+| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 条 2026-05-07 全部 done，P1 wave 收官；30 子任务 P2-P5 待 sprint planning） |
 | `in_design` | 0 | — | — |
-| `planned` | 11 | — | T-0098-P1-02..P1-06 5 条（wave-3 / Owner=Claude / 2026-05-07 升格，wave-batched 模式 §C.1 准入开发；P1-01 已 2026-05-07 done） |
+| `planned` | 6 | — | （T-0098-P1-02..P1-06 已于 2026-05-07 wave-batched 全部 done 收官；其他 6 条 planned 来自其他任务） |
 | `triaged` | 37 | — | T-0098 30 sub-task 占 30 条（P2-P5；P1 6 条 2026-05-07 升格 planned）；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -324,16 +324,16 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Domain | Closed | 一句话摘要 |
 |----|-------|--------|--------|----------|
+| **T-0098-P1-06** | 4 域字典 Loader + provider 接线 + 修复 entry_type 列宽 | infra+F02+F03+F04 | 2026-05-07 | **P1 wave 收官**；4 包 12 文件 ~1500 LOC；DoD 12 项行数全过；000060 forward fix entry_type VARCHAR(8)→16 |
+| T-0098-P1-05 | KPI 表名对齐文档（D1=A docs only） | F03 | 2026-05-07 | 设计 §2.3 D1=A 命名对齐表 17 行；0 schema 变更；不再写 000060_kpi_rename |
+| T-0098-P1-04 | 迁移 000059 alarm 字典（severity_levels + 4 种子 + alarm_definitions + alarms_active.is_unknown） | F04 | 2026-05-07 | 2 新表 + 4 索引；severity 4 行种子（31001-31004）；旧 alarm_libraries 留 P5-06 DROP（D2=B）|
+| T-0098-P1-03 | 迁移 000058 param 字典（4 表 + 跨域 FK 收口） | F02 | 2026-05-07 | 4 新表 + 8 索引；DO 块 ADD CONSTRAINT 补齐 products.param_model_id FK；首跑触发 §5.5.1 教训 |
+| T-0098-P1-02 | 迁移 000057 products + product_class_patterns + devices.product_id | F02 | 2026-05-07 | 2 新表 + 5 索引（含 sort_order 部分唯一）；devices 分区表无 FK；param_model_id 留位 |
 | T-0098-P1-01 | 共享字典装载基础设施（dictloader + DictLoaderConfig） | infra | 2026-05-07 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；wave-3 P1 首发；Loader 接口 ready for P1-06 |
 | T-0027 | 拓扑自动分组规则引擎激活 | F06/topology | 2026-05-06 | 三路径全闭环（手工 + cron + EventBus）+ R-104 关闭 |
 | T-0083 | backup 多设备 orphan reaper | F06/backup | 2026-04-30 | list-prefix scan + 1000/run cap + @weekly |
 | T-0085 | backup CBC + ChaCha20 算法 | F06/backup+security | 2026-04-30 | encrypt-then-MAC + AEAD 矩阵闭环 3/3 |
 | T-0086 | backup KMSKeyProvider skeleton | F06/backup+security | 2026-04-30 | 接口 ready，真 KMS 适配器 carve T-0091 |
-| T-0087 | backup KEK 旋转 core | F06/backup+security | 2026-04-30 | OENC v2 + 多版本 KeyProvider |
-| T-0092 | backup re-encrypt CLI | F06/backup+security+ops | 2026-04-30 | 独立二进制 + 7-class skip 决策 |
-| T-0029 | RF 控制走 Carrier 适配器 | device | 2026-04-30 | 去 LTE 硬编码 |
-| T-0028 | syslog 远程转发 UDP/TCP | F06/syslog | 2026-04-30 | RFC 3164 + 0 新依赖 |
-| T-0031 | CAPTCHA 图形生成 | admin | 2026-04-30 | PNG 5-char 噪图 |
 
 （其余历史 done 见归档；T-0094 misdiagnosis 见 §8 Rejected）
 
@@ -397,11 +397,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-07 | **P1 wave 收官** S2..S7 wave-batched 全过 | T-0098-P1-02..P1-06 5 commit | P1-02 products schema → P1-03 param 字典 + 跨域 FK → P1-04 alarm 字典 + 4 种子 → P1-05 KPI 命名 D1=A docs → P1-06 4 Loader + provider + 修复 entry_type 列宽；**DoD 12 项行数全过**（9+4781+2001 / 15+29 / 4+442 / 1764 / 6254）；6 sub-task 全部 done；wave-3 P1 阶段封箱 |
 | 2026-05-07 | S2..S7 wave-batched 全过 | T-0098-P1-01 dictloader 框架 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；planned → done；wave-3 P1 首发 |
-| 2026-05-07 | P1-01..P1-06 升格 planned + 前戏完成 | T-0098 umbrella + 6 sub-task | Sprint=wave-3 / Owner=Claude；wave-batched §C.1 准入；6 commit + 单 PR 形态；可 `pick T-0098-P1-01` 开车 |
+| 2026-05-07 | P1-01..P1-06 升格 planned + 前戏完成 | T-0098 umbrella + 6 sub-task | Sprint=wave-3 / Owner=Claude；wave-batched §C.1 准入；6 commit + 单 PR 形态 |
 | 2026-05-07 | D4=A 自动满足 + R-T0098-11 关闭 | T-0098-P1-02 / P1-06 Notes | products.xml 已入库（commit 50fa1a0c），P1-02 仅写 schema |
 | 2026-05-07 | PgM 决策 + 子任务批量登记 | T-0098 umbrella + 36 sub + 12 R-T0098-* | D1-D10 全采纳推荐；P1-P3 准 W3 / P4-P5 推迟 |
-| 2026-05-06 | S1+S2+...+S7 全过 | T-0027 拓扑自动分组规则引擎 | 11 commits + R-104 关闭；进 §6 Done |
 
 ---
 
