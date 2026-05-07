@@ -36,6 +36,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.Metrics.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.DictLoader.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
@@ -164,6 +167,21 @@ func (c LogConfig) validate() error {
 func (c MetricsConfig) validate() error {
 	if c.Port != 0 && (c.Port < 1 || c.Port > 65535) {
 		return fmt.Errorf("metrics.port must be between 1 and 65535, got %d", c.Port)
+	}
+	return nil
+}
+
+func (c DictLoaderConfig) validate() error {
+	// All zero values are acceptable — the dictloader package applies defaults
+	// (LoadConcurrency=4, CacheVersionPollInterval=30s) at construction.
+	if c.LoadConcurrency < 0 {
+		return fmt.Errorf("dict_loader.load_concurrency must not be negative, got %d", c.LoadConcurrency)
+	}
+	if c.LoadConcurrency > 64 {
+		return fmt.Errorf("dict_loader.load_concurrency must not exceed 64, got %d", c.LoadConcurrency)
+	}
+	if c.CacheVersionPollInterval < 0 {
+		return fmt.Errorf("dict_loader.cache_version_poll_interval must not be negative, got %s", c.CacheVersionPollInterval)
 	}
 	return nil
 }

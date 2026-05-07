@@ -123,6 +123,22 @@ type BatchProcessorConfig struct {
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"` // 优雅关闭超时
 }
 
+// DictLoaderConfig 配置共享字典装载基础设施（T-0098 P1-01）。
+// 由参数模型 / KPI 指标库 / 告警库 / 产品 四类启动期 Loader 共用：
+//   - XMLBaseDir 是各域 Loader.Directory() 的根（相对工作目录或绝对路径）
+//   - AutoLoadOnStartup=false 时跳过启动期 LoadAll，仅由管理 API 触发 Reload
+//   - CacheVersionPollInterval 控制 Redis 计数器轮询周期（每实例独立 goroutine）
+//   - LoadConcurrency 限制 LoadAll 内 errgroup 并发数
+//
+// 各域独立配置（如参数模型的 discovered_cache_ttl）仍放在各自的
+// ParamModelConfig / IndicatorConfig / AlarmDefinitionConfig 中。
+type DictLoaderConfig struct {
+	XMLBaseDir               string        `mapstructure:"xml_base_dir"`
+	AutoLoadOnStartup        bool          `mapstructure:"auto_load_on_startup"`
+	CacheVersionPollInterval time.Duration `mapstructure:"cache_version_poll_interval"`
+	LoadConcurrency          int           `mapstructure:"load_concurrency"`
+}
+
 // AppConfig 是 App 服务的完整配置。
 // 由 cmd/app/main.go 读取 config.yaml 后初始化，包含 REST API、认证、
 // 北向接口、开站引擎、数据模型过期策略和可观测性配置。
@@ -141,6 +157,7 @@ type AppConfig struct {
 	Provision       ProvisionConfig       `mapstructure:"provision"`
 	Upgrade         UpgradeConfig         `mapstructure:"upgrade"`
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
+	DictLoader      DictLoaderConfig      `mapstructure:"dict_loader"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`

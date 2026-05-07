@@ -67,10 +67,10 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
-| `done` | 78 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md` |
-| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 子任务 2026-05-07 已升格 planned/wave-3/Claude，30 子任务 P2-P5 待 sprint planning） |
+| `done` | 79 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+1 T-0098-P1-01 2026-05-07） |
+| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1-01 2026-05-07 done，P1-02..P1-06 5 条 planned/wave-3/Claude；30 子任务 P2-P5 待 sprint planning） |
 | `in_design` | 0 | — | — |
-| `planned` | 12 | — | + T-0098-P1-01..P1-06 6 条（wave-3 / Owner=Claude / 2026-05-07 升格，wave-batched 模式 §C.1 准入开发） |
+| `planned` | 11 | — | T-0098-P1-02..P1-06 5 条（wave-3 / Owner=Claude / 2026-05-07 升格，wave-batched 模式 §C.1 准入开发；P1-01 已 2026-05-07 done） |
 | `triaged` | 37 | — | T-0098 30 sub-task 占 30 条（P2-P5；P1 6 条 2026-05-07 升格 planned）；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -324,6 +324,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Domain | Closed | 一句话摘要 |
 |----|-------|--------|--------|----------|
+| T-0098-P1-01 | 共享字典装载基础设施（dictloader + DictLoaderConfig） | infra | 2026-05-07 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；wave-3 P1 首发；Loader 接口 ready for P1-06 |
 | T-0027 | 拓扑自动分组规则引擎激活 | F06/topology | 2026-05-06 | 三路径全闭环（手工 + cron + EventBus）+ R-104 关闭 |
 | T-0083 | backup 多设备 orphan reaper | F06/backup | 2026-04-30 | list-prefix scan + 1000/run cap + @weekly |
 | T-0085 | backup CBC + ChaCha20 算法 | F06/backup+security | 2026-04-30 | encrypt-then-MAC + AEAD 矩阵闭环 3/3 |
@@ -333,7 +334,6 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0029 | RF 控制走 Carrier 适配器 | device | 2026-04-30 | 去 LTE 硬编码 |
 | T-0028 | syslog 远程转发 UDP/TCP | F06/syslog | 2026-04-30 | RFC 3164 + 0 新依赖 |
 | T-0031 | CAPTCHA 图形生成 | admin | 2026-04-30 | PNG 5-char 噪图 |
-| T-0032 | backup FTP 连接测试 | F06/backup | 2026-04-30 | 两层探测；SFTP/FTPS 拆 T-0093 |
 
 （其余历史 done 见归档；T-0094 misdiagnosis 见 §8 Rejected）
 
@@ -397,12 +397,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-07 | S2..S7 wave-batched 全过 | T-0098-P1-01 dictloader 框架 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；planned → done；wave-3 P1 首发 |
 | 2026-05-07 | P1-01..P1-06 升格 planned + 前戏完成 | T-0098 umbrella + 6 sub-task | Sprint=wave-3 / Owner=Claude；wave-batched §C.1 准入；6 commit + 单 PR 形态；可 `pick T-0098-P1-01` 开车 |
 | 2026-05-07 | D4=A 自动满足 + R-T0098-11 关闭 | T-0098-P1-02 / P1-06 Notes | products.xml 已入库（commit 50fa1a0c），P1-02 仅写 schema |
 | 2026-05-07 | PgM 决策 + 子任务批量登记 | T-0098 umbrella + 36 sub + 12 R-T0098-* | D1-D10 全采纳推荐；P1-P3 准 W3 / P4-P5 推迟 |
 | 2026-05-06 | S1+S2+...+S7 全过 | T-0027 拓扑自动分组规则引擎 | 11 commits + R-104 关闭；进 §6 Done |
-| 2026-04-30 | S1+S2 done + sprint-09 排期 | T-0027 D5=B + D7=A | 设计备忘 9 节预消除歧义 |
-| 2026-04-30 | T-0094 闭环 → §8 Rejected | T-0094 misdiagnosis | 真库 SQL 验证列存在；T-0090 deps 解锁 |
 
 ---
 
