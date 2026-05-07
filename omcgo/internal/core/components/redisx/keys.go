@@ -123,6 +123,30 @@ func (KeyBuilder) ProductPattern() string { return productPattern }
 // ProductCacheVersion 跨实例 ProductRegistry 缓存版本号。
 func (KeyBuilder) ProductCacheVersion() string { return productCacheVersionKey }
 
+// ===== ParamModel / ParamRegistry（T-0098 P2-02）=====
+
+// ParamModelDefault 默认映射缓存（24h TTL，按 paramModelId 索引）。值为 JSON 序列化的 []ParamMapping。
+func (KeyBuilder) ParamModelDefault(paramModelID string) string {
+	return paramModelDefaultPrefix + paramModelID
+}
+
+// ParamModelDefaultPrefix 默认映射键前缀。
+func (KeyBuilder) ParamModelDefaultPrefix() string { return paramModelDefaultPrefix }
+
+// ParamModelDiscovered 设备发现映射缓存（24h TTL，按 productId+swVersion 索引）。
+func (KeyBuilder) ParamModelDiscovered(productID, swVersion string) string {
+	return fmt.Sprintf("%s%s:%s", paramModelDiscoveredPrefix, productID, swVersion)
+}
+
+// ParamModelDiscoveredPrefix 发现映射键前缀。
+func (KeyBuilder) ParamModelDiscoveredPrefix() string { return paramModelDiscoveredPrefix }
+
+// ParamModelPattern 扫描所有 parammodel:* 键。
+func (KeyBuilder) ParamModelPattern() string { return paramModelPattern }
+
+// ParamModelCacheVersion 跨实例 ParamRegistry 缓存版本号。
+func (KeyBuilder) ParamModelCacheVersion() string { return paramModelCacheVersionKey }
+
 // ===== 告警 / 异常重启 =====
 
 // AlarmActive 活跃告警 Hash（每设备一个）。
@@ -205,6 +229,12 @@ const (
 	productByIDPrefix       = "product:byID:"
 	productPattern          = "product:*"
 	productCacheVersionKey  = "product:cache_version"
+
+	// parammodel (T-0098 P2-02 ParamRegistry)
+	paramModelDefaultPrefix    = "parammodel:default:"
+	paramModelDiscoveredPrefix = "parammodel:discovered:"
+	paramModelPattern          = "parammodel:*"
+	paramModelCacheVersionKey  = "parammodel:cache_version"
 
 	// device / provision / upload
 	deviceSNPrefix          = "device:sn:"

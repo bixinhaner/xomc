@@ -27,19 +27,57 @@ type ParamModel struct {
 	LoadedFrom   string
 }
 
-// ParamMapping 对应 param_mappings 表（设计 §1.2.2）。
+// ParamMapping 对应 param_mappings 与 discovered_param_mappings 两张表（设计 §1.4 合并 struct）。
+//
+// 区分依据 SoftwareVersion：
+//   - SoftwareVersion == nil → 来自 param_mappings（默认映射）
+//   - SoftwareVersion != nil → 来自 discovered_param_mappings（设备发现映射）
+//
+// 注意：discovered 表无 param_model_id 列；从 discovered 读出的 ParamMapping
+// 其 ParamModelID 为零值，调用方若需要可从 product.ParamModelID 反查。
 type ParamMapping struct {
-	ParamModelID  uuid.UUID
-	StandardPath  string
-	PrivatePath   string
-	EntryType     string // "object" | "parameter"
-	Access        string
-	DataType      string
-	ChangeApplies string
-	MinValue      *int64
-	MaxValue      *int64
-	IsStorable    bool
-	IsActive      bool
+	ID              uuid.UUID
+	ParamModelID    uuid.UUID
+	StandardPath    string
+	PrivatePath     string
+	EntryType       string // "object" | "parameter"
+	Access          string
+	DataType        string
+	ChangeApplies   string
+	MinValue        *int64
+	MaxValue        *int64
+	IsStorable      bool
+	IsActive        bool
+	SoftwareVersion *string // 仅 discovered 映射非 nil
+}
+
+// MappingSource 标记 MappingSet 来源，区分精确的 discovered 与降级的 default（设计 §1.6）。
+type MappingSource string
+
+// 取值。
+const (
+	MappingSourceDiscovered MappingSource = "discovered"
+	MappingSourceDefault    MappingSource = "default"
+)
+
+// MappingSet 是 Registry 一次取出的映射集合，承载双向翻译所需的全部数据。
+type MappingSet struct {
+	ProductID       uuid.UUID  // 仅 discovered 来源时有意义；default 时为零值
+	ParamModelID    uuid.UUID  // 默认映射的所属模型；discovered 来源会从 product 反查回填
+	SoftwareVersion string     // discovered 来源的 swVersion；default 时为空串
+	Source          MappingSource
+	Mappings        []ParamMapping // 原始顺序保留（供 P2-04 sync.go 去重前缀使用）
+}
+
+// TranslationResult 是 Translator.ToPrivate / ToStandard 的统一返回。
+//
+// Found=false 表示在当前 MappingSet 中未找到对应路径；Mapping 为 nil。
+// Translated 在 Found=false 时也设回 Original，便于调用侧无脑回退。
+type TranslationResult struct {
+	Original   string
+	Translated string
+	Found      bool
+	Mapping    *ParamMapping
 }
 
 // StandardParam 对应 standard_params 表（设计 §1.2.4）。

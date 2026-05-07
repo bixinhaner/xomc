@@ -117,6 +117,13 @@ func Setup(r *gin.Engine, c *Container) error {
 		Depends: []string{"dictload"},
 		Init:    func() error { return initProductRegistryModule(c) },
 	})
+	// T-0098 P2-02：ParamRegistry（按 productId/paramModelId 取映射 + Translator 双向翻译）
+	// 依赖 productregistry 注入为 productGetter（反查 product.ParamModelID 供 default 降级）。
+	graph.Add(components.ModuleInitializer{
+		Name:    "paramregistry",
+		Depends: []string{"dictload", "productregistry"},
+		Init:    func() error { return initParamRegistryModule(c) },
+	})
 
 	totalStart := time.Now()
 

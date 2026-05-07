@@ -39,6 +39,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.DictLoader.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.ParamRegistry.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
@@ -182,6 +185,17 @@ func (c DictLoaderConfig) validate() error {
 	}
 	if c.CacheVersionPollInterval < 0 {
 		return fmt.Errorf("dict_loader.cache_version_poll_interval must not be negative, got %s", c.CacheVersionPollInterval)
+	}
+	return nil
+}
+
+func (c ParamRegistryConfig) validate() error {
+	// 零值合法——RedisCache 在构造时把 ≤0 退化为默认 24h。
+	if c.DefaultTTL < 0 {
+		return fmt.Errorf("param_registry.default_ttl must not be negative, got %s", c.DefaultTTL)
+	}
+	if c.DiscoveredTTL < 0 {
+		return fmt.Errorf("param_registry.discovered_ttl must not be negative, got %s", c.DiscoveredTTL)
 	}
 	return nil
 }

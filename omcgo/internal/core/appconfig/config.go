@@ -177,6 +177,22 @@ type ProductLoaderConfig struct {
 	File      string `mapstructure:"file"`      // 默认 "products.xml"
 }
 
+// ParamRegistryConfig 控制 ParamRegistry 运行期行为（T-0098 P2-02）。
+//
+// UseNew 是 dual-stack 切换 flag：
+//   - false（默认）→ 消费者（provision/sync、orchestrator、device handler、interop）继续走旧 datamodel.ParamRegistry
+//   - true        → 消费者走新 parammodel.Registry + Translator（P2-02..P2-08 全部合入后才能切）
+//
+// 本 flag **不被 parammodel.Registry 自身消费**——新 Registry 始终可启动可测；
+// flag 仅在 P2-04..08 各消费者改造时按需读取，决定走哪个栈。
+//
+// DefaultTTL / DiscoveredTTL 控制 L2 Redis 缓存 TTL；≤ 0 时由 RedisCache 退化为 24h。
+type ParamRegistryConfig struct {
+	UseNew        bool          `mapstructure:"use_new"`
+	DefaultTTL    time.Duration `mapstructure:"default_ttl"`
+	DiscoveredTTL time.Duration `mapstructure:"discovered_ttl"`
+}
+
 // AppConfig 是 App 服务的完整配置。
 // 由 cmd/app/main.go 读取 config.yaml 后初始化，包含 REST API、认证、
 // 北向接口、开站引擎、数据模型过期策略和可观测性配置。
@@ -196,6 +212,7 @@ type AppConfig struct {
 	Upgrade         UpgradeConfig         `mapstructure:"upgrade"`
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
 	DictLoader      DictLoaderConfig      `mapstructure:"dict_loader"`
+	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`

@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -57,6 +58,9 @@ type Container struct {
 
 	// ProductRegistry 模块设置（T-0098 P2-01）
 	ProductRegistry *product.Registry
+
+	// ParamRegistry 模块设置（T-0098 P2-02）
+	ParamRegistry *parammodel.Registry
 
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry
