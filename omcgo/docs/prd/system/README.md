@@ -10,8 +10,8 @@
 | 4 | 角色管理 | [roles.md](./roles.md) | `/system/roles` | 🟢 完整（CRUD + 菜单/API/分组）| 🟢 完整 | API 权限 DDL `role_api_permissions` 待补 |
 | 5 | 菜单管理 | [menus.md](./menus.md) | `/system/menus` | 🟢 完整（CRUD + tree）| 🔴 前端 mock | P0：前端对接真实 API |
 | 6 | 操作日志 | [operation-log.md](./operation-log.md) | `/system/operation-log` | 🟢 完整 | 🟢 完整 | 路由复用 `/pages/log/OperationLog` |
-| 7 | 系统配置 | [system-config.md](./system-config.md) | `/system/config` | 🟡 部分（缺批量更新）| 🟡 9 Tab 框架 | P0：批量更新接口 + value_type 校验 |
-| 8 | UI 定制化 | [ui-customization.md](./ui-customization.md) | `/system/ui-custom` | 🟡 复用 sys_configs | 🟡 框架 | 依赖 system-config 的 P0 |
+| 7 | 系统配置 | [config.md](./config.md) | `/system/config` | 🟡 部分（缺批量更新）| 🟢 7 Tab（v1.0 删 SAS/LDAP）| P0：批量更新接口 + value_type 校验 |
+| 8 | UI 定制化 | [ui-customization.md](./ui-customization.md) | `/system/ui-custom` | 🟡 复用 sys_configs | 🟡 框架 | 依赖 config.md 的 P0 |
 | 9 | API 管理 | [api-management.md](./api-management.md) | `/system/api-management` | 🟢 完整（含 sync）| 🟢 完整 | 与角色 API 权限联动 |
 | 10 | 字典管理 | [data-dictionary.md](./data-dictionary.md) | `/system/data-dictionary` | 🟢 完整（双面板 CRUD）| 🟢 完整 | 待确认 dictionary handler 路由挂载 |
 | 11 | 设备分类 | [device-classification.md](./device-classification.md) | `/system/device-class` | 🔴 缺专项 API | 🔴 前端 mock | P0：派生分类树聚合接口 |
@@ -37,8 +37,8 @@ User (users.md)
 ### 配置数据共享链
 
 ```
-sys_configs（system-config.md 主管）
-  ├─ category=basic/security/device/notify/storage/...   ← system-config.md
+sys_configs（config.md 主管）
+  ├─ category=basic/security/device/notify/storage/...   ← config.md
   └─ category=ui_custom                                  ← ui-customization.md
 ```
 
@@ -51,7 +51,7 @@ notification_rules (notification-settings.md, 待实现)
   ↓
 notification_recipient_groups + notification_templates
   ↓
-派发到 SMTP/SMS（凭证来自 system-config.md `notify` Tab）
+派发到 SMTP/SMS（凭证来自 config.md `notify` Tab）
   或 inbox（写入 internal/notification/, 用户登录后查看）
 ```
 
@@ -66,7 +66,7 @@ notification_recipient_groups + notification_templates
 | 任务 | 来源 PRD |
 |------|---------|
 | 前端 `MenuManagement` 对接真实 API（替换 mock）| [menus.md §7](./menus.md) |
-| 系统配置批量更新接口 `PUT /admin/configs/batch` | [system-config.md §7](./system-config.md) |
+| 系统配置批量更新接口 `PUT /admin/configs/batch` | [config.md §7](./config.md) |
 | `role_api_permissions` DDL 落地 | [roles.md §7](./roles.md) / [api-management.md §7](./api-management.md) |
 | 设备分类树聚合接口 `/device-classifications/tree` | [device-classification.md §7](./device-classification.md) |
 | 通知规则 / 收件人 / 模板 三张 DDL + CRUD | [notification-settings.md §7](./notification-settings.md) |
@@ -92,7 +92,7 @@ notification_recipient_groups + notification_templates
 | 任务 | 来源 PRD |
 |------|---------|
 | 字典批量导入 / 多语言 | [data-dictionary.md §7](./data-dictionary.md) |
-| 系统配置版本快照 / 跨环境导入导出 | [system-config.md §7](./system-config.md) |
+| 系统配置版本快照 / 跨环境导入导出 | [config.md §7](./config.md) |
 | UI 定制按 carrier 多租户（部署级 carrier，非 user 字段；users.carrier 已 v1.0 删除）| [ui-customization.md §7](./ui-customization.md) |
 | API 端点 OpenAPI 导出 | [api-management.md §7](./api-management.md) |
 | 通知规则优先级 / 静默时段 | [notification-settings.md §7](./notification-settings.md) |

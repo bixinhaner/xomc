@@ -16,11 +16,9 @@ import NotificationSettings from './NotificationSettings';
 import StorageSettings from './StorageSettings';
 import OmcSettings from './OmcSettings';
 import NorthboundSettings from './NorthboundSettings';
-import SasSettings from './SasSettings';
-import LdapSettings from './LdapSettings';
 
-// 设置子页签类型
-type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound' | 'sas' | 'ldap';
+// 设置子页签类型（v1.0：移除 sas / ldap，参 docs/prd/system/config.md）
+type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -31,8 +29,6 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'storage', labelKey: 'system.config.storage' },
   { key: 'omc', labelKey: 'system.config.omc' },
   { key: 'northbound', labelKey: 'system.config.northbound' },
-  { key: 'sas', labelKey: 'system.config.sas' },
-  { key: 'ldap', labelKey: 'system.config.ldap' },
 ];
 
 export default function SystemConfig() {
@@ -48,8 +44,6 @@ export default function SystemConfig() {
   const [storageForm] = Form.useForm();
   const [omcForm] = Form.useForm();
   const [northboundForm] = Form.useForm();
-  const [sasForm] = Form.useForm();
-  const [ldapForm] = Form.useForm();
 
   // 获取当前设置页签对应的表单
   const getCurrentForm = () => {
@@ -61,8 +55,6 @@ export default function SystemConfig() {
       storage: storageForm,
       omc: omcForm,
       northbound: northboundForm,
-      sas: sasForm,
-      ldap: ldapForm,
     };
     return formMap[activeTab];
   };
@@ -97,10 +89,6 @@ export default function SystemConfig() {
         return <OmcSettings form={omcForm} />;
       case 'northbound':
         return <NorthboundSettings form={northboundForm} />;
-      case 'sas':
-        return <SasSettings form={sasForm} />;
-      case 'ldap':
-        return <LdapSettings form={ldapForm} />;
       default:
         return null;
     }
