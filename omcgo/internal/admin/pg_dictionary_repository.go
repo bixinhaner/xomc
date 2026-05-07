@@ -189,7 +189,7 @@ func (r *PgDictionaryRepository) Delete(ctx context.Context, id int64) error {
 
 // listActiveDetails returns enabled details for a dictionary, sorted by sort_order.
 func (r *PgDictionaryRepository) listActiveDetails(ctx context.Context, dictID int64) ([]DictionaryDetail, error) {
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
 		From("sys_dictionary_details").
 		Where(sq.And{sq.Eq{"sys_dictionary_id": dictID}, sq.Eq{"deleted_at": nil}, sq.Eq{"status": true}}).
 		OrderBy("sort ASC").
@@ -207,7 +207,7 @@ func (r *PgDictionaryRepository) listActiveDetails(ctx context.Context, dictID i
 	var details []DictionaryDetail
 	for rows.Next() {
 		var d DictionaryDetail
-		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan detail: %w", err)
 		}
 		details = append(details, d)
@@ -233,8 +233,8 @@ func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *Dicti
 	now := time.Now()
 
 	query, args, err := storage.Psql.Insert("sys_dictionary_details").
-		Columns("label", "value", "extend", "status", "sort", "sys_dictionary_id", "created_at", "updated_at").
-		Values(detail.Label, detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, now, now).
+		Columns("label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
+		Values(detail.Label, detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, detail.ParentID, detail.Level, now, now).
 		Suffix("RETURNING id, created_at, updated_at").
 		ToSql()
 	if err != nil {
@@ -249,7 +249,7 @@ func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *Dicti
 }
 
 func (r *PgDictionaryDetailRepository) GetByID(ctx context.Context, id int64) (*DictionaryDetail, error) {
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
 		From("sys_dictionary_details").
 		Where(sq.And{sq.Eq{"id": id}, sq.Eq{"deleted_at": nil}}).
 		ToSql()
@@ -259,7 +259,7 @@ func (r *PgDictionaryDetailRepository) GetByID(ctx context.Context, id int64) (*
 
 	var d DictionaryDetail
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
-		&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.CreatedAt, &d.UpdatedAt,
+		&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.CreatedAt, &d.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -302,7 +302,7 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	offset := req.Offset()
 	limit := req.Limit()
 
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
 		From("sys_dictionary_details").
 		Where(where).
 		OrderBy("sort ASC").
@@ -322,7 +322,7 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	var items []DictionaryDetail
 	for rows.Next() {
 		var d DictionaryDetail
-		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan detail: %w", err)
 		}
 		items = append(items, d)
@@ -348,6 +348,10 @@ func (r *PgDictionaryDetailRepository) Update(ctx context.Context, detail *Dicti
 	if detail.SysDictionaryID != 0 {
 		builder = builder.Set("sys_dictionary_id", detail.SysDictionaryID)
 	}
+	// PRD §10：parent_id / level 由 service 层在调用 Update 前显式置入 detail；
+	// 包含切顶层（ParentID=nil） + 转移到不同父（ParentID 非 nil）两路。
+	builder = builder.Set("parent_id", detail.ParentID)
+	builder = builder.Set("level", detail.Level)
 
 	query, args, err := builder.
 		Where(sq.And{sq.Eq{"id": detail.ID}, sq.Eq{"deleted_at": nil}}).
@@ -389,6 +393,54 @@ func (r *PgDictionaryDetailRepository) DeleteByDictionaryID(ctx context.Context,
 	)
 	if err != nil {
 		return fmt.Errorf("soft-delete details by dictionary ID: %w", err)
+	}
+	return nil
+}
+
+// ListSubtreeIDs 用 PG recursive CTE 一次查全 rootID 自身 + 所有后代（深度优先）。
+// 仅返回未软删除的行。
+func (r *PgDictionaryDetailRepository) ListSubtreeIDs(ctx context.Context, rootID int64) ([]int64, error) {
+	const sql = `
+WITH RECURSIVE subtree AS (
+    SELECT id FROM sys_dictionary_details WHERE id = $1 AND deleted_at IS NULL
+    UNION ALL
+    SELECT d.id
+    FROM sys_dictionary_details d
+    INNER JOIN subtree s ON d.parent_id = s.id
+    WHERE d.deleted_at IS NULL
+)
+SELECT id FROM subtree
+`
+	rows, err := r.pool.Query(ctx, sql, rootID)
+	if err != nil {
+		return nil, fmt.Errorf("query subtree ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan subtree id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// ShiftLevelDelta 把 ids 集合中所有行的 level 各加 delta。delta 可为负。
+// 用于「换父」级联调整子树深度。
+func (r *PgDictionaryDetailRepository) ShiftLevelDelta(ctx context.Context, ids []int64, delta int) error {
+	if len(ids) == 0 || delta == 0 {
+		return nil
+	}
+	now := time.Now()
+	_, err := r.pool.Exec(ctx,
+		`UPDATE sys_dictionary_details SET level = level + $1, updated_at = $2 WHERE id = ANY($3) AND deleted_at IS NULL`,
+		delta, now, ids,
+	)
+	if err != nil {
+		return fmt.Errorf("shift level delta: %w", err)
 	}
 	return nil
 }

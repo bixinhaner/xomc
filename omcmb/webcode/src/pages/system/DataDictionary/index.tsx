@@ -8,6 +8,7 @@ import {
   Modal,
   Form,
   InputNumber,
+  Select,
   Switch,
   Space,
   Tag,
@@ -21,6 +22,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   SearchOutlined,
+  PlusSquareOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -314,11 +316,18 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
     onError: () => void message.error(t('common.deleteFailed') || '删除失败'),
   });
 
-  const openAdd = () => {
+  // PRD §10：「+ 添加子项」打开抽屉时把 parent_id 预填为该行 id；
+  // 顶部「+ 添加详情」打开时 parent_id 为 null。
+  const openAdd = (parentDetail?: DictionaryDetail) => {
     if (!selectedDict) return;
     setEditingDetail(null);
     detailForm.resetFields();
-    detailForm.setFieldsValue({ status: true, sort: 0, sysDictionaryId: selectedDict.id });
+    detailForm.setFieldsValue({
+      status: true,
+      sort: 0,
+      sysDictionaryId: selectedDict.id,
+      parentId: parentDetail ? parentDetail.id : null,
+    });
     setDetailModalOpen(true);
   };
 
@@ -331,6 +340,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       status: detail.status,
       sort: detail.sort,
       sysDictionaryId: detail.sysDictionaryId,
+      parentId: detail.parentId ?? null,
     });
     setDetailModalOpen(true);
   };
@@ -346,11 +356,16 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
 
   const handleSave = () => {
     void detailForm.validateFields().then((vals) => {
+      // antd Select allowClear 会把空值返回为 undefined；显式归一为 null（=切顶层）。
+      const normalized = {
+        ...vals,
+        parentId: (vals as { parentId?: number | null }).parentId ?? null,
+      };
       if (editingDetail) {
-        updateDetailMutation.mutate({ id: editingDetail.id, ...vals });
+        updateDetailMutation.mutate({ id: editingDetail.id, ...normalized });
       } else {
         createDetailMutation.mutate({
-          ...vals,
+          ...normalized,
           sysDictionaryId: selectedDict!.id,
         } as CreateDictionaryDetailPayload);
       }
@@ -360,6 +375,34 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
   const handleStatusChange = (detail: DictionaryDetail, checked: boolean) => {
     updateDetailMutation.mutate({ id: detail.id, status: checked });
   };
+
+  // PRD §10 Q9：父级下拉选项 = 当前字典内所有可选父项。
+  //   - 编辑模式：剔除自己 + 自己的所有后代（防环 / 与后端 cycle 检验对齐）
+  //   - 仅显示 level < 2 的项（其下加一层就到 MaxDepth-1=2，仍合法）
+  //   - 创建模式：显示所有 level < 2 的项
+  const parentOptions = useMemo(() => {
+    const list = detailData?.list ?? [];
+    if (!editingDetail) {
+      return list
+        .filter((d) => (d.level ?? 0) < 2)
+        .map((d) => ({ label: `${d.label} (level ${d.level ?? 0})`, value: d.id }));
+    }
+    // 计算 editingDetail 的所有后代 id 集合（含自身）
+    const excluded = new Set<number>([editingDetail.id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const d of list) {
+        if (d.parentId != null && excluded.has(d.parentId) && !excluded.has(d.id)) {
+          excluded.add(d.id);
+          changed = true;
+        }
+      }
+    }
+    return list
+      .filter((d) => !excluded.has(d.id) && (d.level ?? 0) < 2)
+      .map((d) => ({ label: `${d.label} (level ${d.level ?? 0})`, value: d.id }));
+  }, [detailData?.list, editingDetail]);
 
   const columns: DataTableColumn<DictionaryDetail & Record<string, unknown>>[] = useMemo(
     () => [
@@ -384,6 +427,14 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         dataIndex: 'extend',
         width: 120,
         render: (val) => (val ? String(val) : '—'),
+      },
+      {
+        // PRD §10 v0.2：层级列（0=顶层 / 1=一级子 / 2=二级子）
+        key: 'level',
+        title: '层级',
+        dataIndex: 'level',
+        width: 70,
+        render: (val) => Number(val ?? 0),
       },
       {
         key: 'status',
@@ -412,12 +463,25 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 120,
+        width: 220,
         fixed: 'right',
         render: (_, record) => {
           const detail = record as DictionaryDetail;
+          // PRD §10：仅当 detail.level < MaxDepth-1 (=2) 时允许加子项。
+          const canAddChild = (detail.level ?? 0) < 2;
           return (
             <Space size={4}>
+              <Tooltip title={canAddChild ? '' : '已达最大深度'}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusSquareOutlined />}
+                  onClick={() => openAdd(detail)}
+                  disabled={!canAddChild}
+                >
+                  添加子项
+                </Button>
+              </Tooltip>
               <Button
                 type="link"
                 size="small"
@@ -481,7 +545,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
             size="small"
             icon={<PlusOutlined />}
             disabled={!selectedDict}
-            onClick={openAdd}
+            onClick={() => openAdd()}
           >
             {t('dictionary.addDetail')}
           </Button>
@@ -524,6 +588,16 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         destroyOnClose
       >
         <Form form={detailForm} layout="vertical" style={{ marginTop: 16 }}>
+          {/* PRD §10：父级字典项 — allowClear=切顶层；过滤掉自身+后代防环 */}
+          <Form.Item name="parentId" label="父级字典项">
+            <Select
+              allowClear
+              placeholder="（顶层项）"
+              options={parentOptions}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
           <Form.Item name="label" label={t('dictionary.label')} rules={[{ required: true }]}>
             <Input placeholder={t('dictionary.label')} />
           </Form.Item>

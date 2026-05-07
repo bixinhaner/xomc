@@ -47,6 +47,9 @@ export interface DictionaryDetail {
   status: boolean;
   sort: number;
   sysDictionaryId: number;
+  // PRD docs/prd/system/data-dictionary.md §10 v0.2 新增字段
+  parentId?: number | null; // null/undefined = 顶层项
+  level: number;            // 0 = 顶层 / 1 = 一级子 / 2 = 二级子（最大深度 3）
   createdAt?: string;
   updatedAt?: string;
 }
@@ -73,6 +76,8 @@ export interface CreateDictionaryDetailPayload {
   status?: boolean;
   sort?: number;
   sysDictionaryId: number;
+  // PRD §10：可选父明细 ID。nil/undefined = 顶层项（level=0）。
+  parentId?: number | null;
 }
 
 export interface UpdateDictionaryDetailPayload {
@@ -83,6 +88,8 @@ export interface UpdateDictionaryDetailPayload {
   status?: boolean;
   sort?: number;
   sysDictionaryId?: number;
+  // PRD §10：携带 parent_id 时即触发换父；undefined = 不变更，null = 设为顶层。
+  parentId?: number | null;
 }
 
 export interface DictDetailListParams {
@@ -120,6 +127,9 @@ interface BackendDictionaryDetail {
   status: boolean;
   sort: number;
   sysDictionaryId: number;
+  // PRD §10 v0.2：parent_id (snake) + level
+  parent_id?: number | null;
+  level?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -145,9 +155,30 @@ function mapBackendDictionaryDetail(b: BackendDictionaryDetail): DictionaryDetai
     status: b.status,
     sort: b.sort || 0,
     sysDictionaryId: b.sysDictionaryId,
+    parentId: b.parent_id ?? null,
+    level: b.level ?? 0,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };
+}
+
+// 把前端 camelCase payload 转成后端 JSON：parentId → parent_id（仅当字段存在时携带）。
+// undefined 不发，null 发（语义=切顶层 / 清父）。
+function toBackendDictionaryDetailBody(
+  p: Partial<CreateDictionaryDetailPayload & UpdateDictionaryDetailPayload>,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (p.id !== undefined) body.id = p.id;
+  if (p.label !== undefined) body.label = p.label;
+  if (p.value !== undefined) body.value = p.value;
+  if (p.extend !== undefined) body.extend = p.extend;
+  if (p.status !== undefined) body.status = p.status;
+  if (p.sort !== undefined) body.sort = p.sort;
+  if (p.sysDictionaryId !== undefined) body.sysDictionaryId = p.sysDictionaryId;
+  if (Object.prototype.hasOwnProperty.call(p, 'parentId')) {
+    body.parent_id = p.parentId; // 含 null（切顶层）
+  }
+  return body;
 }
 // ---- End Dictionary types ----
 
@@ -896,12 +927,19 @@ export const adminApi = {
   },
 
   async createDictionaryDetail(req: CreateDictionaryDetailPayload): Promise<DictionaryDetail> {
-    const { data } = await http.post<BackendDictionaryDetail>('/admin/sysDictionaryDetail/createSysDictionaryDetail', req);
+    // PRD §10：parentId(camel) → parent_id(snake)。toBackendDictionaryDetailBody 处理。
+    const { data } = await http.post<BackendDictionaryDetail>(
+      '/admin/sysDictionaryDetail/createSysDictionaryDetail',
+      toBackendDictionaryDetailBody(req),
+    );
     return mapBackendDictionaryDetail(data);
   },
 
   async updateDictionaryDetail(req: UpdateDictionaryDetailPayload): Promise<DictionaryDetail> {
-    const { data } = await http.put<BackendDictionaryDetail>('/admin/sysDictionaryDetail/updateSysDictionaryDetail', req);
+    const { data } = await http.put<BackendDictionaryDetail>(
+      '/admin/sysDictionaryDetail/updateSysDictionaryDetail',
+      toBackendDictionaryDetailBody(req),
+    );
     return mapBackendDictionaryDetail(data);
   },
 
