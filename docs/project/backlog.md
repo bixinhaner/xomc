@@ -67,10 +67,10 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
-| `done` | 85 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 T-0098-P1-01..P1-06 + **+1 T-0098-P2-01** 2026-05-07，P1 wave 收官 + P2 wave 入口 1） |
-| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 条 2026-05-07 全部 done，P1 wave 收官；P2 11 条 2026-05-07 升格 planned 等 wave-batched 落地；P3-P5 19 子任务待下轮 planning） |
+| `done` | 86 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 T-0098-P1-01..P1-06 + **+2 T-0098-P2-01/P2-02** 2026-05-07，P1 wave 收官 + P2 wave 入口 1 + 参数轨脊柱）|
+| `in_dev` | 2 | — | T-0095 KPI（D10=A 已决议吸收至 T-0098-P2-09/P3-03/P4-05，待 sub-task 启动合并关闭）；T-0098 数据字典平台化（umbrella；P1 6 条 + P2-01/P2-02 2 条 done；P2 剩 9 条等 wave-batched 串行/并行落地；P3-P5 19 子任务待下轮 planning） |
 | `in_design` | 0 | — | — |
-| `planned` | 16 | — | P1 历史升格行已 done；新增 T-0098-P2-02..P2-11 10 条（P2-01 当日 done）2026-05-07 升格 wave-3 + Owner=Claude；其他 6 条来自其他任务 |
+| `planned` | 15 | — | P1 历史升格行已 done；P2-01/P2-02 当日 done；剩 P2-03..P2-11 9 条 wave-3 + Owner=Claude；其他 6 条来自其他任务 |
 | `triaged` | 26 | — | T-0098 19 sub-task 占 19 条（P3-P5；P1 6 条 + P2 11 条 2026-05-07 升格 planned）；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -324,6 +324,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Domain | Closed | 一句话摘要 |
 |----|-------|--------|--------|----------|
+| **T-0098-P2-02** | ParamRegistry — Registry + Translator + L1+L2 缓存 + discovered→default 降级 | F02 | 2026-05-07 | **参数轨脊柱 / 一次解锁 6 条下游**；6 实现 + 4 测试 ~1860 LOC；registry 60-100%/translator 91-100%/metrics 100% 单测；6 metric + 5 log 全 grep；productGetter 接口注入解耦；param_registry.use_new dual-stack flag 默认 false |
 | **T-0098-P2-01** | ProductRegistry — productClass 路由 + L1+L2 缓存 + 三引用校验 | F02 | 2026-05-07 | **P2 wave 入口 1**；6 实现 + 3 测试 ~1280 LOC；registry 87-95%/cache 100%/metrics 100% 单测；4 metric 全 grep；ModuleGraph "productregistry" Depends ["dictload"] |
 | **T-0098-P1-06** | 4 域字典 Loader + provider 接线 + 修复 entry_type 列宽 | infra+F02+F03+F04 | 2026-05-07 | **P1 wave 收官**；4 包 12 文件 ~1500 LOC；DoD 12 项行数全过；000060 forward fix entry_type VARCHAR(8)→16 |
 | T-0098-P1-05 | KPI 表名对齐文档（D1=A docs only） | F03 | 2026-05-07 | 设计 §2.3 D1=A 命名对齐表 17 行；0 schema 变更；不再写 000060_kpi_rename |
@@ -333,7 +334,6 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0098-P1-01 | 共享字典装载基础设施（dictloader + DictLoaderConfig） | infra | 2026-05-07 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；wave-3 P1 首发；Loader 接口 ready for P1-06 |
 | T-0027 | 拓扑自动分组规则引擎激活 | F06/topology | 2026-05-06 | 三路径全闭环（手工 + cron + EventBus）+ R-104 关闭 |
 | T-0083 | backup 多设备 orphan reaper | F06/backup | 2026-04-30 | list-prefix scan + 1000/run cap + @weekly |
-| T-0085 | backup CBC + ChaCha20 算法 | F06/backup+security | 2026-04-30 | encrypt-then-MAC + AEAD 矩阵闭环 3/3 |
 
 （其余历史 done 见归档；T-0094 misdiagnosis 见 §8 Rejected）
 
@@ -397,11 +397,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-07 | **P2-02 ParamRegistry done** S2..S7 wave-batched 全过 | T-0098-P2-02 | 6 实现 + 4 测试 ~1860 LOC（含 ~655 LOC 测试）；registry 60-100% / translator 91-100% / metrics 100% 单测覆盖；6 Prometheus metric + 5 类 log 全 grep 命中；Provider ModuleGraph "paramregistry" Depends ["dictload","productregistry"]；param_registry.use_new dual-stack flag 默认 false；productGetter 接口注入解耦；**一次落地解锁 P2-03..P2-08 6 条下游**；详见 verify-T-0098-P2-02.md；planned 16→15 / done 85→86 |
 | 2026-05-07 | **P2-01 ProductRegistry done** S2..S7 wave-batched 全过 | T-0098-P2-01 | 6 实现 + 3 测试 ~1280 LOC（含 ~515 LOC 测试）；registry 87-95% / cache 100% / metrics 100% 单测覆盖；4 Prometheus metric + 3 类 log 全 grep 命中；Provider ModuleGraph "productregistry" Depends ["dictload"]；详见 verify-T-0098-P2-01.md；planned 17→16 / done 84→85 |
 | 2026-05-07 | **P2 前戏完成升格 + 双入口准入** | T-0098-P2-01..P2-11 11 sub-task | State→planned / Sprint=wave-3 / Owner=Claude；P2-01 (F02 ProductRegistry) + P2-09 (F03 KPI loader) 两个独立入口可并发；其余 9 条因路径集中 `internal/provision/` 串行；wave-batched §C.1 准入 Skip S0/S1；triaged 37→26 / planned 6→17 |
 | 2026-05-07 | **P1 wave 收官** S2..S7 wave-batched 全过 | T-0098-P1-02..P1-06 5 commit | P1-02 products schema → P1-03 param 字典 + 跨域 FK → P1-04 alarm 字典 + 4 种子 → P1-05 KPI 命名 D1=A docs → P1-06 4 Loader + provider + 修复 entry_type 列宽；**DoD 12 项行数全过**（9+4781+2001 / 15+29 / 4+442 / 1764 / 6254）；6 sub-task 全部 done；wave-3 P1 阶段封箱 |
 | 2026-05-07 | S2..S7 wave-batched 全过 | T-0098-P1-01 dictloader 框架 | 4 实现 + 4 测试 + appconfig 接入；coverage 98.4%；planned → done；wave-3 P1 首发 |
-| 2026-05-07 | P1-01..P1-06 升格 planned + 前戏完成 | T-0098 umbrella + 6 sub-task | Sprint=wave-3 / Owner=Claude；wave-batched §C.1 准入；6 commit + 单 PR 形态 |
 
 ---
 
