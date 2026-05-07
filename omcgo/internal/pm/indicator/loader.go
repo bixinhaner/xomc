@@ -203,6 +203,26 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		rep.RowsAffected += n
 	}
 
+	// T-0098 P2-09：enabled 属性 OR 合并 + operator_code='default' 桶刷新（设计 §2.6 + 实施计划 §1.2）
+	enbEnabled := aggregateEnabledOR(enbDocs)
+	gsmEnabled := aggregateEnabledOR([]xmlIndicatorModel{gsmDoc})
+	gnbEnabled := aggregateEnabledOR([]xmlIndicatorModel{gnbDoc})
+	if n, err := refreshDefaultEnabledBucket(ctx, tx, "enabled_pm_indicators_enb", enbEnabled); err != nil {
+		return rep, fmt.Errorf("refresh enabled_pm_indicators_enb: %w", err)
+	} else {
+		rep.RowsAffected += n
+	}
+	if n, err := refreshDefaultEnabledBucket(ctx, tx, "enabled_pm_indicators_gsm", gsmEnabled); err != nil {
+		return rep, fmt.Errorf("refresh enabled_pm_indicators_gsm: %w", err)
+	} else {
+		rep.RowsAffected += n
+	}
+	if n, err := refreshDefaultEnabledBucket(ctx, tx, "enabled_pm_indicators_gnb", gnbEnabled); err != nil {
+		return rep, fmt.Errorf("refresh enabled_pm_indicators_gnb: %w", err)
+	} else {
+		rep.RowsAffected += n
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return rep, fmt.Errorf("commit indicator tx: %w", err)
 	}
@@ -434,6 +454,110 @@ func rewriteFormulas(ctx context.Context, tx pgx.Tx, table string, formulas []fo
 		}
 	}
 	return len(formulas), nil
+}
+
+// aggregateEnabledOR 计算 indicator_id → 有效 enabled 标志（多文件 OR 合并；设计 §2.6 / P2-09）。
+//
+// 语义：
+//   - 同一 indicator_id 在任意一个文件标 enabled="true"（或缺省）→ true
+//   - 仅当所有出现处都明确 enabled="false" / "0" → false
+//   - 缺省 / 空字符串 / "true" / 其他 → true（与 XML 历史宽松约定一致）
+func aggregateEnabledOR(docs []xmlIndicatorModel) map[string]bool {
+	out := make(map[string]bool, 256)
+	for _, doc := range docs {
+		for _, ind := range doc.Indicators {
+			if ind.ID == "" {
+				continue
+			}
+			cur, exists := out[ind.ID]
+			if !exists {
+				out[ind.ID] = parseEnabledFlag(ind.Enabled)
+				continue
+			}
+			// OR 合并：cur 已 true → 保持；否则取本次解析值
+			if !cur {
+				out[ind.ID] = parseEnabledFlag(ind.Enabled)
+			}
+		}
+	}
+	return out
+}
+
+// parseEnabledFlag 把 XML 字符串 enabled 属性解析为 bool。
+//   - "" / "true" / "1" / "TRUE" / "T" → true
+//   - "false" / "0" / "FALSE" / "F"   → false
+//   - 其它 → true（容错，与 XML 现网约定一致）
+func parseEnabledFlag(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "false", "0", "f", "no", "n":
+		return false
+	}
+	return true
+}
+
+// refreshDefaultEnabledBucket 仅刷新 operator_code='default' 桶；不动其他 operator。
+//
+// 实现：
+//   1. INSERT enabled=true 集合（ON CONFLICT DO NOTHING）
+//   2. DELETE enabled=false 集合 WHERE operator_code='default' AND indicator_id IN (...)
+//
+// 返回 (insertedOrDeletedRows, err)。
+//
+// 注意：本函数不预先 TRUNCATE — 这是设计 §2.6 "桶刷新"语义的关键：
+// 运营商在 UI 配的非 default 桶（cmcc / ctcc / cucc 等）必须保留。
+func refreshDefaultEnabledBucket(ctx context.Context, tx pgx.Tx, table string, enabledMap map[string]bool) (int, error) {
+	if len(enabledMap) == 0 {
+		return 0, nil
+	}
+	enabledIDs := make([]string, 0, len(enabledMap))
+	disabledIDs := make([]string, 0, len(enabledMap))
+	for id, en := range enabledMap {
+		if en {
+			enabledIDs = append(enabledIDs, id)
+		} else {
+			disabledIDs = append(disabledIDs, id)
+		}
+	}
+
+	rowsAffected := 0
+
+	// 1. 插入启用集（ON CONFLICT 防重）
+	if len(enabledIDs) > 0 {
+		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+			Insert(table).Columns("operator_code", "indicator_id")
+		for _, id := range enabledIDs {
+			ib = ib.Values("default", id)
+		}
+		ib = ib.Suffix("ON CONFLICT (operator_code, indicator_id) DO NOTHING")
+		insSQL, args, err := ib.ToSql()
+		if err != nil {
+			return 0, fmt.Errorf("build insert %s default-bucket: %w", table, err)
+		}
+		tag, err := tx.Exec(ctx, insSQL, args...)
+		if err != nil {
+			return 0, fmt.Errorf("exec insert %s default-bucket: %w", table, err)
+		}
+		rowsAffected += int(tag.RowsAffected())
+	}
+
+	// 2. 删除禁用集 — 仅限 operator_code='default'
+	if len(disabledIDs) > 0 {
+		delSQL, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+			Delete(table).
+			Where(sq.Eq{"operator_code": "default"}).
+			Where(sq.Eq{"indicator_id": disabledIDs}).
+			ToSql()
+		if err != nil {
+			return 0, fmt.Errorf("build delete %s default-bucket: %w", table, err)
+		}
+		tag, err := tx.Exec(ctx, delSQL, args...)
+		if err != nil {
+			return 0, fmt.Errorf("exec delete %s default-bucket: %w", table, err)
+		}
+		rowsAffected += int(tag.RowsAffected())
+	}
+
+	return rowsAffected, nil
 }
 
 func nullIfEmpty(s string) interface{} {
