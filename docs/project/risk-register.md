@@ -264,6 +264,140 @@
 
 ---
 
+## T-0098 数据字典平台化任务专属风险（R-T0098-01..12）
+
+> 来源：`docs/project/参数-KPI-告警-整合-实施计划.md` §4。
+> 与 T-0098 36 个子任务（T-0098-P1-01 .. T-0098-P5-06）配套登记；任务关闭时统一关闭/降级。
+> **2026-05-07 PgM 决策点 D1-D10 全采纳推荐**（详见 backlog §10 变更日志）— R-T0098-09 因 D5=B 落定从 Open → Mitigating。
+
+### R-T0098-01 旧 data_model_definitions Phase 5 直接 DROP
+- **描述**：Phase 5 计划 DROP `data_model_definitions` 表；当前为 dev-only 环境，无生产数据
+- **等级**：P1
+- **概率**：低
+- **影响**：高（若已部署 staging 未做备份则数据永久丢失）
+- **Owner**：数据与存储专家
+- **状态**：Open
+- **关联 Task**：T-0098 / T-0098-P5-01 / T-0098-P5-02
+- **缓解**：Phase 5 启动前确认 staging 状态；已部署需先做完整备份；用 000061 down section 验证可回滚
+- **下次复盘**：T-0098 Phase 5 启动前
+
+### R-T0098-02 KPI 表名重命名风险（已规避）
+- **描述**：原计划重命名 KPI 表（`indicator_unit` → `indicator_units` 等）影响 `pm/worker` + 17 张表 + 触发器
+- **等级**：P1
+- **概率**：中
+- **影响**：中
+- **Owner**：F03 owner
+- **状态**：**Closed by D1=A** (2026-05-07，决议保留现状，改设计 footnote)
+- **关联 Task**：T-0098-P1-05（降级为 docs 任务）
+- **缓解**：D1=A 决策避开重命名路径；P1-05 改为更新设计 footnote 文档对齐
+
+### R-T0098-03 alarm_libraries ALTER 与 receiver 同步失败
+- **描述**：旧 `alarm_libraries` 与新 `alarm_definitions` schema 差异较大，ALTER + 重命名列与现有 receiver 同步失败可能导致告警丢失
+- **等级**：P1
+- **概率**：中
+- **影响**：高
+- **Owner**：F04 owner
+- **状态**：**Mitigating by D2=B** (2026-05-07，决议 DROP + CREATE NEW alarm_definitions)
+- **关联 Task**：T-0098-P1-04 / T-0098-P5-06 / T-0098-P2-10
+- **缓解**：D2=B 决策走 DROP+CREATE 路径，告警数据来自 XML 可重载即恢复；P1-04 启动前 grep 现存 receiver 路径确认零 FK 反查
+
+### R-T0098-04 迁移 000057-000059 跨多 PR 时序 app 无法启动
+- **描述**：3 张迁移（products / param_dictionary / alarm_dictionary）若拆 PR 合入，中间状态 loader 启动会因表缺失 ERROR
+- **等级**：P0（启动阻塞）
+- **概率**：高
+- **影响**：中
+- **Owner**：F02 + F04 + infra
+- **状态**：**Mitigating by D8=A** (2026-05-07，决议单 PR 合 P1)
+- **关联 Task**：T-0098-P1-02 / T-0098-P1-03 / T-0098-P1-04 / T-0098-P1-06
+- **缓解**：D8=A 决策强制 P1 单 PR 合入；不允许拆；本地 `make migrate-up` + `make migrate-down` 双向干跑通过后才合入
+
+### R-T0098-05 6 个消费者改造跨多 PR 中途主干编译失败
+- **描述**：sync.go / orchestrator.go / model_upload.go / device_param_handler.go / interop / pm worker 6 处切换 ParamRegistry，跨多 PR 时主干编译会失败
+- **等级**：P1
+- **概率**：中
+- **影响**：高
+- **Owner**：F02 owner
+- **状态**：**Mitigating by D9=B** (2026-05-07，决议 feature flag `param_registry.use_new` 保留至 Phase 5 完成)
+- **关联 Task**：T-0098-P2-04 .. T-0098-P2-08 / T-0098-P2-11
+- **缓解**：D9=B feature flag 保护过渡期；新旧路径共存，逐 PR 切换；Phase 5 完成后删 flag
+
+### R-T0098-06 删 ParameterTreeIterator 影响 engine_test.go 1082 行测试
+- **描述**：T-0098-P2-04 重写 sync.go 同时删除 `ParameterTreeIterator`，影响 `provision/engine_test.go` 1082 行（含 Phase1GPNs 路径全部用例）
+- **等级**：P1
+- **概率**：高
+- **影响**：中
+- **Owner**：F02 owner
+- **状态**：Open
+- **关联 Task**：T-0098-P2-04
+- **缓解**：P2-04 PR 同步重构 engine_test.go，不留残留；CPE simulator 端到端覆盖兜底
+- **下次复盘**：P2-04 启动前
+
+### R-T0098-07 webcode-v2/v3 因 frontend-core 类型变化崩溃
+- **描述**：T-0098-P4-01 拆 `paramModelApi/productApi/alarmDefinitionApi` 影响 webcode-v2/v3 编译
+- **等级**：P2
+- **概率**：中
+- **影响**：低
+- **Owner**：frontend-core owner
+- **状态**：**Mitigating by D7=A** (2026-05-07，决议仅评估编译，不强制 v2/v3 跟进 UI 完整性)
+- **关联 Task**：T-0098-P4-01 / T-0098-P4-08
+- **缓解**：D7=A 决策只看 `npm run build` 不阻塞；T-0098-P4-08 单独评估；与 T-0035 多皮肤计划解耦
+
+### R-T0098-08 provision/engine.go + sync.go 重写隐性 bug
+- **描述**：`provision/engine.go` 663 行 + `sync.go` 482 行重写，重写量大，隐性 bug 概率高
+- **等级**：P0
+- **概率**：高
+- **影响**：高
+- **Owner**：F02 owner + 架构专家
+- **状态**：Open
+- **关联 Task**：T-0098-P2-04 / T-0098-P2-05 / T-0098-P2-06
+- **缓解**：优先级最高的 review；强制 `/ultrareview` 多 agent；CPE simulator 端到端覆盖；D9=B feature flag 保留至 P5 提供 fallback
+- **下次复盘**：P2-04..06 任一 PR review 时
+
+### R-T0098-09 Wave 3 硬化期 FREEZE 冲突
+- **描述**：T-0098 是 feat 类，与 Wave 3 硬化期（2026-04-28~2026-08-03）FREEZE 冲突
+- **等级**：P0（排期阻塞）
+- **概率**：高
+- **影响**：高
+- **Owner**：项目经理（PgM）
+- **状态**：**Mitigating by D5=B** (2026-05-07，决议 P1-P3 视为设计已交付的实现收敛纳入 W3，P4/P5 推迟到 W3 后)
+- **关联 Task**：T-0098-P1-* / T-0098-P2-* / T-0098-P3-* (W3 内) ; T-0098-P4-* / T-0098-P5-* (W3 后)
+- **缓解**：D5=B 划线明确；P1-P3 子任务 sprint planning 时按"W3 期允许"准入；P4/P5 子任务标记 "**D5=B Wave 3 后启动**"
+- **下次复盘**：每月 W3 计分盘点
+
+### R-T0098-10 XL 任务 8-sprint 长链中途人员变动
+- **描述**：T-0098 横跨 ~8 sprint，中途 Owner 变动可能导致进度断层
+- **等级**：P2
+- **概率**：中
+- **影响**：中
+- **Owner**：项目经理（PgM）
+- **状态**：Open
+- **关联 Task**：T-0098 全 36 子任务
+- **缓解**：每 Phase 末 demo + 文档更新；36 子任务粒度便于交接；Phase DoD 七节交付验证可独立验收
+- **下次复盘**：每 Sprint 回顾
+
+### R-T0098-11 products.xml 离线脚本归属不明阻塞 P1-02
+- **描述**：`data/param-mappings/products.xml` 需离线脚本生成，归属不明阻塞 P1-02 + P1-06
+- **等级**：P1
+- **概率**：中
+- **影响**：中
+- **Owner**：后端架构（D4=A）
+- **状态**：**Mitigating by D4=A** (2026-05-07，决议后端架构同学产出)
+- **关联 Task**：T-0098-P1-02 / T-0098-P1-06
+- **缓解**：D4=A 决策落定；具体人选由 sprint planning 时落实；脚本与 paramModel/KPI/Alarm 数据耦合紧，与设计文档同步迭代
+
+### R-T0098-12 super_admin 角色与现有 admin 权限边界争议
+- **描述**：Phase 3 引入 super_admin 角色，与现有 admin 角色权限边界可能争议
+- **等级**：P2
+- **概率**：低
+- **影响**：低
+- **Owner**：admin 模块 owner + 安全合规专家
+- **状态**：Open
+- **关联 Task**：T-0098-P3-05 / T-0098-P4-02
+- **缓解**：P3-05 启动前与 admin 模块 owner 对齐；现 PrivateRoute 已支持角色过滤可复用
+- **下次复盘**：P3-05 启动前
+
+---
+
 ## P2 风险（优化项）
 
 ### R-201 RF 控制硬编码 LTE
