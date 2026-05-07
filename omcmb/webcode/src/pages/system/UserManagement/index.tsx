@@ -350,27 +350,6 @@ export default function UserManagement() {
     });
   }, [data?.items, selectedKeys, hasBuiltInSelected, t, unlockUser, modal, message]);
 
-  const handleBatchResetPassword = useCallback(() => {
-    // 内置用户不允许操作
-    if (hasBuiltInSelected) {
-      modal.warning({
-        title: t('common.warning'),
-        content: t('user.builtInCannotBatchOp'),
-      });
-      return;
-    }
-    const users = (data?.items || []).filter((u) => selectedKeys.includes(u.id));
-    if (users.length === 0) return;
-    modal.confirm({
-      title: t('common.confirm'),
-      content: t('user.confirmBatchResetPassword'),
-      onOk: () => {
-        message.success(t('common.success'));
-        setSelectedKeys([]);
-      },
-    });
-  }, [data?.items, selectedKeys, hasBuiltInSelected, t, modal, message]);
-
   const handleBatchMoveGroup = useCallback(() => {
     // 内置用户不允许操作
     if (hasBuiltInSelected) {
@@ -742,13 +721,6 @@ export default function UserManagement() {
               label: '启用',
               icon: <CheckCircleOutlined />,
               onClick: handleBatchUnlock,
-              disabled: hasBuiltInSelected,
-            },
-            {
-              key: 'resetPwd',
-              label: t('user.resetPassword'),
-              icon: <KeyOutlined />,
-              onClick: handleBatchResetPassword,
               disabled: hasBuiltInSelected,
             },
             {
