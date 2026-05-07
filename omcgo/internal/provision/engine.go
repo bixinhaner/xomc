@@ -253,9 +253,23 @@ func (e *ProvisioningEngine) handleTemplateProvisioning(ctx context.Context, tas
 		return e.failTask(ctx, task, fmt.Errorf("transition to configuring: %w", err))
 	}
 
-	steps, err := BuildProvisioningSteps(tmpl)
-	if err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("build provisioning steps: %w", err))
+	// T-0098 P2-05 dual-stack：Path A 模板 Parameters 视为 standardPath，
+	// 翻译为 privatePath 后再下发；旧栈（syncService nil 或 translator 未解出）保持原行为。
+	var (
+		steps    []ProvisioningStep
+		buildErr error
+	)
+	if e.syncService != nil {
+		if translator, ok := e.syncService.ResolveTranslator(ctx, dev); ok {
+			steps, buildErr = BuildProvisioningStepsTranslated(tmpl, translator)
+		} else {
+			steps, buildErr = BuildProvisioningSteps(tmpl)
+		}
+	} else {
+		steps, buildErr = BuildProvisioningSteps(tmpl)
+	}
+	if buildErr != nil {
+		return e.failTask(ctx, task, fmt.Errorf("build provisioning steps: %w", buildErr))
 	}
 	task.TotalSteps = len(steps)
 	if err := e.taskRepo.Update(ctx, task); err != nil {

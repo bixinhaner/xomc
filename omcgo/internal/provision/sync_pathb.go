@@ -162,6 +162,24 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	return true, nil
 }
 
+// ResolveTranslator 公共接口：返回 device 当前 ProductClass + FirmwareVersion 对应的 Translator。
+//
+// 供 P2-05 orchestrator 模板下发路径使用：模板 Parameters key 视为 standardPath，
+// 通过 Translator.ToPrivate 翻译为设备私有路径再下发 SPV / GPV。
+//
+// 任一前置条件失败 → 返回 (nil, false)，调用方降级到旧栈。
+func (s *SyncService) ResolveTranslator(ctx context.Context, dev *model.Device) (*parammodel.Translator, bool) {
+	set, ok := s.resolveMappingSet(ctx, dev)
+	if !ok {
+		return nil, false
+	}
+	t := parammodel.NewTranslator(set, nil, s.logger)
+	if t == nil {
+		return nil, false
+	}
+	return t, true
+}
+
 // resolveMappingSet 在 dual-stack 启用时尝试解析 device 对应的 MappingSet。
 //
 // 任何前置条件失败 → 返回 (nil, false)。
