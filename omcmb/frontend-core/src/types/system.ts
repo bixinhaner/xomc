@@ -116,6 +116,36 @@ export interface ApiPermission {
   method: string;
 }
 
+// ---- System Config (sys_configs KV table)
+// 参 omgo/docs/prd/system/config.md。后端 7 个 category：
+// basic / security / device / notify / storage / omc / northbound。
+export type SysConfigValueType = 'string' | 'int' | 'float' | 'bool' | 'json';
+
+export interface SysConfigItem {
+  id: string;
+  category: string;
+  key: string;
+  value: string;
+  valueType?: SysConfigValueType;
+  description?: string;
+  isPublic?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface BatchUpdateSysConfigItem {
+  key: string;
+  value: string;
+  // 后端 sys_configs.value_type 列允许 'string'|'int'|'float'|'bool'|'json'；
+  // 缺省按 'string' 入库（仅新增时用，已存在的行不会改 value_type）。
+  value_type?: SysConfigValueType;
+}
+
+export interface BatchUpdateSysConfigPayload {
+  category: string;
+  items: BatchUpdateSysConfigItem[];
+}
+
 export type OperationResult = 'success' | 'failure' | 'partial';
 export type OperationType =
   | 'create'

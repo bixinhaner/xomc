@@ -21,6 +21,9 @@ import type {
   UpdateMenuRequest,
   SetRoleMenusRequest,
   RoleWithMenus,
+  SysConfigItem,
+  SysConfigValueType,
+  BatchUpdateSysConfigPayload,
 } from '../../types/system';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
@@ -247,6 +250,19 @@ interface BackendApiEndpoint {
   updated_at: string;
 }
 
+// Backend sys_configs row — DDL omcgo/migrations/000009_sys_admin.sql:113。
+interface BackendSysConfig {
+  id: string;
+  category: string;
+  key: string;
+  value: string;
+  value_type: string;
+  desc?: string;
+  is_public?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // Backend group model
 interface BackendGroup {
   id: string;
@@ -439,6 +455,24 @@ function mapBackendApiEndpoint(b: BackendApiEndpoint): ApiEndpoint {
     apiGroup: b.api_group ?? '',
     // module 字段类型上是 string（早期遗留），为兼容现有列定义保留 path 兜底。
     module: b.api_group ?? '',
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+
+function mapBackendSysConfig(b: BackendSysConfig): SysConfigItem {
+  const allowed: SysConfigValueType[] = ['string', 'int', 'float', 'bool', 'json'];
+  const vt = (allowed as readonly string[]).includes(b.value_type)
+    ? (b.value_type as SysConfigValueType)
+    : 'string';
+  return {
+    id: b.id,
+    category: b.category,
+    key: b.key,
+    value: b.value,
+    valueType: vt,
+    description: b.desc,
+    isPublic: b.is_public,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };
@@ -963,5 +997,18 @@ export const adminApi = {
   // Change password (current user)
   async changePassword(data: { old_password: string; new_password: string }): Promise<void> {
     await http.post('/auth/change-password', data);
+  },
+
+  // ---- System Config (KV by category, batch upsert) ----
+  // 参 omgo/docs/prd/system/config.md §5。前端 system/config 页面 7 Tab 用：
+  // 进入页面/切 Tab 调 getSysConfigsByCategory；保存按钮调 batchUpdateSysConfigs。
+  async getSysConfigsByCategory(category: string): Promise<SysConfigItem[]> {
+    const { data } = await http.get<BackendSysConfig[]>('/admin/sysConfig', { params: { category } });
+    return (Array.isArray(data) ? data : []).map(mapBackendSysConfig);
+  },
+
+  async batchUpdateSysConfigs(payload: BatchUpdateSysConfigPayload): Promise<number> {
+    const { data } = await http.post<{ updated?: number }>('/admin/sysConfig/batch', payload);
+    return data?.updated ?? 0;
   },
 };

@@ -27,6 +27,7 @@ func (h *SysConfigHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		configs.GET("", h.List)
 		configs.GET("/:id", h.Get)
 		configs.POST("", h.Create)
+		configs.POST("/batch", h.BatchUpdate)
 		configs.PUT("/:id", h.Update)
 		configs.DELETE("/:id", h.Delete)
 	}
@@ -105,4 +106,20 @@ func (h *SysConfigHandler) Delete(c *gin.Context) {
 		return
 	}
 	response.OKWithMsg(c, nil, "删除成功")
+}
+
+// BatchUpdate 按 category 批量 upsert 一组 (key,value) 配置项 — system/config 页面"保存"用。
+// 参 docs/prd/system/config.md §5.2。
+func (h *SysConfigHandler) BatchUpdate(c *gin.Context) {
+	var req BatchUpdateSysConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	count, err := h.service.BatchUpsert(c.Request.Context(), req)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OKWithMsg(c, gin.H{"updated": count}, "保存成功")
 }

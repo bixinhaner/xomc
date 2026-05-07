@@ -1,5 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User, Role, Group, ApiEndpointListParams, ApiEndpointPayload } from '../../types/system';
+import type {
+  User,
+  Role,
+  Group,
+  ApiEndpointListParams,
+  ApiEndpointPayload,
+  SysConfigItem,
+  BatchUpdateSysConfigPayload,
+} from '../../types/system';
 import type { Dictionary } from '../../services/api/adminApi';
 import type { PageRequest } from '../../types/pagination';
 import { systemService } from '../../mock/services/systemService';
@@ -394,5 +402,26 @@ export function useDictionary(dictType: string) {
     queryFn: () => adminApi.findDictionaryByType(dictType),
     enabled: !!dictType,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- System Config (sys_configs) hooks — system/config 页面用 ----
+// 参 omgo/docs/prd/system/config.md。enabled 控制只在 active tab 切到时拉取。
+export function useSysConfigsByCategory(category: string, enabled = true) {
+  return useQuery<SysConfigItem[]>({
+    queryKey: ['system', 'sysConfig', category],
+    queryFn: () => adminApi.getSysConfigsByCategory(category),
+    enabled: enabled && !!category,
+    staleTime: 30_000,
+  });
+}
+
+export function useBatchUpdateSysConfigs() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: BatchUpdateSysConfigPayload) => adminApi.batchUpdateSysConfigs(payload),
+    onSuccess: (_count, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['system', 'sysConfig', variables.category] });
+    },
   });
 }

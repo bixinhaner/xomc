@@ -44,6 +44,19 @@ type UpdateSysConfigRequest struct {
 	IsPublic    *bool   `json:"is_public"`
 }
 
+// BatchItem 是单次批量 upsert 的 KV 项。value_type 可选，缺省 'string'。
+type BatchItem struct {
+	Key       string `json:"key" binding:"required"`
+	Value     string `json:"value"`
+	ValueType string `json:"value_type"`
+}
+
+// BatchUpdateSysConfigRequest 按 category 批量 upsert 配置（PRD config.md §5.2）。
+type BatchUpdateSysConfigRequest struct {
+	Category string      `json:"category" binding:"required"`
+	Items    []BatchItem `json:"items" binding:"required,min=1"`
+}
+
 // --- SysConfigRepository ---
 
 // SysConfigRepository defines the persistence interface for system configs.
@@ -54,6 +67,7 @@ type SysConfigRepository interface {
 	List(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error)
 	Update(ctx context.Context, cfg *SysConfig) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	BatchUpsert(ctx context.Context, category string, items []BatchItem) (int, error)
 }
 
 // PgSysConfigRepository implements SysConfigRepository using PostgreSQL.
@@ -186,6 +200,46 @@ func (r *PgSysConfigRepository) Delete(ctx context.Context, id uuid.UUID) error 
 	return nil
 }
 
+// BatchUpsert 在单次事务内批量 upsert sys_configs 的 (category, key) → value 映射。
+// 借助 DDL 中的 UNIQUE(category, key) 约束做 ON CONFLICT 升级。返回成功条数。
+func (r *PgSysConfigRepository) BatchUpsert(ctx context.Context, category string, items []BatchItem) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin batch upsert tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	count := 0
+	for _, item := range items {
+		valueType := item.ValueType
+		if valueType == "" {
+			valueType = "string"
+		}
+		// 仅 update value + updated_at；value_type / desc / is_public 仅在新增时落库，
+		// 已存在的行不会被覆盖到这些维度（防止业务侧误传 value_type 把字段语义破坏）。
+		_, err := tx.Exec(ctx, `
+INSERT INTO sys_configs (category, key, value, value_type)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (category, key) DO UPDATE
+SET value = EXCLUDED.value, updated_at = NOW()
+`, category, item.Key, item.Value, valueType)
+		if err != nil {
+			return count, fmt.Errorf("upsert %s.%s: %w", category, item.Key, err)
+		}
+		count++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return count, fmt.Errorf("commit batch upsert: %w", err)
+	}
+	return count, nil
+}
+
 // --- SysConfigService ---
 
 // SysConfigService provides business logic for system configuration.
@@ -255,4 +309,9 @@ func (s *SysConfigService) Update(ctx context.Context, id uuid.UUID, req UpdateS
 // Delete deletes a config.
 func (s *SysConfigService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
+}
+
+// BatchUpsert 按 PRD config.md §5.2 把整个 category 的 KV 批量写入。
+func (s *SysConfigService) BatchUpsert(ctx context.Context, req BatchUpdateSysConfigRequest) (int, error) {
+	return s.repo.BatchUpsert(ctx, req.Category, req.Items)
 }
