@@ -112,7 +112,7 @@ func initProvisionModule(c *Container) error {
 		modelUploadSvc := provision.NewModelUploadService(
 			discoveryLogRepo, c.DMImporter, c.DMRegistry, c.TaskSvc,
 			c.MinIO, c.Cfg.Provision.ModelUpload, logger,
-		)
+		).WithParamRegistry(c.ProductRegistry, c.ParamIntersect, c.Cfg.ParamRegistry.UseNew)
 		provisionEngine.SetModelUploadService(modelUploadSvc)
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
