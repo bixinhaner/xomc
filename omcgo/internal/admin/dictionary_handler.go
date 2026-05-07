@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // DictionaryHandler provides HTTP endpoints for dictionary management.
@@ -54,7 +55,7 @@ func (h *DictionaryHandler) CreateDictionary(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "创建成功"})
+	response.OKWithMsg(c, result, "创建成功")
 }
 
 // DeleteDictionary handles DELETE /sysDictionary/deleteSysDictionary?id=123
@@ -75,7 +76,7 @@ func (h *DictionaryHandler) DeleteDictionary(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": nil, "msg": "删除成功"})
+	response.OKWithMsg(c, nil, "删除成功")
 }
 
 // UpdateDictionary handles PUT /sysDictionary/updateSysDictionary
@@ -92,7 +93,7 @@ func (h *DictionaryHandler) UpdateDictionary(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "更新成功"})
+	response.OKWithMsg(c, result, "更新成功")
 }
 
 // FindDictionary handles GET /sysDictionary/findSysDictionary?type=gender
@@ -109,7 +110,7 @@ func (h *DictionaryHandler) FindDictionary(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }
 
 // GetDictionaryList handles GET /sysDictionary/getSysDictionaryList
@@ -124,14 +125,10 @@ func (h *DictionaryHandler) GetDictionaryList(c *gin.Context) {
 		result = []Dictionary{}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"list":  result,
-			"total": len(result),
-		},
-		"msg": "查询成功",
-	})
+	response.OKWithMsg(c, gin.H{
+		"list":  result,
+		"total": len(result),
+	}, "查询成功")
 }
 
 // CreateDictionaryDetail handles POST /sysDictionaryDetail/createSysDictionaryDetail
@@ -148,7 +145,7 @@ func (h *DictionaryHandler) CreateDictionaryDetail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "创建成功"})
+	response.OKWithMsg(c, result, "创建成功")
 }
 
 // DeleteDictionaryDetail handles DELETE /sysDictionaryDetail/deleteSysDictionaryDetail?id=1
@@ -169,7 +166,7 @@ func (h *DictionaryHandler) DeleteDictionaryDetail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": nil, "msg": "删除成功"})
+	response.OKWithMsg(c, nil, "删除成功")
 }
 
 // UpdateDictionaryDetail handles PUT /sysDictionaryDetail/updateSysDictionaryDetail
@@ -186,7 +183,7 @@ func (h *DictionaryHandler) UpdateDictionaryDetail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "更新成功"})
+	response.OKWithMsg(c, result, "更新成功")
 }
 
 // FindDictionaryDetail handles GET /sysDictionaryDetail/findSysDictionaryDetail?id=1
@@ -209,7 +206,7 @@ func (h *DictionaryHandler) FindDictionaryDetail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }
 
 // GetDictionaryDetailList handles GET /sysDictionaryDetail/getSysDictionaryDetailList
@@ -226,12 +223,8 @@ func (h *DictionaryHandler) GetDictionaryDetailList(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"list":  result.Items,
-			"total": result.Total,
-		},
-		"msg": "查询成功",
-	})
+	response.OKWithMsg(c, gin.H{
+		"list":  result.Items,
+		"total": result.Total,
+	}, "查询成功")
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ListApiEndpoints returns API endpoints from the database with pagination and filtering.
@@ -23,7 +24,7 @@ func (h *Handler) ListApiEndpoints(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateApiEndpoint creates a new API endpoint.
@@ -41,7 +42,7 @@ func (h *Handler) CreateApiEndpoint(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, ep)
+	response.OKWithStatus(c, http.StatusCreated, ep)
 }
 
 // UpdateApiEndpoint modifies an existing API endpoint.
@@ -65,7 +66,7 @@ func (h *Handler) UpdateApiEndpoint(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ep)
+	response.OK(c, ep)
 }
 
 // DeleteApiEndpoint removes a single API endpoint by ID.
@@ -82,7 +83,7 @@ func (h *Handler) DeleteApiEndpoint(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, nil)
+	response.OK(c, nil)
 }
 
 // BatchDeleteApiEndpoints removes multiple API endpoints by IDs.
@@ -99,7 +100,7 @@ func (h *Handler) BatchDeleteApiEndpoints(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, nil)
+	response.OK(c, nil)
 }
 
 // GetApiGroups returns the list of distinct api_group values.
@@ -110,13 +111,13 @@ func (h *Handler) GetApiGroups(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": groups})
+	response.OK(c, gin.H{"data": groups})
 }
 
 // SyncApiEndpoints triggers a sync of Gin routes into the database.
 func (h *Handler) SyncApiEndpoints(c *gin.Context) {
 	if h.ginRoutes == nil {
-		c.JSON(http.StatusOK, SyncResult{})
+		response.OK(c, SyncResult{})
 		return
 	}
 
@@ -126,7 +127,7 @@ func (h *Handler) SyncApiEndpoints(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ginRoutesContextKey is the context key used to pass gin.RoutesInfo into handlers.
@@ -143,7 +144,7 @@ func (h *Handler) GetRoleApiPermissions(c *gin.Context) {
 	}
 
 	if h.apiPermRepo == nil {
-		c.JSON(http.StatusOK, gin.H{"endpoint_ids": []uuid.UUID{}})
+		response.OK(c, gin.H{"endpoint_ids": []uuid.UUID{}})
 		return
 	}
 
@@ -156,7 +157,7 @@ func (h *Handler) GetRoleApiPermissions(c *gin.Context) {
 		ids = []uuid.UUID{}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"endpoint_ids": ids})
+	response.OK(c, gin.H{"endpoint_ids": ids})
 }
 
 // SetRoleApiPermissions sets API endpoint permissions for a role.
@@ -176,7 +177,7 @@ func (h *Handler) SetRoleApiPermissions(c *gin.Context) {
 	}
 
 	if h.apiPermRepo == nil {
-		c.JSON(http.StatusOK, gin.H{"message": "api permission service not configured"})
+		response.OKWithMsg(c, nil, "api permission service not configured")
 		return
 	}
 
@@ -188,5 +189,5 @@ func (h *Handler) SetRoleApiPermissions(c *gin.Context) {
 	// PRD roles.md §10 DoD：API 权限变更后失效该角色下所有用户的可见域缓存。
 	h.service.InvalidatePermCacheByRole(c.Request.Context(), roleID)
 
-	c.JSON(http.StatusOK, gin.H{"message": "api permissions updated", "count": len(req.EndpointIDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.EndpointIDs)}, "api permissions updated")
 }

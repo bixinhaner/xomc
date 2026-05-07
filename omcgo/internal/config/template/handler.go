@@ -6,7 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for configuration template REST API.
@@ -37,7 +40,7 @@ func (h *Handler) List(c *gin.Context) {
 		ListRequest: model.DefaultListRequest(),
 	}
 	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	if carrier := c.Query("carrier"); carrier != "" {
@@ -62,26 +65,26 @@ func (h *Handler) List(c *gin.Context) {
 
 	result, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // Get handles GET /api/v1/templates/:id.
 func (h *Handler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid template ID")
 		return
 	}
 
 	t, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		response.Fail(c, http.StatusNotFound, "template not found")
 		return
 	}
-	c.JSON(http.StatusOK, t)
+	response.OK(c, t)
 }
 
 type createTemplateRequest struct {
@@ -99,7 +102,7 @@ type createTemplateRequest struct {
 func (h *Handler) Create(c *gin.Context) {
 	var req createTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -117,10 +120,10 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	if err := h.repo.Create(c.Request.Context(), t); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, t)
+	response.OKWithStatus(c, http.StatusCreated, t)
 }
 
 type updateTemplateRequest struct {
@@ -139,19 +142,19 @@ type updateTemplateRequest struct {
 func (h *Handler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid template ID")
 		return
 	}
 
 	var req updateTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	existing, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		response.Fail(c, http.StatusNotFound, "template not found")
 		return
 	}
 
@@ -166,23 +169,23 @@ func (h *Handler) Update(c *gin.Context) {
 	existing.Description = req.Description
 
 	if err := h.repo.Update(c.Request.Context(), existing); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, existing)
+	response.OK(c, existing)
 }
 
 // Delete handles DELETE /api/v1/templates/:id.
 func (h *Handler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid template ID")
 		return
 	}
 
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		response.Fail(c, http.StatusNotFound, "template not found")
 		return
 	}
-	c.JSON(http.StatusNoContent, nil)
+	response.OK(c, nil)
 }

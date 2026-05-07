@@ -9,6 +9,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // HistoryHandler exposes read-only HTTP endpoints for notification history.
@@ -86,7 +87,7 @@ func (h *HistoryHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetByID handles GET /history/:id.
@@ -102,5 +103,5 @@ func (h *HistoryHandler) GetByID(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, entry)
+	response.OK(c, entry)
 }

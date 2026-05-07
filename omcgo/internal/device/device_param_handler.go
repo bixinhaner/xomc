@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
@@ -125,7 +126,7 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 	// Check if client wants flat or tree format.
 	format := c.DefaultQuery("format", "tree")
 	if format == "flat" {
-		c.JSON(http.StatusOK, gin.H{"items": params, "total": len(params)})
+		response.OK(c, gin.H{"items": params, "total": len(params)})
 		return
 	}
 
@@ -151,7 +152,7 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 		tree = stripLeafNodes(tree)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"tree": tree, "total": len(params)})
+	response.OK(c, gin.H{"tree": tree, "total": len(params)})
 }
 
 // SearchParameters handles GET /api/v1/devices/:id/parameter-tree/search.
@@ -182,7 +183,7 @@ func (h *ParameterTreeHandler) SearchParameters(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"items": matched, "total": len(matched)})
+	response.OK(c, gin.H{"items": matched, "total": len(matched)})
 }
 
 // SetParameterValuesRequest defines the request body for setting parameter values.
@@ -249,10 +250,9 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 					}
 				}
 				if len(validationErrors) > 0 {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error":             "parameter validation failed",
-						"validation_errors": validationErrors,
-					})
+					response.FailWithData(c, http.StatusBadRequest,
+						"parameter validation failed",
+						gin.H{"validation_errors": validationErrors})
 					return
 				}
 				// Check if any parameter requires reboot.
@@ -274,7 +274,7 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
 		"message":         "set parameter values command queued",
 		"parameters":      len(req.Parameters),
 		"reboot_required": rebootRequired,
@@ -308,7 +308,7 @@ func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 	}
 
 	if len(params) == 0 {
-		c.JSON(http.StatusOK, gin.H{"message": "no parameters to sync"})
+		response.OKWithMsg(c, nil, "no parameters to sync")
 		return
 	}
 
@@ -340,7 +340,7 @@ func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
 		"message":    "parameter sync command queued",
 		"parameters": len(paths),
 	})
@@ -389,7 +389,7 @@ func (h *ParameterTreeHandler) TriggerDiscover(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "parameter discovery command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "parameter discovery command queued"})
 }
 
 // GetSyncStatus handles GET /api/v1/devices/:id/parameters/sync-status.
@@ -422,7 +422,7 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		status = "syncing"
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"status":           status,
 		"total_parameters": len(params),
 		"pending_commands": pendingCommands,
@@ -493,7 +493,7 @@ func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
 		zap.String("serial_number", dev.SerialNumber),
 		zap.String("command_id", created.ID))
 
-	c.JSON(http.StatusAccepted, gin.H{
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
 		"message":    "configuration file sync command queued",
 		"command_id": created.ID,
 		"file_type":  "11",
@@ -697,7 +697,7 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 		items = append(items, item)
 	}
 
-	c.JSON(http.StatusOK, DirectChildrenResponse{
+	response.OK(c, DirectChildrenResponse{
 		Items:      items,
 		SubObjects: subObjects,
 		Total:      total,
@@ -769,7 +769,7 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"parameters": schemaItems,
 		"objects":    objectItems,
 		"total":      len(schemaItems),
@@ -954,10 +954,8 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 			if validator != nil {
 				currentCount, _ := h.countInstances(c.Request.Context(), id, req.ObjectPath)
 				if ve := validator.ValidateAddObject(req.ObjectPath, currentCount); ve != nil {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error":   "add object validation failed",
-						"details": ve,
-					})
+					response.FailWithData(c, http.StatusBadRequest,
+						"add object validation failed", gin.H{"details": ve})
 					return
 				}
 			}
@@ -985,7 +983,7 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "add object command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "add object command queued"})
 }
 
 // DeleteObjectRequest defines the request body for deleting a multi-instance object.
@@ -1029,10 +1027,8 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 			if validator != nil {
 				currentCount, _ := h.countInstances(c.Request.Context(), id, parentPath)
 				if ve := validator.ValidateDeleteObject(parentPath, currentCount); ve != nil {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error":   "delete object validation failed",
-						"details": ve,
-					})
+					response.FailWithData(c, http.StatusBadRequest,
+						"delete object validation failed", gin.H{"details": ve})
 					return
 				}
 			}
@@ -1060,7 +1056,7 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "delete object command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "delete object command queued"})
 }
 
 // countInstances counts the number of distinct instances under an object path prefix.

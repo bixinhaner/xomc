@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 func (h *Handler) Login(c *gin.Context) {
@@ -101,7 +102,7 @@ func (h *Handler) Login(c *gin.Context) {
 	// W3.G.2 ActionLogin / category 1 of 5: see comment in failure branch.
 	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, "")
 
-	c.JSON(http.StatusOK, tokenPair)
+	response.OK(c, tokenPair)
 }
 
 // GetCaptcha handles GET /api/v1/auth/captcha — generates a new CAPTCHA challenge.
@@ -118,7 +119,7 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, challenge)
+	response.OK(c, challenge)
 }
 
 func (h *Handler) Refresh(c *gin.Context) {
@@ -135,7 +136,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, tokenPair)
+	response.OK(c, tokenPair)
 }
 
 // Me handles GET /api/v1/auth/me — returns current authenticated user info.
@@ -159,14 +160,14 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.OK(c, user)
 }
 
 // SwitchRole handles POST /auth/switch-role
 func (h *Handler) SwitchRole(c *gin.Context) {
 	userID := getUserID(c)
 	if userID == uuid.Nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "authentication required"})
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, errors.New("authentication required"))
 		return
 	}
 
@@ -184,14 +185,14 @@ func (h *Handler) SwitchRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": tokenPair, "msg": "角色切换成功"})
+	response.OKWithMsg(c, tokenPair, "角色切换成功")
 }
 
 // GetUserMenusByRole handles GET /auth/menus — returns menus for current role
 func (h *Handler) GetUserMenusByRole(c *gin.Context) {
 	userID := getUserID(c)
 	if userID == uuid.Nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "authentication required"})
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, errors.New("authentication required"))
 		return
 	}
 
@@ -204,7 +205,7 @@ func (h *Handler) GetUserMenusByRole(c *gin.Context) {
 				commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"code": 0, "data": menus, "msg": "查询成功"})
+			response.OKWithMsg(c, menus, "查询成功")
 			return
 		}
 	}
@@ -215,7 +216,7 @@ func (h *Handler) GetUserMenusByRole(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": menus, "msg": "查询成功"})
+	response.OKWithMsg(c, menus, "查询成功")
 }
 
 // recordAuthAuditLog writes an authentication audit log entry asynchronously.
@@ -283,5 +284,5 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "password changed successfully"})
+	response.OKWithMsg(c, nil, "password changed successfully")
 }

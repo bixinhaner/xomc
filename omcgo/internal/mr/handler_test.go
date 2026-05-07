@@ -2,7 +2,6 @@ package mr
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/mr/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -222,8 +222,7 @@ func TestHandler_ListIndicators_Default(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[MRIndicator]
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "MR.RSRP", resp.Items[0].IndicatorCode)
@@ -286,8 +285,7 @@ func TestHandler_GetIndicatorStats_Found(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "MR.RSRP", resp["indicator_code"])
 	// min should be -140, max should be -44, avg = (-140 + -44)/2 = -92
 	assert.InDelta(t, -92.0, resp["avg"], 0.01)
@@ -334,8 +332,7 @@ func TestHandler_QueryMRData_Default(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[MRRecordEntry]
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 }

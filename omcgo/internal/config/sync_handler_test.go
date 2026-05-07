@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -79,9 +80,8 @@ func TestSyncHandler_PushConfig_Success(t *testing.T) {
 	assert.Equal(t, "SetParameterValues", capturedReq.Method)
 
 	var respBody map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &respBody)
-	require.NoError(t, err)
-	assert.Equal(t, "configuration push queued", respBody["message"])
+	_, msg := response.DecodeData(t, w.Body, &respBody)
+	assert.Equal(t, "configuration push queued", msg)
 	assert.Equal(t, "DEV001", respBody["device_id"])
 }
 
@@ -151,9 +151,8 @@ func TestSyncHandler_PullConfig_Success(t *testing.T) {
 	assert.Equal(t, "GetParameterValues", capturedReq.Method)
 
 	var respBody map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &respBody)
-	require.NoError(t, err)
-	assert.Equal(t, "configuration pull queued", respBody["message"])
+	_, msg := response.DecodeData(t, w.Body, &respBody)
+	assert.Equal(t, "configuration pull queued", msg)
 	assert.Equal(t, "DEV001", respBody["device_id"])
 }
 
@@ -189,8 +188,7 @@ func TestSyncHandler_GetSyncStatus_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp SyncStatusResponse
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "DEV001", resp.DeviceID)
 	assert.Equal(t, int64(5), resp.PendingCount)
 }

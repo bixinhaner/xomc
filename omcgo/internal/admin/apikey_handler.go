@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // APIKeyHandler provides HTTP endpoints for API key management.
@@ -53,7 +54,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, resp)
+	response.OKWithStatus(c, http.StatusCreated, resp)
 }
 
 // ListAPIKeys handles GET /api/v1/api-keys.
@@ -75,7 +76,7 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"items": keys, "total": len(keys)})
+	response.OK(c, gin.H{"items": keys, "total": len(keys)})
 }
 
 // RevokeAPIKey handles DELETE /api/v1/api-keys/:id.
@@ -91,5 +92,5 @@ func (h *APIKeyHandler) RevokeAPIKey(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "api key revoked"})
+	response.OKWithMsg(c, nil, "api key revoked")
 }

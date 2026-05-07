@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/stretchr/testify/assert"
@@ -118,7 +119,7 @@ func TestHandler_ListCounters_Default(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[model.PMCounter]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 }
@@ -169,7 +170,7 @@ func TestHandler_ListAggregatedCounters(t *testing.T) {
 	var body struct {
 		Items []counter.AggregatedCounter `json:"items"`
 	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	response.DecodeData(t, w.Body, &body)
 	require.Len(t, body.Items, 1)
 	assert.Equal(t, float64(5000), body.Items[0].SumValue)
 }
@@ -190,7 +191,7 @@ func TestHandler_ListKPIValues(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[model.KPIValue]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 }
 
@@ -206,7 +207,7 @@ func TestHandler_ListKPIDefinitions(t *testing.T) {
 		Items []model.KPIDefinition `json:"items"`
 		Total int                   `json:"total"`
 	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	response.DecodeData(t, w.Body, &body)
 	assert.Equal(t, 0, body.Total)
 }
 
@@ -241,7 +242,7 @@ func TestHandler_ListTasks(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[PerformanceTask]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 }
 

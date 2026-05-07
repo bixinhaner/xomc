@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ---------------------------------------------------------------------------
@@ -214,8 +215,7 @@ func TestHandler_ListCommands(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[MMLCommand]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "LST CELL", resp.Items[0].CommandCode)
@@ -256,8 +256,7 @@ func TestHandler_GetCommand(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp MMLCommand
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, cmdID, resp.ID)
 	assert.Equal(t, "LST CELL", resp.CommandCode)
 	assert.Equal(t, "GetParameterValues", resp.RPCMethod)
@@ -291,20 +290,15 @@ func TestHandler_GetCommandParamPaths(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp struct {
-		Code int                       `json:"code"`
-		Data CommandParamPathsResponse `json:"data"`
-	}
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
-	assert.Equal(t, 0, resp.Code)
-	assert.Equal(t, "MOD CELL", resp.Data.CommandCode)
-	assert.Equal(t, "MOD", resp.Data.OperationType)
-	assert.Equal(t, []string{"LST", "MOD"}, resp.Data.SupportedOperations)
-	require.Len(t, resp.Data.ParamPaths, 1)
-	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", resp.Data.ParamPaths[0].Path)
-	assert.Equal(t, "LTE射频参数", resp.Data.ParamPaths[0].Label)
-	assert.True(t, resp.Data.ParamPaths[0].Writable)
+	var data CommandParamPathsResponse
+	response.DecodeData(t, w.Body, &data)
+	assert.Equal(t, "MOD CELL", data.CommandCode)
+	assert.Equal(t, "MOD", data.OperationType)
+	assert.Equal(t, []string{"LST", "MOD"}, data.SupportedOperations)
+	require.Len(t, data.ParamPaths, 1)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", data.ParamPaths[0].Path)
+	assert.Equal(t, "LTE射频参数", data.ParamPaths[0].Label)
+	assert.True(t, data.ParamPaths[0].Writable)
 }
 
 func TestHandler_Execute(t *testing.T) {
@@ -349,8 +343,7 @@ func TestHandler_Execute(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp MMLTask
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, TaskPending, resp.Status)
 	assert.Equal(t, "Query cells", resp.TaskName)
@@ -393,8 +386,7 @@ func TestHandler_ListScripts(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[MMLScript]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Batch Query Script", resp.Items[0].ScriptName)
@@ -432,8 +424,7 @@ func TestHandler_CreateScript(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp MMLScript
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "New Script", resp.ScriptName)
 	assert.Equal(t, "LST CELL;", resp.Content)
@@ -461,8 +452,8 @@ func TestHandler_DeleteScript(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/mml/scripts/"+scriptID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Empty(t, w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }
 
 func TestHandler_ListTasks(t *testing.T) {
@@ -502,8 +493,7 @@ func TestHandler_ListTasks(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[MMLTask]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Batch Query", resp.Items[0].TaskName)
@@ -539,8 +529,7 @@ func TestHandler_StartTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp MMLTask
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, taskID, resp.ID)
 }
 
@@ -622,5 +611,6 @@ func TestHandler_DeleteTask(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/mml/tasks/"+taskID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }

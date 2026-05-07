@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -83,6 +84,9 @@ func (m *handlerMockUserRepo) UpdateLastLogin(ctx context.Context, id uuid.UUID)
 		return m.updateLastLoginFn(ctx, id)
 	}
 	return nil
+}
+func (m *handlerMockUserRepo) GetUsernamesByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
+	return map[uuid.UUID]string{}, nil
 }
 
 type handlerMockRoleRepo struct {
@@ -246,7 +250,7 @@ func TestHandler_Login_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp TokenPair
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEmpty(t, resp.AccessToken)
 	assert.NotEmpty(t, resp.RefreshToken)
 	assert.Equal(t, "Bearer", resp.TokenType)
@@ -302,7 +306,7 @@ func TestHandler_ListUsers(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[User]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 }
 
@@ -325,7 +329,7 @@ func TestHandler_CreateUser_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp User
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "newuser", resp.Username)
 }
 
@@ -349,7 +353,7 @@ func TestHandler_GetUser_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp User
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "testuser", resp.Username)
 }
 
@@ -381,7 +385,7 @@ func TestHandler_DeleteUser_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+uuid.New().String(), nil)
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, deleteCalled)
 }
 
@@ -549,5 +553,5 @@ func TestHandler_ListRoles(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[Role]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 }

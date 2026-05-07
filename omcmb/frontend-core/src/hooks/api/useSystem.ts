@@ -5,6 +5,7 @@ import type { PageRequest } from '../../types/pagination';
 import { systemService } from '../../mock/services/systemService';
 import { adminApi } from '../../services/api/adminApi';
 import { systemApi } from '../../services/api/systemApi';
+import { deviceApi } from '../../services/api/deviceApi';
 import { deviceService } from '../../mock/services/deviceService';
 import { useMock } from '../../services/apiSwitch';
 
@@ -297,11 +298,18 @@ export function useSystemInfo() {
 }
 
 // Device Groups
+//
+// 历史 bug：此 hook 之前直写 `deviceService.getGroups()`（mock 服务），导致
+// 角色/数据权限编辑面板始终显示 mock 树（grp-default、grp-bj…），切真后端
+// 提交时后端 uuid.Parse 报 "invalid UUID length: 11"。
+// 修复：按 useMock 双轨切换；真实后端走 deviceApi.getGroups()。
 export function useAllDeviceGroups() {
   return useQuery({
     queryKey: ['system', 'deviceGroups', 'all'],
     queryFn: async () => {
-      const result = await deviceService.getGroups();
+      const result = useMock
+        ? await deviceService.getGroups()
+        : await deviceApi.getGroups();
       return result.groups;
     },
     staleTime: 5 * 60 * 1000,

@@ -84,6 +84,11 @@ func (m *mockUserRepo) UpdateLastLogin(ctx context.Context, id uuid.UUID) error 
 	return nil
 }
 
+// GetUsernamesByIDs：mockUserRepo 默认返回空 map（测试不关心 enrich 结果时 no-op）。
+func (m *mockUserRepo) GetUsernamesByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
+	return map[uuid.UUID]string{}, nil
+}
+
 type mockRoleRepo struct {
 	createFn               func(ctx context.Context, role *Role) error
 	getByIDFn              func(ctx context.Context, id uuid.UUID) (*Role, error)

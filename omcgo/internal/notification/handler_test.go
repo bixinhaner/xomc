@@ -1,7 +1,6 @@
 package notification
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // setupHandlerTest builds a gin router with notification handler routes
@@ -61,7 +61,7 @@ func TestHandler_List_OK(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[Notification]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 }
 
@@ -84,7 +84,7 @@ func TestHandler_List_FilterByType(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[Notification]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Equal(t, NotifTypeAlarm, resp.Items[0].Type)
 }
@@ -100,7 +100,7 @@ func TestHandler_List_FilterByIsRead_True(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[Notification]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.True(t, resp.Items[0].IsRead)
 }
@@ -116,7 +116,7 @@ func TestHandler_List_FilterByIsRead_False(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[Notification]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.False(t, resp.Items[0].IsRead)
 }
@@ -155,7 +155,7 @@ func TestHandler_GetUnreadCount_OK(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp map[string]int64
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp["count"])
 }
 
@@ -186,7 +186,8 @@ func TestHandler_MarkRead_OK(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPut, "/notifications/"+n.ID.String()+"/read", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }
 
 func TestHandler_MarkRead_BadID(t *testing.T) {
@@ -225,7 +226,8 @@ func TestHandler_MarkAllRead_OK(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPut, "/notifications/read-all", nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }
 
 func TestHandler_MarkAllRead_Unauthorized(t *testing.T) {
@@ -255,7 +257,8 @@ func TestHandler_Delete_OK(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodDelete, "/notifications/"+n.ID.String(), nil)
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }
 
 func TestHandler_Delete_BadID(t *testing.T) {

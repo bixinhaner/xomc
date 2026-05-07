@@ -8,6 +8,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for topology (device group) REST API.
@@ -90,24 +91,24 @@ func (h *Handler) GetTreeWithCounts(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, TreeResponse{Items: tree, Stats: stats})
+	response.OK(c, TreeResponse{Items: tree, Stats: stats})
 }
 
 // ListTree handles GET /groups (legacy, no counts).
 func (h *Handler) ListTree(c *gin.Context) {
 	tree, err := h.service.GetTree(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": tree})
+	response.OK(c, gin.H{"items": tree})
 }
 
 // Get handles GET /device-groups/:id.
 func (h *Handler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
@@ -116,14 +117,14 @@ func (h *Handler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, group)
+	response.OK(c, group)
 }
 
 // CreateGroup handles POST /device-groups.
 func (h *Handler) CreateGroup(c *gin.Context) {
 	var req CreateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -132,20 +133,20 @@ func (h *Handler) CreateGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusCreated, group)
+	response.OKWithStatus(c, http.StatusCreated, group)
 }
 
 // UpdateGroup handles PUT /device-groups/:id.
 func (h *Handler) UpdateGroup(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
 	var req UpdateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -154,14 +155,14 @@ func (h *Handler) UpdateGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, group)
+	response.OK(c, group)
 }
 
 // DeleteGroup handles DELETE /device-groups/:id.
 func (h *Handler) DeleteGroup(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
@@ -169,14 +170,14 @@ func (h *Handler) DeleteGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // CheckDelete handles GET /device-groups/:id/check-delete.
 func (h *Handler) CheckDelete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
@@ -185,7 +186,7 @@ func (h *Handler) CheckDelete(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 // GetStats handles GET /device-groups/stats.
@@ -195,14 +196,14 @@ func (h *Handler) GetStats(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	response.OK(c, stats)
 }
 
 // BatchSort handles PUT /device-groups/sort.
 func (h *Handler) BatchSort(c *gin.Context) {
 	var req BatchSortRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -210,26 +211,26 @@ func (h *Handler) BatchSort(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "sort updated"})
+	response.OKWithMsg(c, nil, "sort updated")
 }
 
 // BatchAddDevices handles POST /device-groups/:id/devices.
 func (h *Handler) BatchAddDevices(c *gin.Context) {
 	groupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
 	var req BatchDevicesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	deviceIDs, err := parseUUIDs(req.DeviceIDs)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -240,7 +241,7 @@ func (h *Handler) BatchAddDevices(c *gin.Context) {
 		return
 	}
 	if group.Level != 2 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "devices can only be added to level-2 groups"})
+		response.Fail(c, http.StatusBadRequest, "devices can only be added to level-2 groups")
 		return
 	}
 
@@ -249,26 +250,26 @@ func (h *Handler) BatchAddDevices(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"affected": affected})
+	response.OK(c, gin.H{"affected": affected})
 }
 
 // BatchRemoveDevices handles DELETE /device-groups/:id/devices.
 func (h *Handler) BatchRemoveDevices(c *gin.Context) {
 	groupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
 	var req BatchDevicesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	deviceIDs, err := parseUUIDs(req.DeviceIDs)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -277,14 +278,14 @@ func (h *Handler) BatchRemoveDevices(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"affected": affected})
+	response.OK(c, gin.H{"affected": affected})
 }
 
 // MoveDevicesHandler handles POST /device-groups/move-devices.
 func (h *Handler) MoveDevicesHandler(c *gin.Context) {
 	var req MoveDevicesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -293,30 +294,30 @@ func (h *Handler) MoveDevicesHandler(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"affected": affected})
+	response.OK(c, gin.H{"affected": affected})
 }
 
 // ListDevices handles GET /device-groups/:id/devices.
 func (h *Handler) ListDevices(c *gin.Context) {
 	groupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
 	ids, err := h.repo.ListDeviceIDs(c.Request.Context(), groupID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"device_ids": ids, "total": len(ids)})
+	response.OK(c, gin.H{"device_ids": ids, "total": len(ids)})
 }
 
 // AddDevice handles POST /groups/:id/devices (legacy single device).
 func (h *Handler) AddDevice(c *gin.Context) {
 	groupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
@@ -324,42 +325,42 @@ func (h *Handler) AddDevice(c *gin.Context) {
 		DeviceID string `json:"device_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	deviceID, err := uuid.Parse(req.DeviceID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+		response.Fail(c, http.StatusBadRequest, "invalid device_id")
 		return
 	}
 
 	if err := h.repo.AddDevice(c.Request.Context(), groupID, deviceID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "device added to group"})
+	response.OKWithStatus(c, http.StatusCreated, gin.H{"message": "device added to group"})
 }
 
 // RemoveDevice handles DELETE /groups/:id/devices/:deviceId (legacy).
 func (h *Handler) RemoveDevice(c *gin.Context) {
 	groupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid group ID")
 		return
 	}
 
 	deviceID, err := uuid.Parse(c.Param("deviceId"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid device ID")
 		return
 	}
 
 	if err := h.repo.RemoveDevice(c.Request.Context(), groupID, deviceID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "device not in group"})
+		response.Fail(c, http.StatusNotFound, "device not in group")
 		return
 	}
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- Site handlers ----
@@ -394,7 +395,7 @@ func (h *Handler) ListSites(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 type createSiteRequest struct {
@@ -438,7 +439,7 @@ func (h *Handler) CreateSite(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, site)
+	response.OKWithStatus(c, http.StatusCreated, site)
 }
 
 // GetSite handles GET /api/v1/sites/:id.
@@ -455,7 +456,7 @@ func (h *Handler) GetSite(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, site)
+	response.OK(c, site)
 }
 
 // ---- Topology graph handlers ----
@@ -489,7 +490,7 @@ func (h *Handler) ListTopoNodes(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ListTopoEdges handles GET /api/v1/topology/edges.
@@ -509,7 +510,7 @@ func (h *Handler) ListTopoEdges(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetTopoGraph handles GET /api/v1/topology/graph.
@@ -536,7 +537,7 @@ func (h *Handler) GetTopoGraph(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, TopoGraph{
+	response.OK(c, TopoGraph{
 		Nodes: nodes,
 		Edges: edges,
 	})
@@ -556,7 +557,7 @@ func (h *Handler) GetGeoData(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, GeoData{
+	response.OK(c, GeoData{
 		Sites: sites,
 		Nodes: nodes,
 	})

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -62,7 +63,7 @@ func (h *FilterHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *FilterHandler) GetByID(c *gin.Context) {
@@ -76,7 +77,7 @@ func (h *FilterHandler) GetByID(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, rule)
+	response.OK(c, rule)
 }
 
 func (h *FilterHandler) Create(c *gin.Context) {
@@ -120,7 +121,7 @@ func (h *FilterHandler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, rule)
+	response.OKWithStatus(c, http.StatusCreated, rule)
 }
 
 func (h *FilterHandler) Update(c *gin.Context) {
@@ -180,7 +181,7 @@ func (h *FilterHandler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, rule)
+	response.OK(c, rule)
 }
 
 func (h *FilterHandler) Delete(c *gin.Context) {
@@ -193,7 +194,7 @@ func (h *FilterHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "filter rule deleted"})
+	response.OKWithMsg(c, nil, "filter rule deleted")
 }
 
 func (h *FilterHandler) Toggle(c *gin.Context) {
@@ -206,5 +207,5 @@ func (h *FilterHandler) Toggle(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "filter rule toggled"})
+	response.OKWithMsg(c, nil, "filter rule toggled")
 }

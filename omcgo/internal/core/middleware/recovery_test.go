@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -26,11 +27,8 @@ func TestRecovery_PanicReturns500(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var body map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &body)
-	assert.NoError(t, err)
-	assert.Equal(t, float64(500), body["code"])
-	assert.Equal(t, "internal server error", body["message"])
+	msg, _ := response.DecodeFail(t, w.Body)
+	assert.Equal(t, "internal server error", msg)
 }
 
 func TestRecovery_NormalRequest(t *testing.T) {
@@ -67,9 +65,6 @@ func TestRecovery_PanicWithError(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var body map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &body)
-	assert.NoError(t, err)
-	assert.Equal(t, float64(500), body["code"])
-	assert.Equal(t, "internal server error", body["message"])
+	msg, _ := response.DecodeFail(t, w.Body)
+	assert.Equal(t, "internal server error", msg)
 }

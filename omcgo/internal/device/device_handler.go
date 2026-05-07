@@ -12,6 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // VisibleGroupsResolver resolves which device groups a user can see.
@@ -107,7 +108,7 @@ func (h *Handler) CreateDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, device)
+	response.OKWithStatus(c, http.StatusCreated, device)
 }
 
 // UpdateDevice handles PUT /api/v1/devices/:id.
@@ -134,7 +135,7 @@ func (h *Handler) UpdateDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, device)
+	response.OK(c, device)
 }
 
 // DeleteDevice handles DELETE /api/v1/devices/:id.
@@ -163,7 +164,7 @@ func (h *Handler) DeleteDevice(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ListProductClasses handles GET /api/v1/devices/product-classes.
@@ -173,7 +174,7 @@ func (h *Handler) ListProductClasses(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, classes)
+	response.OK(c, classes)
 }
 
 // ListDevices handles GET /api/v1/devices with pagination and filtering.
@@ -266,7 +267,7 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetDevice handles GET /api/v1/devices/:id.
@@ -287,7 +288,7 @@ func (h *Handler) GetDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, device)
+	response.OK(c, device)
 }
 
 // GetDeviceParameters handles GET /api/v1/devices/:id/parameters.
@@ -304,7 +305,7 @@ func (h *Handler) GetDeviceParameters(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"items": params, "total": len(params)})
+	response.OK(c, gin.H{"items": params, "total": len(params)})
 }
 
 // GetStats handles GET /api/v1/devices/stats.
@@ -321,7 +322,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"counts": counts})
+	response.OK(c, gin.H{"counts": counts})
 }
 
 // RebootDevice handles POST /api/v1/devices/:id/reboot.
@@ -350,7 +351,7 @@ func (h *Handler) RebootDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "reboot command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "reboot command queued"})
 }
 
 // ListGeo handles GET /api/v1/devices/geo.
@@ -421,7 +422,7 @@ func (h *Handler) ListGeo(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"items": devices,
 		"total": total,
 	})
@@ -470,7 +471,7 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // SearchDevices handles GET /api/v1/devices/search.
@@ -478,7 +479,7 @@ func (h *Handler) GetGeoStats(c *gin.Context) {
 func (h *Handler) SearchDevices(c *gin.Context) {
 	keyword := c.Query("keyword")
 	if len(keyword) < 2 {
-		c.JSON(http.StatusOK, gin.H{"items": []GeoDevice{}})
+		response.OK(c, gin.H{"items": []GeoDevice{}})
 		return
 	}
 
@@ -496,7 +497,7 @@ func (h *Handler) SearchDevices(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"items": devices})
+	response.OK(c, gin.H{"items": devices})
 }
 
 // TriggerParamSync handles POST /api/v1/devices/:id/param-sync.
@@ -512,7 +513,7 @@ func (h *Handler) TriggerParamSync(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "parameter sync command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "parameter sync command queued"})
 }
 
 // SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.
@@ -536,7 +537,7 @@ func (h *Handler) SetRFSwitch(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"message": "RF switch command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "RF switch command queued"})
 }
 
 // BatchDeleteDevices handles DELETE /api/v1/devices/batch.
@@ -553,7 +554,7 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 		return
 	}
 	if len(req.IDs) > 100 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 100"})
+		response.Fail(c, http.StatusBadRequest, "batch size must not exceed 100")
 		return
 	}
 
@@ -578,7 +579,7 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 	entry.Success = result.Failed == 0
 	audit.LogAsync(entry)
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // BatchRebootDevices handles POST /api/v1/devices/batch-reboot.
@@ -595,7 +596,7 @@ func (h *Handler) BatchRebootDevices(c *gin.Context) {
 		return
 	}
 	if len(req.IDs) > 50 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 50"})
+		response.Fail(c, http.StatusBadRequest, "batch size must not exceed 50")
 		return
 	}
 
@@ -614,7 +615,7 @@ func (h *Handler) BatchRebootDevices(c *gin.Context) {
 	entry.Success = result.Failed == 0
 	audit.LogAsync(entry)
 
-	c.JSON(http.StatusAccepted, result)
+	response.OKWithStatus(c, http.StatusAccepted, result)
 }
 
 // ===== Recycle Bin Handlers =====
@@ -672,7 +673,7 @@ func (h *Handler) ListRecycleBin(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // RestoreDevicesRequest binds the request body for restore operation.
@@ -694,7 +695,7 @@ func (h *Handler) RestoreDevices(c *gin.Context) {
 		return
 	}
 	if len(req.IDs) > 100 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 100"})
+		response.Fail(c, http.StatusBadRequest, "batch size must not exceed 100")
 		return
 	}
 
@@ -704,10 +705,7 @@ func (h *Handler) RestoreDevices(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"restored": restored,
-		"message": "Devices restored successfully",
-	})
+	response.OKWithMsg(c, gin.H{"restored": restored}, "Devices restored successfully")
 }
 
 // PermanentDeleteDevices handles DELETE /api/v1/devices/recycle/permanent.
@@ -724,7 +722,7 @@ func (h *Handler) PermanentDeleteDevices(c *gin.Context) {
 		return
 	}
 	if len(req.IDs) > 100 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "batch size must not exceed 100"})
+		response.Fail(c, http.StatusBadRequest, "batch size must not exceed 100")
 		return
 	}
 
@@ -734,8 +732,5 @@ func (h *Handler) PermanentDeleteDevices(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"deleted": deleted,
-		"message": "Devices permanently deleted",
-	})
+	response.OKWithMsg(c, gin.H{"deleted": deleted}, "Devices permanently deleted")
 }

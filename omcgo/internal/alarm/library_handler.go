@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -80,7 +81,7 @@ func (h *LibraryHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *LibraryHandler) GetByID(c *gin.Context) {
@@ -94,7 +95,7 @@ func (h *LibraryHandler) GetByID(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, lib)
+	response.OK(c, lib)
 }
 
 func (h *LibraryHandler) Create(c *gin.Context) {
@@ -108,7 +109,7 @@ func (h *LibraryHandler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, lib)
+	response.OKWithStatus(c, http.StatusCreated, lib)
 }
 
 func (h *LibraryHandler) Update(c *gin.Context) {
@@ -127,7 +128,7 @@ func (h *LibraryHandler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, lib)
+	response.OK(c, lib)
 }
 
 func (h *LibraryHandler) Delete(c *gin.Context) {
@@ -140,7 +141,7 @@ func (h *LibraryHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarm library deleted"})
+	response.OKWithMsg(c, nil, "alarm library deleted")
 }
 
 func (h *LibraryHandler) ListI18n(c *gin.Context) {
@@ -157,7 +158,7 @@ func (h *LibraryHandler) ListI18n(c *gin.Context) {
 	if items == nil {
 		items = []AlarmLibraryI18n{}
 	}
-	c.JSON(http.StatusOK, items)
+	response.OK(c, items)
 }
 
 func (h *LibraryHandler) CreateI18n(c *gin.Context) {
@@ -176,7 +177,7 @@ func (h *LibraryHandler) CreateI18n(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, i18n)
+	response.OKWithStatus(c, http.StatusCreated, i18n)
 }
 
 func (h *LibraryHandler) DeleteI18n(c *gin.Context) {
@@ -189,5 +190,5 @@ func (h *LibraryHandler) DeleteI18n(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "i18n deleted"})
+	response.OKWithMsg(c, nil, "i18n deleted")
 }

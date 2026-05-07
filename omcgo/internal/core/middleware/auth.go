@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // AuthMiddleware 返回一个 Gin 中间件，验证 HTTP 请求中的 JWT Bearer Token。
@@ -19,19 +21,13 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "missing authorization header",
-			})
+			response.Fail(c, http.StatusUnauthorized, "missing authorization header")
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "invalid authorization header format",
-			})
+			response.Fail(c, http.StatusUnauthorized, "invalid authorization header format")
 			return
 		}
 
@@ -39,10 +35,7 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 		// Phase 4 will implement proper JWT validation.
 		token := parts[1]
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "empty token",
-			})
+			response.Fail(c, http.StatusUnauthorized, "empty token")
 			return
 		}
 

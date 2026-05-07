@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/errors"
-	"go.uber.org/zap"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler 任务管理 REST API Handler
@@ -79,10 +81,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": task,
-	})
+	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
 // GetTask 获取任务详情
@@ -106,10 +105,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": task,
-	})
+	response.OK(c, task)
 }
 
 // GetPendingTasks 获取待处理任务列表
@@ -128,12 +124,9 @@ func (h *Handler) GetPendingTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"tasks": tasks,
-			"total": len(tasks),
-		},
+	response.OK(c, gin.H{
+		"tasks": tasks,
+		"total": len(tasks),
 	})
 }
 
@@ -172,10 +165,7 @@ func (h *Handler) GetTaskHistory(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": resp,
-	})
+	response.OK(c, resp)
 }
 
 // CancelTask 取消任务
@@ -202,10 +192,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "task cancelled",
-	})
+	response.OKWithMsg(c, nil, "task cancelled")
 }
 
 // GetTaskStats 获取任务统计
@@ -230,12 +217,9 @@ func (h *Handler) GetTaskStats(c *gin.Context) {
 		logger.L(c.Request.Context()).Warn("get queue length", zap.Error(err))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"by_status":    stats,
-			"queue_length": queueLen,
-		},
+	response.OK(c, gin.H{
+		"by_status":    stats,
+		"queue_length": queueLen,
 	})
 }
 
@@ -278,12 +262,9 @@ func (h *Handler) BatchCreateTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"created": len(tasks),
-			"tasks":   tasks,
-		},
+	response.OKWithStatus(c, http.StatusCreated, gin.H{
+		"created": len(tasks),
+		"tasks":   tasks,
 	})
 }
 
@@ -309,10 +290,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 
 	// 检查是否可以重试
 	if !task.CanRetry() {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    -1,
-			"message": "task cannot be retried: exceeded max retries",
-		})
+		response.Fail(c, http.StatusBadRequest, "task cannot be retried: exceeded max retries")
 		return
 	}
 
@@ -326,11 +304,7 @@ func (h *Handler) RetryTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "task queued for retry",
-		"data":    task,
-	})
+	response.OKWithMsg(c, task, "task queued for retry")
 }
 
 // PurgeOldTasks 清理旧任务（管理员接口）
@@ -350,13 +324,9 @@ func (h *Handler) PurgeOldTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "old tasks purged",
-		"data": gin.H{
-			"deleted_count": count,
-		},
-	})
+	response.OKWithMsg(c, gin.H{
+		"deleted_count": count,
+	}, "old tasks purged")
 }
 
 // parseTimeParam 解析时间参数

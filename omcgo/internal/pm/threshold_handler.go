@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -70,7 +71,7 @@ func (h *ThresholdHandler) ListThresholds(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetThreshold handles GET /thresholds/:id.
@@ -86,7 +87,7 @@ func (h *ThresholdHandler) GetThreshold(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, threshold)
+	response.OK(c, threshold)
 }
 
 // CreateThreshold handles POST /thresholds.
@@ -121,7 +122,7 @@ func (h *ThresholdHandler) CreateThreshold(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, threshold)
+	response.OKWithStatus(c, http.StatusCreated, threshold)
 }
 
 // UpdateThreshold handles PUT /thresholds/:id.
@@ -179,7 +180,7 @@ func (h *ThresholdHandler) UpdateThreshold(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, existing)
+	response.OK(c, existing)
 }
 
 // DeleteThreshold handles DELETE /thresholds/:id.
@@ -194,5 +195,5 @@ func (h *ThresholdHandler) DeleteThreshold(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "threshold deleted"})
+	response.OKWithMsg(c, nil, "threshold deleted")
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // DeviceInfoHandler provides HTTP handlers for device extended info management.
@@ -50,7 +51,7 @@ func (h *DeviceInfoHandler) GetDeviceInfo(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, info)
+	response.OK(c, info)
 }
 
 // GetDeviceDetail handles GET /api/v1/devices/:id/detail.
@@ -72,7 +73,7 @@ func (h *DeviceInfoHandler) GetDeviceDetail(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, composite)
+	response.OK(c, composite)
 }
 
 // UpdateDeviceInfo handles PUT /api/v1/devices/:id/info.
@@ -98,7 +99,7 @@ func (h *DeviceInfoHandler) UpdateDeviceInfo(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+	response.OKWithMsg(c, nil, "updated")
 }
 
 // ActivateDevice handles PUT /api/v1/devices/:id/activate.
@@ -114,7 +115,7 @@ func (h *DeviceInfoHandler) ActivateDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "device activated"})
+	response.OKWithMsg(c, nil, "device activated")
 }
 
 // DeactivateDevice handles PUT /api/v1/devices/:id/deactivate.
@@ -130,7 +131,7 @@ func (h *DeviceInfoHandler) DeactivateDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "device deactivated"})
+	response.OKWithMsg(c, nil, "device deactivated")
 }
 
 // enumItem represents a single enum option.
@@ -206,5 +207,5 @@ func (h *DeviceInfoHandler) GetEnums(c *gin.Context) {
 		},
 	}
 
-	c.JSON(http.StatusOK, enums)
+	response.OK(c, enums)
 }

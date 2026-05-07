@@ -11,6 +11,7 @@
 | 0.4  | 2026-05-06 | Backend/Frontend Team | §1 顶部增加超级管理员高优先级规则块：source='builtIn' 等价 Unix root，绕过菜单/API/设备分组/制式四类权限校验。把分散在 §1.4 / §11.1 / §11.2 中的"超管旁路"规则提到首屏强提示位 |
 | 0.5  | 2026-05-06 | Backend/Frontend Team | 修复角色编辑面板「菜单权限」「数据权限」回显空白 + 「数据权限」实际未保存的双 bug。**前端**：编辑/查看打开时通过 `getRoleById` + `getRoleDeviceGroups` 专项端点回显（与 API 权限模式一致）；保存时通过 `setRoleDeviceGroups` 专项端点写入。**后端**：`PgRoleRepository.List/ListWithPagination/GetByID` 批量填充 `DeviceGroupIDs`，让 [users.md §11.2 决议 ① ⚠️ 标识](./users.md) 判定准确。详见 §11.6 |
 | 0.6  | 2026-05-06 | Backend/Frontend Team | **§7 Backlog 全量落地**：① `role_api_permissions` DDL（P0 #1）；② `Role.UserCount/Code/CreatedBy/UpdatedBy` 字段（P0 #2 + P1 #5 + P2 #8）；③ ListWithPagination 批量派生 UserCount；④ CreateRole/UpdateRole 自动写入 created_by/updated_by；⑤ network_types 决议 **方案 B**（接受角色级简化，DDL 加注释，UI 不变）；⑥ §11.2 决议 ① 5 个 UI 触点全覆盖（角色列表 ⚠️ Tag、编辑/查看 banner、清空设备分组二次确认、用户管理分配下拉/批量 Modal 已在 v0.5 完成）；⑦ 角色克隆 `POST /admin/roles/{id}/copy`（P2 #9）。详见 §11.7 |
+| 0.7  | 2026-05-07 | Backend/Frontend Team | 修两个 round-trip bug：① `RoleDeviceGroupData.GroupIDs` JSON tag `group_ids` → `device_group_ids`，与前端 PUT body / GET 响应解析一致（之前 PUT 字段不匹配导致空数组覆盖、绑定丢失）；② `mapBackendRole` 回读 permissions 只取 `resource` 不拼 `:action`，与 `ALL_PERMISSION_LEAF_KEYS` 格式对齐（之前 `device.list.query:read` 永远匹配不上 → 菜单权限永远不勾选）。详见 §11.8 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -673,3 +674,112 @@ doEditSubmit();
 - [ ] `Role.code` 在 UI 上是否显式暴露给管理员配置？当前后端字段就位，前端表单**未加输入框**（避免暴露给非技术用户）；如某场景需配置（如审计/SDK 集成），加 `<Input>` 即可
 - [ ] CopyRole 是否要求源角色 `is_system = false`（即"内置角色不可被复制"）？当前**允许**复制内置角色（副本仍为非内置），实际业务可能希望禁止
 - [ ] CopyRole 副本的 `code` 字段如何处理？当前 service **不复制** `Code`（避免唯一约束冲突）；如未来 `code` 加自增后缀策略再调整
+
+### 11.8 v0.7 — 修两个 round-trip 字段命名 bug
+
+#### Bug ①：`/admin/roles/{id}/device-groups` 字段命名错位
+
+**现象**（用户报告）：
+```
+PUT 请求 body：  {"device_group_ids": ["grp-default", "grp-bj"], "network_types": []}
+PUT 响应：       200（"更新成功"）
+GET 响应：       {"group_ids": [], "network_types": []}    ← 完全空
+```
+
+**根因**：
+
+后端 [`RoleDeviceGroupData`](../../../internal/admin/repository.go) 结构体的 JSON tag 是 `group_ids`，handler `c.ShouldBindJSON(&req)` 读不到前端送的 `device_group_ids` 字段 → `req.GroupIDs = nil` → `SetDeviceGroupData(roleID, RoleDeviceGroupData{GroupIDs: nil})` 把 DB 中现有 `role_device_groups` 行**全删**且不重新 INSERT。表面上 PUT 返回 200，实际全军覆没。
+
+GET 时序列化字段名 `group_ids`，但前端 `getRoleDeviceGroups` 期待响应字段是 `device_group_ids`，又拿到 undefined → []。
+
+| 流向 | 前端字段 | 后端字段（旧） | 是否匹配 |
+|------|---------|--------------|---------|
+| PUT body | `device_group_ids` | `group_ids` | ❌ |
+| GET response | `device_group_ids`（期望）| `group_ids`（实际）| ❌ |
+
+**修复**：
+
+后端 `RoleDeviceGroupData.GroupIDs` 的 JSON tag `group_ids` → `device_group_ids`：
+
+```go
+type RoleDeviceGroupData struct {
+    GroupIDs     []uuid.UUID `json:"device_group_ids"` // v0.7 改
+    NetworkTypes []string    `json:"network_types"`
+}
+```
+
+→ PUT 与 GET 双向对齐前端契约，写入与回读一致。
+
+**风险评估**：
+
+- 任何 v0.7 之前依赖响应字段 `group_ids` 的客户端会 break。本地 grep 确认仅 `device_handler.go` 用 `c.Query("group_ids")`（device 模块自身的 query string，不涉及本端点）。
+- 前端 [`getRoleDeviceGroups`](../../../../omcmb/frontend-core/src/services/api/adminApi.ts) 早已用 `device_group_ids` 解析 → v0.7 后才真正读到数据（之前一直读空）。
+
+#### Bug ②：menu permissions round-trip 格式不对齐
+
+**现象**（用户报告）：
+> GET /admin/roles/{id}/api-permissions 响应有数据，但编辑角色时菜单权限没有回显（选中菜单）。
+
+**澄清**：用户报的「菜单权限没回显」实际是 `permissionTreeData` 勾选树（即 `roles.permissions` 三元组的 UI 表示），不是 `role_menus` 关联表也不是 `role_api_permissions` 关联表。前端代码里这块的 state 叫 `checkedPermissionKeys`。
+
+**根因**：写入与回读格式不对齐。
+
+| 阶段 | 数据 |
+|------|------|
+| 前端 `permissionsToArray(checkedPermissionKeys)` 提交 | `["device.list.query", "alarm.current.add", ...]`（点分 3 段，无 action 后缀）|
+| `adminApi.createRole` 拆 `:` 兜底 `action='read'` | `[{resource: "device.list.query", action: "read"}, ...]` |
+| 后端入库 `permissions` 表 | `(role_id, "device.list.query", "read")` |
+| `mapBackendRole` 回读拼 `${resource}:${action}` | `["device.list.query:read", ...]`（**多了 `:read` 后缀**）|
+| `permissionsArrayToCheckedKeys` 过滤匹配 `ALL_PERMISSION_LEAF_KEYS` | `ALL_PERMISSION_LEAF_KEYS` 里只有 `"device.list.query"`，**找不到带 `:read` 后缀的** → 过滤为空数组 |
+| Tree 勾选 | **永远空** |
+
+**修复**：
+
+[`mapBackendRole`](../../../../omcmb/frontend-core/src/services/api/adminApi.ts) 回读 permissions 只取 `resource`（不再拼 `:action`），并用 `Set` 去重避免历史数据中同 resource 多 action 行产生重复 key：
+
+```ts
+// 旧
+const permissions = (br.permissions || []).map((p) => `${p.resource}:${p.action}`);
+
+// 新（v0.7）
+const permissions = Array.from(
+  new Set((br.permissions || []).map((p) => p.resource))
+);
+```
+
+**为什么不在前端 PERMISSION_MODULES 加 action 维度，反而只保留 resource？**
+
+- 前端 PERMISSION_MODULES 的叶子 key 已经是 `module.sub.op` 三段格式，`op` 部分（如 `query/add/edit/delete`）**已经表达了 action 语义**
+- 写入路径硬编码 `action='read'`（兜底），后端入库 action 字段对前端意义为 0
+- DB 保留 `action` 列是为了未来可能的"非菜单 RBAC"场景（如 API endpoint × method 双维度）；**菜单权限维度下，action 是冗余字段**
+- 前端模型按 resource 单一字符串走，回读路径自然对齐写入路径
+
+**round-trip 验证**：
+
+```
+前端选 "device.list.query"
+ ↓ permissionsToArray(checkedKeys) → ["device.list.query"]
+ ↓ createRole payload → [{resource:"device.list.query", action:"read"}]
+ ↓ DB INSERT (role_id, "device.list.query", "read")
+ ↓ GET /admin/roles/{id} 返回 permissions: [{resource:"device.list.query", action:"read"}]
+ ↓ mapBackendRole → ["device.list.query"]              ← 不再带 :read
+ ↓ permissionsArrayToCheckedKeys → ["device.list.query"]  ← 匹配 ALL_PERMISSION_LEAF_KEYS
+ ↓ Tree.checkedKeys                                    ← ✓ 勾选成功
+```
+
+#### 验证
+
+| 检查 | 结果 |
+|------|------|
+| `CGO_ENABLED=0 go build ./...` | ✅ |
+| `go test -count=1 ./internal/admin/...` | ✅ |
+| `npm run typecheck`（webcode） | ✅ |
+| 手测设备分组保存与回显 | ✅（`grp-default` 等仍需为合法 UUID，否则 gin uuid.Parse 报 400）|
+| 手测菜单权限回显 | ✅ 编辑面板打开后 Tree 自动勾选已保存项 |
+
+#### 待澄清事项
+
+- [ ] 前端 PERMISSION_MODULES 与后端 `roles.permissions` 表语义是否在未来真的需要 action 维度（如 GET vs DELETE 区分）？目前实际仅起 mock 作用；如未来需要多 action，需要：
+   - PERMISSION_MODULES 改为按 `(resource, action)` 二元组
+   - mapBackendRole 重新引入 `${resource}:${action}` 拼接
+   - permissionsArrayToCheckedKeys 同步更新过滤逻辑

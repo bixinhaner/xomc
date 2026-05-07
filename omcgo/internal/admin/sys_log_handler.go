@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // LogHandler provides HTTP endpoints for system log management.
@@ -45,7 +46,7 @@ func (h *LogHandler) ListLoginLogs(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }
 
 func (h *LogHandler) ListOperLogs(c *gin.Context) {
@@ -65,7 +66,7 @@ func (h *LogHandler) ListOperLogs(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }
 
 func (h *LogHandler) ListTaskLogs(c *gin.Context) {
@@ -85,5 +86,5 @@ func (h *LogHandler) ListTaskLogs(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }

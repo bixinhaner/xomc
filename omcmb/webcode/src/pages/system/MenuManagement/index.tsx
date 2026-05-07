@@ -24,12 +24,14 @@ import {
   MoreOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
+import http from '@core/services/http';
 import styles from './index.module.css';
 
 // 菜单类型
@@ -66,6 +68,46 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
+// 后端 Menu JSON 形态（snake_case，详见 omcgo/internal/admin/model.go Menu 结构体）。
+// status 字段后端用 'normal'|'disabled'（DB CHECK），与页面本地一致；
+// type='directory'|'menu'|'button' 与 DDL chk_menu_type 对齐。
+interface BackendMenu {
+  id: string;
+  name: string;
+  type: MenuType;
+  permission_key: string;
+  parent_id?: string;
+  sort_order: number;
+  route_path?: string;
+  component_path?: string;
+  icon?: string;
+  show_status?: ShowStatus;
+  status: MenuStatus;
+  children?: BackendMenu[];
+}
+
+// mapBackendMenu 把一颗 BackendMenu 子树转成页面本地 MenuItem 子树（递归）。
+// isExternal / routeParams / apiPermission 是页面早期 mock 字段，后端无对应列；
+// 编辑/新增表单以默认值兜底（'no' / undefined / 'none'），保证 UI 不崩。
+function mapBackendMenu(b: BackendMenu): MenuItem {
+  return {
+    id: b.id,
+    name: b.name,
+    type: b.type,
+    sort: b.sort_order,
+    permissionKey: b.permission_key,
+    componentPath: b.component_path ?? '',
+    status: b.status,
+    parentId: b.parent_id ?? null,
+    icon: b.icon || undefined,
+    routePath: b.route_path || undefined,
+    showStatus: b.show_status ?? 'show',
+    isExternal: 'no',
+    apiPermission: 'none',
+    children: b.children?.map(mapBackendMenu),
+  };
+}
+
 // 菜单类型选项
 const MENU_TYPE_OPTIONS = [
   { label: '目录', value: 'directory' },
@@ -89,190 +131,60 @@ const DEFAULT_OPERATIONS = [
   { key: 'import', name: '导入' },
 ];
 
-// Mock数据 - 菜单列表
-const MOCK_MENUS: MenuItem[] = [
-  {
-    id: '1',
-    name: '设备管理',
-    type: 'directory',
-    sort: 1,
-    permissionKey: 'device',
-    componentPath: '',
-    status: 'normal',
-    parentId: null,
-    children: [
-      {
-        id: '1-1',
-        name: '设备列表',
-        type: 'menu',
-        sort: 1,
-        permissionKey: 'device:list',
-        componentPath: '/device/list',
-        status: 'normal',
-        parentId: '1',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `1-1-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `device:list:${op.key}`,
-          componentPath: '',
-          status: 'normal' as MenuStatus,
-          parentId: '1-1',
-        })),
-      },
-      {
-        id: '1-2',
-        name: '设备分组',
-        type: 'menu',
-        sort: 2,
-        permissionKey: 'device:group',
-        componentPath: '/device/group',
-        status: 'normal',
-        parentId: '1',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `1-2-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `device:group:${op.key}`,
-          componentPath: '',
-          status: 'normal' as MenuStatus,
-          parentId: '1-2',
-        })),
-      },
-    ],
-  },
-  {
-    id: '2',
-    name: '告警管理',
-    type: 'directory',
-    sort: 2,
-    permissionKey: 'alarm',
-    componentPath: '',
-    status: 'normal',
-    parentId: null,
-    children: [
-      {
-        id: '2-1',
-        name: '当前告警',
-        type: 'menu',
-        sort: 1,
-        permissionKey: 'alarm:current',
-        componentPath: '/alarm/current',
-        status: 'normal',
-        parentId: '2',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `2-1-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `alarm:current:${op.key}`,
-          componentPath: '',
-          status: 'normal' as MenuStatus,
-          parentId: '2-1',
-        })),
-      },
-      {
-        id: '2-2',
-        name: '历史告警',
-        type: 'menu',
-        sort: 2,
-        permissionKey: 'alarm:history',
-        componentPath: '/alarm/history',
-        status: 'disabled',
-        parentId: '2',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `2-2-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `alarm:history:${op.key}`,
-          componentPath: '',
-          status: 'disabled' as MenuStatus,
-          parentId: '2-2',
-        })),
-      },
-    ],
-  },
-  {
-    id: '3',
-    name: '系统管理',
-    type: 'directory',
-    sort: 3,
-    permissionKey: 'system',
-    componentPath: '',
-    status: 'normal',
-    parentId: null,
-    children: [
-      {
-        id: '3-1',
-        name: '用户管理',
-        type: 'menu',
-        sort: 1,
-        permissionKey: 'system:users',
-        componentPath: '/system/users',
-        status: 'normal',
-        parentId: '3',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `3-1-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `system:users:${op.key}`,
-          componentPath: '',
-          status: 'normal' as MenuStatus,
-          parentId: '3-1',
-        })),
-      },
-      {
-        id: '3-2',
-        name: '角色管理',
-        type: 'menu',
-        sort: 2,
-        permissionKey: 'system:roles',
-        componentPath: '/system/roles',
-        status: 'normal',
-        parentId: '3',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `3-2-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `system:roles:${op.key}`,
-          componentPath: '',
-          status: 'normal' as MenuStatus,
-          parentId: '3-2',
-        })),
-      },
-      {
-        id: '3-3',
-        name: '菜单管理',
-        type: 'menu',
-        sort: 3,
-        permissionKey: 'system:menus',
-        componentPath: '/system/menus',
-        status: 'normal',
-        parentId: '3',
-        children: DEFAULT_OPERATIONS.map((op, idx) => ({
-          id: `3-3-${op.key}`,
-          name: op.name,
-          type: 'button' as MenuType,
-          sort: idx + 1,
-          permissionKey: `system:menus:${op.key}`,
-          componentPath: '',
-          status: 'normal' as MenuStatus,
-          parentId: '3-3',
-        })),
-      },
-    ],
-  },
-];
+
+
+// 后端 GET /admin/menus/tree 响应。handler 把树包了一层 {data: [...]}（参 menu_handler.go GetMenuTree），
+// 与外层信封 {ret,msg,data} 由 http.ts 拦截器拆包后，response.data 是内层 {data: BackendMenu[]}。
+async function fetchMenuTree(): Promise<MenuItem[]> {
+  const { data } = await http.get<{ data: BackendMenu[] }>('/admin/menus/tree');
+  return (data?.data ?? []).map(mapBackendMenu);
+}
+
+// CreateMenuRequest payload（与 omcgo/internal/admin/model.go CreateMenuRequest 对齐）。
+interface CreateMenuPayload {
+  name: string;
+  type: MenuType;
+  permission_key: string;
+  parent_id?: string | null;
+  sort_order?: number;
+  route_path?: string;
+  component_path?: string;
+  icon?: string;
+  show_status?: ShowStatus;
+}
+
+// UpdateMenuRequest payload（字段全可选）。
+type UpdateMenuPayload = Partial<CreateMenuPayload> & { status?: MenuStatus };
+
+const MENU_QUERY_KEY = ['admin', 'menus', 'tree'] as const;
 
 export default function MenuManagement() {
   const t = useT();
   const { modal, message } = App.useApp();
-  const [menus, setMenus] = useState<MenuItem[]>(MOCK_MENUS);
+  const queryClient = useQueryClient();
+
+  // ───── 拉取菜单树 ─────
+  const { data: menus = [], isLoading } = useQuery({
+    queryKey: MENU_QUERY_KEY,
+    queryFn: fetchMenuTree,
+    staleTime: 60 * 1000,
+  });
+
+  // ───── 增删改 mutation ─────
+  const createMenuMut = useMutation({
+    mutationFn: (payload: CreateMenuPayload) => http.post('/admin/menus', payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MENU_QUERY_KEY }),
+  });
+  const updateMenuMut = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: UpdateMenuPayload }) =>
+      http.put(`/admin/menus/${id}`, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MENU_QUERY_KEY }),
+  });
+  const deleteMenusMut = useMutation({
+    mutationFn: (ids: string[]) => http.delete('/admin/menus', { data: { ids } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MENU_QUERY_KEY }),
+  });
+
   const [editVisible, setEditVisible] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
   const [form] = Form.useForm();
@@ -342,27 +254,20 @@ export default function MenuManagement() {
     });
   }, []);
 
-  // 处理删除
+  // 处理删除（DELETE /admin/menus，body { ids: [...] }）。
+  // 后端 admin.AdminService.DeleteMenus 在 service 层自行级联删除子节点，前端只发顶层 id。
   const handleDelete = useCallback((menu: MenuItem) => {
     modal.confirm({
       title: t('common.confirmDelete'),
       content: `确定要删除菜单「${menu.name}」吗？${menu.children && menu.children.length > 0 ? '该菜单下的子菜单也将被删除。' : ''}`,
       onOk: () => {
-        // 递归删除菜单
-        const deleteFromList = (items: MenuItem[], id: string): MenuItem[] => {
-          return items.filter((item) => {
-            if (item.id === id) return false;
-            if (item.children) {
-              item.children = deleteFromList(item.children, id);
-            }
-            return true;
-          });
-        };
-        setMenus((prev) => deleteFromList([...prev], menu.id));
-        message.success(t('common.deleteSuccess'));
+        deleteMenusMut.mutate([menu.id], {
+          onSuccess: () => message.success(t('common.deleteSuccess')),
+          onError: (err) => message.error((err as Error).message || t('common.deleteFailed')),
+        });
       },
     });
-  }, [modal, message, t]);
+  }, [modal, message, t, deleteMenusMut]);
 
   // 处理编辑
   const handleEdit = useCallback((menu: MenuItem) => {
@@ -385,46 +290,37 @@ export default function MenuManagement() {
     setEditVisible(true);
   }, [form]);
 
-  // 处理保存
+  // 处理保存（PUT /admin/menus/:id）。
+  // 字段映射：sort → sort_order；permissionKey → permission_key；空字符串显式传以便清空。
+  // showIcon 为 mock 字段，icon 仅在用户真填了图标值时才覆盖。
   const handleSave = useCallback(() => {
     form.validateFields().then((vals) => {
       if (!selectedMenu) return;
-
-      // 更新菜单数据
-      const updateInList = (items: MenuItem[]): MenuItem[] => {
-        return items.map((item) => {
-          if (item.id === selectedMenu.id) {
-            return {
-              ...item,
-              name: vals.name,
-              type: vals.type,
-              sort: vals.sort,
-              permissionKey: vals.permissionKey,
-              componentPath: vals.componentPath,
-              status: vals.status,
-              // 新增字段
-              icon: vals.showIcon ? 'menu-icon' : undefined,
-              isExternal: vals.isExternal,
-              routePath: vals.routePath,
-              routeParams: vals.routeParams,
-              showStatus: vals.showStatus,
-              apiPermission: vals.apiPermission,
-            };
-          }
-          if (item.children) {
-            return { ...item, children: updateInList(item.children) };
-          }
-          return item;
-        });
+      const payload: UpdateMenuPayload = {
+        name: vals.name,
+        type: vals.type,
+        sort_order: vals.sort,
+        permission_key: vals.permissionKey,
+        route_path: vals.routePath ?? '',
+        component_path: vals.componentPath ?? '',
+        show_status: vals.showStatus ?? 'show',
+        status: vals.status,
       };
-
-      setMenus((prev) => updateInList([...prev]));
-      message.success(t('common.save'));
-      setEditVisible(false);
-      form.resetFields();
-      setSelectedMenu(null);
+      if (vals.showIcon === false) payload.icon = '';
+      updateMenuMut.mutate(
+        { id: selectedMenu.id, payload },
+        {
+          onSuccess: () => {
+            message.success(t('common.save'));
+            setEditVisible(false);
+            form.resetFields();
+            setSelectedMenu(null);
+          },
+          onError: (err) => message.error((err as Error).message || t('common.saveFailed')),
+        },
+      );
     });
-  }, [form, selectedMenu, message, t]);
+  }, [form, selectedMenu, message, t, updateMenuMut]);
 
   // 生成树形选择数据
   const menuTreeData = useMemo(() => {
@@ -454,89 +350,46 @@ export default function MenuManagement() {
     setAddVisible(true);
   }, [addForm]);
 
-  // 保存新增菜单
+  // 保存新增菜单（POST /admin/menus）。
+  // parentId === '0' 是 TreeSelect 的「主类目」哨兵 → 转后端 parent_id=null。
   const handleAddSave = useCallback(() => {
     addForm.validateFields().then((vals) => {
-      const newMenu: MenuItem = {
-        id: `menu_${Date.now()}`,
+      const payload: CreateMenuPayload = {
         name: vals.name,
         type: vals.type,
-        sort: vals.sort,
-        permissionKey: vals.permissionKey || '',
-        componentPath: vals.componentPath || '',
-        status: vals.status,
-        parentId: vals.parentId === '0' ? null : vals.parentId,
-        // 新增字段
-        icon: vals.showIcon ? 'menu-icon' : undefined,
-        isExternal: vals.isExternal,
-        routePath: vals.routePath,
-        routeParams: vals.routeParams,
-        showStatus: vals.showStatus,
-        apiPermission: vals.apiPermission,
+        permission_key: vals.permissionKey || '',
+        parent_id: vals.parentId === '0' ? null : vals.parentId,
+        sort_order: vals.sort,
+        route_path: vals.routePath ?? '',
+        component_path: vals.componentPath ?? '',
+        show_status: vals.showStatus ?? 'show',
       };
-
-      // 添加到对应的位置
-      if (vals.parentId === '0') {
-        // 添加到根级别
-        setMenus((prev) => [...prev, newMenu]);
-      } else {
-        // 添加到指定父菜单下
-        const addToParent = (items: MenuItem[], parentId: string): MenuItem[] => {
-          return items.map((item) => {
-            if (item.id === parentId) {
-              return {
-                ...item,
-                children: [...(item.children || []), newMenu],
-              };
-            }
-            if (item.children) {
-              return { ...item, children: addToParent(item.children, parentId) };
-            }
-            return item;
-          });
-        };
-        setMenus((prev) => addToParent([...prev], vals.parentId));
-      }
-
-      message.success(t('common.save'));
-      setAddVisible(false);
-      addForm.resetFields();
+      createMenuMut.mutate(payload, {
+        onSuccess: () => {
+          message.success(t('common.save'));
+          setAddVisible(false);
+          addForm.resetFields();
+        },
+        onError: (err) => message.error((err as Error).message || t('common.saveFailed')),
+      });
     });
-  }, [addForm, message, t]);
+  }, [addForm, message, t, createMenuMut]);
 
-  // 排序值+1
+  // 排序值 +1（PUT /admin/menus/:id 仅更新 sort_order）。
   const handleMoveDown = useCallback((record: MenuItem & { level: number }) => {
-    const updateSort = (items: MenuItem[], id: string): MenuItem[] => {
-      return items.map((item) => {
-        if (item.id === id) {
-          return { ...item, sort: (item.sort || 0) + 1 };
-        }
-        if (item.children) {
-          return { ...item, children: updateSort(item.children, id) };
-        }
-        return item;
-      });
-    };
+    updateMenuMut.mutate({
+      id: record.id,
+      payload: { sort_order: (record.sort || 0) + 1 },
+    });
+  }, [updateMenuMut]);
 
-    setMenus((prev) => updateSort(prev, record.id));
-  }, []);
-
-  // 排序值-1
+  // 排序值 -1。
   const handleMoveUp = useCallback((record: MenuItem & { level: number }) => {
-    const updateSort = (items: MenuItem[], id: string): MenuItem[] => {
-      return items.map((item) => {
-        if (item.id === id) {
-          return { ...item, sort: Math.max(1, (item.sort || 1) - 1) };
-        }
-        if (item.children) {
-          return { ...item, children: updateSort(item.children, id) };
-        }
-        return item;
-      });
-    };
-
-    setMenus((prev) => updateSort(prev, record.id));
-  }, []);
+    updateMenuMut.mutate({
+      id: record.id,
+      payload: { sort_order: Math.max(1, (record.sort || 1) - 1) },
+    });
+  }, [updateMenuMut]);
 
   // 表格列定义
   const columns: DataTableColumn<MenuItem & { level: number; hasChildren: boolean }>[] = useMemo(() => [
@@ -696,6 +549,7 @@ export default function MenuManagement() {
           tableId="menu-management-list"
           columns={columns}
           dataSource={filteredMenus}
+          loading={isLoading}
           rowKey="id"
           scroll={{ x: 1000 }}
         />

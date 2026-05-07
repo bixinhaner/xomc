@@ -8,6 +8,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/global"
 )
 
@@ -52,7 +53,7 @@ func (h *RegistrationHandler) CreateRegistration(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, reg)
+	response.OKWithStatus(c, http.StatusCreated, reg)
 }
 
 // ListRegistrations handles GET /device-registrations.
@@ -84,7 +85,7 @@ func (h *RegistrationHandler) ListRegistrations(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // DeleteRegistration handles DELETE /device-registrations/:id.
@@ -100,5 +101,5 @@ func (h *RegistrationHandler) DeleteRegistration(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // CreateMenu handles POST /menus.
@@ -26,7 +27,7 @@ func (h *Handler) CreateMenu(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, menu)
+	response.OKWithStatus(c, http.StatusCreated, menu)
 }
 
 // GetMenu handles GET /menus/:id.
@@ -44,7 +45,7 @@ func (h *Handler) GetMenu(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, menu)
+	response.OK(c, menu)
 }
 
 // ListMenus handles GET /menus.
@@ -61,7 +62,7 @@ func (h *Handler) ListMenus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // UpdateMenu handles PUT /menus/:id.
@@ -86,7 +87,7 @@ func (h *Handler) UpdateMenu(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	response.OK(c, gin.H{"success": true})
 }
 
 // DeleteMenus handles DELETE /menus.
@@ -115,7 +116,7 @@ func (h *Handler) DeleteMenus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	response.OK(c, gin.H{"success": true})
 }
 
 // GetMenuTree handles GET /menus/tree.
@@ -133,7 +134,7 @@ func (h *Handler) GetMenuTree(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": menus})
+	response.OK(c, gin.H{"data": menus})
 }
 
 // GetUserMenuTree handles GET /menus/user.
@@ -146,7 +147,7 @@ func (h *Handler) GetUserMenuTree(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": menus})
+	response.OK(c, gin.H{"data": menus})
 }
 
 // SetRoleMenus handles PUT /roles/:id/menus.
@@ -171,7 +172,7 @@ func (h *Handler) SetRoleMenus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	response.OK(c, gin.H{"success": true})
 }
 
 // GetRoleMenus handles GET /roles/:id/menus.
@@ -189,5 +190,5 @@ func (h *Handler) GetRoleMenus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": menus})
+	response.OK(c, gin.H{"data": menus})
 }

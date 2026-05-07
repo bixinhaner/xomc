@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
@@ -164,10 +165,7 @@ func RateLimit(cfg RateLimitConfig) gin.HandlerFunc {
 				zap.Int("burst", burst),
 			)
 
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"code":    "RATE_LIMITED",
-				"message": "too many requests, please retry later",
-			})
+			response.Fail(c, http.StatusTooManyRequests, "too many requests, please retry later")
 			return
 		}
 

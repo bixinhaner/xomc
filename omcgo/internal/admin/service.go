@@ -528,13 +528,17 @@ func (s *AdminService) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 // ListUsers returns a filtered, paginated list of users with roles loaded.
+//
+// 同时反查 created_by / updated_by 对应的 username（一次性 N→K，K 为去重后的
+// operator 数）注入 CreatorUsername / UpdaterUsername，省去前端二次拉全量
+// /admin/users 仅为展示创建人/更新人列。
 func (s *AdminService) ListUsers(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error) {
 	result, err := s.userRepo.List(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	// 批量加载所有用户的角色
+	// 批量加载所有用户的角色 + creator/updater username。
 	if len(result.Items) > 0 {
 		userIds := make([]uuid.UUID, len(result.Items))
 		for i, user := range result.Items {
@@ -546,17 +550,20 @@ func (s *AdminService) ListUsers(ctx context.Context, filter UserFilter) (*model
 			s.logger.Warn("failed to load roles for users", zap.Error(err))
 			// 即使角色加载失败，仍然返回用户列表
 		} else {
-			// 填充角色数据
 			for i := range result.Items {
 				result.Items[i].Roles = rolesMap[result.Items[i].ID]
 			}
 		}
+
+		s.enrichOperatorUsernames(ctx, result.Items)
 	}
 
 	return result, nil
 }
 
 // GetUser returns a user by ID with roles loaded.
+//
+// 同 ListUsers 一并填充 CreatorUsername / UpdaterUsername，详情面板与列表口径一致。
 func (s *AdminService) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
@@ -568,7 +575,50 @@ func (s *AdminService) GetUser(ctx context.Context, id uuid.UUID) (*User, error)
 		return nil, fmt.Errorf("get user roles: %w", err)
 	}
 	user.Roles = roles
+
+	one := []User{*user}
+	s.enrichOperatorUsernames(ctx, one)
+	user.CreatorUsername = one[0].CreatorUsername
+	user.UpdaterUsername = one[0].UpdaterUsername
 	return user, nil
+}
+
+// enrichOperatorUsernames 收集 users 中出现过的 created_by / updated_by ID 去重，
+// 一次 SQL 拉回 username 映射，再回填到每条 User 的派生字段上。
+// repo 失败时只 warn 不 abort——丢失派生字段不应阻塞列表返回。
+func (s *AdminService) enrichOperatorUsernames(ctx context.Context, users []User) {
+	if len(users) == 0 {
+		return
+	}
+	idSet := make(map[uuid.UUID]struct{}, len(users)*2)
+	for _, u := range users {
+		if u.CreatedBy != nil {
+			idSet[*u.CreatedBy] = struct{}{}
+		}
+		if u.UpdatedBy != nil {
+			idSet[*u.UpdatedBy] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	nameMap, err := s.userRepo.GetUsernamesByIDs(ctx, ids)
+	if err != nil {
+		s.logger.Warn("enrich operator usernames", zap.Error(err))
+		return
+	}
+	for i := range users {
+		if users[i].CreatedBy != nil {
+			users[i].CreatorUsername = nameMap[*users[i].CreatedBy]
+		}
+		if users[i].UpdatedBy != nil {
+			users[i].UpdaterUsername = nameMap[*users[i].UpdatedBy]
+		}
+	}
 }
 
 // AssignRole assigns a role to a user.
@@ -1027,24 +1077,10 @@ func (s *AdminService) CheckMenuPermission(ctx context.Context, userID uuid.UUID
 }
 
 // buildMenuTree builds a tree structure from a flat list of menus.
+//
+// 复用 pg_menu_repository.assembleMenuTree（修复了早期 2-层装配 bug，参 buildTree 注释）。
 func buildMenuTree(menus []Menu) []Menu {
-	menuMap := make(map[uuid.UUID]*Menu)
-	var roots []Menu
-
-	for i := range menus {
-		menuMap[menus[i].ID] = &menus[i]
-		menus[i].Children = nil
-	}
-
-	for _, m := range menus {
-		if m.ParentID == nil {
-			roots = append(roots, m)
-		} else if parent, ok := menuMap[*m.ParentID]; ok {
-			parent.Children = append(parent.Children, m)
-		}
-	}
-
-	return roots
+	return assembleMenuTree(menus)
 }
 
 // filterTreeForDisplay filters the tree to only show directories and menus (no buttons).

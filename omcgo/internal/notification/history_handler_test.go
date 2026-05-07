@@ -2,7 +2,6 @@ package notification
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 func newHistoryTestRouter(t *testing.T) (*gin.Engine, *HistoryService) {
@@ -41,7 +41,7 @@ func TestHistoryHandler_GetByID(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var got NotificationHistory
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	response.DecodeData(t, w.Body, &got)
 	assert.Equal(t, entry.ID, got.ID)
 }
 
@@ -72,7 +72,7 @@ func TestHistoryHandler_List_FilterByStatus(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[NotificationHistory]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	for _, item := range resp.Items {
 		assert.Equal(t, HistoryStatusFailed, item.Status)
@@ -107,12 +107,12 @@ func TestHistoryHandler_List_FilterByTemplateAndAlarm(t *testing.T) {
 	w := doJSON(t, r, http.MethodGet, "/api/v1/notifications/history?template_id="+tplID.String(), nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[NotificationHistory]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 
 	w2 := doJSON(t, r, http.MethodGet, "/api/v1/notifications/history?alarm_id="+alarmID.String(), nil)
 	assert.Equal(t, http.StatusOK, w2.Code)
 	var resp2 model.ListResponse[NotificationHistory]
-	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+	response.DecodeData(t, w2.Body, &resp2)
 	assert.Equal(t, int64(1), resp2.Total)
 }

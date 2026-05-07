@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // userContextWithOperator 把 gin.Context 中的认证信息复制到 context.Context，
@@ -34,7 +35,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, user)
+	response.OKWithStatus(c, http.StatusCreated, user)
 }
 
 func (h *Handler) GetUser(c *gin.Context) {
@@ -51,7 +52,7 @@ func (h *Handler) GetUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.OK(c, user)
 }
 
 func (h *Handler) UpdateUser(c *gin.Context) {
@@ -74,7 +75,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.OK(c, user)
 }
 
 func (h *Handler) DeleteUser(c *gin.Context) {
@@ -90,7 +91,7 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, nil)
+	response.OK(c, nil)
 }
 
 func (h *Handler) ListUsers(c *gin.Context) {
@@ -106,7 +107,7 @@ func (h *Handler) ListUsers(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) AssignRole(c *gin.Context) {
@@ -128,7 +129,7 @@ func (h *Handler) AssignRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "role assigned"})
+	response.OKWithMsg(c, nil, "role assigned")
 }
 
 func (h *Handler) RemoveRole(c *gin.Context) {
@@ -150,7 +151,7 @@ func (h *Handler) RemoveRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "role removed"})
+	response.OKWithMsg(c, nil, "role removed")
 }
 
 func (h *Handler) ResetPassword(c *gin.Context) {
@@ -172,7 +173,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "password reset"})
+	response.OKWithMsg(c, nil, "password reset")
 }
 
 func (h *Handler) LockUser(c *gin.Context) {
@@ -188,7 +189,7 @@ func (h *Handler) LockUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "user locked"})
+	response.OKWithMsg(c, nil, "user locked")
 }
 
 // ForceLogoutRequest 是批量强制下线接口的请求载荷。
@@ -214,7 +215,7 @@ func (h *Handler) BatchAssignRoles(c *gin.Context) {
 		commonerrors.AbortWithError(c, status, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"updated": len(req.UserIDs)})
+	response.OK(c, gin.H{"updated": len(req.UserIDs)})
 }
 
 // CopyUser 复制源用户为新账号；返回新用户对象 + 临时密码（仅这次响应可见）。
@@ -230,7 +231,7 @@ func (h *Handler) CopyUser(c *gin.Context) {
 		commonerrors.AbortWithError(c, status, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{
+	response.OKWithStatus(c, http.StatusCreated, gin.H{
 		"user":          user,
 		"temp_password": tempPwd,
 	})
@@ -250,7 +251,7 @@ func (h *Handler) ForceLogout(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"revoked": len(req.UserIDs)})
+	response.OK(c, gin.H{"revoked": len(req.UserIDs)})
 }
 
 func (h *Handler) UnlockUser(c *gin.Context) {
@@ -266,5 +267,5 @@ func (h *Handler) UnlockUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "user unlocked"})
+	response.OKWithMsg(c, nil, "user unlocked")
 }

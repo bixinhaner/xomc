@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"go.uber.org/zap"
@@ -31,18 +32,18 @@ func NewPMHandler(svc *NorthboundService, logger *zap.Logger) *PMHandler {
 func (h *PMHandler) ExportPM(c *gin.Context) {
 	var req ExportPMRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	startTime, err := time.Parse(time.RFC3339, req.StartTime)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_time format, use RFC3339"})
+		response.Fail(c, http.StatusBadRequest, "invalid start_time format, use RFC3339")
 		return
 	}
 	endTime, err := time.Parse(time.RFC3339, req.EndTime)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_time format, use RFC3339"})
+		response.Fail(c, http.StatusBadRequest, "invalid end_time format, use RFC3339")
 		return
 	}
 
@@ -54,7 +55,7 @@ func (h *PMHandler) ExportPM(c *gin.Context) {
 	if req.DeviceID != "" {
 		id, err := uuid.Parse(req.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -69,11 +70,11 @@ func (h *PMHandler) ExportPM(c *gin.Context) {
 	result, err := h.svc.ExportPM(c.Request.Context(), filter)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("northbound PM export failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "pm export failed"})
+		response.Fail(c, http.StatusInternalServerError, "pm export failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ExportKPI handles KPI data export for northbound consumers.
@@ -89,7 +90,7 @@ func (h *PMHandler) ExportKPI(c *gin.Context) {
 	}
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -97,7 +98,7 @@ func (h *PMHandler) ExportKPI(c *gin.Context) {
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -127,9 +128,9 @@ func (h *PMHandler) ExportKPI(c *gin.Context) {
 	result, err := h.svc.ExportKPI(c.Request.Context(), filter)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("northbound KPI export failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "kpi export failed"})
+		response.Fail(c, http.StatusInternalServerError, "kpi export failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }

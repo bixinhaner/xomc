@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ---------------------------------------------------------------------------
@@ -141,8 +142,7 @@ func TestHandler_ListDefinitions(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[ReportDefinition]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Daily KPI Report", resp.Items[0].ReportName)
@@ -187,8 +187,7 @@ func TestHandler_CreateDefinition(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp ReportDefinition
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "Weekly Alarm Report", resp.ReportName)
 	assert.Equal(t, ReportAlarm, resp.ReportType)
@@ -232,8 +231,7 @@ func TestHandler_GetDefinition(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp ReportDefinition
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, defID, resp.ID)
 	assert.Equal(t, "Monthly Device Report", resp.ReportName)
 	assert.Equal(t, ReportDevice, resp.ReportType)
@@ -259,8 +257,8 @@ func TestHandler_DeleteDefinition(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/reports/definitions/"+defID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Empty(t, w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }
 
 func TestHandler_ListRecords(t *testing.T) {
@@ -299,8 +297,7 @@ func TestHandler_ListRecords(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[ReportRecord]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Daily KPI Report-2026-03-10", resp.Items[0].ReportName)
@@ -349,8 +346,7 @@ func TestHandler_GenerateReport(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp ReportRecord
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, defID, resp.ReportDefinitionID)
 	assert.Equal(t, "Daily KPI Report-2026-03-10", resp.ReportName)
@@ -373,8 +369,7 @@ func TestHandler_GetSampleData(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 
 	// Verify the three top-level keys exist
 	assert.Contains(t, resp, "kpi_summary")

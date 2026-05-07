@@ -9,6 +9,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for backup management REST API.
@@ -145,7 +146,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateTask handles POST /api/v1/backup/tasks.
@@ -168,7 +169,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // GetTask handles GET /api/v1/backup/tasks/:id.
@@ -185,7 +186,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // DeleteTask handles DELETE /api/v1/backup/tasks/:id.
@@ -201,7 +202,7 @@ func (h *Handler) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // CancelTask handles POST /api/v1/backup/tasks/:id/cancel.
@@ -217,7 +218,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
+	response.OK(c, gin.H{"status": "cancelled"})
 }
 
 // ---- Schedule handlers ----
@@ -244,7 +245,7 @@ func (h *Handler) ListSchedules(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateSchedule handles POST /api/v1/backup/schedules.
@@ -272,7 +273,7 @@ func (h *Handler) CreateSchedule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // UpdateSchedule handles PUT /api/v1/backup/schedules/:id.
@@ -306,7 +307,7 @@ func (h *Handler) UpdateSchedule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	response.OK(c, updated)
 }
 
 // DeleteSchedule handles DELETE /api/v1/backup/schedules/:id.
@@ -322,7 +323,7 @@ func (h *Handler) DeleteSchedule(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- FTP Config request types ----
@@ -377,7 +378,7 @@ func (h *Handler) ListFTPConfigs(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateFTPConfig handles POST /api/v1/backup/ftp-configs.
@@ -414,7 +415,7 @@ func (h *Handler) CreateFTPConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, config)
+	response.OKWithStatus(c, http.StatusCreated, config)
 }
 
 // UpdateFTPConfig handles PUT /api/v1/backup/ftp-configs/:id.
@@ -462,7 +463,7 @@ func (h *Handler) UpdateFTPConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, existing)
+	response.OK(c, existing)
 }
 
 // DeleteFTPConfig handles DELETE /api/v1/backup/ftp-configs/:id.
@@ -478,7 +479,7 @@ func (h *Handler) DeleteFTPConfig(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // TestFTPConnection handles POST /api/v1/backup/ftp-configs/:id/test.
@@ -501,7 +502,7 @@ func (h *Handler) TestFTPConnection(c *gin.Context) {
 	}
 
 	if h.ftpTester == nil {
-		c.JSON(http.StatusOK, gin.H{
+		response.OK(c, gin.H{
 			"success":  false,
 			"message":  "FTP connection tester not wired (DI gap; see T-0032)",
 			"protocol": cfg.Protocol,
@@ -512,5 +513,5 @@ func (h *Handler) TestFTPConnection(c *gin.Context) {
 	}
 
 	result := h.ftpTester.Test(c.Request.Context(), cfg)
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }

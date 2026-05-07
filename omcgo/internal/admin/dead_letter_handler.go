@@ -11,6 +11,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // DeadLetterReplayer 是 admin handler 与 runner.Runner 的解耦点。
@@ -118,7 +119,7 @@ func (h *DeadLetterHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": resp, "msg": "ok"})
+	response.OK(c, resp)
 }
 
 // Get 返回单条死信详情。404 if not found。
@@ -138,7 +139,7 @@ func (h *DeadLetterHandler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": dl, "msg": "ok"})
+	response.OK(c, dl)
 }
 
 // Delete 删除一条死信记录。删除后续 Get 同 ID 返回 404。
@@ -153,7 +154,7 @@ func (h *DeadLetterHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, nil, "deleted")
 }
 
 // Replay 把死信 payload 重新 publish 到原 subject，记录不删除（PRD §8.3）。
@@ -185,5 +186,5 @@ func (h *DeadLetterHandler) Replay(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "republished", "id": id.String()})
+	response.OKWithMsg(c, gin.H{"id": id.String()}, "republished")
 }

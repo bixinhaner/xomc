@@ -44,6 +44,11 @@ type User struct {
 	ExpireAt            *time.Time `json:"expire_at,omitempty"`
 	CreatedBy           *uuid.UUID `json:"created_by,omitempty"`
 	UpdatedBy           *uuid.UUID `json:"updated_by,omitempty"`
+	// CreatorUsername / UpdaterUsername 是 ListUsers / GetUser 派生字段：
+	// 用 created_by / updated_by 反查 users.username，省去前端二次拉全量用户表。
+	// 当对应 ID 为 NULL（seed 写入 / 内置）时为空字符串；前端按空值渲染"内置"。
+	CreatorUsername     string     `json:"creator_username,omitempty"`
+	UpdaterUsername     string     `json:"updater_username,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
 }

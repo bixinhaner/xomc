@@ -2,13 +2,14 @@ package components
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 var (
@@ -72,5 +73,5 @@ func (h *SystemInfoHandler) GetSystemInfo(c *gin.Context) {
 		CacheStatus: cacheStatus,
 	}
 
-	c.JSON(http.StatusOK, info)
+	response.OK(c, info)
 }

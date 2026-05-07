@@ -61,7 +61,7 @@ func TestRateLimit_RejectsBeyondBurst(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w1.Code)
 	assert.Equal(t, http.StatusOK, w2.Code)
 	assert.Equal(t, http.StatusTooManyRequests, w3.Code)
-	assert.Contains(t, w3.Body.String(), "RATE_LIMITED")
+	assert.Contains(t, w3.Body.String(), "too many requests")
 }
 
 func TestRateLimit_PerIPIsolation(t *testing.T) {
@@ -169,8 +169,9 @@ func TestRateLimit_RejectionResponseShape(t *testing.T) {
 
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, `"code":"RATE_LIMITED"`)
-	assert.Contains(t, body, `"message"`)
+	assert.Contains(t, body, `"ret":0`)
+	assert.Contains(t, body, `"msg"`)
+	assert.Contains(t, body, "too many requests")
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 }
 

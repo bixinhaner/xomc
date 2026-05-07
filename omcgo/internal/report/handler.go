@@ -12,6 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for report management REST API.
@@ -117,7 +118,7 @@ func (h *Handler) ListDefinitions(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateDefinition handles POST /api/v1/reports/definitions.
@@ -148,7 +149,7 @@ func (h *Handler) CreateDefinition(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // GetDefinition handles GET /api/v1/reports/definitions/:id.
@@ -165,7 +166,7 @@ func (h *Handler) GetDefinition(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, def)
+	response.OK(c, def)
 }
 
 // UpdateDefinition handles PUT /api/v1/reports/definitions/:id.
@@ -202,7 +203,7 @@ func (h *Handler) UpdateDefinition(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	response.OK(c, updated)
 }
 
 // DeleteDefinition handles DELETE /api/v1/reports/definitions/:id.
@@ -218,7 +219,7 @@ func (h *Handler) DeleteDefinition(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- Record handlers ----
@@ -252,7 +253,7 @@ func (h *Handler) ListRecords(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GenerateReport handles POST /api/v1/reports/generate.
@@ -275,7 +276,7 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, record)
+	response.OKWithStatus(c, http.StatusCreated, record)
 }
 
 // DownloadRecord handles GET /api/v1/reports/records/:id/download.
@@ -325,7 +326,7 @@ func (h *Handler) DownloadRecord(c *gin.Context) {
 	}
 
 	if record.DownloadURL != "" {
-		c.JSON(http.StatusOK, gin.H{
+		response.OK(c, gin.H{
 			"url":       record.DownloadURL,
 			"file_name": record.ReportName + "." + record.Format,
 		})
@@ -333,7 +334,7 @@ func (h *Handler) DownloadRecord(c *gin.Context) {
 	}
 
 	// No file available yet
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"url":       "",
 		"file_name": record.ReportName + "." + record.Format,
 		"message":   "report is still generating or no file available",
@@ -374,5 +375,5 @@ func (h *Handler) GetSampleData(c *gin.Context) {
 		},
 	}
 
-	c.JSON(http.StatusOK, sampleData)
+	response.OK(c, sampleData)
 }

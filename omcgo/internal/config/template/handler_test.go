@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -169,8 +170,7 @@ func TestHandler_ListTemplates(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[ConfigTemplate]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -197,8 +197,7 @@ func TestHandler_CreateTemplate(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp ConfigTemplate
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Provisioning Template", resp.Name)
 	assert.Equal(t, model.CarrierCode("cmcc"), resp.Carrier)
 	assert.Equal(t, model.Technology("lte"), resp.Technology)
@@ -223,8 +222,7 @@ func TestHandler_GetTemplate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp ConfigTemplate
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, tmplID, resp.ID)
 	assert.Equal(t, "My Template", resp.Name)
 }
@@ -266,8 +264,7 @@ func TestHandler_UpdateTemplate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp ConfigTemplate
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Updated Name", resp.Name)
 	assert.Equal(t, model.CarrierCode("ctcc"), resp.Carrier)
 	assert.Equal(t, model.Technology("nr"), resp.Technology)
@@ -285,7 +282,8 @@ func TestHandler_DeleteTemplate(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/templates/"+tmplID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	// Verify template removed from repo.
 	_, exists := repo.templates[tmplID]

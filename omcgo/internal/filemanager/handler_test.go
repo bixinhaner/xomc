@@ -2,7 +2,6 @@ package filemanager
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -109,7 +109,7 @@ func TestHandler_ListFiles_Default(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[ManagedFile]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -149,7 +149,7 @@ func TestHandler_GetFileByID_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp ManagedFile
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, fileID, resp.ID)
 	assert.Equal(t, "config_v1.xml", resp.FileName)
 }

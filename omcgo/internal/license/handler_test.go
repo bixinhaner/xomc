@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ---------------------------------------------------------------------------
@@ -212,8 +213,7 @@ func TestHandler_List(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[License]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 	assert.Equal(t, 1, resp.Page)
@@ -233,8 +233,7 @@ func TestHandler_GetByID(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp License
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, lic.ID, resp.ID)
 	assert.Equal(t, "License A", resp.LicenseName)
 	assert.Equal(t, "LIC-GET-001", resp.LicenseCode)
@@ -258,8 +257,7 @@ func TestHandler_GetSummary(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp LicenseSummary
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(4), resp.Total)
 	assert.Equal(t, int64(2), resp.Active)
 	assert.Equal(t, int64(1), resp.Expired)
@@ -284,8 +282,7 @@ func TestHandler_Activate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp License
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, lic.ID, resp.ID)
 	assert.Equal(t, StatusActive, resp.Status)
 
@@ -306,8 +303,7 @@ func TestHandler_Revoke(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]string
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "revoked", resp["status"])
 
 	// Verify the repo was updated.
@@ -350,8 +346,7 @@ func TestHandler_Import(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp License
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "Imported License", resp.LicenseName)
 	assert.Equal(t, "LIC-IMP-001", resp.LicenseCode)

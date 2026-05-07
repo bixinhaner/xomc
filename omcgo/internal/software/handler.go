@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides REST API endpoints for software/firmware management.
@@ -81,7 +82,7 @@ func (h *Handler) ListFirmware(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) UploadFirmware(c *gin.Context) {
@@ -121,7 +122,7 @@ func (h *Handler) UploadFirmware(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, fw)
+	response.OKWithStatus(c, http.StatusCreated, fw)
 }
 
 func (h *Handler) GetFirmware(c *gin.Context) {
@@ -136,7 +137,7 @@ func (h *Handler) GetFirmware(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, fw)
+	response.OK(c, fw)
 }
 
 func (h *Handler) DeleteFirmware(c *gin.Context) {
@@ -150,7 +151,7 @@ func (h *Handler) DeleteFirmware(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	response.OK(c, gin.H{"status": "deleted"})
 }
 
 func (h *Handler) ToggleFirmwareRecommend(c *gin.Context) {
@@ -171,7 +172,7 @@ func (h *Handler) ToggleFirmwareRecommend(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, fw)
+	response.OK(c, fw)
 }
 
 func (h *Handler) DownloadFirmware(c *gin.Context) {
@@ -242,7 +243,7 @@ func (h *Handler) UpdateFirmware(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, fw)
+	response.OK(c, fw)
 }
 
 func (h *Handler) ListUpgradeTasks(c *gin.Context) {
@@ -257,7 +258,7 @@ func (h *Handler) ListUpgradeTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) GetUpgradeTask(c *gin.Context) {
@@ -272,7 +273,7 @@ func (h *Handler) GetUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 func (h *Handler) CreateUpgradeTask(c *gin.Context) {
@@ -301,7 +302,7 @@ func (h *Handler) CreateUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusCreated, task)
+	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
 func (h *Handler) SuspendUpgradeTask(c *gin.Context) {
@@ -315,7 +316,7 @@ func (h *Handler) SuspendUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "upgrade task suspended"})
+	response.OKWithMsg(c, nil, "upgrade task suspended")
 }
 
 func (h *Handler) ResumeUpgradeTask(c *gin.Context) {
@@ -329,7 +330,7 @@ func (h *Handler) ResumeUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "upgrade task resumed"})
+	response.OKWithMsg(c, nil, "upgrade task resumed")
 }
 
 func (h *Handler) TerminateUpgradeTask(c *gin.Context) {
@@ -343,7 +344,7 @@ func (h *Handler) TerminateUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "upgrade task terminated"})
+	response.OKWithMsg(c, nil, "upgrade task terminated")
 }
 
 func (h *Handler) RetryUpgradeTask(c *gin.Context) {
@@ -357,7 +358,7 @@ func (h *Handler) RetryUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "retry initiated"})
+	response.OKWithMsg(c, nil, "retry initiated")
 }
 
 func (h *Handler) DeleteUpgradeTask(c *gin.Context) {
@@ -371,7 +372,7 @@ func (h *Handler) DeleteUpgradeTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "upgrade task deleted"})
+	response.OKWithMsg(c, nil, "upgrade task deleted")
 }
 
 func (h *Handler) CreateRollback(c *gin.Context) {
@@ -386,7 +387,7 @@ func (h *Handler) CreateRollback(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusCreated, task)
+	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
 func (h *Handler) ListSubTasks(c *gin.Context) {
@@ -408,7 +409,7 @@ func (h *Handler) ListSubTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) ListAllSubTasks(c *gin.Context) {
@@ -423,7 +424,7 @@ func (h *Handler) ListAllSubTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) GetSubTask(c *gin.Context) {
@@ -438,7 +439,7 @@ func (h *Handler) GetSubTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // ==========================================================================
@@ -485,5 +486,5 @@ func (h *Handler) transitionCanary(c *gin.Context, fn func(ctx context.Context, 
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"task_id": id.String(), "operation": op, "result": "ok"})
+	response.OK(c, gin.H{"task_id": id.String(), "operation": op, "result": "ok"})
 }

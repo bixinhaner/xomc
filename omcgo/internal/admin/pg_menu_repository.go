@@ -456,23 +456,47 @@ func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 }
 
 // buildTree builds a tree structure from a flat list of menus.
+//
+// 历史 bug：早期实现按 parent.Children = append(..., m) 一遍循环装配，因 m 是值拷贝
+// 且 append 当时父子双方 Children 都还未填好，只能装出 2 层，第 3 层（按钮）整体丢失。
+// 现改为「按 parent_id 收集 → 自顶向下递归 build」，保证每层 Children 在被装入父节点
+// 之前已经填充完毕。
 func (r *PgMenuRepository) buildTree(flat []Menu) []Menu {
-	menuMap := make(map[uuid.UUID]*Menu)
-	var roots []Menu
+	return assembleMenuTree(flat)
+}
 
-	for i := range flat {
-		menuMap[flat[i].ID] = &flat[i]
-		flat[i].Children = nil
+// assembleMenuTree 是包级 helper，方便 service 层共用。
+func assembleMenuTree(flat []Menu) []Menu {
+	if len(flat) == 0 {
+		return nil
 	}
+	byID := make(map[uuid.UUID]Menu, len(flat))
+	childIDs := make(map[uuid.UUID][]uuid.UUID)
+	var rootIDs []uuid.UUID
 
 	for _, m := range flat {
+		m.Children = nil
+		byID[m.ID] = m
 		if m.ParentID == nil {
-			roots = append(roots, m)
-		} else if parent, ok := menuMap[*m.ParentID]; ok {
-			parent.Children = append(parent.Children, m)
+			rootIDs = append(rootIDs, m.ID)
+		} else {
+			childIDs[*m.ParentID] = append(childIDs[*m.ParentID], m.ID)
 		}
 	}
 
+	var build func(id uuid.UUID) Menu
+	build = func(id uuid.UUID) Menu {
+		node := byID[id]
+		for _, cid := range childIDs[id] {
+			node.Children = append(node.Children, build(cid))
+		}
+		return node
+	}
+
+	roots := make([]Menu, 0, len(rootIDs))
+	for _, id := range rootIDs {
+		roots = append(roots, build(id))
+	}
 	return roots
 }
 

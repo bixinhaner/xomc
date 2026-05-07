@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // SysConfigHandler provides HTTP endpoints for system configuration.
@@ -42,7 +43,7 @@ func (h *SysConfigHandler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "创建成功"})
+	response.OKWithMsg(c, result, "创建成功")
 }
 
 func (h *SysConfigHandler) Get(c *gin.Context) {
@@ -56,7 +57,7 @@ func (h *SysConfigHandler) Get(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }
 
 func (h *SysConfigHandler) List(c *gin.Context) {
@@ -71,7 +72,7 @@ func (h *SysConfigHandler) List(c *gin.Context) {
 	if result == nil {
 		result = []SysConfig{}
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "查询成功"})
+	response.OKWithMsg(c, result, "查询成功")
 }
 
 func (h *SysConfigHandler) Update(c *gin.Context) {
@@ -90,7 +91,7 @@ func (h *SysConfigHandler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result, "msg": "更新成功"})
+	response.OKWithMsg(c, result, "更新成功")
 }
 
 func (h *SysConfigHandler) Delete(c *gin.Context) {
@@ -103,5 +104,5 @@ func (h *SysConfigHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": nil, "msg": "删除成功"})
+	response.OKWithMsg(c, nil, "删除成功")
 }

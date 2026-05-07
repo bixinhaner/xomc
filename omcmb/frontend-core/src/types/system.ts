@@ -22,9 +22,13 @@ export interface User {
   lastLoginTime?: string;
   createTime: string;
   updateTime?: string;
-  /** 创建人 / 更新人：后端返回 UUID，前端通过 useAllUsers 查 username 显示。 */
+  /** 创建人 / 更新人 ID：后端 UUID，可能为空（seed 写入 / 内置）。 */
   createdBy?: string;
   updatedBy?: string;
+  /** 创建人 / 更新人 username：由后端 ListUsers / GetUser 反查 users 表注入；
+   *  当 ID 为空或对应记录已删除时为空字符串，前端按空值渲染"内置"。 */
+  creatorUsername?: string;
+  updaterUsername?: string;
   department?: string;
   description?: string;
 }

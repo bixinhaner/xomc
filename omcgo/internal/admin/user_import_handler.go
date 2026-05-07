@@ -11,6 +11,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // importMaxFileSize 限制上传文件大小，防止内存被大文件耗尽。
@@ -141,7 +142,7 @@ func (h *Handler) ImportUsers(c *gin.Context) {
 	}
 	if len(rows) < 2 {
 		// 仅表头或空表
-		c.JSON(http.StatusOK, ImportUserResult{Errors: []ImportUserError{}})
+		response.OK(c, ImportUserResult{Errors: []ImportUserError{}})
 		return
 	}
 
@@ -179,7 +180,7 @@ func (h *Handler) ImportUsers(c *gin.Context) {
 		result.Created++
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // isImportRowSkippable 跳过空行与注释行（首字段以 # 开头）。

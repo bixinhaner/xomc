@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"go.uber.org/zap"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // IndicatorHandler provides REST API endpoints for KPI indicator management.
@@ -180,7 +182,7 @@ func (h *IndicatorHandler) GetIndicatorGroupTree(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, tree)
+	response.OK(c, tree)
 }
 
 // CreateGroup handles POST /pm/indicatormg/addIndicatorGroup.
@@ -196,7 +198,7 @@ func (h *IndicatorHandler) CreateGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, group)
+	response.OK(c, group)
 }
 
 // GetGroupInfo handles POST /pm/indicatormg/getIndicatorGroupInfo.
@@ -218,7 +220,7 @@ func (h *IndicatorHandler) GetGroupInfo(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, group)
+	response.OK(c, group)
 }
 
 // ModifyGroup handles POST /pm/indicatormg/modifyIndicatorGroup.
@@ -250,7 +252,7 @@ func (h *IndicatorHandler) ModifyGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // DeleteGroup handles POST /pm/indicatormg/delIndicatorGroup.
@@ -271,7 +273,7 @@ func (h *IndicatorHandler) DeleteGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // GetIndicatorListByPage handles POST /pm/indicatormg/getIndicatorListByPage.
@@ -288,7 +290,7 @@ func (h *IndicatorHandler) GetIndicatorListByPage(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetEffectiveIndicators handles POST /pm/indicatormg/getEffectiveIndicators.
@@ -310,7 +312,7 @@ func (h *IndicatorHandler) GetEffectiveIndicators(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, ids)
+	response.OK(c, ids)
 }
 
 // GetIndicatorInfo handles POST /pm/indicatormg/getIndicatorInfo.
@@ -332,7 +334,7 @@ func (h *IndicatorHandler) GetIndicatorInfo(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, indicator)
+	response.OK(c, indicator)
 }
 
 // AddOrModifyIndicator handles POST /pm/indicatormg/addOrModifyIndicator.
@@ -373,7 +375,7 @@ func (h *IndicatorHandler) AddOrModifyIndicator(c *gin.Context) {
 			commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
+		response.OKWithMsg(c, nil, "success")
 		return
 	}
 
@@ -401,7 +403,7 @@ func (h *IndicatorHandler) AddOrModifyIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, indicator)
+	response.OK(c, indicator)
 }
 
 // DeleteIndicator handles POST /pm/indicatormg/delIndicator.
@@ -422,7 +424,7 @@ func (h *IndicatorHandler) DeleteIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // ExportAllIndicator handles POST /pm/indicatormg/exportAllIndicator.
@@ -457,7 +459,7 @@ func (h *IndicatorHandler) UpdateBaseKpiCustName(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // UpdateEnbIndicatorsName handles POST /pm/indicatormg/updateEnbIndicatorsName.
@@ -483,7 +485,7 @@ func (h *IndicatorHandler) GetIndicatorUnitList(c *gin.Context) {
 		{ID: "7", EnName: "mbps", CnName: "Mbps"},
 		{ID: "8", EnName: "ms", CnName: "毫秒"},
 	}
-	c.JSON(http.StatusOK, units)
+	response.OK(c, units)
 }
 
 // GetIndicatorGroupList handles POST /pm/indicatormg/getIndicatorGroupList.
@@ -507,7 +509,7 @@ func (h *IndicatorHandler) GetIndicatorGroupList(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, groups)
+	response.OK(c, groups)
 }
 
 // GetIndicatorTypes handles POST /pm/indicatormg/getIndicatorTypes.
@@ -516,7 +518,7 @@ func (h *IndicatorHandler) GetIndicatorTypes(c *gin.Context) {
 		{"id": "0", "name": "Counter"},
 		{"id": "1", "name": "KPI"},
 	}
-	c.JSON(http.StatusOK, types)
+	response.OK(c, types)
 }
 
 // ── Enable/Disable Handlers ──────────────────────────────────────────────────
@@ -533,7 +535,7 @@ func (h *IndicatorHandler) EnableIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // DisableIndicator handles POST /cell/perfmgmt/kpimanage/disableIndicator.
@@ -548,7 +550,7 @@ func (h *IndicatorHandler) DisableIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // IsIndicatorInTemplate handles GET /cell/perfmgmt/kpimanage/isIndicatorInTemplate.
@@ -564,7 +566,7 @@ func (h *IndicatorHandler) IsIndicatorInTemplate(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, exists)
+	response.OK(c, exists)
 }
 
 // ── GNB Handlers ─────────────────────────────────────────────────────────────
@@ -586,7 +588,7 @@ func (h *IndicatorHandler) GetGNBIndicatorGroupTree(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, tree)
+	response.OK(c, tree)
 }
 
 // CreateGNBGroup handles POST /gnb/pm/indicatormg/addIndicatorGroup.
@@ -603,7 +605,7 @@ func (h *IndicatorHandler) CreateGNBGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, group)
+	response.OK(c, group)
 }
 
 // GetGNBGroupInfo handles POST /gnb/pm/indicatormg/getIndicatorGroupInfo.
@@ -619,7 +621,7 @@ func (h *IndicatorHandler) GetGNBGroupInfo(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, group)
+	response.OK(c, group)
 }
 
 // ModifyGNBGroup handles POST /gnb/pm/indicatormg/modifyIndicatorGroup.
@@ -644,7 +646,7 @@ func (h *IndicatorHandler) ModifyGNBGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // DeleteGNBGroup handles POST /gnb/pm/indicatormg/delIndicatorGroup.
@@ -661,7 +663,7 @@ func (h *IndicatorHandler) DeleteGNBGroup(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // GetGNBIndicatorListPageData handles POST /gnb/pm/indicatormg/getIndicatorListPageData.
@@ -679,7 +681,7 @@ func (h *IndicatorHandler) GetGNBIndicatorListPageData(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetGNBIndicatorInfo handles POST /gnb/pm/indicatormg/getIndicatorInfo.
@@ -697,7 +699,7 @@ func (h *IndicatorHandler) GetGNBIndicatorInfo(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, indicator)
+	response.OK(c, indicator)
 }
 
 // AddOrModifyGNBIndicator handles POST /gnb/pm/indicatormg/addOrModifyIndicator.
@@ -727,7 +729,7 @@ func (h *IndicatorHandler) AddOrModifyGNBIndicator(c *gin.Context) {
 			commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
+		response.OKWithMsg(c, nil, "success")
 		return
 	}
 
@@ -752,7 +754,7 @@ func (h *IndicatorHandler) AddOrModifyGNBIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, indicator)
+	response.OK(c, indicator)
 }
 
 // DeleteGNBIndicator handles POST /gnb/pm/indicatormg/delIndicator.
@@ -769,7 +771,7 @@ func (h *IndicatorHandler) DeleteGNBIndicator(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // ExportGNBAllIndicator handles POST /gnb/pm/indicatormg/exportAllIndicator.
@@ -805,7 +807,7 @@ func (h *IndicatorHandler) UpdateGNBBaseKpiCustName(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }
 
 // UpdateGnbIndicatorsName handles POST /gnb/pm/indicatormg/updateGnbIndicatorsName.
@@ -827,5 +829,5 @@ func (h *IndicatorHandler) updateCounterName(c *gin.Context, dt DeviceType) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.OKWithMsg(c, nil, "success")
 }

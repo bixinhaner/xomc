@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 func newTemplateTestRouter(t *testing.T) (*gin.Engine, *TemplateService) {
@@ -59,7 +60,7 @@ func TestTemplateHandler_Create_Success(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var got NotificationTemplate
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	response.DecodeData(t, w.Body, &got)
 	assert.Equal(t, "alarm-major", got.Name)
 	assert.NotEqual(t, uuid.Nil, got.ID)
 }
@@ -99,7 +100,7 @@ func TestTemplateHandler_GetByID(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var got NotificationTemplate
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	response.DecodeData(t, w.Body, &got)
 	assert.Equal(t, tpl.ID, got.ID)
 }
 
@@ -134,7 +135,7 @@ func TestTemplateHandler_Update(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var got NotificationTemplate
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	response.DecodeData(t, w.Body, &got)
 	assert.Equal(t, "new subject", got.Subject)
 	assert.False(t, got.Enabled)
 }
@@ -150,7 +151,8 @@ func TestTemplateHandler_Delete(t *testing.T) {
 	require.NoError(t, err)
 
 	w := doJSON(t, r, http.MethodDelete, "/api/v1/notifications/templates/"+tpl.ID.String(), nil)
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	w2 := doJSON(t, r, http.MethodGet, "/api/v1/notifications/templates/"+tpl.ID.String(), nil)
 	assert.Equal(t, http.StatusNotFound, w2.Code)
@@ -172,7 +174,7 @@ func TestTemplateHandler_List_FilterByChannel(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[NotificationTemplate]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	for _, item := range resp.Items {
 		assert.Equal(t, TemplateChannelEmail, item.Channel)

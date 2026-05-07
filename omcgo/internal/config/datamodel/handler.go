@@ -6,7 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for data model REST API.
@@ -59,7 +62,7 @@ func (h *Handler) List(c *gin.Context) {
 		ListRequest: model.DefaultListRequest(),
 	}
 	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	if carrier := c.Query("carrier"); carrier != "" {
@@ -83,26 +86,26 @@ func (h *Handler) List(c *gin.Context) {
 
 	result, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // Get handles GET /api/v1/datamodels/:id.
 func (h *Handler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid data model ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid data model ID")
 		return
 	}
 
 	dm, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "data model not found"})
+		response.Fail(c, http.StatusNotFound, "data model not found")
 		return
 	}
-	c.JSON(http.StatusOK, dm)
+	response.OK(c, dm)
 }
 
 type createDataModelRequest struct {
@@ -122,7 +125,7 @@ type createDataModelRequest struct {
 func (h *Handler) Create(c *gin.Context) {
 	var req createDataModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -149,10 +152,10 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	if err := h.repo.Create(c.Request.Context(), dm); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, dm)
+	response.OKWithStatus(c, http.StatusCreated, dm)
 }
 
 type updateDataModelRequest struct {
@@ -168,19 +171,19 @@ type updateDataModelRequest struct {
 func (h *Handler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid data model ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid data model ID")
 		return
 	}
 
 	var req updateDataModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	existing, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "data model not found"})
+		response.Fail(c, http.StatusNotFound, "data model not found")
 		return
 	}
 
@@ -194,37 +197,37 @@ func (h *Handler) Update(c *gin.Context) {
 	existing.Description = req.Description
 
 	if err := h.repo.Update(c.Request.Context(), existing); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, existing)
+	response.OK(c, existing)
 }
 
 // Delete handles DELETE /api/v1/datamodels/:id (only draft models).
 func (h *Handler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid data model ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid data model ID")
 		return
 	}
 
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusNoContent, nil)
+	response.OK(c, nil)
 }
 
 // Activate handles POST /api/v1/datamodels/:id/activate.
 func (h *Handler) Activate(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid data model ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid data model ID")
 		return
 	}
 
 	if err := h.repo.Activate(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -234,14 +237,14 @@ func (h *Handler) Activate(c *gin.Context) {
 		_ = h.registry.InvalidateCache(c.Request.Context(), dm)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "data model activated"})
+	response.OKWithMsg(c, nil, "data model activated")
 }
 
 // Deprecate handles POST /api/v1/datamodels/:id/deprecate.
 func (h *Handler) Deprecate(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid data model ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid data model ID")
 		return
 	}
 
@@ -249,7 +252,7 @@ func (h *Handler) Deprecate(c *gin.Context) {
 	dm, _ := h.repo.GetByID(c.Request.Context(), id)
 
 	if err := h.repo.Deprecate(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -257,17 +260,17 @@ func (h *Handler) Deprecate(c *gin.Context) {
 		_ = h.registry.InvalidateCache(c.Request.Context(), dm)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "data model deprecated"})
+	response.OKWithMsg(c, nil, "data model deprecated")
 }
 
 // Import handles POST /api/v1/datamodels/import.
 func (h *Handler) Import(c *gin.Context) {
 	dm, err := h.importer.ImportFromJSON(c.Request.Context(), c.Request.Body, "api")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusCreated, dm)
+	response.OKWithStatus(c, http.StatusCreated, dm)
 }
 
 // ImportXML handles POST /api/v1/datamodels/import-xml.
@@ -278,7 +281,7 @@ func (h *Handler) ImportXML(c *gin.Context) {
 		carrier = model.CarrierCode(c.Query("carrier"))
 	}
 	if carrier == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "carrier is required (form field or query param)"})
+		response.Fail(c, http.StatusBadRequest, "carrier is required (form field or query param)")
 		return
 	}
 
@@ -287,33 +290,33 @@ func (h *Handler) ImportXML(c *gin.Context) {
 		// Fall back to reading raw body if not multipart.
 		dm, err := h.importer.ImportFromXML(c.Request.Context(), c.Request.Body, carrier, "api")
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 			return
 		}
-		c.JSON(http.StatusCreated, dm)
+		response.OKWithStatus(c, http.StatusCreated, dm)
 		return
 	}
 	defer file.Close()
 
 	dm, err := h.importer.ImportFromXML(c.Request.Context(), file, carrier, "api")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusCreated, dm)
+	response.OKWithStatus(c, http.StatusCreated, dm)
 }
 
 // Export handles GET /api/v1/datamodels/:id/export.
 func (h *Handler) Export(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid data model ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid data model ID")
 		return
 	}
 
 	data, err := h.importer.ExportToJSON(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusNotFound, err)
 		return
 	}
 
@@ -328,49 +331,49 @@ func (h *Handler) Resolve(c *gin.Context) {
 	productClass := c.Query("product_class")
 
 	if carrier == "" || tech == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "carrier and technology are required"})
+		response.Fail(c, http.StatusBadRequest, "carrier and technology are required")
 		return
 	}
 
 	dm, err := h.registry.Resolve(c.Request.Context(), carrier, tech, oui, productClass)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if dm == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no matching data model found"})
+		response.Fail(c, http.StatusNotFound, "no matching data model found")
 		return
 	}
-	c.JSON(http.StatusOK, dm)
+	response.OK(c, dm)
 }
 
 // Statistics handles GET /api/v1/datamodels/statistics.
 func (h *Handler) Statistics(c *gin.Context) {
 	stats, err := h.repo.Statistics(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	response.OK(c, stats)
 }
 
 // RefreshCache handles POST /api/v1/datamodels/cache/refresh.
 func (h *Handler) RefreshCache(c *gin.Context) {
 	if err := h.registry.InvalidateAll(c.Request.Context()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "cache refreshed"})
+	response.OKWithMsg(c, nil, "cache refreshed")
 }
 
 // ListOUI handles GET /api/v1/oui.
 func (h *Handler) ListOUI(c *gin.Context) {
 	entries, err := h.ouiRepo.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": entries, "total": len(entries)})
+	response.OK(c, gin.H{"items": entries, "total": len(entries)})
 }
 
 type createOUIRequest struct {
@@ -384,7 +387,7 @@ type createOUIRequest struct {
 func (h *Handler) CreateOUI(c *gin.Context) {
 	var req createOUIRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -396,9 +399,9 @@ func (h *Handler) CreateOUI(c *gin.Context) {
 	}
 
 	if err := h.ouiRepo.Create(c.Request.Context(), entry); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, entry)
+	response.OKWithStatus(c, http.StatusCreated, entry)
 }
 

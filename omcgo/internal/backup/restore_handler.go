@@ -13,6 +13,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // SetRestoreService wires the RestoreService post-construction (DI hook,
@@ -55,7 +56,7 @@ func (h *Handler) CreateRestore(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, rt)
+	response.OK(c, rt)
 }
 
 // ListRestoreTasks handles GET /api/v1/backup/restore-tasks.
@@ -79,7 +80,7 @@ func (h *Handler) ListRestoreTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 // CreateRestoreByTaskID handles POST /api/v1/backup/restore/by-task-id (T-0079).
@@ -116,7 +117,7 @@ func (h *Handler) CreateRestoreByTaskID(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetRestoreTask handles GET /api/v1/backup/restore-tasks/:id.
@@ -140,5 +141,5 @@ func (h *Handler) GetRestoreTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, rt)
+	response.OK(c, rt)
 }

@@ -179,6 +179,10 @@ interface BackendUser {
   expire_at?: string;
   created_by?: string;
   updated_by?: string;
+  // 派生字段：后端 ListUsers / GetUser 反查 users 表注入；前端直接读，
+  // 取代历史的「拉全量 /admin/users 建 ID→username 映射」做法。
+  creator_username?: string;
+  updater_username?: string;
   created_at: string;
   updated_at: string;
 }
@@ -313,6 +317,8 @@ function mapBackendUser(bu: BackendUser): User {
     updateTime: bu.updated_at,
     createdBy: bu.created_by,
     updatedBy: bu.updated_by,
+    creatorUsername: bu.creator_username,
+    updaterUsername: bu.updater_username,
   };
 }
 
@@ -456,9 +462,14 @@ export const adminApi = {
     return mapUserListResponse(data);
   },
 
+  // GET /admin/users 是分页接口（返回 {items, total, page, page_size}），不是裸数组。
+  // 给一个足够大的 page_size 一次拉全；当用户数 > 1000 时再考虑分页拼装。
   async getAllUsers(): Promise<User[]> {
-    const { data } = await http.get<BackendUser[]>('/admin/users');
-    return (Array.isArray(data) ? data : []).map(mapBackendUser);
+    const { data } = await http.get<BackendListResponse<BackendUser>>(
+      '/admin/users',
+      { params: { page: 1, page_size: 1000 } }
+    );
+    return (data?.items ?? []).map(mapBackendUser);
   },
 
   async getUserById(id: string): Promise<User | null> {

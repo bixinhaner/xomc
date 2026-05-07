@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -191,7 +191,7 @@ func TestDmHandler_List_Default(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[DataModel]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 }
 
@@ -211,7 +211,7 @@ func TestDmHandler_Get_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp DataModel
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, id, resp.ID)
 }
 
@@ -250,7 +250,7 @@ func TestDmHandler_Create_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp DataModel
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, StatusDraft, resp.Status)
 	assert.Equal(t, "Device.", resp.RootObject)
 }
@@ -282,7 +282,7 @@ func TestDmHandler_Delete_Success(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodDelete, "/api/v1/datamodels/"+uuid.New().String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, deleteCalled)
 }
 
@@ -347,7 +347,7 @@ func TestDmHandler_Statistics(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var stats DataModelStats
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &stats))
+	response.DecodeData(t, w.Body, &stats)
 	assert.Equal(t, int64(10), stats.Total)
 }
 
@@ -397,7 +397,7 @@ func TestDmHandler_ListOUI(t *testing.T) {
 		Items []OUIEntry `json:"items"`
 		Total int        `json:"total"`
 	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	response.DecodeData(t, w.Body, &body)
 	assert.Equal(t, 2, body.Total)
 	assert.Len(t, body.Items, 2)
 }

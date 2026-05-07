@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ParamHandler provides HTTP handlers for the parameter library API.
@@ -44,7 +45,7 @@ func (h *ParamHandler) ListVersions(c *gin.Context) {
 	if versions == nil {
 		versions = []ParamVersion{}
 	}
-	c.JSON(http.StatusOK, gin.H{"items": versions})
+	response.OK(c, gin.H{"items": versions})
 }
 
 // GetGroupTree returns the hierarchical group tree for a version.
@@ -64,7 +65,7 @@ func (h *ParamHandler) GetGroupTree(c *gin.Context) {
 	if groups == nil {
 		groups = []ParamGroup{}
 	}
-	c.JSON(http.StatusOK, gin.H{"items": groups})
+	response.OK(c, gin.H{"items": groups})
 }
 
 // GetGroupParams returns parameters for a specific group.
@@ -84,7 +85,7 @@ func (h *ParamHandler) GetGroupParams(c *gin.Context) {
 	if params == nil {
 		params = []Param{}
 	}
-	c.JSON(http.StatusOK, gin.H{"items": params})
+	response.OK(c, gin.H{"items": params})
 }
 
 // SearchParams searches parameters within a version.
@@ -112,5 +113,5 @@ func (h *ParamHandler) SearchParams(c *gin.Context) {
 	if params == nil {
 		params = []Param{}
 	}
-	c.JSON(http.StatusOK, gin.H{"items": params})
+	response.OK(c, gin.H{"items": params})
 }

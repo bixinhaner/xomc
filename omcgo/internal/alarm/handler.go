@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -115,7 +116,7 @@ func (h *Handler) ListActive(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) ListHistory(c *gin.Context) {
@@ -169,7 +170,7 @@ func (h *Handler) ListHistory(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) GetByID(c *gin.Context) {
@@ -183,7 +184,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, alarm)
+	response.OK(c, alarm)
 }
 
 type acknowledgeRequest struct {
@@ -205,7 +206,7 @@ func (h *Handler) Acknowledge(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarm acknowledged"})
+	response.OKWithMsg(c, nil, "alarm acknowledged")
 }
 
 func (h *Handler) ClearAlarm(c *gin.Context) {
@@ -218,7 +219,7 @@ func (h *Handler) ClearAlarm(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarm cleared"})
+	response.OKWithMsg(c, nil, "alarm cleared")
 }
 
 func (h *Handler) Statistics(c *gin.Context) {
@@ -232,7 +233,7 @@ func (h *Handler) Statistics(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	response.OK(c, stats)
 }
 
 func (h *Handler) HistoryStatistics(c *gin.Context) {
@@ -241,7 +242,7 @@ func (h *Handler) HistoryStatistics(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, stats)
+	response.OK(c, stats)
 }
 
 // BatchAcknowledge handles POST /alarms/active/batch/acknowledge.
@@ -262,7 +263,7 @@ func (h *Handler) BatchAcknowledge(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarms acknowledged", "count": len(req.IDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "alarms acknowledged")
 }
 
 // BatchUnacknowledge handles POST /alarms/active/batch/unacknowledge.
@@ -278,7 +279,7 @@ func (h *Handler) BatchUnacknowledge(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarms unacknowledged", "count": len(req.IDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "alarms unacknowledged")
 }
 
 // BatchClear handles POST /alarms/active/batch/clear.
@@ -299,7 +300,7 @@ func (h *Handler) BatchClear(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarms cleared", "count": len(req.IDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "alarms cleared")
 }
 
 // BatchHistoryAcknowledge handles POST /alarms/history/batch/acknowledge.
@@ -320,7 +321,7 @@ func (h *Handler) BatchHistoryAcknowledge(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "history alarms acknowledged", "count": len(req.IDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "history alarms acknowledged")
 }
 
 // BatchHistoryUnacknowledge handles POST /alarms/history/batch/unacknowledge.
@@ -336,7 +337,7 @@ func (h *Handler) BatchHistoryUnacknowledge(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "history alarms unacknowledged", "count": len(req.IDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "history alarms unacknowledged")
 }
 
 // BatchHistoryDelete handles POST /alarms/history/batch/delete.
@@ -352,7 +353,7 @@ func (h *Handler) BatchHistoryDelete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "history alarms deleted", "count": len(req.IDs)})
+	response.OKWithMsg(c, gin.H{"count": len(req.IDs)}, "history alarms deleted")
 }
 
 // MarkRead handles POST /alarms/active/:id/read.
@@ -366,7 +367,7 @@ func (h *Handler) MarkRead(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "alarm marked as read"})
+	response.OKWithMsg(c, nil, "alarm marked as read")
 }
 
 func parseSeverity(s string) model.AlarmSeverity {
@@ -394,7 +395,7 @@ func (h *Handler) TriggerSync(c *gin.Context) {
 	}
 
 	if h.syncService == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "alarm sync service not available"})
+		response.Fail(c, http.StatusServiceUnavailable, "alarm sync service not available")
 		return
 	}
 
@@ -404,8 +405,5 @@ func (h *Handler) TriggerSync(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "alarm sync triggered",
-		"device_sn": deviceSN,
-	})
+	response.OKWithMsg(c, gin.H{"device_sn": deviceSN}, "alarm sync triggered")
 }

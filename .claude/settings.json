@@ -35,13 +35,24 @@
       "Bash(git worktree remove:*)",
       "Bash(git branch -D:*)",
       "Edit(**/.claude/commands/**)",
-      "Write(**/.claude/commands/**)"
-    ],
-    "ask": [
-      "Bash(git rebase:*)",
-      "Bash(git reset --hard)",
-      "Bash(git reset --hard:*)",
-      "Bash(git clean -f:*)"
+      "Write(**/.claude/commands/**)",
+      "Bash(docker exec *)",
+      "Bash(which python3.12 python3.11 python3.10 2>&1 | head; ls /usr/local/bin/python* /opt/homebrew/bin/python* 2>&1 | head)",
+      "Read(//usr/local/bin/**)",
+      "Bash(ls /opt/homebrew/bin/ 2>&1 | grep -iE \"python|node\" | head; which node)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(node /tmp/gen_api_desc.mjs)",
+      "Bash(make migrate-seed-up *)",
+      "Bash(go run *)",
+      "Bash(docker port *)",
+      "Bash(env OMCGO_DB_DSN=\"postgres://omcgo:omcgo123@127.0.0.1:5432/omcgo?sslmode=disable\" go run ./cmd/migrate up --path migrations/seed)",
+      "Bash(bash run/scripts/status.sh)",
+      "Bash(ps -p 5638 -o command)",
+      "Bash(ps -p 9777 -o command)",
+      "Bash(find /Users/cb/code/baicells -name docker-compose.yml -path \"*deployments/docker*\" 2>&1 | head)",
+      "Read(//Users/cb/code/baicells/**)",
+      "Bash(awk '/^const MOCK_MENUS/,/^];/' /Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/system/MenuManagement/index.tsx)",
+      "Bash(awk 'NR==134 { skip=1 } NR==312 { skip=0; print \"\"; next } !skip' /Users/cb/code/baicells/goomc/omcmb/webcode/src/pages/system/MenuManagement/index.tsx)"
     ],
     "deny": [
       "Bash(git push -f)",
@@ -55,6 +66,15 @@
       "Bash(rm -rf)",
       "Bash(rm -rf:*)",
       "Bash(git config --global:*)"
+    ],
+    "ask": [
+      "Bash(git rebase:*)",
+      "Bash(git reset --hard)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

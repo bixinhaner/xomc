@@ -9,6 +9,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 func (h *Handler) ListRoles(c *gin.Context) {
@@ -24,7 +25,7 @@ func (h *Handler) ListRoles(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ListAllRoles 返回所有角色（不分页，用于下拉框）
@@ -35,7 +36,7 @@ func (h *Handler) ListAllRoles(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, roles)
+	response.OK(c, roles)
 }
 
 func (h *Handler) GetRole(c *gin.Context) {
@@ -52,7 +53,7 @@ func (h *Handler) GetRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, role)
+	response.OK(c, role)
 }
 
 func (h *Handler) CreateRole(c *gin.Context) {
@@ -69,7 +70,7 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, role)
+	response.OKWithStatus(c, http.StatusCreated, role)
 }
 
 func (h *Handler) UpdateRole(c *gin.Context) {
@@ -92,7 +93,7 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, role)
+	response.OK(c, role)
 }
 
 func (h *Handler) DeleteRole(c *gin.Context) {
@@ -108,7 +109,7 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, nil)
+	response.OK(c, nil)
 }
 
 // CopyRole handles POST /roles/:id/copy（roles.md §7 P2 #9）。
@@ -126,7 +127,7 @@ func (h *Handler) CopyRole(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusCreated, role)
+	response.OKWithStatus(c, http.StatusCreated, role)
 }
 
 func (h *Handler) ListPermissions(c *gin.Context) {
@@ -136,7 +137,7 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, perms)
+	response.OK(c, perms)
 }
 
 // GetRoleDeviceGroups handles GET /roles/:id/device-groups.
@@ -159,7 +160,7 @@ func (h *Handler) GetRoleDeviceGroups(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, data)
+	response.OK(c, data)
 }
 
 // SetRoleDeviceGroups handles PUT /roles/:id/device-groups.
@@ -191,7 +192,7 @@ func (h *Handler) SetRoleDeviceGroups(c *gin.Context) {
 	// 之前只调 InvalidateRoleCache（log-only），无法真正使 perm:visible_groups 失效。
 	h.service.InvalidatePermCacheByRole(c.Request.Context(), id)
 
-	c.JSON(http.StatusOK, gin.H{"message": "device groups updated"})
+	response.OKWithMsg(c, nil, "device groups updated")
 }
 
 func (h *Handler) ListAuditLogs(c *gin.Context) {
@@ -207,7 +208,7 @@ func (h *Handler) ListAuditLogs(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ListRoleUsers handles GET /roles/:id/users — returns paginated users in a role.
@@ -230,5 +231,5 @@ func (h *Handler) ListRoleUsers(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }

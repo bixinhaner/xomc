@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // SSEHandler provides the HTTP handler for SSE stream connections.
@@ -47,10 +48,7 @@ func (h *SSEHandler) Stream(c *gin.Context) {
 	username, err := h.authenticate(c)
 	if err != nil {
 		h.logger.Warn("SSE authentication failed", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "unauthorized",
-		})
+		response.Fail(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -61,10 +59,7 @@ func (h *SSEHandler) Stream(c *gin.Context) {
 			zap.String("user_id", username),
 			zap.Error(err),
 		)
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "subscribe failed",
-		})
+		response.Fail(c, http.StatusInternalServerError, "subscribe failed")
 		return
 	}
 	defer h.hub.Unsubscribe(username)
@@ -79,10 +74,7 @@ func (h *SSEHandler) Stream(c *gin.Context) {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		h.logger.Error("streaming not supported")
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "streaming not supported",
-		})
+		response.Fail(c, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 

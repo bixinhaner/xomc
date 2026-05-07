@@ -2,12 +2,15 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
 // Context keys for authenticated user information.
@@ -40,20 +43,16 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 		if apiKey != "" && apiKeySvc != nil && userRepo != nil {
 			key, err := apiKeySvc.Validate(c.Request.Context(), apiKey)
 			if err != nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "invalid or expired API key",
-				})
+				commonerrors.AbortWithError(c, http.StatusUnauthorized,
+					errors.New("invalid or expired API key"))
 				return
 			}
 
 			// Load user to derive IsSuperAdmin and roles (v1.0：carrier 已删除)
 			user, err := userRepo.GetByID(c.Request.Context(), key.UserID)
 			if err != nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "API key owner not found",
-				})
+				commonerrors.AbortWithError(c, http.StatusUnauthorized,
+					errors.New("API key owner not found"))
 				return
 			}
 
@@ -80,28 +79,22 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 		// Fall back to Bearer JWT
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "missing authorization header",
-			})
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				errors.New("missing authorization header"))
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "invalid authorization header format",
-			})
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				errors.New("invalid authorization header format"))
 			return
 		}
 
 		claims, err := jwt.ValidateAccessToken(parts[1])
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "invalid or expired token",
-			})
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				errors.New("invalid or expired token"))
 			return
 		}
 
@@ -109,10 +102,8 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 		if revoker != nil {
 			revoked, err := revoker.IsRevoked(c.Request.Context(), claims.UserID, claims.IssuedAt)
 			if err == nil && revoked {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "session was forcibly terminated, please re-login",
-				})
+				commonerrors.AbortWithError(c, http.StatusUnauthorized,
+					errors.New("session was forcibly terminated, please re-login"))
 				return
 			}
 		}
@@ -132,19 +123,15 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get(CtxKeyUserID)
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "authentication required",
-			})
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				errors.New("authentication required"))
 			return
 		}
 
 		userID, ok := userIDVal.(uuid.UUID)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "invalid user context",
-			})
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("invalid user context"))
 			return
 		}
 
@@ -157,18 +144,14 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "permission check failed",
-			})
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("permission check failed"))
 			return
 		}
 
 		if !allowed {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":    403,
-				"message": "insufficient permissions",
-			})
+			commonerrors.AbortWithError(c, http.StatusForbidden,
+				errors.New("insufficient permissions"))
 			return
 		}
 
@@ -193,19 +176,15 @@ func RequireResourcePermission(roleRepo PermissionChecker, resource string) gin.
 
 		userIDVal, exists := c.Get(CtxKeyUserID)
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "authentication required",
-			})
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				errors.New("authentication required"))
 			return
 		}
 
 		userID, ok := userIDVal.(uuid.UUID)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "invalid user context",
-			})
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("invalid user context"))
 			return
 		}
 
@@ -218,18 +197,14 @@ func RequireResourcePermission(roleRepo PermissionChecker, resource string) gin.
 		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "permission check failed",
-			})
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("permission check failed"))
 			return
 		}
 
 		if !allowed {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":    403,
-				"message": "insufficient permissions",
-			})
+			commonerrors.AbortWithError(c, http.StatusForbidden,
+				errors.New("insufficient permissions"))
 			return
 		}
 
@@ -328,10 +303,8 @@ func RequireApiPermission(apiChecker ApiPermissionChecker) gin.HandlerFunc {
 			}
 		}
 
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"code":    403,
-			"message": "API access not permitted",
-		})
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			errors.New("API access not permitted"))
 	}
 }
 

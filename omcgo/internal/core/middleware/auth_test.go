@@ -1,14 +1,13 @@
 package middleware
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAuthMiddleware_MissingHeader_Returns401(t *testing.T) {
@@ -24,11 +23,8 @@ func TestAuthMiddleware_MissingHeader_Returns401(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var body map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &body)
-	require.NoError(t, err)
-	assert.Equal(t, float64(401), body["code"])
-	assert.Equal(t, "missing authorization header", body["message"])
+	msg, _ := response.DecodeFail(t, w.Body)
+	assert.Equal(t, "missing authorization header", msg)
 }
 
 func TestAuthMiddleware_InvalidFormat_Returns401(t *testing.T) {
@@ -57,11 +53,7 @@ func TestAuthMiddleware_InvalidFormat_Returns401(t *testing.T) {
 			r.ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-			var body map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &body)
-			require.NoError(t, err)
-			assert.Equal(t, float64(401), body["code"])
+			response.DecodeFail(t, w.Body)
 		})
 	}
 }
@@ -80,10 +72,8 @@ func TestAuthMiddleware_EmptyToken_Returns401(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var body map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &body)
-	require.NoError(t, err)
-	assert.Equal(t, "empty token", body["message"])
+	msg, _ := response.DecodeFail(t, w.Body)
+	assert.Equal(t, "empty token", msg)
 }
 
 func TestAuthMiddleware_ValidToken_PassesThrough(t *testing.T) {

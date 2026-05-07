@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -283,8 +284,7 @@ func TestHandler_CreateDevice_Success(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp model.Device
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "SN-CREATE-001", resp.SerialNumber)
 	assert.Equal(t, "AABBCC", resp.OUI)
 	assert.Equal(t, model.CarrierCMCC, resp.Carrier)
@@ -346,8 +346,7 @@ func TestHandler_GetDevice_Found(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.Device
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, deviceID, resp.ID)
 	assert.Equal(t, "SN-GET-001", resp.SerialNumber)
 	assert.Equal(t, model.CarrierCTCC, resp.Carrier)
@@ -400,8 +399,7 @@ func TestHandler_UpdateDevice_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.Device
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Site-B", resp.SiteName)
 	assert.Equal(t, 31.2304, resp.Latitude)
 	// Unchanged fields should remain the same.
@@ -420,8 +418,8 @@ func TestHandler_DeleteDevice_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/devices/"+deviceID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Empty(t, w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	// Verify device was removed from the repo.
 	_, exists := deviceRepo.devices[deviceID]
@@ -443,8 +441,7 @@ func TestHandler_ListDevices(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[model.Device]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 	assert.Equal(t, 1, resp.Page)
@@ -497,8 +494,7 @@ func TestHandler_GetStats(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]map[string]float64
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 
 	counts, ok := resp["counts"]
 	require.True(t, ok, "response should contain 'counts' key")

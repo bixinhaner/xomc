@@ -12,6 +12,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	coreerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -60,7 +61,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	var q fileQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -68,7 +69,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -89,40 +90,40 @@ func (h *Handler) ListFiles(c *gin.Context) {
 
 	result, err := h.store.ListFiles(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) DownloadFile(c *gin.Context) {
 	fileID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file id"})
+		response.Fail(c, http.StatusBadRequest, "invalid file id")
 		return
 	}
 
 	// Look up file by ID directly
 	fileInfo, err := h.store.GetFileByID(c.Request.Context(), fileID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		response.Fail(c, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	if fileInfo == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		response.Fail(c, http.StatusNotFound, "file not found")
 		return
 	}
 
 	obj, err := h.minioClient.GetObject(c.Request.Context(), h.bucket, fileInfo.MinioPath, minio.GetObjectOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "download failed"})
+		response.Fail(c, http.StatusInternalServerError, "download failed")
 		return
 	}
 	defer obj.Close()
 
 	stat, err := obj.Stat()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "get file info failed"})
+		response.Fail(c, http.StatusInternalServerError, "get file info failed")
 		return
 	}
 
@@ -145,7 +146,7 @@ func (h *Handler) QueryData(c *gin.Context) {
 	var q dataQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -153,7 +154,7 @@ func (h *Handler) QueryData(c *gin.Context) {
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -161,7 +162,7 @@ func (h *Handler) QueryData(c *gin.Context) {
 	if q.FileID != "" {
 		id, err := uuid.Parse(q.FileID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid file_id")
 			return
 		}
 		filter.FileID = &id
@@ -185,10 +186,10 @@ func (h *Handler) QueryData(c *gin.Context) {
 
 	result, err := h.store.QueryRecords(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ---- Indicator handlers ----
@@ -199,7 +200,7 @@ func (h *Handler) ListIndicators(c *gin.Context) {
 		ListRequest: model.DefaultListRequest(),
 	}
 	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	if category := c.Query("category"); category != "" {
@@ -211,34 +212,34 @@ func (h *Handler) ListIndicators(c *gin.Context) {
 
 	result, err := h.indRepo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ListAllIndicators handles GET /api/v1/mr/indicators/all.
 func (h *Handler) ListAllIndicators(c *gin.Context) {
 	items, err := h.indRepo.ListAll(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, items)
+	response.OK(c, items)
 }
 
 // GetIndicatorStats handles GET /api/v1/mr/indicators/:code/stats.
 func (h *Handler) GetIndicatorStats(c *gin.Context) {
 	code := c.Param("code")
 	if code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "indicator code is required"})
+		response.Fail(c, http.StatusBadRequest, "indicator code is required")
 		return
 	}
 
 	// Verify indicator exists
 	indicator, err := h.indRepo.GetByCode(c.Request.Context(), code)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "indicator not found"})
+		response.Fail(c, http.StatusNotFound, "indicator not found")
 		return
 	}
 
@@ -252,7 +253,7 @@ func (h *Handler) GetIndicatorStats(c *gin.Context) {
 	}
 	avg := (minVal + maxVal) / 2
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"indicator_code": code,
 		"avg":            avg,
 		"min":            minVal,
@@ -284,7 +285,7 @@ func (h *Handler) ListMappings(c *gin.Context) {
 		ListRequest: model.DefaultListRequest(),
 	}
 	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	if deviceSN := c.Query("device_sn"); deviceSN != "" {
@@ -297,23 +298,23 @@ func (h *Handler) ListMappings(c *gin.Context) {
 
 	result, err := h.mapRepo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // UpdateMapping handles PUT /api/v1/mr/mappings/:id.
 func (h *Handler) UpdateMapping(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	var req updateMappingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -334,20 +335,20 @@ func (h *Handler) UpdateMapping(c *gin.Context) {
 		coreerrors.AbortWithError(c, coreerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, mapping)
+	response.OK(c, mapping)
 }
 
 // ToggleMapping handles PUT /api/v1/mr/mappings/:id/toggle.
 func (h *Handler) ToggleMapping(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	var req toggleMappingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -356,7 +357,7 @@ func (h *Handler) ToggleMapping(c *gin.Context) {
 		coreerrors.AbortWithError(c, coreerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // exportRequest defines the request body for MR data export.
@@ -373,7 +374,7 @@ type exportRequest struct {
 func (h *Handler) ExportMRData(c *gin.Context) {
 	var req exportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -383,7 +384,7 @@ func (h *Handler) ExportMRData(c *gin.Context) {
 	if req.DeviceID != "" {
 		id, err := uuid.Parse(req.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -407,7 +408,7 @@ func (h *Handler) ExportMRData(c *gin.Context) {
 
 	result, err := h.store.QueryRecords(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("query MR records: %v", err)})
+		response.Fail(c, http.StatusInternalServerError, fmt.Sprintf("query MR records: %v", err))
 		return
 	}
 
@@ -418,7 +419,7 @@ func (h *Handler) ExportMRData(c *gin.Context) {
 
 	// Default: JSON export
 	c.Header("Content-Disposition", "attachment; filename=mr_export.json")
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"total":   result.Total,
 		"records": result.Items,
 	})

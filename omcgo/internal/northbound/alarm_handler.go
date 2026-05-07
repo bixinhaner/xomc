@@ -8,6 +8,7 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -29,7 +30,7 @@ func NewAlarmHandler(svc *NorthboundService, logger *zap.Logger) *AlarmHandler {
 func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
 	var req ExportAlarmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -63,29 +64,29 @@ func (h *AlarmHandler) ExportAlarms(c *gin.Context) {
 	result, err := h.svc.ExportAlarms(c.Request.Context(), filter)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("northbound alarm export failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "alarm export failed"})
+		response.Fail(c, http.StatusInternalServerError, "alarm export failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ListActiveAlarms returns all active alarms for northbound sync.
 func (h *AlarmHandler) ListActiveAlarms(c *gin.Context) {
 	listReq := model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&listReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	result, err := h.svc.ListActiveAlarms(c.Request.Context(), listReq)
 	if err != nil {
 		logger.L(c.Request.Context()).Error("northbound alarm list failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "alarm list failed"})
+		response.Fail(c, http.StatusInternalServerError, "alarm list failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func parseSeverity(s string) model.AlarmSeverity {

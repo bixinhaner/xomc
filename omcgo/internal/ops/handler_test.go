@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ---------------------------------------------------------------------------
@@ -155,8 +156,7 @@ func TestHandler_ListTemplates(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[OpsTemplate]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 	assert.Equal(t, "Firmware Upgrade", resp.Items[0].TemplateName)
@@ -197,8 +197,7 @@ func TestHandler_CreateTemplate(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp OpsTemplate
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "Config Sync", resp.TemplateName)
 	assert.Equal(t, "config", resp.Category)
@@ -240,8 +239,7 @@ func TestHandler_GetTemplate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp OpsTemplate
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, tmplID, resp.ID)
 	assert.Equal(t, "Firmware Upgrade", resp.TemplateName)
 	assert.Equal(t, 10, resp.UseCount)
@@ -266,8 +264,8 @@ func TestHandler_DeleteTemplate(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/ops/templates/"+tmplID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Empty(t, w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 }
 
 func TestHandler_CreateTask(t *testing.T) {
@@ -314,8 +312,7 @@ func TestHandler_CreateTask(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp OpsTask
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, OpsTaskPending, resp.Status)
 	assert.Equal(t, "Upgrade Batch 1", resp.TaskName)
@@ -355,8 +352,7 @@ func TestHandler_CancelTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]string
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "cancelled", resp["status"])
 }
 
@@ -389,8 +385,7 @@ func TestHandler_PauseTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]string
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "paused", resp["status"])
 }
 
@@ -423,7 +418,6 @@ func TestHandler_ResumeTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]string
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "running", resp["status"])
 }

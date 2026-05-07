@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Recovery 返回一个 Gin 中间件，捕获 Handler 内的 panic，
@@ -22,10 +24,7 @@ func Recovery(logger *zap.Logger) gin.HandlerFunc {
 					zap.String("method", c.Request.Method),
 					zap.String("path", c.Request.URL.Path),
 				)
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-					"code":    500,
-					"message": "internal server error",
-				})
+				response.Fail(c, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 		c.Next()

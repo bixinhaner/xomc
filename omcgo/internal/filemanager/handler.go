@@ -12,6 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for the file manager REST API.
@@ -71,7 +72,7 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // Upload handles POST /api/v1/files (multipart/form-data).
@@ -100,7 +101,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, mf)
+	response.OKWithStatus(c, http.StatusCreated, mf)
 }
 
 // GetByID handles GET /api/v1/files/:id.
@@ -117,7 +118,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, mf)
+	response.OK(c, mf)
 }
 
 // Delete handles DELETE /api/v1/files/:id.
@@ -133,7 +134,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	response.OK(c, gin.H{"status": "deleted"})
 }
 
 // Download handles GET /api/v1/files/:id/download (blob download).
@@ -188,7 +189,7 @@ func (h *Handler) Distribute(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"file_id":      id.String(),
 		"device_count": len(req.DeviceSNs),
 		"succeeded":    succeeded,

@@ -11,6 +11,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for license management REST API.
@@ -55,7 +56,7 @@ func (h *Handler) GetQuota(c *gin.Context) {
 			commonerrors.NewBusinessError(9103, "failed to load license quota", err))
 		return
 	}
-	c.JSON(http.StatusOK, q)
+	response.OK(c, q)
 }
 
 // ---- Request types ----
@@ -114,7 +115,7 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetByID handles GET /api/v1/licenses/:id.
@@ -131,7 +132,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, lic)
+	response.OK(c, lic)
 }
 
 // GetSummary handles GET /api/v1/licenses/summary.
@@ -142,7 +143,7 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, summary)
+	response.OK(c, summary)
 }
 
 // Activate handles POST /api/v1/licenses/activate.
@@ -159,7 +160,7 @@ func (h *Handler) Activate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, lic)
+	response.OK(c, lic)
 }
 
 // Revoke handles POST /api/v1/licenses/:id/revoke.
@@ -175,7 +176,7 @@ func (h *Handler) Revoke(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "revoked"})
+	response.OK(c, gin.H{"status": "revoked"})
 }
 
 // Import handles POST /api/v1/licenses/import.
@@ -213,5 +214,5 @@ func (h *Handler) Import(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }

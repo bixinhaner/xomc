@@ -9,6 +9,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // TemplateHandler exposes the notification template CRUD endpoints.
@@ -78,7 +79,7 @@ func (h *TemplateHandler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetByID handles GET /templates/:id.
@@ -94,7 +95,7 @@ func (h *TemplateHandler) GetByID(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, tpl)
+	response.OK(c, tpl)
 }
 
 // Create handles POST /templates.
@@ -110,7 +111,7 @@ func (h *TemplateHandler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusCreated, tpl)
+	response.OKWithStatus(c, http.StatusCreated, tpl)
 }
 
 // Update handles PUT /templates/:id.
@@ -132,7 +133,7 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, tpl)
+	response.OK(c, tpl)
 }
 
 // Delete handles DELETE /templates/:id.
@@ -147,5 +148,5 @@ func (h *TemplateHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }

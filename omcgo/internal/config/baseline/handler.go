@@ -10,6 +10,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for config baseline management REST API.
@@ -109,7 +110,7 @@ func (h *Handler) ListBaselines(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateBaseline handles POST /api/v1/config/baselines.
@@ -136,7 +137,7 @@ func (h *Handler) CreateBaseline(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // GetBaseline handles GET /api/v1/config/baselines/:id.
@@ -153,7 +154,7 @@ func (h *Handler) GetBaseline(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, baseline)
+	response.OK(c, baseline)
 }
 
 // UpdateBaseline handles PUT /api/v1/config/baselines/:id.
@@ -186,7 +187,7 @@ func (h *Handler) UpdateBaseline(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	response.OK(c, updated)
 }
 
 // DeleteBaseline handles DELETE /api/v1/config/baselines/:id.
@@ -202,7 +203,7 @@ func (h *Handler) DeleteBaseline(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- Config Task handlers ----
@@ -229,7 +230,7 @@ func (h *Handler) ListConfigTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateConfigTask handles POST /api/v1/config/tasks.
@@ -258,7 +259,7 @@ func (h *Handler) CreateConfigTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // ---- Neighbor handlers ----
@@ -284,5 +285,5 @@ func (h *Handler) ListNeighbors(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }

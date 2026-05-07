@@ -19,6 +19,10 @@ type UserRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter UserFilter) (*model.ListResponse[User], error)
 	UpdateLastLogin(ctx context.Context, id uuid.UUID) error
+	// GetUsernamesByIDs 按 ID 批量返回 username，缺失/未找到的 ID 不出现在结果里。
+	// ListUsers 用此把 created_by / updated_by 反查成 username 注入响应，
+	// 取代前端二次拉全量 /admin/users。
+	GetUsernamesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
 // RoleReader provides read-only access to roles.
@@ -79,8 +83,12 @@ type RoleRepository interface {
 }
 
 // RoleDeviceGroupData holds a role's device group IDs and optional network type filters.
+//
+// v0.7（roles.md §11.8）：JSON tag `group_ids` 改为 `device_group_ids`，与前端
+// `setRoleDeviceGroups` PUT body 与 `getRoleDeviceGroups` GET 响应解析一致。
+// 之前 PUT 请求体中 `device_group_ids` 字段被静默忽略，导致 `role_device_groups` 表被空数组覆盖。
 type RoleDeviceGroupData struct {
-	GroupIDs     []uuid.UUID `json:"group_ids"`
+	GroupIDs     []uuid.UUID `json:"device_group_ids"`
 	NetworkTypes []string    `json:"network_types"`
 }
 

@@ -273,6 +273,40 @@ func (r *PgUserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID) er
 	return nil
 }
 
+// GetUsernamesByIDs 批量返回 (id → username)。空入参返回空 map。
+// 找不到的 ID 不出现在结果里——调用方按 zero value 处理（前端渲染"内置"）。
+func (r *PgUserRepository) GetUsernamesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	if len(ids) == 0 {
+		return map[uuid.UUID]string{}, nil
+	}
+	query, args, err := storage.Psql.Select("id", "username").
+		From("users").
+		Where(sq.Eq{"id": ids}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get usernames SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query usernames: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[uuid.UUID]string, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		var username string
+		if err := rows.Scan(&id, &username); err != nil {
+			return nil, fmt.Errorf("scan username: %w", err)
+		}
+		out[id] = username
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iter usernames: %w", err)
+	}
+	return out, nil
+}
+
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
 	var email, phone, description *string

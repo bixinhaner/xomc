@@ -9,8 +9,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+
 	"github.com/omcgo/omcgo/internal/admin"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides REST API endpoints for dashboard.
@@ -46,7 +48,7 @@ func (h *Handler) GetSummary(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, summary)
+	response.OK(c, summary)
 }
 
 // GetAlarmTrend handles GET /api/v1/dashboard/alarm-trend?days=7.
@@ -67,7 +69,7 @@ func (h *Handler) GetAlarmTrend(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, entries)
+	response.OK(c, entries)
 }
 
 // GetDeviceStatus handles GET /api/v1/dashboard/device-status.
@@ -77,7 +79,7 @@ func (h *Handler) GetDeviceStatus(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, counts)
+	response.OK(c, counts)
 }
 
 // GetKPITrend handles GET /api/v1/dashboard/kpi-trend?kpi_name=...&days=7.
@@ -105,7 +107,7 @@ func (h *Handler) GetKPITrend(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, entries)
+	response.OK(c, entries)
 }
 
 // GetRegionStats handles GET /api/v1/dashboard/region-stats.
@@ -115,7 +117,7 @@ func (h *Handler) GetRegionStats(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, entries)
+	response.OK(c, entries)
 }
 
 // GetWidgets handles GET /api/v1/dashboard/widgets.
@@ -131,7 +133,7 @@ func (h *Handler) GetWidgets(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, layout)
+	response.OK(c, layout)
 }
 
 // SaveWidgets handles PUT /api/v1/dashboard/widgets.
@@ -156,7 +158,7 @@ func (h *Handler) SaveWidgets(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, layout)
+	response.OK(c, layout)
 }
 
 // GetAlarmTypePie handles GET /api/v1/dashboard/alarm-type-pie.
@@ -166,7 +168,7 @@ func (h *Handler) GetAlarmTypePie(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, entries)
+	response.OK(c, entries)
 }
 
 // GetKPITimeSeries handles GET /api/v1/dashboard/kpi-time-series?kpi_names=...&start_time=...&end_time=...
@@ -209,7 +211,7 @@ func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // getUserID extracts the authenticated user's UUID from the Gin context.

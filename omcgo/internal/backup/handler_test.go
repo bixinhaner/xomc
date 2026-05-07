@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ---------------------------------------------------------------------------
@@ -281,8 +282,7 @@ func TestHandler_ListTasks(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[BackupTask]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 	assert.Equal(t, 1, resp.Page)
@@ -307,8 +307,7 @@ func TestHandler_CreateTask(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp BackupTask
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, TaskFull, resp.TaskType)
 	assert.Equal(t, "device", resp.TargetType)
@@ -330,8 +329,7 @@ func TestHandler_GetTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp BackupTask
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, task.ID, resp.ID)
 	assert.Equal(t, TaskConfigOnly, resp.TaskType)
 	assert.Equal(t, TaskRunning, resp.Status)
@@ -347,8 +345,8 @@ func TestHandler_DeleteTask(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/backup/tasks/"+task.ID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Empty(t, w.Body.String())
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	// Verify task was removed from the repo.
 	_, exists := taskRepo.tasks[task.ID]
@@ -368,8 +366,7 @@ func TestHandler_CancelTask(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]string
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "cancelled", resp["status"])
 
 	// Verify the task status was updated in the repo.
@@ -397,8 +394,7 @@ func TestHandler_CreateSchedule(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp BackupSchedule
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "Daily Full Backup", resp.Name)
 	assert.Equal(t, "0 2 * * *", resp.CronExpr)
@@ -422,8 +418,7 @@ func TestHandler_ListFTPConfigs(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[FTPConfig]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -453,8 +448,7 @@ func TestHandler_CreateFTPConfig(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp FTPConfig
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
 	assert.Equal(t, "New FTP Server", resp.ConfigName)
 	assert.Equal(t, "ftp.newhost.com", resp.Host)

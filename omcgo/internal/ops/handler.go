@@ -10,6 +10,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for ops tools REST API.
@@ -130,7 +131,7 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateTemplate handles POST /api/v1/ops/templates.
@@ -158,7 +159,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // GetTemplate handles GET /api/v1/ops/templates/:id.
@@ -175,7 +176,7 @@ func (h *Handler) GetTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, tmpl)
+	response.OK(c, tmpl)
 }
 
 // UpdateTemplate handles PUT /api/v1/ops/templates/:id.
@@ -209,7 +210,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	response.OK(c, updated)
 }
 
 // DeleteTemplate handles DELETE /api/v1/ops/templates/:id.
@@ -225,7 +226,7 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- Command Record handlers ----
@@ -258,7 +259,7 @@ func (h *Handler) ListCommandRecords(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateCommandRecord handles POST /api/v1/ops/command-records.
@@ -286,7 +287,7 @@ func (h *Handler) CreateCommandRecord(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // ---- Task handlers ----
@@ -321,7 +322,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateTask handles POST /api/v1/ops/tasks.
@@ -348,7 +349,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // GetTask handles GET /api/v1/ops/tasks/:id.
@@ -365,7 +366,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // CancelTask handles POST /api/v1/ops/tasks/:id/cancel.
@@ -381,7 +382,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
+	response.OK(c, gin.H{"status": "cancelled"})
 }
 
 // PauseTask handles POST /api/v1/ops/tasks/:id/pause.
@@ -397,7 +398,7 @@ func (h *Handler) PauseTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "paused"})
+	response.OK(c, gin.H{"status": "paused"})
 }
 
 // ResumeTask handles POST /api/v1/ops/tasks/:id/resume.
@@ -413,5 +414,5 @@ func (h *Handler) ResumeTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "running"})
+	response.OK(c, gin.H{"status": "running"})
 }

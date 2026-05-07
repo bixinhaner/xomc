@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +29,7 @@ func (h *ConfigHandler) ExportConfig(c *gin.Context) {
 	deviceIDStr := c.Param("deviceId")
 	deviceID, err := uuid.Parse(deviceIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+		response.Fail(c, http.StatusBadRequest, "invalid device_id")
 		return
 	}
 
@@ -37,11 +38,11 @@ func (h *ConfigHandler) ExportConfig(c *gin.Context) {
 		logger.L(c.Request.Context()).Error("northbound config export failed",
 			zap.String("device_id", deviceIDStr),
 			zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "config export failed"})
+		response.Fail(c, http.StatusInternalServerError, "config export failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"device_id":  deviceIDStr,
 		"parameters": params,
 		"total":      len(params),

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // PolicyRequest is the JSON body for PUT /backup/policy. Mirrors BackupPolicy
@@ -77,7 +78,7 @@ func (h *Handler) GetPolicy(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, policy)
+	response.OK(c, policy)
 }
 
 // UpdatePolicy handles PUT /api/v1/backup/policy.
@@ -97,5 +98,5 @@ func (h *Handler) UpdatePolicy(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, policy)
+	response.OK(c, policy)
 }

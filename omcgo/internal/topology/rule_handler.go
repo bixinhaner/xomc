@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // RuleHandler 设备规则 HTTP 处理器
@@ -70,7 +71,7 @@ func (h *RuleHandler) ListRules(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 // GetRule 获取规则详情
@@ -88,7 +89,7 @@ func (h *RuleHandler) GetRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, rule)
+	response.OK(c, rule)
 }
 
 // CreateRule 创建规则
@@ -107,7 +108,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, rule)
+	response.OKWithStatus(c, http.StatusCreated, rule)
 }
 
 // UpdateRule 更新规则
@@ -132,7 +133,7 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, rule)
+	response.OK(c, rule)
 }
 
 // DeleteRule 删除规则
@@ -149,7 +150,7 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	response.OKWithMsg(c, nil, "deleted")
 }
 
 // ToggleRule 切换规则启用状态
@@ -176,7 +177,7 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, rule)
+	response.OK(c, rule)
 }
 
 // BatchSortRules 批量调整规则优先级
@@ -194,7 +195,7 @@ func (h *RuleHandler) BatchSortRules(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "sorted"})
+	response.OKWithMsg(c, nil, "sorted")
 }
 
 // ApplyRule 应用规则
@@ -219,7 +220,7 @@ func (h *RuleHandler) ApplyRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, task)
+	response.OKWithStatus(c, http.StatusAccepted, task)
 }
 
 // GetTask 获取任务详情
@@ -243,7 +244,7 @@ func (h *RuleHandler) GetTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // ListTasks 获取规则的任务列表
@@ -268,7 +269,7 @@ func (h *RuleHandler) ListTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, RuleTaskListResponse{
+	response.OK(c, RuleTaskListResponse{
 		Items: tasks,
 		Total: int64(len(tasks)),
 	})
@@ -280,17 +281,17 @@ func (h *RuleHandler) GetNextPriority(c *gin.Context) {
 	// 使用 repo 的 GetNextPriority 方法
 	repo, ok := h.service.repo.(*PgDeviceRuleRepository)
 	if !ok {
-		c.JSON(http.StatusOK, gin.H{"priority": 1})
+		response.OK(c, gin.H{"priority": 1})
 		return
 	}
 
 	priority, err := repo.GetNextPriority(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"priority": 1})
+		response.OK(c, gin.H{"priority": 1})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"priority": priority})
+	response.OK(c, gin.H{"priority": priority})
 }
 
 // parseIntParam 解析整数参数

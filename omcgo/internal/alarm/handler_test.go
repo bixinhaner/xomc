@@ -1,7 +1,6 @@
 package alarm
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -75,7 +75,7 @@ func TestHandler_ListActive_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[model.Alarm]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -127,7 +127,7 @@ func TestHandler_ListHistory_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[model.Alarm]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 }
 
@@ -161,7 +161,7 @@ func TestHandler_Statistics_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var stats AlarmStatistics
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &stats))
+	response.DecodeData(t, w.Body, &stats)
 	assert.Equal(t, int64(3), stats.TotalActive)
 }
 
@@ -194,7 +194,7 @@ func TestHandler_GetByID_Found(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var got model.Alarm
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	response.DecodeData(t, w.Body, &got)
 	assert.Equal(t, alarm.ID, got.ID)
 	assert.Equal(t, alarm.AlarmIdentifier, got.AlarmIdentifier)
 }

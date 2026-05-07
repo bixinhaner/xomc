@@ -1,21 +1,25 @@
 import http from '../http';
 import type { ApiEndpoint } from '../../types/system';
+import { adminApi } from './adminApi';
 
 export const apiPermissionApi = {
-  // 获取所有API端点列表（大分页一次拉取）
+  // 获取所有 API 端点列表（分页拼装）。
+  //
+  // 历史 bug：曾直接把 `data.items` 当 ApiEndpoint[] 用，跳过了
+  // adminApi.mapBackendApiEndpoint 的 snake_case → camelCase 映射，导致
+  // ep.apiGroup 永远 undefined → 角色面板 API 权限树全部归到「other」分组。
+  // 现统一走 adminApi.getApiEndpoints（内部已 map），分页拼装到末页为止。
   listEndpoints: async (): Promise<ApiEndpoint[]> => {
-    const allEndpoints: ApiEndpoint[] = [];
+    const all: ApiEndpoint[] = [];
     let page = 1;
-    let total = 0;
-    do {
-      const { data } = await http.get<{ items: ApiEndpoint[]; total: number }>('/admin/api-endpoints', {
-        params: { page, page_size: 100 },
-      });
-      allEndpoints.push(...(data.items || []));
-      total = data.total || 0;
+    const pageSize = 200;
+    for (;;) {
+      const resp = await adminApi.getApiEndpoints({ page, pageSize });
+      all.push(...resp.items);
+      if (all.length >= resp.total || resp.items.length === 0) break;
       page++;
-    } while (allEndpoints.length < total);
-    return allEndpoints;
+    }
+    return all;
   },
 
   // 获取角色的API权限（返回 endpoint ID 列表）

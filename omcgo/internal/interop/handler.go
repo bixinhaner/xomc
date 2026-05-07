@@ -9,6 +9,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides REST API endpoints for interop testing (F10).
@@ -41,7 +42,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ListTestCases returns all registered conformance test cases grouped by category.
 func (h *Handler) ListTestCases(c *gin.Context) {
 	cases := h.runner.ListTestCases()
-	c.JSON(http.StatusOK, cases)
+	response.OK(c, cases)
 }
 
 // RunTests executes conformance tests against a device.
@@ -89,7 +90,7 @@ func (h *Handler) RunTests(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"device_sn": req.DeviceSN,
 		"total":     len(results),
 		"passed":    passed,
@@ -127,7 +128,7 @@ func (h *Handler) RunByCategory(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"device_sn": req.DeviceSN,
 		"category":  category,
 		"total":     len(results),
@@ -167,5 +168,5 @@ func (h *Handler) ValidateDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, report)
+	response.OK(c, report)
 }

@@ -9,6 +9,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for the notification REST API.
@@ -88,7 +89,7 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetUnreadCount handles GET /notifications/unread-count.
@@ -106,7 +107,7 @@ func (h *Handler) GetUnreadCount(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"count": count})
+	response.OK(c, gin.H{"count": count})
 }
 
 // MarkRead handles PUT /notifications/:id/read.
@@ -129,7 +130,7 @@ func (h *Handler) MarkRead(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // MarkAllRead handles PUT /notifications/read-all.
@@ -146,7 +147,7 @@ func (h *Handler) MarkAllRead(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // Delete handles DELETE /notifications/:id.
@@ -169,5 +170,5 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }

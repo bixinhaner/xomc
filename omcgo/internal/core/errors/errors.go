@@ -71,10 +71,21 @@ func NewBusinessError(code int, message string, err error) *BusinessError {
 }
 
 // ErrorResponse is the JSON structure returned to API clients on error.
+//
+// v0.6 起统一为 {ret:0, msg, data:null} 信封（详见 docs/architecture/api-envelope.md）。
+// 字段含义：
+//   - Ret       : 固定 0（失败）。成功路径走 internal/core/response.OK
+//   - Msg       : 可读错误描述（来自 BusinessError.Message 或 err.Error()）
+//   - Data      : 失败时固定 nil（json.RawMessage("null") 序列化为字面 null）
+//   - BizCode   : 业务错误码（来自 BusinessError.Code，0 表示无）；omitempty
+//   - RequestID : 请求 ID，便于排障；omitempty
+//
+// 兼容性：HTTP status code 语义保留（4xx/5xx）；网关、监控、日志层仍能识别。
 type ErrorResponse struct {
-	Code      int    `json:"code"`
-	Message   string `json:"message"`
-	Details   string `json:"details,omitempty"`
+	Ret       int    `json:"ret"`
+	Msg       string `json:"msg"`
+	Data      any    `json:"data"`
+	BizCode   int    `json:"biz_code,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 }
 
@@ -85,6 +96,8 @@ type ErrorResponse struct {
 // messages or details (passwords, tokens, API keys, device credentials)
 // are masked. This is a defense-in-depth layer: callers should still
 // avoid putting secrets in error messages, but mistakes do not leak.
+//
+// v0.6: 输出信封改为 {ret:0, msg, data:null, biz_code?, request_id?}。
 func AbortWithError(c *gin.Context, statusCode int, err error) {
 	var reqIDStr string
 	if rid, exists := c.Get("request_id"); exists {
@@ -92,21 +105,22 @@ func AbortWithError(c *gin.Context, statusCode int, err error) {
 	}
 
 	resp := ErrorResponse{
-		Code:      statusCode,
-		Message:   http.StatusText(statusCode),
+		Ret:       0,
+		Msg:       http.StatusText(statusCode),
+		Data:      nil,
 		RequestID: reqIDStr,
 	}
 
 	var bErr *BusinessError
 	if errors.As(err, &bErr) {
-		resp.Code = bErr.Code
-		resp.Message = bErr.Message
+		resp.BizCode = bErr.Code
+		resp.Msg = bErr.Message
 	} else if err != nil {
 		// If the error string is itself JSON (common when bubbling up
 		// upstream API errors), redact embedded sensitive fields before
 		// surfacing it. RedactJSON returns the input unchanged when it
 		// is not valid JSON, so plain messages flow through untouched.
-		resp.Details = string(redact.RedactJSON([]byte(err.Error())))
+		resp.Msg = string(redact.RedactJSON([]byte(err.Error())))
 	}
 
 	body, marshalErr := json.Marshal(resp)

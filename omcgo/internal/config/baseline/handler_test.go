@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -204,8 +205,7 @@ func TestHandler_ListBaselines(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[BaselineConfig]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -230,8 +230,7 @@ func TestHandler_CreateBaseline(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp BaselineConfig
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "New Baseline", resp.BaselineName)
 	assert.Equal(t, BaselineDraft, resp.Status)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
@@ -251,8 +250,7 @@ func TestHandler_GetBaseline(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp BaselineConfig
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, blID, resp.ID)
 	assert.Equal(t, "Get-Baseline", resp.BaselineName)
 }
@@ -293,8 +291,7 @@ func TestHandler_UpdateBaseline(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp BaselineConfig
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Updated-Baseline", resp.BaselineName)
 	assert.Equal(t, BaselineActive, resp.Status)
 }
@@ -310,7 +307,8 @@ func TestHandler_DeleteBaseline(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/config/baselines/"+blID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	// Verify baseline removed.
 	_, exists := baselineRepo.baselines[blID]
@@ -340,8 +338,7 @@ func TestHandler_CreateConfigTask(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp ConfigTask
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Batch Config Task", resp.TaskName)
 	assert.Equal(t, ConfigTaskBatchConfig, resp.TaskType)
 	assert.Equal(t, ConfigTaskPending, resp.Status)
@@ -363,8 +360,7 @@ func TestHandler_ListConfigTasks(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[ConfigTask]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -405,8 +401,7 @@ func TestHandler_ListNeighbors(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[NeighborParam]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }

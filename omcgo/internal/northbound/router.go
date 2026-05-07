@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/reliability"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/northbound/push"
 )
 
@@ -66,13 +67,13 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 
 func (r *Router) listTargets(c *gin.Context) {
 	targets := r.svc.PushEngine().ListTargets()
-	c.JSON(http.StatusOK, gin.H{"items": targets, "total": len(targets)})
+	response.OK(c, gin.H{"items": targets, "total": len(targets)})
 }
 
 func (r *Router) addTarget(c *gin.Context) {
 	var req AddPushTargetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -89,29 +90,29 @@ func (r *Router) addTarget(c *gin.Context) {
 	}
 
 	r.svc.PushEngine().AddTarget(target)
-	c.JSON(http.StatusCreated, gin.H{"message": "push target added", "id": req.ID})
+	response.OKWithStatus(c, http.StatusCreated, gin.H{"message": "push target added", "id": req.ID})
 }
 
 func (r *Router) removeTarget(c *gin.Context) {
 	id := c.Param("id")
 	if !r.svc.PushEngine().RemoveTarget(id) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "push target not found"})
+		response.Fail(c, http.StatusNotFound, "push target not found")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "push target removed", "id": id})
+	response.OKWithMsg(c, gin.H{"id": id}, "push target removed")
 }
 
 func (r *Router) getCircuitBreaker(c *gin.Context) {
 	id := c.Param("id")
 	cb := r.svc.PushEngine().GetCircuitBreaker(id)
 	if cb == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "push target not found"})
+		response.Fail(c, http.StatusNotFound, "push target not found")
 		return
 	}
 
 	failureCount, threshold := cb.Counters()
 	state := cb.State()
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"target_id":     id,
 		"state":         state.String(),
 		"failure_count": failureCount,
@@ -123,17 +124,17 @@ func (r *Router) resetCircuitBreaker(c *gin.Context) {
 	id := c.Param("id")
 	cb := r.svc.PushEngine().GetCircuitBreaker(id)
 	if cb == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "push target not found"})
+		response.Fail(c, http.StatusNotFound, "push target not found")
 		return
 	}
 
 	cb.Reset()
-	c.JSON(http.StatusOK, gin.H{"message": "circuit breaker reset", "target_id": id, "state": reliability.StateClosed.String()})
+	response.OKWithMsg(c, gin.H{"target_id": id, "state": reliability.StateClosed.String()}, "circuit breaker reset")
 }
 
 func (r *Router) listDeadLetters(c *gin.Context) {
 	if r.outboxRepo == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "outbox not configured"})
+		response.Fail(c, http.StatusServiceUnavailable, "outbox not configured")
 		return
 	}
 
@@ -148,60 +149,60 @@ func (r *Router) listDeadLetters(c *gin.Context) {
 
 	entries, total, err := r.outboxRepo.ListDead(c.Request.Context(), limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": entries, "total": total})
+	response.OK(c, gin.H{"items": entries, "total": total})
 }
 
 func (r *Router) replayDeadLetter(c *gin.Context) {
 	if r.outboxRepo == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "outbox not configured"})
+		response.Fail(c, http.StatusServiceUnavailable, "outbox not configured")
 		return
 	}
 
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid uuid"})
+		response.Fail(c, http.StatusBadRequest, "invalid uuid")
 		return
 	}
 
 	if err := r.outboxRepo.Replay(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusNotFound, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "dead letter replayed", "id": idStr})
+	response.OKWithMsg(c, gin.H{"id": idStr}, "dead letter replayed")
 }
 
 func (r *Router) fullSync(c *gin.Context) {
 	dataType := c.DefaultQuery("data_type", "device")
 	result, err := r.svc.SyncService().FullSync(c.Request.Context(), dataType)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (r *Router) incrementalSync(c *gin.Context) {
 	dataType := c.DefaultQuery("data_type", "alarm")
 	sinceStr := c.Query("since")
 	if sinceStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "since parameter is required (RFC3339 format)"})
+		response.Fail(c, http.StatusBadRequest, "since parameter is required (RFC3339 format)")
 		return
 	}
 
 	since, err := time.Parse(time.RFC3339, sinceStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid since format, use RFC3339"})
+		response.Fail(c, http.StatusBadRequest, "invalid since format, use RFC3339")
 		return
 	}
 
 	result, err := r.svc.SyncService().IncrementalSync(c.Request.Context(), dataType, since)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }

@@ -36,7 +36,6 @@ import type { DataTableColumn } from '@/components/DataTable';
 import dayjs from 'dayjs';
 import {
   useUsers,
-  useAllUsers,
   useCreateUser,
   useUpdateUser,
   useDeleteUsers,
@@ -77,20 +76,15 @@ export default function UserManagement() {
   });
 
   const { data: allRoles } = useAllRoles();
-  const { data: allUsers } = useAllUsers();
 
-  // 创建人 / 更新人列：后端字段是 UUID，前端用 username 展示。
+  // 创建人 / 更新人列：后端 ListUsers 反查 users.username 注入 creator_username /
+  // updater_username（参 omcgo/internal/admin/service.go ListUsers），前端直接读。
+  // 历史的 useAllUsers 全量映射方案已下线，避免重复请求 /admin/users。
   // PRD §11.9 v0.8：空值显示"内置"（覆盖 builtIn / LDAP / 历史三种无 operator 场景）。
-  const userIdToName = useMemo(() => {
-    const map = new Map<string, string>();
-    (allUsers ?? []).forEach((u) => map.set(u.id, u.username));
-    return map;
-  }, [allUsers]);
-  const renderUserId = useCallback((val: unknown) => {
-    if (!val) return '内置';
-    const id = String(val);
-    return userIdToName.get(id) ?? id.slice(0, 8);
-  }, [userIdToName]);
+  const renderOperator = useCallback((username: unknown) => {
+    if (!username) return '内置';
+    return String(username);
+  }, []);
 
   // PRD §11.7 决议 ①：未绑定任何设备分组的角色，下拉 option 追加 ⚠️ 标记，
   // 防止管理员误以为"分配了角色就能看到设备"。
@@ -627,18 +621,18 @@ export default function UserManagement() {
       render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
     },
     {
-      key: 'createdBy',
+      key: 'creatorUsername',
       title: '创建人',
-      dataIndex: 'createdBy',
+      dataIndex: 'creatorUsername',
       width: 110,
-      render: renderUserId,
+      render: renderOperator,
     },
     {
-      key: 'updatedBy',
+      key: 'updaterUsername',
       title: '更新人',
-      dataIndex: 'updatedBy',
+      dataIndex: 'updaterUsername',
       width: 110,
-      render: renderUserId,
+      render: renderOperator,
     },
     {
       key: 'description',
@@ -659,7 +653,7 @@ export default function UserManagement() {
         return desc;
       },
     },
-  ], [t, form, isBuiltIn, handleDelete, handleCopy, forceLogout, updateUser, modal, message, renderUserId]);
+  ], [t, form, isBuiltIn, handleDelete, handleCopy, forceLogout, updateUser, modal, message, renderOperator]);
 
   return (
     <ListPageLayout
@@ -1004,10 +998,10 @@ export default function UserManagement() {
             <span>{selectedUser?.updateTime ? new Date(selectedUser.updateTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
           <Form.Item label="创建人">
-            <span>{renderUserId(selectedUser?.createdBy)}</span>
+            <span>{renderOperator(selectedUser?.creatorUsername)}</span>
           </Form.Item>
           <Form.Item label="更新人">
-            <span>{renderUserId(selectedUser?.updatedBy)}</span>
+            <span>{renderOperator(selectedUser?.updaterUsername)}</span>
           </Form.Item>
           <Form.Item label="备注">
             <span>{selectedUser?.description || '-'}</span>

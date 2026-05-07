@@ -5,6 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for provisioning REST API.
@@ -41,7 +44,7 @@ func (h *Handler) List(c *gin.Context) {
 	if deviceID := c.Query("device_id"); deviceID != "" {
 		id, err := uuid.Parse(deviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -49,26 +52,26 @@ func (h *Handler) List(c *gin.Context) {
 
 	items, total, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
+	response.OK(c, gin.H{"items": items, "total": total})
 }
 
 // Get handles GET /api/v1/provisioning/tasks/:id.
 func (h *Handler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid task ID")
 		return
 	}
 
 	task, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		response.Fail(c, http.StatusNotFound, "task not found")
 		return
 	}
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 type createTaskRequest struct {
@@ -79,49 +82,49 @@ type createTaskRequest struct {
 func (h *Handler) Create(c *gin.Context) {
 	var req createTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	deviceID, err := uuid.Parse(req.DeviceID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+		response.Fail(c, http.StatusBadRequest, "invalid device_id")
 		return
 	}
 
 	task := NewProvisioningTask(deviceID)
 	if err := h.repo.Create(c.Request.Context(), task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, task)
+	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
 // Retry handles POST /api/v1/provisioning/tasks/:id/retry.
 func (h *Handler) Retry(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task ID"})
+		response.Fail(c, http.StatusBadRequest, "invalid task ID")
 		return
 	}
 
 	task, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		response.Fail(c, http.StatusNotFound, "task not found")
 		return
 	}
 
 	if task.Status != StateFailed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only failed tasks can be retried"})
+		response.Fail(c, http.StatusBadRequest, "only failed tasks can be retried")
 		return
 	}
 
 	// Create a new task for retry.
 	newTask := NewProvisioningTask(task.DeviceID)
 	if err := h.repo.Create(c.Request.Context(), newTask); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, newTask)
+	response.OKWithStatus(c, http.StatusCreated, newTask)
 }

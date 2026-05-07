@@ -89,8 +89,11 @@ func TestAbortWithError_BusinessError(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, `"code":1001`)
-	assert.Contains(t, body, `"message":"device not found"`)
+	// v0.6 envelope: {ret:0, msg, data:null, biz_code?}
+	assert.Contains(t, body, `"ret":0`)
+	assert.Contains(t, body, `"biz_code":1001`)
+	assert.Contains(t, body, `"msg":"device not found"`)
+	assert.Contains(t, body, `"data":null`)
 }
 
 func TestAbortWithError_PlainError(t *testing.T) {
@@ -106,7 +109,9 @@ func TestAbortWithError_PlainError(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, `"details":"something went wrong"`)
+	// v0.6: plain error 的 .Error() 文本写入 msg 字段（不再有 details）
+	assert.Contains(t, body, `"ret":0`)
+	assert.Contains(t, body, `"msg":"something went wrong"`)
 }
 
 // TestAbortWithError_RedactsSensitiveJSONInDetails confirms that if a
@@ -151,6 +156,7 @@ func TestAbortWithError_BusinessError_NoLeakWhenMessageIsSafe(t *testing.T) {
 
 	body := w.Body.String()
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
-	assert.Contains(t, body, `"code":7001`)
-	assert.Contains(t, body, `"message":"authentication failed"`)
+	assert.Contains(t, body, `"ret":0`)
+	assert.Contains(t, body, `"biz_code":7001`)
+	assert.Contains(t, body, `"msg":"authentication failed"`)
 }

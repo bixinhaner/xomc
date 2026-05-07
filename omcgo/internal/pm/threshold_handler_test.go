@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -138,8 +139,7 @@ func TestThresholdHandler_ListThresholds_Default(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[KPIThreshold]
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 	assert.Len(t, resp.Items, 1)
 }
@@ -190,8 +190,7 @@ func TestThresholdHandler_GetThreshold_Found(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp KPIThreshold
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, threshold.ID, resp.ID)
 	assert.Equal(t, "RSRP", resp.KPIName)
 }

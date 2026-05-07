@@ -10,6 +10,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"go.uber.org/zap"
@@ -68,14 +69,14 @@ func (h *Handler) ListCounters(c *gin.Context) {
 	var q counterQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	filter := counter.CounterFilter{ListRequest: q.ListRequest}
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -112,16 +113,16 @@ func (h *Handler) ListCounters(c *gin.Context) {
 	}
 	result, err := h.counterRepo.Query(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 	var q counterQuery
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	filter := counter.CounterFilter{}
@@ -147,10 +148,10 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 	}
 	result, err := h.counterRepo.QueryAggregated(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": result})
+	response.OK(c, gin.H{"items": result})
 }
 
 type kpiQuery struct {
@@ -168,7 +169,7 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 	var q kpiQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	filter := kpi.KPIFilter{ListRequest: q.ListRequest}
@@ -211,10 +212,10 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 	}
 	result, err := h.kpiRepo.Query(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 func (h *Handler) ListKPIDefinitions(c *gin.Context) {
@@ -240,7 +241,7 @@ func (h *Handler) ListKPIDefinitions(c *gin.Context) {
 			Counters:    f.Counters,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
+	response.OK(c, gin.H{"items": items, "total": len(items)})
 }
 
 type calculateRequest struct {
@@ -255,22 +256,22 @@ type calculateRequest struct {
 func (h *Handler) CalculateKPI(c *gin.Context) {
 	var req calculateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 	deviceID, err := uuid.Parse(req.DeviceID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+		response.Fail(c, http.StatusBadRequest, "invalid device_id")
 		return
 	}
 	startTime, err := time.Parse(time.RFC3339, req.StartTime)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_time"})
+		response.Fail(c, http.StatusBadRequest, "invalid start_time")
 		return
 	}
 	endTime, err := time.Parse(time.RFC3339, req.EndTime)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_time"})
+		response.Fail(c, http.StatusBadRequest, "invalid end_time")
 		return
 	}
 
@@ -280,10 +281,10 @@ func (h *Handler) CalculateKPI(c *gin.Context) {
 	)
 	_ = startTime // endTime is used as collectTime
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": results, "total": len(results)})
+	response.OK(c, gin.H{"items": results, "total": len(results)})
 }
 
 // ---- PM Task handlers ----
@@ -318,7 +319,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // CreateTask handles POST /pm/tasks.
@@ -343,7 +344,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusCreated, task)
+	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
 // ---- PM File handlers ----
@@ -360,7 +361,7 @@ func (h *Handler) ListPMFiles(c *gin.Context) {
 	var q pmFileQuery
 	q.ListRequest = model.DefaultListRequest()
 	if err := c.ShouldBindQuery(&q); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -368,7 +369,7 @@ func (h *Handler) ListPMFiles(c *gin.Context) {
 	if q.DeviceID != "" {
 		id, err := uuid.Parse(q.DeviceID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+			response.Fail(c, http.StatusBadRequest, "invalid device_id")
 			return
 		}
 		filter.DeviceID = &id
@@ -386,40 +387,40 @@ func (h *Handler) ListPMFiles(c *gin.Context) {
 
 	result, err := h.fileStore.ListFiles(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // DownloadPMFile handles GET /pm/files/:id/download.
 func (h *Handler) DownloadPMFile(c *gin.Context) {
 	fileID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file id"})
+		response.Fail(c, http.StatusBadRequest, "invalid file id")
 		return
 	}
 
 	fileInfo, err := h.fileStore.GetFileByID(c.Request.Context(), fileID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		response.Fail(c, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	if fileInfo == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		response.Fail(c, http.StatusNotFound, "file not found")
 		return
 	}
 
 	obj, err := h.minioClient.GetObject(c.Request.Context(), h.pmBucket, fileInfo.MinioPath, minio.GetObjectOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "download failed"})
+		response.Fail(c, http.StatusInternalServerError, "download failed")
 		return
 	}
 	defer obj.Close()
 
 	stat, err := obj.Stat()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "get file info failed"})
+		response.Fail(c, http.StatusInternalServerError, "get file info failed")
 		return
 	}
 

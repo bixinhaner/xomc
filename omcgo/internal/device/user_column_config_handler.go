@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // ColumnConfigHandler provides HTTP endpoints for user column configuration.
@@ -45,14 +46,14 @@ func (h *ColumnConfigHandler) GetColumnConfig(c *gin.Context) {
 
 	if config == nil {
 		// Return default columns.
-		c.JSON(http.StatusOK, gin.H{
+		response.OK(c, gin.H{
 			"page_key": pageKey,
 			"columns":  DefaultDeviceColumns(),
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, config)
+	response.OK(c, config)
 }
 
 // SaveColumnConfig handles PUT /column-configs/:pageKey.
@@ -84,7 +85,7 @@ func (h *ColumnConfigHandler) SaveColumnConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, config)
+	response.OK(c, config)
 }
 
 func getUserID(c *gin.Context) (uuid.UUID, error) {

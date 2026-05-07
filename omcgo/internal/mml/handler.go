@@ -10,6 +10,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 // Handler provides HTTP handlers for the MML console REST API.
@@ -180,7 +181,7 @@ func (h *Handler) ListCommands(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetCommand handles GET /api/v1/mml/commands/:id.
@@ -197,7 +198,7 @@ func (h *Handler) GetCommand(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, cmd)
+	response.OK(c, cmd)
 }
 
 // GetCommandParamPaths handles GET /api/v1/mml/commands/:id/param-paths.
@@ -214,10 +215,7 @@ func (h *Handler) GetCommandParamPaths(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": result,
-	})
+	response.OK(c, result)
 }
 
 // ---- Execute / Task creation handlers ----
@@ -333,7 +331,7 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, task)
+	response.OKWithStatus(c, http.StatusCreated, task)
 }
 
 // ---- Script handlers ----
@@ -362,7 +360,7 @@ func (h *Handler) ListScripts(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetScript handles GET /api/v1/mml/scripts/:id.
@@ -379,7 +377,7 @@ func (h *Handler) GetScript(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, script)
+	response.OK(c, script)
 }
 
 // CreateScript handles POST /api/v1/mml/scripts.
@@ -408,7 +406,7 @@ func (h *Handler) CreateScript(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // UpdateScript handles PUT /api/v1/mml/scripts/:id.
@@ -438,7 +436,7 @@ func (h *Handler) UpdateScript(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	response.OK(c, updated)
 }
 
 // ListScriptRuns handles GET /api/v1/mml/scripts/:id/runs.
@@ -460,7 +458,7 @@ func (h *Handler) ListScriptRuns(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 // StartScript handles POST /api/v1/mml/scripts/:id/start.
@@ -475,7 +473,7 @@ func (h *Handler) StartScript(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, script)
+	response.OK(c, script)
 }
 
 // PauseScript handles POST /api/v1/mml/scripts/:id/pause.
@@ -490,7 +488,7 @@ func (h *Handler) PauseScript(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, script)
+	response.OK(c, script)
 }
 
 // CancelScript handles POST /api/v1/mml/scripts/:id/cancel.
@@ -505,7 +503,7 @@ func (h *Handler) CancelScript(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
-	c.JSON(http.StatusOK, script)
+	response.OK(c, script)
 }
 
 // DeleteScript handles DELETE /api/v1/mml/scripts/:id.
@@ -521,7 +519,7 @@ func (h *Handler) DeleteScript(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- Task handlers ----
@@ -559,7 +557,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetTask handles GET /api/v1/mml/tasks/:id.
@@ -576,7 +574,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // ---- Task control handlers (Phase 2) ----
@@ -595,7 +593,7 @@ func (h *Handler) StartTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // PauseTask handles POST /api/v1/mml/tasks/:id/pause.
@@ -612,7 +610,7 @@ func (h *Handler) PauseTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // CancelTask handles POST /api/v1/mml/tasks/:id/cancel.
@@ -629,7 +627,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, task)
+	response.OK(c, task)
 }
 
 // DeleteTask handles DELETE /api/v1/mml/tasks/:id.
@@ -645,7 +643,7 @@ func (h *Handler) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // ---- Dangerous command check ----
@@ -664,7 +662,7 @@ func (h *Handler) DangerousCheck(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"dangerous": dc != nil,
 		"info":      dc,
 	})
@@ -699,7 +697,7 @@ func (h *Handler) GetTaskResults(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // ---- Template handlers ----
@@ -739,7 +737,7 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.OK(c, result)
 }
 
 // GetTemplate handles GET /api/v1/mml/templates/:id.
@@ -756,7 +754,7 @@ func (h *Handler) GetTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, tmpl)
+	response.OK(c, tmpl)
 }
 
 // CreateCustomCommandRequest defines the request body for creating a custom command.
@@ -802,7 +800,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, created)
 }
 
 // UpdateCustomCommandRequest defines the request body for updating a custom command.
@@ -850,7 +848,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	response.OK(c, updated)
 }
 
 // DeleteTemplate handles DELETE /api/v1/mml/templates/:id.
@@ -869,7 +867,7 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	response.OK(c, nil)
 }
 
 // CloneTemplate handles POST /api/v1/mml/templates/:id/clone.
@@ -889,7 +887,7 @@ func (h *Handler) CloneTemplate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, cloned)
+	response.OKWithStatus(c, http.StatusCreated, cloned)
 }
 
 // parseInt is a helper to parse an int from a string.

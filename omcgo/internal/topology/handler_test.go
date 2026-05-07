@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -365,8 +366,7 @@ func TestHandler_ListTree(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]json.RawMessage
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Contains(t, resp, "items")
 }
 
@@ -387,8 +387,7 @@ func TestHandler_Create(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp DeviceGroup
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "New Group", resp.Name)
 	assert.Equal(t, model.CarrierCode("cmcc"), resp.Carrier)
 	assert.NotEqual(t, uuid.Nil, resp.ID)
@@ -408,8 +407,7 @@ func TestHandler_Get(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp DeviceGroup
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, groupID, resp.ID)
 	assert.Equal(t, "Test Group", resp.Name)
 }
@@ -434,8 +432,7 @@ func TestHandler_Update(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp DeviceGroup
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, "Updated Name", resp.Name)
 }
 
@@ -450,7 +447,8 @@ func TestHandler_Delete(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/"+groupID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	// Verify group removed.
 	_, exists := groupRepo.groups[groupID]
@@ -492,7 +490,8 @@ func TestHandler_RemoveDevice(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/"+groupID.String()+"/devices/"+deviceID.String(), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	response.DecodeData(t, w.Body, nil)
 
 	// Verify device removed from the group.
 	ids := groupRepo.devices[groupID]
@@ -515,8 +514,7 @@ func TestHandler_ListSites(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[Site]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }
@@ -647,8 +645,7 @@ func TestHandler_ListTopoNodes(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp model.ListResponse[TopoNode]
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
 }

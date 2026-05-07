@@ -2,7 +2,6 @@ package software
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -192,7 +191,7 @@ func TestSwHandler_ListFirmware_Default(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[FirmwareVersion]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 }
 
@@ -212,7 +211,7 @@ func TestSwHandler_GetFirmware_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp FirmwareVersion
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, id, resp.ID)
 }
 
@@ -265,7 +264,7 @@ func TestSwHandler_ListUpgradeTasks_Default(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp model.ListResponse[UpgradeTask]
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(1), resp.Total)
 }
 
@@ -284,7 +283,7 @@ func TestSwHandler_GetUpgradeTask_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp UpgradeTask
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, id, resp.ID)
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin/audit"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -109,11 +110,10 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":    "configuration push queued",
+	response.OKWithMsg(c, gin.H{
 		"device_id":  deviceID,
 		"command_id": created.ID,
-	})
+	}, "configuration push queued")
 }
 
 // PullConfig queues GetParameterValues commands for a device.
@@ -148,11 +148,10 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":    "configuration pull queued",
+	response.OKWithMsg(c, gin.H{
 		"device_id":  deviceID,
 		"command_id": created.ID,
-	})
+	}, "configuration pull queued")
 }
 
 // GetSyncStatus returns the number of pending commands for a device.
@@ -170,7 +169,7 @@ func (h *SyncHandler) GetSyncStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, SyncStatusResponse{
+	response.OK(c, SyncStatusResponse{
 		DeviceID:     deviceID,
 		PendingCount: count,
 	})

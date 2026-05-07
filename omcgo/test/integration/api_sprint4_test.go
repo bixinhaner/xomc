@@ -151,8 +151,10 @@ func TestErrorResponseWithRequestID(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &errResp)
 	require.NoError(t, err)
 
+	// v0.6 envelope: {ret:0, msg, data:null, biz_code?, request_id?}
 	assert.Equal(t, "test-req-123", errResp.RequestID, "ErrorResponse must include request_id")
-	assert.Equal(t, http.StatusNotFound, errResp.Code)
+	assert.Equal(t, 0, errResp.Ret)
+	// 无 BusinessError 时 BizCode = 0（omitempty 不上线，但结构体字段值仍是 0）
 }
 
 // TestErrorResponseWithBusinessError verifies BusinessError propagation.
@@ -184,7 +186,9 @@ func TestErrorResponseWithBusinessError(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &errResp)
 	require.NoError(t, err)
 
-	assert.Equal(t, commonerrors.ErrCodeDeviceNotFound, errResp.Code, "should propagate business error code")
-	assert.Equal(t, "device not found", errResp.Message)
+	// v0.6 envelope: BusinessError.Code → ErrorResponse.BizCode；Message → Msg
+	assert.Equal(t, 0, errResp.Ret)
+	assert.Equal(t, commonerrors.ErrCodeDeviceNotFound, errResp.BizCode, "should propagate business error code")
+	assert.Equal(t, "device not found", errResp.Msg)
 	assert.Equal(t, "test-req-456", errResp.RequestID)
 }

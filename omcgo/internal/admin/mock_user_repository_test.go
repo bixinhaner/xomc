@@ -143,6 +143,21 @@ func (mr *MockUserRepositoryMockRecorder) UpdateLastLogin(ctx, id any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastLogin", reflect.TypeOf((*MockUserRepository)(nil).UpdateLastLogin), ctx, id)
 }
 
+// GetUsernamesByIDs mocks base method.
+func (m *MockUserRepository) GetUsernamesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUsernamesByIDs", ctx, ids)
+	ret0, _ := ret[0].(map[uuid.UUID]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUsernamesByIDs indicates an expected call of GetUsernamesByIDs.
+func (mr *MockUserRepositoryMockRecorder) GetUsernamesByIDs(ctx, ids any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUsernamesByIDs", reflect.TypeOf((*MockUserRepository)(nil).GetUsernamesByIDs), ctx, ids)
+}
+
 // UpdatePassword mocks base method.
 func (m *MockUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
 	m.ctrl.T.Helper()
